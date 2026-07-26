@@ -1,5 +1,9 @@
 import { supabase } from "@/lib/supabase"
 import { ACTIVE_STUDENT_STATUS, WITHDRAWN_STUDENT_STATUS } from "@/lib/student-status.js"
+import type {
+  DashboardConflictRpcInput,
+  DashboardConflictTaskLink,
+} from "@/features/dashboard/conflict-contract"
 
 import {
   REGISTRATION_PIPELINE_STATUSES,
@@ -199,6 +203,7 @@ export type OpsWordRetestDetail = {
   className?: string
   studentName?: string
   testAt?: string
+  expectedRetestAt?: string
   textbookName?: string
   unit?: string
   requestNote?: string
@@ -647,6 +652,36 @@ function nullableDate(value: unknown) {
     return Number.isNaN(date.getTime()) ? trimmed : date.toISOString()
   }
   return trimmed
+}
+
+export function seoulDateTimeInputToIso(value: string) {
+  const normalized = text(value)
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(normalized)) return ""
+  const parsed = new Date(`${normalized}:00+09:00`)
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString()
+}
+
+export function isoToSeoulDateTimeInput(value: string) {
+  const normalized = text(value)
+  if (!normalized) return ""
+  const parsed = new Date(normalized)
+  if (Number.isNaN(parsed.getTime())) return ""
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(parsed)
+  const values = Object.fromEntries(
+    parts
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  )
+  if (!values.year || !values.month || !values.day || !values.hour || !values.minute) return ""
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`
 }
 
 function nullableNumber(value: unknown) {
@@ -1100,6 +1135,7 @@ function mapWordRetest(row: Row | undefined): OpsWordRetestDetail | undefined {
     className: text(row.class_name),
     studentName: text(row.student_name),
     testAt: text(row.test_at),
+    expectedRetestAt: text(row.expected_retest_at),
     textbookName: text(row.textbook_name),
     unit: text(row.unit),
     requestNote: text(row.request_note),
@@ -1813,7 +1849,13 @@ function didMutateOpsTask(data: unknown) {
 }
 
 const OPS_TASK_OPTIONAL_TEAM_WORKFLOW_COLUMNS = ["requested_team", "assignee_team", "start_at"]
-const OPS_WORD_RETEST_OPTIONAL_DETAIL_COLUMNS = ["teacher_catalog_id", "total_question_count", "score_out_of_100", "cutoff_question_count"]
+const OPS_WORD_RETEST_OPTIONAL_DETAIL_COLUMNS = [
+  "teacher_catalog_id",
+  "expected_retest_at",
+  "total_question_count",
+  "score_out_of_100",
+  "cutoff_question_count",
+]
 
 function buildTaskRow(input: OpsTaskInput, options: { preserveManagementLinks?: boolean; completedAtFallback?: string } = {}) {
   const completedAt = nullableDate(input.completedAt) || (input.status === "done" ? nullableDate(options.completedAtFallback) : null)
@@ -1944,6 +1986,7 @@ function buildWordRetestRow(taskId: string, detail: OpsWordRetestDetail = {}) {
     class_name: nullable(detail.className),
     student_name: nullable(detail.studentName),
     test_at: nullableDate(detail.testAt),
+    expected_retest_at: seoulDateTimeInputToIso(detail.expectedRetestAt || "") || null,
     textbook_name: nullable(detail.textbookName),
     unit: nullable(detail.unit),
     request_note: nullable(detail.requestNote),
@@ -1968,6 +2011,8 @@ type OpsTaskProducerResponse = {
   sourceId?: unknown
   sourceEventId?: unknown
   sourceEventIds?: unknown
+  expectedRetestAt?: unknown
+  updatedAt?: unknown
 }
 
 function createOpsTaskRequestId() {
@@ -2155,6 +2200,130 @@ function producerSourceEventIds(response: OpsTaskProducerResponse) {
   return response.sourceEventIds.map(text).filter(Boolean)
 }
 
+function normalizeDashboardConflictId(value: unknown) {
+  return text(value).replace(/^\{(.+)\}$/, "$1").toLowerCase()
+}
+
+function normalizeDashboardConflictTime(value: unknown) {
+  const match = text(value).match(/^(\d{1,2}):(\d{2})$/)
+  if (!match) return text(value)
+  return `${match[1].padStart(2, "0")}:${match[2]}`
+}
+
+function normalizeDashboardConflictInput(
+  input: DashboardConflictRpcInput,
+): DashboardConflictRpcInput {
+  const ids = (values: string[]) => [...new Set(
+    (Array.isArray(values) ? values : []).map(normalizeDashboardConflictId).filter(Boolean),
+  )].sort()
+  return {
+    type: input.type,
+    occurrenceKind: input.occurrenceKind,
+    classIds: ids(input.classIds),
+    studentIds: ids(input.studentIds),
+    examEventIds: ids(input.examEventIds),
+    examDetailIds: ids(input.examDetailIds),
+    teacherCatalogIds: ids(input.teacherCatalogIds),
+    classroomCatalogIds: ids(input.classroomCatalogIds),
+    weekday: text(input.weekday),
+    overlapStart: normalizeDashboardConflictTime(input.overlapStart),
+    overlapEnd: normalizeDashboardConflictTime(input.overlapEnd),
+    examDate: text(input.examDate),
+    examRule: input.examRule,
+  }
+}
+
+function dashboardConflictKey(input: DashboardConflictRpcInput) {
+  if (input.type === "exam") {
+    return `exam:v1:${input.classIds[0] || ""}:${input.examDate}:${input.examRule}`
+  }
+  const key = [
+    "weekly",
+    "v1",
+    input.type,
+    input.weekday,
+    `${input.overlapStart}-${input.overlapEnd}`,
+    ...input.classIds,
+  ]
+  if (input.type === "student") key.push(input.studentIds[0] || "")
+  return key.join(":")
+}
+
+function normalizeDashboardConflictTaskLink(
+  value: unknown,
+  expectedKey: string,
+): DashboardConflictTaskLink {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("일정 충돌 할 일 상태를 확인하지 못했습니다.")
+  }
+  const row = value as Row
+  const conflictKey = text(row.conflictKey)
+  const taskId = text(row.taskId)
+  if (
+    conflictKey !== expectedKey
+    || typeof row.linked !== "boolean"
+    || typeof row.canOpen !== "boolean"
+    || typeof row.alreadyExists !== "boolean"
+    || (!row.canOpen && Boolean(taskId))
+    || (row.canOpen && (!row.linked || !taskId))
+    || (!row.linked && (row.canOpen || row.alreadyExists || Boolean(taskId)))
+  ) {
+    throw new Error("일정 충돌 할 일 상태를 확인하지 못했습니다.")
+  }
+  return {
+    conflictKey,
+    linked: row.linked,
+    taskId: row.canOpen ? taskId : "",
+    canOpen: row.canOpen,
+    alreadyExists: row.alreadyExists,
+  }
+}
+
+export async function listDashboardConflictTaskLinks(
+  conflicts: DashboardConflictRpcInput[],
+): Promise<DashboardConflictTaskLink[]> {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const normalized = conflicts.map(normalizeDashboardConflictInput)
+  const keys = normalized.map(dashboardConflictKey)
+  if (new Set(keys).size !== keys.length) {
+    throw new Error("중복된 일정 충돌을 확인했습니다.")
+  }
+  const { data, error } = await supabase.rpc("list_dashboard_conflict_task_links_v1", {
+    p_conflicts: normalized,
+  })
+  if (error) throw error
+  if (!Array.isArray(data) || data.length !== keys.length) {
+    throw new Error("일정 충돌 할 일 상태를 확인하지 못했습니다.")
+  }
+  const linksByKey = new Map<string, DashboardConflictTaskLink>()
+  data.forEach((row, index) => {
+    const link = normalizeDashboardConflictTaskLink(row, keys[index])
+    if (linksByKey.has(link.conflictKey)) {
+      throw new Error("중복된 일정 충돌 할 일 상태를 받았습니다.")
+    }
+    linksByKey.set(link.conflictKey, link)
+  })
+  return keys.map((key) => {
+    const link = linksByKey.get(key)
+    if (!link) throw new Error("일정 충돌 할 일 상태를 확인하지 못했습니다.")
+    return link
+  })
+}
+
+export async function createDashboardConflictTask(
+  conflict: DashboardConflictRpcInput,
+): Promise<DashboardConflictTaskLink> {
+  const normalized = normalizeDashboardConflictInput(conflict)
+  const expectedKey = dashboardConflictKey(normalized)
+  const response = await runIdempotentOpsTaskProducerRpc("create_dashboard_conflict_task_v1", {
+    p_conflict: normalized,
+  })
+  const link = normalizeDashboardConflictTaskLink(response, expectedKey)
+  if (!link.linked) throw new Error("일정 충돌 할 일을 등록하지 못했습니다.")
+  clearOpsTaskWorkspaceDataCache()
+  return link
+}
+
 const OPS_TASK_SOURCE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function producerSourceEventId(response: OpsTaskProducerResponse) {
@@ -2207,6 +2376,12 @@ export type OpsTaskSourceEventReceipt = Readonly<{
 export type OpsTaskCommentReceipt = Readonly<{
   comment: OpsTaskComment
   sourceEventIds: string[]
+}>
+
+export type UpdateWordRetestExpectedAtResult = Readonly<{
+  taskId: string
+  expectedRetestAt: string
+  updatedAt: string
 }>
 
 function stripMissingMigrationColumns(row: Row, columns: string[]) {
@@ -4260,14 +4435,63 @@ export async function retryWordRetest(
   input: OpsTaskInput,
 ): Promise<OpsTaskProducerReceipt> {
   if (input.type !== "word_retest") throw new Error("단어 재시험만 다시 만들 수 있습니다.")
+  const retryInput: OpsTaskInput = {
+    ...input,
+    wordRetest: {
+      ...input.wordRetest,
+      expectedRetestAt: "",
+    },
+  }
   const response = await runIdempotentOpsTaskProducerRpc("retry_word_retest_v1", {
     p_previous_task_id: previousTaskId,
-    p_input: buildOpsTaskProducerInput(input),
+    p_input: buildOpsTaskProducerInput(retryInput),
   })
   clearOpsTaskWorkspaceDataCache()
   return {
     taskId: producerTaskId(response),
     sourceEventIds: producerSourceEventIds(response),
+  }
+}
+
+export async function updateWordRetestExpectedAt(input: {
+  taskId: string
+  expectedRetestAt: string
+  expectedUpdatedAt: string
+}): Promise<UpdateWordRetestExpectedAtResult> {
+  const taskId = text(input.taskId)
+  const expectedUpdatedAt = text(input.expectedUpdatedAt)
+  if (!taskId || !expectedUpdatedAt) throw new Error("단어 재시험 데이터를 다시 불러오세요.")
+
+  const expectedRetestAt = seoulDateTimeInputToIso(input.expectedRetestAt) || null
+  const response = await runIdempotentOpsTaskProducerRpc("update_word_retest_expected_at_v1", {
+    p_task_id: taskId,
+    p_expected_retest_at: expectedRetestAt,
+    p_expected_updated_at: expectedUpdatedAt,
+  })
+  const responseTaskId = text(response.taskId)
+  const responseUpdatedAt = text(response.updatedAt)
+  const hasExpectedRetestAt = Object.prototype.hasOwnProperty.call(response, "expectedRetestAt")
+  const responseExpectedRetestAt = text(response.expectedRetestAt)
+  if (
+    responseTaskId !== taskId
+    || !responseUpdatedAt
+    || Number.isNaN(new Date(responseUpdatedAt).getTime())
+    || !hasExpectedRetestAt
+    || (response.expectedRetestAt !== null && typeof response.expectedRetestAt !== "string")
+    || (responseExpectedRetestAt && Number.isNaN(new Date(responseExpectedRetestAt).getTime()))
+    || (
+      expectedRetestAt
+        ? new Date(responseExpectedRetestAt).getTime() !== new Date(expectedRetestAt).getTime()
+        : responseExpectedRetestAt !== ""
+    )
+  ) {
+    throw new Error("저장된 응시예정일시를 확인하지 못했습니다.")
+  }
+  clearOpsTaskWorkspaceDataCache()
+  return {
+    taskId: responseTaskId,
+    expectedRetestAt: responseExpectedRetestAt,
+    updatedAt: responseUpdatedAt,
   }
 }
 

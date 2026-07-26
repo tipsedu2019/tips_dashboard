@@ -18,6 +18,29 @@ function sourceBetween(start, end) {
   return serviceSource.slice(startIndex, endIndex);
 }
 
+test("word-retest expected time uses explicit Seoul conversion and the narrow cache-invalidating RPC", () => {
+  const mapper = sourceBetween("function mapWordRetest", "function mapComment");
+  const serializer = sourceBetween("function buildWordRetestRow", "type OpsTaskProducerResponse");
+  const updater = sourceBetween(
+    "export async function updateWordRetestExpectedAt",
+    "export async function reportWordRetestResult",
+  );
+  const retry = sourceBetween(
+    "export async function retryWordRetest",
+    "export async function updateWordRetestExpectedAt",
+  );
+
+  assert.match(mapper, /expectedRetestAt: text\(row\.expected_retest_at\)/);
+  assert.match(serializer, /expected_retest_at: seoulDateTimeInputToIso\(detail\.expectedRetestAt \|\| ""\) \|\| null/);
+  assert.match(serviceSource, /timeZone: "Asia\/Seoul"/);
+  assert.match(updater, /runIdempotentOpsTaskProducerRpc\("update_word_retest_expected_at_v1"/);
+  assert.match(updater, /p_expected_retest_at: expectedRetestAt/);
+  assert.match(updater, /p_expected_updated_at: expectedUpdatedAt/);
+  assert.match(updater, /clearOpsTaskWorkspaceDataCache\(\)/);
+  assert.doesNotMatch(updater, /dispatch|sourceEvent|notification/i);
+  assert.match(retry, /expectedRetestAt: ""/);
+});
+
 function transpileAndLoad(source, exports, mocks = {}) {
   const compiled = ts.transpileModule(
     `${source}\nmodule.exports = { ${exports.join(", ")} }`,

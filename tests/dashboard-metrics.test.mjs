@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  buildDashboardConflictRows,
   buildDashboardMetrics,
   buildScheduleCollisionSummary,
   findExamConflictsForClasses,
 } from "../src/features/dashboard/metrics.js";
+
+const metricsSource = readFileSync(
+  new URL("../src/features/dashboard/metrics.js", import.meta.url),
+  "utf8",
+);
 
 test("detects teacher and classroom schedule overlaps", () => {
   const classes = [
@@ -237,7 +244,7 @@ test("detects same-day and previous-day exam conflicts", () => {
   );
 });
 
-test("ignores blank modern exam dates instead of falling back to legacy exam days", () => {
+test("uses the legacy exam day when a modern detail has no subject date", () => {
   const classes = [
     {
       id: "math-a",
@@ -281,10 +288,12 @@ test("ignores blank modern exam dates instead of falling back to legacy exam day
     academicEvents,
   );
 
-  assert.equal(conflicts.length, 0);
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].conflicts[0].rule, "day-before-other-subject");
+  assert.equal(conflicts[0].conflicts[0].examDate, "2026-04-29");
 });
 
-test("does not use legacy exam days when annual board has modern exam coverage without subject date", () => {
+test("uses the legacy exam day when annual board coverage has no subject detail for that date", () => {
   const classes = [
     {
       id: "math-a",
@@ -329,7 +338,63 @@ test("does not use legacy exam days when annual board has modern exam coverage w
     academicEvents,
   );
 
-  assert.equal(conflicts.length, 0);
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].conflicts[0].rule, "day-before-other-subject");
+  assert.equal(conflicts[0].conflicts[0].examDate, "2026-04-29");
+});
+
+test("prefers modern subject detail over legacy subjects on the same exam date", () => {
+  const classes = [
+    {
+      id: "science-a",
+      name: "Science A",
+      subject: "Science",
+      schedule_plan: {
+        sessions: [{ state: "active", date: "2026-04-28" }],
+      },
+      student_ids: ["student-1"],
+    },
+  ];
+  const students = [
+    { id: "student-1", name: "Student A", school: "Daegee High", grade: "G1" },
+  ];
+  const academicSchools = [{ id: "school-1", name: "Daegee High" }];
+  const academicEvents = [
+    { id: "event-1", title: "Midterm", school_id: "school-1" },
+  ];
+  const academicExamDays = [
+    {
+      school_id: "school-1",
+      grade: "G1",
+      subject: "English",
+      exam_date: "2026-04-29",
+    },
+  ];
+  const academicEventExamDetails = [
+    {
+      id: "detail-1",
+      academic_event_id: "event-1",
+      school_id: "school-1",
+      grade: "G1",
+      subject: "Math",
+      exam_date: "2026-04-29",
+    },
+  ];
+
+  const conflicts = findExamConflictsForClasses(
+    classes,
+    students,
+    academicSchools,
+    academicExamDays,
+    academicEventExamDetails,
+    academicEvents,
+  );
+
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].conflicts[0].rule, "day-before-other-subject");
+  assert.equal(conflicts[0].conflicts[0].label, "수학 시험 전날");
+  assert.deepEqual(conflicts[0].conflicts[0].examEventIds, ["event-1"]);
+  assert.deepEqual(conflicts[0].conflicts[0].examDetailIds, ["detail-1"]);
 });
 
 test("detects subject exam events saved directly on the annual board", () => {
@@ -556,4 +621,352 @@ test("uses class management grade before enrolled student grades for class break
   assert.deepEqual(metrics.classBreakdowns.byGrade.map((row) => row.label), ["고1"]);
   assert.equal(metrics.classBreakdowns.byGrade[0].classCount, 1);
   assert.equal(metrics.classBreakdowns.byGrade[0].studentCount, 2);
+});
+
+test("builds independent science buckets and sorted dashboard rosters", () => {
+  const metrics = buildDashboardMetrics({
+    classes: [
+      {
+        id: "science-high-1",
+        name: "고1 통합과학2",
+        subject: "science",
+        grade: "고1",
+        status: "수업 진행 중",
+        teacher: "김과학",
+        classroom: "별관 4강",
+        student_ids: ["student-2", "student-1", "student-2"],
+      },
+      {
+        id: "english-high-1",
+        name: "고1 영어",
+        subject: "english",
+        grade: "고1",
+        status: "수업 진행 중",
+        student_ids: ["student-3"],
+      },
+    ],
+    students: [
+      { id: "student-1", name: "가학생", school: "대기고", grade: "고1" },
+      { id: "student-2", name: "나학생", school: "대기고", grade: "고1" },
+      { id: "student-3", name: "영학생", school: "중앙여고", grade: "고1" },
+    ],
+  });
+
+  const science = metrics.analyticsByView.science.high;
+  assert.equal(science.summary.activeClassesCount, 1);
+  assert.equal(science.summary.uniqueRegisteredStudentCount, 2);
+  assert.deepEqual(
+    science.studentBreakdowns.byGrade[0].schools[0].studentRoster,
+    [
+      { id: "student-1", name: "가학생", school: "대기고", grade: "고1" },
+      { id: "student-2", name: "나학생", school: "대기고", grade: "고1" },
+    ],
+  );
+  assert.deepEqual(
+    science.studentBreakdowns.bySchool[0].grades[0].studentRoster.map((student) => student.name),
+    ["가학생", "나학생"],
+  );
+  assert.deepEqual(
+    science.classBreakdowns.byGrade[0].classSummaries[0].studentRoster.map((student) => student.name),
+    ["가학생", "나학생"],
+  );
+  assert.equal(metrics.analyticsByView.english.high.summary.activeClassesCount, 1);
+});
+
+test("builds student breakdowns once per dashboard analytics bucket", () => {
+  const summaryStart = metricsSource.indexOf("function buildDashboardBucketSummary");
+  const bucketStart = metricsSource.indexOf("function buildDashboardAnalyticsBucket");
+  const nextFunctionStart = metricsSource.indexOf(
+    "function buildDashboardAnalyticsBySubject",
+    bucketStart,
+  );
+  const summarySource = metricsSource.slice(summaryStart, bucketStart);
+  const bucketSource = metricsSource.slice(bucketStart, nextFunctionStart);
+
+  assert.equal(
+    [...bucketSource.matchAll(/buildStudentBreakdowns\(classes, students\)/g)].length,
+    1,
+  );
+  assert.doesNotMatch(summarySource, /buildStudentBreakdowns\(/);
+  assert.match(
+    bucketSource,
+    /summary: buildDashboardBucketSummary\(classes, studentBreakdowns\)/,
+  );
+  assert.equal(
+    [...summarySource.matchAll(/getWeeklyMinutesForClasses\(classes\)/g)].length,
+    1,
+  );
+});
+
+function buildWeeklyConflictFixture({
+  now = "2026-07-23T09:00:00+09:00",
+  reverse = false,
+  teacher = "김과학",
+  classroom = "별관 4강",
+  secondStart = "10:30",
+} = {}) {
+  const classes = [
+    {
+      id: "class-a",
+      name: "고1 통합과학 A",
+      subject: "과학",
+      grade: "고1",
+      status: "수업 진행 중",
+      schedule: "월 10:00-11:00",
+      teacher,
+      classroom,
+      student_ids: ["student-registered"],
+      waitlist_student_ids: ["student-waitlist"],
+    },
+    {
+      id: "class-b",
+      name: "고1 통합과학 B",
+      subject: "science",
+      grade: "고1",
+      status: "수업 진행 중",
+      schedule: `월 ${secondStart}-11:30`,
+      teacher,
+      classroom,
+      student_ids: ["student-registered"],
+      waitlist_student_ids: ["student-waitlist"],
+    },
+  ];
+
+  return buildDashboardMetrics({
+    classes: reverse ? [...classes].reverse() : classes,
+    students: [
+      {
+        id: "student-registered",
+        name: "등록학생",
+        class_ids: ["class-b", "class-a", "class-a"],
+      },
+      {
+        id: "student-waitlist",
+        name: "대기학생",
+        waitlist_class_ids: ["class-a", "class-b"],
+      },
+    ],
+    teacherCatalogs: [
+      {
+        id: "teacher-catalog-science",
+        name: teacher,
+        profile_id: "profile-science",
+      },
+    ],
+    classroomCatalogs: [
+      {
+        id: "classroom-catalog-annex-4",
+        name: classroom,
+      },
+    ],
+    now,
+  });
+}
+
+test("normalizes weekly conflicts with stable source-based keys and registered rosters", () => {
+  const metrics = buildWeeklyConflictFixture();
+  const weeklyRows = metrics.conflictRows.filter((row) => row.occurrenceKind === "weekly");
+
+  assert.deepEqual(
+    [...new Set(weeklyRows.map((row) => row.type))].sort(),
+    ["classroom", "student", "teacher"],
+  );
+  assert.equal(metrics.riskCount, metrics.conflictRows.length);
+  assert.equal(weeklyRows.filter((row) => row.type === "student").length, 1);
+  assert.equal(
+    weeklyRows.find((row) => row.type === "teacher").key,
+    "weekly:v1:teacher:월:10:30-11:00:class-a:class-b",
+  );
+  assert.equal(
+    weeklyRows.find((row) => row.type === "student").key,
+    "weekly:v1:student:월:10:30-11:00:class-a:class-b:student-registered",
+  );
+  assert.deepEqual(
+    weeklyRows.find((row) => row.type === "student").affectedStudentIds,
+    ["student-registered"],
+  );
+  assert.ok(weeklyRows.every((row) => !row.affectedStudentIds.includes("student-waitlist")));
+  assert.deepEqual(
+    weeklyRows.find((row) => row.type === "teacher").source.teacherCatalogIds,
+    ["teacher-catalog-science"],
+  );
+  assert.deepEqual(
+    weeklyRows.find((row) => row.type === "classroom").source.classroomCatalogIds,
+    ["classroom-catalog-annex-4"],
+  );
+  assert.equal(
+    weeklyRows.find((row) => row.type === "teacher").primaryAssigneeProfileId,
+    "profile-science",
+  );
+  assert.ok(weeklyRows.every((row) => row.subject === "과학"));
+});
+
+test("weekly keys ignore pair order and mutable resource names but include overlap time", () => {
+  const first = buildWeeklyConflictFixture();
+  const reversed = buildWeeklyConflictFixture({ reverse: true });
+  const renamed = buildWeeklyConflictFixture({
+    teacher: "새 과학 선생님",
+    classroom: "별관 과학실",
+  });
+  const shifted = buildWeeklyConflictFixture({ secondStart: "10:45" });
+  const nextWeek = buildWeeklyConflictFixture({ now: "2026-07-30T09:00:00+09:00" });
+
+  for (const type of ["teacher", "classroom", "student"]) {
+    const firstRow = first.conflictRows.find((row) => row.type === type);
+    const reversedRow = reversed.conflictRows.find((row) => row.type === type);
+    const renamedRow = renamed.conflictRows.find((row) => row.type === type);
+    const shiftedRow = shifted.conflictRows.find((row) => row.type === type);
+    const nextWeekRow = nextWeek.conflictRows.find((row) => row.type === type);
+
+    assert.equal(reversedRow.key, firstRow.key, `${type} reversed pair`);
+    assert.equal(renamedRow.key, firstRow.key, `${type} renamed resource`);
+    assert.notEqual(shiftedRow.key, firstRow.key, `${type} shifted overlap`);
+    assert.equal(nextWeekRow.key, firstRow.key, `${type} next week`);
+    assert.notEqual(nextWeekRow.nextOccurrenceAt, firstRow.nextOccurrenceAt, `${type} occurrence`);
+  }
+});
+
+test("normalizes future science exam conflicts and preserves event, detail, and student IDs", () => {
+  const metrics = buildDashboardMetrics({
+    classes: [
+      {
+        id: "science-exam-class",
+        name: "고1 통합과학2",
+        subject: "science",
+        status: "수업 진행 중",
+        schedule: "목 10:00-11:00",
+        schedule_plan: {
+          sessions: [{ state: "active", date: "2026-07-23" }],
+        },
+        teacher: "김과학",
+        classroom: "별관 4강",
+        student_ids: ["student-1"],
+      },
+    ],
+    students: [{ id: "student-1", name: "과학학생", school: "대기고", grade: "고1" }],
+    academicSchools: [{ id: "school-1", name: "대기고" }],
+    academicEvents: [
+      {
+        id: "event-science",
+        title: "통합과학 시험",
+        school_id: "school-1",
+        grade: "고1",
+        type: "시험기간",
+      },
+    ],
+    academicEventExamDetails: [
+      {
+        id: "detail-science",
+        academic_event_id: "event-science",
+        school_id: "school-1",
+        grade: "고1",
+        subject: "과학",
+        exam_date: "2026-07-23",
+      },
+    ],
+    teacherCatalogs: [
+      {
+        id: "teacher-catalog-science",
+        name: "김과학",
+        profile_id: "profile-science",
+      },
+    ],
+    now: "2026-07-23T09:00:00+09:00",
+  });
+
+  const row = metrics.conflictRows.find((item) => item.type === "exam");
+  assert.ok(row);
+  assert.equal(row.key, "exam:v1:science-exam-class:2026-07-23:same-day-subject");
+  assert.equal(row.subject, "과학");
+  assert.deepEqual(row.affectedStudentIds, ["student-1"]);
+  assert.deepEqual(row.source.studentIds, ["student-1"]);
+  assert.deepEqual(row.source.examEventIds, ["event-science"]);
+  assert.deepEqual(row.source.examDetailIds, ["detail-science"]);
+  assert.equal(row.source.examRule, "same-day-subject");
+  assert.equal(metrics.riskCount, metrics.conflictRows.length);
+});
+
+test("omits past dated conflicts and applies the mixed next-day subject rule", () => {
+  const base = {
+    classes: [
+      {
+        id: "science-class",
+        name: "과학 수업",
+        subject: "과학",
+        status: "수업 진행 중",
+        schedule: "수금 10:00-11:00",
+        schedule_plan: {
+          sessions: [
+            { state: "active", date: "2026-07-22" },
+            { state: "active", date: "2026-07-24" },
+          ],
+        },
+        student_ids: ["student-1"],
+      },
+    ],
+    students: [{ id: "student-1", name: "학생", school: "대기고", grade: "고1" }],
+    academicSchools: [{ id: "school-1", name: "대기고" }],
+    academicEvents: [{ id: "event-1", school_id: "school-1", grade: "고1", type: "시험기간" }],
+    now: "2026-07-23T09:00:00+09:00",
+  };
+
+  const mixedSubjects = buildDashboardConflictRows({
+    ...base,
+    academicEventExamDetails: [
+      {
+        id: "detail-past",
+        academic_event_id: "event-1",
+        school_id: "school-1",
+        grade: "고1",
+        subject: "과학",
+        exam_date: "2026-07-22",
+      },
+      {
+        id: "detail-science",
+        academic_event_id: "event-1",
+        school_id: "school-1",
+        grade: "고1",
+        subject: "과학",
+        exam_date: "2026-07-25",
+      },
+      {
+        id: "detail-math",
+        academic_event_id: "event-1",
+        school_id: "school-1",
+        grade: "고1",
+        subject: "수학",
+        exam_date: "2026-07-25",
+      },
+    ],
+  });
+
+  assert.equal(mixedSubjects.filter((row) => row.type === "exam").length, 0);
+
+  const otherSubjects = buildDashboardConflictRows({
+    ...base,
+    academicEventExamDetails: [
+      {
+        id: "detail-math",
+        academic_event_id: "event-1",
+        school_id: "school-1",
+        grade: "고1",
+        subject: "수학",
+        exam_date: "2026-07-25",
+      },
+      {
+        id: "detail-english",
+        academic_event_id: "event-1",
+        school_id: "school-1",
+        grade: "고1",
+        subject: "영어",
+        exam_date: "2026-07-25",
+      },
+    ],
+  });
+
+  assert.equal(otherSubjects.filter((row) => row.type === "exam").length, 1);
+  assert.equal(
+    otherSubjects.find((row) => row.type === "exam").source.examRule,
+    "day-before-other-subject",
+  );
 });

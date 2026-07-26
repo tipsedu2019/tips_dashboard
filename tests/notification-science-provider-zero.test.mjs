@@ -153,7 +153,6 @@ test("prepare ACL hardening is one exact forward-only service-role contract", as
     /notification_runtime_flags|google_chat_webhook_settings|cron\.schedule|net\.http|fetch\s*\(|provider|secret/i,
   )
 })
-
 test("science row is seeded disconnected with no secret and snapshot listing makes provider/fetch calls 0", async () => {
   const migration = await readFile(scienceMigrationUrl, "utf8")
   assert.match(

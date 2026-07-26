@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 
 import {
   buildDashboardMetrics,
@@ -15,10 +15,27 @@ type DashboardMetricsData = Record<string, unknown> & {
   progressLogsCount: number
 }
 
+type ConflictSourceStatus = "loading" | "ready" | "error"
+
+type DashboardConflictSources = {
+  schedule: { status: ConflictSourceStatus; error: string }
+  exam: { status: ConflictSourceStatus; error: string }
+}
+
 type DashboardMetricsState = DashboardMetricsData & {
   isLoading: boolean
   isConnected: boolean
   error: string | null
+  conflictSources: DashboardConflictSources
+}
+
+type DashboardMetrics = DashboardMetricsState & {
+  retryExamSources: () => void
+}
+
+type DashboardCoreData = {
+  classes: unknown[]
+  students: unknown[]
 }
 
 const buildMetrics = buildDashboardMetrics as unknown as (args: Record<string, unknown>) => DashboardMetricsData
@@ -29,6 +46,10 @@ const EMPTY_METRICS = {
   isLoading: true,
   isConnected: false,
   error: null as string | null,
+  conflictSources: {
+    schedule: { status: "loading", error: "" },
+    exam: { status: "loading", error: "" },
+  },
 } satisfies DashboardMetricsState
 
 const DASHBOARD_CORE_TABLE_TIMEOUT_MS = 15000
@@ -43,6 +64,11 @@ type DashboardTableReadOptions = {
 type SupabaseTableResult = {
   data?: unknown[] | null
   error?: unknown | null
+}
+
+type DashboardTableReadResult = {
+  data: unknown[]
+  error: unknown | null
 }
 
 const DASHBOARD_TABLE_COLUMNS: Record<string, string> = {
@@ -63,6 +89,8 @@ const DASHBOARD_TABLE_COLUMNS: Record<string, string> = {
   academic_exam_days: "id,school_id,grade,subject,exam_date",
   academic_event_exam_details: "id,academic_event_id,school_id,grade,subject,exam_date",
   academic_events: "*",
+  teacher_catalogs: "id,name,profile_id,subjects,is_visible",
+  classroom_catalogs: "id,name,subjects,is_visible",
 }
 
 function isMissingRelationError(error: unknown) {
@@ -87,16 +115,11 @@ function isMissingColumnError(error: unknown) {
 function withTableTimeout<T>(
   request: PromiseLike<T>,
   tableName: string,
-  { optional, timeoutMs }: { optional: boolean; timeoutMs: number },
+  { timeoutMs }: { optional: boolean; timeoutMs: number },
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<T>((resolve, reject) => {
+  const timeout = new Promise<T>((_resolve, reject) => {
     timer = setTimeout(() => {
-      if (optional) {
-        resolve({ data: [], error: null } as T)
-        return
-      }
-
       reject(new Error(`${tableName} 데이터를 불러오지 못했습니다.`))
     }, timeoutMs)
   })
@@ -116,43 +139,92 @@ async function queryTable(tableName: string, columns: string, optional: boolean,
   )
 }
 
-async function readTable(tableName: string, options: DashboardTableReadOptions = {}): Promise<unknown[]> {
+async function readTableResult(
+  tableName: string,
+  options: DashboardTableReadOptions = {},
+): Promise<DashboardTableReadResult> {
   if (!supabase) {
-    return []
+    return {
+      data: [],
+      error: new Error("Supabase 연결 설정을 확인해 주세요."),
+    }
   }
 
   const optional = options.optional ?? false
   const columns = options.columns || DASHBOARD_TABLE_COLUMNS[tableName] || "*"
   const timeoutMs = options.timeoutMs || (optional ? DASHBOARD_OPTIONAL_TABLE_TIMEOUT_MS : DASHBOARD_CORE_TABLE_TIMEOUT_MS)
-  let result = await queryTable(tableName, columns, optional, timeoutMs)
 
-  if (result.error && columns !== "*" && isMissingColumnError(result.error)) {
-    result = await queryTable(tableName, "*", optional, timeoutMs)
-  }
+  try {
+    let result = await queryTable(tableName, columns, optional, timeoutMs)
 
-  if (result.error) {
-    if (optional || isMissingRelationError(result.error)) {
-      return []
+    if (result.error && columns !== "*" && isMissingColumnError(result.error)) {
+      result = await queryTable(tableName, "*", optional, timeoutMs)
     }
-    throw result.error
-  }
 
-  return result.data || []
+    return {
+      data: result.data || [],
+      error: result.error || null,
+    }
+  } catch (error) {
+    return { data: [], error }
+  }
+}
+
+async function readTable(tableName: string, options: DashboardTableReadOptions = {}): Promise<unknown[]> {
+  const result = await readTableResult(tableName, options)
+  if (!result.error) {
+    return result.data
+  }
+  if (options.optional) {
+    return []
+  }
+  if (isMissingRelationError(result.error)) {
+    throw new Error(`${tableName} 데이터 원본을 찾지 못했습니다.`)
+  }
+  throw result.error
+}
+
+function getSourceError(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+  if (typeof error === "object" && error && "message" in error) {
+    return String((error as { message?: unknown }).message || fallback)
+  }
+  return fallback
 }
 
 export function useTipsDashboardMetrics() {
   const [metrics, setMetrics] = useState<DashboardMetricsState>(EMPTY_METRICS)
+  const [coreData, setCoreData] = useState<DashboardCoreData | null>(null)
+  const [examSourceRevision, setExamSourceRevision] = useState(0)
+
+  const retryExamSources = useCallback(() => {
+    setMetrics((current) => ({
+      ...current,
+      conflictSources: {
+        ...current.conflictSources,
+        exam: { status: "loading", error: "" },
+      },
+    }))
+    setExamSourceRevision((current) => current + 1)
+  }, [])
 
   useEffect(() => {
     let isMounted = true
 
-    async function loadMetrics() {
+    async function loadCoreMetrics() {
       if (!supabase) {
         if (isMounted) {
+          const connectionError = "Supabase 연결 설정을 확인해 주세요."
           setMetrics({
             ...EMPTY_METRICS,
             isLoading: false,
-            error: "Supabase 연결 설정을 확인해 주세요.",
+            error: connectionError,
+            conflictSources: {
+              schedule: { status: "error", error: connectionError },
+              exam: { status: "error", error: connectionError },
+            },
           })
         }
         return
@@ -173,62 +245,122 @@ export function useTipsDashboardMetrics() {
             isLoading: false,
             isConnected: true,
             error: null,
+            conflictSources: {
+              schedule: { status: "ready", error: "" },
+              exam: { status: "loading", error: "" },
+            },
           })
-        }
-
-        const [
-          classTerms,
-          classGroups,
-          classGroupMembers,
-          academicSchools,
-          academicExamDays,
-          academicEventExamDetails,
-          academicEvents,
-        ] = await Promise.all([
-          readTable("class_terms", { optional: true }),
-          readTable("class_schedule_sync_groups", { optional: true }),
-          readTable("class_schedule_sync_group_members", { optional: true }),
-          readTable("academic_schools", { optional: true }),
-          readTable("academic_exam_days", { optional: true }),
-          readTable("academic_event_exam_details", { optional: true }),
-          readTable("academic_events", { optional: true }),
-        ])
-
-        if (isMounted) {
-          setMetrics({
-            ...buildMetrics({
-              classes,
-              students,
-              classTerms,
-              classGroups,
-              classGroupMembers,
-              academicSchools,
-              academicExamDays,
-              academicEventExamDetails,
-              academicEvents,
-            }),
-            isLoading: false,
-            isConnected: true,
-            error: null,
-          })
+          setCoreData({ classes, students })
         }
       } catch (error) {
         if (isMounted) {
+          const message = getSourceError(error, "알 수 없는 연결 오류가 발생했습니다.")
           setMetrics({
             ...EMPTY_METRICS,
             isLoading: false,
-            error: error instanceof Error ? error.message : "알 수 없는 연결 오류가 발생했습니다.",
+            error: message,
+            conflictSources: {
+              schedule: { status: "error", error: message },
+              exam: { status: "loading", error: "" },
+            },
           })
         }
       }
     }
 
-    loadMetrics()
+    loadCoreMetrics()
 
     return () => {
       isMounted = false
     }
   }, [])
 
-  return metrics
+  useEffect(() => {
+    if (!coreData) return
+    const sourceData = coreData
+
+    let isMounted = true
+
+    async function loadEnrichment() {
+      setMetrics((current) => ({
+        ...current,
+        conflictSources: {
+          ...current.conflictSources,
+          exam: { status: "loading", error: "" },
+        },
+      }))
+
+      const [
+        classTerms,
+        classGroups,
+        classGroupMembers,
+        teacherCatalogs,
+        classroomCatalogs,
+        academicSchoolsResult,
+        academicExamDaysResult,
+        academicEventExamDetailsResult,
+        academicEventsResult,
+      ] = await Promise.all([
+        readTable("class_terms", { optional: true }),
+        readTable("class_schedule_sync_groups", { optional: true }),
+        readTable("class_schedule_sync_group_members", { optional: true }),
+        readTable("teacher_catalogs", { optional: true }),
+        readTable("classroom_catalogs", { optional: true }),
+        readTableResult("academic_schools", { optional: true }),
+        readTableResult("academic_exam_days", { optional: true }),
+        readTableResult("academic_event_exam_details", { optional: true }),
+        readTableResult("academic_events", { optional: true }),
+      ])
+
+      if (!isMounted) return
+
+      const examErrors = [
+        academicSchoolsResult.error,
+        academicExamDaysResult.error,
+        academicEventExamDetailsResult.error,
+        academicEventsResult.error,
+      ].filter(Boolean)
+      const examReady = examErrors.length === 0
+      const examError = examReady
+        ? ""
+        : getSourceError(examErrors[0], "시험 일정 데이터를 불러오지 못했습니다.")
+
+      setMetrics({
+        ...buildMetrics({
+          classes: sourceData.classes,
+          students: sourceData.students,
+          classTerms,
+          classGroups,
+          classGroupMembers,
+          teacherCatalogs,
+          classroomCatalogs,
+          academicSchools: examReady ? academicSchoolsResult.data : [],
+          academicExamDays: examReady ? academicExamDaysResult.data : [],
+          academicEventExamDetails: examReady ? academicEventExamDetailsResult.data : [],
+          academicEvents: examReady ? academicEventsResult.data : [],
+        }),
+        isLoading: false,
+        isConnected: true,
+        error: null,
+        conflictSources: {
+          schedule: { status: "ready", error: "" },
+          exam: {
+            status: examReady ? "ready" : "error",
+            error: examError,
+          },
+        },
+      })
+    }
+
+    loadEnrichment()
+
+    return () => {
+      isMounted = false
+    }
+  }, [coreData, examSourceRevision])
+
+  return useMemo<DashboardMetrics>(
+    () => ({ ...metrics, retryExamSources }),
+    [metrics, retryExamSources],
+  )
 }

@@ -1,12 +1,23 @@
 "use client"
 
-import { type ReactNode, useMemo, useState } from "react"
+import Link from "next/link"
+import {
+  type ReactElement,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import {
   AlertTriangle,
   ChevronDown,
 } from "lucide-react"
+import { toast } from "sonner"
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Card,
   CardAction,
@@ -14,17 +25,37 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  projectDashboardConflictRpcInput,
+  type DashboardConflictRow,
+  type DashboardConflictTaskLink,
+  type DashboardConflictType,
+} from "@/features/dashboard/conflict-contract"
+import {
+  createDashboardConflictTask,
+  listDashboardConflictTaskLinks,
+} from "@/features/tasks/ops-task-service"
 import { cn } from "@/lib/utils"
+import { useAuth } from "@/providers/auth-provider"
 
-type DashboardSubjectKey = "all" | "english" | "math"
+type DashboardSubjectKey = "all" | "english" | "math" | "science"
 type DashboardDivisionKey = "all" | "middle" | "high"
 type StudentBasis = "students" | "enrollments"
 type ClassOperationGroupMode = "grade" | "teacher" | "classroom"
+
+type DashboardStudentRef = {
+  id: string
+  name: string
+  school: string
+  grade: string
+}
 
 type BreakdownRow = {
   label: string
   enrollmentCount: number
   studentCount: number
+  studentRoster?: DashboardStudentRef[]
   schools?: BreakdownRow[]
   grades?: BreakdownRow[]
 }
@@ -37,6 +68,7 @@ type ClassSummaryRow = {
   classroomLabel: string
   studentCount: number
   enrollmentCount: number
+  studentRoster?: DashboardStudentRef[]
   weeklyMinutes?: number
   weeklyHoursLabel?: string
 }
@@ -75,22 +107,6 @@ type DashboardBucket = {
   summary?: DashboardBucketSummary
 }
 
-type ExamConflictClass = {
-  classId: string
-  title: string
-  subject: string
-  teacherLabel?: string
-  conflicts: Array<{
-    rule?: string
-    message: string
-    sessionDate: string
-    examDate: string
-    students: string[]
-    schoolName?: string
-    grade?: string
-  }>
-}
-
 type DashboardMetrics = {
   activeClassesCount: number
   studentsCount: number
@@ -100,7 +116,12 @@ type DashboardMetrics = {
   uniqueWaitlistStudentCount?: number
   weeklyHoursLabel?: string
   riskCount?: number
-  examConflicts?: ExamConflictClass[]
+  conflictRows?: DashboardConflictRow[]
+  conflictSources: {
+    schedule: { status: "loading" | "ready" | "error"; error: string }
+    exam: { status: "loading" | "ready" | "error"; error: string }
+  }
+  retryExamSources: () => void
   studentBreakdowns?: DashboardBucket["studentBreakdowns"]
   classBreakdowns?: DashboardBucket["classBreakdowns"]
   analyticsBySubject?: Partial<Record<DashboardSubjectKey, DashboardBucket>>
@@ -110,25 +131,18 @@ type DashboardMetrics = {
   error: string | null
 }
 
-type ConflictBoardRow = {
-  id: string
-  classTitle: string
-  subjectLabel: string
-  teacherLabel: string
-  examLabel: string
-  whatTargetLabel: string
-  dateLabel: string
-  schoolLabel: string
-  gradeLabel: string
-  whoLabel: string
-  whyLabel: string
-  affectedCount: number
-}
+type ConflictActionState =
+  | { status: "checking" }
+  | { status: "idle" }
+  | { status: "saving" }
+  | { status: "linked"; taskId: string; canOpen: boolean }
+  | { status: "error"; message: string }
 
 const SUBJECT_TABS: Array<{ key: DashboardSubjectKey; label: string }> = [
   { key: "all", label: "전체" },
   { key: "english", label: "영어" },
   { key: "math", label: "수학" },
+  { key: "science", label: "과학" },
 ]
 
 const DIVISION_TABS: Array<{ key: DashboardDivisionKey; label: string }> = [
@@ -142,6 +156,20 @@ const CLASS_OPERATION_GROUP_TABS: Array<{ key: ClassOperationGroupMode; label: s
   { key: "teacher", label: "선생님" },
   { key: "classroom", label: "강의실" },
 ]
+
+const CONFLICT_TYPE_ORDER: Record<DashboardConflictType, number> = {
+  exam: 0,
+  teacher: 1,
+  classroom: 2,
+  student: 3,
+}
+
+const CONFLICT_TYPE_LABELS: Record<DashboardConflictType, string> = {
+  exam: "시험",
+  teacher: "선생님",
+  classroom: "강의실",
+  student: "학생",
+}
 
 const EMPTY_BUCKET: DashboardBucket = {
   studentBreakdowns: {
@@ -231,85 +259,11 @@ function getSummary(metrics: DashboardMetrics, bucket: DashboardBucket): Dashboa
   }
 }
 
-function normalizeText(value: string | undefined) {
-  return String(value || "").replace(/\s+/g, "").toLowerCase()
-}
-
 function splitBadgeLabels(value: string | undefined) {
   return String(value || "")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean)
-}
-
-function matchesSubject(subject: string | undefined, subjectKey: DashboardSubjectKey) {
-  if (subjectKey === "all") return true
-  const normalized = normalizeText(subject)
-  if (subjectKey === "english") return normalized.includes("영어") || normalized.includes("english")
-  return normalized.includes("수학") || normalized.includes("math")
-}
-
-function matchesDivision(grade: string | undefined, division: DashboardDivisionKey) {
-  if (division === "all") return true
-
-  const normalized = normalizeText(grade)
-  if (!normalized) return true
-  if (division === "high") {
-    return normalized.includes("고") || normalized.includes("high") || /(10|11|12)/.test(normalized)
-  }
-  return (
-    normalized.includes("초") ||
-    normalized.includes("중") ||
-    normalized.includes("elementary") ||
-    normalized.includes("middle") ||
-    /^[1-9]$/.test(normalized)
-  )
-}
-
-function getConflictExamLabel(conflict: ExamConflictClass["conflicts"][number], fallbackSubject: string) {
-  const message = conflict.message || `${fallbackSubject || "시험"} 시험`
-  const withoutTiming = message.replace(/\s*(전날|당일).*$/, "").trim()
-  if (!withoutTiming) return `${fallbackSubject || "학교"} 시험`
-  return withoutTiming.includes("시험") ? withoutTiming : `${withoutTiming} 시험`
-}
-
-function getConflictRows(
-  conflicts: ExamConflictClass[] | undefined,
-  subject: DashboardSubjectKey,
-  division: DashboardDivisionKey,
-) {
-  return (conflicts || [])
-    .filter((classItem) => matchesSubject(classItem.subject, subject))
-    .map((classItem): ConflictBoardRow | null => {
-      const scopedConflicts = classItem.conflicts.filter((conflict) => matchesDivision(conflict.grade, division))
-      const first = scopedConflicts[0]
-      if (!first) return null
-
-      const affectedStudents = new Set(scopedConflicts.flatMap((conflict) => conflict.students || []))
-      const examLabel = getConflictExamLabel(first, classItem.subject)
-      const isDayBeforeOtherSubject = first.rule === "day-before-other-subject" || first.message?.includes("전날")
-      const whyLabel = isDayBeforeOtherSubject
-        ? "타과목 시험일 전날에는 수업을 진행하지 않습니다."
-        : "본과목 시험일 당일에는 수업을 진행하지 않습니다."
-      const studentNames = [...affectedStudents].filter(Boolean)
-
-      return {
-        id: classItem.classId,
-        classTitle: classItem.title,
-        subjectLabel: classItem.subject || "과목",
-        teacherLabel: classItem.teacherLabel || "미정",
-        examLabel,
-        whatTargetLabel: isDayBeforeOtherSubject ? "타과목 시험일 전날" : "본과목 시험일",
-        dateLabel: first.sessionDate || first.examDate,
-        schoolLabel: first.schoolName || "",
-        gradeLabel: first.grade || "",
-        whoLabel: studentNames.length > 0 ? studentNames.join(", ") : "영향 학생 없음",
-        whyLabel,
-        affectedCount: affectedStudents.size || first.students?.length || 0,
-      }
-    })
-    .filter((row): row is ConflictBoardRow => Boolean(row))
-    .sort((left, right) => left.dateLabel.localeCompare(right.dateLabel, "ko", { numeric: true }))
 }
 
 function getMaxValue(rows: BreakdownRow[], basis: StudentBasis) {
@@ -438,6 +392,54 @@ function ListScopeToggle({
   )
 }
 
+function StudentRosterPopover({
+  label,
+  roster,
+  children,
+}: {
+  label: string
+  roster: DashboardStudentRef[]
+  children: ReactElement
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>{children}</PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={8}
+        aria-label={`${label} 명단`}
+        className="w-[min(18rem,calc(100vw-2rem))] rounded-lg p-0 shadow-lg"
+      >
+        <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
+          <div className="min-w-0 truncate text-sm font-semibold">{label}</div>
+          <Badge variant="secondary" className="h-5 shrink-0 rounded-full px-2 text-[11px]">
+            {formatNumber(roster.length)}명
+          </Badge>
+        </div>
+        <div className="max-h-64 overflow-y-auto overscroll-contain p-2">
+          {roster.length > 0 ? (
+            <div className="grid gap-1">
+              {roster.map((student) => {
+                const meta = [student.school, student.grade].filter(Boolean).join(" · ")
+                return (
+                  <div key={student.id} className="rounded-md px-2 py-1.5 hover:bg-muted/70">
+                    <div className="text-sm font-medium leading-5">{student.name}</div>
+                    {meta ? <div className="text-xs text-muted-foreground">{meta}</div> : null}
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="px-2 py-5 text-center text-sm text-muted-foreground">
+              표시할 학생이 없습니다.
+            </div>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 function getActiveLabel<T extends string>(items: Array<{ key: T; label: string }>, value: T) {
   return items.find((item) => item.key === value)?.label ?? value
 }
@@ -483,14 +485,12 @@ function DashboardHeader({
   onSubjectChange,
   onDivisionChange,
   metrics,
-  conflictCount,
 }: {
   subject: DashboardSubjectKey
   division: DashboardDivisionKey
   onSubjectChange: (next: DashboardSubjectKey) => void
   onDivisionChange: (next: DashboardDivisionKey) => void
   metrics: DashboardMetrics
-  conflictCount: number
 }) {
   const isDisconnected = !metrics.isLoading && (metrics.error || !metrics.isConnected)
   const statusBadge = isDisconnected ? (
@@ -498,15 +498,11 @@ function DashboardHeader({
       <AlertTriangle className="size-3.5" />
       연결 확인
     </Badge>
-  ) : conflictCount > 0 ? (
-    <Badge variant="destructive" className="font-medium">
-      충돌 {formatNumber(conflictCount)}건
-    </Badge>
   ) : null
 
   return (
     <section aria-label="대시보드 작업 기준" className="min-w-0">
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border bg-background px-2.5 py-2">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-2.5 py-2">
         <DashboardVisibleFilters
           subject={subject}
           division={division}
@@ -672,7 +668,7 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
   const hasDistributionRows = gradeRows.length > 0 || schoolRows.length > 0
 
   return (
-    <Card className="min-w-0 gap-4 rounded-xl py-4 shadow-none">
+    <Card className="min-w-0 gap-4 rounded-xl border-0 py-4 shadow-none">
       <CardHeader className="has-data-[slot=card-action]:grid-cols-1 gap-3 border-b px-4 pb-3 sm:px-5 sm:has-data-[slot=card-action]:grid-cols-[1fr_auto]">
         <CardTitle className="text-base">학생 분포</CardTitle>
         {hasDistributionRows ? (
@@ -755,12 +751,26 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
                           const schoolValue = getValue(school)
 
                           return (
-                            <div key={school.label} role="listitem" className={cn(DISTRIBUTION_ROW_CLASS, "text-xs")}>
-                              <span className="truncate pl-5 font-medium text-muted-foreground">{school.label}</span>
-                              <div className="h-1 overflow-hidden rounded-full bg-muted">
-                                <AnimatedBar percent={getBarScale(schoolValue, gradeMax, 4)} className="bg-primary/65" />
-                              </div>
-                              <span className="text-right tabular-nums">{formatNumber(schoolValue)}{unit}</span>
+                            <div key={school.label} role="listitem">
+                              <StudentRosterPopover
+                                label={`${row.label} · ${school.label} 학생`}
+                                roster={school.studentRoster || []}
+                              >
+                                <button
+                                  type="button"
+                                  aria-label={`${row.label} ${school.label} 학생 명단 보기`}
+                                  className={cn(
+                                    DISTRIBUTION_ROW_CLASS,
+                                    "w-full rounded-md text-left text-xs transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                                  )}
+                                >
+                                  <span className="truncate pl-5 font-medium text-muted-foreground">{school.label}</span>
+                                  <div className="h-1 overflow-hidden rounded-full bg-muted">
+                                    <AnimatedBar percent={getBarScale(schoolValue, gradeMax, 4)} className="bg-primary/65" />
+                                  </div>
+                                  <span className="text-right tabular-nums">{formatNumber(schoolValue)}{unit}</span>
+                                </button>
+                              </StudentRosterPopover>
                             </div>
                           )
                         })}
@@ -830,12 +840,26 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
                           const gradeValue = getValue(grade)
 
                           return (
-                            <div key={grade.label} role="listitem" className={cn(DISTRIBUTION_ROW_CLASS, "text-xs")}>
-                              <span className="truncate pl-5 font-medium text-muted-foreground">{grade.label}</span>
-                              <div className="h-1 overflow-hidden rounded-full bg-muted">
-                                <AnimatedBar percent={getBarScale(gradeValue, schoolMax, 4)} className="bg-primary/65" />
-                              </div>
-                              <span className="text-right tabular-nums">{formatNumber(gradeValue)}{unit}</span>
+                            <div key={grade.label} role="listitem">
+                              <StudentRosterPopover
+                                label={`${row.label} · ${grade.label} 학생`}
+                                roster={grade.studentRoster || []}
+                              >
+                                <button
+                                  type="button"
+                                  aria-label={`${row.label} ${grade.label} 학생 명단 보기`}
+                                  className={cn(
+                                    DISTRIBUTION_ROW_CLASS,
+                                    "w-full rounded-md text-left text-xs transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                                  )}
+                                >
+                                  <span className="truncate pl-5 font-medium text-muted-foreground">{grade.label}</span>
+                                  <div className="h-1 overflow-hidden rounded-full bg-muted">
+                                    <AnimatedBar percent={getBarScale(gradeValue, schoolMax, 4)} className="bg-primary/65" />
+                                  </div>
+                                  <span className="text-right tabular-nums">{formatNumber(gradeValue)}{unit}</span>
+                                </button>
+                              </StudentRosterPopover>
                             </div>
                           )
                         })}
@@ -867,10 +891,7 @@ function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
   )
   const groupRows = groupRowsByMode[groupMode]
   const groupLabel = getActiveLabel(CLASS_OPERATION_GROUP_TABS, groupMode)
-  const defaultOpenGroupKey = groupRows[0] ? getClassOperationGroupKey(groupMode, groupRows[0].label) : undefined
-  const [openGroupKeys, setOpenGroupKeys] = useState<Set<string>>(
-    () => new Set(defaultOpenGroupKey ? [defaultOpenGroupKey] : []),
-  )
+  const [openGroupKeys, setOpenGroupKeys] = useState<Set<string>>(() => new Set())
   const [expandedClassKeys, setExpandedClassKeys] = useState<Set<string>>(() => new Set())
   const classMax = getClassMaxValue(groupRows)
   const hasClassGroups = Object.values(groupRowsByMode).some((rows) => rows.length > 0)
@@ -887,17 +908,7 @@ function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
     })
   }
   const changeGroupMode = (nextMode: ClassOperationGroupMode) => {
-    const nextRows = groupRowsByMode[nextMode]
-    const nextPrefix = `class-${nextMode}:`
-    const nextDefaultOpenKey = nextRows[0] ? getClassOperationGroupKey(nextMode, nextRows[0].label) : undefined
     setGroupMode(nextMode)
-    if (!nextDefaultOpenKey) return
-    setOpenGroupKeys((current) => {
-      if ([...current].some((key) => key.startsWith(nextPrefix))) {
-        return current
-      }
-      return new Set([...current, nextDefaultOpenKey])
-    })
   }
   const toggleExpandedClassList = (key: string) => {
     setExpandedClassKeys((current) => {
@@ -912,7 +923,7 @@ function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
   }
 
   return (
-    <Card className="min-w-0 gap-4 rounded-xl py-4 shadow-none">
+    <Card className="min-w-0 gap-4 rounded-xl border-0 py-4 shadow-none">
       <CardHeader className="has-data-[slot=card-action]:grid-cols-1 gap-3 border-b px-4 pb-3 sm:px-5 sm:has-data-[slot=card-action]:grid-cols-[1fr_auto]">
         <CardTitle className="text-base">수업 운영</CardTitle>
         {hasClassGroups ? (
@@ -980,39 +991,46 @@ function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
                       </div>
                       <div role="list" aria-label={`${row.label} 수업 목록`} className="grid gap-1.5">
                         {classRows.map((classItem) => (
-                          <div
-                            key={classItem.id}
-                            role="listitem"
-                            className="min-w-0 border-l-2 border-l-primary/35 bg-background px-3 py-2"
-                          >
-                            <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-1.5 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
-                              <Badge variant="outline" className="bg-primary/5 text-primary">{classItem.subject}</Badge>
-                              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                                <span className="min-w-0 max-w-full text-sm font-semibold leading-5">{classItem.title}</span>
-                                {splitBadgeLabels(classItem.teacherLabel).map((label) => (
-                                  <Badge
-                                    key={`teacher:${classItem.id}:${label}`}
-                                    variant="outline"
-                                    className="min-w-0 max-w-full shrink justify-start !overflow-visible !whitespace-normal break-keep bg-background px-1.5 text-[11px] font-medium leading-4 text-muted-foreground"
-                                  >
-                                    {label}
-                                  </Badge>
-                                ))}
-                                {splitBadgeLabels(classItem.classroomLabel).map((label) => (
-                                  <Badge
-                                    key={`classroom:${classItem.id}:${label}`}
-                                    variant="outline"
-                                    className="min-w-0 max-w-full shrink justify-start !overflow-visible !whitespace-normal break-keep bg-background px-1.5 text-[11px] font-medium leading-4 text-muted-foreground"
-                                  >
-                                    {label}
-                                  </Badge>
-                                ))}
-                              </div>
-                              <span className="col-start-2 grid justify-items-start gap-0.5 text-xs font-medium tabular-nums text-muted-foreground sm:col-start-3 sm:justify-items-end">
-                                <span>{formatWeeklyHoursLabel(classItem.weeklyHoursLabel)}</span>
-                                <span>{formatNumber(classItem.studentCount)}명</span>
-                              </span>
-                            </div>
+                          <div key={classItem.id} role="listitem">
+                            <StudentRosterPopover
+                              label={`${classItem.title} 학생`}
+                              roster={classItem.studentRoster || []}
+                            >
+                              <button
+                                type="button"
+                                aria-label={`${classItem.title} 학생 명단 보기`}
+                                className="w-full min-w-0 border-l-2 border-l-primary/35 bg-background px-3 py-2 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                              >
+                                <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-1.5 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+                                  <Badge variant="outline" className="bg-primary/5 text-primary">{classItem.subject}</Badge>
+                                  <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                    <span className="min-w-0 max-w-full text-sm font-semibold leading-5">{classItem.title}</span>
+                                    {splitBadgeLabels(classItem.teacherLabel).map((label) => (
+                                      <Badge
+                                        key={`teacher:${classItem.id}:${label}`}
+                                        variant="outline"
+                                        className="min-w-0 max-w-full shrink justify-start !overflow-visible !whitespace-normal break-keep bg-background px-1.5 text-[11px] font-medium leading-4 text-muted-foreground"
+                                      >
+                                        {label}
+                                      </Badge>
+                                    ))}
+                                    {splitBadgeLabels(classItem.classroomLabel).map((label) => (
+                                      <Badge
+                                        key={`classroom:${classItem.id}:${label}`}
+                                        variant="outline"
+                                        className="min-w-0 max-w-full shrink justify-start !overflow-visible !whitespace-normal break-keep bg-background px-1.5 text-[11px] font-medium leading-4 text-muted-foreground"
+                                      >
+                                        {label}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                  <span className="col-start-2 grid justify-items-start gap-0.5 text-xs font-medium tabular-nums text-muted-foreground sm:col-start-3 sm:justify-items-end">
+                                    <span>{formatWeeklyHoursLabel(classItem.weeklyHoursLabel)}</span>
+                                    <span>{formatNumber(classItem.studentCount)}명</span>
+                                  </span>
+                                </div>
+                              </button>
+                            </StudentRosterPopover>
                           </div>
                         ))}
                       </div>
@@ -1031,90 +1049,268 @@ function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
   )
 }
 
-function ConflictBoard({ rows }: { rows: ConflictBoardRow[] }) {
+function formatConflictOccurrence(row: DashboardConflictRow) {
+  const date = new Date(row.nextOccurrenceAt)
+  if (!Number.isNaN(date.getTime())) {
+    return new Intl.DateTimeFormat("ko-KR", {
+      timeZone: "Asia/Seoul",
+      month: "numeric",
+      day: "numeric",
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(date)
+  }
+
+  return [
+    row.recurrenceDay ? `${row.recurrenceDay}요일` : "",
+    row.source.overlapStart,
+  ].filter(Boolean).join(" ") || row.source.examDate || "일정 미정"
+}
+
+function getConflictActionState(link: DashboardConflictTaskLink | undefined): ConflictActionState {
+  if (!link?.linked) return { status: "idle" }
+  return {
+    status: "linked",
+    taskId: link.canOpen ? link.taskId : "",
+    canOpen: link.canOpen,
+  }
+}
+
+function getConflictActionError(error: unknown) {
+  if (error instanceof Error && error.message) return error.message
+  return "할 일을 등록하지 못했습니다."
+}
+
+function ConflictWarning({ metrics }: { metrics: DashboardMetrics }) {
+  const { role } = useAuth()
   const [showAllConflicts, setShowAllConflicts] = useState(false)
-  const affectedCount = rows.reduce((sum, row) => sum + row.affectedCount, 0)
+  const [actionStateByKey, setActionStateByKey] = useState<Record<string, ConflictActionState>>({})
+  const rows = useMemo(
+    () => [...(metrics.conflictRows || [])].sort((left, right) => (
+      left.nextOccurrenceAt.localeCompare(right.nextOccurrenceAt) ||
+      CONFLICT_TYPE_ORDER[left.type] - CONFLICT_TYPE_ORDER[right.type] ||
+      left.key.localeCompare(right.key)
+    )),
+    [metrics.conflictRows],
+  )
+  const conflictKeySignature = useMemo(
+    () => rows.map((row) => row.key).sort().join("|"),
+    [rows],
+  )
+  const rowsRef = useRef(rows)
+  const canCreateTask = new Set(["admin", "staff", "teacher"]).has(role)
+  const sourcesReady =
+    metrics.conflictSources.schedule.status === "ready" &&
+    metrics.conflictSources.exam.status === "ready"
   const visibleRows = showAllConflicts ? rows : rows.slice(0, 3)
 
-  if (rows.length === 0) {
+  useEffect(() => {
+    rowsRef.current = rows
+  }, [rows])
+
+  useEffect(() => {
+    const currentRows = rowsRef.current
+    if (currentRows.length === 0) {
+      return
+    }
+
+    let isCurrent = true
+
+    listDashboardConflictTaskLinks(
+      currentRows.map(projectDashboardConflictRpcInput),
+    )
+      .then((links: DashboardConflictTaskLink[]) => {
+        if (!isCurrent) return
+        const linksByKey = new Map<string, DashboardConflictTaskLink>(
+          links.map((link: DashboardConflictTaskLink) => [link.conflictKey, link]),
+        )
+        setActionStateByKey(Object.fromEntries(
+          currentRows.map((row) => [row.key, getConflictActionState(linksByKey.get(row.key))]),
+        ))
+      })
+      .catch((error: unknown) => {
+        if (!isCurrent) return
+        const message = getConflictActionError(error)
+        setActionStateByKey(Object.fromEntries(
+          currentRows.map((row) => [row.key, { status: "error", message } satisfies ConflictActionState]),
+        ))
+      })
+
+    return () => {
+      isCurrent = false
+    }
+  }, [conflictKeySignature])
+
+  async function createConflictTask(row: DashboardConflictRow) {
+    setActionStateByKey((current) => ({
+      ...current,
+      [row.key]: { status: "saving" },
+    }))
+
+    try {
+      const link = await createDashboardConflictTask(
+        projectDashboardConflictRpcInput(row),
+      )
+      setActionStateByKey((current) => ({
+        ...current,
+        [row.key]: getConflictActionState(link),
+      }))
+    } catch (error) {
+      const message = getConflictActionError(error)
+      setActionStateByKey((current) => ({
+        ...current,
+        [row.key]: { status: "error", message },
+      }))
+      toast.error(message)
+    }
+  }
+
+  if (rows.length === 0 && sourcesReady) {
     return null
   }
 
   return (
-    <Card className="min-w-0 gap-4 rounded-xl py-5 shadow-xs">
-      <CardHeader className="px-4 sm:px-5">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <AlertTriangle className="size-4 text-destructive" />
-          일정 충돌 보드
-        </CardTitle>
-        <CardAction className="flex items-center gap-2">
-          <ListScopeToggle
-            label="일정 충돌"
-            expanded={showAllConflicts}
-            visibleCount={3}
-            totalCount={rows.length}
+    <Alert
+      aria-label="일정 충돌"
+      className="min-w-0 border-amber-300 bg-amber-50/80 py-4 text-amber-950 dark:border-amber-900 dark:bg-amber-950/25 dark:text-amber-100"
+    >
+      <AlertTriangle className="text-amber-700 dark:text-amber-300" aria-hidden="true" />
+      <AlertTitle className="flex min-h-6 flex-wrap items-center justify-between gap-2 text-base font-semibold">
+        <span>일정 충돌 {formatNumber(rows.length)}건</span>
+        {rows.length > 3 ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-expanded={showAllConflicts}
+            aria-controls="dashboard-conflict-rows"
             onClick={() => setShowAllConflicts((current) => !current)}
-          />
-          <Badge variant={rows.length > 0 ? "destructive" : "outline"}>{formatNumber(rows.length)}</Badge>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="space-y-4 px-4 sm:px-5">
-        <div className="grid gap-3 xl:grid-cols-3">
-          {visibleRows.map((row) => (
-            <div key={row.id} className="min-w-0 rounded-xl border bg-background p-4">
-              <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <Badge variant="outline" className="bg-primary/5 text-primary">{row.subjectLabel}</Badge>
-                    <Badge variant="outline">{row.teacherLabel}</Badge>
-                    <span className="min-w-0 max-w-full text-sm font-semibold leading-5 text-destructive">{row.classTitle}</span>
-                    <AlertTriangle className="size-3.5 text-destructive" aria-hidden="true" />
-                    <span className="text-sm font-semibold leading-5 text-destructive">{row.examLabel}</span>
-                  </div>
+            className="h-8 text-amber-950 hover:bg-amber-100 hover:text-amber-950 dark:text-amber-100 dark:hover:bg-amber-950"
+          >
+            <ChevronDown
+              className={cn("size-4 transition-transform", showAllConflicts && "rotate-180")}
+              aria-hidden="true"
+            />
+            {showAllConflicts ? "접기" : "전체 보기"}
+          </Button>
+        ) : null}
+      </AlertTitle>
+      <AlertDescription className="mt-2 w-full min-w-0 gap-3 text-amber-950 dark:text-amber-100">
+        {metrics.conflictSources.schedule.status === "loading" ? (
+          <p>시간표 일정 충돌을 확인하고 있습니다.</p>
+        ) : null}
+        {metrics.conflictSources.schedule.status === "error" ? (
+          <p>시간표 일정 충돌을 확인하지 못했습니다.</p>
+        ) : null}
+        {metrics.conflictSources.exam.status === "loading" ? (
+          <p>시험 일정 충돌을 확인하고 있습니다.</p>
+        ) : null}
+        {metrics.conflictSources.exam.status === "error" ? (
+          <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p>시험 일정 충돌을 확인하지 못했습니다.</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={metrics.retryExamSources}
+              className="w-full border-amber-300 bg-background sm:w-auto"
+            >
+              다시 시도
+            </Button>
+          </div>
+        ) : null}
+        <div id="dashboard-conflict-rows" className="grid w-full min-w-0 divide-y divide-amber-200/80 border-t border-amber-200/80 dark:divide-amber-900 dark:border-amber-900">
+          {visibleRows.map((row) => {
+            const actionState = actionStateByKey[row.key] || { status: "checking" }
+            const canOpenTask =
+              actionState.status === "linked" &&
+              actionState.canOpen &&
+              Boolean(actionState.taskId)
+
+            return (
+              <div
+                key={row.key}
+                className="grid min-w-0 gap-3 py-3 lg:grid-cols-[minmax(8rem,0.7fr)_minmax(0,2fr)_minmax(9rem,1fr)_minmax(0,1.6fr)_auto] lg:items-start"
+              >
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <Badge variant="outline" className="border-amber-300 bg-background/80 text-amber-950 dark:text-amber-100">
+                    {CONFLICT_TYPE_LABELS[row.type]}
+                  </Badge>
+                  <span className="text-xs font-semibold tabular-nums">
+                    {formatConflictOccurrence(row)}
+                  </span>
                 </div>
-                <div className="flex shrink-0 flex-wrap gap-1.5 sm:justify-end">
-                  {[row.schoolLabel, row.gradeLabel].filter(Boolean).map((label, index) => (
-                    <Badge key={`${label}-${index}`} variant="outline" className="bg-muted/45">
-                      {label}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-              <div className="mt-4 grid gap-2 text-xs">
-                <ProcessRow label="일시" value={row.dateLabel} />
-                <ProcessRow
-                  label="충돌"
-                  value={(
-                    <span className="inline-flex flex-wrap items-center gap-1.5">
-                      <span>본과목 수업일</span>
-                      <AlertTriangle className="size-3.5 text-destructive" aria-hidden="true" />
-                      <span>{row.whatTargetLabel}</span>
+                <ProcessRow label="문제" value={row.problem} />
+                <ProcessRow label="담당" value={row.ownerLabel} />
+                <ProcessRow label="처리" value={row.resolution} />
+                <div className="grid min-w-0 gap-1 lg:justify-items-end">
+                  {actionState.status === "checking" ? (
+                    <Button type="button" variant="outline" size="sm" disabled className="w-full sm:w-auto">
+                      확인 중
+                    </Button>
+                  ) : null}
+                  {actionState.status === "saving" ? (
+                    <Button type="button" variant="outline" size="sm" disabled className="w-full sm:w-auto">
+                      등록 중
+                    </Button>
+                  ) : null}
+                  {canOpenTask ? (
+                    <Button asChild variant="outline" size="sm" className="w-full bg-background sm:w-auto">
+                      <Link href={`/admin/tasks?taskId=${encodeURIComponent(actionState.taskId)}`}>
+                        등록됨 · 할 일 보기
+                      </Link>
+                    </Button>
+                  ) : null}
+                  {actionState.status === "linked" && !canOpenTask ? (
+                    <Button type="button" variant="outline" size="sm" disabled className="w-full sm:w-auto">
+                      등록됨 · 담당자가 처리 중
+                    </Button>
+                  ) : null}
+                  {actionState.status === "idle" && canCreateTask ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => createConflictTask(row)}
+                      className="w-full sm:w-auto"
+                    >
+                      할 일 등록
+                    </Button>
+                  ) : null}
+                  {actionState.status === "idle" && !canCreateTask ? (
+                    <span className="rounded-md border border-amber-300 bg-background/70 px-2.5 py-1.5 text-center text-xs font-medium">
+                      관리팀 등록 필요
                     </span>
-                  )}
-                />
-                <ProcessRow label="대상" value={row.whoLabel} />
-                <ProcessRow label="사유" value={row.whyLabel} />
-                <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-2 sm:grid-cols-[5.6rem_minmax(0,1fr)]">
-                  <span className="text-muted-foreground">처리</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {["보강 제안", "회차 휴강", "보호자 안내"].map((label) => (
-                      <span key={label} className="rounded-md bg-muted px-2 py-1 font-medium">
-                        {label}
-                      </span>
-                    ))}
+                  ) : null}
+                  {actionState.status === "error" && canCreateTask ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => createConflictTask(row)}
+                      className="w-full border-destructive/40 bg-background text-destructive sm:w-auto"
+                    >
+                      등록 실패 · 다시 시도
+                    </Button>
+                  ) : null}
+                  {actionState.status === "error" && !canCreateTask ? (
+                    <span className="text-xs font-medium text-destructive">상태 확인 실패</span>
+                  ) : null}
+                  <div aria-live="polite" className="min-h-4 max-w-56 text-xs text-destructive">
+                    {actionState.status === "error" ? actionState.message : null}
+                    <span className="sr-only">
+                      {actionState.status === "saving" ? "할 일을 등록하고 있습니다." : null}
+                      {actionState.status === "linked" ? "할 일이 등록되었습니다." : null}
+                    </span>
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
-        <div className="flex flex-wrap gap-2 border-t pt-4">
-          <Badge variant="outline">충돌 영향 학생 {formatNumber(affectedCount)}명</Badge>
-          <Badge variant="outline">대상 수업 {formatNumber(rows.length)}개</Badge>
-          <Badge variant="outline">오늘 확정 필요 {formatNumber(rows.length)}건</Badge>
-        </div>
-      </CardContent>
-    </Card>
+      </AlertDescription>
+    </Alert>
   )
 }
 
@@ -1143,47 +1339,32 @@ export function SectionCards({ metrics }: { metrics: DashboardMetrics }) {
     [activeDivision, activeSubject, metrics],
   )
   const summary = useMemo(() => getSummary(metrics, activeBucket), [activeBucket, metrics])
-  const conflictRows = useMemo(
-    () => getConflictRows(metrics.examConflicts, activeSubject, activeDivision),
-    [activeDivision, activeSubject, metrics.examConflicts],
-  )
-
-  if (metrics.isLoading) {
-    return (
-      <div className="grid min-w-0 gap-4">
-        <DashboardHeader
-          subject={activeSubject}
-          division={activeDivision}
-          onSubjectChange={setActiveSubject}
-          onDivisionChange={setActiveDivision}
-          metrics={metrics}
-          conflictCount={conflictRows.length}
-        />
-        <DashboardLoadingState />
-      </div>
-    )
-  }
 
   return (
     <div className="grid min-w-0 gap-4">
+      <ConflictWarning metrics={metrics} />
       <DashboardHeader
         subject={activeSubject}
         division={activeDivision}
         onSubjectChange={setActiveSubject}
         onDivisionChange={setActiveDivision}
         metrics={metrics}
-        conflictCount={conflictRows.length}
       />
-      <KpiStrip metrics={metrics} summary={summary} />
-      <ConflictBoard rows={conflictRows} />
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.85fr)]">
-        <div className="order-2 min-w-0 lg:order-1">
-          <StudentDistributionPanel bucket={activeBucket} />
-        </div>
-        <div className="order-1 min-w-0 lg:order-2">
-          <ClassOperationsPanel key={`${activeSubject}:${activeDivision}`} bucket={activeBucket} />
-        </div>
-      </div>
+      {metrics.isLoading ? (
+        <DashboardLoadingState />
+      ) : (
+        <>
+          <KpiStrip metrics={metrics} summary={summary} />
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.85fr)]">
+            <div className="order-2 min-w-0 lg:order-1">
+              <StudentDistributionPanel bucket={activeBucket} />
+            </div>
+            <div className="order-1 min-w-0 lg:order-2">
+              <ClassOperationsPanel key={`${activeSubject}:${activeDivision}`} bucket={activeBucket} />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

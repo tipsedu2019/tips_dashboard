@@ -78,6 +78,24 @@ function mergeLocalDateTime(dateValue: string, timeValue: string) {
   return date && time ? `${date}T${time}` : ""
 }
 
+export type DateTimePickerDraftState = {
+  date: string
+  time: string
+  isComplete: boolean
+  isPartial: boolean
+}
+
+export function getDateTimePickerDraftState(dateValue: string, timeValue: string): DateTimePickerDraftState {
+  const date = toDateKey(dateValue)
+  const time = normalizeTimeInput(timeValue)
+  return {
+    date,
+    time,
+    isComplete: Boolean(date && time),
+    isPartial: Boolean(date || time) && !(date && time),
+  }
+}
+
 function toDateKey(value: Date | string | undefined) {
   if (!value) return ""
   if (value instanceof Date) {
@@ -138,6 +156,7 @@ type DatePickerControlProps = {
   linkedDatesLabel?: string
   restrictToLinkedDates?: boolean
   disablePortal?: boolean
+  triggerRef?: React.Ref<HTMLButtonElement>
 }
 
 export function DatePickerControl({
@@ -153,6 +172,7 @@ export function DatePickerControl({
   linkedDatesLabel = "선택 가능 날짜",
   restrictToLinkedDates = false,
   disablePortal = false,
+  triggerRef,
 }: DatePickerControlProps) {
   const [open, setOpen] = React.useState(false)
   const selectedDate = parseDateKey(value)
@@ -175,6 +195,7 @@ export function DatePickerControl({
     <Popover open={open} onOpenChange={(nextOpen) => setOpen(disabled ? false : nextOpen)}>
       <PopoverTrigger asChild>
         <Button
+          ref={triggerRef}
           id={id}
           type="button"
           variant="outline"
@@ -388,6 +409,8 @@ type DateTimePickerControlProps = {
   className?: string
   disablePortal?: boolean
   timeOptions?: string[]
+  dateTriggerRef?: React.Ref<HTMLButtonElement>
+  onDraftStateChange?: (state: DateTimePickerDraftState) => void
 }
 
 export function DateTimePickerControl({
@@ -403,16 +426,32 @@ export function DateTimePickerControl({
   className,
   disablePortal = false,
   timeOptions = FULL_DAY_TIME_OPTIONS,
+  dateTriggerRef,
+  onDraftStateChange,
 }: DateTimePickerControlProps) {
   const requiredDescriptionId = React.useId()
   const [dateDraft, setDateDraft] = React.useState(() => splitLocalDateTime(value).date)
   const [timeDraft, setTimeDraft] = React.useState(() => splitLocalDateTime(value).time)
+  const onDraftStateChangeRef = React.useRef(onDraftStateChange)
+  const lastEmittedDraftRef = React.useRef("")
+
+  React.useEffect(() => {
+    onDraftStateChangeRef.current = onDraftStateChange
+  }, [onDraftStateChange])
 
   React.useEffect(() => {
     const nextDraft = splitLocalDateTime(value)
     setDateDraft(nextDraft.date)
     setTimeDraft(nextDraft.time)
   }, [value])
+
+  React.useEffect(() => {
+    const nextDraft = getDateTimePickerDraftState(dateDraft, timeDraft)
+    const signature = `${nextDraft.date}|${nextDraft.time}|${nextDraft.isComplete}|${nextDraft.isPartial}`
+    if (lastEmittedDraftRef.current === signature) return
+    lastEmittedDraftRef.current = signature
+    onDraftStateChangeRef.current?.(nextDraft)
+  }, [dateDraft, timeDraft])
 
   function commitIfComplete(nextDate: string, nextTime: string) {
     const nextValue = mergeLocalDateTime(nextDate, nextTime)
@@ -441,6 +480,7 @@ export function DateTimePickerControl({
     <div className={cn("grid min-w-0 gap-2 sm:grid-cols-2", className)}>
       {required ? <span id={requiredDescriptionId} className="sr-only">필수 입력</span> : null}
       <DatePickerControl
+        triggerRef={dateTriggerRef}
         value={dateDraft}
         onChange={handleDateChange}
         ariaLabel={dateAriaLabel}

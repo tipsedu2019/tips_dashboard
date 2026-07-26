@@ -255,7 +255,7 @@ test("dashboard focuses on student, enrollment, class, and conflict signals", as
   assert.doesNotMatch(source, /충돌 없음/);
   assert.doesNotMatch(source, /충돌 0건/);
   assert.doesNotMatch(source, /CheckCircle2/);
-  assert.match(source, /if \(rows\.length === 0\) \{\s*return null\s*\}/);
+  assert.match(source, /if \(rows\.length === 0 && sourcesReady\) \{\s*return null\s*\}/);
   assert.match(source, /classSummaries/);
   assert.match(source, /scheduleLabel/);
   assert.match(source, /weeklyHoursLabel/);
@@ -280,10 +280,58 @@ test("dashboard focuses on student, enrollment, class, and conflict signals", as
 
 test("dashboard exposes subject and division tabs with conflict process rows", async () => {
   const source = await readSource("src/app/admin/dashboard/components/section-cards.tsx");
+  const studentRosterPopoverBlock = source.slice(
+    source.indexOf("function StudentRosterPopover"),
+    source.indexOf("function getActiveLabel"),
+  );
+  const studentDistributionBlock = source.slice(
+    source.indexOf("function StudentDistributionPanel"),
+    source.indexOf("function ClassOperationsPanel"),
+  );
+  const classOperationsBlock = source.slice(
+    source.indexOf("function ClassOperationsPanel"),
+    source.indexOf("function ConflictWarning"),
+  );
+  const schoolLeafBlock = studentDistributionBlock.slice(
+    studentDistributionBlock.indexOf("schoolRowsForGrade.map"),
+    studentDistributionBlock.indexOf("gradeRowsForSchool.map"),
+  );
+  const gradeLeafBlock = studentDistributionBlock.slice(
+    studentDistributionBlock.indexOf("gradeRowsForSchool.map"),
+  );
+  const changeGroupModeBlock = classOperationsBlock.slice(
+    classOperationsBlock.indexOf("const changeGroupMode"),
+    classOperationsBlock.indexOf("const toggleExpandedClassList"),
+  );
+  const borderlessOuterCard = '<Card className="min-w-0 gap-4 rounded-xl border-0 py-4 shadow-none">';
 
   assert.match(source, /SUBJECT_TABS/);
   assert.match(source, /DIVISION_TABS/);
   assert.match(source, /\{ key: "all", label: "전체" \}/);
+  assert.match(source, /\{ key: "science", label: "과학" \}/);
+  assert.match(source, /type DashboardSubjectKey = "all" \| "english" \| "math" \| "science"/);
+  assert.doesNotMatch(source, /function matchesSubject|function matchesDivision/);
+  assert.match(source, /function StudentRosterPopover/);
+  assert.match(source, /PopoverTrigger asChild/);
+  assert.match(source, /max-h-64 overflow-y-auto overscroll-contain/);
+  assert.match(studentRosterPopoverBlock, /<PopoverContent[\s\S]*aria-label=\{`\$\{label\} 명단`\}/);
+  assert.match(classOperationsBlock, /const \[openGroupKeys, setOpenGroupKeys\] = useState<Set<string>>\(\(\) => new Set\(\)\)/);
+  assert.doesNotMatch(source, /defaultOpenGroupKey/);
+  assert.doesNotMatch(source, /nextDefaultOpenKey/);
+  assert.equal(studentDistributionBlock.split(borderlessOuterCard).length - 1, 1);
+  assert.equal(classOperationsBlock.split(borderlessOuterCard).length - 1, 1);
+  assert.equal(
+    studentDistributionBlock.split(borderlessOuterCard).length - 1 +
+      classOperationsBlock.split(borderlessOuterCard).length - 1,
+    2,
+  );
+  assert.match(changeGroupModeBlock, /const changeGroupMode = \(nextMode: ClassOperationGroupMode\) => \{\s*setGroupMode\(nextMode\)\s*\}/);
+  assert.doesNotMatch(changeGroupModeBlock, /setOpenGroupKeys|defaultOpenGroupKey|nextDefaultOpenKey/);
+  assert.match(schoolLeafBlock, /schoolRowsForGrade\.map[\s\S]*<StudentRosterPopover[\s\S]*roster=\{school\.studentRoster \|\| \[\]\}[\s\S]*학생 명단 보기/);
+  assert.match(gradeLeafBlock, /gradeRowsForSchool\.map[\s\S]*<StudentRosterPopover[\s\S]*roster=\{grade\.studentRoster \|\| \[\]\}[\s\S]*학생 명단 보기/);
+  assert.equal((studentDistributionBlock.match(/<StudentRosterPopover/g) || []).length, 2);
+  assert.match(classOperationsBlock, /classRows\.map[\s\S]*<StudentRosterPopover[\s\S]*roster=\{classItem\.studentRoster \|\| \[\]\}[\s\S]*학생 명단 보기/);
+  assert.equal((classOperationsBlock.match(/<StudentRosterPopover/g) || []).length, 1);
   assert.match(source, /초중등부/);
   assert.match(source, /고등부/);
   const visibleFilterBlock = source.slice(
@@ -325,14 +373,11 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.match(source, /const unit = "명"/);
   assert.doesNotMatch(source, /basis === "students" \? "명" : "건"/);
   assert.doesNotMatch(source, /더 보기/);
-  assert.match(source, /label="대상"/);
-  assert.match(source, /label="일시"/);
-  assert.match(source, />처리<\/span>/);
-  assert.match(source, /schoolLabel/);
-  assert.match(source, /gradeLabel/);
-  assert.match(source, /\[row\.schoolLabel, row\.gradeLabel\]/);
-  assert.doesNotMatch(source, /\[row\.schoolLabel, row\.gradeLabel, row\.dateLabel\]/);
-  assert.match(source, /text-destructive">\{row\.classTitle\}/);
+  assert.match(source, /<ProcessRow label="문제" value=\{row\.problem\} \/>/);
+  assert.match(source, /<ProcessRow label="담당" value=\{row\.ownerLabel\} \/>/);
+  assert.match(source, /<ProcessRow label="처리" value=\{row\.resolution\} \/>/);
+  assert.match(source, /formatConflictOccurrence\(row\)/);
+  assert.doesNotMatch(source, /schoolLabel|gradeLabel|row\.classTitle/);
   assert.doesNotMatch(source, /\$\{row\.label\} 더 보기/);
   assert.match(source, /const schoolRowsForGrade = isExpanded \? allSchoolRowsForGrade : \[\]/);
   assert.match(source, /const gradeRowsForSchool = isExpanded \? allGradeRowsForSchool : \[\]/);
@@ -363,9 +408,7 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.match(source, /byTeacher \|\| \[\]/);
   assert.match(source, /byClassroom \|\| \[\]/);
   assert.match(source, /function getClassOperationGroupKey/);
-  assert.match(source, /const defaultOpenGroupKey = groupRows\[0\] \? getClassOperationGroupKey\(groupMode, groupRows\[0\]\.label\) : undefined/);
   assert.match(source, /const changeGroupMode = \(nextMode: ClassOperationGroupMode\)/);
-  assert.match(source, /new Set\(defaultOpenGroupKey \? \[defaultOpenGroupKey\] : \[\]\)/);
   assert.doesNotMatch(source, /\+\$\{formatNumber/);
   assert.match(source, /label: "재원"/);
   assert.match(source, /label: "수강"/);
@@ -389,19 +432,16 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.match(source, /합계 \{formatNumber\(row\.classCount\)\}개 · \{formatWeeklyHoursLabel\(row\.weeklyHoursLabel\)\} · \{formatNumber\(row\.studentCount\)\}명/);
   assert.match(source, /\{formatNumber\(row\.studentCount\)\}명/);
   assert.match(source, /formatWeeklyHoursLabel\(classItem\.weeklyHoursLabel\)[\s\S]*formatNumber\(classItem\.studentCount\)/);
-  assert.match(source, /본과목 수업일/);
-  assert.match(source, /타과목 시험일 전날/);
-  assert.match(source, /본과목 시험일/);
+  assert.match(source, /일정 충돌/);
+  assert.match(source, /문제/);
+  assert.match(source, /담당/);
   assert.doesNotMatch(source, /Who·When·Where/);
   assert.doesNotMatch(source, /등록 명단 기준/);
-  assert.match(source, /타과목 시험일 전날에는 수업을 진행하지 않습니다/);
-  assert.match(source, /본과목 시험일 당일에는 수업을 진행하지 않습니다/);
-  assert.doesNotMatch(source, /해당 과목 시험일 당일에는 수업을 진행하지 않습니다/);
   assert.doesNotMatch(source, /시험\/수업 충돌/);
   assert.doesNotMatch(source, /수업: /);
   assert.match(source, /const visibleRows = showAllConflicts \? rows : rows\.slice\(0, 3\)/);
-  assert.match(source, /label="일정 충돌"/);
-  assert.match(source, /<ConflictBoard rows=\{conflictRows\} \/>[\s\S]*<div className="grid gap-4/);
+  assert.match(source, /aria-label="일정 충돌"/);
+  assert.match(source, /<ConflictWarning metrics=\{metrics\} \/>[\s\S]*<DashboardHeader[\s\S]*<KpiStrip/);
   assert.match(source, /splitBadgeLabels\(classItem\.teacherLabel\)/);
   assert.match(source, /splitBadgeLabels\(classItem\.classroomLabel\)/);
   assert.doesNotMatch(source, /classItem\.scheduleLabel\} · \{classItem\.teacherLabel\}/);
@@ -422,12 +462,74 @@ test("dashboard metrics renders the core snapshot before optional enrichment", a
   assert.match(source, /classes: "\*"/);
   assert.match(source, /students:\s*\[[\s\S]*"school"[\s\S]*"grade"[\s\S]*"class_ids"/);
   assert.match(source, /academic_events: "\*"/);
+  assert.match(source, /teacher_catalogs: "id,name,profile_id,subjects,is_visible"/);
+  assert.match(source, /classroom_catalogs: "id,name,subjects,is_visible"/);
   assert.match(source, /function isMissingColumnError/);
   assert.match(source, /result = await queryTable\(tableName, "\*", optional, timeoutMs\)/);
-  assert.match(source, /if \(optional \|\| isMissingRelationError\(result\.error\)\)/);
   assert.match(source, /const \[classes, students\] = await Promise\.all/);
   assert.match(source, /buildMetrics\(\{\s*classes,\s*students,\s*\}\)/);
   assert.match(source, /readTable\("class_terms", \{ optional: true \}\)/);
+  assert.match(source, /type ConflictSourceStatus = "loading" \| "ready" \| "error"/);
+  assert.match(source, /schedule: \{ status: "loading", error: "" \}/);
+  assert.match(source, /exam: \{ status: "loading", error: "" \}/);
+  assert.match(source, /setExamSourceRevision\(\(current\) => current \+ 1\)/);
+  assert.match(source, /retryExamSources/);
+  assert.match(source, /examSourceRevision/);
+  assert.match(source, /teacherCatalogs/);
+  assert.match(source, /classroomCatalogs/);
+  assert.doesNotMatch(source, /resolve\(\{ data: \[\], error: null \} as T\)/);
+});
+
+test("dashboard renders academy-wide actionable conflict state before filters and metrics", async () => {
+  const source = await readSource("src/app/admin/dashboard/components/section-cards.tsx");
+  const contractSource = await readSource("src/features/dashboard/conflict-contract.ts");
+  const conflictWarningBlock = source.slice(
+    source.indexOf("function ConflictWarning"),
+    source.indexOf("function ProcessRow"),
+  );
+  const sectionCardsBlock = source.slice(source.indexOf("export function SectionCards"));
+  const sectionOrder = [
+    sectionCardsBlock.indexOf("<ConflictWarning"),
+    sectionCardsBlock.indexOf("<DashboardHeader"),
+    sectionCardsBlock.indexOf("<KpiStrip"),
+    sectionCardsBlock.indexOf("<StudentDistributionPanel"),
+  ];
+  const filterBlock = source.slice(
+    source.indexOf("function DashboardHeader"),
+    source.indexOf("function KpiStrip"),
+  );
+  const segmentedControlBlock = source.slice(
+    source.indexOf("function SegmentedControl"),
+    source.indexOf("function ListScopeToggle"),
+  );
+
+  assert.ok(sectionOrder.every((index) => index >= 0));
+  assert.deepEqual(sectionOrder, [...sectionOrder].sort((left, right) => left - right));
+  assert.doesNotMatch(conflictWarningBlock, /activeSubject|activeDivision/);
+  assert.match(conflictWarningBlock, /rows\.length === 0 && sourcesReady/);
+  assert.match(conflictWarningBlock, /시험 일정 충돌을 확인하지 못했습니다\./);
+  assert.match(conflictWarningBlock, /retryExamSources/);
+  assert.match(conflictWarningBlock, /rows\.slice\(0, 3\)/);
+  assert.match(conflictWarningBlock, /aria-expanded=\{showAllConflicts\}/);
+  assert.match(conflictWarningBlock, /CONFLICT_TYPE_ORDER/);
+  assert.match(conflictWarningBlock, /useAuth\(\)/);
+  assert.match(conflictWarningBlock, /new Set\(\["admin", "staff", "teacher"\]\)/);
+  assert.match(conflictWarningBlock, /관리팀 등록 필요/);
+  assert.match(conflictWarningBlock, /등록됨 · 담당자가 처리 중/);
+  assert.match(conflictWarningBlock, /actionStateByKey/);
+  assert.match(conflictWarningBlock, /listDashboardConflictTaskLinks/);
+  assert.match(conflictWarningBlock, /createDashboardConflictTask/);
+  assert.match(conflictWarningBlock, /aria-live="polite"/);
+  assert.doesNotMatch(filterBlock, /rounded-xl border bg-background/);
+  assert.match(segmentedControlBlock, /rounded-md border bg-muted\/30/);
+  assert.match(segmentedControlBlock, /focus-visible:ring-2 focus-visible:ring-ring/);
+  assert.match(contractSource, /export type DashboardConflictRow/);
+  assert.match(contractSource, /export type DashboardConflictRpcInput/);
+  assert.match(contractSource, /export function projectDashboardConflictRpcInput/);
+  assert.doesNotMatch(
+    contractSource.slice(contractSource.indexOf("export function projectDashboardConflictRpcInput")),
+    /title:|ownerLabel:|resolution:|key:/,
+  );
 });
 
 test("dashboard keeps dense cards readable on mobile widths", async () => {
@@ -441,7 +543,6 @@ test("dashboard keeps dense cards readable on mobile widths", async () => {
   assert.match(source, /CLASS_OPERATION_ROW_CLASS/);
   assert.match(source, /grid-cols-\[1rem_minmax\(4\.5rem,7rem\)_minmax\(0,1fr\)_6\.25rem\]/);
   assert.match(source, /focus-visible:ring-2 focus-visible:ring-ring/);
-  assert.match(source, /defaultOpenGroupKey/);
   assert.match(source, /ChevronDown/);
   assert.match(source, /aria-label=\{`\$\{row\.label\} \$\{groupLabel\} 수업/);
   assert.match(source, /key=\{`\$\{activeSubject\}:\$\{activeDivision\}`\}/);

@@ -2290,7 +2290,7 @@ test("operation forms keep staged linked selectors outside canonical registratio
     "wordRetestTextbookGradeFilter",
     'const defaultAssigneeId = currentUserId || ""',
     "const { user, session, canManageAll, isAdmin, isStaff, isTeacher, isAssistant } = useAuth()",
-    'setWordRetestMode(isTeacher && !isStaff ? "teacher" : "assistant")',
+    'setWordRetestMode(wordRetestViewerRole === "teacher" ? "teacher" : "assistant")',
     "shouldShowFormDetailTabs",
     "{formStepProgressLabel}",
     "{getTaskTypeLabel(form.type)}",
@@ -3380,7 +3380,7 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "WordRetestMainExamDateField",
     "getWordRetestClassScheduleItems",
     "classScheduleItems",
-    "data-word-retest-class-date",
+    "ClassScheduleCalendarSurface",
     "<SelectedValuePill",
     "PopoverContent",
     "TOUCH_SCROLL_AREA_STYLE",
@@ -3479,8 +3479,8 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     'retestStatus: wordRetest.retestStatus || "not_started"',
     'retestStatus: "absent"',
     'if (deepLinkedTask.type === "word_retest")',
-    "openEdit(deepLinkedTask)",
-    "onOpen={openEdit}",
+    "openWordRetestEditor(deepLinkedTask)",
+    "onOpen={handleWordRetestOpen}",
     "단어 재시험 수정",
     'if (task.type === "word_retest") return []',
     "!isTodoWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !isWordRetestWorkspace && visibleOperationMetrics.length > 0",
@@ -3563,7 +3563,7 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     workspaceSource,
     /testAt: dateInputValue\(wordRetest\.testAt \|\| task\.dueAt \|\| task\.startAt \|\| ""\)/,
   );
-  assert.doesNotMatch(workspaceSource, /testAt: ""[\s\S]*retryReason/);
+  assert.doesNotMatch(workspaceSource, /(?:^|[^A-Za-z])testAt: ""[\s\S]*retryReason/);
   assert.match(workspaceSource, /재재시험 추가 및 불합격 확인/);
   assert.match(workspaceSource, /재재시험 추가 및 미응시 확인/);
   assert.match(workspaceSource, /retryReason === "absent"[\s\S]*retestStatus: originalWordRetestStatus/);
@@ -3606,6 +3606,29 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     workspaceSource.indexOf('<WordRetestResizableHeaderCell label="상태"'),
     workspaceSource.indexOf('<WordRetestResizableHeaderCell label="다음 액션"'),
   );
+  const desktopHeaderOrder = [
+    ['label="상태" columnKey="status"', "상태"],
+    ['label="본시험일" columnKey="testAt"', "본시험일"],
+    ['label="응시예정일시" columnKey="expectedRetestAt"', "응시예정일시"],
+    ['label="담당선생님" columnKey="teacher"', "담당선생님"],
+    ['label="수업" columnKey="class"', "수업"],
+    ['label="학생" columnKey="student"', "학생"],
+    ['label="교재" columnKey="textbook"', "교재"],
+    ['label="시험범위" columnKey="unit"', "시험범위"],
+    ['label="메모" columnKey="note"', "메모"],
+    ['label="출제 개수" columnKey="total"', "출제 개수"],
+    ['label="커트라인" columnKey="cutoff"', "커트라인"],
+    ['label="맞은 개수" columnKey="score"', "맞은 개수"],
+    ['label="결과" columnKey="result"', "결과"],
+  ];
+  const desktopHeaderIndexes = desktopHeaderOrder.map(([source]) => wordRetestHeaderSource.indexOf(source));
+  assert.ok(desktopHeaderIndexes.every((index) => index > -1), "all approved desktop columns should be present");
+  for (let index = 1; index < desktopHeaderIndexes.length; index += 1) {
+    assert.ok(
+      desktopHeaderIndexes[index - 1] < desktopHeaderIndexes[index],
+      `${desktopHeaderOrder[index - 1][1]} should appear before ${desktopHeaderOrder[index][1]}`,
+    );
+  }
   assert.ok(
     wordRetestHeaderSource.indexOf('label="출제 개수" columnKey="total"') <
       wordRetestHeaderSource.indexOf('label="커트라인" columnKey="cutoff"'),
@@ -3651,25 +3674,28 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     ["수업", "order-3"],
     ["학생", "order-4"],
     ["본시험일", "order-5"],
-    ["장소", "order-6"],
-    ["교재", "order-7"],
-    ["시험범위", "order-8"],
-    ["출제 개수", "order-9"],
-    ["커트라인", "order-10"],
-    ["맞은 개수", "order-11"],
-    ["결과", "order-12"],
+    ["응시예정일시", "order-6"],
+    ["장소", "order-7"],
+    ["교재", "order-8"],
+    ["시험범위", "order-9"],
+    ["메모", "order-10"],
     ["다음 액션", "order-last"],
   ];
   for (const [label, orderClass] of mobileRowOrder) {
     const labelIndex = wordRetestRowSource.indexOf(`>${label}</span>`);
     assert.ok(labelIndex > -1, `${label} mobile label should be present`);
-    const cellSource = wordRetestRowSource.slice(Math.max(0, labelIndex - 220), labelIndex);
+    const cellSource = wordRetestRowSource.slice(Math.max(0, labelIndex - 320), labelIndex);
     assert.ok(cellSource.includes(orderClass), `${label} should use ${orderClass} on mobile`);
     assert.ok(
       cellSource.includes("md:order-none") || cellSource.includes("md:hidden") || orderClass === "order-last",
       `${label} should keep desktop order`,
     );
   }
+  const mobileScoreGroupSource = wordRetestRowSource.slice(
+    wordRetestRowSource.indexOf('className="order-11 grid min-w-0 gap-2 md:contents"'),
+    wordRetestRowSource.indexOf('className="order-last flex flex-wrap'),
+  );
+  assertIncludesAll(mobileScoreGroupSource, ["출제 개수", "커트라인", "맞은 개수", "결과"]);
 
   const wordRetestMainExamDateFieldSource = workspaceSource.slice(
     workspaceSource.indexOf("function WordRetestMainExamDateField"),
@@ -3678,11 +3704,18 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
   assert.match(wordRetestMainExamDateFieldSource, /function handleMainExamDateSelect/);
   assert.match(wordRetestMainExamDateFieldSource, /classScheduleItemsByDate/);
   assert.match(wordRetestMainExamDateFieldSource, /const shouldRestrictToClassSchedule = classScheduleItems\.length > 0/);
-  assert.match(wordRetestMainExamDateFieldSource, /data-word-retest-class-date/);
-  assert.match(wordRetestMainExamDateFieldSource, /disabled=\{!selectable\}/);
+  assert.match(wordRetestMainExamDateFieldSource, /disabled = !classSelected \|\| \(shouldRestrictToClassSchedule && !isClassScheduleDate\)/);
+  assert.match(
+    workspaceSource,
+    /classSelected=\{Boolean\(selectedWordRetestClass \|\| \(wordRetest\.className \|\| ""\)\.trim\(\)\)\}/,
+    "manual and legacy class names should keep the main-exam calendar available",
+  );
+  assert.match(wordRetestMainExamDateFieldSource, /<ClassScheduleCalendarSurface/);
+  assert.match(wordRetestMainExamDateFieldSource, /<ScheduleSelectionDependencyState/);
+  assert.match(wordRetestMainExamDateFieldSource, /등록된 일정이 없어 일반 날짜를 선택할 수 있습니다\./);
   assert.match(wordRetestMainExamDateFieldSource, /수업일정 없음/);
   assert.match(wordRetestMainExamDateFieldSource, /수업일정/);
-  assert.match(wordRetestMainExamDateFieldSource, /setCalendarDateOpen\(false\)/);
+  assert.doesNotMatch(wordRetestMainExamDateFieldSource, /Popover|PopoverContent|setCalendarDateOpen/);
   assert.doesNotMatch(wordRetestMainExamDateFieldSource, /Clock|timeListRef|handleTimeListWheel|WORD_RETEST_TIME_OPTIONS|직접 시간 입력/);
 
   const wordRetestToolbarSource = workspaceSource.slice(
@@ -3941,6 +3974,192 @@ test("completed absent word retests expose one recovery reretry action only in t
   );
 });
 
+test("word retest expected schedule keeps reference-only editing, approved form order, table order, and shared calendar contracts", async () => {
+  const [workspaceSource, calendarSurfaceSource, fixtureSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/class-schedule-calendar-surface.tsx"),
+    readSource("src/features/tasks/word-retest-browser-fixture.ts"),
+  ]);
+
+  assertIncludesAll(workspaceSource, [
+    'type WordRetestEditMode = "full" | "expected_only"',
+    'type WordRetestEditIntent = "standard_edit" | "expected_quick"',
+    'type WordRetestPendingFocus = "expected_retest_date" | ""',
+    "isWordRetestExactlyLinkedToTeacher",
+    "needsWordRetestTeacherAccountLink",
+    "담당선생님 계정 연결 필요",
+    'if (!["admin", "staff", "assistant"].includes(wordRetestViewerRole)) return',
+    "expectedRetestDraft.isPartial",
+    "날짜와 시간을 모두 선택해 주세요.",
+    "저장 후 학생별로 입력해 주세요.",
+    'data-word-retest-edit-mode="expected_only"',
+    "updateWordRetestExpectedAt({",
+    'setWordRetestEditIntent("standard_edit")',
+    'openWordRetestEditor(task, "expected_quick")',
+    'setWordRetestPendingFocus(intent === "expected_quick" ? "expected_retest_date" : "")',
+    'setWordRetestPendingFocus("")',
+    'label="응시예정일시" columnKey="expectedRetestAt"',
+    'label="메모" columnKey="note"',
+    "formatWordRetestExpectedAt",
+    "getWordRetestExpectedAtInputValue",
+    "getWordRetestNote",
+    "requestNote: taskWordRetest.requestNote || task.memo || \"\"",
+    "expectedRetestAt: getWordRetestExpectedAtInputValue(taskWordRetest.expectedRetestAt)",
+    'expectedRetestAt: ""',
+  ]);
+
+  const widthsSource = workspaceSource.slice(
+    workspaceSource.indexOf("const WORD_RETEST_TABLE_COLUMN_WIDTHS"),
+    workspaceSource.indexOf("const WORD_RETEST_TABLE_GRID_ORDER"),
+  );
+  assert.match(widthsSource, /expectedRetestAt:\s*168/);
+  assert.match(widthsSource, /note:\s*220/);
+  assert.match(widthsSource, /expectedRetestAt:\s*148/);
+  assert.match(widthsSource, /note:\s*160/);
+
+  const gridOrderSource = workspaceSource.slice(
+    workspaceSource.indexOf("function getWordRetestTableGridTemplate"),
+    workspaceSource.indexOf("function getWordRetestRequestDefaults"),
+  );
+  assertInOrder(gridOrderSource, [
+    "widths.select",
+    "widths.status",
+    "widths.testAt",
+    "widths.expectedRetestAt",
+    "widths.teacher",
+    "widths.class",
+    "widths.student",
+    "widths.textbook",
+    "widths.unit",
+    "widths.note",
+    "widths.total",
+    "widths.cutoff",
+    "widths.score",
+    "widths.result",
+    "widths.action",
+  ]);
+
+  const wordRetestBasicSource = workspaceSource.slice(
+    workspaceSource.indexOf('if (step === "word_retest_basic")'),
+    workspaceSource.indexOf('if (step === "word_retest_scope")'),
+  );
+  assertInOrder(wordRetestBasicSource, [
+    "<WordRetestMainExamDateField",
+    "<WordRetestExpectedAtField",
+    '<TaskListboxField label="장소"',
+  ]);
+  assert.match(wordRetestBasicSource, /disabled=\{selectedWordRetestStudentIds\.length > 1\}/);
+  assert.match(wordRetestBasicSource, /multiStudent=\{selectedWordRetestStudentIds\.length > 1\}/);
+
+  const wordRetestScopeSource = workspaceSource.slice(
+    workspaceSource.indexOf('if (step === "word_retest_scope")'),
+    workspaceSource.indexOf('if (step === "word_retest_scores")'),
+  );
+  assertInOrder(wordRetestScopeSource, [
+    'label="교재"',
+    'label="시험범위"',
+    'label="메모"',
+    'label="출제 개수"',
+    'label="커트라인(합격 개수)"',
+  ]);
+
+  const expectedInputHelperSource = workspaceSource.slice(
+    workspaceSource.indexOf("function getWordRetestExpectedAtInputValue"),
+    workspaceSource.indexOf("function formFromTask"),
+  );
+  assert.match(expectedInputHelperSource, /\/\^\\d\{4\}-\\d\{2\}-\\d\{2\}T\\d\{2\}:\\d\{2\}\$\/\.test\(normalized\)[\s\S]*return normalized/);
+  assert.match(expectedInputHelperSource, /return isoToSeoulDateTimeInput\(normalized\)/);
+
+  const normalizeSource = workspaceSource.slice(
+    workspaceSource.indexOf("function normalizeFormForSubmit"),
+    workspaceSource.indexOf("function sanitizeRegistrationInquiryOnlyInput"),
+  );
+  assert.match(normalizeSource, /expectedRetestAt: getWordRetestExpectedAtInputValue\(input\.wordRetest\?\.expectedRetestAt\)/);
+  assert.doesNotMatch(normalizeSource, /seoulDateTimeInputToIso/);
+
+  const expectedOnlySubmitSource = workspaceSource.slice(
+    workspaceSource.indexOf('submissionForm.type === "word_retest"\n      && editingTask\n      && wordRetestEditMode === "expected_only"'),
+    workspaceSource.indexOf("const registrationCreateBlockers"),
+  );
+  assert.match(expectedOnlySubmitSource, /updateWordRetestExpectedAt\(\{/);
+  assert.match(expectedOnlySubmitSource, /expectedRetestAt: getWordRetestExpectedAtInputValue\(submissionForm\.wordRetest\?\.expectedRetestAt\)/);
+  assert.doesNotMatch(expectedOnlySubmitSource, /updateOpsTask\(|seoulDateTimeInputToIso/);
+
+  const multiStudentSource = workspaceSource.slice(
+    workspaceSource.indexOf("function selectWordRetestStudents"),
+    workspaceSource.indexOf("function selectWithdrawalSubject"),
+  );
+  assert.match(multiStudentSource, /nextStudentIds\.length > 1[\s\S]*updateWordRetest\("expectedRetestAt", ""\)/);
+  assert.match(multiStudentSource, /nextStudentIds\.length > 1[\s\S]*onExpectedRetestDraftStateChange\?\.\(EMPTY_DATE_TIME_PICKER_DRAFT\)/);
+  assert.match(workspaceSource, /key=\{selectedWordRetestStudentIds\.length > 1 \? "word-retest-expected-multiple" : "word-retest-expected-single"\}/);
+  assert.match(workspaceSource, /const inputWithExpectedRetestSafety = hasMultipleWordRetestStudents[\s\S]*expectedRetestAt: ""/);
+  assert.match(workspaceSource, /retryPayload[\s\S]*expectedRetestAt: ""/);
+
+  const editorSource = workspaceSource.slice(
+    workspaceSource.indexOf("const openWordRetestEditor"),
+    workspaceSource.indexOf("const openRegistrationCustomerMessage"),
+  );
+  assert.match(editorSource, /if \(isClosedOpsTask\(task\)\)[\s\S]*openDetail\(task\)/);
+  assert.match(editorSource, /intent === "expected_quick"[\s\S]*\? "expected_only"/);
+  assert.match(editorSource, /exactlyLinkedTeacher && getWordRetestWorkspaceRole\(task\) === "assistant"/);
+  assert.match(editorSource, /trigger\.focus\(\{ preventScroll: true \}\)[\s\S]*setWordRetestPendingFocus\(""\)/);
+
+  const rowSource = workspaceSource.slice(
+    workspaceSource.indexOf("memo(function WordRetestTaskRow"),
+    workspaceSource.indexOf("function WordRetestRoleActionButton"),
+  );
+  assert.match(rowSource, /<button[\s\S]*data-word-retest-interactive="true"[\s\S]*event\.stopPropagation\(\)[\s\S]*onExpectedQuickEdit\(task\)/);
+  assert.match(rowSource, /line-clamp-2/);
+  assert.match(rowSource, /group-hover:block/);
+  assert.match(rowSource, /const note = getWordRetestNote\(task\)/);
+
+  const detailSource = workspaceSource.slice(
+    workspaceSource.indexOf("function WordRetestDetailPanel"),
+    workspaceSource.indexOf("function Info"),
+  );
+  assertInOrder(detailSource, [
+    'label="본시험일"',
+    'label="응시예정일시"',
+    'label="학생"',
+    'label="교재"',
+    'label="시험범위"',
+    'label="메모"',
+    'label="점수"',
+    'label="결과"',
+  ]);
+
+  assertIncludesAll(calendarSurfaceSource, [
+    "export type ClassScheduleCalendarDay",
+    "export type ClassScheduleCalendarSurfaceProps",
+    'role="grid"',
+    'role="columnheader"',
+    'role="gridcell"',
+    "weekdayLabels.map",
+    "days.map",
+    "onPreviousMonth",
+    "onNextMonth",
+    "onSelectDay(day.key)",
+    "focus-visible:ring-2",
+    "billing-previous",
+    "billing-current",
+    "billing-next",
+  ]);
+
+  assertIncludesAll(fixtureSource, [
+    'WORD_RETEST_BROWSER_FIXTURE_QUERY = "word-retest-expected-schedule"',
+    'WORD_RETEST_BROWSER_FIXTURE_ROLES = ["assistant", "teacher", "admin"]',
+    "fixture-word-retest-assistant-stage",
+    "fixture-word-retest-teacher-stage",
+    "fixture-word-retest-completed",
+    "fixture-word-retest-name-only",
+    "fixture-class-with-schedule",
+    "fixture-class-without-schedule",
+    'profileId: "fixture-teacher-profile"',
+    "function deepFreeze",
+    "JSON.parse(JSON.stringify(buildFixtureData(fixtureRole)))",
+  ]);
+});
+
 test("word retest workspace keeps page title full and add actions compact", async () => {
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
 
@@ -4134,6 +4353,7 @@ test("canonical registration delete uses a dedicated guarded RPC and never expos
 
   assert.match(workspaceSource, /canDeleteRegistrationCase\(task, registrationViewerRole\)/);
   assert.match(workspaceSource, /ops_task_delete_forbidden[\s\S]*?이 업무를 삭제할 권한이 없습니다\./);
+  assert.match(workspaceSource, /dashboard_conflict_task_delete_forbidden[\s\S]*?일정 충돌에서 만든 할 일은 삭제 대신 완료 또는 취소해 주세요\./);
   assert.match(workspaceSource, /registration_case_delete_not_allowed[\s\S]*?대기 또는 등록이 시작된 신청은 삭제할 수 없습니다\./);
   assert.match(workspaceSource, /upstream request timeout[\s\S]*?서버 응답이 지연되었습니다\. 잠시 후 다시 시도해 주세요\./);
 

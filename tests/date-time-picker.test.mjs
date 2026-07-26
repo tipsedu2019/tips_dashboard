@@ -17,6 +17,7 @@ function loadPickerHelpers(source, helperNames = [
   "normalizeTimeInput",
   "splitLocalDateTime",
   "mergeLocalDateTime",
+  "getDateTimePickerDraftState",
   "getTimePickerOptions",
 ]) {
   const helperStart = source.indexOf("const TIME_OPTION_START_MINUTES");
@@ -105,6 +106,55 @@ test("combined picker keeps partial drafts internal, syncs external resets, and 
   assert.match(componentSource, /timeOptions = FULL_DAY_TIME_OPTIONS/);
   assert.match(componentSource, /options=\{timeOptions\}/);
   assert.match(componentSource, /className=\{cn\("grid min-w-0 gap-2/);
+});
+
+test("combined picker reports empty partial complete and cleared draft states", async () => {
+  const source = await readPickerSource();
+  const { getDateTimePickerDraftState } = loadPickerHelpers(source, ["getDateTimePickerDraftState"]);
+  const combinedPickerSource = source.slice(source.indexOf("type DateTimePickerControlProps"));
+
+  assert.deepEqual({ ...getDateTimePickerDraftState("", "") }, {
+    date: "",
+    time: "",
+    isComplete: false,
+    isPartial: false,
+  });
+  assert.deepEqual({ ...getDateTimePickerDraftState("2026-07-23", "") }, {
+    date: "2026-07-23",
+    time: "",
+    isComplete: false,
+    isPartial: true,
+  });
+  assert.deepEqual({ ...getDateTimePickerDraftState("", "09:00") }, {
+    date: "",
+    time: "09:00",
+    isComplete: false,
+    isPartial: true,
+  });
+  assert.deepEqual({ ...getDateTimePickerDraftState("2026-07-23", "09:00") }, {
+    date: "2026-07-23",
+    time: "09:00",
+    isComplete: true,
+    isPartial: false,
+  });
+  assert.match(combinedPickerSource, /onDraftStateChange\?: \(state: DateTimePickerDraftState\) => void/);
+  assert.match(combinedPickerSource, /getDateTimePickerDraftState\(dateDraft, timeDraft\)/);
+  assert.match(combinedPickerSource, /onDraftStateChangeRef\.current\?\.\(nextDraft\)/);
+  assert.match(combinedPickerSource, /function handleClear[\s\S]*setDateDraft\(""\)[\s\S]*setTimeDraft\(""\)/);
+});
+
+test("combined picker forwards its date trigger ref to the actual button", async () => {
+  const source = await readPickerSource();
+  const datePickerSource = source.slice(
+    source.indexOf("type DatePickerControlProps"),
+    source.indexOf("type TimePickerControlProps"),
+  );
+  const combinedPickerSource = source.slice(source.indexOf("type DateTimePickerControlProps"));
+
+  assert.match(datePickerSource, /triggerRef\?: React\.Ref<HTMLButtonElement>/);
+  assert.match(datePickerSource, /<Button[\s\S]*ref=\{triggerRef\}/);
+  assert.match(combinedPickerSource, /dateTriggerRef\?: React\.Ref<HTMLButtonElement>/);
+  assert.match(combinedPickerSource, /<DatePickerControl[\s\S]*triggerRef=\{dateTriggerRef\}/);
 });
 
 test("date and time controls keep selected-time scrolling inside the listbox", async () => {

@@ -40,6 +40,10 @@ function unique(values = []) {
   return [...new Set(values.map(text).filter(Boolean))];
 }
 
+function sortedIds(values = []) {
+  return unique(values).sort();
+}
+
 function parseJsonObject(value) {
   if (!value) return null;
   if (typeof value === "object") return value;
@@ -114,6 +118,14 @@ function timeToMinutes(value) {
   }
 
   return hour * 60 + minute;
+}
+
+function normalizeClockTime(value) {
+  const [hour, minute] = text(value).split(":").map(Number);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return text(value);
+  }
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 export function formatDashboardHours(totalMinutes) {
@@ -217,6 +229,24 @@ function studentNamesFromIds(ids = [], studentsById = new Map()) {
   ).sort((left, right) => left.localeCompare(right, "ko", { numeric: true }));
 }
 
+function dashboardStudentRosterFromIds(ids = [], studentsById = new Map()) {
+  return unique(ids.map((studentId) => text(studentId)))
+    .filter(Boolean)
+    .map((id) => {
+      const student = studentsById.get(id);
+      return {
+        id,
+        name: text(student?.name) || "학생 정보 확인 필요",
+        school: text(student?.school),
+        grade: text(student?.grade),
+      };
+    })
+    .sort((left, right) => (
+      left.name.localeCompare(right.name, "ko", { numeric: true }) ||
+      left.id.localeCompare(right.id, "ko", { numeric: true })
+    ));
+}
+
 function buildClassLoadSummary(classItem = {}, studentsById = new Map()) {
   const registeredIds = getStudentIds(classItem);
   const waitlistIds = getWaitlistIds(classItem);
@@ -263,18 +293,25 @@ export function buildScheduleCollisionSummary(classes = [], students = []) {
   const classIdsByStudentId = new Map();
   classes.forEach((classItem) => {
     const classId = text(classItem.id);
-    [...getStudentIds(classItem), ...getWaitlistIds(classItem)].forEach((studentId) => {
+    getStudentIds(classItem).forEach((studentId) => {
       const list = classIdsByStudentId.get(studentId) || [];
       list.push(classId);
       classIdsByStudentId.set(studentId, unique(list));
     });
   });
 
-  const student = students
+  const studentsById = new Map((students || []).map((studentItem) => [text(studentItem.id), studentItem]));
+  const studentCandidates = [
+    ...(students || []),
+    ...[...classIdsByStudentId.keys()]
+      .filter((studentId) => !studentsById.has(studentId))
+      .map((studentId) => ({ id: studentId })),
+  ];
+
+  const student = studentCandidates
     .map((studentItem) => {
       const studentClassIds = unique([
         ...getStudentClassIds(studentItem, "registered"),
-        ...getStudentClassIds(studentItem, "waitlist"),
         ...(classIdsByStudentId.get(text(studentItem.id)) || []),
       ]);
 
@@ -360,6 +397,7 @@ const DASHBOARD_SUBJECT_FILTERS = [
   { key: "all", label: "전체", subject: "" },
   { key: "english", label: "영어", subject: "영어" },
   { key: "math", label: "수학", subject: "수학" },
+  { key: "science", label: "과학", subject: "과학" },
 ];
 
 const DASHBOARD_DIVISION_FILTERS = [
@@ -507,11 +545,6 @@ function matchesGradeReference(item = {}, studentGrade = "") {
   return grades.includes("all") || grades.includes(studentGrade);
 }
 
-function isModernExamCalendarEvent(event = {}) {
-  const type = normalizeAcademicEventType(event.type || event.typeLabel || event.type_label);
-  return type === "시험기간" || type === "영어시험일" || type === "수학시험일" || type === "과학시험일";
-}
-
 function subjectOfExamEventType(value) {
   const type = normalizeAcademicEventType(value);
   if (type === "영어시험일") return "영어";
@@ -526,6 +559,8 @@ function buildExamDetailRows(academicEventExamDetails = [], academicEvents = [])
     .map((detail) => {
       const event = eventMap.get(text(detail.academicEventId || detail.academic_event_id));
       return {
+        detailId: text(detail.id),
+        academicEventId: text(detail.academicEventId || detail.academic_event_id || event?.id),
         schoolId: text(detail.schoolId || detail.school_id || event?.schoolId || event?.school_id),
         school: text(detail.school || event?.school),
         grade: text(detail.grade || event?.grade || "all"),
@@ -544,6 +579,8 @@ function buildExamDetailRows(academicEventExamDetails = [], academicEvents = [])
       if (!subject) return null;
 
       return {
+        detailId: "",
+        academicEventId: text(event.id),
         schoolId: text(event.schoolId || event.school_id),
         school: text(event.school || event.schoolName || event.school_name),
         grade: text(event.grade || "all"),
@@ -558,7 +595,7 @@ function buildExamDetailRows(academicEventExamDetails = [], academicEvents = [])
   return [...detailRows, ...subjectEventRows];
 }
 
-function getRelevantExamRows(student, academicSchools = [], detailRows = [], legacyExamDays = [], academicEvents = []) {
+function getRelevantExamRows(student, academicSchools = [], detailRows = [], legacyExamDays = []) {
   const school = resolveSchool(academicSchools, student);
   const schoolId = school ? text(school.id) : "";
   const schoolName = text(school?.name || student.school);
@@ -569,29 +606,20 @@ function getRelevantExamRows(student, academicSchools = [], detailRows = [], leg
     return matchesGradeReference(item, studentGrade);
   });
 
-  const hasModernExamCoverage = (academicEvents || []).some((event) => {
-    if (!isModernExamCalendarEvent(event)) return false;
-    if (!matchesSchoolReference(event, schoolId, schoolName)) return false;
-    return matchesGradeReference(event, studentGrade);
-  });
-
-  if (modernRows.length > 0 || hasModernExamCoverage) {
-    return {
-      schoolName,
-      grade: studentGrade || "all",
-      rows: modernRows,
-    };
-  }
-
   const legacyRows = (legacyExamDays || []).filter((item) => {
     if (!matchesSchoolReference(item, schoolId, schoolName)) return false;
     return matchesGradeReference(item, studentGrade);
   });
-
-  return {
-    schoolName,
-    grade: studentGrade || "all",
-    rows: legacyRows.map((item) => ({
+  const modernDates = new Set(
+    modernRows
+      .map((item) => text(item.examDate))
+      .filter(Boolean),
+  );
+  const fallbackRows = legacyRows
+    .filter((item) => !modernDates.has(text(item.examDate || item.exam_date)))
+    .map((item) => ({
+      detailId: "",
+      academicEventId: "",
       schoolId: text(item.schoolId || item.school_id),
       school: text(item.school),
       grade: text(item.grade || "all"),
@@ -599,13 +627,19 @@ function getRelevantExamRows(student, academicSchools = [], detailRows = [], leg
       examDate: text(item.examDate || item.exam_date),
       label: text(item.label || "시험"),
       note: text(item.note),
-    })),
+    }));
+
+  return {
+    schoolName,
+    grade: studentGrade || "all",
+    rows: [...modernRows, ...fallbackRows],
   };
 }
 
-function buildStudentExamLookup(student, academicSchools = [], detailRows = [], legacyExamDays = [], academicEvents = []) {
-  const examInfo = getRelevantExamRows(student, academicSchools, detailRows, legacyExamDays, academicEvents);
+function buildStudentExamLookup(student, academicSchools = [], detailRows = [], legacyExamDays = []) {
+  const examInfo = getRelevantExamRows(student, academicSchools, detailRows, legacyExamDays);
   const lookup = new Map();
+  const rowsByDate = new Map();
 
   examInfo.rows.forEach((item) => {
     const date = text(item.examDate);
@@ -615,12 +649,17 @@ function buildStudentExamLookup(student, academicSchools = [], detailRows = [], 
       lookup.set(date, new Set());
     }
     lookup.get(date).add(subject);
+    if (!rowsByDate.has(date)) {
+      rowsByDate.set(date, []);
+    }
+    rowsByDate.get(date).push(item);
   });
 
   return {
     schoolName: examInfo.schoolName,
     grade: examInfo.grade,
     rows: examInfo.rows,
+    rowsByDate,
     lookup,
   };
 }
@@ -701,12 +740,12 @@ export function getClassExamConflictsForDates(
   const conflictMap = new Map();
 
   enrolledStudents.forEach((student) => {
-    const examInfo = buildStudentExamLookup(student, academicSchools, detailRows, academicExamDays, academicEvents);
+    const examInfo = buildStudentExamLookup(student, academicSchools, detailRows, academicExamDays);
 
     sessionDates.forEach((sessionDate) => {
       const sameDaySubjects = examInfo.lookup.get(sessionDate);
       if (sameDaySubjects?.has(subject)) {
-        const key = `same-day:${sessionDate}:${subject}`;
+        const key = `same-day:${sessionDate}`;
         if (!conflictMap.has(key)) {
           conflictMap.set(key, {
             rule: "same-day-subject",
@@ -716,6 +755,9 @@ export function getClassExamConflictsForDates(
             label: `${subject} 시험`,
             note: "",
             students: [],
+            studentIds: [],
+            examEventIds: [],
+            examDetailIds: [],
             schoolName: examInfo.schoolName,
             grade: examInfo.grade,
             message: `${subject} 시험 당일`,
@@ -725,13 +767,24 @@ export function getClassExamConflictsForDates(
         if (!entry.students.includes(studentNameOf(student))) {
           entry.students.push(studentNameOf(student));
         }
+        entry.studentIds = unique([...entry.studentIds, text(student.id)]);
+        const sameDayRows = (examInfo.rowsByDate.get(sessionDate) || [])
+          .filter((row) => normalizeSubject(row.subject) === subject);
+        entry.examEventIds = unique([
+          ...entry.examEventIds,
+          ...sameDayRows.map((row) => row.academicEventId),
+        ]);
+        entry.examDetailIds = unique([
+          ...entry.examDetailIds,
+          ...sameDayRows.map((row) => row.detailId),
+        ]);
       }
 
       const nextDate = shiftDateString(sessionDate, 1);
       const nextDaySubjects = examInfo.lookup.get(nextDate);
       if (nextDaySubjects && nextDaySubjects.size > 0 && !nextDaySubjects.has(subject)) {
         const nextSubjects = [...nextDaySubjects].sort();
-        const key = `day-before:${sessionDate}:${nextSubjects.join("+")}`;
+        const key = `day-before:${sessionDate}`;
         if (!conflictMap.has(key)) {
           conflictMap.set(key, {
             rule: "day-before-other-subject",
@@ -741,6 +794,9 @@ export function getClassExamConflictsForDates(
             label: `${nextSubjects.join(", ")} 시험 전날`,
             note: "",
             students: [],
+            studentIds: [],
+            examEventIds: [],
+            examDetailIds: [],
             schoolName: examInfo.schoolName,
             grade: examInfo.grade,
             message: `${nextSubjects.join(", ")} 시험 전날`,
@@ -750,6 +806,16 @@ export function getClassExamConflictsForDates(
         if (!entry.students.includes(studentNameOf(student))) {
           entry.students.push(studentNameOf(student));
         }
+        entry.studentIds = unique([...entry.studentIds, text(student.id)]);
+        const nextDayRows = examInfo.rowsByDate.get(nextDate) || [];
+        entry.examEventIds = unique([
+          ...entry.examEventIds,
+          ...nextDayRows.map((row) => row.academicEventId),
+        ]);
+        entry.examDetailIds = unique([
+          ...entry.examDetailIds,
+          ...nextDayRows.map((row) => row.detailId),
+        ]);
       }
     });
   });
@@ -787,6 +853,488 @@ export function findExamConflictsForClasses(
     }))
     .filter((entry) => entry.conflicts.length > 0)
     .sort((left, right) => left.title.localeCompare(right.title, "ko", { numeric: true }));
+}
+
+const SEOUL_TIME_ZONE = "Asia/Seoul";
+const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
+
+function normalizedName(value) {
+  return text(value).replace(/\s+/g, "").toLowerCase();
+}
+
+function dateStringToUtcDate(dateString) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text(dateString))) {
+    return null;
+  }
+  const [year, month, day] = text(dateString).split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function shiftUtcDateString(dateString, amount) {
+  const date = dateStringToUtcDate(dateString);
+  if (!date) return "";
+  date.setUTCDate(date.getUTCDate() + amount);
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function weekdayForDateString(dateString) {
+  const date = dateStringToUtcDate(dateString);
+  return date ? WEEKDAY_LABELS[date.getUTCDay()] : "";
+}
+
+function getSeoulClockParts(now) {
+  const date = now instanceof Date ? now : new Date(now || Date.now());
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: SEOUL_TIME_ZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(safeDate)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+  const dateString = `${parts.year}-${parts.month}-${parts.day}`;
+
+  return {
+    dateString,
+    weekday: weekdayForDateString(dateString),
+    minutes: Number(parts.hour || 0) * 60 + Number(parts.minute || 0),
+  };
+}
+
+function nextWeeklyOccurrenceAt(weekday, start, now) {
+  const clock = getSeoulClockParts(now);
+  const currentIndex = WEEKDAY_LABELS.indexOf(clock.weekday);
+  const targetIndex = WEEKDAY_LABELS.indexOf(text(weekday));
+  if (currentIndex < 0 || targetIndex < 0 || !text(start)) {
+    return "";
+  }
+
+  let dayOffset = (targetIndex - currentIndex + 7) % 7;
+  if (dayOffset === 0 && timeToMinutes(start) <= clock.minutes) {
+    dayOffset = 7;
+  }
+  const nextDate = shiftUtcDateString(clock.dateString, dayOffset);
+  return nextDate ? `${nextDate}T${text(start)}:00+09:00` : "";
+}
+
+function datedOccurrenceAt(classItem, sessionDate) {
+  const weekday = weekdayForDateString(sessionDate);
+  const matchingStarts = buildScheduleSlots(classItem)
+    .filter((slot) => !weekday || slot.day === weekday)
+    .map((slot) => text(slot.start))
+    .filter(Boolean)
+    .sort();
+  const start = normalizeClockTime(matchingStarts[0] || "00:00");
+  return `${sessionDate}T${start}:00+09:00`;
+}
+
+function weeklyConflictKey(
+  type,
+  { weekday, overlapStart, overlapEnd, classIds, studentId = "" },
+) {
+  const identity = [
+    "weekly",
+    "v1",
+    type,
+    text(weekday),
+    `${normalizeClockTime(overlapStart)}-${normalizeClockTime(overlapEnd)}`,
+    ...sortedIds(classIds),
+  ];
+  if (text(studentId)) {
+    identity.push(text(studentId));
+  }
+  return identity.join(":");
+}
+
+function catalogRowsForClasses(classes, catalogs, kind, preferredNames = []) {
+  const preferredKeys = new Set(preferredNames.map(normalizedName).filter(Boolean));
+  const explicitIds = new Set(
+    classes.flatMap((classItem) => {
+      if (kind === "teacher") {
+        return [
+          ...toArray(classItem.teacher_catalog_ids || classItem.teacherCatalogIds),
+          classItem.teacher_catalog_id,
+          classItem.teacherCatalogId,
+          classItem.teacher_id,
+          classItem.teacherId,
+        ];
+      }
+      return [
+        ...toArray(classItem.classroom_catalog_ids || classItem.classroomCatalogIds),
+        classItem.classroom_catalog_id,
+        classItem.classroomCatalogId,
+        classItem.classroom_id,
+        classItem.classroomId,
+      ];
+    }).map(text).filter(Boolean),
+  );
+  const fallbackNames = kind === "teacher"
+    ? classes.flatMap((classItem) => splitTeacherList(
+      classItem.teacher || classItem.teacher_name || classItem.teacherName,
+    ))
+    : classes.flatMap((classItem) => splitClassroomList(classItem.classroom || classItem.room));
+  const nameKeys = preferredKeys.size > 0
+    ? preferredKeys
+    : new Set(fallbackNames.map(normalizedName).filter(Boolean));
+
+  return (catalogs || []).filter((catalog) => (
+    nameKeys.has(normalizedName(catalog.name)) ||
+    (preferredKeys.size === 0 && explicitIds.has(text(catalog.id)))
+  ));
+}
+
+function resolveTeacherOwnership(classes, teacherCatalogs, preferredNames = []) {
+  const catalogRows = catalogRowsForClasses(classes, teacherCatalogs, "teacher", preferredNames);
+  const profileIds = unique(catalogRows.map((catalog) => catalog.profileId || catalog.profile_id));
+  const teacherLabels = unique([
+    ...preferredNames,
+    ...classes.flatMap((classItem) => splitTeacherList(
+      classItem.teacher || classItem.teacher_name || classItem.teacherName,
+    )),
+  ]);
+  const fallbackLabel = teacherLabels.join(", ") || "담당선생님 미정";
+
+  return {
+    teacherCatalogIds: sortedIds(catalogRows.map((catalog) => catalog.id)),
+    profileIds,
+    ownerLabel: profileIds.length > 0 ? fallbackLabel : `관리팀 (담당 ${fallbackLabel})`,
+    assigneeTeam: profileIds.length > 0 ? "" : "관리팀",
+  };
+}
+
+function campusOfClass(classItem = {}) {
+  const explicit = text(classItem.campus || classItem.branch);
+  if (explicit) return explicit;
+  const classroom = splitClassroomList(classItem.classroom || classItem.room)
+    .find((label) => /^(본관|별관)/.test(label));
+  return classroom?.match(/^(본관|별관)/)?.[1] || "";
+}
+
+function commonClassValue(classes, resolver) {
+  const values = unique(classes.map(resolver));
+  return values.length === 1 ? values[0] : "";
+}
+
+function affectedStudentsForClasses(classes) {
+  return sortedIds(classes.flatMap(getStudentIds));
+}
+
+function createConflictSource({
+  classIds = [],
+  studentIds = [],
+  examEventIds = [],
+  examDetailIds = [],
+  teacherCatalogIds = [],
+  classroomCatalogIds = [],
+  weekday = "",
+  overlapStart = "",
+  overlapEnd = "",
+  examDate = "",
+  examRule = "",
+} = {}) {
+  return {
+    classIds: sortedIds(classIds),
+    studentIds: sortedIds(studentIds),
+    examEventIds: sortedIds(examEventIds),
+    examDetailIds: sortedIds(examDetailIds),
+    teacherCatalogIds: sortedIds(teacherCatalogIds),
+    classroomCatalogIds: sortedIds(classroomCatalogIds),
+    weekday: text(weekday),
+    overlapStart: normalizeClockTime(overlapStart),
+    overlapEnd: normalizeClockTime(overlapEnd),
+    examDate: text(examDate),
+    examRule: text(examRule),
+  };
+}
+
+function mergeConflictRow(rowsByKey, row) {
+  const current = rowsByKey.get(row.key);
+  if (!current) {
+    rowsByKey.set(row.key, row);
+    return;
+  }
+
+  rowsByKey.set(row.key, {
+    ...current,
+    affectedStudentIds: sortedIds([
+      ...current.affectedStudentIds,
+      ...row.affectedStudentIds,
+    ]),
+    source: createConflictSource({
+      ...current.source,
+      studentIds: [...current.source.studentIds, ...row.source.studentIds],
+      examEventIds: [...current.source.examEventIds, ...row.source.examEventIds],
+      examDetailIds: [...current.source.examDetailIds, ...row.source.examDetailIds],
+      teacherCatalogIds: [
+        ...current.source.teacherCatalogIds,
+        ...row.source.teacherCatalogIds,
+      ],
+      classroomCatalogIds: [
+        ...current.source.classroomCatalogIds,
+        ...row.source.classroomCatalogIds,
+      ],
+    }),
+  });
+}
+
+function classesForOverlap(overlap, classesById) {
+  return sortedIds([overlap.left.classId, overlap.right.classId])
+    .map((classId) => classesById.get(classId))
+    .filter(Boolean);
+}
+
+function weeklyConflictBase({
+  type,
+  overlap,
+  involvedClasses,
+  affectedStudentIds,
+  now,
+}) {
+  const classIds = sortedIds(involvedClasses.map((classItem) => classItem.id));
+  return {
+    type,
+    occurrenceKind: "weekly",
+    nextOccurrenceAt: nextWeeklyOccurrenceAt(overlap.day, overlap.start, now),
+    recurrenceDay: overlap.day,
+    classIds,
+    classNames: involvedClasses.map(classFullNameOf),
+    affectedStudentIds: sortedIds(affectedStudentIds),
+    subject: commonClassValue(involvedClasses, (classItem) => normalizeSubject(classItem.subject)),
+    campus: commonClassValue(involvedClasses, campusOfClass),
+  };
+}
+
+export function buildDashboardConflictRows({
+  classes = [],
+  students = [],
+  academicSchools = [],
+  academicExamDays = [],
+  academicEventExamDetails = [],
+  academicEvents = [],
+  teacherCatalogs = [],
+  classroomCatalogs = [],
+  now = new Date(),
+} = {}) {
+  const activeClasses = (classes || []).filter(isActiveClass);
+  const classesById = new Map(activeClasses.map((classItem) => [text(classItem.id), classItem]));
+  const collisionSummary = buildScheduleCollisionSummary(activeClasses, students);
+  const rowsByKey = new Map();
+  const currentSeoulDate = getSeoulClockParts(now).dateString;
+
+  findExamConflictsForClasses(
+    activeClasses,
+    students,
+    academicSchools,
+    academicExamDays,
+    academicEventExamDetails,
+    academicEvents,
+  ).forEach((classConflict) => {
+    const classItem = classesById.get(text(classConflict.classId));
+    if (!classItem) return;
+    const ownership = resolveTeacherOwnership(
+      [classItem],
+      teacherCatalogs,
+      splitTeacherList(classConflict.teacherLabel),
+    );
+
+    classConflict.conflicts.forEach((conflict) => {
+      const sessionDate = text(conflict.sessionDate);
+      const examDate = text(conflict.examDate);
+      const rule = text(conflict.rule);
+      if (!sessionDate || sessionDate < currentSeoulDate) return;
+
+      const classId = text(classConflict.classId);
+      const key = `exam:v1:${classId}:${examDate}:${rule}`;
+      const subject = normalizeSubject(classConflict.subject);
+      const isSameDay = rule === "same-day-subject";
+      mergeConflictRow(rowsByKey, {
+        key,
+        type: "exam",
+        occurrenceKind: "dated",
+        title: "시험 일정 충돌",
+        nextOccurrenceAt: datedOccurrenceAt(classItem, sessionDate),
+        recurrenceDay: "",
+        problem: isSameDay
+          ? `${classConflict.title} 수업이 ${subject || "해당 과목"} 시험일과 겹칩니다.`
+          : `${classConflict.title} 수업 다음 날에 ${conflict.label || "타과목 시험"}이 있습니다.`,
+        ownerLabel: ownership.ownerLabel,
+        resolution: "수업일 변경 또는 휴강·보강 확정 후 학생·보호자 안내",
+        classIds: [classId],
+        classNames: [classFullNameOf(classItem)],
+        affectedStudentIds: sortedIds(conflict.studentIds),
+        subject,
+        campus: campusOfClass(classItem),
+        primaryAssigneeProfileId: ownership.profileIds[0] || "",
+        secondaryAssigneeProfileId: "",
+        assigneeTeam: ownership.assigneeTeam,
+        source: createConflictSource({
+          classIds: [classId],
+          studentIds: conflict.studentIds,
+          examEventIds: conflict.examEventIds,
+          examDetailIds: conflict.examDetailIds,
+          teacherCatalogIds: ownership.teacherCatalogIds,
+          examDate,
+          examRule: rule,
+        }),
+      });
+    });
+  });
+
+  collisionSummary.teacher.forEach((collision) => {
+    collision.overlaps.forEach((overlap) => {
+      const involvedClasses = classesForOverlap(overlap, classesById);
+      if (involvedClasses.length !== 2) return;
+      const base = weeklyConflictBase({
+        type: "teacher",
+        overlap,
+        involvedClasses,
+        affectedStudentIds: affectedStudentsForClasses(involvedClasses),
+        now,
+      });
+      const ownership = resolveTeacherOwnership(
+        involvedClasses,
+        teacherCatalogs,
+        [collision.label],
+      );
+      const key = weeklyConflictKey("teacher", {
+        weekday: overlap.day,
+        overlapStart: overlap.start,
+        overlapEnd: overlap.end,
+        classIds: base.classIds,
+      });
+      mergeConflictRow(rowsByKey, {
+        ...base,
+        key,
+        title: "선생님 일정 충돌",
+        problem: `${collision.label} 선생님이 ${base.classNames.join(", ")} 수업을 동시에 담당합니다.`,
+        ownerLabel: ownership.ownerLabel,
+        resolution: "한 수업의 시간 또는 대체 선생님 확정",
+        primaryAssigneeProfileId: ownership.profileIds[0] || "",
+        secondaryAssigneeProfileId: "",
+        assigneeTeam: ownership.assigneeTeam,
+        source: createConflictSource({
+          classIds: base.classIds,
+          teacherCatalogIds: ownership.teacherCatalogIds,
+          weekday: overlap.day,
+          overlapStart: overlap.start,
+          overlapEnd: overlap.end,
+        }),
+      });
+    });
+  });
+
+  collisionSummary.classroom.forEach((collision) => {
+    collision.overlaps.forEach((overlap) => {
+      const involvedClasses = classesForOverlap(overlap, classesById);
+      if (involvedClasses.length !== 2) return;
+      const base = weeklyConflictBase({
+        type: "classroom",
+        overlap,
+        involvedClasses,
+        affectedStudentIds: affectedStudentsForClasses(involvedClasses),
+        now,
+      });
+      const catalogRows = catalogRowsForClasses(
+        involvedClasses,
+        classroomCatalogs,
+        "classroom",
+        [collision.label],
+      );
+      const key = weeklyConflictKey("classroom", {
+        weekday: overlap.day,
+        overlapStart: overlap.start,
+        overlapEnd: overlap.end,
+        classIds: base.classIds,
+      });
+      mergeConflictRow(rowsByKey, {
+        ...base,
+        key,
+        title: "강의실 일정 충돌",
+        problem: `${collision.label}에 ${base.classNames.join(", ")} 수업이 동시에 배정되어 있습니다.`,
+        ownerLabel: "관리팀",
+        resolution: "한 수업의 강의실 또는 시간 변경",
+        primaryAssigneeProfileId: "",
+        secondaryAssigneeProfileId: "",
+        assigneeTeam: "관리팀",
+        source: createConflictSource({
+          classIds: base.classIds,
+          classroomCatalogIds: catalogRows.map((catalog) => catalog.id),
+          weekday: overlap.day,
+          overlapStart: overlap.start,
+          overlapEnd: overlap.end,
+        }),
+      });
+    });
+  });
+
+  collisionSummary.student.forEach((collision) => {
+    collision.overlaps.forEach((overlap) => {
+      const involvedClasses = classesForOverlap(overlap, classesById);
+      if (involvedClasses.length !== 2) return;
+      const studentId = text(collision.id);
+      const base = weeklyConflictBase({
+        type: "student",
+        overlap,
+        involvedClasses,
+        affectedStudentIds: [studentId],
+        now,
+      });
+      const slotTeacherNames = unique([
+        ...resolveSlotTeachers(overlap.left, involvedClasses.find((item) => text(item.id) === text(overlap.left.classId))),
+        ...resolveSlotTeachers(overlap.right, involvedClasses.find((item) => text(item.id) === text(overlap.right.classId))),
+      ]);
+      const ownership = resolveTeacherOwnership(
+        involvedClasses,
+        teacherCatalogs,
+        slotTeacherNames,
+      );
+      const key = weeklyConflictKey("student", {
+        weekday: overlap.day,
+        overlapStart: overlap.start,
+        overlapEnd: overlap.end,
+        classIds: base.classIds,
+        studentId,
+      });
+      mergeConflictRow(rowsByKey, {
+        ...base,
+        key,
+        title: "학생 시간표 충돌",
+        problem: `${collision.label} 학생의 ${base.classNames.join(", ")} 수업 시간이 겹칩니다.`,
+        ownerLabel: ownership.ownerLabel,
+        resolution: "두 담당선생님이 우선 수업과 보강 방안 확정",
+        primaryAssigneeProfileId: ownership.profileIds[0] || "",
+        secondaryAssigneeProfileId: ownership.profileIds[1] || "",
+        assigneeTeam: ownership.assigneeTeam,
+        source: createConflictSource({
+          classIds: base.classIds,
+          studentIds: [studentId],
+          teacherCatalogIds: ownership.teacherCatalogIds,
+          weekday: overlap.day,
+          overlapStart: overlap.start,
+          overlapEnd: overlap.end,
+        }),
+      });
+    });
+  });
+
+  return [...rowsByKey.values()].sort((left, right) => (
+    text(left.nextOccurrenceAt).localeCompare(text(right.nextOccurrenceAt)) ||
+    ["exam", "teacher", "classroom", "student"].indexOf(left.type) -
+      ["exam", "teacher", "classroom", "student"].indexOf(right.type) ||
+    left.key.localeCompare(right.key)
+  ));
 }
 
 function buildLoad(rows = [], key) {
@@ -894,12 +1442,16 @@ function pushBreakdown(map, label, studentId) {
   map.set(key, current);
 }
 
-function finalizeBreakdown(map, { order = "enrollment-asc" } = {}) {
+function finalizeBreakdown(
+  map,
+  { order = "enrollment-asc", studentsById = new Map() } = {},
+) {
   return [...map.entries()]
     .map(([label, payload]) => ({
       label,
       enrollmentCount: payload.enrollmentCount,
       studentCount: payload.studentIds.size,
+      studentRoster: dashboardStudentRosterFromIds([...payload.studentIds], studentsById),
     }))
     .sort((left, right) => {
       if (order === "student-desc") {
@@ -944,17 +1496,17 @@ function buildStudentBreakdowns(classes = [], students = []) {
     });
   });
 
-  const gradeRows = finalizeBreakdown(byGrade, { order: "student-desc" }).map((row) => ({
+  const gradeRows = finalizeBreakdown(byGrade, { order: "student-desc", studentsById }).map((row) => ({
     ...row,
-    schools: finalizeBreakdown(schoolsByGrade.get(row.label) || new Map(), { order: "student-desc" }),
+    schools: finalizeBreakdown(schoolsByGrade.get(row.label) || new Map(), { order: "student-desc", studentsById }),
   }));
 
   return {
-    bySubject: finalizeBreakdown(bySubject),
+    bySubject: finalizeBreakdown(bySubject, { studentsById }),
     byGrade: gradeRows,
-    bySchool: finalizeBreakdown(bySchool, { order: "student-desc" }).map((row) => ({
+    bySchool: finalizeBreakdown(bySchool, { order: "student-desc", studentsById }).map((row) => ({
       ...row,
-      grades: finalizeBreakdown(gradesBySchool.get(row.label) || new Map(), { order: "student-desc" }),
+      grades: finalizeBreakdown(gradesBySchool.get(row.label) || new Map(), { order: "student-desc", studentsById }),
     })),
   };
 }
@@ -969,7 +1521,7 @@ function createClassBreakdownAccumulator() {
   };
 }
 
-function buildDashboardClassSummary(classItem = {}, studentIds = []) {
+function buildDashboardClassSummary(classItem = {}, studentIds = [], studentsById = new Map()) {
   const weeklyMinutes = getWeeklyMinutesForClass(classItem);
 
   return {
@@ -981,6 +1533,7 @@ function buildDashboardClassSummary(classItem = {}, studentIds = []) {
     classroomLabel: splitClassroomList(classItem.classroom || classItem.room).join(", ") || "미정",
     studentCount: unique(studentIds).length,
     enrollmentCount: studentIds.length,
+    studentRoster: dashboardStudentRosterFromIds(studentIds, studentsById),
     weeklyMinutes,
     weeklyHoursLabel: formatDashboardHours(weeklyMinutes),
   };
@@ -1051,7 +1604,7 @@ function buildClassBreakdowns(classes = [], students = []) {
     const registeredIds = getStudentIds(classItem);
     const gradeLabels = inferClassGradeLabels(classItem, studentsById);
     const subjectLabel = text(classItem.subject) || "미정";
-    const classSummary = buildDashboardClassSummary(classItem, registeredIds);
+    const classSummary = buildDashboardClassSummary(classItem, registeredIds, studentsById);
     const teacherLabels = splitTeacherList(classItem.teacher || classItem.teacher_name || classItem.teacherName);
     const classroomLabels = splitClassroomList(classItem.classroom || classItem.room);
     const schoolLabels = unique(
@@ -1077,7 +1630,11 @@ function buildClassBreakdowns(classes = [], students = []) {
         gradeLabel,
         classId,
         studentIdsForGrade.length > 0 ? studentIdsForGrade : registeredIds,
-        buildDashboardClassSummary(classItem, studentIdsForGrade.length > 0 ? studentIdsForGrade : registeredIds),
+        buildDashboardClassSummary(
+          classItem,
+          studentIdsForGrade.length > 0 ? studentIdsForGrade : registeredIds,
+          studentsById,
+        ),
       );
     });
 
@@ -1090,7 +1647,11 @@ function buildClassBreakdowns(classes = [], students = []) {
         schoolLabel,
         classId,
         studentIdsForSchool.length > 0 ? studentIdsForSchool : registeredIds,
-        buildDashboardClassSummary(classItem, studentIdsForSchool.length > 0 ? studentIdsForSchool : registeredIds),
+        buildDashboardClassSummary(
+          classItem,
+          studentIdsForSchool.length > 0 ? studentIdsForSchool : registeredIds,
+          studentsById,
+        ),
       );
     });
   });
@@ -1124,10 +1685,13 @@ function getWeeklyMinutesForClasses(classes = []) {
   return classes.reduce((sum, classItem) => sum + getWeeklyMinutesForClass(classItem), 0);
 }
 
-function buildDashboardBucketSummary(classes = [], students = []) {
-  const studentBreakdowns = buildStudentBreakdowns(classes, students);
+function buildDashboardBucketSummary(
+  classes = [],
+  studentBreakdowns = { bySchool: [], byGrade: [] },
+) {
   const registeredStudentIds = classes.flatMap(getStudentIds);
   const waitlistStudentIds = classes.flatMap(getWaitlistIds);
+  const weeklyMinutes = getWeeklyMinutesForClasses(classes);
 
   return {
     activeClassesCount: classes.length,
@@ -1137,16 +1701,18 @@ function buildDashboardBucketSummary(classes = [], students = []) {
     uniqueWaitlistStudentCount: unique(waitlistStudentIds).length,
     schoolCount: studentBreakdowns.bySchool.filter((row) => row.studentCount > 0).length,
     gradeCount: studentBreakdowns.byGrade.filter((row) => row.studentCount > 0).length,
-    weeklyMinutes: getWeeklyMinutesForClasses(classes),
-    weeklyHoursLabel: formatDashboardHours(getWeeklyMinutesForClasses(classes)),
+    weeklyMinutes,
+    weeklyHoursLabel: formatDashboardHours(weeklyMinutes),
   };
 }
 
 function buildDashboardAnalyticsBucket(classes = [], students = []) {
+  const studentBreakdowns = buildStudentBreakdowns(classes, students);
+
   return {
-    studentBreakdowns: buildStudentBreakdowns(classes, students),
+    studentBreakdowns,
     classBreakdowns: buildClassBreakdowns(classes, students),
-    summary: buildDashboardBucketSummary(classes, students),
+    summary: buildDashboardBucketSummary(classes, studentBreakdowns),
     teacherLoad: buildResourceLoadFromClasses(classes, "teacher", students),
     classroomLoad: buildResourceLoadFromClasses(classes, "classroom", students),
   };
@@ -1206,6 +1772,7 @@ export function createEmptyDashboardMetrics() {
       total: 0,
     },
     examConflicts: [],
+    conflictRows: [],
     studentBreakdowns: {
       bySubject: [],
       byGrade: [],
@@ -1238,6 +1805,9 @@ export function buildDashboardMetrics({
   academicExamDays = [],
   academicEventExamDetails = [],
   academicEvents = [],
+  teacherCatalogs = [],
+  classroomCatalogs = [],
+  now = new Date(),
 } = {}) {
   const activeClasses = classes.filter(isActiveClass);
   const timetable = buildTimetableWorkspaceModel({
@@ -1258,6 +1828,17 @@ export function buildDashboardMetrics({
     academicEventExamDetails,
     academicEvents,
   );
+  const conflictRows = buildDashboardConflictRows({
+    classes: activeClasses,
+    students,
+    academicSchools,
+    academicExamDays,
+    academicEventExamDetails,
+    academicEvents,
+    teacherCatalogs,
+    classroomCatalogs,
+    now,
+  });
   const teacherLoad = buildResourceLoadFromClasses(activeClasses, "teacher", students);
   const classroomLoad = buildResourceLoadFromClasses(activeClasses, "classroom", students);
   const analyticsBySubject = buildDashboardAnalyticsBySubject(activeClasses, students);
@@ -1279,12 +1860,13 @@ export function buildDashboardMetrics({
     classroomCount: timetable.summary.classroomCount,
     collisionSummary,
     examConflicts,
+    conflictRows,
     studentBreakdowns: buildStudentBreakdowns(activeClasses, students),
     classBreakdowns: buildClassBreakdowns(activeClasses, students),
     analyticsBySubject,
     analyticsByView,
     teacherLoad: teacherLoad.length ? teacherLoad : buildLoad(timetable.rows, "teacher"),
     classroomLoad: classroomLoad.length ? classroomLoad : buildLoad(timetable.rows, "classroom"),
-    riskCount: collisionSummary.total + examConflicts.length,
+    riskCount: conflictRows.length,
   };
 }

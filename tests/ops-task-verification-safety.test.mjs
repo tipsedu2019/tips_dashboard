@@ -18,6 +18,14 @@ const registrationMutationSource = await readFile(
   new URL("../supabase/migrations/20260712182834_registration_subject_track_mutations.sql", import.meta.url),
   "utf8",
 )
+const wordRetestFixtureSource = await readFile(
+  new URL("../src/features/tasks/word-retest-browser-fixture.ts", import.meta.url),
+  "utf8",
+)
+const opsTaskWorkspaceSource = await readFile(
+  new URL("../src/features/tasks/ops-task-workspace.tsx", import.meta.url),
+  "utf8",
+)
 
 function assertIncludesAll(source, snippets) {
   for (const snippet of snippets) {
@@ -185,6 +193,38 @@ test("authenticated browser verification includes the deterministic subject-trac
   assert.match(browserSource, /verifyRegistrationSubjectTrackFixture/)
   assert.match(browserSource, /same-day dual level test/)
   assert.match(browserSource, /multiple English classes/)
+})
+
+test("word-retest expected-schedule fixture is exact-query, role-explicit, immutable, and read-only", () => {
+  assertIncludesAll(wordRetestFixtureSource, [
+    'WORD_RETEST_BROWSER_FIXTURE_QUERY = "word-retest-expected-schedule"',
+    'WORD_RETEST_BROWSER_FIXTURE_ROLES = ["assistant", "teacher", "admin"]',
+    "export function shouldEnableWordRetestBrowserFixture",
+    "fixtureValue === WORD_RETEST_BROWSER_FIXTURE_QUERY",
+    "WORD_RETEST_BROWSER_FIXTURE_ROLES.includes(fixtureRole as WordRetestBrowserFixtureRole)",
+    "export function resolveWordRetestBrowserFixtureViewer",
+    "export function getWordRetestBrowserFixtureData",
+    "JSON.parse(JSON.stringify(buildFixtureData(fixtureRole)))",
+    "return deepFreeze(clone)",
+    'profileId: "fixture-teacher-profile"',
+    "fixture-word-retest-name-only",
+  ])
+  assert.doesNotMatch(
+    wordRetestFixtureSource,
+    /(?:createClient|@supabase|\.rpc\s*\(|\.from\s*\(|fetch\s*\()/,
+  )
+
+  assertIncludesAll(opsTaskWorkspaceSource, [
+    'const wordRetestFixtureValue = searchParams.get("fixture")',
+    'const wordRetestFixtureRoleValue = searchParams.get("fixtureRole")',
+    "shouldEnableWordRetestBrowserFixture(wordRetestFixtureValue, wordRetestFixtureRoleValue)",
+    "resolveWordRetestBrowserFixtureViewer(wordRetestFixtureRoleValue)",
+    "getWordRetestBrowserFixtureData(wordRetestFixtureViewer.viewerRole)",
+  ])
+  assert.match(
+    opsTaskWorkspaceSource,
+    /const wordRetestFixtureRequested = isWordRetestWorkspace[\s\S]*&& shouldEnableWordRetestBrowserFixture\(wordRetestFixtureValue, wordRetestFixtureRoleValue\)/,
+  )
 })
 
 test("subject-track fixture verification exercises the refined no-save application and mobile overflow", () => {

@@ -17,6 +17,10 @@ const assistantWordRetestPermissionsMigrationUrl = new URL(
   "../supabase/migrations/20260721131903_assistant_word_retest_makeup_permissions.sql",
   import.meta.url,
 )
+const expectedAtMigrationUrl = new URL(
+  "../supabase/migrations/20260726035635_word_retest_expected_at.sql",
+  import.meta.url,
+)
 const serviceUrl = new URL("../src/features/tasks/ops-task-service.ts", import.meta.url)
 const workspaceUrl = new URL("../src/features/tasks/ops-task-workspace.tsx", import.meta.url)
 
@@ -626,6 +630,7 @@ test("단어 재시험 계보 링크는 읽기 전용으로 매핑하고 생산 
     nullable: (value) => String(value || "").trim() || null,
     nullableDate: (value) => String(value || "").trim() || null,
     nullableNumber: (value) => String(value || "").trim() || null,
+    seoulDateTimeInputToIso: (value) => String(value || "").trim(),
   })
 
   const mapped = mapWordRetest({
@@ -643,6 +648,39 @@ test("단어 재시험 계보 링크는 읽기 전용으로 매핑하고 생산 
   for (const key of ["retryOfTaskId", "retryTaskId", "retry_of_task_id", "retry_task_id"]) {
     assert.equal(key in row, false, `${key} must not be in producer payload`)
   }
+})
+
+test("응시예정일시 전용 변경은 기존 create/update/retry 생산자와 알림 일정을 재정의하지 않는다", async () => {
+  const [migration, service] = await Promise.all([
+    source(expectedAtMigrationUrl),
+    source(serviceUrl),
+  ])
+  const expectedOnlyRpc = block(
+    migration,
+    "create or replace function dashboard_private.update_word_retest_expected_at_v1_impl",
+    "create or replace function public.update_word_retest_expected_at_v1",
+  )
+  const serviceRpc = block(
+    service,
+    "export async function updateWordRetestExpectedAt",
+    "export async function reportWordRetestResult",
+  )
+
+  for (const producer of [
+    "create_ops_task_v2_impl",
+    "update_ops_task_v2_impl",
+    "retry_word_retest_v1_impl",
+  ]) {
+    assert.doesNotMatch(
+      migration,
+      new RegExp(`create or replace function dashboard_private\\.${producer}`),
+    )
+  }
+  assert.match(service, /expected_retest_at: seoulDateTimeInputToIso\(detail\.expectedRetestAt \|\| ""\) \|\| null/)
+  assert.match(service, /expectedRetestAt: ""/)
+  assert.match(serviceRpc, /update_word_retest_expected_at_v1/)
+  assert.doesNotMatch(expectedOnlyRpc, /record_ops_task_notification_source|record_notification_event|schedule_changed|fanout|delivery/i)
+  assert.doesNotMatch(serviceRpc, /dispatchLegacyOpsTaskSource|sourceEventIds|notification/i)
 })
 
 test("클라이언트는 closure 후 활동 이력·댓글을 테이블에 직접 쓰지 않고 UUID 영수증을 검증한다", async () => {

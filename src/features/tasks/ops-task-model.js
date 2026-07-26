@@ -206,13 +206,25 @@ export function getWordRetestScoreSavePlan(task = {}, input = {}) {
   };
 }
 
-function matchesWordRetestTeacher(task = {}, context = {}) {
+export function isWordRetestExactlyLinkedToTeacher(task = {}, context = {}) {
   const detail = getWordRetestDetail(task);
-  return matchesIdentity(
-    [detail.teacherId, detail.teacher_id, task.requestedBy, task.requested_by],
-    [detail.teacherName, detail.teacher_name, task.requestedByLabel, task.requested_by_label],
-    context,
-  ) || matchesTeam([task.requestedTeam, task.requested_team], context);
+  const currentTeacherCatalogId = text(
+    context.currentTeacherCatalogId || context.current_teacher_catalog_id,
+  );
+  const teacherCatalogId = text(detail.teacherId || detail.teacher_id);
+  return Boolean(currentTeacherCatalogId && teacherCatalogId === currentTeacherCatalogId);
+}
+
+export function needsWordRetestTeacherAccountLink(task = {}, teacherCatalogs = []) {
+  if (text(task.type) !== "word_retest") return false;
+  const detail = getWordRetestDetail(task);
+  const teacherCatalogId = text(detail.teacherId || detail.teacher_id);
+  if (!teacherCatalogId) return true;
+
+  const teacherCatalog = (teacherCatalogs || []).find((catalog) => (
+    text(catalog.id) === teacherCatalogId
+  ));
+  return !text(teacherCatalog?.profileId || teacherCatalog?.profile_id);
 }
 
 export function getWordRetestRoleContext({
@@ -250,10 +262,19 @@ export function isWordRetestInAssistantQueue(task = {}, context = {}) {
 }
 
 export function isWordRetestInTeacherQueue(task = {}, context = {}) {
-  if (getWordRetestWorkspaceRole(task) !== "teacher") return false;
+  if (text(task.type) !== "word_retest" || isClosedOpsTask(task)) return false;
   const normalized = normalizedUserContext(context);
-  if (!normalized.currentUserId && !normalized.currentUserLabel && !normalized.currentUserTeam) return true;
-  return matchesWordRetestTeacher(task, context);
+  const role = text(context.role).toLowerCase();
+  const currentTeacherCatalogId = text(
+    context.currentTeacherCatalogId || context.current_teacher_catalog_id,
+  );
+
+  if (role || currentTeacherCatalogId) {
+    return role === "teacher" && isWordRetestExactlyLinkedToTeacher(task, context);
+  }
+
+  if (normalized.currentUserId || normalized.currentUserLabel || normalized.currentUserTeam) return false;
+  return getWordRetestWorkspaceRole(task) === "teacher";
 }
 
 export function toDateKey(value) {

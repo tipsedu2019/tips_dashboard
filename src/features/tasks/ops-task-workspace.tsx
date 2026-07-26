@@ -1,7 +1,7 @@
 "use client"
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type TouchEvent, type WheelEvent } from "react"
+import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type TouchEvent, type WheelEvent } from "react"
 import { ArrowDown, ArrowUp, Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, Copy, FileText, Filter, Inbox, List, MessageSquareText, Plus, RefreshCw, Search, Send, Trash2, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -21,7 +21,11 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
-import { DatePickerControl } from "@/components/ui/date-time-picker"
+import {
+  DatePickerControl,
+  DateTimePickerControl,
+  type DateTimePickerDraftState,
+} from "@/components/ui/date-time-picker"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -53,12 +57,14 @@ import {
   getWordRetestWorkspaceRole,
   hasOpsTaskCalendarDate,
   hasOpsTaskOverdueCalendarDate,
+  isWordRetestExactlyLinkedToTeacher,
   isClosedOpsTask,
   isOpsTaskInUserInbox,
   isOpsTaskInUserSent,
   isOpsTaskAssignedToUser,
   isWordRetestInAssistantQueue,
   isWordRetestInTeacherQueue,
+  needsWordRetestTeacherAccountLink,
   sortOpsTasksByPriority,
   sortOpsTasksByWorkflowStatus,
   sortOpsTasksByWorkDate,
@@ -82,9 +88,11 @@ import {
   reportWordRetestAbsent,
   reportWordRetestResult,
   retryWordRetest,
+  isoToSeoulDateTimeInput,
   summarizeOpsTasks,
   updateOpsTask,
   updateOpsTaskStatus,
+  updateWordRetestExpectedAt,
   type OpsTaskAttachment,
   type OpsTaskEvent,
   type OpsClassOption,
@@ -105,6 +113,16 @@ import {
   type OpsTaskWorkspaceOptionData,
   type RegistrationSchoolCatalogStatus,
 } from "./ops-task-service"
+import {
+  ClassScheduleCalendarSurface,
+  type ClassScheduleCalendarDay,
+} from "./class-schedule-calendar-surface"
+import {
+  getWordRetestBrowserFixtureData,
+  resolveWordRetestBrowserFixtureViewer,
+  shouldEnableWordRetestBrowserFixture,
+  type WordRetestBrowserFixtureRole,
+} from "./word-retest-browser-fixture"
 import {
   canEditRegistrationTask,
   canSendRegistrationAdmissionMessage,
@@ -286,6 +304,9 @@ type RegistrationCustomerMessageStatus = {
 }
 
 type WordRetestMode = "assistant" | "teacher"
+type WordRetestEditMode = "full" | "expected_only"
+type WordRetestEditIntent = "standard_edit" | "expected_quick"
+type WordRetestPendingFocus = "expected_retest_date" | ""
 type WordRetestBranchFilter = "all" | "본관" | "별관"
 type WordRetestPeriodFilter = "all" | "today" | "week" | "month" | "custom"
 type WordRetestSelectFilterKey = "all" | string
@@ -298,6 +319,12 @@ type WordRetestClassScheduleItem = {
   dateKey: string
   label: string
   state: string
+}
+const EMPTY_DATE_TIME_PICKER_DRAFT: DateTimePickerDraftState = {
+  date: "",
+  time: "",
+  isComplete: false,
+  isPartial: false,
 }
 type WithdrawalClassScheduleItem = WordRetestClassScheduleItem & {
   sessionNumber: number
@@ -361,7 +388,7 @@ type TransferTableSort = {
   columnKey: TransferTableColumnKey
   direction: "asc" | "desc"
 } | null
-type WordRetestTableColumnKey = "select" | "status" | "testAt" | "teacher" | "class" | "student" | "textbook" | "unit" | "total" | "cutoff" | "score" | "result" | "action"
+type WordRetestTableColumnKey = "select" | "status" | "testAt" | "expectedRetestAt" | "teacher" | "class" | "student" | "textbook" | "unit" | "note" | "total" | "cutoff" | "score" | "result" | "action"
 type TaskFocus = "none" | "today" | "overdue" | "mine" | "unassigned" | "confirmation"
 type WordRetestRetryReason = "failed" | "absent"
 type FormCompletionIntent = {
@@ -504,11 +531,13 @@ const WORD_RETEST_TABLE_COLUMN_WIDTHS: Record<WordRetestTableColumnKey, number> 
   select: 40,
   status: 102,
   testAt: 132,
+  expectedRetestAt: 168,
   teacher: 112,
   class: 128,
   student: 108,
   textbook: 220,
   unit: 108,
+  note: 220,
   total: 96,
   cutoff: 86,
   score: 248,
@@ -519,11 +548,13 @@ const WORD_RETEST_TABLE_COLUMN_MIN_WIDTHS: Record<WordRetestTableColumnKey, numb
   select: 40,
   status: 88,
   testAt: 112,
+  expectedRetestAt: 148,
   teacher: 96,
   class: 108,
   student: 88,
   textbook: 150,
   unit: 88,
+  note: 160,
   total: 88,
   cutoff: 78,
   score: 210,
@@ -1439,13 +1470,15 @@ function getUnknownErrorMessage(error: unknown) {
 
 function getOpsTaskActionErrorMessage(error: unknown, fallback: string) {
   const rawMessage = getUnknownErrorMessage(error)
-  const message = rawMessage.includes("ops_task_delete_forbidden")
-    ? "이 업무를 삭제할 권한이 없습니다."
-    : rawMessage.includes("registration_case_delete_not_allowed")
-      ? "대기 또는 등록이 시작된 신청은 삭제할 수 없습니다."
-      : rawMessage.toLowerCase().includes("upstream request timeout")
-        ? "서버 응답이 지연되었습니다. 잠시 후 다시 시도해 주세요."
-        : rawMessage || fallback
+  const message = rawMessage.includes("dashboard_conflict_task_delete_forbidden")
+    ? "일정 충돌에서 만든 할 일은 삭제 대신 완료 또는 취소해 주세요."
+    : rawMessage.includes("ops_task_delete_forbidden")
+      ? "이 업무를 삭제할 권한이 없습니다."
+      : rawMessage.includes("registration_case_delete_not_allowed")
+        ? "대기 또는 등록이 시작된 신청은 삭제할 수 없습니다."
+        : rawMessage.toLowerCase().includes("upstream request timeout")
+          ? "서버 응답이 지연되었습니다. 잠시 후 다시 시도해 주세요."
+          : rawMessage || fallback
   const cleanupError = typeof error === "object" && error ? (error as { cleanupError?: unknown }).cleanupError : null
   const cleanupText = getUnknownErrorMessage(cleanupError)
   const cleanupMessage = cleanupText ? `생성 정리 확인 필요: ${cleanupText}` : ""
@@ -1476,7 +1509,7 @@ const EMPTY_FORM: OpsTaskInput = {
   registration: {},
   withdrawal: {},
   transfer: {},
-  wordRetest: { branch: "본관", retestStatus: "not_started" },
+  wordRetest: { branch: "본관", retestStatus: "not_started", expectedRetestAt: "" },
 }
 
 function cloneForm(input: OpsTaskInput = EMPTY_FORM): OpsTaskInput {
@@ -1486,7 +1519,7 @@ function cloneForm(input: OpsTaskInput = EMPTY_FORM): OpsTaskInput {
     registration: { pipelineStatus: REGISTRATION_PIPELINE_STATUSES[0]?.value || "0. 등록 문의", ...(input.registration || {}) },
     withdrawal: { ...(input.withdrawal || {}) },
     transfer: { ...(input.transfer || {}) },
-    wordRetest: { branch: "본관", retestStatus: "not_started", ...(input.wordRetest || {}) },
+    wordRetest: { branch: "본관", retestStatus: "not_started", expectedRetestAt: "", ...(input.wordRetest || {}) },
   }
 }
 
@@ -1494,7 +1527,22 @@ function serializeOpsTaskInput(input: OpsTaskInput) {
   return JSON.stringify(input)
 }
 
+function getWordRetestExpectedAtInputValue(value?: string) {
+  const normalized = String(value || "").trim()
+  if (!normalized) return ""
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(normalized)) return normalized
+  return isoToSeoulDateTimeInput(normalized)
+}
+
 function formFromTask(task: OpsTask): OpsTaskInput {
+  const taskWordRetest = task.wordRetest
+  const wordRetest = taskWordRetest
+    ? {
+        ...taskWordRetest,
+        requestNote: taskWordRetest.requestNote || task.memo || "",
+        expectedRetestAt: getWordRetestExpectedAtInputValue(taskWordRetest.expectedRetestAt),
+      }
+    : undefined
   return cloneForm({
     title: task.title,
     type: task.type,
@@ -1520,7 +1568,7 @@ function formFromTask(task: OpsTask): OpsTaskInput {
     registration: task.registration,
     withdrawal: task.withdrawal,
     transfer: task.transfer,
-    wordRetest: task.wordRetest,
+    wordRetest,
   })
 }
 
@@ -1731,6 +1779,34 @@ function getWordRetestTextbookLabel(task: OpsTask) {
 
 function getWordRetestUnitLabel(task: OpsTask) {
   return task.wordRetest?.unit || "미지정"
+}
+
+function getWordRetestNote(task: Pick<OpsTask, "memo" | "wordRetest">) {
+  return String(task.wordRetest?.requestNote || task.memo || "").trim()
+}
+
+function formatWordRetestExpectedAt(value?: string) {
+  const localValue = getWordRetestExpectedAtInputValue(value)
+  return localValue ? localValue.replace("T", " ") : "미정"
+}
+
+function getExpectedRetestDraftFromValue(value?: string): DateTimePickerDraftState {
+  const match = String(value || "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})$/)
+  if (!match) return { ...EMPTY_DATE_TIME_PICKER_DRAFT }
+  return {
+    date: match[1],
+    time: match[2],
+    isComplete: true,
+    isPartial: false,
+  }
+}
+
+function getWordRetestResultLabel(wordRetest?: OpsTaskInput["wordRetest"]) {
+  if (isWordRetestAbsent(wordRetest)) return "미응시"
+  const result = getWordRetestScoreResult(wordRetest)
+  if (result === "passed") return "통과"
+  if (result === "failed") return "재시험"
+  return "미정"
 }
 
 function getWordRetestStatusLabel(value?: string, taskStatus?: OpsTaskStatus, wordRetest?: OpsTaskInput["wordRetest"]) {
@@ -2092,11 +2168,13 @@ function getWordRetestTableGridTemplate(widths: Record<WordRetestTableColumnKey,
     widths.select,
     widths.status,
     widths.testAt,
+    widths.expectedRetestAt,
     widths.teacher,
     widths.class,
     widths.student,
     widths.textbook,
     widths.unit,
+    widths.note,
     widths.total,
     widths.cutoff,
     widths.score,
@@ -4794,10 +4872,6 @@ function getTransferTuitionAdjustment({
   }
 }
 
-function getCalendarMonthKey(value: Date) {
-  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}`
-}
-
 function DateField({
   label,
   value,
@@ -5015,6 +5089,52 @@ function WithdrawalScheduleCalendarField({
   const progressLabel = metrics.fourWeekLessonHours
     ? `${metrics.progressPercent}%`
     : "자동 계산"
+  const calendarDays = useMemo<ClassScheduleCalendarDay[]>(() => (
+    calendarCells.map((cell) => {
+      const scheduleItem = itemsByDate.get(cell.dateKey)
+      const selectable = Boolean(scheduleItem && isWithdrawalScheduleSelectable(scheduleItem))
+      const selected = cell.dateKey === selectedDateKey
+      const dateLabel = getWithdrawalCalendarCellDateLabel(cell.dateKey)
+      const sessionLabel = getWithdrawalCalendarDisplaySessionLabel(scheduleItem, { includeMonth: true })
+      const state = stringValue(scheduleItem?.state)
+      const calendarMonthNumber = calendarMonth.getMonth() + 1
+      const billingMonthNumber = getWithdrawalScheduleBillingMonthNumber(scheduleItem)
+      const tone: ClassScheduleCalendarDay["tone"] = !scheduleItem
+        ? cell.isToday
+          ? "today"
+          : cell.isCurrentMonth
+            ? "default"
+            : "muted"
+        : billingMonthNumber < calendarMonthNumber
+          ? "billing-previous"
+          : billingMonthNumber > calendarMonthNumber
+            ? "billing-next"
+            : "billing-current"
+      const badgeTone: ClassScheduleCalendarDay["badges"][number]["tone"] = state === "makeup"
+        ? "makeup"
+        : ["exception", "canceled", "cancelled"].includes(state)
+          ? "holiday"
+          : state === "completed"
+            ? "completed"
+            : "default"
+
+      return {
+        key: cell.dateKey,
+        displayLabel: scheduleItem ? dateLabel : cell.dayLabel,
+        inCurrentMonth: cell.isCurrentMonth,
+        isToday: cell.isToday,
+        selected,
+        disabled: !selectable,
+        tone,
+        badges: scheduleItem ? [{
+          primary: sessionLabel,
+          secondary: scheduleItem.stateLabel,
+          tone: badgeTone,
+        }] : [],
+        ariaLabel: getWithdrawalCalendarCellTitle(cell.dateKey, scheduleItem),
+      }
+    })
+  ), [calendarCells, calendarMonth, itemsByDate, selectedDateKey])
 
   if (!classItem) {
     return (
@@ -5048,71 +5168,21 @@ function WithdrawalScheduleCalendarField({
           <FieldHelpLabel label="퇴원일" help={WITHDRAWAL_DATE_HELP} />
         </span>
       </div>
-      <div className="rounded-lg border bg-background">
-        <div className="flex items-center justify-between border-b px-2 py-1.5">
-          <button
-            type="button"
-            aria-label="이전 달"
-            onClick={() => setCalendarMonth((month) => addCalendarMonths(month, -1))}
-            className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
-          >
-            <ChevronLeft className="size-4" />
-          </button>
-          <span className="text-sm font-semibold">{getCalendarMonthLabel(calendarMonth)}</span>
-          <button
-            type="button"
-            aria-label="다음 달"
-            onClick={() => setCalendarMonth((month) => addCalendarMonths(month, 1))}
-            className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
-          >
-            <ChevronRight className="size-4" />
-          </button>
-        </div>
-        <div role="grid" aria-labelledby={fieldId} className="grid grid-cols-7 gap-1 p-2">
-          {CALENDAR_WEEKDAY_LABELS.map((weekday) => (
-            <div key={weekday} role="columnheader" className="grid h-6 place-items-center text-[11px] font-medium text-muted-foreground">
-              {weekday}
-            </div>
-          ))}
-          {calendarCells.map((cell) => {
-            const scheduleItem = itemsByDate.get(cell.dateKey)
-            const selectable = Boolean(scheduleItem && isWithdrawalScheduleSelectable(scheduleItem))
-            const selected = cell.dateKey === selectedDateKey
-            const dateLabel = getWithdrawalCalendarCellDateLabel(cell.dateKey)
-            const sessionLabel = getWithdrawalCalendarDisplaySessionLabel(scheduleItem, { includeMonth: true })
-            const calendarCellTitle = getWithdrawalCalendarCellTitle(cell.dateKey, scheduleItem)
-            const toneClass = getWithdrawalCalendarCellToneClass(cell.dateKey, selected, selectable, scheduleItem)
-            return (
-              <button
-                key={cell.dateKey}
-                type="button"
-                role="gridcell"
-                aria-selected={selected}
-                aria-label={calendarCellTitle}
-                title={calendarCellTitle}
-                onClick={() => scheduleItem && handleScheduleSelect(scheduleItem)}
-                disabled={!selectable}
-                className={[
-                  "grid min-h-16 min-w-0 place-items-center content-center gap-0.5 rounded-md px-1.5 py-1 text-center text-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40",
-                  toneClass,
-                  !selected && scheduleItem && !selectable ? "border border-dashed border-muted bg-muted/30 text-muted-foreground" : "",
-                  !selected && !selectable && cell.isCurrentMonth ? "text-muted-foreground/55" : "",
-                  !selected && !selectable && !cell.isCurrentMonth ? "text-muted-foreground/25" : "",
-                ].join(" ")}
-              >
-                <span className="text-[11px] font-medium">{scheduleItem ? dateLabel : cell.dayLabel}</span>
-                {scheduleItem && (
-                  <>
-                    {sessionLabel && <span className="w-full whitespace-normal break-keep font-semibold leading-tight">{sessionLabel}</span>}
-                    <span className="w-full whitespace-normal break-keep text-[10px] font-medium leading-tight opacity-80">{scheduleItem.stateLabel}</span>
-                  </>
-                )}
-              </button>
-            )
-          })}
-        </div>
+      <div>
+        <ClassScheduleCalendarSurface
+          monthLabel={getCalendarMonthLabel(calendarMonth)}
+          weekdayLabels={CALENDAR_WEEKDAY_LABELS}
+          days={calendarDays}
+          labelledBy={fieldId}
+          onPreviousMonth={() => setCalendarMonth((month) => addCalendarMonths(month, -1))}
+          onNextMonth={() => setCalendarMonth((month) => addCalendarMonths(month, 1))}
+          onSelectDay={(dateKey) => {
+            const scheduleItem = itemsByDate.get(dateKey)
+            if (scheduleItem) handleScheduleSelect(scheduleItem)
+          }}
+        />
         {scheduleItems.length === 0 && (
-          <p className="border-t px-3 py-2 text-sm text-muted-foreground">
+          <p className="-mt-px rounded-b-lg border border-t-0 px-3 py-2 text-sm text-muted-foreground">
             수업을 선택하면 등록된 수업일정이 표시됩니다.
           </p>
         )}
@@ -5404,21 +5474,20 @@ function WordRetestMainExamDateField({
   value,
   onChange,
   onClear,
+  classSelected,
   classScheduleItems,
 }: {
   label: string
   value: string
   onChange: (value: string) => void
   onClear: () => void
+  classSelected: boolean
   classScheduleItems: WordRetestClassScheduleItem[]
 }) {
   const fieldId = useId()
-  const calendarId = useId()
   const dateValue = dateInputValue(value)
-  const [calendarDateOpen, setCalendarDateOpen] = useState(false)
   const [calendarMonth, setCalendarMonth] = useState(() => getCalendarMonthDate(dateValue))
   const calendarCells = useMemo(() => buildCalendarDateCells(calendarMonth), [calendarMonth])
-  const selectedDateLabel = dateValue ? dateOnlyLabel(dateValue) : "연도. 월. 일."
   const classScheduleItemsByDate = useMemo(() => {
     const itemsByDate = new Map<string, WordRetestClassScheduleItem[]>()
     classScheduleItems.forEach((item) => {
@@ -5429,152 +5498,136 @@ function WordRetestMainExamDateField({
     return itemsByDate
   }, [classScheduleItems])
   const shouldRestrictToClassSchedule = classScheduleItems.length > 0
-  const monthKey = getCalendarMonthKey(calendarMonth)
-  const visibleClassScheduleItems = classScheduleItems
-    .filter((item) => item.dateKey.startsWith(monthKey))
-    .slice(0, 12)
+  const calendarDays = useMemo<ClassScheduleCalendarDay[]>(() => (
+    calendarCells.map((cell) => {
+      const selected = cell.dateKey === dateValue
+      const dayScheduleItems = classScheduleItemsByDate.get(cell.dateKey) || []
+      const isClassScheduleDate = dayScheduleItems.length > 0
+      const disabled = !classSelected || (shouldRestrictToClassSchedule && !isClassScheduleDate)
+      const scheduleLabel = dayScheduleItems.map((item) => item.label).join(", ")
+
+      return {
+        key: cell.dateKey,
+        displayLabel: cell.dayLabel,
+        inCurrentMonth: cell.isCurrentMonth,
+        isToday: cell.isToday,
+        selected,
+        disabled,
+        tone: cell.isToday ? "today" : cell.isCurrentMonth ? "default" : "muted",
+        badges: dayScheduleItems.slice(0, 2).map((item) => ({
+          primary: item.label || "수업",
+          secondary: item.state === "makeup" ? "보강" : "",
+          tone: item.state === "makeup" ? "makeup" : "class",
+        })),
+        ariaLabel: isClassScheduleDate
+          ? `${cell.dateKey} ${scheduleLabel} 선택`
+          : disabled
+            ? `${cell.dateKey} 수업일정 없음`
+            : `${cell.dateKey} 선택`,
+      }
+    })
+  ), [
+    calendarCells,
+    classScheduleItemsByDate,
+    classSelected,
+    dateValue,
+    shouldRestrictToClassSchedule,
+  ])
 
   function handleMainExamDateSelect(nextDate: string) {
     onChange(nextDate)
     setCalendarMonth(getCalendarMonthDate(nextDate))
-    setCalendarDateOpen(false)
   }
 
   return (
-    <Popover open={calendarDateOpen} onOpenChange={(open) => {
-      setCalendarDateOpen(open)
-      if (open) setCalendarMonth(getCalendarMonthDate(dateValue))
-    }}>
-      <div className="grid min-w-0 gap-1.5 text-sm font-medium">
-        <label id={fieldId}>{label}</label>
-        <span className="relative block min-w-0">
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              aria-labelledby={fieldId}
-              aria-haspopup="dialog"
-              aria-expanded={calendarDateOpen}
-              aria-controls={calendarId}
-              className={[
-                "flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-3 text-left text-sm shadow-xs outline-none transition hover:border-foreground/30 focus:border-ring focus:ring-ring/40 focus:ring-2",
-                value ? "pr-10" : "",
-                calendarDateOpen ? "border-ring ring-2 ring-ring/40" : "",
-              ].filter(Boolean).join(" ")}
-            >
-              <span className={value ? "min-w-0 flex-1 truncate text-foreground" : "min-w-0 flex-1 truncate text-muted-foreground"}>{selectedDateLabel}</span>
-              <CalendarDays className="size-4 shrink-0 text-muted-foreground" />
-            </button>
-          </PopoverTrigger>
-          {value && (
+    <section className="grid min-w-0 gap-2 md:col-span-2">
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <span id={fieldId} className="text-sm font-medium">{label}</span>
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-xs text-muted-foreground">
+            {dateValue ? dateOnlyLabel(dateValue) : "미선택"}
+          </span>
+          {value ? (
             <button
               type="button"
               aria-label={`${label} 지우기`}
-              onClick={(event) => {
-                event.stopPropagation()
-                onClear()
-              }}
-              className="absolute right-2 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              onClick={onClear}
+              className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
             >
-              <X className="size-4" />
+              <X className="size-4" aria-hidden="true" />
             </button>
-          )}
+          ) : null}
         </span>
       </div>
-      {calendarDateOpen && (
-        <PopoverContent
-          id={calendarId}
-          role="dialog"
-          aria-labelledby={fieldId}
-          align="start"
-          side="bottom"
-          sideOffset={6}
-          collisionPadding={12}
-          disablePortal
-          style={TOUCH_SCROLL_AREA_STYLE}
-          onTouchMove={stopTouchScrollPropagation}
-          className="z-[120] w-[min(23rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] overflow-hidden p-0"
-        >
-          <div className="flex items-center justify-between border-b px-2 py-1.5">
-            <button
-              type="button"
-              aria-label="이전 달"
-              onClick={() => setCalendarMonth((month) => addCalendarMonths(month, -1))}
-              className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            >
-              <ChevronLeft className="size-4" />
-            </button>
-            <span className="text-sm font-semibold">{getCalendarMonthLabel(calendarMonth)}</span>
-            <button
-              type="button"
-              aria-label="다음 달"
-              onClick={() => setCalendarMonth((month) => addCalendarMonths(month, 1))}
-              className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            >
-              <ChevronRight className="size-4" />
-            </button>
-          </div>
-          <div role="grid" aria-label={`${label} 달력`} className="grid grid-cols-7 gap-1 p-2">
-            {CALENDAR_WEEKDAY_LABELS.map((weekday) => (
-              <div key={weekday} role="columnheader" className="grid h-6 place-items-center text-[11px] font-medium text-muted-foreground">
-                {weekday}
-              </div>
-            ))}
-	            {calendarCells.map((cell) => {
-	              const selected = cell.dateKey === dateValue
-	              const dayScheduleItems = classScheduleItemsByDate.get(cell.dateKey) || []
-	              const isClassScheduleDate = dayScheduleItems.length > 0
-	              const selectable = !shouldRestrictToClassSchedule || isClassScheduleDate
-	              const scheduleLabel = dayScheduleItems.map((item) => item.label).join(", ")
-	              return (
-	                <button
-                  key={cell.dateKey}
-                  type="button"
-                  role="gridcell"
-                  aria-selected={selected}
-	                  aria-label={isClassScheduleDate ? `${cell.dateKey} ${scheduleLabel} 선택` : shouldRestrictToClassSchedule ? `${cell.dateKey} 수업일정 없음` : `${cell.dateKey} 선택`}
-	                  data-word-retest-class-date={isClassScheduleDate ? "true" : undefined}
-	                  title={isClassScheduleDate ? `${cell.dateKey} ${scheduleLabel}` : cell.dateKey}
-	                  onClick={() => selectable && handleMainExamDateSelect(cell.dateKey)}
-	                  disabled={!selectable}
-	                  className={[
-	                    "grid h-10 min-w-0 place-items-center rounded-md text-xs leading-none outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40",
-	                    selected ? "bg-primary text-primary-foreground shadow-xs" : "",
-	                    !selected && isClassScheduleDate ? "border border-primary/35 bg-primary/[0.06] text-primary" : "",
-	                    !selected && !isClassScheduleDate && !shouldRestrictToClassSchedule && cell.isToday ? "border border-primary/50 text-primary" : "",
-	                    !selected && !isClassScheduleDate && !shouldRestrictToClassSchedule && !cell.isToday && cell.isCurrentMonth ? "text-foreground hover:bg-muted" : "",
-	                    !selected && !isClassScheduleDate && !shouldRestrictToClassSchedule && !cell.isToday && !cell.isCurrentMonth ? "text-muted-foreground/45 hover:bg-muted/60" : "",
-	                    !selected && !isClassScheduleDate && shouldRestrictToClassSchedule ? "cursor-not-allowed text-muted-foreground/35" : "",
-	                  ].join(" ")}
-	                >
-                  <span className="font-semibold">{cell.dayLabel}</span>
-                  {isClassScheduleDate && <span className="mt-0.5 text-[9px] font-bold">수업</span>}
-                </button>
-              )
-            })}
-          </div>
-          {visibleClassScheduleItems.length > 0 && (
-            <div className="grid gap-1.5 border-t bg-muted/30 px-2.5 py-2">
-              <span className="text-xs font-semibold text-muted-foreground">수업일정</span>
-              <div className="flex flex-wrap gap-1">
-                {visibleClassScheduleItems.map((item) => (
-                  <button
-                    key={`${item.dateKey}-${item.label}`}
-                    type="button"
-                    onClick={() => handleMainExamDateSelect(item.dateKey)}
-                    className={[
-                      "rounded border px-2 py-1 text-xs font-semibold transition",
-                      item.dateKey === dateValue ? "border-primary bg-primary text-primary-foreground" : "border-primary/25 bg-background text-primary hover:bg-primary/10",
-                    ].join(" ")}
-                  >
-                    {item.dateKey.slice(5)} {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </PopoverContent>
+      {!classSelected ? (
+        <ScheduleSelectionDependencyState fieldId={fieldId} />
+      ) : (
+        <ClassScheduleCalendarSurface
+          monthLabel={getCalendarMonthLabel(calendarMonth)}
+          weekdayLabels={CALENDAR_WEEKDAY_LABELS}
+          days={calendarDays}
+          labelledBy={fieldId}
+          onPreviousMonth={() => setCalendarMonth((month) => addCalendarMonths(month, -1))}
+          onNextMonth={() => setCalendarMonth((month) => addCalendarMonths(month, 1))}
+          onSelectDay={handleMainExamDateSelect}
+        />
       )}
-    </Popover>
+      {classSelected && classScheduleItems.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          등록된 일정이 없어 일반 날짜를 선택할 수 있습니다.
+        </p>
+      ) : null}
+    </section>
+  )
+}
+
+function WordRetestExpectedAtField({
+  value,
+  onChange,
+  disabled = false,
+  multiStudent = false,
+  error = "",
+  dateTriggerRef,
+  onDraftStateChange,
+}: {
+  value: string
+  onChange: (value: string) => void
+  disabled?: boolean
+  multiStudent?: boolean
+  error?: string
+  dateTriggerRef?: Ref<HTMLButtonElement>
+  onDraftStateChange?: (state: DateTimePickerDraftState) => void
+}) {
+  const errorId = useId()
+  return (
+    <div className="grid min-w-0 gap-1.5 text-sm font-medium">
+      <span>응시예정일시</span>
+      <DateTimePickerControl
+        value={value}
+        onChange={onChange}
+        dateAriaLabel="응시예정일 날짜"
+        timeAriaLabel="응시예정일 시각"
+        clearAriaLabel="응시예정일시 지우기"
+        dateTriggerRef={dateTriggerRef}
+        onDraftStateChange={onDraftStateChange}
+        disabled={disabled}
+        disablePortal
+      />
+      {multiStudent ? (
+        <p className="text-xs font-normal text-muted-foreground">
+          저장 후 학생별로 입력해 주세요.
+        </p>
+      ) : (
+        <p className="text-xs font-normal text-muted-foreground">
+          참고용 약속 일시이며 상태·미응시 판정·알림에는 사용하지 않습니다.
+        </p>
+      )}
+      {error ? (
+        <p id={errorId} role="alert" className="text-xs font-medium text-destructive">
+          {error}
+        </p>
+      ) : null}
+    </div>
   )
 }
 
@@ -7666,6 +7719,7 @@ function getNextTaskStatusAction(task: Pick<OpsTask, "status" | "type">): { stat
 
 function canEditTaskDetails(task: Pick<OpsTask, "type" | "status">) {
   if (task.type === "registration") return canEditRegistrationTask(task as Pick<OpsTask, "type" | "status" | "registration">)
+  if (task.type === "word_retest") return !["done", "canceled"].includes(task.status)
   return task.type === "general" || task.status !== "done"
 }
 
@@ -7940,6 +7994,10 @@ function normalizeFormForSubmit(input: OpsTaskInput): OpsTaskInput {
       ...input,
       assigneeId: "",
       assigneeTeam: "조교팀",
+      wordRetest: {
+        ...(input.wordRetest || {}),
+        expectedRetestAt: getWordRetestExpectedAtInputValue(input.wordRetest?.expectedRetestAt),
+      },
     }
   }
 
@@ -8324,6 +8382,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const registrationFixtureFaultTaskId = searchParams.get("fixtureFaultTaskId")
   const registrationFixtureFaultCanonicalRequestNote = searchParams.get("fixtureFaultCanonicalRequestNote")
   const registrationFixtureFaultError = searchParams.get("fixtureFaultError")
+  const wordRetestFixtureValue = searchParams.get("fixture")
+  const wordRetestFixtureRoleValue = searchParams.get("fixtureRole")
+  const wordRetestFixtureRequested = isWordRetestWorkspace
+    && shouldEnableWordRetestBrowserFixture(wordRetestFixtureValue, wordRetestFixtureRoleValue)
+  const wordRetestFixtureViewer = useMemo(
+    () => wordRetestFixtureRequested
+      ? resolveWordRetestBrowserFixtureViewer(wordRetestFixtureRoleValue)
+      : null,
+    [wordRetestFixtureRequested, wordRetestFixtureRoleValue],
+  )
   const registrationFixtureRequested = isRegistrationWorkspace
     && shouldEnableRegistrationSubjectTrackFixture(process.env.NODE_ENV, registrationFixtureValue)
   const registrationNotificationSessionToken = registrationFixtureRequested ? "" : notificationSessionToken
@@ -8378,9 +8446,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         includeTeacherOptions: true,
         includeProfileOptions: true,
       }
-  const initialWorkspaceData = registrationFixtureRequested
-    ? null
-    : getCachedOpsTaskWorkspaceData(workspaceLoadOptions)
+  const initialWorkspaceData = wordRetestFixtureRequested && wordRetestFixtureViewer
+    ? getWordRetestBrowserFixtureData(wordRetestFixtureViewer.viewerRole)
+    : registrationFixtureRequested
+      ? null
+      : getCachedOpsTaskWorkspaceData(workspaceLoadOptions)
   const [data, setData] = useState<OpsTaskWorkspaceData | null>(() => initialWorkspaceData)
   const [workspaceLoading, setLoading] = useState(() => !initialWorkspaceData)
   const registrationFixtureTransitioning = registrationFixtureRequested !== registrationFixtureRuntimeReady
@@ -8425,6 +8495,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [registrationCustomerMessageTask, setRegistrationCustomerMessageTask] = useState<OpsTask | null>(null)
   const [formOpen, setFormOpen] = useState(false)
   const [formDetailStep, setFormDetailStep] = useState<FormDetailStepKey>("registration_contact")
+  const [wordRetestEditMode, setWordRetestEditMode] = useState<WordRetestEditMode>("full")
+  const [wordRetestEditIntent, setWordRetestEditIntent] = useState<WordRetestEditIntent>("standard_edit")
+  const [wordRetestPendingFocus, setWordRetestPendingFocus] = useState<WordRetestPendingFocus>("")
+  const [expectedRetestDraft, setExpectedRetestDraft] = useState<DateTimePickerDraftState>(EMPTY_DATE_TIME_PICKER_DRAFT)
+  const expectedRetestDateTriggerRef = useRef<HTMLButtonElement>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [registrationApplicationHost, setRegistrationApplicationHost] = useState<RegistrationApplicationHostState>({ kind: "closed" })
   const [editingTask, setEditingTask] = useState<OpsTask | null>(null)
@@ -8517,6 +8592,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     currentUserLabel,
     currentUserTeam,
   }), [currentUserId, currentUserLabel, currentUserTeam])
+  const wordRetestViewerId = wordRetestFixtureViewer?.viewerId || currentUserId
+  const wordRetestViewerRole: WordRetestBrowserFixtureRole | "staff" = wordRetestFixtureViewer?.viewerRole
+    || (isAdmin ? "admin" : isStaff ? "staff" : isTeacher ? "teacher" : "assistant")
   const canDelete = canManageAll || isStaff
   const registrationViewerId = registrationFixtureEnabled
     ? registrationFixtureViewer?.viewerId || ""
@@ -8615,6 +8693,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
   const reload = useCallback(async (force = false, showPending = true) => {
     if (latestWorkspaceViewerIdRef.current !== currentUserId) return
+    if (wordRetestFixtureRequested && wordRetestFixtureViewer) {
+      workspaceDataViewerIdRef.current = currentUserId
+      setData(getWordRetestBrowserFixtureData(wordRetestFixtureViewer.viewerRole))
+      setLoading(false)
+      return
+    }
     if (registrationFixtureRequested && !registrationFixtureEnabled) {
       setLoading(true)
       return
@@ -8663,6 +8747,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setBulkDeleteTargets([])
       setWordRetestSelectedTaskIds(new Set())
       setWordRetestStudentIds([])
+      setWordRetestEditMode("full")
+      setWordRetestEditIntent("standard_edit")
+      setWordRetestPendingFocus("")
+      setExpectedRetestDraft(EMPTY_DATE_TIME_PICKER_DRAFT)
       setWithdrawalNotificationOpen(false)
       setTransferNotificationOpen(false)
       setRegistrationNotificationOpen(false)
@@ -8714,7 +8802,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         : nextData,
     )
     setLoading(false)
-  }, [currentUserId, isRegistrationWorkspace, isTodoWorkspace, registrationFixtureEnabled, registrationFixtureRequested, scopedTaskType])
+  }, [currentUserId, isRegistrationWorkspace, isTodoWorkspace, registrationFixtureEnabled, registrationFixtureRequested, scopedTaskType, wordRetestFixtureRequested, wordRetestFixtureViewer])
 
   useEffect(() => {
     workspaceMountedRef.current = true
@@ -8846,8 +8934,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       return
     }
     if (isWordRetestModeKey(requestedMode)) return
-    setWordRetestMode(isTeacher && !isStaff ? "teacher" : "assistant")
-  }, [isAssistant, isStaff, isTeacher, isWordRetestWorkspace, searchParams])
+    setWordRetestMode(wordRetestViewerRole === "teacher" ? "teacher" : "assistant")
+  }, [isAssistant, isWordRetestWorkspace, searchParams, wordRetestViewerRole])
 
   const syncView = (nextView: ViewKey, nextFocus: TaskFocus = "none") => {
     setView(nextView)
@@ -9229,6 +9317,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     () => findCurrentUserTeacherOption(teachers, currentUserId, user?.email, user?.loginId, currentUserLabel),
     [currentUserId, currentUserLabel, teachers, user?.email, user?.loginId],
   )
+  const exactWordRetestTeacherOption = useMemo(
+    () => teachers.find((teacher) => (
+      Boolean(wordRetestViewerId) && teacher.profileId === wordRetestViewerId
+    )),
+    [teachers, wordRetestViewerId],
+  )
   const shouldDefaultWordRetestTeacherFilter = useMemo(() => {
     if (!isWordRetestTeacherOption(currentUserTeacherOption)) return false
     if (normalizeTaskTeamValue(currentUserTaskTeam) === "영어팀") return true
@@ -9295,20 +9389,39 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     () => filterRegistrationCaseListItems(registrationCaseItems, registrationView, deferredQuery),
     [deferredQuery, registrationCaseItems, registrationView],
   )
-  const wordRetestRoleTabs = isAssistant
+  const wordRetestRoleTabs = isAssistant || wordRetestViewerRole === "assistant"
     ? WORD_RETEST_ROLE_TABS.filter((tab) => tab.key === "assistant")
     : WORD_RETEST_ROLE_TABS
-  const wordRetestRoleContext = useMemo(
-    () => getWordRetestRoleContext({
+  const wordRetestRoleContext = useMemo(() => {
+    if (wordRetestViewerRole === "admin" || wordRetestViewerRole === "staff") return {}
+    if (wordRetestViewerRole === "teacher") {
+      return {
+        role: wordRetestViewerRole,
+        currentUserId: wordRetestViewerId,
+        currentTeacherCatalogId: exactWordRetestTeacherOption?.id || "",
+      }
+    }
+    return getWordRetestRoleContext({
       canManageAll,
-      currentUserContext,
-      currentUserTaskTeam,
-      isAssistant,
+      currentUserContext: {
+        ...currentUserContext,
+        currentUserId: wordRetestViewerId,
+      },
+      currentUserTaskTeam: wordRetestFixtureRequested ? "조교팀" : currentUserTaskTeam,
+      isAssistant: true,
       isStaff,
-      wordRetestMode,
-    }),
-    [canManageAll, currentUserContext, currentUserTaskTeam, isAssistant, isStaff, wordRetestMode],
-  )
+      wordRetestMode: "assistant",
+    })
+  }, [
+    canManageAll,
+    currentUserContext,
+    currentUserTaskTeam,
+    exactWordRetestTeacherOption?.id,
+    isStaff,
+    wordRetestFixtureRequested,
+    wordRetestViewerId,
+    wordRetestViewerRole,
+  ])
   const branchScopedWordRetestTasks = useMemo(() => (
     scopedTasks.filter((task) => wordRetestBranchFilter === "all" || getWordRetestBranch(task) === wordRetestBranchFilter)
   ), [scopedTasks, wordRetestBranchFilter])
@@ -9543,7 +9656,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const formRequestedByLabel = profileLabelById.get(form.requestedBy || "") || editingTask?.requestedByLabel || (form.requestedBy === currentUserId ? currentUserLabel : "") || "미지정"
   const formRequestedTeamLabel = form.requestedTeam || editingTask?.requestedTeam || currentUserTaskTeam || "미지정"
   const isFormDirty = (formOpen || registrationApplicationHost.kind === "create")
-    && serializeOpsTaskInput(form) !== formBaselineRef.current
+    && (
+      serializeOpsTaskInput(form) !== formBaselineRef.current
+      || (form.type === "word_retest" && expectedRetestDraft.isPartial)
+    )
   const hasUnsavedWorkspaceInput = isFormDirty
     || (registrationApplicationHost.kind === "detail" && registrationApplicationDirty)
 
@@ -9563,14 +9679,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       ? "미응시 재재시험 추가"
       : "불합격 재재시험 추가"
     : editingTask
-      ? form.type === "general"
-        ? "할 일 수정"
-        : `${getTaskTypeLabel(form.type)} 수정`
-	      : isTemplateForm
-	        ? getWorkspaceCreateActionLabel(workspace, getTaskTypeLabel(form.type))
-	        : isTodoWorkspace
-	          ? "할 일 추가"
-	          : `${workspaceLabel} 추가`
+      ? form.type === "word_retest" && wordRetestEditMode === "expected_only"
+        ? "응시예정일시 수정"
+        : form.type === "general"
+          ? "할 일 수정"
+          : `${getTaskTypeLabel(form.type)} 수정`
+      : isTemplateForm
+        ? getWorkspaceCreateActionLabel(workspace, getTaskTypeLabel(form.type))
+        : isTodoWorkspace
+          ? "할 일 추가"
+          : `${workspaceLabel} 추가`
   const formCloseLabel = "닫기"
   const formActionBarClassName = "-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:items-center sm:justify-end"
 
@@ -9614,6 +9732,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setRegistrationApplicationDirty(false)
     setForm(nextForm)
     setWordRetestStudentIds([])
+    setWordRetestEditMode("full")
+    setWordRetestEditIntent("standard_edit")
+    setWordRetestPendingFocus("")
+    setExpectedRetestDraft(getExpectedRetestDraftFromValue(nextForm.wordRetest?.expectedRetestAt))
     formBaselineRef.current = serializeOpsTaskInput(nextForm)
     setFormDetailStep(getDefaultFormDetailStep(type))
     setMessage("")
@@ -9672,6 +9794,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setEditingTask(task)
     setForm(nextForm)
     setWordRetestStudentIds(task.type === "word_retest" && task.studentId ? [task.studentId] : [])
+    setWordRetestEditMode("full")
+    setWordRetestEditIntent("standard_edit")
+    setWordRetestPendingFocus("")
+    setExpectedRetestDraft(getExpectedRetestDraftFromValue(nextForm.wordRetest?.expectedRetestAt))
     formBaselineRef.current = serializeOpsTaskInput(nextForm)
     setFormDetailStep(getCompletionBlockerFormStep(task.type, blockers) || getDefaultFormDetailStep(task.type))
     setMessage(blockers.length > 0 && !shouldDeferWordRetestRetryBlockers ? getCompletionBlockerActionLabel(blockers) : "")
@@ -9700,6 +9826,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         ...wordRetest,
         retestStatus: "not_started",
         testAt: dateInputValue(wordRetest.testAt || task.dueAt || task.startAt || ""),
+        expectedRetestAt: "",
         firstScore: "",
         secondScore: "",
         thirdScore: "",
@@ -9713,6 +9840,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setEditingTask(task)
     setForm(nextForm)
     setWordRetestStudentIds(nextForm.studentId ? [nextForm.studentId] : [])
+    setWordRetestEditMode("full")
+    setWordRetestEditIntent("standard_edit")
+    setWordRetestPendingFocus("")
+    setExpectedRetestDraft(EMPTY_DATE_TIME_PICKER_DRAFT)
     formBaselineRef.current = serializeOpsTaskInput(nextForm)
     setFormDetailStep("word_retest_basic")
     setMessage("")
@@ -9822,6 +9953,52 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setAttachmentName("")
     setAttachmentLink("")
   }, [syncTaskDeepLink])
+
+  const openWordRetestEditor = useCallback((
+    task: OpsTask,
+    intent: WordRetestEditIntent = "standard_edit",
+    blockers: string[] = [],
+  ) => {
+    if (isClosedOpsTask(task)) {
+      openDetail(task)
+      return
+    }
+
+    const exactlyLinkedTeacher = wordRetestViewerRole === "teacher"
+      && isWordRetestExactlyLinkedToTeacher(task, wordRetestRoleContext)
+    if (wordRetestViewerRole === "teacher" && !exactlyLinkedTeacher) {
+      openDetail(task)
+      return
+    }
+
+    const nextEditMode: WordRetestEditMode = intent === "expected_quick"
+      || (exactlyLinkedTeacher && getWordRetestWorkspaceRole(task) === "assistant")
+      ? "expected_only"
+      : "full"
+    openEdit(task, blockers)
+    setWordRetestEditMode(nextEditMode)
+    setWordRetestEditIntent(intent)
+    setFormDetailStep("word_retest_basic")
+    setWordRetestPendingFocus(intent === "expected_quick" ? "expected_retest_date" : "")
+  }, [openDetail, openEdit, wordRetestRoleContext, wordRetestViewerRole])
+
+  useEffect(() => {
+    if (!formOpen || wordRetestPendingFocus !== "expected_retest_date") return
+    let animationFrame = 0
+    let attempts = 0
+    const focusExpectedRetestDate = () => {
+      const trigger = expectedRetestDateTriggerRef.current
+      if (trigger) {
+        trigger.focus({ preventScroll: true })
+        setWordRetestPendingFocus("")
+        return
+      }
+      attempts += 1
+      if (attempts < 8) animationFrame = window.requestAnimationFrame(focusExpectedRetestDate)
+    }
+    animationFrame = window.requestAnimationFrame(focusExpectedRetestDate)
+    return () => window.cancelAnimationFrame(animationFrame)
+  }, [formOpen, wordRetestEditMode, wordRetestPendingFocus])
 
   const openRegistrationCustomerMessage = useCallback((task: OpsTask) => {
     setDetailOpen(false)
@@ -10281,7 +10458,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       syncTaskDeepLink(deepLinkedTaskId, null)
     }
     if (deepLinkedTask.type === "word_retest") {
-      openEdit(deepLinkedTask)
+      openWordRetestEditor(deepLinkedTask)
       return
     }
     if (deepLinkedTask.type === "registration" && deepLinkedAppointmentId) {
@@ -10330,7 +10507,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     registrationTrackSelectionRef.current = ""
     setSelectedTask(deepLinkedTask)
     setDetailOpen(true)
-  }, [data, deleteTarget, detailOpen, openEdit, openRegistrationAppointment, openRegistrationTrack, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
+  }, [data, deleteTarget, detailOpen, openRegistrationAppointment, openRegistrationTrack, openWordRetestEditor, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
 
   function handleDetailOpenChange(nextOpen: boolean) {
     setDetailOpen(nextOpen)
@@ -10807,6 +10984,49 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       currentViewerGeneration: workspaceViewerGenerationRef.current,
     })
     const submissionForm = form
+    if (submissionForm.type === "word_retest" && expectedRetestDraft.isPartial) {
+      setFormDetailStep("word_retest_basic")
+      setMessage("날짜와 시간을 모두 선택해 주세요.")
+      setNotice("")
+      window.requestAnimationFrame(() => expectedRetestDateTriggerRef.current?.focus({ preventScroll: true }))
+      return
+    }
+    if (
+      submissionForm.type === "word_retest"
+      && editingTask
+      && wordRetestEditMode === "expected_only"
+    ) {
+      setSaving(true)
+      setMessage("")
+      setNotice("")
+      setStatusUndo(null)
+      try {
+        const receipt = await updateWordRetestExpectedAt({
+          taskId: editingTask.id,
+          expectedRetestAt: getWordRetestExpectedAtInputValue(submissionForm.wordRetest?.expectedRetestAt),
+          expectedUpdatedAt: editingTask.updatedAt,
+        })
+        const updatedTask: OpsTask = {
+          ...editingTask,
+          updatedAt: receipt.updatedAt,
+          wordRetest: {
+            ...(editingTask.wordRetest || {}),
+            expectedRetestAt: receipt.expectedRetestAt,
+          },
+        }
+        replaceTaskInState(updatedTask)
+        setSelectedTask((current) => current?.id === updatedTask.id ? updatedTask : current)
+        setFormOpen(false)
+        setWordRetestPendingFocus("")
+        setExpectedRetestDraft(EMPTY_DATE_TIME_PICKER_DRAFT)
+        setNotice("응시예정일시를 저장했습니다.")
+      } catch (error) {
+        setMessage(getOpsTaskActionErrorMessage(error, "응시예정일시를 저장하지 못했습니다. 최신 내용을 다시 확인하세요."))
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
     const registrationCreateBlockers = submissionForm.type === "registration"
       ? getRegistrationCreateBlockers(submissionForm)
       : []
@@ -10861,7 +11081,19 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           },
         }
         : inputWithCompletionIntent
-      const payload = normalizeFormForSubmit(inputWithRegistrationPrefillStatus)
+      const hasMultipleWordRetestStudents = !editingTask
+        && inputWithRegistrationPrefillStatus.type === "word_retest"
+        && new Set(wordRetestStudentIds.map((studentId) => studentId.trim()).filter(Boolean)).size > 1
+      const inputWithExpectedRetestSafety = hasMultipleWordRetestStudents
+        ? {
+            ...inputWithRegistrationPrefillStatus,
+            wordRetest: {
+              ...(inputWithRegistrationPrefillStatus.wordRetest || {}),
+              expectedRetestAt: "",
+            },
+          }
+        : inputWithRegistrationPrefillStatus
+      const payload = normalizeFormForSubmit(inputWithExpectedRetestSafety)
       const isWordRetestRetry = formCompletionIntent?.kind === "word_retest_retry"
         && Boolean(editingTask)
         && payload.type === "word_retest"
@@ -10907,6 +11139,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           wordRetest: {
             ...withoutWordRetestLineage(payload.wordRetest || {}),
             retestStatus: "not_started",
+            expectedRetestAt: "",
             firstScore: "",
             secondScore: "",
             thirdScore: "",
@@ -11370,6 +11603,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
   useEffect(() => {
     if (!isWordRetestWorkspace || loading || !data) return
+    if (!["admin", "staff", "assistant"].includes(wordRetestViewerRole)) return
 
     const nextTasks = wordRetestFilterSourceTasks.filter((task) => (
       shouldAutoMarkWordRetestAbsent(task) && !autoAbsentWordRetestIdsRef.current.has(task.id)
@@ -11464,6 +11698,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     notificationSessionToken,
     reload,
     wordRetestFilterSourceTasks,
+    wordRetestViewerRole,
   ])
 
   const submitWordRetestCompletion = async (task: OpsTask) => {
@@ -11838,6 +12073,15 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }, [])
   const handleWordRetestStatusChange = useStableEvent((task: OpsTask, status: OpsTaskStatus) => {
     void changeStatus(task, status)
+  })
+  const handleWordRetestOpen = useStableEvent((task: OpsTask) => {
+    openWordRetestEditor(task, "standard_edit")
+  })
+  const handleWordRetestEdit = useStableEvent((task: OpsTask, blockers: string[] = []) => {
+    openWordRetestEditor(task, "standard_edit", blockers)
+  })
+  const handleWordRetestExpectedQuickEdit = useStableEvent((task: OpsTask) => {
+    openWordRetestEditor(task, "expected_quick")
   })
   const handleWordRetestCompletion = useStableEvent((task: OpsTask) => {
     void submitWordRetestCompletion(task)
@@ -12414,11 +12658,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
 	          />
 	        ) : isWordRetestWorkspace ? (
-	          <WordRetestTaskList
+		          <WordRetestTaskList
 	            tasks={visibleTasks}
 	            mode={wordRetestMode}
-	            onOpen={openEdit}
-	            onEdit={openEdit}
+		            onOpen={handleWordRetestOpen}
+		            onEdit={handleWordRetestEdit}
+                onExpectedQuickEdit={handleWordRetestExpectedQuickEdit}
+                teachers={data?.teachers || EMPTY_TEACHER_OPTIONS}
+                showTeacherAccountWarning={wordRetestViewerRole === "admin" || wordRetestViewerRole === "staff"}
 	            onStatusChange={handleWordRetestStatusChange}
 	            onComplete={handleWordRetestCompletion}
 	            onRetry={handleWordRetestRetry}
@@ -12711,12 +12958,33 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                    )}
 	                  </div>
                 )}
+                {wordRetestEditMode === "expected_only" && editingTask ? (
+                  <div data-word-retest-edit-mode="expected_only" data-word-retest-edit-intent={wordRetestEditIntent} className="grid gap-4">
+                    <div className="grid gap-2 rounded-md bg-muted/35 p-3 text-sm md:grid-cols-2">
+                      <ReadonlyInfoField label="담당선생님" value={getWordRetestTeacherLabel(editingTask)} />
+                      <ReadonlyInfoField label="학생" value={getWordRetestStudentLabel(editingTask)} />
+                      <ReadonlyInfoField label="수업" value={getWordRetestClassLabel(editingTask)} />
+                      <ReadonlyInfoField label="본시험일" value={dateOnlyLabel(editingTask.wordRetest?.testAt || "")} />
+                    </div>
+                    <WordRetestExpectedAtField
+                      value={form.wordRetest?.expectedRetestAt || ""}
+                      onChange={(value) => updateWordRetest("expectedRetestAt", value)}
+                      error={expectedRetestDraft.isPartial ? "날짜와 시간을 모두 선택해 주세요." : ""}
+                      dateTriggerRef={expectedRetestDateTriggerRef}
+                      onDraftStateChange={setExpectedRetestDraft}
+                    />
+                  </div>
+                ) : (
+                  <>
 	                <TypeSpecificFields
 	                  step="word_retest_basic"
 	                  form={form}
 	                  formCompletionIntent={formCompletionIntent}
-	                  wordRetestStudentIds={wordRetestStudentIds}
-	                  onWordRetestStudentIdsChange={setWordRetestStudentIds}
+		                  wordRetestStudentIds={wordRetestStudentIds}
+		                  onWordRetestStudentIdsChange={setWordRetestStudentIds}
+                      expectedRetestDateTriggerRef={expectedRetestDateTriggerRef}
+                      onExpectedRetestDraftStateChange={setExpectedRetestDraft}
+                      expectedRetestDraftError={expectedRetestDraft.isPartial ? "날짜와 시간을 모두 선택해 주세요." : ""}
 	                  students={data?.students || EMPTY_STUDENT_OPTIONS}
 	                  classes={data?.classes || EMPTY_CLASS_OPTIONS}
 	                  teachers={data?.teachers || EMPTY_TEACHER_OPTIONS}
@@ -12732,8 +13000,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                  step="word_retest_scope"
 	                  form={form}
 	                  formCompletionIntent={formCompletionIntent}
-	                  wordRetestStudentIds={wordRetestStudentIds}
-	                  onWordRetestStudentIdsChange={setWordRetestStudentIds}
+		                  wordRetestStudentIds={wordRetestStudentIds}
+		                  onWordRetestStudentIdsChange={setWordRetestStudentIds}
+                      expectedRetestDateTriggerRef={expectedRetestDateTriggerRef}
+                      onExpectedRetestDraftStateChange={setExpectedRetestDraft}
+                      expectedRetestDraftError={expectedRetestDraft.isPartial ? "날짜와 시간을 모두 선택해 주세요." : ""}
 	                  students={data?.students || EMPTY_STUDENT_OPTIONS}
 	                  classes={data?.classes || EMPTY_CLASS_OPTIONS}
 	                  teachers={data?.teachers || EMPTY_TEACHER_OPTIONS}
@@ -12745,7 +13016,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                  updateTransfer={updateTransfer}
 	                  updateWordRetest={updateWordRetest}
 	                />
-		                {editingTask && formCompletionIntent?.kind !== "word_retest_retry" && (
+			                {editingTask && formCompletionIntent?.kind !== "word_retest_retry" && (
 		                  <section className="grid gap-3 rounded-lg border bg-muted/20 p-3">
 	                    <div className="flex items-center justify-between gap-2">
 	                      <h3 className="text-sm font-semibold">점수</h3>
@@ -12754,8 +13025,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                      step="word_retest_scores"
 	                      form={form}
 	                      formCompletionIntent={formCompletionIntent}
-	                      wordRetestStudentIds={wordRetestStudentIds}
-	                      onWordRetestStudentIdsChange={setWordRetestStudentIds}
+		                      wordRetestStudentIds={wordRetestStudentIds}
+		                      onWordRetestStudentIdsChange={setWordRetestStudentIds}
+                          expectedRetestDateTriggerRef={expectedRetestDateTriggerRef}
+                          onExpectedRetestDraftStateChange={setExpectedRetestDraft}
+                          expectedRetestDraftError={expectedRetestDraft.isPartial ? "날짜와 시간을 모두 선택해 주세요." : ""}
 	                      students={data?.students || EMPTY_STUDENT_OPTIONS}
 	                      classes={data?.classes || EMPTY_CLASS_OPTIONS}
 	                      teachers={data?.teachers || EMPTY_TEACHER_OPTIONS}
@@ -12767,9 +13041,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                      updateTransfer={updateTransfer}
 	                      updateWordRetest={updateWordRetest}
 	                    />
-	                  </section>
-	                )}
-	              </section>
+			                  </section>
+			                )}
+                  </>
+                )}
+		              </section>
 	            )}
 
             {isTemplateForm && !isWordRetestForm && formDetailTabs.length > 0 && (
@@ -12937,11 +13213,15 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                   {formCloseLabel}
                 </Button>
               )}
-              {!isEditingLockedCompletedTask && (
-                <Button type="submit" disabled={saving || (!canSubmitCurrentForm && form.type !== "registration")} className="w-full sm:w-auto">
-                  {saving ? "저장 중" : getFormCompletionIntentSubmitLabel(formCompletionIntent, form.type, Boolean(editingTask))}
-                </Button>
-              )}
+	              {!isEditingLockedCompletedTask && (
+	                <Button type="submit" disabled={saving || (!canSubmitCurrentForm && form.type !== "registration")} className="w-full sm:w-auto">
+	                  {saving
+                      ? "저장 중"
+                      : wordRetestEditMode === "expected_only"
+                        ? "응시예정일시 저장"
+                        : getFormCompletionIntentSubmitLabel(formCompletionIntent, form.type, Boolean(editingTask))}
+	                </Button>
+	              )}
             </div>
           </form>
         </DialogContent>
@@ -13039,7 +13319,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 {selectedTaskFresh.type === "general" ? (
                   <GeneralTaskDetailPanel task={selectedTaskFresh} />
                 ) : selectedTaskFresh.type === "word_retest" ? (
-                  <WordRetestDetailPanel task={selectedTaskFresh} />
+                  <WordRetestDetailPanel
+                    task={selectedTaskFresh}
+                    teachers={data?.teachers || EMPTY_TEACHER_OPTIONS}
+                    showTeacherAccountWarning={wordRetestViewerRole === "admin" || wordRetestViewerRole === "staff"}
+                  />
                 ) : selectedTaskFresh.type === "registration" ? (
                   registrationCaseDetail && isCanonicalRegistrationTrackDetail ? (
                     <RegistrationApplication
@@ -13146,10 +13430,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                    <>
 	                      {detailWordRetestPrimaryActions.map((action) => (
 	                        <WordRetestRoleActionButton
-	                          key={`${action.kind}-${action.label}`}
-	                          task={selectedTaskFresh}
-	                          action={action}
-	                          onEdit={openEdit}
+		                          key={`${action.kind}-${action.label}`}
+		                          task={selectedTaskFresh}
+		                          action={action}
+		                          onEdit={handleWordRetestEdit}
 	                          onStatusChange={(task, status) => void changeStatus(task, status)}
 	                          onComplete={(task) => void submitWordRetestCompletion(task)}
 	                          onRetry={openWordRetestRetryForm}
@@ -13230,7 +13514,15 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       </Button>
                     ))}
                   {selectedTaskCanEdit && !isCanonicalRegistrationTrackDetail && (
-                    <Button type="button" variant="outline" size="sm" onClick={() => openEdit(selectedTaskFresh)} className="w-full sm:w-auto">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => selectedTaskFresh.type === "word_retest"
+                        ? handleWordRetestEdit(selectedTaskFresh)
+                        : openEdit(selectedTaskFresh)}
+                      className="w-full sm:w-auto"
+                    >
                       수정
                     </Button>
                   )}
@@ -13572,8 +13864,11 @@ function TypeSpecificFields({
   step,
   form,
   formCompletionIntent,
-  wordRetestStudentIds,
-  onWordRetestStudentIdsChange,
+	  wordRetestStudentIds,
+	  onWordRetestStudentIdsChange,
+    expectedRetestDateTriggerRef,
+    onExpectedRetestDraftStateChange,
+    expectedRetestDraftError,
   students,
   classes,
   teachers,
@@ -13603,8 +13898,11 @@ function TypeSpecificFields({
   step: FormDetailStepKey
   form: OpsTaskInput
   formCompletionIntent?: FormCompletionIntent | null
-  wordRetestStudentIds?: string[]
-  onWordRetestStudentIdsChange?: (values: string[]) => void
+	  wordRetestStudentIds?: string[]
+	  onWordRetestStudentIdsChange?: (values: string[]) => void
+  expectedRetestDateTriggerRef?: Ref<HTMLButtonElement>
+  onExpectedRetestDraftStateChange?: (state: DateTimePickerDraftState) => void
+  expectedRetestDraftError?: string
   students: OpsStudentOption[]
   classes: OpsClassOption[]
   teachers: OpsTeacherOption[]
@@ -13903,6 +14201,10 @@ function TypeSpecificFields({
   function selectWordRetestStudents(studentIds: string[]) {
     const nextStudentIds = Array.from(new Set(studentIds.map((studentId) => studentId.trim()).filter(Boolean)))
     onWordRetestStudentIdsChange?.(nextStudentIds)
+    if (nextStudentIds.length > 1) {
+      updateWordRetest("expectedRetestAt", "")
+      onExpectedRetestDraftStateChange?.(EMPTY_DATE_TIME_PICKER_DRAFT)
+    }
     selectStudent(nextStudentIds[0] || "", { fillWordRetest: true, fillWordRetestClass: true })
   }
 
@@ -14554,13 +14856,25 @@ function TypeSpecificFields({
               }} />}
             </div>
           )}
+          <WordRetestMainExamDateField
+            key={selectedWordRetestClassId || "word-retest-main-exam-calendar"}
+            label="본시험일"
+            value={dateInputValue(wordRetest.testAt || "")}
+            onChange={(value) => updateWordRetest("testAt", value)}
+            onClear={() => updateWordRetest("testAt", "")}
+            classSelected={Boolean(selectedWordRetestClass || (wordRetest.className || "").trim())}
+            classScheduleItems={wordRetestClassScheduleItems}
+          />
           <div className="grid gap-3 md:grid-cols-2">
-            <WordRetestMainExamDateField
-              label="본시험일"
-              value={dateInputValue(wordRetest.testAt || "")}
-              onChange={(value) => updateWordRetest("testAt", value)}
-              onClear={() => updateWordRetest("testAt", "")}
-              classScheduleItems={wordRetestClassScheduleItems}
+            <WordRetestExpectedAtField
+              key={selectedWordRetestStudentIds.length > 1 ? "word-retest-expected-multiple" : "word-retest-expected-single"}
+              value={wordRetest.expectedRetestAt || ""}
+              onChange={(value) => updateWordRetest("expectedRetestAt", value)}
+              disabled={selectedWordRetestStudentIds.length > 1}
+              multiStudent={selectedWordRetestStudentIds.length > 1}
+              error={expectedRetestDraftError}
+              dateTriggerRef={expectedRetestDateTriggerRef}
+              onDraftStateChange={onExpectedRetestDraftStateChange}
             />
             <TaskListboxField label="장소" value={wordRetest.branch || "본관"} options={WORD_RETEST_BRANCH_OPTIONS} onChange={(value) => updateWordRetest("branch", value)} emptyClassName="text-foreground" />
           </div>
@@ -14591,11 +14905,11 @@ function TypeSpecificFields({
             <TextField label="시험범위" value={wordRetest.unit || ""} onChange={(value) => updateWordRetest("unit", value)} />
           </div>
           {shouldShowManualField("wordRetestTextbook", form.textbookId, wordRetest.textbookName) && <TextField label="교재명" value={wordRetest.textbookName || ""} onChange={(value) => updateWordRetest("textbookName", value)} />}
+          <TextField label="메모" value={wordRetest.requestNote || ""} onChange={(value) => updateWordRetest("requestNote", value)} />
           <div className="grid gap-3 md:grid-cols-2">
             <TextField label="출제 개수" value={wordRetest.totalQuestionCount || ""} inputMode="numeric" onChange={(value) => updateWordRetest("totalQuestionCount", value)} />
             <TextField label="커트라인(합격 개수)" value={wordRetest.cutoffQuestionCount || ""} inputMode="numeric" onChange={(value) => updateWordRetest("cutoffQuestionCount", value)} />
           </div>
-          <TextField label="메모" value={wordRetest.requestNote || ""} onChange={(value) => updateWordRetest("requestNote", value)} />
         </div>
       )
     }
@@ -15220,6 +15534,9 @@ function WordRetestTaskList({
   mode,
   onOpen,
   onEdit,
+  onExpectedQuickEdit,
+  teachers,
+  showTeacherAccountWarning,
   onStatusChange,
   onComplete,
   onRetry,
@@ -15243,6 +15560,9 @@ function WordRetestTaskList({
   mode: WordRetestMode
   onOpen: (task: OpsTask) => void
   onEdit: (task: OpsTask, blockers?: string[]) => void
+  onExpectedQuickEdit: (task: OpsTask) => void
+  teachers: OpsTeacherOption[]
+  showTeacherAccountWarning: boolean
   onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
   onComplete: (task: OpsTask) => void
   onRetry: (task: OpsTask, retryReason: WordRetestRetryReason) => void
@@ -15336,11 +15656,13 @@ function WordRetestTaskList({
         </span>
         <WordRetestResizableHeaderCell label="상태" columnKey="status" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="본시험일" columnKey="testAt" onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="응시예정일시" columnKey="expectedRetestAt" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="담당선생님" columnKey="teacher" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="수업" columnKey="class" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="학생" columnKey="student" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="교재" columnKey="textbook" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="시험범위" columnKey="unit" onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="메모" columnKey="note" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="출제 개수" columnKey="total" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="커트라인" columnKey="cutoff" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="맞은 개수" columnKey="score" onResizeStart={startColumnResize} />
@@ -15353,8 +15675,11 @@ function WordRetestTaskList({
           task={task}
           mode={mode}
           completionBlockers={completionBlockersByTaskId.get(task.id) || EMPTY_COMPLETION_BLOCKERS}
-          onOpen={onOpen}
-          onEdit={onEdit}
+	          onOpen={onOpen}
+	          onEdit={onEdit}
+            onExpectedQuickEdit={onExpectedQuickEdit}
+            teachers={teachers}
+            showTeacherAccountWarning={showTeacherAccountWarning}
           onStatusChange={onStatusChange}
           onComplete={onComplete}
           onRetry={onRetry}
@@ -15407,6 +15732,9 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
   completionBlockers,
   onOpen,
   onEdit,
+  onExpectedQuickEdit,
+  teachers,
+  showTeacherAccountWarning,
   onStatusChange,
   onComplete,
   onRetry,
@@ -15424,6 +15752,9 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
   completionBlockers: string[]
   onOpen: (task: OpsTask) => void
   onEdit: (task: OpsTask, blockers?: string[]) => void
+  onExpectedQuickEdit: (task: OpsTask) => void
+  teachers: OpsTeacherOption[]
+  showTeacherAccountWarning: boolean
   onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
   onComplete: (task: OpsTask) => void
   onRetry: (task: OpsTask, retryReason: WordRetestRetryReason) => void
@@ -15444,6 +15775,10 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
   const studentLabel = getWordRetestStudentLabel(task)
   const textbookLabel = getWordRetestTextbookLabel(task)
   const unitLabel = getWordRetestUnitLabel(task)
+  const note = getWordRetestNote(task)
+  const expectedRetestLabel = formatWordRetestExpectedAt(wordRetest.expectedRetestAt)
+  const teacherAccountLinkRequired = showTeacherAccountWarning
+    && needsWordRetestTeacherAccountLink(task, teachers)
   const absent = isWordRetestAbsent(wordRetest)
   const scoreEditingAllowed = task.status === "in_progress"
     && wordRetest.retestStatus === "in_progress"
@@ -15459,7 +15794,7 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
       className="grid cursor-pointer gap-2 border-b px-3 py-3 text-sm last:border-b-0 hover:bg-muted/35 md:min-w-max md:items-center md:gap-3 md:[grid-template-columns:var(--word-retest-grid-template)]"
       style={{ "--word-retest-grid-template": gridTemplateColumns } as CSSProperties}
     >
-      <span className="order-first flex min-w-0 items-center md:order-none md:justify-center">
+      <span className="hidden min-w-0 items-center md:flex md:justify-center">
         <input
           type="checkbox"
           aria-label={`${studentLabel} 단어 재시험 선택`}
@@ -15481,13 +15816,27 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
         <span className="mr-2 text-xs text-muted-foreground md:hidden">본시험일</span>
         <span className="font-medium">{dateOnlyLabel(wordRetest.testAt || task.dueAt || "")}</span>
       </span>
-      <span className="order-6 min-w-0 md:hidden">
-        <span className="mr-2 text-xs text-muted-foreground">장소</span>
-        <Badge variant="secondary">{branch}</Badge>
-      </span>
-      <span className="order-2 min-w-0 truncate font-medium md:order-none">
+      <button
+        type="button"
+        data-word-retest-interactive="true"
+        aria-label={`${studentLabel} 응시예정일시 ${expectedRetestLabel} 수정`}
+        onClick={(event) => {
+          event.stopPropagation()
+          onExpectedQuickEdit(task)
+        }}
+        className="order-6 min-w-0 text-left font-medium hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 md:order-none"
+      >
+        <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">응시예정일시</span>
+        {expectedRetestLabel}
+      </button>
+      <span className="order-2 grid min-w-0 gap-0.5 font-medium md:order-none">
         <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">담당선생님</span>
-        {teacherLabel}
+        <span className="truncate">{teacherLabel}</span>
+        {teacherAccountLinkRequired ? (
+          <span className="text-[10px] font-medium leading-tight text-amber-700 dark:text-amber-300">
+            담당선생님 계정 연결 필요
+          </span>
+        ) : null}
       </span>
       <span className="order-3 min-w-0 truncate md:order-none">
         <span className="mr-2 text-xs text-muted-foreground md:hidden">수업</span>
@@ -15496,13 +15845,20 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
       <button
         type="button"
         aria-label={`${studentLabel} 단어 재시험 수정`}
-        onClick={() => onOpen(task)}
+        onClick={(event) => {
+          event.stopPropagation()
+          onOpen(task)
+        }}
         className="order-4 min-w-0 truncate text-left font-semibold hover:text-primary md:order-none"
       >
         <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">학생</span>
         {studentLabel}
       </button>
-      <span className="group relative order-7 min-w-0 truncate md:order-none">
+      <span className="order-7 min-w-0 md:hidden">
+        <span className="mr-2 text-xs text-muted-foreground">장소</span>
+        <Badge variant="secondary">{branch}</Badge>
+      </span>
+      <span className="group relative order-8 min-w-0 truncate md:order-none">
         <span className="mr-2 text-xs text-muted-foreground md:hidden">교재</span>
         <span tabIndex={0} title={textbookLabel} className="outline-none focus-visible:text-primary">
           {textbookLabel}
@@ -15513,32 +15869,52 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
           </span>
         )}
       </span>
-      <span className="order-8 min-w-0 truncate text-muted-foreground md:order-none md:text-foreground">
+      <span className="order-9 min-w-0 truncate text-muted-foreground md:order-none md:text-foreground">
         <span className="mr-2 text-xs text-muted-foreground md:hidden">시험범위</span>
         {unitLabel}
       </span>
-      <span className="order-9 min-w-0 font-medium md:order-none">
-        <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">출제 개수</span>
-        {wordRetest.totalQuestionCount || "-"}
+      <span className="order-10 min-w-0 md:order-none">
+        <span className="mr-2 text-xs text-muted-foreground md:hidden">메모</span>
+        <span className="line-clamp-2 text-muted-foreground md:hidden">{note || "-"}</span>
+        <span className="group relative hidden min-w-0 md:block">
+          <span
+            tabIndex={0}
+            title={note || "-"}
+            className="block truncate outline-none focus-visible:text-primary"
+          >
+            {note || "-"}
+          </span>
+          {note ? (
+            <span className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden max-w-sm whitespace-normal rounded-md border bg-popover px-2 py-1.5 text-xs font-medium text-popover-foreground shadow-lg group-hover:block group-focus-within:block">
+              {note}
+            </span>
+          ) : null}
+        </span>
       </span>
-      <span className="order-10 min-w-0 font-medium md:order-none">
-        <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">커트라인</span>
-        {wordRetest.cutoffQuestionCount || "-"}
-      </span>
-      <span className="order-11 min-w-0 md:order-none">
-        <span className="mr-2 text-xs text-muted-foreground md:hidden">맞은 개수</span>
-        <WordRetestInlineScoreEditor
-          task={task}
-          draft={resolvedScoreDraft}
-          disabled={statusActionDisabled || absent || isClosedOpsTask(task) || !scoreEditingAllowed}
-          onDraftChange={onScoreDraftChange}
-          onSave={onScoreSave}
-        />
-      </span>
-      <span className="order-12 min-w-0 md:order-none">
-        <span className="mr-2 text-xs text-muted-foreground md:hidden">결과</span>
-        <WordRetestScoreResultCell wordRetest={scorePreviewWordRetest} />
-      </span>
+      <div className="order-11 grid min-w-0 gap-2 md:contents">
+        <span className="min-w-0 font-medium">
+          <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">출제 개수</span>
+          {wordRetest.totalQuestionCount || "-"}
+        </span>
+        <span className="min-w-0 font-medium">
+          <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">커트라인</span>
+          {wordRetest.cutoffQuestionCount || "-"}
+        </span>
+        <span className="min-w-0">
+          <span className="mr-2 text-xs text-muted-foreground md:hidden">맞은 개수</span>
+          <WordRetestInlineScoreEditor
+            task={task}
+            draft={resolvedScoreDraft}
+            disabled={statusActionDisabled || absent || isClosedOpsTask(task) || !scoreEditingAllowed}
+            onDraftChange={onScoreDraftChange}
+            onSave={onScoreSave}
+          />
+        </span>
+        <span className="min-w-0">
+          <span className="mr-2 text-xs text-muted-foreground md:hidden">결과</span>
+          <WordRetestScoreResultCell wordRetest={scorePreviewWordRetest} />
+        </span>
+      </div>
       <span className="order-last flex flex-wrap justify-start gap-1.5 md:order-none md:justify-end">
         <span className="mr-2 text-xs text-muted-foreground md:hidden">다음 액션</span>
         {primaryActions.map((action) => (
@@ -16313,9 +16689,19 @@ function GeneralTaskDetailPanel({ task }: { task: OpsTask }) {
   )
 }
 
-function WordRetestDetailPanel({ task }: { task: OpsTask }) {
+function WordRetestDetailPanel({
+  task,
+  teachers,
+  showTeacherAccountWarning,
+}: {
+  task: OpsTask
+  teachers: OpsTeacherOption[]
+  showTeacherAccountWarning: boolean
+}) {
   const wordRetest = task.wordRetest || {}
-  const requestNote = wordRetest.requestNote || task.memo || ""
+  const note = getWordRetestNote(task)
+  const teacherAccountLinkRequired = showTeacherAccountWarning
+    && needsWordRetestTeacherAccountLink(task, teachers)
 
   return (
     <div className="grid gap-4">
@@ -16327,12 +16713,20 @@ function WordRetestDetailPanel({ task }: { task: OpsTask }) {
         <Badge variant="secondary">{getWordRetestTeacherLabel(task)}</Badge>
         <Badge variant="secondary">{getWordRetestClassLabel(task)}</Badge>
       </div>
+      {teacherAccountLinkRequired ? (
+        <div role="status" className="rounded-md border border-amber-300/70 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+          담당선생님 계정 연결 필요
+        </div>
+      ) : null}
       <dl className="grid gap-3 md:grid-cols-2">
         <DetailInfoTile label="본시험일" value={dateOnlyLabel(wordRetest.testAt || task.dueAt || "") === "-" ? "미지정" : dateOnlyLabel(wordRetest.testAt || task.dueAt || "")} />
+        <DetailInfoTile label="응시예정일시" value={formatWordRetestExpectedAt(wordRetest.expectedRetestAt)} />
         <DetailInfoTile label="학생" value={getWordRetestStudentLabel(task)} />
         <DetailInfoTile label="교재" value={getWordRetestTextbookLabel(task)} />
         <DetailInfoTile label="시험범위" value={getWordRetestUnitLabel(task)} />
+        <DetailInfoTile label="메모" value={note || "미입력"} />
         <DetailInfoTile label="점수" value={getWordRetestScoreSummary(task)} />
+        <DetailInfoTile label="결과" value={getWordRetestResultLabel(wordRetest)} />
         <DetailInfoTile label="점수 기준" value={[
           wordRetest.totalQuestionCount ? `출제 ${wordRetest.totalQuestionCount}개` : "",
           wordRetest.cutoffQuestionCount ? `커트라인 ${wordRetest.cutoffQuestionCount}개` : "",
@@ -16341,9 +16735,6 @@ function WordRetestDetailPanel({ task }: { task: OpsTask }) {
           <TaskStatusBadge status={task.status} />
         </DetailInfoTile>
       </dl>
-      {requestNote && (
-        <DetailInfoTile label="메모" value={requestNote} />
-      )}
     </div>
   )
 }

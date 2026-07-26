@@ -356,6 +356,7 @@ const AUTHENTICATED_CORE_SMOKE_ROUTES = [
     path: "/admin/dashboard",
     name: "dashboard",
     expectedTexts: ["대시보드"],
+    interaction: "dashboard-read-only",
   },
   {
     path: "/admin/students",
@@ -438,6 +439,27 @@ const ROUTES = [
   { path: "/admin/transfer", name: "transfer", expectedTexts: ["전반", "전반 신청"], interaction: "open-create" },
   { path: "/admin/withdrawal", name: "withdrawal", expectedTexts: ["퇴원", "퇴원 신청"], interaction: "open-create" },
   { path: "/admin/word-retests", name: "word-retests", expectedTexts: ["영어 단어 재시험", "추가"], interaction: "open-create" },
+  {
+    path: "/admin/word-retests?fixture=word-retest-expected-schedule&fixtureRole=assistant&role=assistant",
+    name: "word-retest-expected-schedule-assistant-fixture",
+    expectedTexts: ["영어 단어 재시험", "응시예정일시", "김연결"],
+    interaction: "word-retest-expected-schedule-fixture",
+    fixtureRole: "assistant",
+  },
+  {
+    path: "/admin/word-retests?fixture=word-retest-expected-schedule&fixtureRole=teacher&role=teacher",
+    name: "word-retest-expected-schedule-teacher-fixture",
+    expectedTexts: ["영어 단어 재시험", "응시예정일시", "이메모"],
+    interaction: "word-retest-expected-schedule-fixture",
+    fixtureRole: "teacher",
+  },
+  {
+    path: "/admin/word-retests?fixture=word-retest-expected-schedule&fixtureRole=admin&role=assistant",
+    name: "word-retest-expected-schedule-admin-fixture",
+    expectedTexts: ["영어 단어 재시험", "응시예정일시", "김연결"],
+    interaction: "word-retest-expected-schedule-fixture",
+    fixtureRole: "admin",
+  },
   { path: "/admin/makeup-requests", name: "makeup-requests", expectedTexts: ["휴보강", "신청"], interaction: "makeup-request" },
   { path: "/admin/approvals", name: "approvals", expectedTexts: ["전자결재", "영어", "수학", "자유"], interaction: "approval-draft" },
   ...AUTHENTICATED_CORE_SMOKE_ROUTES,
@@ -2432,6 +2454,260 @@ async function verifyWordRetestManualInteraction(page) {
   if (!focusReturned) throw new Error("Word retest manual did not return focus to its toolbar launcher.")
 }
 
+async function verifyDashboardReadOnlyInteraction(page) {
+  const subjectFilter = page.getByRole("group", { name: "과목", exact: true }).first()
+  const divisionFilter = page.getByRole("group", { name: "부서", exact: true }).first()
+  const filterSurface = page.getByRole("region", { name: "대시보드 작업 기준" }).first()
+  for (const [label, locator] of [
+    ["dashboard subject filter", subjectFilter],
+    ["dashboard division filter", divisionFilter],
+    ["dashboard filter surface", filterSurface],
+  ]) {
+    if (!(await locator.count().catch(() => 0))) throw new Error(`${label} was not found.`)
+  }
+
+  const filterBorders = await filterSurface.evaluate((surface) => {
+    const outer = window.getComputedStyle(surface)
+    const subjectGroup = surface.querySelector('[role="group"][aria-label="과목"]')
+    const inner = subjectGroup ? window.getComputedStyle(subjectGroup) : null
+    return {
+      outer: [outer.borderTopWidth, outer.borderRightWidth, outer.borderBottomWidth, outer.borderLeftWidth],
+      inner: inner
+        ? [inner.borderTopWidth, inner.borderRightWidth, inner.borderBottomWidth, inner.borderLeftWidth]
+        : [],
+    }
+  })
+  if (filterBorders.outer.some((width) => Number.parseFloat(width) > 0)) {
+    throw new Error(`dashboard filter surface still has an outer border: ${filterBorders.outer.join(", ")}.`)
+  }
+  if (!filterBorders.inner.some((width) => Number.parseFloat(width) > 0)) {
+    throw new Error("dashboard subject segmented control lost its inner border.")
+  }
+
+  const scienceButton = subjectFilter.getByRole("button", { name: "과학", exact: true })
+  if (!(await scienceButton.count().catch(() => 0))) throw new Error("dashboard science subject filter was not found.")
+
+  const conflictWarning = page.getByRole("alert", { name: "일정 충돌" }).first()
+  const conflictWarningVisible = await conflictWarning.isVisible().catch(() => false)
+  const warningTextBefore = conflictWarningVisible
+    ? await conflictWarning.innerText({ timeout: 5000 })
+    : ""
+  const conflictIdentityBefore = conflictWarningVisible
+    ? await conflictWarning.locator("#dashboard-conflict-rows > div").evaluateAll((rows) => (
+        rows.map((row) => Array.from(row.children).slice(0, 4).map((cell) => cell.textContent?.trim() || "").join("|"))
+      ))
+    : []
+  if (conflictWarningVisible) {
+    const warningBeforeFilters = await conflictWarning.evaluate((warning, filter) => (
+      Boolean(warning.compareDocumentPosition(filter) & Node.DOCUMENT_POSITION_FOLLOWING)
+    ), await filterSurface.elementHandle())
+    if (!warningBeforeFilters) throw new Error("dashboard schedule conflict warning is not above the filters.")
+
+    for (const label of ["문제", "담당", "처리"]) {
+      if (!warningTextBefore.includes(label)) throw new Error(`dashboard conflict warning is missing ${label}.`)
+    }
+    const taskAction = conflictWarning
+      .getByRole("button", { name: /할 일 등록|확인 중|등록 중|관리팀 등록 필요|등록 실패/ })
+      .or(conflictWarning.getByRole("link", { name: "등록됨 · 할 일 보기" }))
+      .or(conflictWarning.getByRole("button", { name: "등록됨 · 담당자가 처리 중" }))
+      .or(conflictWarning.getByText("관리팀 등록 필요", { exact: true }))
+      .first()
+    if (!(await taskAction.count().catch(() => 0))) {
+      throw new Error("dashboard conflict warning does not expose a non-mutating task action state.")
+    }
+  }
+
+  await scienceButton.click()
+  if ((await scienceButton.getAttribute("aria-pressed").catch(() => "")) !== "true") {
+    throw new Error("dashboard science subject filter did not become selected.")
+  }
+  if (conflictWarningVisible) {
+    const conflictIdentityAfter = await conflictWarning.locator("#dashboard-conflict-rows > div").evaluateAll((rows) => (
+      rows.map((row) => Array.from(row.children).slice(0, 4).map((cell) => cell.textContent?.trim() || "").join("|"))
+    ))
+    if (JSON.stringify(conflictIdentityAfter) !== JSON.stringify(conflictIdentityBefore)) {
+      throw new Error("dashboard global conflict warning changed when the science filter changed.")
+    }
+  }
+  await subjectFilter.getByRole("button", { name: "전체", exact: true }).click()
+
+  const classGroupButtons = page.locator('button[aria-label$=" 수업 펼치기"]')
+  const classGroupCount = await classGroupButtons.count().catch(() => 0)
+  for (let index = 0; index < classGroupCount; index += 1) {
+    if ((await classGroupButtons.nth(index).getAttribute("aria-expanded")) !== "false") {
+      throw new Error("dashboard class-operation groups are not all collapsed by default.")
+    }
+  }
+
+  let classRosterPopoverChecked = false
+  if (classGroupCount > 0) {
+    await classGroupButtons.first().click()
+    const classOperationsList = page.getByRole("list", { name: /별 수업 운영$/ }).first()
+    const classRosterButton = await firstUsable(classOperationsList.locator('button[aria-label$="학생 명단 보기"]'))
+    if (await classRosterButton.count().catch(() => 0)) {
+      await classRosterButton.click()
+      const classRosterPopover = page.locator('[role="dialog"][aria-label$="명단"]').last()
+      await classRosterPopover.waitFor({ state: "visible", timeout: 5000 })
+      classRosterPopoverChecked = true
+      await page.keyboard.press("Escape")
+    }
+  }
+
+  let distributionRosterPopoverChecked = false
+  const distributionExpandButton = await firstUsable(page.locator('button[aria-label$="분포 펼치기"]'))
+  if (await distributionExpandButton.count().catch(() => 0)) {
+    await distributionExpandButton.click()
+    const distributionRosterButton = await firstUsable(
+      page.locator('section[aria-label$="학생 분포"] button[aria-label$="학생 명단 보기"]'),
+    )
+    if (await distributionRosterButton.count().catch(() => 0)) {
+      await distributionRosterButton.click()
+      const distributionRosterPopover = page.locator('[role="dialog"][aria-label$="명단"]').last()
+      await distributionRosterPopover.waitFor({ state: "visible", timeout: 5000 })
+      distributionRosterPopoverChecked = true
+      await page.keyboard.press("Escape")
+    }
+  }
+
+  return {
+    readOnly: true,
+    scienceFilter: true,
+    outerFilterBorderRemoved: true,
+    conflictWarningChecked: conflictWarningVisible,
+    classGroupsInitiallyCollapsed: classGroupCount,
+    classRosterPopoverChecked,
+    distributionRosterPopoverChecked,
+    taskActionClicked: false,
+  }
+}
+
+const WORD_RETEST_EXPECTED_SCHEDULE_COLUMNS = [
+  "상태",
+  "본시험일",
+  "응시예정일시",
+  "담당선생님",
+  "수업",
+  "학생",
+  "교재",
+  "시험범위",
+  "메모",
+  "출제 개수",
+  "커트라인",
+  "맞은 개수",
+  "결과",
+  "다음 액션",
+]
+
+async function chooseLinkedFixtureOption(page, dialog, label, optionLabel) {
+  const trigger = dialog.getByLabel(label, { exact: true }).first()
+  if (!(await trigger.count().catch(() => 0))) throw new Error(`word-retest fixture ${label} control was not found.`)
+  await trigger.click()
+  const option = page.getByRole("option", { name: optionLabel, exact: true }).first()
+  await option.waitFor({ state: "visible", timeout: 5000 })
+  await option.click()
+}
+
+async function closeDirtyFixtureDialog(page, dialog) {
+  const closeButton = dialog.getByRole("button", { name: "닫기", exact: true }).first()
+  await closeButton.click()
+  const discardDialog = page.getByRole("dialog").filter({ hasText: "입력한 내용을 버릴까요?" }).first()
+  if (await discardDialog.isVisible().catch(() => false)) {
+    await discardDialog.getByRole("button", { name: "저장하지 않고 닫기", exact: true }).click()
+  }
+  await dialog.waitFor({ state: "hidden", timeout: 5000 })
+}
+
+async function verifyWordRetestExpectedScheduleFixture(page, route, fixtureSafety) {
+  if (!fixtureSafety) throw new Error("word-retest fixture safety guards were not installed before navigation.")
+  const role = route.fixtureRole
+  if (!["assistant", "teacher", "admin"].includes(role)) throw new Error(`unsupported word-retest fixture role: ${role}`)
+
+  const tableHeaderCheckbox = page.getByLabel("보이는 단어 재시험 전체 선택").first()
+  if (!(await tableHeaderCheckbox.count().catch(() => 0))) {
+    throw new Error("word-retest fixture data-table header was not found.")
+  }
+  const tableHeader = tableHeaderCheckbox.locator("xpath=../..")
+  const visibleHeaderLabels = (await tableHeader.locator(":scope > span").allTextContents())
+    .map((label) => label.trim())
+    .filter(Boolean)
+  if (JSON.stringify(visibleHeaderLabels) !== JSON.stringify(WORD_RETEST_EXPECTED_SCHEDULE_COLUMNS)) {
+    throw new Error(`word-retest column order changed: ${visibleHeaderLabels.join(" > ")}`)
+  }
+
+  const bodyText = await page.locator("body").innerText({ timeout: 5000 })
+  const expectedMemo = role === "teacher" ? "기존 업무 메모에서 표시" : "사전 준비가 필요한 학생"
+  if (!bodyText.includes(expectedMemo)) throw new Error(`word-retest ${role} fixture is missing memo text: ${expectedMemo}.`)
+  if (role === "teacher" && bodyText.includes("최비연결")) {
+    throw new Error("word-retest teacher fixture exposed a name-only, non-linked task.")
+  }
+
+  const expectedEditButton = await firstUsable(page.locator('button[aria-label*="응시예정일시"][aria-label$="수정"]'))
+  if (!(await expectedEditButton.count().catch(() => 0))) {
+    throw new Error(`word-retest ${role} fixture has no expected-schedule quick edit button.`)
+  }
+  await expectedEditButton.click()
+  const expectedDialog = page.getByRole("dialog").filter({ hasText: "응시예정일시 수정" }).first()
+  await expectedDialog.waitFor({ state: "visible", timeout: 5000 })
+  const expectedDialogText = await expectedDialog.innerText({ timeout: 5000 })
+  for (const label of ["담당선생님", "학생", "수업", "본시험일", "응시예정일시"]) {
+    if (!expectedDialogText.includes(label)) throw new Error(`word-retest expected-only dialog is missing ${label}.`)
+  }
+  if (!(await expectedDialog.locator('[data-word-retest-edit-mode="expected_only"]').count())) {
+    throw new Error("word-retest quick edit did not open the expected-only editor.")
+  }
+  await expectedDialog.getByRole("button", { name: "닫기", exact: true }).first().click()
+  await expectedDialog.waitFor({ state: "hidden", timeout: 5000 })
+
+  let mainExamCalendarChecked = false
+  let modalFieldOrderChecked = false
+  if (role === "admin") {
+    const addButton = page.getByRole("button", { name: "추가", exact: true }).last()
+    await addButton.click()
+    const createDialog = page.getByRole("dialog").filter({ hasText: "영어 단어 재시험 추가" }).first()
+    await createDialog.waitFor({ state: "visible", timeout: 5000 })
+    await chooseLinkedFixtureOption(page, createDialog, "담당선생님", "연결 선생님")
+    await chooseLinkedFixtureOption(page, createDialog, "수업", "영어 어휘 A")
+
+    const mainExamCalendar = createDialog.getByRole("grid", { name: "본시험일" }).first()
+    await mainExamCalendar.waitFor({ state: "visible", timeout: 5000 })
+    const [calendarBox, formBox] = await Promise.all([
+      mainExamCalendar.boundingBox(),
+      createDialog.locator("form").boundingBox(),
+    ])
+    if (!calendarBox || !formBox || calendarBox.width < formBox.width * 0.9) {
+      throw new Error("word-retest main-exam calendar is not using the full modal form width.")
+    }
+    const calendarText = await mainExamCalendar.innerText({ timeout: 5000 })
+    for (const label of ["7월 7회차", "7월 8회차", "7월 9회차", "보강"]) {
+      if (!calendarText.includes(label)) throw new Error(`word-retest main-exam calendar is missing ${label}.`)
+    }
+    mainExamCalendarChecked = true
+
+    const scopeLabels = ["교재", "시험범위", "메모", "출제 개수", "커트라인(합격 개수)"]
+    const fieldOrder = await createDialog.locator("label").evaluateAll((labels, expected) => (
+      expected.map((label) => labels.findIndex((node) => node.textContent?.trim() === label))
+    ), scopeLabels)
+    if (fieldOrder.some((index) => index < 0) || fieldOrder.some((index, position) => position > 0 && index <= fieldOrder[position - 1])) {
+      throw new Error(`word-retest modal field order changed: ${fieldOrder.join(", ")}`)
+    }
+    modalFieldOrderChecked = true
+    await closeDirtyFixtureDialog(page, createDialog)
+  }
+
+  fixtureSafety.assertNoMutationRequests(`word-retest ${role} fixture verification`)
+  return {
+    readOnly: true,
+    fixtureRole: role,
+    exactColumnOrder: true,
+    expectedOnlyModal: true,
+    memoVisible: true,
+    exactTeacherOwnership: role !== "teacher" || !bodyText.includes("최비연결"),
+    mainExamCalendarChecked,
+    modalFieldOrderChecked,
+    mutationRequests: fixtureSafety.mutationRequests.length,
+  }
+}
+
 async function verifyWordRetestModeInteraction(page) {
   const teacherButton = await firstUsable(
     page.locator('button, [role="button"]').filter({ hasText: /담당\s*선생님/ }),
@@ -2657,11 +2933,15 @@ async function verifyRouteInteraction(page, route, options = {}) {
     await verifyWordRetestManualInteraction(page)
     await verifyWordRetestModeInteraction(page)
   }
+  if (route.interaction === "dashboard-read-only") return verifyDashboardReadOnlyInteraction(page)
   if (route.interaction === "makeup-request") return verifyMakeupRequestInteraction(page)
   if (route.interaction === "quick-add") return verifyQuickAddInteraction(page, options.quickAddSampleCount)
   if (route.interaction === "open-create") return verifyCreateDialogInteraction(page, route, options.operationSampleCount)
   if (route.interaction === "approval-draft") return verifyApprovalDraftInteraction(page)
   if (route.interaction === "registration-subject-track-fixture") return verifyRegistrationSubjectTrackFixture(page, options)
+  if (route.interaction === "word-retest-expected-schedule-fixture") {
+    return verifyWordRetestExpectedScheduleFixture(page, route, options.wordRetestFixtureSafety)
+  }
   return {}
 }
 
@@ -3364,6 +3644,54 @@ const REGISTRATION_FIXTURE_PROVIDER_ROUTE_PATTERNS = [
   "**/api/notifications/**/self-test",
 ]
 
+const WORD_RETEST_FIXTURE_MUTATION_PATHS = [
+  "/rest/v1/",
+  "/api/google-chat",
+  "/api/web-push",
+  "/api/solapi",
+  "/api/notifications/",
+]
+
+function isWordRetestFixtureMutationRequest(request) {
+  const method = request.method().toUpperCase()
+  if (["GET", "HEAD", "OPTIONS"].includes(method)) return false
+  const pathname = new URL(request.url()).pathname
+  return WORD_RETEST_FIXTURE_MUTATION_PATHS.some((prefix) => pathname.includes(prefix))
+}
+
+async function installWordRetestFixtureSafetyGuards(page) {
+  const mutationRequests = []
+  const blockMutationRequest = async (route) => {
+    if (!isWordRetestFixtureMutationRequest(route.request())) {
+      await route.continue()
+      return
+    }
+    mutationRequests.push({
+      method: route.request().method(),
+      url: route.request().url(),
+    })
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: false, fixture: true, blocked: "word-retest fixture mutation" }),
+    })
+  }
+  await page.route("**/*", blockMutationRequest)
+
+  return {
+    mutationRequests,
+    assertNoMutationRequests(stage) {
+      if (mutationRequests.length === 0) return
+      throw new Error(
+        `word-retest fixture attempted ${mutationRequests.length} mutation request(s) during ${stage}: ${mutationRequests.map((request) => `${request.method} ${request.url}`).join(" | ")}`,
+      )
+    },
+    async cleanup() {
+      await page.unroute("**/*", blockMutationRequest)
+    },
+  }
+}
+
 async function installRegistrationFixtureSafetyGuards(page) {
   const interceptedProviderRequests = []
   const notificationPermissionPrompts = []
@@ -3499,6 +3827,9 @@ async function inspectRoute(page, baseUrl, route, options = {}) {
   const registrationFixtureSafety = route.interaction === "registration-subject-track-fixture"
     ? await installRegistrationFixtureSafetyGuards(page)
     : null
+  const wordRetestFixtureSafety = route.interaction === "word-retest-expected-schedule-fixture"
+    ? await installWordRetestFixtureSafetyGuards(page)
+    : null
 
   try {
     const assertRouteHealth = async (stage) => {
@@ -3532,6 +3863,7 @@ async function inspectRoute(page, baseUrl, route, options = {}) {
       ...options,
       baseUrl,
       registrationFixtureSafety,
+      wordRetestFixtureSafety,
     })
     await assertRouteHealth("post interaction")
 
@@ -3546,6 +3878,7 @@ async function inspectRoute(page, baseUrl, route, options = {}) {
     }
   } finally {
     await registrationFixtureSafety?.cleanup()
+    await wordRetestFixtureSafety?.cleanup()
     page.off("console", onConsole)
     page.off("pageerror", onPageError)
     page.off("requestfailed", onRequestFailed)
@@ -3707,6 +4040,7 @@ async function run() {
   }
   const deterministicFixtureOnly = getAuthenticatedRoutes().every((route) => (
     route.interaction === "registration-subject-track-fixture"
+    || route.interaction === "word-retest-expected-schedule-fixture"
   ))
   const authorizedSupabaseUrl = env("SUPABASE_URL", env("NEXT_PUBLIC_SUPABASE_URL", env("VITE_SUPABASE_URL")))
   if (!deterministicFixtureOnly && !authorizedSupabaseUrl) {

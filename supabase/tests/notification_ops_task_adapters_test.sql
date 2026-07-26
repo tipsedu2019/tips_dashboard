@@ -362,6 +362,26 @@ select is(
   '담당자 변경 후 보조 담당자 위치가 정확히 남는다'
 );
 
+select lives_ok($$
+  select public.transition_ops_task_status_v2(
+    (select fixture.task_id from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word'),
+    'in_progress',
+    (
+      select task.updated_at from public.ops_tasks task
+      where task.id = (select fixture.task_id from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word')
+    ),
+    '71000000-0000-4000-8000-000000000031'::uuid
+  )
+$$, '실제 조교는 조교 담당 단계에서 단어 재시험을 시작할 수 있다');
+
+select lives_ok($$
+  select public.report_word_retest_result_v1(
+    (select fixture.task_id from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word'),
+    '{"first_score":5}'::jsonb,
+    '71000000-0000-4000-8000-000000000032'::uuid
+  )
+$$, '실제 조교는 진행 단계에서 결과를 보고할 수 있다');
+
 select pg_catalog.set_config(
   'request.jwt.claims',
   '{"sub":"71000000-0000-4000-8000-000000000004","role":"authenticated"}',
@@ -377,10 +397,13 @@ select lives_ok($$
   select public.update_ops_task_v2(
     (select fixture.task_id from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word'),
     '{"task":{"priority":"high"}}'::jsonb,
-    (select fixture.original_updated_at from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word'),
+    (
+      select task.updated_at from public.ops_tasks task
+      where task.id = (select fixture.task_id from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word')
+    ),
     '71000000-0000-4000-8000-000000000028'::uuid
   )
-$$, '단어 업무의 task 전용 수정은 기존 detail을 지우지 않는다');
+$$, '연결 교사의 기존 검토 단계 수정은 detail을 지우지 않는다');
 
 select is(
   (
@@ -402,7 +425,10 @@ select throws_ok($$
   select public.update_ops_task_v2(
     (select fixture.task_id from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word'),
     '{"word_retest":{"test_at":null}}'::jsonb,
-    (select fixture.original_updated_at from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word'),
+    (
+      select task.updated_at from public.ops_tasks task
+      where task.id = (select fixture.task_id from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word')
+    ),
     '71000000-0000-4000-8000-000000000029'::uuid
   )
 $$, '22023', 'word_retest_context_required', '수정으로 단어 재시험 본시험일을 제거할 수 없다');
@@ -422,27 +448,72 @@ select throws_ok($$
         'retest_status', 'not_started'
       )
     ),
-    (select fixture.original_updated_at from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word'),
+    (
+      select task.updated_at from public.ops_tasks task
+      where task.id = (select fixture.task_id from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word')
+    ),
     '71000000-0000-4000-8000-000000000027'::uuid
   )
 $$, '42501', 'ops_task_access_denied', '연결 교사는 수정 후 자기 교사 연결을 제거할 수 없다');
 
 select lives_ok($$
-  select public.transition_ops_task_status_v2(
+  select public.request_word_retest_revision_v1(
     (select fixture.task_id from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word'),
-    'in_progress',
-    (select fixture.original_updated_at from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word'),
-    '71000000-0000-4000-8000-000000000018'::uuid
+    '점수 재확인',
+    '71000000-0000-4000-8000-000000000033'::uuid
   )
-$$, '연결된 단어 담당 선생님은 재시험을 시작할 수 있다');
+$$, '연결 교사는 기존 검토 단계의 수정 요청 동작을 계속 사용할 수 있다');
+
+select throws_ok($$
+  select public.update_ops_task_v2(
+    (select fixture.task_id from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word'),
+    '{"task":{"memo":"전용 RPC 우회"}}'::jsonb,
+    (
+      select task.updated_at from public.ops_tasks task
+      where task.id = (select fixture.task_id from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word')
+    ),
+    '71000000-0000-4000-8000-000000000034'::uuid
+  )
+$$, '42501', 'word_retest_expected_only_required',
+  '연결 교사는 조교 담당 단계에서 범용 수정 RPC로 우회할 수 없다');
+
+select throws_ok($$
+  select public.delete_ops_task_v1(
+    (select fixture.task_id from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word'),
+    '71000000-0000-4000-8000-000000000035'::uuid
+  )
+$$, '42501', 'word_retest_expected_only_required',
+  '연결 교사는 조교 담당 단계의 단어 재시험을 삭제할 수 없다');
+
+select pg_catalog.set_config(
+  'request.jwt.claims',
+  '{"sub":"71000000-0000-4000-8000-000000000003","role":"authenticated"}',
+  true
+);
+select pg_catalog.set_config(
+  'request.jwt.claim.sub',
+  '71000000-0000-4000-8000-000000000003',
+  true
+);
 
 select lives_ok($$
   select public.report_word_retest_result_v1(
     (select fixture.task_id from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word'),
     '{"first_score":5}'::jsonb,
-    '71000000-0000-4000-8000-000000000019'::uuid
+    '71000000-0000-4000-8000-000000000036'::uuid
   )
-$$, '결과 보고는 권위 상태와 원본 이벤트를 함께 기록한다');
+$$, '실제 조교는 연결 교사의 수정 요청 뒤에도 결과를 다시 보고할 수 있다');
+
+select pg_catalog.set_config(
+  'request.jwt.claims',
+  '{"sub":"71000000-0000-4000-8000-000000000004","role":"authenticated"}',
+  true
+);
+select pg_catalog.set_config(
+  'request.jwt.claim.sub',
+  '71000000-0000-4000-8000-000000000004',
+  true
+);
 
 select throws_ok($$
   select public.transition_ops_task_status_v2(

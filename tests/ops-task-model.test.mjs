@@ -18,8 +18,10 @@ import {
   isOpsTaskInUserInbox,
   isOpsTaskInUserSent,
   getWordRetestWorkspaceRole,
+  isWordRetestExactlyLinkedToTeacher,
   isWordRetestInAssistantQueue,
   isWordRetestInTeacherQueue,
+  needsWordRetestTeacherAccountLink,
   sortOpsTasksByPriority,
   sortOpsTasksByWorkDate,
   sortOpsTasksByWorkflowStatus,
@@ -87,7 +89,6 @@ test("legacy basic word retests keep task-level due and start date deadlines", (
     startAt: "2026-07-01",
   }, "2026-07-09"), true);
 });
-
 test("기존 점수만 남은 보류 재시험은 비점수 수정으로 자동 재시작하지 않는다", () => {
   const plan = opsTaskModel.getWordRetestScoreSavePlan({
     type: "word_retest",
@@ -231,34 +232,78 @@ test("team workflow inbox and sent boxes follow the current action owner", () =>
   assert.equal(isOpsTaskInUserSent(tasks[2], { currentUserId: "assistant-1", currentUserTeam: "조교팀" }), false);
 });
 
-test("word retest workspace roles follow assistant teacher action ownership", () => {
+test("word retest visibility uses the exact linked teacher catalog without broadening action ownership", () => {
   const assistantStatuses = ["requested", "confirmed", "in_progress", "on_hold"];
+  const teacherContext = {
+    role: "teacher",
+    currentTeacherCatalogId: "teacher-catalog-1",
+    currentUserId: "teacher-profile-1",
+    currentUserLabel: "한지현",
+    currentUserTeam: "영어팀",
+  };
 
   for (const status of assistantStatuses) {
-    const task = { id: status, type: "word_retest", status };
+    const task = {
+      id: status,
+      type: "word_retest",
+      status,
+      requestedBy: "someone-else",
+      requestedTeam: "영어팀",
+      wordRetest: { teacherId: "teacher-catalog-1", teacherName: "한지현" },
+    };
     assert.equal(getWordRetestWorkspaceRole(task), "assistant", status);
     assert.equal(isWordRetestInAssistantQueue(task), true, status);
     assert.equal(isWordRetestInTeacherQueue(task), false, status);
+    assert.equal(isWordRetestInTeacherQueue(task, teacherContext), true, status);
+    assert.equal(isWordRetestExactlyLinkedToTeacher(task, teacherContext), true, status);
   }
 
   const reviewTask = {
     id: "review",
     type: "word_retest",
     status: "review_requested",
-    requestedBy: "teacher-1",
+    requestedBy: "teacher-profile-1",
     requestedTeam: "영어팀",
-    wordRetest: { teacherId: "teacher-1", teacherName: "한지현" },
+    wordRetest: { teacherId: "teacher-catalog-1", teacherName: "한지현" },
   };
 
   assert.equal(getWordRetestWorkspaceRole(reviewTask), "teacher");
   assert.equal(isWordRetestInAssistantQueue(reviewTask), false);
   assert.equal(isWordRetestInTeacherQueue(reviewTask), true);
-  assert.equal(isWordRetestInTeacherQueue(reviewTask, { currentUserId: "teacher-1" }), true);
-  assert.equal(isWordRetestInTeacherQueue(reviewTask, { currentUserLabel: "한지현" }), true);
-  assert.equal(isWordRetestInTeacherQueue(reviewTask, { currentUserId: "other", currentUserLabel: "다른선생님" }), false);
+  assert.equal(isWordRetestInTeacherQueue(reviewTask, teacherContext), true);
+  assert.equal(isWordRetestInTeacherQueue(reviewTask, {
+    ...teacherContext,
+    currentTeacherCatalogId: "teacher-catalog-2",
+    currentUserLabel: "한지현",
+  }), false, "the same display name must not grant ownership");
+  assert.equal(isWordRetestInTeacherQueue(reviewTask, {
+    role: "teacher",
+    currentUserId: "teacher-profile-1",
+    currentUserLabel: "한지현",
+    currentUserTeam: "영어팀",
+  }), false, "requester, team, and name fallbacks must not grant ownership");
+  assert.equal(isWordRetestInTeacherQueue(reviewTask, {
+    role: "assistant",
+    currentTeacherCatalogId: "teacher-catalog-1",
+  }), false, "a catalog-linked assistant is not promoted into the teacher queue");
+
+  assert.equal(needsWordRetestTeacherAccountLink(reviewTask, [
+    { id: "teacher-catalog-1", profileId: "teacher-profile-1" },
+  ]), false);
+  assert.equal(needsWordRetestTeacherAccountLink(reviewTask, [
+    { id: "teacher-catalog-1", profileId: "" },
+  ]), true);
+  assert.equal(needsWordRetestTeacherAccountLink({
+    ...reviewTask,
+    wordRetest: { teacherName: "한지현" },
+  }, [
+    { id: "teacher-catalog-1", profileId: "teacher-profile-1" },
+  ]), true, "a legacy name-only row stays out of the exact teacher queue");
 
   assert.equal(getWordRetestWorkspaceRole({ type: "word_retest", status: "done" }), "completed");
   assert.equal(getWordRetestWorkspaceRole({ type: "word_retest", status: "canceled" }), "completed");
+  assert.equal(isWordRetestInTeacherQueue({ ...reviewTask, status: "done" }, teacherContext), false);
+  assert.equal(isWordRetestInTeacherQueue({ ...reviewTask, status: "canceled" }, teacherContext), false);
   assert.equal(getWordRetestWorkspaceRole({ type: "general", status: "requested" }), "none");
 });
 
@@ -346,7 +391,29 @@ test("word retest role context gives actual assistants their resolved team witho
     status: "review_requested",
     requestedBy: "teacher-1",
     wordRetest: { teacherId: "teacher-1" },
-  }, teacherContext), true);
+  }, {
+    ...teacherContext,
+    role: "teacher",
+    currentTeacherCatalogId: "teacher-1",
+  }), true);
+});
+
+test("word retest expected schedule remains outside calendar automation", () => {
+  const task = {
+    id: "word-expected-only",
+    title: "응시예정일시 자동화 경계",
+    type: "word_retest",
+    status: "requested",
+    wordRetest: {
+      testAt: "2026-07-10T18:00:00+09:00",
+      expectedRetestAt: "2026-07-21T09:00:00+09:00",
+    },
+  };
+
+  assert.deepEqual(
+    getOpsTaskCalendarItems([task]).map((item) => [item.kind, item.date]),
+    [["본시험", "2026-07-10"]],
+  );
 });
 
 test("team workflow sorting supports due-date and status ordering", () => {
