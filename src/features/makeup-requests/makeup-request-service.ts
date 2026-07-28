@@ -792,6 +792,8 @@ export async function createMakeupRequest(input: MakeupRequestInput, requesterId
   })
   const createInput: Row = { ...payload }
   delete createInput.status
+  delete createInput.returned_reason
+  delete createInput.rejected_reason
   const result = await runIdempotentMakeupCreate({
     actorId: requesterId,
     payload: createInput,

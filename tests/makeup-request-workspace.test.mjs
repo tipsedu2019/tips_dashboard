@@ -90,6 +90,15 @@ function loadWorkspaceApproverHelpers() {
   );
 }
 
+function loadMakeupActionErrorMessage() {
+  const source = sourceBetween(
+    workspaceSource,
+    "function getMakeupActionErrorMessage",
+    "function RequiredFormLabel",
+  );
+  return transpileAndLoad(source, ["getMakeupActionErrorMessage"]);
+}
+
 function loadMakeupPayloadValidation() {
   const managerRoleSource = sourceBetween(
     serviceSource,
@@ -116,6 +125,29 @@ function loadMakeupPayloadValidation() {
     },
   );
 }
+
+test("휴보강 상신 DB 검증 실패는 원시 코드 대신 운영자 안내로 표시한다", () => {
+  const { getMakeupActionErrorMessage } = loadMakeupActionErrorMessage();
+
+  assert.equal(
+    getMakeupActionErrorMessage(
+      { message: "makeup_request_input_invalid", code: "22023" },
+      "휴보강 신청서 저장에 실패했습니다.",
+    ),
+    "휴보강 신청 정보를 저장할 수 없습니다. 수업·담당 선생님·결재자 연결을 확인해 주세요.",
+  );
+});
+
+test("신규 휴보강 상신은 서버가 허용하지 않는 반려·보완 필드를 전송하지 않는다", () => {
+  const createSource = sourceBetween(
+    serviceSource,
+    "export async function createMakeupRequest",
+    "async function loadSingleMakeupRequest",
+  );
+
+  assert.match(createSource, /delete createInput\.returned_reason/);
+  assert.match(createSource, /delete createInput\.rejected_reason/);
+});
 
 test("makeup request route remains exposed to full roles but not the assistant shell", () => {
   const assistantAllowedPathsSource = authGuardSource.slice(
@@ -318,6 +350,7 @@ test("new makeup requests refresh the Seoul year at submission while edits keep 
   assert.match(submitSource, /const submissionEffectiveYear = getMakeupApproverEffectiveYear\(editingRequest\?\.createdAt\)/);
   assert.match(submitSource, /resolveMakeupSubmissionApproverCatalogId\(\{/);
   assert.match(submitSource, /patchInput\(\{ approverTeacherCatalogId: submissionApproverTeacherCatalogId \}\)/);
+  assert.match(submitSource, /getMakeupActionErrorMessage\(submitError, "휴보강 신청서 저장에 실패했습니다\."\)/);
   assert.match(submitSource, /approverTeacherCatalogId: submissionApproverTeacherCatalogId/);
 
   const {

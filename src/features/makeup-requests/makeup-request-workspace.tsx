@@ -309,6 +309,18 @@ function resolveMakeupSubmissionApproverCatalogId({
 }
 
 function getMakeupActionErrorMessage(error: unknown, fallback: string) {
+  const code = error && typeof error === "object"
+    ? String((error as { code?: unknown }).code || "").trim()
+    : ""
+  const message = error && typeof error === "object"
+    ? String((error as { message?: unknown }).message || "").trim()
+    : error instanceof Error
+      ? error.message.trim()
+      : ""
+
+  if (message === "makeup_request_input_invalid" || code === "22023") {
+    return "휴보강 신청 정보를 저장할 수 없습니다. 수업·담당 선생님·결재자 연결을 확인해 주세요."
+  }
   if (error instanceof Error && error.message) return error.message
   if (error && typeof error === "object") {
     const detail = [
@@ -2156,7 +2168,7 @@ export function MakeupRequestWorkspace() {
       setRequestDialogOpen(false)
       await refresh()
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "휴보강 신청서 저장에 실패했습니다.")
+      setError(getMakeupActionErrorMessage(submitError, "휴보강 신청서 저장에 실패했습니다."))
     } finally {
       setSaving(false)
     }
