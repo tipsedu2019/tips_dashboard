@@ -1,6 +1,16 @@
 import { supabase } from "../../lib/supabase.ts";
 
 import {
+  CONTINUOUS_CLASS_SCHEDULE_RPC,
+  type GenerateClassLessonSessionsInput,
+  type SaveClassLessonContentInput,
+  type SaveClassLessonSessionInput,
+  type SaveClassScheduleDefaultsInput,
+} from "./continuous-class-schedule-contract.ts";
+
+export { CONTINUOUS_CLASS_SCHEDULE_RPC } from "./continuous-class-schedule-contract.ts";
+
+import {
   buildContinuousScheduleBackfillPreview,
   compareContinuousScheduleShadow,
   type ContinuousScheduleLegacyInput,
@@ -39,6 +49,34 @@ type SupabaseReadResult = {
   error: unknown;
 };
 
+export type ContinuousScheduleRpcErrorKind =
+  | "stale"
+  | "forbidden"
+  | "not_ready"
+  | "idempotency"
+  | "validation"
+  | "unknown";
+
+export type ContinuousScheduleRpcError = {
+  kind: ContinuousScheduleRpcErrorKind;
+  code: string;
+};
+
+export type ContinuousScheduleMutationRpcClient = {
+  rpc: (name: string, parameters: Record<string, unknown>) => Promise<{
+    data: unknown;
+    error: unknown;
+  }>;
+};
+
+export type ContinuousScheduleMutationAction = {
+  requestKey: string;
+  saveDefaults: (input: SaveClassScheduleDefaultsInput) => Promise<unknown>;
+  generateSessions: (input: GenerateClassLessonSessionsInput) => Promise<unknown>;
+  saveSession: (input: SaveClassLessonSessionInput) => Promise<unknown>;
+  saveContent: (input: SaveClassLessonContentInput) => Promise<unknown>;
+};
+
 type SupabaseReadQuery = PromiseLike<SupabaseReadResult> & {
   eq: (column: string, value: string) => SupabaseReadQuery;
   order: (column: string) => SupabaseReadQuery;
@@ -53,6 +91,108 @@ type SupabaseContinuousScheduleReaderClient = {
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function rpcCode(error: unknown): string {
+  return text(record(error)?.code).toUpperCase();
+}
+
+function rpcMessage(error: unknown): string {
+  return text(record(error)?.message).toLowerCase();
+}
+
+export function mapContinuousScheduleRpcError(error: unknown): ContinuousScheduleRpcError {
+  const code = rpcCode(error);
+  const message = rpcMessage(error);
+  if (code === "40001" || message.includes("class_schedule_stale")) {
+    return { kind: "stale", code };
+  }
+  if (code === "42501" || message.includes("class_schedule_forbidden")) {
+    return { kind: "forbidden", code };
+  }
+  if (message.includes("continuous_class_schedule_runtime_not_ready")) {
+    return { kind: "not_ready", code };
+  }
+  if (message.includes("idempotency_key_reused")) {
+    return { kind: "idempotency", code };
+  }
+  if (["22023", "22007", "23514", "23505"].includes(code) || message.includes("class_schedule_validation")) {
+    return { kind: "validation", code };
+  }
+  return { kind: "unknown", code };
+}
+
+function defaultRequestKey(): string {
+  if (typeof globalThis.crypto?.randomUUID !== "function") {
+    throw new Error("A cryptographically secure request key generator is required.");
+  }
+  return globalThis.crypto.randomUUID();
+}
+
+async function invokeContinuousScheduleRpc(
+  client: ContinuousScheduleMutationRpcClient,
+  name: string,
+  parameters: Record<string, unknown>,
+): Promise<unknown> {
+  const result = await client.rpc(name, parameters);
+  if (result.error) throw result.error;
+  return result.data;
+}
+
+export function createContinuousScheduleMutationAction(input: {
+  rpc: ContinuousScheduleMutationRpcClient["rpc"];
+  createRequestKey?: () => string;
+}): ContinuousScheduleMutationAction {
+  const requestKey = (input.createRequestKey || defaultRequestKey)();
+  const client: ContinuousScheduleMutationRpcClient = { rpc: input.rpc };
+
+  return {
+    requestKey,
+    saveDefaults(value) {
+      return invokeContinuousScheduleRpc(client, CONTINUOUS_CLASS_SCHEDULE_RPC.saveDefaults, {
+        p_class_id: value.classId,
+        p_expected_schedule_revision: value.expectedScheduleRevision,
+        p_slots: value.slots,
+        p_request_key: requestKey,
+        p_reason: value.reason,
+      });
+    },
+    generateSessions(value) {
+      return invokeContinuousScheduleRpc(client, CONTINUOUS_CLASS_SCHEDULE_RPC.generateSessions, {
+        p_class_id: value.classId,
+        p_expected_schedule_revision: value.expectedScheduleRevision,
+        p_date_from: value.dateFrom,
+        p_date_to: value.dateTo,
+        p_request_key: requestKey,
+        p_reason: value.reason,
+      });
+    },
+    saveSession(value) {
+      return invokeContinuousScheduleRpc(client, CONTINUOUS_CLASS_SCHEDULE_RPC.saveSession, {
+        p_session_id: value.sessionId,
+        p_expected_revision: value.expectedRevision,
+        p_schedule_state: value.scheduleState,
+        p_session_date: value.sessionDate,
+        p_start_time: value.startTime,
+        p_end_time: value.endTime,
+        p_teacher_catalog_id: value.teacherCatalogId,
+        p_classroom_catalog_id: value.classroomCatalogId,
+        p_memo: value.memo,
+        p_public_note: value.publicNote,
+        p_teacher_note: value.teacherNote,
+        p_request_key: requestKey,
+        p_correction_reason: value.correctionReason,
+      });
+    },
+    saveContent(value) {
+      return invokeContinuousScheduleRpc(client, CONTINUOUS_CLASS_SCHEDULE_RPC.saveContent, {
+        p_class_id: value.classId,
+        p_expected_content_hash: value.expectedContentHash,
+        p_content_patch: value.contentPatch,
+        p_request_key: requestKey,
+      });
+    },
+  };
 }
 
 function record(value: unknown): Record<string, unknown> | null {
