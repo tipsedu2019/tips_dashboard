@@ -40,6 +40,7 @@ const STATE_PRIORITY = {
   exception: 1,
   tbd: 2,
   makeup: 3,
+  skipped: 4,
 };
 
 const PERIOD_COLORS = [
@@ -405,16 +406,16 @@ export function applyCalendarDateToggle(planInput, dateString, meta = {}) {
     }
 
     return applySessionStateChange(planInput, dateString, {
-      nextState: "active",
-      isForced: true,
+      nextState: "exception",
+      isForced: false,
     });
   }
 
   if (currentState === "force_active") {
     return applySessionStateChange(planInput, dateString, {
-      nextState: "makeup",
+      nextState: "exception",
       memo: planInput?.sessionStates?.[dateString]?.memo || "",
-      isForced: true,
+      isForced: false,
     });
   }
 
@@ -445,9 +446,17 @@ export function applyCalendarDateToggle(planInput, dateString, meta = {}) {
 
   if (currentState === "tbd") {
     return applySessionStateChange(planInput, dateString, {
-      nextState: "active",
+      nextState: "skipped",
       memo: planInput?.sessionStates?.[dateString]?.memo || "",
       isForced: false,
+    });
+  }
+
+  if (currentState === "skipped") {
+    return applySessionStateChange(planInput, dateString, {
+      nextState: "active",
+      memo: planInput?.sessionStates?.[dateString]?.memo || "",
+      isForced: !meta?.hasBaseSession,
     });
   }
 
@@ -887,7 +896,7 @@ function canReuseSessionForBillingPeriod(existingSession, billingId) {
 }
 
 function isCountedScheduleState(state) {
-  return !["exception", "tbd"].includes(state);
+  return !["exception", "tbd", "skipped"].includes(state);
 }
 
 function getProgressStatusFromEntries(textbookEntries = []) {
@@ -1193,7 +1202,10 @@ export function calculateSchedulePlan(planInput) {
       if (
         hasBaseSession ||
         overrideState === "force_active" ||
-        overrideState === "makeup"
+        overrideState === "exception" ||
+        overrideState === "makeup" ||
+        overrideState === "tbd" ||
+        overrideState === "skipped"
       ) {
         baseEntries.push({
           billingId: period.id,

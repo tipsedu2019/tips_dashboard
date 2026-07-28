@@ -706,7 +706,8 @@ test("global shell exposes stable browser-use targets", async () => {
   assert.match(navUserSource, /data-testid="admin-profile-avatar-grid"/);
   assert.match(sidebarSource, /data-testid="admin-sidebar-rail"/);
   assert.match(appSidebarSource, /<SidebarRail \/>/);
-  assert.match(dialogSource, /data-\[state=closed\]:pointer-events-none data-\[state=closed\]:hidden data-\[state=closed\]:invisible/);
+  assert.match(dialogSource, /data-\[state=closed\]:pointer-events-none/);
+  assert.doesNotMatch(dialogSource, /data-\[state=closed\]:hidden|data-\[state=closed\]:invisible/);
   assert.match(dialogSource, /absolute top-4 right-4 z-30/);
   assert.match(globalsSource, /\[data-slot="dialog-content"\]\[data-state="closed"\]/);
 });
