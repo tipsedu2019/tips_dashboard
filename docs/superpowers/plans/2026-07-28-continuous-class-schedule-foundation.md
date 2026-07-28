@@ -204,7 +204,7 @@ export async function loadContinuousScheduleShadowEvidence(
 - Consumes: already-parsed default slots with `{ day, startTime, endTime, teacher, classroom }`, a class ID, raw schedule text, and the existing `schedule_plan`.
 - Produces: `buildContinuousScheduleBackfillPreview()` and `compareContinuousScheduleShadow()` using the locked interfaces above.
 
-- [ ] **Step 1: Write the failing preview tests**
+- [x] **Step 1: Write the failing preview tests**
 
 Create `tests/continuous-class-schedule-model.node.ts` with these cases:
 
@@ -331,7 +331,7 @@ test("shadow comparison reports exact key, date, state, and slot count mismatche
 });
 ```
 
-- [ ] **Step 2: Run the preview tests and confirm the missing module failure**
+- [x] **Step 2: Run the preview tests and confirm the missing module failure**
 
 Run:
 
@@ -342,7 +342,7 @@ TASK_NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencie
 
 Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `continuous-class-schedule-model.ts`.
 
-- [ ] **Step 3: Implement strict normalization types and helpers**
+- [x] **Step 3: Implement strict normalization types and helpers**
 
 Create `src/features/academic/continuous-class-schedule-model.ts`. Use these exact state and day registries:
 
@@ -389,7 +389,7 @@ const ISSUE_ORDER = [
 
 `eligible` is true only when `issues.length === 0`.
 
-- [ ] **Step 4: Implement deterministic shadow comparison**
+- [x] **Step 4: Implement deterministic shadow comparison**
 
 Add:
 
@@ -414,7 +414,7 @@ export type ContinuousScheduleShadowIssueCode =
 Return unique issue codes in the order shown above. Do not compare resource
 snapshots for legacy sessions because those values are intentionally unknown.
 
-- [ ] **Step 5: Run the focused model test**
+- [x] **Step 5: Run the focused model test**
 
 Run:
 
@@ -425,7 +425,7 @@ TASK_NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencie
 
 Expected: all three tests PASS.
 
-- [ ] **Step 6: Run lint and commit Task 1**
+- [x] **Step 6: Run lint and commit Task 1**
 
 Run:
 
@@ -452,7 +452,7 @@ Expected: lint and diff checks pass; one focused commit is created.
 - Consumes: existing `public.classes`, `public.profiles`, `public.teacher_catalogs`, `public.classroom_catalogs`, `public.set_updated_at()`, and `public.log_dashboard_audit_event()`.
 - Produces: additive class columns, `public.class_schedule_slots`, `public.class_lesson_sessions`, `dashboard_private.class_schedule_mutation_receipts`, and `public.continuous_class_schedule_runtime_version()`.
 
-- [ ] **Step 1: Write the failing migration contract test**
+- [x] **Step 1: Write the failing migration contract test**
 
 Create `tests/continuous-class-schedule-schema.test.mjs`. Read the migration and
 pgTAP file with `readFile`. Normalize SQL by removing line comments and
@@ -505,7 +505,7 @@ Also assert:
 - the pgTAP file names all tables, columns, checks, indexes, RLS states, and the
   runtime function returning zero.
 
-- [ ] **Step 2: Run the schema test and confirm missing-file failure**
+- [x] **Step 2: Run the schema test and confirm missing-file failure**
 
 Run:
 
@@ -516,7 +516,7 @@ TASK_NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencie
 
 Expected: FAIL because the migration and pgTAP files do not exist.
 
-- [ ] **Step 3: Create the forward-only migration header and class columns**
+- [x] **Step 3: Create the forward-only migration header and class columns**
 
 Start `supabase/migrations/20260728152442_continuous_class_schedule_foundation.sql`
 with:
@@ -579,7 +579,7 @@ $$;
 
 Do not update any existing class row.
 
-- [ ] **Step 4: Add the current-default slot table**
+- [x] **Step 4: Add the current-default slot table**
 
 Use this exact core shape:
 
@@ -610,7 +610,7 @@ create index if not exists class_schedule_slots_class_sort_idx
 Add an idempotent `set_updated_at_class_schedule_slots` trigger using
 `public.set_updated_at()`.
 
-- [ ] **Step 5: Add the lesson-session snapshot table**
+- [x] **Step 5: Add the lesson-session snapshot table**
 
 Use this exact core shape:
 
@@ -673,7 +673,7 @@ create index if not exists class_lesson_sessions_class_state_date_idx
 
 Add an idempotent `set_updated_at_class_lesson_sessions` trigger.
 
-- [ ] **Step 6: Add the private receipt table and inactive marker**
+- [x] **Step 6: Add the private receipt table and inactive marker**
 
 Create:
 
@@ -713,7 +713,7 @@ grant execute on function public.continuous_class_schedule_runtime_version()
   to authenticated;
 ```
 
-- [ ] **Step 7: Add read-only RLS and audit triggers**
+- [x] **Step 7: Add read-only RLS and audit triggers**
 
 For `class_schedule_slots` and `class_lesson_sessions`:
 
@@ -747,7 +747,7 @@ Do not create a write policy. Add idempotent
 
 End the migration with `commit;`.
 
-- [ ] **Step 8: Create the pgTAP schema contract**
+- [x] **Step 8: Create the pgTAP schema contract**
 
 Create `supabase/tests/continuous_class_schedule_foundation_test.sql` with a
 transactional pgTAP test containing these 33 assertions:
@@ -932,7 +932,7 @@ rollback;
 
 The total assertion count must remain exactly 33.
 
-- [ ] **Step 9: Run schema contracts**
+- [x] **Step 9: Run schema contracts**
 
 Run:
 
@@ -954,7 +954,7 @@ Expected: 33 pgTAP assertions PASS. If no isolated database is running, record
 the pgTAP runtime check as pending; do not start, reset, link, or modify a
 linked/remote database as part of this task.
 
-- [ ] **Step 10: Commit Task 2**
+- [x] **Step 10: Commit Task 2**
 
 Run:
 
@@ -978,7 +978,7 @@ Expected: one additive schema commit; no operational database is changed.
 - Consumes: `public.continuous_class_schedule_runtime_version()` and a zero-row fallback probe of `public.class_lesson_sessions`.
 - Produces: cached `ContinuousScheduleRuntimeState`, `probeContinuousScheduleRuntime()`, `resetContinuousScheduleRuntimeProbe()`, and `invalidateContinuousScheduleRuntimeAfterReadyFailure()`.
 
-- [ ] **Step 1: Write the runtime-probe harness and failing tests**
+- [x] **Step 1: Write the runtime-probe harness and failing tests**
 
 Use the same factory-marker and `typescript.transpileModule()` harness as
 `tests/registration-runtime-probe.test.mjs`. The client records RPC names and
@@ -1020,7 +1020,7 @@ Also test:
 - `invalidateAfterReadyFailure()` resets and throws
   `ContinuousScheduleRuntimeIntegrityError`.
 
-- [ ] **Step 2: Run the probe test and confirm missing-module failure**
+- [x] **Step 2: Run the probe test and confirm missing-module failure**
 
 Run:
 
@@ -1031,7 +1031,7 @@ TASK_NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencie
 
 Expected: FAIL because the runtime probe module does not exist.
 
-- [ ] **Step 3: Implement the probe factory**
+- [x] **Step 3: Implement the probe factory**
 
 Create `src/features/academic/continuous-class-schedule-runtime-probe.ts`
 with factory markers:
@@ -1068,7 +1068,7 @@ Follow the generation-token cache/reset pattern in
 `registration-runtime-probe.ts`. End the factory marker before binding the
 default Supabase client.
 
-- [ ] **Step 4: Run probe tests and lint**
+- [x] **Step 4: Run probe tests and lint**
 
 Run:
 
@@ -1080,7 +1080,7 @@ TASK_NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencie
 
 Expected: all runtime tests pass and lint exits zero.
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
 Run:
 
@@ -1102,7 +1102,7 @@ git commit -m "feat: probe continuous schedule shadow runtime"
 - Consumes: `ContinuousScheduleRuntimeState`, a class row with `schedule_storage_mode`, the Task 1 preview model, and exact-class Supabase reads.
 - Produces: `loadContinuousScheduleShadowEvidence()`; its `authoritativeSource` is locked to `"legacy"` in release 1.
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 Build a fake reader with these methods:
 
@@ -1201,7 +1201,7 @@ test("shadow mode compares exact-class rows but keeps legacy authoritative", asy
 });
 ```
 
-- [ ] **Step 2: Run the service test and confirm missing-module failure**
+- [x] **Step 2: Run the service test and confirm missing-module failure**
 
 Run:
 
@@ -1212,7 +1212,7 @@ TASK_NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencie
 
 Expected: FAIL because the service module does not exist.
 
-- [ ] **Step 3: Implement the release-1 service boundary**
+- [x] **Step 3: Implement the release-1 service boundary**
 
 Create:
 
@@ -1272,7 +1272,7 @@ supabase
 Do not import this service into `useAcademicWorkspaceData` or
 `ClassScheduleWorkspace` in release 1.
 
-- [ ] **Step 4: Run service tests, model tests, and lint**
+- [x] **Step 4: Run service tests, model tests, and lint**
 
 Run:
 
@@ -1284,7 +1284,7 @@ TASK_NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencie
 
 Expected: all focused tests and lint pass.
 
-- [ ] **Step 5: Commit Task 4**
+- [x] **Step 5: Commit Task 4**
 
 Run:
 
@@ -1308,7 +1308,7 @@ git commit -m "feat: read continuous schedule shadow evidence"
 - Consumes: exported class rows or an explicitly authorized read-only live Supabase query, `parseClassScheduleSlots()`, Task 1 preview model, and optional shadow rows.
 - Produces: redacted JSON evidence with class IDs, eligibility, counts, and issue codes; it performs no write.
 
-- [ ] **Step 1: Write failing command-contract tests**
+- [x] **Step 1: Write failing command-contract tests**
 
 Create `tests/continuous-class-schedule-backfill-preview.test.mjs`.
 Import these functions from the script:
@@ -1374,7 +1374,7 @@ test("live all-class preview requires explicit confirmation", () => {
 });
 ```
 
-- [ ] **Step 2: Run the command tests and confirm missing-file failure**
+- [x] **Step 2: Run the command tests and confirm missing-file failure**
 
 Run:
 
@@ -1385,7 +1385,7 @@ TASK_NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencie
 
 Expected: FAIL because the preview script does not exist.
 
-- [ ] **Step 3: Implement explicit argument and redaction boundaries**
+- [x] **Step 3: Implement explicit argument and redaction boundaries**
 
 `parseContinuousSchedulePreviewArgs(argv)` returns one of:
 
@@ -1417,7 +1417,7 @@ evidence file.
 
 Populate only the redacted fields asserted by the test.
 
-- [ ] **Step 4: Implement file and explicit live reads**
+- [x] **Step 4: Implement file and explicit live reads**
 
 File mode reads a JSON array whose rows may contain:
 
@@ -1469,7 +1469,7 @@ import {
 The command must not stage shadow data, update storage mode, call a mutation
 RPC, or write a file.
 
-- [ ] **Step 5: Write the operator runbook**
+- [x] **Step 5: Write the operator runbook**
 
 Create `docs/operations/continuous-class-schedule-foundation-runbook.md` with:
 
@@ -1497,7 +1497,7 @@ TASK_NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencie
 "$TASK_NODE" --experimental-strip-types scripts/preview-continuous-class-schedule-backfill.mjs --live --all --confirm-all-read
 ```
 
-- [ ] **Step 6: Add the synthetic fixture and run a local smoke test**
+- [x] **Step 6: Add the synthetic fixture and run a local smoke test**
 
 Create `tests/fixtures/continuous-class-schedule-preview.json`:
 
@@ -1534,7 +1534,7 @@ TASK_NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencie
 Expected: tests pass and stdout contains one eligible synthetic class with no
 raw plan or names.
 
-- [ ] **Step 7: Lint and commit Task 5**
+- [x] **Step 7: Lint and commit Task 5**
 
 Run:
 
@@ -1672,6 +1672,14 @@ other prohibited actions.
 
 ## Verification record — 2026-07-28
 
+- Task 1: `3c2c368a` — legacy-to-shadow preview model.
+- Task 2: `f3e49cc1` — inactive normalized schema.
+- Task 3: `b2f26d32` — fail-closed runtime probe.
+- Task 4: `a2c67ee4` — exact-class shadow evidence reader.
+- Task 5: `c0734045` — read-only preview command and runbook.
+- Task 6: `1e370405`, `d4183d09`, `a7b45cda` — verification and Docker-free
+  integration boundary.
+
 - Focused foundation Node tests: 25 passed, 0 failed.
 - Related legacy regression tests: 114 passed, 0 failed.
 - Full Node test command: 1,906 passed, 0 failed.
@@ -1699,5 +1707,6 @@ other prohibited actions.
   tables; index tuning is deferred until the write/query workload is designed.
 
 Release 1 remains operationally inactive after schema application: no live
-preview, backfill, runtime/storage-mode change, push, deployment, or provider
-action was performed.
+preview, backfill, or runtime/storage-mode change was performed. Git push and
+Vercel production deployment completed on 2026-07-29 after the final local
+type-check and Webpack build passed; no provider action was performed.
