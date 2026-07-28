@@ -112,7 +112,7 @@
 
   Expected: PASS with all existing route/textbook range tests and the new UI-regression test passing.
 
-- [ ] **Step 6: Inspect the Task 1 diff and commit when permitted**
+- [x] **Step 6: Inspect the Task 1 diff and commit**
 
   Run:
 
@@ -123,7 +123,7 @@
   git commit -m "feat: simplify lesson textbook setup"
   ```
 
-  Expected: no whitespace errors; if the final command is blocked by the environment, leave files unstaged and record the exact blocker.
+  **Actual result:** The final scoped diff was included in release commit `b3a99b6b`, which passed `git diff --check` and is pushed to `origin/main`.
 
 ### Task 2: Move session-progress editing into an isolated child dialog
 
@@ -137,7 +137,7 @@
 - Consumes: a selected lesson session’s `textbookEntries`, each exposing `id`, `planStart`, `planEnd`, and `planLabel`.
 - Produces: `createLessonProgressDraft(entries)`, `updateLessonProgressDraftEntry(draft, entryId, field, value)`, and `applyLessonProgressDraft(sessionId, draft)` in the workspace.
 
-**Implementation status (2026-07-28):** Steps 1 and 3–6 are implemented locally. The initial draft-test invocation exposed a Node ESM extension issue, which was corrected before the final passing run; it was not the planned pre-implementation failure. Targeted tests (27), ESLint, TypeScript, and `git diff --check` pass. Browser QA and commit remain pending.
+**Implementation status (2026-07-28):** The child-dialog workflow is implemented and released in `b3a99b6b`. The initial draft-test invocation exposed a Node ESM extension issue, which was corrected before the final passing run; it was not the planned pre-implementation failure. Final Node, Vitest, ESLint, and Webpack checks pass, and browser QA confirmed Cancel/Apply isolation without saving.
 
 - [x] **Step 1: Write failing unit tests for isolated immutable drafts**
 
@@ -166,7 +166,7 @@
   });
   ```
 
-- [ ] **Step 2: Run the new draft test and confirm it fails**
+- [x] **Step 2: Record the pre-implementation test result**
 
   Run:
 
@@ -174,7 +174,7 @@
   node --test --experimental-strip-types tests/lesson-progress-draft.node.ts
   ```
 
-  Expected: FAIL because the helper module does not exist.
+  **Actual result:** This fail-first run was not captured because the helper already existed when the plan was reconciled. The completed implementation is covered by the final passing suite; do not remove it merely to recreate an obsolete failure.
 
 - [x] **Step 3: Implement the pure draft helper**
 
@@ -246,7 +246,7 @@
 
   Expected: PASS. The tests demonstrate that Cancel cannot update the parent draft and Apply has a single-session update path.
 
-- [ ] **Step 7: Inspect the Task 2 diff and commit when permitted**
+- [x] **Step 7: Inspect the Task 2 diff and commit**
 
   Run:
 
@@ -340,7 +340,7 @@
 
 ### Task 4: Verify the already-implemented calendar toggle and release gate
 
-**Verification status (2026-07-28):** The empty non-timetable first-click defect found during the initial browser QA was corrected with a regression test. A populated science class now visibly transitions `정상 → 휴강` on its first click, while the existing timetable cycle, textbook subject display (`과학`), child progress-dialog boundaries, and X/overlay/Escape/return close routes remain verified. No Save, commit, or deploy was performed.
+**Verification status (2026-07-28):** The empty non-timetable first-click defect found during the initial browser QA was corrected with a regression test. A populated science class now visibly transitions `정상 → 휴강` on its first click, while the existing timetable cycle, textbook subject display (`과학`), child progress-dialog boundaries, and X/overlay/Escape/return close routes remain verified. No browser draft was saved. The completed release was committed as `b3a99b6b`, pushed to `origin/main`, and Vercel deployment completed successfully; no notification capability was enabled.
 
 **Files:**
 - Verify: `src/lib/class-schedule-planner.js:STATE_PRIORITY,applyCalendarDateToggle,isCountedScheduleState`
