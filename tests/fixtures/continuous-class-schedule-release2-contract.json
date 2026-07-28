@@ -1,0 +1,27 @@
+{
+  "classId": "10000000-0000-4000-8000-000000000001",
+  "actorProfileId": "20000000-0000-4000-8000-000000000001",
+  "requestKey": "30000000-0000-4000-8000-000000000001",
+  "defaultSlots": [
+    {
+      "id": "40000000-0000-4000-8000-000000000001",
+      "weekday": 2,
+      "startTime": "14:00",
+      "endTime": "15:30",
+      "teacherCatalogId": "50000000-0000-4000-8000-000000000001",
+      "classroomCatalogId": "60000000-0000-4000-8000-000000000001",
+      "sortOrder": 0
+    }
+  ],
+  "expected": {
+    "runtimeVersion": 0,
+    "operation": "save_class_schedule_defaults_v1",
+    "auditColumns": [
+      "class_id",
+      "request_key",
+      "request_operation",
+      "change_reason"
+    ],
+    "existingSessionSnapshotMustRemainUntouched": true
+  }
+}
