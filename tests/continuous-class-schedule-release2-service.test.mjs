@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   CONTINUOUS_CLASS_SCHEDULE_RPC,
+  createBoundedContinuousScheduleReader,
   createContinuousScheduleMutationAction,
   mapContinuousScheduleRpcError,
 } from "../src/features/academic/continuous-class-schedule-service.ts";
@@ -74,4 +75,74 @@ test("RPC errors are mapped to safe schedule action states", () => {
   ]) {
     assert.equal(mapContinuousScheduleRpcError(error).kind, expected);
   }
+});
+
+test("bounded reader deduplicates one range, aborts a prior class, and trusts the RPC authority result", async () => {
+  const calls = [];
+  let firstSignal;
+  let resolveFirst;
+  const firstRead = new Promise((resolve) => { resolveFirst = resolve; });
+  const reader = createBoundedContinuousScheduleReader({
+    runtimeProbe: { async probe() { return { mode: "ready", version: 1 }; }, reset() {} },
+    async readSchedule(input, signal) {
+      calls.push({ input, signal });
+      if (input.classId === CLASS_ID) {
+        firstSignal = signal;
+        return firstRead;
+      }
+      return { authoritativeSource: "legacy", runtimeVersion: 0 };
+    },
+    async loadLegacy(input) {
+      return { source: "legacy", classId: input.classId, sessions: [] };
+    },
+  });
+
+  const first = reader.load({ classId: CLASS_ID, dateFrom: "2026-04-01", dateTo: "2026-04-30" });
+  assert.strictEqual(first, reader.load({ classId: CLASS_ID, dateFrom: "2026-04-01", dateTo: "2026-04-30" }));
+  await new Promise((resolve) => queueMicrotask(resolve));
+  const second = reader.load({
+    classId: "10000000-0000-4000-8000-000000000002",
+    dateFrom: "2026-04-01",
+    dateTo: "2026-04-30",
+  });
+  assert.equal(firstSignal.aborted, true);
+  assert.deepEqual(await second, {
+    source: "legacy",
+    classId: "10000000-0000-4000-8000-000000000002",
+    sessions: [],
+  });
+
+  resolveFirst({ authoritativeSource: "normalized", runtimeVersion: 1, sessions: [{ id: "session-1" }] });
+  assert.deepEqual(await first, {
+    source: "normalized",
+    data: { authoritativeSource: "normalized", runtimeVersion: 1, sessions: [{ id: "session-1" }] },
+  });
+  assert.equal(calls.length, 2);
+});
+
+test("runtime-not-ready reloads legacy while other normalized read failures stay explicit", async () => {
+  let resets = 0;
+  const legacy = async (input) => ({ source: "legacy", classId: input.classId, sessions: [] });
+  const notReady = createBoundedContinuousScheduleReader({
+    runtimeProbe: { async probe() { return { mode: "ready", version: 1 }; }, reset() { resets += 1; } },
+    async readSchedule() { throw { code: "P0001", message: "continuous_class_schedule_runtime_not_ready" }; },
+    loadLegacy: legacy,
+  });
+  assert.deepEqual(await notReady.load({ classId: CLASS_ID, dateFrom: "2026-04-01", dateTo: "2026-04-30" }), {
+    source: "legacy", classId: CLASS_ID, sessions: [],
+  });
+  assert.equal(resets, 1);
+
+  const failed = createBoundedContinuousScheduleReader({
+    runtimeProbe: { async probe() { return { mode: "ready", version: 1 }; }, reset() {} },
+    async readSchedule() { throw { code: "XX000", message: "database failed" }; },
+    loadLegacy: legacy,
+  });
+  const result = await failed.load({ classId: CLASS_ID, dateFrom: "2026-04-01", dateTo: "2026-04-30" });
+  assert.deepEqual(result, { source: "error", error: { code: "XX000", message: "database failed" } });
+
+  await assert.rejects(
+    failed.load({ classId: "not-a-uuid", dateFrom: "2026-04-01", dateTo: "2027-05-01" }),
+    /class id and a date range/i,
+  );
 });

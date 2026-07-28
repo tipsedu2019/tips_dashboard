@@ -77,6 +77,22 @@ export type ContinuousScheduleMutationAction = {
   saveContent: (input: SaveClassLessonContentInput) => Promise<unknown>;
 };
 
+export type ContinuousScheduleBoundedReadInput = {
+  classId: string;
+  dateFrom: string;
+  dateTo: string;
+};
+
+export type ContinuousScheduleBoundedReadResult =
+  | { source: "normalized"; data: Record<string, unknown> }
+  | { source: "legacy"; classId: string; sessions: unknown[] }
+  | { source: "error"; error: unknown };
+
+export type ContinuousScheduleBoundedReader = {
+  load: (input: ContinuousScheduleBoundedReadInput) => Promise<ContinuousScheduleBoundedReadResult>;
+  reset: () => void;
+};
+
 type SupabaseReadQuery = PromiseLike<SupabaseReadResult> & {
   eq: (column: string, value: string) => SupabaseReadQuery;
   order: (column: string) => SupabaseReadQuery;
@@ -101,6 +117,29 @@ function rpcMessage(error: unknown): string {
   return text(record(error)?.message).toLowerCase();
 }
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function isValidScheduleRange(input: ContinuousScheduleBoundedReadInput): boolean {
+  if (!isUuid(input.classId) || !/^\d{4}-\d{2}-\d{2}$/.test(input.dateFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(input.dateTo)) {
+    return false;
+  }
+  const dateFrom = new Date(`${input.dateFrom}T00:00:00.000Z`);
+  const dateTo = new Date(`${input.dateTo}T00:00:00.000Z`);
+  return Number.isFinite(dateFrom.getTime())
+    && Number.isFinite(dateTo.getTime())
+    && dateTo >= dateFrom
+    && (dateTo.getTime() - dateFrom.getTime()) / 86_400_000 <= 366;
+}
+
+function isMissingScheduleReadRpc(error: unknown): boolean {
+  const code = rpcCode(error);
+  const message = rpcMessage(error);
+  return code === "PGRST202" || code === "42883"
+    || (message.includes("get_class_schedule_v1") && message.includes("schema cache"));
+}
+
 export function mapContinuousScheduleRpcError(error: unknown): ContinuousScheduleRpcError {
   const code = rpcCode(error);
   const message = rpcMessage(error);
@@ -120,6 +159,75 @@ export function mapContinuousScheduleRpcError(error: unknown): ContinuousSchedul
     return { kind: "validation", code };
   }
   return { kind: "unknown", code };
+}
+
+export function createBoundedContinuousScheduleReader(input: {
+  runtimeProbe: Pick<
+    import("./continuous-class-schedule-runtime-probe.ts").ContinuousScheduleRuntimeProbe,
+    "probe" | "reset"
+  >;
+  readSchedule: (
+    input: ContinuousScheduleBoundedReadInput,
+    signal: AbortSignal,
+  ) => Promise<Record<string, unknown>>;
+  loadLegacy: (
+    input: ContinuousScheduleBoundedReadInput,
+  ) => Promise<{ source: "legacy"; classId: string; sessions: unknown[] }>;
+}): ContinuousScheduleBoundedReader {
+  const inFlight = new Map<string, Promise<ContinuousScheduleBoundedReadResult>>();
+  const inFlightTokens = new Map<string, symbol>();
+  let activeClassId = "";
+  let activeController: AbortController | null = null;
+
+  function reset(): void {
+    activeController?.abort();
+    activeController = null;
+    activeClassId = "";
+    inFlight.clear();
+    inFlightTokens.clear();
+  }
+
+  function load(value: ContinuousScheduleBoundedReadInput) {
+    if (!isValidScheduleRange(value)) {
+      return Promise.reject(new Error("A valid class ID and a date range of at most 366 days are required."));
+    }
+    const key = `${value.classId}:${value.dateFrom}:${value.dateTo}`;
+    const existing = inFlight.get(key);
+    if (existing) return existing;
+    if (activeClassId && activeClassId !== value.classId) activeController?.abort();
+    activeClassId = value.classId;
+    const controller = new AbortController();
+    activeController = controller;
+
+    const token = Symbol(key);
+    const request = (async () => {
+      try {
+        await input.runtimeProbe.probe();
+        const result = await input.readSchedule(value, controller.signal);
+        if (result.authoritativeSource === "normalized") {
+          return { source: "normalized" as const, data: result };
+        }
+        if (result.authoritativeSource === "legacy") return input.loadLegacy(value);
+        return { source: "error" as const, error: new Error("Continuous schedule read returned no authoritative source.") };
+      } catch (error) {
+        if (mapContinuousScheduleRpcError(error).kind === "not_ready" || isMissingScheduleReadRpc(error)) {
+          input.runtimeProbe.reset();
+          return input.loadLegacy(value);
+        }
+        return { source: "error" as const, error };
+      } finally {
+        if (inFlightTokens.get(key) === token) {
+          inFlight.delete(key);
+          inFlightTokens.delete(key);
+        }
+      }
+    })();
+    inFlight.set(key, request);
+    inFlightTokens.set(key, token);
+    return request;
+  }
+
+  return { load, reset };
 }
 
 function defaultRequestKey(): string {
