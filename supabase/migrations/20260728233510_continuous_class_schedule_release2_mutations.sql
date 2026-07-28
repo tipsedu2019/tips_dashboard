@@ -431,6 +431,7 @@ begin
     'legacySchedule', v_class.schedule,
     'legacyTeacher', v_class.teacher,
     'legacyRoom', v_class.room,
+    'schedulePlanHash', dashboard_private.continuous_class_schedule_hash_v1(coalesce(v_class.schedule_plan, '{}'::jsonb)),
     'slots', coalesce((select jsonb_agg(jsonb_build_object(
       'id', id, 'weekday', weekday, 'startTime', to_char(start_time, 'HH24:MI'), 'endTime', to_char(end_time, 'HH24:MI'),
       'teacherCatalogId', teacher_catalog_id, 'teacherName', teacher_name,
