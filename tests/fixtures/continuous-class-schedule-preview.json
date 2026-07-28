@@ -1,0 +1,19 @@
+[
+  {
+    "id": "10000000-0000-4000-8000-000000000001",
+    "schedule": "화 14:00-15:30",
+    "teacher": "테스트 선생님",
+    "room": "테스트 강의실",
+    "schedule_plan": {
+      "sessions": [
+        {
+          "id": "session:001:2026-04-03",
+          "date": "2026-04-03",
+          "scheduleState": "active"
+        }
+      ]
+    },
+    "shadow_slots": [],
+    "shadow_sessions": []
+  }
+]
