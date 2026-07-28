@@ -39,7 +39,7 @@ type SupabaseReadResult = {
   error: unknown;
 };
 
-type SupabaseReadQuery = {
+type SupabaseReadQuery = PromiseLike<SupabaseReadResult> & {
   eq: (column: string, value: string) => SupabaseReadQuery;
   order: (column: string) => SupabaseReadQuery;
   limit: (count: number) => PromiseLike<SupabaseReadResult>;
@@ -148,7 +148,7 @@ export async function loadContinuousScheduleShadowEvidence(
 
   const preview = buildContinuousScheduleBackfillPreview(input.legacyInput);
   const comparison = compareContinuousScheduleShadow(preview, { slots, sessions });
-  const evidenceIssueCodes = [...comparison.issueCodes];
+  const evidenceIssueCodes: string[] = [...comparison.issueCodes];
 
   if (storageMode === "normalized") {
     evidenceIssueCodes.push(
