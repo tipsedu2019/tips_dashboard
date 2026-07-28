@@ -1677,6 +1677,9 @@ Expected: release 1 is code-complete but operationally inactive.
 - `git diff --check`: passed before the verification-note commit.
 - pgTAP runtime verification: pending. `supabase status` could not connect to
   Docker, so no local database was started, reset, linked, migrated, or changed.
+- 2026-07-29 operator decision: proceed with source integration without Docker.
+  This does not waive the database gate: the migration remains unapplied until
+  an isolated PostgreSQL/Supabase environment can run the 33 pgTAP assertions.
 
 Release 1 remains operationally inactive: no migration application, live
 preview, runtime/storage-mode change, push, deployment, or provider action was
