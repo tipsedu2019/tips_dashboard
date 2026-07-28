@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(20);
+select plan(32);
 
 select has_column('public', 'dashboard_audit_logs', 'class_id');
 select has_column('public', 'dashboard_audit_logs', 'request_key');
@@ -116,6 +116,19 @@ select ok(
   ),
   'runtime table keeps one singleton row'
 );
+
+select has_function('public', 'get_class_schedule_defaults_v1', array['uuid']::text[]);
+select has_function('public', 'get_class_schedule_v1', array['uuid', 'date', 'date']::text[]);
+select has_function('public', 'initialize_new_class_schedule_v1', array['uuid', 'bigint', 'text', 'jsonb', 'uuid']::text[]);
+select has_function('public', 'save_class_schedule_defaults_v1', array['uuid', 'bigint', 'jsonb', 'uuid', 'text']::text[]);
+select has_function('public', 'preview_class_lesson_session_generation_v1', array['uuid', 'bigint', 'date', 'date']::text[]);
+select has_function('public', 'generate_class_lesson_sessions_v1', array['uuid', 'bigint', 'date', 'date', 'uuid', 'text']::text[]);
+select has_function('public', 'save_class_lesson_session_v1', array['uuid', 'bigint', 'text', 'date', 'time', 'time', 'uuid', 'uuid', 'text', 'text', 'text', 'uuid', 'text']::text[]);
+select has_function('public', 'save_class_lesson_content_v1', array['uuid', 'text', 'jsonb', 'uuid']::text[]);
+select has_function('public', 'backfill_class_schedule_shadow_v1', array['uuid', 'text', 'jsonb', 'jsonb', 'uuid']::text[]);
+select has_function('public', 'verify_class_schedule_shadow_v1', array['uuid', 'text']::text[]);
+select has_function('public', 'activate_class_schedule_storage_v1', array['uuid', 'bigint', 'text', 'uuid']::text[]);
+select has_function('public', 'deactivate_class_schedule_storage_v1', array['uuid', 'uuid', 'text']::text[]);
 
 select * from finish();
 rollback;

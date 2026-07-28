@@ -15,6 +15,29 @@ const fixtureUrl = new URL(
   "./fixtures/continuous-class-schedule-release2-contract.json",
   import.meta.url,
 );
+const mutationMigrationUrl = new URL(
+  "../supabase/migrations/20260728233510_continuous_class_schedule_release2_mutations.sql",
+  import.meta.url,
+);
+const contractUrl = new URL(
+  "../src/features/academic/continuous-class-schedule-contract.ts",
+  import.meta.url,
+);
+
+const MUTATION_RPC_NAMES = [
+  "get_class_schedule_defaults_v1",
+  "get_class_schedule_v1",
+  "initialize_new_class_schedule_v1",
+  "save_class_schedule_defaults_v1",
+  "preview_class_lesson_session_generation_v1",
+  "generate_class_lesson_sessions_v1",
+  "save_class_lesson_session_v1",
+  "save_class_lesson_content_v1",
+  "backfill_class_schedule_shadow_v1",
+  "verify_class_schedule_shadow_v1",
+  "activate_class_schedule_storage_v1",
+  "deactivate_class_schedule_storage_v1",
+];
 
 function normalizeSql(source) {
   return source
@@ -79,7 +102,7 @@ test("release 2 contracts preserve inactive runtime and close direct audit write
     "change_reason",
   ]);
   assert.equal(fixture.defaultSlots.length, 1);
-  assert.match(normalizedPgTap, /select plan\(20\)/);
+  assert.match(normalizedPgTap, /select plan\(32\)/);
   for (const expected of [
     "dashboard_audit_logs_authenticated_insert",
     "continuous_class_schedule_runtime",
@@ -90,4 +113,52 @@ test("release 2 contracts preserve inactive runtime and close direct audit write
   ]) {
     assert.match(normalizedPgTap, new RegExp(expected));
   }
+});
+
+test("mutation migration implements every typed Release 2 RPC with a closed privilege boundary", async () => {
+  const [migration, contract] = await Promise.all([
+    readFile(fileURLToPath(mutationMigrationUrl), "utf8"),
+    readFile(fileURLToPath(contractUrl), "utf8"),
+  ]);
+  const normalized = normalizeSql(migration);
+
+  assert.match(migration, /^begin;\s*/i);
+  assert.match(migration.trim(), /commit;$/i);
+  assert.match(migration, /set local lock_timeout = '5s';/i);
+  assert.match(migration, /set local statement_timeout = '120s';/i);
+
+  for (const rpcName of MUTATION_RPC_NAMES) {
+    assert.match(contract, new RegExp(`"${rpcName}"`));
+    assert.match(
+      normalized,
+      new RegExp(`create or replace function public\\.${rpcName}\\(`),
+    );
+    assert.match(
+      normalized,
+      new RegExp(`revoke all on function public\\.${rpcName}\\(`),
+    );
+    assert.match(
+      normalized,
+      new RegExp(`grant execute on function public\\.${rpcName}\\([\\s\\S]*?to authenticated`),
+    );
+  }
+
+  for (const helper of [
+    "require_continuous_class_schedule_mutation_v1",
+    "with_continuous_class_schedule_audit_context_v1",
+    "continuous_class_schedule_request_replay_v1",
+    "project_continuous_class_schedule_plan_v1",
+  ]) {
+    assert.match(normalized, new RegExp(`create or replace function dashboard_private\\.${helper}\\(`));
+  }
+
+  assert.match(normalized, /pg_advisory_xact_lock/);
+  assert.match(normalized, /idempotency_key_reused/);
+  assert.match(normalized, /class_schedule_stale/);
+  assert.match(normalized, /continuous_class_schedule_runtime_not_ready/);
+  assert.match(normalized, /set_config\('app\.class_schedule_mutation', 'release2-rpc', true\)/);
+  assert.match(normalized, /on delete set null/);
+  assert.doesNotMatch(normalized, /update public\.class_lesson_sessions[\s\S]{0,250}save_class_schedule_defaults_v1/);
+  assert.doesNotMatch(normalized, /google_chat|web_push|solapi/i);
+  assert.doesNotMatch(normalized, /drop (?:table|column)/);
 });
