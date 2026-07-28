@@ -4,7 +4,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const migrationUrl = new URL(
-  "../supabase/migrations/20260729100000_continuous_class_schedule_release2_contracts.sql",
+  "../supabase/migrations/20260728230427_continuous_class_schedule_release2_contracts.sql",
   import.meta.url,
 );
 const pgTapUrl = new URL(
@@ -55,7 +55,7 @@ test("release 2 contracts preserve inactive runtime and close direct audit write
   assert.match(normalized, /check \(version in \(0, 1\)\)/);
   assert.match(normalized, /create table if not exists dashboard_private\.class_schedule_cutovers/);
   assert.match(normalized, /revoke all on table dashboard_private\.class_schedule_cutovers from public, anon, authenticated/);
-  assert.match(normalized, /create function public\.continuous_class_schedule_runtime_version\(\)[\s\S]*select version[\s\S]*dashboard_private\.continuous_class_schedule_runtime/);
+  assert.match(normalized, /create (?:or replace )?function public\.continuous_class_schedule_runtime_version\(\)[\s\S]*select version[\s\S]*dashboard_private\.continuous_class_schedule_runtime/);
   assert.match(normalized, /returns trigger[\s\S]*continuous_class_schedule_direct_write_guard/);
   assert.match(normalized, /create trigger continuous_class_schedule_slots_direct_write_guard/);
   assert.match(normalized, /create trigger continuous_class_lesson_sessions_direct_write_guard/);
@@ -79,7 +79,7 @@ test("release 2 contracts preserve inactive runtime and close direct audit write
     "change_reason",
   ]);
   assert.equal(fixture.defaultSlots.length, 1);
-  assert.match(normalizedPgTap, /select plan\(19\)/);
+  assert.match(normalizedPgTap, /select plan\(20\)/);
   for (const expected of [
     "dashboard_audit_logs_authenticated_insert",
     "continuous_class_schedule_runtime",

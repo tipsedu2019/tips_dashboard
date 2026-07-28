@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(19);
+select plan(20);
 
 select has_column('public', 'dashboard_audit_logs', 'class_id');
 select has_column('public', 'dashboard_audit_logs', 'request_key');
@@ -62,6 +62,11 @@ select ok(
       and not tgisinternal
   ),
   'session direct-write guard trigger exists'
+);
+select has_function(
+  'public',
+  'continuous_class_schedule_direct_write_guard',
+  array[]::text[]
 );
 select throws_ok(
   $$insert into public.class_schedule_slots (
