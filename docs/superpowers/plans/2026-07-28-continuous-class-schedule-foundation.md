@@ -1555,7 +1555,7 @@ git commit -m "chore: add continuous schedule shadow preview"
 - Consumes: all Task 1–5 artifacts.
 - Produces: evidence that the foundation is inactive, additive, read-only, and safe to hand to a high-reasoning database review before any migration application.
 
-- [ ] **Step 1: Run all focused Node tests**
+- [x] **Step 1: Run all focused Node tests**
 
 Run:
 
@@ -1571,7 +1571,7 @@ TASK_NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencie
 
 Expected: all focused tests pass.
 
-- [ ] **Step 2: Run related legacy regressions**
+- [x] **Step 2: Run related legacy regressions**
 
 Run:
 
@@ -1589,7 +1589,7 @@ TASK_NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencie
 Expected: existing lesson design, registration, makeup, and dashboard results
 remain unchanged.
 
-- [ ] **Step 3: Run full static and build verification**
+- [x] **Step 3: Run full static and build verification**
 
 Run:
 
@@ -1605,7 +1605,7 @@ git diff --check
 Expected: all commands exit zero. Record any pre-existing warning separately;
 do not convert a warning into a pass claim for a failed command.
 
-- [ ] **Step 4: Inspect the release boundary**
+- [x] **Step 4: Inspect the release boundary**
 
 Run:
 
@@ -1638,7 +1638,7 @@ Confirm:
 - no notification file or capability changed;
 - the only live-capable command is read-only and requires explicit flags.
 
-- [ ] **Step 5: Record results and commit the verification note**
+- [x] **Step 5: Record results and commit the verification note**
 
 Update this plan with the exact test counts, command exits, pgTAP runtime status,
 and any pending database-backed check. Then run:
@@ -1648,7 +1648,7 @@ git add docs/superpowers/plans/2026-07-28-continuous-class-schedule-foundation.m
 git commit -m "docs: record continuous schedule foundation verification"
 ```
 
-- [ ] **Step 6: Stop for database safety review**
+- [x] **Step 6: Stop for database safety review**
 
 Do not push, deploy, apply the migration, run the live preview, or start release
 2. Hand off:
@@ -1661,3 +1661,24 @@ Do not push, deploy, apply the migration, run the live preview, or start release
   runtime marker, and rollback boundary.
 
 Expected: release 1 is code-complete but operationally inactive.
+
+---
+
+## Verification record — 2026-07-28
+
+- Focused foundation Node tests: 25 passed, 0 failed.
+- Related legacy regression tests: 114 passed, 0 failed.
+- Full Node test command: 1,906 passed, 0 failed.
+- ESLint: 0 errors; one existing warning remains in
+  `scripts/generate-target-ui-blueprints.mjs` for unused `contentH`.
+- `tsc --noEmit`: passed after commit `d4183d09` corrected two new type-contract
+  mismatches.
+- `next build --webpack`: passed.
+- `git diff --check`: passed before the verification-note commit.
+- pgTAP runtime verification: pending. `supabase status` could not connect to
+  Docker, so no local database was started, reset, linked, migrated, or changed.
+
+Release 1 remains operationally inactive: no migration application, live
+preview, runtime/storage-mode change, push, deployment, or provider action was
+performed. Before any database action, request a highest-model/high-reasoning
+review of migration, RLS, ACL, runtime marker, and rollback boundaries.
