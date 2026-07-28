@@ -4,7 +4,7 @@
 
 이 문서는 릴리스 1의 읽기 전용 증거 수집에만 사용한다. 수업명, 교사명, 강의실, 교재, 학생, 연락처, 원본 `schedule_plan`은 보고서에 출력하지 않는다.
 
-필수 커밋은 연속 수업 일정 기반 전환 브랜치의 태스크 1~5 커밋이며, 대상 마이그레이션 파일은 `supabase/migrations/20260728130000_continuous_class_schedule_foundation.sql`이다.
+필수 커밋은 연속 수업 일정 기반 전환 브랜치의 태스크 1~5 커밋이며, 대상 마이그레이션 파일은 `supabase/migrations/20260728152442_continuous_class_schedule_foundation.sql`이다. 이 타임스탬프는 2026-07-29 운영 DB에 기록된 마이그레이션 버전과 일치한다.
 
 ## 실행 명령
 
@@ -29,6 +29,6 @@ TASK_NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencie
 
 ## 중지 조건과 승인
 
-보고서에 차단 이슈가 있거나 shadow 불일치가 있으면 이후 단계를 중지하고 원인을 검토한다. 릴리스 1에서는 연결된 데이터베이스·원격 데이터베이스에 마이그레이션을 적용하거나 런타임/저장 모드를 전환하지 않는다.
+보고서에 차단 이슈가 있거나 shadow 불일치가 있으면 이후 단계를 중지하고 원인을 검토한다. 릴리스 1 기반 스키마는 2026-07-29 운영 DB에 적용되었지만 런타임 버전은 `0`이고 저장 모드는 모두 `legacy`다. 런타임/저장 모드 전환이나 shadow 데이터 쓰기는 하지 않는다.
 
-데이터베이스 마이그레이션 적용, 운영 데이터 읽기, 이후 backfill 쓰기는 각각 별도의 명시적 승인과 고추론 DB 안전 검토가 필요하다. 이 명령은 파일을 쓰지 않고, DB mutation RPC·insert·update·delete·upsert를 실행하지 않는다.
+운영 데이터 읽기와 이후 backfill 쓰기는 각각 별도의 명시적 승인과 고추론 DB 안전 검토가 필요하다. 이 명령은 파일을 쓰지 않고, DB mutation RPC·insert·update·delete·upsert를 실행하지 않는다.

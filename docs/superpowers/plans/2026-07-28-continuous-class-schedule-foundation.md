@@ -13,9 +13,10 @@
 - Implement only release 1, `기반과 어두운 전환`, from `docs/superpowers/specs/2026-07-28-continuous-classes-session-snapshots-design.md`.
 - Do not change the current lesson-design UI or `ClassScheduleWorkspace`.
 - Do not change the authoritative browser write to `classes.schedule_plan`.
-- Do not apply a migration to any linked, preview, or production database. An
-  already-running, unlinked disposable local Supabase test database may be used
-  only for pgTAP verification after confirming its isolation.
+- The implementation phase must not apply a migration to any linked, preview,
+  or production database. On 2026-07-29 the operator separately approved and
+  applied only the reviewed additive foundation migration; this does not
+  authorize backfill or later runtime/storage-mode writes.
 - Do not set any class above `schedule_storage_mode = 'legacy'`.
 - `continuous_class_schedule_runtime_version()` must return `0`; normalized reads cannot become authoritative.
 - Do not backfill, infer, or display historical teacher, classroom, start-time, or end-time values.
@@ -23,7 +24,8 @@
 - Defer `class_textbook_assignments`, `progress_logs` foreign keys, historical
   views, term-filter removal, and end/reopen UI to release 3.
 - Do not enable Google Chat, Web Push, SOLAPI, notification workers, or any notification capability.
-- No production push, Vercel deployment, Supabase migration application, or provider action is included.
+- No Git push, Vercel deployment, or provider action is included. The separately
+  authorized Supabase schema application is recorded in the verification record.
 - Execute inline one task at a time by default; do not use subagents unless the user explicitly reauthorizes them.
 - Every database mutation added in a later release must use revision checks and idempotency. This release creates only the inactive schema and read-only inspection boundary.
 
@@ -35,7 +37,7 @@
 - `src/features/academic/continuous-class-schedule-runtime-probe.ts` — cached global runtime detection with `legacy`, `shadow`, and `ready` states.
 - `src/features/academic/continuous-class-schedule-service.ts` — exact-class, read-only shadow loader; never changes the authoritative legacy result.
 - `scripts/preview-continuous-class-schedule-backfill.mjs` — explicit read-only JSON/live preview entry point that emits IDs, counts, and issue codes only.
-- `supabase/migrations/20260728130000_continuous_class_schedule_foundation.sql` — additive columns, normalized shadow tables, RLS, audit triggers, and runtime marker.
+- `supabase/migrations/20260728152442_continuous_class_schedule_foundation.sql` — additive columns, normalized shadow tables, RLS, audit triggers, and runtime marker. The timestamp matches the production migration history recorded on 2026-07-29.
 - `supabase/tests/continuous_class_schedule_foundation_test.sql` — pgTAP contract for the inactive schema.
 - `tests/continuous-class-schedule-model.node.ts` — pure migration-preview and comparison tests.
 - `tests/continuous-class-schedule-schema.test.mjs` — migration lexical, ACL, and safety assertions.
@@ -442,7 +444,7 @@ Expected: lint and diff checks pass; one focused commit is created.
 ### Task 2: Add the inactive normalized schema
 
 **Files:**
-- Create: `supabase/migrations/20260728130000_continuous_class_schedule_foundation.sql`
+- Create: `supabase/migrations/20260728152442_continuous_class_schedule_foundation.sql`
 - Create: `supabase/tests/continuous_class_schedule_foundation_test.sql`
 - Create: `tests/continuous-class-schedule-schema.test.mjs`
 
@@ -516,7 +518,7 @@ Expected: FAIL because the migration and pgTAP files do not exist.
 
 - [ ] **Step 3: Create the forward-only migration header and class columns**
 
-Start `supabase/migrations/20260728130000_continuous_class_schedule_foundation.sql`
+Start `supabase/migrations/20260728152442_continuous_class_schedule_foundation.sql`
 with:
 
 ```sql
@@ -958,7 +960,7 @@ Run:
 
 ```bash
 git diff --check
-git add supabase/migrations/20260728130000_continuous_class_schedule_foundation.sql supabase/tests/continuous_class_schedule_foundation_test.sql tests/continuous-class-schedule-schema.test.mjs
+git add supabase/migrations/20260728152442_continuous_class_schedule_foundation.sql supabase/tests/continuous_class_schedule_foundation_test.sql tests/continuous-class-schedule-schema.test.mjs
 git commit -m "feat: add continuous schedule shadow schema"
 ```
 
@@ -1617,7 +1619,7 @@ git diff origin/main..HEAD -- \
   src/features/academic/continuous-class-schedule-runtime-probe.ts \
   src/features/academic/continuous-class-schedule-service.ts \
   scripts/preview-continuous-class-schedule-backfill.mjs \
-  supabase/migrations/20260728130000_continuous_class_schedule_foundation.sql \
+  supabase/migrations/20260728152442_continuous_class_schedule_foundation.sql \
   supabase/tests/continuous_class_schedule_foundation_test.sql \
   tests/continuous-class-schedule-model.node.ts \
   tests/continuous-class-schedule-schema.test.mjs \
@@ -1662,6 +1664,10 @@ Do not push, deploy, apply the migration, run the live preview, or start release
 
 Expected: release 1 is code-complete but operationally inactive.
 
+This was the implementation handoff gate. The later, separately authorized
+schema-only production application is recorded below and did not authorize the
+other prohibited actions.
+
 ---
 
 ## Verification record — 2026-07-28
@@ -1675,13 +1681,23 @@ Expected: release 1 is code-complete but operationally inactive.
   mismatches.
 - `next build --webpack`: passed.
 - `git diff --check`: passed before the verification-note commit.
-- pgTAP runtime verification: pending. `supabase status` could not connect to
-  Docker, so no local database was started, reset, linked, migrated, or changed.
-- 2026-07-29 operator decision: proceed with source integration without Docker.
-  This does not waive the database gate: the migration remains unapplied until
-  an isolated PostgreSQL/Supabase environment can run the 33 pgTAP assertions.
+- pgTAP local runtime verification was initially pending because Docker was not
+  available; no local database was started or changed.
+- 2026-07-29 operator decision: apply the reviewed additive migration directly
+  to the linked production database without Docker.
+- Production migration version: `20260728152442`
+  (`continuous_class_schedule_foundation`). The local migration filename was
+  aligned to that recorded version so later CLI timestamp comparison remains
+  consistent.
+- Production catalog verification: all 33 pgTAP-equivalent schema, constraint,
+  RLS, ACL, index, trigger, and inactive-runtime checks passed using read-only
+  catalog queries. The two shadow tables and private receipt table remained
+  empty; all 70 existing classes remained in `legacy` mode at revision `0`.
+- Supabase advisors reported no security notice for the new foundation
+  objects. Performance advisors reported 11 `INFO` notices for currently
+  unindexed foreign keys or unused indexes on the empty, inactive shadow
+  tables; index tuning is deferred until the write/query workload is designed.
 
-Release 1 remains operationally inactive: no migration application, live
-preview, runtime/storage-mode change, push, deployment, or provider action was
-performed. Before any database action, request a highest-model/high-reasoning
-review of migration, RLS, ACL, runtime marker, and rollback boundaries.
+Release 1 remains operationally inactive after schema application: no live
+preview, backfill, runtime/storage-mode change, push, deployment, or provider
+action was performed.

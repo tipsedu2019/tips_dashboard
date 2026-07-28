@@ -4,7 +4,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const migrationUrl = new URL(
-  "../supabase/migrations/20260728130000_continuous_class_schedule_foundation.sql",
+  "../supabase/migrations/20260728152442_continuous_class_schedule_foundation.sql",
   import.meta.url,
 );
 const pgTapUrl = new URL(
