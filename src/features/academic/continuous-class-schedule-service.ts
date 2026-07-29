@@ -72,6 +72,7 @@ export type ContinuousScheduleMutationRpcClient = {
 export type ContinuousScheduleMutationAction = {
   requestKey: string;
   saveDefaults: (input: SaveClassScheduleDefaultsInput) => Promise<unknown>;
+  previewGeneration: (input: Omit<GenerateClassLessonSessionsInput, "reason">) => Promise<unknown>;
   generateSessions: (input: GenerateClassLessonSessionsInput) => Promise<unknown>;
   saveSession: (input: SaveClassLessonSessionInput) => Promise<unknown>;
   saveContent: (input: SaveClassLessonContentInput) => Promise<unknown>;
@@ -263,6 +264,14 @@ export function createContinuousScheduleMutationAction(input: {
         p_slots: value.slots,
         p_request_key: requestKey,
         p_reason: value.reason,
+      });
+    },
+    previewGeneration(value) {
+      return invokeContinuousScheduleRpc(client, CONTINUOUS_CLASS_SCHEDULE_RPC.previewGeneration, {
+        p_class_id: value.classId,
+        p_expected_schedule_revision: value.expectedScheduleRevision,
+        p_date_from: value.dateFrom,
+        p_date_to: value.dateTo,
       });
     },
     generateSessions(value) {

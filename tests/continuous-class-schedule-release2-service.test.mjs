@@ -77,6 +77,20 @@ test("RPC errors are mapped to safe schedule action states", () => {
   }
 });
 
+test("generation preview sends only the bounded range and revision", async () => {
+  const calls = [];
+  const action = createContinuousScheduleMutationAction({
+    createRequestKey: () => "70000000-0000-4000-8000-000000000003",
+    async rpc(name, args) { calls.push([name, args]); return { data: { creatableCount: 2 }, error: null }; },
+  });
+  assert.deepEqual(await action.previewGeneration({
+    classId: CLASS_ID, expectedScheduleRevision: 4, dateFrom: "2026-08-01", dateTo: "2026-08-31",
+  }), { creatableCount: 2 });
+  assert.deepEqual(calls, [["preview_class_lesson_session_generation_v1", {
+    p_class_id: CLASS_ID, p_expected_schedule_revision: 4, p_date_from: "2026-08-01", p_date_to: "2026-08-31",
+  }]]);
+});
+
 test("bounded reader deduplicates one range, aborts a prior class, and trusts the RPC authority result", async () => {
   const calls = [];
   let firstSignal;
