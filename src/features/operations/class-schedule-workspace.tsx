@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { CSSProperties, KeyboardEvent } from "react";
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { ArrowLeft, ArrowUpRight, BookOpen, Plus, Trash2, X } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -1839,7 +1839,10 @@ function findLessonDesignElementByDataAttribute(attributeName: string, value: st
 function scrollElementInsideContainerToCenter(
   container: Element,
   target: Element,
-  { fallbackToDocument = true }: { fallbackToDocument?: boolean } = {},
+  {
+    fallbackToDocument = true,
+    behavior = "smooth",
+  }: { fallbackToDocument?: boolean; behavior?: ScrollBehavior } = {},
 ) {
   const scrollContainer = container as HTMLElement;
   const targetElement = target as HTMLElement;
@@ -1852,7 +1855,7 @@ function scrollElementInsideContainerToCenter(
   if (!canScrollInside) {
     if (fallbackToDocument) {
       targetElement.scrollIntoView({
-        behavior: "smooth",
+        behavior,
         block: "center",
         inline: "nearest",
       });
@@ -1871,7 +1874,151 @@ function scrollElementInsideContainerToCenter(
 
   scrollContainer.scrollTo({
     top: Math.max(0, nextTop),
-    behavior: "smooth",
+    behavior,
+  });
+}
+
+function scrollLessonDesignPeriodSession(
+  sessionId: string,
+  { behavior = "smooth" }: { behavior?: ScrollBehavior } = {},
+) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const periodTarget = findLessonDesignElementByDataAttribute("data-lesson-period-session-id", sessionId);
+  const periodSidebar = document.querySelector('[data-lesson-period-sidebar="true"]');
+
+  if (periodTarget && periodSidebar?.contains(periodTarget)) {
+    scrollElementInsideContainerToCenter(periodSidebar, periodTarget, {
+      fallbackToDocument: false,
+      behavior,
+    });
+  }
+}
+
+function scrollLessonDesignPeriodSessionAfterRender(sessionId: string) {
+  if (typeof window === "undefined") {
+    scrollLessonDesignPeriodSession(sessionId);
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => scrollLessonDesignPeriodSession(sessionId));
+  });
+}
+
+function getLessonDesignDialogScrollTop() {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  const dialogScroller = document.querySelector('[data-testid="lesson-design-dialog-scroll"]') as HTMLElement | null;
+  return dialogScroller?.scrollTop ?? null;
+}
+
+function scrollLessonDesignCalendarSessionToPeriod(
+  dialogScroller: HTMLElement,
+  periodTarget: Element,
+  calendarTarget: Element,
+) {
+  const alignCalendar = () => {
+    const periodRect = periodTarget.getBoundingClientRect();
+    const calendarRect = calendarTarget.getBoundingClientRect();
+    const maxScrollTop = Math.max(0, dialogScroller.scrollHeight - dialogScroller.clientHeight);
+    const nextTop = Math.min(
+      maxScrollTop,
+      Math.max(
+        0,
+        dialogScroller.scrollTop +
+          calendarRect.top +
+          calendarRect.height / 2 -
+          periodRect.top -
+          periodRect.height / 2,
+      ),
+    );
+
+    dialogScroller.scrollTo({ top: nextTop, behavior: "auto" });
+    const periodSidebar = periodTarget.closest('[data-lesson-period-sidebar="true"]') as HTMLElement | null;
+    if (periodSidebar) {
+      scrollLessonDesignPeriodSessionToCalendar(periodSidebar, periodTarget, calendarTarget);
+    }
+  };
+
+  alignCalendar();
+  if (typeof window !== "undefined") {
+    window.requestAnimationFrame(alignCalendar);
+  }
+}
+
+function scrollLessonDesignPeriodSessionToCalendar(
+  periodSidebar: HTMLElement,
+  periodTarget: Element,
+  calendarTarget: Element,
+) {
+  const periodRect = periodTarget.getBoundingClientRect();
+  const calendarRect = calendarTarget.getBoundingClientRect();
+  const centerDelta =
+    calendarRect.top + calendarRect.height / 2 - periodRect.top - periodRect.height / 2;
+  const maxScrollTop = Math.max(0, periodSidebar.scrollHeight - periodSidebar.clientHeight);
+  const nextTop = Math.min(maxScrollTop, Math.max(0, periodSidebar.scrollTop - centerDelta));
+
+  if (Math.abs(nextTop - periodSidebar.scrollTop) < 1) {
+    return;
+  }
+
+  periodSidebar.scrollTo({ top: nextTop, behavior: "auto" });
+}
+
+function scrollLessonDesignPeriodSessionToCalendarAfterRender(
+  sessionId: string,
+  preservedDialogScrollTop: number | null = null,
+) {
+  const restoreDialogScrollTop = () => {
+    if (
+      typeof preservedDialogScrollTop !== "number" ||
+      !Number.isFinite(preservedDialogScrollTop) ||
+      typeof document === "undefined"
+    ) {
+      return;
+    }
+
+    const dialogScroller = document.querySelector('[data-testid="lesson-design-dialog-scroll"]') as HTMLElement | null;
+    dialogScroller?.scrollTo({ top: preservedDialogScrollTop, behavior: "auto" });
+  };
+  const align = () => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const periodTarget = findLessonDesignElementByDataAttribute("data-lesson-period-session-id", sessionId);
+    const periodSidebar = document.querySelector('[data-lesson-period-sidebar="true"]') as HTMLElement | null;
+    const calendarTarget = findLessonDesignElementByDataAttribute("data-lesson-calendar-session-id", sessionId);
+    const canAlignDesktopPair =
+      Boolean(periodTarget && periodSidebar?.contains(periodTarget) && calendarTarget) &&
+      typeof window !== "undefined" &&
+      window.getComputedStyle(periodSidebar as Element).position === "sticky";
+
+    if (canAlignDesktopPair && periodTarget && periodSidebar && calendarTarget) {
+      scrollLessonDesignPeriodSessionToCalendar(periodSidebar, periodTarget, calendarTarget);
+    } else {
+      scrollLessonDesignPeriodSession(sessionId, { behavior: "auto" });
+    }
+
+    restoreDialogScrollTop();
+  };
+
+  if (typeof window === "undefined") {
+    align();
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    align();
+    window.requestAnimationFrame(() => {
+      align();
+      window.requestAnimationFrame(align);
+    });
   });
 }
 
@@ -1882,21 +2029,26 @@ function scrollLessonDesignSessionPair(sessionId: string) {
 
   const periodTarget = findLessonDesignElementByDataAttribute("data-lesson-period-session-id", sessionId);
   const periodSidebar = document.querySelector('[data-lesson-period-sidebar="true"]');
+  const calendarTarget = findLessonDesignElementByDataAttribute("data-lesson-calendar-session-id", sessionId);
+  const dialogScroller = calendarTarget?.closest('[data-testid="lesson-design-dialog-scroll"]') as HTMLElement | null;
+  const isDesktopPair =
+    Boolean(periodTarget && periodSidebar?.contains(periodTarget) && dialogScroller) &&
+    window.getComputedStyle(periodSidebar as Element).position === "sticky";
 
-  if (periodTarget && periodSidebar?.contains(periodTarget)) {
-    scrollElementInsideContainerToCenter(periodSidebar, periodTarget, { fallbackToDocument: false });
-  }
-}
-
-function scrollLessonDesignSessionPairAfterRender(sessionId: string) {
-  if (typeof window === "undefined") {
-    scrollLessonDesignSessionPair(sessionId);
+  if (isDesktopPair && periodTarget && dialogScroller && calendarTarget) {
+    scrollLessonDesignPeriodSession(sessionId, { behavior: "auto" });
+    scrollLessonDesignCalendarSessionToPeriod(dialogScroller, periodTarget, calendarTarget);
     return;
   }
 
-  window.requestAnimationFrame(() => {
-    window.requestAnimationFrame(() => scrollLessonDesignSessionPair(sessionId));
-  });
+  scrollLessonDesignPeriodSession(sessionId);
+  if (calendarTarget) {
+    calendarTarget.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+      inline: "nearest",
+    });
+  }
 }
 
 function resolveRequestedLessonDesignSession(
@@ -2449,6 +2601,7 @@ export function ClassScheduleWorkspace() {
   const [selectedLessonPeriodId, setSelectedLessonPeriodId] = useState("all");
   const [selectedLessonScheduleState, setSelectedLessonScheduleState] = useState("all");
   const [selectedLessonSessionId, setSelectedLessonSessionId] = useState("");
+  const [lessonDesignPairSyncRequest, setLessonDesignPairSyncRequest] = useState(0);
   const [lessonMonthDetailsOpen, setLessonMonthDetailsOpen] = useState(false);
   const [lessonPlanDraft, setLessonPlanDraft] = useState<Record<string, unknown> | null>(null);
   const [isLessonDesignSaving, setIsLessonDesignSaving] = useState(false);
@@ -2470,8 +2623,73 @@ export function ClassScheduleWorkspace() {
   const [lessonCalendarDropTarget, setLessonCalendarDropTarget] = useState("");
   const lessonPlanDraftRef = useRef<Record<string, unknown> | null>(null);
   const lessonPlanSourceKeyRef = useRef("");
+  const pendingLessonDesignDialogScrollTopRef = useRef<number | null>(null);
+  const pendingLessonDesignCalendarPointerScrollTopRef = useRef<number | null>(null);
+  const pendingLessonDesignPairSessionIdRef = useRef("");
   const deferredSearch = useDeferredValue(search);
   const deferredLessonTextbookSearch = useDeferredValue(lessonTextbookSearch);
+
+  useLayoutEffect(() => {
+    const scrollTop = pendingLessonDesignDialogScrollTopRef.current;
+    if (typeof scrollTop !== "number" || !Number.isFinite(scrollTop) || typeof document === "undefined") {
+      return;
+    }
+
+    const dialogScroller = document.querySelector('[data-testid="lesson-design-dialog-scroll"]') as HTMLElement | null;
+    const restoreScrollTop = () => {
+      dialogScroller?.scrollTo({ top: scrollTop, behavior: "auto" });
+    };
+    restoreScrollTop();
+
+    if (typeof window === "undefined") {
+      pendingLessonDesignDialogScrollTopRef.current = null;
+      return;
+    }
+
+    let secondAnimationFrameId: number | null = null;
+    let thirdAnimationFrameId: number | null = null;
+    const firstAnimationFrameId = window.requestAnimationFrame(() => {
+      restoreScrollTop();
+      secondAnimationFrameId = window.requestAnimationFrame(() => {
+        restoreScrollTop();
+        thirdAnimationFrameId = window.requestAnimationFrame(() => {
+          restoreScrollTop();
+          if (pendingLessonDesignDialogScrollTopRef.current === scrollTop) {
+            pendingLessonDesignDialogScrollTopRef.current = null;
+          }
+        });
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(firstAnimationFrameId);
+      if (secondAnimationFrameId !== null) {
+        window.cancelAnimationFrame(secondAnimationFrameId);
+      }
+      if (thirdAnimationFrameId !== null) {
+        window.cancelAnimationFrame(thirdAnimationFrameId);
+      }
+    };
+  }, [lessonPlanDraft, selectedLessonSessionId]);
+
+  useLayoutEffect(() => {
+    const sessionId = pendingLessonDesignPairSessionIdRef.current;
+    if (!sessionId) {
+      return;
+    }
+
+    pendingLessonDesignPairSessionIdRef.current = "";
+    scrollLessonDesignSessionPair(sessionId);
+
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const animationFrameId = window.requestAnimationFrame(() => {
+      scrollLessonDesignSessionPair(sessionId);
+    });
+    return () => window.cancelAnimationFrame(animationFrameId);
+  }, [lessonDesignPairSyncRequest]);
 
   const model = useMemo(
     () =>
@@ -3648,6 +3866,12 @@ export function ClassScheduleWorkspace() {
         return;
       }
 
+      const pointerScrollTop = pendingLessonDesignCalendarPointerScrollTopRef.current;
+      pendingLessonDesignCalendarPointerScrollTopRef.current = null;
+      const dialogScrollTop = Number.isFinite(pointerScrollTop)
+        ? pointerScrollTop
+        : getLessonDesignDialogScrollTop();
+      pendingLessonDesignDialogScrollTopRef.current = dialogScrollTop;
       let preferredScheduleState = meta.hasSession ? "exception" : "force_active";
       const nextDraft = buildNextLessonPlanDraft((current) => {
         const sessionStates = (((current.sessionStates || {}) as Record<string, unknown>) || {}) as Record<
@@ -3672,11 +3896,14 @@ export function ClassScheduleWorkspace() {
       setSelectedLessonCalendarDate(dateKey);
       setLessonMonthDetailsOpen(true);
       if (nextFocusedSessionId) {
-        scrollLessonDesignSessionPairAfterRender(nextFocusedSessionId);
+        scrollLessonDesignPeriodSessionToCalendarAfterRender(nextFocusedSessionId, dialogScrollTop);
       }
     },
     [buildNextLessonPlanDraft, syncLessonDesignDraftSnapshot],
   );
+  const handleLessonCalendarPointerDown = useCallback(() => {
+    pendingLessonDesignCalendarPointerScrollTopRef.current = getLessonDesignDialogScrollTop();
+  }, []);
   const handleLessonCalendarDrop = useCallback(
     (targetDate: string, meta: { hasSession: boolean }) => {
       if (
@@ -4106,7 +4333,8 @@ export function ClassScheduleWorkspace() {
       ) {
         scrollLessonDesignSelectedSessionEditorAfterRender();
       } else if (scrollMode === "sync") {
-        scrollLessonDesignSessionPairAfterRender(resolvedSessionId);
+        pendingLessonDesignPairSessionIdRef.current = resolvedSessionId;
+        setLessonDesignPairSyncRequest((current) => current + 1);
       } else if (scrollMode === "none" && scopedSession?.monthKey) {
         scrollLessonDesignPeriodDetailAfterRender(scopedSession.monthKey);
       }
@@ -4177,7 +4405,7 @@ export function ClassScheduleWorkspace() {
     const selectedSessionId = text(selectedLessonSession?.id);
     const animationFrameId = window.requestAnimationFrame(() => {
       if (requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.periods && selectedSessionId) {
-        scrollLessonDesignSessionPair(selectedSessionId);
+        scrollLessonDesignPeriodSession(selectedSessionId);
         return;
       }
 
@@ -4209,7 +4437,7 @@ export function ClassScheduleWorkspace() {
     }
 
     lastSyncedLessonSessionPairKeyRef.current = syncKey;
-    scrollLessonDesignSessionPairAfterRender(selectedLessonSession.id);
+    scrollLessonDesignPeriodSessionAfterRender(selectedLessonSession.id);
   }, [
     isLessonDesignPage,
     requestedLessonDesignSectionId,
@@ -4348,7 +4576,7 @@ export function ClassScheduleWorkspace() {
     }
     if (requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.periods) {
       setLessonMonthDetailsOpen((current) => (current ? current : true));
-      scrollLessonDesignSessionPairAfterRender(resolvedRequestedSession.id);
+      scrollLessonDesignPeriodSessionAfterRender(resolvedRequestedSession.id);
     }
     if (selectedLessonSessionId !== resolvedRequestedSession.id) {
       setSelectedLessonSessionId(resolvedRequestedSession.id);
@@ -5611,6 +5839,7 @@ export function ClassScheduleWorkspace() {
                                         isCalendarDragSource && "opacity-70 ring-2 ring-primary/40",
                                         isCalendarDropTarget && "ring-2 ring-primary",
                                       )}
+                                      onPointerDown={handleLessonCalendarPointerDown}
                                       onClick={() => {
                                         handleLessonCalendarDateClick(dateKey, {
                                           hasSession: Boolean(primarySession),
@@ -6498,15 +6727,15 @@ export function ClassScheduleWorkspace() {
 	            className="z-[80] flex max-h-[calc(100dvh-5rem)] w-[calc(100vw-2rem)] max-w-6xl flex-col overflow-hidden p-0 sm:max-w-6xl"
 	          >
 	            <DialogHeader className="border-b px-4 py-3 sm:px-5">
-	              <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 pr-8">
-	                <DialogTitle className="truncate text-base font-semibold">{lessonDesignTitle}</DialogTitle>
+	              <div className="flex min-w-0 flex-wrap items-center gap-2 pr-8">
+	                <DialogTitle className="shrink-0 truncate text-base font-semibold">{lessonDesignTitle}</DialogTitle>
 	                <div
 	                  data-testid="lesson-design-title-meta"
 	                  aria-label="수업 기본 정보"
-	                  className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-1 text-xs text-muted-foreground"
+	                  className="flex min-w-0 flex-wrap items-center gap-1.5"
 	                >
 	                  {lessonDesignHeaderMeta.map((item) => (
-	                    <span key={item.key} className="whitespace-nowrap">
+	                    <span key={item.key} className="inline-flex items-center rounded-full border border-border/70 bg-muted/60 px-2.5 py-1 text-xs font-medium text-foreground">
 	                      {item.label}
 	                    </span>
 	                  ))}
@@ -6518,6 +6747,7 @@ export function ClassScheduleWorkspace() {
 	            </DialogHeader>
 	            <div
 	              data-testid="lesson-design-dialog-scroll"
+	              style={{ overflowAnchor: "none" }}
 	              className="min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-pb-28"
             >
               {lessonDesignWorkspaceContent}

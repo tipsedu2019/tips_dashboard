@@ -26,8 +26,9 @@ test("lesson design opens as a contained modal with its own scroll viewport", as
   const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
 
   assert.match(source, /data-testid="lesson-design-modal-dialog"/);
-  assert.match(source, /<DialogTitle className="truncate text-base font-semibold">\{lessonDesignTitle\}<\/DialogTitle>/);
+  assert.match(source, /<DialogTitle className="shrink-0 truncate text-base font-semibold">\{lessonDesignTitle\}<\/DialogTitle>/);
   assert.match(source, /data-testid="lesson-design-dialog-scroll"/);
+  assert.match(source, /data-testid="lesson-design-dialog-scroll"\s*style=\{\{ overflowAnchor: "none" \}\}/);
   assert.match(source, /className="[^"]*max-h-\[calc\(100dvh-5rem\)\][^"]*w-\[calc\(100vw-2rem\)\][^"]*max-w-6xl[^"]*overflow-hidden[^"]*p-0[^"]*"/);
   assert.match(source, /className="[^"]*min-h-0[^"]*flex-1[^"]*overflow-y-auto[^"]*overscroll-contain[^"]*scroll-pb-28[^"]*"/);
   assert.doesNotMatch(source, /data-testid="lesson-design-fullscreen-dialog"/);
@@ -88,10 +89,19 @@ test("lesson design page keeps schedule controls direct and non-duplicative", as
   assert.doesNotMatch(source, /setSelectedLessonScheduleState\(value\)/);
 });
 
-test("schedule mode keeps calendar selections co-visible and leaves textbook details to progress mode", async () => {
+test("schedule mode keeps monthly sessions and calendar cells mutually aligned", async () => {
   const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
+  const periodSession = source.match(
+    /function scrollLessonDesignPeriodSession\(\s*sessionId: string,[\s\S]*?\) \{([\s\S]*?)\r?\n\}/,
+  );
   const sessionPair = source.match(
     /function scrollLessonDesignSessionPair\(sessionId: string\) \{([\s\S]*?)\r?\n\}/,
+  );
+  const periodToCalendar = source.match(
+    /function scrollLessonDesignPeriodSessionToCalendar\([\s\S]*?\) \{([\s\S]*?)\r?\n\}/,
+  );
+  const periodToCalendarAfterRender = source.match(
+    /function scrollLessonDesignPeriodSessionToCalendarAfterRender\(\s*sessionId: string,[\s\S]*?\) \{([\s\S]*?)\r?\n\}/,
   );
   const calendarSection = source.match(
     /<section\s+id=\{LESSON_DESIGN_SECTION_IDS\.calendar\}([\s\S]*?)\r?\n\s*<\/section>/,
@@ -99,15 +109,45 @@ test("schedule mode keeps calendar selections co-visible and leaves textbook det
   const calendarToggle = source.match(
     /const handleLessonCalendarToggle = useCallback\(([\s\S]*?)\r?\n  const handleLessonCalendarDrop/,
   );
+  const focusSession = source.match(
+    /const focusLessonDesignSession = useCallback\(([\s\S]*?)\r?\n  useEffect\(\(\) => \{/,
+  );
 
+  assert.ok(periodSession, "period-only scrolling helper should exist");
   assert.ok(sessionPair, "session-pair scrolling helper should exist");
+  assert.ok(periodToCalendar, "calendar boundary correction helper should exist");
+  assert.ok(periodToCalendarAfterRender, "calendar-origin sidebar alignment helper should exist");
   assert.ok(calendarSection, "calendar section should exist");
   assert.ok(calendarToggle, "calendar toggle handler should exist");
-  assert.match(sessionPair[1], /scrollElementInsideContainerToCenter\(periodSidebar, periodTarget, \{ fallbackToDocument: false \}\)/);
-  assert.doesNotMatch(sessionPair[1], /calendarTarget\?\.scrollIntoView/);
+  assert.ok(focusSession, "monthly session focus handler should exist");
+  assert.match(periodSession[1], /scrollElementInsideContainerToCenter\(periodSidebar, periodTarget, \{[\s\S]*fallbackToDocument: false/);
+  assert.doesNotMatch(periodSession[1], /data-lesson-calendar-session-id/);
+  assert.match(sessionPair[1], /const calendarTarget = findLessonDesignElementByDataAttribute\("data-lesson-calendar-session-id", sessionId\)/);
+  assert.match(sessionPair[1], /scrollLessonDesignCalendarSessionToPeriod\(dialogScroller, periodTarget, calendarTarget\)/);
+  assert.match(source, /periodTarget\.closest\('\[data-lesson-period-sidebar="true"\]'\) as HTMLElement \| null/);
+  assert.match(source, /scrollLessonDesignPeriodSessionToCalendar\(periodSidebar, periodTarget, calendarTarget\)/);
+  assert.match(periodToCalendarAfterRender[1], /scrollLessonDesignPeriodSessionToCalendar\(periodSidebar, periodTarget, calendarTarget\)/);
+  assert.match(periodToCalendarAfterRender[1], /preservedDialogScrollTop/);
+  assert.match(periodToCalendarAfterRender[1], /dialogScroller\?\.scrollTo\(\{ top: preservedDialogScrollTop, behavior: "auto" \}\)/);
+  assert.match(source, /function getLessonDesignDialogScrollTop\(\)/);
+  assert.match(source, /const pendingLessonDesignDialogScrollTopRef = useRef<number \| null>\(null\);/);
+  assert.match(source, /const pendingLessonDesignCalendarPointerScrollTopRef = useRef<number \| null>\(null\);/);
+  assert.match(source, /useLayoutEffect\(\(\) => \{[\s\S]*pendingLessonDesignDialogScrollTopRef\.current/);
+  assert.match(source, /const pendingLessonDesignPairSessionIdRef = useRef\(""\);/);
+  assert.match(source, /const \[lessonDesignPairSyncRequest, setLessonDesignPairSyncRequest\] = useState\(0\);/);
+  assert.match(
+    source,
+    /useLayoutEffect\(\(\) => \{[\s\S]*pendingLessonDesignPairSessionIdRef\.current[\s\S]*scrollLessonDesignSessionPair\(sessionId\)[\s\S]*\[lessonDesignPairSyncRequest\]\)/,
+  );
+  assert.doesNotMatch(source, /function restoreLessonDesignDialogScrollTopAfterRender/);
   assert.match(calendarToggle[1], /const nextFocusedSessionId = syncLessonDesignDraftSnapshot\(nextDraft, \{/);
-  assert.match(calendarToggle[1], /scrollLessonDesignSessionPairAfterRender\(nextFocusedSessionId\)/);
+  assert.match(calendarToggle[1], /const dialogScrollTop = Number\.isFinite\(pointerScrollTop\)/);
+  assert.match(calendarToggle[1], /scrollLessonDesignPeriodSessionToCalendarAfterRender\(nextFocusedSessionId, dialogScrollTop\)/);
+  assert.match(calendarToggle[1], /pendingLessonDesignDialogScrollTopRef\.current = dialogScrollTop/);
+  assert.match(calendarToggle[1], /pendingLessonDesignCalendarPointerScrollTopRef\.current/);
   assert.doesNotMatch(calendarToggle[1], /scrollLessonDesignSelectedSessionEditorAfterRender/);
+  assert.match(focusSession[1], /pendingLessonDesignPairSessionIdRef\.current = resolvedSessionId/);
+  assert.match(focusSession[1], /setLessonDesignPairSyncRequest\(\(current\) => current \+ 1\)/);
   assert.match(source, /const shouldShowSessionTextbookBadge = showTextbookPlans && hasSessionTextbookEntries;/);
   assert.match(source, /const isSessionOutsideTextbookRange =\s*showTextbookPlans && hasLessonTextbooks && !hasSessionTextbookEntries;/);
   assert.match(source, /\{shouldShowSessionTextbookBadge \? \(/);
@@ -117,6 +157,10 @@ test("schedule mode keeps calendar selections co-visible and leaves textbook det
   assert.doesNotMatch(calendarSection[1], /lessonDesignSnapshot\.plannerSchedule/);
   assert.match(source, /data-testid="lesson-design-title-meta"/);
   assert.match(source, /lessonDesignHeaderMeta\.map/);
+  assert.match(source, /className="inline-flex items-center rounded-full border border-border\/70 bg-muted\/60 px-2\.5 py-1 text-xs font-medium text-foreground"/);
+  assert.match(source, /const handleLessonCalendarPointerDown = useCallback/);
+  assert.match(source, /onPointerDown=\{handleLessonCalendarPointerDown\}/);
+  assert.doesNotMatch(source, /flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 pr-8/);
 });
 
 test("lesson design period add follows the previous period month sequence", async () => {
@@ -382,21 +426,22 @@ test("lesson design session query sync does not override local session clicks", 
   assert.match(source, /lastRequestedLessonSessionKeyRef\.current = requestedLessonSessionKey/);
   assert.match(source, /requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS\.periods/);
   assert.match(source, /setLessonMonthDetailsOpen\(true\)/);
-  assert.match(source, /scrollLessonDesignSessionPairAfterRender\(resolvedRequestedSession\.id\)/);
+  assert.match(source, /scrollLessonDesignPeriodSessionAfterRender\(resolvedRequestedSession\.id\)/);
   assert.match(source, /markPendingLessonSessionSelection\(periodSelectedSession\.id\)/);
   assert.doesNotMatch(source, /setSelectedLessonSessionId\(periodSelectedSession\.id\)/);
   assert.match(source, /options: \{ scroll\?: boolean \} = \{\}/);
   assert.match(source, /scroll: scrollMode !== "none" && scrollMode !== "sync"/);
   assert.match(source, /scrollMode\?: "editor" \| "section" \| "sync" \| "none"/);
   assert.match(source, /scrollLessonDesignPeriodDetailAfterRender/);
-  assert.match(source, /scrollLessonDesignSessionPairAfterRender/);
+  assert.match(source, /pendingLessonDesignPairSessionIdRef\.current = resolvedSessionId/);
+  assert.match(source, /setLessonDesignPairSyncRequest\(\(current\) => current \+ 1\)/);
   assert.match(
     source,
-    /requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS\.periods && selectedSessionId[\s\S]*scrollLessonDesignSessionPair\(selectedSessionId\)/,
+    /requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS\.periods && selectedSessionId[\s\S]*scrollLessonDesignPeriodSession\(selectedSessionId\)/,
   );
   assert.match(
     source,
-    /requestedLessonDesignSectionId !== LESSON_DESIGN_SECTION_IDS\.periods[\s\S]*lastSyncedLessonSessionPairKeyRef\.current = ""[\s\S]*scrollLessonDesignSessionPairAfterRender\(selectedLessonSession\.id\)/,
+    /requestedLessonDesignSectionId !== LESSON_DESIGN_SECTION_IDS\.periods[\s\S]*lastSyncedLessonSessionPairKeyRef\.current = ""[\s\S]*scrollLessonDesignPeriodSessionAfterRender\(selectedLessonSession\.id\)/,
   );
 });
 
