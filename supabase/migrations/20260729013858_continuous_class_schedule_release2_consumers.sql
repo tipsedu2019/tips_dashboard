@@ -186,3 +186,163 @@ revoke execute on function public.save_registration_enrollment_rows(uuid, jsonb,
 grant execute on function public.save_registration_enrollment_rows(uuid, jsonb, text) to authenticated;
 revoke all on function public.preview_registration_lesson_session_backfill_v1() from public, anon;
 grant execute on function public.preview_registration_lesson_session_backfill_v1() to authenticated;
+
+alter table public.makeup_requests
+  add column original_lesson_session_id uuid references public.class_lesson_sessions(id) on delete set null,
+  add column original_lesson_session_revision bigint,
+  add column makeup_lesson_session_ids jsonb not null default '[]'::jsonb,
+  add column makeup_effect_revision bigint;
+
+create index makeup_requests_original_lesson_session_id_idx
+  on public.makeup_requests(original_lesson_session_id)
+  where original_lesson_session_id is not null;
+
+create or replace function dashboard_private.apply_normalized_makeup_effect_v1(
+  p_request_id uuid,
+  p_class_id uuid,
+  p_calendar_events jsonb
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_request public.makeup_requests%rowtype;
+  v_session public.class_lesson_sessions%rowtype;
+  v_slot jsonb;
+  v_new_ids jsonb := '[]'::jsonb;
+  v_new_id uuid;
+begin
+  select * into v_request from public.makeup_requests where id = p_request_id for update;
+  select * into v_session from public.class_lesson_sessions
+    where id = v_request.original_lesson_session_id and class_id = p_class_id for update;
+  if not found or v_session.schedule_state not in ('active', 'makeup') then
+    raise exception 'makeup_lesson_session_stale' using errcode = '40001';
+  end if;
+  if v_request.original_lesson_session_revision is distinct from v_session.revision then
+    raise exception 'makeup_lesson_session_stale' using errcode = '40001';
+  end if;
+  update public.class_lesson_sessions set schedule_state = 'exception', revision = revision + 1
+    where id = v_session.id;
+  for v_slot in select value from jsonb_array_elements(v_request.makeup_slots) loop
+    insert into public.class_lesson_sessions(
+      class_id, session_key, session_date, schedule_state, start_time, end_time,
+      teacher_catalog_id, teacher_name_snapshot, classroom_name_snapshot, origin,
+      memo, created_by, updated_by
+    ) values (
+      p_class_id, 'makeup:' || p_request_id::text || ':' || (jsonb_array_length(v_new_ids) + 1)::text,
+      (v_slot ->> 'startAt')::timestamptz::date, 'makeup',
+      (v_slot ->> 'startAt')::timestamptz::time, (v_slot ->> 'endAt')::timestamptz::time,
+      v_session.teacher_catalog_id, v_session.teacher_name_snapshot, v_slot ->> 'classroom', 'manual',
+      coalesce(v_request.reason, ''), (select auth.uid()), (select auth.uid())
+    ) returning id into v_new_id;
+    v_new_ids := v_new_ids || jsonb_build_array(v_new_id);
+  end loop;
+  update public.makeup_requests set makeup_lesson_session_ids = v_new_ids,
+    makeup_effect_revision = v_session.revision + 1 where id = p_request_id;
+end;
+$$;
+
+create or replace function dashboard_private.revert_normalized_makeup_effect_v1(
+  p_request_id uuid,
+  p_class_id uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare v_request public.makeup_requests%rowtype; v_session public.class_lesson_sessions%rowtype;
+begin
+  select * into v_request from public.makeup_requests where id = p_request_id for update;
+  select * into v_session from public.class_lesson_sessions
+    where id = v_request.original_lesson_session_id and class_id = p_class_id for update;
+  if not found or v_session.revision is distinct from v_request.makeup_effect_revision then
+    raise exception 'makeup_lesson_session_stale' using errcode = '40001';
+  end if;
+  if exists (select 1 from jsonb_array_elements_text(v_request.makeup_lesson_session_ids) item
+    join public.class_lesson_sessions session on session.id = item.value::uuid
+    where session.revision <> 0) then raise exception 'makeup_lesson_session_stale' using errcode = '40001'; end if;
+  update public.class_lesson_sessions set schedule_state = 'active', revision = revision + 1 where id = v_session.id;
+  delete from public.class_lesson_sessions where id in (select value::uuid from jsonb_array_elements_text(v_request.makeup_lesson_session_ids));
+end;
+$$;
+
+alter function dashboard_private.notification_apply_makeup_calendar_effects_v1(uuid, uuid, jsonb, jsonb, uuid, uuid, jsonb, jsonb)
+  rename to notification_apply_makeup_calendar_effects_legacy_v1;
+alter function dashboard_private.notification_revert_makeup_calendar_effects_v1(uuid, uuid, jsonb, jsonb, uuid, uuid, jsonb)
+  rename to notification_revert_makeup_calendar_effects_legacy_v1;
+
+create or replace function dashboard_private.notification_apply_makeup_calendar_effects_v1(
+  p_request_id uuid, p_class_id uuid, p_schedule_plan_before jsonb, p_schedule_plan_after jsonb,
+  p_cancel_academic_event_id uuid, p_makeup_academic_event_id uuid, p_makeup_academic_event_ids jsonb, p_calendar_events jsonb
+) returns void language plpgsql security definer set search_path = '' as $$
+declare v_mode text; v_event jsonb;
+begin
+  select schedule_storage_mode into v_mode from public.classes where id = p_class_id;
+  if v_mode <> 'normalized' then
+    perform dashboard_private.notification_apply_makeup_calendar_effects_legacy_v1(p_request_id, p_class_id, p_schedule_plan_before, p_schedule_plan_after, p_cancel_academic_event_id, p_makeup_academic_event_id, p_makeup_academic_event_ids, p_calendar_events);
+    return;
+  end if;
+  if p_calendar_events is null or jsonb_typeof(p_calendar_events) <> 'array' then raise exception 'makeup_calendar_effects_invalid' using errcode = '22023'; end if;
+  perform dashboard_private.apply_normalized_makeup_effect_v1(p_request_id, p_class_id, p_calendar_events);
+  for v_event in select value from jsonb_array_elements(p_calendar_events) loop
+    insert into public.academic_events(id, title, date, type, grade, note)
+    values ((v_event ->> 'id')::uuid, v_event ->> 'title', (v_event ->> 'date')::date, v_event ->> 'type', v_event ->> 'grade', v_event ->> 'note')
+    on conflict (id) do update set title = excluded.title, date = excluded.date, type = excluded.type, grade = excluded.grade, note = excluded.note
+    where strpos(coalesce(public.academic_events.note, ''), p_request_id::text) > 0;
+  end loop;
+end;
+$$;
+
+create or replace function dashboard_private.notification_revert_makeup_calendar_effects_v1(
+  p_request_id uuid, p_class_id uuid, p_schedule_plan_before jsonb, p_schedule_plan_after jsonb,
+  p_cancel_academic_event_id uuid, p_makeup_academic_event_id uuid, p_makeup_academic_event_ids jsonb
+) returns void language plpgsql security definer set search_path = '' as $$
+declare v_mode text;
+begin
+  select schedule_storage_mode into v_mode from public.classes where id = p_class_id;
+  if v_mode <> 'normalized' then
+    perform dashboard_private.notification_revert_makeup_calendar_effects_legacy_v1(p_request_id, p_class_id, p_schedule_plan_before, p_schedule_plan_after, p_cancel_academic_event_id, p_makeup_academic_event_id, p_makeup_academic_event_ids);
+    return;
+  end if;
+  perform dashboard_private.revert_normalized_makeup_effect_v1(p_request_id, p_class_id);
+  delete from public.academic_events event where strpos(coalesce(event.note, ''), '[[TIPS_MAKEUP]]') > 0 and strpos(coalesce(event.note, ''), p_request_id::text) > 0;
+end;
+$$;
+
+alter function dashboard_private.create_makeup_request_v2_unguarded(jsonb, uuid)
+  rename to create_makeup_request_v2_legacy_v1;
+
+create or replace function dashboard_private.create_makeup_request_v2_unguarded(p_input jsonb, p_request_id uuid)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare v_input jsonb; v_result jsonb; v_request_id uuid; v_session_id uuid; v_mode text; v_cancel_date date;
+begin
+  v_session_id := nullif(p_input ->> 'original_lesson_session_id', '')::uuid;
+  v_input := p_input - 'original_lesson_session_id';
+  select schedule_storage_mode into v_mode from public.classes where id = (v_input ->> 'class_id')::uuid;
+  v_cancel_date := nullif(v_input ->> 'cancel_date', '')::date;
+  if v_mode = 'normalized' and v_cancel_date is not null and v_session_id is null then raise exception 'makeup_lesson_session_required' using errcode = '22023'; end if;
+  if v_session_id is not null and not exists (select 1 from public.class_lesson_sessions where id = v_session_id and class_id = (v_input ->> 'class_id')::uuid and session_date = v_cancel_date and schedule_state in ('active', 'makeup')) then raise exception 'makeup_lesson_session_invalid' using errcode = '22023'; end if;
+  v_result := dashboard_private.create_makeup_request_v2_legacy_v1(v_input, p_request_id);
+  v_request_id := (v_result -> 'request' ->> 'id')::uuid;
+  if v_session_id is not null then
+    update public.makeup_requests request set original_lesson_session_id = v_session_id,
+      original_lesson_session_revision = session.revision
+    from public.class_lesson_sessions session where request.id = v_request_id and session.id = v_session_id;
+  end if;
+  return v_result;
+end;
+$$;
+
+alter function dashboard_private.apply_normalized_makeup_effect_v1(uuid, uuid, jsonb) owner to postgres;
+alter function dashboard_private.revert_normalized_makeup_effect_v1(uuid, uuid) owner to postgres;
+alter function dashboard_private.notification_apply_makeup_calendar_effects_v1(uuid, uuid, jsonb, jsonb, uuid, uuid, jsonb, jsonb) owner to postgres;
+alter function dashboard_private.notification_revert_makeup_calendar_effects_v1(uuid, uuid, jsonb, jsonb, uuid, uuid, jsonb) owner to postgres;
+alter function dashboard_private.create_makeup_request_v2_unguarded(jsonb, uuid) owner to postgres;
+revoke all on function dashboard_private.apply_normalized_makeup_effect_v1(uuid, uuid, jsonb) from public, anon, authenticated, service_role;
+revoke all on function dashboard_private.revert_normalized_makeup_effect_v1(uuid, uuid) from public, anon, authenticated, service_role;
+revoke all on function dashboard_private.notification_apply_makeup_calendar_effects_v1(uuid, uuid, jsonb, jsonb, uuid, uuid, jsonb, jsonb) from public, anon, authenticated, service_role;
+revoke all on function dashboard_private.notification_revert_makeup_calendar_effects_v1(uuid, uuid, jsonb, jsonb, uuid, uuid, jsonb) from public, anon, authenticated, service_role;
+revoke all on function dashboard_private.create_makeup_request_v2_unguarded(jsonb, uuid) from public, anon, authenticated, service_role;
