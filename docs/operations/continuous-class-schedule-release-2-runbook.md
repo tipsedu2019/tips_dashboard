@@ -1,21 +1,22 @@
-# 연속 수업 일정 Release 2 운영 가이드
+# 연속 수업 일정 Release 2 운영 런북
 
-## 현재 단계
+## 기본 원칙
 
-이 문서는 Release 2 구현과 비활성 배포를 위한 운영 경계를 기록한다. 현재
-단계에서는 runtime `0`과 `legacy` authority를 유지한다.
+- runtime 0에서는 `classes.schedule_plan`이 권위 원본이다. apply·activate를 실행하지 않는다.
+- apply는 단일 class, 정확한 source hash, UUID request key, `--apply`, class ID 재확인이 모두 있어야 한다.
+- apply와 verifier는 service role이 아닌 인증된 관리자 access token만 사용한다. 토큰·이름·원본 JSON을 출력하지 않는다.
 
-## 고정 안전 규칙
+## Canary 절차
 
-- 운영 수업 데이터는 정확한 class ID, 예상 source hash, request key, 명시적
-  승인 없이 변경하지 않는다.
-- backfill, runtime `1`, class activation은 이 문서의 후속 gate가 채워진 뒤에만
-  수행한다.
-- 알림 공급자와 실제 발송은 이 릴리스의 작업 대상이 아니다.
-- 롤백은 runtime을 `0`으로 낮추고 JSON authority로 복귀하며, 정규화 데이터나
-  audit/receipt를 삭제하지 않는다.
+1. read-only preview에서 critical issue 0인 class ID 하나를 고른다.
+2. class ID·count·issue code만 사용자에게 제시하고 쓰기 승인을 받는다.
+3. apply 뒤 source hash·projection mismatch·audit·ACL·runtime/mode를 verifier로 기록한다.
+4. browser에서 등록·휴보강·대시보드 parity를 확인한다. 공급자 발송은 비활성으로 유지한다.
+5. 사용자 승인 뒤에만 다음 wave를 진행한다.
 
-## 후속 보강 항목
+## runtime 0 rollback
 
-Task 13에서 read-only verifier, 단일 class apply 명령, canary evidence 형식,
-runtime rollback의 guarded SQL 절차를 이 문서에 추가한다.
+1. runtime을 0으로 되돌린다.
+2. 해당 class를 normalized에서 shadow로 demote한다.
+3. projection·audit·consumer parity를 다시 확인한다.
+4. legacy `schedule_plan`을 덮어쓰지 않는다.
