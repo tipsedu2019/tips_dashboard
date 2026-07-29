@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -45,6 +45,16 @@ function normalizeSql(source) {
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+function functionBlock(source, functionName) {
+  const normalizedName = `create or replace function ${functionName.toLowerCase()}(`;
+  const lower = source.toLowerCase();
+  const start = lower.indexOf(normalizedName);
+  assert.notEqual(start, -1, `missing ${functionName}`);
+  const end = lower.indexOf("\n$$;", start);
+  assert.notEqual(end, -1, `unterminated ${functionName}`);
+  return lower.slice(start, end + 4);
 }
 
 test("release 2 contracts preserve inactive runtime and close direct audit writes", async () => {
@@ -161,4 +171,48 @@ test("mutation migration implements every typed Release 2 RPC with a closed priv
   assert.doesNotMatch(normalized, /update public\.class_lesson_sessions[\s\S]{0,250}save_class_schedule_defaults_v1/);
   assert.doesNotMatch(normalized, /google_chat|web_push|solapi/i);
   assert.doesNotMatch(normalized, /drop (?:table|column)/);
+});
+
+test("backfill correction persists exact shadow rows and verifies stored evidence without activating runtime", async () => {
+  const migrationsDirectory = fileURLToPath(new URL("../supabase/migrations/", import.meta.url));
+  const correctionFiles = (await readdir(migrationsDirectory))
+    .filter((name) => name.endsWith("_continuous_class_schedule_backfill_correction.sql"));
+  assert.equal(correctionFiles.length, 1, "one generated backfill correction migration is required");
+
+  const migration = await readFile(new URL(
+    `../supabase/migrations/${correctionFiles[0]}`,
+    import.meta.url,
+  ), "utf8");
+  const normalized = normalizeSql(migration);
+  const backfill = functionBlock(migration, "public.backfill_class_schedule_shadow_v1");
+  const verify = functionBlock(migration, "public.verify_class_schedule_shadow_v1");
+  const activate = functionBlock(migration, "public.activate_class_schedule_storage_v1");
+
+  assert.match(migration, /^begin;\s*/i);
+  assert.match(migration.trim(), /commit;$/i);
+  assert.match(migration, /set local lock_timeout = '5s';/i);
+  assert.match(migration, /set local statement_timeout = '120s';/i);
+  assert.match(backfill, /insert into public\.class_schedule_slots/);
+  assert.match(backfill, /insert into public\.class_lesson_sessions/);
+  assert.match(backfill, /delete from public\.class_schedule_slots/);
+  assert.match(backfill, /delete from public\.class_lesson_sessions/);
+  assert.match(backfill, /schedule_storage_mode = 'shadow'/);
+  assert.match(backfill, /continuous_class_schedule_backfill_source_hash_v1\(\s*v_class\s*\)/);
+  assert.match(backfill, /source_schedule_plan_hash,\s*source_backfill_hash,/);
+  assert.match(verify, /slot_payload_mismatch/);
+  assert.match(verify, /session_payload_mismatch/);
+  assert.match(verify, /projection_mismatch/);
+  assert.match(verify, /continuous_class_schedule_backfill_source_hash_v1\(\s*v_class\s*\)/);
+  assert.match(verify, /cutover\.source_backfill_hash = p_expected_source_hash/);
+  assert.match(normalized, /add column if not exists source_backfill_hash text/);
+  assert.doesNotMatch(verify, /v_projection_hash\s*:=\s*v_source_hash/);
+  assert.match(activate, /public\.verify_class_schedule_shadow_v1/);
+  assert.match(activate, /v_verification\s*->>\s*'matches'/);
+  assert.match(activate, /cutover\.source_backfill_hash = p_expected_source_hash/);
+  assert.match(activate, /where id = v_cutover_id/);
+  assert.doesNotMatch(
+    normalized,
+    /update dashboard_private\.continuous_class_schedule_runtime[\s\S]*version\s*=\s*1/,
+  );
+  assert.doesNotMatch(normalized, /update public\.classes set schedule_plan/);
 });
