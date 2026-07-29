@@ -68,7 +68,7 @@ test("lesson design page keeps schedule controls direct and non-duplicative", as
   assert.match(source, /selectedDays\.length > 0 \? selectedDays\.length \* 4 : 0/);
   assert.match(source, /lessonCalendarMonths\.map\(\(month\) =>/);
   assert.match(source, /월 선택/);
-  assert.match(source, /isLessonDesignProgressMode\s*\? "2xl:grid-cols-\[minmax\(24rem,0\.9fr\)_minmax\(32rem,1\.1fr\)\]"\s*:\s*"xl:grid-cols-2"/);
+  assert.match(source, /isLessonDesignProgressMode \? "grid-cols-1" : "xl:grid-cols-2"/);
   assert.doesNotMatch(source, /xl:grid-cols-\[minmax\(18rem,0\.85fr\)_minmax\(34rem,1\.45fr\)\]/);
   assert.match(
     source,
@@ -148,9 +148,9 @@ test("schedule mode keeps monthly sessions and calendar cells mutually aligned",
   assert.doesNotMatch(calendarToggle[1], /scrollLessonDesignSelectedSessionEditorAfterRender/);
   assert.match(focusSession[1], /pendingLessonDesignPairSessionIdRef\.current = resolvedSessionId/);
   assert.match(focusSession[1], /setLessonDesignPairSyncRequest\(\(current\) => current \+ 1\)/);
-  assert.match(source, /const shouldShowSessionTextbookBadge = showTextbookPlans && hasSessionTextbookEntries;/);
-  assert.match(source, /const isSessionOutsideTextbookRange =\s*showTextbookPlans && hasLessonTextbooks && !hasSessionTextbookEntries;/);
-  assert.match(source, /\{shouldShowSessionTextbookBadge \? \(/);
+  assert.doesNotMatch(source, /const shouldShowSessionTextbookBadge = showTextbookPlans/);
+  assert.doesNotMatch(source, /const isSessionOutsideTextbookRange =\s*showTextbookPlans/);
+  assert.doesNotMatch(source, /showTextbookPlans/);
   assert.match(source, /<p className="text-lg font-semibold text-foreground">월별 회차<\/p>/);
   assert.match(source, /handleLessonSessionRelease\(session\)/);
   assert.match(source, /aria-label=\{`\$\{session\.label\} 일정 해제`\}/);
@@ -281,14 +281,20 @@ test("lesson design connects textbooks before assigning session ranges", async (
   assert.match(plannerSource, /subSubject: textbook\.subSubject \|\| ""/);
 });
 
-test("lesson textbook UI limits candidates to the class subject and removes duplicate controls", async () => {
+test("lesson textbook UI limits both candidates and filter options to the class subject", async () => {
   const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
 
   assert.doesNotMatch(source, /lessonTextbookSubjectFilter/);
   assert.doesNotMatch(source, /전체 기간/);
   assert.doesNotMatch(source, /현재 회차부터/);
   assert.doesNotMatch(source, /<summary[^>]*>교재 정보<\/summary>/);
-  assert.match(source, /bookSubjectKey !== plannerSubjectKey/);
+  assert.match(source, /const lessonTextbookSubjectBooks = useMemo/);
+  assert.match(source, /const lessonPlannerSubjectKey = useMemo/);
+  assert.match(source, /categories: buildLessonTextbookFilterOptions\(lessonTextbookSubjectBooks, getTextbookCategory\)/);
+  assert.match(source, /publishers: buildLessonTextbookFilterOptions\(lessonTextbookSubjectBooks, getTextbookPublisher\)/);
+  assert.match(source, /for \(const book of lessonTextbookSubjectBooks\)/);
+  assert.match(source, /setLessonTextbookCategoryFilter\(\(current\) =>/);
+  assert.match(source, /setLessonTextbookPublisherFilter\(\(current\) =>/);
   assert.match(source, /getLessonSubjectDisplayLabel\(getTextbookSubject\(book\)\)/);
 });
 
@@ -317,16 +323,11 @@ test("lesson design ranks class-fit textbooks and keeps session range entry manu
   assert.match(source, /score: scoreLessonTextbookCandidate\(book, lessonDesignSnapshot\)/);
   assert.match(source, /right\.score - left\.score/);
   assert.match(source, /lessonTextbookProgressSessions/);
-  assert.match(source, /selectedLessonTextbookProgressSessionIndex/);
   assert.match(source, /lessonTextbookCompletedSessionCount/);
   assert.match(source, /lessonTextbookPendingSessionCount/);
-  assert.match(source, /lessonTextbookOutOfRangeSessionCount/);
-  assert.match(source, /selectedLessonSessionSummaryLabel/);
-  assert.match(source, /selectedLessonSessionRangeStateLabel/);
   assert.match(source, /applyTextbookPlanRangeField/);
   assert.match(source, /applyLessonProgressDraft/);
   assert.match(source, /openLessonProgressDialog/);
-  assert.match(source, /handleIncludeLessonSessionInTextbookRange/);
   assert.match(source, /markPendingLessonSessionSelection\(progressDialogSessionId\)/);
   assert.match(source, /시작 범위/);
   assert.match(source, /종료 범위/);
@@ -347,7 +348,7 @@ test("lesson design ranks class-fit textbooks and keeps session range entry manu
   assert.doesNotMatch(source, /handleLessonTextbookPlanAutoFill/);
   assert.doesNotMatch(source, /auto-fill-current-session/);
   assert.doesNotMatch(source, /auto-fill-following-sessions/);
-  assert.match(source, /기간에 포함/);
+  assert.doesNotMatch(source, /기간에 포함/);
   assert.doesNotMatch(source, /전체 기간/);
   assert.doesNotMatch(source, /현재 회차부터/);
   assert.doesNotMatch(source, /현재 회차 자동 배정/);
@@ -358,16 +359,15 @@ test("lesson design ranks class-fit textbooks and keeps session range entry manu
   assert.doesNotMatch(source, /"0회차"/);
   assert.doesNotMatch(source, /title=\{preset\.label\}/);
   assert.doesNotMatch(source, /preset\.label\.startsWith\(`\$\{entry\.scopeLabel\} `\)/);
-  assert.match(source, /이전 회차/);
+  assert.doesNotMatch(source, /이전 회차/);
   assert.doesNotMatch(source, /다음 미배정/);
-  assert.match(source, /진도 \{lessonTextbookCompletedSessionCount\}\/\{lessonTextbookProgressSessions\.length\}/);
-  assert.match(source, /미배정 \{lessonTextbookPendingSessionCount\}/);
-  assert.match(source, /\{selectedLessonSessionAssignedTextbookCount\}\/\{selectedLessonSession\.textbookEntries\.length\}권 배정/);
-  assert.match(source, /Math\.max\(selectedLessonTextbookProgressSessionIndex \+ 1, 1\)/);
-  assert.match(source, /\{lessonTextbookProgressSessions\.length\}회/);
+  assert.doesNotMatch(source, /진도 \{lessonTextbookCompletedSessionCount\}\/\{lessonTextbookProgressSessions\.length\}/);
+  assert.doesNotMatch(source, /미배정 \{lessonTextbookPendingSessionCount\}/);
+  assert.doesNotMatch(source, /\{selectedLessonSessionAssignedTextbookCount\}\/\{selectedLessonSession\.textbookEntries\.length\}권 배정/);
+  assert.doesNotMatch(source, /Math\.max\(selectedLessonTextbookProgressSessionIndex \+ 1, 1\)/);
   assert.doesNotMatch(source, /\{Math\.max\(selectedLessonSessionIndex \+ 1, 1\)\}\/\{filteredLessonSessions\.length\}회/);
-  assert.match(source, /다음 회차/);
-  assert.match(source, /교재별 진도/);
+  assert.doesNotMatch(source, /다음 회차/);
+  assert.doesNotMatch(source, /교재별 진도/);
   assert.doesNotMatch(source, /\$\{textbookEntrySummaries\.length\}개 교재 범위/);
 });
 
@@ -454,7 +454,15 @@ test("lesson design session query sync does not override local session clicks", 
   assert.match(source, /options: \{ scroll\?: boolean \} = \{\}/);
   assert.match(source, /scroll: scrollMode !== "none" && scrollMode !== "sync"/);
   assert.match(source, /scrollMode\?: "editor" \| "section" \| "sync" \| "none"/);
-  assert.match(source, /scrollLessonDesignPeriodDetailAfterRender/);
+  assert.match(source, /const preservedLessonDesignSectionScrollKeyRef = useRef\(""\);/);
+  assert.match(
+    source,
+    /if \(scrollMode === "none"\) \{\s*preservedLessonDesignSectionScrollKeyRef\.current = \[\s*text\(targetRow\?\.id\),\s*resolvedSessionId,\s*targetSectionId,\s*\]\.join\(":"\);/,
+  );
+  assert.match(
+    source,
+    /if \(preservedLessonDesignSectionScrollKeyRef\.current === scrollKey\) \{\s*preservedLessonDesignSectionScrollKeyRef\.current = "";\s*lastScrolledLessonDesignSectionKeyRef\.current = scrollKey;\s*return;/,
+  );
   assert.match(source, /pendingLessonDesignPairSessionIdRef\.current = resolvedSessionId/);
   assert.match(source, /setLessonDesignPairSyncRequest\(\(current\) => current \+ 1\)/);
   assert.match(
@@ -495,7 +503,7 @@ test("lesson design keeps textbook finder filters separate from explicit connect
   assert.match(source, /type="search"[\s\S]*value=\{lessonTextbookSearch\}/);
   assert.match(source, /autoComplete="off"[\s\S]*enterKeyHint="search"/);
   assert.match(source, /const candidates: Array<\{ book: Record<string, unknown>; score: number; title: string \}> = \[\]/);
-  assert.match(source, /for \(const book of data\.textbooks\)/);
+  assert.match(source, /for \(const book of lessonTextbookSubjectBooks\)/);
   assert.match(source, /score: scoreLessonTextbookCandidate\(book, lessonDesignSnapshot\)/);
   assert.match(source, /return scoreGap \|\| left\.title\.localeCompare\(right\.title, "ko"\)/);
   assert.doesNotMatch(source, /onPointerDown=\{\(\) => \{\s*if \(!isLessonTextbookFinderVisible\)/);
@@ -510,26 +518,21 @@ test("lesson design keeps textbook finder filters separate from explicit connect
   assert.match(source, /isLessonDesignProgressMode && !hasLessonTextbooks \? "교재 연결 필요" : "저장"/);
   assert.doesNotMatch(source, /xl:sticky xl:top-20/);
   assert.match(source, /isLessonDesignProgressMode && hasLessonTextbooks \? \(/);
-  assert.match(source, /교재 기간 밖/);
+  assert.doesNotMatch(source, /교재 기간 밖/);
   assert.match(source, /기간 밖/);
   assert.match(source, /id=\{LESSON_DESIGN_SECTION_IDS\.board\}[\s\S]*relative z-\[1\] min-w-0 border-t bg-background py-6/);
   assert.match(source, /onPointerDown=\{\(\) => markPendingLessonSessionSelection\(session\.id\)\}/);
   assert.match(source, /onMouseDown=\{\(\) => markPendingLessonSessionSelection\(session\.id\)\}/);
   assert.match(source, /data-testid=\{`lesson-board-session-\$\{session\.id\}`\}/);
   assert.match(source, /data-testid=\{`lesson-textbook-candidate-\$\{bookId\}`\}/);
-  assert.match(source, /id="lesson-session-jump"/);
-  assert.match(source, /lessonSessionIndexById/);
+  assert.doesNotMatch(source, /id="lesson-session-jump"/);
+  assert.doesNotMatch(source, /lessonSessionIndexById/);
   assert.match(source, /filteredLessonSessionById/);
   assert.match(source, /lessonDesignSessionById/);
   assert.match(source, /firstPendingLessonSession/);
   assert.match(source, /filteredLessonSessionById\.has\(current\)/);
   assert.match(source, /filteredLessonSessionById\.get\(selectedLessonSessionId\)/);
   assert.match(source, /lessonDesignSessionById\.get\(resolvedSessionId\)/);
-  assert.match(source, /lessonSessionJumpOptions/);
-  assert.match(source, /\{lessonSessionJumpOptions\.map\(\(session\) => \(/);
-  assert.doesNotMatch(source, /\{filteredLessonSessions\.map\(\(session\) => \(\s*<option key=\{`lesson-session-jump/);
-  assert.match(source, /focusLessonDesignSession\(previousLessonSession\.id/);
-  assert.match(source, /focusLessonDesignSession\(nextLessonSession\.id/);
   assert.match(source, /aria-pressed=\{isSelected\}/);
   assert.match(source, /textbookSessionCount/);
   assert.match(source, /outsideTextbookRangeCount/);
@@ -573,11 +576,8 @@ test("lesson design splits schedule generation from progress generation", async 
   assert.match(source, /router\.replace\(`\$\{pathname\}\?\$\{nextParams\.toString\(\)\}`, \{ scroll: false \}\);/);
   assert.doesNotMatch(source, /if \(isLessonDesignPage && row\) \{/);
   assert.match(source, /isLessonDesignProgressMode \? \(/);
-  assert.match(source, /renderLessonMonthSessionDetails\(periodSessions, \{ showTextbookPlans: false \}\)/);
-  assert.match(
-    source,
-    /renderLessonMonthSessionDetails\(\[selectedLessonSession\], \{\s*showScheduleControls: false,\s*showTextbookPlans: true,\s*\}\)/,
-  );
+  assert.match(source, /renderLessonMonthSessionDetails\(periodSessions\)/);
+  assert.doesNotMatch(source, /renderLessonMonthSessionDetails\(\[selectedLessonSession\]/);
   assert.match(source, /sectionId: LESSON_DESIGN_SECTION_IDS\.board/);
   assert.match(
     source,
@@ -591,6 +591,14 @@ test("lesson design splits schedule generation from progress generation", async 
     source,
     /requestedSessionId \? LESSON_DESIGN_SECTION_IDS\.board : LESSON_DESIGN_SECTION_IDS\.periods/,
   );
+
+  const textbookSectionStart = source.indexOf(`<section id={LESSON_DESIGN_SECTION_IDS.textbooks}`);
+  const textbookSectionEnd = source.indexOf(`{!isLessonDesignProgressMode ?`, textbookSectionStart);
+  const textbookSection = source.slice(textbookSectionStart, textbookSectionEnd);
+
+  assert.match(textbookSection, /"xl:grid-cols-2"/);
+  assert.match(textbookSection, /id="lesson-textbook-finder" className="order-2/);
+  assert.match(textbookSection, /"order-1 rounded-lg border border-primary\/20 bg-primary\/5 p-2 shadow-xs"/);
 });
 
 test("lesson design modal removes the readiness jump strip", async () => {
@@ -618,10 +626,9 @@ test("lesson design keeps navigation, recovery, and save actions stable", async 
   assert.match(source, /h-\[calc\(100dvh-var\(--header-height\)-2rem\)\] overflow-y-auto overscroll-contain/);
   assert.match(source, /data-testid="lesson-design-bottom-action-bar"/);
   assert.match(source, /fixed bottom-4 right-4 z-30/);
-  assert.match(source, /data-testid="lesson-design-progress-editor"/);
-  assert.match(source, /data-testid="lesson-design-progress-editor"[\s\S]*overflow-x-hidden/);
-  assert.match(source, /2xl:sticky 2xl:top-\[calc\(var\(--header-height\)\+1rem\)\]/);
-  assert.match(source, /2xl:max-h-\[calc\(100dvh-var\(--header-height\)-6\.5rem\)\] 2xl:self-start 2xl:overflow-y-auto/);
+  assert.doesNotMatch(source, /data-testid="lesson-design-progress-editor"/);
+  assert.doesNotMatch(source, /id="lesson-session-jump"/);
+  assert.match(source, /data-testid="lesson-progress-dialog"/);
   assert.match(source, /\[content-visibility:auto\]/);
   assert.match(source, /const canScrollInside =/);
   assert.match(source, /window\.getComputedStyle\(scrollContainer\)\.overflowY/);
@@ -717,25 +724,19 @@ test("class schedule overview opens the official class schedule detail with pres
   assert.doesNotMatch(listSection, /onClick=\{\(\) => setSelectedClassId\(row\.id\)\}/);
 });
 
-test("lesson design exposes a compact PC work queue only when it adds progress value", async () => {
+test("lesson design opens progress from the selected session without a secondary editor", async () => {
   const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
 
-  assert.match(source, /const lessonDesignWorkQueueItems = isLessonDesignProgressMode/);
-  assert.match(source, /: \[\]/);
-  assert.match(source, /isLessonDesignProgressMode && lessonDesignWorkQueueItems\.length > 0/);
-  assert.match(source, /data-testid="lesson-design-work-queue"/);
-  assert.match(source, /lessonTextbookSelectedCount/);
-  assert.match(source, /lessonTextbookPendingSessionCount/);
-  assert.match(source, /lessonTextbookOutOfRangeSessionCount/);
-  assert.match(source, /nextPendingLessonSession/);
-  assert.match(source, /firstOutOfRangeLessonSession/);
-  assert.match(source, /selectedLessonSessionSummaryLabel/);
-  assert.match(source, /scrollLessonDesignSection\(item\.sectionId\)/);
-  assert.match(source, /focusLessonDesignSession\(item\.targetSessionId/);
-  assert.match(source, /targetSessionId/);
-  assert.match(source, /label: "기간 밖"/);
-  assert.match(source, /lg:grid-cols-5/);
-  assert.doesNotMatch(source, /key: "periods"[\s\S]*key: "state"/);
+  assert.doesNotMatch(source, /lessonDesignWorkQueueItems/);
+  assert.doesNotMatch(source, /data-testid="lesson-design-work-queue"/);
+  assert.doesNotMatch(source, /data-testid="lesson-design-progress-editor"/);
+  assert.doesNotMatch(source, /id="lesson-session-jump"/);
+  assert.doesNotMatch(source, /scrollLessonDesignPeriodDetailAfterRender/);
+  assert.match(
+    source,
+    /focusLessonDesignSession\(session\.id, \{\s*sectionId: LESSON_DESIGN_SECTION_IDS\.board,\s*scrollMode: "none",\s*\}\);\s*openLessonProgressDialog\(session\.id\);/,
+  );
+  assert.match(source, /data-testid="lesson-progress-dialog"/);
 });
 
 test("lesson design presents compact filters, selected rows, and mobile-safe sessions", async () => {
