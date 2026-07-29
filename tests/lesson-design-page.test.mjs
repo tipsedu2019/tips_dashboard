@@ -36,12 +36,23 @@ test("lesson design opens as a contained modal with its own scroll viewport", as
   assert.doesNotMatch(source, /!rounded-none/);
 });
 
-test("lesson design modal owns one delayed close transition before route restoration", async () => {
+test("lesson design close suppresses route-driven reopen until the close route is restored", async () => {
   const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
 
   assert.match(source, /const requestLessonDesignClose = useCallback/);
-  assert.match(source, /lessonDesignCloseTimerRef\.current/);
-  assert.match(source, /window\.setTimeout\(finishLessonDesignClose, 200\)/);
+  assert.match(source, /const isLessonDesignClosingRef = useRef\(false\);/);
+  assert.match(
+    source,
+    /if \(isLessonDesignClosingRef\.current\) \{\s*return;\s*\}\s*isLessonDesignClosingRef\.current = true;/,
+  );
+  assert.match(source, /setLessonDesignOpen\(false\);\s*finishLessonDesignClose\(\);/);
+  assert.match(
+    source,
+    /if \(!shouldOpenLessonDesign\) \{\s*isLessonDesignClosingRef\.current = false;\s*return;/,
+  );
+  assert.match(source, /if \(isLessonDesignClosingRef\.current\) \{\s*return;\s*\}/);
+  assert.doesNotMatch(source, /lessonDesignCloseTimerRef/);
+  assert.doesNotMatch(source, /window\.setTimeout\(finishLessonDesignClose, 200\)/);
   assert.match(source, /const handleLessonDesignOpenChange = useCallback\(\(open: boolean\) => \{[\s\S]*?requestLessonDesignClose\(\);/);
   assert.doesNotMatch(source, /setLessonDesignOpen\(open\);\s*if \(!open\)/);
 });
@@ -56,11 +67,11 @@ test("lesson design page keeps schedule controls direct and non-duplicative", as
   assert.match(source, /selectedDays\.length > 0 \? selectedDays\.length \* 4 : 0/);
   assert.match(source, /lessonCalendarMonths\.map\(\(month\) =>/);
   assert.match(source, /월 선택/);
-  assert.match(source, /xl:grid-cols-\[minmax\(18rem,0\.85fr\)_minmax\(34rem,1\.45fr\)\]/);
-  assert.doesNotMatch(source, /2xl:grid-cols-\[minmax\(18rem,0\.85fr\)_minmax\(34rem,1\.45fr\)\]/);
+  assert.match(source, /isLessonDesignProgressMode\s*\? "2xl:grid-cols-\[minmax\(24rem,0\.9fr\)_minmax\(32rem,1\.1fr\)\]"\s*:\s*"xl:grid-cols-2"/);
+  assert.doesNotMatch(source, /xl:grid-cols-\[minmax\(18rem,0\.85fr\)_minmax\(34rem,1\.45fr\)\]/);
   assert.match(
     source,
-    /data-lesson-period-sidebar="true"[\s\S]*className="[^"]*xl:col-start-1[^"]*xl:pr-5[^"]*"/,
+    /data-lesson-period-sidebar="true"[\s\S]*className="[^"]*xl:col-start-1[^"]*xl:sticky[^"]*xl:max-h-\[calc\(100dvh-8rem\)\][^"]*xl:overflow-y-auto[^"]*xl:pr-5[^"]*"/,
   );
   assert.match(
     source,
@@ -75,6 +86,37 @@ test("lesson design page keeps schedule controls direct and non-duplicative", as
   assert.doesNotMatch(source, /lessonScheduleStateCounts/);
   assert.doesNotMatch(source, /calendar-jump-/);
   assert.doesNotMatch(source, /setSelectedLessonScheduleState\(value\)/);
+});
+
+test("schedule mode keeps calendar selections co-visible and leaves textbook details to progress mode", async () => {
+  const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
+  const sessionPair = source.match(
+    /function scrollLessonDesignSessionPair\(sessionId: string\) \{([\s\S]*?)\r?\n\}/,
+  );
+  const calendarSection = source.match(
+    /<section\s+id=\{LESSON_DESIGN_SECTION_IDS\.calendar\}([\s\S]*?)\r?\n\s*<\/section>/,
+  );
+  const calendarToggle = source.match(
+    /const handleLessonCalendarToggle = useCallback\(([\s\S]*?)\r?\n  const handleLessonCalendarDrop/,
+  );
+
+  assert.ok(sessionPair, "session-pair scrolling helper should exist");
+  assert.ok(calendarSection, "calendar section should exist");
+  assert.ok(calendarToggle, "calendar toggle handler should exist");
+  assert.match(sessionPair[1], /scrollElementInsideContainerToCenter\(periodSidebar, periodTarget, \{ fallbackToDocument: false \}\)/);
+  assert.doesNotMatch(sessionPair[1], /calendarTarget\?\.scrollIntoView/);
+  assert.match(calendarToggle[1], /const nextFocusedSessionId = syncLessonDesignDraftSnapshot\(nextDraft, \{/);
+  assert.match(calendarToggle[1], /scrollLessonDesignSessionPairAfterRender\(nextFocusedSessionId\)/);
+  assert.doesNotMatch(calendarToggle[1], /scrollLessonDesignSelectedSessionEditorAfterRender/);
+  assert.match(source, /const shouldShowSessionTextbookBadge = showTextbookPlans && hasSessionTextbookEntries;/);
+  assert.match(source, /const isSessionOutsideTextbookRange =\s*showTextbookPlans && hasLessonTextbooks && !hasSessionTextbookEntries;/);
+  assert.match(source, /\{shouldShowSessionTextbookBadge \? \(/);
+  assert.match(source, /<p className="text-lg font-semibold text-foreground">월별 회차<\/p>/);
+  assert.match(source, /handleLessonSessionRelease\(session\)/);
+  assert.match(source, /aria-label=\{`\$\{session\.label\} 일정 해제`\}/);
+  assert.doesNotMatch(calendarSection[1], /lessonDesignSnapshot\.plannerSchedule/);
+  assert.match(source, /data-testid="lesson-design-title-meta"/);
+  assert.match(source, /lessonDesignHeaderMeta\.map/);
 });
 
 test("lesson design period add follows the previous period month sequence", async () => {

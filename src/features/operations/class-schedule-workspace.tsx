@@ -1836,7 +1836,11 @@ function findLessonDesignElementByDataAttribute(attributeName: string, value: st
   );
 }
 
-function scrollElementInsideContainerToCenter(container: Element, target: Element) {
+function scrollElementInsideContainerToCenter(
+  container: Element,
+  target: Element,
+  { fallbackToDocument = true }: { fallbackToDocument?: boolean } = {},
+) {
   const scrollContainer = container as HTMLElement;
   const targetElement = target as HTMLElement;
   const overflowY =
@@ -1846,11 +1850,13 @@ function scrollElementInsideContainerToCenter(container: Element, target: Elemen
     /^(auto|scroll|overlay)$/.test(overflowY);
 
   if (!canScrollInside) {
-    targetElement.scrollIntoView({
-      behavior: "smooth",
-      block: "center",
-      inline: "nearest",
-    });
+    if (fallbackToDocument) {
+      targetElement.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+        inline: "nearest",
+      });
+    }
     return;
   }
 
@@ -1878,21 +1884,8 @@ function scrollLessonDesignSessionPair(sessionId: string) {
   const periodSidebar = document.querySelector('[data-lesson-period-sidebar="true"]');
 
   if (periodTarget && periodSidebar?.contains(periodTarget)) {
-    scrollElementInsideContainerToCenter(periodSidebar, periodTarget);
-  } else {
-    periodTarget?.scrollIntoView({
-      behavior: "smooth",
-      block: "center",
-      inline: "nearest",
-    });
+    scrollElementInsideContainerToCenter(periodSidebar, periodTarget, { fallbackToDocument: false });
   }
-
-  const calendarTarget = findLessonDesignElementByDataAttribute("data-lesson-calendar-session-id", sessionId);
-  calendarTarget?.scrollIntoView({
-    behavior: "smooth",
-    block: "center",
-    inline: "nearest",
-  });
 }
 
 function scrollLessonDesignSessionPairAfterRender(sessionId: string) {
@@ -3440,6 +3433,8 @@ export function ClassScheduleWorkspace() {
         }
         markPendingLessonSessionSelection(nextFocusedSession.id);
       }
+
+      return text(nextFocusedSession?.id);
     },
     [data.textbooks, lessonPlanDefaults, markPendingLessonSessionSelection, selectedRow],
   );
@@ -3625,6 +3620,28 @@ export function ClassScheduleWorkspace() {
     },
     [updateLessonPlanDraft],
   );
+  const handleLessonSessionRelease = useCallback(
+    (session: (typeof selectedLessonSession)) => {
+      const sessionDate = resolveLessonSessionDraftDate(session);
+      if (!sessionDate) {
+        return;
+      }
+
+      updateLessonPlanDraft((current) => {
+        const sessionStates = ((current.sessionStates || {}) as Record<string, unknown>) || {};
+        const currentState = (sessionStates[sessionDate] || null) as Record<string, unknown> | null;
+        return applyLessonSessionStateChange(current, sessionDate, {
+          nextState: "skipped",
+          memo: getLessonSessionDraftMemo(session, currentState),
+          makeupMemo: "",
+          makeupDate: "",
+          isForced: false,
+        });
+      });
+      setSelectedLessonCalendarDate(sessionDate);
+    },
+    [updateLessonPlanDraft],
+  );
   const handleLessonCalendarToggle = useCallback(
     (dateKey: string, meta: { hasSession: boolean; hasBaseSession: boolean; isMakeup: boolean }) => {
       if (!dateKey || meta.isMakeup) {
@@ -3648,13 +3665,15 @@ export function ClassScheduleWorkspace() {
             : "exception";
         return applyCalendarDateToggle(current, dateKey, meta) as Record<string, unknown>;
       });
-      syncLessonDesignDraftSnapshot(nextDraft, {
+      const nextFocusedSessionId = syncLessonDesignDraftSnapshot(nextDraft, {
         targetDate: dateKey,
         preferScheduleState: preferredScheduleState,
       });
       setSelectedLessonCalendarDate(dateKey);
       setLessonMonthDetailsOpen(true);
-      scrollLessonDesignSelectedSessionEditorAfterRender();
+      if (nextFocusedSessionId) {
+        scrollLessonDesignSessionPairAfterRender(nextFocusedSessionId);
+      }
     },
     [buildNextLessonPlanDraft, syncLessonDesignDraftSnapshot],
   );
@@ -3982,10 +4001,9 @@ export function ClassScheduleWorkspace() {
   );
   const lastScrolledLessonDesignSectionKeyRef = useRef("");
   const lastSyncedLessonSessionPairKeyRef = useRef("");
-  const lessonDesignCloseTimerRef = useRef<number | null>(null);
+  const isLessonDesignClosingRef = useRef(false);
 
   const finishLessonDesignClose = useCallback(() => {
-    lessonDesignCloseTimerRef.current = null;
     if (requestedLessonReturnPath) {
       router.replace(requestedLessonReturnPath, { scroll: false });
       return;
@@ -3996,27 +4014,14 @@ export function ClassScheduleWorkspace() {
     );
   }, [requestedLessonReturnPath, router, searchParams]);
   const requestLessonDesignClose = useCallback(() => {
-    if (lessonDesignCloseTimerRef.current) {
+    if (isLessonDesignClosingRef.current) {
       return;
     }
 
+    isLessonDesignClosingRef.current = true;
     setLessonDesignOpen(false);
-    if (isLessonDesignPage) {
-      finishLessonDesignClose();
-      return;
-    }
-
-    lessonDesignCloseTimerRef.current = window.setTimeout(finishLessonDesignClose, 200);
-  }, [finishLessonDesignClose, isLessonDesignPage]);
-
-  useEffect(
-    () => () => {
-      if (lessonDesignCloseTimerRef.current) {
-        window.clearTimeout(lessonDesignCloseTimerRef.current);
-      }
-    },
-    [],
-  );
+    finishLessonDesignClose();
+  }, [finishLessonDesignClose]);
 
   useEffect(() => {
     if (!isLessonDesignPage || !searchParams.has("lessonMonths")) {
@@ -4230,6 +4235,11 @@ export function ClassScheduleWorkspace() {
     const shouldOpenLessonDesign =
       searchParams.get("lessonDesign") === "1" || pathname.endsWith("/lesson-design");
     if (!shouldOpenLessonDesign) {
+      isLessonDesignClosingRef.current = false;
+      return;
+    }
+
+    if (isLessonDesignClosingRef.current) {
       return;
     }
 
@@ -4443,6 +4453,21 @@ export function ClassScheduleWorkspace() {
   const lessonDesignDescription = selectedRow
     ? `${selectedRow.termName || "학기 미정"} · ${selectedRow.teacher || "선생님 미정"}`
     : "수업 설계";
+  const lessonDesignTeacherName = text(
+    selectedLessonSession?.teacherNameSnapshot || selectedRow?.teacher || selectedRowClassItem?.teacher,
+  );
+  const lessonDesignClassroomName = text(
+    selectedLessonSession?.classroomNameSnapshot ||
+      selectedRowClassItem?.classroom ||
+      selectedRowClassItem?.classroomName ||
+      selectedRowClassItem?.room ||
+      selectedRowClassItem?.roomName,
+  );
+  const lessonDesignHeaderMeta = [
+    { key: "schedule", label: text(lessonDesignSnapshot?.plannerSchedule) || "시간표 미정" },
+    { key: "teacher", label: `선생님 ${lessonDesignTeacherName || "미정"}` },
+    { key: "classroom", label: `강의실 ${lessonDesignClassroomName || "미정"}` },
+  ];
   const lessonDesignReturnLabel = getLessonDesignReturnLabel(requestedLessonReturnPath);
   const lessonDesignReturnActionLabel = getLessonDesignReturnActionLabel(lessonDesignReturnLabel);
 
@@ -4530,8 +4555,11 @@ export function ClassScheduleWorkspace() {
           sessions.map((session) => {
             const isSelectedSession = selectedLessonSession?.id === session.id;
             const hasSessionTextbookEntries = session.textbookEntries.length > 0;
+            const shouldShowSessionTextbookBadge = showTextbookPlans && hasSessionTextbookEntries;
             const isSessionOutsideTextbookRange =
               showTextbookPlans && hasLessonTextbooks && !hasSessionTextbookEntries;
+            const isSessionReleasable =
+              showScheduleControls && !normalizedLessonSessionDraft && session.scheduleState !== "makeup";
             return (
                 <div
                   key={`month-session-edit-${session.id}`}
@@ -4539,7 +4567,7 @@ export function ClassScheduleWorkspace() {
                   data-lesson-period-session-id={session.id}
                   data-lesson-selected-editor={isSelectedSession ? "true" : "false"}
                   className={cn(
-                    "overflow-hidden rounded-[1rem] border bg-background scroll-mt-28",
+                    "relative overflow-hidden rounded-[1rem] border bg-background scroll-mt-28",
                     isSelectedSession && "border-primary/50 shadow-sm",
                 )}
               >
@@ -4551,6 +4579,7 @@ export function ClassScheduleWorkspace() {
                   className={cn(
                     "flex w-full flex-wrap items-center justify-between gap-2 border-l-4 border-l-transparent px-3 py-2.5 text-left transition-colors hover:bg-muted/30",
                     isSelectedSession && "border-l-primary bg-primary/5",
+                    isSelectedSession && isSessionReleasable && "pr-12",
                   )}
                   onPointerDown={() => markPendingLessonSessionSelection(session.id)}
                   onClick={() =>
@@ -4575,13 +4604,25 @@ export function ClassScheduleWorkspace() {
                     <Badge variant={getScheduleStateTone(session.scheduleState)}>
                       {session.scheduleStateLabel}
                     </Badge>
-                    {hasSessionTextbookEntries ? (
+                    {shouldShowSessionTextbookBadge ? (
                       <Badge variant="outline">{session.textbookEntryLabel}</Badge>
                     ) : isSessionOutsideTextbookRange ? (
                       <Badge variant="outline">기간 밖</Badge>
                     ) : null}
                   </span>
                 </button>
+                ) : null}
+                {isSelectedSession && isSessionReleasable ? (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="absolute right-2 top-2 size-8 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    aria-label={`${session.label} 일정 해제`}
+                    onClick={() => handleLessonSessionRelease(session)}
+                  >
+                    <X className="size-4" aria-hidden="true" />
+                  </Button>
                 ) : null}
 
                 {isSelectedSession && selectedLessonSession ? (
@@ -4811,7 +4852,7 @@ export function ClassScheduleWorkspace() {
             "grid min-w-0 gap-0 p-4 pb-24 lg:p-6 lg:pb-24",
             isLessonDesignProgressMode
               ? "2xl:grid-cols-[minmax(24rem,0.9fr)_minmax(32rem,1.1fr)]"
-              : "xl:grid-cols-[minmax(18rem,0.85fr)_minmax(34rem,1.45fr)]",
+              : "xl:grid-cols-2",
           )}
         >
           {lessonDesignSaveError ? (
@@ -5234,10 +5275,10 @@ export function ClassScheduleWorkspace() {
           <section
             id={LESSON_DESIGN_SECTION_IDS.periods}
             data-lesson-period-sidebar="true"
-            className="bg-background py-4 xl:col-start-1 xl:pr-5"
+            className="min-w-0 bg-background py-4 xl:col-start-1 xl:sticky xl:top-0 xl:max-h-[calc(100dvh-8rem)] xl:self-start xl:overflow-y-auto xl:overscroll-contain xl:pr-5"
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-lg font-semibold text-foreground">일정 생성</p>
+              <p className="text-lg font-semibold text-foreground">월별 회차</p>
               <div className="flex flex-wrap gap-2">
                 <Button type="button" size="sm" variant="outline" onClick={handleAddLessonPeriod}>
                   월 추가
@@ -5369,7 +5410,6 @@ export function ClassScheduleWorkspace() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
 	                    <div className="space-y-1">
 	                      <p className="text-lg font-semibold text-foreground">캘린더</p>
-	                      <p className="text-sm text-muted-foreground">{lessonDesignSnapshot.plannerSchedule}</p>
 	                    </div>
 	                  </div>
                     {lessonPreviewBadges.length > 0 ? (
@@ -6458,7 +6498,20 @@ export function ClassScheduleWorkspace() {
 	            className="z-[80] flex max-h-[calc(100dvh-5rem)] w-[calc(100vw-2rem)] max-w-6xl flex-col overflow-hidden p-0 sm:max-w-6xl"
 	          >
 	            <DialogHeader className="border-b px-4 py-3 sm:px-5">
-	              <DialogTitle className="truncate text-base font-semibold">{lessonDesignTitle}</DialogTitle>
+	              <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 pr-8">
+	                <DialogTitle className="truncate text-base font-semibold">{lessonDesignTitle}</DialogTitle>
+	                <div
+	                  data-testid="lesson-design-title-meta"
+	                  aria-label="수업 기본 정보"
+	                  className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-1 text-xs text-muted-foreground"
+	                >
+	                  {lessonDesignHeaderMeta.map((item) => (
+	                    <span key={item.key} className="whitespace-nowrap">
+	                      {item.label}
+	                    </span>
+	                  ))}
+	                </div>
+	              </div>
 	              <DialogDescription className="sr-only">
 	                수업 일정과 수업교재를 연결하고 회차별 진도를 설계합니다.
 	              </DialogDescription>
