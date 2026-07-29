@@ -389,6 +389,10 @@ type TransferTableSort = {
   direction: "asc" | "desc"
 } | null
 type WordRetestTableColumnKey = "select" | "status" | "testAt" | "expectedRetestAt" | "teacher" | "class" | "student" | "textbook" | "unit" | "note" | "total" | "cutoff" | "score" | "result" | "action"
+type WordRetestTableSort = {
+  columnKey: WordRetestTableColumnKey
+  direction: "asc" | "desc"
+} | null
 type TaskFocus = "none" | "today" | "overdue" | "mine" | "unassigned" | "confirmation"
 type WordRetestRetryReason = "failed" | "absent"
 type FormCompletionIntent = {
@@ -561,6 +565,12 @@ const WORD_RETEST_TABLE_COLUMN_MIN_WIDTHS: Record<WordRetestTableColumnKey, numb
   result: 116,
   action: 92,
 }
+const WORD_RETEST_EXPECTED_RETEST_TIME_OPTIONS = Array.from({ length: 52 }, (_, index) => {
+  const totalMinutes = 13 * 60 + index * 10
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`
+})
 function useStableEvent<T extends (...args: never[]) => unknown>(handler: T): T {
   const handlerRef = useRef(handler)
 
@@ -1917,6 +1927,43 @@ function matchesWordRetestPeriodFilter(
   const endDateKey = toDateKey(customEndDate)
   if (!startDateKey && !endDateKey) return true
   return isDateKeyInRange(dateKey, startDateKey, endDateKey)
+}
+
+function getWordRetestTableValue(task: OpsTask, columnKey: WordRetestTableColumnKey) {
+  const wordRetest = task.wordRetest || {}
+  switch (columnKey) {
+    case "status":
+      return getWordRetestStatusLabel(wordRetest.retestStatus, task.status, wordRetest)
+    case "testAt":
+      return getWordRetestTestDateKey(task)
+    case "expectedRetestAt":
+      return getWordRetestExpectedAtInputValue(wordRetest.expectedRetestAt)
+    case "teacher":
+      return getWordRetestTeacherLabel(task)
+    case "class":
+      return getWordRetestClassLabel(task)
+    case "student":
+      return getWordRetestStudentLabel(task)
+    case "textbook":
+      return getWordRetestTextbookLabel(task)
+    case "unit":
+      return getWordRetestUnitLabel(task)
+    case "note":
+      return getWordRetestNote(task)
+    case "total":
+      return wordRetest.totalQuestionCount || ""
+    case "cutoff":
+      return wordRetest.cutoffQuestionCount || ""
+    case "score":
+      return String(getWordRetestBestScore(wordRetest) ?? "")
+    case "result":
+      return getWordRetestResultLabel(wordRetest)
+    case "select":
+    case "action":
+      return ""
+    default:
+      return ""
+  }
 }
 
 function sortWordRetestTasksByTestAt(tasks: OpsTask[]) {
@@ -5486,91 +5533,33 @@ function WordRetestMainExamDateField({
 }) {
   const fieldId = useId()
   const dateValue = dateInputValue(value)
-  const [calendarMonth, setCalendarMonth] = useState(() => getCalendarMonthDate(dateValue))
-  const calendarCells = useMemo(() => buildCalendarDateCells(calendarMonth), [calendarMonth])
-  const classScheduleItemsByDate = useMemo(() => {
-    const itemsByDate = new Map<string, WordRetestClassScheduleItem[]>()
-    classScheduleItems.forEach((item) => {
-      const items = itemsByDate.get(item.dateKey) || []
-      items.push(item)
-      itemsByDate.set(item.dateKey, items)
-    })
-    return itemsByDate
-  }, [classScheduleItems])
-  const shouldRestrictToClassSchedule = classScheduleItems.length > 0
-  const calendarDays = useMemo<ClassScheduleCalendarDay[]>(() => (
-    calendarCells.map((cell) => {
-      const selected = cell.dateKey === dateValue
-      const dayScheduleItems = classScheduleItemsByDate.get(cell.dateKey) || []
-      const isClassScheduleDate = dayScheduleItems.length > 0
-      const disabled = !classSelected || (shouldRestrictToClassSchedule && !isClassScheduleDate)
-      const scheduleLabel = dayScheduleItems.map((item) => item.label).join(", ")
-
-      return {
-        key: cell.dateKey,
-        displayLabel: cell.dayLabel,
-        inCurrentMonth: cell.isCurrentMonth,
-        isToday: cell.isToday,
-        selected,
-        disabled,
-        tone: cell.isToday ? "today" : cell.isCurrentMonth ? "default" : "muted",
-        badges: dayScheduleItems.slice(0, 2).map((item) => ({
-          primary: item.label || "수업",
-          secondary: item.state === "makeup" ? "보강" : "",
-          tone: item.state === "makeup" ? "makeup" : "class",
-        })),
-        ariaLabel: isClassScheduleDate
-          ? `${cell.dateKey} ${scheduleLabel} 선택`
-          : disabled
-            ? `${cell.dateKey} 수업일정 없음`
-            : `${cell.dateKey} 선택`,
-      }
-    })
-  ), [
-    calendarCells,
-    classScheduleItemsByDate,
-    classSelected,
-    dateValue,
-    shouldRestrictToClassSchedule,
-  ])
-
-  function handleMainExamDateSelect(nextDate: string) {
-    onChange(nextDate)
-    setCalendarMonth(getCalendarMonthDate(nextDate))
-  }
 
   return (
-    <section className="grid min-w-0 gap-2 md:col-span-2">
-      <div className="flex min-w-0 items-center justify-between gap-2">
-        <span id={fieldId} className="text-sm font-medium">{label}</span>
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-xs text-muted-foreground">
-            {dateValue ? dateOnlyLabel(dateValue) : "미선택"}
-          </span>
+    <section className="grid min-w-0 gap-1.5">
+      <span id={fieldId} className="text-sm font-medium">{label}</span>
+      {!classSelected ? (
+        <ScheduleSelectionDependencyState fieldId={fieldId} />
+      ) : (
+        <div className="flex min-w-0 items-start gap-2">
+          <DatePickerControl
+            value={dateValue}
+            onChange={onChange}
+            ariaLabel={`${label} 날짜`}
+            linkedDates={classScheduleItems.map((item) => ({ value: item.dateKey, label: item.label }))}
+            linkedDatesLabel="수업 회차"
+            restrictToLinkedDates={classScheduleItems.length > 0}
+          />
           {value ? (
             <button
               type="button"
               aria-label={`${label} 지우기`}
               onClick={onClear}
-              className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
             >
               <X className="size-4" aria-hidden="true" />
             </button>
           ) : null}
-        </span>
-      </div>
-      {!classSelected ? (
-        <ScheduleSelectionDependencyState fieldId={fieldId} />
-      ) : (
-        <ClassScheduleCalendarSurface
-          monthLabel={getCalendarMonthLabel(calendarMonth)}
-          weekdayLabels={CALENDAR_WEEKDAY_LABELS}
-          days={calendarDays}
-          labelledBy={fieldId}
-          onPreviousMonth={() => setCalendarMonth((month) => addCalendarMonths(month, -1))}
-          onNextMonth={() => setCalendarMonth((month) => addCalendarMonths(month, 1))}
-          onSelectDay={handleMainExamDateSelect}
-        />
+        </div>
       )}
       {classSelected && classScheduleItems.length === 0 ? (
         <p className="text-xs text-muted-foreground">
@@ -5611,17 +5600,14 @@ function WordRetestExpectedAtField({
         dateTriggerRef={dateTriggerRef}
         onDraftStateChange={onDraftStateChange}
         disabled={disabled}
-        disablePortal
+        timeOptions={WORD_RETEST_EXPECTED_RETEST_TIME_OPTIONS}
+        preserveSelectedTimeOption={false}
       />
       {multiStudent ? (
         <p className="text-xs font-normal text-muted-foreground">
           저장 후 학생별로 입력해 주세요.
         </p>
-      ) : (
-        <p className="text-xs font-normal text-muted-foreground">
-          참고용 약속 일시이며 상태·미응시 판정·알림에는 사용하지 않습니다.
-        </p>
-      )}
+      ) : null}
       {error ? (
         <p id={errorId} role="alert" className="text-xs font-medium text-destructive">
           {error}
@@ -7887,15 +7873,20 @@ function getSecondaryTaskStatusOptions(task: Pick<OpsTask, "status" | "type">) {
 
 function getWordRetestPrimaryActions(task: OpsTask, mode: WordRetestMode, completionBlockers: string[] = EMPTY_COMPLETION_BLOCKERS): WordRetestPrimaryAction[] {
   const wordRetest = task.wordRetest || {}
+  const scoreResult = getWordRetestScoreResult(wordRetest)
   const canRetryCompletedAbsent = mode === "teacher"
     && task.status === "done"
     && wordRetest.retestStatus === "absent"
     && !wordRetest.retryTaskId
   if (canRetryCompletedAbsent) return [{ kind: "word_retest_retry", label: "재재시험 추가", retryReason: "absent" }]
+  const canRetryCompletedFailed = mode === "teacher"
+    && task.status === "done"
+    && scoreResult === "failed"
+    && !wordRetest.retryTaskId
+  if (canRetryCompletedFailed) return [{ kind: "word_retest_retry", label: "재재시험 추가", retryReason: "failed" }]
   if (getWordRetestWorkspaceRole(task) === "completed") return []
 
   const absent = isWordRetestAbsent(wordRetest)
-  const scoreResult = getWordRetestScoreResult(wordRetest)
 
   if (mode === "assistant") {
     if (task.status === "requested" || task.status === "confirmed" || task.status === "on_hold") {
@@ -14813,7 +14804,7 @@ function TypeSpecificFields({
             renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
           />
           {shouldShowManualField("wordRetestTeacher", wordRetest.teacherId, wordRetest.teacherName) && <TextField label="담당선생님명" value={wordRetest.teacherName || ""} onChange={(value) => updateWordRetest("teacherName", value)} />}
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3">
             <LinkedSelect
               label="수업"
               value={form.classId || ""}
@@ -14846,7 +14837,7 @@ function TypeSpecificFields({
             />
           </div>
           {(shouldShowManualField("wordRetestClass", form.classId, wordRetest.className) || shouldShowManualField("wordRetestStudent", form.studentId, wordRetest.studentName)) && (
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-3">
               {shouldShowManualField("wordRetestClass", form.classId, wordRetest.className) && <TextField label="수업명" value={wordRetest.className || ""} onChange={(value) => {
                 updateWordRetest("className", value)
                 updateForm("className", value)
@@ -14866,7 +14857,7 @@ function TypeSpecificFields({
             classSelected={Boolean(selectedWordRetestClass || (wordRetest.className || "").trim())}
             classScheduleItems={wordRetestClassScheduleItems}
           />
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3">
             <WordRetestExpectedAtField
               key={selectedWordRetestStudentIds.length > 1 ? "word-retest-expected-multiple" : "word-retest-expected-single"}
               value={wordRetest.expectedRetestAt || ""}
@@ -15584,12 +15575,32 @@ function WordRetestTaskList({
   completionBlockersByTaskId?: OperationCompletionBlockerMap
 }) {
   const [columnWidths, setColumnWidths] = useState<Record<WordRetestTableColumnKey, number>>(WORD_RETEST_TABLE_COLUMN_WIDTHS)
+  const [wordRetestTableSort, setWordRetestTableSort] = useState<WordRetestTableSort>(null)
   const gridTemplateColumns = getWordRetestTableGridTemplate(columnWidths)
   const gridTemplateStyle = { "--word-retest-grid-template": gridTemplateColumns } as CSSProperties
-  const selectableTasks = useMemo(() => tasks.filter(canSelectTask), [canSelectTask, tasks])
-  const selectedTasks = useMemo(() => tasks.filter((task) => selectedTaskIds.has(task.id) && canSelectTask(task)), [canSelectTask, selectedTaskIds, tasks])
+  const visibleWordRetestTasks = useMemo(() => {
+    if (!wordRetestTableSort) return tasks
+
+    return [...tasks].sort((left, right) => {
+      const leftValue = getWordRetestTableValue(left, wordRetestTableSort.columnKey)
+      const rightValue = getWordRetestTableValue(right, wordRetestTableSort.columnKey)
+      const result = leftValue.localeCompare(rightValue, "ko", { numeric: true })
+      return wordRetestTableSort.direction === "asc" ? result : -result
+    })
+  }, [tasks, wordRetestTableSort])
+  const selectableTasks = useMemo(() => visibleWordRetestTasks.filter(canSelectTask), [canSelectTask, visibleWordRetestTasks])
+  const selectedTasks = useMemo(() => visibleWordRetestTasks.filter((task) => selectedTaskIds.has(task.id) && canSelectTask(task)), [canSelectTask, selectedTaskIds, visibleWordRetestTasks])
   const allVisibleSelected = selectableTasks.length > 0 && selectableTasks.every((task) => selectedTaskIds.has(task.id))
   const partiallySelected = selectedTasks.length > 0 && !allVisibleSelected
+
+  function handleHeaderSelect(columnKey: WordRetestTableColumnKey) {
+    if (columnKey === "select" || columnKey === "action") return
+    setWordRetestTableSort((current) => {
+      if (!current || current.columnKey !== columnKey) return { columnKey, direction: "asc" }
+      if (current.direction === "asc") return { columnKey, direction: "desc" }
+      return null
+    })
+  }
 
   function startColumnResize(key: WordRetestTableColumnKey, event: ReactPointerEvent<HTMLButtonElement>) {
     event.preventDefault()
@@ -15651,26 +15662,26 @@ function WordRetestTaskList({
             ref={(node) => {
               if (node) node.indeterminate = partiallySelected
             }}
-            onChange={(event) => onSelectAll(event.target.checked, tasks)}
+            onChange={(event) => onSelectAll(event.target.checked, visibleWordRetestTasks)}
             className="size-4 rounded border-border text-primary"
           />
         </span>
-        <WordRetestResizableHeaderCell label="상태" columnKey="status" onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="본시험일" columnKey="testAt" onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="응시예정일시" columnKey="expectedRetestAt" onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="담당선생님" columnKey="teacher" onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="수업" columnKey="class" onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="학생" columnKey="student" onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="교재" columnKey="textbook" onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="시험범위" columnKey="unit" onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="메모" columnKey="note" onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="출제 개수" columnKey="total" onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="커트라인" columnKey="cutoff" onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="맞은 개수" columnKey="score" onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="결과" columnKey="result" onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="다음 액션" columnKey="action" align="right" onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="상태" columnKey="status" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="본시험일" columnKey="testAt" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="응시예정일시" columnKey="expectedRetestAt" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="담당선생님" columnKey="teacher" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="수업" columnKey="class" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="학생" columnKey="student" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="교재" columnKey="textbook" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="시험범위" columnKey="unit" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="메모" columnKey="note" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="출제 개수" columnKey="total" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="커트라인" columnKey="cutoff" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="맞은 개수" columnKey="score" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="결과" columnKey="result" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="다음 액션" columnKey="action" align="right" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
       </div>
-      {tasks.map((task) => (
+      {visibleWordRetestTasks.map((task) => (
         <WordRetestTaskRow
           key={task.id}
           task={task}
@@ -15702,16 +15713,37 @@ function WordRetestResizableHeaderCell({
   label,
   columnKey,
   align = "left",
+  sort,
+  onHeaderSelect,
   onResizeStart,
 }: {
   label: string
   columnKey: WordRetestTableColumnKey
   align?: "left" | "right"
+  sort: WordRetestTableSort
+  onHeaderSelect: (columnKey: WordRetestTableColumnKey) => void
   onResizeStart: (key: WordRetestTableColumnKey, event: ReactPointerEvent<HTMLButtonElement>) => void
 }) {
+  const isActiveSort = sort?.columnKey === columnKey
+  const SortIcon = isActiveSort ? (sort.direction === "asc" ? ArrowUp : ArrowDown) : ChevronsUpDown
+  const sortable = columnKey !== "select" && columnKey !== "action"
+  const ariaSort = !isActiveSort ? "none" : sort.direction === "asc" ? "ascending" : "descending"
+
   return (
-    <span className={["relative min-w-0 pr-2", align === "right" ? "text-right" : ""].join(" ")}>
-      <span className="block truncate">{label}</span>
+    <span role="columnheader" aria-sort={ariaSort} className={["relative min-w-0 pr-2", align === "right" ? "text-right" : ""].join(" ")}>
+      <button
+        type="button"
+        disabled={!sortable}
+        aria-label={`${label} 정렬`}
+        onClick={() => onHeaderSelect(columnKey)}
+        className={[
+          "flex w-full min-w-0 items-center gap-1 text-left hover:text-foreground disabled:pointer-events-none disabled:opacity-60",
+          align === "right" ? "justify-end text-right" : "",
+        ].join(" ")}
+      >
+        <span className="block truncate">{label}</span>
+        {sortable ? <SortIcon className="size-3.5 shrink-0" aria-hidden="true" /> : null}
+      </button>
       <button
         type="button"
         aria-label={`${label} 열 너비 조절`}

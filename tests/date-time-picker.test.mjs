@@ -54,7 +54,7 @@ test("date-time drafts preserve the complete counterpart and never synthesize a 
   assert.equal(mergeLocalDateTime("", "01:27"), "");
 });
 
-test("time validity spans the full day while standalone candidates keep their existing window", async () => {
+test("time validity spans the full day while restricted candidates can omit legacy values", async () => {
   const source = await readPickerSource();
   const {
     TIME_OPTIONS,
@@ -78,6 +78,12 @@ test("time validity spans the full day while standalone candidates keep their ex
   assert.ok(optionsWithLegacyTime.includes("01:27"));
   assert.equal(optionsWithLegacyTime.filter((value) => value === "01:27").length, 1);
   assert.deepEqual(optionsWithLegacyTime, [...optionsWithLegacyTime].sort());
+
+  assert.deepEqual(
+    Array.from(getTimePickerOptions(["13:00", "13:10", "21:30"], "09:00", false)),
+    ["13:00", "13:10", "21:30"],
+    "a restricted picker must not reinsert an out-of-window legacy time into its selectable options",
+  );
 });
 
 test("combined picker keeps partial drafts internal, syncs external resets, and exposes a default or supplied clear name", async () => {
@@ -100,11 +106,13 @@ test("combined picker keeps partial drafts internal, syncs external resets, and 
     componentSource,
     /function handleClear[\s\S]*setDateDraft\(""\)[\s\S]*setTimeDraft\(""\)[\s\S]*onChange\(""\)/,
   );
-  assert.match(source, /type DateTimePickerControlProps = \{[\s\S]*?clearAriaLabel\?: string[\s\S]*?timeOptions\?: string\[\]/);
+  assert.match(source, /type DateTimePickerControlProps = \{[\s\S]*?clearAriaLabel\?: string[\s\S]*?timeOptions\?: string\[\][\s\S]*?preserveSelectedTimeOption\?: boolean/);
   assert.match(componentSource, /clearAriaLabel = "날짜와 시각 지우기"/);
   assert.match(componentSource, /aria-label=\{clearAriaLabel\}/);
   assert.match(componentSource, /timeOptions = FULL_DAY_TIME_OPTIONS/);
+  assert.match(componentSource, /preserveSelectedTimeOption = true/);
   assert.match(componentSource, /options=\{timeOptions\}/);
+  assert.match(componentSource, /preserveSelectedTimeOption=\{preserveSelectedTimeOption\}/);
   assert.match(componentSource, /className=\{cn\("grid min-w-0 gap-2/);
 });
 
@@ -171,8 +179,9 @@ test("date and time controls keep selected-time scrolling inside the listbox", a
   assert.match(datePickerSource, /disablePortal\?: boolean/);
   assert.match(datePickerSource, /<PopoverContent[\s\S]*disablePortal=\{disablePortal\}/);
   assert.match(timePickerSource, /options\?: string\[\]/);
+  assert.match(timePickerSource, /preserveSelectedTimeOption\?: boolean/);
   assert.match(timePickerSource, /disablePortal\?: boolean/);
-  assert.match(timePickerSource, /getTimePickerOptions\(options, normalizedValue\)/);
+  assert.match(timePickerSource, /getTimePickerOptions\(options, normalizedValue, preserveSelectedTimeOption\)/);
   assert.match(timePickerSource, /selectedOptionRef/);
   assert.match(timePickerSource, /timeListRef/);
   assert.match(timePickerSource, /scrollTimeOptionWithinList\(timeListRef\.current, selectedOptionRef\.current, "center"\)/);

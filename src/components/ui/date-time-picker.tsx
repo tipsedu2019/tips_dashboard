@@ -57,10 +57,10 @@ function normalizeTimeInput(value: string) {
   return ""
 }
 
-function getTimePickerOptions(options: string[], value: string) {
+function getTimePickerOptions(options: string[], value: string, preserveSelectedTimeOption = true) {
   const normalizedOptions = Array.from(new Set(options.map(normalizeTimeInput).filter(Boolean)))
   const normalizedValue = normalizeTimeInput(value)
-  if (normalizedValue && !normalizedOptions.includes(normalizedValue)) normalizedOptions.push(normalizedValue)
+  if (preserveSelectedTimeOption && normalizedValue && !normalizedOptions.includes(normalizedValue)) normalizedOptions.push(normalizedValue)
   return normalizedOptions.sort()
 }
 
@@ -259,6 +259,7 @@ type TimePickerControlProps = {
   className?: string
   disabled?: boolean
   options?: string[]
+  preserveSelectedTimeOption?: boolean
   disablePortal?: boolean
   showIcon?: boolean
 }
@@ -295,21 +296,23 @@ export function TimePickerControl({
   className,
   disabled = false,
   options = TIME_OPTIONS,
+  preserveSelectedTimeOption = true,
   disablePortal = false,
   showIcon = true,
 }: TimePickerControlProps) {
   const normalizedValue = normalizeTimeInput(value)
   const selectedTimeLabel = formatTimeLabel(normalizedValue)
-  const timeOptions = getTimePickerOptions(options, normalizedValue)
+  const timeOptions = getTimePickerOptions(options, normalizedValue, preserveSelectedTimeOption)
+  const resolvedActiveTime = timeOptions.includes(normalizedValue) ? normalizedValue : timeOptions[0] || ""
   const [open, setOpen] = React.useState(false)
-  const [activeTime, setActiveTime] = React.useState(() => normalizedValue || timeOptions[0] || "")
+  const [activeTime, setActiveTime] = React.useState(() => resolvedActiveTime)
   const selectedOptionRef = React.useRef<HTMLButtonElement>(null)
   const timeOptionRefs = React.useRef<Array<HTMLButtonElement | null>>([])
   const timeListRef = React.useRef<HTMLDivElement>(null)
 
   function handleOpenChange(nextOpen: boolean) {
     const resolvedOpen = disabled ? false : nextOpen
-    if (resolvedOpen) setActiveTime(normalizedValue || timeOptions[0] || "")
+    if (resolvedOpen) setActiveTime(resolvedActiveTime)
     setOpen(resolvedOpen)
   }
 
@@ -409,6 +412,7 @@ type DateTimePickerControlProps = {
   className?: string
   disablePortal?: boolean
   timeOptions?: string[]
+  preserveSelectedTimeOption?: boolean
   dateTriggerRef?: React.Ref<HTMLButtonElement>
   onDraftStateChange?: (state: DateTimePickerDraftState) => void
 }
@@ -426,6 +430,7 @@ export function DateTimePickerControl({
   className,
   disablePortal = false,
   timeOptions = FULL_DAY_TIME_OPTIONS,
+  preserveSelectedTimeOption = true,
   dateTriggerRef,
   onDraftStateChange,
 }: DateTimePickerControlProps) {
@@ -498,6 +503,7 @@ export function DateTimePickerControl({
           placeholder={timePlaceholder}
           disabled={disabled}
           options={timeOptions}
+          preserveSelectedTimeOption={preserveSelectedTimeOption}
           disablePortal={disablePortal}
           showIcon={!hasDraft}
           className="min-w-0 flex-1"

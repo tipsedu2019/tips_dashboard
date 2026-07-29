@@ -3468,8 +3468,8 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "보이는 단어 재시험 전체 선택",
     "선택 삭제",
     "memo(function WordRetestTaskRow",
-    "const selectableTasks = useMemo(() => tasks.filter(canSelectTask)",
-    "const selectedTasks = useMemo(() => tasks.filter((task) => selectedTaskIds.has(task.id) && canSelectTask(task))",
+    "const selectableTasks = useMemo(() => visibleWordRetestTasks.filter(canSelectTask)",
+    "const selectedTasks = useMemo(() => visibleWordRetestTasks.filter((task) => selectedTaskIds.has(task.id) && canSelectTask(task))",
     "const toggleWordRetestSelection = useCallback((task: OpsTask, selected: boolean)",
     "function useStableEvent",
     "const handleWordRetestStatusChange = useStableEvent((task: OpsTask, status: OpsTaskStatus)",
@@ -3723,20 +3723,18 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     workspaceSource.indexOf("function WordRetestMainExamDateField"),
     workspaceSource.indexOf("function ReadonlyInfoField"),
   );
-  assert.match(wordRetestMainExamDateFieldSource, /function handleMainExamDateSelect/);
-  assert.match(wordRetestMainExamDateFieldSource, /classScheduleItemsByDate/);
-  assert.match(wordRetestMainExamDateFieldSource, /const shouldRestrictToClassSchedule = classScheduleItems\.length > 0/);
-  assert.match(wordRetestMainExamDateFieldSource, /disabled = !classSelected \|\| \(shouldRestrictToClassSchedule && !isClassScheduleDate\)/);
+  assert.match(wordRetestMainExamDateFieldSource, /<DatePickerControl/);
+  assert.match(wordRetestMainExamDateFieldSource, /linkedDates=\{classScheduleItems\.map\(\(item\) => \(\{ value: item\.dateKey, label: item\.label \}\)\)\}/);
+  assert.match(wordRetestMainExamDateFieldSource, /linkedDatesLabel="수업 회차"/);
+  assert.match(wordRetestMainExamDateFieldSource, /restrictToLinkedDates=\{classScheduleItems\.length > 0\}/);
   assert.match(
     workspaceSource,
     /classSelected=\{Boolean\(selectedWordRetestClass \|\| \(wordRetest\.className \|\| ""\)\.trim\(\)\)\}/,
     "manual and legacy class names should keep the main-exam calendar available",
   );
-  assert.match(wordRetestMainExamDateFieldSource, /<ClassScheduleCalendarSurface/);
   assert.match(wordRetestMainExamDateFieldSource, /<ScheduleSelectionDependencyState/);
   assert.match(wordRetestMainExamDateFieldSource, /등록된 일정이 없어 일반 날짜를 선택할 수 있습니다\./);
-  assert.match(wordRetestMainExamDateFieldSource, /수업일정 없음/);
-  assert.match(wordRetestMainExamDateFieldSource, /수업일정/);
+  assert.doesNotMatch(wordRetestMainExamDateFieldSource, /ClassScheduleCalendarSurface/);
   assert.doesNotMatch(wordRetestMainExamDateFieldSource, /Popover|PopoverContent|setCalendarDateOpen/);
   assert.doesNotMatch(wordRetestMainExamDateFieldSource, /Clock|timeListRef|handleTimeListWheel|WORD_RETEST_TIME_OPTIONS|직접 시간 입력/);
 
@@ -3972,7 +3970,7 @@ test("word retest lineage badges sit beside preserved result status in list and 
   assert.match(source, /if \(statusValue === "absent"\) return "미응시"/);
 });
 
-test("completed absent word retests expose one recovery reretry action only in teacher mode", async () => {
+test("completed absent and failed word retests expose one recovery reretry action only in teacher mode", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const actionSource = source.slice(
     source.indexOf("function getWordRetestPrimaryActions"),
@@ -3994,6 +3992,67 @@ test("completed absent word retests expose one recovery reretry action only in t
       actionSource.indexOf('getWordRetestWorkspaceRole(task) === "completed"'),
     "completed absent recovery must run before the completed-workspace early return",
   );
+  assert.match(
+    actionSource,
+    /const scoreResult = getWordRetestScoreResult\(wordRetest\)[\s\S]*const canRetryCompletedFailed = mode === "teacher"[\s\S]*task\.status === "done"[\s\S]*scoreResult === "failed"[\s\S]*!wordRetest\.retryTaskId/,
+    "teacher mode should recover done failed sources without an outgoing retry link",
+  );
+  assert.match(
+    actionSource,
+    /if \(canRetryCompletedFailed\) return \[\{ kind: "word_retest_retry", label: "재재시험 추가", retryReason: "failed" \}\]/,
+    "completed failed recovery should return exactly one reretry action",
+  );
+  assert.ok(
+    actionSource.indexOf("if (canRetryCompletedFailed)") <
+      actionSource.indexOf('getWordRetestWorkspaceRole(task) === "completed"'),
+    "completed failed recovery must run before the completed-workspace early return",
+  );
+});
+
+test("word retest table headers sort and the compact schedule form keeps session dates and appointment controls readable", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const mainExamDateSource = source.slice(
+    source.indexOf("function WordRetestMainExamDateField"),
+    source.indexOf("function WordRetestExpectedAtField"),
+  );
+  const expectedAtSource = source.slice(
+    source.indexOf("function WordRetestExpectedAtField"),
+    source.indexOf("function ReadonlyInfoField"),
+  );
+  const taskListSource = source.slice(
+    source.indexOf("function WordRetestTaskList"),
+    source.indexOf("function shouldIgnoreWordRetestRowOpen"),
+  );
+  const headerSource = source.slice(
+    source.indexOf("function WordRetestResizableHeaderCell"),
+    source.indexOf("function shouldIgnoreWordRetestRowOpen"),
+  );
+  const wordRetestBasicSource = source.slice(
+    source.indexOf('if (step === "word_retest_basic")'),
+    source.indexOf('if (step === "word_retest_scope")'),
+  );
+
+  assert.match(source, /type WordRetestTableSort = \{/);
+  assert.match(source, /function getWordRetestTableValue\(task: OpsTask, columnKey: WordRetestTableColumnKey\)/);
+  assert.match(taskListSource, /const \[wordRetestTableSort, setWordRetestTableSort\] = useState<WordRetestTableSort>\(null\)/);
+  assert.match(taskListSource, /const visibleWordRetestTasks = useMemo/);
+  assert.match(taskListSource, /getWordRetestTableValue\(left, wordRetestTableSort\.columnKey\)[\s\S]*localeCompare\(rightValue, "ko", \{ numeric: true \}\)/);
+  assert.match(taskListSource, /onHeaderSelect=\{handleHeaderSelect\}/);
+  assert.match(headerSource, /sort: WordRetestTableSort/);
+  assert.match(headerSource, /onHeaderSelect: \(columnKey: WordRetestTableColumnKey\) => void/);
+  assert.match(headerSource, /aria-sort=\{ariaSort\}/);
+  assert.match(headerSource, /aria-label=\{`\$\{label\} 정렬`\}/);
+
+  assert.match(source, /const WORD_RETEST_EXPECTED_RETEST_TIME_OPTIONS = Array\.from\(\{ length: 52 \}/);
+  assert.match(expectedAtSource, /timeOptions=\{WORD_RETEST_EXPECTED_RETEST_TIME_OPTIONS\}/);
+  assert.match(expectedAtSource, /preserveSelectedTimeOption=\{false\}/);
+  assert.doesNotMatch(expectedAtSource, /disablePortal/);
+  assert.doesNotMatch(expectedAtSource, /참고용 약속 일시이며 상태·미응시 판정·알림에는 사용하지 않습니다\./);
+
+  assert.match(mainExamDateSource, /<DatePickerControl[\s\S]*linkedDates=\{classScheduleItems\.map\(\(item\) => \(\{ value: item\.dateKey, label: item\.label \}\)\)\}/);
+  assert.match(mainExamDateSource, /restrictToLinkedDates=\{classScheduleItems\.length > 0\}/);
+  assert.doesNotMatch(mainExamDateSource, /ClassScheduleCalendarSurface/);
+  assert.doesNotMatch(wordRetestBasicSource, /<div className="grid gap-3 md:grid-cols-2">/);
 });
 
 test("word retest expected schedule keeps reference-only editing, approved form order, table order, and shared calendar contracts", async () => {
@@ -4173,9 +4232,13 @@ test("word retest expected schedule keeps reference-only editing, approved form 
     "fixture-word-retest-assistant-stage",
     "fixture-word-retest-teacher-stage",
     "fixture-word-retest-completed",
+    "fixture-word-retest-completed-failed",
     "fixture-word-retest-name-only",
     "fixture-class-with-schedule",
     "fixture-class-without-schedule",
+    "sessionNumber: 7",
+    "sessionNumber: 8",
+    "sessionNumber: 9",
     'profileId: "fixture-teacher-profile"',
     "function deepFreeze",
     "JSON.parse(JSON.stringify(buildFixtureData(fixtureRole)))",

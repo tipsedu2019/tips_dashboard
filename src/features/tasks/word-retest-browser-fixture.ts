@@ -145,6 +145,32 @@ function buildFixtureData(role: WordRetestBrowserFixtureRole): OpsTaskWorkspaceD
     },
   })
 
+  const completedFailed = createTask("fixture-word-retest-completed-failed", {
+    status: "done",
+    studentId: "fixture-student-completed-failed",
+    studentName: "최불합격완료",
+    classId: "fixture-class-with-schedule",
+    className: "영어 어휘 A",
+    wordRetest: {
+      branch: "본관",
+      teacherId: "fixture-teacher-catalog-linked",
+      teacherName: "연결 선생님",
+      className: "영어 어휘 A",
+      studentName: "최불합격완료",
+      testAt: "2026-07-19T09:00:00+09:00",
+      expectedRetestAt: "2026-07-22T19:30:00+09:00",
+      textbookName: "Fixture 어휘 교재",
+      unit: "Unit 6 재시험",
+      requestNote: "완료 뒤 재재시험 추가 확인용",
+      totalQuestionCount: "30",
+      cutoffQuestionCount: "27",
+      firstScore: "24",
+      secondScore: "",
+      thirdScore: "",
+      retestStatus: "done",
+    },
+  })
+
   const nameOnlyUnrelated = createTask("fixture-word-retest-name-only", {
     status: "requested",
     studentId: "fixture-student-unrelated",
@@ -170,7 +196,7 @@ function buildFixtureData(role: WordRetestBrowserFixtureRole): OpsTaskWorkspaceD
   })
 
   return {
-    tasks: [linkedAssistantStage, linkedTeacherStage, completed, nameOnlyUnrelated],
+    tasks: [linkedAssistantStage, linkedTeacherStage, completed, completedFailed, nameOnlyUnrelated],
     profiles: [
       { id: "fixture-admin-profile", label: "Fixture 관리자", email: "admin@fixture.invalid", loginId: "fixture-admin", role: "admin" },
       { id: "fixture-assistant-profile", label: "Fixture 조교", email: "assistant@fixture.invalid", loginId: "fixture-assistant", role: "assistant" },
@@ -181,6 +207,7 @@ function buildFixtureData(role: WordRetestBrowserFixtureRole): OpsTaskWorkspaceD
       { id: "fixture-student-linked", label: "김연결", grade: "고1", school: "새봄고", contact: "", parentContact: "", status: "재원", classIds: ["fixture-class-with-schedule"], waitlistClassIds: [] },
       { id: "fixture-student-legacy-note", label: "이메모", grade: "고1", school: "새봄고", contact: "", parentContact: "", status: "재원", classIds: ["fixture-class-without-schedule"], waitlistClassIds: [] },
       { id: "fixture-student-completed", label: "박완료", grade: "고1", school: "새봄고", contact: "", parentContact: "", status: "재원", classIds: ["fixture-class-with-schedule"], waitlistClassIds: [] },
+      { id: "fixture-student-completed-failed", label: "최불합격완료", grade: "고1", school: "새봄고", contact: "", parentContact: "", status: "재원", classIds: ["fixture-class-with-schedule"], waitlistClassIds: [] },
       { id: "fixture-student-unrelated", label: "최비연결", grade: "고1", school: "새봄고", contact: "", parentContact: "", status: "재원", classIds: ["fixture-class-with-schedule"], waitlistClassIds: [] },
     ],
     classes: [
@@ -194,12 +221,12 @@ function buildFixtureData(role: WordRetestBrowserFixtureRole): OpsTaskWorkspaceD
         schedule: "화목 18:00-20:00",
         schedulePlan: {
           sessions: [
-            { date: "2026-07-21", session_label: "7월 7회차", state: "active" },
-            { date: "2026-07-23", session_label: "7월 8회차", state: "active" },
-            { date: "2026-07-28", session_label: "7월 9회차", state: "makeup" },
+            { date: "2026-07-21", sessionNumber: 7, state: "active" },
+            { date: "2026-07-23", sessionNumber: 8, state: "active" },
+            { date: "2026-07-28", sessionNumber: 9, state: "makeup" },
           ],
         },
-        studentIds: ["fixture-student-linked", "fixture-student-completed", "fixture-student-unrelated"],
+        studentIds: ["fixture-student-linked", "fixture-student-completed", "fixture-student-completed-failed", "fixture-student-unrelated"],
         waitlistIds: [],
         textbookIds: ["fixture-textbook-vocabulary"],
       },
