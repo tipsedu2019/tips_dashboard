@@ -101,6 +101,36 @@ test("generation candidates snapshot default values and never replace an existin
   ]);
 });
 
+test("generation candidates preserve a backfilled session that already occupies the date", () => {
+  const result = buildContinuousLessonSessionGenerationCandidates({
+    classId: CLASS_ID,
+    dateFrom: "2026-04-06",
+    dateTo: "2026-04-06",
+    slots: [{
+      id: SLOT_ID,
+      weekday: 1,
+      startTime: "14:00",
+      endTime: "15:30",
+      teacherCatalogId: "50000000-0000-4000-8000-000000000001",
+      teacherName: "테스트 선생님",
+      classroomCatalogId: "60000000-0000-4000-8000-000000000001",
+      classroomName: "테스트 강의실",
+      sortOrder: 0,
+    }],
+    existingSessionKeys: new Set(),
+    existingLegacySessionDates: new Set(["2026-04-06"]),
+  });
+
+  assert.deepEqual(result.counts, { requested: 1, creatable: 0, existing: 1, excluded: 0 });
+  assert.deepEqual(result.candidates, [{
+    sessionKey: `default:${SLOT_ID}:2026-04-06`,
+    sessionDate: "2026-04-06",
+    sourceScheduleSlotId: SLOT_ID,
+    status: "existing",
+    snapshot: null,
+  }]);
+});
+
 test("shadow comparison reports snapshot and projection mismatches without inventing legacy resources", () => {
   const comparison = compareContinuousScheduleShadow({
     classId: CLASS_ID,

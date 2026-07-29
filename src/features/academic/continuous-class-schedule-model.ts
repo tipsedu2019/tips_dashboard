@@ -466,6 +466,7 @@ export function buildContinuousLessonSessionGenerationCandidates(input: {
     sortOrder: number;
   }>;
   existingSessionKeys: ReadonlySet<string>;
+  existingLegacySessionDates?: ReadonlySet<string>;
 }): {
   candidates: ContinuousLessonSessionGenerationCandidate[];
   counts: { requested: number; creatable: number; existing: number; excluded: number };
@@ -479,7 +480,10 @@ export function buildContinuousLessonSessionGenerationCandidates(input: {
     for (const slot of input.slots) {
       if (slot.weekday !== weekdayFor(date)) continue;
       const sessionKey = `default:${slot.id}:${date}`;
-      if (input.existingSessionKeys.has(sessionKey)) {
+      if (
+        input.existingSessionKeys.has(sessionKey)
+        || input.existingLegacySessionDates?.has(date)
+      ) {
         candidates.push({
           sessionKey,
           sessionDate: date,
