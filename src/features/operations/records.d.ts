@@ -107,3 +107,8 @@ export function buildClassScheduleRouteModel(input?: {
 export function buildClassSchedulePendingSessionSummary(
   sessions?: OperationsSourceRow[],
 ): string;
+
+export function mergeNormalizedLessonSessions(
+  legacyPlan?: OperationsSourceRow,
+  normalizedSessions?: OperationsSourceRow[],
+): OperationsSourceRow;

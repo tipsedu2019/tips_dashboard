@@ -442,8 +442,35 @@ function normalizeSessionScheduleMeta(session = {}) {
   };
 }
 
+export function mergeNormalizedLessonSessions(legacyPlan = {}, normalizedSessions = []) {
+  const legacySessions = Array.isArray(legacyPlan?.sessions) ? legacyPlan.sessions : [];
+  const legacyByKey = new Map(legacySessions.map((session) => [text(session?.id || session?.sessionKey), session]));
+  return {
+    ...legacyPlan,
+    sessions: (Array.isArray(normalizedSessions) ? normalizedSessions : []).map((session) => {
+      const sessionKey = text(session?.session_key || session?.sessionKey || session?.id);
+      const legacy = legacyByKey.get(sessionKey) || {};
+      const time = (value) => text(value).slice(0, 5);
+      return {
+        ...legacy,
+        id: text(session?.id),
+        sessionKey,
+        date: text(session?.session_date || session?.sessionDate),
+        scheduleState: text(session?.schedule_state || session?.scheduleState || "active"),
+        startTime: time(session?.start_time || session?.startTime),
+        endTime: time(session?.end_time || session?.endTime),
+        teacherNameSnapshot: text(session?.teacher_name_snapshot || session?.teacherNameSnapshot),
+        classroomNameSnapshot: text(session?.classroom_name_snapshot || session?.classroomNameSnapshot),
+      };
+    }),
+  };
+}
+
 function buildFallbackSessions(classItem = {}, progressSummary = null) {
-  const plan = classItem?.schedulePlan || classItem?.schedule_plan || null;
+  const legacyPlan = classItem?.schedulePlan || classItem?.schedule_plan || null;
+  const plan = Array.isArray(classItem?.normalizedSessions)
+    ? mergeNormalizedLessonSessions(legacyPlan || {}, classItem.normalizedSessions)
+    : legacyPlan;
   const sessions = Array.isArray(plan?.sessions)
     ? plan.sessions
     : Array.isArray(plan?.session_list)
