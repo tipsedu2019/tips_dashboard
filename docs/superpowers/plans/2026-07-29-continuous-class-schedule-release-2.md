@@ -1308,12 +1308,21 @@ git diff --check
 
 ### Task 15. shadow backfill과 runtime 활성화
 
+> 2026-07-29 canary 실행 직전 기존 backfill RPC가 payload를 저장하지 않고
+> mode만 shadow로 바꾸는 결함과 apply/verifier 계약 누락을 확인해 쓰기를
+> 중지했다. 실제 수업 데이터 변경은 없었다.
+> `20260729083619_continuous_class_schedule_backfill_correction.sql`, apply
+> payload 전달, exact row/projection verifier, pgTAP 보정 시나리오를 먼저
+> 배포·검증한 뒤 새 request key와 새 read-only preview로 3단계부터 다시
+> 진행한다. 이 보정은 runtime 활성화 Migration D와 분리한다.
+
 **스텝**
 
 1. 운영 전체 read-only preview 생성
 2. critical issue 0인 정확한 canary class 1개 선정
 3. 사용자에게 class ID·count·issue code만 제시하고 backfill 쓰기 승인 요청
-4. canary를 legacy → shadow로 backfill
+4. 보정 마이그레이션·pgTAP·apply/verifier 회귀가 모두 통과한 뒤 canary를
+   legacy → shadow로 backfill
 5. source hash·row tuple·exact projection mismatch 0 확인
 6. 모든 필수 consumer가 배포됐고 rollback rehearsal이 통과했는지 재확인
 7. 별도 Migration D를 생성·검토·적용해 runtime 1
