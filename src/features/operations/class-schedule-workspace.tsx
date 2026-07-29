@@ -2611,6 +2611,7 @@ export function ClassScheduleWorkspace() {
   const [generationSaving, setGenerationSaving] = useState(false);
   const [normalizedScheduleRefreshNonce, setNormalizedScheduleRefreshNonce] = useState(0);
   const [normalizedLessonSessionDrafts, setNormalizedLessonSessionDrafts] = useState<Record<string, Partial<SaveClassLessonSessionInput>>>({});
+  const [normalizedLessonSessionDetailsOpenSessionId, setNormalizedLessonSessionDetailsOpenSessionId] = useState("");
   const [isNormalizedLessonSessionSaving, setIsNormalizedLessonSessionSaving] = useState(false);
   const [lessonTextbookSearch, setLessonTextbookSearch] = useState("");
   const [lessonTextbookCategoryFilter, setLessonTextbookCategoryFilter] = useState("all");
@@ -4786,6 +4787,8 @@ export function ClassScheduleWorkspace() {
             const shouldShowSessionTextbookBadge = showTextbookPlans && hasSessionTextbookEntries;
             const isSessionOutsideTextbookRange =
               showTextbookPlans && hasLessonTextbooks && !hasSessionTextbookEntries;
+            const isNormalizedSessionDetailsOpen =
+              Boolean(normalizedLessonSessionDraft) && normalizedLessonSessionDetailsOpenSessionId === session.id;
             const isSessionReleasable =
               showScheduleControls && !normalizedLessonSessionDraft && session.scheduleState !== "makeup";
             return (
@@ -4876,45 +4879,63 @@ export function ClassScheduleWorkspace() {
                               </Button>
                             ))}
                           </div>
-                          <div className="grid gap-2 sm:grid-cols-3">
-                            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-                              <span>수업일</span>
-                              <Input type="date" value={text(normalizedLessonSessionDraft.sessionDate)} onChange={(event) => updateNormalizedLessonSessionDraft({ sessionDate: event.target.value })} />
-                            </label>
-                            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-                              <span>시작</span>
-                              <Input type="time" value={text(normalizedLessonSessionDraft.startTime)} onChange={(event) => updateNormalizedLessonSessionDraft({ startTime: event.target.value })} />
-                            </label>
-                            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-                              <span>종료</span>
-                              <Input type="time" value={text(normalizedLessonSessionDraft.endTime)} onChange={(event) => updateNormalizedLessonSessionDraft({ endTime: event.target.value })} />
-                            </label>
-                          </div>
-                          <div className="grid gap-2 sm:grid-cols-2">
-                            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-                              <span>선생님</span>
-                              <select value={text(normalizedLessonSessionDraft.teacherCatalogId)} onChange={(event) => updateNormalizedLessonSessionDraft({ teacherCatalogId: event.target.value })} className="border-input bg-background h-9 rounded-md border px-2 text-sm shadow-xs outline-none">
-                                <option value="">미배정</option>
-                                {normalizedLessonSessionDraft.teacherCatalogId && !teacherCatalogOptions.some((catalog) => catalog.id === normalizedLessonSessionDraft.teacherCatalogId) ? <option value={text(normalizedLessonSessionDraft.teacherCatalogId)}>{selectedLessonSession.teacherNameSnapshot || "현재 선생님"}</option> : null}
-                                {teacherCatalogOptions.map((catalog) => <option key={catalog.id} value={catalog.id}>{catalog.name}</option>)}
-                              </select>
-                            </label>
-                            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-                              <span>강의실</span>
-                              <select value={text(normalizedLessonSessionDraft.classroomCatalogId)} onChange={(event) => updateNormalizedLessonSessionDraft({ classroomCatalogId: event.target.value })} className="border-input bg-background h-9 rounded-md border px-2 text-sm shadow-xs outline-none">
-                                <option value="">미배정</option>
-                                {normalizedLessonSessionDraft.classroomCatalogId && !classroomCatalogOptions.some((catalog) => catalog.id === normalizedLessonSessionDraft.classroomCatalogId) ? <option value={text(normalizedLessonSessionDraft.classroomCatalogId)}>{selectedLessonSession.classroomNameSnapshot || "현재 강의실"}</option> : null}
-                                {classroomCatalogOptions.map((catalog) => <option key={catalog.id} value={catalog.id}>{catalog.name}</option>)}
-                              </select>
-                            </label>
-                          </div>
                           <Textarea value={text(normalizedLessonSessionDraft.memo)} onChange={(event) => updateNormalizedLessonSessionDraft({ memo: event.target.value })} placeholder="메모" aria-label={`${selectedLessonSession.label} 메모`} rows={1} className="h-9 min-h-9 resize-none overflow-hidden py-2" />
-                          <Input value={text(normalizedLessonSessionDraft.correctionReason)} onChange={(event) => updateNormalizedLessonSessionDraft({ correctionReason: text(event.target.value) || null })} placeholder="정정 사유 (마감 수업은 필수)" aria-label={`${selectedLessonSession.label} 정정 사유`} />
-                          <div className="flex justify-end">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              data-testid="normalized-lesson-session-details-toggle"
+                              aria-expanded={isNormalizedSessionDetailsOpen}
+                              onClick={() =>
+                                setNormalizedLessonSessionDetailsOpenSessionId((current) =>
+                                  current === session.id ? "" : session.id,
+                                )
+                              }
+                            >
+                              {isNormalizedSessionDetailsOpen ? "일정 정보 수정 닫기" : "일정 정보 수정"}
+                            </Button>
                             <Button type="button" size="sm" onClick={() => void saveNormalizedLessonSession()} disabled={isNormalizedLessonSessionSaving}>
                               {isNormalizedLessonSessionSaving ? "저장 중" : "일정 저장"}
                             </Button>
                           </div>
+                          {isNormalizedSessionDetailsOpen ? (
+                            <div data-testid="normalized-lesson-session-details" className="grid gap-3 rounded-lg border bg-muted/20 p-3">
+                              <div className="grid gap-2 sm:grid-cols-3">
+                                <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+                                  <span>수업일</span>
+                                  <Input type="date" value={text(normalizedLessonSessionDraft.sessionDate)} onChange={(event) => updateNormalizedLessonSessionDraft({ sessionDate: event.target.value })} />
+                                </label>
+                                <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+                                  <span>시작</span>
+                                  <Input type="time" value={text(normalizedLessonSessionDraft.startTime)} onChange={(event) => updateNormalizedLessonSessionDraft({ startTime: event.target.value })} />
+                                </label>
+                                <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+                                  <span>종료</span>
+                                  <Input type="time" value={text(normalizedLessonSessionDraft.endTime)} onChange={(event) => updateNormalizedLessonSessionDraft({ endTime: event.target.value })} />
+                                </label>
+                              </div>
+                              <div className="grid gap-2 sm:grid-cols-2">
+                                <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+                                  <span>선생님</span>
+                                  <select value={text(normalizedLessonSessionDraft.teacherCatalogId)} onChange={(event) => updateNormalizedLessonSessionDraft({ teacherCatalogId: event.target.value })} className="border-input bg-background h-9 rounded-md border px-2 text-sm shadow-xs outline-none">
+                                    <option value="">미배정</option>
+                                    {normalizedLessonSessionDraft.teacherCatalogId && !teacherCatalogOptions.some((catalog) => catalog.id === normalizedLessonSessionDraft.teacherCatalogId) ? <option value={text(normalizedLessonSessionDraft.teacherCatalogId)}>{selectedLessonSession.teacherNameSnapshot || "현재 선생님"}</option> : null}
+                                    {teacherCatalogOptions.map((catalog) => <option key={catalog.id} value={catalog.id}>{catalog.name}</option>)}
+                                  </select>
+                                </label>
+                                <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+                                  <span>강의실</span>
+                                  <select value={text(normalizedLessonSessionDraft.classroomCatalogId)} onChange={(event) => updateNormalizedLessonSessionDraft({ classroomCatalogId: event.target.value })} className="border-input bg-background h-9 rounded-md border px-2 text-sm shadow-xs outline-none">
+                                    <option value="">미배정</option>
+                                    {normalizedLessonSessionDraft.classroomCatalogId && !classroomCatalogOptions.some((catalog) => catalog.id === normalizedLessonSessionDraft.classroomCatalogId) ? <option value={text(normalizedLessonSessionDraft.classroomCatalogId)}>{selectedLessonSession.classroomNameSnapshot || "현재 강의실"}</option> : null}
+                                    {classroomCatalogOptions.map((catalog) => <option key={catalog.id} value={catalog.id}>{catalog.name}</option>)}
+                                  </select>
+                                </label>
+                              </div>
+                              <Input value={text(normalizedLessonSessionDraft.correctionReason)} onChange={(event) => updateNormalizedLessonSessionDraft({ correctionReason: text(event.target.value) || null })} placeholder="정정 사유 (마감 수업은 필수)" aria-label={`${selectedLessonSession.label} 정정 사유`} />
+                            </div>
+                          ) : null}
                         </div>
                       ) : (
                       <>

@@ -163,6 +163,28 @@ test("schedule mode keeps monthly sessions and calendar cells mutually aligned",
   assert.doesNotMatch(source, /flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 pr-8/);
 });
 
+test("normalized session editor keeps time and resource fields behind an explicit disclosure", async () => {
+  const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
+  const normalizedEditor = source.match(
+    /normalizedLessonSessionDraft \? \(([\s\S]*?)\n\s*\) : \(\n\s*<>/,
+  );
+
+  assert.ok(normalizedEditor, "normalized session editor branch should exist");
+  assert.match(
+    source,
+    /const \[normalizedLessonSessionDetailsOpenSessionId, setNormalizedLessonSessionDetailsOpenSessionId\] = useState\(""\);/,
+  );
+  assert.match(normalizedEditor[1], /data-testid="normalized-lesson-session-details-toggle"/);
+  assert.match(normalizedEditor[1], /aria-expanded=\{isNormalizedSessionDetailsOpen\}/);
+  assert.match(normalizedEditor[1], /\{isNormalizedSessionDetailsOpen \? \(/);
+  assert.match(normalizedEditor[1], /data-testid="normalized-lesson-session-details"/);
+  assert.ok(
+    normalizedEditor[1].indexOf('data-testid="normalized-lesson-session-details"') <
+      normalizedEditor[1].indexOf("<span>선생님</span>"),
+    "teacher selection must stay inside the collapsed schedule-details section",
+  );
+});
+
 test("lesson design period add follows the previous period month sequence", async () => {
   const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
   const plannerSource = await readSource("src/lib/class-schedule-planner.js");
