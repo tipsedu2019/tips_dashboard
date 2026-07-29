@@ -64,11 +64,13 @@ async function attachNormalizedLessonSessions(classes: unknown[]) {
     list.push(row)
     byClassId.set(classId, list)
   }
-  return classes.map((row) => {
+  const sessionsByClass = classes.map((row) => {
     if (typeof row !== "object" || row === null) return row
     const record = row as Record<string, unknown>
     return { ...record, lessonSessions: byClassId.get(String(record.id || "")) || [] }
   })
+  classes.splice(0, classes.length, ...sessionsByClass)
+  return classes
 }
 
 const buildMetrics = buildDashboardMetrics as unknown as (args: Record<string, unknown>) => DashboardMetricsData
@@ -264,15 +266,12 @@ export function useTipsDashboardMetrics() {
       }
 
       try {
-        const [classRows, students] = await Promise.all([readTable("classes"), readTable("students")])
-        const classes = await attachNormalizedLessonSessions(classRows)
+        const [classes, students] = await Promise.all([readTable("classes"), readTable("students")])
+        await attachNormalizedLessonSessions(classes)
 
         if (isMounted) {
           setMetrics({
-            ...buildMetrics({
-              classes,
-              students,
-            }),
+            ...buildMetrics({ classes, students, }),
             isLoading: false,
             isConnected: true,
             error: null,
