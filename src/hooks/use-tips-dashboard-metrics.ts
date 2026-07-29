@@ -38,6 +38,39 @@ type DashboardCoreData = {
   students: unknown[]
 }
 
+function dayKey(value: Date) {
+  return value.toISOString().slice(0, 10)
+}
+
+async function attachNormalizedLessonSessions(classes: unknown[]) {
+  if (!supabase) return classes
+  const normalizedIds = classes
+    .filter((row) => typeof row === "object" && row !== null && String((row as { schedule_storage_mode?: unknown }).schedule_storage_mode || "") === "normalized")
+    .map((row) => String((row as { id?: unknown }).id || "")).filter(Boolean)
+  if (normalizedIds.length === 0) return classes
+  const from = new Date()
+  const to = new Date(from)
+  to.setDate(to.getDate() + 180)
+  const { data, error } = await supabase.from("class_lesson_sessions")
+    .select("id,class_id,session_date,schedule_state")
+    .in("class_id", normalizedIds)
+    .gte("session_date", dayKey(from))
+    .lte("session_date", dayKey(to))
+  if (error) return classes
+  const byClassId = new Map<string, unknown[]>()
+  for (const row of data || []) {
+    const classId = String((row as { class_id?: unknown }).class_id || "")
+    const list = byClassId.get(classId) || []
+    list.push(row)
+    byClassId.set(classId, list)
+  }
+  return classes.map((row) => {
+    if (typeof row !== "object" || row === null) return row
+    const record = row as Record<string, unknown>
+    return { ...record, lessonSessions: byClassId.get(String(record.id || "")) || [] }
+  })
+}
+
 const buildMetrics = buildDashboardMetrics as unknown as (args: Record<string, unknown>) => DashboardMetricsData
 const createEmptyMetrics = createEmptyDashboardMetrics as unknown as () => DashboardMetricsData
 
@@ -231,10 +264,8 @@ export function useTipsDashboardMetrics() {
       }
 
       try {
-        const [classes, students] = await Promise.all([
-          readTable("classes"),
-          readTable("students"),
-        ])
+        const [classRows, students] = await Promise.all([readTable("classes"), readTable("students")])
+        const classes = await attachNormalizedLessonSessions(classRows)
 
         if (isMounted) {
           setMetrics({
