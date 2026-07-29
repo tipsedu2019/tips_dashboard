@@ -40,7 +40,11 @@ import { cn } from "@/lib/utils";
 import {
   buildClassSchedulePendingSessionSummary,
   buildClassScheduleRouteModel,
+  mergeNormalizedLessonSessions,
 } from "./records.js";
+import { createBoundedContinuousScheduleReader } from "@/features/academic/continuous-class-schedule-service";
+import { probeContinuousScheduleRuntime, resetContinuousScheduleRuntimeProbe } from "@/features/academic/continuous-class-schedule-runtime-probe";
+import { useContinuousClassSchedule } from "./use-continuous-class-schedule";
 import {
   createLessonProgressDraft,
   updateLessonProgressDraftEntry,
@@ -50,6 +54,13 @@ import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
 
 function text(value: unknown) {
   return String(value || "").trim();
+}
+
+function getLessonMonthRange(monthKey: string) {
+  if (!/^\d{4}-\d{2}$/.test(monthKey)) return null;
+  const [year, month] = monthKey.split("-").map(Number);
+  const end = new Date(Date.UTC(year, month, 0));
+  return { dateFrom: `${monthKey}-01`, dateTo: `${monthKey}-${String(end.getUTCDate()).padStart(2, "0")}` };
 }
 
 function normalizeAdminReturnPath(value: unknown) {
@@ -2639,9 +2650,47 @@ export function ClassScheduleWorkspace() {
     [allRowsModel.rows, model.rows, selectedClassId],
   );
 
+  const normalizedScheduleReader = useMemo(() => {
+    if (!supabase) return null;
+    const client = supabase;
+    return createBoundedContinuousScheduleReader({
+      runtimeProbe: { probe: probeContinuousScheduleRuntime, reset: resetContinuousScheduleRuntimeProbe },
+      async readSchedule(input) {
+        const { data, error } = await client.rpc("get_class_schedule_v1", {
+          p_class_id: input.classId,
+          p_date_from: input.dateFrom,
+          p_date_to: input.dateTo,
+        });
+        if (error) throw error;
+        return (data || {}) as Record<string, unknown>;
+      },
+      async loadLegacy(input) {
+        return { source: "legacy", classId: input.classId, sessions: [] };
+      },
+    });
+  }, []);
+  const normalizedReadMonthKey = focusedLessonMonthKey || new Date().toISOString().slice(0, 7);
+  const activeLessonMonthRange = useMemo(() => getLessonMonthRange(normalizedReadMonthKey), [normalizedReadMonthKey]);
+  const normalizedScheduleRead = useContinuousClassSchedule(
+    normalizedScheduleReader,
+    selectedRow && activeLessonMonthRange
+      ? { classId: selectedRow.id, ...activeLessonMonthRange }
+      : null,
+  );
+
   const selectedRowClassItem = useMemo(
-    () => ((selectedRow?.raw || null) as Record<string, unknown> | null)?.classItem as Record<string, unknown> | null,
-    [selectedRow],
+    () => {
+      const classItem = ((selectedRow?.raw || null) as Record<string, unknown> | null)?.classItem as Record<string, unknown> | null;
+      if (!classItem || normalizedScheduleRead.status !== "ready" || normalizedScheduleRead.value.source !== "normalized") return classItem;
+      return {
+        ...classItem,
+        schedulePlan: mergeNormalizedLessonSessions(
+          (classItem.schedulePlan || classItem.schedule_plan || {}) as Record<string, unknown>,
+          Array.isArray(normalizedScheduleRead.value.data.sessions) ? normalizedScheduleRead.value.data.sessions as Record<string, unknown>[] : [],
+        ),
+      };
+    },
+    [normalizedScheduleRead, selectedRow],
   );
   const lessonPlanSourceKey = useMemo(() => {
     const savedPlan = (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>;
