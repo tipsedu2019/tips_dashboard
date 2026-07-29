@@ -10458,6 +10458,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       syncTaskDeepLink(deepLinkedTaskId, null)
     }
     if (deepLinkedTask.type === "word_retest") {
+      if (selectedTask?.id === deepLinkedTaskId && detailOpen) return
       openWordRetestEditor(deepLinkedTask)
       return
     }

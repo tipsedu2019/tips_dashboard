@@ -2045,6 +2045,28 @@ test("registration browser-back closure clears canonical state and restores the 
   assert.doesNotMatch(cancel, /setRegistrationApplicationDirty\(false\)|closeRegistrationApplicationHost\(\)/);
 });
 
+test("completed word retest deep links do not re-open an already open detail dialog", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const deepLinkStart = source.indexOf("useEffect(() => {\n    if (deleteTarget) return");
+  const deepLinkEnd = source.indexOf("\n  function handleDetailOpenChange", deepLinkStart);
+  const deepLink = source.slice(deepLinkStart, deepLinkEnd);
+  const wordRetestStart = deepLink.indexOf('if (deepLinkedTask.type === "word_retest")');
+  const wordRetestEnd = deepLink.indexOf('if (deepLinkedTask.type === "registration"', wordRetestStart);
+  const wordRetestDeepLink = deepLink.slice(wordRetestStart, wordRetestEnd);
+
+  assert.ok(wordRetestStart >= 0 && wordRetestEnd > wordRetestStart, "word retest deep-link branch is missing");
+  assert.match(
+    wordRetestDeepLink,
+    /if \(\s*selectedTask\?\.id === deepLinkedTaskId\s*&&\s*detailOpen\s*\) return/,
+    "an already open completed detail must not re-enter the word-retest editor",
+  );
+  assert.ok(
+    wordRetestDeepLink.indexOf("selectedTask?.id === deepLinkedTaskId")
+      < wordRetestDeepLink.indexOf("openWordRetestEditor(deepLinkedTask)"),
+    "the re-entry guard must run before opening the word-retest editor",
+  );
+});
+
 test("successful legacy registration create closes and resets its common application before another submit", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const legacyStart = source.indexOf('if (createAttempt.writer === "legacy")');
