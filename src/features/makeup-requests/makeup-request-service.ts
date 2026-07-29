@@ -76,6 +76,8 @@ export type MakeupClassOption = {
   room: string
   schedule: string
   schedulePlan: Row
+  scheduleStorageMode: "legacy" | "shadow" | "normalized"
+  lessonSessions: Array<{ id: string; date: string; state: string }>
   textbooks: Row[]
   textbookIds: string[]
 }
@@ -152,6 +154,7 @@ export type MakeupRequestInput = {
   classId: string
   reason: string
   cancelDate: string
+  originalLessonSessionId: string
   makeupSlots: MakeupSlotInput[]
   makeupClassroom: string
   approverTeacherCatalogId: string
@@ -381,6 +384,8 @@ function mapClass(row: Row): MakeupClassOption {
     room: text(row.room),
     schedule: text(row.schedule),
     schedulePlan,
+    scheduleStorageMode: text(row.schedule_storage_mode) === "normalized" ? "normalized" : text(row.schedule_storage_mode) === "shadow" ? "shadow" : "legacy",
+    lessonSessions: Array.isArray(row.lessonSessions) ? row.lessonSessions as MakeupClassOption["lessonSessions"] : [],
     textbooks: Array.isArray(row.textbooks) ? (row.textbooks as Row[]) : [],
     textbookIds: parseTextbookIds(row),
   }
@@ -652,7 +657,7 @@ export async function loadMakeupRequestWorkspaceData(): Promise<MakeupRequestWor
   }
 
   try {
-    const [profilesRows, teacherRows, classRows, classroomRows, academicEventRows, requestRows, notificationSettingRows, notificationDeliveryRows] = await Promise.all([
+    const [profilesRows, teacherRows, classRows, classroomRows, academicEventRows, requestRows, notificationSettingRows, notificationDeliveryRows, lessonSessionRows] = await Promise.all([
       readTable("profiles", "id,email,name,role,login_id,teacher_catalog_id", true),
       readTable("teacher_catalogs", "id,name,subjects,is_visible,sort_order,profile_id,account_email,dashboard_role", true),
       readTable("classes", "*", true),
@@ -661,10 +666,22 @@ export async function loadMakeupRequestWorkspaceData(): Promise<MakeupRequestWor
       readTable("makeup_requests", "*", false),
       readTable("makeup_notification_settings", "*", true),
       readNotificationDeliveryRows(),
+      readTable("class_lesson_sessions", "id,class_id,session_date,schedule_state", true),
     ])
     const profiles = profilesRows.map(mapProfile)
     const teachers = teacherRows.map(mapTeacher)
-    const classes = classRows.map(mapClass)
+    const lessonSessionsByClassId = new Map<string, MakeupClassOption["lessonSessions"]>()
+    for (const row of lessonSessionRows) {
+      const classId = text(row.class_id)
+      const id = text(row.id)
+      const date = text(row.session_date)
+      const state = text(row.schedule_state)
+      if (!classId || !id || !date || !["active", "makeup"].includes(state)) continue
+      const list = lessonSessionsByClassId.get(classId) || []
+      list.push({ id, date, state })
+      lessonSessionsByClassId.set(classId, list)
+    }
+    const classes = classRows.map((row) => mapClass({ ...row, lessonSessions: lessonSessionsByClassId.get(text(row.id)) || [] }))
     const profilesById = new Map(profiles.map((profile) => [profile.id, profile]))
     const teachersById = new Map(teachers.map((teacher) => [teacher.id, teacher]))
     const requestIds = requestRows.map((row) => text(row.id)).filter(Boolean)
@@ -748,6 +765,10 @@ function buildCreatePayload(
   if (hasCancel && !text(input.cancelDate)) {
     throw new Error("휴강일을 입력해 주세요.")
   }
+  if (classItem.scheduleStorageMode === "normalized" && hasCancel) {
+    const selectedSession = classItem.lessonSessions.find((session) => session.id === input.originalLessonSessionId && session.date === input.cancelDate)
+    if (!selectedSession) throw new Error("휴강할 실제 수업 회차를 선택해 주세요.")
+  }
   if (hasMakeup && input.makeupSlots.some((slot) => !text(slot.classroom))) {
     throw new Error("각 보강일시의 강의실을 선택해 주세요.")
   }
@@ -769,6 +790,7 @@ function buildCreatePayload(
     class_name: classItem.name,
     reason: text(input.reason),
     cancel_date: hasCancel ? input.cancelDate : null,
+    original_lesson_session_id: classItem.scheduleStorageMode === "normalized" && hasCancel ? input.originalLessonSessionId : null,
     makeup_start_at: hasMakeup ? firstSlot.startAt : null,
     makeup_end_at: hasMakeup ? firstSlot.endAt : null,
     makeup_classroom: hasMakeup ? firstSlot.classroom : null,

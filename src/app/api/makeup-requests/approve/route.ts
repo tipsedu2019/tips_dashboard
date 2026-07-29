@@ -287,6 +287,8 @@ export async function POST(request: Request) {
       ? "보강 강의실 충돌이 있어 승인하지 못했습니다."
       : message === "makeup_request_source_changed"
         ? "신청 후 수업 정보가 변경되어 다시 확인해야 합니다."
+        : message === "makeup_lesson_session_stale"
+          ? "승인 후 수업 회차가 변경되어 승인 취소할 수 없습니다."
         : "휴보강 승인을 완료하지 못했습니다."
     return response({ ok: false, error: userMessage }, status)
   }

@@ -48,6 +48,7 @@ test("legacy sessions retain keys, states, and billing metadata without invented
     teacherNameSnapshot: "",
     classroomCatalogId: null,
     classroomNameSnapshot: "",
+    memo: "",
     origin: "legacy",
     legacyBillingId: "period-april",
     legacyBillingLabel: "4월",

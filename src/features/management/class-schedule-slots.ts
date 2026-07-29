@@ -1,14 +1,20 @@
 export type ClassScheduleSlot = {
+  id: string | null;
   day: string;
   startTime: string;
   endTime: string;
   teacher: string;
+  teacherCatalogId: string | null;
   classroom: string;
+  classroomCatalogId: string | null;
+  sortOrder: number;
 };
 
 const CLASS_SCHEDULE_DAYS = ["월", "화", "수", "목", "금", "토", "일"] as const;
 type ClassScheduleDay = (typeof CLASS_SCHEDULE_DAYS)[number];
 const CLASS_SCHEDULE_DAY_SET = new Set<string>(CLASS_SCHEDULE_DAYS);
+const CLASS_SCHEDULE_DAY_INDEX = new Map<string, number>(CLASS_SCHEDULE_DAYS.map((day, index) => [day, index === 6 ? 0 : index + 1]));
+const CLASS_SCHEDULE_DAY_BY_INDEX = new Map([...CLASS_SCHEDULE_DAY_INDEX].map(([day, index]) => [index, day]));
 const DAY_GROUP_PATTERN = /([월화수목금토일]+)\s*(\d{1,2}:\d{2})\s*[-~–]\s*(\d{1,2}:\d{2})(?:\s*\(([^)]*)\))?/g;
 
 function text(value: unknown) {
@@ -58,7 +64,58 @@ function getFallbackValue(values: string[], slotIndex: number) {
 }
 
 function createEmptyClassScheduleSlot(): ClassScheduleSlot {
-  return { day: "", startTime: "", endTime: "", teacher: "", classroom: "" };
+  return {
+    id: null,
+    day: "",
+    startTime: "",
+    endTime: "",
+    teacher: "",
+    teacherCatalogId: null,
+    classroom: "",
+    classroomCatalogId: null,
+    sortOrder: 0,
+  };
+}
+
+function optionalId(value: unknown): string | null {
+  return text(value) || null;
+}
+
+function numeric(value: unknown, fallback: number): number {
+  return Number.isInteger(value) ? Number(value) : fallback;
+}
+
+export function fromContinuousClassScheduleDefaults(rows: unknown[]): ClassScheduleSlot[] {
+  return (Array.isArray(rows) ? rows : []).flatMap((value, index) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const row = value as Record<string, unknown>;
+    const weekday = numeric(row.weekday, -1);
+    const day = CLASS_SCHEDULE_DAY_BY_INDEX.get(weekday);
+    if (!day) return [];
+    return [{
+      id: optionalId(row.id),
+      day,
+      startTime: text(row.startTime || row.start_time),
+      endTime: text(row.endTime || row.end_time),
+      teacher: text(row.teacherName || row.teacher_name),
+      teacherCatalogId: optionalId(row.teacherCatalogId || row.teacher_catalog_id),
+      classroom: text(row.classroomName || row.classroom_name),
+      classroomCatalogId: optionalId(row.classroomCatalogId || row.classroom_catalog_id),
+      sortOrder: numeric(row.sortOrder ?? row.sort_order, index),
+    }];
+  });
+}
+
+export function toContinuousClassScheduleSlots(slots: ClassScheduleSlot[]) {
+  return slots.map((slot, index) => ({
+    id: slot.id,
+    weekday: CLASS_SCHEDULE_DAY_INDEX.get(text(slot.day)) ?? -1,
+    startTime: text(slot.startTime),
+    endTime: text(slot.endTime),
+    teacherCatalogId: optionalId(slot.teacherCatalogId),
+    classroomCatalogId: optionalId(slot.classroomCatalogId),
+    sortOrder: numeric(slot.sortOrder, index),
+  }));
 }
 
 export function parseClassScheduleSlots(
@@ -83,13 +140,17 @@ export function parseClassScheduleSlots(
     for (const day of days) {
       const slotIndex = slots.length;
       slots.push({
+        id: null,
         day,
         startTime,
         endTime,
         teacher: firstDetailIsTeacher ? firstDetail : getFallbackValue(teachers, slotIndex),
+        teacherCatalogId: null,
         classroom: firstDetailIsTeacher
           ? detailParts.slice(1).join(", ") || classroomsByDay.get(day) || getFallbackValue(classrooms, slotIndex)
           : detailParts[detailParts.length - 1] || classroomsByDay.get(day) || getFallbackValue(classrooms, slotIndex),
+        classroomCatalogId: null,
+        sortOrder: slotIndex,
       });
     }
   }
@@ -99,11 +160,15 @@ export function parseClassScheduleSlots(
   const day = text(schedule.match(/[월화수목금토일]/)?.[0]);
   const timeMatch = schedule.match(/(\d{1,2}:\d{2})\s*[-~–]\s*(\d{1,2}:\d{2})/);
   const fallbackSlot = {
+    id: null,
     day,
     startTime: text(timeMatch?.[1]),
     endTime: text(timeMatch?.[2]),
     teacher: teachers[0] || "",
+    teacherCatalogId: null,
     classroom: classrooms[0] || "",
+    classroomCatalogId: null,
+    sortOrder: 0,
   };
 
   return Object.values(fallbackSlot).some(Boolean)

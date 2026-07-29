@@ -101,6 +101,7 @@ const EMPTY_INPUT: MakeupRequestInput = {
   classId: "",
   reason: "",
   cancelDate: "",
+  originalLessonSessionId: "",
   makeupSlots: [{ id: "slot-1", date: "", startTime: "", endTime: "", classroom: "" }],
   makeupClassroom: "",
   approverTeacherCatalogId: "",
@@ -1959,6 +1960,11 @@ export function MakeupRequestWorkspace() {
   const selectedClassScheduleDateOptions = useMemo(() => (
     getMakeupClassScheduleDateOptions(selectedClass)
   ), [selectedClass])
+  const normalizedCancelSessions = useMemo(() => (
+    selectedClass?.scheduleStorageMode === "normalized"
+      ? selectedClass.lessonSessions.filter((session) => session.date === input.cancelDate)
+      : []
+  ), [input.cancelDate, selectedClass])
   const canEditMakeupSlots = Boolean(selectedClass)
   const materializedMakeupSlots = useMemo(() => materializeSlots(input), [input])
   const requestHasCancelDate = Boolean(input.cancelDate)
@@ -2011,6 +2017,7 @@ export function MakeupRequestWorkspace() {
       ...current,
       classId: "",
       cancelDate: "",
+      originalLessonSessionId: "",
       makeupClassroom: "",
       makeupSlots: current.makeupSlots.map((slot) => ({ ...slot, date: "", startTime: "", endTime: "", classroom: "" })),
       approverTeacherCatalogId: "",
@@ -2023,6 +2030,7 @@ export function MakeupRequestWorkspace() {
       ...current,
       classId: "",
       cancelDate: "",
+      originalLessonSessionId: "",
       makeupClassroom: "",
       makeupSlots: current.makeupSlots.map((slot) => ({ ...slot, date: "", startTime: "", endTime: "", classroom: "" })),
       approverTeacherCatalogId: "",
@@ -2038,6 +2046,7 @@ export function MakeupRequestWorkspace() {
       ...current,
       classId,
       cancelDate: scheduleDateOptions.length === 0 || scheduleDateOptions.some((item) => item.value === current.cancelDate) ? current.cancelDate : "",
+      originalLessonSessionId: "",
       approverTeacherCatalogId: firstApprover?.id || "",
     }))
     if (classItem) {
@@ -2429,6 +2438,7 @@ export function MakeupRequestWorkspace() {
       classId: request.classId,
       reason: request.reason,
       cancelDate: request.cancelDate,
+      originalLessonSessionId: "",
       makeupSlots: request.makeupSlots.length > 0
         ? request.makeupSlots.map((slot) => toFormSlot({ ...slot, classroom: slot.classroom || request.makeupClassroom }))
         : [toFormSlot({ startAt: request.makeupStartAt, endAt: request.makeupEndAt, classroom: request.makeupClassroom })],
@@ -2452,6 +2462,7 @@ export function MakeupRequestWorkspace() {
       classId: request.classId,
       reason: request.reason,
       cancelDate: request.cancelDate,
+      originalLessonSessionId: "",
       makeupSlots: [{ id: createSlotId(), date: "", startTime: "", endTime: "", classroom: "" }],
       makeupClassroom: "",
       approverTeacherCatalogId: request.approverTeacherCatalogId,
@@ -2598,7 +2609,12 @@ export function MakeupRequestWorkspace() {
 	                <DatePickerControl
 	                  id="cancel-date"
 	                  value={input.cancelDate}
-	                  onChange={(value) => patchInput({ cancelDate: value })}
+	                  onChange={(value) => {
+                    const sessions = selectedClass?.scheduleStorageMode === "normalized"
+                      ? selectedClass.lessonSessions.filter((session) => session.date === value)
+                      : []
+                    patchInput({ cancelDate: value, originalLessonSessionId: sessions.length === 1 ? sessions[0].id : "" })
+                  }}
 	                  placeholder={!selectedClass ? "수업을 먼저 선택" : selectedClassScheduleDateOptions.length > 0 ? "수업일정에서 휴강일 선택" : "휴강일 선택"}
 	                  ariaLabel="휴강일 선택"
 	                  disabled={!selectedClass}
@@ -2614,6 +2630,18 @@ export function MakeupRequestWorkspace() {
                 />
               </div>
             </div>
+
+            {selectedClass?.scheduleStorageMode === "normalized" && input.cancelDate ? (
+              <div className="grid gap-2">
+                <Label htmlFor="original-lesson-session">휴강 수업 회차</Label>
+                <Select value={input.originalLessonSessionId} onValueChange={(value) => patchInput({ originalLessonSessionId: value })}>
+                  <SelectTrigger id="original-lesson-session"><SelectValue placeholder="실제 수업 회차 선택" /></SelectTrigger>
+                  <SelectContent>
+                    {normalizedCancelSessions.map((session) => <SelectItem key={session.id} value={session.id}>{session.state === "makeup" ? "보강 수업" : "정규 수업"}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
 
             <div className="grid gap-2">
               <div className="flex items-center justify-between gap-2">

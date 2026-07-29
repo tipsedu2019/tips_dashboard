@@ -750,6 +750,7 @@ export function RegistrationEnrollmentEditor({
                   updateRow(row.clientKey, {
                     classStartDate: session.dateKey,
                     classStartSessionKey: session.value,
+                    classStartLessonSessionId: session.lessonSessionId || "",
                     classStartSession: session.sessionLabel,
                   })
                 }}

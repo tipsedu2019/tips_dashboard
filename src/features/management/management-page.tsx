@@ -70,8 +70,10 @@ import {
 import {
   formatClassScheduleDisplayLines,
   formatClassScheduleSlots,
+  fromContinuousClassScheduleDefaults,
   parseClassScheduleSlots,
   stripSharedScheduleDetails,
+  toContinuousClassScheduleSlots,
   type ClassScheduleSlot,
 } from "./class-schedule-slots";
 import type { ClassStudentPickerFilters, StudentClassPickerFilters } from "./student-class-picker-model";
@@ -81,7 +83,7 @@ type ManagementServiceClient = {
   updateStudent: (record: Record<string, unknown>) => Promise<unknown>;
   deleteStudent: (id: string) => Promise<unknown>;
   createClass: (record: Record<string, unknown>, options?: { candidateMembershipContext?: ClassFormReferences }) => Promise<unknown>;
-  updateClass: (record: Record<string, unknown>, options?: { candidateMembershipContext?: ClassFormReferences }) => Promise<unknown>;
+  updateClass: (record: Record<string, unknown>, options?: { candidateMembershipContext?: ClassFormReferences; scheduleOwnership?: "normalized" }) => Promise<unknown>;
   deleteClass: (id: string) => Promise<unknown>;
   createTextbook: (record: Record<string, unknown>) => Promise<unknown>;
   updateTextbook: (record: Record<string, unknown>) => Promise<unknown>;
@@ -91,6 +93,21 @@ type ManagementServiceClient = {
   assignStudentToClass: (args: { studentId: string; classId: string; mode: "enrolled" | "waitlist" }) => Promise<unknown>;
   removeStudentFromClass: (args: { studentId: string; classId: string }) => Promise<unknown>;
   replaceClassGroupMemberships: (args: { classId: string; groupIds: string[] }) => Promise<unknown>;
+  getClassScheduleDefaults: (classId: string) => Promise<unknown>;
+  saveClassScheduleDefaults: (input: {
+    classId: string;
+    expectedScheduleRevision: number;
+    slots: ReturnType<typeof toContinuousClassScheduleSlots>;
+    requestKey: string;
+    reason?: string | null;
+  }) => Promise<unknown>;
+  initializeClassSchedule: (input: {
+    classId: string;
+    expectedScheduleRevision: number;
+    expectedSchedulePlanHash: string;
+    slots: ReturnType<typeof toContinuousClassScheduleSlots>;
+    requestKey: string;
+  }) => Promise<unknown>;
 };
 
 // Contract markers: managementService.updateStudent, managementService.updateClass,
@@ -426,7 +443,17 @@ function ClassCapacityInput({
 }
 
 function createEmptyClassScheduleSlot(): ClassScheduleSlot {
-  return { day: "", startTime: "", endTime: "", teacher: "", classroom: "" };
+  return {
+    id: null,
+    day: "",
+    startTime: "",
+    endTime: "",
+    teacher: "",
+    teacherCatalogId: null,
+    classroom: "",
+    classroomCatalogId: null,
+    sortOrder: 0,
+  };
 }
 
 function getNextClassScheduleDay(day: string) {
@@ -437,7 +464,51 @@ function getNextClassScheduleDay(day: string) {
 
 function createNextClassScheduleSlot(slots: ClassScheduleSlot[]) {
   const source = slots[slots.length - 1] || createEmptyClassScheduleSlot();
-  return { ...source, day: getNextClassScheduleDay(source.day) };
+  return {
+    ...source,
+    id: null,
+    day: getNextClassScheduleDay(source.day),
+    sortOrder: slots.length,
+  };
+}
+
+type NormalizedClassScheduleDefaults = {
+  scheduleRevision: number;
+  schedulePlanHash: string;
+  slots: ClassScheduleSlot[];
+};
+
+type PendingClassScheduleInitialization = {
+  classId: string;
+  expectedScheduleRevision: number;
+  expectedSchedulePlanHash: string;
+  slots: ReturnType<typeof toContinuousClassScheduleSlots>;
+  requestKey: string;
+};
+
+function readNormalizedClassScheduleDefaults(value: unknown): NormalizedClassScheduleDefaults | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const defaults = value as Record<string, unknown>;
+  if (text(defaults.authoritativeSource) !== "normalized") return null;
+  const scheduleRevision = Number(defaults.scheduleRevision);
+  if (!Number.isSafeInteger(scheduleRevision) || scheduleRevision < 0) return null;
+  return {
+    scheduleRevision,
+    schedulePlanHash: text(defaults.schedulePlanHash),
+    slots: fromContinuousClassScheduleDefaults(Array.isArray(defaults.slots) ? defaults.slots : []),
+  };
+}
+
+function isNormalizedClassRow(row: ManagementRow): boolean {
+  const raw = (row.raw || {}) as Record<string, unknown>;
+  return text(raw.schedule_storage_mode || raw.scheduleStorageMode) === "normalized";
+}
+
+function createContinuousScheduleRequestKey(): string {
+  if (typeof globalThis.crypto?.randomUUID !== "function") {
+    throw new Error("기본 시간표 저장을 위한 요청 키를 만들 수 없습니다.");
+  }
+  return globalThis.crypto.randomUUID();
 }
 
 function getClassSubjectValue(raw: Record<string, unknown> = {}) {
@@ -504,6 +575,15 @@ function getClassTeacherOptionsForSubject(rawRows: Record<string, unknown>[], su
   );
 }
 
+function getClassTeacherCatalogIdForSubject(rawRows: Record<string, unknown>[], subject: string, name: string) {
+  const selectedName = text(name);
+  return text(getClassTeacherCatalogRows(rawRows).find((catalog) => (
+    catalog.is_visible !== false
+    && isClassTeacherCatalogForSubject(catalog, subject)
+    && text(catalog.name) === selectedName
+  ))?.id) || null;
+}
+
 function getClassClassroomCatalogRows(rawRows: Record<string, unknown>[]) {
   const byIdOrName = new Map<string, Record<string, unknown>>();
   for (const raw of rawRows) {
@@ -544,6 +624,15 @@ function getClassClassroomOptionsForSubject(rawRows: Record<string, unknown>[], 
     ],
     catalogOptions,
   );
+}
+
+function getClassClassroomCatalogIdForSubject(rawRows: Record<string, unknown>[], subject: string, name: string) {
+  const selectedName = text(name);
+  return text(getClassClassroomCatalogRows(rawRows).find((catalog) => (
+    catalog.is_visible !== false
+    && isClassroomCatalogForClassSubject(catalog, subject)
+    && text(catalog.name) === selectedName
+  ))?.id) || null;
 }
 
 function uniqueSortedOptions(values: string[], preferredOrder: string[] = []) {
@@ -1248,6 +1337,10 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const [selectedRow, setSelectedRow] = useState<ManagementRow | null>(null);
   const [form, setForm] = useState<FormState>(() => initialForm(kind));
   const [classScheduleSlots, setClassScheduleSlots] = useState<ClassScheduleSlot[]>([]);
+  const [normalizedScheduleDefaults, setNormalizedScheduleDefaults] = useState<NormalizedClassScheduleDefaults | null>(null);
+  const [scheduleDefaultsSaving, setScheduleDefaultsSaving] = useState(false);
+  const [scheduleDefaultsRequestKey, setScheduleDefaultsRequestKey] = useState("");
+  const [pendingClassScheduleInitialization, setPendingClassScheduleInitialization] = useState<PendingClassScheduleInitialization | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState("");
   const [saving, setSaving] = useState(false);
@@ -1378,18 +1471,21 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       })),
     [classFormReferences.scienceSubjectAreas],
   );
-  const classSelectOptions = useMemo(() => {
-    if (kind !== "classes") {
-      return {} as Record<string, string[]>;
-    }
-
-    const rawRows = [
+  const classResourceRows = useMemo(() => kind === "classes"
+    ? [
       ...rows.map((row) => (row.raw || {}) as Record<string, unknown>),
       {
         available_teacher_catalogs: classFormReferences.teacherCatalogs,
         available_classroom_catalogs: classFormReferences.classroomCatalogs,
       },
-    ];
+    ]
+    : [], [classFormReferences.classroomCatalogs, classFormReferences.teacherCatalogs, kind, rows]);
+
+  const classSelectOptions = useMemo(() => {
+    if (kind !== "classes") {
+      return {} as Record<string, string[]>;
+    }
+    const rawRows = classResourceRows;
 
     return {
       status: [...CLASS_STATUS_OPTIONS],
@@ -1400,7 +1496,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       teacher: getClassTeacherOptionsForSubject(rawRows, selectedClassSubject),
       classroom: getClassClassroomOptionsForSubject(rawRows, selectedClassSubject),
     } satisfies Record<string, string[]>;
-  }, [classFormReferences.classroomCatalogs, classFormReferences.teacherCatalogs, kind, rows, selectedClassSubject]);
+  }, [classResourceRows, kind, selectedClassSubject]);
   const scienceClassCandidateSelectionBlocked = kind === "classes"
     && isScienceClassSubject(selectedClassSubject)
     && (
@@ -1723,20 +1819,16 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     const normalizedValue = nextValue === "__none__" ? "" : nextValue;
     if (kind === "classes" && fieldName === "subject") {
       const nextSubject = parseAcademicSubject(normalizedValue) || normalizedValue;
-      const rawRows = [
-        ...rows.map((row) => (row.raw || {}) as Record<string, unknown>),
-        {
-          available_teacher_catalogs: classFormReferences.teacherCatalogs,
-          available_classroom_catalogs: classFormReferences.classroomCatalogs,
-        },
-      ];
+      const rawRows = classResourceRows;
       const teacherOptions = getClassTeacherOptionsForSubject(rawRows, normalizedValue);
       const classroomOptions = getClassClassroomOptionsForSubject(rawRows, normalizedValue);
       const enforceExactScienceCandidates = isScienceClassSubject(nextSubject);
       const nextSlots = (classScheduleSlots.length > 0 ? classScheduleSlots : parseClassScheduleSlots(form.schedule, form.teacher, form.classroom)).map((slot) => ({
         ...slot,
         teacher: shouldClearClassResourceSelection(slot.teacher, teacherOptions, enforceExactScienceCandidates) ? "" : slot.teacher,
+        teacherCatalogId: shouldClearClassResourceSelection(slot.teacher, teacherOptions, enforceExactScienceCandidates) ? null : slot.teacherCatalogId,
         classroom: shouldClearClassResourceSelection(slot.classroom, classroomOptions, enforceExactScienceCandidates) ? "" : slot.classroom,
+        classroomCatalogId: shouldClearClassResourceSelection(slot.classroom, classroomOptions, enforceExactScienceCandidates) ? null : slot.classroomCatalogId,
       }));
       const formattedSlots = formatClassScheduleSlots(nextSlots);
       setClassScheduleSlots(nextSlots);
@@ -1813,6 +1905,63 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const removeClassScheduleSlot = (index: number) => {
     const nextSlots = getClassScheduleSlotsFromForm().filter((_, slotIndex) => slotIndex !== index);
     syncClassScheduleSlots(nextSlots.length > 0 ? nextSlots : [createEmptyClassScheduleSlot()]);
+  };
+  const classScheduleDefaultsDirty = Boolean(normalizedScheduleDefaults) && JSON.stringify(
+    toContinuousClassScheduleSlots(getClassScheduleSlotsFromForm()),
+  ) !== JSON.stringify(toContinuousClassScheduleSlots(normalizedScheduleDefaults?.slots || []));
+  const reloadClassScheduleDefaults = async () => {
+    if (!selectedRow || !normalizedScheduleDefaults) return;
+    setOperationError(null);
+    try {
+      const defaults = readNormalizedClassScheduleDefaults(await service.getClassScheduleDefaults(selectedRow.id));
+      if (!defaults) {
+        setNormalizedScheduleDefaults(null);
+        setScheduleDefaultsRequestKey("");
+        return;
+      }
+      const formatted = formatClassScheduleSlots(defaults.slots);
+      setClassScheduleSlots(defaults.slots);
+      setForm((current) => ({ ...current, ...formatted }));
+      setNormalizedScheduleDefaults(defaults);
+      setScheduleDefaultsRequestKey("");
+      setSaveNotice("최신 기본 시간표를 불러왔습니다.");
+    } catch (error) {
+      setOperationError(getSaveErrorMessage(error));
+    }
+  };
+  const handleClassScheduleDefaultsSave = async () => {
+    if (!selectedRow || !normalizedScheduleDefaults || !canMutateRows || !classScheduleDefaultsDirty) return;
+    setScheduleDefaultsSaving(true);
+    setOperationError(null);
+    setSaveNotice("");
+    const requestKey = scheduleDefaultsRequestKey || createContinuousScheduleRequestKey();
+    setScheduleDefaultsRequestKey(requestKey);
+    try {
+      const result = await service.saveClassScheduleDefaults({
+        classId: selectedRow.id,
+        expectedScheduleRevision: normalizedScheduleDefaults.scheduleRevision,
+        slots: toContinuousClassScheduleSlots(getClassScheduleSlotsFromForm()),
+        requestKey,
+      });
+      const nextDefaults = readNormalizedClassScheduleDefaults({
+        authoritativeSource: "normalized",
+        scheduleRevision: (result as Record<string, unknown> | null)?.scheduleRevision,
+        schedulePlanHash: normalizedScheduleDefaults.schedulePlanHash,
+        slots: (result as Record<string, unknown> | null)?.slots,
+      });
+      if (!nextDefaults) throw new Error("기본 시간표 저장 결과를 다시 확인해 주세요.");
+      const formatted = formatClassScheduleSlots(nextDefaults.slots);
+      setClassScheduleSlots(nextDefaults.slots);
+      setForm((current) => ({ ...current, ...formatted }));
+      setNormalizedScheduleDefaults(nextDefaults);
+      setScheduleDefaultsRequestKey("");
+      setSaveNotice("기본 시간표 저장 완료");
+    } catch (error) {
+      const message = getSaveErrorMessage(error);
+      setOperationError(message.includes("class_schedule_stale") ? "다른 변경이 있습니다. 최신값을 불러온 뒤 다시 저장하세요." : message);
+    } finally {
+      setScheduleDefaultsSaving(false);
+    }
   };
 
   const renderClassScheduleSlotEditor = () => {
@@ -1902,9 +2051,17 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 	                </div>
 		                <div className="grid min-w-0 gap-1">
 		                  <Label htmlFor={`${rowId}-teacher`} className="text-[11px] font-medium text-muted-foreground md:sr-only">선생님</Label>
-		                  <Select
-		                    value={slot.teacher || "__none__"}
-	                    onValueChange={(value) => updateClassScheduleSlot(index, { teacher: value === "__none__" ? "" : value })}
+	                  <Select
+	                    value={slot.teacher || "__none__"}
+	                    onValueChange={(value) => {
+                          const teacher = value === "__none__" ? "" : value;
+                          updateClassScheduleSlot(index, {
+                            teacher,
+                            teacherCatalogId: normalizedScheduleDefaults || dialogMode === "create"
+                              ? getClassTeacherCatalogIdForSubject(classResourceRows, selectedClassSubject, teacher)
+                              : null,
+                          });
+                        }}
 	                    disabled={!canMutateRows}
 	                  >
 	                    <SelectTrigger id={`${rowId}-teacher`} className="w-full min-w-0">
@@ -1920,9 +2077,17 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 	                </div>
 		                <div className="grid min-w-0 gap-1">
 		                  <Label htmlFor={`${rowId}-classroom`} className="text-[11px] font-medium text-muted-foreground md:sr-only">강의실</Label>
-		                  <Select
-		                    value={slot.classroom || "__none__"}
-	                    onValueChange={(value) => updateClassScheduleSlot(index, { classroom: value === "__none__" ? "" : value })}
+	                  <Select
+	                    value={slot.classroom || "__none__"}
+	                    onValueChange={(value) => {
+                          const classroom = value === "__none__" ? "" : value;
+                          updateClassScheduleSlot(index, {
+                            classroom,
+                            classroomCatalogId: normalizedScheduleDefaults || dialogMode === "create"
+                              ? getClassClassroomCatalogIdForSubject(classResourceRows, selectedClassSubject, classroom)
+                              : null,
+                          });
+                        }}
 	                    disabled={!canMutateRows}
 	                  >
 	                    <SelectTrigger id={`${rowId}-classroom`} className="w-full min-w-0">
@@ -1965,6 +2130,26 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           <Plus className="mr-1.5 size-4" aria-hidden="true" />
           시간 추가
         </Button>
+        {normalizedScheduleDefaults ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+            <p className="text-xs text-muted-foreground">새로 생성하는 일정부터 적용 · 기존 일정은 유지</p>
+            <div className="flex items-center gap-2">
+              {operationError?.includes("최신값을 불러온") ? (
+                <Button type="button" size="sm" variant="outline" onClick={() => void reloadClassScheduleDefaults()} disabled={scheduleDefaultsSaving}>
+                  최신값 불러오기
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void handleClassScheduleDefaultsSave()}
+                disabled={!canMutateRows || !classScheduleDefaultsDirty || scheduleDefaultsSaving}
+              >
+                {scheduleDefaultsSaving ? "기본 시간표 저장 중" : "기본 시간표 저장"}
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </section>
     );
   };
@@ -2152,9 +2337,14 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   ) => {
     const nextTab = kind === "classes" ? normalizeClassDetailTab(options.tab) : "basic";
     const nextForm = initialForm(kind, row);
+    const defaultsRequest = kind === "classes" && isNormalizedClassRow(row)
+      ? service.getClassScheduleDefaults(row.id)
+      : Promise.resolve(null);
     setSelectedRow(row);
     setForm(nextForm);
     setClassScheduleSlots(kind === "classes" ? parseClassScheduleSlots(nextForm.schedule, nextForm.teacher, nextForm.classroom) : []);
+    setNormalizedScheduleDefaults(null);
+    setScheduleDefaultsRequestKey("");
     setTargetId("");
     setPendingRelationMode(null);
     setPendingClassStudentDetailId("");
@@ -2173,7 +2363,20 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       writeStudentDetailRoute(row.id);
     }
     if (kind === "students") setRelatedRows(await service.listClasses());
-    if (kind === "classes") setRelatedRows(await service.listStudents());
+    if (kind === "classes") {
+      const [students, defaults] = await Promise.all([service.listStudents(), defaultsRequest.catch((error) => {
+        setOperationError(getSaveErrorMessage(error));
+        return null;
+      })]);
+      setRelatedRows(students);
+      const normalizedDefaults = readNormalizedClassScheduleDefaults(defaults);
+      if (normalizedDefaults) {
+        const formatted = formatClassScheduleSlots(normalizedDefaults.slots);
+        setClassScheduleSlots(normalizedDefaults.slots);
+        setForm((current) => ({ ...current, ...formatted }));
+        setNormalizedScheduleDefaults(normalizedDefaults);
+      }
+    }
   }, [kind, writeClassDetailRoute, writeStudentDetailRoute]);
 
   useEffect(() => {
@@ -2334,6 +2537,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         }
         setForm(nextForm);
         setClassScheduleSlots(kind === "classes" ? parseClassScheduleSlots(nextForm.schedule, nextForm.teacher, nextForm.classroom) : []);
+        setPendingClassScheduleInitialization(null);
         setPendingRelationMode(null);
         setPendingClassStudentDetailId("");
         setRelationPickerOpen(false);
@@ -2373,6 +2577,23 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       ? deleteRequest?.rows[0]?.title || config.emptyLabel
       : `${deleteRequestCount}개 ${config.emptyLabel}`;
 
+  const retryClassScheduleInitialization = async () => {
+    if (!pendingClassScheduleInitialization) return;
+    setSaving(true);
+    setOperationError(null);
+    try {
+      await service.initializeClassSchedule(pendingClassScheduleInitialization);
+      setPendingClassScheduleInitialization(null);
+      setDialogMode(null);
+      setSelectedRow(null);
+      await refresh();
+    } catch (error) {
+      setOperationError(`수업은 생성됐습니다. 기본 시간표 초기화는 다시 시도해 주세요: ${getSaveErrorMessage(error)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!canMutateRows) {
@@ -2397,6 +2618,26 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           classId,
           groupIds: parseClassGroupIds(form.classGroupIds),
         });
+        const defaults = await service.getClassScheduleDefaults(classId);
+        if (defaults && typeof defaults === "object" && !Array.isArray(defaults)) {
+          const source = defaults as Record<string, unknown>;
+          if (Number(source.runtimeVersion) === 1 && text(source.authoritativeSource) === "legacy" && text(source.schedulePlanHash)) {
+            const initialization = {
+              classId,
+              expectedScheduleRevision: Number(source.scheduleRevision) || 0,
+              expectedSchedulePlanHash: text(source.schedulePlanHash),
+              slots: toContinuousClassScheduleSlots(getClassScheduleSlotsFromForm()),
+              requestKey: createContinuousScheduleRequestKey(),
+            };
+            setPendingClassScheduleInitialization(initialization);
+            try {
+              await service.initializeClassSchedule(initialization);
+              setPendingClassScheduleInitialization(null);
+            } catch (initializationError) {
+              throw new Error(`수업은 생성됐습니다. 기본 시간표 초기화는 다시 시도해 주세요: ${getSaveErrorMessage(initializationError)}`);
+            }
+          }
+        }
       } else {
         await service.createTextbook(payload);
       }
@@ -2428,7 +2669,10 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       if (kind === "students") {
         await service.updateStudent(payload);
       } else if (kind === "classes") {
-        const updated = await service.updateClass(payload, { candidateMembershipContext: classFormReferences });
+        const updated = await service.updateClass(payload, {
+          candidateMembershipContext: classFormReferences,
+          ...(normalizedScheduleDefaults ? { scheduleOwnership: "normalized" as const } : {}),
+        });
         const classId = getSavedClassId(updated, payload.id || selectedRow.id);
         await service.replaceClassGroupMemberships({
           classId,
@@ -2571,6 +2815,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const handleDialogOpenChange = (open: boolean) => {
     if (open) return;
     setDialogMode(null);
+    setPendingClassScheduleInitialization(null);
     setPendingClassStudentDetailId("");
     if (kind === "classes") {
       clearClassDetailRoute();
@@ -3189,7 +3434,13 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
               <DialogFooter className="items-center gap-3">
                 {renderSaveStatus()}
                 <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)} disabled={saving}>취소</Button>
-                <Button type="submit" disabled={saving || !canMutateRows || scienceClassCandidateSelectionBlocked}>{saving ? "저장 중" : "등록 저장"}</Button>
+                {pendingClassScheduleInitialization ? (
+                  <Button type="button" onClick={() => void retryClassScheduleInitialization()} disabled={saving || !canMutateRows}>
+                    기본 시간표 초기화 다시 시도
+                  </Button>
+                ) : (
+                  <Button type="submit" disabled={saving || !canMutateRows || scienceClassCandidateSelectionBlocked}>{saving ? "저장 중" : "등록 저장"}</Button>
+                )}
               </DialogFooter>
             </form>
           )}

@@ -607,6 +607,7 @@ function enrollment(input: Partial<OpsRegistrationEnrollment> & Pick<OpsRegistra
     textbookId: input.textbookId ?? null,
     classStartDate: input.classStartDate ?? "2026-07-20",
     classStartSessionKey: input.classStartSessionKey ?? "2026-07-20:1",
+    classStartLessonSessionId: input.classStartLessonSessionId ?? null,
     classStartSession: input.classStartSession ?? "1회차",
     status: input.status || "planned",
     makeeduRegistered: Boolean(input.makeeduRegistered),

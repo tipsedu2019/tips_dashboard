@@ -685,6 +685,17 @@ function getSchedulePlanSessionDates(classItem) {
     .filter(Boolean);
 }
 
+function getNormalizedLessonSessionDates(classItem) {
+  if (text(classItem.scheduleStorageMode || classItem.schedule_storage_mode) !== "normalized") return [];
+  const sessions = Array.isArray(classItem.lessonSessions)
+    ? classItem.lessonSessions
+    : Array.isArray(classItem.lesson_sessions) ? classItem.lesson_sessions : [];
+  return [...new Set(sessions
+    .filter((session) => ["active", "makeup"].includes(text(session?.scheduleState || session?.schedule_state)))
+    .map((session) => text(session?.date || session?.sessionDate || session?.session_date).slice(0, 10))
+    .filter(Boolean))].sort();
+}
+
 function dayLabelToIndex(day) {
   return ["일", "월", "화", "수", "목", "금", "토"].indexOf(text(day));
 }
@@ -714,6 +725,8 @@ function getFallbackScheduleDates(classItem) {
 }
 
 function getClassSessionDates(classItem) {
+  const normalizedSessionDates = getNormalizedLessonSessionDates(classItem);
+  if (normalizedSessionDates.length > 0) return normalizedSessionDates;
   const schedulePlanDates = getSchedulePlanSessionDates(classItem);
   return schedulePlanDates.length > 0 ? schedulePlanDates : getFallbackScheduleDates(classItem);
 }

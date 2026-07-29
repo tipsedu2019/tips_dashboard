@@ -194,6 +194,7 @@ export type RegistrationEnrollmentDraft = {
   textbookExplicitlyCleared: boolean
   classStartDate: string
   classStartSessionKey: string
+  classStartLessonSessionId: string
   classStartSession: string
   status: "planned" | "waitlisted" | "enrolled" | "canceled"
   makeeduRegistered: boolean
@@ -223,6 +224,7 @@ export type RegistrationEnrollmentSerializedRow = {
   textbookId: string | null
   classStartDate: string | null
   classStartSessionKey: string | null
+  classStartLessonSessionId: string | null
   classStartSession: string | null
   sortOrder: number
 }
@@ -235,10 +237,11 @@ export type RegistrationEnrollmentBlocker = {
 
 export function createRegistrationEnrollmentDraft(input?: Partial<RegistrationEnrollmentDraft>): RegistrationEnrollmentDraft
 
-export function restoreRegistrationEnrollmentDraft(input?: Omit<Partial<RegistrationEnrollmentDraft>, "textbookId" | "classStartDate" | "classStartSessionKey" | "classStartSession"> & {
+export function restoreRegistrationEnrollmentDraft(input?: Omit<Partial<RegistrationEnrollmentDraft>, "textbookId" | "classStartDate" | "classStartSessionKey" | "classStartLessonSessionId" | "classStartSession"> & {
   textbookId?: string | null
   classStartDate?: string | null
   classStartSessionKey?: string | null
+  classStartLessonSessionId?: string | null
   classStartSession?: string | null
 }): RegistrationEnrollmentDraft
 
@@ -256,10 +259,11 @@ export function serializeRegistrationEnrollmentRows(
 
 export function mergeSavedRegistrationEnrollmentRows(
   localRows?: readonly RegistrationEnrollmentDraft[],
-  savedRows?: readonly (Omit<Partial<RegistrationEnrollmentDraft>, "textbookId" | "classStartDate" | "classStartSessionKey" | "classStartSession"> & {
+  savedRows?: readonly (Omit<Partial<RegistrationEnrollmentDraft>, "textbookId" | "classStartDate" | "classStartSessionKey" | "classStartLessonSessionId" | "classStartSession"> & {
     textbookId?: string | null
     classStartDate?: string | null
-    classStartSessionKey?: string | null
+  classStartSessionKey?: string | null
+  classStartLessonSessionId?: string | null
     classStartSession?: string | null
   })[],
 ): RegistrationEnrollmentDraft[]

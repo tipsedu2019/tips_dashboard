@@ -11,6 +11,11 @@ const DEFAULT_CLASS_STATUS = "수강";
 const DEFAULT_CLASS_TYPE = "정규";
 const ARCHIVED_CLASS_STATUS = "종강";
 const DASHBOARD_ROLES = ["admin", "staff", "teacher", "assistant", "viewer"];
+const CONTINUOUS_CLASS_SCHEDULE_RPC = {
+  getDefaults: "get_class_schedule_defaults_v1",
+  initializeNewClass: "initialize_new_class_schedule_v1",
+  saveDefaults: "save_class_schedule_defaults_v1",
+};
 const CLASSROOM_ALIAS_MAP = new Map([
   ["별3", "별관 3강"],
   ["별3강", "별관 3강"],
@@ -31,6 +36,13 @@ const CLASSROOM_ALIAS_MAP = new Map([
 
 function trimText(value) {
   return typeof value === "string" ? value.trim() : String(value || "").trim();
+}
+
+function isMissingContinuousScheduleRpc(error) {
+  const code = trimText(error?.code).toUpperCase();
+  const message = trimText(error?.message).toLowerCase();
+  return code === "PGRST202" || code === "42883"
+    || (message.includes("class_schedule") && message.includes("schema cache"));
 }
 
 export function createId() {
@@ -916,6 +928,13 @@ export function buildClassPayload(record = {}, options = {}) {
   };
 }
 
+export function buildClassMetadataPayload(record = {}, options = {}) {
+  return stripPayloadFields(
+    buildClassPayload(record, options),
+    ["teacher", "schedule", "room"],
+  );
+}
+
 export function buildClassSubjectOptions(rows = []) {
   const legacyValues = (Array.isArray(rows) ? rows : [])
     .map((row) => trimText(row?.subject))
@@ -1168,15 +1187,68 @@ export function createManagementService(options = {}) {
     async updateClass(record = {}, options = {}) {
       const client = ensureClient(supabase);
       const runtime = await probeRegistrationRuntime();
-      const payload = buildClassPayload(record, {
+      const payloadOptions = {
         generateId,
         candidateMembershipContext: options.candidateMembershipContext,
-      });
+      };
+      const payload = options.scheduleOwnership === "normalized"
+        ? buildClassMetadataPayload(record, payloadOptions)
+        : buildClassPayload(record, payloadOptions);
       const updated = await upsertClassRows(
         client,
         runtime.mode === "legacy" ? payload : stripReadyClassWriteFields(payload),
       );
       return Array.isArray(updated) ? updated[0] || null : updated || null;
+    },
+
+    async getClassScheduleDefaults(classId) {
+      const client = ensureClient(supabase);
+      const { data, error } = await client.rpc(CONTINUOUS_CLASS_SCHEDULE_RPC.getDefaults, {
+        p_class_id: trimText(classId),
+      });
+      if (error) {
+        if (isMissingContinuousScheduleRpc(error)) return null;
+        throw error;
+      }
+      return data || null;
+    },
+
+    async saveClassScheduleDefaults({
+      classId,
+      expectedScheduleRevision,
+      slots,
+      requestKey,
+      reason = null,
+    } = {}) {
+      const client = ensureClient(supabase);
+      const { data, error } = await client.rpc(CONTINUOUS_CLASS_SCHEDULE_RPC.saveDefaults, {
+        p_class_id: trimText(classId),
+        p_expected_schedule_revision: expectedScheduleRevision,
+        p_slots: Array.isArray(slots) ? slots : [],
+        p_request_key: trimText(requestKey),
+        p_reason: reason,
+      });
+      if (error) throw error;
+      return data || null;
+    },
+
+    async initializeClassSchedule({
+      classId,
+      expectedScheduleRevision,
+      expectedSchedulePlanHash,
+      slots,
+      requestKey,
+    } = {}) {
+      const client = ensureClient(supabase);
+      const { data, error } = await client.rpc(CONTINUOUS_CLASS_SCHEDULE_RPC.initializeNewClass, {
+        p_class_id: trimText(classId),
+        p_expected_schedule_revision: expectedScheduleRevision,
+        p_expected_schedule_plan_hash: trimText(expectedSchedulePlanHash),
+        p_slots: Array.isArray(slots) ? slots : [],
+        p_request_key: trimText(requestKey),
+      });
+      if (error) throw error;
+      return data || null;
     },
 
     async replaceClassGroupMemberships({ classId, groupIds = [] } = {}) {

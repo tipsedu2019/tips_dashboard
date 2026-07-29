@@ -26,6 +26,7 @@ export type ContinuousScheduleRuntimeProbeClient = {
 export type ContinuousScheduleRuntimeProbe = {
   probe: () => Promise<ContinuousScheduleRuntimeState>;
   reset: () => void;
+  resetForFocus: () => void;
   invalidateAfterReadyFailure: (cause: unknown) => never;
 };
 
@@ -95,25 +96,37 @@ export class ContinuousScheduleRuntimeIntegrityError extends Error {
 
 export function createContinuousScheduleRuntimeProbe(
   client: ContinuousScheduleRuntimeProbeClient | null,
+  options: {
+    maxAgeMs?: number;
+    now?: () => number;
+  } = {},
 ): ContinuousScheduleRuntimeProbe {
   let cachedState: ContinuousScheduleRuntimeState | null = null;
+  let cachedAt = 0;
   let inFlight: Promise<ContinuousScheduleRuntimeState> | null = null;
   let generation = 0;
+  const maxAgeMs = options.maxAgeMs ?? 30_000;
+  const now = options.now ?? (() => Date.now());
 
   function reset(): void {
     generation += 1;
     cachedState = null;
+    cachedAt = 0;
     inFlight = null;
   }
 
   function probe(): Promise<ContinuousScheduleRuntimeState> {
-    if (cachedState) return Promise.resolve(cachedState);
+    if (cachedState && now() - cachedAt < maxAgeMs) return Promise.resolve(cachedState);
+    if (cachedState) cachedState = null;
     if (inFlight) return inFlight;
 
     const requestGeneration = generation;
     const request = detectContinuousScheduleRuntime(client)
       .then((state) => {
-        if (requestGeneration === generation) cachedState = state;
+        if (requestGeneration === generation) {
+          cachedState = state;
+          cachedAt = now();
+        }
         return state;
       })
       .finally(() => {
@@ -128,7 +141,7 @@ export function createContinuousScheduleRuntimeProbe(
     throw new ContinuousScheduleRuntimeIntegrityError(cause);
   }
 
-  return { probe, reset, invalidateAfterReadyFailure };
+  return { probe, reset, resetForFocus: reset, invalidateAfterReadyFailure };
 }
 // continuous-class-schedule-runtime-probe-factory:end
 
@@ -142,6 +155,10 @@ export function probeContinuousScheduleRuntime(): Promise<ContinuousScheduleRunt
 
 export function resetContinuousScheduleRuntimeProbe(): void {
   defaultContinuousScheduleRuntimeProbe.reset();
+}
+
+export function resetContinuousScheduleRuntimeProbeForFocus(): void {
+  defaultContinuousScheduleRuntimeProbe.resetForFocus();
 }
 
 export function invalidateContinuousScheduleRuntimeAfterReadyFailure(

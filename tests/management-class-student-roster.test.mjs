@@ -724,7 +724,7 @@ test("class schedule add copies the previous row and advances only the day", asy
   assert.match(pageSource, /return CLASS_SCHEDULE_DAYS\[\(currentIndex \+ 1\) % CLASS_SCHEDULE_DAYS\.length\]/);
   assert.match(pageSource, /function createNextClassScheduleSlot\(slots: ClassScheduleSlot\[\]\)/);
   assert.match(pageSource, /const source = slots\[slots\.length - 1\] \|\| createEmptyClassScheduleSlot\(\)/);
-  assert.match(pageSource, /return \{ \.\.\.source, day: getNextClassScheduleDay\(source\.day\) \}/);
+  assert.match(pageSource, /id: null,[\s\S]*day: getNextClassScheduleDay\(source\.day\),[\s\S]*sortOrder: slots\.length/);
   assert.match(pageSource, /const slots = getClassScheduleSlotsFromForm\(\);[\s\n]*syncClassScheduleSlots\(\[[\s\n]*\.\.\.slots,[\s\n]*createNextClassScheduleSlot\(slots\),[\s\n]*\]\)/);
   assert.doesNotMatch(pageSource, /\.\.\.getClassScheduleSlotsFromForm\(\),[\s\n]*\{ day: "", startTime: "", endTime: "", teacher: "", classroom: "" \}/);
 });

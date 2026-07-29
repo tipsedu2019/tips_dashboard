@@ -1105,7 +1105,7 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
   await service.completeRegistrationConsultation({ consultationId: "consultation-1", outcome: "waiting", waitingKind: "next_term_opening", classId: "", requestKey: key });
   await service.transitionRegistrationWaiting({ trackId: "track-1", action: "change_waiting_kind", waitingKind: "current_term_opening", classId: "", retakeDecision: "", reason: "", requestKey: key });
   await service.routeRegistrationEnrollmentDecision({ trackId: "track-1", destination: "waiting", waitingKind: "current_term_opening", classId: "", reason: "", requestKey: key });
-  const saved = await service.saveRegistrationEnrollmentRows({ trackId: "track-1", rows: [{ id: "", classId: "class-1", textbookId: "", classStartDate: "", classStartSessionKey: "", classStartSession: "", sortOrder: 0 }], requestKey: key });
+  const saved = await service.saveRegistrationEnrollmentRows({ trackId: "track-1", rows: [{ id: "", classId: "class-1", textbookId: "", classStartDate: "", classStartSessionKey: "", classStartLessonSessionId: "10000000-0000-4000-8000-000000000011", classStartSession: "", sortOrder: 0 }], requestKey: key });
   await service.claimRegistrationAdmissionMessage({ taskId: "task-1", messageRequestKey: "message-key" });
   await service.reconcileRegistrationAdmissionMessage({ messageId: "message-1", resolution: "accepted", providerEvidence: { observedState: "accepted", providerMessageId: "provider-1" }, reason: "확인", requestKey: key });
   await service.releaseRegistrationAdmissionMessageRetry({ messageId: "message-1", providerEvidence: { observedState: "closed", lookupRequestKey: "message-key" }, reason: "재발송", requestKey: key });
@@ -1143,6 +1143,7 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
   assert.equal(harness.rpcCalls[10][1].p_class_id, null);
   assert.equal(harness.rpcCalls[13][1].p_rows[0].id, null);
   assert.equal(harness.rpcCalls[13][1].p_rows[0].textbookId, null);
+  assert.equal(harness.rpcCalls[13][1].p_rows[0].classStartLessonSessionId, "10000000-0000-4000-8000-000000000011");
   assert.equal(JSON.stringify(harness.rpcCalls[24][1].p_assignments), JSON.stringify({ assignments: [], trackStates: [] }));
   assert.equal("p_track_states" in harness.rpcCalls[24][1], false);
   assert.equal(harness.rpcCalls[23][1].p_destination, null);

@@ -264,3 +264,28 @@ test("ready-state integrity failure resets the cache and throws an explicit erro
   await runtime.probe();
   assert.equal(harness.calls.rpc, 2);
 });
+
+test("probe cache expires and a focus reset fetches the runtime marker again", async () => {
+  const { createContinuousScheduleRuntimeProbe } = await loadProbeFactory();
+  let now = 0;
+  const harness = createClient({
+    readiness: [{ data: 0, error: null }, { data: 1, error: null }, { data: 0, error: null }],
+  });
+  const runtime = createContinuousScheduleRuntimeProbe(harness.client, {
+    now: () => now,
+    maxAgeMs: 1_000,
+  });
+
+  assert.deepEqual({ ...(await runtime.probe()) }, { mode: "shadow", version: 0 });
+  now = 999;
+  assert.deepEqual({ ...(await runtime.probe()) }, { mode: "shadow", version: 0 });
+  assert.equal(harness.calls.rpc, 1);
+
+  now = 1_000;
+  assert.deepEqual({ ...(await runtime.probe()) }, { mode: "ready", version: 1 });
+  assert.equal(harness.calls.rpc, 2);
+
+  runtime.resetForFocus();
+  assert.deepEqual({ ...(await runtime.probe()) }, { mode: "shadow", version: 0 });
+  assert.equal(harness.calls.rpc, 3);
+});
