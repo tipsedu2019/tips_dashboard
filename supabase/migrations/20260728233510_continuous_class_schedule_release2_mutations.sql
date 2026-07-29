@@ -196,6 +196,29 @@ begin
 end;
 $$;
 
+create or replace function dashboard_private.continuous_class_schedule_content_hash_v1(
+  p_plan jsonb
+)
+returns text
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select dashboard_private.continuous_class_schedule_hash_v1(
+    jsonb_build_object(
+      'textbooks', coalesce(p_plan -> 'textbooks', '[]'::jsonb),
+      'sessions', coalesce((
+        select jsonb_agg(jsonb_build_object(
+          'sessionKey', coalesce(item ->> 'sessionKey', item ->> 'session_key', item ->> 'id'),
+          'textbookEntries', coalesce(item -> 'textbookEntries', '[]'::jsonb)
+        ) order by coalesce(item ->> 'sessionKey', item ->> 'session_key', item ->> 'id'))
+        from jsonb_array_elements(coalesce(p_plan -> 'sessions', '[]'::jsonb)) item
+      ), '[]'::jsonb)
+    )
+  );
+$$;
+
 create or replace function dashboard_private.resolve_continuous_schedule_catalog_name_v1(
   p_kind text,
   p_catalog_id uuid,
@@ -460,7 +483,7 @@ begin
   return jsonb_build_object(
     'authoritativeSource', 'normalized', 'runtimeVersion', 1, 'storageMode', v_class.schedule_storage_mode,
     'scheduleRevision', v_class.schedule_revision,
-    'contentHash', dashboard_private.continuous_class_schedule_hash_v1(v_plan),
+    'contentHash', dashboard_private.continuous_class_schedule_content_hash_v1(v_plan),
     'hasMoreBefore', exists(select 1 from public.class_lesson_sessions where class_id = p_class_id and session_date < p_date_from),
     'hasMoreAfter', exists(select 1 from public.class_lesson_sessions where class_id = p_class_id and session_date > p_date_to),
     'sessions', coalesce((select jsonb_agg(to_jsonb(s) order by session_date, start_time nulls last, session_key)
@@ -602,17 +625,44 @@ create or replace function public.save_class_lesson_content_v1(
   p_class_id uuid, p_expected_content_hash text, p_content_patch jsonb, p_request_key uuid
 )
 returns jsonb language plpgsql security definer set search_path = '' as $$
-declare v_class public.classes%rowtype; v_hash text; v_replay jsonb; v_plan jsonb; v_response jsonb;
+declare v_class public.classes%rowtype; v_hash text; v_replay jsonb; v_plan jsonb; v_response jsonb; v_patch_sessions jsonb; v_merged_sessions jsonb; v_patch_session jsonb;
 begin
   v_hash := dashboard_private.continuous_class_schedule_hash_v1(jsonb_build_object('classId', p_class_id, 'contentHash', p_expected_content_hash, 'patch', p_content_patch));
   v_replay := dashboard_private.continuous_class_schedule_request_replay_v1('save_class_lesson_content_v1', p_request_key, v_hash); if v_replay is not null then return v_replay; end if;
   v_class := dashboard_private.require_continuous_class_schedule_mutation_v1(p_class_id, true, true, false, null);
-  if jsonb_typeof(p_content_patch) <> 'object' or p_content_patch ?| array['date','scheduleState','startTime','endTime','teacherCatalogId','classroomCatalogId','sessionKey','billingId'] then raise exception 'class_schedule_validation' using errcode = '22023'; end if;
+  if jsonb_typeof(p_content_patch) <> 'object'
+    or p_content_patch - 'textbooks' - 'sessions' <> '{}'::jsonb
+    or (p_content_patch ? 'textbooks' and jsonb_typeof(p_content_patch -> 'textbooks') <> 'array')
+    or (p_content_patch ? 'sessions' and jsonb_typeof(p_content_patch -> 'sessions') <> 'array')
+  then raise exception 'class_schedule_validation' using errcode = '22023'; end if;
   select coalesce(schedule_plan, '{}'::jsonb) into v_plan from public.classes where id = p_class_id for update;
-  if dashboard_private.continuous_class_schedule_hash_v1(v_plan) <> p_expected_content_hash then raise exception 'class_schedule_stale' using errcode = '40001'; end if;
+  if dashboard_private.continuous_class_schedule_content_hash_v1(v_plan) <> p_expected_content_hash then raise exception 'class_schedule_stale' using errcode = '40001'; end if;
+  v_patch_sessions := coalesce(p_content_patch -> 'sessions', '[]'::jsonb);
+  for v_patch_session in select value from jsonb_array_elements(v_patch_sessions) loop
+    if jsonb_typeof(v_patch_session) <> 'object'
+      or v_patch_session - 'sessionKey' - 'textbookEntries' <> '{}'::jsonb
+      or nullif(btrim(v_patch_session ->> 'sessionKey'), '') is null
+      or jsonb_typeof(v_patch_session -> 'textbookEntries') is distinct from 'array'
+      or (select count(*) from jsonb_array_elements(v_patch_sessions) duplicate
+          where duplicate ->> 'sessionKey' = v_patch_session ->> 'sessionKey') > 1
+      or not exists (
+        select 1 from jsonb_array_elements(coalesce(v_plan -> 'sessions', '[]'::jsonb)) current_session
+        where coalesce(current_session ->> 'sessionKey', current_session ->> 'session_key', current_session ->> 'id') = v_patch_session ->> 'sessionKey'
+      )
+    then raise exception 'class_schedule_validation' using errcode = '22023'; end if;
+  end loop;
+  select coalesce(jsonb_agg(
+    current_session || coalesce((
+      select jsonb_build_object('textbookEntries', patch_session -> 'textbookEntries')
+      from jsonb_array_elements(v_patch_sessions) patch_session
+      where patch_session ->> 'sessionKey' = coalesce(current_session ->> 'sessionKey', current_session ->> 'session_key', current_session ->> 'id')
+    ), '{}'::jsonb)
+  ), '[]'::jsonb)
+  into v_merged_sessions
+  from jsonb_array_elements(coalesce(v_plan -> 'sessions', '[]'::jsonb)) current_session;
   perform dashboard_private.with_continuous_class_schedule_audit_context_v1(p_class_id, p_request_key, 'save_class_lesson_content_v1');
-  update public.classes set schedule_plan = v_plan || p_content_patch where id = p_class_id;
-  select jsonb_build_object('contentHash', dashboard_private.continuous_class_schedule_hash_v1(schedule_plan)) into v_response from public.classes where id = p_class_id;
+  update public.classes set schedule_plan = (v_plan || (p_content_patch - 'sessions')) || jsonb_build_object('sessions', v_merged_sessions) where id = p_class_id;
+  select jsonb_build_object('contentHash', dashboard_private.continuous_class_schedule_content_hash_v1(schedule_plan)) into v_response from public.classes where id = p_class_id;
   return dashboard_private.record_continuous_class_schedule_receipt_v1('save_class_lesson_content_v1', p_request_key, v_hash, v_response);
 end;
 $$;
@@ -695,6 +745,7 @@ revoke all on function dashboard_private.with_continuous_class_schedule_audit_co
 revoke all on function dashboard_private.continuous_class_schedule_request_replay_v1(text, uuid, text) from public, anon, authenticated, service_role;
 revoke all on function dashboard_private.record_continuous_class_schedule_receipt_v1(text, uuid, text, jsonb) from public, anon, authenticated, service_role;
 revoke all on function dashboard_private.continuous_class_schedule_hash_v1(jsonb) from public, anon, authenticated, service_role;
+revoke all on function dashboard_private.continuous_class_schedule_content_hash_v1(jsonb) from public, anon, authenticated, service_role;
 revoke all on function dashboard_private.resolve_continuous_schedule_catalog_name_v1(text, uuid, text) from public, anon, authenticated, service_role;
 revoke all on function dashboard_private.project_continuous_class_schedule_plan_v1(uuid) from public, anon, authenticated, service_role;
 revoke all on function dashboard_private.save_continuous_schedule_defaults_rows_v1(public.classes, jsonb) from public, anon, authenticated, service_role;

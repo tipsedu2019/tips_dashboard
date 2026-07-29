@@ -929,6 +929,7 @@ function normalizeExistingSession(session = {}, textbooks = []) {
 
   return {
     id: String(session.id || "").trim() || createPlannerId(),
+    sessionKey: String(session.sessionKey || session.session_key || "").trim(),
     billingId: String(session.billingId || "").trim(),
     billingLabel: String(session.billingLabel || "").trim(),
     billingColor: String(session.billingColor || "").trim(),
@@ -1046,6 +1047,7 @@ function createSessionPayload({
 
   return {
     id: existing?.id || buildDeterministicSessionId(source, countedSessions),
+    sessionKey: existing?.sessionKey || "",
     billingId: source.billingId,
     billingLabel: source.billingLabel,
     billingColor: source.billingColor,
@@ -1575,6 +1577,7 @@ export function buildSchedulePlanForSave(plan, defaults = {}) {
     })),
     sessions: calculated.sessions.map((session) => ({
       id: session.id,
+      sessionKey: session.sessionKey || session.session_key || session.id,
       billingId: session.billingId,
       billingLabel: session.billingLabel,
       billingColor: session.billingColor,
@@ -1610,6 +1613,24 @@ export function buildSchedulePlanForSave(plan, defaults = {}) {
   };
 
   return payload;
+}
+
+export function buildLessonContentPatch(plan = {}, options = {}) {
+  const textbooks = Array.isArray(plan?.textbooks) ? plan.textbooks : [];
+  const sessions = Array.isArray(plan?.sessions) ? plan.sessions : [];
+  const allowedSessionKeys = Array.isArray(options?.sessionKeys)
+    ? new Set(options.sessionKeys.map((value) => String(value || "").trim()).filter(Boolean))
+    : null;
+
+  return {
+    textbooks,
+    sessions: sessions
+      .map((session) => ({
+        sessionKey: String(session?.sessionKey || session?.session_key || "").trim(),
+        textbookEntries: Array.isArray(session?.textbookEntries) ? session.textbookEntries : [],
+      }))
+      .filter((session) => session.sessionKey && (!allowedSessionKeys || allowedSessionKeys.has(session.sessionKey))),
+  };
 }
 
 export function getStateBadgeLabel(state) {

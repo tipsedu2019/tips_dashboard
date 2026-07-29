@@ -28,6 +28,7 @@ import {
   applyCalendarDateSubstitution,
   applyCalendarDateToggle,
   applyTextbookPlanRangeField,
+  buildLessonContentPatch,
   buildSchedulePlanForSave,
   computeAutoEndDate,
   getNextBillingPeriodMonth,
@@ -2697,6 +2698,19 @@ export function ClassScheduleWorkspace() {
       ? { classId: selectedRow?.id || "", expectedScheduleRevision: Number(normalizedScheduleRead.value.data.scheduleRevision || 0), ...activeLessonMonthRange }
       : null
   ), [activeLessonMonthRange, normalizedScheduleRead, selectedRow?.id]);
+  const normalizedContentContext = useMemo(() => (
+    normalizedScheduleRead.status === "ready" && normalizedScheduleRead.value.source === "normalized"
+      ? {
+        classId: selectedRow?.id || "",
+        expectedContentHash: text(normalizedScheduleRead.value.data.contentHash),
+        sessionKeys: Array.isArray(normalizedScheduleRead.value.data.sessions)
+          ? normalizedScheduleRead.value.data.sessions
+            .map((session) => text((session as Record<string, unknown>)?.session_key || (session as Record<string, unknown>)?.sessionKey))
+            .filter(Boolean)
+          : [],
+      }
+      : null
+  ), [normalizedScheduleRead, selectedRow?.id]);
 
   const selectedRowClassItem = useMemo(
     () => {
@@ -3827,23 +3841,41 @@ export function ClassScheduleWorkspace() {
     if (!selectedRow || !lessonPlanForSave || !supabase) {
       return;
     }
+    const client = supabase;
 
     setIsLessonDesignSaving(true);
     setLessonDesignSaveError("");
     setLessonDesignSaveNotice("");
 
     try {
-      const { error: updateError } = await supabase
-        .from("classes")
-        .update({ schedule_plan: lessonPlanForSave })
-        .eq("id", text(selectedRow.id));
+      if (normalizedContentContext) {
+        if (!normalizedContentContext.expectedContentHash) {
+          throw new Error("최신 일정 내용을 다시 불러온 뒤 저장해 주세요.");
+        }
+        const action = createContinuousScheduleMutationAction({
+          rpc: async (name, parameters) => await client.rpc(name, parameters),
+        });
+        await action.saveContent({
+          classId: normalizedContentContext.classId,
+          expectedContentHash: normalizedContentContext.expectedContentHash,
+          contentPatch: buildLessonContentPatch(lessonPlanForSave, {
+            sessionKeys: normalizedContentContext.sessionKeys,
+          }),
+        });
+        setNormalizedScheduleRefreshNonce((current) => current + 1);
+      } else {
+        const { error: updateError } = await client
+          .from("classes")
+          .update({ schedule_plan: lessonPlanForSave })
+          .eq("id", text(selectedRow.id));
 
-      if (updateError) {
-        throw updateError;
+        if (updateError) {
+          throw updateError;
+        }
       }
 
       await refresh();
-      setLessonDesignSaveNotice("수업계획을 저장했습니다.");
+      setLessonDesignSaveNotice(normalizedContentContext ? "수업 내용을 저장했습니다." : "수업계획을 저장했습니다.");
     } catch (saveError) {
       setLessonDesignSaveError(
         saveError instanceof Error ? saveError.message : "수업계획 저장에 실패했습니다.",
@@ -3851,7 +3883,7 @@ export function ClassScheduleWorkspace() {
     } finally {
       setIsLessonDesignSaving(false);
     }
-  }, [lessonPlanForSave, refresh, selectedRow]);
+  }, [lessonPlanForSave, normalizedContentContext, refresh, selectedRow]);
 
   const previewLessonSessionGeneration = useCallback(async () => {
     if (!supabase || !normalizedGenerationContext) return;
