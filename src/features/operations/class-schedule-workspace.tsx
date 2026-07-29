@@ -45,6 +45,7 @@ import {
 import { createBoundedContinuousScheduleReader } from "@/features/academic/continuous-class-schedule-service";
 import { probeContinuousScheduleRuntime, resetContinuousScheduleRuntimeProbe } from "@/features/academic/continuous-class-schedule-runtime-probe";
 import { useContinuousClassSchedule } from "./use-continuous-class-schedule";
+import { createContinuousScheduleMutationAction } from "@/features/academic/continuous-class-schedule-service";
 import {
   createLessonProgressDraft,
   updateLessonProgressDraftEntry,
@@ -2450,6 +2451,8 @@ export function ClassScheduleWorkspace() {
   const [isLessonDesignSaving, setIsLessonDesignSaving] = useState(false);
   const [lessonDesignSaveError, setLessonDesignSaveError] = useState("");
   const [lessonDesignSaveNotice, setLessonDesignSaveNotice] = useState("");
+  const [generationPreview, setGenerationPreview] = useState<Record<string, unknown> | null>(null);
+  const [generationSaving, setGenerationSaving] = useState(false);
   const [lessonTextbookSearch, setLessonTextbookSearch] = useState("");
   const [lessonTextbookCategoryFilter, setLessonTextbookCategoryFilter] = useState("all");
   const [lessonTextbookPublisherFilter, setLessonTextbookPublisherFilter] = useState("all");
@@ -2677,6 +2680,11 @@ export function ClassScheduleWorkspace() {
       ? { classId: selectedRow.id, ...activeLessonMonthRange }
       : null,
   );
+  const normalizedGenerationContext = useMemo(() => (
+    normalizedScheduleRead.status === "ready" && normalizedScheduleRead.value.source === "normalized" && activeLessonMonthRange
+      ? { classId: selectedRow?.id || "", expectedScheduleRevision: Number(normalizedScheduleRead.value.data.scheduleRevision || 0), ...activeLessonMonthRange }
+      : null
+  ), [activeLessonMonthRange, normalizedScheduleRead, selectedRow?.id]);
 
   const selectedRowClassItem = useMemo(
     () => {
@@ -3770,6 +3778,41 @@ export function ClassScheduleWorkspace() {
       setIsLessonDesignSaving(false);
     }
   }, [lessonPlanForSave, refresh, selectedRow]);
+
+  const previewLessonSessionGeneration = useCallback(async () => {
+    if (!supabase || !normalizedGenerationContext) return;
+    const client = supabase;
+    setGenerationSaving(true);
+    setLessonDesignSaveError("");
+    try {
+      const action = createContinuousScheduleMutationAction({ rpc: async (name, parameters) => await client.rpc(name, parameters) });
+      const preview = await action.previewGeneration(normalizedGenerationContext);
+      setGenerationPreview((preview || {}) as Record<string, unknown>);
+    } catch (error) {
+      setLessonDesignSaveError(error instanceof Error ? error.message : "일정 생성 미리보기에 실패했습니다.");
+    } finally {
+      setGenerationSaving(false);
+    }
+  }, [normalizedGenerationContext]);
+
+  const confirmLessonSessionGeneration = useCallback(async () => {
+    if (!supabase || !normalizedGenerationContext || !generationPreview) return;
+    const client = supabase;
+    setGenerationSaving(true);
+    setLessonDesignSaveError("");
+    try {
+      const action = createContinuousScheduleMutationAction({ rpc: async (name, parameters) => await client.rpc(name, parameters) });
+      const result = await action.generateSessions({ ...normalizedGenerationContext, reason: null });
+      setGenerationPreview(null);
+      setLessonDesignSaveNotice(`추가 ${Number((result as Record<string, unknown>)?.generatedCount || 0)} · 기존 ${Number(generationPreview.existingCount || 0)} · 확인 필요 ${Number(generationPreview.resourceConflictCount || 0)}`);
+      await refresh();
+    } catch (error) {
+      setLessonDesignSaveError(error instanceof Error ? error.message : "일정 생성이 실패했습니다. 미리보기를 다시 확인하세요.");
+      setGenerationPreview(null);
+    } finally {
+      setGenerationSaving(false);
+    }
+  }, [generationPreview, normalizedGenerationContext, refresh]);
   const openLessonDesignForRow = useCallback(
     (
       row: Record<string, unknown> | null,
@@ -5736,6 +5779,17 @@ export function ClassScheduleWorkspace() {
                 <ArrowLeft className="mr-1.5 size-4" />
                 {lessonDesignReturnLabel}
               </Button>
+            ) : null}
+            {normalizedGenerationContext ? (
+              generationPreview ? (
+                <Button type="button" className="h-9 rounded-md px-4" onClick={() => void confirmLessonSessionGeneration()} disabled={generationSaving}>
+                  {generationSaving ? "생성 중" : `생성 확정 · 추가 ${Number(generationPreview.creatableCount || 0)}`}
+                </Button>
+              ) : (
+                <Button type="button" variant="outline" className="h-9 rounded-md px-4" onClick={() => void previewLessonSessionGeneration()} disabled={generationSaving}>
+                  {generationSaving ? "미리보기 중" : "일정 미리보기"}
+                </Button>
+              )
             ) : null}
             <Button
               type="button"
