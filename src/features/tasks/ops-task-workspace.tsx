@@ -5548,6 +5548,7 @@ function WordRetestMainExamDateField({
             linkedDates={classScheduleItems.map((item) => ({ value: item.dateKey, label: item.label }))}
             linkedDatesLabel="수업 회차"
             restrictToLinkedDates={classScheduleItems.length > 0}
+            showLinkedDates={false}
           />
           {value ? (
             <button
@@ -9676,7 +9677,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           ? "할 일 수정"
           : `${getTaskTypeLabel(form.type)} 수정`
       : isTemplateForm
-        ? getWorkspaceCreateActionLabel(workspace, getTaskTypeLabel(form.type))
+        ? form.type === "word_retest"
+          ? `${getTaskTypeLabel(form.type)} 추가`
+          : getWorkspaceCreateActionLabel(workspace, getTaskTypeLabel(form.type))
         : isTodoWorkspace
           ? "할 일 추가"
           : `${workspaceLabel} 추가`

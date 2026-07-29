@@ -177,7 +177,9 @@ test("date and time controls keep selected-time scrolling inside the listbox", a
   );
 
   assert.match(datePickerSource, /disablePortal\?: boolean/);
+  assert.match(datePickerSource, /showLinkedDates\?: boolean/);
   assert.match(datePickerSource, /<PopoverContent[\s\S]*disablePortal=\{disablePortal\}/);
+  assert.match(datePickerSource, /\{showLinkedDates && normalizedLinkedDates\.length > 0 \?/);
   assert.match(timePickerSource, /options\?: string\[\]/);
   assert.match(timePickerSource, /preserveSelectedTimeOption\?: boolean/);
   assert.match(timePickerSource, /disablePortal\?: boolean/);

@@ -4051,6 +4051,7 @@ test("word retest table headers sort and the compact schedule form keeps session
 
   assert.match(mainExamDateSource, /<DatePickerControl[\s\S]*linkedDates=\{classScheduleItems\.map\(\(item\) => \(\{ value: item\.dateKey, label: item\.label \}\)\)\}/);
   assert.match(mainExamDateSource, /restrictToLinkedDates=\{classScheduleItems\.length > 0\}/);
+  assert.match(mainExamDateSource, /showLinkedDates=\{false\}/);
   assert.doesNotMatch(mainExamDateSource, /ClassScheduleCalendarSurface/);
   assert.doesNotMatch(wordRetestBasicSource, /<div className="grid gap-3 md:grid-cols-2">/);
 });
@@ -4253,6 +4254,7 @@ test("word retest workspace keeps page title full and add actions compact", asyn
   assert.match(workspaceSource, /if \(workspace === "word_retest"\) return "추가"/);
   assert.match(workspaceSource, /const emptyActionLabel = getWorkspaceCreateActionLabel\(workspace, workspaceLabel\)/);
   assert.match(workspaceSource, /\{getWorkspaceCreateActionLabel\(workspace, workspaceLabel\)\}/);
+  assert.match(workspaceSource, /isTemplateForm[\s\S]*form\.type === "word_retest"[\s\S]*`\$\{getTaskTypeLabel\(form\.type\)\} 추가`/);
   assert.doesNotMatch(workspaceSource, /<span className="hidden sm:inline">\{workspaceLabel\} 추가<\/span>/);
   assert.doesNotMatch(workspaceSource, /word_retest: "단어 재시험"/);
 });

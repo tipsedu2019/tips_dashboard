@@ -155,6 +155,7 @@ type DatePickerControlProps = {
   linkedDates?: Array<{ value: string; label?: string }>
   linkedDatesLabel?: string
   restrictToLinkedDates?: boolean
+  showLinkedDates?: boolean
   disablePortal?: boolean
   triggerRef?: React.Ref<HTMLButtonElement>
 }
@@ -171,6 +172,7 @@ export function DatePickerControl({
   linkedDates = [],
   linkedDatesLabel = "선택 가능 날짜",
   restrictToLinkedDates = false,
+  showLinkedDates = true,
   disablePortal = false,
   triggerRef,
 }: DatePickerControlProps) {
@@ -223,7 +225,7 @@ export function DatePickerControl({
             handleDateSelect(nextDate)
           }}
         />
-        {normalizedLinkedDates.length > 0 ? (
+        {showLinkedDates && normalizedLinkedDates.length > 0 ? (
           <div className="grid gap-1.5 border-t bg-muted/30 px-2.5 py-2">
             <span className="text-xs font-semibold text-muted-foreground">{linkedDatesLabel}</span>
             <div className="flex max-w-72 flex-wrap gap-1">
