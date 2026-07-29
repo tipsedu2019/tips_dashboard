@@ -20,6 +20,7 @@ export function useContinuousClassSchedule(
   const classId = input?.classId;
   const dateFrom = input?.dateFrom;
   const dateTo = input?.dateTo;
+  const refreshKey = input?.refreshKey;
 
   useEffect(() => {
     if (!reader || !classId || !dateFrom || !dateTo) return undefined;
@@ -38,7 +39,7 @@ export function useContinuousClassSchedule(
       active = false;
       reader.reset();
     };
-  }, [classId, dateFrom, dateTo, reader]);
+  }, [classId, dateFrom, dateTo, reader, refreshKey]);
 
   if (!reader || !classId || !dateFrom || !dateTo) return { status: "idle" };
   return state;

@@ -39,10 +39,12 @@ import { cn } from "@/lib/utils";
 
 import {
   buildClassSchedulePendingSessionSummary,
+  buildNormalizedLessonSessionSaveInput,
   buildClassScheduleRouteModel,
   mergeNormalizedLessonSessions,
 } from "./records.js";
 import { createBoundedContinuousScheduleReader } from "@/features/academic/continuous-class-schedule-service";
+import type { SaveClassLessonSessionInput } from "@/features/academic/continuous-class-schedule-contract";
 import { probeContinuousScheduleRuntime, resetContinuousScheduleRuntimeProbe } from "@/features/academic/continuous-class-schedule-runtime-probe";
 import { useContinuousClassSchedule } from "./use-continuous-class-schedule";
 import { createContinuousScheduleMutationAction } from "@/features/academic/continuous-class-schedule-service";
@@ -1621,6 +1623,13 @@ function buildLessonDesignSnapshot(
       billingColor: sessionBillingColor || matchedPeriod?.color || "#216e4e",
       scheduleState: scheduleContext.scheduleState,
       scheduleStateLabel: scheduleContext.scheduleStateLabel,
+      revision: Number(session.revision || sessionSource.revision || 0),
+      startTime: text(session.startTime || session.start_time),
+      endTime: text(session.endTime || session.end_time),
+      teacherCatalogId: text(session.teacherCatalogId || session.teacher_catalog_id),
+      teacherNameSnapshot: text(session.teacherNameSnapshot || session.teacher_name_snapshot),
+      classroomCatalogId: text(session.classroomCatalogId || session.classroom_catalog_id),
+      classroomNameSnapshot: text(session.classroomNameSnapshot || session.classroom_name_snapshot),
       memo: scheduleContext.memo,
       makeupDate: scheduleContext.makeupDate,
       originalDate: scheduleContext.originalDate,
@@ -1634,8 +1643,8 @@ function buildLessonDesignSnapshot(
       progressTone: getProgressTone(text(sessionSource.progressStatus || sessionSource.progress_status)),
       noteSummary: text(sessionSource.noteSummary || sessionSource.note_summary) || "기록 메모 없음",
       rangeLabel: text(sessionSource.rangeLabel || sessionSource.range_label) || "범위 기록 없음",
-      publicNote: text(sessionSource.publicNote || sessionSource.public_note) || "공개 메모 없음",
-      teacherNote: text(sessionSource.teacherNote || sessionSource.teacher_note) || "교사 메모 없음",
+      publicNote: text(session.publicNote || session.public_note || sessionSource.publicNote || sessionSource.public_note),
+      teacherNote: text(session.teacherNote || session.teacher_note || sessionSource.teacherNote || sessionSource.teacher_note),
       content: text(sessionSource.content) || "수업 기록 없음",
       homework: text(sessionSource.homework) || "과제 없음",
       updatedAt: formatUpdatedDate(text(sessionSource.updatedAt || sessionSource.updated_at)),
@@ -2453,6 +2462,9 @@ export function ClassScheduleWorkspace() {
   const [lessonDesignSaveNotice, setLessonDesignSaveNotice] = useState("");
   const [generationPreview, setGenerationPreview] = useState<Record<string, unknown> | null>(null);
   const [generationSaving, setGenerationSaving] = useState(false);
+  const [normalizedScheduleRefreshNonce, setNormalizedScheduleRefreshNonce] = useState(0);
+  const [normalizedLessonSessionDrafts, setNormalizedLessonSessionDrafts] = useState<Record<string, Partial<SaveClassLessonSessionInput>>>({});
+  const [isNormalizedLessonSessionSaving, setIsNormalizedLessonSessionSaving] = useState(false);
   const [lessonTextbookSearch, setLessonTextbookSearch] = useState("");
   const [lessonTextbookCategoryFilter, setLessonTextbookCategoryFilter] = useState("all");
   const [lessonTextbookPublisherFilter, setLessonTextbookPublisherFilter] = useState("all");
@@ -2677,7 +2689,7 @@ export function ClassScheduleWorkspace() {
   const normalizedScheduleRead = useContinuousClassSchedule(
     normalizedScheduleReader,
     selectedRow && activeLessonMonthRange
-      ? { classId: selectedRow.id, ...activeLessonMonthRange }
+      ? { classId: selectedRow.id, ...activeLessonMonthRange, refreshKey: normalizedScheduleRefreshNonce }
       : null,
   );
   const normalizedGenerationContext = useMemo(() => (
@@ -3438,6 +3450,68 @@ export function ClassScheduleWorkspace() {
     selectedLessonSession,
     selectedLessonSessionDraftStateEntry,
   );
+  const normalizedLessonSessionDraft = useMemo<SaveClassLessonSessionInput | null>(() => {
+    if (!normalizedGenerationContext || !selectedLessonSession) return null;
+    const base = buildNormalizedLessonSessionSaveInput(selectedLessonSession) as SaveClassLessonSessionInput;
+    if (!base.sessionId) return null;
+    return {
+      ...base,
+      ...(normalizedLessonSessionDrafts[base.sessionId] || {}),
+    };
+  }, [normalizedGenerationContext, normalizedLessonSessionDrafts, selectedLessonSession]);
+  const teacherCatalogOptions = useMemo(
+    () => data.teacherCatalogs
+      .filter((catalog) => catalog.is_visible !== false)
+      .map((catalog) => ({ id: text(catalog.id), name: text(catalog.name) }))
+      .filter((catalog) => catalog.id && catalog.name)
+      .sort((left, right) => left.name.localeCompare(right.name, "ko")),
+    [data.teacherCatalogs],
+  );
+  const classroomCatalogOptions = useMemo(
+    () => data.classroomCatalogs
+      .filter((catalog) => catalog.is_visible !== false)
+      .map((catalog) => ({ id: text(catalog.id), name: text(catalog.name) }))
+      .filter((catalog) => catalog.id && catalog.name)
+      .sort((left, right) => left.name.localeCompare(right.name, "ko")),
+    [data.classroomCatalogs],
+  );
+  const updateNormalizedLessonSessionDraft = useCallback(
+    (patch: Partial<SaveClassLessonSessionInput>) => {
+      const sessionId = text(normalizedLessonSessionDraft?.sessionId);
+      if (!sessionId) return;
+      setNormalizedLessonSessionDrafts((current) => ({
+        ...current,
+        [sessionId]: { ...(current[sessionId] || {}), ...patch },
+      }));
+      setLessonDesignSaveError("");
+      setLessonDesignSaveNotice("");
+    },
+    [normalizedLessonSessionDraft?.sessionId],
+  );
+  const saveNormalizedLessonSession = useCallback(async () => {
+    if (!supabase || !normalizedLessonSessionDraft) return;
+    const client = supabase;
+    const input = buildNormalizedLessonSessionSaveInput(normalizedLessonSessionDraft) as SaveClassLessonSessionInput;
+    if (!input.sessionId || !input.sessionDate) return;
+    setIsNormalizedLessonSessionSaving(true);
+    setLessonDesignSaveError("");
+    try {
+      const action = createContinuousScheduleMutationAction({ rpc: async (name, parameters) => await client.rpc(name, parameters) });
+      await action.saveSession(input);
+      setNormalizedLessonSessionDrafts((current) => {
+        const next = { ...current };
+        delete next[input.sessionId];
+        return next;
+      });
+      setLessonDesignSaveNotice("일정 변경을 저장했습니다.");
+      setNormalizedScheduleRefreshNonce((current) => current + 1);
+      await refresh();
+    } catch (error) {
+      setLessonDesignSaveError(error instanceof Error ? error.message : "일정 저장에 실패했습니다.");
+    } finally {
+      setIsNormalizedLessonSessionSaving(false);
+    }
+  }, [normalizedLessonSessionDraft, refresh]);
   const handleLessonSessionStateChange = useCallback(
     (session: (typeof selectedLessonSession), nextState: "active" | "exception" | "makeup" | "tbd") => {
       const sessionDate = resolveLessonSessionDraftDate(session);
@@ -3805,6 +3879,7 @@ export function ClassScheduleWorkspace() {
       const result = await action.generateSessions({ ...normalizedGenerationContext, reason: null });
       setGenerationPreview(null);
       setLessonDesignSaveNotice(`추가 ${Number((result as Record<string, unknown>)?.generatedCount || 0)} · 기존 ${Number(generationPreview.existingCount || 0)} · 확인 필요 ${Number(generationPreview.resourceConflictCount || 0)}`);
+      setNormalizedScheduleRefreshNonce((current) => current + 1);
       await refresh();
     } catch (error) {
       setLessonDesignSaveError(error instanceof Error ? error.message : "일정 생성이 실패했습니다. 미리보기를 다시 확인하세요.");
@@ -4480,6 +4555,67 @@ export function ClassScheduleWorkspace() {
                 {isSelectedSession && selectedLessonSession ? (
                   <div className={cn("bg-background", hideSessionHeader ? "py-0" : "border-t px-3 py-3")}>
                     {showScheduleControls ? (
+                      normalizedLessonSessionDraft ? (
+                        <div className="grid gap-3">
+                          <div className="grid grid-cols-4 gap-1.5">
+                            {([
+                              ["active", "정상", "default"],
+                              ["exception", "휴강", "destructive"],
+                              ["makeup", "보강", "default"],
+                              ["tbd", "미정", "secondary"],
+                            ] as const).map(([state, label, selectedVariant]) => (
+                              <Button
+                                key={state}
+                                type="button"
+                                size="sm"
+                                variant={normalizedLessonSessionDraft.scheduleState === state ? selectedVariant : "outline"}
+                                onClick={() => updateNormalizedLessonSessionDraft({ scheduleState: state })}
+                              >
+                                {label}
+                              </Button>
+                            ))}
+                          </div>
+                          <div className="grid gap-2 sm:grid-cols-3">
+                            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+                              <span>수업일</span>
+                              <Input type="date" value={text(normalizedLessonSessionDraft.sessionDate)} onChange={(event) => updateNormalizedLessonSessionDraft({ sessionDate: event.target.value })} />
+                            </label>
+                            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+                              <span>시작</span>
+                              <Input type="time" value={text(normalizedLessonSessionDraft.startTime)} onChange={(event) => updateNormalizedLessonSessionDraft({ startTime: event.target.value })} />
+                            </label>
+                            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+                              <span>종료</span>
+                              <Input type="time" value={text(normalizedLessonSessionDraft.endTime)} onChange={(event) => updateNormalizedLessonSessionDraft({ endTime: event.target.value })} />
+                            </label>
+                          </div>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+                              <span>선생님</span>
+                              <select value={text(normalizedLessonSessionDraft.teacherCatalogId)} onChange={(event) => updateNormalizedLessonSessionDraft({ teacherCatalogId: event.target.value })} className="border-input bg-background h-9 rounded-md border px-2 text-sm shadow-xs outline-none">
+                                <option value="">미배정</option>
+                                {normalizedLessonSessionDraft.teacherCatalogId && !teacherCatalogOptions.some((catalog) => catalog.id === normalizedLessonSessionDraft.teacherCatalogId) ? <option value={text(normalizedLessonSessionDraft.teacherCatalogId)}>{selectedLessonSession.teacherNameSnapshot || "현재 선생님"}</option> : null}
+                                {teacherCatalogOptions.map((catalog) => <option key={catalog.id} value={catalog.id}>{catalog.name}</option>)}
+                              </select>
+                            </label>
+                            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+                              <span>강의실</span>
+                              <select value={text(normalizedLessonSessionDraft.classroomCatalogId)} onChange={(event) => updateNormalizedLessonSessionDraft({ classroomCatalogId: event.target.value })} className="border-input bg-background h-9 rounded-md border px-2 text-sm shadow-xs outline-none">
+                                <option value="">미배정</option>
+                                {normalizedLessonSessionDraft.classroomCatalogId && !classroomCatalogOptions.some((catalog) => catalog.id === normalizedLessonSessionDraft.classroomCatalogId) ? <option value={text(normalizedLessonSessionDraft.classroomCatalogId)}>{selectedLessonSession.classroomNameSnapshot || "현재 강의실"}</option> : null}
+                                {classroomCatalogOptions.map((catalog) => <option key={catalog.id} value={catalog.id}>{catalog.name}</option>)}
+                              </select>
+                            </label>
+                          </div>
+                          <Textarea value={text(normalizedLessonSessionDraft.memo)} onChange={(event) => updateNormalizedLessonSessionDraft({ memo: event.target.value })} placeholder="메모" aria-label={`${selectedLessonSession.label} 메모`} rows={1} className="h-9 min-h-9 resize-none overflow-hidden py-2" />
+                          <Input value={text(normalizedLessonSessionDraft.correctionReason)} onChange={(event) => updateNormalizedLessonSessionDraft({ correctionReason: text(event.target.value) || null })} placeholder="정정 사유 (마감 수업은 필수)" aria-label={`${selectedLessonSession.label} 정정 사유`} />
+                          <div className="flex justify-end">
+                            <Button type="button" size="sm" onClick={() => void saveNormalizedLessonSession()} disabled={isNormalizedLessonSessionSaving}>
+                              {isNormalizedLessonSessionSaving ? "저장 중" : "일정 저장"}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
                       <>
                         <div className="grid grid-cols-4 gap-1.5">
                           <Button
@@ -4569,6 +4705,7 @@ export function ClassScheduleWorkspace() {
                           </div>
                         </div>
                       </>
+                      )
                     ) : null}
 
                     {showTextbookPlans ? (

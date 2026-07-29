@@ -455,14 +455,38 @@ export function mergeNormalizedLessonSessions(legacyPlan = {}, normalizedSession
         ...legacy,
         id: text(session?.id),
         sessionKey,
+        revision: Number(session?.revision || 0),
         date: text(session?.session_date || session?.sessionDate),
         scheduleState: text(session?.schedule_state || session?.scheduleState || "active"),
         startTime: time(session?.start_time || session?.startTime),
         endTime: time(session?.end_time || session?.endTime),
+        teacherCatalogId: text(session?.teacher_catalog_id || session?.teacherCatalogId),
         teacherNameSnapshot: text(session?.teacher_name_snapshot || session?.teacherNameSnapshot),
+        classroomCatalogId: text(session?.classroom_catalog_id || session?.classroomCatalogId),
         classroomNameSnapshot: text(session?.classroom_name_snapshot || session?.classroomNameSnapshot),
+        memo: text(session?.memo),
+        publicNote: text(session?.public_note || session?.publicNote),
+        teacherNote: text(session?.teacher_note || session?.teacherNote),
       };
     }),
+  };
+}
+
+export function buildNormalizedLessonSessionSaveInput(session = {}) {
+  const optional = (value) => text(value) || null;
+  return {
+    sessionId: text(session?.id),
+    expectedRevision: Number(session?.expectedRevision ?? session?.revision ?? 0),
+    scheduleState: text(session?.scheduleState || session?.schedule_state || "active"),
+    sessionDate: text(session?.sessionDate || session?.date || session?.session_date),
+    startTime: optional(session?.startTime || session?.start_time),
+    endTime: optional(session?.endTime || session?.end_time),
+    teacherCatalogId: optional(session?.teacherCatalogId || session?.teacher_catalog_id),
+    classroomCatalogId: optional(session?.classroomCatalogId || session?.classroom_catalog_id),
+    memo: text(session?.memo),
+    publicNote: text(session?.publicNote || session?.public_note),
+    teacherNote: text(session?.teacherNote || session?.teacher_note),
+    correctionReason: optional(session?.correctionReason || session?.correction_reason),
   };
 }
 

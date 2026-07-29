@@ -82,6 +82,7 @@ export type ContinuousScheduleBoundedReadInput = {
   classId: string;
   dateFrom: string;
   dateTo: string;
+  refreshKey?: number;
 };
 
 export type ContinuousScheduleBoundedReadResult =

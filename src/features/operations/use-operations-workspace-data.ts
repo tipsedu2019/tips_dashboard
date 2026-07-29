@@ -25,6 +25,8 @@ type OperationsWorkspaceData = {
   academicCalendarSource: "live" | "seed";
   syncGroups: OperationsWorkspaceRow[];
   syncGroupMembers: OperationsWorkspaceRow[];
+  teacherCatalogs: OperationsWorkspaceRow[];
+  classroomCatalogs: OperationsWorkspaceRow[];
 };
 
 const EMPTY_DATA: OperationsWorkspaceData = {
@@ -44,6 +46,8 @@ const EMPTY_DATA: OperationsWorkspaceData = {
   academicCalendarSource: "live",
   syncGroups: [],
   syncGroupMembers: [],
+  teacherCatalogs: [],
+  classroomCatalogs: [],
 };
 function isMissingRelationError(error: unknown) {
   const code = String((error as { code?: string })?.code || "").trim();
@@ -129,6 +133,8 @@ export function useOperationsWorkspaceData() {
         academicExamMaterialItems,
         syncGroups,
         syncGroupMembers,
+        teacherCatalogs,
+        classroomCatalogs,
       ] = await Promise.all([
         readTable("classes"),
         readTable("class_terms", true),
@@ -145,6 +151,8 @@ export function useOperationsWorkspaceData() {
         readTable("academic_exam_material_items", true),
         readTable("class_schedule_sync_groups", true),
         readTable("class_schedule_sync_group_members", true),
+        readTable("teacher_catalogs", true),
+        readTable("classroom_catalogs", true),
       ]);
 
       const academicCalendar = resolveAcademicCalendarCollections({
@@ -170,6 +178,8 @@ export function useOperationsWorkspaceData() {
         academicCalendarSource: academicCalendar.academicCalendarSource,
         syncGroups,
         syncGroupMembers,
+        teacherCatalogs,
+        classroomCatalogs,
       });
       setError(null);
     } catch (fetchError) {

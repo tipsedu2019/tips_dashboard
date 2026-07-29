@@ -112,3 +112,7 @@ export function mergeNormalizedLessonSessions(
   legacyPlan?: OperationsSourceRow,
   normalizedSessions?: OperationsSourceRow[],
 ): OperationsSourceRow;
+
+export function buildNormalizedLessonSessionSaveInput(
+  session?: OperationsSourceRow,
+): OperationsSourceRow;
