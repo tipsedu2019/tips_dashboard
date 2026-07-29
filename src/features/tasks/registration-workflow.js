@@ -198,6 +198,7 @@ function registrationScheduleDateKey(value) {
 /**
  * @typedef {{
  *   value: string,
+ *   lessonSessionId: string,
  *   dateKey: string,
  *   sessionNumber: number,
  *   sessionLabel: string,
@@ -226,11 +227,20 @@ export function getSelectableRegistrationScheduleSessions(schedulePlan, options 
     if (options.afterDateKey && dateKey <= options.afterDateKey) return [];
     const rawSessionNumber = Number(entry.sessionNumber ?? entry.session_number);
     const sessionNumber = Number.isInteger(rawSessionNumber) ? rawSessionNumber : 0;
-    if (!dateKey || sessionNumber <= 0) return [];
-    const value = `${dateKey}:${sessionNumber}`;
+    const lessonSessionId = text(entry.id || entry.lesson_session_id || entry.lessonSessionId);
+    const normalizedSessionKey = text(entry.sessionKey || entry.session_key);
+    if (!dateKey || (sessionNumber <= 0 && (!lessonSessionId || !normalizedSessionKey))) return [];
+    const value = normalizedSessionKey || `${dateKey}:${sessionNumber}`;
     if (seen.has(value)) return [];
     seen.add(value);
-    return [{ value, dateKey, sessionNumber, sessionLabel: `${sessionNumber}회차`, state }];
+    return [{
+      value,
+      ...(lessonSessionId ? { lessonSessionId } : {}),
+      dateKey,
+      sessionNumber,
+      sessionLabel: sessionNumber > 0 ? `${sessionNumber}회차` : "수업",
+      state,
+    }];
   }).sort((left, right) => left.dateKey.localeCompare(right.dateKey) || left.sessionNumber - right.sessionNumber);
 }
 

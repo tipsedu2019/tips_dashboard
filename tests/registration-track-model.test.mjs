@@ -136,9 +136,22 @@ test("new enrollment rows keep stable keys and selecting a class defaults its li
     textbookId: "book-a",
     classStartDate: null,
     classStartSessionKey: null,
+    classStartLessonSessionId: null,
     classStartSession: null,
     sortOrder: 0,
   })
+})
+
+test("serialized enrollment rows retain the normalized lesson-session UUID", () => {
+  assert.equal(serializeRegistrationEnrollmentRows([{
+    classId: "eng-a",
+    textbookId: "",
+    classStartDate: "2026-08-03",
+    classStartSessionKey: "default:slot-1:2026-08-03",
+    classStartLessonSessionId: "10000000-0000-4000-8000-000000000011",
+    classStartSession: "수업",
+    sortOrder: 0,
+  }])[0].classStartLessonSessionId, "10000000-0000-4000-8000-000000000011")
 })
 
 test("persisted null textbook restores as an explicit already-owned choice", () => {

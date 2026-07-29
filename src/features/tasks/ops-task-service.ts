@@ -382,6 +382,7 @@ const OPS_REGISTRATION_CLASS_COLUMN_CANDIDATES = [
   "id,name,subject,grade,teacher,room",
 ] as const
 const OPS_REGISTRATION_CLASS_DETAIL_COLUMN_CANDIDATES = [
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,textbook_ids,schedule_storage_mode",
   "id,name,subject,grade,teacher,room,schedule,schedule_plan,textbook_ids",
   "id,name,subject,grade,teacher,room,schedule,schedule_plan",
 ] as const
@@ -882,7 +883,26 @@ async function readOpsRegistrationClassDetail(
     const result = await supabase.from("classes").select(columns).eq("id", safeClassId).limit(1)
     if (!result.error) {
       const row = ((result.data || []) as unknown as Row[])[0]
-      return row ? mapOpsClassOption(row) : null
+      if (!row) return null
+      const mapped = mapOpsClassOption(row)
+      if (text(row.schedule_storage_mode) !== "normalized") return mapped
+      metrics.queryCount += 1
+      const sessionResult = await supabase
+        .from("class_lesson_sessions")
+        .select("id,session_key,session_date,schedule_state")
+        .eq("class_id", safeClassId)
+        .order("session_date")
+      if (sessionResult.error) {
+        if (isMissingRelationError(sessionResult.error)) return mapped
+        throw sessionResult.error
+      }
+      return {
+        ...mapped,
+        schedulePlan: {
+          ...(mapped.schedulePlan || {}),
+          sessions: (sessionResult.data || []) as Record<string, unknown>[],
+        },
+      }
     }
     if (!isMissingColumnError(result.error)) throw result.error
   }

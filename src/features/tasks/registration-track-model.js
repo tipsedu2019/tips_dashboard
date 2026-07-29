@@ -302,6 +302,7 @@ export function createRegistrationEnrollmentDraft({
     textbookExplicitlyCleared: false,
     classStartDate: "",
     classStartSessionKey: "",
+    classStartLessonSessionId: "",
     classStartSession: "",
     status: "planned",
     makeeduRegistered: false,
@@ -321,6 +322,7 @@ export function restoreRegistrationEnrollmentDraft(enrollment = {}) {
     textbookExplicitlyCleared: Boolean(id) && enrollment?.textbookId == null,
     classStartDate: enrollmentText(enrollment?.classStartDate),
     classStartSessionKey: enrollmentText(enrollment?.classStartSessionKey),
+    classStartLessonSessionId: enrollmentText(enrollment?.classStartLessonSessionId),
     classStartSession: enrollmentText(enrollment?.classStartSession),
   })
 }
@@ -341,6 +343,7 @@ export function applyRegistrationEnrollmentClassSelection(row, input = {}) {
     textbookExplicitlyCleared: false,
     classStartDate: "",
     classStartSessionKey: "",
+    classStartLessonSessionId: "",
     classStartSession: "",
   }
 }
@@ -352,6 +355,7 @@ export function serializeRegistrationEnrollmentRows(rows = []) {
       textbookId: enrollmentText(row?.textbookId) || null,
       classStartDate: enrollmentText(row?.classStartDate) || null,
       classStartSessionKey: enrollmentText(row?.classStartSessionKey) || null,
+      classStartLessonSessionId: enrollmentText(row?.classStartLessonSessionId) || null,
       classStartSession: enrollmentText(row?.classStartSession) || null,
       sortOrder: Number.isFinite(Number(row?.sortOrder)) ? Number(row.sortOrder) : index,
     }
@@ -388,6 +392,7 @@ export function mergeSavedRegistrationEnrollmentRows(localRows = [], savedRows =
         textbookId: enrollmentText(savedRow?.textbookId),
         classStartDate: enrollmentText(savedRow?.classStartDate),
         classStartSessionKey: enrollmentText(savedRow?.classStartSessionKey),
+        classStartLessonSessionId: enrollmentText(savedRow?.classStartLessonSessionId),
         classStartSession: enrollmentText(savedRow?.classStartSession),
         textbookExplicitlyCleared: localRow?.textbookExplicitlyCleared || false,
         sortOrder: Number.isFinite(Number(savedRow?.sortOrder)) ? Number(savedRow.sortOrder) : savedIndex,

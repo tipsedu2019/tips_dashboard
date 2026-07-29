@@ -177,6 +177,24 @@ test("R09d registration campus accepts only the two operating campuses and defau
   assert.equal(normalizeRegistrationCampus("서관"), "");
 });
 
+test("registration schedule choices preserve a normalized lesson-session UUID without requiring a legacy sequence number", () => {
+  assert.deepEqual(getSelectableRegistrationScheduleSessions({
+    sessions: [{
+      id: "10000000-0000-4000-8000-000000000011",
+      sessionKey: "default:slot-1:2026-08-03",
+      date: "2026-08-03",
+      scheduleState: "active",
+    }],
+  }), [{
+    value: "default:slot-1:2026-08-03",
+    lessonSessionId: "10000000-0000-4000-8000-000000000011",
+    dateKey: "2026-08-03",
+    sessionNumber: 0,
+    sessionLabel: "수업",
+    state: "active",
+  }]);
+});
+
 test("R09e registration persistence failures use operator-facing guidance", () => {
   const getRegistrationPersistenceErrorMessage = registrationWorkflow.getRegistrationPersistenceErrorMessage;
   assert.equal(typeof getRegistrationPersistenceErrorMessage, "function");

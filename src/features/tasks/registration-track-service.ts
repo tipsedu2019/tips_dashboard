@@ -123,6 +123,7 @@ export type OpsRegistrationEnrollment = {
   textbookId: string | null
   classStartDate: string | null
   classStartSessionKey: string | null
+  classStartLessonSessionId: string | null
   classStartSession: string | null
   status: "planned" | "waitlisted" | "enrolled" | "canceled"
   makeeduRegistered: boolean
@@ -504,6 +505,7 @@ export type RegistrationEnrollmentRowInput = {
   textbookId?: string | null
   classStartDate?: string | null
   classStartSessionKey?: string | null
+  classStartLessonSessionId?: string | null
   classStartSession?: string | null
   sortOrder: number
 }
@@ -956,6 +958,7 @@ function mapEnrollment(row: Row): OpsRegistrationEnrollment {
     textbookId: nullableText(value(row, "textbook_id", "textbookId")),
     classStartDate: nullableText(value(row, "class_start_date", "classStartDate")),
     classStartSessionKey: nullableText(value(row, "class_start_session_key", "classStartSessionKey")),
+    classStartLessonSessionId: nullableText(value(row, "class_start_lesson_session_id", "classStartLessonSessionId")),
     classStartSession: nullableText(value(row, "class_start_session", "classStartSession")),
     status: (text(value(row, "status")) || "planned") as OpsRegistrationEnrollment["status"],
     makeeduRegistered: bool(value(row, "makeedu_registered", "makeeduRegistered")),
@@ -2327,6 +2330,7 @@ export function createRegistrationTrackService(
       textbookId: normalizeUuid(row.textbookId),
       classStartDate: nullableText(row.classStartDate),
       classStartSessionKey: nullableText(row.classStartSessionKey),
+      classStartLessonSessionId: normalizeUuid(row.classStartLessonSessionId),
       classStartSession: nullableText(row.classStartSession),
       sortOrder: row.sortOrder,
     }))
