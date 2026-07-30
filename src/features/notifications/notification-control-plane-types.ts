@@ -1,3 +1,8 @@
+import {
+  NOTIFICATION_CONNECTION_KEYS,
+  type NotificationConnectionKey,
+} from "./notification-google-chat-catalog.ts"
+
 export type DbBigInt = string
 
 export const NOTIFICATION_WORKFLOW_OPTIONS = [
@@ -146,15 +151,8 @@ export const NOTIFICATION_EDITABLE_CHANNEL_KEYS = [
 export type NotificationEditableChannelKey =
   (typeof NOTIFICATION_EDITABLE_CHANNEL_KEYS)[number]
 
-export const NOTIFICATION_CONNECTION_KEYS = [
-  "google_chat.management",
-  "google_chat.executive",
-  "google_chat.math",
-  "google_chat.english",
-  "google_chat.science",
-] as const
-
-export type NotificationConnectionKey = (typeof NOTIFICATION_CONNECTION_KEYS)[number]
+export { NOTIFICATION_CONNECTION_KEYS }
+export type { NotificationConnectionKey }
 
 export const NOTIFICATION_CONNECTION_STATES = [
   "legacy_active",

@@ -1057,11 +1057,13 @@ test("connection repository returns masked DTOs and never exposes either stored 
   assert.deepEqual(result.map((entry) => [entry.connectionKey, entry.connectionState]), [
     ["google_chat.management", "legacy_active"],
     ["google_chat.executive", "encrypted_active"],
+    ["google_chat.english", "disconnected"],
     ["google_chat.math", "disconnected"],
     ["google_chat.science", "disconnected"],
   ])
-  assert.equal(result[3].configured, false)
-  assert.equal(result[3].webhookUrlMask, null)
+  assert.equal(result[2].revision, "0")
+  assert.equal(result[2].configured, false)
+  assert.equal(result[2].webhookUrlMask, null)
   assert.doesNotMatch(
     JSON.stringify(result),
     /key-secret|token-secret|second-key|second-token|webhook_url_ciphertext|legacy-value-that-must-not-win/,

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { readFile } from "node:fs/promises"
 import test from "node:test"
 
 import {
@@ -221,14 +222,25 @@ test("locks the complete event, audience, and channel vocabularies", () => {
   ])
 })
 
-test("locks the five Google Chat connection slots with science last", () => {
+test("locks the five Google Chat connection slots in operator order", () => {
   assert.deepEqual(NOTIFICATION_CONNECTION_KEYS, [
     "google_chat.management",
     "google_chat.executive",
-    "google_chat.math",
     "google_chat.english",
+    "google_chat.math",
     "google_chat.science",
   ])
+})
+
+test("checks subject-team Google Chat readiness in English, math, science order", async () => {
+  const source = await readFile(
+    new URL("../src/features/notifications/notification-control-plane-model.ts", import.meta.url),
+    "utf8",
+  )
+  assert.match(
+    source,
+    /\["google_chat\.english", "google_chat\.math", "google_chat\.science"\]/,
+  )
 })
 
 test("maps the snake_case wire snapshot to one camelCase browser DTO", () => {

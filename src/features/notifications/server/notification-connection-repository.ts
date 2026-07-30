@@ -5,6 +5,11 @@ import {
   type NotificationConnectionKey,
   type NotificationConnectionState,
 } from "../notification-control-plane-types.ts"
+import {
+  GOOGLE_CHAT_CONNECTION_CHANNEL_BY_KEY,
+  GOOGLE_CHAT_CONNECTION_KEY_BY_CHANNEL,
+  type GoogleChatConnectionChannel,
+} from "../notification-google-chat-catalog.ts"
 import { randomUUID } from "node:crypto"
 import {
   decodeNotificationConnectionEncryptionKey,
@@ -20,18 +25,11 @@ export const GOOGLE_CHAT_CONNECTION_TEST_MESSAGE =
 const DECIMAL_REVISION = /^(0|[1-9]\d*)$/
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const CONNECTION_KEY_SET = new Set<string>(NOTIFICATION_CONNECTION_KEYS)
-const CONNECTION_TO_CHANNEL = {
-  "google_chat.management": "admin",
-  "google_chat.executive": "executive",
-  "google_chat.math": "math",
-  "google_chat.english": "english",
-  "google_chat.science": "science",
-} as const
-const CHANNEL_TO_CONNECTION = Object.fromEntries(
-  Object.entries(CONNECTION_TO_CHANNEL).map(([connectionKey, channel]) => [channel, connectionKey]),
-) as Record<string, NotificationConnectionKey>
+const CONNECTION_TO_CHANNEL = GOOGLE_CHAT_CONNECTION_CHANNEL_BY_KEY
+const CHANNEL_TO_CONNECTION = GOOGLE_CHAT_CONNECTION_KEY_BY_CHANNEL
+const GOOGLE_CHAT_CHANNEL_SET = new Set<string>(Object.keys(CHANNEL_TO_CONNECTION))
 
-type GoogleChatChannel = (typeof CONNECTION_TO_CHANNEL)[NotificationConnectionKey]
+type GoogleChatChannel = GoogleChatConnectionChannel
 
 type LegacyConnectionResult = Readonly<{
   connection_key?: unknown
@@ -213,7 +211,9 @@ function rowToDto(
   row: NotificationConnectionRow,
   encryptionKey: ReturnType<typeof decodeNotificationConnectionEncryptionKey>,
 ): NotificationConnectionDto {
-  const connectionKey = CHANNEL_TO_CONNECTION[row.channel]
+  const connectionKey = GOOGLE_CHAT_CHANNEL_SET.has(row.channel)
+    ? CHANNEL_TO_CONNECTION[row.channel as GoogleChatChannel]
+    : undefined
   if (!connectionKey) {
     throw new NotificationConnectionError("notification_connection_unsafe_response", 502)
   }
@@ -255,6 +255,21 @@ function rowToDto(
     lastErrorCode: typeof row.last_error_code === "string" && NOTIFICATION_CONNECTION_RESULT_CODE_PATTERN.test(row.last_error_code)
       ? row.last_error_code
       : null,
+    editable: true,
+  }
+}
+
+function virtualDisconnectedConnection(
+  connectionKey: NotificationConnectionKey,
+): NotificationConnectionDto {
+  return {
+    connectionKey,
+    connectionState: "disconnected",
+    revision: "0",
+    configured: false,
+    webhookUrlMask: null,
+    lastVerifiedAt: null,
+    lastErrorCode: null,
     editable: true,
   }
 }
@@ -309,15 +324,16 @@ export function createNotificationConnectionRepository(dependencies: {
   return {
     async listConnections(): Promise<ReadonlyArray<NotificationConnectionDto>> {
       const rows = await dependencies.store.listRows()
-      const order = new Map<string, number>(
-        NOTIFICATION_CONNECTION_KEYS.map((key, index) => [key, index]),
+      const actualByKey = new Map(
+        rows.map((row) => {
+          const connection = rowToDto(row, encryptionKey)
+          return [connection.connectionKey, connection]
+        }),
       )
-      return rows
-        .map((row) => rowToDto(row, encryptionKey))
-        .sort((left, right) => (
-          (order.get(left.connectionKey) ?? Number.MAX_SAFE_INTEGER) -
-          (order.get(right.connectionKey) ?? Number.MAX_SAFE_INTEGER)
-        ))
+      return NOTIFICATION_CONNECTION_KEYS.map(
+        (connectionKey) => actualByKey.get(connectionKey)
+          ?? virtualDisconnectedConnection(connectionKey),
+      )
     },
 
     async replaceConnection(input: {

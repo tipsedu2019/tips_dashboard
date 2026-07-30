@@ -379,15 +379,16 @@ test("연결 관리는 규칙 표와 분리되고 관리자 동작은 자동 테
   assert.match(source, /if \(replaced\)[\s\S]*setWebhookInputs/)
 })
 
-test("연결 화면은 별도 과학팀 Google Chat 슬롯을 표시하고 과목팀 준비 상태에 포함한다", async () => {
+test("연결 화면은 고정 카탈로그의 팀명과 subject-team 순서를 사용한다", async () => {
   const source = await readOptionalSource(
     "src/features/notifications/notification-control-panel.tsx",
   )
 
-  assert.match(source, /"google_chat\.science":\s*"과학팀 Google Chat"/)
+  assert.match(source, /GOOGLE_CHAT_CONNECTION_LABELS/)
+  assert.doesNotMatch(source, /경영진 Google Chat/)
   assert.match(
     source,
-    /\["google_chat\.math",\s*"google_chat\.english",\s*"google_chat\.science"\]/,
+    /\["google_chat\.english",\s*"google_chat\.math",\s*"google_chat\.science"\]/,
   )
   assert.match(
     source,

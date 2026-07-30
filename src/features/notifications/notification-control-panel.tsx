@@ -47,6 +47,7 @@ import {
   type NotificationRuleDto,
   type NotificationWorkflowKey,
 } from "./notification-control-plane-types"
+import { GOOGLE_CHAT_CONNECTION_LABELS } from "./notification-google-chat-catalog"
 import { useNotificationNavigationGuard } from "./use-notification-navigation-guard"
 
 export type NotificationControlPlaneAvailability = {
@@ -72,14 +73,6 @@ function readSettingsFlag(input: unknown): boolean | null {
   const flag = input.flags.notification_control_plane_settings_ui_enabled
   if (!isRecord(flag) || typeof flag.enabled !== "boolean") return null
   return flag.enabled
-}
-
-const CONNECTION_LABELS: Record<NotificationConnectionKey, string> = {
-  "google_chat.management": "관리팀 Google Chat",
-  "google_chat.executive": "경영진 Google Chat",
-  "google_chat.math": "수학팀 Google Chat",
-  "google_chat.english": "영어팀 Google Chat",
-  "google_chat.science": "과학팀 Google Chat",
 }
 
 const RECONCILIATION_POLL_MAX_ATTEMPTS = 8
@@ -357,7 +350,7 @@ function RuleToggle({
       : rule.audienceKey === "executive_team"
         ? ["google_chat.executive"]
         : rule.audienceKey === "subject_team"
-          ? ["google_chat.math", "google_chat.english", "google_chat.science"]
+          ? ["google_chat.english", "google_chat.math", "google_chat.science"]
           : []
   const connectionMissing = value.enabled && rule.channelKey === "google_chat" && (
     requiredConnectionKeys.length === 0 ||
@@ -713,7 +706,7 @@ function ConnectionsView({
           <Card key={connection.connectionKey}>
             <CardHeader className="pb-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <CardTitle className="text-base">{CONNECTION_LABELS[connection.connectionKey]}</CardTitle>
+                <CardTitle className="text-base">{GOOGLE_CHAT_CONNECTION_LABELS[connection.connectionKey]}</CardTitle>
                 <Badge variant={connection.lastErrorCode ? "destructive" : "outline"}>
                   {connectionStatusLabel(connection)}
                 </Badge>
@@ -1366,7 +1359,7 @@ export function NotificationControlPanel({
               {snapshot.connections.map((connection) => (
                 <p key={connection.connectionKey} className="text-xs sm:text-sm">
                   <span className="font-medium">
-                    {CONNECTION_LABELS[connection.connectionKey]} {connectionStatusLabel(connection)}
+                    {GOOGLE_CHAT_CONNECTION_LABELS[connection.connectionKey]} {connectionStatusLabel(connection)}
                   </span>
                   <span className="ml-2 text-muted-foreground">
                     마지막 검증 {formatTimestamp(connection.lastVerifiedAt)}

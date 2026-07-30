@@ -1,5 +1,5 @@
 begin;
-select plan(228);
+select plan(234);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
@@ -6207,6 +6207,114 @@ select ok(
   ),
   'each worker run stores exactly one start and one terminal heartbeat'
 );
+
+savepoint fixed_google_chat_catalog;
+reset role;
+delete from public.google_chat_webhook_settings where channel in ('english', 'math');
+insert into public.google_chat_webhook_settings(
+  channel, webhook_url, webhook_url_ciphertext, webhook_url_mask,
+  connection_state, revision, last_verified_at, last_error_code
+) values ('science', '', null, null, 'disconnected', 1, null, null)
+on conflict (channel) do update set
+  connection_state = excluded.connection_state,
+  revision = excluded.revision,
+  webhook_url = excluded.webhook_url,
+  webhook_url_ciphertext = excluded.webhook_url_ciphertext,
+  webhook_url_mask = excluded.webhook_url_mask;
+
+create temporary table fixed_google_chat_catalog_before on commit drop as
+select pg_catalog.count(*)::bigint as row_count
+from public.google_chat_webhook_settings;
+
+select is(
+  (
+    select pg_catalog.jsonb_agg(value ->> 'connection_key' order by ordinal)
+    from pg_catalog.jsonb_array_elements(
+      dashboard_private.notification_control_plane_snapshot_v1('tasks', true)
+        -> 'connections'
+    ) with ordinality connection(value, ordinal)
+  ),
+  '["google_chat.management","google_chat.executive","google_chat.english","google_chat.math","google_chat.science"]'::jsonb,
+  'snapshot projects the exact five Google Chat slots in fixed order'
+);
+select is(
+  (
+    select pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'key', value ->> 'connection_key',
+        'state', value ->> 'connection_state',
+        'revision', value ->> 'revision',
+        'configured', value -> 'configured',
+        'mask', value -> 'webhook_url_mask'
+      )
+      order by ordinal
+    )
+    from pg_catalog.jsonb_array_elements(
+      dashboard_private.notification_control_plane_snapshot_v1('tasks', true)
+        -> 'connections'
+    ) with ordinality connection(value, ordinal)
+    where value ->> 'connection_key' in ('google_chat.english', 'google_chat.math')
+  ),
+  '[
+    {"key":"google_chat.english","state":"disconnected","revision":"0","configured":false,"mask":null},
+    {"key":"google_chat.math","state":"disconnected","revision":"0","configured":false,"mask":null}
+  ]'::jsonb,
+  'missing rows are virtual disconnected revision zero slots'
+);
+select is(
+  (select pg_catalog.count(*)::bigint from public.google_chat_webhook_settings),
+  (select row_count from fixed_google_chat_catalog_before),
+  'snapshot projection writes no connection row'
+);
+select is(
+  (
+    select value ->> 'revision'
+    from pg_catalog.jsonb_array_elements(
+      dashboard_private.notification_control_plane_snapshot_v1('tasks', true)
+        -> 'connections'
+    ) connection(value)
+    where value ->> 'connection_key' = 'google_chat.science'
+  ),
+  '1',
+  'stored disconnected science revision is preserved'
+);
+
+select pg_temp.notification_runtime_set_service_role();
+set local role service_role;
+select lives_ok(
+  $sql$
+    select public.replace_google_chat_connection_v1(
+      '30000000-0000-4000-8000-000000000001',
+      'english',
+      'https://chat.googleapis.com/v1/spaces/ENGLISH/messages?key=new-key&token=new-token',
+      'v1:new-iv:new-tag:new-ciphertext',
+      'chat.googleapis.com/v1/spaces/…/messages',
+      0,
+      '30000000-0000-4000-8000-000000000411'
+    )
+  $sql$,
+  'absent English row accepts expected revision zero'
+);
+reset role;
+select ok(
+  (
+    select connection_state = 'encrypted_active' and revision = 1
+    from public.google_chat_webhook_settings
+    where channel = 'english'
+  )
+  and (
+    select value ->> 'connection_state' = 'encrypted_active'
+      and value ->> 'revision' = '1'
+    from pg_catalog.jsonb_array_elements(
+      dashboard_private.notification_control_plane_snapshot_v1('tasks', true)
+        -> 'connections'
+    ) connection(value)
+    where value ->> 'connection_key' = 'google_chat.english'
+  ),
+  'revision zero replacement becomes a stored revision one connection'
+);
+rollback to savepoint fixed_google_chat_catalog;
+release savepoint fixed_google_chat_catalog;
 
 select * from finish();
 rollback;

@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint src tests middleware.ts next.config.ts",
     "test:notifications": "node --test --experimental-strip-types tests/notification-control-plane-*.test.mjs",
+    "preflight:google-chat-connections": "node --experimental-strip-types scripts/preflight-google-chat-connection-fallbacks.mjs",
     "verify:ops-samples": "node scripts/verify-ops-task-sample-workflow.mjs",
     "verify:ops-samples:cli": "node scripts/verify-ops-task-sample-workflow.mjs --run --cli",
     "verify:ops-browser": "node scripts/verify-ops-task-browser-workflow.mjs",

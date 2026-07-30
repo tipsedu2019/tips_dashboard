@@ -104,7 +104,7 @@ test("science connection SQL keeps admin-only CAS, encrypted writes, and safe au
 
 test("prepare ACL hardening is one exact forward-only service-role contract", async () => {
   const pgTap = await readFile(notificationRuntimePgTapUrl, "utf8")
-  assert.match(pgTap, /select\s+plan\(228\);/i)
+  assert.match(pgTap, /select\s+plan\(234\);/i)
   assert.equal((pgTap.match(new RegExp(PREPARE_FUNCTION_SIGNATURE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? []).length, 4)
   assert.match(
     pgTap,
@@ -187,16 +187,15 @@ test("science row is seeded disconnected with no secret and snapshot listing mak
   })
 
   const result = await repository.listConnections()
-  assert.deepEqual(result, [{
-    connectionKey: "google_chat.science",
-    connectionState: "disconnected",
-    revision: "1",
-    configured: false,
-    webhookUrlMask: null,
-    lastVerifiedAt: null,
-    lastErrorCode: null,
-    editable: true,
-  }])
+  assert.deepEqual(result.map((connection) => [connection.connectionKey, connection.revision]), [
+    ["google_chat.management", "0"],
+    ["google_chat.executive", "0"],
+    ["google_chat.english", "0"],
+    ["google_chat.math", "0"],
+    ["google_chat.science", "1"],
+  ])
+  assert.equal(result.every((connection) => connection.connectionState === "disconnected"), true)
+  assert.equal(result.every((connection) => connection.configured === false), true)
   assert.equal(providerCalls, 0, "provider calls 0")
   assert.equal(fetchCalls, 0, "fetch calls 0")
 })
