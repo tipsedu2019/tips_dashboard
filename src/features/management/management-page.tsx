@@ -82,7 +82,7 @@ type ManagementServiceClient = {
   createStudent: (record: Record<string, unknown>) => Promise<unknown>;
   updateStudent: (record: Record<string, unknown>) => Promise<unknown>;
   deleteStudent: (id: string) => Promise<unknown>;
-  createClass: (record: Record<string, unknown>, options?: { candidateMembershipContext?: ClassFormReferences }) => Promise<unknown>;
+  createClass: (record: Record<string, unknown>, options: { candidateMembershipContext?: ClassFormReferences; groupIds: string[] }) => Promise<unknown>;
   updateClass: (record: Record<string, unknown>, options?: { candidateMembershipContext?: ClassFormReferences; scheduleOwnership?: "normalized" }) => Promise<unknown>;
   deleteClass: (id: string) => Promise<unknown>;
   createTextbook: (record: Record<string, unknown>) => Promise<unknown>;
@@ -2612,12 +2612,11 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       if (kind === "students") {
         await service.createStudent(payload);
       } else if (kind === "classes") {
-        const created = await service.createClass(payload, { candidateMembershipContext: classFormReferences });
-        const classId = getSavedClassId(created, payload.id);
-        await service.replaceClassGroupMemberships({
-          classId,
+        const created = await service.createClass(payload, {
+          candidateMembershipContext: classFormReferences,
           groupIds: parseClassGroupIds(form.classGroupIds),
         });
+        const classId = getSavedClassId(created, payload.id);
         const defaults = await service.getClassScheduleDefaults(classId);
         if (defaults && typeof defaults === "object" && !Array.isArray(defaults)) {
           const source = defaults as Record<string, unknown>;

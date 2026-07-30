@@ -16,6 +16,8 @@ const CONTINUOUS_CLASS_SCHEDULE_RPC = {
   initializeNewClass: "initialize_new_class_schedule_v1",
   saveDefaults: "save_class_schedule_defaults_v1",
 };
+const CLASS_CREATE_WITH_GROUPS_RPC = "create_class_with_group_memberships_v1";
+const CLASS_REPLACE_GROUPS_RPC = "replace_class_group_memberships_v1";
 const CLASSROOM_ALIAS_MAP = new Map([
   ["별3", "별관 3강"],
   ["별3강", "별관 3강"],
@@ -838,22 +840,6 @@ async function insertStudentClassHistory(client, rows = []) {
   return data || [];
 }
 
-async function deleteClassGroupMembersByClass(client, classId) {
-  const safeClassId = trimText(classId);
-  if (!safeClassId) {
-    return;
-  }
-
-  const { error } = await client
-    .from("class_schedule_sync_group_members")
-    .delete()
-    .eq("class_id", safeClassId);
-
-  if (error) {
-    throw error;
-  }
-}
-
 function findById(rows, id) {
   const safeId = trimText(id);
   return (rows || []).find((row) => trimText(row?.id) === safeId) || null;
@@ -1172,16 +1158,22 @@ export function createManagementService(options = {}) {
 
     async createClass(record = {}, options = {}) {
       const client = ensureClient(supabase);
-      const runtime = await probeRegistrationRuntime();
+      const groupIds = normalizeIdList(options.groupIds);
+      if (groupIds.length === 0) {
+        throw new Error("기간을 하나 이상 선택하세요.");
+      }
       const payload = buildClassPayload(record, {
         generateId,
         candidateMembershipContext: options.candidateMembershipContext,
       });
-      const created = await upsertClassRows(
-        client,
-        runtime.mode === "legacy" ? payload : stripReadyClassWriteFields(payload),
-      );
-      return Array.isArray(created) ? created[0] || null : created || null;
+      const { data, error } = await client.rpc(CLASS_CREATE_WITH_GROUPS_RPC, {
+        p_class: stripPayloadFields(payload, ["student_ids", "waitlist_ids"]),
+        p_group_ids: groupIds,
+      });
+      if (error) {
+        throw error;
+      }
+      return Array.isArray(data) ? data[0] || null : data || null;
     },
 
     async updateClass(record = {}, options = {}) {
@@ -1259,21 +1251,17 @@ export function createManagementService(options = {}) {
       }
 
       const nextGroupIds = normalizeIdList(groupIds);
-      await deleteClassGroupMembersByClass(client, safeClassId);
       if (nextGroupIds.length === 0) {
-        return [];
+        throw new Error("기간을 하나 이상 선택하세요.");
       }
-
-      return upsertRows(
-        client,
-        "class_schedule_sync_group_members",
-        nextGroupIds.map((groupId, index) => ({
-          group_id: groupId,
-          class_id: safeClassId,
-          sort_order: index,
-        })),
-        { onConflict: "group_id,class_id" },
-      );
+      const { data, error } = await client.rpc(CLASS_REPLACE_GROUPS_RPC, {
+        p_class_id: safeClassId,
+        p_group_ids: nextGroupIds,
+      });
+      if (error) {
+        throw error;
+      }
+      return data || null;
     },
 
     async deleteClass(id) {
