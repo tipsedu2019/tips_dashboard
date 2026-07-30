@@ -2320,6 +2320,48 @@ test("Google Chat provider는 주입 fetch만 쓰고 확정 성공·429·영구 
   assert.equal(ledger.length, callsBeforeMissing, "연결이 없으면 fixture transport도 호출하면 안 된다")
 })
 
+test("Google Chat provider는 안전한 상대 링크만 고정 origin의 전체 URL로 보내고 잘못된 링크는 전송 전에 닫는다", async () => {
+  const { createGoogleChatProvider } = await import(googleChatProviderModuleUrl)
+  const fetchCalls = []
+  const provider = createGoogleChatProvider({
+    fetch: async (input, init) => {
+      fetchCalls.push({ input: String(input), init: clone(init) })
+      return new Response(JSON.stringify({ name: "spaces/fixture/messages/full-url" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    },
+  })
+
+  assertProviderResult(
+    await provider.send(createBegunGoogleChatContext({
+      href: "/admin/withdrawal?flow=operations&taskId=ea3cd6e1-e2da-4f9d-833e-c7349c09ee31",
+    })),
+    "sent",
+    null,
+  )
+  assert.equal(fetchCalls.length, 1)
+  assert.match(
+    fetchCalls[0].init.body,
+    /https:\/\/tipsedu\.co\.kr\/admin\/withdrawal\?flow=operations&taskId=ea3cd6e1-e2da-4f9d-833e-c7349c09ee31/,
+  )
+
+  for (const href of [
+    "https://tipsedu.co.kr/admin/withdrawal",
+    "//tipsedu.co.kr/admin/withdrawal",
+    "/admin/withdrawal#fragment",
+    "/admin/withdrawal?next=https://evil.invalid",
+    "/login?next=/admin/withdrawal",
+  ]) {
+    assertProviderResult(
+      await provider.send(createBegunGoogleChatContext({ href })),
+      "failed",
+      "render_validation_failed",
+    )
+  }
+  assert.equal(fetchCalls.length, 1, "잘못된 링크는 webhook fetch 전에 실패해야 한다")
+})
+
 test("Google Chat 5xx는 수락 여부가 불명하므로 unknown으로 닫히고 다음 worker에서 자동 재발송하지 않는다", async () => {
   const { createGoogleChatProvider } = await import(googleChatProviderModuleUrl)
   const { createNotificationWorkerRuntime } = await import(workerModuleUrl)

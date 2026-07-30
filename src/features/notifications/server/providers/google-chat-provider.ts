@@ -31,6 +31,8 @@ type FetchTransport = (
 ) => Promise<Response>
 
 const SAFE_PROVIDER_ID = /^[A-Za-z0-9._/-]{1,256}$/
+const GOOGLE_CHAT_APP_ORIGIN = "https://tipsedu.co.kr"
+const EXTERNAL_URL_PATTERN = /(?:https?:\/\/|\/\/)/iu
 
 function result(
   status: NotificationProviderResult["status"],
@@ -53,6 +55,32 @@ function safeWebhookUrl(value: unknown) {
     return validateGoogleChatWebhookUrl(value)
   } catch {
     return null
+  }
+}
+
+function absoluteGoogleChatAppHref(value: unknown) {
+  if (value === null) return null
+  if (
+    typeof value !== "string" ||
+    !value.startsWith("/admin/") ||
+    value.includes("#") ||
+    EXTERNAL_URL_PATTERN.test(value)
+  ) {
+    return undefined
+  }
+
+  try {
+    const parsed = new URL(value, GOOGLE_CHAT_APP_ORIGIN)
+    if (
+      parsed.origin !== GOOGLE_CHAT_APP_ORIGIN ||
+      !parsed.pathname.startsWith("/admin/") ||
+      parsed.hash
+    ) {
+      return undefined
+    }
+    return parsed.toString()
+  } catch {
+    return undefined
   }
 }
 
@@ -114,6 +142,13 @@ export function createGoogleChatProvider(input: {
           errorSummary: "provider connection unavailable",
         })
       }
+      const href = absoluteGoogleChatAppHref(context.href)
+      if (href === undefined) {
+        return result("failed", "render_validation_failed", {
+          errorCode: "render_validation_failed",
+          errorSummary: "notification link invalid",
+        })
+      }
 
       let response: Response
       try {
@@ -121,7 +156,7 @@ export function createGoogleChatProvider(input: {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            text: [context.rendered_title, context.rendered_body, context.href]
+            text: [context.rendered_title, context.rendered_body, href]
               .filter((value): value is string => typeof value === "string" && value.length > 0)
               .join("\n"),
           }),

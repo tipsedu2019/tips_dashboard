@@ -1036,6 +1036,12 @@ function normalizeProviderResult(
       errorCode: "connection_missing",
       errorSummary: "provider connection unavailable",
     },
+    render_validation_failed: {
+      status: "failed",
+      reason: "render_validation_failed",
+      errorCode: "render_validation_failed",
+      errorSummary: "notification link invalid",
+    },
     provider_timeout_after_dispatch: {
       status: "delivery_unknown",
       reason: "provider_timeout_after_dispatch",
