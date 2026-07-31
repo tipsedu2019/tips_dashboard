@@ -64,6 +64,29 @@ function formatNotificationTime(value: string) {
   }).format(date)
 }
 
+const NOTIFICATION_BODY_ISO_DATE_TIME_PATTERN = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})\b/g
+const notificationBodyDateTimeFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Seoul",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+})
+
+function formatNotificationBody(value: string) {
+  return value.replace(NOTIFICATION_BODY_ISO_DATE_TIME_PATTERN, (isoDateTime) => {
+    const date = new Date(isoDateTime)
+    if (!Number.isFinite(date.getTime())) return isoDateTime
+
+    const parts = Object.fromEntries(
+      notificationBodyDateTimeFormatter.formatToParts(date).map((part) => [part.type, part.value]),
+    )
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`
+  })
+}
+
 function getPushStateLabel(state: DashboardPushState) {
   const labels: Record<DashboardPushState, string> = {
     checking: "현재 브라우저 상태를 확인하는 중입니다.",
@@ -501,7 +524,7 @@ export function DashboardNotificationPopover() {
                   <span className="text-sm font-medium">{notification.title}</span>
                   {!notification.readAt ? <span className="mt-1 size-2 rounded-full bg-primary" aria-hidden="true" /> : null}
                 </div>
-                {notification.body ? <span className="text-xs text-muted-foreground">{notification.body}</span> : null}
+                {notification.body ? <span className="text-xs text-muted-foreground">{formatNotificationBody(notification.body)}</span> : null}
                 <span className="text-[11px] text-muted-foreground">{formatNotificationTime(notification.createdAt)}</span>
               </div>
             )

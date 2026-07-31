@@ -99,6 +99,31 @@ function loadMakeupActionErrorMessage() {
   return transpileAndLoad(source, ["getMakeupActionErrorMessage"]);
 }
 
+function loadMakeupRequestViewHelpers() {
+  const source = sourceBetween(
+    workspaceSource,
+    "function isMakeupRequestParticipant",
+    "type MakeupRequestTableColumnKey",
+  );
+  return transpileAndLoad(
+    source,
+    ["getMakeupRequestViewRequests"],
+    {
+      MAKEUP_REQUEST_REQUEST_STATUSES: ["revision_requested"],
+      MAKEUP_REQUEST_CLOSED_STATUSES: ["completed", "rejected", "canceled"],
+    },
+  );
+}
+
+function loadNotificationBodyFormatter() {
+  const source = sourceBetween(
+    notificationPopoverSource,
+    "function formatNotificationTime",
+    "function getPushStateLabel",
+  );
+  return transpileAndLoad(source, ["formatNotificationBody"]);
+}
+
 function loadMakeupPayloadValidation() {
   const managerRoleSource = sourceBetween(
     serviceSource,
@@ -619,6 +644,51 @@ test("makeup workspace separates request status tabs by workflow state", () => {
   assert.match(workspaceSource, /request\.status === "refund_pending"/);
   assert.doesNotMatch(workspaceSource, /const MAKEUP_REQUEST_ACTIVE_STATUSES = \["approval_pending", "revision_requested", "makeup_pending", "refund_pending"\]/);
   assert.doesNotMatch(workspaceSource, /\{ id: "approvals", label: "결재함" \}/);
+});
+
+test("관리팀은 자신이 참여하지 않은 결재대기 휴보강을 확인한다", () => {
+  const { getMakeupRequestViewRequests } = loadMakeupRequestViewHelpers();
+  const request = {
+    id: "approval-pending-request",
+    status: "approval_pending",
+    requesterId: "requester-profile",
+    teacherProfileId: "teacher-profile",
+    approverProfileId: "approver-profile",
+  };
+
+  assert.equal(
+    getMakeupRequestViewRequests([request], "approvalPending", "management-profile", true)
+      .map((item) => item.id)
+      .join(","),
+    "approval-pending-request",
+  );
+});
+
+test("관리팀은 자신이 참여하지 않은 보강대기 휴보강을 확인한다", () => {
+  const { getMakeupRequestViewRequests } = loadMakeupRequestViewHelpers();
+  const request = {
+    id: "makeup-pending-request",
+    status: "makeup_pending",
+    requesterId: "requester-profile",
+    teacherProfileId: "teacher-profile",
+    approverProfileId: "approver-profile",
+  };
+
+  assert.equal(
+    getMakeupRequestViewRequests([request], "makeupPending", "management-profile", true)
+      .map((item) => item.id)
+      .join(","),
+    "makeup-pending-request",
+  );
+});
+
+test("알림 본문의 ISO 보강 시간을 한국식 시각으로 표시한다", () => {
+  const { formatNotificationBody } = loadNotificationBodyFormatter();
+
+  assert.equal(
+    formatNotificationBody("보강일시: 2026-08-07T10:00:00+09:00 - 2026-08-07T12:00:00+09:00"),
+    "보강일시: 2026-08-07 10:00 - 2026-08-07 12:00",
+  );
 });
 
 test("makeup workspace avoids browser prompt and fills wide screens", () => {

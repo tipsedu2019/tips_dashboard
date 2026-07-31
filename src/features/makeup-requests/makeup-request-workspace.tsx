@@ -570,13 +570,13 @@ function getMakeupRequestViewRequests(
   }
   if (view === "approvalPending") {
     return requests.filter((request) => (
-      isMakeupRequestParticipant(request, currentUserId) &&
+      (canManage || isMakeupRequestParticipant(request, currentUserId)) &&
       request.status === "approval_pending"
     ))
   }
   if (view === "makeupPending") {
     return requests.filter((request) => (
-      isMakeupRequestParticipant(request, currentUserId) &&
+      (canManage || isMakeupRequestParticipant(request, currentUserId)) &&
       request.status === "makeup_pending"
     ))
   }
