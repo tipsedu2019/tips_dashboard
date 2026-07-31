@@ -124,6 +124,19 @@ function loadNotificationBodyFormatter() {
   return transpileAndLoad(source, ["formatNotificationBody"]);
 }
 
+function loadMakeupFilterHelpers() {
+  const source = sourceBetween(
+    workspaceSource,
+    "function buildMakeupSubjectFilterOptions",
+    "function getSlotRoomAvailability",
+  );
+  return transpileAndLoad(
+    source,
+    ["buildMakeupSubjectFilterOptions", "matchesMakeupTeacherSubject"],
+    { MAKEUP_FILTER_SUBJECTS: ["영어", "수학", "과학"] },
+  );
+}
+
 function loadMakeupPayloadValidation() {
   const managerRoleSource = sourceBetween(
     serviceSource,
@@ -161,6 +174,29 @@ test("휴보강 상신 DB 검증 실패는 원시 코드 대신 운영자 안내
     ),
     "휴보강 신청 정보를 저장할 수 없습니다. 수업·담당 선생님·결재자 연결을 확인해 주세요.",
   );
+});
+
+test("휴보강 선택 필터는 지정 과목만 제공하고 과목 미지정 선생님을 제외한다", () => {
+  const { buildMakeupSubjectFilterOptions, matchesMakeupTeacherSubject } = loadMakeupFilterHelpers();
+
+  assert.match(workspaceSource, /const subjectFilterOptions = useMemo\(\(\) => buildMakeupSubjectFilterOptions\(requests\), \[requests\]\)/);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(buildMakeupSubjectFilterOptions([
+      { subject: "수학" },
+      { subject: "수학" },
+      { subject: "영어" },
+      { subject: "국어" },
+    ]))),
+    [
+      { value: "영어", label: "영어", count: 1 },
+      { value: "수학", label: "수학", count: 2 },
+      { value: "과학", label: "과학", count: 0 },
+    ],
+  );
+  assert.equal(matchesMakeupTeacherSubject({ subjects: "영어, 과학" }, "영어"), true);
+  assert.equal(matchesMakeupTeacherSubject({ subjects: "영어, 과학" }, "수학"), false);
+  assert.equal(matchesMakeupTeacherSubject({ subjects: "" }, "과학"), false);
+  assert.equal(matchesMakeupTeacherSubject({ subjects: "" }, ""), true);
 });
 
 test("신규 휴보강 상신은 서버가 허용하지 않는 반려·보완 필드를 전송하지 않는다", () => {
@@ -723,7 +759,7 @@ test("makeup settings switches between the legacy dialog and the one canonical s
 });
 
 test("makeup workspace exposes notification controls cancellation and fixed subject ordering", () => {
-  assert.match(workspaceSource, /const SUBJECT_SORT_ORDER = \["영어", "수학"\]/);
+  assert.match(workspaceSource, /const SUBJECT_SORT_ORDER = \["영어", "수학", "과학"\]/);
   assert.match(workspaceSource, /sortSubjectOptions/);
   assert.match(workspaceSource, /알림 설정/);
   assert.match(workspaceSource, /notificationDialogOpen/);

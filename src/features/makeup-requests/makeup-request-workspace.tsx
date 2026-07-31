@@ -162,7 +162,8 @@ const MAKEUP_ACTION_NOTE_CONFIG: Record<MakeupActionNoteKind, {
   },
 }
 
-const SUBJECT_SORT_ORDER = ["영어", "수학"]
+const SUBJECT_SORT_ORDER = ["영어", "수학", "과학"]
+const MAKEUP_FILTER_SUBJECTS = SUBJECT_SORT_ORDER
 const MAKEUP_MANAGER_APPROVER_NAMES = new Set(Object.values(APPROVER_NAMES_BY_GROUP).flat())
 
 const NOTIFICATION_DELIVERY_STATUS_LABELS: Record<string, string> = {
@@ -1384,10 +1385,7 @@ function MakeupRequestDataTable({
   const isFilterInputExpanded = filterInputOpen || Boolean(filterValue)
   const todayKey = useMemo(() => toDateKey(new Date()), [])
 
-  const subjectFilterOptions = useMemo(() => (
-    buildMakeupRequestSelectFilterOptions(requests, (request) => ({ value: request.subject, label: request.subject }))
-      .sort((left, right) => sortSubjectOptions(left.label, right.label))
-  ), [requests])
+  const subjectFilterOptions = useMemo(() => buildMakeupSubjectFilterOptions(requests), [requests])
 
   const teacherFilterSourceRequests = useMemo(() => (
     selectedSubjectFilter === "all" ? requests : requests.filter((request) => request.subject === selectedSubjectFilter)
@@ -1719,6 +1717,14 @@ function getTeacherOptionKey(teacher: MakeupTeacherOption) {
   return teacher.id ? `id:${teacher.id}` : `name:${teacher.name}`
 }
 
+function buildMakeupSubjectFilterOptions(requests: MakeupRequest[]) {
+  return MAKEUP_FILTER_SUBJECTS.map((subject) => ({
+    value: subject,
+    label: subject,
+    count: requests.filter((request) => request.subject === subject).length,
+  }))
+}
+
 function normalizeMakeupTeacherSubjects(subjects: string) {
   return subjects
     .split(/[,，/]+/)
@@ -1734,7 +1740,7 @@ function matchesMakeupTeacherSubject(teacher: MakeupTeacherOption, subject: stri
   const selectedSubject = subject.trim()
   if (!selectedSubject) return true
   const subjects = normalizeMakeupTeacherSubjects(teacher.subjects)
-  if (subjects.length === 0) return true
+  if (subjects.length === 0) return false
   const selectedToken = normalizeMakeupSubjectToken(selectedSubject)
   return subjects.some((teacherSubject) => (
     teacherSubject === selectedSubject || normalizeMakeupSubjectToken(teacherSubject) === selectedToken
