@@ -44,6 +44,10 @@ import {
 } from "./registration-runtime-probe"
 import type { RegistrationRuntimeState } from "./registration-runtime-probe"
 import type { RegistrationNotificationProcessingReadiness } from "./registration-appointment-draft"
+import {
+  REGISTRATION_WORKFLOW_STATUSES,
+  getRegistrationWorkflowStatusFromLegacyTrack,
+} from "./registration-workflow-status.js"
 
 export type { RegistrationRuntimeState }
 function probeRegistrationSubjectTrackRuntime(): Promise<RegistrationRuntimeState> {
@@ -94,11 +98,28 @@ export type OpsRegistrationTrackStatus =
   | "not_registered"
   | "inquiry_closed"
 
+export type OpsRegistrationWorkflowStatus =
+  | "inquiry"
+  | "level_test_requested"
+  | "consultation_requested"
+  | "consultation_completed"
+  | "waiting_current_class"
+  | "waiting_new_class"
+  | "waiting_next_opening"
+  | "enrollment_requested"
+  | "payment_in_progress"
+  | "registered"
+  | "not_registered"
+  | "inquiry_only"
+
 export type OpsRegistrationTrackSummary = {
   id: string
   taskId: string
   subject: RegistrationSubject
   status: OpsRegistrationTrackStatus
+  workflowStatus: OpsRegistrationWorkflowStatus
+  workflowRevision: number
+  workflowStatusEnteredAt: string
   legacy: boolean
   directorProfileId: string | null
   directorName: string
@@ -332,6 +353,13 @@ export type RegistrationTrackTransitionResponse = {
   consultationId?: string | null
   enrollmentId?: string | null
   canceledEnrollmentIds?: string[]
+}
+
+export type RegistrationWorkflowStatusMutationResponse = {
+  trackId: string
+  workflowStatus: OpsRegistrationWorkflowStatus
+  workflowRevision: number
+  workflowStatusEnteredAt: string
 }
 
 export type RegistrationDirectorAssignmentResponse = RegistrationTrackTransitionResponse & {
@@ -648,6 +676,9 @@ const TRACK_SUMMARY_COLUMNS = [
   "task_id",
   "subject",
   "pipeline_status",
+  "workflow_status",
+  "workflow_revision",
+  "workflow_status_entered_at",
   "director_profile_id",
   "director_assignment_source",
   "director_assignment_rule_key",
@@ -885,6 +916,17 @@ function trackStatus(input: unknown): OpsRegistrationTrackStatus {
   return (text(input) || "inquiry") as OpsRegistrationTrackStatus
 }
 
+function workflowStatus(row: Row): OpsRegistrationWorkflowStatus {
+  const direct = text(value(row, "workflow_status", "workflowStatus"))
+  if (REGISTRATION_WORKFLOW_STATUSES.includes(direct)) {
+    return direct as OpsRegistrationWorkflowStatus
+  }
+  return getRegistrationWorkflowStatusFromLegacyTrack({
+    status: value(row, "pipeline_status", "status"),
+    waitingKind: value(row, "waiting_kind", "waitingKind"),
+  }) as OpsRegistrationWorkflowStatus
+}
+
 function waitingKind(input: unknown): RegistrationWaitingKind {
   const normalized = text(input)
   return (["current_class", "current_term_opening", "next_term_opening"].includes(normalized)
@@ -930,6 +972,9 @@ function mapTrack(row: Row, directorNames = new Map<string, string>(), legacy = 
     taskId: text(value(row, "task_id", "taskId")),
     subject: subject(value(row, "subject")),
     status: trackStatus(value(row, "pipeline_status", "status")),
+    workflowStatus: workflowStatus(row),
+    workflowRevision: numberValue(value(row, "workflow_revision", "workflowRevision")) || 1,
+    workflowStatusEnteredAt: text(value(row, "workflow_status_entered_at", "workflowStatusEnteredAt")),
     legacy,
     directorProfileId,
     directorName: directorProfileId
@@ -1493,6 +1538,9 @@ export function createRegistrationTrackService(
       taskId: input.taskId,
       subject: entry,
       status: input.status,
+      workflowStatus: getRegistrationWorkflowStatusFromLegacyTrack({ status: input.status }) as OpsRegistrationWorkflowStatus,
+      workflowRevision: 1,
+      workflowStatusEnteredAt: input.stageEnteredAt || "",
       legacy: true,
       directorProfileId: null,
       directorName: input.directorName || "",
@@ -2281,6 +2329,30 @@ export function createRegistrationTrackService(
     }
   }
 
+  async function setRegistrationWorkflowStatus(input: {
+    trackId: string
+    workflowStatus: OpsRegistrationWorkflowStatus
+    expectedWorkflowRevision: number
+    requestKey: string
+  }): Promise<RegistrationWorkflowStatusMutationResponse> {
+    const result = await callRpc<Row>("set_registration_workflow_status_v1", {
+      p_track_id: input.trackId,
+      p_workflow_status: input.workflowStatus,
+      p_expected_workflow_revision: input.expectedWorkflowRevision,
+      p_request_key: requireRequestKey(input.requestKey),
+    })
+    const status = text(value(result, "workflow_status", "workflowStatus"))
+    if (!REGISTRATION_WORKFLOW_STATUSES.includes(status)) {
+      throw new Error("registration_workflow_status_response_invalid")
+    }
+    return {
+      trackId: text(value(result, "track_id", "trackId")),
+      workflowStatus: status as OpsRegistrationWorkflowStatus,
+      workflowRevision: numberValue(value(result, "workflow_revision", "workflowRevision")),
+      workflowStatusEnteredAt: text(value(result, "workflow_status_entered_at", "workflowStatusEnteredAt")),
+    }
+  }
+
   async function transitionRegistrationWaiting(input: {
     trackId: string
     action: "change_waiting_kind" | "record_retest_required" | "move_to_enrollment" | "close_not_registered"
@@ -2589,6 +2661,7 @@ export function createRegistrationTrackService(
     completeRegistrationLevelTestAttempt,
     closeRegistrationLevelTestTrack,
     completeRegistrationConsultation,
+    setRegistrationWorkflowStatus,
     transitionRegistrationWaiting,
     routeRegistrationEnrollmentDecision,
     saveRegistrationEnrollmentRows,
@@ -2848,6 +2921,14 @@ export function completeRegistrationConsultation(
   const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationConsultationCompletionResponse>("completeRegistrationConsultation", input)
   if (fixture) return fixture
   return defaultRegistrationTrackService.completeRegistrationConsultation(input)
+}
+
+export function setRegistrationWorkflowStatus(
+  input: Parameters<typeof defaultRegistrationTrackService.setRegistrationWorkflowStatus>[0],
+): Promise<RegistrationWorkflowStatusMutationResponse> {
+  const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationWorkflowStatusMutationResponse>("setRegistrationWorkflowStatus", input)
+  if (fixture) return fixture
+  return defaultRegistrationTrackService.setRegistrationWorkflowStatus(input)
 }
 
 export function transitionRegistrationWaiting(

@@ -23,6 +23,7 @@ import {
   parseRegistrationSubjects,
   shouldEnsureRegistrationStudent,
 } from "./registration-workflow"
+import { getRegistrationWorkflowStatusFromLegacyTrack } from "./registration-workflow-status.js"
 import {
   clearRegistrationTrackServiceCaches,
   loadOpsRegistrationWorkspaceOptionData as loadRegistrationWorkspaceOptionData,
@@ -1514,6 +1515,9 @@ function createLegacyRegistrationTrackSummaries(tasks: OpsTask[]): OpsRegistrati
       taskId: task.id,
       subject,
       status,
+      workflowStatus: getRegistrationWorkflowStatusFromLegacyTrack({ status, waitingKind }),
+      workflowRevision: 1,
+      workflowStatusEnteredAt: task.registration?.inquiryAt || task.createdAt,
       legacy: true,
       directorProfileId: null,
       directorName: "",

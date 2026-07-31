@@ -7,6 +7,10 @@ import ts from "typescript";
 
 import { parseAcademicSubject } from "../src/lib/academic-subject-registry.ts";
 import { normalizeRegistrationLevelTestPlace } from "../src/features/tasks/registration-level-test-place.ts";
+import {
+  REGISTRATION_WORKFLOW_STATUSES,
+  getRegistrationWorkflowStatusFromLegacyTrack,
+} from "../src/features/tasks/registration-workflow-status.js";
 
 const serviceUrl = new URL(
   "../src/features/tasks/registration-track-service.ts",
@@ -45,6 +49,8 @@ async function loadFactory(extraGlobals = {}) {
     crypto: { randomUUID: () => "uuid-from-crypto" },
     normalizeRegistrationLevelTestPlace,
     parseAcademicSubject,
+    REGISTRATION_WORKFLOW_STATUSES,
+    getRegistrationWorkflowStatusFromLegacyTrack,
     ...extraGlobals,
   });
   return sandboxModule.exports;
@@ -58,6 +64,33 @@ test("track rows preserve science and fail closed for unsupported subjects", asy
     () => mapTrack({ id: "unsupported-track", subject: "unknown" }),
     /registration_subject_unsupported/,
   );
+});
+
+test("track summaries prefer the manual workflow status and preserve its revision", async () => {
+  const { mapTrack } = await loadFactory();
+
+  const explicit = mapTrack({
+    id: "track-1",
+    task_id: "task-1",
+    subject: "영어",
+    pipeline_status: "waiting",
+    workflow_status: "waiting_next_opening",
+    workflow_revision: 4,
+    workflow_status_entered_at: "2026-08-01T01:00:00.000Z",
+  });
+  const legacy = mapTrack({
+    id: "track-2",
+    task_id: "task-1",
+    subject: "수학",
+    pipeline_status: "waiting",
+    waiting_kind: "current_class",
+  });
+
+  assert.equal(explicit.workflowStatus, "waiting_next_opening");
+  assert.equal(explicit.workflowRevision, 4);
+  assert.equal(explicit.workflowStatusEnteredAt, "2026-08-01T01:00:00.000Z");
+  assert.equal(legacy.workflowStatus, "waiting_current_class");
+  assert.equal(legacy.workflowRevision, 1);
 });
 
 test("version-2 event parser preserves explicit user, system, and migration actors", async () => {
@@ -361,6 +394,47 @@ function initialWorkflowCreateInput() {
   };
 }
 
+test("manual workflow status uses only its dedicated revisioned RPC", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    rpcHandler(name, args) {
+      assert.equal(name, "set_registration_workflow_status_v1");
+      assert.deepEqual({ ...args }, {
+        p_track_id: "track-1",
+        p_workflow_status: "payment_in_progress",
+        p_expected_workflow_revision: 3,
+        p_request_key: "workflow-request",
+      });
+      return {
+        data: {
+          trackId: "track-1",
+          workflowStatus: "payment_in_progress",
+          workflowRevision: 4,
+          workflowStatusEnteredAt: "2026-08-01T03:00:00.000Z",
+        },
+        error: null,
+      };
+    },
+  });
+  let invalidations = 0;
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    onMutationSuccess: () => { invalidations += 1; },
+  }));
+
+  const result = await service.setRegistrationWorkflowStatus({
+    trackId: "track-1",
+    workflowStatus: "payment_in_progress",
+    expectedWorkflowRevision: 3,
+    requestKey: "workflow-request",
+  });
+
+  assert.equal(result.trackId, "track-1");
+  assert.equal(result.workflowStatus, "payment_in_progress");
+  assert.equal(result.workflowRevision, 4);
+  assert.equal(result.workflowStatusEnteredAt, "2026-08-01T03:00:00.000Z");
+  assert.equal(invalidations, 1);
+});
+
 test("calendar raw loader uses the canonical half-open scheduled query without caching", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const row = {
@@ -617,7 +691,8 @@ test("track summary loader uses the exact safe projection and skips profile look
   assert.equal(result.mode, "ready");
   assert.deepEqual({ ...result.tracks[0] }, {
     id: "track-1", taskId: "task-1", subject: "영어",
-    status: "visit_consultation_scheduled", legacy: false, directorProfileId: null,
+    status: "visit_consultation_scheduled", workflowStatus: "consultation_requested",
+    workflowRevision: 1, workflowStatusEnteredAt: "", legacy: false, directorProfileId: null,
     directorName: "", directorAssignmentSource: "", directorAssignmentRuleKey: "",
     waitingKind: "", levelTestRetakeDecision: "", migrationReviewRequired: false,
     stageEnteredAt: "2026-07-12T01:00:00Z",
@@ -626,7 +701,7 @@ test("track summary loader uses the exact safe projection and skips profile look
   });
   assert.equal(harness.queries.length, 1);
   assert.equal(harness.queries[0].columns,
-    "id,task_id,subject,pipeline_status,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,level_test_retake_decision,migration_review_required,stage_entered_at,phone_ready_at,phone_ready_source,updated_at,visit_scheduled_at,visit_place");
+    "id,task_id,subject,pipeline_status,workflow_status,workflow_revision,workflow_status_entered_at,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,level_test_retake_decision,migration_review_required,stage_entered_at,phone_ready_at,phone_ready_source,updated_at,visit_scheduled_at,visit_place");
   assert.deepEqual(harness.queries[0].filters, [["in", "task_id", ["task-1"]]]);
   assert.doesNotMatch(harness.queries[0].columns, /schedule_plan|textbook|student_ids|waitlist_ids/);
   assert.doesNotMatch(harness.queries[0].columns, /consultations|appointments|\*/);
@@ -1385,6 +1460,9 @@ test("initial workflow create uses the exact atomic payload and maps the complet
       taskId: "task-new",
       subject: "영어",
       status: "consultation_waiting",
+      workflowStatus: "consultation_requested",
+      workflowRevision: 1,
+      workflowStatusEnteredAt: "",
       legacy: false,
       directorProfileId: "director-1",
       directorName: "",
@@ -1402,6 +1480,9 @@ test("initial workflow create uses the exact atomic payload and maps the complet
       taskId: "task-new",
       subject: "수학",
       status: "visit_consultation_scheduled",
+      workflowStatus: "consultation_requested",
+      workflowRevision: 1,
+      workflowStatusEnteredAt: "",
       legacy: false,
       directorProfileId: "director-2",
       directorName: "",

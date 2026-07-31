@@ -23,6 +23,7 @@ import type {
   OpsRegistrationTrackEvent,
   OpsRegistrationTrackStatus,
   OpsRegistrationTrackSummary,
+  OpsRegistrationWorkflowStatus,
   RegistrationCaseCreateWithInitialWorkflowInput,
   RegistrationCaseCreateWithInitialWorkflowResponse,
   RegistrationPhoneReadySource,
@@ -36,6 +37,10 @@ import type {
   RegistrationSubjectTrackFixtureDebugSnapshot,
 } from "./registration-track-fixture-runtime"
 import { normalizeRegistrationLevelTestPlace } from "./registration-level-test-place.ts"
+import {
+  REGISTRATION_WORKFLOW_STATUSES,
+  getRegistrationWorkflowStatusFromLegacyTrack,
+} from "./registration-workflow-status.js"
 import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
 import { ACADEMIC_SUBJECT_VALUES, sortAcademicSubjects } from "../../lib/academic-subject-registry.ts"
 
@@ -564,6 +569,7 @@ function track(input: {
   taskId: string
   subject: RegistrationSubject
   status: OpsRegistrationTrackStatus
+  workflowStatus?: OpsRegistrationWorkflowStatus
   directorProfileId?: string | null
   directorName?: string
   migrationReviewRequired?: boolean
@@ -577,6 +583,9 @@ function track(input: {
     taskId: input.taskId,
     subject: input.subject,
     status: input.status,
+    workflowStatus: input.workflowStatus || getRegistrationWorkflowStatusFromLegacyTrack({ status: input.status }),
+    workflowRevision: 1,
+    workflowStatusEnteredAt: input.stageEnteredAt || "2026-07-12T10:00:00+09:00",
     legacy: false,
     directorProfileId: input.directorProfileId === undefined
       ? defaultDirector.profileId
@@ -2227,6 +2236,28 @@ export function reduceRegistrationSubjectTrackFixture(
       detail.commonRevision += 1
       syncCase(state, detail)
       result = { taskId, commonRevision: detail.commonRevision }
+      break
+    }
+    case "setRegistrationWorkflowStatus": {
+      const detail = requireCase(findCaseByTrackId(state, asText(payload, "trackId")), "track_not_found")
+      const selected = requireCase(detail.tracks.find((item) => item.id === payload.trackId), "track_not_found")
+      const nextStatus = asText(payload, "workflowStatus")
+      if (!REGISTRATION_WORKFLOW_STATUSES.includes(nextStatus)) throw new Error("registration_workflow_status_invalid")
+      if (Number(payload.expectedWorkflowRevision) !== selected.workflowRevision) {
+        throw new Error("registration_workflow_status_refresh_required")
+      }
+      if (selected.workflowStatus !== nextStatus) {
+        selected.workflowStatus = nextStatus as OpsRegistrationWorkflowStatus
+        selected.workflowRevision += 1
+        selected.workflowStatusEnteredAt = FIXTURE_NOW
+      }
+      syncCase(state, detail)
+      result = {
+        trackId: selected.id,
+        workflowStatus: selected.workflowStatus,
+        workflowRevision: selected.workflowRevision,
+        workflowStatusEnteredAt: selected.workflowStatusEnteredAt,
+      }
       break
     }
     case "routeRegistrationInquiry": {

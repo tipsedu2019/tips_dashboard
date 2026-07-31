@@ -9,6 +9,10 @@ import {
   parseAcademicSubject,
   sortAcademicSubjects,
 } from "../src/lib/academic-subject-registry.ts"
+import {
+  REGISTRATION_WORKFLOW_STATUSES,
+  getRegistrationWorkflowStatusFromLegacyTrack,
+} from "../src/features/tasks/registration-workflow-status.js"
 
 const academicSubjectRegistry = {
   ACADEMIC_SUBJECT_VALUES,
@@ -47,6 +51,12 @@ async function loadTsModule(url) {
             const normalized = String(value ?? "").trim()
             return ["본관", "별관"].includes(normalized) ? normalized : null
           },
+        }
+      }
+      if (specifier === "./registration-workflow-status.js") {
+        return {
+          REGISTRATION_WORKFLOW_STATUSES,
+          getRegistrationWorkflowStatusFromLegacyTrack,
         }
       }
       if (specifier === "../../lib/academic-subject-registry.ts") return academicSubjectRegistry
@@ -167,6 +177,12 @@ async function loadServiceBoundary({
             const normalized = String(value ?? "").trim()
             return ["본관", "별관"].includes(normalized) ? normalized : null
           },
+        }
+      }
+      if (specifier === "./registration-workflow-status.js") {
+        return {
+          REGISTRATION_WORKFLOW_STATUSES,
+          getRegistrationWorkflowStatusFromLegacyTrack,
         }
       }
       if (specifier === "../../lib/academic-subject-registry.ts") return academicSubjectRegistry
