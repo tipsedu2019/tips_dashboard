@@ -3674,3 +3674,46 @@ test("unified registration inquiry save is one guarded atomic database boundary"
     /send_google_chat|send_web_push|solapi|notification_provider|http_post|net\.http/i,
   )
 })
+
+test("manual workflow status is revisioned, idempotent, audited, and free of operational side effects", async () => {
+  const sql = await readMigration("registration_manual_workflow_status")
+  const trimmed = sql.trim()
+  const implementation = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "set_registration_workflow_status_v1_impl",
+  )
+  const wrapper = readFunctionBlock(sql, "public", "set_registration_workflow_status_v1")
+
+  assert.match(trimmed, /^begin;/i)
+  assert.match(trimmed, /commit;$/i)
+  assert.match(
+    sql,
+    /add column if not exists workflow_status text[\s\S]*?add column if not exists workflow_revision integer[\s\S]*?add column if not exists workflow_status_entered_at timestamptz/i,
+  )
+  assert.match(sql, /workflow_status in \([\s\S]*?'consultation_completed'[\s\S]*?'payment_in_progress'[\s\S]*?'inquiry_only'/)
+  assert.match(sql, /workflow_revision > 0/)
+  assert.match(sql, /pipeline_status = 'waiting'[\s\S]*?waiting_current_class[\s\S]*?waiting_new_class[\s\S]*?waiting_next_opening/)
+  assert.match(sql, /create or replace function dashboard_private\.assert_registration_workflow_status_access\(/)
+  assert.deepEqual(readFunctionArgumentTypes(implementation), ["uuid", "text", "integer", "text"])
+  assert.deepEqual(readFunctionArgumentTypes(wrapper), ["uuid", "text", "integer", "text"])
+  assert.match(implementation, /security definer/)
+  assert.match(implementation, /set search_path = ''/)
+  assert.match(wrapper, /security invoker/)
+  assert.match(wrapper, /set search_path = ''/)
+  assert.match(implementation, /workflow_revision <> p_expected_workflow_revision[\s\S]*?registration_workflow_status_refresh_required/)
+  assert.match(implementation, /mutation_type = 'set_workflow_status'/)
+  assert.match(implementation, /target_fingerprint = v_target_fingerprint/)
+  assert.match(implementation, /idempotency_key_reused/)
+  assert.match(implementation, /write_registration_track_event_v2\([\s\S]*?'registration_workflow_status_changed'/)
+  assert.doesNotMatch(implementation, /transition_registration_track_status/)
+  assert.doesNotMatch(implementation, /ops_registration_appointments|ops_registration_level_tests|ops_registration_consultations|ops_registration_enrollments|ops_registration_admission_batches|ops_registration_messages/)
+  assert.match(
+    sql,
+    /revoke all on function public\.set_registration_workflow_status_v1\(uuid, text, integer, text\)[\s\S]*?from public, anon, authenticated, service_role;/i,
+  )
+  assert.match(
+    sql,
+    /grant execute on function public\.set_registration_workflow_status_v1\(uuid, text, integer, text\)\s+to authenticated;/i,
+  )
+})
