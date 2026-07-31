@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 
 import type { RegistrationCaseListViewItem } from "./registration-case-list-model"
 import { getRegistrationSummaryActionPermissions } from "./registration-track-model.js"
-import type { OpsRegistrationTrackStatus } from "./registration-track-service"
+import type { OpsRegistrationWorkflowStatus } from "./registration-track-service"
 
 export type RegistrationCaseListAction = "complete_consultation"
 
@@ -29,37 +29,41 @@ export type RegistrationCaseListProps = {
   onDelete: (item: RegistrationCaseListViewItem) => void
 }
 
-const TRACK_STATUS_LABELS: Record<OpsRegistrationTrackStatus, string> = {
-  inquiry: "문의",
-  migration_review: "과목 확인 필요",
-  level_test_scheduled: "레벨테스트 예약",
-  level_test_in_progress: "레벨테스트 진행",
-  consultation_waiting: "전화상담 대기",
-  visit_consultation_scheduled: "방문상담 예약",
-  waiting: "대기",
-  enrollment_decided: "등록 결정",
-  enrollment_processing: "등록 처리",
+const TRACK_STATUS_LABELS: Record<OpsRegistrationWorkflowStatus, string> = {
+  inquiry: "등록 문의",
+  level_test_requested: "레벨테스트 신청",
+  consultation_requested: "상담 신청",
+  consultation_completed: "상담 완료",
+  waiting_current_class: "현재반 대기 신청",
+  waiting_new_class: "신규반 대기 신청",
+  waiting_next_opening: "다음 개강 알림 요청",
+  enrollment_requested: "등록 신청",
+  payment_in_progress: "수납 진행 중",
   registered: "등록 완료",
-  not_registered: "미등록 완료",
-  inquiry_closed: "문의 완료",
+  not_registered: "미등록",
+  inquiry_only: "문의만",
 }
 
 const TRACK_MANAGEMENT_LABELS = {
   inquiry: "문의 처리",
   level_test: "레벨테스트 관리",
-  consulting: "상담 관리",
+  consultation_requested: "상담 관리",
+  consultation_completed: "상담 확인",
   waiting: "대기 관리",
   enrollment: "등록 관리",
-  closed: "완료 확인",
+  payment: "수납 관리",
+  completed: "완료 확인",
 } as const
 
 const REGISTRATION_CASE_VIEW_COLUMNS = {
   inquiry: ["학생", "학년 · 학교", "연락처", "문의 과목 · 일시"],
   level_test: ["학생 · 과목", "예약 일시", "장소", "진행 · 결과"],
-  consulting: ["학생 · 과목", "상담 유형", "책임자", "기준 · 예약 일시", "장소"],
+  consultation_requested: ["학생 · 과목", "상담 유형", "책임자", "기준 · 예약 일시", "장소"],
+  consultation_completed: ["학생 · 과목", "상담 상태", "책임자", "완료 일시"],
   waiting: ["학생 · 과목", "대기 종류", "책임자", "단계 진입일시"],
   enrollment: ["학생 · 과목", "등록 상태", "수업 시작", "교재 준비"],
-  closed: ["학생 · 과목", "완료 상태", "책임자", "완료 일시"],
+  payment: ["학생 · 과목", "수납 상태", "수업 시작", "교재 준비"],
+  completed: ["학생 · 과목", "완료 상태", "책임자", "완료 일시"],
 } as const
 
 const REGISTRATION_CASE_INITIAL_RENDER_LIMIT = 40
@@ -70,9 +74,9 @@ const REGISTRATION_CASE_DATE_FORMATTER = new Intl.DateTimeFormat("ko-KR", {
   minute: "2-digit",
 })
 
-function RegistrationTrackStatusBadge({ status }: { status: OpsRegistrationTrackStatus }) {
-  const completed = status === "registered" || status === "not_registered" || status === "inquiry_closed"
-  const attention = status === "migration_review"
+function RegistrationTrackStatusBadge({ status }: { status: OpsRegistrationWorkflowStatus }) {
+  const completed = status === "registered" || status === "not_registered" || status === "inquiry_only"
+  const attention = status === "waiting_current_class" || status === "waiting_new_class" || status === "waiting_next_opening"
 
   return (
     <Badge
@@ -103,7 +107,7 @@ function RegistrationCaseTracks({ item }: { item: RegistrationCaseListViewItem }
       {item.tracks.map((track) => (
         <span key={track.trackId} className="flex min-w-0 items-center gap-1">
           <Badge variant="outline">{track.subject}</Badge>
-          <RegistrationTrackStatusBadge status={track.status} />
+          <RegistrationTrackStatusBadge status={track.workflowStatus} />
         </span>
       ))}
     </div>
@@ -137,15 +141,22 @@ function RegistrationCaseProcessCells({ item, cellRole }: Pick<RegistrationCaseR
     <RegistrationCaseCell label="학생 · 과목" cellRole={cellRole}>{student}</RegistrationCaseCell>
     <RegistrationCaseCell label="예약 일시" cellRole={cellRole}>{registration?.levelTestAt ? formatRegistrationCaseTime(registration.levelTestAt) : trackLines((track) => formatRegistrationCaseTime(track.stageEnteredAt))}</RegistrationCaseCell>
     <RegistrationCaseCell label="장소" cellRole={cellRole}>{registration?.levelTestPlace}</RegistrationCaseCell>
-    <RegistrationCaseCell label="진행 · 결과" cellRole={cellRole}>{registration?.levelTestResult || trackLines((track) => TRACK_STATUS_LABELS[track.status])}</RegistrationCaseCell>
+    <RegistrationCaseCell label="진행 · 결과" cellRole={cellRole}>{registration?.levelTestResult || trackLines((track) => TRACK_STATUS_LABELS[track.workflowStatus])}</RegistrationCaseCell>
   </>
 
-  if (item.viewKey === "consulting") return <>
+  if (item.viewKey === "consultation_requested") return <>
     <RegistrationCaseCell label="학생 · 과목" cellRole={cellRole}>{student}</RegistrationCaseCell>
-    <RegistrationCaseCell label="상담 유형" cellRole={cellRole}>{trackLines((track) => TRACK_STATUS_LABELS[track.status])}</RegistrationCaseCell>
+    <RegistrationCaseCell label="상담 유형" cellRole={cellRole}>{trackLines((track) => TRACK_STATUS_LABELS[track.workflowStatus])}</RegistrationCaseCell>
     <RegistrationCaseCell label="책임자" cellRole={cellRole}>{trackLines((track) => `${track.subject} · ${track.directorName || "미지정"}`)}</RegistrationCaseCell>
     <RegistrationCaseCell label="기준 · 예약 일시" cellRole={cellRole}>{trackLines((track) => `${track.subject} · ${getRegistrationCaseTrackTimeLabel(track)}`)}</RegistrationCaseCell>
     <RegistrationCaseCell label="장소" cellRole={cellRole}>{trackLines((track) => track.visitPlace || (track.status === "consultation_waiting" ? "전화상담" : "미정"))}</RegistrationCaseCell>
+  </>
+
+  if (item.viewKey === "consultation_completed") return <>
+    <RegistrationCaseCell label="학생 · 과목" cellRole={cellRole}>{student}</RegistrationCaseCell>
+    <RegistrationCaseCell label="상담 상태" cellRole={cellRole}>{trackLines((track) => TRACK_STATUS_LABELS[track.workflowStatus])}</RegistrationCaseCell>
+    <RegistrationCaseCell label="책임자" cellRole={cellRole}>{trackLines((track) => track.directorName || "미지정")}</RegistrationCaseCell>
+    <RegistrationCaseCell label="완료 일시" cellRole={cellRole}>{trackLines((track) => formatRegistrationCaseTime(track.workflowStatusEnteredAt))}</RegistrationCaseCell>
   </>
 
   if (item.viewKey === "waiting") return <>
@@ -157,16 +168,23 @@ function RegistrationCaseProcessCells({ item, cellRole }: Pick<RegistrationCaseR
 
   if (item.viewKey === "enrollment") return <>
     <RegistrationCaseCell label="학생 · 과목" cellRole={cellRole}>{student}</RegistrationCaseCell>
-    <RegistrationCaseCell label="등록 상태" cellRole={cellRole}>{trackLines((track) => TRACK_STATUS_LABELS[track.status])}</RegistrationCaseCell>
+    <RegistrationCaseCell label="등록 상태" cellRole={cellRole}>{trackLines((track) => TRACK_STATUS_LABELS[track.workflowStatus])}</RegistrationCaseCell>
+    <RegistrationCaseCell label="수업 시작" cellRole={cellRole}>{[registration?.classStartDate, registration?.classStartSession].filter(Boolean).join(" · ")}</RegistrationCaseCell>
+    <RegistrationCaseCell label="교재 준비" cellRole={cellRole}>{registration?.textbookPreparation || "미정"}</RegistrationCaseCell>
+  </>
+
+  if (item.viewKey === "payment") return <>
+    <RegistrationCaseCell label="학생 · 과목" cellRole={cellRole}>{student}</RegistrationCaseCell>
+    <RegistrationCaseCell label="수납 상태" cellRole={cellRole}>{trackLines((track) => TRACK_STATUS_LABELS[track.workflowStatus])}</RegistrationCaseCell>
     <RegistrationCaseCell label="수업 시작" cellRole={cellRole}>{[registration?.classStartDate, registration?.classStartSession].filter(Boolean).join(" · ")}</RegistrationCaseCell>
     <RegistrationCaseCell label="교재 준비" cellRole={cellRole}>{registration?.textbookPreparation || "미정"}</RegistrationCaseCell>
   </>
 
   return <>
     <RegistrationCaseCell label="학생 · 과목" cellRole={cellRole}>{student}</RegistrationCaseCell>
-    <RegistrationCaseCell label="완료 상태" cellRole={cellRole}>{trackLines((track) => TRACK_STATUS_LABELS[track.status])}</RegistrationCaseCell>
+    <RegistrationCaseCell label="완료 상태" cellRole={cellRole}>{trackLines((track) => TRACK_STATUS_LABELS[track.workflowStatus])}</RegistrationCaseCell>
     <RegistrationCaseCell label="책임자" cellRole={cellRole}>{trackLines((track) => track.directorName || "미지정")}</RegistrationCaseCell>
-    <RegistrationCaseCell label="완료 일시" cellRole={cellRole}>{trackLines((track) => formatRegistrationCaseTime(track.stageEnteredAt))}</RegistrationCaseCell>
+    <RegistrationCaseCell label="완료 일시" cellRole={cellRole}>{trackLines((track) => formatRegistrationCaseTime(track.workflowStatusEnteredAt))}</RegistrationCaseCell>
   </>
 }
 

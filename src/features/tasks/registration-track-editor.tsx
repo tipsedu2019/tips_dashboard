@@ -72,12 +72,17 @@ import {
 import {
   loadAssignedScienceConsultationClassOptions,
   saveRegistrationCaseInquiry,
+  setRegistrationWorkflowStatus,
   type OpsRegistrationAppointment,
   type OpsRegistrationCaseDetail,
   type OpsRegistrationConsultation,
   type OpsRegistrationTrackSummary,
   type RegistrationAppointmentMutationResponse,
 } from "./registration-track-service"
+import {
+  REGISTRATION_WORKFLOW_STATUS_LABELS,
+  getRegistrationWorkflowStatusOptions,
+} from "./registration-workflow-status.js"
 
 export type RegistrationTrackViewerRole = "admin" | "staff" | "assistant" | "teacher" | null
 
@@ -278,6 +283,7 @@ export function RegistrationApplication({
   const [migrationDirectorResetVersion, setMigrationDirectorResetVersion] = useState(0)
   const [migrationReviewResetVersion, setMigrationReviewResetVersion] = useState(0)
   const [scienceConsultationClassOptions, setScienceConsultationClassOptions] = useState<OpsClassOption[]>([])
+  const [workflowStatusSaving, setWorkflowStatusSaving] = useState(false)
   const dirtyKeysRef = useRef<Set<RegistrationApplicationDirtyKey>>(new Set())
   const dirtyProducersRef = useRef(new Map<RegistrationApplicationDirtyKey, Set<string>>())
   const onDirtyChangeRef = useRef(onDirtyChange)
@@ -495,6 +501,30 @@ export function RegistrationApplication({
   const waitingState = splitPlacementState("waiting")
   const registrationState = splitPlacementState("registration")
   const focusedContext = trackContexts.find((context) => context.track.id === activeTrackId) || null
+  const workflowStatusOptions = activeTrack
+    ? getRegistrationWorkflowStatusOptions({
+      viewerId,
+      viewerRole,
+      directorProfileId: activeTrack.directorProfileId,
+    })
+    : []
+  async function changeWorkflowStatus(nextStatus: string) {
+    if (!activeTrack || nextStatus === activeTrack.workflowStatus || workflowStatusSaving) return
+    setWorkflowStatusSaving(true)
+    try {
+      await setRegistrationWorkflowStatus({
+        trackId: activeTrack.id,
+        workflowStatus: nextStatus as typeof activeTrack.workflowStatus,
+        expectedWorkflowRevision: activeTrack.workflowRevision,
+        requestKey: `registration-workflow-status:${activeTrack.id}:${crypto.randomUUID()}`,
+      })
+      await onReload(activeTrack.id)
+    } catch (error) {
+      onWarning(errorMessage(error, "진행상태를 변경하지 못했습니다. 최신 정보를 확인해 주세요."))
+    } finally {
+      setWorkflowStatusSaving(false)
+    }
+  }
   const migrationReviewPanelId = reviewTrack ? `registration-inquiry-${reviewTrack.id}` : null
   const subjectPanelIdsByTrackId = Object.fromEntries(trackContexts.map((context) => [
     context.track.id,
@@ -862,16 +892,35 @@ export function RegistrationApplication({
       closeAction={closeAction}
       historyAction={<RegistrationApplicationHistoryAction detail={detail} profiles={profiles} />}
       subjectNavigation={(
-        <RegistrationApplicationSubjectTabs
-          tracks={orderedTracks.map((track) => ({
-            id: track.id,
-            subject: track.subject,
-            statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status],
-          }))}
-          value={activeTrackId}
-          panelIdsByTrackId={subjectPanelIdsByTrackId}
-          onValueChange={handleSubjectTabChange}
-        />
+        <div className="grid gap-3">
+          <RegistrationApplicationSubjectTabs
+            tracks={orderedTracks.map((track) => ({
+              id: track.id,
+              subject: track.subject,
+              statusLabel: REGISTRATION_WORKFLOW_STATUS_LABELS[track.workflowStatus] || REGISTRATION_TRACK_STATUS_LABELS[track.status],
+            }))}
+            value={activeTrackId}
+            panelIdsByTrackId={subjectPanelIdsByTrackId}
+            onValueChange={handleSubjectTabChange}
+          />
+          {activeTrack ? (
+            <label className="flex min-w-0 items-center gap-2 text-sm font-medium">
+              <span className="shrink-0 text-muted-foreground">진행상태</span>
+              <select
+                aria-label={`${activeTrack.subject} 진행상태`}
+                value={activeTrack.workflowStatus}
+                disabled={workflowStatusSaving || workflowStatusOptions.length === 0}
+                onChange={(event) => void changeWorkflowStatus(event.target.value)}
+                className="h-9 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value={activeTrack.workflowStatus}>{REGISTRATION_WORKFLOW_STATUS_LABELS[activeTrack.workflowStatus]}</option>
+                {workflowStatusOptions.filter((option) => option.value !== activeTrack.workflowStatus).map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+        </div>
       )}
       progress={<RegistrationApplicationProgressStepper steps={getRegistrationApplicationProgress(activeTrack?.status || "inquiry", activeTrack?.waitingKind || "")} />}
       sectionStates={sectionStates}

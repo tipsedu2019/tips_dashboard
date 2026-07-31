@@ -1,21 +1,34 @@
 import type { OpsTask } from "./ops-task-service"
 import {
-  getRegistrationTrackViewKey,
-  isRegistrationTrackTerminal,
-  type RegistrationTrackViewKey,
-} from "./registration-track-model.js"
+  getRegistrationWorkflowStatusFromLegacyTrack,
+  getRegistrationWorkflowViewKey,
+} from "./registration-workflow-status.js"
 import type {
   OpsRegistrationTrackStatus,
   OpsRegistrationTrackSummary,
+  OpsRegistrationWorkflowStatus,
   RegistrationSubject,
 } from "./registration-track-service"
+
+export type RegistrationWorkflowViewKey =
+  | "inquiry"
+  | "level_test"
+  | "consultation_requested"
+  | "consultation_completed"
+  | "waiting"
+  | "enrollment"
+  | "payment"
+  | "completed"
 
 export type RegistrationCaseListTrackItem = {
   key: string
   trackId: string
   subject: RegistrationSubject
   status: OpsRegistrationTrackStatus
-  viewKey: RegistrationTrackViewKey
+  workflowStatus: OpsRegistrationWorkflowStatus
+  workflowRevision: number
+  workflowStatusEnteredAt: string
+  viewKey: RegistrationWorkflowViewKey
   directorProfileId: string | null
   directorName: string
   stageEnteredAt: string
@@ -37,29 +50,24 @@ export type RegistrationCaseListItem = {
 }
 
 export type RegistrationCaseListViewItem = RegistrationCaseListItem & {
-  viewKey: RegistrationTrackViewKey
+  viewKey: RegistrationWorkflowViewKey
   matchingTracks: RegistrationCaseListTrackItem[]
   representativeTrack: RegistrationCaseListTrackItem
   representativeSortValue: string
 }
 
-const REGISTRATION_TRACK_VIEW_KEYS: RegistrationTrackViewKey[] = [
+const REGISTRATION_TRACK_VIEW_KEYS: RegistrationWorkflowViewKey[] = [
   "inquiry",
   "level_test",
-  "consulting",
+  "consultation_requested",
+  "consultation_completed",
   "waiting",
   "enrollment",
-  "closed",
+  "payment",
+  "completed",
 ]
 
-const REVERSIBLE_REGISTRATION_TRACK_STATUSES = new Set<OpsRegistrationTrackStatus>([
-  "inquiry",
-  "migration_review",
-  "level_test_scheduled",
-  "level_test_in_progress",
-  "consultation_waiting",
-  "visit_consultation_scheduled",
-])
+const DELETABLE_WORKFLOW_STATUSES = new Set<OpsRegistrationWorkflowStatus>(["inquiry"])
 
 export function canDeleteRegistrationCase(
   task: Pick<OpsTask, "type" | "status" | "registrationTracks">,
@@ -68,7 +76,7 @@ export function canDeleteRegistrationCase(
   if (viewerRole !== "admin" || task.type !== "registration") return false
   if (task.status === "done" || task.status === "canceled") return false
   const tracks = task.registrationTracks || []
-  return tracks.length > 0 && tracks.every((track) => REVERSIBLE_REGISTRATION_TRACK_STATUSES.has(track.status))
+  return tracks.length > 0 && tracks.every((track) => DELETABLE_WORKFLOW_STATUSES.has(track.workflowStatus))
 }
 
 export function buildRegistrationCaseListItems(
@@ -85,7 +93,10 @@ export function buildRegistrationCaseListItems(
       trackId: track.id,
       subject: track.subject,
       status: track.status,
-      viewKey: getRegistrationTrackViewKey(track.status),
+      workflowStatus: track.workflowStatus || getRegistrationWorkflowStatusFromLegacyTrack(track),
+      workflowRevision: track.workflowRevision || 1,
+      workflowStatusEnteredAt: track.workflowStatusEnteredAt || track.stageEnteredAt,
+      viewKey: getRegistrationWorkflowViewKey(track.workflowStatus || getRegistrationWorkflowStatusFromLegacyTrack(track)) as RegistrationWorkflowViewKey,
       directorProfileId: track.directorProfileId,
       directorName: track.directorName,
       stageEnteredAt: track.stageEnteredAt,
@@ -101,20 +112,15 @@ export function buildRegistrationCaseListItems(
 
 export function getRegistrationCaseMatchedTracks(
   item: RegistrationCaseListItem,
-  viewKey: RegistrationTrackViewKey,
+  viewKey: RegistrationWorkflowViewKey,
 ): RegistrationCaseListTrackItem[] {
-  if (viewKey === "closed") {
-    return item.tracks.length > 0 && item.tracks.every((track) => isRegistrationTrackTerminal(track.status))
-      ? item.tracks
-      : []
-  }
-  return item.tracks.filter((track) => track.viewKey === viewKey)
+  return item.tracks.filter((track) => track.viewKey === normalizeRegistrationWorkflowViewKey(viewKey))
 }
 
 export function getRegistrationCaseTabCounts(
   items: readonly RegistrationCaseListItem[],
-): Record<RegistrationTrackViewKey, number> {
-  const counts = Object.fromEntries(REGISTRATION_TRACK_VIEW_KEYS.map((viewKey) => [viewKey, 0])) as Record<RegistrationTrackViewKey, number>
+): Record<RegistrationWorkflowViewKey, number> {
+  const counts = Object.fromEntries(REGISTRATION_TRACK_VIEW_KEYS.map((viewKey) => [viewKey, 0])) as Record<RegistrationWorkflowViewKey, number>
   for (const item of items) {
     for (const viewKey of REGISTRATION_TRACK_VIEW_KEYS) {
       if (getRegistrationCaseMatchedTracks(item, viewKey).length > 0) counts[viewKey] += 1
@@ -125,28 +131,35 @@ export function getRegistrationCaseTabCounts(
 
 export function filterRegistrationCaseListItems(
   items: readonly RegistrationCaseListItem[],
-  viewKey: RegistrationTrackViewKey,
+  viewKey: RegistrationWorkflowViewKey,
   query = "",
 ): RegistrationCaseListViewItem[] {
+  const normalizedViewKey = normalizeRegistrationWorkflowViewKey(viewKey)
   const normalizedQuery = normalizeRegistrationCaseSearchText(query)
   const matched = items.flatMap((item) => {
-    const sourceMatchedTracks = getRegistrationCaseMatchedTracks(item, viewKey)
-    const matchingTracks = viewKey === "consulting"
+    const sourceMatchedTracks = getRegistrationCaseMatchedTracks(item, normalizedViewKey)
+    const matchingTracks = normalizedViewKey === "consultation_requested"
       ? [...sourceMatchedTracks].sort(compareConsultationTracks)
       : sourceMatchedTracks
     if (matchingTracks.length === 0 || !matchesRegistrationCaseSearch(item, matchingTracks, normalizedQuery)) return []
     const representativeTrack = matchingTracks[0]
     return [{
       ...item,
-      viewKey,
+      viewKey: normalizedViewKey,
       matchingTracks,
       representativeTrack,
       representativeSortValue: getRegistrationCaseTrackTimeValue(representativeTrack),
     }]
   })
 
-  if (viewKey !== "consulting") return matched
+  if (normalizedViewKey !== "consultation_requested") return matched
   return [...matched].sort(compareConsultationCaseItems)
+}
+
+function normalizeRegistrationWorkflowViewKey(value: string): RegistrationWorkflowViewKey {
+  if (value === "consulting") return "consultation_requested"
+  if (value === "closed") return "completed"
+  return value as RegistrationWorkflowViewKey
 }
 
 export function getRegistrationCaseTrackTimeValue(

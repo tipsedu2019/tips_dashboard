@@ -531,7 +531,7 @@ test("fixture reset is deterministic and contains the approved workflow samples"
   assert.equal(first.caseDetails["fixture-task-migration-review"].tracks.every((track) => track.migrationReviewRequired), true)
 })
 
-test("fixture cases project once per view with stable cross-view identity and all-terminal completion", async () => {
+test("fixture cases project once per workflow tab with stable cross-view identity", async () => {
   const { createRegistrationSubjectTrackFixtureState } = await loadFixtureModule()
   const {
     buildRegistrationCaseListItems,
@@ -541,7 +541,7 @@ test("fixture cases project once per view with stable cross-view identity and al
   const state = createRegistrationSubjectTrackFixtureState()
   const items = buildRegistrationCaseListItems(state.workspaceData.tasks)
   const views = Object.fromEntries(
-    ["inquiry", "level_test", "consulting", "waiting", "enrollment", "closed"]
+    ["inquiry", "level_test", "consultation_requested", "consultation_completed", "waiting", "enrollment", "payment", "completed"]
       .map((view) => [view, filterRegistrationCaseListItems(items, view)]),
   )
 
@@ -552,17 +552,17 @@ test("fixture cases project once per view with stable cross-view identity and al
   assert.equal(dualRows.length, 1)
   assert.deepEqual(plain(dualRows[0].matchingTracks.map((track) => track.subject)), ["영어", "수학"])
 
-  const crossConsulting = views.consulting.find((row) => row.taskId === "fixture-task-cross-stage")
+  const crossConsulting = views.consultation_requested.find((row) => row.taskId === "fixture-task-cross-stage")
   const crossLevelTest = views.level_test.find((row) => row.taskId === "fixture-task-cross-stage")
   assert.equal(crossConsulting?.task, crossLevelTest?.task)
   assert.deepEqual(plain(crossConsulting?.matchingTracks.map((track) => track.subject)), ["영어"])
   assert.deepEqual(plain(crossLevelTest?.matchingTracks.map((track) => track.subject)), ["수학"])
 
-  assert.equal(views.closed.some((row) => row.taskId === "fixture-task-partial-registration"), false)
+  assert.equal(views.completed.some((row) => row.taskId === "fixture-task-partial-registration"), true)
   assert.deepEqual(plain(
-    views.closed.filter((row) => row.taskId === "fixture-task-all-terminal").map((row) => row.taskId),
+    views.completed.filter((row) => row.taskId === "fixture-task-all-terminal").map((row) => row.taskId),
   ), ["fixture-task-all-terminal"])
-  assert.equal(getRegistrationCaseTabCounts(items).closed >= 1, true)
+  assert.equal(getRegistrationCaseTabCounts(items).completed >= 1, true)
 })
 
 test("fixture calendar adapter derives one live row per canonical appointment", async () => {

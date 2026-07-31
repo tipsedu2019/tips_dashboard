@@ -114,14 +114,16 @@ test("same-view subject tracks remain in one case row and counts increment once"
   assert.deepEqual(getRegistrationCaseTabCounts(items), {
     inquiry: 0,
     level_test: 0,
-    consulting: 2,
+    consultation_requested: 2,
+    consultation_completed: 0,
     waiting: 0,
     enrollment: 0,
-    closed: 0,
+    payment: 0,
+    completed: 0,
   })
 })
 
-test("closed view requires tracks and only admits cases whose tracks are all terminal", () => {
+test("completed view projects completed subjects even when another subject remains active", () => {
   const items = buildRegistrationCaseListItems([
     registrationCase({ id: "empty" }),
     registrationCase({ id: "mixed", registrationTracks: [
@@ -134,8 +136,8 @@ test("closed view requires tracks and only admits cases whose tracks are all ter
     ] }),
   ])
 
-  assert.deepEqual(filterRegistrationCaseListItems(items, "closed").map((item) => item.taskId), ["closed"])
-  assert.equal(getRegistrationCaseTabCounts(items).closed, 1)
+  assert.deepEqual(filterRegistrationCaseListItems(items, "completed").map((item) => item.taskId), ["mixed", "closed"])
+  assert.equal(getRegistrationCaseTabCounts(items).completed, 2)
 })
 
 test("consultation puts phone work before visits and sorts valid readiness times first", () => {

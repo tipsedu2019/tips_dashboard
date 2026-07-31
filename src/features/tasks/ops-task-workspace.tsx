@@ -267,7 +267,7 @@ type TodoSortKey = "status" | "priority" | "due"
 type TodoDueFilterKey = "all" | "overdue" | "today" | "upcoming" | "unscheduled"
 type TodoSelectFilterKey = "all" | string
 type WithdrawalViewKey = "applicant" | "operations" | "closed"
-type RegistrationViewKey = "inquiry" | "level_test" | "consulting" | "waiting" | "enrollment" | "closed"
+type RegistrationViewKey = "inquiry" | "level_test" | "consultation_requested" | "consultation_completed" | "waiting" | "enrollment" | "payment" | "completed"
 type RegistrationWorkspaceMode = "list" | "calendar"
 type WithdrawalPeriodFilter = "all" | "today" | "week" | "month" | "custom"
 type WithdrawalNotificationChannelKey = "applicant" | "operations" | "google_chat_admin"
@@ -704,12 +704,14 @@ const WITHDRAWAL_VIEW_TABS: Array<{ key: WithdrawalViewKey; label: string }> = [
 ]
 
 const REGISTRATION_VIEW_TABS: Array<{ key: RegistrationViewKey; label: string }> = [
-  { key: "inquiry", label: "문의" },
-  { key: "level_test", label: "레벨테스트" },
-  { key: "consulting", label: "상담" },
-  { key: "waiting", label: "대기" },
-  { key: "enrollment", label: "등록" },
-  { key: "closed", label: "완료" },
+  { key: "inquiry", label: "등록 문의" },
+  { key: "level_test", label: "레벨테스트 신청" },
+  { key: "consultation_requested", label: "상담 신청" },
+  { key: "consultation_completed", label: "상담 완료" },
+  { key: "waiting", label: "대기 신청" },
+  { key: "enrollment", label: "등록 신청" },
+  { key: "payment", label: "수납 진행 중" },
+  { key: "completed", label: "완료" },
 ]
 
 const REGISTRATION_GRADE_OPTIONS = getRegistrationGradeOptions()
@@ -3047,6 +3049,13 @@ function getWithdrawalViewTasks(tasks: OpsTask[], view: WithdrawalViewKey) {
 
 function isRegistrationViewKey(value: string): value is RegistrationViewKey {
   return REGISTRATION_VIEW_TABS.some((tab) => tab.key === value)
+}
+
+function normalizeRegistrationViewKey(value: string): RegistrationViewKey | null {
+  if (isRegistrationViewKey(value)) return value
+  if (value === "consulting") return "consultation_requested"
+  if (value === "closed") return "completed"
+  return null
 }
 
 function isLegacyRegistrationTrackId(trackId: string) {
@@ -8931,7 +8940,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setTodoSort(nextTodoRouteState.sort || (nextTodoRouteState.status ? "status" : "due"))
     } else if (isRegistrationWorkspace) {
       setRegistrationMode(nextView === "calendar" ? "calendar" : "list")
-      if (isRegistrationViewKey(nextWorkflowFlow)) setRegistrationView(nextWorkflowFlow)
+      const normalizedRegistrationView = normalizeRegistrationViewKey(nextWorkflowFlow)
+      if (normalizedRegistrationView) setRegistrationView(normalizedRegistrationView)
     } else if (isWithdrawalWorkspace || isTransferWorkspace) {
       if (isWithdrawalViewKey(nextWorkflowFlow)) setWithdrawalView(nextWorkflowFlow)
     } else if (isWordRetestWorkspace) {
