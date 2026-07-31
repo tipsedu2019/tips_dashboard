@@ -1642,20 +1642,30 @@ function getFormCompletionIntentSubmitLabel(intent: FormCompletionIntent | null,
   return "저장"
 }
 
+function getTransferRequiredInputBlockers(input: OpsTaskInput) {
+  if (input.type !== "transfer") return []
+
+  const transfer = input.transfer || {}
+  const blockers: string[] = []
+
+  if (!String(input.subject || "").trim()) blockers.push("과목")
+  if (!String(transfer.fromTeacherName || "").trim()) blockers.push("전 선생님")
+  if (!String(transfer.fromClassId || "").trim()) blockers.push("전 수업")
+  if (!String(input.studentId || "").trim()) blockers.push("학생")
+  if (!String(transfer.fromClassEndDate || "").trim()) blockers.push("전 수업 종료일")
+  if (!String(transfer.toTeacherName || "").trim()) blockers.push("후 선생님")
+  if (!String(transfer.toClassId || "").trim()) blockers.push("후 수업")
+  if (!String(transfer.toClassStartDate || "").trim()) blockers.push("후 수업 시작일")
+
+  return blockers
+}
+
 function canSubmitOpsTaskForm(input: OpsTaskInput, isEditing: boolean) {
   if (input.type === "registration" && !isEditing) {
     return getRegistrationCreateBlockers(input).length === 0
   }
-  if (input.type === "transfer" && !isEditing) {
-    const transfer = input.transfer || {}
-    return Boolean(
-      input.subject &&
-      transfer.fromTeacherName &&
-      transfer.fromClassId &&
-      input.studentId &&
-      transfer.toTeacherName &&
-      transfer.toClassId,
-    )
+  if (input.type === "transfer") {
+    return getTransferRequiredInputBlockers(input).length === 0
   }
   if (input.type !== "withdrawal" || isEditing) return true
   const withdrawal = input.withdrawal || {}
@@ -2599,8 +2609,8 @@ function getCompletionBlockerFormStep(type: OpsTaskType, blockers: string[]): Fo
   }
 
   if (type === "transfer") {
-    if (blockers.some((blocker) => ["학생"].includes(blocker))) return "transfer_basic"
-    if (blockers.some((blocker) => ["전 수업", "후 수업", "다른 수업", "전 수업 명단", "전 수업 종료일", "후 수업 시작일"].includes(blocker))) return "transfer_schedule"
+    if (blockers.some((blocker) => ["과목", "학생"].includes(blocker))) return "transfer_basic"
+    if (blockers.some((blocker) => ["전 선생님", "전 수업", "후 선생님", "후 수업", "다른 수업", "전 수업 명단", "전 수업 종료일", "후 수업 시작일"].includes(blocker))) return "transfer_schedule"
     if (blockers.some((blocker) => ["메이크에듀 전반처리", "수업료 처리", "교재비 처리"].includes(blocker))) return "transfer_checks"
   }
 
@@ -3360,6 +3370,16 @@ const TRANSFER_TO_UNDISTRIBUTED_TEXTBOOK_HELP = [
 
 const WITHDRAWAL_DATE_HELP = "당월 출석부를 보고 학생이 마지막으로 수업 받은 날짜를 선택해 주세요. 퇴원요청이 있는 날로부터 거슬러 올라가서 최종 출석한 날이 퇴원일입니다. 퇴원일 이후의 결석에는 수강료가 청구되지 않습니다.\n\n수업 일정에서 마지막으로 출석한 날짜를 선택하면 퇴원회차와 수업진행률이 자동 계산됩니다."
 
+function RequiredFieldLabel({ label }: { label: ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      <span>{label}</span>
+      <span aria-hidden="true" className="text-destructive">*</span>
+      <span className="sr-only">필수 입력</span>
+    </span>
+  )
+}
+
 function TaskListboxField({
   label,
   value,
@@ -3596,6 +3616,7 @@ function LinkedSelect({
   disabledPlaceholder,
   placeholder = "선택",
   attention = false,
+  required = false,
   manualLabel,
   onManualSelect,
   renderSelected,
@@ -3612,6 +3633,7 @@ function LinkedSelect({
   disabledPlaceholder?: string
   placeholder?: string
   attention?: boolean
+  required?: boolean
   manualLabel?: string
   onManualSelect?: () => void
   renderSelected?: (option: LinkedSelectOption) => ReactNode
@@ -3621,6 +3643,7 @@ function LinkedSelect({
   onDeselect?: () => void
 }) {
   const fieldId = useId()
+  const requiredDescriptionId = useId()
   const queryId = useId()
   const listId = useId()
   const [linkedQuery, setLinkedQuery] = useState("")
@@ -3704,6 +3727,8 @@ function LinkedSelect({
         value={linkedQuery}
         placeholder={`${label} 검색`}
         aria-labelledby={fieldId}
+        aria-describedby={required ? requiredDescriptionId : undefined}
+        aria-required={required || undefined}
         aria-controls={listId}
         autoComplete="off"
         autoFocus
@@ -3719,6 +3744,7 @@ function LinkedSelect({
     <button
       type="button"
       aria-labelledby={fieldId}
+      aria-describedby={required ? requiredDescriptionId : undefined}
       aria-haspopup="listbox"
       aria-expanded={isLinkedSelectOpen}
       aria-controls={listId}
@@ -3750,7 +3776,11 @@ function LinkedSelect({
   return (
     <Popover open={isLinkedSelectOpen} onOpenChange={(open) => setIsLinkedSearchOpen(disabled ? false : open)}>
       <div className="relative grid min-w-0 gap-1.5 text-sm font-medium">
-        <label id={fieldId}>{label}</label>
+        <label id={fieldId} className="inline-flex items-center gap-0.5">
+          <span>{label}</span>
+          {required ? <span aria-hidden="true" className="text-destructive">*</span> : null}
+        </label>
+        {required ? <span id={requiredDescriptionId} className="sr-only">필수 입력</span> : null}
         <PopoverAnchor asChild>{linkedSelectControl}</PopoverAnchor>
       </div>
       {isLinkedSelectOpen && (
@@ -5250,14 +5280,17 @@ function TransferScheduleCalendarField({
   dateValue,
   sessionValue,
   onScheduleSelect,
+  required = false,
 }: {
   label: string
   classItem?: OpsClassOption
   dateValue: string
   sessionValue: string
   onScheduleSelect: (metrics: ReturnType<typeof getTransferClassScheduleMetrics>) => void
+  required?: boolean
 }) {
   const fieldId = useId()
+  const requiredDescriptionId = useId()
   const selectedDateKey = dateInputValue(dateValue)
   const scheduleItems = useMemo(() => getWithdrawalClassScheduleItems(classItem), [classItem])
   const [calendarMonth, setCalendarMonth] = useState(() => getCalendarMonthDate(selectedDateKey))
@@ -5279,7 +5312,9 @@ function TransferScheduleCalendarField({
         <div className="flex items-center gap-2">
           <span id={fieldId} className="text-sm font-medium">
             {label}
+            {required ? <span aria-hidden="true" className="ml-0.5 text-destructive">*</span> : null}
           </span>
+          {required ? <span id={requiredDescriptionId} className="sr-only">필수 입력</span> : null}
         </div>
         <ScheduleSelectionDependencyState fieldId={fieldId} />
         <ReadonlyInfoField label={`${label} 회차`} value={sessionValue || "자동 계산"} />
@@ -5298,7 +5333,9 @@ function TransferScheduleCalendarField({
       <div className="flex items-center gap-2">
         <span id={fieldId} className="text-sm font-medium">
           {label}
+          {required ? <span aria-hidden="true" className="ml-0.5 text-destructive">*</span> : null}
         </span>
+        {required ? <span id={requiredDescriptionId} className="sr-only">필수 입력</span> : null}
       </div>
       <div className="rounded-lg border bg-background">
         <div className="flex items-center justify-between border-b px-2 py-1.5">
@@ -5320,7 +5357,7 @@ function TransferScheduleCalendarField({
             <ChevronRight className="size-4" />
           </button>
         </div>
-        <div role="grid" aria-labelledby={fieldId} className="grid grid-cols-7 gap-1 p-2">
+        <div role="grid" aria-labelledby={fieldId} aria-describedby={required ? requiredDescriptionId : undefined} className="grid grid-cols-7 gap-1 p-2">
           {CALENDAR_WEEKDAY_LABELS.map((weekday) => (
             <div key={weekday} role="columnheader" className="grid h-6 place-items-center text-[11px] font-medium text-muted-foreground">
               {weekday}
@@ -11031,6 +11068,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       focusRegistrationFormSection(registrationCreateBlockers[0])
       return
     }
+    const transferRequiredBlockers = getTransferRequiredInputBlockers(submissionForm)
+    if (transferRequiredBlockers.length > 0) {
+      setMessage(`전반 신청 전에 필수 항목을 모두 입력하세요: ${transferRequiredBlockers.map((blocker) => BLOCKER_ACTION_LABELS[blocker] || blocker).join(", ")}`)
+      setFormCompletionBlockers(transferRequiredBlockers)
+      const transferRequiredStep = getCompletionBlockerFormStep("transfer", transferRequiredBlockers)
+      if (transferRequiredStep) setFormDetailStep(transferRequiredStep)
+      return
+    }
     const nextTitle = submissionForm.title.trim() || buildFallbackTaskTitle(submissionForm)
     if (!nextTitle) {
       setMessage(submissionForm.type === "general" ? "할 일을 입력하세요." : "학생명이나 수업명 중 하나를 입력하세요.")
@@ -14688,11 +14733,12 @@ function TypeSpecificFields({
         <section aria-label="전반 공통 정보" className="grid gap-3">
           <div className="grid gap-3 md:grid-cols-2">
             <TaskListboxField
-              label="과목"
+              label={<RequiredFieldLabel label="과목" />}
               value={form.subject || ""}
               options={transferSubjectOptions}
               onChange={selectTransferSubject}
               attention={!form.subject}
+              required
             />
             <LinkedSelect
               label="학생"
@@ -14702,6 +14748,7 @@ function TypeSpecificFields({
               disabled={!canSelectTransferStudent}
               disabledPlaceholder="전 수업 먼저"
               attention={canSelectTransferStudent && !form.studentId}
+              required
               renderOption={(option) => {
                 const student = findStudent(option.id)
                 return <LinkedSelectedValue label={option.label} pills={[student?.grade, student?.school]} />
@@ -14722,6 +14769,7 @@ function TypeSpecificFields({
               disabled={!canSelectTransferFromTeacher}
               disabledPlaceholder="과목 먼저"
               attention={canSelectTransferFromTeacher && !selectedTransferFromTeacherId}
+              required
               renderOption={(option) => <LinkedSelectedValue label={option.label} />}
               renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
             />
@@ -14733,6 +14781,7 @@ function TypeSpecificFields({
               disabled={!canSelectTransferFromClass}
               disabledPlaceholder="전 선생님 먼저"
               attention={canSelectTransferFromClass && !transfer.fromClassId}
+              required
               renderOption={(option) => <LinkedSelectedValue label={option.label} />}
               renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
             />
@@ -14744,6 +14793,7 @@ function TypeSpecificFields({
               dateValue={transfer.fromClassEndDate || ""}
               sessionValue={transfer.fromClassEndSession || ""}
               onScheduleSelect={syncTransferFromScheduleSelection}
+              required
             />
           </section>
           <section aria-label="후 수업 정보" className="grid content-start gap-3 rounded-md border bg-muted/20 p-3">
@@ -14756,6 +14806,7 @@ function TypeSpecificFields({
               disabled={!canSelectTransferToTeacher}
               disabledPlaceholder="과목 먼저"
               attention={canSelectTransferToTeacher && !selectedTransferToTeacherId}
+              required
               renderOption={(option) => <LinkedSelectedValue label={option.label} />}
               renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
             />
@@ -14767,6 +14818,7 @@ function TypeSpecificFields({
               disabled={!canSelectTransferToClass}
               disabledPlaceholder="후 선생님 먼저"
               attention={canSelectTransferToClass && !(transfer.toClassId || form.classId)}
+              required
               renderOption={(option) => <LinkedSelectedValue label={option.label} />}
               renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
             />
@@ -14778,6 +14830,7 @@ function TypeSpecificFields({
               dateValue={transfer.toClassStartDate || ""}
               sessionValue={transfer.toClassStartSession || ""}
               onScheduleSelect={syncTransferToScheduleSelection}
+              required
             />
           </section>
         </div>

@@ -3132,7 +3132,7 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     "TransferScheduleCalendarField",
     "TextareaField",
     "UndistributedTextbookListField",
-    'label="과목"',
+    'label={<RequiredFieldLabel label="과목" />}',
     'label="전 선생님"',
     'label="전 수업"',
     'label="학생"',
@@ -3166,7 +3166,7 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     transferFormSource.indexOf('<div className="grid gap-2 md:grid-cols-3">'),
   );
   assertIncludesAll(transferCommonSource, [
-    'label="과목"',
+    'label={<RequiredFieldLabel label="과목" />}',
     'label="학생"',
     'label="전반사유"',
   ]);
@@ -3323,9 +3323,39 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
   assert.doesNotMatch(source, /초중등부: 정은T/);
   assert.match(
     source,
-    /function canSubmitOpsTaskForm\(input: OpsTaskInput, isEditing: boolean\) \{[\s\S]*?if \(input\.type === "transfer" && !isEditing\) \{[\s\S]*?input\.subject &&[\s\S]*?transfer\.fromTeacherName &&[\s\S]*?transfer\.fromClassId &&[\s\S]*?input\.studentId &&[\s\S]*?transfer\.toTeacherName &&[\s\S]*?transfer\.toClassId/,
-    "new transfer requests should require subject, teachers, classes, and student before submit is enabled",
+    /function getTransferRequiredInputBlockers\(input: OpsTaskInput\) \{[\s\S]*?transfer\.fromClassEndDate[\s\S]*?transfer\.toClassStartDate/,
+    "transfer form validation should require both the previous-class end date and next-class start date",
   );
+  assert.match(
+    source,
+    /function canSubmitOpsTaskForm\(input: OpsTaskInput, isEditing: boolean\) \{[\s\S]*?if \(input\.type === "transfer"\) \{[\s\S]*?getTransferRequiredInputBlockers\(input\)\.length === 0/,
+    "transfer forms should remain disabled until every required link and date is present, including while editing",
+  );
+  assert.match(
+    source,
+    /const transferRequiredBlockers = getTransferRequiredInputBlockers\(submissionForm\)[\s\S]*?if \(transferRequiredBlockers\.length > 0\)/,
+    "the submit handler should reject a transfer submit even if it bypasses the disabled button",
+  );
+  assert.match(
+    source,
+    /if \(blockers\.some\(\(blocker\) => \["과목", "학생"\]\.includes\(blocker\)\)\) return "transfer_basic"[\s\S]*?\["전 선생님", "전 수업", "후 선생님", "후 수업", "다른 수업", "전 수업 명단", "전 수업 종료일", "후 수업 시작일"\]/,
+    "transfer validation should direct every missing required field to its form section",
+  );
+  assert.match(
+    source,
+    /function RequiredFieldLabel\([\s\S]*?aria-hidden="true"[\s\S]*?>\*<\/span>/,
+    "required transfer labels should show a visible asterisk",
+  );
+  assertIncludesAll(transferFormSource, [
+    'label={<RequiredFieldLabel label="과목" />}',
+    'label="학생"',
+    'label="전 선생님"',
+    'label="전 수업"',
+    'label="전 수업 종료일"',
+    'label="후 선생님"',
+    'label="후 수업"',
+    'label="후 수업 시작일"',
+  ]);
   assert.match(
     source,
     /if \(!intent && taskType === "transfer" && !isEditing\) return "전반 신청"/,
