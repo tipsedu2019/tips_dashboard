@@ -16,7 +16,6 @@ import { RegistrationApplicationLevelTestSection } from "./registration-applicat
 import {
   getRegistrationApplicationAppointmentActionPlans,
   getRegistrationApplicationCaseEditableSections,
-  getRegistrationApplicationProgress,
   getRegistrationEnrollmentDirtyKey,
   getRegistrationApplicationSectionStates,
   getRegistrationApplicationTrackState,
@@ -27,7 +26,6 @@ import {
   type RegistrationApplicationDirtyKey,
   type RegistrationApplicationSectionKey,
 } from "./registration-application-model"
-import { RegistrationApplicationProgressStepper } from "./registration-application-progress-stepper"
 import { RegistrationApplicationPlacementSection } from "./registration-application-placement-section"
 import { RegistrationApplicationHistoryAction } from "./registration-application-history-action"
 import { RegistrationApplicationShell } from "./registration-application-shell"
@@ -479,7 +477,6 @@ export function RegistrationApplication({
         : canManageCase ? "" : "등록 정보를 수정할 권한이 없습니다",
     }]),
   ) as typeof sectionStates
-  const activeProgress = getRegistrationApplicationProgress(activeTrack?.status || "inquiry", activeTrack?.waitingKind || "")
   const splitPlacementState = (key: "waiting" | "registration") => {
     return {
       current: true,
@@ -912,7 +909,7 @@ export function RegistrationApplication({
           ) : null}
         </div>
       )}
-      progress={<RegistrationApplicationProgressStepper steps={getRegistrationApplicationProgress(activeTrack?.status || "inquiry", activeTrack?.waitingKind || "")} />}
+      progress={null}
       sectionStates={openSectionStates}
       inquiry={(
         <RegistrationApplicationInquirySection
