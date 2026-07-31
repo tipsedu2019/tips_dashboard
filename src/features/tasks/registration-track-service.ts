@@ -918,12 +918,12 @@ function trackStatus(input: unknown): OpsRegistrationTrackStatus {
 
 function workflowStatus(row: Row): OpsRegistrationWorkflowStatus {
   const direct = text(value(row, "workflow_status", "workflowStatus"))
-  if (REGISTRATION_WORKFLOW_STATUSES.includes(direct)) {
+  if ((REGISTRATION_WORKFLOW_STATUSES as readonly string[]).includes(direct)) {
     return direct as OpsRegistrationWorkflowStatus
   }
   return getRegistrationWorkflowStatusFromLegacyTrack({
-    status: value(row, "pipeline_status", "status"),
-    waitingKind: value(row, "waiting_kind", "waitingKind"),
+    status: text(value(row, "pipeline_status", "status")),
+    waitingKind: text(value(row, "waiting_kind", "waitingKind")),
   }) as OpsRegistrationWorkflowStatus
 }
 
@@ -2342,7 +2342,7 @@ export function createRegistrationTrackService(
       p_request_key: requireRequestKey(input.requestKey),
     })
     const status = text(value(result, "workflow_status", "workflowStatus"))
-    if (!REGISTRATION_WORKFLOW_STATUSES.includes(status)) {
+    if (!(REGISTRATION_WORKFLOW_STATUSES as readonly string[]).includes(status)) {
       throw new Error("registration_workflow_status_response_invalid")
     }
     return {

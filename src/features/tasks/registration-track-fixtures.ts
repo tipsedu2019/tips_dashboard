@@ -65,6 +65,7 @@ export const REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS = [
   "syncRegistrationCaseSubjects",
   "saveRegistrationCaseInquiry",
   "updateRegistrationCaseCommon",
+  "setRegistrationWorkflowStatus",
   "routeRegistrationInquiry",
   "assignRegistrationTrackDirector",
   "saveRegistrationSharedAppointment",
@@ -2242,7 +2243,7 @@ export function reduceRegistrationSubjectTrackFixture(
       const detail = requireCase(findCaseByTrackId(state, asText(payload, "trackId")), "track_not_found")
       const selected = requireCase(detail.tracks.find((item) => item.id === payload.trackId), "track_not_found")
       const nextStatus = asText(payload, "workflowStatus")
-      if (!REGISTRATION_WORKFLOW_STATUSES.includes(nextStatus)) throw new Error("registration_workflow_status_invalid")
+      if (!(REGISTRATION_WORKFLOW_STATUSES as readonly string[]).includes(nextStatus)) throw new Error("registration_workflow_status_invalid")
       if (Number(payload.expectedWorkflowRevision) !== selected.workflowRevision) {
         throw new Error("registration_workflow_status_refresh_required")
       }
