@@ -1,4 +1,5 @@
 import { createImmediateNotificationAdapter } from "./immediate-notification-adapter.ts"
+import { buildOpsTransitionNotificationDeepLink } from "./ops-transition-notification-deep-link.ts"
 
 export const transferNotificationAdapter = createImmediateNotificationAdapter({
   workflowKey: "transfer",
@@ -6,6 +7,11 @@ export const transferNotificationAdapter = createImmediateNotificationAdapter({
   linkRoot: "/admin/transfer",
   linkPayloadKey: "task_id",
   linkQueryKey: "taskId",
+  deepLinkBuilder: (input) => buildOpsTransitionNotificationDeepLink({
+    workflowKey: "transfer",
+    taskId: input.payload.task_id,
+    status: input.payload.status,
+  }),
   eventLabels: {
     "transfer.submitted": "제출",
     "transfer.completed": "완료",

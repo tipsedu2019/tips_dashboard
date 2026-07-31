@@ -160,6 +160,7 @@ test("six immediate adapters render the installed seed templates with canonical 
       sourceType: "ops_task_event",
       payload: {
         task_id: PROFILE_A,
+        status: "requested",
         student_name: "김학생",
         requester_name: "이선생",
         from_class_name: "중1 A",
@@ -173,7 +174,7 @@ test("six immediate adapters render the installed seed templates with canonical 
       },
       title: "전반 신청 접수 · 김학생",
       body: "이선생 선생님이 김학생 학생의 전반을 신청했습니다.\n전 수업: 중1 A\n후 수업: 중1 B",
-      href: `/admin/transfer?taskId=${PROFILE_A}`,
+      href: `/admin/transfer?flow=applicant&taskId=${PROFILE_A}`,
     },
     {
       workflowKey: "withdrawal",
@@ -181,6 +182,7 @@ test("six immediate adapters render the installed seed templates with canonical 
       sourceType: "ops_task_event",
       payload: {
         task_id: PROFILE_A,
+        status: "requested",
         student_name: "김학생",
         requester_name: "이선생",
         class_name: "중1 A",
@@ -193,7 +195,7 @@ test("six immediate adapters render the installed seed templates with canonical 
       },
       title: "퇴원 신청 접수 · 김학생",
       body: "이선생 선생님이 김학생 학생의 퇴원을 신청했습니다.\n수업: 중1 A",
-      href: `/admin/withdrawal?taskId=${PROFILE_A}`,
+      href: `/admin/withdrawal?flow=applicant&taskId=${PROFILE_A}`,
     },
     {
       workflowKey: "makeup_requests",

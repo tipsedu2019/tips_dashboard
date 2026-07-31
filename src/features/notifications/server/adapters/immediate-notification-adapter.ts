@@ -19,6 +19,7 @@ type ImmediateNotificationAdapterConfig = Readonly<{
   linkRoot: string
   linkPayloadKey: string
   linkQueryKey: string
+  deepLinkBuilder?: (input: NotificationRenderInput) => string | null
   audienceProfileFields: Readonly<Record<string, ReadonlyArray<string>>>
   workflowLabel?: string
   eventLabels: Readonly<Record<string, string>>
@@ -196,6 +197,7 @@ function buildImmediateRenderContext(
 function buildImmediateDeepLink(config: ImmediateNotificationAdapterConfig, input: NotificationRenderInput) {
   if (input.sourceRevision !== null) throw new Error("notification_payload_schema_unsupported")
   if (input.workflowKey !== config.workflowKey || !config.sourceTypes.includes(input.sourceType)) return null
+  if (config.deepLinkBuilder) return config.deepLinkBuilder(input)
   const entityId = input.payload[config.linkPayloadKey]
   if (typeof entityId !== "string" || !UUID_PATTERN.test(entityId)) return config.linkRoot
   const query = new URLSearchParams()

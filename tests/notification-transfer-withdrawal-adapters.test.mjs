@@ -33,6 +33,65 @@ const intentHelperUrl = new URL(
 )
 const serviceUrl = new URL("../src/features/tasks/ops-task-service.ts", import.meta.url)
 const workspaceUrl = new URL("../src/features/tasks/ops-task-workspace.tsx", import.meta.url)
+const deepLinkHelperUrl = new URL(
+  "../src/features/notifications/server/adapters/ops-transition-notification-deep-link.ts",
+  import.meta.url,
+)
+const deepLinkMigrationUrl = new URL(
+  "../supabase/migrations/20260730143100_notification_transfer_withdrawal_deep_links.sql",
+  import.meta.url,
+)
+
+test("전반·퇴원 canonical 링크는 event status snapshot의 flow를 정확히 사용한다", async () => {
+  const { buildOpsTransitionNotificationDeepLink } = await import(deepLinkHelperUrl)
+  const taskId = "ea3cd6e1-e2da-4f9d-833e-c7349c09ee31"
+  const flowByStatus = new Map([
+    ["requested", "applicant"],
+    ["confirmed", "operations"],
+    ["in_progress", "operations"],
+    ["on_hold", "operations"],
+    ["review_requested", "operations"],
+    ["done", "closed"],
+    ["canceled", "closed"],
+  ])
+  for (const workflowKey of ["transfer", "withdrawal"]) {
+    for (const [status, flow] of flowByStatus) {
+      assert.equal(
+        buildOpsTransitionNotificationDeepLink({ workflowKey, taskId, status }),
+        `/admin/${workflowKey}?flow=${flow}&taskId=${taskId}`,
+      )
+    }
+  }
+  for (const input of [
+    { workflowKey: "transfer", taskId, status: " requested" },
+    { workflowKey: "transfer", taskId, status: "unknown" },
+    { workflowKey: "transfer", taskId: "not-a-uuid", status: "requested" },
+    { workflowKey: "tasks", taskId, status: "requested" },
+  ]) {
+    assert.throws(
+      () => buildOpsTransitionNotificationDeepLink(input),
+      /notification_payload_schema_unsupported/,
+    )
+  }
+})
+
+test("legacy 전반·퇴원 계획도 canonical event snapshot의 상태별 flow를 사용한다", async () => {
+  const sql = await source(deepLinkMigrationUrl)
+  const plan = block(
+    sql,
+    "create or replace function public.get_ops_task_legacy_dispatch_plan_v1",
+    "alter function dashboard_private.notification_ops_task_deep_link_v1",
+  )
+  assert.match(sql, /when 'requested' then 'applicant'/)
+  assert.match(sql, /when 'confirmed' then 'operations'/)
+  assert.match(sql, /when 'done' then 'closed'/)
+  assert.match(sql, /when 'canceled' then 'closed'/)
+  assert.match(sql, /\?flow=' \|\| v_flow \|\| '&taskId='/)
+  assert.match(plan, /dashboard_private\.notification_ops_task_deep_link_v1\([\s\S]*?v_canonical\.payload ->> 'status'/)
+  assert.doesNotMatch(plan, /when 'transfer' then '\/admin\/transfer\?taskId='/)
+  assert.doesNotMatch(plan, /else '\/admin\/withdrawal\?taskId='/)
+  assert.match(sql, /raise exception 'ops_task_notification_deep_link_invalid' using errcode = '22023'/)
+})
 
 async function source(url) {
   return readFile(url, "utf8")

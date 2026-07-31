@@ -1,4 +1,5 @@
 import { createImmediateNotificationAdapter } from "./immediate-notification-adapter.ts"
+import { buildOpsTransitionNotificationDeepLink } from "./ops-transition-notification-deep-link.ts"
 
 export const withdrawalNotificationAdapter = createImmediateNotificationAdapter({
   workflowKey: "withdrawal",
@@ -6,6 +7,11 @@ export const withdrawalNotificationAdapter = createImmediateNotificationAdapter(
   linkRoot: "/admin/withdrawal",
   linkPayloadKey: "task_id",
   linkQueryKey: "taskId",
+  deepLinkBuilder: (input) => buildOpsTransitionNotificationDeepLink({
+    workflowKey: "withdrawal",
+    taskId: input.payload.task_id,
+    status: input.payload.status,
+  }),
   eventLabels: {
     "withdrawal.submitted": "제출",
     "withdrawal.completed": "완료",
