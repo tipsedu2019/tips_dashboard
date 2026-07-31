@@ -168,24 +168,9 @@ function hasRegistrationTrackFrameContent({
   if (section === "admission") return false
   if (section === "inquiry" && track.migrationReviewRequired) return reviewTrackId === track.id
   if (track.migrationReviewRequired) return false
-  if (section === "level_test") return false
-  if (section === "inquiry") {
-    return context.state.currentSection === section
-  }
-  if (section === "consultation") {
-    return REGISTRATION_DIRECTOR_VISIBLE_STATUSES.has(track.status)
-      || context.state.currentSection === "consultation"
-      || Boolean(context.activeConsultation && context.permissions.canCompleteConsultation)
-  }
-  if (section !== "placement") return false
-  if (placementMode === "waiting") {
-    return context.state.currentSection === "placement" && track.status === "waiting"
-  }
-  if (placementMode === "registration") {
-    return ["enrollment_decided", "enrollment_processing", "registered"].includes(track.status)
-      || (context.state.currentSection === "placement" && track.status !== "waiting")
-  }
-  return false
+  return section === "inquiry"
+    || section === "consultation"
+    || (section === "placement" && (placementMode === "waiting" || placementMode === "registration"))
 }
 
 function getRegistrationTrackFocusPanelId(context: TrackContext, reviewTrackId: string | null) {
@@ -483,19 +468,24 @@ export function RegistrationApplication({
       appointmentActionSections: activeAppointmentActionPlans.map((plan) => plan.kind === "level_test" ? "level_test" : "consultation"),
     }),
   })
+  const openSectionStates = Object.fromEntries(
+    Object.entries(sectionStates).map(([section, state]) => [section, {
+      ...state,
+      current: section !== "history",
+      upcoming: false,
+      editable: section === "history" ? false : section === "admission" ? admissionEditable : canManageCase,
+      lockReason: section === "history"
+        ? "저장 시 자동 기록됩니다"
+        : canManageCase ? "" : "등록 정보를 수정할 권한이 없습니다",
+    }]),
+  ) as typeof sectionStates
   const activeProgress = getRegistrationApplicationProgress(activeTrack?.status || "inquiry", activeTrack?.waitingKind || "")
   const splitPlacementState = (key: "waiting" | "registration") => {
-    const progressState = activeProgress.find((step) => step.key === key)?.state || "upcoming"
-    const current = progressState === "current" || progressState === "terminal"
     return {
-      current,
-      editable: current && sectionStates.placement.editable,
-      upcoming: progressState === "upcoming",
-      lockReason: current && sectionStates.placement.editable
-        ? ""
-        : progressState === "upcoming"
-          ? "현재 진행 단계가 아닙니다"
-          : "완료된 단계입니다",
+      current: true,
+      editable: canManageCase,
+      upcoming: false,
+      lockReason: canManageCase ? "" : "등록 정보를 수정할 권한이 없습니다",
     }
   }
   const waitingState = splitPlacementState("waiting")
@@ -923,12 +913,12 @@ export function RegistrationApplication({
         </div>
       )}
       progress={<RegistrationApplicationProgressStepper steps={getRegistrationApplicationProgress(activeTrack?.status || "inquiry", activeTrack?.waitingKind || "")} />}
-      sectionStates={sectionStates}
+      sectionStates={openSectionStates}
       inquiry={(
         <RegistrationApplicationInquirySection
           mode="detail"
-          editable={sectionStates.inquiry.editable}
-          lockReason={sectionStates.inquiry.lockReason}
+          editable={openSectionStates.inquiry.editable}
+          lockReason={openSectionStates.inquiry.lockReason}
           editorContent={(
             <RegistrationInquiryEditor
               key={detail.task.id}
@@ -954,14 +944,14 @@ export function RegistrationApplication({
         />
       )}
       levelTest={(
-        <RegistrationApplicationLevelTestSection editable={sectionStates.level_test.editable}>
+        <RegistrationApplicationLevelTestSection editable={openSectionStates.level_test.editable}>
           {renderTrackFrames("level_test")}
           {renderAppointmentActionPlans("level_test")}
           {appointmentEditor?.kind === "level_test" ? appointmentEditorContent : null}
         </RegistrationApplicationLevelTestSection>
       )}
       consultation={(
-        <RegistrationApplicationConsultationSection editable={sectionStates.consultation.editable}>
+        <RegistrationApplicationConsultationSection editable={openSectionStates.consultation.editable}>
           {renderTrackFrames("consultation")}
           {renderAppointmentActionPlans("visit_consultation")}
           {appointmentEditor?.kind === "visit_consultation" ? appointmentEditorContent : null}
@@ -991,7 +981,7 @@ export function RegistrationApplication({
       )}
       admission={(
         <RegistrationApplicationAdmissionSection
-          editable={sectionStates.admission.editable}
+          editable={openSectionStates.admission.editable}
           fields={(
             <div className="grid gap-3">
               {admissionTargetTracks.length > 0 ? (
