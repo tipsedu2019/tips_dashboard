@@ -1013,7 +1013,6 @@ export function RegistrationAppointmentEditor({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="text-sm font-semibold">{kind === "level_test" ? "레벨테스트 예약" : "방문상담 예약"}</h3>
-          <p className="text-xs text-muted-foreground">같은 일정은 한 번만 정하고, 과목별 진행 결과는 각각 기록합니다.</p>
         </div>
         {onClose ? <Button type="button" size="sm" variant="ghost" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 편집 닫기`} onClick={onClose} disabled={saving || mutationLocked}>닫기</Button> : null}
       </div>
