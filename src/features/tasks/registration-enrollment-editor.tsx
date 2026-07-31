@@ -815,53 +815,6 @@ export function RegistrationEnrollmentEditor({
         </RegistrationRefreshAlert>
       ) : null}
 
-      {track.status === "enrollment_decided" && permissions.canManage && !trackHasOpenBatch ? (
-        <Collapsible open={alternateRouteOpen} onOpenChange={setAlternateRouteOpen} className="group rounded-md border p-3">
-          <RegistrationCollapsibleTrigger>등록 대신 다른 단계로 이동</RegistrationCollapsibleTrigger>
-          <CollapsibleContent className="mt-3 grid gap-3">
-            {decisionRefreshPending ? (
-              <RegistrationRefreshAlert>
-                <Button type="button" aria-label={`${track.subject} 단계 변경 최신 내용 다시 불러오기`} variant="outline" size="sm" className="w-fit" onClick={() => void retryEnrollmentReload({ kind: "decision" })}>
-                  <RefreshCw className="size-4" aria-hidden="true" />
-                  최신 내용 다시 불러오기
-                </Button>
-              </RegistrationRefreshAlert>
-            ) : <>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" aria-label={`${track.subject} 대기로 전환`} size="sm" variant={decisionDestination === "waiting" ? "default" : "outline"} onClick={() => { setDecisionValidationError(""); setDecisionDestination("waiting") }}>대기로 전환</Button>
-              <Button type="button" aria-label={`${track.subject} 미등록 완료`} size="sm" variant={decisionDestination === "not_registered" ? "destructive" : "outline"} onClick={() => { setDecisionValidationError(""); setDecisionDestination("not_registered") }}>미등록 완료</Button>
-            </div>
-            {decisionDestination === "waiting" ? (
-              <div className="grid gap-2 sm:grid-cols-2">
-                <RegistrationSelect
-                  aria-label={`${track.subject} 등록 결정 후 대기 종류`}
-                  value={decisionWaitingKind}
-                  placeholder="대기 종류 선택"
-                  options={[{ value: "", label: "대기 종류 선택" }, ...WAITING_KIND_OPTIONS]}
-                  onValueChange={(value) => { setDecisionValidationError(""); setDecisionWaitingKind(value as RegistrationWaitingKind) }}
-                />
-                {decisionWaitingKind === "current_class" ? (
-                  <RegistrationSelect
-                    aria-label={`${track.subject} 등록 결정 후 대기 수업`}
-                    value={decisionClassId}
-                    placeholder="대기 수업 선택"
-                    options={[
-                      { value: "", label: "대기 수업 선택" },
-                      ...subjectClasses.map((classItem) => ({ value: classItem.id, label: classItem.label })),
-                    ]}
-                    onValueChange={(value) => { setDecisionValidationError(""); setDecisionClassId(value) }}
-                  />
-                ) : null}
-              </div>
-            ) : null}
-            <Textarea aria-label={`${track.subject} 단계 변경 사유`} value={decisionReason} onChange={(event) => { setDecisionValidationError(""); setDecisionReason(event.target.value) }} placeholder="변경 사유" />
-            <Button type="button" aria-label={`${track.subject} 단계 변경`} variant={decisionDestination === "not_registered" ? "destructive" : "default"} onClick={() => void routeDecision()} disabled={saving || decisionRefreshPending}>단계 변경</Button>
-            {decisionValidationError ? <p role="alert" className="text-xs text-destructive">{decisionValidationError}</p> : null}
-            </>}
-          </CollapsibleContent>
-        </Collapsible>
-      ) : null}
-
       {immutableHistory.length > 0 ? (
         <Collapsible open={enrollmentHistoryOpen} onOpenChange={setEnrollmentHistoryOpen} className="group rounded-md border p-3">
           <RegistrationCollapsibleTrigger>수강 이력 {immutableHistory.length}건</RegistrationCollapsibleTrigger>
