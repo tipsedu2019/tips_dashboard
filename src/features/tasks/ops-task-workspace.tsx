@@ -13677,7 +13677,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 ? "loading"
                 : "ready"}
           showCloseButton={false}
-          className="z-[80] max-h-[calc(100dvh-1rem)] scroll-pb-24 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh] sm:max-w-4xl"
+          className={`z-[80] max-h-[calc(100dvh-1rem)] scroll-pb-24 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh] ${registrationApplicationHost.kind === "detail"
+            ? "sm:max-w-[min(96vw,84rem)]"
+            : "sm:max-w-4xl"
+          }`}
         >
           {registrationApplicationHost.kind === "detail" ? (
             <span data-registration-state="saved" className="sr-only">저장된 신청서</span>

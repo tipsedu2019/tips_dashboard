@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { Children, type ReactNode } from "react"
 
 export type RegistrationApplicationPlacementSectionProps = {
   editable: boolean
@@ -11,9 +11,10 @@ export function RegistrationApplicationPlacementSection({
   fields,
   emptyState,
 }: RegistrationApplicationPlacementSectionProps) {
+  const visibleContent = Children.toArray(fields)
   return (
     <div className="grid gap-3" aria-disabled={!editable} data-section-state={editable ? "수정 가능" : "잠김"}>
-      {fields || emptyState || <p className="text-sm text-muted-foreground">등록 결정 후 입력할 수 있습니다.</p>}
+      {visibleContent.length > 0 ? visibleContent : emptyState || <p className="text-sm text-muted-foreground">입력된 내용 없음</p>}
     </div>
   )
 }

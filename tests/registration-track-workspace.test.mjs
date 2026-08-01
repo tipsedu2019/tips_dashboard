@@ -256,14 +256,16 @@ test("create and detail share the approved subject-first inquiry controls", asyn
   assert.match(inquiry, /sortAcademicSubjects/)
 })
 
-test("registration subject tabs and initial root-subject controls support three registry-ordered columns", async () => {
+test("saved subject tabs stay compact while initial root-subject controls support three registry-ordered columns", async () => {
   const [tabs, initialPlan, actions, application] = await Promise.all([
     readFile(new URL("../src/features/tasks/registration-application-subject-tabs.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/features/tasks/registration-initial-plan-control.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
   ])
-  assert.match(tabs, /grid-cols-1[^"]*sm:grid-cols-3/)
+  assert.match(tabs, /overflow-x-auto border-b/)
+  assert.match(tabs, /border-primary/)
+  assert.doesNotMatch(tabs, /sm:grid-cols-3/)
   assert.match(initialPlan, /sortAcademicSubjects/)
   assert.match(initialPlan, /grid-cols-1[^"]*sm:grid-cols-3/)
   assert.match(initialPlan, /md:grid-cols-3/)
@@ -358,22 +360,52 @@ test("level-test and visit-consultation places use the same canonical selects", 
   assert.match(appointmentEditor, /기존 저장 장소: \{appointment\?\.place\}/)
 })
 
-test("future registration sections default collapsed while current and reached sections stay open", async () => {
+test("registration detail keeps every workflow section visible in one continuous workspace", async () => {
   const [model, shell] = await Promise.all([
     readFile(new URL("../src/features/tasks/registration-application-model.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/features/tasks/registration-application-shell.tsx", import.meta.url), "utf8"),
   ])
 
   assert.match(model, /upcoming: boolean/)
-  assert.match(model, /upcoming: section !== "history"/)
-  assert.match(model, /level_test: \{ current: false, editable: false, lockReason: futureLockReason, upcoming: true \}/)
-  assert.match(shell, /from "@\/components\/ui\/collapsible"/)
-  assert.match(shell, /useState\(!state\.upcoming\)/)
-  assert.match(shell, /useEffect\(\(\) => \{[\s\S]*?if \(state\.upcoming\) return[\s\S]*?requestAnimationFrame\(\(\) => setOpen\(true\)\)[\s\S]*?\}, \[state\.upcoming\]\)/)
-  assert.match(shell, /<Collapsible[\s\S]*?open=\{open\}/)
-  assert.match(shell, /<CollapsibleTrigger[\s\S]*?SECTION_TITLES\[section\]/)
-  assert.match(shell, /<CollapsibleContent[\s\S]*?forceMount[\s\S]*?data-\[state=closed\]:hidden/)
-  assert.doesNotMatch(shell, /<details\b|<summary\b/)
+  assert.match(shell, /id=\{`registration-application-\$\{section\}`\}/)
+  assert.match(shell, /<section[\s\S]*?SECTION_TITLES\[section\][\s\S]*?\{children\}[\s\S]*?<\/section>/)
+  assert.match(shell, /lg:grid-cols-\[8rem_minmax\(0,1fr\)\]/)
+  assert.match(shell, /sticky top-0/)
+  assert.doesNotMatch(shell, /Collapsible|ChevronDown|data-\[state=closed\]:hidden|<details\b|<summary\b/)
+})
+
+test("registration detail uses a wide document surface with a compact subject and status header", async () => {
+  const [workspace, subjectTabs, editor, inquiryFields] = await Promise.all([
+    readFile(new URL("../src/features/tasks/ops-task-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-subject-tabs.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-inquiry-fields.tsx", import.meta.url), "utf8"),
+  ])
+
+  assert.match(workspace, /registrationApplicationHost\.kind === "detail"[\s\S]*?sm:max-w-\[min\(96vw,84rem\)\]/)
+  assert.match(subjectTabs, /border-b/)
+  assert.match(subjectTabs, /border-primary/)
+  assert.doesNotMatch(subjectTabs, /sm:grid-cols-3/)
+  assert.match(editor, /data-registration-workflow-status=""/)
+  assert.match(inquiryFields, /xl:grid-cols-3/)
+})
+
+test("empty saved sections show a quiet empty state instead of an outlined blank frame", async () => {
+  const [editor, levelTestSection, consultationSection, placementSection] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-level-test-section.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-consultation-section.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-placement-section.tsx", import.meta.url), "utf8"),
+  ])
+
+  assert.match(editor, /Children\.toArray\(children\)/)
+  assert.match(editor, /입력된 내용 없음/)
+  assert.match(editor, /hasVisibleContent[\s\S]*?border-primary\/60/)
+  assert.doesNotMatch(editor, /return section === "inquiry"\s*\|\|/)
+  for (const section of [levelTestSection, consultationSection, placementSection]) {
+    assert.match(section, /Children\.toArray\(/)
+    assert.match(section, /visibleContent\.length > 0/)
+  }
 })
 
 test("registration create keeps actionable scheduling fields in approved order", async () => {
@@ -507,6 +539,16 @@ test("case list renders one keyed application row in each responsive surface", a
   assert.match(source, /item\.matchingTracks\.map/);
   assert.match(source, /REGISTRATION_CASE_INITIAL_RENDER_LIMIT = 40/);
 });
+
+test("case list makes the whole visible row a keyboard-accessible entry point", async () => {
+  const source = await readListSource()
+
+  assert.match(source, /data-registration-case-row=""/)
+  assert.match(source, /tabIndex=\{0\}/)
+  assert.match(source, /onClick=\{\(\) => openRegistrationCase\(item\)\}/)
+  assert.match(source, /event\.key !== "Enter" && event\.key !== " "/)
+  assert.match(source, /ArrowUpRight/)
+})
 
 test("case projection retains canonical phone and visit dates", async () => {
   const { getRegistrationCaseTrackTimeValue } = await loadCaseListModel()
@@ -2146,7 +2188,8 @@ test("saved detail keeps every operational frame available without repeating she
   assert.match(frameGate, /section === "admission"[\s\S]*?return false/)
   assert.match(frameGate, /section === "inquiry"[\s\S]*?migrationReviewRequired/)
   assert.doesNotMatch(frameGate, /REGISTRATION_DIRECTOR_VISIBLE_STATUSES/)
-  assert.match(frameGate, /return section === "inquiry"[\s\S]*?section === "consultation"/)
+  assert.match(frameGate, /if \(section === "inquiry"\) return track\.migrationReviewRequired/)
+  assert.match(frameGate, /return section === "consultation"/)
   assert.match(frameGate, /placementMode === "waiting"/)
   assert.match(frameGate, /placementMode === "registration"/)
   assert.match(focusPanel, /currentSection === "admission"[\s\S]*?return null/)
@@ -2198,9 +2241,11 @@ test("saved-detail descendants use shared dashboard controls instead of native c
   for (const file of ["registration-application-track-actions.tsx", "registration-appointment-editor.tsx"]) {
     assert.match(sourceByFile[file], /from "@\/components\/ui\/dialog"/)
   }
-  for (const file of ["registration-application-shell.tsx", "registration-enrollment-editor.tsx", "registration-history-timeline.tsx"]) {
+  for (const file of ["registration-enrollment-editor.tsx", "registration-history-timeline.tsx"]) {
     assert.match(sourceByFile[file], /from "@\/components\/ui\/collapsible"/)
   }
+  assert.doesNotMatch(sourceByFile["registration-application-shell.tsx"], /Collapsible/)
+  assert.match(sourceByFile["registration-application-shell.tsx"], /<section/)
   for (const file of [
     "registration-application-inquiry-section.tsx",
     "registration-application-track-actions.tsx",

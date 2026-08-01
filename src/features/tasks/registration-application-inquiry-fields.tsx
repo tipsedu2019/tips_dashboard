@@ -79,7 +79,7 @@ export function RegistrationInquiryCommonFields({
     : schoolChoices
 
   return (
-    <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+    <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
       <Label className="grid min-w-0 gap-1.5" data-registration-focus="studentName">
         <FieldLabel requirement="필수">학생명</FieldLabel>
         <Input
@@ -171,7 +171,7 @@ export function RegistrationInquiryCommonFields({
         />
       </Label>
 
-      <Label className="grid min-w-0 gap-1.5 sm:col-span-2">
+      <Label className="grid min-w-0 gap-1.5 sm:col-span-2 xl:col-span-3">
         <FieldLabel requirement="선택">요청 사항</FieldLabel>
         <Textarea
           value={values.requestNote}

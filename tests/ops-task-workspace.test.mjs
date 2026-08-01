@@ -849,7 +849,7 @@ test("registration workspace replaces Notion registration management with one ap
   );
 
   assertIncludesAll(combined, [
-    'type RegistrationViewKey = "inquiry" | "level_test" | "consulting" | "waiting" | "enrollment" | "closed"',
+    'type RegistrationViewKey = "inquiry" | "level_test" | "consultation_requested" | "consultation_completed" | "waiting" | "enrollment" | "payment" | "completed"',
     "REGISTRATION_VIEW_TABS",
     "STATUS_TO_VIEW",
     "getRegistrationTrackViewKey",
@@ -872,12 +872,14 @@ test("registration workspace replaces Notion registration management with one ap
   ]);
 
   assertIncludesAll(workspaceSource, [
-    '{ key: "inquiry", label: "문의" }',
-    '{ key: "level_test", label: "레벨테스트" }',
-    '{ key: "consulting", label: "상담" }',
-    '{ key: "waiting", label: "대기" }',
-    '{ key: "enrollment", label: "등록" }',
-    '{ key: "closed", label: "완료" }',
+    '{ key: "inquiry", label: "등록 문의" }',
+    '{ key: "level_test", label: "레벨테스트 신청" }',
+    '{ key: "consultation_requested", label: "상담 신청" }',
+    '{ key: "consultation_completed", label: "상담 완료" }',
+    '{ key: "waiting", label: "대기 신청" }',
+    '{ key: "enrollment", label: "등록 신청" }',
+    '{ key: "payment", label: "수납 진행 중" }',
+    '{ key: "completed", label: "완료" }',
     'aria-label={isTodoWorkspace ? "할 일 목록" : isWordRetestWorkspace ? "단어 재시험 역할" : isRegistrationWorkspace ? "등록 흐름" : isWithdrawalWorkspace ? "퇴원 흐름" : isTransferWorkspace ? "전반 흐름" : `${workspaceLabel} 보기`}',
     "const workspaceSurfaceClassName = isWithdrawalWorkspace || isTransferWorkspace || isRegistrationWorkspace",
     "setRegistrationNotificationOpen(true)",
@@ -996,7 +998,7 @@ test("leaving a registration fixture clears provider retry targets before produc
   ]);
 });
 
-test("registration exposes six ordered work tabs with case rows retaining subject-specific states", async () => {
+test("registration exposes eight ordered work tabs with case rows retaining subject-specific states", async () => {
   const [workspaceSource, caseListSource, trackModelSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/registration-case-list.tsx"),
@@ -1008,12 +1010,14 @@ test("registration exposes six ordered work tabs with case rows retaining subjec
   );
 
   const orderedTabs = [
-    '{ key: "inquiry", label: "문의" }',
-    '{ key: "level_test", label: "레벨테스트" }',
-    '{ key: "consulting", label: "상담" }',
-    '{ key: "waiting", label: "대기" }',
-    '{ key: "enrollment", label: "등록" }',
-    '{ key: "closed", label: "완료" }',
+    '{ key: "inquiry", label: "등록 문의" }',
+    '{ key: "level_test", label: "레벨테스트 신청" }',
+    '{ key: "consultation_requested", label: "상담 신청" }',
+    '{ key: "consultation_completed", label: "상담 완료" }',
+    '{ key: "waiting", label: "대기 신청" }',
+    '{ key: "enrollment", label: "등록 신청" }',
+    '{ key: "payment", label: "수납 진행 중" }',
+    '{ key: "completed", label: "완료" }',
   ];
   for (let index = 1; index < orderedTabs.length; index += 1) {
     assert.ok(
@@ -1029,10 +1033,9 @@ test("registration exposes six ordered work tabs with case rows retaining subjec
   ]);
 
   assertIncludesAll(caseListSource, [
-    'level_test_scheduled: "레벨테스트 예약"',
-    'level_test_in_progress: "레벨테스트 진행"',
-    'consultation_waiting: "전화상담 대기"',
-    'visit_consultation_scheduled: "방문상담 예약"',
+    'level_test_requested: "레벨테스트 신청"',
+    'consultation_requested: "상담 신청"',
+    'consultation_completed: "상담 완료"',
     'onAction(item.taskId, track.trackId, "complete_consultation")',
   ]);
 });
@@ -1226,10 +1229,12 @@ test("registration rows expose process-specific columns and safe deletion", asyn
     "REGISTRATION_CASE_VIEW_COLUMNS",
     'inquiry: ["학생", "학년 · 학교", "연락처", "문의 과목 · 일시"]',
     'level_test: ["학생 · 과목", "예약 일시", "장소", "진행 · 결과"]',
-    'consulting: ["학생 · 과목", "상담 유형", "책임자", "기준 · 예약 일시", "장소"]',
+    'consultation_requested: ["학생 · 과목", "상담 유형", "책임자", "기준 · 예약 일시", "장소"]',
+    'consultation_completed: ["학생 · 과목", "상담 상태", "책임자", "완료 일시"]',
     'waiting: ["학생 · 과목", "대기 종류", "책임자", "단계 진입일시"]',
     'enrollment: ["학생 · 과목", "등록 상태", "수업 시작", "교재 준비"]',
-    'closed: ["학생 · 과목", "완료 상태", "책임자", "완료 일시"]',
+    'payment: ["학생 · 과목", "수납 상태", "수업 시작", "교재 준비"]',
+    'completed: ["학생 · 과목", "완료 상태", "책임자", "완료 일시"]',
     "onDelete",
     "삭제",
   ]);

@@ -1,13 +1,6 @@
 "use client"
 
-import { useEffect, useState, type ReactNode } from "react"
-import { ChevronDown } from "lucide-react"
-
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
+import type { ReactNode } from "react"
 
 import {
   isRegistrationApplicationSectionContentDisabled,
@@ -59,6 +52,15 @@ const SECTION_TITLES: Record<RegistrationApplicationUiSectionKey, string> = {
   admission: "입학",
 }
 
+const SECTION_INDEX: Record<RegistrationApplicationUiSectionKey, string> = {
+  inquiry: "01",
+  level_test: "02",
+  consultation: "03",
+  waiting: "04",
+  registration: "05",
+  admission: "06",
+}
+
 function RegistrationApplicationSection({
   mode,
   section,
@@ -72,12 +74,6 @@ function RegistrationApplicationSection({
   notice?: ReactNode
   children: ReactNode
 }) {
-  const [open, setOpen] = useState(!state.upcoming)
-  useEffect(() => {
-    if (state.upcoming) return
-    const frame = window.requestAnimationFrame(() => setOpen(true))
-    return () => window.cancelAnimationFrame(frame)
-  }, [state.upcoming])
   const lockReasonId = `registration-application-${section}-lock-reason`
   const contentDisabled = isRegistrationApplicationSectionContentDisabled({
     mode,
@@ -94,23 +90,22 @@ function RegistrationApplicationSection({
     : state.lockReason
 
   return (
-    <Collapsible
-      open={open}
-      onOpenChange={setOpen}
+    <section
       id={`registration-application-${section}`}
       data-registration-application-section={section}
       data-registration-state={contentDisabled ? "locked" : state.current ? "current" : "ready"}
       aria-label={stateLabel}
-      className="group scroll-mt-4 border-t pt-5"
+      className="scroll-mt-32 border-t py-6 lg:grid lg:grid-cols-[8rem_minmax(0,1fr)] lg:gap-8 lg:py-8"
     >
-      <CollapsibleTrigger type="button" className="flex w-full cursor-pointer items-center justify-between gap-3 text-left text-sm font-semibold">
-        <span>{SECTION_TITLES[section]}</span>
-        <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-      </CollapsibleTrigger>
-      <CollapsibleContent
-        forceMount
-        className="mt-3 grid gap-3 data-[state=closed]:hidden"
-      >
+      <header className="mb-4 lg:mb-0">
+        <span className="text-[11px] font-medium tabular-nums text-muted-foreground">
+          {SECTION_INDEX[section]}
+        </span>
+        <h3 className="mt-1 text-base font-semibold tracking-tight">
+          {SECTION_TITLES[section]}
+        </h3>
+      </header>
+      <div className="grid min-w-0 gap-3">
         {notice}
         <div
           role="group"
@@ -125,8 +120,8 @@ function RegistrationApplicationSection({
             {children}
           </fieldset>
         </div>
-      </CollapsibleContent>
-    </Collapsible>
+      </div>
+    </section>
   )
 }
 
@@ -136,37 +131,40 @@ export function RegistrationApplicationShell(props: RegistrationApplicationShell
     : APPLICATION_UI_SECTION_ORDER
 
   return (
-    <div data-registration-application-mode={props.mode} className="grid gap-5 [&_select:disabled]:border-muted-foreground/20 [&_select:disabled]:bg-muted [&_select:disabled]:text-muted-foreground [&_select:disabled]:opacity-100">
-      <header className="flex min-w-0 items-center justify-between gap-3">
-        <h2 className="min-w-0 truncate text-base font-semibold">{props.studentName}</h2>
-        <div className="flex items-center justify-end gap-2">
-          {props.historyAction}
-          {props.closeAction}
+    <div data-registration-application-mode={props.mode} className="min-w-0 [&_select:disabled]:border-muted-foreground/20 [&_select:disabled]:bg-muted [&_select:disabled]:text-muted-foreground [&_select:disabled]:opacity-100">
+      <header className="sticky top-0 z-20 -mx-6 -mt-6 border-b bg-background/95 px-6 pb-4 pt-5 backdrop-blur supports-[backdrop-filter]:bg-background/90">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <h2 className="min-w-0 truncate text-xl font-semibold tracking-tight">{props.studentName}</h2>
+          <div className="flex items-center justify-end gap-2">
+            {props.historyAction}
+            {props.closeAction}
+          </div>
         </div>
+        {props.subjectNavigation ? <div className="mt-4">{props.subjectNavigation}</div> : null}
+        {props.progress ? <div className="mt-4">{props.progress}</div> : null}
       </header>
 
-      {props.subjectNavigation}
-      {props.progress}
-
-      {sections.map((section) => {
-        const contentKey = SECTION_CONTENT_KEY[section]
-        const sectionState = section === "waiting"
-          ? props.waitingState || props.sectionStates.placement
-          : section === "registration"
-            ? props.registrationState || props.sectionStates.placement
-            : props.sectionStates[section]
-        return (
-          <RegistrationApplicationSection
-            key={section}
-            mode={props.mode}
-            section={section}
-            state={sectionState}
-            notice={section === "waiting" || section === "registration" ? undefined : props.sectionNotices?.[section]}
-          >
-            {props[contentKey]}
-          </RegistrationApplicationSection>
-        )
-      })}
+      <div>
+        {sections.map((section) => {
+          const contentKey = SECTION_CONTENT_KEY[section]
+          const sectionState = section === "waiting"
+            ? props.waitingState || props.sectionStates.placement
+            : section === "registration"
+              ? props.registrationState || props.sectionStates.placement
+              : props.sectionStates[section]
+          return (
+            <RegistrationApplicationSection
+              key={section}
+              mode={props.mode}
+              section={section}
+              state={sectionState}
+              notice={section === "waiting" || section === "registration" ? undefined : props.sectionNotices?.[section]}
+            >
+              {props[contentKey]}
+            </RegistrationApplicationSection>
+          )
+        })}
+      </div>
     </div>
   )
 }

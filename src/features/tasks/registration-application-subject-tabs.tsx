@@ -40,7 +40,7 @@ export function RegistrationApplicationSubjectTabs({
   }
 
   return (
-    <div role="tablist" aria-label="과목별 등록 진행" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+    <div role="tablist" aria-label="과목별 등록 진행" className="flex min-w-0 gap-5 overflow-x-auto border-b">
       {tracks.map((track) => {
         const selected = track.id === value
         return (
@@ -49,16 +49,19 @@ export function RegistrationApplicationSubjectTabs({
             id={`registration-subject-tab-${track.id}`}
             type="button"
             role="tab"
-            variant={selected ? "default" : "outline"}
+            variant="ghost"
             aria-selected={selected}
             aria-controls={panelIdsByTrackId[track.id]?.join(" ")}
             tabIndex={selected ? 0 : -1}
-            className="h-auto min-w-0 justify-between gap-3 px-3 py-2"
+            className={`h-auto min-w-fit flex-none justify-start gap-2 rounded-none border-b-2 px-1 py-2.5 shadow-none ${selected
+              ? "border-primary text-foreground hover:bg-transparent"
+              : "border-transparent text-muted-foreground hover:border-border hover:bg-transparent hover:text-foreground"
+            }`}
             onKeyDown={(event) => handleSubjectTabKeyDown(event, track.id)}
             onClick={() => onValueChange(track.id)}
           >
-            <span>{track.subject}</span>
-            <span className="truncate text-xs font-normal opacity-80">{track.statusLabel}</span>
+            <span className="font-semibold">{track.subject}</span>
+            <span className="max-w-40 truncate text-xs font-normal opacity-70">{track.statusLabel}</span>
           </Button>
         )
       })}

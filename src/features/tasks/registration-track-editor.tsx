@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { Children, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -164,10 +164,9 @@ function hasRegistrationTrackFrameContent({
 }) {
   const { track } = context
   if (section === "admission") return false
-  if (section === "inquiry" && track.migrationReviewRequired) return reviewTrackId === track.id
+  if (section === "inquiry") return track.migrationReviewRequired && reviewTrackId === track.id
   if (track.migrationReviewRequired) return false
-  return section === "inquiry"
-    || section === "consultation"
+  return section === "consultation"
     || (section === "placement" && (placementMode === "waiting" || placementMode === "registration"))
 }
 
@@ -207,6 +206,8 @@ function RegistrationTrackSectionFrame({
     : ["enrollment_decided", "enrollment_processing", "registered", "not_registered"].includes(context.track.status)
   const displayCurrent = section === "placement" ? placementCurrent : sectionState.current
   const panelSection = section === "placement" ? placementMode || "registration" : section
+  const visibleChildren = Children.toArray(children)
+  const hasVisibleContent = visibleChildren.length > 0
   return (
     <article
       role="tabpanel"
@@ -219,13 +220,18 @@ function RegistrationTrackSectionFrame({
       data-registration-focus-track={selected ? labelledByTrackId || context.track.id : undefined}
       data-registration-state={sectionState.current ? "current" : sectionState.editable ? "ready" : "locked"}
       className={[
-        "grid min-w-0 gap-3 rounded-md border p-3",
-        selected ? "border-primary/60 bg-primary/[0.025]" : "bg-background",
-      ].join(" ")}
+        "min-w-0",
+        hasVisibleContent ? "grid gap-3 rounded-md border p-3" : "py-1",
+        hasVisibleContent && selected ? "border-primary/60 bg-primary/[0.025]" : "bg-background",
+      ].filter(Boolean).join(" ")}
     >
-      <fieldset disabled={!sectionState.editable} className="m-0 min-w-0 border-0 p-0">
-        {children}
-      </fieldset>
+      {hasVisibleContent ? (
+        <fieldset disabled={!sectionState.editable} className="m-0 min-w-0 border-0 p-0">
+          {visibleChildren}
+        </fieldset>
+      ) : (
+        <p className="text-sm text-muted-foreground">입력된 내용 없음</p>
+      )}
     </article>
   )
 }
@@ -460,7 +466,7 @@ export function RegistrationApplication({
         : canManageCase ? "" : "등록 정보를 수정할 권한이 없습니다",
     }]),
   ) as typeof sectionStates
-  const splitPlacementState = (key: "waiting" | "registration") => {
+  const splitPlacementState = () => {
     return {
       current: true,
       editable: canManageCase,
@@ -468,8 +474,8 @@ export function RegistrationApplication({
       lockReason: canManageCase ? "" : "등록 정보를 수정할 권한이 없습니다",
     }
   }
-  const waitingState = splitPlacementState("waiting")
-  const registrationState = splitPlacementState("registration")
+  const waitingState = splitPlacementState()
+  const registrationState = splitPlacementState()
   const focusedContext = trackContexts.find((context) => context.track.id === activeTrackId) || null
   const workflowStatusOptions = activeTrack
     ? getRegistrationWorkflowStatusOptions({
@@ -857,7 +863,7 @@ export function RegistrationApplication({
       closeAction={closeAction}
       historyAction={<RegistrationApplicationHistoryAction detail={detail} profiles={profiles} />}
       subjectNavigation={(
-        <div className="grid gap-3">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_18rem] md:items-end">
           <RegistrationApplicationSubjectTabs
             tracks={orderedTracks.map((track) => ({
               id: track.id,
@@ -869,14 +875,14 @@ export function RegistrationApplication({
             onValueChange={handleSubjectTabChange}
           />
           {activeTrack ? (
-            <label className="flex min-w-0 items-center gap-2 text-sm font-medium">
-              <span className="shrink-0 text-muted-foreground">진행상태</span>
+            <label data-registration-workflow-status="" className="grid min-w-0 gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">진행상태</span>
               <select
                 aria-label={`${activeTrack.subject} 진행상태`}
                 value={activeTrack.workflowStatus}
                 disabled={workflowStatusSaving || workflowStatusOptions.length === 0}
                 onChange={(event) => void changeWorkflowStatus(event.target.value)}
-                className="h-9 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-10 min-w-0 rounded-md border border-primary/30 bg-primary/5 px-3 text-sm font-semibold text-primary outline-none focus:ring-2 focus:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <option value={activeTrack.workflowStatus}>{REGISTRATION_WORKFLOW_STATUS_LABELS[activeTrack.workflowStatus]}</option>
                 {workflowStatusOptions.filter((option) => option.value !== activeTrack.workflowStatus).map((option) => (
