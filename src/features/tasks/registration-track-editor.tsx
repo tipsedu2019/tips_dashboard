@@ -220,9 +220,8 @@ function RegistrationTrackSectionFrame({
       data-registration-focus-track={selected ? labelledByTrackId || context.track.id : undefined}
       data-registration-state={sectionState.current ? "current" : sectionState.editable ? "ready" : "locked"}
       className={[
-        "min-w-0",
-        hasVisibleContent ? "grid gap-3 rounded-md border p-3" : "py-1",
-        hasVisibleContent && selected ? "border-primary/60 bg-primary/[0.025]" : "bg-background",
+        "min-w-0 scroll-mt-52 lg:scroll-mt-40",
+        hasVisibleContent ? "grid gap-3" : "py-1",
       ].filter(Boolean).join(" ")}
     >
       {hasVisibleContent ? (

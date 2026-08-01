@@ -52,15 +52,6 @@ const SECTION_TITLES: Record<RegistrationApplicationUiSectionKey, string> = {
   admission: "입학",
 }
 
-const SECTION_INDEX: Record<RegistrationApplicationUiSectionKey, string> = {
-  inquiry: "01",
-  level_test: "02",
-  consultation: "03",
-  waiting: "04",
-  registration: "05",
-  admission: "06",
-}
-
 function RegistrationApplicationSection({
   mode,
   section,
@@ -95,13 +86,10 @@ function RegistrationApplicationSection({
       data-registration-application-section={section}
       data-registration-state={contentDisabled ? "locked" : state.current ? "current" : "ready"}
       aria-label={stateLabel}
-      className="scroll-mt-32 border-t py-6 lg:grid lg:grid-cols-[8rem_minmax(0,1fr)] lg:gap-8 lg:py-8"
+      className="scroll-mt-52 border-t py-4 lg:grid lg:scroll-mt-40 lg:grid-cols-[7rem_minmax(0,1fr)] lg:gap-6 lg:py-5"
     >
-      <header className="mb-4 lg:mb-0">
-        <span className="text-[11px] font-medium tabular-nums text-muted-foreground">
-          {SECTION_INDEX[section]}
-        </span>
-        <h3 className="mt-1 text-base font-semibold tracking-tight">
+      <header className="mb-3 lg:mb-0 lg:pt-0.5">
+        <h3 className="text-sm font-semibold tracking-tight">
           {SECTION_TITLES[section]}
         </h3>
       </header>
@@ -132,7 +120,7 @@ export function RegistrationApplicationShell(props: RegistrationApplicationShell
 
   return (
     <div data-registration-application-mode={props.mode} className="min-w-0 [&_select:disabled]:border-muted-foreground/20 [&_select:disabled]:bg-muted [&_select:disabled]:text-muted-foreground [&_select:disabled]:opacity-100">
-      <header className="sticky top-0 z-20 -mx-6 -mt-6 border-b bg-background/95 px-6 pb-4 pt-5 backdrop-blur supports-[backdrop-filter]:bg-background/90">
+      <header className="sticky -top-6 z-20 -mx-6 -mt-6 border-b bg-background px-6 pb-3 pt-4">
         <div className="flex min-w-0 items-center justify-between gap-3">
           <h2 className="min-w-0 truncate text-xl font-semibold tracking-tight">{props.studentName}</h2>
           <div className="flex items-center justify-end gap-2">
@@ -140,8 +128,8 @@ export function RegistrationApplicationShell(props: RegistrationApplicationShell
             {props.closeAction}
           </div>
         </div>
-        {props.subjectNavigation ? <div className="mt-4">{props.subjectNavigation}</div> : null}
-        {props.progress ? <div className="mt-4">{props.progress}</div> : null}
+        {props.subjectNavigation ? <div className="mt-3">{props.subjectNavigation}</div> : null}
+        {props.progress ? <div className="mt-3">{props.progress}</div> : null}
       </header>
 
       <div>

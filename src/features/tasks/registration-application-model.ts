@@ -260,10 +260,6 @@ function getTrackLockReason(input: {
   hasAllowedAction: boolean
 }) {
   if (input.section === "history") return "자동으로 기록되는 읽기 전용 이력입니다"
-  if (input.section !== input.currentSection) {
-    if (!input.hasAllowedAction) return "현재 진행 단계가 아닙니다"
-    return input.canManage ? "" : "이 작업을 수정할 권한이 없습니다"
-  }
   if (input.canManage) return ""
   if (input.section === "consultation" && input.canCompleteConsultation) return ""
   return "이 작업을 수정할 권한이 없습니다"

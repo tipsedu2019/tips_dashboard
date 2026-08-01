@@ -127,6 +127,22 @@ test("every saved track status has one explicit current application section", ()
   }
 })
 
+test("management can edit saved information across every section without stage locks", () => {
+  for (const status of ["inquiry", "consultation_waiting", "enrollment_decided", "registered"]) {
+    const state = getRegistrationApplicationTrackState({
+      track: makeTrack(status),
+      canManage: true,
+      canCompleteConsultation: false,
+    })
+
+    for (const section of REGISTRATION_APPLICATION_BODY_SECTION_ORDER) {
+      assert.equal(state.sections[section].editable, true, `${status}:${section}`)
+      assert.equal(state.sections[section].lockReason, "", `${status}:${section}`)
+    }
+    assert.equal(state.sections.history.editable, false, status)
+  }
+})
+
 test("a viewer keeps every section value visible but cannot mutate a track", () => {
   const state = getRegistrationApplicationTrackState({
     track: makeTrack("consultation_waiting"),
@@ -264,7 +280,7 @@ test("workspace option results distinguish authoritative loading partial and fai
   assert.equal(resolveRegistrationCreateCatalogStatus({ loading: false, error: "", directorCatalogStatus: null }), "loading")
 })
 
-test("mixed tracks aggregate current emphasis without unlocking the sibling", () => {
+test("mixed tracks keep an unauthorized sibling read-only while management edits remain available", () => {
   const english = getRegistrationApplicationTrackState({ track: makeTrack("consultation_waiting", "영어"), canManage: true, canCompleteConsultation: false })
   const mathematics = getRegistrationApplicationTrackState({ track: makeTrack("level_test_scheduled", "수학"), canManage: false, canCompleteConsultation: false })
   const aggregate = getRegistrationApplicationSectionStates({ tracks: [english, mathematics] })
@@ -272,7 +288,7 @@ test("mixed tracks aggregate current emphasis without unlocking the sibling", ()
   assert.equal(aggregate.consultation.current, true)
   assert.equal(aggregate.consultation.editable, true)
   assert.equal(aggregate.level_test.current, true)
-  assert.equal(aggregate.level_test.editable, false)
+  assert.equal(aggregate.level_test.editable, true)
   assert.equal(mathematics.sections.level_test.editable, false)
 })
 
@@ -400,7 +416,7 @@ test("an open admission batch enables the case section for registered add-class 
   })
 
   assert.equal(registered.currentSection, "placement")
-  assert.equal(registered.sections.admission.editable, false)
+  assert.equal(registered.sections.admission.editable, true)
   assert.ok(caseEditableSections.includes("admission"))
   assert.equal(aggregate.admission.editable, true)
   assert.deepEqual(

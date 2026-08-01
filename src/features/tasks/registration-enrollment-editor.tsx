@@ -717,7 +717,7 @@ export function RegistrationEnrollmentEditor({
               <Trash2 className="size-4" aria-hidden="true" />
               {row.id === null ? "삭제" : "수강 취소"}
             </Button>
-            {rowBlockers.length > 0 ? <p role="alert" className="text-xs text-destructive sm:col-span-4">{rowBlockers.map((blocker) => blocker.message).join(" · ")}</p> : null}
+            {rowsValidationError && rowBlockers.length > 0 ? <p role="alert" className="text-xs text-destructive sm:col-span-4">{rowBlockers.map((blocker) => blocker.message).join(" · ")}</p> : null}
             {row.classId && classDetailById[row.classId] === null && !loadingClassIds.has(row.classId) ? (
               <div role="alert" className="grid gap-2 text-xs text-destructive sm:col-span-4">
                 <span>선택한 수업 일정을 불러오지 못했습니다.</span>
@@ -1276,7 +1276,7 @@ export function RegistrationAdmissionPanel({
       complete: checklist.invoice,
       locked: !displayBatch,
       content: openBatch && permissions.canManage ? (
-        <Button type="button" variant={checklist.invoice ? "outline" : "default"} onClick={() => void advanceBatch("invoice_sent")} disabled={batchRefreshPending || !checklist.makeedu || checklist.invoice || Boolean(busyAction)}>3. 청구서 발송</Button>
+        <Button type="button" variant={checklist.invoice ? "outline" : "default"} onClick={() => void advanceBatch("invoice_sent")} disabled={batchRefreshPending || !checklist.makeedu || checklist.invoice || Boolean(busyAction)}>청구서 발송</Button>
       ) : displayBatch ? <span className="text-sm text-muted-foreground">{checklist.invoice ? "완료" : "대기"}</span> : <span className="text-sm text-muted-foreground">입학 처리 시작 후 진행합니다.</span>,
     },
     {
@@ -1285,7 +1285,7 @@ export function RegistrationAdmissionPanel({
       complete: checklist.payment,
       locked: !displayBatch,
       content: openBatch && permissions.canManage ? (
-        <Button type="button" variant={checklist.payment ? "outline" : "default"} onClick={() => void advanceBatch("payment_confirmed")} disabled={batchRefreshPending || !checklist.invoice || checklist.payment || Boolean(busyAction)}>4. 수납 완료 확인</Button>
+        <Button type="button" variant={checklist.payment ? "outline" : "default"} onClick={() => void advanceBatch("payment_confirmed")} disabled={batchRefreshPending || !checklist.invoice || checklist.payment || Boolean(busyAction)}>수납 완료 확인</Button>
       ) : displayBatch ? <span className="text-sm text-muted-foreground">{checklist.payment ? "완료" : "대기"}</span> : <span className="text-sm text-muted-foreground">입학 처리 시작 후 진행합니다.</span>,
     },
     {
@@ -1294,7 +1294,7 @@ export function RegistrationAdmissionPanel({
       complete: checklist.complete,
       locked: !displayBatch,
       content: openBatch && permissions.canManage ? (
-        <Button type="button" onClick={() => void completeBatch()} disabled={batchRefreshPending || !checklist.payment || checklist.complete || Boolean(busyAction)}>5. 등록 완료</Button>
+        <Button type="button" onClick={() => void completeBatch()} disabled={batchRefreshPending || !checklist.payment || checklist.complete || Boolean(busyAction)}>등록 완료</Button>
       ) : displayBatch ? <span className="text-sm text-muted-foreground">{checklist.complete ? "완료" : "대기"}</span> : <span className="text-sm text-muted-foreground">입학 처리 시작 후 진행합니다.</span>,
     },
   ]

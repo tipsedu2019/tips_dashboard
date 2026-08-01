@@ -120,3 +120,35 @@ test("workflow status choices follow operations and assigned-director ownership"
     ],
   )
 })
+
+test("inline status choices always retain the current value and expose only the viewer's allowed changes", async () => {
+  const { getRegistrationInlineWorkflowStatusOptions } = await loadWorkflowStatus()
+
+  assert.deepEqual(
+    getRegistrationInlineWorkflowStatusOptions({
+      currentStatus: "enrollment_requested",
+      viewerRole: "staff",
+      viewerId: "staff-1",
+      directorProfileId: "director-1",
+    }).map(({ value }) => value),
+    [
+      "enrollment_requested",
+      "inquiry",
+      "level_test_requested",
+      "consultation_requested",
+      "payment_in_progress",
+      "registered",
+      "inquiry_only",
+    ],
+  )
+
+  assert.deepEqual(
+    getRegistrationInlineWorkflowStatusOptions({
+      currentStatus: "consultation_requested",
+      viewerRole: "teacher",
+      viewerId: "teacher-2",
+      directorProfileId: "director-1",
+    }).map(({ value }) => value),
+    ["consultation_requested"],
+  )
+})

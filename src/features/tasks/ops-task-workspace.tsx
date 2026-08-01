@@ -162,15 +162,13 @@ import {
   probeRegistrationSubjectCapabilities,
   type RegistrationSubjectCapability,
 } from "./registration-subject-capability-probe"
-import {
-  RegistrationCaseList,
-  type RegistrationCaseListAction,
-} from "./registration-case-list"
+import { RegistrationCaseList } from "./registration-case-list"
 import {
   buildRegistrationCaseListItems,
   canDeleteRegistrationCase,
   filterRegistrationCaseListItems,
   getRegistrationCaseTabCounts,
+  type RegistrationCaseListViewItem,
 } from "./registration-case-list-model"
 import { RegistrationAppointmentCalendar } from "./registration-appointment-calendar"
 import type { RegistrationAppointmentCalendarItem } from "./registration-appointment-calendar-model"
@@ -182,8 +180,10 @@ import {
   loadRegistrationLegacyNotificationSourceIds,
   probeRegistrationIntakeWorkflowRuntime,
   probeRegistrationSubjectTrackRuntime,
+  setRegistrationWorkflowStatus,
   updateRegistrationCaseCommon,
   type OpsRegistrationCaseDetail,
+  type OpsRegistrationWorkflowStatus,
   type RegistrationSubject,
 } from "./registration-track-service"
 import { RegistrationApplicationCreate } from "./registration-application-create"
@@ -210,9 +210,6 @@ import {
   reconcileRegistrationVisitNotificationRetryTargets,
   sendRegistrationVisitNotificationTarget,
 } from "./registration-consultation-notification.js"
-import {
-  getRegistrationActionPermissions,
-} from "./registration-track-model.js"
 import {
   executeRegistrationSubjectTrackFixtureAction,
   installRegistrationSubjectTrackFixtureRuntime,
@@ -10360,64 +10357,28 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     if (result.warning) setNotice(result.warning)
   }, [registrationFixtureEnabled, registrationNotificationSessionToken])
 
-  const handleRegistrationTrackAction = useCallback(async (
-    taskId: string,
-    trackId: string,
-    action: RegistrationCaseListAction,
+  const handleRegistrationWorkflowStatusChange = useCallback(async (
+    track: RegistrationCaseListViewItem["matchingTracks"][number],
+    workflowStatus: OpsRegistrationWorkflowStatus,
   ) => {
-    if (action !== "complete_consultation") return
-    if (isLegacyRegistrationTrackId(trackId)) {
-      await openRegistrationTrack(taskId, trackId)
-      setMessage("데이터 전환 전 등록 업무는 기존 상세에서 처리하세요.")
-      return
-    }
-
+    if (saving || track.workflowStatus === workflowStatus) return
     setSaving(true)
     setMessage("")
-    const actionSelectionKey = `action:${taskId}:${trackId}`
-    registrationTrackSelectionRef.current = actionSelectionKey
     try {
-      const detail = await loadRegistrationCaseForWorkspace(taskId, true)
-      if (registrationTrackSelectionRef.current !== actionSelectionKey) return
-      const track = detail.tracks.find((item) => item.id === trackId) || null
-      const activeConsultation = detail.consultations.find((consultation) => (
-        consultation.trackId === trackId
-        && ((track?.status === "consultation_waiting" && consultation.mode === "phone" && consultation.status === "waiting")
-          || (track?.status === "visit_consultation_scheduled" && consultation.mode === "visit" && consultation.status === "scheduled"))
-      )) || null
-      const permissions = getRegistrationActionPermissions({
-        viewerId: registrationViewerId,
-        viewerRole: registrationViewerRole,
-        track,
-        activeConsultation,
+      await setRegistrationWorkflowStatus({
+        trackId: track.trackId,
+        workflowStatus,
+        expectedWorkflowRevision: track.workflowRevision,
+        requestKey: createRegistrationMutationRequestKey("registration-workflow-status", track.trackId),
       })
-
-      if (!track || !permissions.canCompleteConsultation) {
-        setMessage("상담 담당자 또는 진행 상태가 변경되었습니다. 목록을 다시 불러왔습니다.")
-        await reload(true, false)
-        return
-      }
-
-      registrationTrackSelectionRef.current = `${taskId}:${trackId}`
-      setSelectedRegistrationTrackId(trackId)
-      setRegistrationCaseDetail(detail)
-      setSelectedTask({ ...detail.task, registrationTracks: detail.tracks })
-      setDetailOpen(false)
-      setRegistrationApplicationHost({
-        kind: "detail",
-        taskId,
-        focusTrackId: trackId,
-        appointmentId: null,
-      })
-      syncTaskDeepLink(taskId, trackId, null, "push")
+      await reload(true, false)
     } catch (error) {
-      if (registrationTrackSelectionRef.current === actionSelectionKey) {
-        setMessage(getOpsTaskActionErrorMessage(error, "상담 상세를 확인하지 못했습니다."))
-      }
+      setMessage(getOpsTaskActionErrorMessage(error, "진행상태를 변경하지 못했습니다. 최신 정보를 확인해 주세요."))
+      await reload(true, false).catch(() => undefined)
     } finally {
       setSaving(false)
     }
-  }, [loadRegistrationCaseForWorkspace, openRegistrationTrack, registrationViewerId, registrationViewerRole, reload, syncTaskDeepLink])
+  }, [reload, saving])
 
   const closeRegistrationApplicationHost = useCallback(() => {
     setRegistrationApplicationHost({ kind: "closed" })
@@ -12667,7 +12628,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	              disabled={saving}
 	              onOpen={(taskId, trackId) => void openRegistrationTrack(taskId, trackId)}
 	              onEdit={(taskId, trackId) => void editRegistrationTrack(taskId, trackId)}
-	              onAction={(taskId, trackId, action) => void handleRegistrationTrackAction(taskId, trackId, action)}
+	              onStatusChange={(track, workflowStatus) => void handleRegistrationWorkflowStatusChange(track, workflowStatus)}
 	              canDelete={(item) => canDeleteTask(item.task)}
 	              onDelete={(item) => requestRemoveTask(item.task)}
 	              emptyLabel={registrationEmptyLabel}

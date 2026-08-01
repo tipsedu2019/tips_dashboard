@@ -594,7 +594,7 @@ test("direct pipeline transitions keep the saved state when canonical reload fai
 test("appointment mutations retain only opaque common notification job references", async () => {
   const { createRegistrationTrackService } = await loadRegistrationServiceFactory();
   const harness = registrationRpcHarness((name) => {
-    assert.equal(name, "save_registration_shared_appointment");
+    assert.equal(name, "save_registration_appointment_details_v1");
     return {
       data: {
         appointment_id: "appointment-1",
@@ -762,7 +762,7 @@ test("failed notification retry keeps one request id and calls only the exact co
     });
   }
   assert.equal(harness.calls.some(([name]) => [
-    "save_registration_shared_appointment",
+    "save_registration_appointment_details_v1",
     "cancel_registration_appointment",
   ].includes(name)), false);
 });

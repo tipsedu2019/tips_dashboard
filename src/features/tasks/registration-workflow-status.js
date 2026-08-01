@@ -127,3 +127,15 @@ export function getRegistrationWorkflowStatusOptions(input = {}) {
 
   return []
 }
+
+export function getRegistrationInlineWorkflowStatusOptions(input = {}) {
+  const currentStatus = text(input.currentStatus)
+  const allowed = getRegistrationWorkflowStatusOptions(input)
+  const current = REGISTRATION_WORKFLOW_STATUSES.includes(currentStatus)
+    ? [workflowStatusOption(currentStatus)]
+    : []
+  return [
+    ...current,
+    ...allowed.filter((option) => option.value !== currentStatus),
+  ]
+}

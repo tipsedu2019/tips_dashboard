@@ -1180,12 +1180,9 @@ export function RegistrationTrackStageEditor({
   }
   if (track.status === "consultation_waiting") {
     return (
-      <section className="grid min-w-0 gap-3 rounded-md border p-3" aria-label={`${track.subject} 상담 대기`}>
-        <div>
-          <h3 className="text-sm font-semibold">[{track.subject}] 전화상담 대기</h3>
-          <p className="text-xs text-muted-foreground">전화상담은 예약 없이 담당자가 순서대로 처리합니다.</p>
-        </div>
-        <dl className="grid gap-2 rounded-md bg-muted/35 p-3 text-sm">
+      <section className="grid min-w-0 gap-3" aria-label={`${track.subject} 상담 대기`}>
+        <h3 className="text-sm font-semibold">전화상담 대기</h3>
+        <dl className="grid gap-2 text-sm">
           <div><dt className="text-xs text-muted-foreground">전화상담 대기 기준일시</dt><dd className="mt-1 font-medium">{formatRegistrationDateTime(activeConsultation?.readyAt || "")}</dd></div>
         </dl>
         {permissions.canManage ? (
@@ -1198,17 +1195,17 @@ export function RegistrationTrackStageEditor({
   }
   if (["level_test_scheduled", "level_test_in_progress"].includes(track.status)) {
     return (
-      <section className="grid min-w-0 gap-3 rounded-md border p-3" aria-label={`${track.subject} 레벨테스트 관리`}>
-        <h3 className="text-sm font-semibold">[{track.subject}] {STATUS_LABELS[track.status]}</h3>
+      <section className="grid min-w-0 gap-3" aria-label={`${track.subject} 레벨테스트 관리`}>
+        <h3 className="text-sm font-semibold">{STATUS_LABELS[track.status]}</h3>
       </section>
     )
   }
   if (track.status === "visit_consultation_scheduled") {
     return (
-      <section className="grid min-w-0 gap-3 rounded-md border p-3" aria-label={`${track.subject} 방문상담 관리`}>
-        <h3 className="text-sm font-semibold">[{track.subject}] 방문상담 예약</h3>
+      <section className="grid min-w-0 gap-3" aria-label={`${track.subject} 방문상담 관리`}>
+        <h3 className="text-sm font-semibold">방문상담 예약</h3>
         {visitAppointment ? (
-          <dl className="grid gap-2 rounded-md bg-muted/35 p-3 text-sm sm:grid-cols-2">
+          <dl className="grid gap-2 text-sm sm:grid-cols-2">
             <div><dt className="text-xs text-muted-foreground">방문상담 일시</dt><dd className="mt-1 font-medium">{formatRegistrationDateTime(visitAppointment.scheduledAt)}</dd></div>
             <div><dt className="text-xs text-muted-foreground">방문상담 장소</dt><dd className="mt-1 font-medium">{visitAppointment.place || "미정"}</dd></div>
           </dl>
@@ -1333,11 +1330,8 @@ export function RegistrationConsultationOutcomeEditor({
   }
 
   return (
-    <section data-registration-action-owner={`${subject}:consultation-outcome-save`} className="grid gap-4 rounded-md border bg-background p-3" aria-label={subject + " 상담 결과"}>
-      <div>
-        <h4 className="text-sm font-semibold">[{subject}] {consultation.mode === "phone" ? "전화상담" : "방문상담"} 결과</h4>
-        <p className="text-xs text-muted-foreground">상담 기록만 저장합니다. 진행상태와 대기 반은 별도로 정합니다.</p>
-      </div>
+    <section data-registration-action-owner={`${subject}:consultation-outcome-save`} className="grid gap-4 border-t pt-4" aria-label={subject + " 상담 결과"}>
+      <h4 className="text-sm font-semibold">{consultation.mode === "phone" ? "전화상담" : "방문상담"} 결과</h4>
 
       {refreshPending ? (
         <Alert className="border-amber-300 bg-amber-50 text-amber-950">

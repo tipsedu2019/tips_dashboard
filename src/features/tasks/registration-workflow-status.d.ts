@@ -45,3 +45,10 @@ export function getRegistrationWorkflowStatusOptions(input?: {
   viewerId?: string | null
   directorProfileId?: string | null
 }): RegistrationWorkflowStatusOption[]
+
+export function getRegistrationInlineWorkflowStatusOptions(input?: {
+  currentStatus?: string | null
+  viewerRole?: string | null
+  viewerId?: string | null
+  directorProfileId?: string | null
+}): RegistrationWorkflowStatusOption[]
