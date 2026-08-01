@@ -1857,7 +1857,7 @@ test("sibling canonical reloads preserve editor drafts and dirty membership", as
   assert.doesNotMatch(editor, /detail\.enrollments\.map\(\(enrollment\)/)
   assert.doesNotMatch(editor, /appointmentActivitySignature/)
   assert.match(actions, /useOwnedDirtyState/)
-  assert.match(editor, /key=\{`consultation:\$\{context\.activeConsultation\.id\}:\$\{context\.activeConsultation\.updatedAt\}`\}/)
+  assert.match(editor, /key=\{`consultation:\$\{context\.latestConsultation\.id\}:\$\{context\.latestConsultation\.updatedAt\}`\}/)
 })
 
 test("inline consultation completion exposes the locked Task 6 interface and recovery copy", async () => {

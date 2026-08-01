@@ -126,6 +126,7 @@ type TrackContext = {
   permissions: RegistrationTrackActionPermissions
   state: ReturnType<typeof getRegistrationApplicationTrackState>
   activeConsultation: OpsRegistrationConsultation | null
+  latestConsultation: OpsRegistrationConsultation | null
   visitConsultation: OpsRegistrationConsultation | null
   visitAppointment: OpsRegistrationAppointment | null
 }
@@ -391,11 +392,15 @@ export function RegistrationApplication({
         || (track.status === "visit_consultation_scheduled" && item.mode === "visit" && item.status === "scheduled"))
     )) || null
     const visitConsultation = detail.consultations.find((item) => item.trackId === track.id && item.mode === "visit" && item.status === "scheduled") || null
+    const latestConsultation = detail.consultations
+      .filter((item) => item.trackId === track.id)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] || null
     return {
       track,
       permissions: permissionsByTrackId.get(track.id) || { canManage: false, canCompleteConsultation: false, readOnly: true },
       state: trackStates.find((state) => state.trackId === track.id)!,
       activeConsultation,
+      latestConsultation,
       visitConsultation,
       visitAppointment: visitConsultation?.appointmentId
         ? detail.appointments.find((item) => item.id === visitConsultation.appointmentId) || null
@@ -750,16 +755,16 @@ export function RegistrationApplication({
         ) : null}
         {renderTrackActions(context, section, placementMode)}
         {section === "consultation"
-          && context.activeConsultation
-          && context.permissions.canCompleteConsultation ? (
+          && context.latestConsultation
+          && (context.permissions.canManage || context.permissions.canCompleteConsultation) ? (
             <RegistrationConsultationOutcomeEditor
-              key={`consultation:${context.activeConsultation.id}:${context.activeConsultation.updatedAt}`}
+              key={`consultation:${context.latestConsultation.id}:${context.latestConsultation.updatedAt}`}
               subject={context.track.subject}
-              consultation={context.activeConsultation}
+              consultation={context.latestConsultation}
               active
               onReload={onReload}
               onWarning={onWarning}
-              onDirtyChange={(dirty) => setDirty(`consultation:track-${context.track.id}`, dirty, `outcome:${context.activeConsultation?.id || context.track.id}`)}
+              onDirtyChange={(dirty) => setDirty(`consultation:track-${context.track.id}`, dirty, `outcome:${context.latestConsultation?.id || context.track.id}`)}
             />
           ) : null}
         </RegistrationTrackSectionFrame>
