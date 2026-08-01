@@ -115,9 +115,6 @@ select
   track.task_id,
   track.subject,
   track.pipeline_status,
-  track.workflow_status,
-  track.workflow_revision,
-  track.workflow_status_entered_at,
   track.director_profile_id,
   track.director_assignment_source,
   track.director_assignment_rule_key,
@@ -129,7 +126,10 @@ select
   active_visit.scheduled_at as visit_scheduled_at,
   active_visit.place as visit_place,
   active_phone.ready_at as phone_ready_at,
-  active_phone.ready_source as phone_ready_source
+  active_phone.ready_source as phone_ready_source,
+  track.workflow_status,
+  track.workflow_revision,
+  track.workflow_status_entered_at
 from public.ops_registration_subject_tracks track
 left join lateral (
   select

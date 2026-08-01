@@ -117,8 +117,15 @@ returns jsonb language plpgsql security definer set search_path = '' as $$
 declare v_attempt public.ops_registration_level_tests%rowtype; v_track public.ops_registration_subject_tracks%rowtype; v_link text := nullif(pg_catalog.btrim(p_material_link), ''); begin
   if auth.uid() is null then raise exception 'registration_access_denied' using errcode = '42501'; end if;
   if nullif(pg_catalog.btrim(p_request_key), '') is null or p_status not in ('completed', 'absent', 'canceled') or (p_status = 'completed' and v_link is null) then raise exception 'registration_level_test_result_invalid' using errcode = '22023'; end if;
-  select attempt, track into v_attempt, v_track from public.ops_registration_level_tests attempt join public.ops_registration_subject_tracks track on track.id = attempt.track_id where attempt.id = p_attempt_id for update of attempt, track;
+  select attempt.* into v_attempt
+  from public.ops_registration_level_tests attempt
+  join public.ops_registration_subject_tracks track on track.id = attempt.track_id
+  where attempt.id = p_attempt_id
+  for update of attempt, track;
   if not found then raise exception 'registration_level_test_not_found' using errcode = 'P0002'; end if;
+  select track.* into strict v_track
+  from public.ops_registration_subject_tracks track
+  where track.id = v_attempt.track_id;
   perform dashboard_private.assert_registration_mutation_access(v_track.task_id, v_track.id, 'complete_level_test');
   update public.ops_registration_level_tests set status = p_status, material_link = case when p_status = 'completed' then v_link else null end, completed_at = coalesce(completed_at, pg_catalog.now()), updated_at = pg_catalog.now() where id = p_attempt_id returning * into v_attempt;
   perform dashboard_private.write_registration_track_event(v_track.task_id, v_track.id, 'registration_level_test_result_saved', v_track.pipeline_status, v_track.pipeline_status, null, jsonb_build_object('attemptId', p_attempt_id, 'status', p_status));
@@ -139,8 +146,15 @@ returns jsonb language plpgsql security definer set search_path = '' as $$
 declare v_consultation public.ops_registration_consultations%rowtype; v_track public.ops_registration_subject_tracks%rowtype; begin
   if auth.uid() is null then raise exception 'registration_access_denied' using errcode = '42501'; end if;
   if nullif(pg_catalog.btrim(p_request_key), '') is null or p_status not in ('waiting', 'scheduled', 'completed', 'canceled') or (p_status = 'completed' and p_outcome not in ('enrollment', 'waiting', 'not_registered')) or (p_status <> 'completed' and p_outcome is not null) then raise exception 'registration_consultation_details_invalid' using errcode = '22023'; end if;
-  select consultation, track into v_consultation, v_track from public.ops_registration_consultations consultation join public.ops_registration_subject_tracks track on track.id = consultation.track_id where consultation.id = p_consultation_id for update of consultation, track;
+  select consultation.* into v_consultation
+  from public.ops_registration_consultations consultation
+  join public.ops_registration_subject_tracks track on track.id = consultation.track_id
+  where consultation.id = p_consultation_id
+  for update of consultation, track;
   if not found then raise exception 'registration_consultation_not_found' using errcode = 'P0002'; end if;
+  select track.* into strict v_track
+  from public.ops_registration_subject_tracks track
+  where track.id = v_consultation.track_id;
   perform dashboard_private.assert_registration_mutation_access(v_track.task_id, v_track.id, 'complete_consultation');
   update public.ops_registration_consultations set status = p_status, outcome = p_outcome, completed_at = case when p_status = 'completed' then coalesce(completed_at, pg_catalog.now()) else null end, updated_at = pg_catalog.now() where id = p_consultation_id returning * into v_consultation;
   perform dashboard_private.write_registration_track_event(v_track.task_id, v_track.id, 'registration_consultation_details_saved', v_track.pipeline_status, v_track.pipeline_status, null, jsonb_build_object('consultationId', p_consultation_id, 'status', p_status, 'outcome', p_outcome));

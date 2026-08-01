@@ -70,6 +70,9 @@ test("status-independent appointment migration keeps workflow and provider actio
   assert.match(sql, /registration_appointment_details_saved/)
   assert.match(sql, /registration_level_test_result_saved/)
   assert.match(sql, /registration_consultation_details_saved/)
+  assert.match(sql, /select attempt\.\* into v_attempt[\s\S]*?for update of attempt, track;[\s\S]*?select track\.\* into strict v_track[\s\S]*?track\.id = v_attempt\.track_id;/)
+  assert.match(sql, /select consultation\.\* into v_consultation[\s\S]*?for update of consultation, track;[\s\S]*?select track\.\* into strict v_track[\s\S]*?track\.id = v_consultation\.track_id;/)
+  assert.doesNotMatch(sql, /select (?:attempt|consultation), track into/)
   assert.doesNotMatch(sql, /transition_registration_track_status/)
   assert.doesNotMatch(sql, /ops_registration_messages/)
   assert.doesNotMatch(sql, /ops_registration_admission_batches/)
@@ -77,6 +80,9 @@ test("status-independent appointment migration keeps workflow and provider actio
 
 test("status-independent placement migration stores waiting details without a pipeline transition", async () => {
   const sql = await readMigration("registration_status_independent_placement")
+  const viewStart = sql.indexOf("create or replace view public.ops_registration_subject_track_summaries")
+  const viewEnd = sql.indexOf("from public.ops_registration_subject_tracks track", viewStart)
+  const viewProjection = sql.slice(viewStart, viewEnd)
   assert.match(sql.trim(), /^begin;/i)
   assert.match(sql.trim(), /commit;$/i)
   assert.match(sql, /add column if not exists waiting_detail_kind text/)
@@ -87,6 +93,17 @@ test("status-independent placement migration stores waiting details without a pi
   assert.match(sql, /track\.waiting_detail_kind/)
   assert.match(sql, /track\.waiting_detail_class_id/)
   assert.match(sql, /track\.waiting_detail_retake_decision/)
+  assertInOrder(viewProjection, [
+    "track.pipeline_status",
+    "track.director_profile_id",
+    "active_phone.ready_source as phone_ready_source",
+    "track.workflow_status",
+    "track.workflow_revision",
+    "track.workflow_status_entered_at",
+    "track.waiting_detail_kind",
+    "track.waiting_detail_class_id",
+    "track.waiting_detail_retake_decision",
+  ])
   assert.doesNotMatch(sql, /transition_registration_track_status/)
   assert.doesNotMatch(sql, /ops_registration_enrollments[\s\S]*?insert into/)
 })
@@ -3727,6 +3744,9 @@ test("unified registration inquiry save is one guarded atomic database boundary"
 test("manual workflow status is revisioned, idempotent, audited, and free of operational side effects", async () => {
   const sql = await readMigration("registration_manual_workflow_status")
   const trimmed = sql.trim()
+  const viewStart = sql.indexOf("create or replace view public.ops_registration_subject_track_summaries")
+  const viewEnd = sql.indexOf("from public.ops_registration_subject_tracks track", viewStart)
+  const viewProjection = sql.slice(viewStart, viewEnd)
   const implementation = readFunctionBlock(
     sql,
     "dashboard_private",
@@ -3743,6 +3763,14 @@ test("manual workflow status is revisioned, idempotent, audited, and free of ope
   assert.match(sql, /workflow_status in \([\s\S]*?'consultation_completed'[\s\S]*?'payment_in_progress'[\s\S]*?'inquiry_only'/)
   assert.match(sql, /workflow_revision > 0/)
   assert.match(sql, /pipeline_status = 'waiting'[\s\S]*?waiting_current_class[\s\S]*?waiting_new_class[\s\S]*?waiting_next_opening/)
+  assertInOrder(viewProjection, [
+    "track.pipeline_status",
+    "track.director_profile_id",
+    "active_phone.ready_source as phone_ready_source",
+    "track.workflow_status",
+    "track.workflow_revision",
+    "track.workflow_status_entered_at",
+  ])
   assert.match(sql, /create or replace function dashboard_private\.assert_registration_workflow_status_access\(/)
   assert.deepEqual(readFunctionArgumentTypes(implementation), ["uuid", "text", "integer", "text"])
   assert.deepEqual(readFunctionArgumentTypes(wrapper), ["uuid", "text", "integer", "text"])
