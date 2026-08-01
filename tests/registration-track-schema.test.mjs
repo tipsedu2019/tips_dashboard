@@ -91,6 +91,15 @@ test("status-independent placement migration stores waiting details without a pi
   assert.doesNotMatch(sql, /ops_registration_enrollments[\s\S]*?insert into/)
 })
 
+test("status-independent enrollment details stay separate from roster enrollment rows", async () => {
+  const sql = await readMigration("registration_status_independent_enrollment_details")
+  assert.match(sql, /add column if not exists enrollment_detail_rows jsonb/)
+  assert.match(sql, /create function public\.save_registration_enrollment_details_v1/)
+  assert.match(sql, /registration_enrollment_details_saved/)
+  assert.doesNotMatch(sql, /ops_registration_enrollments/)
+  assert.doesNotMatch(sql, /transition_registration_track_status/)
+})
+
 test("schema migration removes deleted-class roster references and preserves an audit trail", async () => {
   const sql = await readMigration("registration_subject_tracks_schema")
   const repairStart = sql.indexOf("-- deterministic_orphaned_class_projection_repairs")
