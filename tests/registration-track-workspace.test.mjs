@@ -1164,7 +1164,7 @@ test("대기 상세는 저장된 현재반 claim을 수업 선택값으로 다�
   const source = await readRegistrationApplicationSource()
   assert.match(source, /getRegistrationCurrentClassWaitClassId/)
   assert.match(source, /currentClassWaitClassId=\{getRegistrationCurrentClassWaitClassId/)
-  assert.match(source, /useState\(currentClassWaitClassId\)/)
+  assert.match(source, /track\.waitingDetailClassId \|\| currentClassWaitClassId/)
   assert.match(source, /track\.waitingKind, enrollments: detail\.enrollments/)
 })
 
@@ -1214,12 +1214,13 @@ test("inquiry decisions are subject-scoped and never fake a phone reservation", 
   assert.doesNotMatch(source, /phoneConsultationAt/)
 })
 
-test("waiting controls require the retest decision and expose explicit closure", async () => {
+test("waiting details save separately from the status selector", async () => {
   const source = await readRegistrationApplicationSource()
-  assert.match(source, /레벨테스트 재응시 필요/)
-  assert.match(source, /재응시 없이 등록/)
-  assert.match(source, /대기 종료 · 미등록/)
-  assert.match(source, /transitionRegistrationWaiting/)
+  assert.match(source, /대기 정보 저장/)
+  assert.match(source, /레벨테스트 재응시 여부/)
+  assert.match(source, /saveRegistrationWaitingDetails/)
+  assert.doesNotMatch(source, /대기 상태 변경/)
+  assert.doesNotMatch(source, /대기 종료 · 미등록/)
 })
 
 test("terminal subject outcomes can be deliberately reopened from the same application", async () => {
@@ -2062,8 +2063,8 @@ test("remaining subject-owned mutation controls expose their subject in accessib
   const appointment = await readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
   const enrollment = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
 
-  assert.match(actions, /aria-label=\{`\$\{track\.subject\} 대기 종류 저장`\}/)
-  assert.match(actions, /aria-label=\{`\$\{track\.subject\} 등록 전환`\}/)
+  assert.match(actions, /aria-label=\{`\$\{track\.subject\} 대기 정보 저장`\}/)
+  assert.doesNotMatch(actions, /aria-label=\{`\$\{track\.subject\} 등록 전환`\}/)
   assert.match(actions, /aria-label=\{`\$\{track\.subject\} 방문상담 예약`\}/)
   assert.match(enrollment, /aria-label=\{`\$\{track\.subject\} 수업 \$\{index \+ 1\} \$\{row\.id === null \? "삭제" : "수강 취소"\}`\}/)
   assert.match(appointment, /aria-label=\{`\$\{track\?\.subject \|\| "과목"\} 다시 예약`\}/)

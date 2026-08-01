@@ -599,6 +599,9 @@ function track(input: {
         ? `subject-director-v1:과학:${defaultDirector.profileId}`
         : `academic-director-v1:2026:${input.subject}:고1`,
     waitingKind: "",
+    waitingDetailKind: "",
+    waitingDetailClassId: null,
+    waitingDetailRetakeDecision: "",
     levelTestRetakeDecision: "",
     migrationReviewRequired: Boolean(input.migrationReviewRequired),
     stageEnteredAt: input.stageEnteredAt || "2026-07-12T10:00:00+09:00",

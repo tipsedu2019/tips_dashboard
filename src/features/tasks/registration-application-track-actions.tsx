@@ -44,7 +44,7 @@ import {
   reopenRegistrationTrack,
   resolveRegistrationMigrationReview,
   routeRegistrationInquiry,
-  transitionRegistrationWaiting,
+  saveRegistrationWaitingDetails,
   type OpsRegistrationCaseDetail,
   type OpsRegistrationAppointment,
   type OpsRegistrationConsultation,
@@ -670,6 +670,11 @@ const WAITING_KIND_OPTIONS: Array<{ value: Exclude<RegistrationWaitingKind, "">;
   { value: "next_term_opening", label: "다음 학기 개강반 대기" },
 ]
 
+const WAITING_RETAKE_OPTIONS = [
+  { value: "required", label: "레벨테스트 재응시 필요" },
+  { value: "not_required", label: "재응시 없이 진행" },
+] as const
+
 const MIGRATION_GROUPS = [
   {
     key: "level_test" as const,
@@ -930,47 +935,42 @@ function WaitingStageEditor({
   onOpenLevelTest: () => void
   onDirtyChange?: (dirty: boolean) => void
 }) {
-  const [waitingKind, setWaitingKind] = useState<RegistrationWaitingKind>(track.waitingKind || "current_term_opening")
-  const [classId, setClassId] = useState(currentClassWaitClassId)
-  const [reason, setReason] = useState("")
+  const savedWaitingKind = track.waitingDetailKind || track.waitingKind || "current_term_opening"
+  const savedClassId = track.waitingDetailClassId || currentClassWaitClassId
+  const savedRetakeDecision = track.waitingDetailRetakeDecision || track.levelTestRetakeDecision || "not_required"
+  const [waitingKind, setWaitingKind] = useState<RegistrationWaitingKind>(savedWaitingKind)
+  const [classId, setClassId] = useState(savedClassId)
+  const [retakeDecision, setRetakeDecision] = useState<"required" | "not_required">(savedRetakeDecision)
   const [saving, setSaving] = useState(false)
   const [refreshPending, setRefreshPending] = useState(false)
   const [validationError, setValidationError] = useState("")
-  const [confirmingWaitingClose, setConfirmingWaitingClose] = useState(false)
   const sectionRef = useRef<HTMLElement | null>(null)
   const submissionKeys = useSubmissionKeys()
   useOwnedDirtyState(
     !refreshPending && (
-      waitingKind !== (track.waitingKind || "current_term_opening")
-      || classId !== currentClassWaitClassId
-      || Boolean(reason)
+      waitingKind !== savedWaitingKind
+      || classId !== savedClassId
+      || retakeDecision !== savedRetakeDecision
     ),
     onDirtyChange,
   )
 
-  async function transition(action: "change_waiting_kind" | "record_retest_required" | "move_to_enrollment" | "close_not_registered") {
+  async function saveWaitingDetails() {
     if (saving || refreshPending || !permissions.canManage) return
-    if (action === "change_waiting_kind" && (!waitingKind || (waitingKind === "current_class" && !classId))) {
+    if (!waitingKind || (waitingKind === "current_class" && !classId)) {
       setValidationError("대기 종류와 필요한 수업을 선택하세요.")
       focusFirstInvalid(sectionRef.current, waitingKind ? `[aria-label="${track.subject} 수업 선택"]` : `[aria-label="${track.subject} 대기 종류"]`)
       return
     }
-    if (action === "close_not_registered" && !reason.trim()) {
-      setValidationError("대기 종료 사유를 입력하세요.")
-      focusFirstInvalid(sectionRef.current, `[aria-label="${track.subject} 대기 종료 사유"]`)
-      return
-    }
-    const kind = `registration-waiting-${action}`
+    const kind = "registration-waiting-details"
     const requestKey = submissionKeys.getOrCreate(kind, track.id)
     setSaving(true)
     try {
-      await transitionRegistrationWaiting({
+      await saveRegistrationWaitingDetails({
         trackId: track.id,
-        action,
-        waitingKind: action === "change_waiting_kind" ? waitingKind : "",
-        classId: action === "change_waiting_kind" && waitingKind === "current_class" ? classId : "",
-        retakeDecision: action === "record_retest_required" ? "required" : action === "move_to_enrollment" ? "not_required" : "",
-        reason: action === "close_not_registered" ? reason.trim() : "",
+        waitingKind,
+        classId: waitingKind === "current_class" ? classId : "",
+        retakeDecision,
         requestKey,
       })
       submissionKeys.clear(kind, track.id)
@@ -984,9 +984,9 @@ function WaitingStageEditor({
       } catch {
         onWarning(COMMITTED_REFRESH_ERROR)
       }
-      if (action === "record_retest_required" && reloaded) onOpenLevelTest()
+      if (retakeDecision === "required" && reloaded) onOpenLevelTest()
     } catch (error) {
-      onWarning(errorMessage(error, "대기 상태를 변경하지 못했습니다."))
+      onWarning(errorMessage(error, "대기 정보를 저장하지 못했습니다."))
     } finally {
       setSaving(false)
     }
@@ -1008,12 +1008,12 @@ function WaitingStageEditor({
     <section ref={sectionRef} data-registration-action-owner={`${track.subject}:waiting-close`} className="grid min-w-0 gap-3 rounded-md border p-3" aria-label={`${track.subject} 대기 처리`}>
       <div>
         <h3 className="text-sm font-semibold">[{track.subject}] 대기 관리</h3>
-        <p className="text-xs text-muted-foreground">등록 전환 시 레벨테스트 재응시 여부를 반드시 결정합니다.</p>
+        <p className="text-xs text-muted-foreground">진행상태와 별도로 대기 정보만 저장합니다.</p>
       </div>
       <RegistrationRefreshRecovery pending={refreshPending} retrying={saving} onRetry={() => void retryRefresh()} ownerLabel={track.subject} />
       {permissions.canManage && !refreshPending ? (
         <>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-2 sm:grid-cols-3">
             <RegistrationSelect
               aria-label={`${track.subject} 대기 종류`}
               className="h-9"
@@ -1024,44 +1024,29 @@ function WaitingStageEditor({
               disabled={saving}
             />
             {waitingKind === "current_class" ? <SubjectClassSelect subject={track.subject} value={classId} onChange={setClassId} classOptions={classOptions} disabled={saving} /> : null}
-          </div>
-          <Button type="button" aria-label={`${track.subject} 대기 종류 저장`} variant="outline" size="sm" onClick={() => void transition("change_waiting_kind")} disabled={saving}>
-            대기 상태 변경
-          </Button>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <Button
-              type="button"
-              aria-label={`${track.subject} ${track.levelTestRetakeDecision === "required" ? "레벨테스트 예약" : "레벨테스트 재응시 필요"}`}
-              variant="outline"
-              onClick={() => track.levelTestRetakeDecision === "required" ? onOpenLevelTest() : void transition("record_retest_required")}
+            <RegistrationSelect
+              aria-label={`${track.subject} 레벨테스트 재응시 여부`}
+              className="h-9"
+              value={retakeDecision}
+              placeholder="재응시 여부 선택"
+              options={[...WAITING_RETAKE_OPTIONS]}
+              onValueChange={(value) => setRetakeDecision(value as "required" | "not_required")}
               disabled={saving}
-            >
-              {track.levelTestRetakeDecision === "required" ? "레벨테스트 예약" : "레벨테스트 재응시 필요"}
-            </Button>
-            <Button type="button" aria-label={`${track.subject} 등록 전환`} onClick={() => void transition("move_to_enrollment")} disabled={saving}>
-              재응시 없이 등록
-            </Button>
+            />
           </div>
-          <div className="grid gap-2 border-t pt-3 sm:grid-cols-[1fr_auto]">
-            <Input aria-label={`${track.subject} 대기 종료 사유`} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="미등록 종료 사유" disabled={saving} />
-            <Button type="button" data-registration-primary-action={`${track.subject}:waiting-close`} aria-label={`${track.subject} 대기 종료 미등록`} variant="ghost" onClick={() => setConfirmingWaitingClose(true)} disabled={saving || !reason.trim()}>
-              대기 종료 · 미등록
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" aria-label={`${track.subject} 대기 정보 저장`} variant="outline" size="sm" onClick={() => void saveWaitingDetails()} disabled={saving}>
+              {saving ? "저장 중" : "대기 정보 저장"}
             </Button>
+            {retakeDecision === "required" ? (
+              <Button type="button" aria-label={`${track.subject} 레벨테스트 예약`} variant="outline" size="sm" onClick={onOpenLevelTest} disabled={saving}>
+                레벨테스트 예약
+              </Button>
+            ) : null}
           </div>
         </>
-      ) : !refreshPending ? <p className="text-sm text-muted-foreground">관리 권한이 있는 사용자만 대기 상태를 변경할 수 있습니다.</p> : null}
+      ) : !refreshPending ? <p className="text-sm text-muted-foreground">관리 권한이 있는 사용자만 대기 정보를 저장할 수 있습니다.</p> : null}
       {validationError ? <p role="alert" className="text-xs text-destructive">{validationError}</p> : null}
-      <RegistrationTransitionConfirmDialog
-        open={confirmingWaitingClose}
-        title={`${track.subject} 대기 종료`}
-        description="대기를 종료하고 미등록으로 처리합니다."
-        confirmLabel="대기 종료 · 미등록"
-        onOpenChange={setConfirmingWaitingClose}
-        onConfirm={() => {
-          setConfirmingWaitingClose(false)
-          void transition("close_not_registered")
-        }}
-      />
     </section>
   )
 }

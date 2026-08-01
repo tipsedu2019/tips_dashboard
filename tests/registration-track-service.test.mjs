@@ -694,14 +694,14 @@ test("track summary loader uses the exact safe projection and skips profile look
     status: "visit_consultation_scheduled", workflowStatus: "consultation_requested",
     workflowRevision: 1, workflowStatusEnteredAt: "", legacy: false, directorProfileId: null,
     directorName: "", directorAssignmentSource: "", directorAssignmentRuleKey: "",
-    waitingKind: "", levelTestRetakeDecision: "", migrationReviewRequired: false,
+    waitingKind: "", waitingDetailKind: "", waitingDetailClassId: null, waitingDetailRetakeDecision: "", levelTestRetakeDecision: "", migrationReviewRequired: false,
     stageEnteredAt: "2026-07-12T01:00:00Z",
     phoneReadyAt: null, phoneReadySource: null,
     visitScheduledAt: "2026-07-13T01:00:00Z", visitPlace: "상담실",
   });
   assert.equal(harness.queries.length, 1);
   assert.equal(harness.queries[0].columns,
-    "id,task_id,subject,pipeline_status,workflow_status,workflow_revision,workflow_status_entered_at,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,level_test_retake_decision,migration_review_required,stage_entered_at,phone_ready_at,phone_ready_source,updated_at,visit_scheduled_at,visit_place");
+    "id,task_id,subject,pipeline_status,workflow_status,workflow_revision,workflow_status_entered_at,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,waiting_detail_kind,waiting_detail_class_id,waiting_detail_retake_decision,level_test_retake_decision,migration_review_required,stage_entered_at,phone_ready_at,phone_ready_source,updated_at,visit_scheduled_at,visit_place");
   assert.deepEqual(harness.queries[0].filters, [["in", "task_id", ["task-1"]]]);
   assert.doesNotMatch(harness.queries[0].columns, /schedule_plan|textbook|student_ids|waitlist_ids/);
   assert.doesNotMatch(harness.queries[0].columns, /consultations|appointments|\*/);
@@ -1469,6 +1469,9 @@ test("initial workflow create uses the exact atomic payload and maps the complet
       directorAssignmentSource: "default",
       directorAssignmentRuleKey: "english:2026:high1",
       waitingKind: "",
+      waitingDetailKind: "",
+      waitingDetailClassId: null,
+      waitingDetailRetakeDecision: "",
       levelTestRetakeDecision: "",
       migrationReviewRequired: false,
       stageEnteredAt: "2026-07-12T01:00:00Z",
@@ -1489,6 +1492,9 @@ test("initial workflow create uses the exact atomic payload and maps the complet
       directorAssignmentSource: "manual",
       directorAssignmentRuleKey: "override",
       waitingKind: "current_term_opening",
+      waitingDetailKind: "",
+      waitingDetailClassId: null,
+      waitingDetailRetakeDecision: "",
       levelTestRetakeDecision: "required",
       migrationReviewRequired: false,
       stageEnteredAt: "2026-07-12T02:00:00Z",
@@ -1925,3 +1931,36 @@ test("unified inquiry save performs one sorted atomic RPC request", async () => 
   assert.deepEqual(expectedSubjects, ["수학", "영어"])
   assert.deepEqual(result.tracks.map((track) => track.subject), ["영어", "수학"])
 })
+
+test("waiting details use their dedicated data-only RPC", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    rpcHandler(name, args) {
+      assert.equal(name, "save_registration_waiting_details_v1");
+      assert.deepEqual({ ...args }, {
+        p_track_id: "track-1",
+        p_waiting_kind: "current_class",
+        p_class_id: "10000000-0000-4000-8000-000000000010",
+        p_retake_decision: "required",
+        p_request_key: "waiting-details-request",
+      });
+      return { data: { trackId: "track-1", waitingKind: "current_class", classId: "10000000-0000-4000-8000-000000000010", retakeDecision: "required" }, error: null };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const result = await service.saveRegistrationWaitingDetails({
+    trackId: "track-1",
+    waitingKind: "current_class",
+    classId: "10000000-0000-4000-8000-000000000010",
+    retakeDecision: "required",
+    requestKey: "waiting-details-request",
+  });
+
+  assert.deepEqual({ ...result }, {
+    trackId: "track-1",
+    waitingKind: "current_class",
+    classId: "10000000-0000-4000-8000-000000000010",
+    retakeDecision: "required",
+  });
+});

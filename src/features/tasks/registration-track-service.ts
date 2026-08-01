@@ -126,6 +126,9 @@ export type OpsRegistrationTrackSummary = {
   directorAssignmentSource: "" | "default" | "manual" | "migration"
   directorAssignmentRuleKey: string
   waitingKind: RegistrationWaitingKind
+  waitingDetailKind: RegistrationWaitingKind
+  waitingDetailClassId: string | null
+  waitingDetailRetakeDecision: "" | "required" | "not_required"
   levelTestRetakeDecision: "" | "required" | "not_required"
   migrationReviewRequired: boolean
   stageEnteredAt: string
@@ -353,6 +356,13 @@ export type RegistrationTrackTransitionResponse = {
   consultationId?: string | null
   enrollmentId?: string | null
   canceledEnrollmentIds?: string[]
+}
+
+export type RegistrationWaitingDetailsSaveResponse = {
+  trackId: string
+  waitingKind: RegistrationWaitingKind
+  classId: string
+  retakeDecision: "required" | "not_required"
 }
 
 export type RegistrationWorkflowStatusMutationResponse = {
@@ -683,6 +693,9 @@ const TRACK_SUMMARY_COLUMNS = [
   "director_assignment_source",
   "director_assignment_rule_key",
   "waiting_kind",
+  "waiting_detail_kind",
+  "waiting_detail_class_id",
+  "waiting_detail_retake_decision",
   "level_test_retake_decision",
   "migration_review_required",
   "stage_entered_at",
@@ -983,6 +996,9 @@ function mapTrack(row: Row, directorNames = new Map<string, string>(), legacy = 
     directorAssignmentSource: directorSource(value(row, "director_assignment_source", "directorAssignmentSource")),
     directorAssignmentRuleKey: text(value(row, "director_assignment_rule_key", "directorAssignmentRuleKey")),
     waitingKind: waitingKind(value(row, "waiting_kind", "waitingKind")),
+    waitingDetailKind: waitingKind(value(row, "waiting_detail_kind", "waitingDetailKind")),
+    waitingDetailClassId: nullableText(value(row, "waiting_detail_class_id", "waitingDetailClassId")),
+    waitingDetailRetakeDecision: retakeDecision(value(row, "waiting_detail_retake_decision", "waitingDetailRetakeDecision")),
     levelTestRetakeDecision: retakeDecision(value(row, "level_test_retake_decision", "levelTestRetakeDecision")),
     migrationReviewRequired: bool(value(row, "migration_review_required", "migrationReviewRequired")),
     stageEnteredAt: text(value(row, "stage_entered_at", "stageEnteredAt")),
@@ -1363,12 +1379,18 @@ function missingColumnError(error: unknown) {
   return message.includes("column") && (message.includes("does not exist") || message.includes("schema cache"))
 }
 
-function missingPhoneReadinessColumnError(error: unknown) {
+function missingTrackSummaryOptionalColumnError(error: unknown) {
   if (!missingColumnError(error)) return false
   const message = error && typeof error === "object" && "message" in error
     ? text(error.message).toLowerCase()
     : ""
-  return message.includes("phone_ready_at") || message.includes("phone_ready_source")
+  return [
+    "phone_ready_at",
+    "phone_ready_source",
+    "waiting_detail_kind",
+    "waiting_detail_class_id",
+    "waiting_detail_retake_decision",
+  ].some((column) => message.includes(column))
 }
 
 function errorText(error: unknown) {
@@ -1547,6 +1569,9 @@ export function createRegistrationTrackService(
       directorAssignmentSource: "" as const,
       directorAssignmentRuleKey: "",
       waitingKind: "" as const,
+      waitingDetailKind: "" as const,
+      waitingDetailClassId: null,
+      waitingDetailRetakeDecision: "" as const,
       levelTestRetakeDecision: "" as const,
       migrationReviewRequired: false,
       stageEnteredAt: input.stageEnteredAt || "",
@@ -1591,7 +1616,7 @@ export function createRegistrationTrackService(
             metrics,
           )
         } catch (error) {
-          if (!missingPhoneReadinessColumnError(error)) throw error
+          if (!missingTrackSummaryOptionalColumnError(error)) throw error
           trackRows = await queryRows(
             client.from("ops_registration_subject_track_summaries")
               .select(PRE_INTAKE_TRACK_SUMMARY_COLUMNS)
@@ -2372,6 +2397,28 @@ export function createRegistrationTrackService(
     })
   }
 
+  async function saveRegistrationWaitingDetails(input: {
+    trackId: string
+    waitingKind: RegistrationWaitingKind
+    classId: string
+    retakeDecision: "required" | "not_required"
+    requestKey: string
+  }): Promise<RegistrationWaitingDetailsSaveResponse> {
+    const result = await callRpc<Row>("save_registration_waiting_details_v1", {
+      p_track_id: input.trackId,
+      p_waiting_kind: input.waitingKind,
+      p_class_id: normalizeUuid(input.classId),
+      p_retake_decision: input.retakeDecision,
+      p_request_key: requireRequestKey(input.requestKey),
+    })
+    return {
+      trackId: text(value(result, "track_id", "trackId")),
+      waitingKind: waitingKind(value(result, "waiting_kind", "waitingKind")),
+      classId: nullableText(value(result, "class_id", "classId")) || "",
+      retakeDecision: retakeDecision(value(result, "retake_decision", "retakeDecision")) || "not_required",
+    }
+  }
+
   async function routeRegistrationEnrollmentDecision(input: {
     trackId: string
     destination: "waiting" | "not_registered"
@@ -2662,6 +2709,7 @@ export function createRegistrationTrackService(
     completeRegistrationConsultation,
     setRegistrationWorkflowStatus,
     transitionRegistrationWaiting,
+    saveRegistrationWaitingDetails,
     routeRegistrationEnrollmentDecision,
     saveRegistrationEnrollmentRows,
     listRegistrationLegacySourceIds,
@@ -2936,6 +2984,14 @@ export function transitionRegistrationWaiting(
   const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationTrackTransitionResponse>("transitionRegistrationWaiting", input)
   if (fixture) return fixture
   return defaultRegistrationTrackService.transitionRegistrationWaiting(input)
+}
+
+export function saveRegistrationWaitingDetails(
+  input: Parameters<typeof defaultRegistrationTrackService.saveRegistrationWaitingDetails>[0],
+): Promise<RegistrationWaitingDetailsSaveResponse> {
+  const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationWaitingDetailsSaveResponse>("saveRegistrationWaitingDetails", input)
+  if (fixture) return fixture
+  return defaultRegistrationTrackService.saveRegistrationWaitingDetails(input)
 }
 
 export function routeRegistrationEnrollmentDecision(
