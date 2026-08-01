@@ -129,6 +129,7 @@ export type OpsRegistrationTrackSummary = {
   waitingDetailKind: RegistrationWaitingKind
   waitingDetailClassId: string | null
   waitingDetailRetakeDecision: "" | "required" | "not_required"
+  enrollmentDetailRows?: RegistrationEnrollmentRowInput[]
   levelTestRetakeDecision: "" | "required" | "not_required"
   migrationReviewRequired: boolean
   stageEnteredAt: string
@@ -1013,6 +1014,18 @@ function mapTrack(row: Row, directorNames = new Map<string, string>(), legacy = 
     waitingDetailKind: waitingKind(value(row, "waiting_detail_kind", "waitingDetailKind")),
     waitingDetailClassId: nullableText(value(row, "waiting_detail_class_id", "waitingDetailClassId")),
     waitingDetailRetakeDecision: retakeDecision(value(row, "waiting_detail_retake_decision", "waitingDetailRetakeDecision")),
+    ...(value(row, "enrollment_detail_rows", "enrollmentDetailRows") === undefined ? {} : {
+      enrollmentDetailRows: rows(value(row, "enrollment_detail_rows", "enrollmentDetailRows")).map((item) => ({
+        id: nullableText(value(item, "id")) || undefined,
+        classId: text(value(item, "classId", "class_id")),
+        textbookId: nullableText(value(item, "textbookId", "textbook_id")),
+        classStartDate: nullableText(value(item, "classStartDate", "class_start_date")),
+        classStartSessionKey: nullableText(value(item, "classStartSessionKey", "class_start_session_key")),
+        classStartLessonSessionId: nullableText(value(item, "classStartLessonSessionId", "class_start_lesson_session_id")),
+        classStartSession: nullableText(value(item, "classStartSession", "class_start_session")),
+        sortOrder: numberValue(value(item, "sortOrder", "sort_order")),
+      })),
+    }),
     levelTestRetakeDecision: retakeDecision(value(row, "level_test_retake_decision", "levelTestRetakeDecision")),
     migrationReviewRequired: bool(value(row, "migration_review_required", "migrationReviewRequired")),
     stageEnteredAt: text(value(row, "stage_entered_at", "stageEnteredAt")),
@@ -2527,6 +2540,19 @@ export function createRegistrationTrackService(
     }
   }
 
+  async function saveRegistrationEnrollmentDetails(input: {
+    trackId: string
+    rows: RegistrationEnrollmentRowInput[]
+    requestKey: string
+  }): Promise<{ trackId: string; rows: RegistrationEnrollmentRowInput[] }> {
+    const result = await callRpc<Row>("save_registration_enrollment_details_v1", {
+      p_track_id: input.trackId,
+      p_rows: input.rows,
+      p_request_key: requireRequestKey(input.requestKey),
+    })
+    return { trackId: text(value(result, "track_id", "trackId")), rows: rows(value(result, "rows")).map((item) => ({ classId: text(value(item, "classId")), sortOrder: numberValue(value(item, "sortOrder")) })) }
+  }
+
   async function claimRegistrationAdmissionMessage(input: {
     taskId: string
     messageRequestKey: string
@@ -2778,6 +2804,7 @@ export function createRegistrationTrackService(
     saveRegistrationWaitingDetails,
     routeRegistrationEnrollmentDecision,
     saveRegistrationEnrollmentRows,
+    saveRegistrationEnrollmentDetails,
     listRegistrationLegacySourceIds,
     claimRegistrationAdmissionMessage,
     reconcileRegistrationAdmissionMessage,
@@ -3090,6 +3117,12 @@ export function saveRegistrationEnrollmentRows(
   const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationEnrollmentRowsSaveResponse>("saveRegistrationEnrollmentRows", input)
   if (fixture) return fixture
   return defaultRegistrationTrackService.saveRegistrationEnrollmentRows(input)
+}
+
+export function saveRegistrationEnrollmentDetails(
+  input: Parameters<typeof defaultRegistrationTrackService.saveRegistrationEnrollmentDetails>[0],
+) {
+  return defaultRegistrationTrackService.saveRegistrationEnrollmentDetails(input)
 }
 
 export function claimRegistrationAdmissionMessage(
