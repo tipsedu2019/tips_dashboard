@@ -75,6 +75,19 @@ test("status-independent appointment migration keeps workflow and provider actio
   assert.doesNotMatch(sql, /ops_registration_admission_batches/)
 })
 
+test("status-independent placement migration stores waiting details without a pipeline transition", async () => {
+  const sql = await readMigration("registration_status_independent_placement")
+  assert.match(sql.trim(), /^begin;/i)
+  assert.match(sql.trim(), /commit;$/i)
+  assert.match(sql, /add column if not exists waiting_detail_kind text/)
+  assert.match(sql, /add column if not exists waiting_detail_class_id uuid/)
+  assert.match(sql, /add column if not exists waiting_detail_retake_decision text/)
+  assert.match(sql, /create function public\.save_registration_waiting_details_v1/)
+  assert.match(sql, /registration_waiting_details_saved/)
+  assert.doesNotMatch(sql, /transition_registration_track_status/)
+  assert.doesNotMatch(sql, /ops_registration_enrollments[\s\S]*?insert into/)
+})
+
 test("schema migration removes deleted-class roster references and preserves an audit trail", async () => {
   const sql = await readMigration("registration_subject_tracks_schema")
   const repairStart = sql.indexOf("-- deterministic_orphaned_class_projection_repairs")
