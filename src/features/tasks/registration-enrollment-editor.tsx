@@ -40,7 +40,6 @@ import {
   getRegistrationEnrollmentBlockers,
   getRegistrationEnrollmentCancellationState,
   getRegistrationSelectedAdmissionEnrollmentIds,
-  mergeSavedRegistrationEnrollmentRows,
   restoreRegistrationEnrollmentDraft,
   serializeRegistrationEnrollmentRows,
   type RegistrationEnrollmentDraft,
@@ -56,7 +55,7 @@ import {
   cancelRegistrationEnrollment,
   completeRegistrationAdmissionBatch,
   createRegistrationMutationRequestKey,
-  saveRegistrationEnrollmentRows,
+  saveRegistrationEnrollmentDetails,
   setRegistrationEnrollmentMakeedu,
   startRegistrationAdmissionBatch,
   type OpsRegistrationAdmissionBatch,
@@ -318,10 +317,12 @@ export function RegistrationEnrollmentEditor({
     const mutableRows = trackEnrollments.filter(isMutableDraft)
     return mutableRows.length > 0
       ? mutableRows.map(toDraft)
+      : (track.enrollmentDetailRows || []).length > 0
+        ? (track.enrollmentDetailRows || []).map((row) => restoreRegistrationEnrollmentDraft(row))
       : track.status === "enrollment_decided"
         ? [createRegistrationEnrollmentDraft({ clientKey: `enrollment-row:${taskId}:${track.id}` })]
-        : []
-  }, [taskId, track.id, track.status, trackEnrollments])
+        : [createRegistrationEnrollmentDraft({ clientKey: `enrollment-row:${taskId}:${track.id}` })]
+  }, [taskId, track.enrollmentDetailRows, track.id, track.status, trackEnrollments])
   const enrollmentDraftScopeKey = `${taskId}:${track.id}`
   const cachedEnrollmentDraft = persistedRegistrationEnrollmentDrafts.get(enrollmentDraftScopeKey)
   const [draftRows, setDraftRows] = useState<RegistrationEnrollmentDraft[]>(() => {
@@ -359,7 +360,6 @@ export function RegistrationEnrollmentEditor({
   const openBatch = admissionBatches.find((batch) => !["completed", "canceled"].includes(batch.status)) || null
   const trackHasOpenBatch = Boolean(openBatch && trackEnrollments.some((enrollment) => enrollment.admissionBatchId === openBatch.id))
   const canEditRows = permissions.canManage
-    && ["enrollment_decided", "registered"].includes(track.status)
     && !trackHasOpenBatch
     && !rowsRefreshPending
   const selectedCancelEnrollment = trackEnrollments.find((item) => item.id === cancelEnrollmentId) || null
@@ -562,10 +562,8 @@ export function RegistrationEnrollmentEditor({
     const requestKey = submissionKeys.getOrCreate("enrollment-rows", logicalId)
     setSaving(true)
     try {
-      const saved = await saveRegistrationEnrollmentRows({ trackId: track.id, rows, requestKey })
-      const merged = mergeSavedRegistrationEnrollmentRows(draftRows, saved.rows)
-      setDraftRows(merged)
-      initialDraftRowsRef.current = JSON.stringify(merged)
+      await saveRegistrationEnrollmentDetails({ trackId: track.id, rows, requestKey })
+      initialDraftRowsRef.current = JSON.stringify(draftRows)
       persistedRegistrationEnrollmentDrafts.delete(enrollmentDraftScopeKey)
       submissionKeys.clear("enrollment-rows", logicalId)
       await reloadCommitted({ kind: "rows" })

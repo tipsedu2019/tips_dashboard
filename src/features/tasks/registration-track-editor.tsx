@@ -634,7 +634,7 @@ export function RegistrationApplication({
   function renderTrackActions(context: TrackContext, section: RegistrationApplicationSectionKey, placementMode?: RegistrationPlacementMode) {
     const { track, permissions, activeConsultation, visitAppointment } = context
     if (track.migrationReviewRequired) return null
-    if (section === "placement" && placementMode === "registration" && ["enrollment_decided", "enrollment_processing", "registered"].includes(track.status)) {
+    if (section === "placement" && placementMode === "registration") {
       return (
         <RegistrationEnrollmentTrackEditor
           detail={detail}
