@@ -1299,17 +1299,16 @@ test("appointment editor uses one schedule and one result control per subject", 
   assert.match(source, /startRegistrationLevelTestAttempt/)
   assert.match(source, /문의 종료/)
   assert.match(source, /closeRegistrationLevelTestTrack/)
-  assert.match(source, /남은 과목 일정 다시 잡기/)
+  assert.match(source, /결과가 기록된 예약은 참여 과목을 유지합니다\. 일시와 장소는 수정할 수 있습니다\./)
   assert.match(source, /예약 취소/)
   assert.match(source, /cancelRegistrationAppointment/)
 })
 
-test("all-terminal appointment results replace mutation controls with a read-only summary", async () => {
+test("all-terminal appointment results keep details editable while preserving participant integrity", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
 
-  assert.match(source, /editMode !== "read_only"/)
-  assert.match(source, /data-registration-appointment-readonly-summary/)
-  assert.match(source, /예약 일시[\s\S]*?장소[\s\S]*?참여 과목/)
+  assert.match(source, /const participantsLocked = Boolean\(appointment && currentActivities\.some/)
+  assert.match(source, /disabled=\{saving \|\| mutationLocked \|\| participantsLocked\}/)
   assert.match(source, /data-registration-appointment-shared-controls/)
   assert.match(source, /activities\.map/)
   assert.match(source, /다시 예약/)

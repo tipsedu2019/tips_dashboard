@@ -1198,7 +1198,7 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
   assert.deepEqual(harness.rpcCalls.map(([name]) => name), [
     "create_registration_case", "sync_registration_case_subjects", "update_registration_case_common",
     "route_registration_inquiry", "assign_registration_track_director",
-    "save_registration_shared_appointment", "cancel_registration_appointment",
+    "save_registration_appointment_details_v1", "cancel_registration_appointment",
     "start_registration_level_test_attempt", "complete_registration_level_test_attempt",
     "close_registration_level_test_track", "complete_registration_consultation",
     "transition_registration_waiting", "route_registration_enrollment_decision",

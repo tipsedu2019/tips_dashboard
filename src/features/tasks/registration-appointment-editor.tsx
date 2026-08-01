@@ -216,6 +216,7 @@ export function RegistrationAppointmentEditor({
       : []
   ), [appointment, matchingActivities])
   const editMode = getRegistrationAppointmentEditMode(currentActivities)
+  const participantsLocked = Boolean(appointment && currentActivities.some((activity) => activity.status !== "scheduled"))
   const selectableTracks = getEligibleSharedAppointmentTracks(
     kind,
     eligibleTracks,
@@ -1142,7 +1143,7 @@ export function RegistrationAppointmentEditor({
                     variant={selected ? "default" : "outline"}
                     aria-pressed={selected}
                     aria-label={`${appointmentParticipantSubjectLabel} 예약 적용: ${track.subject} ${selected ? "선택됨" : "선택 안 됨"}`}
-                    disabled={saving || mutationLocked || editMode === "replace_remaining"}
+                    disabled={saving || mutationLocked || participantsLocked}
                     onClick={() => toggleTrack(track.id)}
                   >
                     {track.subject}
@@ -1151,15 +1152,15 @@ export function RegistrationAppointmentEditor({
               })}
             </div>
             {selectableTracks.length === 0 ? <p className="text-xs text-muted-foreground">현재 함께 예약할 수 있는 과목이 없습니다.</p> : null}
-            {editMode === "replace_remaining" ? (
-              <p className="text-xs text-muted-foreground">이미 결과가 확정된 과목은 유지하고, 남은 예약 과목만 새 일정으로 옮깁니다.</p>
+            {participantsLocked ? (
+              <p className="text-xs text-muted-foreground">결과가 기록된 예약은 참여 과목을 유지합니다. 일시와 장소는 수정할 수 있습니다.</p>
             ) : null}
           </fieldset>
 
           <div className="flex justify-end">
             <Button type="button" data-registration-primary-action={`${appointmentParticipantSubjectLabel}:appointment-save`} aria-label={`${appointmentParticipantSubjectLabel} 예약 저장`} onClick={() => void saveAppointment()} disabled={saving || mutationLocked || Boolean(conflict)}>
               {appointment
-                ? editMode === "replace_remaining" ? "남은 과목 일정 다시 잡기" : "예약 수정"
+                ? "예약 수정"
                 : "예약 저장"}
             </Button>
           </div>

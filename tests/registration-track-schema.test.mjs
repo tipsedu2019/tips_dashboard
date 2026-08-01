@@ -51,6 +51,30 @@ test("registration subject migrations keep lock and temporary-table work in expl
   }
 })
 
+test("status-independent appointment migration keeps workflow and provider actions outside detail saves", async () => {
+  const sql = await readMigration("registration_status_independent_appointments")
+  const trimmed = sql.trim()
+  assert.match(trimmed, /^begin;/i)
+  assert.match(trimmed, /commit;$/i)
+  for (const name of [
+    "save_registration_appointment_details_v1",
+    "save_registration_level_test_result_v1",
+    "save_registration_consultation_details_v1",
+  ]) {
+    assert.match(sql, new RegExp(`create function public\\.${name}`))
+    assert.match(sql, new RegExp(`revoke execute on function public\\.${name}[^;]+ from public, anon;`))
+    assert.match(sql, new RegExp(`grant execute on function public\\.${name}[^;]+ to authenticated;`))
+  }
+  assert.match(sql, /security definer[\s\S]*?set search_path = ''/)
+  assert.match(sql, /ops_registration_mutations[\s\S]*?target_fingerprint[\s\S]*?response_payload/)
+  assert.match(sql, /registration_appointment_details_saved/)
+  assert.match(sql, /registration_level_test_result_saved/)
+  assert.match(sql, /registration_consultation_details_saved/)
+  assert.doesNotMatch(sql, /transition_registration_track_status/)
+  assert.doesNotMatch(sql, /ops_registration_messages/)
+  assert.doesNotMatch(sql, /ops_registration_admission_batches/)
+})
+
 test("schema migration removes deleted-class roster references and preserves an audit trail", async () => {
   const sql = await readMigration("registration_subject_tracks_schema")
   const repairStart = sql.indexOf("-- deterministic_orphaned_class_projection_repairs")

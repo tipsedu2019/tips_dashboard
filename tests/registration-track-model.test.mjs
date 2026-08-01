@@ -588,13 +588,13 @@ test("admission application excludes released history and batched or canceled ad
   }
 })
 
-test("shared level test includes both eligible subjects but keeps results independent", () => {
+test("shared level-test scheduling ignores workflow status while keeping results independent", () => {
   assert.deepEqual(getEligibleSharedAppointmentTracks("level_test", [
     { id: "eng", subject: "영어", status: "inquiry" },
     { id: "math", subject: "수학", status: "inquiry" },
     { id: "waiting", subject: "수학", status: "waiting", levelTestRetakeDecision: "required" },
     { id: "closed", subject: "영어", status: "registered" },
-  ]).map((track) => track.id), ["eng", "math", "waiting"])
+  ]).map((track) => track.id), ["eng", "math", "waiting", "closed"])
 })
 
 test("appointment eligibility excludes an active activity elsewhere but keeps the current scheduled selection", () => {
@@ -612,7 +612,7 @@ test("appointment eligibility excludes an active activity elsewhere but keeps th
   )
 })
 
-test("a shared test reschedules only the absent subject after its sibling completed", () => {
+test("a shared test can schedule any subject without an active test elsewhere", () => {
   const tracks = [
     { id: "eng", subject: "영어", status: "consultation_waiting" },
     { id: "math", subject: "수학", status: "level_test_scheduled" },
@@ -623,11 +623,11 @@ test("a shared test reschedules only the absent subject after its sibling comple
   ]
   assert.deepEqual(
     getEligibleSharedAppointmentTracks("level_test", tracks, activities, null).map((track) => track.id),
-    ["math"],
+    ["eng", "math"],
   )
 })
 
-test("visit appointment eligibility includes only free consultation-waiting subjects", () => {
+test("visit appointment eligibility ignores workflow status but excludes an active appointment elsewhere", () => {
   const tracks = [
     { id: "eng", subject: "영어", status: "consultation_waiting" },
     { id: "math", subject: "수학", status: "consultation_waiting" },
@@ -639,14 +639,14 @@ test("visit appointment eligibility includes only free consultation-waiting subj
   ]
   assert.deepEqual(
     getEligibleSharedAppointmentTracks("visit_consultation", tracks, activities, null).map((track) => track.id),
-    ["math"],
+    ["math", "done"],
   )
 })
 
-test("appointment mutation mode distinguishes scheduled, partial, and all-terminal participants", () => {
+test("appointment details remain editable after any activity outcome", () => {
   assert.equal(getRegistrationAppointmentEditMode([{ status: "scheduled" }, { status: "scheduled" }]), "edit")
-  assert.equal(getRegistrationAppointmentEditMode([{ status: "completed" }, { status: "scheduled" }]), "replace_remaining")
-  assert.equal(getRegistrationAppointmentEditMode([{ status: "completed" }, { status: "absent" }]), "read_only")
+  assert.equal(getRegistrationAppointmentEditMode([{ status: "completed" }, { status: "scheduled" }]), "edit")
+  assert.equal(getRegistrationAppointmentEditMode([{ status: "completed" }, { status: "absent" }]), "edit")
 })
 
 test("a mounted appointment transition submits only still-scheduled children on the current appointment", () => {
@@ -690,7 +690,7 @@ test("tab counts count one application case even when multiple subjects match a 
       { id: "math", taskId: "case-1", subject: "수학", status: "visit_consultation_scheduled", directorName: "", directorProfileId: null, stageEnteredAt: "", phoneReadyAt: null, migrationReviewRequired: false },
     ],
   }])
-  assert.deepEqual(getRegistrationCaseTabCounts(items), { inquiry: 0, level_test: 0, consulting: 1, waiting: 0, enrollment: 0, closed: 0 })
+  assert.deepEqual(getRegistrationCaseTabCounts(items), { inquiry: 0, level_test: 0, consultation_requested: 1, consultation_completed: 0, waiting: 0, enrollment: 0, payment: 0, completed: 0 })
 })
 
 test("phone consultation completion requires an outcome and advances atomically", () => {
@@ -750,7 +750,7 @@ test("level-test appointment completes only after every attempt is terminal", ()
     { status: "canceled", materialLink: "" },
     { status: "canceled", materialLink: "" },
   ]), "canceled")
-  assert.equal(canEditRegistrationAppointment([{ status: "completed" }, { status: "scheduled" }]), false)
+  assert.equal(canEditRegistrationAppointment([{ status: "completed" }, { status: "scheduled" }]), true)
 })
 
 test("parent stays open for tracks or admission batches still in progress", () => {

@@ -2189,14 +2189,13 @@ export function createRegistrationTrackService(
     requestKey: string
   }): Promise<RegistrationAppointmentMutationResponse> {
     const normalizedInput = normalizeRegistrationSharedAppointmentInput(input)
-    const result = await callRpc<unknown>("save_registration_shared_appointment", {
+    const result = await callRpc<unknown>("save_registration_appointment_details_v1", {
       p_appointment_id: normalizeUuid(normalizedInput.appointmentId),
       p_task_id: normalizedInput.taskId,
       p_kind: normalizedInput.kind,
       p_scheduled_at: normalizedInput.scheduledAt,
       p_place: normalizedInput.place,
       p_track_ids: normalizedInput.trackIds,
-      p_replace_remaining: normalizedInput.replaceRemaining,
       p_expected_notification_revision: normalizedInput.expectedNotificationRevision,
       p_request_key: requireRequestKey(normalizedInput.requestKey),
     })

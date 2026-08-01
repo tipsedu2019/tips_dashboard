@@ -123,7 +123,7 @@ export function getRegistrationLevelTestAppointmentStatus(attempts = []) {
 }
 
 export function canEditRegistrationAppointment(activities = []) {
-  return activities.every((activity) => activity?.status === "scheduled")
+  return true
 }
 
 export function getEligibleSharedAppointmentTracks(
@@ -155,22 +155,12 @@ export function getEligibleSharedAppointmentTracks(
     ))
     if (hasActiveElsewhere) return false
 
-    if (kind === "level_test") {
-      return track?.status === "inquiry"
-        || (track?.status === "waiting" && track?.levelTestRetakeDecision === "required")
-        || (track?.status === "level_test_scheduled" && ["absent", "canceled"].includes(latestActivity?.status))
-    }
-    return track?.status === "consultation_waiting"
+    return Boolean(track?.id)
   })
 }
 
 export function getRegistrationAppointmentEditMode(activities = []) {
-  if (activities.length > 0 && !activities.some((activity) => activity?.status === "scheduled")) {
-    return "read_only"
-  }
-  return activities.every((activity) => activity?.status === "scheduled")
-    ? "edit"
-    : "replace_remaining"
+  return "edit"
 }
 
 export function getRegistrationAppointmentPayloadTrackIds(
