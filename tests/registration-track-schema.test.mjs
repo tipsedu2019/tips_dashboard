@@ -117,6 +117,32 @@ test("status-independent enrollment details stay separate from roster enrollment
   assert.doesNotMatch(sql, /transition_registration_track_status/)
 })
 
+test("withdrawal completion migration scopes roster release to the selected class", async () => {
+  const sql = await readMigration("withdrawal_subject_scoped_completion")
+  const withdrawal = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "complete_ops_withdrawal_roster_transition_impl",
+  )
+
+  assert.match(sql.trim(), /^begin;/i)
+  assert.match(sql.trim(), /commit;$/i)
+  assert.match(withdrawal, /v_affected_class_ids := array\[v_source_class_id\]/)
+  assert.match(withdrawal, /enrollment\.class_id = v_source_class_id/)
+  assert.match(withdrawal, /v_remaining_live_roster_count/)
+  assert.match(withdrawal, /case when v_remaining_live_roster_count = 0 then '퇴원' else '재원' end/)
+  assert.match(withdrawal, /'studentStatus', v_next_student_status/)
+  assert.doesNotMatch(withdrawal, /전체 수업 및 대기 명단 제거/)
+  assert.match(
+    sql,
+    /revoke all on function dashboard_private\.complete_ops_withdrawal_roster_transition_impl\(uuid, text\)\s+from public, anon, authenticated, service_role;/,
+  )
+  assert.doesNotMatch(
+    sql,
+    /grant execute on function dashboard_private\.complete_ops_withdrawal_roster_transition_impl/,
+  )
+})
+
 test("schema migration removes deleted-class roster references and preserves an audit trail", async () => {
   const sql = await readMigration("registration_subject_tracks_schema")
   const repairStart = sql.indexOf("-- deterministic_orphaned_class_projection_repairs")
@@ -3231,7 +3257,7 @@ test("Task 3H3 withdrawal races use bounded fixture-only service checkpoints at 
   assert.match(concurrency, /releaseRegistrationVerificationCheckpoint/)
   assert.match(concurrency, /disarmRegistrationVerificationCheckpoint/)
   assert.match(concurrency, /"registration_student_reactivation_required"/)
-  assert.match(concurrency, /"registration_workflow_retry_required"/)
+  assert.match(concurrency, /unrelated subject withdrawal must also commit/)
   assert.match(concurrency, /proofScope:\s*"deterministic_internal_checkpoint_race"/)
   assert.match(concurrency, /internalLockOrderProven:\s*true/)
   assert.match(concurrency, /lockOrders:\s*cases\.length/)

@@ -413,7 +413,7 @@ test("withdrawal races use fixed service-only checkpoints without exposing a deb
     '"release_registration_verification_checkpoint"',
     '"disarm_registration_verification_checkpoint"',
     '"registration_student_reactivation_required"',
-    '"registration_workflow_retry_required"',
+    "unrelated subject withdrawal must also commit",
     "registrationEventCount",
     "assert.equal(raceState.registrationEventCount, 0)",
     "assert.ok(raceState.registrationEventCount > 0)",

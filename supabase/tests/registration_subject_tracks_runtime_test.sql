@@ -4337,8 +4337,8 @@ insert into public.classes(
   id, name, subject, status, student_ids, waitlist_ids, textbook_ids
 ) values
   ('00000000-0000-4000-8000-000000000711', '런타임 711', '영어', '수업 진행 중', '["00000000-0000-4000-8000-000000000701"]'::jsonb, '[]'::jsonb, '[]'::jsonb),
-  ('00000000-0000-4000-8000-000000000712', '런타임 712', '수학', '수업 진행 중', '[]'::jsonb, '["00000000-0000-4000-8000-000000000701"]'::jsonb, '[]'::jsonb),
-  ('00000000-0000-4000-8000-000000000714', '런타임 714', '영어', '수업 진행 중', '["00000000-0000-4000-8000-000000000701"]'::jsonb, '[]'::jsonb, '[]'::jsonb),
+  ('00000000-0000-4000-8000-000000000712', '런타임 712', '과학', '수업 진행 중', '[]'::jsonb, '["00000000-0000-4000-8000-000000000701"]'::jsonb, '[]'::jsonb),
+  ('00000000-0000-4000-8000-000000000714', '런타임 714', '수학', '수업 진행 중', '["00000000-0000-4000-8000-000000000701"]'::jsonb, '[]'::jsonb, '[]'::jsonb),
   ('00000000-0000-4000-8000-000000000715', '런타임 715', '영어', '수업 진행 중', '["00000000-0000-4000-8000-000000000702"]'::jsonb, '[]'::jsonb, '[]'::jsonb),
   ('00000000-0000-4000-8000-000000000716', '런타임 716', '영어', '수업 진행 중', '["00000000-0000-4000-8000-000000000703"]'::jsonb, '[]'::jsonb, '[]'::jsonb),
   ('00000000-0000-4000-8000-000000000717', '런타임 717', '영어', '수업 진행 중', '[]'::jsonb, '[]'::jsonb, '[]'::jsonb),
@@ -4374,7 +4374,7 @@ insert into public.ops_tasks(
   id, title, type, status, requested_by, student_id, class_id,
   student_name, subject, priority
 ) values
-  ('00000000-0000-4000-8000-000000000801', '등록 801', 'registration', 'done', '00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000701', null, '런타임퇴원claim', '영어, 수학', 'normal'),
+  ('00000000-0000-4000-8000-000000000801', '등록 801', 'registration', 'done', '00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000701', null, '런타임퇴원claim', '영어, 수학, 과학', 'normal'),
   ('00000000-0000-4000-8000-000000000802', '등록 802', 'registration', 'done', '00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000703', null, '런타임전반claim', '영어', 'normal'),
   ('00000000-0000-4000-8000-000000000803', '등록 803', 'registration', 'done', '00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000705', null, '런타임퇴원rollback', '영어, 수학', 'normal'),
   ('00000000-0000-4000-8000-000000000804', '등록 804', 'registration', 'done', '00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000706', null, '런타임전반rollback', '영어', 'normal'),
@@ -4403,8 +4403,9 @@ insert into public.ops_registration_details(
 insert into public.ops_registration_subject_tracks(
   id, task_id, subject, pipeline_status, waiting_kind
 ) values
+  ('00000000-0000-4000-8000-000000000810', '00000000-0000-4000-8000-000000000801', '수학', 'registered', null),
   ('00000000-0000-4000-8000-000000000811', '00000000-0000-4000-8000-000000000801', '영어', 'registered', null),
-  ('00000000-0000-4000-8000-000000000812', '00000000-0000-4000-8000-000000000801', '수학', 'waiting', 'current_class'),
+  ('00000000-0000-4000-8000-000000000812', '00000000-0000-4000-8000-000000000801', '과학', 'waiting', 'current_class'),
   ('00000000-0000-4000-8000-000000000813', '00000000-0000-4000-8000-000000000802', '영어', 'registered', null),
   ('00000000-0000-4000-8000-000000000814', '00000000-0000-4000-8000-000000000803', '영어', 'registered', null),
   ('00000000-0000-4000-8000-000000000815', '00000000-0000-4000-8000-000000000803', '수학', 'waiting', 'current_class'),
@@ -4426,13 +4427,13 @@ insert into public.ops_registration_enrollments(
   status, makeedu_registered, roster_active, sort_order
 ) values
   ('00000000-0000-4000-8000-000000000831', '00000000-0000-4000-8000-000000000811', '00000000-0000-4000-8000-000000000701', '00000000-0000-4000-8000-000000000821', '00000000-0000-4000-8000-000000000711', '2026-07-20', '2026-07-20:1', '1회차', 'enrolled', true, true, 0),
-  ('00000000-0000-4000-8000-000000000832', '00000000-0000-4000-8000-000000000811', '00000000-0000-4000-8000-000000000701', '00000000-0000-4000-8000-000000000821', '00000000-0000-4000-8000-000000000714', '2026-07-20', '2026-07-20:1', '1회차', 'enrolled', true, true, 1),
+  ('00000000-0000-4000-8000-000000000832', '00000000-0000-4000-8000-000000000810', '00000000-0000-4000-8000-000000000701', '00000000-0000-4000-8000-000000000821', '00000000-0000-4000-8000-000000000714', '2026-07-20', '2026-07-20:1', '1회차', 'enrolled', true, true, 0),
   ('00000000-0000-4000-8000-000000000833', '00000000-0000-4000-8000-000000000812', '00000000-0000-4000-8000-000000000701', null, '00000000-0000-4000-8000-000000000712', null, null, null, 'waitlisted', false, true, 0),
   ('00000000-0000-4000-8000-000000000834', '00000000-0000-4000-8000-000000000813', '00000000-0000-4000-8000-000000000703', '00000000-0000-4000-8000-000000000822', '00000000-0000-4000-8000-000000000716', '2026-07-20', '2026-07-20:1', '1회차', 'enrolled', true, true, 0),
   ('00000000-0000-4000-8000-000000000835', '00000000-0000-4000-8000-000000000814', '00000000-0000-4000-8000-000000000705', '00000000-0000-4000-8000-000000000823', '00000000-0000-4000-8000-000000000720', '2026-07-20', '2026-07-20:1', '1회차', 'enrolled', true, true, 0),
   ('00000000-0000-4000-8000-000000000836', '00000000-0000-4000-8000-000000000815', '00000000-0000-4000-8000-000000000705', null, '00000000-0000-4000-8000-000000000721', null, null, null, 'waitlisted', false, true, 0),
   ('00000000-0000-4000-8000-000000000837', '00000000-0000-4000-8000-000000000816', '00000000-0000-4000-8000-000000000706', '00000000-0000-4000-8000-000000000824', '00000000-0000-4000-8000-000000000722', '2026-07-20', '2026-07-20:1', '1회차', 'enrolled', true, true, 0),
-  ('00000000-0000-4000-8000-000000000838', '00000000-0000-4000-8000-000000000817', '00000000-0000-4000-8000-000000000707', '00000000-0000-4000-8000-000000000825', '00000000-0000-4000-8000-000000000725', '2026-07-20', '2026-07-20:1', '1회차', 'planned', false, true, 0),
+  ('00000000-0000-4000-8000-000000000838', '00000000-0000-4000-8000-000000000817', '00000000-0000-4000-8000-000000000707', '00000000-0000-4000-8000-000000000825', '00000000-0000-4000-8000-000000000724', '2026-07-20', '2026-07-20:1', '1회차', 'planned', false, true, 0),
   ('00000000-0000-4000-8000-000000000839', '00000000-0000-4000-8000-000000000819', null, null, '00000000-0000-4000-8000-000000000727', '2026-07-20', '2026-07-20:1', '1회차', 'planned', false, false, 0);
 
 insert into public.ops_withdrawal_details(
@@ -4562,50 +4563,54 @@ select public.complete_ops_transfer_roster_transition(
 
 select pg_temp.registration_record(140,
   (
-    select payload @> '{"studentStatus":"퇴원","taskStatus":"done","timetableRosterUpdated":true}'::jsonb
-      and jsonb_array_length(payload -> 'releasedEnrollmentIds') = 2
-      and jsonb_array_length(payload -> 'canceledWaitlistEnrollmentIds') = 1
+    select payload @> '{"studentStatus":"재원","taskStatus":"done","timetableRosterUpdated":true}'::jsonb
+      and payload -> 'affectedClassIds' = '["00000000-0000-4000-8000-000000000711"]'::jsonb
+      and jsonb_array_length(payload -> 'releasedEnrollmentIds') = 1
+      and jsonb_array_length(payload -> 'canceledWaitlistEnrollmentIds') = 0
     from registration_runtime_140_response
   )
   and (
-    select status = '퇴원'
-      and class_ids = '[]'::jsonb
-      and waitlist_class_ids = '[]'::jsonb
+    select status = '재원'
+      and class_ids = '["00000000-0000-4000-8000-000000000714"]'::jsonb
+      and waitlist_class_ids = '["00000000-0000-4000-8000-000000000712"]'::jsonb
     from public.students
     where id = '00000000-0000-4000-8000-000000000701'
   )
-  and not exists (
-    select 1
-    from public.classes class
-    where class.id in (
-      '00000000-0000-4000-8000-000000000711',
-      '00000000-0000-4000-8000-000000000712',
-      '00000000-0000-4000-8000-000000000714'
-    )
-      and (
-        coalesce(class.student_ids, '[]'::jsonb) ? '00000000-0000-4000-8000-000000000701'
-        or coalesce(class.waitlist_ids, '[]'::jsonb) ? '00000000-0000-4000-8000-000000000701'
-      )
+  and (
+    select not (student_ids ? '00000000-0000-4000-8000-000000000701')
+    from public.classes where id = '00000000-0000-4000-8000-000000000711'
   )
   and (
-    select count(*) = 2
+    select student_ids ? '00000000-0000-4000-8000-000000000701'
+    from public.classes where id = '00000000-0000-4000-8000-000000000714'
+  )
+  and (
+    select waitlist_ids ? '00000000-0000-4000-8000-000000000701'
+    from public.classes where id = '00000000-0000-4000-8000-000000000712'
+  )
+  and (
+    select count(*) = 1
     from public.ops_registration_enrollments enrollment
-    where enrollment.id in (
-      '00000000-0000-4000-8000-000000000831',
-      '00000000-0000-4000-8000-000000000832'
-    )
+    where enrollment.id = '00000000-0000-4000-8000-000000000831'
       and enrollment.status = 'enrolled'
       and not enrollment.roster_active
       and enrollment.roster_release_kind = 'withdrawal'
       and enrollment.roster_release_source_task_id = '00000000-0000-4000-8000-000000000841'
   )
   and (
-    select status = 'canceled' and not roster_active
+    select status = 'enrolled' and roster_active
+      and roster_release_kind is null
+      and roster_release_source_task_id is null
+    from public.ops_registration_enrollments
+    where id = '00000000-0000-4000-8000-000000000832'
+  )
+  and (
+    select status = 'waitlisted' and roster_active
     from public.ops_registration_enrollments
     where id = '00000000-0000-4000-8000-000000000833'
   )
   and (
-    select pipeline_status = 'not_registered' and waiting_kind is null
+    select pipeline_status = 'waiting' and waiting_kind = 'current_class'
     from public.ops_registration_subject_tracks
     where id = '00000000-0000-4000-8000-000000000812'
   )
@@ -6610,16 +6615,16 @@ select ok(
   '139. withdrawal/transfer type reclassification, general-task/detail mismatch, and two-step completion bypass are denied.'
 );
 
--- assertion 140: claimed whole-student withdrawal removes every enrolled and current-class waitlist pair, releases/cancels claims, closes wait tracks, then sets `퇴원` atomically.
+-- assertion 140: claimed multi-subject withdrawal removes only the selected class and preserves every other enrolled/waitlisted subject while keeping the student active.
 select ok(
   pg_temp.registration_contract(140),
-  '140. claimed whole-student withdrawal removes every enrolled and current-class waitlist pair, releases/cancels claims, closes wait tracks, then sets `퇴원` atomically.'
+  '140. claimed multi-subject withdrawal removes only the selected class and preserves every other enrolled/waitlisted subject while keeping the student active.'
 );
 
--- assertion 141: unclaimed legacy/management whole-student withdrawal completes through the same atomic roster/status/task path.
+-- assertion 141: a student with only the selected class is marked withdrawn after that final class is removed.
 select ok(
   pg_temp.registration_contract(141),
-  '141. unclaimed legacy/management whole-student withdrawal completes through the same atomic roster/status/task path.'
+  '141. a student with only the selected class is marked withdrawn after that final class is removed.'
 );
 
 -- assertion 142: claimed transfer releases only the source registration claim, moves the roster to the destination, and preserves paid admission history.

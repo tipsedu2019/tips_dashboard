@@ -2945,6 +2945,15 @@ function getOpsStudentClassMode(student: Row | null, classId: string) {
   return ""
 }
 
+function getWithdrawalStudentStatusAfterClassRemoval(student: Row | null, classId: string) {
+  const removedClassId = text(classId)
+  const remainingClassIds = normalizeIdList(student?.class_ids).filter((id) => id !== removedClassId)
+  const remainingWaitlistClassIds = normalizeIdList(student?.waitlist_class_ids).filter((id) => id !== removedClassId)
+  return remainingClassIds.length === 0 && remainingWaitlistClassIds.length === 0
+    ? WITHDRAWN_STUDENT_STATUS
+    : ACTIVE_STUDENT_STATUS
+}
+
 function hasOpsStudentClassRosterLink(student: Row | null, classRow: Row | null) {
   const studentId = text(student?.id)
   const classId = text(classRow?.id)
@@ -3971,9 +3980,10 @@ async function syncWithdrawalManagementLinks(taskId: string, input: OpsTaskInput
     assertResolvedManagementRecord(classRow, "퇴원 완료 전에 기존 수업을 연결하세요.")
     assertOpsStudentInClass(student, classRow, "퇴원 완료 전에 학생이 해당 수업 명단에 있는지 확인하세요.")
     const classLabel = text(classRow.name) || text(input.className)
+    const nextStudentStatus = getWithdrawalStudentStatusAfterClassRemoval(student, text(classRow.id))
     try {
       await removeOpsStudentFromClass(student, classRow, "withdrawal_completed")
-      await setOpsStudentStatus(student, WITHDRAWN_STUDENT_STATUS)
+      await setOpsStudentStatus(student, nextStudentStatus)
       await markWithdrawalRosterUpdated(taskId)
     } catch (error) {
       try {
@@ -3984,7 +3994,11 @@ async function syncWithdrawalManagementLinks(taskId: string, input: OpsTaskInput
       throw error
     }
     await writeAutoSyncEventOnce(taskId, "수업명단", `${classLabel} 제거 · withdrawal_completed`)
-    await writeAutoSyncEventOnce(taskId, "학생 상태", "퇴원")
+    await writeAutoSyncEventOnce(
+      taskId,
+      "학생 상태",
+      nextStudentStatus === WITHDRAWN_STUDENT_STATUS ? "퇴원" : "다른 수강 과목 유지 · 재원",
+    )
   }
 }
 

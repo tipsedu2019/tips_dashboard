@@ -15,7 +15,7 @@ const PLANNED_SCENARIOS = [
   "message claim versus identity edit and two message claims never send twice",
   "message finalizer acceptance versus failed-hold reconciliation preserves accepted precedence",
   "consultation ownership reassignment defeats the former director completion",
-  "withdrawal versus batch/wait materialization: deterministic checkpoints prove both SQL lock orders",
+  "subject-scoped withdrawal versus batch/wait materialization preserves the winning unrelated subject",
   "withdrawal final invariant leaves no withdrawn student with a live roster claim",
 ]
 
@@ -1034,8 +1034,12 @@ async function runOrderedWithdrawalRace(context, kind, lockOrder) {
   assert.equal(results[0].status, "fulfilled", `${kind} ${lockOrder}: lock holder must commit`)
   const expectedLoserError = lockOrder === "withdrawal_first"
     ? "registration_student_reactivation_required"
-    : "registration_workflow_retry_required"
-  assertRejectedWithDatabaseError(results[1], expectedLoserError, `${kind} ${lockOrder}`)
+    : null
+  if (expectedLoserError) {
+    assertRejectedWithDatabaseError(results[1], expectedLoserError, `${kind} ${lockOrder}`)
+  } else {
+    assert.equal(results[1].status, "fulfilled", `${kind} ${lockOrder}: unrelated subject withdrawal must also commit`)
+  }
   rememberRosterPair(context.fixture, student.id, sourceClass.id)
   rememberRosterPair(context.fixture, student.id, destinationClass.id)
   const raceState = await readWithdrawalRaceState(context, {
@@ -1061,9 +1065,11 @@ async function runOrderedWithdrawalRace(context, kind, lockOrder) {
     }
   } else {
     assert.notEqual(raceState.state.status, "퇴원")
-    assert.equal(raceState.withdrawalTask.status, "in_progress")
-    assert.equal(raceState.withdrawalChecklist.timetable_roster_updated, false)
-    assert.equal(raceState.withdrawalEventCount, 0)
+    assert.deepEqual(raceState.state.class_ids, [])
+    assert.deepEqual(raceState.state.waitlist_class_ids, kind === "wait" ? [destinationClass.id] : [])
+    assert.equal(raceState.withdrawalTask.status, "done")
+    assert.equal(raceState.withdrawalChecklist.timetable_roster_updated, true)
+    assert.ok(raceState.withdrawalEventCount > 0)
     assert.ok(raceState.registrationEventCount > 0)
     assert.equal(raceState.liveClaims.length, 1)
     assert.equal(raceState.liveClaims[0].student_id, student.id)
@@ -1082,7 +1088,7 @@ async function runOrderedWithdrawalRace(context, kind, lockOrder) {
     kind,
     lockOrder,
     expectedLoserError,
-    observedWinner: lockOrder === "withdrawal_first" ? "withdrawal" : kind,
+    observedWinner: lockOrder === "withdrawal_first" ? "withdrawal" : `${kind}_and_withdrawal`,
     studentStatus: raceState.state.status,
     proofScope: "deterministic_internal_checkpoint_race",
     internalLockOrderProven: true,

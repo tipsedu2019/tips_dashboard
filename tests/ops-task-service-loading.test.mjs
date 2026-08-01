@@ -124,6 +124,36 @@ function loadRegistrationTrackParentResolver() {
   ).resolveRegistrationTrackSummariesForParents;
 }
 
+function loadWithdrawalStudentStatusPolicy() {
+  const source = sourceBetween(
+    "function getWithdrawalStudentStatusAfterClassRemoval",
+    "function hasOpsStudentClassRosterLink",
+  );
+  return transpileAndLoad(
+    source,
+    ["getWithdrawalStudentStatusAfterClassRemoval"],
+    {
+      ACTIVE_STUDENT_STATUS: "재원",
+      WITHDRAWN_STUDENT_STATUS: "퇴원",
+      normalizeIdList(value) {
+        return Array.isArray(value) ? [...new Set(value.map(String).filter(Boolean))] : [];
+      },
+      text: (value) => String(value || "").trim(),
+    },
+  ).getWithdrawalStudentStatusAfterClassRemoval;
+}
+
+test("withdrawal status changes only after the selected class is the student's final live roster", () => {
+  const getStatus = loadWithdrawalStudentStatusPolicy();
+
+  assert.equal(getStatus({ class_ids: ["english"] }, "english"), "퇴원");
+  assert.equal(getStatus({ class_ids: ["english", "math"] }, "english"), "재원");
+  assert.equal(
+    getStatus({ class_ids: ["english"], waitlist_class_ids: ["science"] }, "english"),
+    "재원",
+  );
+});
+
 function deferred() {
   let resolve;
   let reject;
