@@ -1964,3 +1964,34 @@ test("waiting details use their dedicated data-only RPC", async () => {
     retakeDecision: "required",
   });
 });
+
+test("level-test results use their dedicated data-only RPC", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    rpcHandler(name, args) {
+      assert.equal(name, "save_registration_level_test_result_v1");
+      assert.deepEqual({ ...args }, {
+        p_attempt_id: "attempt-1",
+        p_status: "completed",
+        p_material_link: "https://drive.test/result",
+        p_request_key: "result-request",
+      });
+      return { data: { attemptId: "attempt-1", trackId: "track-1", status: "completed", materialLink: "https://drive.test/result" }, error: null };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const result = await service.saveRegistrationLevelTestResult({
+    attemptId: "attempt-1",
+    status: "completed",
+    materialLink: "https://drive.test/result",
+    requestKey: "result-request",
+  });
+
+  assert.deepEqual({ ...result }, {
+    attemptId: "attempt-1",
+    trackId: "track-1",
+    status: "completed",
+    materialLink: "https://drive.test/result",
+  });
+});

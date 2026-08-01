@@ -44,13 +44,13 @@ import {
 import {
   cancelRegistrationAppointment,
   closeRegistrationLevelTestTrack,
-  completeRegistrationLevelTestAttempt,
   createRegistrationMutationRequestKey,
   getRegistrationNotificationProcessingReadiness,
   getRegistrationNotificationJobStatus,
   previewRegistrationAppointmentReminders,
   retryRegistrationNotificationJob,
   saveRegistrationSharedAppointment,
+  saveRegistrationLevelTestResult,
   startRegistrationLevelTestAttempt,
   type OpsRegistrationAppointment,
   type OpsRegistrationConsultation,
@@ -936,16 +936,12 @@ export function RegistrationAppointmentEditor({
       onWarning(`[${track?.subject || "해당 과목"}] 결과 링크를 입력하세요.`)
       return
     }
-    if (status === "completed" && !track?.directorProfileId) {
-      onWarning(`[${track?.subject || "해당 과목"}] 상담 책임자를 먼저 지정하세요.`)
-      return
-    }
     const logicalDraft = `${activity.id}:${status}:${materialLink}`
-    const kindKey = "level-test-complete"
+    const kindKey = "level-test-result"
     const requestKey = submissionKeys.getOrCreate(kindKey, logicalDraft)
     setActivitySavingId(activity.id)
     try {
-      await completeRegistrationLevelTestAttempt({
+      await saveRegistrationLevelTestResult({
         attemptId: activity.id,
         status,
         materialLink: status === "completed" ? materialLink : "",

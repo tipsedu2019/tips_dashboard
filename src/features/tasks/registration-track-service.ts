@@ -431,6 +431,13 @@ export type RegistrationLevelTestMutationResponse = {
   consultationId?: string | null
 }
 
+export type RegistrationLevelTestResultSaveResponse = {
+  attemptId: string
+  trackId: string
+  status: "completed" | "absent" | "canceled"
+  materialLink: string | null
+}
+
 export type RegistrationConsultationCompletionResponse = {
   consultation: OpsRegistrationConsultation
   track: OpsRegistrationTrackSummary
@@ -2321,6 +2328,30 @@ export function createRegistrationTrackService(
     })
   }
 
+  async function saveRegistrationLevelTestResult(input: {
+    attemptId: string
+    status: "completed" | "absent" | "canceled"
+    materialLink: string
+    requestKey: string
+  }): Promise<RegistrationLevelTestResultSaveResponse> {
+    const result = await callRpc<Row>("save_registration_level_test_result_v1", {
+      p_attempt_id: input.attemptId,
+      p_status: input.status,
+      p_material_link: input.status === "completed" ? input.materialLink.trim() : null,
+      p_request_key: requireRequestKey(input.requestKey),
+    })
+    const status = text(value(result, "status"))
+    if (!( ["completed", "absent", "canceled"] as const).includes(status as "completed" | "absent" | "canceled")) {
+      throw new Error("registration_level_test_result_response_invalid")
+    }
+    return {
+      attemptId: text(value(result, "attempt_id", "attemptId")),
+      trackId: text(value(result, "track_id", "trackId")),
+      status: status as RegistrationLevelTestResultSaveResponse["status"],
+      materialLink: nullableText(value(result, "material_link", "materialLink")),
+    }
+  }
+
   async function closeRegistrationLevelTestTrack(input: {
     trackId: string
     reason: string
@@ -2705,6 +2736,7 @@ export function createRegistrationTrackService(
     retryRegistrationNotificationJob,
     startRegistrationLevelTestAttempt,
     completeRegistrationLevelTestAttempt,
+    saveRegistrationLevelTestResult,
     closeRegistrationLevelTestTrack,
     completeRegistrationConsultation,
     setRegistrationWorkflowStatus,
@@ -2952,6 +2984,14 @@ export function completeRegistrationLevelTestAttempt(
   const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationLevelTestMutationResponse>("completeRegistrationLevelTestAttempt", input)
   if (fixture) return fixture
   return defaultRegistrationTrackService.completeRegistrationLevelTestAttempt(input)
+}
+
+export function saveRegistrationLevelTestResult(
+  input: Parameters<typeof defaultRegistrationTrackService.saveRegistrationLevelTestResult>[0],
+): Promise<RegistrationLevelTestResultSaveResponse> {
+  const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationLevelTestResultSaveResponse>("saveRegistrationLevelTestResult", input)
+  if (fixture) return fixture
+  return defaultRegistrationTrackService.saveRegistrationLevelTestResult(input)
 }
 
 export function closeRegistrationLevelTestTrack(

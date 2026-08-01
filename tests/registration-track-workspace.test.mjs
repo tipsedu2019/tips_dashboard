@@ -1223,6 +1223,12 @@ test("waiting details save separately from the status selector", async () => {
   assert.doesNotMatch(source, /대기 종료 · 미등록/)
 })
 
+test("level-test result saves separately from the status selector", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
+  assert.match(source, /saveRegistrationLevelTestResult/)
+  assert.doesNotMatch(source, /completeRegistrationLevelTestAttempt/)
+})
+
 test("terminal subject outcomes can be deliberately reopened from the same application", async () => {
   const source = await readRegistrationApplicationSource()
 
