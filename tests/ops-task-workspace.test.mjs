@@ -911,8 +911,8 @@ test("registration workspace replaces Notion registration management with one ap
   assertIncludesAll(initialPlanSource, [
     "ProcessSubjectPicker",
     "상담 책임자",
-    "방문상담일시",
-    "방문상담실",
+    "방문상담 예약일시",
+    'data-registration-focus="visitConsultationPlace"',
   ]);
 
   assertIncludesAll(detailDialogSource, [
@@ -1719,10 +1719,11 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
     "dateAriaLabel=\"방문상담일 날짜\"",
     "timeAriaLabel=\"방문상담일 시각\"",
     "레벨테스트 장소",
-    "방문상담실",
+    "방문상담 예약일시",
+    'data-registration-focus="visitConsultationPlace"',
   ]);
   assert.doesNotMatch(initialPlanSource, /전화상담 예약일시|phoneConsultationAt|시험지·결과지 URL|levelTestMaterialLink|결과 링크|전화상담 대기 기준일시|상담 결과|참여 과목|ParticipantBadges/);
-  assertInOrder(initialPlanSource, ["상담 책임자", "방문상담일시", "방문상담실"]);
+  assertInOrder(initialPlanSource, ["상담 책임자", "방문상담 예약일시", 'data-registration-focus="visitConsultationPlace"', "<span>장소</span>"]);
   assertInOrder(initialPlanSource, ["레벨테스트 예약일시", "레벨테스트 장소"]);
   assert.match(source, /getRegistrationCreateDefaults\(new Date\(\)\.toISOString\(\)\)/);
 
@@ -1732,7 +1733,10 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
     'data-registration-focus="subject"',
     'data-registration-focus="studentName"',
     'data-registration-focus="schoolGrade"',
+    "학교",
     'data-registration-focus="parentPhone"',
+    "학생 전화",
+    "문의일시",
     '요청 사항',
   ];
   for (let index = 1; index < orderedInquiryFields.length; index += 1) {
@@ -2227,7 +2231,8 @@ test("registration resolves and edits directors per subject in the canonical ini
     "directorOptionsBySubject,",
   ]);
   assertIncludesAll(initialPlanSource, [
-    "consultationSubjects.map((subject)",
+    "orderedSubjects.map((subject)",
+    "data-registration-consultation-slot",
     "draft.directorOverrides[subject] || resolvedDirectorId",
     "directorOptionsBySubject[subject]",
     "[subject]: nextValue",

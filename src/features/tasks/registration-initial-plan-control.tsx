@@ -82,7 +82,7 @@ export function RegistrationInitialLevelTestFields({
         />
       </div>
       <Label className="grid gap-1.5" aria-label="레벨테스트 예약일시" data-registration-focus="levelTestAt">
-        <span>예약일시</span>
+        <span>레벨테스트 예약일시</span>
         <DateTimePickerControl
           value={draft.levelTestScheduledAt}
           onChange={(value) => onChange({ ...draft, levelTestScheduledAt: value })}
@@ -139,49 +139,81 @@ export function RegistrationInitialConsultationFields({
         label="상담"
         onToggle={(subject, checked) => onChange(setRegistrationInitialSubjectAction(draft, subject, checked ? "direct_phone" : "inquiry"))}
       />
-      <div className="grid gap-3 md:grid-cols-3">
-        {consultationSubjects.map((subject) => (
-          <Label key={`${subject}-mode`} className="grid gap-1.5">
-            <span>{subject} 상담 방식</span>
-            <RegistrationSelect
-              value={draft.subjectPlans[subject] || ""}
-              disabled={consultationControlsDisabled}
-              placeholder="상담 방식 선택"
-              options={[{ value: "direct_phone", label: "전화상담" }, { value: "visit", label: "방문상담" }]}
-              onValueChange={(value) => onChange(setRegistrationInitialSubjectAction(draft, subject, value as "direct_phone" | "visit"))}
-              aria-label={`${subject} 상담 방식`}
-            />
-          </Label>
-        ))}
-        {consultationSubjects.map((subject) => {
-          const resolvedDirectorId = resolvedDirectorIds[subject] || ""
-          const value = draft.directorOverrides[subject] || resolvedDirectorId
-          const options = directorOptionsBySubject[subject] || []
-          return (
-            <Label key={subject} className="grid gap-1.5" data-registration-focus={`counselor:${subject}`}>
-              <span>{subject} 상담 책임자</span>
-              <RegistrationSelect
-                value={value}
-                disabled={consultationControlsDisabled}
-                placeholder="책임자 선택"
-                options={options}
-                onValueChange={(nextValue) => onChange({
-                  ...draft,
-                  directorOverrides: {
-                    ...draft.directorOverrides,
-                    [subject]: nextValue,
-                  },
-                })}
-                aria-label={`${subject} 상담 책임자`}
+      {consultationSubjects.length > 0 ? (
+        <>
+          <div className="grid gap-3 md:grid-cols-3" data-registration-consultation-row="mode">
+            {orderedSubjects.map((subject) => consultationSubjects.includes(subject) ? (
+              <Label
+                key={`${subject}-mode`}
+                className="grid gap-1.5"
+                data-registration-consultation-slot={`mode:${subject}`}
+              >
+                <span>{subject} 상담 방식</span>
+                <RegistrationSelect
+                  value={draft.subjectPlans[subject] || ""}
+                  disabled={consultationControlsDisabled}
+                  placeholder="상담 방식 선택"
+                  options={[{ value: "direct_phone", label: "전화상담" }, { value: "visit", label: "방문상담" }]}
+                  onValueChange={(value) => onChange(setRegistrationInitialSubjectAction(draft, subject, value as "direct_phone" | "visit"))}
+                  aria-label={`${subject} 상담 방식`}
+                />
+              </Label>
+            ) : (
+              <div
+                key={`${subject}-mode-empty`}
+                aria-hidden="true"
+                className="hidden md:block"
+                data-registration-consultation-slot={`mode:${subject}`}
               />
-            </Label>
-          )
-        })}
-      </div>
+            ))}
+          </div>
+          <div className="grid gap-3 md:grid-cols-3" data-registration-consultation-row="director">
+            {orderedSubjects.map((subject) => {
+              if (!consultationSubjects.includes(subject)) {
+                return (
+                  <div
+                    key={`${subject}-director-empty`}
+                    aria-hidden="true"
+                    className="hidden md:block"
+                    data-registration-consultation-slot={`director:${subject}`}
+                  />
+                )
+              }
+              const resolvedDirectorId = resolvedDirectorIds[subject] || ""
+              const value = draft.directorOverrides[subject] || resolvedDirectorId
+              const options = directorOptionsBySubject[subject] || []
+              return (
+                <Label
+                  key={subject}
+                  className="grid gap-1.5"
+                  data-registration-focus={`counselor:${subject}`}
+                  data-registration-consultation-slot={`director:${subject}`}
+                >
+                  <span>{subject} 상담 책임자</span>
+                  <RegistrationSelect
+                    value={value}
+                    disabled={consultationControlsDisabled}
+                    placeholder="책임자 선택"
+                    options={options}
+                    onValueChange={(nextValue) => onChange({
+                      ...draft,
+                      directorOverrides: {
+                        ...draft.directorOverrides,
+                        [subject]: nextValue,
+                      },
+                    })}
+                    aria-label={`${subject} 상담 책임자`}
+                  />
+                </Label>
+              )
+            })}
+          </div>
+        </>
+      ) : null}
       {visitSubjects.length > 0 ? (
         <div className="grid gap-3 md:grid-cols-2">
           <Label className="grid gap-1.5" data-registration-focus="visitConsultationAt">
-            <span>방문상담일시</span>
+            <span>방문상담 예약일시</span>
             <DateTimePickerControl
               value={draft.visitScheduledAt}
               onChange={(value) => onChange({ ...draft, visitScheduledAt: value })}
@@ -193,7 +225,7 @@ export function RegistrationInitialConsultationFields({
             />
           </Label>
           <Label className="grid gap-1.5" data-registration-focus="visitConsultationPlace">
-            <span>방문상담실</span>
+            <span>장소</span>
             <RegistrationSelect
               value={normalizeRegistrationLevelTestPlace(draft.visitPlace) ?? ""}
               disabled={visitFieldsDisabled}

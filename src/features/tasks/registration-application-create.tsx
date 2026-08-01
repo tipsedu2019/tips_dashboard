@@ -14,10 +14,8 @@ import { RegistrationApplicationLevelTestSection } from "./registration-applicat
 import {
   getRegistrationCreateCatalogState,
   getRegistrationCreateSectionStates,
-  getRegistrationApplicationProgress,
   type RegistrationCreateCatalogStatus,
 } from "./registration-application-model"
-import { RegistrationApplicationProgressStepper } from "./registration-application-progress-stepper"
 import { RegistrationApplicationShell } from "./registration-application-shell"
 import {
   reconcileRegistrationInitialWorkflowCapabilities,
@@ -216,12 +214,6 @@ export function RegistrationApplicationCreate({
       mode="create"
       studentName={form.studentName || "새 등록 신청"}
       closeAction={closeAction}
-      progress={(
-        <RegistrationApplicationProgressStepper
-          steps={getRegistrationApplicationProgress("inquiry")}
-          enabledKeys={["inquiry", "level_test", "consultation"]}
-        />
-      )}
       sectionStates={sectionStates}
       sectionNotices={catalogState.showLocalStatus ? {
         consultation: (

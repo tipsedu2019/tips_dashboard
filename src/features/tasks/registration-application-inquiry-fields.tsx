@@ -91,13 +91,6 @@ export function RegistrationInquiryCommonFields({
         />
       </Label>
 
-      <div className="grid min-w-0 content-start gap-1.5">
-        <FieldLabel requirement="자동">문의일시</FieldLabel>
-        <output aria-label="문의일시 자동" className="min-h-10 py-2 text-sm">
-          {inquiryAtLabel}
-        </output>
-      </div>
-
       <Label className="grid min-w-0 gap-1.5" data-registration-focus="schoolGrade">
         <FieldLabel requirement="필수">학년</FieldLabel>
         <RegistrationSelect
@@ -170,6 +163,13 @@ export function RegistrationInquiryCommonFields({
           onChange={(event) => onChange("studentPhone", event.target.value)}
         />
       </Label>
+
+      <div className="grid min-w-0 content-start gap-1.5">
+        <FieldLabel requirement="자동">문의일시</FieldLabel>
+        <output aria-label="문의일시 자동" className="min-h-10 py-2 text-sm">
+          {inquiryAtLabel}
+        </output>
+      </div>
 
       <Label className="grid min-w-0 gap-1.5 sm:col-span-2 xl:col-span-3">
         <FieldLabel requirement="선택">요청 사항</FieldLabel>

@@ -14,7 +14,7 @@ export type RegistrationApplicationShellProps = {
   closeAction: ReactNode
   historyAction?: ReactNode
   subjectNavigation?: ReactNode
-  progress: ReactNode
+  progress?: ReactNode
   sectionStates: Record<
     RegistrationApplicationSectionKey,
     RegistrationApplicationSectionState
@@ -129,7 +129,7 @@ export function RegistrationApplicationShell(props: RegistrationApplicationShell
           </div>
         </div>
         {props.subjectNavigation ? <div className="mt-3">{props.subjectNavigation}</div> : null}
-        {props.progress ? <div className="mt-3">{props.progress}</div> : null}
+        {props.mode === "detail" && props.progress ? <div className="mt-3">{props.progress}</div> : null}
       </header>
 
       <div>

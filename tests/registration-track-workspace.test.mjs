@@ -242,7 +242,7 @@ test("create and detail share the approved subject-first inquiry controls", asyn
   assert.match(inquiry, /<RegistrationInquiryCommonFields/)
   assert.match(create, /<RegistrationSubjectPicker/)
   assert.match(inquiry, /<RegistrationSubjectPicker/)
-  assert.match(fields, /학생명[\s\S]*문의일시[\s\S]*학년[\s\S]*학교[\s\S]*학부모 전화[\s\S]*학생 전화[\s\S]*요청 사항/)
+  assert.match(fields, /학생명[\s\S]*학년[\s\S]*학교[\s\S]*학부모 전화[\s\S]*학생 전화[\s\S]*문의일시[\s\S]*요청 사항/)
   assert.match(picker, /variant=\{selected \? "default" : "outline"\}/)
   assert.match(picker, /aria-pressed=\{selected\}/)
   assert.match(picker, /<Check/)
@@ -329,7 +329,7 @@ test("registration create mounts the shared application with only actionable int
   assert.match(initialPlan, /function ProcessSubjectPicker/)
   assert.match(levelTest + initialPlan, /레벨테스트 예약일시/)
   assert.match(levelTest + initialPlan, /레벨테스트 장소/)
-  assert.match(consultation + initialPlan, /상담 책임자[\s\S]*방문상담일시[\s\S]*방문상담실/)
+  assert.match(consultation + initialPlan, /상담 책임자[\s\S]*방문상담 예약일시[\s\S]*data-registration-focus="visitConsultationPlace"[\s\S]*<span>장소<\/span>/)
   assert.doesNotMatch(initialPlan, /결과 링크|전화상담 대기 기준일시|상담 결과/)
   assert.doesNotMatch(create, /RegistrationApplicationPlacementSection|RegistrationApplicationAdmissionSection|대기 종류|수업 시작 일정/)
   assert.doesNotMatch(create, /첫 저장 후 자동 기록됩니다/)
@@ -429,7 +429,7 @@ test("registration create keeps actionable scheduling fields in approved order",
   }
 
   assertOrdered(levelTest, [
-    "<span>예약일시</span>",
+    "<span>레벨테스트 예약일시</span>",
     "<span>장소</span>",
   ])
   assert.doesNotMatch(levelTest, /결과 링크|시험 시작·완료 상태|시험지·결과지 링크|참여 과목|ParticipantBadges/)
@@ -463,14 +463,13 @@ test("registration create keeps only actionable fields visible and controls dash
 
   assert.match(shell, /CREATE_UI_SECTION_ORDER = \["inquiry", "level_test", "consultation"\]/)
   assert.match(shell, /props\.mode === "create"\s*\? CREATE_UI_SECTION_ORDER/)
-  assert.match(shell, /\{props\.subjectNavigation\}[\s\S]*?\{props\.progress\}/)
+  assert.match(shell, /props\.mode === "detail" && props\.progress/)
   assert.doesNotMatch(shell, />펼치기</)
 
   assert.doesNotMatch(create, /waiting=\{|registration=\{|admission=\{/)
   assert.doesNotMatch(create, /ReadonlyCreateField|첫 저장 후 자동 기록됩니다/)
   assert.match(create, /inquiryAtLabel="저장 시각"/)
-  assert.match(create, /enabledKeys=\{\["inquiry", "level_test", "consultation"\]\}/)
-  assert.match(await readFile(new URL("../src/features/tasks/registration-application-progress-stepper.tsx", import.meta.url), "utf8"), /저장 후 사용 가능/)
+  assert.doesNotMatch(create, /RegistrationApplicationProgressStepper|enabledKeys=|progress=\{/)
 
   assert.doesNotMatch(initialPlan, /결과 링크|전화상담 대기 기준일시|상담 결과/)
   assert.match(initialPlan, /<Select value=\{value\}/)
