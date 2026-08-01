@@ -40,7 +40,6 @@ export type RegistrationApplicationDirtyKey =
 
 export type RegistrationEnrollmentDirtyScope =
   | { kind: "rows" }
-  | { kind: "decision" }
   | { kind: "cancellation"; enrollmentId: string }
 
 export type RegistrationApplicationSectionState = {
@@ -566,6 +565,5 @@ export function getRegistrationEnrollmentDirtyKey(
   scope: RegistrationEnrollmentDirtyScope,
 ): RegistrationApplicationDirtyKey {
   if (scope.kind === "rows") return `placement:enrollments-${trackId}`
-  if (scope.kind === "decision") return `placement:decision-${trackId}`
   return `placement:cancellation-${trackId}-${scope.enrollmentId}`
 }

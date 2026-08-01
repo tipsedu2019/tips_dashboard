@@ -56,7 +56,6 @@ import {
   cancelRegistrationEnrollment,
   completeRegistrationAdmissionBatch,
   createRegistrationMutationRequestKey,
-  routeRegistrationEnrollmentDecision,
   saveRegistrationEnrollmentRows,
   setRegistrationEnrollmentMakeedu,
   startRegistrationAdmissionBatch,
@@ -334,21 +333,14 @@ export function RegistrationEnrollmentEditor({
   const [classDetailRetryToken, setClassDetailRetryToken] = useState(0)
   const [saving, setSaving] = useState(false)
   const [rowsRefreshPending, setRowsRefreshPending] = useState(false)
-  const [decisionRefreshPending, setDecisionRefreshPending] = useState(false)
   const [cancellationRefreshPending, setCancellationRefreshPending] = useState(false)
   const [cancelEnrollmentId, setCancelEnrollmentId] = useState("")
   const [cancelReason, setCancelReason] = useState("")
   const [cancelDestination, setCancelDestination] = useState<"" | "enrollment_decided" | "waiting" | "not_registered">("")
   const [cancelWaitingKind, setCancelWaitingKind] = useState<RegistrationWaitingKind>("")
   const [cancelClassId, setCancelClassId] = useState("")
-  const [decisionDestination, setDecisionDestination] = useState<"" | "waiting" | "not_registered">("")
-  const [decisionWaitingKind, setDecisionWaitingKind] = useState<RegistrationWaitingKind>("")
-  const [decisionClassId, setDecisionClassId] = useState("")
-  const [decisionReason, setDecisionReason] = useState("")
   const [rowsValidationError, setRowsValidationError] = useState("")
-  const [decisionValidationError, setDecisionValidationError] = useState("")
   const [cancellationValidationError, setCancellationValidationError] = useState("")
-  const [alternateRouteOpen, setAlternateRouteOpen] = useState(false)
   const [enrollmentHistoryOpen, setEnrollmentHistoryOpen] = useState(false)
   const sectionRef = useRef<HTMLElement | null>(null)
   const initialDraftRowsRef = useRef(cachedEnrollmentDraft?.baseline || JSON.stringify(draftRows))
@@ -376,11 +368,9 @@ export function RegistrationEnrollmentEditor({
     enrollments: trackEnrollments,
   })
   const rowsDirty = JSON.stringify(draftRows) !== initialDraftRowsRef.current
-  const decisionDirty = Boolean(decisionDestination || decisionWaitingKind || decisionClassId || decisionReason)
   const cancellationScope: RegistrationEnrollmentDirtyScope = { kind: "cancellation", enrollmentId: cancelEnrollmentId || "new" }
   const cancellationDirty = Boolean(cancelEnrollmentId || cancelReason || cancelDestination || cancelWaitingKind || cancelClassId)
   useScopedDirtyState({ kind: "rows" }, !rowsRefreshPending && rowsDirty, onDirtyChange)
-  useScopedDirtyState({ kind: "decision" }, !decisionRefreshPending && decisionDirty, onDirtyChange)
   useScopedDirtyState(cancellationScope, !cancellationRefreshPending && cancellationDirty, onDirtyChange)
   useEffect(() => {
     setDraftRows((current) => {
@@ -526,7 +516,6 @@ export function RegistrationEnrollmentEditor({
 
   function setOwnerRefreshPending(owner: RegistrationEnrollmentDirtyScope, pending: boolean) {
     if (owner.kind === "rows") setRowsRefreshPending(pending)
-    else if (owner.kind === "decision") setDecisionRefreshPending(pending)
     else setCancellationRefreshPending(pending)
   }
 
@@ -582,54 +571,6 @@ export function RegistrationEnrollmentEditor({
       await reloadCommitted({ kind: "rows" })
     } catch (error) {
       onWarning(errorMessage(error, "수업 정보를 저장하지 못했습니다."))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function routeDecision() {
-    if (saving || decisionRefreshPending) return
-    if (!decisionDestination) {
-      setDecisionValidationError("변경할 단계를 선택하세요.")
-      window.requestAnimationFrame(() => sectionRef.current?.querySelector<HTMLElement>(`[aria-label="${track.subject} 대기로 전환"]`)?.focus())
-      return
-    }
-    if (decisionDestination === "waiting" && !decisionWaitingKind) {
-      setDecisionValidationError("대기 종류를 선택하세요.")
-      window.requestAnimationFrame(() => sectionRef.current?.querySelector<HTMLElement>(`[aria-label="${track.subject} 등록 결정 후 대기 종류"]`)?.focus())
-      return
-    }
-    if (decisionDestination === "waiting" && decisionWaitingKind === "current_class" && !decisionClassId) {
-      setDecisionValidationError("대기 수업을 선택하세요.")
-      window.requestAnimationFrame(() => sectionRef.current?.querySelector<HTMLElement>(`[aria-label="${track.subject} 등록 결정 후 대기 수업"]`)?.focus())
-      return
-    }
-    if (!decisionReason.trim()) {
-      setDecisionValidationError("단계 변경 사유를 입력하세요.")
-      window.requestAnimationFrame(() => sectionRef.current?.querySelector<HTMLElement>(`[aria-label="${track.subject} 단계 변경 사유"]`)?.focus())
-      return
-    }
-    const logicalId = `${track.id}:${decisionDestination}:${decisionWaitingKind}:${decisionClassId}:${decisionReason.trim()}`
-    const requestKey = submissionKeys.getOrCreate("enrollment-decision", logicalId)
-    setSaving(true)
-    try {
-      await routeRegistrationEnrollmentDecision({
-        trackId: track.id,
-        destination: decisionDestination,
-        waitingKind: decisionDestination === "waiting" ? decisionWaitingKind : "",
-        classId: decisionDestination === "waiting" && decisionWaitingKind === "current_class" ? decisionClassId : "",
-        reason: decisionReason.trim(),
-        requestKey,
-      })
-      submissionKeys.clear("enrollment-decision", logicalId)
-      setDecisionDestination("")
-      setDecisionWaitingKind("")
-      setDecisionClassId("")
-      setDecisionReason("")
-      setDecisionValidationError("")
-      await reloadCommitted({ kind: "decision" })
-    } catch (error) {
-      onWarning(errorMessage(error, "등록 결정을 변경하지 못했습니다."))
     } finally {
       setSaving(false)
     }
@@ -798,8 +739,8 @@ export function RegistrationEnrollmentEditor({
             <Plus className="size-4" aria-hidden="true" />
             수업 추가
           </Button>
-          <Button type="button" data-registration-primary-action={`${track.subject}:enrollment-row-save`} aria-label={`${track.subject} 수업 정보 저장`} onClick={() => void saveRows()} disabled={saving || rowsRefreshPending || draftRows.length === 0}>
-            {saving ? "저장 중" : "수업 정보 저장"}
+          <Button type="button" data-registration-primary-action={`${track.subject}:enrollment-row-save`} aria-label={`${track.subject} 등록 정보 저장`} onClick={() => void saveRows()} disabled={saving || rowsRefreshPending || draftRows.length === 0}>
+            {saving ? "저장 중" : "등록 정보 저장"}
           </Button>
         </div>
       ) : null}

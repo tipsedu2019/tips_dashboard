@@ -489,17 +489,13 @@ test("common revision conflicts retain attempted values beside canonical latest 
   ])
 })
 
-test("enrollment row, decision, and cancellation drafts keep independent stable owners", () => {
+test("enrollment row and cancellation drafts keep independent stable owners", () => {
   const rowsKey = getRegistrationEnrollmentDirtyKey("track123", { kind: "rows" })
-  const decisionKey = getRegistrationEnrollmentDirtyKey("track123", { kind: "decision" })
   const cancellationKey = getRegistrationEnrollmentDirtyKey("track123", { kind: "cancellation", enrollmentId: "enrollment456" })
   let dirty = updateRegistrationApplicationDirtyKeys(new Set(), rowsKey, true)
-  dirty = updateRegistrationApplicationDirtyKeys(dirty, decisionKey, true)
   dirty = updateRegistrationApplicationDirtyKeys(dirty, cancellationKey, true)
-  dirty = updateRegistrationApplicationDirtyKeys(dirty, decisionKey, false)
 
   assert.equal(rowsKey, "placement:enrollments-track123")
-  assert.equal(decisionKey, "placement:decision-track123")
   assert.equal(cancellationKey, "placement:cancellation-track123-enrollment456")
   assert.deepEqual([...dirty], [rowsKey, cancellationKey])
 })
