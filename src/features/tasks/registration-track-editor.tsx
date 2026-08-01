@@ -68,7 +68,6 @@ import {
   getRegistrationCurrentClassWaitClassId,
 } from "./registration-track-model.js"
 import {
-  loadAssignedScienceConsultationClassOptions,
   saveRegistrationCaseInquiry,
   setRegistrationWorkflowStatus,
   type OpsRegistrationAppointment,
@@ -265,7 +264,6 @@ export function RegistrationApplication({
   const [migrationConflictRetrying, setMigrationConflictRetrying] = useState(false)
   const [migrationDirectorResetVersion, setMigrationDirectorResetVersion] = useState(0)
   const [migrationReviewResetVersion, setMigrationReviewResetVersion] = useState(0)
-  const [scienceConsultationClassOptions, setScienceConsultationClassOptions] = useState<OpsClassOption[]>([])
   const [workflowStatusSaving, setWorkflowStatusSaving] = useState(false)
   const dirtyKeysRef = useRef<Set<RegistrationApplicationDirtyKey>>(new Set())
   const dirtyProducersRef = useRef(new Map<RegistrationApplicationDirtyKey, Set<string>>())
@@ -404,26 +402,6 @@ export function RegistrationApplication({
         : null,
     }
   })
-  const assignedScienceConsultationId = trackContexts.find((context) => (
-    viewerRole === "teacher"
-    && context.track.subject === "과학"
-    && context.permissions.canCompleteConsultation
-  ))?.activeConsultation?.id || ""
-  useEffect(() => {
-    let active = true
-    setScienceConsultationClassOptions([])
-    if (!assignedScienceConsultationId || !viewerId) return () => { active = false }
-    void loadAssignedScienceConsultationClassOptions({ viewerId, consultationId: assignedScienceConsultationId })
-      .then((options) => {
-        if (active) setScienceConsultationClassOptions(options.filter((item) => item.subject === "과학"))
-      })
-      .catch(() => {
-        if (!active) return
-        setScienceConsultationClassOptions([])
-        onWarning("과학 수업 목록을 불러오지 못했습니다.")
-      })
-    return () => { active = false }
-  }, [assignedScienceConsultationId, onWarning, viewerId])
   const admissionApplicationState = getRegistrationAdmissionApplicationState({
     tracks: orderedTracks,
     enrollments: detail.enrollments,
@@ -779,11 +757,6 @@ export function RegistrationApplication({
               subject={context.track.subject}
               consultation={context.activeConsultation}
               active
-              classOptions={viewerRole === "teacher"
-                && context.permissions.canCompleteConsultation
-                && context.track.subject === "과학"
-                ? scienceConsultationClassOptions
-                : classOptions}
               onReload={onReload}
               onWarning={onWarning}
               onDirtyChange={(dirty) => setDirty(`consultation:track-${context.track.id}`, dirty, `outcome:${context.activeConsultation?.id || context.track.id}`)}

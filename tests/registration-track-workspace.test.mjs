@@ -292,23 +292,14 @@ test("science director UI consumes only the configured capability profile and te
   assert.match(model, /readOnly: !canManage/)
 })
 
-test("assigned science teacher lazily reads only consultation class options while unassigned viewers make zero requests", async () => {
+test("consultation outcomes do not load a separate class catalog", async () => {
   const application = await readFile(
     new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url),
     "utf8",
   )
-  assert.match(
-    application,
-    /const assignedScienceConsultationId = trackContexts\.find\(\(context\) => \([\s\S]*viewerRole === "teacher"[\s\S]*context\.track\.subject === "과학"[\s\S]*context\.permissions\.canCompleteConsultation/,
-  )
-  const guardIndex = application.indexOf("if (!assignedScienceConsultationId || !viewerId)")
-  const readIndex = application.indexOf("loadAssignedScienceConsultationClassOptions({ viewerId, consultationId: assignedScienceConsultationId })")
-  assert.ok(guardIndex >= 0 && readIndex > guardIndex, "unassigned viewer must return before the read")
+  assert.doesNotMatch(application, /loadAssignedScienceConsultationClassOptions/)
+  assert.doesNotMatch(application, /scienceConsultationClassOptions/)
   assert.doesNotMatch(application, /loadOpsTaskWorkspaceOptionData/)
-  assert.match(
-    application,
-    /classOptions=\{viewerRole === "teacher"\s*&& context\.permissions\.canCompleteConsultation\s*&& context\.track\.subject === "과학"\s*\? scienceConsultationClassOptions\s*:\s*classOptions\}/,
-  )
 })
 
 test("registration create mounts the shared application with only actionable intake fields", async () => {
@@ -1347,7 +1338,7 @@ test("committed appointment and result mutations cannot be resubmitted when refr
 
 test("track editor opens one shared editor for level tests and visit consultations", async () => {
   const source = await readRegistrationApplicationSource()
-  const stageSource = sourceBetween(source, "export function RegistrationTrackStageEditor", "type ConsultationOutcomeDraft")
+  const stageSource = sourceBetween(source, "export function RegistrationTrackStageEditor", "export type RegistrationConsultationOutcomeEditorProps")
   assert.match(source, /RegistrationAppointmentEditor/)
   assert.match(source, /getRegistrationApplicationAppointmentActionPlans\(\{/)
   assert.match(source, /activeAppointmentActionPlans\.filter\(\(plan\) => plan\.kind === kind\)/)
@@ -1372,24 +1363,20 @@ test("appointment plan entry actions expose their actual participant subjects", 
 test("phone and visit consultation completion share one inline subject outcome editor", async () => {
   const source = await readRegistrationApplicationSource()
   const outcomeSource = sourceBetween(source, "export function RegistrationConsultationOutcomeEditor", "export function RegistrationMigrationReviewEditor")
-  const stageSource = sourceBetween(source, "export function RegistrationTrackStageEditor", "type ConsultationOutcomeDraft")
+  const stageSource = sourceBetween(source, "export function RegistrationTrackStageEditor", "export type RegistrationConsultationOutcomeEditorProps")
   assert.match(source, /RegistrationConsultationOutcomeEditor/)
-  assert.match(source, /completeRegistrationConsultation/)
+  assert.match(source, /saveRegistrationConsultationDetails/)
   assert.match(source, /consultationId: consultation\.id/)
   assert.match(source, />등록</)
   assert.match(source, />대기</)
-  assert.match(source, />미등록 완료</)
+  assert.match(source, />미등록</)
   assert.match(source, /className="grid grid-cols-2 gap-2 sm:grid-cols-3"/)
-  assert.match(source, /className="col-span-2 sm:col-span-1"[\s\S]*?>미등록 완료</)
-  assert.match(source, /현재 학기 수강반 대기/)
-  assert.match(source, /현재 학기 개강반 대기/)
-  assert.match(source, /다음 학기 개강반 대기/)
+  assert.match(source, /className="col-span-2 sm:col-span-1"[\s\S]*?>미등록</)
   assert.doesNotMatch(source, /상담 완료일시/)
-  assert.match(outcomeSource, /aria-pressed=\{draft\.outcome === "enrollment"\}[\s\S]*?disabled=\{saving\}/)
-  assert.match(outcomeSource, /aria-pressed=\{draft\.outcome === "waiting"\}[\s\S]*?disabled=\{saving\}/)
-  assert.match(outcomeSource, /aria-pressed=\{draft\.outcome === "not_registered"\}[\s\S]*?disabled=\{saving\}/)
-  assert.match(outcomeSource, /value=\{draft\.waitingKind\}[\s\S]*?disabled=\{saving\}/)
-  assert.match(outcomeSource, /SubjectClassSelect[\s\S]*?disabled=\{saving\}/)
+  assert.match(outcomeSource, /aria-pressed=\{outcome === "enrollment"\}[\s\S]*?disabled=\{saving\}/)
+  assert.match(outcomeSource, /aria-pressed=\{outcome === "waiting"\}[\s\S]*?disabled=\{saving\}/)
+  assert.match(outcomeSource, /aria-pressed=\{outcome === "not_registered"\}[\s\S]*?disabled=\{saving\}/)
+  assert.doesNotMatch(outcomeSource, /상담 결과 대기 종류|SubjectClassSelect/)
   assert.match(outcomeSource, /saving \? "저장 중" : "상담 결과 저장"/)
   assert.doesNotMatch(outcomeSource, /<Dialog|<DialogContent/)
   assert.doesNotMatch(stageSource, /onOpenOutcome|전화상담 완료|방문상담 완료/)
@@ -1479,7 +1466,7 @@ test("appointment participant report helper keeps its TypeScript contract", asyn
 test("phone completion does not call the visit reservation notification helper", async () => {
   const source = await readRegistrationApplicationSource()
   const outcomeBlock = sourceBetween(source, "export function RegistrationConsultationOutcomeEditor", "export function RegistrationMigrationReviewEditor")
-  assert.match(outcomeBlock, /completeRegistrationConsultation/)
+  assert.match(outcomeBlock, /saveRegistrationConsultationDetails/)
   assert.match(outcomeBlock, /onReload/)
   assert.doesNotMatch(outcomeBlock, /sendRegistrationVisitNotificationTarget/)
   assert.doesNotMatch(outcomeBlock, /consultation-notification/)
@@ -1715,7 +1702,7 @@ test("enrollment stages show the real work surface without a redundant placehold
   const stageEditor = sourceBetween(
     source,
     "export function RegistrationTrackStageEditor(",
-    "\ntype ConsultationOutcomeDraft",
+    "\nexport type RegistrationConsultationOutcomeEditorProps",
   )
 
   assert.match(stageEditor, /\["not_registered", "inquiry_closed"\]\.includes\(track\.status\)[\s\S]*?<TerminalStageEditor/)
@@ -1910,7 +1897,7 @@ test("subject-owned controls name their subject and keep mobile primary actions 
   assert.match(consultation, /aria-label=\{`\$\{subject\} 상담 결과 저장`\}/)
   assert.match(appointment, /aria-label=\{`\$\{track\?\.subject \|\| "과목"\} 결과 링크`\}/)
   assert.match(enrollmentRows, /aria-label=\{`\$\{track\.subject\} 수업 \$\{index \+ 1\} 선택`\}/)
-  assert.ok(consultation.indexOf("waitingKind") < consultation.indexOf("상담 결과 저장"))
+  assert.ok(consultation.indexOf("outcome") < consultation.indexOf("상담 결과 저장"))
   assert.ok(enrollmentRows.indexOf("draftRows.map") < enrollmentRows.indexOf("등록 정보 저장"))
 })
 

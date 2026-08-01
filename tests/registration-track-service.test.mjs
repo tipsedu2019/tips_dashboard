@@ -1995,3 +1995,34 @@ test("level-test results use their dedicated data-only RPC", async () => {
     materialLink: "https://drive.test/result",
   });
 });
+
+test("consultation records use their dedicated data-only RPC", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    rpcHandler(name, args) {
+      assert.equal(name, "save_registration_consultation_details_v1");
+      assert.deepEqual({ ...args }, {
+        p_consultation_id: "consultation-1",
+        p_status: "completed",
+        p_outcome: "waiting",
+        p_request_key: "consultation-details-request",
+      });
+      return { data: { consultationId: "consultation-1", trackId: "track-1", status: "completed", outcome: "waiting" }, error: null };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const result = await service.saveRegistrationConsultationDetails({
+    consultationId: "consultation-1",
+    status: "completed",
+    outcome: "waiting",
+    requestKey: "consultation-details-request",
+  });
+
+  assert.deepEqual({ ...result }, {
+    consultationId: "consultation-1",
+    trackId: "track-1",
+    status: "completed",
+    outcome: "waiting",
+  });
+});

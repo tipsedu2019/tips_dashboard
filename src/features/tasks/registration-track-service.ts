@@ -443,6 +443,13 @@ export type RegistrationConsultationCompletionResponse = {
   track: OpsRegistrationTrackSummary
 }
 
+export type RegistrationConsultationDetailsSaveResponse = {
+  consultationId: string
+  trackId: string
+  status: "waiting" | "scheduled" | "completed" | "canceled"
+  outcome: "" | "enrollment" | "waiting" | "not_registered"
+}
+
 export type RegistrationEnrollmentRowsSaveResponse = {
   trackId: string
   rows: OpsRegistrationEnrollment[]
@@ -2384,6 +2391,32 @@ export function createRegistrationTrackService(
     }
   }
 
+  async function saveRegistrationConsultationDetails(input: {
+    consultationId: string
+    status: "waiting" | "scheduled" | "completed" | "canceled"
+    outcome: "" | "enrollment" | "waiting" | "not_registered"
+    requestKey: string
+  }): Promise<RegistrationConsultationDetailsSaveResponse> {
+    const result = await callRpc<Row>("save_registration_consultation_details_v1", {
+      p_consultation_id: input.consultationId,
+      p_status: input.status,
+      p_outcome: input.status === "completed" ? input.outcome : null,
+      p_request_key: requireRequestKey(input.requestKey),
+    })
+    const status = text(value(result, "status"))
+    const outcome = text(value(result, "outcome"))
+    if (!( ["waiting", "scheduled", "completed", "canceled"] as const).includes(status as RegistrationConsultationDetailsSaveResponse["status"])
+      || !( ["", "enrollment", "waiting", "not_registered"] as const).includes(outcome as RegistrationConsultationDetailsSaveResponse["outcome"])) {
+      throw new Error("registration_consultation_details_response_invalid")
+    }
+    return {
+      consultationId: text(value(result, "consultation_id", "consultationId")),
+      trackId: text(value(result, "track_id", "trackId")),
+      status: status as RegistrationConsultationDetailsSaveResponse["status"],
+      outcome: outcome as RegistrationConsultationDetailsSaveResponse["outcome"],
+    }
+  }
+
   async function setRegistrationWorkflowStatus(input: {
     trackId: string
     workflowStatus: OpsRegistrationWorkflowStatus
@@ -2739,6 +2772,7 @@ export function createRegistrationTrackService(
     saveRegistrationLevelTestResult,
     closeRegistrationLevelTestTrack,
     completeRegistrationConsultation,
+    saveRegistrationConsultationDetails,
     setRegistrationWorkflowStatus,
     transitionRegistrationWaiting,
     saveRegistrationWaitingDetails,
@@ -3008,6 +3042,14 @@ export function completeRegistrationConsultation(
   const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationConsultationCompletionResponse>("completeRegistrationConsultation", input)
   if (fixture) return fixture
   return defaultRegistrationTrackService.completeRegistrationConsultation(input)
+}
+
+export function saveRegistrationConsultationDetails(
+  input: Parameters<typeof defaultRegistrationTrackService.saveRegistrationConsultationDetails>[0],
+): Promise<RegistrationConsultationDetailsSaveResponse> {
+  const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationConsultationDetailsSaveResponse>("saveRegistrationConsultationDetails", input)
+  if (fixture) return fixture
+  return defaultRegistrationTrackService.saveRegistrationConsultationDetails(input)
 }
 
 export function setRegistrationWorkflowStatus(

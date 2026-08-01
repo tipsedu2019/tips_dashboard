@@ -39,11 +39,11 @@ import {
 import { RegistrationEnrollmentEditor, type RegistrationEnrollmentDirtyScope } from "./registration-enrollment-editor"
 import {
   assignRegistrationTrackDirector,
-  completeRegistrationConsultation,
   createRegistrationMutationRequestKey,
   reopenRegistrationTrack,
   resolveRegistrationMigrationReview,
   routeRegistrationInquiry,
+  saveRegistrationConsultationDetails,
   saveRegistrationWaitingDetails,
   type OpsRegistrationCaseDetail,
   type OpsRegistrationAppointment,
@@ -1264,17 +1264,10 @@ export function RegistrationEnrollmentTrackEditor({
   )
 }
 
-type ConsultationOutcomeDraft = {
-  outcome: "enrollment" | "waiting" | "not_registered"
-  waitingKind: RegistrationWaitingKind
-  classId: string
-}
-
 export type RegistrationConsultationOutcomeEditorProps = {
   subject: RegistrationSubject
   consultation: OpsRegistrationConsultation
   active: boolean
-  classOptions: OpsClassOption[]
   onReload: () => void | Promise<void>
   onWarning: (message: string) => void
   onDirtyChange?: (dirty: boolean) => void
@@ -1284,54 +1277,27 @@ export function RegistrationConsultationOutcomeEditor({
   subject,
   consultation,
   active,
-  classOptions,
   onReload,
   onWarning,
   onDirtyChange,
 }: RegistrationConsultationOutcomeEditorProps): JSX.Element {
-  const [draft, setDraft] = useState<ConsultationOutcomeDraft>({
-    outcome: "enrollment",
-    waitingKind: "current_term_opening",
-    classId: "",
-  })
+  const [outcome, setOutcome] = useState<"enrollment" | "waiting" | "not_registered">(consultation.outcome || "enrollment")
   const [saving, setSaving] = useState(false)
   const [refreshPending, setRefreshPending] = useState(false)
-  const [validationError, setValidationError] = useState("")
-  const sectionRef = useRef<HTMLElement | null>(null)
   const submissionKeys = useSubmissionKeys()
-  const waitingIsValid = draft.outcome !== "waiting"
-    || Boolean(draft.waitingKind && (draft.waitingKind !== "current_class" || draft.classId))
-  useOwnedDirtyState(
-    active && !refreshPending && (
-      draft.outcome !== "enrollment"
-      || draft.waitingKind !== "current_term_opening"
-      || Boolean(draft.classId)
-    ),
-    onDirtyChange,
-  )
+  useOwnedDirtyState(active && !refreshPending && outcome !== (consultation.outcome || "enrollment"), onDirtyChange)
 
   async function submit() {
     if (!active || saving || refreshPending) return
-    if (!waitingIsValid) {
-      setValidationError("대기 종류와 필요한 수업을 선택하세요.")
-      focusFirstInvalid(sectionRef.current, draft.waitingKind ? `[aria-label="${subject} 수업 선택"]` : `[aria-label="${subject} 상담 결과 대기 종류"]`)
-      return
-    }
-    const normalizedDraft = JSON.stringify({
-      consultationId: consultation.id,
-      outcome: draft.outcome,
-      waitingKind: draft.outcome === "waiting" ? draft.waitingKind : "",
-      classId: draft.outcome === "waiting" && draft.waitingKind === "current_class" ? draft.classId : "",
-    })
-    const kind = "consultation-complete"
+    const normalizedDraft = JSON.stringify({ consultationId: consultation.id, outcome })
+    const kind = "consultation-details"
     const requestKey = submissionKeys.getOrCreate(kind, normalizedDraft)
     setSaving(true)
     try {
-      await completeRegistrationConsultation({
+      await saveRegistrationConsultationDetails({
         consultationId: consultation.id,
-        outcome: draft.outcome,
-        waitingKind: draft.outcome === "waiting" ? draft.waitingKind : "",
-        classId: draft.outcome === "waiting" && draft.waitingKind === "current_class" ? draft.classId : "",
+        status: "completed",
+        outcome,
         requestKey,
       })
     } catch (error) {
@@ -1367,10 +1333,10 @@ export function RegistrationConsultationOutcomeEditor({
   }
 
   return (
-    <section ref={sectionRef} data-registration-action-owner={`${subject}:consultation-outcome-save`} className="grid gap-4 rounded-md border bg-background p-3" aria-label={subject + " 상담 결과"}>
+    <section data-registration-action-owner={`${subject}:consultation-outcome-save`} className="grid gap-4 rounded-md border bg-background p-3" aria-label={subject + " 상담 결과"}>
       <div>
         <h4 className="text-sm font-semibold">[{subject}] {consultation.mode === "phone" ? "전화상담" : "방문상담"} 결과</h4>
-        <p className="text-xs text-muted-foreground">완료 일시는 저장 시 자동 기록됩니다. 과목별 다음 단계를 선택하세요.</p>
+        <p className="text-xs text-muted-foreground">상담 기록만 저장합니다. 진행상태와 대기 반은 별도로 정합니다.</p>
       </div>
 
       {refreshPending ? (
@@ -1385,42 +1351,16 @@ export function RegistrationConsultationOutcomeEditor({
           <fieldset className="grid gap-2">
             <legend className="text-sm font-medium">상담 결과</legend>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <Button type="button" aria-label={`${subject} 상담 결과 등록`} variant={draft.outcome === "enrollment" ? "default" : "outline"} aria-pressed={draft.outcome === "enrollment"} disabled={saving} onClick={() => setDraft((current) => ({ ...current, outcome: "enrollment" }))}>등록</Button>
-              <Button type="button" aria-label={`${subject} 상담 결과 대기`} variant={draft.outcome === "waiting" ? "default" : "outline"} aria-pressed={draft.outcome === "waiting"} disabled={saving} onClick={() => setDraft((current) => ({ ...current, outcome: "waiting" }))}>대기</Button>
-              <Button type="button" aria-label={`${subject} 상담 결과 미등록 완료`} className="col-span-2 sm:col-span-1" variant={draft.outcome === "not_registered" ? "default" : "outline"} aria-pressed={draft.outcome === "not_registered"} disabled={saving} onClick={() => setDraft((current) => ({ ...current, outcome: "not_registered" }))}>미등록 완료</Button>
+              <Button type="button" aria-label={`${subject} 상담 결과 등록`} variant={outcome === "enrollment" ? "default" : "outline"} aria-pressed={outcome === "enrollment"} disabled={saving} onClick={() => setOutcome("enrollment")}>등록</Button>
+              <Button type="button" aria-label={`${subject} 상담 결과 대기`} variant={outcome === "waiting" ? "default" : "outline"} aria-pressed={outcome === "waiting"} disabled={saving} onClick={() => setOutcome("waiting")}>대기</Button>
+              <Button type="button" aria-label={`${subject} 상담 결과 미등록`} className="col-span-2 sm:col-span-1" variant={outcome === "not_registered" ? "default" : "outline"} aria-pressed={outcome === "not_registered"} disabled={saving} onClick={() => setOutcome("not_registered")}>미등록</Button>
             </div>
           </fieldset>
-          {draft.outcome === "waiting" ? (
-            <div className="grid gap-2">
-              <Label className="grid gap-1.5">
-                대기 종류
-                <RegistrationSelect
-                  aria-label={`${subject} 상담 결과 대기 종류`}
-                  className="h-9"
-                  value={draft.waitingKind}
-                  placeholder="대기 종류 선택"
-                  options={WAITING_KIND_OPTIONS}
-                  onValueChange={(value) => {
-                    setValidationError("")
-                    setDraft((current) => ({ ...current, waitingKind: value as RegistrationWaitingKind, classId: "" }))
-                  }}
-                  disabled={saving}
-                />
-              </Label>
-              {draft.waitingKind === "current_class" ? (
-                <Label className="grid gap-1.5">
-                  대기 수업
-                  <SubjectClassSelect subject={subject} value={draft.classId} onChange={(classId) => { setValidationError(""); setDraft((current) => ({ ...current, classId })) }} classOptions={classOptions} disabled={saving} />
-                </Label>
-              ) : null}
-            </div>
-          ) : null}
           <div className="flex justify-end">
           <Button type="button" data-registration-primary-action={`${subject}:consultation-outcome-save`} aria-label={`${subject} 상담 결과 저장`} onClick={() => void submit()} disabled={saving}>{saving ? "저장 중" : "상담 결과 저장"}</Button>
           </div>
         </>
       )}
-      {validationError ? <p role="alert" className="text-xs text-destructive">{validationError}</p> : null}
     </section>
   )
 }
