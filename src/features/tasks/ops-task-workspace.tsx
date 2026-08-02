@@ -178,6 +178,7 @@ import type {
 } from "./registration-appointment-calendar-model"
 import {
   buildRegistrationWorkspaceSearchParams,
+  getRegistrationDirectDeepLinkTarget,
   isRegistrationConsultationViewKey,
   normalizeRegistrationConsultationOwnerScope,
   normalizeRegistrationWorkspaceCalendarKind,
@@ -10139,14 +10140,22 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setNotice("")
   }, [syncTaskDeepLink])
 
-  const openRegistrationTrack = useCallback(async (taskId: string, trackId: string) => {
+  const openRegistrationTrack = useCallback(async (
+    taskId: string,
+    trackId: string,
+    options: { allowDirectLoad?: boolean } = {},
+  ) => {
     const task = taskById.get(taskId)
-    if (!task || task.type !== "registration") {
+    if ((!task && !options.allowDirectLoad) || (task && task.type !== "registration")) {
       setMessage("선택한 등록 업무를 찾을 수 없습니다. 목록을 다시 불러오세요.")
       return null
     }
 
     if (isLegacyRegistrationTrackId(trackId)) {
+      if (!task) {
+        setMessage("선택한 등록 업무를 찾을 수 없습니다. 목록을 다시 불러오세요.")
+        return null
+      }
       openDetail(task, trackId)
       syncTaskDeepLink(taskId, null)
       return { task, track: task.registrationTracks?.find((item) => item.id === trackId) || null, detail: null }
@@ -10159,7 +10168,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setDetailOpen(false)
     setRegistrationApplicationDirty(false)
     setRegistrationCaseDetail(null)
-    setSelectedTask(task)
+    setSelectedTask(task || null)
     setSelectedRegistrationTrackId(trackId)
     setSelectedRegistrationAppointmentId(null)
     setRegistrationDetailLoadError("")
@@ -10179,7 +10188,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         canManageRegistrationWorkflow ? ensureRegistrationOptions(true) : Promise.resolve(),
         editorReady,
       ])
-      if (registrationTrackSelectionRef.current !== selectionKey) return null
+      if (
+        registrationTrackSelectionRef.current !== selectionKey
+        || (!task && latestWorkspaceViewerIdRef.current !== currentUserId)
+      ) return null
       const track = detail.tracks.find((item) => item.id === trackId)
       if (!track) {
         setSelectedRegistrationTrackId(null)
@@ -10197,6 +10209,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         return null
       }
       const exactTask = { ...detail.task, registrationTracks: detail.tracks }
+      if (!task) workspaceDataViewerIdRef.current = currentUserId
       setRegistrationDetailLoadError("")
       setRegistrationCaseDetail(detail)
       setSelectedTask(exactTask)
@@ -10220,7 +10233,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       }
       return null
     }
-  }, [canManageRegistrationWorkflow, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, openDetail, syncTaskDeepLink, taskById])
+  }, [canManageRegistrationWorkflow, currentUserId, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, openDetail, syncTaskDeepLink, taskById])
 
   const editRegistrationTrack = useCallback(async (taskId: string, trackId: string) => {
     const selection = await openRegistrationTrack(taskId, trackId)
@@ -10543,6 +10556,24 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       requestRegistrationApplicationClose()
       return
     }
+    const directRegistrationTarget = getRegistrationDirectDeepLinkTarget({
+      viewerId: registrationViewerId,
+      taskId: deepLinkedTaskId,
+      trackId: deepLinkedTrackId,
+      appointmentId: deepLinkedAppointmentId,
+      workspaceReady: Boolean(data && workspaceDataBelongsToCurrentViewer),
+      currentSelectionKey: registrationTrackSelectionRef.current,
+    })
+    if (directRegistrationTarget) {
+      setSelectedRegistrationAppointmentId(null)
+      setSelectedRegistrationTrackId(directRegistrationTarget.trackId)
+      void openRegistrationTrack(
+        directRegistrationTarget.taskId,
+        directRegistrationTarget.trackId,
+        { allowDirectLoad: true },
+      )
+      return
+    }
     if (!data || !workspaceDataBelongsToCurrentViewer) return
     const deepLinkedTask = taskById.get(deepLinkedTaskId)
     if (!deepLinkedTask) {
@@ -10603,7 +10634,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     registrationTrackSelectionRef.current = ""
     setSelectedTask(deepLinkedTask)
     setDetailOpen(true)
-  }, [data, deleteTarget, detailOpen, openRegistrationAppointment, openRegistrationTrack, openWordRetestEditor, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
+  }, [data, deleteTarget, detailOpen, openRegistrationAppointment, openRegistrationTrack, openWordRetestEditor, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, registrationViewerId, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
 
   function handleDetailOpenChange(nextOpen: boolean) {
     setDetailOpen(nextOpen)

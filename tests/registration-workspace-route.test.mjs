@@ -3,6 +3,7 @@ import test from "node:test"
 
 import {
   buildRegistrationWorkspaceSearchParams,
+  getRegistrationDirectDeepLinkTarget,
   isRegistrationConsultationViewKey,
   normalizeRegistrationConsultationOwnerScope,
   normalizeRegistrationWorkspaceCalendarKind,
@@ -18,6 +19,55 @@ test("route values normalize to safe defaults", () => {
   assert.equal(normalizeRegistrationWorkspaceCalendarKind("phone"), "all")
   assert.equal(isRegistrationConsultationViewKey("consultation_requested"), true)
   assert.equal(isRegistrationConsultationViewKey("waiting"), false)
+})
+
+test("explicit canonical track deep links start before the workspace list is ready", () => {
+  const target = getRegistrationDirectDeepLinkTarget({
+    viewerId: "viewer-1",
+    taskId: "task-1",
+    trackId: "track-1",
+    appointmentId: "",
+    workspaceReady: false,
+    currentSelectionKey: "",
+  })
+
+  assert.deepEqual(target, {
+    kind: "track",
+    taskId: "task-1",
+    trackId: "track-1",
+  })
+  assert.equal(getRegistrationDirectDeepLinkTarget({
+    viewerId: "viewer-1",
+    taskId: "task-1",
+    trackId: "track-1",
+    appointmentId: "",
+    workspaceReady: true,
+    currentSelectionKey: "",
+  }), null)
+  assert.equal(getRegistrationDirectDeepLinkTarget({
+    viewerId: "viewer-1",
+    taskId: "task-1",
+    trackId: "legacy:task-1:영어",
+    appointmentId: "",
+    workspaceReady: false,
+    currentSelectionKey: "",
+  }), null)
+  assert.equal(getRegistrationDirectDeepLinkTarget({
+    viewerId: "viewer-1",
+    taskId: "task-1",
+    trackId: "track-1",
+    appointmentId: "appointment-1",
+    workspaceReady: false,
+    currentSelectionKey: "",
+  }), null)
+  assert.equal(getRegistrationDirectDeepLinkTarget({
+    viewerId: "viewer-1",
+    taskId: "task-1",
+    trackId: "track-1",
+    appointmentId: "",
+    workspaceReady: false,
+    currentSelectionKey: "task-1:track-1",
+  }), null)
 })
 
 test("calendar target removes list state and preserves fixture context", () => {

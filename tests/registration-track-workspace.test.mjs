@@ -879,6 +879,9 @@ test("registration deep links preserve task, track, and appointment ids and clea
   assert.match(deepLinkEffect, /const currentSearchParams = new URLSearchParams\(window\.location\.search\)/);
   assert.match(deepLinkEffect, /currentSearchParams\.get\("taskId"\)/);
   assert.match(deepLinkEffect, /currentSearchParams\.get\("trackId"\)/);
+  assert.match(deepLinkEffect, /getRegistrationDirectDeepLinkTarget\(\{/);
+  assert.match(deepLinkEffect, /workspaceReady: Boolean\(data && workspaceDataBelongsToCurrentViewer\)/);
+  assert.match(deepLinkEffect, /\{ allowDirectLoad: true \}/);
   assert.doesNotMatch(deepLinkEffect, /(^|[^.\w])searchParams\.get\(/m);
   assert.match(deepLinkEffect, /setSelectedRegistrationTrackId\(deepLinkedTrackId\)/);
   assert.match(closeHandler, /setDetailOpen\(nextOpen\)/);
