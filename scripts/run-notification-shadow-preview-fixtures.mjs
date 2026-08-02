@@ -500,6 +500,7 @@ function buildFixtures() {
       payloadSchemaVersion: 1,
       payload: {
         task_id: taskId,
+        status: "requested",
         requester_profile_id: requester,
         student_name: "김학생",
         requester_name: "이선생",
@@ -515,7 +516,7 @@ function buildFixtures() {
           before_class: "중1 A",
           after_class: "중1 B",
         },
-        href: `/admin/transfer?taskId=${taskId}`,
+        href: `/admin/transfer?flow=applicant&taskId=${taskId}`,
         targets: [profileTarget(requester)],
       },
     }))
@@ -537,6 +538,7 @@ function buildFixtures() {
       payloadSchemaVersion: 1,
       payload: {
         task_id: taskId,
+        status: "requested",
         student_name: "박학생",
         requester_name: "최선생",
         class_name: "중2 B",
@@ -549,7 +551,7 @@ function buildFixtures() {
       legacy: {
         template: legacyTemplate,
         context: { student_name: "박학생", teacher_name: "최선생", class_name: "중2 B" },
-        href: `/admin/withdrawal?taskId=${taskId}`,
+        href: `/admin/withdrawal?flow=applicant&taskId=${taskId}`,
         targets: [connectionTarget("google_chat.management")],
       },
     }))
