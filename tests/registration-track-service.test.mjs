@@ -585,6 +585,26 @@ function detailRows(table) {
         phone_ready_at: "2026-07-12T01:00:00Z",
         phone_ready_source: "inquiry",
         director: { id: "director-1", name: "강부희" },
+        level_tests: [{
+          id: "test-1", track_id: "track-1", appointment_id: "appointment-1",
+          attempt_number: 1, status: "completed", started_at: "2026-07-13T01:00:00Z",
+          completed_at: "2026-07-13T02:00:00Z", material_link: "https://drive.test/test",
+        }],
+        consultations: [{
+          id: "consultation-1", track_id: "track-1", appointment_id: null,
+          mode: "phone", status: "waiting", director_profile_id: "director-1",
+          ready_at: "2026-07-12T01:00:00Z", ready_source: "level_test_completion",
+          completed_at: null, outcome: null,
+          created_at: "2026-07-12T01:00:00Z", updated_at: "2026-07-12T02:00:00Z",
+        }],
+        enrollments: [{
+          id: "enrollment-1", track_id: "track-1", student_id: null,
+          admission_batch_id: null, class_id: "class-1", textbook_id: null,
+          class_start_date: null, class_start_session_key: null,
+          class_start_session: null, status: "planned", makeedu_registered: false,
+          roster_active: false, roster_released_at: null, roster_release_reason: null,
+          roster_release_source_task_id: null, roster_release_kind: null, sort_order: 0,
+        }],
       }],
       error: null,
     };
@@ -859,7 +879,7 @@ test("a missing child relation after ready invalidates and throws integrity inst
   assert.equal(invalidations, 1);
 });
 
-test("detail loader performs nine scoped reads, maps rows, and shares same-viewer in-flight work", async () => {
+test("detail loader embeds track children in six scoped reads, maps rows, and shares same-viewer in-flight work", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const gate = deferred();
   let first = true;
@@ -888,7 +908,7 @@ test("detail loader performs nine scoped reads, maps rows, and shares same-viewe
   gate.resolve();
   const detail = await left;
 
-  assert.equal(harness.queries.length, 9);
+  assert.equal(harness.queries.length, 6);
   assert.equal(detail.commonRevision, 3);
   assert.equal(detail.tracks[0].directorName, "강부희");
   assert.equal(detail.tracks[0].phoneReadyAt, "2026-07-12T01:00:00Z");
@@ -917,17 +937,19 @@ test("detail loader performs nine scoped reads, maps rows, and shares same-viewe
     ["eq", "claim_active", true],
   ]);
   assert.equal(messages.limit, 1);
-  for (const query of harness.queries.filter((query) => [
+  const tracks = harness.queries.find((query) => query.table === "ops_registration_subject_tracks");
+  assert.match(tracks.columns, /level_tests:ops_registration_level_tests\(\*\)/);
+  assert.match(tracks.columns, /consultations:ops_registration_consultations\(\*\)/);
+  assert.match(tracks.columns, /enrollments:ops_registration_enrollments\(\*\)/);
+  assert.equal(harness.queries.some((query) => [
     "ops_registration_level_tests", "ops_registration_consultations", "ops_registration_enrollments",
-  ].includes(query.table))) {
-    assert.deepEqual(query.filters, [["in", "track_id", ["track-1"]]]);
-  }
-  assert.deepEqual(measures, [{ name: "registration:case-detail", cacheHit: false, queryCount: 9, ok: true }]);
+  ].includes(query.table)), false);
+  assert.deepEqual(measures, [{ name: "registration:case-detail", cacheHit: false, queryCount: 6, ok: true }]);
   assert.ok(performanceCalls.some((entry) => entry[0] === "measure" && entry[1] === "registration:case-detail"));
 
   const cached = await service.loadCaseDetail("task-1", "viewer-1");
   assert.strictEqual(cached, detail);
-  assert.equal(harness.queries.length, 9);
+  assert.equal(harness.queries.length, 6);
   assert.deepEqual(measures.at(-1), {
     name: "registration:case-detail", cacheHit: true, queryCount: 0, ok: true,
   });
@@ -953,11 +975,11 @@ test("detail caches are viewer-scoped, rejected reads are removed, and clear ign
   await service.loadCaseDetail("task-1", "viewer-1");
   const afterViewerOne = harness.queries.length;
   await service.loadCaseDetail("task-1", "viewer-2");
-  assert.equal(harness.queries.length, afterViewerOne + 9);
+  assert.equal(harness.queries.length, afterViewerOne + 6);
 
   service.clearCaches();
   await service.loadCaseDetail("task-1", "viewer-1");
-  assert.equal(harness.queries.length, afterViewerOne + 18);
+  assert.equal(harness.queries.length, afterViewerOne + 12);
 });
 
 test("registration option loader starts five reads, includes schools, excludes students and inactive rows", async () => {

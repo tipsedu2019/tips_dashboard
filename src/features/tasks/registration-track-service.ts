@@ -739,15 +739,15 @@ const PRE_INTAKE_TRACK_SUMMARY_COLUMNS = [
 ].join(",")
 
 const TASK_SCOPED_CASE_READS = [
-  ["ops_registration_subject_tracks", "*,director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)"],
+  ["ops_registration_subject_tracks", [
+    "*",
+    "director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)",
+    "level_tests:ops_registration_level_tests(*)",
+    "consultations:ops_registration_consultations(*)",
+    "enrollments:ops_registration_enrollments(*)",
+  ].join(",")],
   ["ops_registration_appointments", "*"],
   ["ops_registration_admission_batches", "*"],
-] as const
-
-const TRACK_SCOPED_CASE_READS = [
-  ["ops_registration_level_tests", "*"],
-  ["ops_registration_consultations", "*"],
-  ["ops_registration_enrollments", "*"],
 ] as const
 
 const PARENT_DETAIL_COLUMNS = "*,ops_registration_details(*),ops_task_comments(*),ops_task_attachments(*)"
@@ -1733,13 +1733,9 @@ export function createRegistrationTrackService(
         const [parentRow, trackRows, appointmentRows, batchRows, eventRows, messageRows] = phaseOne as [
           Row, Row[], Row[], Row[], Row[], Row[],
         ]
-        const trackIds = trackRows.map((row) => text(value(row, "id"))).filter(Boolean)
-        const [levelTestRows, consultationRows, enrollmentRows] = await Promise.all(
-          TRACK_SCOPED_CASE_READS.map(([table, columns]) => queryRows(
-            client.from(table).select(columns).in("track_id", trackIds),
-            metrics,
-          )),
-        )
+        const levelTestRows = trackRows.flatMap((row) => rows(value(row, "level_tests")))
+        const consultationRows = trackRows.flatMap((row) => rows(value(row, "consultations")))
+        const enrollmentRows = trackRows.flatMap((row) => rows(value(row, "enrollments")))
         const detailRow = firstRow(value(parentRow, "ops_registration_details")) || {}
         const comments = rows(value(parentRow, "ops_task_comments")).map(mapComment)
         const attachments = rows(value(parentRow, "ops_task_attachments")).map(mapAttachment)
