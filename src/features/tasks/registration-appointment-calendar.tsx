@@ -8,10 +8,14 @@ import { Button } from "@/components/ui/button"
 
 import type {
   RegistrationAppointmentCalendarItem,
+  RegistrationAppointmentCalendarKindCounts,
+  RegistrationAppointmentCalendarKindFilter,
   RegistrationAppointmentCalendarRange,
   RegistrationAppointmentCalendarStatus,
 } from "./registration-appointment-calendar-model"
 import {
+  filterRegistrationAppointmentCalendarItems,
+  getRegistrationAppointmentCalendarKindCounts,
   getRegistrationAppointmentCalendarRange,
   getSeoulRegistrationDateKey,
 } from "./registration-appointment-calendar-model"
@@ -35,6 +39,8 @@ type CalendarView = "month" | "week"
 type RegistrationAppointmentCalendarProps = {
   onOpenAppointment: (item: RegistrationAppointmentCalendarItem) => void
   refreshToken?: string | number
+  kindFilter?: RegistrationAppointmentCalendarKindFilter
+  onKindCountsChange?: (counts: RegistrationAppointmentCalendarKindCounts) => void
 }
 
 function dateKeyFromUtcDate(date: Date) {
@@ -100,6 +106,7 @@ function appointmentCard(
       key={item.id}
       type="button"
       data-registration-calendar-item=""
+      data-registration-calendar-kind={item.kind}
       data-registration-calendar-appointment-id={item.appointmentId}
       data-registration-calendar-task-id={item.taskId}
       onClick={() => onOpenAppointment(item)}
@@ -125,6 +132,8 @@ function appointmentCard(
 export function RegistrationAppointmentCalendar({
   onOpenAppointment,
   refreshToken = "",
+  kindFilter = "all",
+  onKindCountsChange,
 }: RegistrationAppointmentCalendarProps) {
   const [view, setView] = useState<CalendarView>("month")
   const [anchorDateKey, setAnchorDateKey] = useState(() => getSeoulRegistrationDateKey())
@@ -137,10 +146,18 @@ export function RegistrationAppointmentCalendar({
   const range = useMemo(() => getRegistrationAppointmentCalendarRange(view, anchorDateKey), [anchorDateKey, view])
   const days = useMemo(() => calendarDays(range, view), [range, view])
   const todayDateKey = getSeoulRegistrationDateKey()
+  const visibleItems = useMemo(
+    () => filterRegistrationAppointmentCalendarItems(items, kindFilter),
+    [items, kindFilter],
+  )
+  const kindCounts = useMemo(
+    () => getRegistrationAppointmentCalendarKindCounts(items),
+    [items],
+  )
 
   const itemsByDate = useMemo(() => {
     const grouped = new Map<string, RegistrationAppointmentCalendarItem[]>()
-    for (const item of items) {
+    for (const item of visibleItems) {
       const dateKey = getSeoulRegistrationDateKey(item.scheduledAt)
       const current = grouped.get(dateKey) || []
       current.push(item)
@@ -150,7 +167,7 @@ export function RegistrationAppointmentCalendar({
       current.sort((left, right) => left.scheduledAt.localeCompare(right.scheduledAt) || left.appointmentId.localeCompare(right.appointmentId))
     }
     return grouped
-  }, [items])
+  }, [visibleItems])
 
   const load = useCallback(async () => {
     const generation = ++loadGenerationRef.current
@@ -182,6 +199,8 @@ export function RegistrationAppointmentCalendar({
   useEffect(() => {
     void load()
   }, [load, refreshToken, retryToken])
+
+  useEffect(() => onKindCountsChange?.(kindCounts), [kindCounts, onKindCountsChange])
 
   function toggleStatus(status: RegistrationAppointmentCalendarStatus) {
     setStatuses((current) => current.includes(status)
@@ -315,7 +334,7 @@ export function RegistrationAppointmentCalendar({
         })}
       </div>
 
-      {!loading && !error && items.length === 0 ? (
+      {!loading && !error && visibleItems.length === 0 ? (
         <div className="rounded-md border border-dashed px-4 py-12 text-center text-sm text-muted-foreground">
           선택한 기간과 상태에 해당하는 등록 예약이 없습니다.
         </div>

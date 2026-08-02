@@ -116,6 +116,43 @@ test("같은 날의 서로 다른 예약 ID를 합치지 않고 명시한 상태
   assert.deepEqual(buildRegistrationAppointmentCalendarItems(rows, { statuses: [] }), []);
 });
 
+test("일정 유형 필터와 건수는 공유 예약을 과목별로 나누지 않는다", async () => {
+  const {
+    buildRegistrationAppointmentCalendarItems,
+    filterRegistrationAppointmentCalendarItems,
+    getRegistrationAppointmentCalendarKindCounts,
+  } = await loadModel();
+  const items = buildRegistrationAppointmentCalendarItems([
+    calendarRow(),
+    calendarRow({
+      appointment_id: "appointment-visit",
+      kind: "visit_consultation",
+      scheduled_at: "2026-07-16T14:00:00+09:00",
+      track_ids: ["track-math"],
+      subjects: ["수학"],
+    }),
+  ]);
+  const originalIds = [
+    "registration-appointment:appointment-shared",
+    "registration-appointment:appointment-visit",
+  ];
+
+  assert.deepEqual(getRegistrationAppointmentCalendarKindCounts(items), {
+    all: 2,
+    level_test: 1,
+    visit_consultation: 1,
+  });
+  const levelTests = filterRegistrationAppointmentCalendarItems(items, "level_test");
+  assert.deepEqual(levelTests.map((item) => item.appointmentId), ["appointment-shared"]);
+  assert.deepEqual(levelTests[0].subjects, ["영어", "수학"]);
+  assert.deepEqual(
+    filterRegistrationAppointmentCalendarItems(items, "visit_consultation").map((item) => item.appointmentId),
+    ["appointment-visit"],
+  );
+  assert.deepEqual(filterRegistrationAppointmentCalendarItems(items, "all").map((item) => item.id), originalIds);
+  assert.deepEqual(items.map((item) => item.id), originalIds);
+});
+
 test("과목과 트랙을 영어, 수학, 과학 레지스트리 순서로 함께 정렬한다", async () => {
   const { buildRegistrationAppointmentCalendarItems } = await loadModel();
   const [item] = buildRegistrationAppointmentCalendarItems([

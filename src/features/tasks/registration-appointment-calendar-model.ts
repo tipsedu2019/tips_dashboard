@@ -5,6 +5,8 @@ import {
 import type { RegistrationSubject } from "./registration-track-service"
 
 export type RegistrationAppointmentCalendarKind = "level_test" | "visit_consultation"
+export type RegistrationAppointmentCalendarKindFilter = "all" | RegistrationAppointmentCalendarKind
+export type RegistrationAppointmentCalendarKindCounts = Record<RegistrationAppointmentCalendarKindFilter, number>
 export type RegistrationAppointmentCalendarStatus = "scheduled" | "completed" | "canceled"
 
 export type RegistrationAppointmentCalendarRow = {
@@ -292,4 +294,23 @@ export function buildRegistrationAppointmentCalendarItems(
       href: buildRegistrationAppointmentHref(taskId, appointmentId),
     }]
   })
+}
+
+export function filterRegistrationAppointmentCalendarItems(
+  items: readonly RegistrationAppointmentCalendarItem[],
+  kind: RegistrationAppointmentCalendarKindFilter,
+): RegistrationAppointmentCalendarItem[] {
+  return kind === "all" ? [...items] : items.filter((item) => item.kind === kind)
+}
+
+export function getRegistrationAppointmentCalendarKindCounts(
+  items: readonly RegistrationAppointmentCalendarItem[],
+): RegistrationAppointmentCalendarKindCounts {
+  const levelTest = items.filter((item) => item.kind === "level_test").length
+  const visitConsultation = items.filter((item) => item.kind === "visit_consultation").length
+  return {
+    all: items.length,
+    level_test: levelTest,
+    visit_consultation: visitConsultation,
+  }
 }
