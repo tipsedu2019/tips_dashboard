@@ -56,17 +56,37 @@ test("explicit canonical track deep links start before the workspace list is rea
     viewerId: "viewer-1",
     taskId: "task-1",
     trackId: "track-1",
+    appointmentId: "",
+    workspaceReady: false,
+    currentSelectionKey: "task-1:track-1",
+  }), null)
+})
+
+test("explicit appointment deep links start before the workspace list is ready", () => {
+  const target = getRegistrationDirectDeepLinkTarget({
+    viewerId: "viewer-1",
+    taskId: "task-1",
+    trackId: "",
     appointmentId: "appointment-1",
     workspaceReady: false,
     currentSelectionKey: "",
-  }), null)
+    currentAppointmentId: "",
+  })
+
+  assert.deepEqual(target, {
+    kind: "appointment",
+    taskId: "task-1",
+    trackId: null,
+    appointmentId: "appointment-1",
+  })
   assert.equal(getRegistrationDirectDeepLinkTarget({
     viewerId: "viewer-1",
     taskId: "task-1",
     trackId: "track-1",
-    appointmentId: "",
+    appointmentId: "appointment-1",
     workspaceReady: false,
     currentSelectionKey: "task-1:track-1",
+    currentAppointmentId: "appointment-1",
   }), null)
 })
 

@@ -19,6 +19,11 @@ export type RegistrationDirectDeepLinkTarget = {
   kind: "track"
   taskId: string
   trackId: string
+} | {
+  kind: "appointment"
+  taskId: string
+  trackId: string | null
+  appointmentId: string
 }
 
 const DETAIL_KEYS = ["taskId", "trackId", "appointmentId"] as const
@@ -48,16 +53,34 @@ export function getRegistrationDirectDeepLinkTarget(input: {
   appointmentId: string
   workspaceReady: boolean
   currentSelectionKey: string
+  currentAppointmentId?: string
 }): RegistrationDirectDeepLinkTarget | null {
   const viewerId = input.viewerId.trim()
   const taskId = input.taskId.trim()
   const trackId = input.trackId.trim()
+  const appointmentId = input.appointmentId.trim()
   if (
     input.workspaceReady
     || !viewerId
     || !taskId
-    || !trackId
-    || input.appointmentId.trim()
+  ) return null
+
+  if (appointmentId) {
+    if (
+      input.currentSelectionKey === `appointment:${taskId}:${appointmentId}`
+      || input.currentAppointmentId?.trim() === appointmentId
+    ) return null
+
+    return {
+      kind: "appointment",
+      taskId,
+      trackId: trackId && !trackId.startsWith("legacy:") ? trackId : null,
+      appointmentId,
+    }
+  }
+
+  if (
+    !trackId
     || trackId.startsWith("legacy:")
     || input.currentSelectionKey === `${taskId}:${trackId}`
   ) return null
