@@ -719,6 +719,7 @@ const TRACK_SUMMARY_COLUMNS = [
   "updated_at",
   "visit_scheduled_at",
   "visit_place",
+  "director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)",
 ].join(",")
 
 const PRE_INTAKE_TRACK_SUMMARY_COLUMNS = [
@@ -736,6 +737,7 @@ const PRE_INTAKE_TRACK_SUMMARY_COLUMNS = [
   "updated_at",
   "visit_scheduled_at",
   "visit_place",
+  "director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)",
 ].join(",")
 
 const TASK_SCOPED_CASE_READS = [
@@ -1651,20 +1653,9 @@ export function createRegistrationTrackService(
             metrics,
           )
         }
-        const directorIds = [...new Set(trackRows
-          .map((row) => nullableText(value(row, "director_profile_id")))
-          .filter((id): id is string => Boolean(id)))]
-        const directorNames = new Map<string, string>()
-        if (directorIds.length > 0) {
-          const profileRows = await queryRows(
-            client.from("profiles").select("id,name").in("id", directorIds),
-            metrics,
-          )
-          for (const row of profileRows) directorNames.set(text(value(row, "id")), text(value(row, "name")))
-        }
         return {
           mode: "ready",
-          tracks: trackRows.map((row) => mapTrack(row, directorNames, false)),
+          tracks: trackRows.map((row) => mapTrack(row)),
         }
       } catch (error) {
         if (missingSchemaError(error)) return invalidateReadyRuntime(error)
