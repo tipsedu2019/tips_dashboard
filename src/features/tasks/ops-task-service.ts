@@ -1577,6 +1577,7 @@ async function readOpsRegistrationParentWorkspaceData(
   }
 
   try {
+    const runtimeProbePromise = probeRegistrationSubjectTrackRuntime()
     metrics.queryCount += 1
     const taskReadPromise = supabase
       .from("ops_tasks")
@@ -1586,7 +1587,7 @@ async function readOpsRegistrationParentWorkspaceData(
         if (error) throw error
         return (data || []) as unknown as Row[]
       })
-    const taskRows = await taskReadPromise
+    const [taskRows] = await Promise.all([taskReadPromise, runtimeProbePromise])
     const registrationRows = embeddedTaskRows(taskRows, "ops_registration_details")
     const registration = singleByTaskId(registrationRows.map((row) => ({
       taskId: text(row.task_id),
