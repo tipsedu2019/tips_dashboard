@@ -721,7 +721,7 @@ test("track summary loader uses the exact safe projection and skips profile look
   });
   assert.equal(harness.queries.length, 1);
   assert.equal(harness.queries[0].columns,
-    "id,task_id,subject,pipeline_status,workflow_status,workflow_revision,workflow_status_entered_at,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,waiting_detail_kind,waiting_detail_class_id,waiting_detail_retake_decision,level_test_retake_decision,migration_review_required,stage_entered_at,phone_ready_at,phone_ready_source,updated_at,visit_scheduled_at,visit_place");
+    "id,task_id,subject,pipeline_status,workflow_status,workflow_revision,workflow_status_entered_at,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,waiting_detail_kind,waiting_detail_class_id,waiting_detail_retake_decision,level_test_retake_decision,migration_review_required,stage_entered_at,phone_ready_at,phone_ready_source,updated_at,visit_scheduled_at,visit_place,director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)");
   assert.deepEqual(harness.queries[0].filters, [["in", "task_id", ["task-1"]]]);
   assert.doesNotMatch(harness.queries[0].columns, /schedule_plan|textbook|student_ids|waitlist_ids/);
   assert.doesNotMatch(harness.queries[0].columns, /consultations|appointments|\*/);
@@ -803,16 +803,20 @@ test("track summary loader does not fall back for an unrelated missing summary c
   assert.equal(harness.queries.length, 1);
 });
 
-test("track summary loader deduplicates directors into one narrow profile lookup", async () => {
+test("track summary loader embeds director names without a profile lookup waterfall", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient({
     queryHandler(query) {
       if (query.table === "profiles") {
         return { data: [{ id: "director-1", name: "강부희" }], error: null };
       }
+      const embedsDirector = query.columns.includes(
+        "director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)",
+      );
       return { data: ["track-1", "track-2"].map((id) => ({
         id, task_id: "task-1", subject: id === "track-1" ? "영어" : "수학",
         pipeline_status: "inquiry", director_profile_id: "director-1",
+        director: embedsDirector ? { id: "director-1", name: "강부희" } : null,
         director_assignment_source: "default", director_assignment_rule_key: "rule",
         waiting_kind: null, level_test_retake_decision: null,
         migration_review_required: false, stage_entered_at: "2026-07-12T01:00:00Z",
@@ -824,10 +828,11 @@ test("track summary loader deduplicates directors into one narrow profile lookup
   const result = await service.loadTrackSummaries(["task-1"], "viewer-1");
 
   assert.deepEqual(result.tracks.map((track) => track.directorName), ["강부희", "강부희"]);
-  assert.equal(harness.queries.length, 2);
-  assert.equal(harness.queries[1].table, "profiles");
-  assert.equal(harness.queries[1].columns, "id,name");
-  assert.deepEqual(harness.queries[1].filters, [["in", "id", ["director-1"]]]);
+  assert.equal(harness.queries.length, 1);
+  assert.match(
+    harness.queries[0].columns,
+    /director:profiles!ops_registration_subject_tracks_director_profile_id_fkey\(id,name\)/,
+  );
 });
 
 test("legacy and maintenance are explicit and legacy summaries remain per subject", async () => {
