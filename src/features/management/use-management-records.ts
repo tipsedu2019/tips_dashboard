@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { supabase } from "@/lib/supabase";
 import {
@@ -12,6 +12,7 @@ import {
   normalizeTextbookManagementRecord,
 } from "./records.js";
 import { buildCurriculumWorkspaceModel } from "../academic/records.js";
+import { loadManagementRowsProgressively } from "./management-progressive-loader.js";
 
 export type ManagementKind = "students" | "classes" | "textbooks";
 
@@ -498,14 +499,147 @@ function attachClassAuditSummary(
   };
 }
 
+function normalizeManagementRows(
+  kind: ManagementKind,
+  sourceRows: Record<string, unknown>[],
+) {
+  const config = CONFIG[kind];
+  return sourceRows
+    .map((row) => config.normalize(row))
+    .sort((left, right) => left.title.localeCompare(right.title, "ko"));
+}
+
+async function enrichManagementRows(
+  kind: ManagementKind,
+  initialRows: Record<string, unknown>[],
+) {
+  let sourceRows = initialRows;
+  let classFormReferences = EMPTY_CLASS_FORM_REFERENCES;
+
+  if (kind === "students") {
+    const [classes, classHistory, textbookSaleLines, textbooks] = await Promise.all([
+      readOptionalTable("classes"),
+      readOptionalTable("student_class_enrollment_history"),
+      readOptionalTable("textbook_sale_lines"),
+      readOptionalTable("textbooks"),
+    ]);
+    const classesById = new Map(
+      classes.map((classRow) => [textValue(classRow.id), classRow]),
+    );
+    const textbooksById = new Map(
+      textbooks.map((textbook) => [textValue(textbook.id), textbook]),
+    );
+    const classHistoryByStudentId = groupRowsByKey(classHistory, "student_id");
+    const textbookHistoryByStudentId = groupRowsByKey(textbookSaleLines, "student_id");
+
+    sourceRows = sourceRows.map((row) =>
+      attachStudentHistorySummaries(
+        attachStudentClassSummaries(row, classesById),
+        classHistoryByStudentId,
+        textbookHistoryByStudentId,
+        classesById,
+        textbooksById,
+      ),
+    );
+  }
+
+  if (kind === "classes") {
+    const [students, classGroups, classGroupMembers, classTerms, textbooks, progressLogs, classAuditLogs, teacherCatalogs, classroomCatalogs, scienceSubjectAreas] = await Promise.all([
+      readOptionalTable("students"),
+      readOptionalTable("class_schedule_sync_groups"),
+      readOptionalTable("class_schedule_sync_group_members", "group_id,class_id,sort_order"),
+      readOptionalTable("class_terms"),
+      readOptionalTable("textbooks"),
+      readOptionalTable("progress_logs"),
+      readOptionalClassAuditLogs(),
+      readOptionalTable("teacher_catalogs", "id,name,subjects,is_visible,sort_order"),
+      readOptionalTable("classroom_catalogs", "id,name,subjects,is_visible,sort_order"),
+      readActiveScienceSubjectAreas(),
+    ]);
+    classFormReferences = { teacherCatalogs, classroomCatalogs, scienceSubjectAreas };
+    const studentsById = new Map(
+      students.map((student) => [textValue(student.id), student]),
+    );
+    const groupsById = new Map(
+      classGroups.map((group) => [textValue(group.id), group]),
+    );
+    const membersByClassId = classGroupMembers.reduce<Map<string, string[]>>((result, member) => {
+      const classId = textValue(member.class_id || member.classId);
+      const groupId = textValue(member.group_id || member.groupId);
+      if (!classId || !groupId) {
+        return result;
+      }
+      const list = result.get(classId) || [];
+      list.push(groupId);
+      result.set(classId, list);
+      return result;
+    }, new Map());
+    const curriculumModel = buildCurriculumWorkspaceModel({
+      classes: sourceRows,
+      classTerms,
+      classGroups,
+      classGroupMembers,
+      textbooks,
+      progressLogs,
+      filters: {},
+    }) as { rows?: Record<string, unknown>[] };
+    const curriculumByClassId = new Map(
+      (curriculumModel.rows || []).map((row) => [textValue(row.id), row]),
+    );
+    const auditLogsByClassId = groupRowsByKey(classAuditLogs, "entity_id");
+
+    sourceRows = sourceRows.map((row) =>
+      ({
+        ...attachClassAuditSummary(
+          attachClassCurriculumSummary(
+            attachClassGroupSummaries(
+              attachClassStudentSummaries(row, studentsById),
+              groupsById,
+              membersByClassId,
+            ),
+            curriculumByClassId,
+          ),
+          auditLogsByClassId,
+        ),
+        available_class_groups: classGroups.map((group) => toClassGroupSummary(group, textValue(group.id))),
+        availableClassGroups: classGroups.map((group) => toClassGroupSummary(group, textValue(group.id))),
+        available_teacher_catalogs: teacherCatalogs,
+        availableTeacherCatalogs: teacherCatalogs,
+        available_classroom_catalogs: classroomCatalogs,
+        availableClassroomCatalogs: classroomCatalogs,
+        available_science_subject_areas: scienceSubjectAreas,
+        availableScienceSubjectAreas: scienceSubjectAreas,
+        available_textbooks: textbooks.map((textbook) => ({
+          id: textValue(textbook.id),
+          title: textValue(textbook.title || textbook.name),
+          subject: textValue(textbook.subject),
+          school_level: textValue(textbook.school_level),
+          grade_level: textValue(textbook.grade_level),
+          school_levels: Array.isArray(textbook.school_levels) ? textbook.school_levels : [],
+          grade_levels: Array.isArray(textbook.grade_levels) ? textbook.grade_levels : [],
+          sub_subject: textValue(textbook.sub_subject),
+          subject_area_key: textValue(textbook.subject_area_key),
+          publisher: textValue(textbook.publisher),
+        })).filter((textbook) => textbook.id && textbook.title),
+      }),
+    );
+  }
+
+  return { sourceRows, classFormReferences };
+}
+
 export function useManagementRecords(kind: ManagementKind) {
   const [rows, setRows] = useState<ManagementRow[]>([]);
   const [classFormReferences, setClassFormReferences] = useState<ClassFormReferences>(EMPTY_CLASS_FORM_REFERENCES);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadGenerationRef = useRef(0);
 
   const load = useCallback(async () => {
     const config = CONFIG[kind];
+    const loadGeneration = loadGenerationRef.current + 1;
+    loadGenerationRef.current = loadGeneration;
+    const isCurrent = () => loadGenerationRef.current === loadGeneration;
 
     if (!supabase) {
       setRows([]);
@@ -522,148 +656,63 @@ export function useManagementRecords(kind: ManagementKind) {
       if (kind !== "classes") {
         setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
       }
-      const { data, error: queryError } = await withTableTimeout(
-        supabase.from(config.table).select("*"),
-        config.table,
-        false,
-      );
+      await loadManagementRowsProgressively({
+        loadPrimaryRows: async () => {
+          const { data, error: queryError } = await withTableTimeout(
+            supabase!.from(config.table).select("*"),
+            config.table,
+            false,
+          );
 
-      if (queryError) {
-        throw queryError;
-      }
-
-      let sourceRows = (data || []) as Record<string, unknown>[];
-
-      if (kind === "students") {
-        const [classes, classHistory, textbookSaleLines, textbooks] = await Promise.all([
-          readOptionalTable("classes"),
-          readOptionalTable("student_class_enrollment_history"),
-          readOptionalTable("textbook_sale_lines"),
-          readOptionalTable("textbooks"),
-        ]);
-        const classesById = new Map(
-          classes.map((classRow) => [textValue(classRow.id), classRow]),
-        );
-        const textbooksById = new Map(
-          textbooks.map((textbook) => [textValue(textbook.id), textbook]),
-        );
-        const classHistoryByStudentId = groupRowsByKey(classHistory, "student_id");
-        const textbookHistoryByStudentId = groupRowsByKey(textbookSaleLines, "student_id");
-
-        sourceRows = sourceRows.map((row) =>
-          attachStudentHistorySummaries(
-            attachStudentClassSummaries(row, classesById),
-            classHistoryByStudentId,
-            textbookHistoryByStudentId,
-            classesById,
-            textbooksById,
-          ),
-        );
-      }
-
-      if (kind === "classes") {
-        const [students, classGroups, classGroupMembers, classTerms, textbooks, progressLogs, classAuditLogs, teacherCatalogs, classroomCatalogs, scienceSubjectAreas] = await Promise.all([
-          readOptionalTable("students"),
-          readOptionalTable("class_schedule_sync_groups"),
-          readOptionalTable("class_schedule_sync_group_members", "group_id,class_id,sort_order"),
-          readOptionalTable("class_terms"),
-          readOptionalTable("textbooks"),
-          readOptionalTable("progress_logs"),
-          readOptionalClassAuditLogs(),
-          readOptionalTable("teacher_catalogs", "id,name,subjects,is_visible,sort_order"),
-          readOptionalTable("classroom_catalogs", "id,name,subjects,is_visible,sort_order"),
-          readActiveScienceSubjectAreas(),
-        ]);
-        setClassFormReferences({ teacherCatalogs, classroomCatalogs, scienceSubjectAreas });
-        const studentsById = new Map(
-          students.map((student) => [textValue(student.id), student]),
-        );
-        const groupsById = new Map(
-          classGroups.map((group) => [textValue(group.id), group]),
-        );
-        const membersByClassId = classGroupMembers.reduce<Map<string, string[]>>((result, member) => {
-          const classId = textValue(member.class_id || member.classId);
-          const groupId = textValue(member.group_id || member.groupId);
-          if (!classId || !groupId) {
-            return result;
+          if (queryError) {
+            throw queryError;
           }
-          const list = result.get(classId) || [];
-          list.push(groupId);
-          result.set(classId, list);
-          return result;
-        }, new Map());
-        const curriculumModel = buildCurriculumWorkspaceModel({
-          classes: sourceRows,
-          classTerms,
-          classGroups,
-          classGroupMembers,
-          textbooks,
-          progressLogs,
-          filters: {},
-        }) as { rows?: Record<string, unknown>[] };
-        const curriculumByClassId = new Map(
-          (curriculumModel.rows || []).map((row) => [textValue(row.id), row]),
-        );
-        const auditLogsByClassId = groupRowsByKey(classAuditLogs, "entity_id");
 
-        sourceRows = sourceRows.map((row) =>
-          ({
-            ...attachClassAuditSummary(
-              attachClassCurriculumSummary(
-                attachClassGroupSummaries(
-                  attachClassStudentSummaries(row, studentsById),
-                  groupsById,
-                  membersByClassId,
-                ),
-                curriculumByClassId,
-              ),
-              auditLogsByClassId,
-            ),
-            available_class_groups: classGroups.map((group) => toClassGroupSummary(group, textValue(group.id))),
-            availableClassGroups: classGroups.map((group) => toClassGroupSummary(group, textValue(group.id))),
-            available_teacher_catalogs: teacherCatalogs,
-            availableTeacherCatalogs: teacherCatalogs,
-            available_classroom_catalogs: classroomCatalogs,
-            availableClassroomCatalogs: classroomCatalogs,
-            available_science_subject_areas: scienceSubjectAreas,
-            availableScienceSubjectAreas: scienceSubjectAreas,
-            available_textbooks: textbooks.map((textbook) => ({
-              id: textValue(textbook.id),
-              title: textValue(textbook.title || textbook.name),
-              subject: textValue(textbook.subject),
-              school_level: textValue(textbook.school_level),
-              grade_level: textValue(textbook.grade_level),
-              school_levels: Array.isArray(textbook.school_levels) ? textbook.school_levels : [],
-              grade_levels: Array.isArray(textbook.grade_levels) ? textbook.grade_levels : [],
-              sub_subject: textValue(textbook.sub_subject),
-              subject_area_key: textValue(textbook.subject_area_key),
-              publisher: textValue(textbook.publisher),
-            })).filter((textbook) => textbook.id && textbook.title),
-          }),
-        );
-      }
-
-      const nextRows = sourceRows
-        .map((row) => config.normalize(row as Record<string, unknown>))
-        .sort((left, right) => left.title.localeCompare(right.title, "ko"));
-
-      setRows(nextRows);
-      setError(null);
+          return (data || []) as Record<string, unknown>[];
+        },
+        enrichRows: kind === "students" || kind === "classes"
+          ? (sourceRows: Record<string, unknown>[]) => enrichManagementRows(kind, sourceRows)
+          : undefined,
+        onPrimaryRows: (sourceRows: Record<string, unknown>[]) => {
+          setRows(normalizeManagementRows(kind, sourceRows));
+          setError(null);
+          setLoading(false);
+        },
+        onEnrichedRows: ({ sourceRows, classFormReferences: nextClassFormReferences }: Awaited<ReturnType<typeof enrichManagementRows>>) => {
+          setRows(normalizeManagementRows(kind, sourceRows));
+          if (kind === "classes") {
+            setClassFormReferences(nextClassFormReferences);
+          }
+          setError(null);
+        },
+        onEnrichmentError: (fetchError: unknown) => {
+          setError(
+            fetchError instanceof Error
+              ? `부가 데이터를 불러오지 못했습니다. ${fetchError.message}`
+              : "부가 데이터를 불러오지 못했습니다.",
+          );
+        },
+        isCurrent,
+      });
     } catch (fetchError) {
-      setRows([]);
-      if (kind === "classes") {
-        setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
+      if (isCurrent()) {
+        setRows([]);
+        if (kind === "classes") {
+          setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
+        }
+        setError(
+          fetchError instanceof Error ? fetchError.message : "알 수 없는 연결 오류가 발생했습니다.",
+        );
+        setLoading(false);
       }
-      setError(
-        fetchError instanceof Error ? fetchError.message : "알 수 없는 연결 오류가 발생했습니다.",
-      );
-    } finally {
-      setLoading(false);
     }
   }, [kind]);
 
   useEffect(() => {
     void load();
+    return () => {
+      loadGenerationRef.current += 1;
+    };
   }, [load]);
 
   const stats = useMemo(() => CONFIG[kind].buildStats(rows), [kind, rows]);
