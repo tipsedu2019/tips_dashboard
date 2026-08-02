@@ -13,6 +13,7 @@ function track({
   id,
   subject = "영어",
   status = "inquiry",
+  workflowStatus,
   directorName = "",
   directorProfileId = null,
   stageEnteredAt = "2026-07-12T00:00:00Z",
@@ -25,6 +26,7 @@ function track({
     taskId: "",
     subject,
     status,
+    workflowStatus,
     directorName,
     directorProfileId,
     stageEnteredAt,
@@ -121,6 +123,102 @@ test("same-view subject tracks remain in one case row and counts increment once"
     payment: 0,
     completed: 0,
   })
+})
+
+test("mine consultation scope keeps only viewer-owned subjects in one case row", () => {
+  const items = buildRegistrationCaseListItems([
+    registrationCase({
+      id: "case-1",
+      registrationTracks: [
+        track({
+          id: "eng",
+          subject: "영어",
+          status: "visit_consultation_scheduled",
+          directorProfileId: "director-me",
+          directorName: "내 책임자",
+          visitScheduledAt: "2026-08-03T10:00:00+09:00",
+        }),
+        track({
+          id: "math",
+          subject: "수학",
+          status: "consultation_waiting",
+          directorProfileId: "director-other",
+          directorName: "다른 책임자",
+          phoneReadyAt: "2026-08-02T09:00:00+09:00",
+        }),
+      ],
+    }),
+  ])
+
+  const [mine] = filterRegistrationCaseListItems(items, "consultation_requested", "", {
+    consultationOwnerId: "director-me",
+  })
+
+  assert.deepEqual(mine.matchingTracks.map((item) => item.trackId), ["eng"])
+  assert.equal(mine.representativeTrack.trackId, "eng")
+  assert.equal(mine.representativeSortValue, "2026-08-03T10:00:00+09:00")
+  assert.deepEqual(
+    filterRegistrationCaseListItems(items, "consultation_requested")[0].matchingTracks.map((item) => item.trackId),
+    ["math", "eng"],
+  )
+})
+
+test("mine consultation scope also filters completed subjects", () => {
+  const items = buildRegistrationCaseListItems([
+    registrationCase({
+      id: "case-1",
+      registrationTracks: [
+        track({ id: "eng", workflowStatus: "consultation_completed", directorProfileId: "director-me" }),
+        track({ id: "math", subject: "수학", workflowStatus: "consultation_completed", directorProfileId: "director-other" }),
+      ],
+    }),
+  ])
+
+  const [mine] = filterRegistrationCaseListItems(items, "consultation_completed", "", {
+    consultationOwnerId: "director-me",
+  })
+
+  assert.deepEqual(mine.matchingTracks.map((item) => item.trackId), ["eng"])
+  assert.equal(mine.representativeTrack.trackId, "eng")
+})
+
+test("mine consultation search excludes other-owner subject and consultation metadata", () => {
+  const items = buildRegistrationCaseListItems([
+    registrationCase({
+      id: "case-1",
+      registrationTracks: [
+        track({ id: "eng", workflowStatus: "consultation_completed", directorProfileId: "director-me", directorName: "내 책임자" }),
+        track({
+          id: "math",
+          subject: "수학",
+          workflowStatus: "consultation_completed",
+          directorProfileId: "director-other",
+          directorName: "검색되면 안 됨",
+          visitPlace: "다른 상담실",
+        }),
+      ],
+    }),
+  ])
+  const options = { consultationOwnerId: "director-me" }
+
+  assert.equal(filterRegistrationCaseListItems(items, "consultation_completed", "수학", options).length, 0)
+  assert.equal(filterRegistrationCaseListItems(items, "consultation_completed", "검색되면 안 됨", options).length, 0)
+  assert.equal(filterRegistrationCaseListItems(items, "consultation_completed", "다른 상담실", options).length, 0)
+  assert.equal(filterRegistrationCaseListItems(items, "consultation_completed", "내 책임자", options).length, 1)
+})
+
+test("mine consultation scope is empty when the viewer ID is unavailable", () => {
+  const items = buildRegistrationCaseListItems([
+    registrationCase({
+      id: "case-1",
+      registrationTracks: [
+        track({ id: "eng", status: "consultation_waiting", directorProfileId: "director-me" }),
+      ],
+    }),
+  ])
+
+  assert.equal(filterRegistrationCaseListItems(items, "consultation_requested", "", { consultationOwnerId: "" }).length, 0)
+  assert.equal(filterRegistrationCaseListItems(items, "consultation_requested", "", { consultationOwnerId: null }).length, 0)
 })
 
 test("completed view projects completed subjects even when another subject remains active", () => {

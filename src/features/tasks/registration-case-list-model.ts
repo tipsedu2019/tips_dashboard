@@ -56,6 +56,10 @@ export type RegistrationCaseListViewItem = RegistrationCaseListItem & {
   representativeSortValue: string
 }
 
+export type RegistrationCaseListFilterOptions = {
+  consultationOwnerId?: string | null
+}
+
 const REGISTRATION_TRACK_VIEW_KEYS: RegistrationWorkflowViewKey[] = [
   "inquiry",
   "level_test",
@@ -133,15 +137,29 @@ export function filterRegistrationCaseListItems(
   items: readonly RegistrationCaseListItem[],
   viewKey: RegistrationWorkflowViewKey,
   query = "",
+  options: RegistrationCaseListFilterOptions = {},
 ): RegistrationCaseListViewItem[] {
   const normalizedViewKey = normalizeRegistrationWorkflowViewKey(viewKey)
   const normalizedQuery = normalizeRegistrationCaseSearchText(query)
+  const ownerScoped = normalizedViewKey === "consultation_requested" || normalizedViewKey === "consultation_completed"
   const matched = items.flatMap((item) => {
-    const sourceMatchedTracks = getRegistrationCaseMatchedTracks(item, normalizedViewKey)
+    const viewTracks = getRegistrationCaseMatchedTracks(item, normalizedViewKey)
+    const sourceMatchedTracks = options.consultationOwnerId === undefined || !ownerScoped
+      ? viewTracks
+      : viewTracks.filter((track) => (
+          Boolean(options.consultationOwnerId)
+          && track.directorProfileId === options.consultationOwnerId
+        ))
     const matchingTracks = normalizedViewKey === "consultation_requested"
       ? [...sourceMatchedTracks].sort(compareConsultationTracks)
       : sourceMatchedTracks
-    if (matchingTracks.length === 0 || !matchesRegistrationCaseSearch(item, matchingTracks, normalizedQuery)) return []
+    const searchSubjectTracks = options.consultationOwnerId === undefined || !ownerScoped
+      ? item.tracks
+      : matchingTracks
+    if (
+      matchingTracks.length === 0
+      || !matchesRegistrationCaseSearch(item, matchingTracks, normalizedQuery, searchSubjectTracks)
+    ) return []
     const representativeTrack = matchingTracks[0]
     return [{
       ...item,
@@ -218,6 +236,7 @@ function matchesRegistrationCaseSearch(
   item: RegistrationCaseListItem,
   matchingTracks: RegistrationCaseListTrackItem[],
   normalizedQuery: string,
+  subjectTracks: readonly RegistrationCaseListTrackItem[] = item.tracks,
 ): boolean {
   if (!normalizedQuery) return true
   const registration = item.task.registration
@@ -229,7 +248,7 @@ function matchesRegistrationCaseSearch(
     registration?.schoolGrade,
     registration?.schoolName,
     registration?.requestNote,
-    ...item.tracks.map((track) => track.subject),
+    ...subjectTracks.map((track) => track.subject),
     ...matchingTracks.flatMap((track) => [track.directorName, track.visitPlace]),
   ].some((value) => normalizeRegistrationCaseSearchText(value).includes(normalizedQuery))
 }
