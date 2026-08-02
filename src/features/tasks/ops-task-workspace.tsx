@@ -184,7 +184,10 @@ import {
   type RegistrationConsultationOwnerScope,
   type RegistrationWorkspaceRouteTarget,
 } from "./registration-workspace-route"
-import { RegistrationApplication } from "./registration-application-lazy"
+import {
+  preloadRegistrationApplication,
+  RegistrationApplication,
+} from "./registration-application-lazy"
 import {
   createRegistrationCase,
   createRegistrationCaseWithInitialWorkflow,
@@ -10169,10 +10172,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     syncTaskDeepLink(taskId, trackId, null, "push")
     setMessage("")
     setNotice("")
+    const editorReady = preloadRegistrationApplication()
     try {
       const [detail] = await Promise.all([
         loadRegistrationCaseForWorkspace(taskId),
         canManageRegistrationWorkflow ? ensureRegistrationOptions(true) : Promise.resolve(),
+        editorReady,
       ])
       if (registrationTrackSelectionRef.current !== selectionKey) return null
       const track = detail.tracks.find((item) => item.id === trackId)
@@ -10258,11 +10263,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     syncTaskDeepLink(taskId, null, appointmentId, "push")
     setMessage("")
     setNotice("")
+    const editorReady = preloadRegistrationApplication()
 
     try {
       const [detail] = await Promise.all([
         loadRegistrationCaseForWorkspace(taskId),
         canManageRegistrationWorkflow ? ensureRegistrationOptions(true) : Promise.resolve(),
+        editorReady,
       ])
       if (registrationTrackSelectionRef.current !== selectionKey) return null
       const appointmentFocus = resolveRegistrationAppointmentFocus(detail, appointmentId, preferredTrackId)
