@@ -257,6 +257,7 @@ function registrationSummaryTrack(taskId, id, subject, status) {
 function createWorkspaceLoaderHarness({
   taskGatesByType = {},
   windowMock,
+  registrationRuntimeProbe = async () => ({ mode: "ready", version: 1 }),
   registrationTrackSummaryFactory = (taskIds) => taskIds.map((taskId) => (
     registrationSummaryTrack(taskId, `track:${taskId}`, "영어", "inquiry")
   )),
@@ -271,6 +272,7 @@ function createWorkspaceLoaderHarness({
     taskSelects: [],
     scopedReads: [],
     trackSummaryCalls: [],
+    registrationRuntimeProbeCalls: 0,
     clearedTrackCaches: 0,
   };
   const taskQueryTypes = [];
@@ -382,6 +384,10 @@ function createWorkspaceLoaderHarness({
           mode: "ready",
           tracks: registrationTrackSummaryFactory(taskIds),
         };
+      },
+      async probeRegistrationSubjectTrackRuntime() {
+        counts.registrationRuntimeProbeCalls += 1;
+        return registrationRuntimeProbe();
       },
       clearRegistrationTrackServiceCaches() {
         counts.clearedTrackCaches += 1;
@@ -835,6 +841,32 @@ test("registration cold load uses the narrow parent projection and loads track s
     viewerId: "viewer-a",
     force: true,
   }]);
+});
+
+test("registration cold load starts the runtime probe while parent rows are still loading", async () => {
+  const runtimeGate = deferred();
+  const harness = createWorkspaceLoaderHarness({
+    registrationRuntimeProbe: () => runtimeGate.promise,
+  });
+  const load = harness.loadOpsTaskWorkspaceData({
+    taskType: "registration",
+    viewerId: "viewer-a",
+    force: true,
+  });
+
+  await Promise.resolve();
+  const startedBeforeEitherResponse = {
+    taskQueries: harness.counts.taskQueries,
+    runtimeProbes: harness.counts.registrationRuntimeProbeCalls,
+  };
+  harness.releaseTasks([]);
+  runtimeGate.resolve({ mode: "ready", version: 1 });
+  await load;
+
+  assert.deepEqual(startedBeforeEitherResponse, {
+    taskQueries: 1,
+    runtimeProbes: 1,
+  });
 });
 
 test("registration parent loading preserves one task with every subject track", async () => {
