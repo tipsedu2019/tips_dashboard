@@ -45,6 +45,9 @@ import {
 import type { RegistrationRuntimeState } from "./registration-runtime-probe"
 import type { RegistrationNotificationProcessingReadiness } from "./registration-appointment-draft"
 import {
+  createRegistrationNotificationProcessingReadinessLoader,
+} from "./registration-notification-processing-readiness"
+import {
   REGISTRATION_WORKFLOW_STATUSES,
   getRegistrationWorkflowStatusFromLegacyTrack,
 } from "./registration-workflow-status.js"
@@ -2845,26 +2848,31 @@ function mapRegistrationProcessingHeartbeat<Kind extends "worker" | "watchdog">(
   return { kind, phase: row.phase, createdAt: row.createdAt }
 }
 
-export async function getRegistrationNotificationProcessingReadiness(
+const loadRegistrationNotificationProcessingReadiness =
+  createRegistrationNotificationProcessingReadinessLoader<RegistrationNotificationProcessingReadiness>(
+    async (token) => {
+      const response = await fetch("/api/notifications/operations?view=registration-processing-readiness", {
+        method: "GET",
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!response.ok) throw new Error("registration_notification_processing_readiness_unavailable")
+      const payload = await response.json() as Record<string, unknown>
+      return {
+        registrationRuntimeMarker: "registration_appointment_reminders_runtime_version",
+        registrationRuntimeVersion: payload.registrationRuntimeVersion,
+        adaptersRuntimeMarker: "notification_workflow_adapters_runtime_version",
+        adaptersRuntimeVersion: payload.adaptersRuntimeVersion,
+        workerHeartbeat: mapRegistrationProcessingHeartbeat(payload.workerHeartbeat, "worker"),
+        watchdogHeartbeat: mapRegistrationProcessingHeartbeat(payload.watchdogHeartbeat, "watchdog"),
+      }
+    },
+  )
+
+export function getRegistrationNotificationProcessingReadiness(
   accessToken: string,
 ): Promise<RegistrationNotificationProcessingReadiness> {
-  const token = String(accessToken || "").trim()
-  if (!token) throw new Error("registration_notification_processing_auth_required")
-  const response = await fetch("/api/notifications/operations?view=registration-processing-readiness", {
-    method: "GET",
-    cache: "no-store",
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!response.ok) throw new Error("registration_notification_processing_readiness_unavailable")
-  const payload = await response.json() as Record<string, unknown>
-  return {
-    registrationRuntimeMarker: "registration_appointment_reminders_runtime_version",
-    registrationRuntimeVersion: payload.registrationRuntimeVersion,
-    adaptersRuntimeMarker: "notification_workflow_adapters_runtime_version",
-    adaptersRuntimeVersion: payload.adaptersRuntimeVersion,
-    workerHeartbeat: mapRegistrationProcessingHeartbeat(payload.workerHeartbeat, "worker"),
-    watchdogHeartbeat: mapRegistrationProcessingHeartbeat(payload.watchdogHeartbeat, "watchdog"),
-  }
+  return loadRegistrationNotificationProcessingReadiness(accessToken)
 }
 
 let registrationTrackMutationCacheInvalidator: (() => void) | null = null
