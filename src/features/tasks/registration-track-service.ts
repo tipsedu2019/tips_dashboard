@@ -1738,31 +1738,38 @@ export function createRegistrationTrackService(
     const requestEpoch = detailEpochs.get(cacheKey) || 0
 
     const request = measure("registration:case-detail", false, async (metrics) => {
+      const phaseOneRequest = Promise.all([
+        queryOne(
+          client.from("ops_tasks").select(PARENT_DETAIL_COLUMNS).eq("id", safeTaskId).single(),
+          metrics,
+        ),
+        ...TASK_SCOPED_CASE_READS.map(([table, columns]) => queryRows(
+          client.from(table).select(columns).eq("task_id", safeTaskId),
+          metrics,
+        )),
+        queryRows(
+          client.from("ops_task_events").select(EVENT_COLUMNS).eq("task_id", safeTaskId),
+          metrics,
+        ),
+        queryRows(
+          client.from("ops_registration_messages")
+            .select(MESSAGE_COLUMNS)
+            .eq("task_id", safeTaskId)
+            .eq("template_key", "admission_application")
+            .eq("claim_active", true)
+            .limit(1),
+          metrics,
+        ),
+      ])
+        .then(
+          (phaseOne) => ({ ok: true as const, phaseOne }),
+          (error) => ({ ok: false as const, error }),
+        )
       await requireReadyRuntime()
       try {
-        const phaseOne = await Promise.all([
-          queryOne(
-            client.from("ops_tasks").select(PARENT_DETAIL_COLUMNS).eq("id", safeTaskId).single(),
-            metrics,
-          ),
-          ...TASK_SCOPED_CASE_READS.map(([table, columns]) => queryRows(
-            client.from(table).select(columns).eq("task_id", safeTaskId),
-            metrics,
-          )),
-          queryRows(
-            client.from("ops_task_events").select(EVENT_COLUMNS).eq("task_id", safeTaskId),
-            metrics,
-          ),
-          queryRows(
-            client.from("ops_registration_messages")
-              .select(MESSAGE_COLUMNS)
-              .eq("task_id", safeTaskId)
-              .eq("template_key", "admission_application")
-              .eq("claim_active", true)
-              .limit(1),
-            metrics,
-          ),
-        ])
+        const phaseOneResult = await phaseOneRequest
+        if (!phaseOneResult.ok) throw phaseOneResult.error
+        const phaseOne = phaseOneResult.phaseOne
         const [parentRow, trackRows, appointmentRows, batchRows, eventRows, messageRows] = phaseOne as [
           Row, Row[], Row[], Row[], Row[], Row[],
         ]
