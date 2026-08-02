@@ -880,7 +880,7 @@ test("registration workspace replaces Notion registration management with one ap
     '{ key: "enrollment", label: "등록 신청" }',
     '{ key: "payment", label: "수납 진행 중" }',
     '{ key: "completed", label: "완료" }',
-    'aria-label={isTodoWorkspace ? "할 일 목록" : isWordRetestWorkspace ? "단어 재시험 역할" : isRegistrationWorkspace ? "등록 흐름" : isWithdrawalWorkspace ? "퇴원 흐름" : isTransferWorkspace ? "전반 흐름" : `${workspaceLabel} 보기`}',
+    'isRegistrationWorkspace ? registrationMode === "calendar" ? "등록 예약 종류" : "등록 흐름"',
     "const workspaceSurfaceClassName = isWithdrawalWorkspace || isTransferWorkspace || isRegistrationWorkspace",
     "setRegistrationNotificationOpen(true)",
     'isRegistrationWorkspace ? "등록 알림 설정"',
@@ -893,12 +893,12 @@ test("registration workspace replaces Notion registration management with one ap
     'data-testid="registration-case-desktop-list"',
     'aria-label="등록 신청 데이터테이블"',
     "RegistrationCaseActions",
-    "item.tracks.map",
     "item.matchingTracks.map",
     "getRegistrationCaseTrackTimeLabel(track)",
     "REGISTRATION_CASE_INITIAL_RENDER_LIMIT = 40",
     "key={item.taskId}",
   ]);
+  assert.doesNotMatch(registrationTableSource, /item\.tracks\.map/);
 
   assertIncludesAll(workspaceSource, [
     'label="진행상태"',
@@ -1036,7 +1036,9 @@ test("registration exposes eight ordered work tabs with case rows retaining subj
     'level_test_requested: "레벨테스트 신청"',
     'consultation_requested: "상담 신청"',
     'consultation_completed: "상담 완료"',
-    'onAction(item.taskId, track.trackId, "complete_consultation")',
+    "RegistrationTrackStatusControl",
+    "getRegistrationInlineWorkflowStatusOptions",
+    "onStatusChange(track, value as OpsRegistrationWorkflowStatus)",
   ]);
 });
 
@@ -1050,7 +1052,10 @@ test("registration toolbar keeps search without a manual or refresh button", asy
   assert.doesNotMatch(workspaceSource, /aria-label="학년 필터"|allLabel="학년 전체"|selectedGradeFilter|appliedGradeFilter/);
   assert.match(workspaceSource, /const hasQuery = !isWithdrawalWorkspace && !isTransferWorkspace && query\.trim\(\)\.length > 0/);
   assert.match(workspaceSource, /const showSearch = isRegistrationWorkspace\s*\? registrationMode === "list"\s*:/);
-  assert.match(workspaceSource, /filterRegistrationCaseListItems\(registrationCaseItems, registrationView, deferredQuery\)/);
+  assert.match(
+    workspaceSource,
+    /filterRegistrationCaseListItems\(\s*registrationCaseItems,\s*registrationView,\s*deferredQuery,\s*\{ consultationOwnerId \},\s*\)/,
+  );
   const registrationToolbar = workspaceSource.slice(
     workspaceSource.indexOf("{isRegistrationWorkspace && ("),
     workspaceSource.indexOf("{!isWordRetestWorkspace && !isRegistrationWorkspace", workspaceSource.indexOf("{isRegistrationWorkspace && (")),
@@ -1089,9 +1094,9 @@ test("canonical registration detail shows a retry state instead of a permanent l
 
 test("registration list and calendar navigation clear stale detail notices", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const modeSource = source.slice(
-    source.indexOf("  const syncRegistrationMode"),
-    source.indexOf("  function handleRegistrationViewTabKeyDown"),
+  const clearSource = source.slice(
+    source.indexOf("  const clearRegistrationWorkspaceSelection"),
+    source.indexOf("  const replaceRegistrationWorkspaceSearch"),
   );
   const editSource = source.slice(
     source.indexOf("  const editRegistrationTrack"),
@@ -1102,7 +1107,16 @@ test("registration list and calendar navigation clear stale detail notices", asy
     source.indexOf("  const openRegistrationCalendarItem"),
   );
 
-  assert.match(modeSource, /setNotice\(""\)/);
+  assert.match(clearSource, /setNotice\(""\)/);
+  for (const [start, end] of [
+    ["  const syncRegistrationView", "  const syncRegistrationConsultationOwnerScope"],
+    ["  const syncRegistrationConsultationOwnerScope", "  const syncRegistrationCalendarKind"],
+    ["  const syncRegistrationCalendarKind", "  const syncRegistrationMode"],
+    ["  const syncRegistrationMode", "  function handleRegistrationViewTabKeyDown"],
+  ]) {
+    const navigationSource = source.slice(source.indexOf(start), source.indexOf(end));
+    assert.match(navigationSource, /clearRegistrationWorkspaceSelection\(\)/, `${start.trim()} must clear stale selection notices`);
+  }
   assert.match(appointmentSource, /setNotice\(""\)/);
   assert.doesNotMatch(editSource, /과목별 상세를 확인하세요/);
   assert.doesNotMatch(source, /상담 결과 입력을 계속 진행하세요/);
@@ -1146,7 +1160,7 @@ test("등록 예약 달력은 목록 흐름과 분리되고 정확한 예약 딥
     "item.href",
     "initialAppointmentId={selectedRegistrationAppointmentId}",
     "onAppointmentOpenChange={handleRegistrationAppointmentOpenChange}",
-    'routeParams.set("view", "calendar")',
+    'replaceRegistrationWorkspaceSearch({ mode: "calendar", calendarKind })',
     'role="group" aria-label="등록 화면 보기"',
   ]);
   assert.match(
@@ -1227,14 +1241,14 @@ test("registration rows expose process-specific columns and safe deletion", asyn
 
   assertIncludesAll(tableSource, [
     "REGISTRATION_CASE_VIEW_COLUMNS",
-    'inquiry: ["학생", "학년 · 학교", "연락처", "문의 과목 · 일시"]',
-    'level_test: ["학생 · 과목", "예약 일시", "장소", "진행 · 결과"]',
-    'consultation_requested: ["학생 · 과목", "상담 유형", "책임자", "기준 · 예약 일시", "장소"]',
-    'consultation_completed: ["학생 · 과목", "상담 상태", "책임자", "완료 일시"]',
-    'waiting: ["학생 · 과목", "대기 종류", "책임자", "단계 진입일시"]',
-    'enrollment: ["학생 · 과목", "등록 상태", "수업 시작", "교재 준비"]',
-    'payment: ["학생 · 과목", "수납 상태", "수업 시작", "교재 준비"]',
-    'completed: ["학생 · 과목", "완료 상태", "책임자", "완료 일시"]',
+    'inquiry: ["학생", "진행상태", "학년 · 학교", "연락처", "문의 일시"]',
+    'level_test: ["학생", "진행상태", "예약 일시", "장소", "결과"]',
+    'consultation_requested: ["학생", "진행상태", "책임자", "기준 · 예약 일시", "장소"]',
+    'consultation_completed: ["학생", "진행상태", "책임자", "완료 일시"]',
+    'waiting: ["학생", "진행상태", "책임자", "단계 진입일시"]',
+    'enrollment: ["학생", "진행상태", "수업 시작", "교재 준비"]',
+    'payment: ["학생", "진행상태", "수업 시작", "교재 준비"]',
+    'completed: ["학생", "진행상태", "책임자", "완료 일시"]',
     "onDelete",
     "삭제",
   ]);
@@ -1333,7 +1347,8 @@ test("registration alone uses the application list while neighboring operation t
   assert.match(workspaceSource, /isTransferWorkspace \? \([\s\S]*?<TransferDataTable/);
   assert.match(workspaceSource, /onOpen=\{\(taskId, trackId\) => void openRegistrationTrack\(taskId, trackId\)\}/);
   assert.match(workspaceSource, /onEdit=\{\(taskId, trackId\) => void editRegistrationTrack\(taskId, trackId\)\}/);
-  assert.match(workspaceSource, /onAction=\{\(taskId, trackId, action\) => void handleRegistrationTrackAction\(taskId, trackId, action\)\}/);
+  assert.match(workspaceSource, /onStatusChange=\{\(track, workflowStatus\) => void handleRegistrationWorkflowStatusChange\(track, workflowStatus\)\}/);
+  assert.doesNotMatch(workspaceSource, /handleRegistrationTrackAction|RegistrationCaseListAction/);
 });
 
 test("local task mutations invalidate stale background workspace reloads before committing state", async () => {
@@ -2026,9 +2041,9 @@ test("registration browser-back closure clears canonical state and restores the 
   const cancelStart = source.indexOf("function cancelFormCloseConfirmation");
   const cancelEnd = source.indexOf("\n  function handleFormOpenChange", cancelStart);
   const cancel = source.slice(cancelStart, cancelEnd);
-  const quickActionStart = source.indexOf("const handleRegistrationTrackAction = useCallback");
-  const quickActionEnd = source.indexOf("\n  const closeRegistrationApplicationHost", quickActionStart);
-  const quickAction = source.slice(quickActionStart, quickActionEnd);
+  const openTrackStart = source.indexOf("const openRegistrationTrack = useCallback");
+  const openTrackEnd = source.indexOf("\n  const editRegistrationTrack", openTrackStart);
+  const openTrack = source.slice(openTrackStart, openTrackEnd);
 
   assert.match(source, /getOpsTaskHistoryMutation/);
   assert.match(source, /window\.history\.pushState/);
@@ -2036,7 +2051,7 @@ test("registration browser-back closure clears canonical state and restores the 
   assert.match(source, /window\.history\.forward\(\)/);
   assert.match(source, /addEventListener\("popstate"/);
   assert.match(source, /addEventListener\("beforeunload"/);
-  assert.match(quickAction, /syncTaskDeepLink\(taskId, trackId, null, "push"\)/);
+  assert.match(openTrack, /syncTaskDeepLink\(taskId, trackId, null, "push"\)/);
   assert.doesNotMatch(deepLink, /if \(!deepLinkedTaskId \|\| !data/);
   assert.match(deepLink, /if \(!deepLinkedTaskId\) \{[\s\S]*?\["loading_detail", "detail", "refresh_failed"\]\.includes\(registrationApplicationHost\.kind\)/);
   assert.match(deepLink, /registrationCloseDeepLinkRestoreRef\.current = \{[\s\S]*?taskId: registrationApplicationHost\.taskId[\s\S]*?focusTrackId: registrationApplicationHost\.focusTrackId[\s\S]*?appointmentId: registrationApplicationHost\.appointmentId/);
@@ -2164,24 +2179,32 @@ test("canonical registration host owns notification and error live regions witho
 });
 
 test("registration application rows retain every subject during class sync", async () => {
-  const [workspaceSource, serviceSource, caseListSource] = await Promise.all([
+  const [workspaceSource, serviceSource, caseListSource, caseListModelSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/ops-task-service.ts"),
     readSource("src/features/tasks/registration-case-list.tsx"),
+    readSource("src/features/tasks/registration-case-list-model.ts"),
   ]);
 
   assertIncludesAll(workspaceSource, [
     "buildRegistrationCaseListItems(scopedTasks)",
-    "filterRegistrationCaseListItems(registrationCaseItems, registrationView, deferredQuery)",
+    "filterRegistrationCaseListItems(",
+    "{ consultationOwnerId }",
     'form.type !== "registration" || !form.subject',
   ]);
+  assertIncludesAll(caseListModelSource, [
+    "tracks: (task.registrationTracks || []).map",
+    "const viewTracks = getRegistrationCaseMatchedTracks(item, normalizedViewKey)",
+    "matchingTracks",
+    "representativeTrack",
+  ]);
   assertIncludesAll(caseListSource, [
-    "item.tracks.map",
     "item.matchingTracks.map",
     "item.representativeTrack.trackId",
     "track.trackId",
     "track.subject",
   ]);
+  assert.doesNotMatch(caseListSource, /item\.tracks\.map/);
   assertIncludesAll(serviceSource, [
     "assertRegistrationInquiryBaseReady",
     "assertRegistrationInquiryBaseReady(input)",
@@ -2759,7 +2782,7 @@ test("withdrawal workspace follows request processing and completed queues", asy
   );
   assert.match(
     source,
-    /aria-label=\{isTodoWorkspace \? "할 일 목록" : isWordRetestWorkspace \? "단어 재시험 역할" : isRegistrationWorkspace \? "등록 흐름" : isWithdrawalWorkspace \? "퇴원 흐름" : isTransferWorkspace \? "전반 흐름" : `\$\{workspaceLabel\} 보기`\}/,
+    /isWithdrawalWorkspace \? "퇴원 흐름"/,
   );
   assertIncludesAll(source, [
     "const workspaceSurfaceClassName = isWithdrawalWorkspace || isTransferWorkspace",

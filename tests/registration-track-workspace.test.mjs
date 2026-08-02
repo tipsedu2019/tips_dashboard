@@ -825,7 +825,10 @@ test("workspace derives tab counts from application cases before filtering the s
   assert.match(source, /const registrationCaseItems = useMemo/);
   assert.match(source, /getRegistrationCaseTabCounts\(registrationCaseItems\)/);
   assert.match(source, /const visibleRegistrationCaseItems = useMemo/);
-  assert.match(source, /filterRegistrationCaseListItems\(registrationCaseItems, registrationView, deferredQuery\)/);
+  assert.match(
+    source,
+    /filterRegistrationCaseListItems\(\s*registrationCaseItems,\s*registrationView,\s*deferredQuery,\s*\{ consultationOwnerId \},\s*\)/,
+  );
   assert.match(source, /<RegistrationCaseList/);
   assert.match(source, /items=\{visibleRegistrationCaseItems\}/);
   assert.match(source, /viewerId=\{registrationViewerId\}/);
