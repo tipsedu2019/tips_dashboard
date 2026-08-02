@@ -184,7 +184,7 @@ import {
   type RegistrationConsultationOwnerScope,
   type RegistrationWorkspaceRouteTarget,
 } from "./registration-workspace-route"
-import { RegistrationApplication } from "./registration-track-editor"
+import { RegistrationApplication } from "./registration-application-lazy"
 import {
   createRegistrationCase,
   createRegistrationCaseWithInitialWorkflow,
