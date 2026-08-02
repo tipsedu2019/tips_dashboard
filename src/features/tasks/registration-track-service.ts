@@ -1637,18 +1637,11 @@ export function createRegistrationTrackService(
     const requestEpoch = summaryEpochs.get(cacheKey) || 0
 
     const request = measure<RegistrationTrackSummaryLoadResult>(measureName, false, async (metrics) => {
-      const runtime = await probeRuntime()
-      if (runtime.mode !== "ready" || runtime.version !== 1) {
-        return { mode: runtime.mode, tracks: [] } as RegistrationTrackSummaryLoadResult
-      }
-      if (normalizedTaskIds?.length === 0) return { mode: "ready", tracks: [] }
-
-      try {
-        let trackRows: Row[]
+      const loadTrackRows = async () => {
         try {
           const summaryQuery = client.from("ops_registration_subject_track_summaries")
             .select(TRACK_SUMMARY_COLUMNS)
-          trackRows = await queryRows(
+          return await queryRows(
             normalizedTaskIds === null
               ? summaryQuery
               : summaryQuery.in("task_id", normalizedTaskIds),
@@ -1658,12 +1651,34 @@ export function createRegistrationTrackService(
           if (!missingTrackSummaryOptionalColumnError(error)) throw error
           const fallbackQuery = client.from("ops_registration_subject_track_summaries")
             .select(PRE_INTAKE_TRACK_SUMMARY_COLUMNS)
-          trackRows = await queryRows(
+          return queryRows(
             normalizedTaskIds === null
               ? fallbackQuery
               : fallbackQuery.in("task_id", normalizedTaskIds),
             metrics,
           )
+        }
+      }
+      const eagerWorkspaceRows = normalizedTaskIds === null
+        ? loadTrackRows().then(
+            (trackRows) => ({ ok: true as const, trackRows }),
+            (error) => ({ ok: false as const, error }),
+          )
+        : null
+      const runtime = await probeRuntime()
+      if (runtime.mode !== "ready" || runtime.version !== 1) {
+        return { mode: runtime.mode, tracks: [] } as RegistrationTrackSummaryLoadResult
+      }
+      if (normalizedTaskIds?.length === 0) return { mode: "ready", tracks: [] }
+
+      try {
+        let trackRows: Row[]
+        if (eagerWorkspaceRows) {
+          const result = await eagerWorkspaceRows
+          if (!result.ok) throw result.error
+          trackRows = result.trackRows
+        } else {
+          trackRows = await loadTrackRows()
         }
         return {
           mode: "ready",
