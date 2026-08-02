@@ -10248,9 +10248,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     taskId: string,
     appointmentId: string,
     preferredTrackId: string | null = null,
+    options: { allowDirectLoad?: boolean } = {},
   ) => {
     const task = taskById.get(taskId)
-    if (!task || task.type !== "registration") {
+    if ((!task && !options.allowDirectLoad) || (task && task.type !== "registration")) {
       setMessage("선택한 등록 예약을 찾을 수 없습니다. 달력을 다시 불러오세요.")
       return null
     }
@@ -10262,7 +10263,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setFormOpen(false)
     setDetailOpen(false)
     setRegistrationApplicationDirty(false)
-    setSelectedTask(task)
+    setSelectedTask(task || null)
     setSelectedRegistrationTrackId(null)
     setSelectedRegistrationAppointmentId(appointmentId)
     setRegistrationCaseDetail(null)
@@ -10284,7 +10285,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         canManageRegistrationWorkflow ? ensureRegistrationOptions(true) : Promise.resolve(),
         editorReady,
       ])
-      if (registrationTrackSelectionRef.current !== selectionKey) return null
+      if (
+        registrationTrackSelectionRef.current !== selectionKey
+        || (!task && latestWorkspaceViewerIdRef.current !== currentUserId)
+      ) return null
       const appointmentFocus = resolveRegistrationAppointmentFocus(detail, appointmentId, preferredTrackId)
       if (!appointmentFocus) {
         setSelectedRegistrationAppointmentId(null)
@@ -10297,6 +10301,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       }
       const { appointment, focusTrackId: nextTrackId } = appointmentFocus
       const exactTask = { ...detail.task, registrationTracks: detail.tracks }
+      if (!task) workspaceDataViewerIdRef.current = currentUserId
       setRegistrationDetailLoadError("")
       registrationTrackSelectionRef.current = `${taskId}:${nextTrackId}`
       setRegistrationCaseDetail(detail)
@@ -10324,7 +10329,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       }
       return null
     }
-  }, [canManageRegistrationWorkflow, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, syncTaskDeepLink, taskById])
+  }, [canManageRegistrationWorkflow, currentUserId, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, syncTaskDeepLink, taskById])
 
   const openRegistrationCalendarItem = useCallback((item: RegistrationAppointmentCalendarItem) => {
     const canonicalUrl = new URL(item.href, window.location.origin)
@@ -10563,8 +10568,18 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       appointmentId: deepLinkedAppointmentId,
       workspaceReady: Boolean(data && workspaceDataBelongsToCurrentViewer),
       currentSelectionKey: registrationTrackSelectionRef.current,
+      currentAppointmentId: selectedRegistrationAppointmentId || "",
     })
     if (directRegistrationTarget) {
+      if (directRegistrationTarget.kind === "appointment") {
+        void openRegistrationAppointment(
+          directRegistrationTarget.taskId,
+          directRegistrationTarget.appointmentId,
+          directRegistrationTarget.trackId,
+          { allowDirectLoad: true },
+        )
+        return
+      }
       setSelectedRegistrationAppointmentId(null)
       setSelectedRegistrationTrackId(directRegistrationTarget.trackId)
       void openRegistrationTrack(
