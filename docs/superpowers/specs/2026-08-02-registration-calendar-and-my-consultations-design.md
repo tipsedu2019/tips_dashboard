@@ -2,7 +2,7 @@
 
 **작성일:** 2026-08-02
 
-**상태:** 사용자 문서 검토 대기
+**상태:** 승인
 
 **관련 설계:** `2026-07-15-registration-appointments-reminders-design.md`
 
