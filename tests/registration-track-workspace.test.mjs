@@ -1323,6 +1323,35 @@ test("workspace preloads the unified editor while canonical subject detail data 
   assert.match(source, /admissionActions=/)
 })
 
+test("canonical detail renders before option catalogs begin loading", async () => {
+  const source = await readWorkspaceSource()
+  const blocks = [
+    source.slice(
+      source.indexOf("const openRegistrationTrack = useCallback"),
+      source.indexOf("\n  const editRegistrationTrack"),
+    ),
+    source.slice(
+      source.indexOf("const openRegistrationAppointment = useCallback"),
+      source.indexOf("\n  const openRegistrationCalendarItem"),
+    ),
+  ]
+
+  for (const block of blocks) {
+    assert.match(
+      block,
+      /const \[detail\] = await Promise\.all\(\[\s*loadRegistrationCaseForWorkspace\(taskId\),\s*editorReady,\s*\]\)/,
+    )
+    const awaitedLoads = block.match(
+      /const \[detail\] = await Promise\.all\(\[([\s\S]*?)\]\)/,
+    )?.[1] || ""
+    assert.doesNotMatch(awaitedLoads, /ensureRegistrationOptions/)
+    const detailHostAt = block.lastIndexOf('kind: "detail"')
+    const optionsAt = block.indexOf("void ensureRegistrationOptions(true)", detailHostAt)
+    assert.ok(detailHostAt >= 0, "canonical detail host must be committed")
+    assert.ok(optionsAt > detailHostAt, "option catalogs must start after the detail host is committed")
+  }
+})
+
 test("ready-mode creation uses one guarded initial-workflow RPC without a director follow-up", async () => {
   const source = await readWorkspaceSource()
   assert.match(source, /probeRegistrationSubjectTrackRuntime/)

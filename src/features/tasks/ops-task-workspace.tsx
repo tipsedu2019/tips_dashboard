@@ -10185,7 +10185,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     try {
       const [detail] = await Promise.all([
         loadRegistrationCaseForWorkspace(taskId),
-        canManageRegistrationWorkflow ? ensureRegistrationOptions(true) : Promise.resolve(),
         editorReady,
       ])
       if (
@@ -10219,6 +10218,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         focusTrackId: track.id,
         appointmentId: null,
       })
+      if (canManageRegistrationWorkflow) void ensureRegistrationOptions(true)
       return { task: exactTask, track, detail }
     } catch {
       if (registrationTrackSelectionRef.current === selectionKey) {
@@ -10282,7 +10282,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     try {
       const [detail] = await Promise.all([
         loadRegistrationCaseForWorkspace(taskId),
-        canManageRegistrationWorkflow ? ensureRegistrationOptions(true) : Promise.resolve(),
         editorReady,
       ])
       if (
@@ -10314,6 +10313,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         focusTrackId: nextTrackId,
         appointmentId,
       })
+      if (canManageRegistrationWorkflow) void ensureRegistrationOptions(true)
       syncTaskDeepLink(taskId, nextTrackId, appointmentId)
       return { task: exactTask, detail, appointment, trackId: nextTrackId }
     } catch {
