@@ -22,7 +22,6 @@ import {
   getLatestRegistrationLevelTestActivityIds,
   getRegistrationAppointmentEditMode,
   getRegistrationAppointmentPayloadTrackIds,
-  getRegistrationAppointmentReportedTrackIds,
 } from "./registration-track-model.js"
 import {
   REGISTRATION_LEVEL_TEST_PLACES,
@@ -42,7 +41,6 @@ import {
   type RegistrationNotificationProcessingReadiness,
 } from "./registration-appointment-draft"
 import {
-  cancelRegistrationAppointment,
   closeRegistrationLevelTestTrack,
   createRegistrationMutationRequestKey,
   getRegistrationNotificationProcessingReadiness,
@@ -72,14 +70,13 @@ export type RegistrationAppointmentEditorProps = {
   onSaved: (saved: RegistrationAppointmentMutationResponse) => void | Promise<void>
   onWarning: (message: string) => void
   onReload?: () => void | Promise<void>
-  onClose?: () => void
-  onRebook?: (trackId: string) => void
   embedded?: boolean
+  subjectScoped?: boolean
+  visibleTrackId?: string
   notificationToken?: string
   notificationProcessingReadiness?: RegistrationNotificationProcessingReadiness | null
   onDirtyChange?: (dirty: boolean) => void
   onTrackDirtyChange?: (trackId: string, dirty: boolean) => void
-  onParticipantTrackIdsChange?: (trackIds: readonly string[]) => void
 }
 
 type SubmissionKeys = {
@@ -103,7 +100,7 @@ type PersistedConflictDraft = {
 }
 
 type PendingAppointmentConfirmation = {
-  action: "save" | "cancel"
+  action: "save"
   message: string
 }
 
@@ -193,14 +190,13 @@ export function RegistrationAppointmentEditor({
   onSaved,
   onWarning,
   onReload,
-  onClose,
-  onRebook,
   embedded = false,
+  subjectScoped = false,
+  visibleTrackId = "",
   notificationToken = "",
   notificationProcessingReadiness = null,
   onDirtyChange,
   onTrackDirtyChange,
-  onParticipantTrackIdsChange,
 }: RegistrationAppointmentEditorProps) {
   const conflictScopeKey = `${taskId}:${kind}`
   const submissionKeys = useSubmissionKeys(conflictScopeKey)
@@ -216,7 +212,6 @@ export function RegistrationAppointmentEditor({
       : []
   ), [appointment, matchingActivities])
   const editMode = getRegistrationAppointmentEditMode(currentActivities)
-  const participantsLocked = Boolean(appointment && currentActivities.some((activity) => activity.status !== "scheduled"))
   const selectableTracks = getEligibleSharedAppointmentTracks(
     kind,
     eligibleTracks,
@@ -224,7 +219,7 @@ export function RegistrationAppointmentEditor({
     appointment?.id || null,
   )
   const initialSelectedTrackIds = appointment
-    ? currentActivities.filter((activity) => activity.status === "scheduled").map((activity) => activity.trackId)
+    ? currentActivities.map((activity) => activity.trackId)
     : selectableTracks.some((track) => track.id === initialTrackId)
       ? [initialTrackId]
       : selectableTracks[0]?.id
@@ -374,31 +369,11 @@ export function RegistrationAppointmentEditor({
     trackIds: [...(preserveLocalDraft ? selectedTrackIds : effectiveSelectedTrackIds)].sort(),
     replaceRemaining: draftReplaceRemaining,
   }
-  const onParticipantTrackIdsChangeRef = useRef(onParticipantTrackIdsChange)
-  useEffect(() => {
-    onParticipantTrackIdsChangeRef.current = onParticipantTrackIdsChange
-  }, [onParticipantTrackIdsChange])
-  const reportedParticipantTrackIds = getRegistrationAppointmentReportedTrackIds(
-    kind,
-    editMode,
-    appointmentDraft.trackIds,
-    currentActivities,
-    appointment?.id || null,
-  )
-  const participantTrackIdsKey = reportedParticipantTrackIds?.join("\u001f") ?? null
-  const reportedParticipantTrackIdsKeyRef = useRef<string | null>(null)
-  useEffect(() => {
-    if (!reportedParticipantTrackIds) return
-    if (reportedParticipantTrackIdsKeyRef.current === participantTrackIdsKey) return
-    reportedParticipantTrackIdsKeyRef.current = participantTrackIdsKey
-    onParticipantTrackIdsChangeRef.current?.(reportedParticipantTrackIds)
-  }, [participantTrackIdsKey, reportedParticipantTrackIds])
   const previousAppointmentDraft: RegistrationAppointmentDraft | null = appointment
     ? {
         scheduledAt: appointment.scheduledAt,
         place: appointment.place,
         trackIds: currentActivities
-          .filter((activity) => activity.status === "scheduled")
           .map((activity) => activity.trackId)
           .sort(),
         replaceRemaining: false,
@@ -460,11 +435,6 @@ export function RegistrationAppointmentEditor({
   const appointmentParticipantSubjectLabel = appointmentParticipantSubjects.join("·")
     || eligibleTracks.map((track) => track.subject).join("·")
     || "과목"
-  const appointmentSummarySubjects = Array.from(new Set(currentActivities.flatMap((activity) => {
-    const subject = trackById.get(activity.trackId)?.subject
-    return subject ? [subject] : []
-  })))
-  const appointmentSummarySubjectLabel = appointmentSummarySubjects.join("·") || "과목"
   const normalizedDraft = JSON.stringify({
     appointmentId: baseAppointmentId,
     expectedNotificationRevision,
@@ -567,7 +537,7 @@ export function RegistrationAppointmentEditor({
   }
 
   async function prepareAppointmentConfirmation(
-    action: "save" | "cancel",
+    action: "save",
     next: RegistrationAppointmentDraft | null,
   ) {
     const [previousReminderRoundCount, nextReminderRoundCount] = await Promise.all([
@@ -800,14 +770,14 @@ export function RegistrationAppointmentEditor({
 
   async function saveAppointment() {
     if (!canSave) {
-      const message = "예약 일시, 장소, 적용 과목을 모두 입력하세요."
+      const message = "예약 일시와 장소를 모두 입력하세요."
       setValidationError(message)
       onWarning(message)
       const selector = !scheduledAt
         ? "[data-appointment-field=scheduled-at] input, [data-appointment-field=scheduled-at] button"
         : !canonicalLevelTestPlace
           ? "[data-appointment-field=place] [data-slot=select-trigger], [data-appointment-field=place] input"
-          : "[data-appointment-field=tracks] button"
+          : "[data-appointment-field=place] [data-slot=select-trigger], [data-appointment-field=place] input"
       window.requestAnimationFrame(() => sectionRef.current?.querySelector<HTMLElement>(selector)?.focus())
       return
     }
@@ -851,61 +821,15 @@ export function RegistrationAppointmentEditor({
     setSaving(false)
   }
 
-  async function cancelAppointment() {
-    if (!appointment || saving || mutationLocked) return
-    setSaving(true)
-    await prepareAppointmentConfirmation("cancel", null)
-  }
-
-  async function performCancelAppointment() {
-    if (!appointment) {
-      setSaving(false)
-      return
-    }
-    const logicalDraft = `${appointment.id}:${expectedNotificationRevision ?? appointment.notificationRevision}:cancel`
-    const kindKey = "registration-appointment-cancel"
-    const requestKey = submissionKeys.getOrCreate(kindKey, logicalDraft)
-    let saved: RegistrationAppointmentMutationResponse
-    try {
-      saved = await cancelRegistrationAppointment({
-        appointmentId: appointment.id,
-        expectedNotificationRevision: expectedNotificationRevision ?? appointment.notificationRevision,
-        reason: "",
-        requestKey,
-      })
-    } catch (error) {
-      const message = errorMessage(error, "예약을 취소하지 못했습니다.")
-      if (message.includes("registration_appointment_revision_conflict")) {
-        await handleRevisionConflict()
-        setSaving(false)
-        return
-      }
-      onWarning(message)
-      setSaving(false)
-      return
-    }
-    submissionKeys.clear(kindKey, logicalDraft)
-    persistedAppointmentConflictDrafts.delete(conflictScopeKey)
-    setConflict(null)
-    setShowConflictComparison(false)
-    await finishAppointmentSave(saved)
-    setSaving(false)
-  }
-
   function dismissAppointmentConfirmation() {
     setPendingConfirmation(null)
     setSaving(false)
   }
 
   async function confirmPreparedAppointmentMutation() {
-    const action = pendingConfirmation?.action
-    if (!action) return
+    if (!pendingConfirmation) return
     setPendingConfirmation(null)
-    if (action === "save") {
-      await performSaveAppointment()
-      return
-    }
-    await performCancelAppointment()
+    await performSaveAppointment()
   }
 
   async function startAttempt(activity: OpsRegistrationLevelTest) {
@@ -990,29 +914,16 @@ export function RegistrationAppointmentEditor({
     setActivitySavingId("")
   }
 
-  function toggleTrack(trackId: string) {
-    if (editMode === "replace_remaining" || mutationLocked) return
-    setSelectedTrackIds((current) => (
-      current.includes(trackId)
-        ? current.filter((id) => id !== trackId)
-        : [...current, trackId]
-    ))
-  }
-
   return (
     <section
       ref={sectionRef}
+      data-registration-subject-scoped={subjectScoped ? "" : undefined}
       className={embedded
         ? "grid min-w-0 gap-4"
         : "grid min-w-0 gap-4 rounded-md border bg-background p-3"}
       aria-label={kind === "level_test" ? "레벨테스트 예약" : "방문상담 예약"}
     >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold">{kind === "level_test" ? "레벨테스트 예약" : "방문상담 예약"}</h3>
-        </div>
-        {onClose ? <Button type="button" size="sm" variant="ghost" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 편집 닫기`} onClick={onClose} disabled={saving || mutationLocked}>닫기</Button> : null}
-      </div>
+      <h3 className="text-sm font-semibold">{kind === "level_test" ? "레벨테스트 예약" : "방문상담 예약"}</h3>
 
       {conflict ? (
         <Alert className="border-amber-300 bg-amber-50 text-amber-950">
@@ -1084,112 +995,57 @@ export function RegistrationAppointmentEditor({
         </Alert>
       ) : null}
 
-      {editMode !== "read_only" ? (
-        <div
-          data-registration-action-owner={`${appointmentParticipantSubjectLabel}:appointment-save`}
-          data-registration-appointment-shared-controls
-          data-registration-appointment-subjects={appointmentParticipantSubjects.join("|")}
-          className="grid gap-3"
-        >
-          <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1.5fr)_minmax(12rem,1fr)]">
-            <Label data-appointment-field="scheduled-at" className="grid min-w-0 gap-1.5">
-              <span>예약 일시 <span className="text-xs font-semibold text-primary">필수</span></span>
-              <DateTimePickerControl
-                value={scheduledAt}
-                onChange={(value) => { setValidationError(""); setScheduledAt(value) }}
-                dateAriaLabel={`${appointmentParticipantSubjectLabel} 예약 날짜`}
-                timeAriaLabel={`${appointmentParticipantSubjectLabel} 예약 시각`}
-                clearAriaLabel={`${appointmentParticipantSubjectLabel} 예약 날짜와 시각 지우기`}
-                required
-                disabled={saving || mutationLocked}
-                disablePortal
-                timeOptions={REGISTRATION_TIME_OPTIONS}
-              />
-            </Label>
-            <Label data-appointment-field="place" className="grid min-w-0 gap-1.5">
-              <span>장소 <span className="text-xs font-semibold text-primary">필수</span></span>
-              <RegistrationSelect
-                aria-label={`${appointmentParticipantSubjectLabel} 예약 장소`}
-                value={normalizeRegistrationLevelTestPlace(place) ?? ""}
-                placeholder="장소 선택"
-                options={[
-                  { value: "", label: "장소 선택" },
-                  ...REGISTRATION_LEVEL_TEST_PLACES.map((option) => ({ value: option, label: option })),
-                ]}
-                onValueChange={(value) => { setValidationError(""); setPlace(value) }}
-                disabled={saving || mutationLocked}
-                className="h-10"
-              />
-              {legacyLevelTestPlace ? (
-                <span className="text-xs text-muted-foreground">기존 저장 장소: {appointment?.place}</span>
-              ) : null}
-            </Label>
-          </div>
-
-          <fieldset data-appointment-field="tracks" className="grid gap-2">
-            <legend className="text-sm font-medium">적용 과목 <span className="text-xs font-semibold text-primary">필수</span></legend>
-            <div className="flex flex-wrap gap-2">
-              {selectableTracks.map((track) => {
-                const selected = appointmentDraft.trackIds.includes(track.id)
-                return (
-                  <Button
-                    key={track.id}
-                    type="button"
-                    size="sm"
-                    variant={selected ? "default" : "outline"}
-                    aria-pressed={selected}
-                    aria-label={`${appointmentParticipantSubjectLabel} 예약 적용: ${track.subject} ${selected ? "선택됨" : "선택 안 됨"}`}
-                    disabled={saving || mutationLocked || participantsLocked}
-                    onClick={() => toggleTrack(track.id)}
-                  >
-                    {track.subject}
-                  </Button>
-                )
-              })}
-            </div>
-            {selectableTracks.length === 0 ? <p className="text-xs text-muted-foreground">현재 함께 예약할 수 있는 과목이 없습니다.</p> : null}
-            {participantsLocked ? (
-              <p className="text-xs text-muted-foreground">결과가 기록된 예약은 참여 과목을 유지합니다. 일시와 장소는 수정할 수 있습니다.</p>
+      <div
+        data-registration-action-owner={`${appointmentParticipantSubjectLabel}:appointment-save`}
+        data-registration-appointment-shared-controls
+        data-registration-appointment-subjects={appointmentParticipantSubjects.join("|")}
+        className="grid gap-3"
+      >
+        <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1.5fr)_minmax(12rem,1fr)]">
+          <Label data-appointment-field="scheduled-at" className="grid min-w-0 gap-1.5">
+            <span>예약 일시 <span className="text-xs font-semibold text-primary">필수</span></span>
+            <DateTimePickerControl
+              value={scheduledAt}
+              onChange={(value) => { setValidationError(""); setScheduledAt(value) }}
+              dateAriaLabel={`${appointmentParticipantSubjectLabel} 예약 날짜`}
+              timeAriaLabel={`${appointmentParticipantSubjectLabel} 예약 시각`}
+              clearAriaLabel={`${appointmentParticipantSubjectLabel} 예약 날짜와 시각 지우기`}
+              required
+              disabled={saving || mutationLocked}
+              disablePortal
+              timeOptions={REGISTRATION_TIME_OPTIONS}
+            />
+          </Label>
+          <Label data-appointment-field="place" className="grid min-w-0 gap-1.5">
+            <span>장소 <span className="text-xs font-semibold text-primary">필수</span></span>
+            <RegistrationSelect
+              aria-label={`${appointmentParticipantSubjectLabel} 예약 장소`}
+              value={normalizeRegistrationLevelTestPlace(place) ?? ""}
+              placeholder="장소 선택"
+              options={[
+                { value: "", label: "장소 선택" },
+                ...REGISTRATION_LEVEL_TEST_PLACES.map((option) => ({ value: option, label: option })),
+              ]}
+              onValueChange={(value) => { setValidationError(""); setPlace(value) }}
+              disabled={saving || mutationLocked}
+              className="h-10"
+            />
+            {legacyLevelTestPlace ? (
+              <span className="text-xs text-muted-foreground">기존 저장 장소: {appointment?.place}</span>
             ) : null}
-          </fieldset>
+          </Label>
+        </div>
 
-          <div className="flex justify-end">
-            <Button type="button" data-registration-primary-action={`${appointmentParticipantSubjectLabel}:appointment-save`} aria-label={`${appointmentParticipantSubjectLabel} 예약 저장`} onClick={() => void saveAppointment()} disabled={saving || mutationLocked || Boolean(conflict)}>
-              {appointment
-                ? "예약 수정"
-                : "예약 저장"}
-            </Button>
-          </div>
+        <div className="flex justify-end">
+          <Button type="button" data-registration-primary-action={`${appointmentParticipantSubjectLabel}:appointment-save`} aria-label={`${appointmentParticipantSubjectLabel} 예약 저장`} onClick={() => void saveAppointment()} disabled={saving || mutationLocked || Boolean(conflict)}>
+            예약 저장
+          </Button>
         </div>
-      ) : (
-        <div
-          data-registration-appointment-readonly-summary=""
-          aria-label={`${appointmentSummarySubjectLabel} 저장된 예약 정보`}
-          className="grid gap-3 rounded-md border bg-muted/30 p-3"
-        >
-          <dl className="grid gap-3 sm:grid-cols-3">
-            <div className="grid gap-1">
-              <dt className="text-xs text-muted-foreground">예약 일시</dt>
-              <dd className="text-sm font-medium">{toLocalDateTime(appointment?.scheduledAt).replace("T", " ") || "기록 없음"}</dd>
-            </div>
-            <div className="grid gap-1">
-              <dt className="text-xs text-muted-foreground">장소</dt>
-              <dd className="text-sm font-medium">{appointment?.place || "기록 없음"}</dd>
-            </div>
-            <div className="grid gap-1">
-              <dt className="text-xs text-muted-foreground">참여 과목</dt>
-              <dd className="flex flex-wrap gap-1">
-                {appointmentSummarySubjects.map((subject) => <Badge key={subject} variant="secondary">{subject}</Badge>)}
-              </dd>
-            </div>
-          </dl>
-          <p className="text-xs text-muted-foreground">완료된 예약 정보는 읽기 전용입니다.</p>
-        </div>
-      )}
+      </div>
 
       {kind === "level_test" ? (
         <div className="grid gap-3 border-t pt-4">
-          {activities.map((activity) => {
+          {matchingActivities.filter((activity) => !visibleTrackId || activity.trackId === visibleTrackId).map((activity) => {
             if (!("attemptNumber" in activity) || !displayActivityIds.has(activity.id)) return null
             const track = trackById.get(activity.trackId)
             const materialLink = draftLinks[activity.id] ?? activity.materialLink ?? ""
@@ -1248,21 +1104,12 @@ export function RegistrationAppointmentEditor({
                       placeholder="문의 종료 사유"
                       disabled={trackRefreshPending || Boolean(activitySavingId)}
                     />
-                    <Button type="button" aria-label={`${track?.subject || "과목"} 다시 예약`} size="sm" variant="outline" onClick={() => onRebook?.(activity.trackId)} disabled={trackRefreshPending || Boolean(activitySavingId)}>다시 예약</Button>
                     <Button type="button" aria-label={`${track?.subject || "과목"} 문의 종료`} size="sm" variant="ghost" onClick={() => void closeInquiry(activity)} disabled={trackRefreshPending || Boolean(activitySavingId) || !(closureReasons[activity.trackId] || "").trim()}>문의 종료</Button>
                   </div>
                 ) : null}
               </section>
             )
           })}
-        </div>
-      ) : null}
-
-      {appointment?.status === "scheduled" && currentActivities.some((activity) => activity.status === "scheduled") ? (
-        <div className="flex justify-end border-t pt-4">
-          <Button type="button" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 취소`} variant="ghost" onClick={() => void cancelAppointment()} disabled={saving || mutationLocked}>
-            예약 취소
-          </Button>
         </div>
       ) : null}
 
@@ -1274,7 +1121,7 @@ export function RegistrationAppointmentEditor({
       >
         <DialogContent showCloseButton={false}>
           <DialogHeader>
-            <DialogTitle>{pendingConfirmation?.action === "cancel" ? "예약을 취소할까요?" : "예약을 저장할까요?"}</DialogTitle>
+            <DialogTitle>예약을 저장할까요?</DialogTitle>
             <DialogDescription className="whitespace-pre-line">
               {pendingConfirmation?.message}
             </DialogDescription>
@@ -1283,10 +1130,9 @@ export function RegistrationAppointmentEditor({
             <Button type="button" variant="outline" onClick={dismissAppointmentConfirmation}>돌아가기</Button>
             <Button
               type="button"
-              variant={pendingConfirmation?.action === "cancel" ? "destructive" : "default"}
               onClick={() => void confirmPreparedAppointmentMutation()}
             >
-              {pendingConfirmation?.action === "cancel" ? "예약 취소" : "저장"}
+              저장
             </Button>
           </DialogFooter>
         </DialogContent>

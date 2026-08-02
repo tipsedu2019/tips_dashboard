@@ -354,7 +354,7 @@ export function RegistrationTrackDirectorSection({
               setAutomaticError("방문상담 예약에서 담당 원장을 다시 확인하세요.")
               const id = ++visitCorrectionRequestIdRef.current
               setVisitCorrectionRequest({ id, trackId: resolution.trackId })
-              onWarning("방문상담 예약 수정에서 담당 원장을 다시 확인하세요.")
+              onWarning("방문상담 예약에서 담당 원장을 다시 확인하세요.")
               continue
             }
             if (isRegistrationDirectorCatalogRefreshError(message)) {
@@ -457,7 +457,7 @@ export function RegistrationTrackDirectorSection({
         }
       } else if (message.includes("registration_visit_reassign_requires_reschedule")) {
         onOpenVisit(track.id)
-        onWarning("방문상담 예약 수정에서 담당 원장을 다시 확인하세요.")
+        onWarning("방문상담 예약에서 담당 원장을 다시 확인하세요.")
       } else if (isRegistrationDirectorCatalogRefreshError(message)) {
         setCatalogRefreshRequired(true)
         setAutomaticError("담당자 기준이 변경되었습니다. 최신 담당자 정보를 다시 불러오세요.")
@@ -916,7 +916,7 @@ function InquiryStageEditor({
   )
 }
 
-function WaitingStageEditor({
+export function RegistrationWaitingDetailsEditor({
   track,
   currentClassWaitClassId,
   permissions,
@@ -932,7 +932,7 @@ function WaitingStageEditor({
   classOptions: OpsClassOption[]
   onReload: () => void | Promise<void>
   onWarning: (message: string) => void
-  onOpenLevelTest: () => void
+  onOpenLevelTest?: () => void
   onDirtyChange?: (dirty: boolean) => void
 }) {
   const savedWaitingKind = track.waitingDetailKind || track.waitingKind || "current_term_opening"
@@ -984,7 +984,7 @@ function WaitingStageEditor({
       } catch {
         onWarning(COMMITTED_REFRESH_ERROR)
       }
-      if (retakeDecision === "required" && reloaded) onOpenLevelTest()
+      if (retakeDecision === "required" && reloaded) onOpenLevelTest?.()
     } catch (error) {
       onWarning(errorMessage(error, "대기 정보를 저장하지 못했습니다."))
     } finally {
@@ -1038,7 +1038,7 @@ function WaitingStageEditor({
             <Button type="button" aria-label={`${track.subject} 대기 정보 저장`} variant="outline" size="sm" onClick={() => void saveWaitingDetails()} disabled={saving}>
               {saving ? "저장 중" : "대기 정보 저장"}
             </Button>
-            {retakeDecision === "required" ? (
+            {retakeDecision === "required" && onOpenLevelTest ? (
               <Button type="button" aria-label={`${track.subject} 레벨테스트 예약`} variant="outline" size="sm" onClick={onOpenLevelTest} disabled={saving}>
                 레벨테스트 예약
               </Button>
@@ -1176,7 +1176,7 @@ export function RegistrationTrackStageEditor({
     return <InquiryStageEditor track={track} permissions={permissions} classOptions={classOptions} onReload={onReload} onWarning={onWarning} onOpenLevelTest={onOpenLevelTest} onDirtyChange={onDirtyChange} />
   }
   if (track.status === "waiting") {
-    return <WaitingStageEditor track={track} currentClassWaitClassId={currentClassWaitClassId} permissions={permissions} classOptions={classOptions} onReload={onReload} onWarning={onWarning} onOpenLevelTest={onOpenLevelTest} onDirtyChange={onDirtyChange} />
+    return <RegistrationWaitingDetailsEditor track={track} currentClassWaitClassId={currentClassWaitClassId} permissions={permissions} classOptions={classOptions} onReload={onReload} onWarning={onWarning} onOpenLevelTest={onOpenLevelTest} onDirtyChange={onDirtyChange} />
   }
   if (track.status === "consultation_waiting") {
     return (

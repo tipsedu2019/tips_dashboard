@@ -3,7 +3,6 @@
 import { Children, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 
 import { RegistrationApplicationAdmissionSection } from "./registration-application-admission-section"
 import { RegistrationApplicationConsultationSection } from "./registration-application-consultation-section"
@@ -20,7 +19,6 @@ import {
   getRegistrationApplicationSectionStates,
   getRegistrationApplicationTrackState,
   resolveRegistrationActiveTrackId,
-  resolveRegistrationAppointmentEditorSeedTrackIds,
   settleRegistrationConflictComparison,
   updateRegistrationApplicationDirtyKeys,
   type RegistrationApplicationDirtyKey,
@@ -38,7 +36,7 @@ import {
   RegistrationMigrationConflictNotice,
   RegistrationMigrationReviewEditor,
   RegistrationTrackDirectorSection,
-  RegistrationTrackStageEditor,
+  RegistrationWaitingDetailsEditor,
   getRegistrationIdentityEditLock,
   type RegistrationMigrationConflictState,
   type RegistrationMigrationDirtyScope,
@@ -131,12 +129,6 @@ type TrackContext = {
   visitAppointment: OpsRegistrationAppointment | null
 }
 
-type AppointmentEditorState = {
-  kind: OpsRegistrationAppointment["kind"]
-  appointmentId: string | null
-  initialTrackId: string
-}
-
 type RegistrationPlacementMode = "waiting" | "registration"
 
 function errorMessage(error: unknown, fallback: string) {
@@ -145,10 +137,6 @@ function errorMessage(error: unknown, fallback: string) {
     return String((error as { message?: unknown }).message || fallback)
   }
   return fallback
-}
-
-function sameRegistrationTrackIds(left: readonly string[], right: readonly string[]) {
-  return left.length === right.length && left.every((trackId, index) => trackId === right[index])
 }
 
 function hasRegistrationTrackFrameContent({
@@ -165,7 +153,7 @@ function hasRegistrationTrackFrameContent({
   const { track } = context
   if (section === "admission") return false
   if (section === "inquiry") return track.migrationReviewRequired && reviewTrackId === track.id
-  if (track.migrationReviewRequired) return false
+  if (track.migrationReviewRequired) return section === "placement" && placementMode === "waiting"
   return section === "consultation"
     || (section === "placement" && (placementMode === "waiting" || placementMode === "registration"))
 }
@@ -259,13 +247,10 @@ export function RegistrationApplication({
   textbookOptions = [],
   admissionActions,
   initialAppointmentId = null,
-  onAppointmentOpenChange,
   onDirtyChange,
   notificationToken = "",
   closeAction,
 }: RegistrationApplicationProps) {
-  const [appointmentEditor, setAppointmentEditor] = useState<AppointmentEditorState | null>(null)
-  const [appointmentDraftParticipantTrackIds, setAppointmentDraftParticipantTrackIds] = useState<string[]>([])
   const [migrationConflictState, setMigrationConflictState] = useState<RegistrationMigrationConflictState | null>(null)
   const [migrationConflictRetrying, setMigrationConflictRetrying] = useState(false)
   const [migrationDirectorResetVersion, setMigrationDirectorResetVersion] = useState(0)
@@ -274,8 +259,6 @@ export function RegistrationApplication({
   const dirtyKeysRef = useRef<Set<RegistrationApplicationDirtyKey>>(new Set())
   const dirtyProducersRef = useRef(new Map<RegistrationApplicationDirtyKey, Set<string>>())
   const onDirtyChangeRef = useRef(onDirtyChange)
-  const appointmentEditorRef = useRef<HTMLDivElement | null>(null)
-  const initialAppointmentAppliedRef = useRef("")
   const initialFocusRequestRef = useRef({ taskId: detail.task.id, trackId: focusTrackId })
   const initialFocusAppliedRef = useRef("")
   if (initialFocusRequestRef.current.taskId !== detail.task.id) {
@@ -539,42 +522,6 @@ export function RegistrationApplication({
     return () => window.cancelAnimationFrame(frame)
   }, [activeTrackId, detail.task.id, focusTrackId, focusedContext, reviewTrack?.id])
 
-  useEffect(() => {
-    if (!initialAppointmentId) {
-      initialAppointmentAppliedRef.current = ""
-      return
-    }
-    const initialKey = `${detail.task.id}:${initialAppointmentId}`
-    if (initialAppointmentAppliedRef.current === initialKey) return
-    const appointment = detail.appointments.find((item) => item.id === initialAppointmentId) || null
-    if (!appointment) return
-    const fallbackTrackId = focusTrackId && orderedTracks.some((track) => track.id === focusTrackId)
-      ? focusTrackId
-      : orderedTracks[0]?.id || ""
-    const initialAppointmentParticipantTrackIds = resolveRegistrationAppointmentEditorSeedTrackIds(
-      appointmentActionPlans,
-      appointment.id,
-      null,
-    )
-    const initialTrackId = focusTrackId && initialAppointmentParticipantTrackIds.includes(focusTrackId)
-      ? focusTrackId
-      : initialAppointmentParticipantTrackIds[0] || fallbackTrackId
-    const frame = window.requestAnimationFrame(() => {
-      initialAppointmentAppliedRef.current = initialKey
-      setAppointmentDraftParticipantTrackIds(initialAppointmentParticipantTrackIds)
-      setAppointmentEditor({ kind: appointment.kind, appointmentId: appointment.id, initialTrackId })
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [appointmentActionPlans, detail.appointments, detail.task.id, focusTrackId, initialAppointmentId, orderedTracks])
-
-  useEffect(() => {
-    if (!appointmentEditor) return
-    const frame = window.requestAnimationFrame(() => {
-      appointmentEditorRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [appointmentEditor])
-
   async function saveInquiry(draft: RegistrationInquiryDraft, requestKey: string) {
     try {
       await saveRegistrationCaseInquiry({
@@ -603,46 +550,33 @@ export function RegistrationApplication({
     return "saved" as const
   }
 
-  function openAppointment(context: TrackContext, kind: OpsRegistrationAppointment["kind"], appointmentId: string | null) {
-    onFocusTrack(context.track.id)
-    const appointmentParticipantTrackIds = resolveRegistrationAppointmentEditorSeedTrackIds(
-      appointmentActionPlans,
-      appointmentId,
-      context.track.id,
-    )
-    setAppointmentDraftParticipantTrackIds(appointmentParticipantTrackIds)
-    setAppointmentEditor({ kind, appointmentId, initialTrackId: context.track.id })
-    onAppointmentOpenChange?.(appointmentId)
-  }
-
   function handleSubjectTabChange(trackId: string) {
     onFocusTrack(trackId)
-  }
-
-  function closeAppointmentEditor() {
-    setAppointmentDraftParticipantTrackIds([])
-    setAppointmentEditor(null)
-    onAppointmentOpenChange?.(null)
   }
 
   async function handleAppointmentSaved(saved: RegistrationAppointmentMutationResponse) {
     await onAppointmentSaved?.(saved)
     await onReload()
-    closeAppointmentEditor()
     if (saved.requiresDirectorAssignmentTrackIds.length > 0) {
       onWarning("상담 책임자가 없는 과목을 먼저 지정하세요.")
     }
   }
 
-  const handleAppointmentParticipantTrackIdsChange = useCallback((trackIds: readonly string[]) => {
-    const nextTrackIds = Array.from(new Set(trackIds)).sort()
-    setAppointmentDraftParticipantTrackIds((currentTrackIds) => (
-      sameRegistrationTrackIds(currentTrackIds, nextTrackIds) ? currentTrackIds : nextTrackIds
-    ))
-  }, [])
-
   function renderTrackActions(context: TrackContext, section: RegistrationApplicationSectionKey, placementMode?: RegistrationPlacementMode) {
-    const { track, permissions, activeConsultation, visitAppointment } = context
+    const { track, permissions } = context
+    if (section === "placement" && placementMode === "waiting") {
+      return (
+        <RegistrationWaitingDetailsEditor
+          track={track}
+          currentClassWaitClassId={getRegistrationCurrentClassWaitClassId({ trackId: track.id, waitingKind: track.waitingKind, enrollments: detail.enrollments })}
+          permissions={permissions}
+          classOptions={classOptions}
+          onReload={onReload}
+          onWarning={onWarning}
+          onDirtyChange={(dirty) => setDirty(`placement:track-${track.id}`, dirty)}
+        />
+      )
+    }
     if (track.migrationReviewRequired) return null
     if (section === "placement" && placementMode === "registration") {
       return (
@@ -659,26 +593,7 @@ export function RegistrationApplication({
         />
       )
     }
-    if (context.state.currentSection !== section) return null
-    if (section === "placement" && placementMode === "waiting" && track.status !== "waiting") return null
-    if (section === "placement" && placementMode === "registration" && track.status === "waiting") return null
-    if (section === "admission") return null
-    return (
-      <RegistrationTrackStageEditor
-        key={`stage:${track.id}:${track.stageEnteredAt}`}
-        track={track}
-        currentClassWaitClassId={getRegistrationCurrentClassWaitClassId({ trackId: track.id, waitingKind: track.waitingKind, enrollments: detail.enrollments })}
-        permissions={permissions}
-        classOptions={classOptions}
-        onReload={onReload}
-        onWarning={onWarning}
-        onOpenLevelTest={() => openAppointment(context, "level_test", null)}
-        onOpenVisit={() => openAppointment(context, "visit_consultation", null)}
-        activeConsultation={activeConsultation}
-        visitAppointment={visitAppointment}
-        onDirtyChange={(dirty) => setDirty(`${section}:track-${track.id}`, dirty)}
-      />
-    )
+    return null
   }
 
   function renderTrackFrames(section: RegistrationApplicationSectionKey, placementMode?: RegistrationPlacementMode) {
@@ -749,10 +664,7 @@ export function RegistrationApplication({
             directorCatalogStatus={directorCatalogStatus}
             subjectCapabilities={subjectCapabilities}
             onRetryDirectorCatalog={onRetryDirectorCatalog}
-            onOpenVisit={(trackId) => {
-              const target = trackContexts.find((item) => item.track.id === trackId)
-              if (target) openAppointment(target, "visit_consultation", target.visitConsultation?.appointmentId || null)
-            }}
+            onOpenVisit={onFocusTrack}
             onReload={onReload}
             onWarning={onWarning}
             onDirtyChange={(dirty) => setDirty(`consultation:track-${context.track.id}`, dirty, `director:${context.track.id}`)}
@@ -777,83 +689,18 @@ export function RegistrationApplication({
       })
   }
 
-  function renderAppointmentActionPlans(kind: OpsRegistrationAppointment["kind"]) {
-    const plans = activeAppointmentActionPlans.filter((plan) => plan.kind === kind)
-    if (plans.length === 0) return null
-    return (
-      <div className="grid gap-2" aria-label={kind === "level_test" ? "레벨테스트 예약 목록" : "방문상담 예약 목록"}>
-        {plans.map((plan) => {
-          const owner = trackContexts.find((context) => context.track.id === activeTrackId)
-          if (!owner) return null
-          const participantSubjectLabel = plan.participantSubjects.join("·") || "과목"
-          const label = kind === "level_test"
-            ? plan.status === "completed" ? "레벨테스트 결과 보기" : "예약 및 과목별 결과 관리"
-            : "방문상담 예약 수정"
-          return (
-            <div key={plan.appointmentId} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
-              <div className="flex flex-wrap gap-1" aria-label={`${label} 적용 과목`}>
-                {plan.participantSubjects.map((subject) => (
-                  <Badge key={subject} variant="secondary">{subject}</Badge>
-                ))}
-              </div>
-              <Button
-                type="button"
-                data-registration-appointment-plan-action=""
-                data-registration-appointment-subjects={plan.participantSubjects.join("|")}
-                aria-label={`${participantSubjectLabel} ${label}`}
-                variant="outline"
-                size="sm"
-                onClick={() => openAppointment(owner, kind, plan.appointmentId)}
-              >
-                {label}
-              </Button>
-            </div>
-          )
-        })}
-      </div>
-    )
-  }
-
-  const editorAppointment = appointmentEditor?.appointmentId
-    ? detail.appointments.find((item) => item.id === appointmentEditor.appointmentId) || null
+  const activeLevelTestPlan = activeAppointmentActionPlans.find((plan) => (
+    plan.kind === "level_test" && plan.appointmentId === initialAppointmentId
+  )) || activeAppointmentActionPlans.find((plan) => plan.kind === "level_test") || null
+  const activeVisitPlan = activeAppointmentActionPlans.find((plan) => (
+    plan.kind === "visit_consultation" && plan.appointmentId === initialAppointmentId
+  )) || activeAppointmentActionPlans.find((plan) => plan.kind === "visit_consultation") || null
+  const activeLevelTestAppointment = activeLevelTestPlan
+    ? detail.appointments.find((item) => item.id === activeLevelTestPlan.appointmentId) || null
     : null
-  const appointmentActivities = appointmentEditor?.kind === "level_test"
-    ? detail.levelTests
-    : detail.consultations.filter((item) => item.mode === "visit")
-  const appointmentEditorParticipantTrackIds = appointmentEditor ? appointmentDraftParticipantTrackIds : []
-  const appointmentEditorContent = appointmentEditor ? (
-    <div
-      ref={appointmentEditorRef}
-      hidden={!(activeTrackId && appointmentEditorParticipantTrackIds.includes(activeTrackId))}
-      data-registration-appointment-focus={editorAppointment?.id || ""}
-      className="grid scroll-m-4 gap-2"
-    >
-      <RegistrationAppointmentEditor
-        key={`${appointmentEditor.kind}:${editorAppointment?.id || "new"}:${editorAppointment?.notificationRevision ?? "new"}`}
-        kind={appointmentEditor.kind}
-        taskId={detail.task.id}
-        eligibleTracks={orderedTracks}
-        initialTrackId={appointmentEditor.initialTrackId}
-        appointment={editorAppointment}
-        activities={appointmentActivities}
-        embedded
-        onSaved={handleAppointmentSaved}
-        onWarning={onWarning}
-        onReload={onReload}
-        onClose={closeAppointmentEditor}
-        onRebook={appointmentEditor.kind === "level_test" ? (trackId) => {
-          onFocusTrack(trackId)
-          onAppointmentOpenChange?.(null)
-          setAppointmentDraftParticipantTrackIds([trackId])
-          setAppointmentEditor({ kind: "level_test", appointmentId: null, initialTrackId: trackId })
-        } : undefined}
-        notificationToken={notificationToken}
-        onDirtyChange={(dirty) => setDirty(`${appointmentEditor.kind === "level_test" ? "level_test" : "consultation"}:appointment-${editorAppointment?.id || "new"}`, dirty)}
-        onTrackDirtyChange={(trackId, dirty) => setDirty(`level_test:track-${trackId}`, dirty)}
-        onParticipantTrackIdsChange={handleAppointmentParticipantTrackIdsChange}
-      />
-    </div>
-  ) : null
+  const activeVisitAppointment = activeVisitPlan
+    ? detail.appointments.find((item) => item.id === activeVisitPlan.appointmentId) || null
+    : null
 
   return (
     <RegistrationApplicationShell
@@ -925,16 +772,50 @@ export function RegistrationApplication({
       )}
       levelTest={(
         <RegistrationApplicationLevelTestSection editable={openSectionStates.level_test.editable}>
-          {renderTrackFrames("level_test")}
-          {renderAppointmentActionPlans("level_test")}
-          {appointmentEditor?.kind === "level_test" ? appointmentEditorContent : null}
+          {activeTrack ? (
+            <RegistrationAppointmentEditor
+              key={`level_test:${activeTrack.id}:${activeLevelTestAppointment?.id || "new"}:${activeLevelTestAppointment?.notificationRevision ?? "new"}`}
+              kind="level_test"
+              taskId={detail.task.id}
+              eligibleTracks={orderedTracks}
+              initialTrackId={activeTrack.id}
+              appointment={activeLevelTestAppointment}
+              activities={detail.levelTests}
+              embedded
+              subjectScoped
+              visibleTrackId={activeTrack.id}
+              onSaved={handleAppointmentSaved}
+              onWarning={onWarning}
+              onReload={onReload}
+              notificationToken={notificationToken}
+              onDirtyChange={(dirty) => setDirty(`level_test:appointment-${activeLevelTestAppointment?.id || activeTrack.id}`, dirty)}
+              onTrackDirtyChange={(trackId, dirty) => setDirty(`level_test:track-${trackId}`, dirty)}
+            />
+          ) : null}
         </RegistrationApplicationLevelTestSection>
       )}
       consultation={(
         <RegistrationApplicationConsultationSection editable={openSectionStates.consultation.editable}>
           {renderTrackFrames("consultation")}
-          {renderAppointmentActionPlans("visit_consultation")}
-          {appointmentEditor?.kind === "visit_consultation" ? appointmentEditorContent : null}
+          {activeTrack ? (
+            <RegistrationAppointmentEditor
+              key={`visit_consultation:${activeTrack.id}:${activeVisitAppointment?.id || "new"}:${activeVisitAppointment?.notificationRevision ?? "new"}`}
+              kind="visit_consultation"
+              taskId={detail.task.id}
+              eligibleTracks={orderedTracks}
+              initialTrackId={activeTrack.id}
+              appointment={activeVisitAppointment}
+              activities={detail.consultations.filter((item) => item.mode === "visit")}
+              embedded
+              subjectScoped
+              visibleTrackId={activeTrack.id}
+              onSaved={handleAppointmentSaved}
+              onWarning={onWarning}
+              onReload={onReload}
+              notificationToken={notificationToken}
+              onDirtyChange={(dirty) => setDirty(`consultation:appointment-${activeVisitAppointment?.id || activeTrack.id}`, dirty)}
+            />
+          ) : null}
         </RegistrationApplicationConsultationSection>
       )}
       waitingState={waitingState}

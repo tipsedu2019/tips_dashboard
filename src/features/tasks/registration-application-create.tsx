@@ -1,34 +1,24 @@
 "use client"
 
-import { useEffect, useMemo, type ReactNode } from "react"
+import { useMemo, type ReactNode } from "react"
 
-import { Button } from "@/components/ui/button"
-
-import { RegistrationApplicationConsultationSection } from "./registration-application-consultation-section"
 import {
   RegistrationInquiryCommonFields,
   type RegistrationInquiryFieldName,
 } from "./registration-application-inquiry-fields"
 import { RegistrationApplicationInquirySection } from "./registration-application-inquiry-section"
-import { RegistrationApplicationLevelTestSection } from "./registration-application-level-test-section"
 import {
-  getRegistrationCreateCatalogState,
   getRegistrationCreateSectionStates,
   type RegistrationCreateCatalogStatus,
 } from "./registration-application-model"
 import { RegistrationApplicationShell } from "./registration-application-shell"
 import {
-  reconcileRegistrationInitialWorkflowCapabilities,
   getRegistrationSubjectPickerAvailability,
   reconcileRegistrationInitialWorkflowDraft,
   reconcileRegistrationSubjectsForGrade,
   type RegistrationInitialPersistenceProbeResult,
   type RegistrationInitialWorkflowDraft,
 } from "./registration-intake-workflow"
-import {
-  RegistrationInitialConsultationFields,
-  RegistrationInitialLevelTestFields,
-} from "./registration-initial-plan-control"
 import {
   getRegistrationSchoolChoices,
 } from "./registration-school-options"
@@ -46,9 +36,6 @@ import {
   parseRegistrationSubjects,
   serializeRegistrationSubjects,
 } from "./registration-workflow"
-
-const READY_INITIAL_ACTIONS = ["inquiry", "direct_phone", "level_test", "visit"] as const
-const INQUIRY_ONLY_INITIAL_ACTIONS = ["inquiry"] as const
 
 export type RegistrationApplicationCreateProps = {
   form: OpsTaskInput
@@ -91,14 +78,9 @@ export function RegistrationApplicationCreate({
   form,
   draft,
   persistence,
-  resolvedDirectorIds,
-  directorOptionsBySubject,
   subjectCapabilities,
   subjectCapabilityError = "",
   disabled,
-  catalogStatus = "ready",
-  catalogError = "",
-  onRetryCatalog,
   schools = [],
   schoolCatalogStatus = "loading",
   schoolCatalogError = "",
@@ -108,8 +90,6 @@ export function RegistrationApplicationCreate({
   onRegistrationFieldChange,
   onDraftChange,
 }: RegistrationApplicationCreateProps) {
-  const catalogState = getRegistrationCreateCatalogState({ status: catalogStatus, error: catalogError })
-  const catalogFailed = catalogState.status === "error" || catalogState.status === "partial"
   const registration = form.registration || {}
   const subjects = parseRegistrationSubjects(form.subject) as RegistrationSubject[]
   const subjectAvailability = useMemo(() => getRegistrationSubjectPickerAvailability({
@@ -117,15 +97,6 @@ export function RegistrationApplicationCreate({
     grade: registration.schoolGrade || "",
     selectedSubjects: subjects,
   }), [registration.schoolGrade, subjectCapabilities, subjects])
-  const stableAllowedInitialActions = persistence.mode === "ready_atomic"
-    ? READY_INITIAL_ACTIONS
-    : INQUIRY_ONLY_INITIAL_ACTIONS
-
-  useEffect(() => {
-    const reconciled = reconcileRegistrationInitialWorkflowCapabilities(draft, stableAllowedInitialActions)
-    if (reconciled !== draft) onDraftChange(reconciled)
-  }, [draft, onDraftChange, stableAllowedInitialActions])
-
   const note = persistenceNote(persistence.mode)
   const inquiryLockReason = disabled
     ? "저장 중입니다"
@@ -137,29 +108,12 @@ export function RegistrationApplicationCreate({
   const writable = !disabled && ["ready_atomic", "canonical_inquiry", "legacy_inquiry"].includes(persistence.mode)
   const sectionStates = useMemo(() => {
     const base = getRegistrationCreateSectionStates({ subjects, draft, writable })
-    const canPlanInitialWorkflow = writable && persistence.mode === "ready_atomic"
     return {
       ...base,
       inquiry: { ...base.inquiry, lockReason: inquiryLockReason },
-      level_test: canPlanInitialWorkflow
-        ? { ...base.level_test, editable: true, lockReason: "" }
-        : base.level_test,
-      consultation: canPlanInitialWorkflow
-        ? { ...base.consultation, editable: true, lockReason: "" }
-        : base.consultation,
       history: base.history,
     }
-  }, [draft, inquiryLockReason, persistence.mode, subjects, writable])
-  const initialFieldsProps = {
-    subjects,
-    draft,
-    resolvedDirectorIds,
-    directorOptionsBySubject,
-    disabled,
-    catalogControlsDisabled: catalogState.catalogControlsDisabled,
-    catalogLockReason: catalogState.lockReason,
-    onChange: onDraftChange,
-  }
+  }, [draft, inquiryLockReason, subjects, writable])
 
   function updateSubjects(subject: RegistrationSubject, checked: boolean) {
     const next = sortAcademicSubjects(checked
@@ -215,29 +169,6 @@ export function RegistrationApplicationCreate({
       studentName={form.studentName || "새 등록 신청"}
       closeAction={closeAction}
       sectionStates={sectionStates}
-      sectionNotices={catalogState.showLocalStatus ? {
-        consultation: (
-          <div
-            data-registration-catalog-status={catalogState.status}
-            data-registration-state={catalogFailed ? "failed" : "locked"}
-            role={catalogFailed ? "alert" : "status"}
-            aria-live="polite"
-            className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
-          >
-            <span>{catalogState.lockReason}</span>
-            {catalogState.showLocalRetry && onRetryCatalog ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={onRetryCatalog}
-              >
-                다시 불러오기
-              </Button>
-            ) : null}
-          </div>
-        ),
-      } : undefined}
       inquiry={(
         <RegistrationApplicationInquirySection
           mode="create"
@@ -283,16 +214,6 @@ export function RegistrationApplicationCreate({
             </div>
           )}
         />
-      )}
-      levelTest={(
-        <RegistrationApplicationLevelTestSection editable={sectionStates.level_test.editable}>
-          <RegistrationInitialLevelTestFields {...initialFieldsProps} disabled={!sectionStates.level_test.editable} />
-        </RegistrationApplicationLevelTestSection>
-      )}
-      consultation={(
-        <RegistrationApplicationConsultationSection editable={sectionStates.consultation.editable}>
-          <RegistrationInitialConsultationFields {...initialFieldsProps} disabled={!sectionStates.consultation.editable} />
-        </RegistrationApplicationConsultationSection>
       )}
     />
   )

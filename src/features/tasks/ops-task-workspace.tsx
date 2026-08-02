@@ -205,7 +205,6 @@ import {
   createRegistrationCreateAttempt,
   createRegistrationInitialWorkflowDraft,
   getRegistrationSubjectPickerAvailability,
-  getRegistrationInitialWorkflowBlockers,
   markRegistrationLegacyCreateStarted,
   normalizeRegistrationInitialWorkflow,
   probeRegistrationInitialPersistence,
@@ -11366,16 +11365,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               throw registrationPersistence.error
             }
 
-            const initialDraft = registrationPersistence.mode === "ready_atomic"
-              ? registrationInitialWorkflowDraft
-              : createRegistrationInitialWorkflowDraft(subjects)
-            const blockers = registrationPersistence.mode === "ready_atomic"
-              ? getRegistrationInitialWorkflowBlockers(initialDraft, subjects, registrationResolvedDirectorIds)
-              : []
-            if (blockers.length > 0) {
-              setFormCompletionBlockers(blockers)
-              throw new Error(`초기 업무를 확인하세요: ${blockers.join(", ")}`)
-            }
+            const initialDraft = createRegistrationInitialWorkflowDraft(subjects)
             const normalizedInitialWorkflow = normalizeRegistrationInitialWorkflow(initialDraft, subjects)
             registrationCreateAttemptRef.current = createRegistrationCreateAttempt(
               registrationCreateAttemptRef.current,

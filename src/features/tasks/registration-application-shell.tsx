@@ -21,8 +21,8 @@ export type RegistrationApplicationShellProps = {
   >
   sectionNotices?: Partial<Record<RegistrationApplicationSectionKey, ReactNode>>
   inquiry: ReactNode
-  levelTest: ReactNode
-  consultation: ReactNode
+  levelTest?: ReactNode
+  consultation?: ReactNode
   waiting?: ReactNode
   registration?: ReactNode
   waitingState?: RegistrationApplicationSectionState
@@ -40,7 +40,7 @@ const SECTION_CONTENT_KEY = {
 } as const
 
 const APPLICATION_UI_SECTION_ORDER = ["inquiry", "level_test", "consultation", "waiting", "registration", "admission"] as const
-const CREATE_UI_SECTION_ORDER = ["inquiry", "level_test", "consultation"] as const
+const CREATE_UI_SECTION_ORDER = ["inquiry"] as const
 type RegistrationApplicationUiSectionKey = typeof APPLICATION_UI_SECTION_ORDER[number]
 
 const SECTION_TITLES: Record<RegistrationApplicationUiSectionKey, string> = {
