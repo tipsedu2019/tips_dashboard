@@ -5,6 +5,8 @@ import vm from "node:vm";
 
 import ts from "typescript";
 
+import { getRegistrationWorkflowStatusFromLegacyTrack } from "../src/features/tasks/registration-workflow-status.js";
+
 const serviceSource = await readFile(
   new URL("../src/features/tasks/ops-task-service.ts", import.meta.url),
   "utf8",
@@ -120,6 +122,7 @@ function loadRegistrationTrackParentResolver() {
       text: (value) => String(value || "").trim(),
       parseRegistrationSubjects: (value) => String(value || "").split(",").map((entry) => entry.trim()).filter(Boolean),
       getRegistrationViewKey: () => "inquiry",
+      getRegistrationWorkflowStatusFromLegacyTrack,
     },
   ).resolveRegistrationTrackSummariesForParents;
 }
