@@ -13,6 +13,7 @@ import {
 } from "./records.js";
 import { buildCurriculumWorkspaceModel } from "../academic/records.js";
 import { loadManagementRowsProgressively } from "./management-progressive-loader.js";
+import { managementPrimaryRowsCache } from "./management-primary-cache.js";
 
 export type ManagementKind = "students" | "classes" | "textbooks";
 
@@ -651,12 +652,14 @@ export function useManagementRecords(kind: ManagementKind) {
 
     setLoading(true);
     setError(null);
+    const cachedPrimaryRows = managementPrimaryRowsCache.read(kind) as Record<string, unknown>[] | null;
 
     try {
       if (kind !== "classes") {
         setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
       }
       await loadManagementRowsProgressively({
+        cachedPrimaryRows,
         loadPrimaryRows: async () => {
           const { data, error: queryError } = await withTableTimeout(
             supabase!.from(config.table).select("*"),
@@ -669,6 +672,9 @@ export function useManagementRecords(kind: ManagementKind) {
           }
 
           return (data || []) as Record<string, unknown>[];
+        },
+        cachePrimaryRows: (sourceRows: Record<string, unknown>[]) => {
+          managementPrimaryRowsCache.write(kind, sourceRows);
         },
         enrichRows: kind === "students" || kind === "classes"
           ? (sourceRows: Record<string, unknown>[]) => enrichManagementRows(kind, sourceRows)
@@ -696,7 +702,9 @@ export function useManagementRecords(kind: ManagementKind) {
       });
     } catch (fetchError) {
       if (isCurrent()) {
-        setRows([]);
+        if (cachedPrimaryRows === null) {
+          setRows([]);
+        }
         if (kind === "classes") {
           setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
         }
