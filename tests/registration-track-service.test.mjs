@@ -944,6 +944,40 @@ test("a missing child relation after ready invalidates and throws integrity inst
   assert.equal(invalidations, 1);
 });
 
+test("case detail reads overlap a delayed runtime readiness check", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const runtimeGate = deferred();
+  const harness = createClient({
+    queryHandler(query) {
+      return detailRows(query.table);
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    probeRuntime: () => runtimeGate.promise,
+  }));
+
+  const pending = service.loadCaseDetail("task-1", "viewer-1", { force: true });
+  await Promise.resolve();
+
+  try {
+    assert.equal(harness.queries.length, 6);
+    assert.deepEqual(harness.queries.map((query) => query.table).sort(), [
+      "ops_registration_admission_batches",
+      "ops_registration_appointments",
+      "ops_registration_messages",
+      "ops_registration_subject_tracks",
+      "ops_task_events",
+      "ops_tasks",
+    ]);
+  } finally {
+    runtimeGate.resolve({ mode: "ready", version: 1 });
+  }
+
+  const detail = await pending;
+  assert.equal(detail.task.id, "task-1");
+  assert.deepEqual(detail.tracks.map((track) => track.id), ["track-1"]);
+});
+
 test("detail loader embeds track children in six scoped reads, maps rows, and shares same-viewer in-flight work", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const gate = deferred();
