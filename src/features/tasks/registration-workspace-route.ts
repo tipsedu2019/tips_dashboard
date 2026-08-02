@@ -15,6 +15,12 @@ export type RegistrationWorkspaceRouteTarget =
       calendarKind: RegistrationWorkspaceCalendarKind
     }
 
+export type RegistrationDirectDeepLinkTarget = {
+  kind: "track"
+  taskId: string
+  trackId: string
+}
+
 const DETAIL_KEYS = ["taskId", "trackId", "appointmentId"] as const
 
 export function isRegistrationConsultationViewKey(
@@ -33,6 +39,30 @@ export function normalizeRegistrationWorkspaceCalendarKind(
   value: string | null,
 ): RegistrationWorkspaceCalendarKind {
   return value === "level_test" || value === "visit_consultation" ? value : "all"
+}
+
+export function getRegistrationDirectDeepLinkTarget(input: {
+  viewerId: string
+  taskId: string
+  trackId: string
+  appointmentId: string
+  workspaceReady: boolean
+  currentSelectionKey: string
+}): RegistrationDirectDeepLinkTarget | null {
+  const viewerId = input.viewerId.trim()
+  const taskId = input.taskId.trim()
+  const trackId = input.trackId.trim()
+  if (
+    input.workspaceReady
+    || !viewerId
+    || !taskId
+    || !trackId
+    || input.appointmentId.trim()
+    || trackId.startsWith("legacy:")
+    || input.currentSelectionKey === `${taskId}:${trackId}`
+  ) return null
+
+  return { kind: "track", taskId, trackId }
 }
 
 export function buildRegistrationWorkspaceSearchParams(
