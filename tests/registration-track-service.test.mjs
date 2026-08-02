@@ -835,6 +835,33 @@ test("track summary loader embeds director names without a profile lookup waterf
   );
 });
 
+test("workspace track summary loader reads all visible tracks without waiting for parent task ids", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    queryHandler(query) {
+      assert.equal(query.table, "ops_registration_subject_track_summaries");
+      return { data: [{
+        id: "track-1", task_id: "task-1", subject: "영어",
+        pipeline_status: "inquiry", director_profile_id: null,
+        director_assignment_source: "", director_assignment_rule_key: "",
+        waiting_kind: null, level_test_retake_decision: null,
+        migration_review_required: false, stage_entered_at: "2026-07-12T01:00:00Z",
+        phone_ready_at: null, phone_ready_source: null,
+        updated_at: "2026-07-12T01:00:00Z",
+        visit_scheduled_at: null, visit_place: null,
+      }], error: null };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  assert.equal(typeof service.loadWorkspaceTrackSummaries, "function");
+  const result = await service.loadWorkspaceTrackSummaries("viewer-1", { force: true });
+
+  assert.deepEqual(result.tracks.map((track) => track.id), ["track-1"]);
+  assert.equal(harness.queries.length, 1);
+  assert.deepEqual(harness.queries[0].filters, []);
+});
+
 test("legacy and maintenance are explicit and legacy summaries remain per subject", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   for (const state of [

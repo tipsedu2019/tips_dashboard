@@ -261,6 +261,7 @@ function createWorkspaceLoaderHarness({
   registrationTrackSummaryFactory = (taskIds) => taskIds.map((taskId) => (
     registrationSummaryTrack(taskId, `track:${taskId}`, "영어", "inquiry")
   )),
+  registrationWorkspaceTrackSummaryLoader = async () => ({ mode: "ready", tracks: [] }),
 } = {}) {
   const defaultTaskGate = deferred();
   const explicitTaskGates = new Map(
@@ -272,6 +273,7 @@ function createWorkspaceLoaderHarness({
     taskSelects: [],
     scopedReads: [],
     trackSummaryCalls: [],
+    workspaceTrackSummaryCalls: [],
     registrationRuntimeProbeCalls: 0,
     clearedTrackCaches: 0,
   };
@@ -384,6 +386,10 @@ function createWorkspaceLoaderHarness({
           mode: "ready",
           tracks: registrationTrackSummaryFactory(taskIds),
         };
+      },
+      async loadRegistrationWorkspaceTrackSummaries(viewerId, options = {}) {
+        counts.workspaceTrackSummaryCalls.push({ viewerId, force: options.force });
+        return registrationWorkspaceTrackSummaryLoader(viewerId, options);
       },
       async probeRegistrationSubjectTrackRuntime() {
         counts.registrationRuntimeProbeCalls += 1;
@@ -812,7 +818,7 @@ test("same-key concurrent workspace loads share one in-flight query wave", async
   assert.strictEqual(firstData, secondData);
 });
 
-test("registration cold load uses the narrow parent projection and loads track summaries separately", async () => {
+test("registration cold load uses the narrow parent projection and workspace track summaries", async () => {
   const harness = createWorkspaceLoaderHarness();
   const load = harness.loadOpsTaskWorkspaceData({
     taskType: "registration",
@@ -836,8 +842,8 @@ test("registration cold load uses the narrow parent projection and loads track s
   assert.doesNotMatch(harness.counts.taskSelects[0], /ops_task_attachments/);
   assert.doesNotMatch(harness.counts.taskSelects[0], /ops_task_events/);
   assert.deepEqual(harness.counts.scopedReads, []);
-  assert.deepEqual(harness.counts.trackSummaryCalls, [{
-    taskIds: ["registration-embedded"],
+  assert.deepEqual(harness.counts.trackSummaryCalls, []);
+  assert.deepEqual(harness.counts.workspaceTrackSummaryCalls, [{
     viewerId: "viewer-a",
     force: true,
   }]);
@@ -869,12 +875,49 @@ test("registration cold load starts the runtime probe while parent rows are stil
   });
 });
 
+test("registration cold load starts workspace track summaries while parent rows are still loading", async () => {
+  const summaryGate = deferred();
+  const harness = createWorkspaceLoaderHarness({
+    registrationWorkspaceTrackSummaryLoader: () => summaryGate.promise,
+  });
+  const load = harness.loadOpsTaskWorkspaceData({
+    taskType: "registration",
+    viewerId: "viewer-a",
+    force: true,
+  });
+
+  await Promise.resolve();
+  const workspaceSummaryCallsBeforeParents = harness.counts.workspaceTrackSummaryCalls.length;
+  harness.releaseTasks([{
+    id: "case-1",
+    type: "registration",
+    ops_registration_details: { task_id: "case-1" },
+  }]);
+  summaryGate.resolve({
+    mode: "ready",
+    tracks: [
+      registrationSummaryTrack("case-1", "track-1", "영어", "inquiry"),
+      registrationSummaryTrack("orphan-case", "track-orphan", "수학", "inquiry"),
+    ],
+  });
+  const data = await load;
+
+  assert.equal(workspaceSummaryCallsBeforeParents, 1);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(data.tasks[0].registrationTracks.map(({ id }) => id))),
+    ["track-1"],
+  );
+});
+
 test("registration parent loading preserves one task with every subject track", async () => {
   const harness = createWorkspaceLoaderHarness({
-    registrationTrackSummaryFactory: (taskIds) => taskIds.flatMap((taskId) => [
-      registrationSummaryTrack(taskId, "eng", "영어", "consultation_waiting"),
-      registrationSummaryTrack(taskId, "math", "수학", "level_test_scheduled"),
-    ]),
+    registrationWorkspaceTrackSummaryLoader: async () => ({
+      mode: "ready",
+      tracks: [
+        registrationSummaryTrack("case-1", "eng", "영어", "consultation_waiting"),
+        registrationSummaryTrack("case-1", "math", "수학", "level_test_scheduled"),
+      ],
+    }),
   })
   const load = harness.loadOpsTaskWorkspaceData({
     taskType: "registration",

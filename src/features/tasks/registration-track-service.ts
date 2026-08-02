@@ -1609,47 +1609,56 @@ export function createRegistrationTrackService(
     } satisfies OpsRegistrationTrackSummary)))
   }
 
-  function loadTrackSummaries(
-    taskIds: string[],
+  function loadTrackSummarySelection(
+    taskIds: string[] | null,
     viewerId: string,
     loadOptions: { force?: boolean } = {},
   ): Promise<RegistrationTrackSummaryLoadResult> {
-    const normalizedTaskIds = [...new Set(taskIds.map(text).filter(Boolean))].sort()
-    const cacheKey = `${requireViewerId(viewerId)}:${normalizedTaskIds.join(",")}`
+    const normalizedTaskIds = taskIds === null
+      ? null
+      : [...new Set(taskIds.map(text).filter(Boolean))].sort()
+    const cacheKey = `${requireViewerId(viewerId)}:${normalizedTaskIds === null ? "workspace" : normalizedTaskIds.join(",")}`
     if (loadOptions.force) {
       advanceEpoch(summaryEpochs, cacheKey)
       summaryCache.delete(cacheKey)
       summaryInFlight.delete(cacheKey)
     }
     const cached = summaryCache.get(cacheKey)
-    if (cached) return measure("registration:track-summary", true, async () => cached)
+    const measureName = normalizedTaskIds === null
+      ? "registration:track-summary:workspace"
+      : "registration:track-summary"
+    if (cached) return measure(measureName, true, async () => cached)
     const pending = summaryInFlight.get(cacheKey)
     if (pending) return pending
     const generation = cacheGeneration
     const requestEpoch = summaryEpochs.get(cacheKey) || 0
 
-    const request = measure<RegistrationTrackSummaryLoadResult>("registration:track-summary", false, async (metrics) => {
+    const request = measure<RegistrationTrackSummaryLoadResult>(measureName, false, async (metrics) => {
       const runtime = await probeRuntime()
       if (runtime.mode !== "ready" || runtime.version !== 1) {
         return { mode: runtime.mode, tracks: [] } as RegistrationTrackSummaryLoadResult
       }
-      if (normalizedTaskIds.length === 0) return { mode: "ready", tracks: [] }
+      if (normalizedTaskIds?.length === 0) return { mode: "ready", tracks: [] }
 
       try {
         let trackRows: Row[]
         try {
+          const summaryQuery = client.from("ops_registration_subject_track_summaries")
+            .select(TRACK_SUMMARY_COLUMNS)
           trackRows = await queryRows(
-            client.from("ops_registration_subject_track_summaries")
-              .select(TRACK_SUMMARY_COLUMNS)
-              .in("task_id", normalizedTaskIds),
+            normalizedTaskIds === null
+              ? summaryQuery
+              : summaryQuery.in("task_id", normalizedTaskIds),
             metrics,
           )
         } catch (error) {
           if (!missingTrackSummaryOptionalColumnError(error)) throw error
+          const fallbackQuery = client.from("ops_registration_subject_track_summaries")
+            .select(PRE_INTAKE_TRACK_SUMMARY_COLUMNS)
           trackRows = await queryRows(
-            client.from("ops_registration_subject_track_summaries")
-              .select(PRE_INTAKE_TRACK_SUMMARY_COLUMNS)
-              .in("task_id", normalizedTaskIds),
+            normalizedTaskIds === null
+              ? fallbackQuery
+              : fallbackQuery.in("task_id", normalizedTaskIds),
             metrics,
           )
         }
@@ -1674,6 +1683,21 @@ export function createRegistrationTrackService(
       })
     summaryInFlight.set(cacheKey, request)
     return request
+  }
+
+  function loadTrackSummaries(
+    taskIds: string[],
+    viewerId: string,
+    loadOptions: { force?: boolean } = {},
+  ) {
+    return loadTrackSummarySelection(taskIds, viewerId, loadOptions)
+  }
+
+  function loadWorkspaceTrackSummaries(
+    viewerId: string,
+    loadOptions: { force?: boolean } = {},
+  ) {
+    return loadTrackSummarySelection(null, viewerId, loadOptions)
   }
 
   function loadCaseDetail(
@@ -2765,6 +2789,7 @@ export function createRegistrationTrackService(
     createLegacyTrackSummaries,
     loadRegistrationAppointmentCalendarRows,
     loadTrackSummaries,
+    loadWorkspaceTrackSummaries,
     loadCaseDetail,
     loadWorkspaceOptionData,
     loadAssignedScienceConsultationClassOptions,
@@ -2876,6 +2901,13 @@ export function loadRegistrationTrackSummaries(
   options: { force?: boolean } = {},
 ): Promise<RegistrationTrackSummaryLoadResult> {
   return defaultRegistrationTrackService.loadTrackSummaries(taskIds, viewerId, options)
+}
+
+export function loadRegistrationWorkspaceTrackSummaries(
+  viewerId: string,
+  options: { force?: boolean } = {},
+): Promise<RegistrationTrackSummaryLoadResult> {
+  return defaultRegistrationTrackService.loadWorkspaceTrackSummaries(viewerId, options)
 }
 
 export function loadRegistrationCaseDetail(

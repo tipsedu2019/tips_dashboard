@@ -29,6 +29,7 @@ import {
   loadOpsRegistrationWorkspaceOptionData as loadRegistrationWorkspaceOptionData,
   loadRegistrationCaseDetail,
   loadRegistrationTrackSummaries,
+  loadRegistrationWorkspaceTrackSummaries,
   setRegistrationTrackMutationCacheInvalidator,
   type OpsRegistrationCaseDetail,
   type OpsRegistrationTrackStatus,
@@ -1578,6 +1579,10 @@ async function readOpsRegistrationParentWorkspaceData(
 
   try {
     const runtimeProbePromise = probeRegistrationSubjectTrackRuntime()
+    const summaryReadPromise = loadRegistrationWorkspaceTrackSummaries(
+      safeViewerId,
+      { force: options.force },
+    )
     metrics.queryCount += 1
     const taskReadPromise = supabase
       .from("ops_tasks")
@@ -1587,7 +1592,11 @@ async function readOpsRegistrationParentWorkspaceData(
         if (error) throw error
         return (data || []) as unknown as Row[]
       })
-    const [taskRows] = await Promise.all([taskReadPromise, runtimeProbePromise])
+    const [taskRows, , summary] = await Promise.all([
+      taskReadPromise,
+      runtimeProbePromise,
+      summaryReadPromise,
+    ])
     const registrationRows = embeddedTaskRows(taskRows, "ops_registration_details")
     const registration = singleByTaskId(registrationRows.map((row) => ({
       taskId: text(row.task_id),
@@ -1611,13 +1620,6 @@ async function readOpsRegistrationParentWorkspaceData(
       emptyAttachments,
       emptyEvents,
     ))
-    const taskIds = parentTasks.map((task) => task.id).filter(Boolean)
-    const summary = await loadRegistrationTrackSummaries(
-      taskIds,
-      safeViewerId,
-      { force: options.force },
-    )
-
     if (summary.mode === "maintenance") {
       return {
         ...emptyOpsTaskWorkspaceData,
