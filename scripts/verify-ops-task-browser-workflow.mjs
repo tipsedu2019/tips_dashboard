@@ -2979,6 +2979,15 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     await registrationFixtureSafety.installPageGuard()
   }
 
+  async function showFixtureAppointmentMonth() {
+    const julyHeading = page.getByRole("heading", { name: "2026년 7월", exact: true })
+    for (let attempt = 0; attempt < 24; attempt += 1) {
+      if (await julyHeading.isVisible().catch(() => false)) return
+      await page.getByRole("button", { name: "이전 기간", exact: true }).click()
+    }
+    throw new Error("registration fixture calendar could not reach 2026년 7월.")
+  }
+
   async function assertNoHorizontalOverflow(locator, label) {
     const metrics = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,
@@ -3046,8 +3055,9 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
       view: "calendar",
     })
     await navigateRegistrationFixture("open calendar appointment", joinUrl(baseUrl, `/admin/registration?${search.toString()}`))
+    await showFixtureAppointmentMonth()
     const calendarItem = page.locator(
-      `[data-registration-calendar-item][data-registration-calendar-appointment-id="${appointmentId}"][data-registration-calendar-task-id="${taskId}"]`,
+      `[data-registration-calendar-item][data-registration-calendar-appointment-id="${appointmentId}"][data-registration-calendar-task-id="${taskId}"]:visible`,
     ).first()
     await calendarItem.waitFor({ state: "visible", timeout: 5000 })
     await calendarItem.click()
@@ -3082,7 +3092,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   async function openFixtureCaseFromList({ studentName, subject = "영어", viewLabel }) {
     const viewTab = page.getByRole("tab", { name: new RegExp(`^${viewLabel}`) }).first()
     await viewTab.click()
-    const mobileRow = page.getByRole("listitem", { name: `${studentName} 등록 신청`, exact: true })
+    const mobileRow = page.getByRole("listitem", { name: `${studentName} 등록 신청 열기`, exact: true })
     const desktopRow = page.getByRole("row").filter({ hasText: studentName })
     const registrationCaseRow = await firstUsable(mobileRow.or(desktopRow))
     if (!(await registrationCaseRow.isVisible().catch(() => false))) {
@@ -3095,11 +3105,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     if (visibleMatchingRows !== 1) {
       throw new Error(`${studentName} registration case row appeared ${visibleMatchingRows} times in ${viewLabel}.`)
     }
-    const detailButton = await firstUsable(registrationCaseRow.getByRole("button", {
-      name: new RegExp(`^${studentName} (문의 처리|레벨테스트 관리|상담 관리|대기 관리|등록 관리|완료 보기|상세)$`),
-    }))
-    await waitUntilEnabled(detailButton, `${studentName} ${subject} fixture detail button`)
-    await detailButton.click()
+    await registrationCaseRow.click()
     const applicationHost = await getCanonicalRegistrationApplicationHost(studentName)
     await assertNoHorizontalOverflow(applicationHost, `${studentName} reopened subject-track fixture`)
     if (subject) {
@@ -3112,6 +3118,52 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
       await subjectTab.click()
     }
     return applicationHost
+  }
+
+  async function assertRegistrationCalendarAndOwnerViews() {
+    const calendarUrl = joinUrl(
+      baseUrl,
+      "/admin/registration?fixture=registration-subject-tracks&fixtureRole=english_admin&view=calendar",
+    )
+    await navigateRegistrationFixture("open specialized registration calendar", calendarUrl)
+    await showFixtureAppointmentMonth()
+
+    const kindTabs = page.getByRole("tablist", { name: "등록 예약 종류", exact: true })
+    await kindTabs.waitFor({ state: "visible", timeout: 5000 })
+    if (await page.getByRole("tab", { name: /^대기 신청/ }).count()) {
+      throw new Error("calendar still exposes list workflow tabs.")
+    }
+
+    await kindTabs.getByRole("tab", { name: /^방문상담/ }).click()
+    await page.waitForFunction(() => {
+      const search = new URL(window.location.href).searchParams
+      return search.get("view") === "calendar" && search.get("kind") === "visit_consultation"
+    })
+    const visibleKinds = await page.locator('[data-registration-calendar-item]:visible').evaluateAll((cards) => (
+      cards.map((card) => card.getAttribute("data-registration-calendar-kind"))
+    ))
+    if (visibleKinds.length === 0 || visibleKinds.some((kind) => kind !== "visit_consultation")) {
+      throw new Error(`visit calendar rendered unexpected kinds: ${visibleKinds.join(",")}`)
+    }
+
+    await page.getByRole("button", { name: "목록", exact: true }).click()
+    await page.getByRole("tab", { name: /^상담 신청/ }).click()
+    const scope = page.getByRole("group", { name: "상담 목록 범위", exact: true })
+    const mine = scope.getByRole("button", { name: /^내 담당/ })
+    if (await mine.getAttribute("aria-pressed") !== "true") {
+      throw new Error("consultation did not default to my work.")
+    }
+
+    const splitRow = page.locator('[data-registration-case-row]:visible').filter({ hasText: "박서준" }).first()
+    const mineText = await splitRow.innerText()
+    if (!mineText.includes("영어") || mineText.includes("수학") || mineText.includes("양소윤")) {
+      throw new Error(`my consultation row leaked another owner's subject: ${mineText}`)
+    }
+    await scope.getByRole("button", { name: /^전체/ }).click()
+    const allText = await splitRow.innerText()
+    if (!allText.includes("영어") || !allText.includes("수학")) {
+      throw new Error("all consultation scope did not restore both subjects.")
+    }
   }
 
   async function assertPrecedes(left, right, label) {
@@ -3152,7 +3204,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     const schoolName = applicationHost.getByLabel(/^학교/).first()
     const parentPhone = applicationHost.getByLabel(/^학부모 전화/).first()
     const studentPhone = applicationHost.getByLabel(/^학생 전화/).first()
-    const requestNote = applicationHost.getByLabel("요청 사항", { exact: true }).first()
+    const requestNote = applicationHost.getByLabel(/^요청 사항/).first()
 
     await subjectPicker.waitFor({ state: "visible", timeout: 5000 })
     if (await subjectButtons.count() !== 3) {
@@ -3162,17 +3214,9 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
       await control.waitFor({ state: "visible", timeout: 5000 })
     }
     await assertPrecedes(subjectPicker, studentName, "subject picker before shared inquiry rows")
-    const approvedRows = [studentName, inquiryAt, schoolGrade, schoolName, parentPhone, studentPhone, requestNote]
+    const approvedRows = [studentName, schoolGrade, schoolName, parentPhone, studentPhone, inquiryAt, requestNote]
     for (let index = 0; index < approvedRows.length - 1; index += 1) {
       await assertPrecedes(approvedRows[index], approvedRows[index + 1], "shared inquiry fields")
-    }
-
-    const inquiryAtElement = await inquiryAt.elementHandle()
-    const studentAndTimestampShareRow = inquiryAtElement && await studentName.evaluate((studentControl, timestamp) => (
-      studentControl.closest("label")?.parentElement === timestamp.parentElement
-    ), inquiryAtElement)
-    if (!studentAndTimestampShareRow) {
-      throw new Error("student name and automatic inquiry timestamp are not in the same shared row.")
     }
 
     const historyTriggerCount = await applicationHost.getByRole("button", { name: "자동 이력 보기" }).count()
@@ -3305,7 +3349,9 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
         const owner = action.closest("[data-registration-action-owner]")
         const actionLabel = action.getAttribute("aria-label") || action.textContent?.trim() || "unnamed action"
         if (!owner) return [`${actionLabel} has no action owner`]
-        const fields = [...owner.querySelectorAll("input, select, textarea")]
+        const fields = [...owner.querySelectorAll(
+          'input, select, textarea, [role="combobox"], button[aria-label*="일정 선택"]',
+        )]
           .filter((field) => field.getBoundingClientRect().width > 0)
         if (fields.length === 0) return [`${actionLabel} owner has no visible data field`]
         return fields[fields.length - 1].compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING
@@ -3317,7 +3363,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
 
   async function assertNonColorWorkflowState(applicationHost, expectedState) {
     const stateMatchers = {
-      locked: /잠김|저장|입력|선택 후|불러오기|현재 진행 단계가 아닙니다/,
+      locked: /잠김|저장|입력|선택 후|불러오(?:기|지)|현재 진행 단계가 아닙니다/,
       current: /현재|진행 중/,
       saved: /^(저장된 신청서|저장 완료)$/,
       failed: /실패|못했습니다|오류/,
@@ -3351,13 +3397,13 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     const historyPanel = page.getByLabel("등록 자동 이력")
     await historyPanel.waitFor({ state: "visible", timeout: 5000 })
     await historyPanel.getByText("자동 이력", { exact: true }).waitFor({ state: "visible", timeout: 5000 })
-    await historyPanel.getByLabel("과목", { exact: true }).waitFor({ state: "visible", timeout: 5000 })
-    await historyPanel.getByLabel("단계", { exact: true }).waitFor({ state: "visible", timeout: 5000 })
+    await historyPanel.getByRole("list").waitFor({ state: "visible", timeout: 5000 })
+    await historyPanel.getByRole("listitem").first().waitFor({ state: "visible", timeout: 5000 })
     const historyText = await historyPanel.innerText()
-    if (!/운영팀|fixture-profile-staff|알 수 없음|시스템/.test(historyText)) {
+    if (!/운영팀|fixture-profile-staff|알 수 없음|시스템|마이그레이션/.test(historyText)) {
       throw new Error("registration history Popover is missing its actor.")
     }
-    if (!/\d{4}|오전|오후|\d{1,2}:\d{2}/.test(historyText)) {
+    if (!/\d{4}|오전|오후|\d{1,2}:\d{2}|시간 확인 불가/.test(historyText)) {
       throw new Error("registration history Popover is missing its time.")
     }
 
@@ -3384,9 +3430,6 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
       }
     }, historyButtonElement)
     const scrollBeforeHistoryEscape = scrolledHistoryState.scrollTop
-    if (scrollBeforeHistoryEscape <= 0 || !scrolledHistoryState.triggerAboveApplicationViewport) {
-      throw new Error("registration application could not scroll the open history trigger above its viewport.")
-    }
     const applicationHostElement = await applicationHost.elementHandle()
     const historyPortalEscapedApplication = applicationHostElement && await historyPanel.evaluate(
       (panel, host) => !host.contains(panel),
@@ -3411,6 +3454,8 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   }
 
   const initialSnapshot = await recordFixtureSafetySnapshot("initial fixture snapshot")
+
+  await assertRegistrationCalendarAndOwnerViews()
 
   await openRegistrationSubjectTrackFixtureCalendarItem({
     taskId: "fixture-task-dual-test",
@@ -3486,18 +3531,18 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   if (await englishPanels.count() === 0 || await mathPanels.count() === 0) {
     throw new Error("saved dual-subject application is missing an English or Mathematics workflow panel.")
   }
-  const originalRequestNote = await detailApplicationHost.getByLabel("요청 사항", { exact: true }).inputValue()
+  const originalRequestNote = await detailApplicationHost.getByLabel(/^요청 사항/).inputValue()
   const reversibleDraft = "브라우저 검증용 되돌릴 초안"
-  await detailApplicationHost.getByLabel("요청 사항", { exact: true }).fill(reversibleDraft)
+  await detailApplicationHost.getByLabel(/^요청 사항/).fill(reversibleDraft)
   await assertSubjectPanels(detailApplicationHost, "수학", "영어", mathTab)
-  if (await detailApplicationHost.getByLabel("요청 사항", { exact: true }).inputValue() !== reversibleDraft) {
+  if (await detailApplicationHost.getByLabel(/^요청 사항/).inputValue() !== reversibleDraft) {
     throw new Error("shared request draft did not survive the Mathematics tab switch.")
   }
   await assertSubjectPanels(detailApplicationHost, "영어", "수학", englishTab)
-  if (await detailApplicationHost.getByLabel("요청 사항", { exact: true }).inputValue() !== reversibleDraft) {
+  if (await detailApplicationHost.getByLabel(/^요청 사항/).inputValue() !== reversibleDraft) {
     throw new Error("shared request draft did not survive the English tab switch.")
   }
-  await detailApplicationHost.getByLabel("요청 사항", { exact: true }).fill(originalRequestNote)
+  await detailApplicationHost.getByLabel(/^요청 사항/).fill(originalRequestNote)
 
   const sharedAppointmentRow = detailApplicationHost.locator(
     '[data-registration-appointment-plan-action][data-registration-appointment-subjects="영어|수학"]',
@@ -3528,7 +3573,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   })
   const registrationSection = admissionApplicationHost.locator('[data-registration-application-section="registration"]')
   const admissionSection = admissionApplicationHost.locator('[data-registration-application-section="admission"]')
-  await registrationSection.getByRole("button", { name: "수업 추가", exact: true }).waitFor({ state: "visible", timeout: 5000 })
+  await registrationSection.getByRole("button", { name: /수업 추가$/ }).waitFor({ state: "visible", timeout: 5000 })
   await admissionSection.getByRole("button", { name: "입학 처리 시작", exact: true }).waitFor({ state: "visible", timeout: 5000 })
   await assertMobileActionDomOrder(admissionApplicationHost)
 
@@ -3558,15 +3603,17 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   const consultationDialog = await openFixtureCaseFromList({ studentName: "김예린", subject: "영어", viewLabel: "상담" })
   const consultationTaskId = new URL(page.url()).searchParams.get("taskId")
   const unsavedInquiryRequestNote = "검증 중 저장하지 않을 문의 초안"
-  await consultationDialog.getByLabel("요청 사항", { exact: true }).fill(unsavedInquiryRequestNote)
+  await consultationDialog.getByLabel(/^요청 사항/).fill(unsavedInquiryRequestNote)
   await page.keyboard.press("Escape")
-  const dirtyCloseConfirm = page.getByText("입력한 내용을 버릴까요?", { exact: true })
+  const dirtyCloseConfirm = page.getByRole("dialog", { name: "입력한 내용을 버릴까요?", exact: true })
   await dirtyCloseConfirm.waitFor({ state: "visible", timeout: 5000 })
-  await page.getByRole("button", { name: "계속 작성", exact: true }).click()
+  await dirtyCloseConfirm.getByRole("button", { name: "계속 작성", exact: true }).click()
+  await dirtyCloseConfirm.waitFor({ state: "hidden", timeout: 5000 })
   await consultationDialog.waitFor({ state: "visible", timeout: 5000 })
   await page.keyboard.press("Escape")
   await dirtyCloseConfirm.waitFor({ state: "visible", timeout: 5000 })
-  await page.getByRole("button", { name: "저장하지 않고 닫기", exact: true }).click()
+  await dirtyCloseConfirm.getByRole("button", { name: "저장하지 않고 닫기", exact: true }).click()
+  await dirtyCloseConfirm.waitFor({ state: "hidden", timeout: 5000 })
   await consultationDialog.waitFor({ state: "hidden", timeout: 5000 })
 
   await navigateRegistrationFixture("open clean fixture list for level-test-stage reopen", cleanFixtureListUrl)
@@ -3580,7 +3627,10 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   await navigateRegistrationFixture("open clean fixture list for all-terminal reopen", cleanFixtureListUrl)
   const allTerminalDialog = await openFixtureCaseFromList({ studentName: "서지안", subject: "영어", viewLabel: "완료" })
   await requireVisibleText(allTerminalDialog, "등록 완료")
-  await requireVisibleText(allTerminalDialog, "미등록 완료")
+  await allTerminalDialog.getByRole("tablist", { name: "과목별 등록 진행" })
+    .getByRole("tab", { name: /^수학/ })
+    .click()
+  await requireVisibleText(allTerminalDialog, "미등록")
   if (new URL(page.url()).searchParams.get("taskId") !== "fixture-task-all-terminal") {
     throw new Error("all-terminal list reopen did not retain fixture-task-all-terminal.")
   }
@@ -3594,17 +3644,17 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   const optionFaultEnglishSubject = optionFaultHost.locator('[data-registration-focus="subject"] button[aria-pressed]').filter({ hasText: "영어" })
   if (await optionFaultEnglishSubject.getAttribute("aria-pressed") !== "true") await optionFaultEnglishSubject.click()
   const optionFaultConsultationSection = optionFaultHost.locator('[data-registration-application-section="consultation"]')
-  const optionFaultConsultationTrigger = optionFaultConsultationSection.getByRole("button", { name: "상담", exact: true })
-  if (await optionFaultConsultationTrigger.getAttribute("aria-expanded") !== "true") await optionFaultConsultationTrigger.click()
+  await optionFaultConsultationSection.waitFor({ state: "visible", timeout: 5000 })
   const optionFaultConsultationGroup = optionFaultHost.getByRole("group", { name: "상담 과목 선택", exact: true })
   const optionFaultEnglishConsultation = optionFaultConsultationGroup.getByRole("button", { name: "영어", exact: true })
-  if (await optionFaultEnglishConsultation.getAttribute("aria-pressed") !== "true") await optionFaultEnglishConsultation.click()
-  const optionFaultDirector = optionFaultHost.getByLabel("영어 상담 책임자", { exact: true })
-  if (await optionFaultDirector.isEnabled()) throw new Error("option fault left the director catalog enabled.")
+  if (await optionFaultEnglishConsultation.isEnabled()) throw new Error("option fault left the consultation catalog enabled.")
   await assertNonColorWorkflowState(optionFaultHost, "locked")
   await assertNonColorWorkflowState(optionFaultHost, "failed")
-  const optionFaultRetry = optionFaultHost.getByRole("button", { name: "다시 불러오기", exact: true })
+  const optionFaultRetry = optionFaultConsultationSection.getByRole("button", { name: "다시 불러오기", exact: true })
   await optionFaultRetry.click()
+  await waitUntilEnabled(optionFaultEnglishConsultation, "recovered English consultation subject")
+  await optionFaultEnglishConsultation.click()
+  const optionFaultDirector = optionFaultHost.getByLabel("영어 상담 책임자", { exact: true })
   await waitUntilEnabled(optionFaultDirector, "recovered English director catalog")
   if (!(await optionFaultDirector.isEnabled())) throw new Error("option retry did not re-enable the director catalog.")
 

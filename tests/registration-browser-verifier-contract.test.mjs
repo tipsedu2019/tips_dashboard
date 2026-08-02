@@ -76,7 +76,7 @@ test("saved detail verification switches every subject panel and preserves a rev
   assert.match(verifier, /\[role="tabpanel"\]\[data-registration-subject="영어"\]/)
   assert.match(verifier, /waitFor\(\{ state: "visible"/)
   assert.match(verifier, /waitFor\(\{ state: "hidden"/)
-  assert.match(verifier, /getByLabel\("요청 사항"/)
+  assert.match(verifier, /getByLabel\(\/\^요청 사항\//)
   assert.match(verifier, /inputValue\(\)/)
   assert.match(verifier, /data-registration-appointment-plan-action/)
   assert.match(verifier, /appointmentId/)
@@ -92,8 +92,8 @@ test("history popover verifies content, focus return, and isolated Escape behavi
 
   assert.match(verifier, /getByRole\("button", \{ name: "자동 이력 보기" \}\)/)
   assert.match(verifier, /getByLabel\("등록 자동 이력"\)/)
-  assert.match(verifier, /getByLabel\("과목"/)
-  assert.match(verifier, /getByLabel\("단계"/)
+  assert.match(verifier, /historyPanel\.getByRole\("list"\)/)
+  assert.match(verifier, /historyPanel\.getByRole\("listitem"\)/)
   assert.match(verifier, /document\.activeElement/)
   assert.match(verifier, /keyboard\.press\("Escape"\)/)
   assert.match(verifier, /scrollTop/)
@@ -141,6 +141,11 @@ test("read-only coverage reopens calendar and list cases without persistent acti
   const source = await readFile(verifierUrl, "utf8")
   const verifier = registrationVerifier(source)
 
+  assert.match(verifier, /async function assertRegistrationCalendarAndOwnerViews\(\)/)
+  assert.match(verifier, /await assertRegistrationCalendarAndOwnerViews\(\)/)
+  assert.match(verifier, /finalFixtureSnapshot\.stateDigest !== initialSnapshot\.stateDigest/)
+  assert.match(verifier, /assertNoInterceptedProviderRequests\("no-send registration application verification"\)/)
+
   const calendarStart = verifier.indexOf("async function openRegistrationSubjectTrackFixtureCalendarItem")
   const calendarEnd = verifier.indexOf("async function openFixtureCaseFromList", calendarStart)
   assert.ok(calendarStart >= 0 && calendarEnd > calendarStart, "calendar and list helpers must execute")
@@ -158,7 +163,7 @@ test("read-only coverage reopens calendar and list cases without persistent acti
   assert.match(list, /getByRole\("tab"/)
   assert.match(list, /getByRole\("listitem"/)
   assert.match(list, /getByRole\("row"\)/)
-  assert.match(list, /detailButton\.click\(\)/)
+  assert.match(list, /registrationCaseRow\.click\(\)/)
   assert.match(verifier, /openFixtureCaseFromList\(\{ studentName: "김예린"[\s\S]*?viewLabel: "상담"/)
   assert.match(verifier, /openFixtureCaseFromList\(\{ studentName: "서지안"[\s\S]*?viewLabel: "완료"/)
 
@@ -178,7 +183,7 @@ test("read-only edge scenarios keep permissions migration terminal and dirty-clo
     "fixture-task-cross-stage",
     "fixture-task-all-terminal",
     "등록 완료",
-    "미등록 완료",
+    "미등록",
   ]) {
     assert.ok(verifier.includes(marker), `restored read-only verifier is missing ${marker}`)
   }
@@ -196,7 +201,7 @@ test("option recovery and accessibility checks execute without saving", async ()
   assert.match(verifier, /async function setNextFault/)
   assert.match(verifier, /kind: "option_data_once"/)
   assert.match(verifier, /optionFaultHost\.locator\('\[data-registration-focus="subject"\] button\[aria-pressed\]'/)
-  assert.match(verifier, /optionFaultConsultationSection[\s\S]*?getByRole\("button", \{ name: "상담", exact: true \}\)[\s\S]*?click\(\)/)
+  assert.match(verifier, /optionFaultConsultationSection\.waitFor\(\{ state: "visible"/)
   assert.match(verifier, /getByRole\("group", \{ name: "상담 과목 선택", exact: true \}\)/)
   assert.match(verifier, /getByLabel\("영어 상담 책임자", \{ exact: true \}\)/)
   assert.doesNotMatch(verifier, /영어 다음 업무/)

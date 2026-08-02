@@ -171,7 +171,19 @@ import {
   type RegistrationCaseListViewItem,
 } from "./registration-case-list-model"
 import { RegistrationAppointmentCalendar } from "./registration-appointment-calendar"
-import type { RegistrationAppointmentCalendarItem } from "./registration-appointment-calendar-model"
+import type {
+  RegistrationAppointmentCalendarItem,
+  RegistrationAppointmentCalendarKindCounts,
+  RegistrationAppointmentCalendarKindFilter,
+} from "./registration-appointment-calendar-model"
+import {
+  buildRegistrationWorkspaceSearchParams,
+  isRegistrationConsultationViewKey,
+  normalizeRegistrationConsultationOwnerScope,
+  normalizeRegistrationWorkspaceCalendarKind,
+  type RegistrationConsultationOwnerScope,
+  type RegistrationWorkspaceRouteTarget,
+} from "./registration-workspace-route"
 import { RegistrationApplication } from "./registration-track-editor"
 import {
   createRegistrationCase,
@@ -710,6 +722,12 @@ const REGISTRATION_VIEW_TABS: Array<{ key: RegistrationViewKey; label: string }>
   { key: "payment", label: "수납 진행 중" },
   { key: "completed", label: "완료" },
 ]
+
+const REGISTRATION_CALENDAR_KIND_TABS = [
+  { key: "all", label: "전체 일정" },
+  { key: "level_test", label: "레벨테스트" },
+  { key: "visit_consultation", label: "방문상담" },
+] as const
 
 const REGISTRATION_GRADE_OPTIONS = getRegistrationGradeOptions()
 
@@ -8501,6 +8519,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [withdrawalView, setWithdrawalView] = useState<WithdrawalViewKey>("applicant")
   const [registrationView, setRegistrationView] = useState<RegistrationViewKey>("inquiry")
   const [registrationMode, setRegistrationMode] = useState<RegistrationWorkspaceMode>("list")
+  const [registrationConsultationOwnerScope, setRegistrationConsultationOwnerScope] = useState<RegistrationConsultationOwnerScope>("mine")
+  const [registrationCalendarKind, setRegistrationCalendarKind] = useState<RegistrationAppointmentCalendarKindFilter>("all")
+  const [registrationCalendarKindCounts, setRegistrationCalendarKindCounts] = useState<RegistrationAppointmentCalendarKindCounts>({
+    all: 0,
+    level_test: 0,
+    visit_consultation: 0,
+  })
   const [registrationCalendarRefreshToken, setRegistrationCalendarRefreshToken] = useState(0)
   const [taskHistoryRevision, setTaskHistoryRevision] = useState(0)
   const [todoSort, setTodoSort] = useState<TodoSortKey>("due")
@@ -8939,6 +8964,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setRegistrationMode(nextView === "calendar" ? "calendar" : "list")
       const normalizedRegistrationView = normalizeRegistrationViewKey(nextWorkflowFlow)
       if (normalizedRegistrationView) setRegistrationView(normalizedRegistrationView)
+      setRegistrationCalendarKind(normalizeRegistrationWorkspaceCalendarKind(searchParams.get("kind")))
+      setRegistrationConsultationOwnerScope(
+        normalizedRegistrationView && isRegistrationConsultationViewKey(normalizedRegistrationView)
+          ? normalizeRegistrationConsultationOwnerScope(searchParams.get("owner"))
+          : "mine",
+      )
     } else if (isWithdrawalWorkspace || isTransferWorkspace) {
       if (isWithdrawalViewKey(nextWorkflowFlow)) setWithdrawalView(nextWorkflowFlow)
     } else if (isWordRetestWorkspace) {
@@ -9015,10 +9046,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
-  const syncRegistrationView = (nextView: RegistrationViewKey) => {
-    setRegistrationMode("list")
-    setRegistrationView(nextView)
-    setTaskFocus("none")
+  const clearRegistrationWorkspaceSelection = () => {
     setDetailOpen(false)
     setRegistrationApplicationHost({ kind: "closed" })
     setSelectedRegistrationTrackId(null)
@@ -9026,35 +9054,52 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setRegistrationCaseDetail(null)
     registrationTrackSelectionRef.current = ""
     setNotice("")
-    const searchParams = new URLSearchParams(window.location.search)
-    searchParams.set("flow", nextView)
-    searchParams.delete("taskId")
-    searchParams.delete("trackId")
-    searchParams.delete("appointmentId")
-    searchParams.delete("view")
-    searchParams.delete("list")
-    searchParams.delete("focus")
+  }
+
+  const replaceRegistrationWorkspaceSearch = (target: RegistrationWorkspaceRouteTarget) => {
+    const searchParams = buildRegistrationWorkspaceSearchParams(
+      new URLSearchParams(window.location.search),
+      target,
+    )
     const queryString = searchParams.toString()
     window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
+  const syncRegistrationView = (nextView: RegistrationViewKey) => {
+    const nextOwnerScope = isRegistrationConsultationViewKey(nextView) && isRegistrationConsultationViewKey(registrationView)
+      ? registrationConsultationOwnerScope
+      : "mine"
+    setRegistrationMode("list")
+    setRegistrationView(nextView)
+    setRegistrationConsultationOwnerScope(nextOwnerScope)
+    setTaskFocus("none")
+    clearRegistrationWorkspaceSelection()
+    replaceRegistrationWorkspaceSearch({ mode: "list", view: nextView, ownerScope: nextOwnerScope })
+  }
+
+  const syncRegistrationConsultationOwnerScope = (ownerScope: RegistrationConsultationOwnerScope) => {
+    setRegistrationConsultationOwnerScope(ownerScope)
+    clearRegistrationWorkspaceSelection()
+    replaceRegistrationWorkspaceSearch({ mode: "list", view: registrationView, ownerScope })
+  }
+
+  const syncRegistrationCalendarKind = (calendarKind: RegistrationAppointmentCalendarKindFilter) => {
+    setRegistrationCalendarKind(calendarKind)
+    clearRegistrationWorkspaceSelection()
+    replaceRegistrationWorkspaceSearch({ mode: "calendar", calendarKind })
+  }
+
   const syncRegistrationMode = (nextMode: RegistrationWorkspaceMode) => {
     setRegistrationMode(nextMode)
-    setDetailOpen(false)
-    setRegistrationApplicationHost({ kind: "closed" })
-    setSelectedRegistrationTrackId(null)
-    setSelectedRegistrationAppointmentId(null)
-    setRegistrationCaseDetail(null)
-    registrationTrackSelectionRef.current = ""
-    setNotice("")
-    const routeParams = new URLSearchParams(window.location.search)
-    if (nextMode === "calendar") routeParams.set("view", "calendar")
-    else routeParams.delete("view")
-    routeParams.delete("taskId")
-    routeParams.delete("trackId")
-    routeParams.delete("appointmentId")
-    const queryString = routeParams.toString()
-    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+    clearRegistrationWorkspaceSelection()
+    if (nextMode === "calendar") {
+      replaceRegistrationWorkspaceSearch({ mode: "calendar", calendarKind: registrationCalendarKind })
+      return
+    }
+    const ownerScope = isRegistrationConsultationViewKey(registrationView)
+      ? registrationConsultationOwnerScope
+      : "mine"
+    replaceRegistrationWorkspaceSearch({ mode: "list", view: registrationView, ownerScope })
   }
 
   function handleRegistrationViewTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, currentView: RegistrationViewKey) {
@@ -9071,6 +9116,26 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     syncRegistrationView(nextView)
     window.requestAnimationFrame(() => {
       document.querySelector<HTMLButtonElement>(`[data-registration-view-tab="${nextView}"]`)?.focus()
+    })
+  }
+
+  function handleRegistrationCalendarKindTabKeyDown(
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentKind: RegistrationAppointmentCalendarKindFilter,
+  ) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
+    event.preventDefault()
+    const currentIndex = REGISTRATION_CALENDAR_KIND_TABS.findIndex((tab) => tab.key === currentKind)
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? REGISTRATION_CALENDAR_KIND_TABS.length - 1
+        : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + REGISTRATION_CALENDAR_KIND_TABS.length) % REGISTRATION_CALENDAR_KIND_TABS.length
+    const nextKind = REGISTRATION_CALENDAR_KIND_TABS[nextIndex]?.key
+    if (!nextKind) return
+    syncRegistrationCalendarKind(nextKind)
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLButtonElement>(`[data-registration-calendar-kind-tab="${nextKind}"]`)?.focus()
     })
   }
 
@@ -9421,10 +9486,28 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     () => getRegistrationCaseTabCounts(registrationCaseItems),
     [registrationCaseItems],
   )
+  const consultationOwnerId = isRegistrationConsultationViewKey(registrationView)
+    && registrationConsultationOwnerScope === "mine"
+    ? registrationViewerId
+    : undefined
   const visibleRegistrationCaseItems = useMemo(
-    () => filterRegistrationCaseListItems(registrationCaseItems, registrationView, deferredQuery),
-    [deferredQuery, registrationCaseItems, registrationView],
+    () => filterRegistrationCaseListItems(
+      registrationCaseItems,
+      registrationView,
+      deferredQuery,
+      { consultationOwnerId },
+    ),
+    [consultationOwnerId, deferredQuery, registrationCaseItems, registrationView],
   )
+  const registrationConsultationScopeCounts = useMemo(() => ({
+    mine: filterRegistrationCaseListItems(
+      registrationCaseItems,
+      registrationView,
+      "",
+      { consultationOwnerId: registrationViewerId },
+    ).length,
+    all: filterRegistrationCaseListItems(registrationCaseItems, registrationView).length,
+  }), [registrationCaseItems, registrationView, registrationViewerId])
   const wordRetestRoleTabs = isAssistant || wordRetestViewerRole === "assistant"
     ? WORD_RETEST_ROLE_TABS.filter((tab) => tab.key === "assistant")
     : WORD_RETEST_ROLE_TABS
@@ -9661,7 +9744,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       : `${workspaceLabel} 없음`
   const registrationEmptyLabel = hasQuery
     ? "현재 단계에서 검색 결과가 없습니다."
-    : `${REGISTRATION_VIEW_TABS.find((tab) => tab.key === registrationView)?.label || "현재"} 단계에 등록 업무가 없습니다.`
+    : isRegistrationConsultationViewKey(registrationView) && registrationConsultationOwnerScope === "mine"
+      ? registrationView === "consultation_requested"
+        ? "내 담당 상담 신청이 없습니다."
+        : "내 담당 상담 완료가 없습니다."
+      : `${REGISTRATION_VIEW_TABS.find((tab) => tab.key === registrationView)?.label || "현재"} 단계에 등록 업무가 없습니다.`
   const emptyCalendarLabel = isFilteredEmpty ? "조건에 맞는 일정 없음" : "일정 없음"
   const shouldHideEmptySurface = !loading && visibleWorkspaceItemCount === 0 && (hasLoadBlocker || Boolean(message && !formOpen && !detailOpen))
 	  const formDetailTabs = useMemo(() => getFormDetailTabs(form.type), [form.type])
@@ -10223,7 +10310,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const openRegistrationCalendarItem = useCallback((item: RegistrationAppointmentCalendarItem) => {
     const canonicalUrl = new URL(item.href, window.location.origin)
     const currentSearchParams = new URLSearchParams(window.location.search)
-    for (const key of ["fixture", "fixtureRole", "flow"] as const) {
+    for (const key of ["fixture", "fixtureRole", "kind"] as const) {
       const value = currentSearchParams.get(key)
       if (value) canonicalUrl.searchParams.set(key, value)
     }
@@ -12193,7 +12280,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           </div>
         ) : null}
         <div className={isTodoWorkspace ? "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start" : isWordRetestWorkspace ? "flex min-w-0 items-center justify-between gap-2" : "flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between"}>
-	          <div className={`${HORIZONTAL_TAB_BAR_CLASS} ${isTodoWorkspace ? "flex-1" : isWordRetestWorkspace ? "flex-1 flex-nowrap overflow-x-auto" : isRegistrationWorkspace ? "w-full !flex-nowrap !overflow-x-auto lg:flex-1" : "w-full lg:flex-1"}`} role="tablist" aria-label={isTodoWorkspace ? "할 일 목록" : isWordRetestWorkspace ? "단어 재시험 역할" : isRegistrationWorkspace ? "등록 흐름" : isWithdrawalWorkspace ? "퇴원 흐름" : isTransferWorkspace ? "전반 흐름" : `${workspaceLabel} 보기`}>
+	          <div className={`${HORIZONTAL_TAB_BAR_CLASS} ${isTodoWorkspace ? "flex-1" : isWordRetestWorkspace ? "flex-1 flex-nowrap overflow-x-auto" : isRegistrationWorkspace ? "w-full !flex-nowrap !overflow-x-auto lg:flex-1" : "w-full lg:flex-1"}`} role="tablist" aria-label={isTodoWorkspace ? "할 일 목록" : isWordRetestWorkspace ? "단어 재시험 역할" : isRegistrationWorkspace ? registrationMode === "calendar" ? "등록 예약 종류" : "등록 흐름" : isWithdrawalWorkspace ? "퇴원 흐름" : isTransferWorkspace ? "전반 흐름" : `${workspaceLabel} 보기`}>
 	            {isWordRetestWorkspace
 	              ? wordRetestRoleTabs.map((tab) => {
 	                const roleCount = wordRetestRoleCounts[tab.key]
@@ -12223,36 +12310,67 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                )
 	              })
 	              : isRegistrationWorkspace
-	                ? REGISTRATION_VIEW_TABS.map((tab) => {
-	                  const registrationCount = registrationCounts[tab.key]
+	                ? registrationMode === "calendar"
+	                  ? REGISTRATION_CALENDAR_KIND_TABS.map((tab) => {
+	                    const registrationCount = registrationCalendarKindCounts[tab.key]
 
-	                  return (
-	                    <button
-	                      key={tab.key}
-	                      type="button"
-	                      role="tab"
-	                      data-registration-view-tab={tab.key}
-	                      tabIndex={registrationView === tab.key ? 0 : -1}
-	                      onClick={() => syncRegistrationView(tab.key)}
-	                      onKeyDown={(event) => handleRegistrationViewTabKeyDown(event, tab.key)}
-	                      aria-selected={registrationView === tab.key}
-	                      aria-label={registrationCount > 0 ? `${tab.label} ${registrationCount}건` : tab.label}
-	                      className={[
-	                        "shrink-0 rounded-md px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40",
-	                        registrationView === tab.key
-	                          ? "bg-primary text-primary-foreground"
-	                          : "text-muted-foreground hover:bg-muted hover:text-foreground",
-	                      ].join(" ")}
-	                    >
-	                      <span>{tab.label}</span>
-	                      {registrationCount > 0 && (
-	                        <span aria-hidden="true" className="ml-1 rounded bg-background/65 px-1.5 py-0.5 text-xs text-inherit opacity-80">
-	                          {registrationCount}
-	                        </span>
-	                      )}
-	                    </button>
-	                  )
-	                })
+	                    return (
+	                      <button
+	                        key={tab.key}
+	                        type="button"
+	                        role="tab"
+	                        data-registration-calendar-kind-tab={tab.key}
+	                        tabIndex={registrationCalendarKind === tab.key ? 0 : -1}
+	                        onClick={() => syncRegistrationCalendarKind(tab.key)}
+	                        onKeyDown={(event) => handleRegistrationCalendarKindTabKeyDown(event, tab.key)}
+	                        aria-selected={registrationCalendarKind === tab.key}
+	                        aria-label={registrationCount > 0 ? `${tab.label} ${registrationCount}건` : tab.label}
+	                        className={[
+	                          "shrink-0 rounded-md px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40",
+	                          registrationCalendarKind === tab.key
+	                            ? "bg-primary text-primary-foreground"
+	                            : "text-muted-foreground hover:bg-muted hover:text-foreground",
+	                        ].join(" ")}
+	                      >
+	                        <span>{tab.label}</span>
+	                        {registrationCount > 0 && (
+	                          <span aria-hidden="true" className="ml-1 rounded bg-background/65 px-1.5 py-0.5 text-xs text-inherit opacity-80">
+	                            {registrationCount}
+	                          </span>
+	                        )}
+	                      </button>
+	                    )
+	                  })
+	                  : REGISTRATION_VIEW_TABS.map((tab) => {
+	                    const registrationCount = registrationCounts[tab.key]
+
+	                    return (
+	                      <button
+	                        key={tab.key}
+	                        type="button"
+	                        role="tab"
+	                        data-registration-view-tab={tab.key}
+	                        tabIndex={registrationView === tab.key ? 0 : -1}
+	                        onClick={() => syncRegistrationView(tab.key)}
+	                        onKeyDown={(event) => handleRegistrationViewTabKeyDown(event, tab.key)}
+	                        aria-selected={registrationView === tab.key}
+	                        aria-label={registrationCount > 0 ? `${tab.label} ${registrationCount}건` : tab.label}
+	                        className={[
+	                          "shrink-0 rounded-md px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40",
+	                          registrationView === tab.key
+	                            ? "bg-primary text-primary-foreground"
+	                            : "text-muted-foreground hover:bg-muted hover:text-foreground",
+	                        ].join(" ")}
+	                      >
+	                        <span>{tab.label}</span>
+	                        {registrationCount > 0 && (
+	                          <span aria-hidden="true" className="ml-1 rounded bg-background/65 px-1.5 py-0.5 text-xs text-inherit opacity-80">
+	                            {registrationCount}
+	                          </span>
+	                        )}
+	                      </button>
+	                    )
+	                  })
 	              : isWithdrawalWorkspace || isTransferWorkspace
 	                ? WITHDRAWAL_VIEW_TABS.map((tab) => {
 	                  const withdrawalCount = (isTransferWorkspace ? transferCounts : withdrawalCounts)[tab.key]
@@ -12393,6 +12511,36 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            )}
           </div>
         </div>
+        {isRegistrationWorkspace
+          && registrationMode === "list"
+          && isRegistrationConsultationViewKey(registrationView) ? (
+          <div role="group" aria-label="상담 목록 범위" className="inline-flex w-fit rounded-md border bg-background p-1">
+            {(["mine", "all"] as const).map((scope) => {
+              const active = registrationConsultationOwnerScope === scope
+              const count = registrationConsultationScopeCounts[scope]
+              const label = scope === "mine" ? "내 담당" : "전체"
+
+              return (
+                <button
+                  key={scope}
+                  type="button"
+                  aria-pressed={active}
+                  aria-label={count > 0 ? `${label} ${count}건` : label}
+                  onClick={() => syncRegistrationConsultationOwnerScope(scope)}
+                  className={[
+                    "rounded px-3 py-1.5 text-sm font-medium transition-colors",
+                    active
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  ].join(" ")}
+                >
+                  <span>{label}</span>
+                  {count > 0 ? <span aria-hidden="true" className="ml-1 opacity-80">{count}</span> : null}
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
         {isTodoWorkspace && (
           <div className="grid gap-2">
             <form onSubmit={submitQuickAdd} className="grid gap-2 rounded-md border bg-background p-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
@@ -12616,6 +12764,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             registrationMode === "calendar" ? (
               <RegistrationAppointmentCalendar
                 refreshToken={`${registrationFixtureRevision}:${registrationCalendarRefreshToken}`}
+                kindFilter={registrationCalendarKind}
+                onKindCountsChange={setRegistrationCalendarKindCounts}
                 onOpenAppointment={openRegistrationCalendarItem}
               />
             ) : (
