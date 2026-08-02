@@ -105,3 +105,47 @@ test("the lazy editor boundary imports the detail editor only when its loader ru
   assert.equal(requiredModules.includes("./registration-track-editor"), true);
   assert.equal(loadedComponent, editorComponent);
 });
+
+test("preloading the registration editor starts one shared import before the lazy boundary renders", async () => {
+  const lazySource = await readFile(
+    new URL("../src/features/tasks/registration-application-lazy.tsx", import.meta.url),
+    "utf8",
+  );
+  const requiredModules = [];
+  const editorComponent = function EditorComponent() {};
+  let capturedLoader = null;
+  const genericModule = createCallableModuleProxy();
+
+  const lazyModule = evaluateCommonJs(lazySource, (moduleId) => {
+    requiredModules.push(moduleId);
+    if (moduleId === "next/dynamic") {
+      return {
+        __esModule: true,
+        default(loader) {
+          capturedLoader = loader;
+          return function LazyEditorBoundary() {};
+        },
+      };
+    }
+    if (moduleId === "./registration-track-editor") {
+      return { RegistrationApplication: editorComponent };
+    }
+    return genericModule;
+  });
+
+  assert.equal(
+    typeof lazyModule.preloadRegistrationApplication,
+    "function",
+    "the click path needs an explicit preload entry point",
+  );
+
+  await lazyModule.preloadRegistrationApplication();
+  const loadedComponent = await capturedLoader();
+
+  assert.equal(
+    requiredModules.filter((moduleId) => moduleId === "./registration-track-editor").length,
+    1,
+    "preload and render must share the same editor import",
+  );
+  assert.equal(loadedComponent, editorComponent);
+});

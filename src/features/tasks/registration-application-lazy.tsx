@@ -4,6 +4,27 @@ import dynamic from "next/dynamic"
 
 import type { RegistrationApplicationProps } from "./registration-track-editor"
 
+type RegistrationApplicationModule = typeof import("./registration-track-editor")
+
+let registrationApplicationModulePromise: Promise<RegistrationApplicationModule> | null = null
+
+function loadRegistrationApplicationModule() {
+  if (!registrationApplicationModulePromise) {
+    registrationApplicationModulePromise = import("./registration-track-editor").catch((error) => {
+      registrationApplicationModulePromise = null
+      throw error
+    })
+  }
+  return registrationApplicationModulePromise
+}
+
+export function preloadRegistrationApplication(): Promise<void> {
+  return loadRegistrationApplicationModule().then(
+    () => undefined,
+    () => undefined,
+  )
+}
+
 function RegistrationApplicationLoading() {
   return (
     <div
@@ -18,6 +39,6 @@ function RegistrationApplicationLoading() {
 }
 
 export const RegistrationApplication = dynamic<RegistrationApplicationProps>(
-  () => import("./registration-track-editor").then((module) => module.RegistrationApplication),
+  () => loadRegistrationApplicationModule().then((module) => module.RegistrationApplication),
   { loading: RegistrationApplicationLoading },
 )

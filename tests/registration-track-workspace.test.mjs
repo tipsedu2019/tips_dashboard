@@ -1305,9 +1305,11 @@ test("subject removal renders the deployed history-block error inline", async ()
   assert.doesNotMatch(source, /registration_subject_has_history/)
 })
 
-test("workspace mounts the unified editor only for a loaded canonical subject track", async () => {
+test("workspace preloads the unified editor while canonical subject detail data loads", async () => {
   const source = await readWorkspaceSource()
-  assert.match(source, /import \{ RegistrationApplication \} from "\.\/registration-application-lazy"/)
+  assert.match(source, /import \{\s*preloadRegistrationApplication,\s*RegistrationApplication,\s*\} from "\.\/registration-application-lazy"/)
+  assert.equal(source.match(/const editorReady = preloadRegistrationApplication\(\)/g)?.length, 2)
+  assert.equal(source.match(/Promise\.all\(\[\s*loadRegistrationCaseForWorkspace\(taskId\),[\s\S]*?editorReady,\s*\]\)/g)?.length, 2)
   assert.match(source, /const \[registrationCaseDetail, setRegistrationCaseDetail\] = useState/)
   assert.match(source, /setRegistrationCaseDetail\(detail\)/)
   assert.match(source, /registrationCaseDetail && isCanonicalRegistrationTrackDetail/)
