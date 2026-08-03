@@ -197,6 +197,94 @@ export type NotificationTemplateVariableDto = Readonly<{
   piiClass: string
 }>
 
+export type NotificationScopeState =
+  | "in_scope"
+  | "excluded_channel"
+  | "no_rule_event"
+
+export type NotificationConfigurationKind =
+  | "editable_rule"
+  | "fixed_policy_editable_template"
+  | "not_applicable"
+
+export type NotificationEnabledState =
+  | "enabled"
+  | "disabled"
+  | "not_applicable"
+
+export type NotificationDispatchOwner =
+  | "canonical"
+  | "legacy"
+  | "none"
+
+export type NotificationTemplateCompliance =
+  | "conformant"
+  | "legacy_custom_nonconformant"
+
+export type NotificationDestinationTeam =
+  | "management"
+  | "executive"
+  | "english"
+  | "math"
+  | "science"
+
+export type NotificationFieldPresenceRule = Readonly<{
+  required: boolean
+  nullBehavior: "reject" | "omit" | "display"
+  nullDisplay: string | null
+  emptyArrayBehavior: "reject" | "allow" | "omit"
+}>
+
+export type NotificationMustHaveFact =
+  | "target"
+  | "event"
+  | "current_state"
+  | "before_after"
+  | "result"
+  | "progress_actor"
+  | "schedule"
+  | "location"
+
+export type NotificationContentContract = Readonly<{
+  contractVersion: string
+  availableVariables: ReadonlyArray<NotificationTemplateVariableDto>
+  requiredTokens: ReadonlyArray<string>
+  optionalLineTokens: ReadonlyArray<string>
+  mustHaveFacts: ReadonlyArray<NotificationMustHaveFact>
+  supportedPayloadVersions: ReadonlyArray<number>
+  destinationPolicy: Readonly<{
+    allowedConnectionKeys: ReadonlyArray<NotificationConnectionKey>
+    subjectScoped: boolean
+  }>
+  freeTextVisibility: Readonly<Record<string, "show" | "omit">>
+  freeTextPriority: ReadonlyArray<string>
+  fieldPresence: Readonly<Record<string, NotificationFieldPresenceRule>>
+}>
+
+export type NotificationContentContractIdentity = Readonly<{
+  workflowKey: NotificationWorkflowKey
+  eventKey: NotificationEventKey
+  audienceKey: NotificationAudienceKey
+  channelKey: NotificationEditableChannelKey
+  ruleVariantKey: string
+}>
+
+export type NotificationContentContractEntry = NotificationContentContractIdentity & Readonly<{
+  contract: NotificationContentContract
+}>
+
+export type NotificationContentCoverageEntry = Readonly<{
+  workflowKey: NotificationWorkflowKey
+  eventKey: NotificationEventKey
+  audienceKey: NotificationAudienceKey | null
+  channelKey: NotificationEditableChannelKey | null
+  ruleVariantKey: string | null
+  scopeState: NotificationScopeState
+  configurationKind: NotificationConfigurationKind
+  enabledState: NotificationEnabledState
+  dispatchOwner: NotificationDispatchOwner
+}>
+
 export type NotificationTemplateDto = Readonly<{
   id: string
   ruleId: string

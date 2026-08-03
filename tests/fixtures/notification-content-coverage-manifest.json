@@ -1,0 +1,243 @@
+{
+  "ruleGroups": [
+    {
+      "workflowKey": "tasks",
+      "eventKeys": [
+        "task.created",
+        "task.assignee_changed",
+        "task.due_changed",
+        "task.status_changed",
+        "task.completed",
+        "task.canceled",
+        "task.reopened",
+        "task.comment_added"
+      ],
+      "cells": [
+        { "audienceKey": "requester_profile", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "primary_assignee", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "secondary_assignee", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "management_team", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "management_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] }
+      ],
+      "scopeState": "in_scope",
+      "configurationKind": "editable_rule",
+      "enabledState": "disabled",
+      "dispatchOwner": "none"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKeys": [
+        "word_retest.created",
+        "word_retest.assigned",
+        "word_retest.schedule_changed",
+        "word_retest.started",
+        "word_retest.result_reported",
+        "word_retest.absent_reported",
+        "word_retest.revision_requested",
+        "word_retest.retry_created",
+        "word_retest.completed",
+        "word_retest.canceled"
+      ],
+      "cells": [
+        { "audienceKey": "requesting_teacher", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "assigned_assistant", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "secondary_assignee", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "management_team", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "management_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] }
+      ],
+      "scopeState": "in_scope",
+      "configurationKind": "editable_rule",
+      "enabledState": "disabled",
+      "dispatchOwner": "none"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKeys": [
+        "approval.created",
+        "approval.submitted",
+        "approval.review_started",
+        "approval.approver_changed",
+        "approval.approved",
+        "approval.returned",
+        "approval.canceled",
+        "approval.resubmitted",
+        "approval.comment_added"
+      ],
+      "cells": [
+        { "audienceKey": "requester_profile", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "approver_profile", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "management_team", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "management_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] }
+      ],
+      "scopeState": "in_scope",
+      "configurationKind": "editable_rule",
+      "enabledState": "disabled",
+      "dispatchOwner": "none"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKeys": [
+        "registration.case_created",
+        "registration.registration_completed",
+        "registration.case_closed"
+      ],
+      "cells": [
+        { "audienceKey": "management_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] }
+      ],
+      "scopeState": "in_scope",
+      "configurationKind": "editable_rule",
+      "enabledState": "enabled",
+      "dispatchOwner": "legacy"
+    },
+    {
+      "workflowKey": "transfer",
+      "eventKeys": ["transfer.submitted", "transfer.completed"],
+      "cells": [
+        { "audienceKey": "management_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] }
+      ],
+      "scopeState": "in_scope",
+      "configurationKind": "editable_rule",
+      "enabledState": "enabled",
+      "dispatchOwner": "legacy"
+    },
+    {
+      "workflowKey": "withdrawal",
+      "eventKeys": ["withdrawal.submitted", "withdrawal.completed"],
+      "cells": [
+        { "audienceKey": "management_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] }
+      ],
+      "scopeState": "in_scope",
+      "configurationKind": "editable_rule",
+      "enabledState": "enabled",
+      "dispatchOwner": "legacy"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKeys": ["makeup.submitted", "makeup.refund_requested"],
+      "cells": [
+        { "audienceKey": "approver_profile", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "management_team", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "executive_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "management_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "subject_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] }
+      ],
+      "scopeState": "in_scope",
+      "configurationKind": "editable_rule",
+      "enabledState": "enabled",
+      "dispatchOwner": "legacy"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKeys": ["makeup.approved", "makeup.refund_completed", "makeup.approval_canceled"],
+      "cells": [
+        { "audienceKey": "requester_profile", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "approver_profile", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "management_team", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "executive_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "management_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "subject_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] }
+      ],
+      "scopeState": "in_scope",
+      "configurationKind": "editable_rule",
+      "enabledState": "enabled",
+      "dispatchOwner": "legacy"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKeys": ["makeup.revision_requested", "makeup.rejected"],
+      "cells": [
+        { "audienceKey": "requester_profile", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "subject_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] }
+      ],
+      "scopeState": "in_scope",
+      "configurationKind": "editable_rule",
+      "enabledState": "enabled",
+      "dispatchOwner": "legacy"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKeys": ["registration.appointment_reminder_due"],
+      "cells": [
+        { "audienceKey": "management_team", "channelKey": "in_app", "ruleVariantKeys": ["previous_day_at", "same_day_at", "offset_before"] },
+        { "audienceKey": "track_director", "channelKey": "in_app", "ruleVariantKeys": ["previous_day_at", "same_day_at", "offset_before"] },
+        { "audienceKey": "management_team", "channelKey": "google_chat", "ruleVariantKeys": ["previous_day_at", "same_day_at", "offset_before"] }
+      ],
+      "scopeState": "in_scope",
+      "configurationKind": "editable_rule",
+      "enabledState": "disabled",
+      "dispatchOwner": "legacy"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKeys": ["registration.phone_consultation_ready"],
+      "cells": [
+        { "audienceKey": "track_director", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] }
+      ],
+      "scopeState": "in_scope",
+      "configurationKind": "fixed_policy_editable_template",
+      "enabledState": "enabled",
+      "dispatchOwner": "legacy"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKeys": [
+        "registration.visit_scheduled",
+        "registration.visit_rescheduled",
+        "registration.visit_replaced",
+        "registration.visit_subject_deselected",
+        "registration.visit_canceled"
+      ],
+      "cells": [
+        { "audienceKey": "track_director", "channelKey": "in_app", "ruleVariantKeys": ["immediate"] },
+        { "audienceKey": "management_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] }
+      ],
+      "scopeState": "in_scope",
+      "configurationKind": "fixed_policy_editable_template",
+      "enabledState": "enabled",
+      "dispatchOwner": "legacy"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKeys": ["registration.admission_message_requested"],
+      "cells": [
+        { "audienceKey": "applicant_guardian", "channelKey": "customer_message", "ruleVariantKeys": ["immediate"] }
+      ],
+      "scopeState": "excluded_channel",
+      "configurationKind": "not_applicable",
+      "enabledState": "enabled",
+      "dispatchOwner": "legacy"
+    }
+  ],
+  "noRuleEvents": [
+    { "workflowKey": "registration", "eventKey": "registration.inquiry_routed" },
+    { "workflowKey": "registration", "eventKey": "registration.director_assigned" },
+    { "workflowKey": "registration", "eventKey": "registration.level_test_scheduled" },
+    { "workflowKey": "registration", "eventKey": "registration.level_test_rescheduled" },
+    { "workflowKey": "registration", "eventKey": "registration.level_test_started" },
+    { "workflowKey": "registration", "eventKey": "registration.level_test_completed" },
+    { "workflowKey": "registration", "eventKey": "registration.level_test_absent" },
+    { "workflowKey": "registration", "eventKey": "registration.level_test_canceled" },
+    { "workflowKey": "registration", "eventKey": "registration.consultation_completed" },
+    { "workflowKey": "registration", "eventKey": "registration.waiting_transitioned" },
+    { "workflowKey": "registration", "eventKey": "registration.enrollment_decided" },
+    { "workflowKey": "registration", "eventKey": "registration.admission_started" },
+    { "workflowKey": "registration", "eventKey": "registration.admission_advanced" },
+    { "workflowKey": "registration", "eventKey": "registration.admission_canceled" },
+    { "workflowKey": "registration", "eventKey": "registration.track_reopened" },
+    { "workflowKey": "registration", "eventKey": "registration.admission_message_accepted" },
+    { "workflowKey": "registration", "eventKey": "registration.admission_message_failed" },
+    { "workflowKey": "registration", "eventKey": "registration.admission_message_unknown" },
+    { "workflowKey": "registration", "eventKey": "registration.admission_message_reconciled" },
+    { "workflowKey": "registration", "eventKey": "registration.admission_message_retry_released" },
+    { "workflowKey": "transfer", "eventKey": "transfer.processing_started" },
+    { "workflowKey": "transfer", "eventKey": "transfer.details_changed" },
+    { "workflowKey": "transfer", "eventKey": "transfer.canceled" },
+    { "workflowKey": "transfer", "eventKey": "transfer.reopened" },
+    { "workflowKey": "withdrawal", "eventKey": "withdrawal.processing_started" },
+    { "workflowKey": "withdrawal", "eventKey": "withdrawal.details_changed" },
+    { "workflowKey": "withdrawal", "eventKey": "withdrawal.canceled" },
+    { "workflowKey": "withdrawal", "eventKey": "withdrawal.reopened" },
+    { "workflowKey": "makeup_requests", "eventKey": "makeup.deleted" },
+    { "workflowKey": "approvals", "eventKey": "approval.deleted" }
+  ]
+}

@@ -1,0 +1,137 @@
+{
+  "contractVersion": "1",
+  "eventContracts": [
+    {
+      "eventKey": "task.created",
+      "requiredTokens": ["업무", "현재상태", "현재담당"],
+      "optionalLineTokens": ["메모정보", "진행정보"],
+      "mustHaveFacts": ["target", "event", "current_state"],
+      "fieldPresenceOverrides": {
+        "current_assignee": { "required": true, "nullBehavior": "display", "nullDisplay": "미배정", "emptyArrayBehavior": "reject" }
+      }
+    },
+    {
+      "eventKey": "task.assignee_changed",
+      "requiredTokens": ["업무", "기존담당", "새담당"],
+      "optionalLineTokens": ["진행정보"],
+      "mustHaveFacts": ["target", "event", "before_after"],
+      "fieldPresenceOverrides": {
+        "before_assignee": { "required": true, "nullBehavior": "display", "nullDisplay": "미배정", "emptyArrayBehavior": "reject" },
+        "after_assignee": { "required": true, "nullBehavior": "display", "nullDisplay": "미배정", "emptyArrayBehavior": "reject" }
+      }
+    },
+    {
+      "eventKey": "task.due_changed",
+      "requiredTokens": ["업무", "기존일정", "새일정"],
+      "optionalLineTokens": ["진행정보"],
+      "mustHaveFacts": ["target", "event", "before_after", "schedule"],
+      "fieldPresenceOverrides": {
+        "before_schedule": { "required": true, "nullBehavior": "display", "nullDisplay": "일정 없음", "emptyArrayBehavior": "reject" },
+        "after_schedule": { "required": true, "nullBehavior": "display", "nullDisplay": "일정 없음", "emptyArrayBehavior": "reject" }
+      }
+    },
+    { "eventKey": "task.status_changed", "requiredTokens": ["업무", "기존상태", "새상태"], "optionalLineTokens": ["진행정보"], "mustHaveFacts": ["target", "event", "before_after"] },
+    { "eventKey": "task.completed", "requiredTokens": ["업무", "완료상태"], "optionalLineTokens": ["메모정보"], "mustHaveFacts": ["target", "event", "current_state"] },
+    { "eventKey": "task.canceled", "requiredTokens": ["업무", "취소상태"], "optionalLineTokens": ["사유정보", "메모정보"], "mustHaveFacts": ["target", "event", "current_state"], "freeTextVisibility": { "reason": "show", "memo": "show" }, "freeTextPriority": ["reason", "memo"] },
+    { "eventKey": "task.reopened", "requiredTokens": ["업무", "기존상태", "새상태"], "optionalLineTokens": ["진행정보"], "mustHaveFacts": ["target", "event", "before_after"] },
+    { "eventKey": "task.comment_added", "requiredTokens": ["업무", "댓글작성자", "댓글미리보기"], "optionalLineTokens": ["첨부정보", "진행정보"], "mustHaveFacts": ["target", "event"], "freeTextVisibility": { "comment_preview": "show", "attachment_summary": "show" }, "freeTextPriority": ["comment_preview", "attachment_summary"] },
+
+    { "eventKey": "word_retest.created", "requiredTokens": ["학생", "수업", "시험범위", "시험일"], "optionalLineTokens": ["진행정보"], "mustHaveFacts": ["target", "event", "schedule"] },
+    {
+      "eventKey": "word_retest.assigned",
+      "requiredTokens": ["학생", "기존담당", "새담당"],
+      "optionalLineTokens": ["진행정보"],
+      "mustHaveFacts": ["target", "event", "before_after"],
+      "fieldPresenceOverrides": {
+        "before_assignee": { "required": true, "nullBehavior": "display", "nullDisplay": "미배정", "emptyArrayBehavior": "reject" },
+        "after_assignee": { "required": true, "nullBehavior": "display", "nullDisplay": "미배정", "emptyArrayBehavior": "reject" }
+      }
+    },
+    {
+      "eventKey": "word_retest.schedule_changed",
+      "requiredTokens": ["학생", "기존시험일", "새시험일"],
+      "optionalLineTokens": ["진행정보"],
+      "mustHaveFacts": ["target", "event", "before_after", "schedule"],
+      "fieldPresenceOverrides": {
+        "before_test_date": { "required": true, "nullBehavior": "display", "nullDisplay": "일정 없음", "emptyArrayBehavior": "reject" },
+        "after_test_date": { "required": true, "nullBehavior": "display", "nullDisplay": "일정 없음", "emptyArrayBehavior": "reject" }
+      }
+    },
+    { "eventKey": "word_retest.started", "requiredTokens": ["학생", "수업", "시험범위", "시작상태"], "optionalLineTokens": ["진행정보"], "mustHaveFacts": ["target", "event", "current_state"] },
+    { "eventKey": "word_retest.result_reported", "requiredTokens": ["학생", "점수", "통과기준", "판정"], "optionalLineTokens": ["메모정보"], "mustHaveFacts": ["target", "event", "result"] },
+    { "eventKey": "word_retest.absent_reported", "requiredTokens": ["학생", "시험일", "판정"], "optionalLineTokens": ["사유정보", "메모정보"], "mustHaveFacts": ["target", "event", "result", "schedule"], "freeTextVisibility": { "reason": "show", "memo": "show" }, "freeTextPriority": ["reason", "memo"] },
+    { "eventKey": "word_retest.revision_requested", "requiredTokens": ["학생", "현재결과", "요청주체"], "optionalLineTokens": ["사유정보", "진행정보"], "mustHaveFacts": ["target", "event", "result", "progress_actor"], "freeTextVisibility": { "reason": "show" }, "freeTextPriority": ["reason"] },
+    { "eventKey": "word_retest.retry_created", "requiredTokens": ["학생", "이전결과", "후속일정"], "optionalLineTokens": ["진행정보"], "mustHaveFacts": ["target", "event", "result", "schedule"] },
+    { "eventKey": "word_retest.completed", "requiredTokens": ["학생", "최종결과"], "optionalLineTokens": ["메모정보"], "mustHaveFacts": ["target", "event", "result"] },
+    { "eventKey": "word_retest.canceled", "requiredTokens": ["학생", "취소상태"], "optionalLineTokens": ["사유정보"], "mustHaveFacts": ["target", "event", "current_state"], "freeTextVisibility": { "reason": "show" }, "freeTextPriority": ["reason"] },
+
+    { "eventKey": "registration.case_created", "requiredTokens": ["학생", "학년", "과목", "문의시각"], "optionalLineTokens": ["메모정보", "진행정보"], "mustHaveFacts": ["target", "event", "schedule"] },
+    { "eventKey": "registration.registration_completed", "requiredTokens": ["학생", "등록과목", "등록수업", "완료상태"], "optionalLineTokens": ["진행정보"], "mustHaveFacts": ["target", "event", "current_state"] },
+    { "eventKey": "registration.case_closed", "requiredTokens": ["학생", "과목", "종료상태"], "optionalLineTokens": ["사유정보", "메모정보"], "mustHaveFacts": ["target", "event", "current_state"], "freeTextVisibility": { "reason": "show", "memo": "show" }, "freeTextPriority": ["reason", "memo"] },
+    { "eventKey": "registration.appointment_reminder_due", "requiredTokens": ["상담종류", "학생", "과목", "일정", "장소"], "optionalLineTokens": ["진행정보"], "mustHaveFacts": ["target", "event", "schedule", "location"], "supportedPayloadVersions": [2] },
+    {
+      "eventKey": "registration.phone_consultation_ready",
+      "requiredTokens": ["학생", "과목", "진행주체"],
+      "optionalLineTokens": ["메모정보"],
+      "mustHaveFacts": ["target", "event", "progress_actor"],
+      "supportedPayloadVersions": [2],
+      "fieldPresenceOverrides": {
+        "progress_actor": { "required": true, "nullBehavior": "display", "nullDisplay": "담당자 지정 대기", "emptyArrayBehavior": "reject" }
+      }
+    },
+    { "eventKey": "registration.visit_scheduled", "requiredTokens": ["학생", "과목", "새일정", "새장소"], "optionalLineTokens": ["진행정보"], "mustHaveFacts": ["target", "event", "schedule", "location"], "supportedPayloadVersions": [2] },
+    { "eventKey": "registration.visit_rescheduled", "requiredTokens": ["학생", "과목", "기존일정", "새일정", "새장소"], "optionalLineTokens": ["진행정보"], "mustHaveFacts": ["target", "event", "before_after", "schedule", "location"], "supportedPayloadVersions": [2] },
+    { "eventKey": "registration.visit_replaced", "requiredTokens": ["학생", "과목", "기존예약", "새예약", "새장소"], "optionalLineTokens": ["진행정보"], "mustHaveFacts": ["target", "event", "before_after", "schedule", "location"], "supportedPayloadVersions": [2] },
+    {
+      "eventKey": "registration.visit_subject_deselected",
+      "requiredTokens": ["학생", "제외과목", "남은과목", "유지일정", "유지장소"],
+      "optionalLineTokens": ["진행정보"],
+      "mustHaveFacts": ["target", "event", "before_after", "schedule", "location"],
+      "supportedPayloadVersions": [2],
+      "fieldPresenceOverrides": {
+        "other_active_subjects": { "required": true, "nullBehavior": "reject", "nullDisplay": null, "emptyArrayBehavior": "allow" }
+      }
+    },
+    { "eventKey": "registration.visit_canceled", "requiredTokens": ["학생", "과목", "취소일정", "취소장소"], "optionalLineTokens": ["사유정보", "진행정보"], "mustHaveFacts": ["target", "event", "schedule", "location"], "supportedPayloadVersions": [2], "freeTextVisibility": { "reason": "show" }, "freeTextPriority": ["reason"] },
+
+    { "eventKey": "transfer.submitted", "requiredTokens": ["학생", "기존반", "이동반", "적용일", "신청자"], "optionalLineTokens": ["사유정보", "메모정보", "진행정보"], "mustHaveFacts": ["target", "event", "before_after", "schedule"], "freeTextVisibility": { "reason": "show", "memo": "show" }, "freeTextPriority": ["reason", "memo"] },
+    { "eventKey": "transfer.completed", "requiredTokens": ["학생", "기존반", "이동반", "기존반종료일", "새반시작일"], "optionalLineTokens": ["진행정보"], "mustHaveFacts": ["target", "event", "before_after", "schedule"] },
+    { "eventKey": "withdrawal.submitted", "requiredTokens": ["학생", "과목", "수업", "제외일", "제외회차", "신청자"], "optionalLineTokens": ["사유정보", "메모정보", "진행정보"], "mustHaveFacts": ["target", "event", "schedule"], "freeTextVisibility": { "reason": "show", "memo": "show" }, "freeTextPriority": ["reason", "memo"] },
+    { "eventKey": "withdrawal.completed", "requiredTokens": ["학생", "과목", "수업", "제외일", "제외회차"], "optionalLineTokens": ["진행정보"], "mustHaveFacts": ["target", "event", "schedule"] },
+
+    { "eventKey": "makeup.submitted", "requiredTokens": ["수업", "과목", "담당선생님", "휴강일", "보강일정", "장소", "진행주체"], "optionalLineTokens": ["사유정보", "메모정보"], "mustHaveFacts": ["target", "event", "schedule", "location", "progress_actor"], "freeTextVisibility": { "reason": "show", "memo": "show" }, "freeTextPriority": ["reason", "memo"] },
+    { "eventKey": "makeup.refund_requested", "requiredTokens": ["수업", "과목", "대상일정", "현재상태"], "optionalLineTokens": ["사유정보", "진행정보"], "mustHaveFacts": ["target", "event", "current_state", "schedule"], "freeTextVisibility": { "reason": "show" }, "freeTextPriority": ["reason"] },
+    { "eventKey": "makeup.approved", "requiredTokens": ["수업", "과목", "휴강일", "보강일정", "장소", "승인주체"], "optionalLineTokens": ["메모정보"], "mustHaveFacts": ["target", "event", "schedule", "location", "progress_actor"], "freeTextVisibility": { "memo": "show" }, "freeTextPriority": ["memo"] },
+    { "eventKey": "makeup.refund_completed", "requiredTokens": ["수업", "과목", "현재상태", "처리시각"], "optionalLineTokens": ["메모정보"], "mustHaveFacts": ["target", "event", "current_state", "schedule"] },
+    { "eventKey": "makeup.approval_canceled", "requiredTokens": ["수업", "과목", "현재상태", "처리시각", "처리주체"], "optionalLineTokens": ["사유정보", "메모정보"], "mustHaveFacts": ["target", "event", "current_state", "progress_actor", "schedule"], "freeTextVisibility": { "reason": "show", "memo": "show" }, "freeTextPriority": ["reason", "memo"] },
+    { "eventKey": "makeup.revision_requested", "requiredTokens": ["수업", "과목", "요청주체", "현재상태"], "optionalLineTokens": ["사유정보", "진행정보"], "mustHaveFacts": ["target", "event", "current_state", "progress_actor"], "freeTextVisibility": { "reason": "show" }, "freeTextPriority": ["reason"] },
+    { "eventKey": "makeup.rejected", "requiredTokens": ["수업", "과목", "반려주체", "현재상태"], "optionalLineTokens": ["사유정보", "메모정보"], "mustHaveFacts": ["target", "event", "current_state", "progress_actor"], "freeTextVisibility": { "reason": "show", "memo": "show" }, "freeTextPriority": ["reason", "memo"] },
+
+    { "eventKey": "approval.created", "requiredTokens": ["문서", "작성자", "대상기간", "현재상태"], "optionalLineTokens": ["첨부정보", "메모정보"], "mustHaveFacts": ["target", "event", "current_state"] },
+    {
+      "eventKey": "approval.submitted",
+      "requiredTokens": ["문서", "작성자", "대상기간", "진행주체"],
+      "optionalLineTokens": ["첨부정보"],
+      "mustHaveFacts": ["target", "event", "progress_actor"],
+      "fieldPresenceOverrides": {
+        "progress_actor": { "required": true, "nullBehavior": "display", "nullDisplay": "결재자 지정 대기", "emptyArrayBehavior": "reject" }
+      }
+    },
+    { "eventKey": "approval.review_started", "requiredTokens": ["문서", "검토주체", "현재상태"], "optionalLineTokens": ["메모정보"], "mustHaveFacts": ["target", "event", "current_state", "progress_actor"] },
+    {
+      "eventKey": "approval.approver_changed",
+      "requiredTokens": ["문서", "기존결재자", "새결재자"],
+      "optionalLineTokens": ["진행정보"],
+      "mustHaveFacts": ["target", "event", "before_after"],
+      "fieldPresenceOverrides": {
+        "before_approver": { "required": true, "nullBehavior": "display", "nullDisplay": "결재자 지정 대기", "emptyArrayBehavior": "reject" },
+        "after_approver": { "required": true, "nullBehavior": "display", "nullDisplay": "결재자 지정 대기", "emptyArrayBehavior": "reject" }
+      }
+    },
+    { "eventKey": "approval.approved", "requiredTokens": ["문서", "승인주체", "현재상태", "처리시각"], "optionalLineTokens": ["메모정보"], "mustHaveFacts": ["target", "event", "current_state", "progress_actor", "schedule"] },
+    { "eventKey": "approval.returned", "requiredTokens": ["문서", "반려주체", "현재상태"], "optionalLineTokens": ["사유정보", "메모정보"], "mustHaveFacts": ["target", "event", "current_state", "progress_actor"], "freeTextVisibility": { "reason": "show", "memo": "show" }, "freeTextPriority": ["reason", "memo"] },
+    { "eventKey": "approval.canceled", "requiredTokens": ["문서", "취소주체", "현재상태"], "optionalLineTokens": ["사유정보", "메모정보"], "mustHaveFacts": ["target", "event", "current_state", "progress_actor"], "freeTextVisibility": { "reason": "show", "memo": "show" }, "freeTextPriority": ["reason", "memo"] },
+    { "eventKey": "approval.resubmitted", "requiredTokens": ["문서", "재상신자", "진행주체"], "optionalLineTokens": ["첨부정보"], "mustHaveFacts": ["target", "event", "progress_actor"] },
+    { "eventKey": "approval.comment_added", "requiredTokens": ["문서", "댓글작성자", "댓글미리보기"], "optionalLineTokens": ["첨부정보", "진행정보"], "mustHaveFacts": ["target", "event"], "freeTextVisibility": { "comment_preview": "show", "attachment_summary": "show" }, "freeTextPriority": ["comment_preview", "attachment_summary"] }
+  ]
+}
