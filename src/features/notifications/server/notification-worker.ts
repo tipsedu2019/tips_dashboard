@@ -17,6 +17,7 @@ import {
   type NotificationProviderResult,
 } from "./providers/google-chat-provider.ts"
 import { createWebPushProvider } from "./providers/web-push-provider.ts"
+import { normalizeRenderedNotificationBody } from "./presentation/notification-presentation-formatters.ts"
 
 type JsonRecord = Record<string, unknown>
 type NotificationRpc = (name: string, parameters: JsonRecord) => Promise<unknown>
@@ -250,6 +251,59 @@ function templateTokens(template: string) {
   return result
 }
 
+function templateVariableMaps(allowedVariables: NotificationTemplateSnapshot["allowedVariables"]) {
+  if (!Array.isArray(allowedVariables)) renderValidationError()
+  const variables = new Map<string, string>()
+  const tokens = new Map<string, string>()
+  for (const definition of allowedVariables) {
+    if (
+      !isPlainRecord(definition)
+      || typeof definition.key !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(definition.key)
+      || typeof definition.token !== "string" || !definition.token || /[{}]/.test(definition.token)
+      || variables.has(definition.key) || tokens.has(definition.token)
+    ) {
+      renderValidationError()
+    }
+    variables.set(definition.key, definition.token)
+    tokens.set(definition.token, definition.key)
+  }
+  return { variables, tokens }
+}
+
+function requestedContextKeysForTemplate(template: NotificationTemplateSnapshot) {
+  const { tokens } = templateVariableMaps(template.allowedVariables)
+  const keys: string[] = []
+  const seen = new Set<string>()
+  for (const token of [
+    ...templateTokens(template.titleTemplate),
+    ...templateTokens(template.bodyTemplate),
+  ]) {
+    const key = tokens.get(token)
+    if (!key) renderValidationError()
+    if (!seen.has(key)) {
+      seen.add(key)
+      keys.push(key)
+    }
+  }
+  return Object.freeze(keys)
+}
+
+export function filterNotificationRenderContext(
+  fullContext: NotificationRenderContext,
+  allowedVariables: NotificationTemplateSnapshot["allowedVariables"],
+): NotificationRenderContext {
+  if (!isPlainRecord(fullContext)) renderValidationError()
+  const { variables } = templateVariableMaps(allowedVariables)
+  const filtered: Record<string, string> = {}
+  for (const key of Object.keys(fullContext).sort()) {
+    if (!variables.has(key)) continue
+    const value = fullContext[key]
+    if (typeof value !== "string") renderValidationError()
+    filtered[key] = value
+  }
+  return Object.freeze(filtered)
+}
+
 function validateDeepLink(workflowKey: string, href: string | null) {
   if (href === null) return null
   if (typeof href !== "string" || !href.startsWith("/") || href.startsWith("//")) {
@@ -286,20 +340,7 @@ export function renderNotificationSnapshot(input: RenderSnapshotInput): Rendered
     renderValidationError()
   }
 
-  const variables = new Map<string, string>()
-  const tokens = new Map<string, string>()
-  for (const definition of input.template.allowedVariables) {
-    if (
-      !isPlainRecord(definition) ||
-      typeof definition.key !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(definition.key) ||
-      typeof definition.token !== "string" || !definition.token || /[{}]/.test(definition.token) ||
-      variables.has(definition.key) || tokens.has(definition.token)
-    ) {
-      renderValidationError()
-    }
-    variables.set(definition.key, definition.token)
-    tokens.set(definition.token, definition.key)
-  }
+  const { variables, tokens } = templateVariableMaps(input.template.allowedVariables)
 
   const contextKeys = Object.keys(input.renderContext).sort()
   for (const key of contextKeys) {
@@ -327,7 +368,7 @@ export function renderNotificationSnapshot(input: RenderSnapshotInput): Rendered
     return value
   })
   const renderedTitle = replace(input.template.titleTemplate)
-  const renderedBody = replace(input.template.bodyTemplate)
+  const renderedBody = normalizeRenderedNotificationBody(replace(input.template.bodyTemplate))
   assertSafeRenderedValue(renderedTitle, MAX_TITLE_LENGTH)
   assertSafeRenderedValue(renderedBody, MAX_BODY_LENGTH)
 
@@ -651,6 +692,7 @@ async function processFanoutJob(
     }
     const targetSet = await adapter.resolveTargets(resolveInput)
     const template = templateFromClaim(job)
+    const requestedContextKeys = requestedContextKeysForTemplate(template)
     const computedTargetSetHash = hashNotificationTargets(targetSet.targets)
     if (targetSet.targetSetHash !== computedTargetSetHash) renderValidationError()
     const renderedTargets = []
@@ -659,16 +701,18 @@ async function processFanoutJob(
         ...resolveInput,
         targetGeneration: targetSet.targetGeneration,
         target,
+        requestedContextKeys,
       }
       const [renderContext, href] = await Promise.all([
         adapter.buildRenderContext(renderInput),
         adapter.buildDeepLink(renderInput),
       ])
+      const filteredContext = filterNotificationRenderContext(renderContext, template.allowedVariables)
       const rendered = renderNotificationSnapshot({
         workflowKey: adapter.workflowKey,
         payloadSchemaVersion: resolveInput.payloadSchemaVersion,
         template,
-        renderContext,
+        renderContext: filteredContext,
         href,
       })
       renderedTargets.push({
@@ -849,6 +893,7 @@ async function renderTargetReconciliationBatch(
     const event = eventFromEnvelope(snapshot)
     const storedRule = ruleFromClaim(snapshot)
     const template = templateFromClaim(snapshot)
+    const requestedContextKeys = requestedContextKeysForTemplate(template)
     if (
       event.eventId !== item.eventId ||
       event.workflowKey !== requiredWorkflowKey(job.workflow_key) ||
@@ -875,16 +920,18 @@ async function renderTargetReconciliationBatch(
         targetGeneration: item.targetSet.targetGeneration,
         target,
         scheduledFor: item.scheduledFor,
+        requestedContextKeys,
       }
       const [renderContext, href] = await Promise.all([
         adapter.buildRenderContext(renderInput),
         adapter.buildDeepLink(renderInput),
       ])
+      const filteredContext = filterNotificationRenderContext(renderContext, template.allowedVariables)
       const rendered = renderNotificationSnapshot({
         workflowKey: adapter.workflowKey,
         payloadSchemaVersion: event.payloadSchemaVersion,
         template,
-        renderContext,
+        renderContext: filteredContext,
         href,
       })
       deliveries.push({

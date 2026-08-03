@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto"
 
-import type { NotificationWorkflowKey } from "../../notification-control-plane-types.ts"
+import {
+  NOTIFICATION_CONNECTION_KEYS,
+  type NotificationConnectionKey,
+  type NotificationDestinationTeam,
+  type NotificationEditableChannelKey,
+  type NotificationWorkflowKey,
+} from "../../notification-control-plane-types.ts"
 import type {
   NotificationRenderContext,
   NotificationRenderInput,
@@ -11,6 +17,7 @@ import type {
   NotificationTargetSet,
   NotificationWorkflowAdapter,
 } from "../notification-workflow-adapter.ts"
+import type { NotificationPresentationBuilder } from "../presentation/notification-presentation.ts"
 import { immediateNotificationProductionDependencies } from "./immediate-notification-source-reader.ts"
 
 type ImmediateNotificationAdapterConfig = Readonly<{
@@ -24,6 +31,7 @@ type ImmediateNotificationAdapterConfig = Readonly<{
   workflowLabel?: string
   eventLabels: Readonly<Record<string, string>>
   renderFields: Readonly<Record<string, ReadonlyArray<string>>>
+  presentationBuilder?: NotificationPresentationBuilder
 }>
 
 export type ImmediateNotificationAuthoritativeRevalidationInput = NotificationRevalidationInput & Readonly<{
@@ -37,6 +45,16 @@ export type ImmediateNotificationAdapterDependencies = Readonly<{
 }>
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const CONNECTION_KEY_SET = new Set<string>(NOTIFICATION_CONNECTION_KEYS)
+const DESTINATION_TEAM_BY_CONNECTION: Readonly<Record<NotificationConnectionKey, NotificationDestinationTeam>> =
+  Object.freeze({
+    "google_chat.management": "management",
+    "google_chat.executive": "executive",
+    "google_chat.english": "english",
+    "google_chat.math": "math",
+    "google_chat.science": "science",
+  })
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
@@ -191,7 +209,77 @@ function buildImmediateRenderContext(
       : input.scheduledFor
     context.deep_link = buildImmediateDeepLink(config, input) ?? config.linkRoot
   }
+  if (config.presentationBuilder) {
+    const presentation = config.presentationBuilder(presentationInput(input))
+    if (!isRecord(presentation)) throw new Error("notification_payload_schema_unsupported")
+    for (const [key, value] of Object.entries(presentation)) {
+      if (!/^[a-z][a-z0-9_]{0,63}$/.test(key) || typeof value !== "string") {
+        throw new Error("notification_payload_schema_unsupported")
+      }
+      if (Object.prototype.hasOwnProperty.call(context, key) && context[key] !== value) {
+        throw new Error("notification_payload_schema_unsupported")
+      }
+      context[key] = value
+    }
+  }
   return Object.freeze(context)
+}
+
+function presentationInput(
+  input: NotificationRenderInput,
+) {
+  const requestedContextKeys = input.requestedContextKeys ?? []
+  if (
+    !Array.isArray(requestedContextKeys)
+    || requestedContextKeys.some((key) => typeof key !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(key))
+    || new Set(requestedContextKeys).size !== requestedContextKeys.length
+  ) {
+    throw new Error("notification_payload_schema_unsupported")
+  }
+  let contractChannelKey: NotificationEditableChannelKey
+  if (input.rule.channelKey === "web_push") contractChannelKey = "in_app"
+  else if (input.rule.channelKey === "in_app" || input.rule.channelKey === "google_chat") {
+    contractChannelKey = input.rule.channelKey
+  } else {
+    throw new Error("notification_payload_schema_unsupported")
+  }
+
+  let connectionKey: NotificationConnectionKey | null = null
+  let destinationTeam: NotificationDestinationTeam | null = null
+  if (input.rule.channelKey === "google_chat") {
+    if (
+      input.target.targetKind !== "connection"
+      || !input.target.connectionKey
+      || !CONNECTION_KEY_SET.has(input.target.connectionKey)
+    ) {
+      throw new Error("notification_payload_schema_unsupported")
+    }
+    connectionKey = input.target.connectionKey as NotificationConnectionKey
+    destinationTeam = DESTINATION_TEAM_BY_CONNECTION[connectionKey]
+  } else if (input.target.connectionKey !== null) {
+    throw new Error("notification_payload_schema_unsupported")
+  }
+
+  return Object.freeze({
+    workflowKey: input.workflowKey,
+    eventKey: input.eventKey,
+    ruleVariantKey: input.rule.ruleVariantKey,
+    payloadSchemaVersion: input.payloadSchemaVersion,
+    payload: input.payload,
+    audienceKey: input.rule.audienceKey,
+    channelKey: input.rule.channelKey,
+    contractIdentity: Object.freeze({
+      workflowKey: input.workflowKey,
+      eventKey: input.eventKey,
+      audienceKey: input.rule.audienceKey,
+      channelKey: contractChannelKey,
+      ruleVariantKey: input.rule.ruleVariantKey,
+    }),
+    requestedContextKeys: Object.freeze([...requestedContextKeys]),
+    connectionKey,
+    destinationTeam,
+    scheduledFor: input.scheduledFor,
+  })
 }
 
 function buildImmediateDeepLink(config: ImmediateNotificationAdapterConfig, input: NotificationRenderInput) {

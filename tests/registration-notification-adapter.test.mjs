@@ -90,6 +90,113 @@ test("공통 immediate subject resolver는 과학/ science만 science connection
   await assert.rejects(adapter.resolveTargets(input("사회")), /notification_payload_schema_unsupported/)
 })
 
+test("공통 immediate presentation hook은 실제 목적지와 다섯 필드 계약 identity만 받고 legacy context를 보존한다", async () => {
+  const { createImmediateNotificationAdapter } = await import(immediateAdapterModuleUrl)
+  const received = []
+  const adapter = createImmediateNotificationAdapter({
+    workflowKey: "makeup_requests",
+    sourceTypes: ["makeup_request_event"],
+    linkRoot: "/admin/makeup-requests",
+    linkPayloadKey: "request_id",
+    linkQueryKey: "requestId",
+    workflowLabel: "휴보강",
+    audienceProfileFields: { subject_team: [] },
+    eventLabels: { "makeup.submitted": "휴보강 신청" },
+    renderFields: {},
+    presentationBuilder(input) {
+      received.push(structuredClone(input))
+      return { class_name: "중2 영어", progress_line: "[진행] 영어팀에서 확인하고 있어요." }
+    },
+  }, {
+    async revalidateAuthoritativeSource() {
+      return { ok: true }
+    },
+  })
+  const resolve = {
+    eventId: EVENT_A,
+    workflowKey: "makeup_requests",
+    eventKey: "makeup.submitted",
+    sourceType: "makeup_request_event",
+    sourceId: APPOINTMENT_A,
+    sourceRevision: null,
+    payloadSchemaVersion: 1,
+    payload: {
+      approval_group: "science",
+      occurred_at: "2026-07-22T05:00:00.000Z",
+      request_id: APPOINTMENT_A,
+    },
+    rule: {
+      ruleId: RULE_CHAT,
+      ruleRevision: "1",
+      templateId: TEMPLATE_A,
+      audienceKey: "subject_team",
+      channelKey: "google_chat",
+      connectionKey: null,
+      ruleVariantKey: "immediate",
+    },
+    scheduledFor: "2026-07-22T05:00:00.000Z",
+  }
+  const targetSet = await adapter.resolveTargets(resolve)
+  const context = await adapter.buildRenderContext({
+    ...resolve,
+    targetGeneration: targetSet.targetGeneration,
+    target: targetSet.targets[0],
+    requestedContextKeys: ["class_name", "progress_line"],
+  })
+
+  assert.deepEqual(received, [{
+    workflowKey: "makeup_requests",
+    eventKey: "makeup.submitted",
+    ruleVariantKey: "immediate",
+    payloadSchemaVersion: 1,
+    payload: resolve.payload,
+    audienceKey: "subject_team",
+    channelKey: "google_chat",
+    contractIdentity: {
+      workflowKey: "makeup_requests",
+      eventKey: "makeup.submitted",
+      audienceKey: "subject_team",
+      channelKey: "google_chat",
+      ruleVariantKey: "immediate",
+    },
+    requestedContextKeys: ["class_name", "progress_line"],
+    connectionKey: "google_chat.science",
+    destinationTeam: "science",
+    scheduledFor: "2026-07-22T05:00:00.000Z",
+  }])
+  assert.deepEqual(context, {
+    workflow_label: "휴보강",
+    event_label: "휴보강 신청",
+    occurred_at: "2026-07-22T05:00:00.000Z",
+    deep_link: `/admin/makeup-requests?requestId=${APPOINTMENT_A}`,
+    class_name: "중2 영어",
+    progress_line: "[진행] 영어팀에서 확인하고 있어요.",
+  })
+
+  const webPushRule = {
+    ...resolve.rule,
+    channelKey: "web_push",
+    connectionKey: null,
+  }
+  await adapter.buildRenderContext({
+    ...resolve,
+    rule: webPushRule,
+    targetGeneration: "0",
+    target: {
+      targetKind: "profile",
+      targetKey: `profile:${PROFILE_A}`,
+      targetProfileId: PROFILE_A,
+      connectionKey: null,
+      targetSnapshot: { profile_id: PROFILE_A },
+    },
+    requestedContextKeys: ["class_name"],
+  })
+  assert.equal(received[1].channelKey, "web_push")
+  assert.equal(received[1].contractIdentity.channelKey, "in_app")
+  assert.equal(received[1].connectionKey, null)
+  assert.equal(received[1].destinationTeam, null)
+})
+
 function rule(overrides = {}) {
   return {
     ruleId: RULE_SAME_DAY,

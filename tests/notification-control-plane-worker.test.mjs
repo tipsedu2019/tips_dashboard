@@ -999,7 +999,11 @@ test("worker 공개 factory는 getAdapter 하나만 받고 workflow 구현을 �
 })
 
 test("공통 renderer는 target hash를 안정화하고 허용 변수·schema·workflow deep link를 fail-closed로 검증한다", async () => {
-  const { hashNotificationTargets, renderNotificationSnapshot } = await import(workerModuleUrl)
+  const {
+    filterNotificationRenderContext,
+    hashNotificationTargets,
+    renderNotificationSnapshot,
+  } = await import(workerModuleUrl)
   const first = {
     targetKind: "profile",
     targetKey: `profile:${PROFILE_ID}`,
@@ -1052,6 +1056,27 @@ test("공통 renderer는 target hash를 안정화하고 허용 변수·schema·w
   })
   assert.deepEqual(renderNotificationSnapshot(input), renderNotificationSnapshot(clone(input)))
 
+  assert.deepEqual(filterNotificationRenderContext({
+    ...input.renderContext,
+    new_rich_context: "새 템플릿에서만 쓰는 값",
+  }, input.template.allowedVariables), input.renderContext)
+  assert.deepEqual(renderNotificationSnapshot({
+    ...input,
+    template: {
+      ...input.template,
+      bodyTemplate: "첫 줄\n{선택행}\n\n\n마지막 줄  ",
+      allowedVariables: [
+        ...input.template.allowedVariables,
+        { key: "optional_line", token: "선택행", piiClass: "none" },
+      ],
+    },
+    renderContext: { ...input.renderContext, optional_line: "" },
+  }), {
+    renderedTitle: "김선생님 새 할 일",
+    renderedBody: "첫 줄\n\n마지막 줄",
+    href: "/admin/tasks?focus=task-42",
+  })
+
   const invalidInputs = [
     { ...input, payloadSchemaVersion: 2 },
     { ...input, renderContext: { ...input.renderContext, unknown: "금지" } },
@@ -1063,6 +1088,17 @@ test("공통 renderer는 target hash를 안정화하고 허용 변수·schema·w
     { ...input, href: "javascript:alert(1)" },
     { ...input, href: "/admin/withdrawal" },
     { ...input, href: "/login?next=/admin/tasks" },
+    { ...input, template: { ...input.template, bodyTemplate: "{알수없는변수}" } },
+    {
+      ...input,
+      template: {
+        ...input.template,
+        allowedVariables: [
+          ...input.template.allowedVariables,
+          { key: "duplicate_token", token: "담당자", piiClass: "none" },
+        ],
+      },
+    },
   ]
   for (const invalid of invalidInputs) {
     assert.throws(
@@ -1071,6 +1107,23 @@ test("공통 renderer는 target hash를 안정화하고 허용 변수·schema·w
       "잘못된 렌더 입력은 provider 전에 닫혀야 한다",
     )
   }
+
+  const richTemplateMissingRequestedField = {
+    ...input,
+    template: {
+      ...input.template,
+      bodyTemplate: "{업무}\n{현재상태}",
+      allowedVariables: [
+        ...input.template.allowedVariables,
+        { key: "current_status", token: "현재상태", piiClass: "none" },
+      ],
+    },
+  }
+  assert.throws(
+    () => renderNotificationSnapshot(richTemplateMissingRequestedField),
+    (error) => error?.code === "render_validation_failed",
+    "schema-v1의 새 템플릿이 실제 요청한 additive field가 없으면 실패 폐쇄해야 한다",
+  )
 })
 
 test("worker는 시작 heartbeat 뒤 정해진 순서로 bounded batch를 처리하고 같은 run ID로 한 번만 성공 종료한다", async () => {
@@ -1360,6 +1413,7 @@ test("대상 재계산 정상 경로는 같은 source revision의 전체 target�
     },
   })
   let providerLookups = 0
+  let receivedRenderInput = null
   const adapter = createAdapter({
     workflowKey: "registration",
     async reconcileTargets() {
@@ -1377,8 +1431,9 @@ test("대상 재계산 정상 경로는 같은 source revision의 전체 target�
         done: true,
       }
     },
-    async buildRenderContext() {
-      return { student_name: "김학생", place: "3층 테스트실" }
+    async buildRenderContext(input) {
+      receivedRenderInput = clone(input)
+      return { student_name: "김학생", place: "3층 테스트실", newly_added_fact: "기존 템플릿에는 없음" }
     },
     async buildDeepLink() {
       return `/admin/registration?taskId=fixture&appointmentId=${sourceId}&view=calendar`
@@ -1396,6 +1451,7 @@ test("대상 재계산 정상 경로는 같은 source revision의 전체 target�
 
   const result = await worker.runBatch({ workerId: "worker-fixture", batchSize: 2, leaseSeconds: 30 })
   assert.equal(result.targetReconciliation, 1)
+  assert.deepEqual(receivedRenderInput.requestedContextKeys, ["student_name", "place"])
   const apply = harness.calls.find((call) => call.name === "apply_notification_target_reconciliation_batch_v1")
   assert.deepEqual(apply.parameters, {
     p_job_id: jobId,
@@ -1527,6 +1583,7 @@ test("worker fanout은 한 규칙을 렌더한 뒤 service-role apply에만 전�
       delivery_count: 1,
     },
   })
+  let receivedRenderInput = null
   const adapter = createAdapter({
     async resolveTargets() {
       return {
@@ -1535,8 +1592,13 @@ test("worker fanout은 한 규칙을 렌더한 뒤 service-role apply에만 전�
         targets: [target],
       }
     },
-    async buildRenderContext() {
-      return { assignee_name: "김선생", task_title: "교재 확인" }
+    async buildRenderContext(input) {
+      receivedRenderInput = clone(input)
+      return {
+        assignee_name: "김선생",
+        task_title: "교재 확인",
+        newly_added_fact: "기존 immutable allowlist에는 없음",
+      }
     },
     async buildDeepLink() {
       return "/admin/tasks?focus=task-42"
@@ -1551,6 +1613,7 @@ test("worker fanout은 한 규칙을 렌더한 뒤 service-role apply에만 전�
 
   const result = await worker.runBatch({ workerId: "worker-fixture", batchSize: 2, leaseSeconds: 30 })
   assert.equal(result.fanout, 1)
+  assert.deepEqual(receivedRenderInput.requestedContextKeys, ["assignee_name", "task_title"])
   const apply = harness.calls.find((call) => (
     call.name === "apply_notification_fanout_batch_v1"
   ))

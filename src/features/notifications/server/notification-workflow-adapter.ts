@@ -55,6 +55,7 @@ export type NotificationRenderInput = Readonly<{
   targetGeneration: DbBigInt
   target: NotificationTarget
   scheduledFor: string
+  requestedContextKeys?: ReadonlyArray<string>
 }>
 
 export type NotificationRenderContext = Readonly<Record<string, string>>
