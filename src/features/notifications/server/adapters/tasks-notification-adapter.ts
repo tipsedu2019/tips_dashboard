@@ -1,3 +1,4 @@
+import { buildTaskNotificationPresentation } from "../presentation/task-notification-presentation.ts"
 import { createImmediateNotificationAdapter } from "./immediate-notification-adapter.ts"
 
 export const tasksNotificationAdapter = createImmediateNotificationAdapter({
@@ -24,4 +25,5 @@ export const tasksNotificationAdapter = createImmediateNotificationAdapter({
     management_team: ["management_profile_ids"],
   },
   renderFields: {},
+  presentationBuilder: buildTaskNotificationPresentation,
 })

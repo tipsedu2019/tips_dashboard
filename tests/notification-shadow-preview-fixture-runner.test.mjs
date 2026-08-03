@@ -82,6 +82,13 @@ test("preview fixture runner는 고정 10개 범위를 실제 adapter로 독립 
     })
     assert.match(first.manifest.digest, /^[a-f0-9]{64}$/)
     assert.equal(runner.verifyNotificationShadowPreviewManifest(first), true)
+
+    const taskCycle = first.cycles.find((cycle) => cycle.scopeKey === "tasks")
+    assert.ok(taskCycle, "할 일 legacy custom preview 증거가 필요합니다")
+    assert.equal(taskCycle.comparison.matched, true)
+    assert.equal(taskCycle.recordedLegacyIntents, 1)
+    assert.equal(taskCycle.externalRequests, 0)
+    assert.equal(taskCycle.databaseOperations, 0)
   } finally {
     globalThis.fetch = originalFetch
   }

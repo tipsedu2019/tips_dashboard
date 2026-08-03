@@ -9,6 +9,10 @@ const migrationUrl = new URL(
   "../supabase/migrations/20260716190000_notification_ops_task_producers.sql",
   import.meta.url,
 )
+const taskContentMigrationUrl = new URL(
+  "../supabase/migrations/20260803141000_notification_task_content_payload.sql",
+  import.meta.url,
+)
 const reretryMigrationUrl = new URL(
   "../supabase/migrations/20260721131836_word_retest_reretry.sql",
   import.meta.url,
@@ -397,6 +401,42 @@ test("일반 할 일과 단어 재시험은 서로 다른 workflow와 허용된 
     "word_retest.revision_requested", "word_retest.retry_created", "word_retest.completed",
     "word_retest.canceled",
   ]) assert.ok(sql.includes(`'${eventKey}'`), `이벤트 매핑 누락: ${eventKey}`)
+})
+
+test("할 일 알림 payload는 표시명·변경 전후·댓글·첨부를 transaction 안에서 불변 snapshot한다", async () => {
+  const sql = await source(taskContentMigrationUrl)
+  const recorder = block(
+    sql,
+    "create or replace function dashboard_private.record_ops_task_notification_source_v2",
+    "revoke all on function dashboard_private.record_ops_task_notification_source_v2",
+  )
+  const snapshotEnd = recorder.indexOf("v_recorded := dashboard_private.record_notification_event_v1")
+  assert.notEqual(snapshotEnd, -1)
+  const snapshotSection = recorder.slice(0, snapshotEnd)
+
+  for (const key of [
+    "task_title", "current_assignee_name", "current_assignee_team",
+    "before_assignee_name", "after_assignee_name", "before_due_at", "after_due_at",
+    "before_status", "after_status", "actor_name", "comment_author_name", "comment_body",
+    "attachment_count", "attachment_types",
+  ]) {
+    assert.match(recorder, new RegExp(`'${key}'`), `표시 snapshot key 누락: ${key}`)
+  }
+
+  assert.match(snapshotSection, /from public\.profiles profile[\s\S]*profile\.name/)
+  assert.match(snapshotSection, /comment_row\.body[\s\S]*from public\.ops_task_comments comment_row/)
+  assert.match(snapshotSection, /from public\.ops_task_attachments attachment[\s\S]*attachment\.file_kind/)
+  assert.match(snapshotSection, /v_payload :=[\s\S]*jsonb_strip_nulls[\s\S]*\|\| pg_catalog\.jsonb_build_object\([\s\S]*'current_assignee_name'/)
+  assert.match(snapshotSection, /insert into public\.ops_task_events/)
+  assert.match(recorder, /record_notification_event_v1\([\s\S]*v_occurred_at,[\s\S]*1,[\s\S]*v_payload/)
+
+  for (const routingKey of [
+    "actor_profile_id", "requester_profile_id", "primary_assignee_profile_id",
+    "secondary_assignee_profile_id", "management_profile_ids",
+  ]) assert.match(recorder, new RegExp(`'${routingKey}'`), `routing UUID key 누락: ${routingKey}`)
+
+  assert.doesNotMatch(sql, /create or replace function dashboard_private\.(?:create|update|transition|add)_ops_task/)
+  assert.doesNotMatch(sql, /active_template_id|update dashboard_private\.notification_rules|record_notification_delivery/i)
 })
 
 test("생성·수정·상태·댓글은 업무 원본과 canonical 이벤트를 같은 함수 트랜잭션에서 기록한다", async () => {
