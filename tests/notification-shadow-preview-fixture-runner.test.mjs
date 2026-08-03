@@ -89,6 +89,13 @@ test("preview fixture runner는 고정 10개 범위를 실제 adapter로 독립 
     assert.equal(taskCycle.recordedLegacyIntents, 1)
     assert.equal(taskCycle.externalRequests, 0)
     assert.equal(taskCycle.databaseOperations, 0)
+
+    const wordRetestCycle = first.cycles.find((cycle) => cycle.scopeKey === "word_retests")
+    assert.ok(wordRetestCycle, "단어 재시험 legacy custom preview 증거가 필요합니다")
+    assert.equal(wordRetestCycle.comparison.matched, true)
+    assert.equal(wordRetestCycle.recordedLegacyIntents, 1)
+    assert.equal(wordRetestCycle.externalRequests, 0)
+    assert.equal(wordRetestCycle.databaseOperations, 0)
   } finally {
     globalThis.fetch = originalFetch
   }

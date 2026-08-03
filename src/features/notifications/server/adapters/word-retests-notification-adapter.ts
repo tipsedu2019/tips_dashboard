@@ -1,3 +1,4 @@
+import { buildWordRetestNotificationPresentation } from "../presentation/word-retest-notification-presentation.ts"
 import { createImmediateNotificationAdapter } from "./immediate-notification-adapter.ts"
 
 export const wordRetestsNotificationAdapter = createImmediateNotificationAdapter({
@@ -26,4 +27,5 @@ export const wordRetestsNotificationAdapter = createImmediateNotificationAdapter
     management_team: ["management_profile_ids"],
   },
   renderFields: {},
+  presentationBuilder: buildWordRetestNotificationPresentation,
 })

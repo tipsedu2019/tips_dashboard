@@ -13,6 +13,10 @@ const taskContentMigrationUrl = new URL(
   "../supabase/migrations/20260803141000_notification_task_content_payload.sql",
   import.meta.url,
 )
+const wordRetestContentMigrationUrl = new URL(
+  "../supabase/migrations/20260803142000_notification_word_retest_content_payload.sql",
+  import.meta.url,
+)
 const reretryMigrationUrl = new URL(
   "../supabase/migrations/20260721131836_word_retest_reretry.sql",
   import.meta.url,
@@ -436,6 +440,67 @@ test("할 일 알림 payload는 표시명·변경 전후·댓글·첨부를 tran
   ]) assert.match(recorder, new RegExp(`'${routingKey}'`), `routing UUID key 누락: ${routingKey}`)
 
   assert.doesNotMatch(sql, /create or replace function dashboard_private\.(?:create|update|transition|add)_ops_task/)
+  assert.doesNotMatch(sql, /active_template_id|update dashboard_private\.notification_rules|record_notification_delivery/i)
+})
+
+test("단어 재시험 알림 payload는 점수 단위·판정·조교·재시험 계보를 transaction 안에서 snapshot한다", async () => {
+  const sql = await source(wordRetestContentMigrationUrl)
+  const recorder = block(
+    sql,
+    "create or replace function dashboard_private.record_ops_task_notification_source_v2",
+    "create or replace function dashboard_private.retry_word_retest_v1_impl",
+  )
+  const retry = block(
+    sql,
+    "create or replace function dashboard_private.retry_word_retest_v1_impl",
+    "create or replace function dashboard_private.report_word_retest_absent_v1_impl",
+  )
+  const absent = block(
+    sql,
+    "create or replace function dashboard_private.report_word_retest_absent_v1_impl",
+    "alter function dashboard_private.record_ops_task_notification_source_v2",
+  )
+  const snapshotEnd = recorder.indexOf("v_recorded := dashboard_private.record_notification_event_v1")
+  assert.notEqual(snapshotEnd, -1)
+  const snapshotSection = recorder.slice(0, snapshotEnd)
+
+  for (const key of [
+    "assigned_assistant_name", "assigned_assistant_team", "before_assistant_name", "after_assistant_name",
+    "test_at", "before_test_at", "after_test_at", "total_question_count", "cutoff_question_count",
+    "first_score", "second_score", "third_score", "score_out_of_100", "result_summary",
+    "actor_name", "reason", "memo", "unit", "previous_result_summary",
+    "previous_total_question_count", "previous_cutoff_question_count", "previous_first_score",
+    "previous_second_score", "previous_third_score",
+  ]) assert.match(recorder, new RegExp(`'${key}'`), `재시험 표시 snapshot key 누락: ${key}`)
+
+  assert.match(snapshotSection, /v_word\.unit/)
+  assert.match(snapshotSection, /v_word\.request_note/)
+  assert.match(snapshotSection, /p_extra_payload #>> '\{before_schedule,test_at\}'/)
+  assert.match(snapshotSection, /p_extra_payload #>> '\{after_schedule,test_at\}'/)
+  assert.match(snapshotSection, /v_word\.cutoff_question_count[\s\S]*v_word\.first_score[\s\S]*v_result_summary/)
+  assert.match(snapshotSection, /from public\.profiles profile[\s\S]*profile\.name/)
+  assert.match(snapshotSection, /from public\.ops_word_retests previous_detail/)
+  assert.match(snapshotSection, /jsonb_strip_nulls[\s\S]*\|\| pg_catalog\.jsonb_build_object\([\s\S]*'assigned_assistant_name'/)
+  assert.match(recorder, /record_notification_event_v1\([\s\S]*v_occurred_at,[\s\S]*1,[\s\S]*v_payload/)
+
+  for (const routingKey of [
+    "requesting_teacher_profile_id", "assigned_assistant_profile_id", "secondary_assignee_profile_id",
+    "management_profile_ids", "previous_task_id", "retry_task_id",
+  ]) assert.match(recorder, new RegExp(`'${routingKey}'`), `재시험 routing/lineage key 누락: ${routingKey}`)
+
+  assert.match(retry, /v_previous_detail\.retest_status = 'absent'/)
+  assert.match(retry, /v_previous_task\.status = 'done'[\s\S]*v_previous_detail\.retest_status = 'absent'/)
+  assert.match(retry, /v_effective_input := p_input/)
+  assert.match(retry, /'test_at', coalesce\(/)
+  assert.match(retry, /if v_previous_status <> 'done' then/)
+  assert.match(retry, /'previous_result_summary'/)
+  assert.match(retry, /'previous_first_score'/)
+
+  assert.match(absent, /if p_source = 'deadline'[\s\S]*v_detail\.retry_of_task_id is not null/)
+  assert.match(absent, /'skippedReason', 'retry_child_deadline'/)
+  assert.match(absent, /return pg_catalog\.jsonb_build_array\(\)/)
+  assert.match(absent, /record_ops_task_notification_source_v2\([\s\S]*'word_retest\.absent_reported'/)
+
   assert.doesNotMatch(sql, /active_template_id|update dashboard_private\.notification_rules|record_notification_delivery/i)
 })
 
