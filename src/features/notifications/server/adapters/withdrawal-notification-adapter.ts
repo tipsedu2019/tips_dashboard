@@ -1,5 +1,27 @@
+import { buildWithdrawalNotificationPresentation } from "../presentation/withdrawal-notification-presentation.ts"
 import { createImmediateNotificationAdapter } from "./immediate-notification-adapter.ts"
 import { buildOpsTransitionNotificationDeepLink } from "./ops-transition-notification-deep-link.ts"
+
+const LEGACY_CONTEXT_KEYS_BY_EVENT: Readonly<Record<string, ReadonlyArray<string>>> = Object.freeze({
+  "withdrawal.submitted": Object.freeze([
+    "student_name", "teacher_name", "class_name",
+  ]),
+  "withdrawal.completed": Object.freeze([
+    "student_name", "withdrawal_date", "withdrawal_round",
+  ]),
+})
+
+function buildWithdrawalAdapterPresentation(
+  input: Parameters<typeof buildWithdrawalNotificationPresentation>[0],
+) {
+  const isHistoricalSeedPayload = input.requestedContextKeys.length === 0
+    && !Object.prototype.hasOwnProperty.call(input.payload, "task_status")
+  if (!isHistoricalSeedPayload) return buildWithdrawalNotificationPresentation(input)
+  return buildWithdrawalNotificationPresentation({
+    ...input,
+    requestedContextKeys: LEGACY_CONTEXT_KEYS_BY_EVENT[input.eventKey] ?? input.requestedContextKeys,
+  })
+}
 
 export const withdrawalNotificationAdapter = createImmediateNotificationAdapter({
   workflowKey: "withdrawal",
@@ -20,11 +42,6 @@ export const withdrawalNotificationAdapter = createImmediateNotificationAdapter(
     requester_profile: ["requester_profile_id"],
     management_team: ["management_profile_ids"],
   },
-  renderFields: {
-    student_name: ["student_name"],
-    teacher_name: ["teacher_name", "requester_name"],
-    class_name: ["class_name"],
-    withdrawal_date: ["withdrawal_date"],
-    withdrawal_round: ["withdrawal_round"],
-  },
+  renderFields: {},
+  presentationBuilder: buildWithdrawalAdapterPresentation,
 })

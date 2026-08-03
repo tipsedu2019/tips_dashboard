@@ -49,6 +49,14 @@ const transferAdapterUrl = new URL(
   "../src/features/notifications/server/adapters/transfer-notification-adapter.ts",
   import.meta.url,
 )
+const withdrawalContentMigrationUrl = new URL(
+  "../supabase/migrations/20260803145000_notification_withdrawal_content_payload.sql",
+  import.meta.url,
+)
+const withdrawalAdapterUrl = new URL(
+  "../src/features/notifications/server/adapters/withdrawal-notification-adapter.ts",
+  import.meta.url,
+)
 
 test("전반·퇴원 canonical 링크는 event status snapshot의 flow를 정확히 사용한다", async () => {
   const { buildOpsTransitionNotificationDeepLink } = await import(deepLinkHelperUrl)
@@ -454,6 +462,111 @@ test("전반 content migration은 신청자·수업 담당자와 제출·완료 
   assert.match(writer, /v_teacher_name := coalesce\(nullif\(v_transfer\.from_teacher_name/)
   assert.doesNotMatch(writer, /v_requester_name\s*:=\s*v_teacher_name/)
   assert.match(writer, /insert into public\.ops_task_events[\s\S]*record_notification_event_v1/)
+  assert.doesNotMatch(sql, /google_chat\.(?:english|math|science)/)
+  assert.doesNotMatch(sql, /notification_runtime_flags|record_notification_delivery|fetch\(|webhook/i)
+})
+
+test("수강 제외 adapter는 선택 과목 범위와 관리팀 Chat 목적지만 렌더한다", async () => {
+  const { withdrawalNotificationAdapter } = await import(withdrawalAdapterUrl)
+  const input = {
+    eventId: "85000000-0000-4000-8000-000000000011",
+    workflowKey: "withdrawal",
+    eventKey: "withdrawal.completed",
+    sourceType: "ops_task_event",
+    sourceId: "85000000-0000-4000-8000-000000000012",
+    sourceRevision: null,
+    payloadSchemaVersion: 1,
+    payload: {
+      task_id: "85000000-0000-4000-8000-000000000001",
+      student_name: "김민서",
+      task_status: "done",
+      status: "done",
+      selected_subject: "수학",
+      selected_class: "중2 수학 A반",
+      applied_withdrawal_date: "2026-08-31",
+      applied_withdrawal_round: "8회차",
+      requester_name: "박지영",
+      actor_name: "이관리",
+      other_active_subjects: ["영어"],
+      reason: null,
+      memo: null,
+      occurred_at: "2026-08-04T01:00:00.000Z",
+      management_profile_ids: [],
+    },
+    rule: {
+      ruleId: "85000000-0000-4000-8000-000000000021",
+      ruleRevision: "1",
+      templateId: "85000000-0000-4000-8000-000000000022",
+      audienceKey: "management_team",
+      channelKey: "google_chat",
+      connectionKey: "google_chat.management",
+      ruleVariantKey: "immediate",
+    },
+    scheduledFor: "2026-08-04T01:00:00.000Z",
+  }
+  const targets = await withdrawalNotificationAdapter.resolveTargets(input)
+  assert.deepEqual(targets.targets.map((target) => target.connectionKey), ["google_chat.management"])
+  const context = await withdrawalNotificationAdapter.buildRenderContext({
+    ...input,
+    targetGeneration: targets.targetGeneration,
+    target: targets.targets[0],
+    requestedContextKeys: [
+      "student_name", "subjects", "class_name", "withdrawal_date", "withdrawal_round", "progress_line",
+    ],
+  })
+  assert.deepEqual(context, {
+    student_name: "김민서 학생",
+    subjects: "수학",
+    class_name: "중2 수학 A반",
+    withdrawal_date: "8월 31일(월)",
+    withdrawal_round: "8회차",
+    progress_line: "[상태] 다른 과목 수강은 그대로 유지돼요.",
+  })
+})
+
+test("수강 제외 content migration은 선택 과목만 제외한 뒤 남은 활성 과목을 같은 transaction에서 snapshot한다", async () => {
+  const [sql, producerSql] = await Promise.all([
+    source(withdrawalContentMigrationUrl),
+    source(migrationUrl),
+  ])
+  const writer = block(
+    sql,
+    "create or replace function dashboard_private.record_ops_transition_notification_source_v1",
+    "revoke all on function dashboard_private.record_ops_transition_notification_source_v1",
+  )
+  for (const key of [
+    "selected_subject", "selected_class",
+    "requested_withdrawal_date", "requested_withdrawal_round",
+    "applied_withdrawal_date", "applied_withdrawal_round",
+    "requester_name", "actor_name", "other_active_subjects",
+  ]) assert.match(writer, new RegExp(`'${key}'`), `수강 제외 표시 snapshot key 누락: ${key}`)
+
+  const completion = block(
+    producerSql,
+    "create or replace function dashboard_private.complete_ops_withdrawal_roster_transition_v2_impl",
+    "create or replace function dashboard_private.complete_ops_withdrawal_roster_transition_v2_impl_end",
+  )
+  assert.ok(
+    completion.indexOf("complete_ops_withdrawal_roster_transition_impl")
+      < completion.indexOf("ensure_ops_transition_completion_source_v1"),
+    "선택 수업 제외가 끝난 뒤 canonical 알림 snapshot을 기록해야 합니다.",
+  )
+  assert.match(writer, /public\.students/)
+  assert.match(writer, /public\.classes/)
+  assert.match(writer, /public\.ops_registration_enrollments/)
+  assert.match(writer, /enrollment\.roster_active/)
+  assert.match(writer, /p_event_key = 'withdrawal\.completed'/)
+  assert.match(writer, /source\.event_type = 'withdrawal\.submitted'/)
+  assert.match(
+    writer,
+    /coalesce\(\s*source\.payload ->> 'requested_withdrawal_date',\s*source\.payload ->> 'withdrawal_date'\s*\)/,
+  )
+  assert.match(
+    writer,
+    /coalesce\(\s*source\.payload ->> 'requested_withdrawal_round',\s*source\.payload ->> 'withdrawal_round'\s*\)/,
+  )
+  assert.match(writer, /insert into public\.ops_task_events[\s\S]*record_notification_event_v1/)
+  assert.doesNotMatch(sql, /update public\.ops_registration_enrollments|apply_student_class_roster_mode/)
   assert.doesNotMatch(sql, /google_chat\.(?:english|math|science)/)
   assert.doesNotMatch(sql, /notification_runtime_flags|record_notification_delivery|fetch\(|webhook/i)
 })
