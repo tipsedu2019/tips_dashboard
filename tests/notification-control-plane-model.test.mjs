@@ -9,6 +9,7 @@ import {
   rebaseNotificationDraft,
   validateNotificationDraft,
 } from "../src/features/notifications/notification-control-plane-model.ts"
+import * as notificationControlPlaneModel from "../src/features/notifications/notification-control-plane-model.ts"
 import {
   NOTIFICATION_AUDIENCE_KEYS,
   NOTIFICATION_CHANNEL_KEYS,
@@ -22,6 +23,59 @@ import {
 const RULE_REVISION = "9007199254740993"
 const TEMPLATE_VERSION = "9007199254740995"
 const CONNECTION_REVISION = "9007199254740997"
+
+const VISIT_SCHEDULED_CONTENT_CONTRACT = {
+  contractVersion: "1",
+  availableVariables: [
+    { key: "student_name", token: "학생", piiClass: "student_name" },
+    { key: "subjects", token: "과목", piiClass: "none" },
+    { key: "after_schedule", token: "새일정", piiClass: "schedule" },
+    { key: "after_place", token: "새장소", piiClass: "location" },
+    { key: "progress_line", token: "진행정보", piiClass: "none" },
+  ],
+  requiredTokens: ["학생", "과목", "새일정", "새장소"],
+  optionalLineTokens: ["진행정보"],
+  mustHaveFacts: ["target", "event", "schedule", "location"],
+  supportedPayloadVersions: [2],
+  destinationPolicy: {
+    allowedConnectionKeys: ["google_chat.management"],
+    subjectScoped: false,
+  },
+  freeTextVisibility: {},
+  freeTextPriority: [],
+  fieldPresence: {
+    student_name: {
+      required: true,
+      nullBehavior: "reject",
+      nullDisplay: null,
+      emptyArrayBehavior: "reject",
+    },
+    subjects: {
+      required: true,
+      nullBehavior: "reject",
+      nullDisplay: null,
+      emptyArrayBehavior: "reject",
+    },
+    after_schedule: {
+      required: true,
+      nullBehavior: "reject",
+      nullDisplay: null,
+      emptyArrayBehavior: "reject",
+    },
+    after_place: {
+      required: true,
+      nullBehavior: "reject",
+      nullDisplay: null,
+      emptyArrayBehavior: "reject",
+    },
+    progress_line: {
+      required: false,
+      nullBehavior: "omit",
+      nullDisplay: null,
+      emptyArrayBehavior: "omit",
+    },
+  },
+}
 
 function createWireSnapshot(overrides = {}) {
   return {
@@ -39,18 +93,27 @@ function createWireSnapshot(overrides = {}) {
         schedule_key: null,
         schedule_config: null,
         enabled: false,
+        configuration_kind: "fixed_policy_editable_template",
+        activation_locked: true,
+        content_contract: VISIT_SCHEDULED_CONTENT_CONTRACT,
+        template_compliance: {
+          contract_version: "1",
+          compliance: "conformant",
+          violations: [],
+        },
         active_template_id: "template-registration-visit-management",
         revision: RULE_REVISION,
         template: {
           id: "template-registration-visit-management",
           rule_id: "rule-registration-visit-management",
           version: TEMPLATE_VERSION,
-          title_template: "{학생} 방문상담 예약",
-          body_template: "{학생} 학생의 방문상담이 예약되었습니다.",
+          title_template: "[방문상담] {student_name}",
+          body_template: "[학생] {student_name}\n[과목] {subjects}\n[일정] {after_schedule}\n[장소] {after_place}\n{progress_line}",
           allowed_variables: [
             { key: "student_name", token: "학생", pii_class: "student_name" },
           ],
-          payload_schema_version: 1,
+          payload_schema_version: 2,
+          content_contract_version: null,
         },
       },
     ],
@@ -254,7 +317,19 @@ test("maps the snake_case wire snapshot to one camelCase browser DTO", () => {
   assert.equal(snapshot.rules[0].ruleVariantKey, "immediate")
   assert.equal(snapshot.rules[0].deliveryMode, "immediate")
   assert.equal(snapshot.rules[0].activeTemplateId, "template-registration-visit-management")
-  assert.equal(snapshot.rules[0].template.titleTemplate, "{학생} 방문상담 예약")
+  assert.equal(snapshot.rules[0].configurationKind, "fixed_policy_editable_template")
+  assert.equal(snapshot.rules[0].activationLocked, true)
+  assert.equal(snapshot.rules[0].contentContract.contractVersion, "1")
+  assert.deepEqual(snapshot.rules[0].contentContract.availableVariables, [
+    { key: "student_name", token: "학생", piiClass: "student_name" },
+    { key: "subjects", token: "과목", piiClass: "none" },
+    { key: "after_schedule", token: "새일정", piiClass: "schedule" },
+    { key: "after_place", token: "새장소", piiClass: "location" },
+    { key: "progress_line", token: "진행정보", piiClass: "none" },
+  ])
+  assert.equal(snapshot.rules[0].templateCompliance, "conformant")
+  assert.equal(snapshot.rules[0].template.titleTemplate, "[방문상담] {student_name}")
+  assert.equal(snapshot.rules[0].template.contentContractVersion, null)
   assert.deepEqual(snapshot.rules[0].template.allowedVariables, [
     { key: "student_name", token: "학생", piiClass: "student_name" },
   ])
@@ -423,10 +498,80 @@ test("rejects extra schedule fields and emits only the closed schedule patch", (
 test("rejects template tokens outside the server-provided allowlist", () => {
   const snapshot = parseSnapshot()
   const draft = createNotificationDraft(snapshot)
-  draft.rules["rule-registration-visit-management"].bodyTemplate = "{학생} {미등록}"
+  draft.rules["rule-registration-visit-management"].bodyTemplate += "\n{unregistered_variable}"
 
   const result = validateNotificationDraft(snapshot, draft)
   assert.equal(issueCodes(result).includes("template_token_not_allowed"), true)
+})
+
+test("validates edits against the current content contract instead of the historical template allowlist", () => {
+  const snapshot = parseSnapshot()
+  const draft = createNotificationDraft(snapshot)
+
+  assert.deepEqual(snapshot.rules[0].template.allowedVariables, [
+    { key: "student_name", token: "학생", piiClass: "student_name" },
+  ])
+  assert.equal(validateNotificationDraft(snapshot, draft).ok, true)
+})
+
+test("blocks a draft that omits a current-contract required variable", () => {
+  const snapshot = parseSnapshot()
+  const draft = createNotificationDraft(snapshot)
+  draft.rules["rule-registration-visit-management"].bodyTemplate =
+    draft.rules["rule-registration-visit-management"].bodyTemplate.replace(
+      "[과목] {subjects}\n",
+      "",
+    )
+
+  const result = validateNotificationDraft(snapshot, draft)
+  assert.equal(issueCodes(result).includes("template_required_token_missing"), true)
+})
+
+test("blocks an optional complete-line variable placed inside explanatory copy", () => {
+  const snapshot = parseSnapshot()
+  const draft = createNotificationDraft(snapshot)
+  draft.rules["rule-registration-visit-management"].bodyTemplate =
+    draft.rules["rule-registration-visit-management"].bodyTemplate.replace(
+      "{progress_line}",
+      "[진행] {progress_line}",
+    )
+
+  const result = validateNotificationDraft(snapshot, draft)
+  assert.equal(issueCodes(result).includes("template_optional_line_invalid"), true)
+})
+
+test("keeps direct team-room instructions as saveable quality warnings", () => {
+  assert.equal(
+    typeof notificationControlPlaneModel.evaluateNotificationDraft,
+    "function",
+    "evaluateNotificationDraft must separate warnings from blockers",
+  )
+  const snapshot = parseSnapshot()
+  const draft = createNotificationDraft(snapshot)
+  draft.rules["rule-registration-visit-management"].titleTemplate =
+    `[다음] ${draft.rules["rule-registration-visit-management"].titleTemplate}`
+
+  const result = notificationControlPlaneModel.evaluateNotificationDraft(snapshot, draft)
+  assert.equal(result.validation.ok, true)
+  assert.equal(
+    result.warnings.some(({ code }) => code === "template_direct_imperative"),
+    true,
+  )
+})
+
+test("counts Korean title guidance by grapheme cluster without blocking save", () => {
+  assert.equal(typeof notificationControlPlaneModel.evaluateNotificationDraft, "function")
+  const snapshot = parseSnapshot()
+  const draft = createNotificationDraft(snapshot)
+  draft.rules["rule-registration-visit-management"].titleTemplate =
+    `${"👨‍👩‍👧‍👦".repeat(61)} {student_name}`
+
+  const result = notificationControlPlaneModel.evaluateNotificationDraft(snapshot, draft)
+  assert.equal(result.validation.ok, true)
+  assert.equal(
+    result.warnings.some(({ code }) => code === "template_title_over_60_graphemes"),
+    true,
+  )
 })
 
 test("blocks a newly enabled Google Chat rule when its required connection is unavailable", () => {

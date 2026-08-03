@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import * as SwitchPrimitive from "@radix-ui/react-switch"
-import { AlertTriangle, Check, Loader2, MessageSquareText, PlugZap } from "lucide-react"
+import { AlertTriangle, Check, Loader2, LockKeyhole, MessageSquareText, PlugZap } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -25,9 +25,9 @@ import { supabase } from "@/lib/supabase"
 import {
   buildNotificationPatch,
   createNotificationDraft,
+  evaluateNotificationDraft,
   isNotificationDraftDirty,
   rebaseNotificationDraft,
-  validateNotificationDraft,
   type NotificationDraft,
   type NotificationRulePatch,
 } from "./notification-control-plane-model"
@@ -195,6 +195,20 @@ function revisionsForPatch(
   return revisions
 }
 
+function contractVersionsForPatch(
+  snapshot: NotificationControlPlaneSnapshot,
+  patch: { rules: Record<string, NotificationRulePatch> },
+): NotificationRevisionMap {
+  const changedRuleIds = new Set(Object.keys(patch.rules))
+  const versions: Record<string, string> = {}
+  for (const rule of snapshot.rules) {
+    if (changedRuleIds.has(rule.id)) {
+      versions[rule.id] = rule.contentContract.contractVersion
+    }
+  }
+  return versions
+}
+
 function connectionFromWire(input: unknown): NotificationConnectionDto | null {
   if (!isRecord(input)) return null
   if ("webhook_url" in input || "webhook_url_ciphertext" in input) return null
@@ -343,6 +357,7 @@ function RuleToggle({
 }: RuleToggleProps) {
   const value = draft.rules[rule.id]
   if (!value) return null
+  const fixedPolicy = rule.configurationKind === "fixed_policy_editable_template"
   const requiredConnectionKeys: NotificationConnectionKey[] = rule.connectionKey
     ? [rule.connectionKey]
     : rule.audienceKey === "management_team"
@@ -391,21 +406,35 @@ function RuleToggle({
         <p className="mr-auto text-xs font-medium text-amber-700">{connectionMessage}</p>
       ) : null}
       <div className={cn("flex items-center gap-2", compact && "justify-between")}>
-        <SwitchPrimitive.Root
-          id={`notification-rule-switch-${surfaceKey}-${rule.id}`}
-          data-notification-rule-switch={rule.id}
-          aria-label={`${rule.audienceLabel ?? rule.audienceKey} ${rule.channelLabel ?? rule.channelKey}`}
-          checked={value.enabled}
-          disabled={saving}
-          onCheckedChange={(enabled) => onChange(rule.id, { enabled })}
-          className="data-[state=checked]:bg-primary relative h-6 w-11 shrink-0 rounded-full bg-input transition-colors disabled:opacity-50"
-        >
-          <SwitchPrimitive.Thumb className="data-[state=checked]:translate-x-5 block size-5 translate-x-0.5 rounded-full bg-background shadow transition-transform" />
-        </SwitchPrimitive.Root>
+        {fixedPolicy ? (
+          <div
+            data-notification-rule-lock={rule.id}
+            className="flex min-h-11 items-center gap-2 text-xs text-muted-foreground"
+          >
+            <Badge variant="outline" className="gap-1">
+              <LockKeyhole aria-hidden="true" className="size-3" />
+              고정
+            </Badge>
+            <span>전달 정책 고정</span>
+          </div>
+        ) : (
+          <SwitchPrimitive.Root
+            id={`notification-rule-switch-${surfaceKey}-${rule.id}`}
+            data-notification-rule-switch={rule.id}
+            aria-label={`${rule.audienceLabel ?? rule.audienceKey} ${rule.channelLabel ?? rule.channelKey}`}
+            checked={value.enabled}
+            disabled={saving}
+            onCheckedChange={(enabled) => onChange(rule.id, { enabled })}
+            className="data-[state=checked]:bg-primary relative h-6 w-11 shrink-0 rounded-full bg-input transition-colors disabled:opacity-50"
+          >
+            <SwitchPrimitive.Thumb className="data-[state=checked]:translate-x-5 block size-5 translate-x-0.5 rounded-full bg-background shadow transition-transform" />
+          </SwitchPrimitive.Root>
+        )}
         <Button
           type="button"
           variant="outline"
           size="sm"
+          className="min-h-11"
           disabled={saving}
           onClick={() => onEditTemplate(rule.id)}
         >
@@ -567,6 +596,7 @@ function RulesView({
 }
 
 type TemplateEditorProps = {
+  snapshot: NotificationControlPlaneSnapshot | null
   rule: NotificationRuleDto | null
   draft: NotificationDraft | null
   saving: boolean
@@ -574,11 +604,20 @@ type TemplateEditorProps = {
   onChange: (ruleId: string, patch: NotificationRulePatch) => void
 }
 
-function TemplateEditor({ rule, draft, saving, onOpenChange, onChange }: TemplateEditorProps) {
-  if (!rule || !draft) return null
+function TemplateEditor({ snapshot, rule, draft, saving, onOpenChange, onChange }: TemplateEditorProps) {
+  if (!snapshot || !rule || !draft) return null
   const value = draft.rules[rule.id]
   if (!value) return null
   const schedule = value.scheduleConfig
+  const evaluation = evaluateNotificationDraft(snapshot, draft)
+  const blockingIssues = evaluation.validation.ok
+    ? []
+    : evaluation.validation.issues.filter(({ path }) => path.startsWith(`rules.${rule.id}.`))
+  const templateWarnings = evaluation.warnings.filter(
+    ({ path }) => path.startsWith(`rules.${rule.id}.`),
+  )
+  const requiredTokens = new Set(rule.contentContract.requiredTokens)
+  const optionalLineTokens = new Set(rule.contentContract.optionalLineTokens)
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
@@ -599,6 +638,26 @@ function TemplateEditor({ rule, draft, saving, onOpenChange, onChange }: Templat
               onChange={(event) => onChange(rule.id, { titleTemplate: event.target.value })}
             />
           </div>
+          {blockingIssues.length > 0 ? (
+            <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+              <p className="text-sm font-medium text-destructive">저장 전에 확인해 주세요</p>
+              <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-destructive">
+                {blockingIssues.map((issue) => (
+                  <li key={`${issue.code}-${issue.path}-${issue.message}`}>{issue.message}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {templateWarnings.length > 0 ? (
+            <div aria-live="polite" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+              <p className="text-sm font-medium">더 읽기 편하게 다듬을 수 있어요</p>
+              <ul className="mt-1 list-disc space-y-1 pl-5 text-xs">
+                {templateWarnings.map((warning) => (
+                  <li key={`${warning.code}-${warning.path}`}>{warning.message}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           <div className="space-y-2">
             <Label htmlFor={`notification-body-${rule.id}`}>본문</Label>
             <Textarea
@@ -648,13 +707,27 @@ function TemplateEditor({ rule, draft, saving, onOpenChange, onChange }: Templat
               </p>
             </div>
           ) : null}
-          {rule.template.allowedVariables.length > 0 ? (
+          {rule.contentContract.availableVariables.length > 0 ? (
             <div className="rounded-lg bg-muted p-3">
               <p className="text-xs font-medium">사용 가능한 변수</p>
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {rule.template.allowedVariables.map((variable) => (
-                  <Badge key={variable.key} variant="secondary">{`{${variable.token}}`}</Badge>
-                ))}
+                {rule.contentContract.availableVariables.map((variable) => {
+                  const required = requiredTokens.has(variable.token)
+                  const optionalLine = optionalLineTokens.has(variable.token)
+                  return (
+                    <Badge
+                      key={variable.key}
+                      variant={required ? "default" : "secondary"}
+                      className="gap-1.5"
+                    >
+                      <code>{`{${variable.key}}`}</code>
+                      <span>{variable.token}</span>
+                      <span className="opacity-70">
+                        {required ? "필수" : optionalLine ? "선택 행" : "선택"}
+                      </span>
+                    </Badge>
+                  )
+                })}
               </div>
             </div>
           ) : null}
@@ -1013,7 +1086,7 @@ export function NotificationControlPanel({
       setMessage("먼저 설정 충돌을 해결해 주세요.")
       return false
     }
-    const validation = validateNotificationDraft(snapshot, draft)
+    const { validation } = evaluateNotificationDraft(snapshot, draft)
     if (!validation.ok) {
       const connectionIssue = validation.issues.some(
         ({ code }) => code === "google_chat_connection_required",
@@ -1025,10 +1098,12 @@ export function NotificationControlPanel({
     }
     const patch = buildNotificationPatch(baseDraft, validation.value)
     if (Object.keys(patch.rules).length === 0) return true
-    const expectedRevisions = revisionsForPatch(snapshot, patch)
+    const expectedRuleRevisions = revisionsForPatch(snapshot, patch)
+    const expectedContractVersions = contractVersionsForPatch(snapshot, patch)
     const saveSignature = JSON.stringify({
       workflowKey: activeWorkflow,
-      expectedRevisions,
+      expectedRuleRevisions,
+      expectedContractVersions,
       patch,
       conflictOverride,
     })
@@ -1042,7 +1117,8 @@ export function NotificationControlPanel({
     try {
       const result = await service.saveControlPlane({
         workflowKey: activeWorkflow,
-        expectedRevisions,
+        expectedRuleRevisions,
+        expectedContractVersions,
         patch,
         requestId,
         ...(conflictOverride ? { conflictOverride } : {}),
@@ -1418,6 +1494,7 @@ export function NotificationControlPanel({
   const auxiliaryDialogs = (
     <>
       <TemplateEditor
+        snapshot={snapshot}
         rule={editingRule}
         draft={draft}
         saving={saving}

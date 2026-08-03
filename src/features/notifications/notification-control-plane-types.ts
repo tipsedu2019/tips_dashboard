@@ -293,6 +293,7 @@ export type NotificationTemplateDto = Readonly<{
   bodyTemplate: string
   allowedVariables: ReadonlyArray<NotificationTemplateVariableDto>
   payloadSchemaVersion: number
+  contentContractVersion: string | null
   checksum: string | null
 }>
 
@@ -314,6 +315,10 @@ export type NotificationRuleDto = Readonly<{
   scheduleKey: NotificationScheduleKey | null
   scheduleConfig: NotificationScheduleConfig
   enabled: boolean
+  configurationKind: Exclude<NotificationConfigurationKind, "not_applicable">
+  activationLocked: boolean
+  contentContract: NotificationContentContract
+  templateCompliance: NotificationTemplateCompliance
   activeTemplateId: string
   revision: DbBigInt
   updatedAt: string | null
@@ -371,11 +376,23 @@ export type NotificationIssueCode =
   | "draft_rule_missing"
   | "draft_rule_unknown"
   | "template_token_not_allowed"
+  | "template_required_token_missing"
+  | "template_optional_line_invalid"
   | "template_content_not_allowed"
   | "google_chat_connection_required"
 
 export type NotificationIssue = Readonly<{
   code: NotificationIssueCode
+  path: string
+  message: string
+}>
+
+export type NotificationTemplateWarningCode =
+  | "template_title_over_60_graphemes"
+  | "template_direct_imperative"
+
+export type NotificationTemplateWarning = Readonly<{
+  code: NotificationTemplateWarningCode
   path: string
   message: string
 }>
@@ -391,6 +408,26 @@ const EDITABLE_CHANNEL_KEY_SET = new Set<string>(NOTIFICATION_EDITABLE_CHANNEL_K
 const CONNECTION_KEY_SET = new Set<string>(NOTIFICATION_CONNECTION_KEYS)
 const CONNECTION_STATE_SET = new Set<string>(NOTIFICATION_CONNECTION_STATES)
 const SCHEDULE_KEY_SET = new Set<string>(NOTIFICATION_SCHEDULE_KEYS)
+const RULE_CONFIGURATION_KIND_SET = new Set<string>([
+  "editable_rule",
+  "fixed_policy_editable_template",
+])
+const TEMPLATE_COMPLIANCE_SET = new Set<string>([
+  "conformant",
+  "legacy_custom_nonconformant",
+])
+const MUST_HAVE_FACT_SET = new Set<string>([
+  "target",
+  "event",
+  "current_state",
+  "before_after",
+  "result",
+  "progress_actor",
+  "schedule",
+  "location",
+])
+const NULL_BEHAVIOR_SET = new Set<string>(["reject", "omit", "display"])
+const EMPTY_ARRAY_BEHAVIOR_SET = new Set<string>(["reject", "allow", "omit"])
 const DECIMAL_BIGINT_PATTERN = /^(0|[1-9]\d*)$/
 const LOCAL_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/
 
@@ -541,6 +578,259 @@ function requiredDecimalString(
   return value
 }
 
+function requiredContractVersion(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+  issues: NotificationIssue[],
+): string | null {
+  const value = requiredString(record, key, path, issues)
+  if (value !== null && !/^[1-9]\d*$/.test(value)) {
+    addIssue(issues, "invalid_field", `${path}.${key}`, "Contract versions must be positive decimal strings.")
+    return null
+  }
+  return value
+}
+
+function stringArray(
+  value: unknown,
+  path: string,
+  issues: NotificationIssue[],
+): string[] | null {
+  if (
+    !Array.isArray(value) ||
+    value.some((item) => typeof item !== "string" || item.length === 0) ||
+    new Set(value).size !== value.length
+  ) {
+    addIssue(issues, "invalid_field", path, "A unique array of non-empty strings is required.")
+    return null
+  }
+  return [...value] as string[]
+}
+
+function parseContentContract(
+  input: unknown,
+  path: string,
+  issues: NotificationIssue[],
+): NotificationContentContract | null {
+  if (!isRecord(input)) {
+    addIssue(issues, "invalid_field", path, "Content contract must be an object.")
+    return null
+  }
+
+  const startIssueCount = issues.length
+  const contractVersion = requiredContractVersion(input, "contractVersion", path, issues)
+  const requiredTokens = stringArray(input.requiredTokens, `${path}.requiredTokens`, issues)
+  const optionalLineTokens = stringArray(
+    input.optionalLineTokens,
+    `${path}.optionalLineTokens`,
+    issues,
+  )
+  const mustHaveFactValues = stringArray(input.mustHaveFacts, `${path}.mustHaveFacts`, issues)
+  const freeTextPriority = stringArray(
+    input.freeTextPriority,
+    `${path}.freeTextPriority`,
+    issues,
+  )
+
+  const availableVariables: NotificationTemplateVariableDto[] = []
+  if (!Array.isArray(input.availableVariables)) {
+    addIssue(
+      issues,
+      "invalid_field",
+      `${path}.availableVariables`,
+      "Available variables must be an array.",
+    )
+  } else {
+    input.availableVariables.forEach((variable, index) => {
+      const variablePath = `${path}.availableVariables[${index}]`
+      if (!isRecord(variable)) {
+        addIssue(issues, "invalid_field", variablePath, "Variable must be an object.")
+        return
+      }
+      const key = requiredString(variable, "key", variablePath, issues)
+      const token = requiredString(variable, "token", variablePath, issues)
+      const piiClass = requiredString(variable, "piiClass", variablePath, issues)
+      if (key !== null && token !== null && piiClass !== null) {
+        availableVariables.push({ key, token, piiClass })
+      }
+    })
+  }
+  if (
+    new Set(availableVariables.map(({ key }) => key)).size !== availableVariables.length ||
+    new Set(availableVariables.map(({ token }) => token)).size !== availableVariables.length
+  ) {
+    addIssue(
+      issues,
+      "duplicate_identity",
+      `${path}.availableVariables`,
+      "Variable keys and labels must be unique.",
+    )
+  }
+
+  const supportedPayloadVersions: number[] = []
+  if (
+    !Array.isArray(input.supportedPayloadVersions) ||
+    input.supportedPayloadVersions.some((version) => !Number.isInteger(version) || version < 1)
+  ) {
+    addIssue(
+      issues,
+      "invalid_field",
+      `${path}.supportedPayloadVersions`,
+      "Supported payload versions must be positive integers.",
+    )
+  } else {
+    supportedPayloadVersions.push(...input.supportedPayloadVersions as number[])
+  }
+
+  let destinationPolicy: NotificationContentContract["destinationPolicy"] | null = null
+  if (!isRecord(input.destinationPolicy)) {
+    addIssue(issues, "invalid_field", `${path}.destinationPolicy`, "Destination policy is required.")
+  } else {
+    const allowedConnectionKeysValue = stringArray(
+      input.destinationPolicy.allowedConnectionKeys,
+      `${path}.destinationPolicy.allowedConnectionKeys`,
+      issues,
+    )
+    const subjectScoped = input.destinationPolicy.subjectScoped
+    if (typeof subjectScoped !== "boolean") {
+      addIssue(
+        issues,
+        "invalid_field",
+        `${path}.destinationPolicy.subjectScoped`,
+        "Subject scope must be boolean.",
+      )
+    }
+    if (
+      allowedConnectionKeysValue !== null &&
+      allowedConnectionKeysValue.some((key) => !CONNECTION_KEY_SET.has(key))
+    ) {
+      addIssue(
+        issues,
+        "unknown_connection",
+        `${path}.destinationPolicy.allowedConnectionKeys`,
+        "Destination policy contains an unknown connection.",
+      )
+    } else if (allowedConnectionKeysValue !== null && typeof subjectScoped === "boolean") {
+      destinationPolicy = {
+        allowedConnectionKeys: allowedConnectionKeysValue as NotificationConnectionKey[],
+        subjectScoped,
+      }
+    }
+  }
+
+  const freeTextVisibility: Record<string, "show" | "omit"> = {}
+  if (!isRecord(input.freeTextVisibility)) {
+    addIssue(
+      issues,
+      "invalid_field",
+      `${path}.freeTextVisibility`,
+      "Free-text visibility must be an object.",
+    )
+  } else {
+    for (const [key, value] of Object.entries(input.freeTextVisibility)) {
+      if (value !== "show" && value !== "omit") {
+        addIssue(
+          issues,
+          "invalid_field",
+          `${path}.freeTextVisibility.${key}`,
+          "Free-text visibility must be show or omit.",
+        )
+      } else {
+        freeTextVisibility[key] = value
+      }
+    }
+  }
+
+  const fieldPresence: Record<string, NotificationFieldPresenceRule> = {}
+  if (!isRecord(input.fieldPresence)) {
+    addIssue(issues, "invalid_field", `${path}.fieldPresence`, "Field presence must be an object.")
+  } else {
+    for (const [key, value] of Object.entries(input.fieldPresence)) {
+      const fieldPath = `${path}.fieldPresence.${key}`
+      if (
+        !isRecord(value) ||
+        typeof value.required !== "boolean" ||
+        typeof value.nullBehavior !== "string" ||
+        !NULL_BEHAVIOR_SET.has(value.nullBehavior) ||
+        (value.nullDisplay !== null && typeof value.nullDisplay !== "string") ||
+        typeof value.emptyArrayBehavior !== "string" ||
+        !EMPTY_ARRAY_BEHAVIOR_SET.has(value.emptyArrayBehavior)
+      ) {
+        addIssue(issues, "invalid_field", fieldPath, "Field presence rule is invalid.")
+        continue
+      }
+      fieldPresence[key] = {
+        required: value.required,
+        nullBehavior: value.nullBehavior as NotificationFieldPresenceRule["nullBehavior"],
+        nullDisplay: value.nullDisplay,
+        emptyArrayBehavior: value.emptyArrayBehavior as NotificationFieldPresenceRule["emptyArrayBehavior"],
+      }
+    }
+  }
+
+  if (mustHaveFactValues?.some((fact) => !MUST_HAVE_FACT_SET.has(fact))) {
+    addIssue(issues, "invalid_field", `${path}.mustHaveFacts`, "Content contract contains an unknown fact.")
+  }
+  const availableTokens = new Set(availableVariables.map(({ token }) => token))
+  if (requiredTokens?.some((token) => !availableTokens.has(token))) {
+    addIssue(issues, "invalid_field", `${path}.requiredTokens`, "A required variable is unavailable.")
+  }
+  if (optionalLineTokens?.some((token) => !availableTokens.has(token))) {
+    addIssue(issues, "invalid_field", `${path}.optionalLineTokens`, "An optional-line variable is unavailable.")
+  }
+
+  if (
+    issues.length !== startIssueCount ||
+    contractVersion === null ||
+    requiredTokens === null ||
+    optionalLineTokens === null ||
+    mustHaveFactValues === null ||
+    destinationPolicy === null ||
+    freeTextPriority === null
+  ) {
+    return null
+  }
+
+  return {
+    contractVersion,
+    availableVariables,
+    requiredTokens,
+    optionalLineTokens,
+    mustHaveFacts: mustHaveFactValues as NotificationMustHaveFact[],
+    supportedPayloadVersions,
+    destinationPolicy,
+    freeTextVisibility,
+    freeTextPriority,
+    fieldPresence,
+  }
+}
+
+function parseTemplateCompliance(
+  input: unknown,
+  contractVersion: string | null,
+  path: string,
+  issues: NotificationIssue[],
+): NotificationTemplateCompliance | null {
+  if (!isRecord(input)) {
+    addIssue(issues, "invalid_field", path, "Template compliance must be an object.")
+    return null
+  }
+  const parsedContractVersion = requiredContractVersion(input, "contract_version", path, issues)
+  const compliance = requiredString(input, "compliance", path, issues)
+  if (!Array.isArray(input.violations)) {
+    addIssue(issues, "invalid_field", `${path}.violations`, "Compliance violations must be an array.")
+  }
+  if (parsedContractVersion !== null && contractVersion !== null && parsedContractVersion !== contractVersion) {
+    addIssue(issues, "invalid_field", `${path}.contract_version`, "Compliance contract version is stale.")
+  }
+  if (compliance === null || !TEMPLATE_COMPLIANCE_SET.has(compliance)) {
+    addIssue(issues, "invalid_field", `${path}.compliance`, "Unknown template compliance state.")
+    return null
+  }
+  return compliance as NotificationTemplateCompliance
+}
+
 function isWorkflowKey(value: string | null): value is NotificationWorkflowKey {
   return value !== null && WORKFLOW_KEY_SET.has(value)
 }
@@ -686,7 +976,25 @@ function parseTemplate(
     path,
     issues,
   )
+  const contentContractVersion = optionalString(
+    input,
+    "content_contract_version",
+    path,
+    issues,
+  )
   const checksum = optionalString(input, "checksum", path, issues)
+
+  if (
+    contentContractVersion !== null &&
+    !/^[1-9]\d*$/.test(contentContractVersion)
+  ) {
+    addIssue(
+      issues,
+      "invalid_field",
+      `${path}.content_contract_version`,
+      "Content contract version must be a positive decimal string or null.",
+    )
+  }
 
   const variablesValue = input.allowed_variables
   const allowedVariables: NotificationTemplateVariableDto[] = []
@@ -745,6 +1053,7 @@ function parseTemplate(
     bodyTemplate,
     allowedVariables,
     payloadSchemaVersion,
+    contentContractVersion,
     checksum,
   }
 }
@@ -770,8 +1079,28 @@ function parseRule(
   const ruleVariantValue = requiredString(input, "rule_variant_key", path, issues)
   const deliveryModeValue = requiredString(input, "delivery_mode", path, issues)
   const enabled = requiredBoolean(input, "enabled", path, issues)
+  const configurationKindValue = requiredString(input, "configuration_kind", path, issues)
+  const activationLocked = requiredBoolean(input, "activation_locked", path, issues)
   const activeTemplateId = requiredString(input, "active_template_id", path, issues)
   const revision = requiredDecimalString(input, "revision", path, issues)
+
+  let configurationKind: Exclude<NotificationConfigurationKind, "not_applicable"> | null = null
+  if (
+    configurationKindValue === null ||
+    !RULE_CONFIGURATION_KIND_SET.has(configurationKindValue)
+  ) {
+    addIssue(
+      issues,
+      "invalid_field",
+      `${path}.configuration_kind`,
+      "Unknown notification configuration kind.",
+    )
+  } else {
+    configurationKind = configurationKindValue as Exclude<
+      NotificationConfigurationKind,
+      "not_applicable"
+    >
+  }
 
   let workflowKey: NotificationWorkflowKey | null = null
   if (!isWorkflowKey(workflowValue)) {
@@ -893,7 +1222,27 @@ function parseRule(
     }
   }
 
+  const contentContract = parseContentContract(
+    input.content_contract,
+    `${path}.content_contract`,
+    issues,
+  )
+  const templateCompliance = parseTemplateCompliance(
+    input.template_compliance,
+    contentContract?.contractVersion ?? null,
+    `${path}.template_compliance`,
+    issues,
+  )
   const template = parseTemplate(input.template, id, activeTemplateId, `${path}.template`, issues)
+
+  if (configurationKind === "fixed_policy_editable_template" && activationLocked !== true) {
+    addIssue(
+      issues,
+      "invalid_field",
+      `${path}.activation_locked`,
+      "Fixed delivery policies must remain activation locked.",
+    )
+  }
 
   const eventLabel = optionalString(input, "event_label", path, issues)
   const groupLabel = optionalString(input, "group_label", path, issues)
@@ -912,6 +1261,10 @@ function parseRule(
     channelKey === null ||
     schedule === null ||
     enabled === null ||
+    configurationKind === null ||
+    activationLocked === null ||
+    contentContract === null ||
+    templateCompliance === null ||
     activeTemplateId === null ||
     revision === null ||
     template === null
@@ -937,6 +1290,10 @@ function parseRule(
     scheduleKey: schedule.scheduleKey,
     scheduleConfig: schedule.scheduleConfig,
     enabled,
+    configurationKind,
+    activationLocked,
+    contentContract,
+    templateCompliance,
     activeTemplateId,
     revision,
     updatedAt,

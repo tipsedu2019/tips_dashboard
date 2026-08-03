@@ -45,7 +45,8 @@ type HandlerDependencies = Readonly<{
   }) => Promise<unknown>
   saveControlPlane: (input: {
     workflowKey: NotificationWorkflowKey
-    expectedRevisions: NotificationRevisionMap
+    expectedRuleRevisions: NotificationRevisionMap
+    expectedContractVersions: NotificationRevisionMap
     patch: { rules: Record<string, Record<string, unknown>> }
     requestId: string
     conflictOverride?: ConflictOverride
@@ -116,6 +117,14 @@ function ruleToWire(rule: NotificationRuleDto) {
     schedule_key: rule.scheduleKey,
     schedule_config: scheduleConfigToWire(rule.scheduleConfig),
     enabled: rule.enabled,
+    configuration_kind: rule.configurationKind,
+    activation_locked: rule.activationLocked,
+    content_contract: rule.contentContract,
+    template_compliance: {
+      contract_version: rule.contentContract.contractVersion,
+      compliance: rule.templateCompliance,
+      violations: [],
+    },
     active_template_id: rule.activeTemplateId,
     revision: rule.revision,
     updated_at: rule.updatedAt,
@@ -131,6 +140,7 @@ function ruleToWire(rule: NotificationRuleDto) {
         pii_class: variable.piiClass,
       })),
       payload_schema_version: rule.template.payloadSchemaVersion,
+      content_contract_version: rule.template.contentContractVersion,
       checksum: rule.template.checksum,
     },
   }
@@ -228,13 +238,33 @@ function parsePatchBody(input: unknown) {
   if (
     !isRecord(input) ||
     (
-      !exactKeys(input, ["workflow_key", "expected_revisions", "patch", "request_id"]) &&
-      !exactKeys(input, ["workflow_key", "expected_revisions", "patch", "request_id", "conflict_override"])
+      !exactKeys(input, [
+        "workflow_key",
+        "expected_rule_revisions",
+        "expected_contract_versions",
+        "patch",
+        "request_id",
+      ]) &&
+      !exactKeys(input, [
+        "workflow_key",
+        "expected_rule_revisions",
+        "expected_contract_versions",
+        "patch",
+        "request_id",
+        "conflict_override",
+      ])
     )
   ) return null
   const selectedWorkflow = workflowKey(input.workflow_key)
-  const expectedRevisions = safeRevisionMap(input.expected_revisions)
-  if (!selectedWorkflow || !expectedRevisions || typeof input.request_id !== "string" || !UUID.test(input.request_id)) {
+  const expectedRuleRevisions = safeRevisionMap(input.expected_rule_revisions)
+  const expectedContractVersions = safeRevisionMap(input.expected_contract_versions)
+  if (
+    !selectedWorkflow ||
+    !expectedRuleRevisions ||
+    !expectedContractVersions ||
+    typeof input.request_id !== "string" ||
+    !UUID.test(input.request_id)
+  ) {
     return null
   }
   if (!isRecord(input.patch) || !exactKeys(input.patch, ["rules"]) || !isRecord(input.patch.rules)) {
@@ -275,7 +305,8 @@ function parsePatchBody(input: unknown) {
   }
   return {
     workflowKey: selectedWorkflow,
-    expectedRevisions,
+    expectedRuleRevisions,
+    expectedContractVersions,
     patch: { rules },
     requestId: input.request_id,
     ...(conflictOverride ? { conflictOverride } : {}),
@@ -452,14 +483,16 @@ async function rpc(client: unknown, name: string, parameters: Record<string, unk
 
 export async function saveNotificationControlPlaneViaRpc({
   workflowKey,
-  expectedRevisions,
+  expectedRuleRevisions,
+  expectedContractVersions,
   patch,
   requestId,
   conflictOverride,
   client,
 }: {
   workflowKey: NotificationWorkflowKey
-  expectedRevisions: NotificationRevisionMap
+  expectedRuleRevisions: NotificationRevisionMap
+  expectedContractVersions: NotificationRevisionMap
   patch: { rules: Record<string, Record<string, unknown>> }
   requestId: string
   conflictOverride?: ConflictOverride
@@ -468,10 +501,11 @@ export async function saveNotificationControlPlaneViaRpc({
   if (conflictOverride) {
     return rpc(
       client,
-      "save_notification_control_plane_with_override_v1",
+      "save_notification_control_plane_with_override_v2",
       {
         p_workflow_key: workflowKey,
-        p_expected_rule_revisions: expectedRevisions,
+        p_expected_rule_revisions: expectedRuleRevisions,
+        p_expected_contract_versions: expectedContractVersions,
         p_patch: patch,
         p_save_request_id: requestId,
         p_override_request_id: conflictOverride.requestId,
@@ -481,10 +515,11 @@ export async function saveNotificationControlPlaneViaRpc({
   }
   return rpc(
     client,
-    "save_notification_control_plane_v1",
+    "save_notification_control_plane_v2",
     {
       p_workflow_key: workflowKey,
-      p_expected_revisions: expectedRevisions,
+      p_expected_rule_revisions: expectedRuleRevisions,
+      p_expected_contract_versions: expectedContractVersions,
       p_patch: patch,
       p_request_id: requestId,
     },
@@ -501,7 +536,8 @@ export function createProductionNotificationControlPlaneRouteHandlers() {
     ),
     async saveControlPlane({
       workflowKey,
-      expectedRevisions,
+      expectedRuleRevisions,
+      expectedContractVersions,
       patch,
       requestId,
       conflictOverride,
@@ -510,7 +546,8 @@ export function createProductionNotificationControlPlaneRouteHandlers() {
       try {
         return await saveNotificationControlPlaneViaRpc({
           workflowKey,
-          expectedRevisions,
+          expectedRuleRevisions,
+          expectedContractVersions,
           patch,
           requestId,
           conflictOverride,

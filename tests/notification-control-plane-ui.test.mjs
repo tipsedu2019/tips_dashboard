@@ -112,6 +112,47 @@ test("공통 패널은 서버가 반환한 규칙만 데스크톱 표와 모바�
   assert.doesNotMatch(source, /NOTIFICATION_AUDIENCES_BY_WORKFLOW/)
 })
 
+test("템플릿 편집기는 최신 계약의 필수 값과 선택 행을 구분하고 경고와 차단을 분리한다", async () => {
+  const [source, modelSource] = await Promise.all([
+    readOptionalSource("src/features/notifications/notification-control-panel.tsx"),
+    readOptionalSource("src/features/notifications/notification-control-plane-model.ts"),
+  ])
+  const editorSource = source.slice(
+    source.indexOf("function TemplateEditor"),
+    source.indexOf("type ConnectionsViewProps"),
+  )
+
+  assert.match(editorSource, /rule\.contentContract\.availableVariables/)
+  assert.match(editorSource, /requiredTokens/)
+  assert.match(editorSource, /optionalLineTokens/)
+  assert.match(editorSource, /필수/)
+  assert.match(editorSource, /선택 행/)
+  assert.match(editorSource, /blockingIssues/)
+  assert.match(editorSource, /templateWarnings/)
+  assert.match(editorSource, /\{warning\.message\}/)
+  assert.match(modelSource, /저장할 수 있어요/)
+  assert.doesNotMatch(editorSource, /rule\.template\.allowedVariables\.map/)
+})
+
+test("고정 등록 전달 정책은 스위치 없이 잠금 상태와 44px 내용 수정 동작만 제공한다", async () => {
+  const source = await readOptionalSource(
+    "src/features/notifications/notification-control-panel.tsx",
+  )
+  const toggleSource = source.slice(
+    source.indexOf("function RuleToggle"),
+    source.indexOf("type RulesViewProps"),
+  )
+
+  assert.match(toggleSource, /rule\.configurationKind === "fixed_policy_editable_template"/)
+  assert.match(toggleSource, /data-notification-rule-lock/)
+  assert.match(toggleSource, /전달 정책 고정/)
+  assert.match(
+    toggleSource,
+    /fixedPolicy[\s\S]*?\?\s*\([\s\S]*?전달 정책 고정[\s\S]*?\)\s*:\s*\(\s*<SwitchPrimitive\.Root/,
+  )
+  assert.match(toggleSource, /min-h-11/)
+})
+
 test("등록 예약 알림은 세 한국어 시점 라벨을 데스크톱과 모바일의 공통 초안에서 표시한다", async () => {
   const source = await readOptionalSource(
     "src/features/notifications/notification-control-panel.tsx",

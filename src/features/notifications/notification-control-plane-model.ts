@@ -5,6 +5,7 @@ import type {
   NotificationRuleDto,
   NotificationScheduleConfig,
   NotificationScheduleKey,
+  NotificationTemplateWarning,
   NotificationWorkflowKey,
 } from "./notification-control-plane-types.ts"
 
@@ -57,6 +58,21 @@ const EDITABLE_FIELDS = [
   "titleTemplate",
   "bodyTemplate",
 ] as const
+
+type GraphemeSegmenter = Readonly<{
+  segment: (input: string) => Iterable<unknown>
+}>
+
+const IntlWithSegmenter = Intl as typeof Intl & Readonly<{
+  Segmenter: new (
+    locale: string,
+    options: Readonly<{ granularity: "grapheme" }>,
+  ) => GraphemeSegmenter
+}>
+
+const KOREAN_GRAPHEME_SEGMENTER = new IntlWithSegmenter.Segmenter("ko", {
+  granularity: "grapheme",
+})
 
 function cloneScheduleConfig(
   value: NotificationScheduleConfig,
@@ -185,7 +201,9 @@ function validateTemplate(
 ) {
   const path = `rules.${rule.id}.${field}`
   const { tokens, malformed } = extractTemplateTokens(value)
-  const allowedTokens = new Set(rule.template.allowedVariables.map(({ token }) => token))
+  const allowedTokens = new Set(
+    rule.contentContract.availableVariables.map(({ key }) => key),
+  )
 
   if (malformed) {
     issues.push(
@@ -217,6 +235,78 @@ function validateTemplate(
         "Raw HTML, provider mentions, and external URLs are not allowed in templates.",
       ),
     )
+  }
+}
+
+function validateContentContract(
+  rule: NotificationRuleDto,
+  draft: NotificationRuleDraft,
+  issues: NotificationIssue[],
+) {
+  const combined = `${draft.titleTemplate}\n${draft.bodyTemplate}`
+  const variableByToken = new Map(
+    rule.contentContract.availableVariables.map((variable) => [variable.token, variable]),
+  )
+
+  for (const token of rule.contentContract.requiredTokens) {
+    const variable = variableByToken.get(token)
+    if (variable && !combined.includes(`{${variable.key}}`)) {
+      issues.push(
+        createIssue(
+          "template_required_token_missing",
+          `rules.${rule.id}.bodyTemplate`,
+          `{${variable.key}} 필수 변수를 제목이나 본문에 넣어 주세요.`,
+        ),
+      )
+    }
+  }
+
+  const bodyLines = draft.bodyTemplate.split("\n").map((line) => line.trim())
+  for (const token of rule.contentContract.optionalLineTokens) {
+    const variable = variableByToken.get(token)
+    if (!variable) continue
+    const marker = `{${variable.key}}`
+    if (
+      combined.includes(marker) &&
+      (draft.titleTemplate.includes(marker) || !bodyLines.includes(marker))
+    ) {
+      issues.push(
+        createIssue(
+          "template_optional_line_invalid",
+          `rules.${rule.id}.bodyTemplate`,
+          `${marker} 선택 정보는 본문에서 한 줄 전체로 배치해 주세요.`,
+        ),
+      )
+    }
+  }
+}
+
+function collectTemplateWarnings(
+  rule: NotificationRuleDto,
+  draft: NotificationRuleDraft,
+  warnings: NotificationTemplateWarning[],
+) {
+  const titleGraphemes = Array.from(
+    KOREAN_GRAPHEME_SEGMENTER.segment(draft.titleTemplate),
+  ).length
+  if (titleGraphemes > 60) {
+    warnings.push({
+      code: "template_title_over_60_graphemes",
+      path: `rules.${rule.id}.titleTemplate`,
+      message: "제목이 60자를 넘어요. 모바일에서 핵심 내용이 먼저 보이도록 줄이는 편을 권장해요. 그대로 저장할 수 있어요.",
+    })
+  }
+
+  const combined = `${draft.titleTemplate}\n${draft.bodyTemplate}`
+  if (
+    combined.includes("[다음]") ||
+    /(확인하세요|처리하세요|입력하세요|연락하세요|해주세요|바랍니다)[.! ]*$/.test(combined)
+  ) {
+    warnings.push({
+      code: "template_direct_imperative",
+      path: `rules.${rule.id}.bodyTemplate`,
+      message: "단체방에서는 [다음]보다 [진행]처럼 모두에게 보이는 상태 표현을 권장해요. 그대로 저장할 수 있어요.",
+    })
   }
 }
 
@@ -281,11 +371,15 @@ function hasRequiredGoogleChatConnection(
   )
 }
 
-export function validateNotificationDraft(
+export function evaluateNotificationDraft(
   snapshot: NotificationControlPlaneSnapshot,
   draft: NotificationDraft,
-): NotificationResult<NotificationDraft> {
+): Readonly<{
+  validation: NotificationResult<NotificationDraft>
+  warnings: ReadonlyArray<NotificationTemplateWarning>
+}> {
   const issues: NotificationIssue[] = []
+  const warnings: NotificationTemplateWarning[] = []
   const snapshotRuleIds = new Set(snapshot.rules.map(({ id }) => id))
 
   if (draft.workflowKey !== snapshot.workflowKey) {
@@ -335,6 +429,8 @@ export function validateNotificationDraft(
 
     validateTemplate(rule, "titleTemplate", ruleDraft.titleTemplate, issues)
     validateTemplate(rule, "bodyTemplate", ruleDraft.bodyTemplate, issues)
+    validateContentContract(rule, ruleDraft, issues)
+    collectTemplateWarnings(rule, ruleDraft, warnings)
 
     if (
       rule.channelKey === "google_chat" &&
@@ -352,8 +448,19 @@ export function validateNotificationDraft(
     }
   }
 
-  if (issues.length > 0) return { ok: false, issues }
-  return { ok: true, value: cloneDraft(draft) }
+  return {
+    validation: issues.length > 0
+      ? { ok: false, issues }
+      : { ok: true, value: cloneDraft(draft) },
+    warnings,
+  }
+}
+
+export function validateNotificationDraft(
+  snapshot: NotificationControlPlaneSnapshot,
+  draft: NotificationDraft,
+): NotificationResult<NotificationDraft> {
+  return evaluateNotificationDraft(snapshot, draft).validation
 }
 
 export function rebaseNotificationDraft(

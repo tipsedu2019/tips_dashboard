@@ -251,13 +251,15 @@ export function createNotificationControlPlaneService(dependencies: {
 
     async saveControlPlane(input: {
       workflowKey: NotificationWorkflowKey
-      expectedRevisions: NotificationRevisionMap
+      expectedRuleRevisions: NotificationRevisionMap
+      expectedContractVersions: NotificationRevisionMap
       patch: SavePatch
       requestId: string
       conflictOverride?: ConflictOverride
     }): Promise<NotificationControlPlaneSaveResult> {
       const workflowKey = requireWorkflowKey(input.workflowKey)
-      validateExpectedRevisions(input.expectedRevisions)
+      validateExpectedRevisions(input.expectedRuleRevisions)
+      validateExpectedRevisions(input.expectedContractVersions)
       if (!UUID.test(input.requestId)) {
         throw new NotificationControlPlaneHttpError("notification_invalid_request", 400)
       }
@@ -270,7 +272,8 @@ export function createNotificationControlPlaneService(dependencies: {
           method: "PATCH",
           body: JSON.stringify({
             workflow_key: workflowKey,
-            expected_revisions: input.expectedRevisions,
+            expected_rule_revisions: input.expectedRuleRevisions,
+            expected_contract_versions: input.expectedContractVersions,
             patch: toWirePatch(input.patch),
             request_id: input.requestId,
             ...(conflictOverride ? { conflict_override: conflictOverride } : {}),

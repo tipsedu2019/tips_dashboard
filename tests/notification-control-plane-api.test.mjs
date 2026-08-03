@@ -66,6 +66,7 @@ const REQUEST_ID = "30000000-0000-4000-8000-000000000201"
 const OVERRIDE_REQUEST_ID = "30000000-0000-4000-8000-000000000202"
 const BIG_REVISION = "9007199254740997"
 const NEXT_BIG_REVISION = "9007199254740998"
+const CONTENT_CONTRACT_VERSION = "1"
 const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64")
 const OTHER_ENCRYPTION_KEY = Buffer.alloc(32, 8).toString("base64")
 const GOOGLE_CHAT_URL =
@@ -122,6 +123,51 @@ function createWireSnapshot(overrides = {}) {
         schedule_key: null,
         schedule_config: null,
         enabled: false,
+        configuration_kind: "editable_rule",
+        activation_locked: false,
+        content_contract: {
+          contractVersion: CONTENT_CONTRACT_VERSION,
+          availableVariables: [
+            { key: "task_title", token: "업무", piiClass: "none" },
+            { key: "current_status", token: "현재상태", piiClass: "none" },
+            { key: "current_assignee", token: "현재담당", piiClass: "staff_name" },
+          ],
+          requiredTokens: ["업무", "현재상태", "현재담당"],
+          optionalLineTokens: [],
+          mustHaveFacts: ["target", "event", "current_state"],
+          supportedPayloadVersions: [1],
+          destinationPolicy: {
+            allowedConnectionKeys: ["google_chat.management"],
+            subjectScoped: false,
+          },
+          freeTextVisibility: {},
+          freeTextPriority: [],
+          fieldPresence: {
+            task_title: {
+              required: true,
+              nullBehavior: "reject",
+              nullDisplay: null,
+              emptyArrayBehavior: "reject",
+            },
+            current_status: {
+              required: true,
+              nullBehavior: "reject",
+              nullDisplay: null,
+              emptyArrayBehavior: "reject",
+            },
+            current_assignee: {
+              required: true,
+              nullBehavior: "reject",
+              nullDisplay: null,
+              emptyArrayBehavior: "reject",
+            },
+          },
+        },
+        template_compliance: {
+          contract_version: CONTENT_CONTRACT_VERSION,
+          compliance: "conformant",
+          violations: [],
+        },
         active_template_id: "30000000-0000-4000-8000-000000000102",
         revision: BIG_REVISION,
         updated_at: "2026-07-17T00:00:00.000Z",
@@ -133,6 +179,7 @@ function createWireSnapshot(overrides = {}) {
           body_template: "새 할 일이 등록되었습니다.",
           allowed_variables: [],
           payload_schema_version: 1,
+          content_contract_version: CONTENT_CONTRACT_VERSION,
           checksum: "fixture-checksum",
         },
       },
@@ -467,7 +514,15 @@ test("browser service maps one snake_case snapshot and preserves bigint revision
   assert.equal(requests[0].init.headers.Authorization, "Bearer session-token")
   assert.equal(snapshot.workflowKey, "tasks")
   assert.equal(snapshot.rules[0].revision, BIG_REVISION)
+  assert.equal(snapshot.rules[0].configurationKind, "editable_rule")
+  assert.equal(snapshot.rules[0].activationLocked, false)
+  assert.equal(snapshot.rules[0].contentContract.contractVersion, CONTENT_CONTRACT_VERSION)
+  assert.equal(snapshot.rules[0].templateCompliance, "conformant")
   assert.equal(snapshot.rules[0].template.version, BIG_REVISION)
+  assert.equal(
+    snapshot.rules[0].template.contentContractVersion,
+    CONTENT_CONTRACT_VERSION,
+  )
   assert.equal(snapshot.connections[0].revision, BIG_REVISION)
   assert.equal(typeof snapshot.rules[0].revision, "string")
   assert.equal("workflow_key" in snapshot, false)
@@ -495,7 +550,8 @@ test("browser service emits only the strict snake_case save wire contract", asyn
 
   const result = await service.saveControlPlane({
     workflowKey: "tasks",
-    expectedRevisions: { [RULE_ID]: BIG_REVISION },
+    expectedRuleRevisions: { [RULE_ID]: BIG_REVISION },
+    expectedContractVersions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
     patch: {
       rules: {
         [RULE_ID]: {
@@ -510,13 +566,19 @@ test("browser service emits only the strict snake_case save wire contract", asyn
   })
 
   assert.deepEqual(Object.keys(sentBody).sort(), [
-    "expected_revisions",
+    "expected_contract_versions",
+    "expected_rule_revisions",
     "patch",
     "request_id",
     "workflow_key",
   ])
   assert.equal(sentBody.workflow_key, "tasks")
-  assert.equal(sentBody.expected_revisions[RULE_ID], BIG_REVISION)
+  assert.equal(sentBody.expected_rule_revisions[RULE_ID], BIG_REVISION)
+  assert.equal(
+    sentBody.expected_contract_versions[RULE_ID],
+    CONTENT_CONTRACT_VERSION,
+  )
+  assert.equal("allowed_variables" in sentBody, false)
   assert.deepEqual(sentBody.patch.rules[RULE_ID], {
     enabled: true,
     title_template: "바뀐 제목",
@@ -542,7 +604,8 @@ test("browser service adds the separate conflict override audit wire only when c
 
   await service.saveControlPlane({
     workflowKey: "tasks",
-    expectedRevisions: { [RULE_ID]: BIG_REVISION },
+    expectedRuleRevisions: { [RULE_ID]: BIG_REVISION },
+    expectedContractVersions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
     patch: { rules: { [RULE_ID]: { enabled: true } } },
     requestId: REQUEST_ID,
     conflictOverride: {
@@ -552,7 +615,8 @@ test("browser service adds the separate conflict override audit wire only when c
   })
   await service.saveControlPlane({
     workflowKey: "tasks",
-    expectedRevisions: { [RULE_ID]: BIG_REVISION },
+    expectedRuleRevisions: { [RULE_ID]: BIG_REVISION },
+    expectedContractVersions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
     patch: { rules: { [RULE_ID]: { enabled: false } } },
     requestId: REQUEST_ID,
   })
@@ -574,7 +638,8 @@ test("browser service treats a committed no-op save as success without inventing
 
   const result = await service.saveControlPlane({
     workflowKey: "tasks",
-    expectedRevisions: { [RULE_ID]: BIG_REVISION },
+    expectedRuleRevisions: { [RULE_ID]: BIG_REVISION },
+    expectedContractVersions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
     patch: { rules: { [RULE_ID]: { enabled: false } } },
     requestId: "30000000-0000-4000-8000-000000000202",
   })
@@ -599,7 +664,8 @@ test("browser service maps revision conflicts without losing the current safe sn
   await assert.rejects(
     service.saveControlPlane({
       workflowKey: "tasks",
-      expectedRevisions: { [RULE_ID]: BIG_REVISION },
+      expectedRuleRevisions: { [RULE_ID]: BIG_REVISION },
+      expectedContractVersions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: { [RULE_ID]: { enabled: true } } },
       requestId: REQUEST_ID,
     }),
@@ -735,7 +801,8 @@ test("control-plane route rejects ordinary users and strict-save payload violati
     "PATCH",
     {
       workflow_key: "tasks",
-      expected_revisions: { [RULE_ID]: BIG_REVISION },
+      expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
+      expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: { [RULE_ID]: { enabled: true } } },
       request_id: REQUEST_ID,
     },
@@ -751,26 +818,37 @@ test("control-plane route rejects ordinary users and strict-save payload violati
     },
     {
       workflow_key: "tasks",
-      expected_revisions: { [RULE_ID]: Number(BIG_REVISION) },
+      expected_rule_revisions: { [RULE_ID]: Number(BIG_REVISION) },
+      expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: {} },
       request_id: REQUEST_ID,
     },
     {
       workflow_key: "tasks",
-      expected_revisions: { [RULE_ID]: BIG_REVISION },
+      expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
+      expected_contract_versions: { [RULE_ID]: 1 },
+      patch: { rules: {} },
+      request_id: REQUEST_ID,
+    },
+    {
+      workflow_key: "tasks",
+      expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
+      expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: { [RULE_ID]: { enabled: true, webhook_url: GOOGLE_CHAT_URL } } },
       request_id: REQUEST_ID,
     },
     {
       workflow_key: "tasks",
-      expected_revisions: { [RULE_ID]: BIG_REVISION },
+      expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
+      expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: {} },
       request_id: REQUEST_ID,
       table_name: "dashboard_private.notification_rules",
     },
     {
       workflow_key: "tasks",
-      expected_revisions: { [RULE_ID]: BIG_REVISION },
+      expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
+      expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: { [RULE_ID]: { enabled: true } } },
       request_id: REQUEST_ID,
       conflict_override: {
@@ -780,7 +858,8 @@ test("control-plane route rejects ordinary users and strict-save payload violati
     },
     {
       workflow_key: "tasks",
-      expected_revisions: { [RULE_ID]: BIG_REVISION },
+      expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
+      expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: { [RULE_ID]: { enabled: true } } },
       request_id: REQUEST_ID,
       conflict_override: {
@@ -817,7 +896,8 @@ test("control-plane route forwards a validated conflict override separately from
     "PATCH",
     {
       workflow_key: "tasks",
-      expected_revisions: { [RULE_ID]: BIG_REVISION },
+      expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
+      expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: { [RULE_ID]: { enabled: true } } },
       request_id: REQUEST_ID,
       conflict_override: {
@@ -835,7 +915,7 @@ test("control-plane route forwards a validated conflict override separately from
   assert.equal(calls[0].requestId, REQUEST_ID)
 })
 
-test("Supabase save adapter selects the override RPC and exact audit parameters only for confirmed overwrites", async () => {
+test("Supabase save adapter selects the v2 RPC and exact audit parameters only for confirmed overwrites", async () => {
   const { saveNotificationControlPlaneViaRpc } = await import(controlPlaneRouteUrl)
   const rpcCalls = []
   const client = {
@@ -846,7 +926,8 @@ test("Supabase save adapter selects the override RPC and exact audit parameters 
   }
   const base = {
     workflowKey: "tasks",
-    expectedRevisions: { [RULE_ID]: BIG_REVISION },
+    expectedRuleRevisions: { [RULE_ID]: BIG_REVISION },
+    expectedContractVersions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
     patch: { rules: { [RULE_ID]: { enabled: true } } },
     requestId: REQUEST_ID,
     client,
@@ -862,20 +943,22 @@ test("Supabase save adapter selects the override RPC and exact audit parameters 
   await saveNotificationControlPlaneViaRpc(base)
 
   assert.deepEqual(rpcCalls[0], [
-    "save_notification_control_plane_with_override_v1",
+    "save_notification_control_plane_with_override_v2",
     {
       p_workflow_key: "tasks",
       p_expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
+      p_expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       p_patch: base.patch,
       p_save_request_id: REQUEST_ID,
       p_override_request_id: OVERRIDE_REQUEST_ID,
       p_conflicting_fields: [`rules.${RULE_ID}.enabled`],
     },
   ])
-  assert.equal(rpcCalls[1][0], "save_notification_control_plane_v1")
+  assert.equal(rpcCalls[1][0], "save_notification_control_plane_v2")
   assert.deepEqual(rpcCalls[1][1], {
     p_workflow_key: "tasks",
-    p_expected_revisions: { [RULE_ID]: BIG_REVISION },
+    p_expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
+    p_expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
     p_patch: base.patch,
     p_request_id: REQUEST_ID,
   })
@@ -906,7 +989,8 @@ test("control-plane route forwards one strict save and returns a safe 409 snapsh
     "PATCH",
     {
       workflow_key: "tasks",
-      expected_revisions: { [RULE_ID]: BIG_REVISION },
+      expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
+      expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: { [RULE_ID]: { enabled: true, title_template: "새 제목" } } },
       request_id: REQUEST_ID,
     },
@@ -917,7 +1001,8 @@ test("control-plane route forwards one strict save and returns a safe 409 snapsh
   assert.equal(calls.length, 1)
   assert.deepEqual(calls[0], {
     workflowKey: "tasks",
-    expectedRevisions: { [RULE_ID]: BIG_REVISION },
+    expectedRuleRevisions: { [RULE_ID]: BIG_REVISION },
+    expectedContractVersions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
     patch: { rules: { [RULE_ID]: { enabled: true, title_template: "새 제목" } } },
     requestId: REQUEST_ID,
     client: { id: "caller" },
