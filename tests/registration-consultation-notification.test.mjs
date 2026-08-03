@@ -281,11 +281,13 @@ test("route response carries the server-owned revision, changed tracks, and warn
   assert.match(routeSource, /warning/)
 })
 
-test("visit cancellation and replacement dispatch only canonical revision targets", async () => {
+test("visit appointment save dispatches only canonical revision targets and keeps cancellation out of the editor", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
   assert.match(source, /notificationTargets/)
-  assert.match(source, /cancelRegistrationAppointment/)
+  assert.match(source, /saveRegistrationSharedAppointment/)
+  assert.match(source, /replaceRemaining: editMode === "replace_remaining"/)
   assert.match(source, /sendRegistrationVisitNotificationTarget/)
+  assert.doesNotMatch(source, /cancelRegistrationAppointment/)
 })
 
 test("visit notification helper sends only the authoritative appointment id", async () => {
@@ -794,7 +796,7 @@ test("notification job status rejects another workflow and unknown states", asyn
   }
 });
 
-test("appointment editor preserves conflict drafts, removes invented cancellation reasons, and keeps common ownership", async () => {
+test("appointment editor preserves conflict drafts, keeps cancellation out, and retains common ownership", async () => {
   const source = await readFile(appointmentEditorUrl, "utf8");
   const conflictBlock = sourceBlock(source, "async function handleRevisionConflict", "async function compareLatestAppointment");
 
@@ -809,7 +811,9 @@ test("appointment editor preserves conflict drafts, removes invented cancellatio
   assert.match(source, /submissionKeys\.clear\("registration-appointment", normalizedDraft\)/);
   assert.doesNotMatch(source, /cancelReason/);
   assert.doesNotMatch(source, /예약 취소 사유/);
-  assert.match(source, /reason:\s*""/);
+  assert.doesNotMatch(source, /cancelRegistrationAppointment/);
+  assert.match(source, /type PendingAppointmentConfirmation = \{[\s\S]*?action: "save"/);
+  assert.match(source, /prepareAppointmentConfirmation\("save", appointmentDraft\)/);
   assert.match(source, /buildRegistrationAppointmentConfirmation/);
   assert.doesNotMatch(source, /NotificationControlPanel/);
 });
