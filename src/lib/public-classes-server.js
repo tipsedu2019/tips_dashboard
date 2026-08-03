@@ -18,7 +18,7 @@ export async function readPublicClassesSnapshot(
 }
 
 export async function loadPublicClassesPagePayload(
-  buildPayload = buildPublicClassesPayload,
+  buildPayload = () => buildPublicClassesPayload({ mode: "summary" }),
   readSnapshot = readPublicClassesSnapshot,
 ) {
   const livePayload = await buildPayload();

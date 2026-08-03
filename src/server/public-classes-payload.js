@@ -133,6 +133,28 @@ function mapPublicClass(row) {
   };
 }
 
+function mapPublicClassSummary(row) {
+  const normalizedStatus = getClassStatus(row);
+  const fee = Number(row.fee || 0);
+  return {
+    id: row.id,
+    name: row.name || "",
+    className: row.name || "",
+    subject: row.subject || "",
+    grade: row.grade || "",
+    teacher: row.teacher || "",
+    room: row.room || "",
+    classroom: row.room || "",
+    schedule: row.schedule || "",
+    status: normalizedStatus,
+    fee,
+    tuition: fee,
+    capacity: Number(row.capacity || 0),
+    studentIds: Array.isArray(row.student_ids) ? row.student_ids : [],
+    waitlistIds: Array.isArray(row.waitlist_ids) ? row.waitlist_ids : [],
+  };
+}
+
 function mapPublicTextbook(row) {
   return {
     id: row.id,
@@ -171,6 +193,7 @@ function mapPublicProgressLog(row) {
 export async function buildPublicClassesPayload({
   env = process.env,
   supabaseClient = null,
+  mode = "full",
 } = {}) {
   await loadPublicClassesEnv(env);
 
@@ -182,6 +205,28 @@ export async function buildPublicClassesPayload({
   }
 
   try {
+    if (mode === "summary") {
+      const { data: classRows, error: classError } = await supabase
+        .from("classes")
+        .select(
+          "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date",
+        );
+
+      if (classError) {
+        throw classError;
+      }
+
+      return {
+        generatedAt: new Date().toISOString(),
+        source: "supabase",
+        classes: (classRows || [])
+          .map(mapPublicClassSummary)
+          .filter((row) => row.status === ACTIVE_CLASS_STATUS),
+        textbooks: [],
+        progressLogs: [],
+      };
+    }
+
     const [
       { data: classRows, error: classError },
       { data: textbookRows, error: textbookError },
