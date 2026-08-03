@@ -1,0 +1,2233 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "1",
+  "requiredExamples": [
+    {
+      "key": "task_due_changed",
+      "title": "🔄 [할 일] 박지훈 학생 교재 주문 마감일이 바뀌었어요",
+      "body": "[업무] 2학기 수학 교재 주문\n[변경] 8월 5일(수) → 8월 7일(금)\n[진행] 관리팀의 변경 일정 확인을 기다리고 있어요."
+    },
+    {
+      "key": "word_retest_passed",
+      "title": "✅ [단어 재시험] 이서연 학생이 재시험을 통과했어요",
+      "body": "[수업] 중2 영어 A반\n[시험] Lesson 12 · 50문항\n[결과] 46점 / 통과 기준 45점 · 통과\n[상태] 재시험 결과가 기록됐어요."
+    },
+    {
+      "key": "approval_submitted",
+      "title": "📥 [전자결재] 7월 교재비 정산서가 제출됐어요",
+      "body": "[문서] 7월 교재비 정산 · 작성자 박지영\n[기간] 2026년 7월\n[진행] 김철수님의 결재를 기다리고 있어요."
+    }
+  ],
+  "eventGoldens": [
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.created",
+      "titleTemplate": "📥 [할 일] 할 일이 등록됐어요 · {task_title}",
+      "bodyTemplate": "[업무] {task_title}\n[상태] {current_status} · 담당 {current_assignee}\n{memo_line}\n{progress_line}",
+      "representativePayload": {
+        "task_title": "2학기 수학 교재 주문",
+        "current_status": "요청됐어요.",
+        "current_assignee": "김철수님",
+        "memo_line": "[메모] 교재 주문 요청이 접수됐어요.",
+        "progress_line": "[진행] 김철수님의 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "📥 [할 일] 할 일이 등록됐어요 · 2학기 수학 교재 주문",
+      "expectedBody": "[업무] 2학기 수학 교재 주문\n[상태] 요청됐어요. · 담당 김철수님\n[메모] 교재 주문 요청이 접수됐어요.\n[진행] 김철수님의 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.assignee_changed",
+      "titleTemplate": "🔄 [할 일] 담당자가 바뀌었어요 · {task_title}",
+      "bodyTemplate": "[업무] {task_title}\n[변경] {before_assignee} → {after_assignee}\n{progress_line}",
+      "representativePayload": {
+        "task_title": "2학기 수학 교재 주문",
+        "before_assignee": "미배정",
+        "after_assignee": "김철수님",
+        "progress_line": "[진행] 김철수님의 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "🔄 [할 일] 담당자가 바뀌었어요 · 2학기 수학 교재 주문",
+      "expectedBody": "[업무] 2학기 수학 교재 주문\n[변경] 미배정 → 김철수님\n[진행] 김철수님의 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.due_changed",
+      "titleTemplate": "🔄 [할 일] 일정이 바뀌었어요 · {task_title}",
+      "bodyTemplate": "[업무] {task_title}\n[변경] {before_schedule} → {after_schedule}\n{progress_line}",
+      "representativePayload": {
+        "task_title": "2학기 수학 교재 주문",
+        "before_schedule": "일정 없음",
+        "after_schedule": "8월 7일(금)",
+        "progress_line": "[진행] 관리팀의 변경 일정 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "🔄 [할 일] 일정이 바뀌었어요 · 2학기 수학 교재 주문",
+      "expectedBody": "[업무] 2학기 수학 교재 주문\n[변경] 일정 없음 → 8월 7일(금)\n[진행] 관리팀의 변경 일정 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.status_changed",
+      "titleTemplate": "🔄 [할 일] 상태가 바뀌었어요 · {task_title}",
+      "bodyTemplate": "[업무] {task_title}\n[변경] {before_status} → {after_status}\n{progress_line}",
+      "representativePayload": {
+        "task_title": "2학기 수학 교재 주문",
+        "before_status": "요청",
+        "after_status": "진행 중",
+        "progress_line": "[진행] 김철수님이 업무를 진행하고 있어요."
+      },
+      "expectedTitle": "🔄 [할 일] 상태가 바뀌었어요 · 2학기 수학 교재 주문",
+      "expectedBody": "[업무] 2학기 수학 교재 주문\n[변경] 요청 → 진행 중\n[진행] 김철수님이 업무를 진행하고 있어요."
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.completed",
+      "titleTemplate": "✅ [할 일] 할 일이 완료됐어요 · {task_title}",
+      "bodyTemplate": "[업무] {task_title}\n[상태] {completion_status}\n{memo_line}",
+      "representativePayload": {
+        "task_title": "2학기 수학 교재 주문",
+        "completion_status": "처리가 완료됐어요.",
+        "memo_line": "[메모] 최종 확인 완료"
+      },
+      "expectedTitle": "✅ [할 일] 할 일이 완료됐어요 · 2학기 수학 교재 주문",
+      "expectedBody": "[업무] 2학기 수학 교재 주문\n[상태] 처리가 완료됐어요.\n[메모] 최종 확인 완료"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.canceled",
+      "titleTemplate": "⛔ [할 일] 할 일이 취소됐어요 · {task_title}",
+      "bodyTemplate": "[업무] {task_title}\n[상태] {cancellation_status}\n{reason_line}\n{memo_line}",
+      "representativePayload": {
+        "task_title": "2학기 수학 교재 주문",
+        "cancellation_status": "처리가 취소됐어요.",
+        "reason_line": "[사유] 보호자 요청",
+        "memo_line": ""
+      },
+      "expectedTitle": "⛔ [할 일] 할 일이 취소됐어요 · 2학기 수학 교재 주문",
+      "expectedBody": "[업무] 2학기 수학 교재 주문\n[상태] 처리가 취소됐어요.\n[사유] 보호자 요청"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.reopened",
+      "titleTemplate": "🔄 [할 일] 할 일이 다시 열렸어요 · {task_title}",
+      "bodyTemplate": "[업무] {task_title}\n[변경] {before_status} → {after_status}\n{progress_line}",
+      "representativePayload": {
+        "task_title": "2학기 수학 교재 주문",
+        "before_status": "완료",
+        "after_status": "요청",
+        "progress_line": "[진행] 관리팀의 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "🔄 [할 일] 할 일이 다시 열렸어요 · 2학기 수학 교재 주문",
+      "expectedBody": "[업무] 2학기 수학 교재 주문\n[변경] 완료 → 요청\n[진행] 관리팀의 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.comment_added",
+      "titleTemplate": "💬 [할 일] 댓글이 등록됐어요 · {task_title}",
+      "bodyTemplate": "[업무] {task_title}\n[댓글] {comment_author} · {comment_preview}\n{attachment_line}\n{progress_line}",
+      "representativePayload": {
+        "task_title": "2학기 수학 교재 주문",
+        "comment_author": "김철수님",
+      "comment_preview": "확인했습니다. 완료 상태로 반영됐어요 [링크 포함]",
+        "attachment_line": "[첨부] 2개 · 문서, 이미지",
+        "progress_line": "[진행] 관리팀의 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "💬 [할 일] 댓글이 등록됐어요 · 2학기 수학 교재 주문",
+    "expectedBody": "[업무] 2학기 수학 교재 주문\n[댓글] 김철수님 · 확인했습니다. 완료 상태로 반영됐어요 [링크 포함]\n[첨부] 2개 · 문서, 이미지\n[진행] 관리팀의 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.created",
+      "titleTemplate": "📥 [단어 재시험] {student_name}의 재시험이 등록됐어요",
+      "bodyTemplate": "[학생] {student_name}\n[수업] {class_name}\n[시험] {test_scope}\n[일정] {test_date}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "이서연 학생",
+        "class_name": "중2 영어 A반",
+        "test_scope": "Lesson 12 · 50문항",
+        "test_date": "8월 7일(금) 17:00",
+        "progress_line": "[진행] 김철수님의 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "📥 [단어 재시험] 이서연 학생의 재시험이 등록됐어요",
+      "expectedBody": "[학생] 이서연 학생\n[수업] 중2 영어 A반\n[시험] Lesson 12 · 50문항\n[일정] 8월 7일(금) 17:00\n[진행] 김철수님의 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.assigned",
+      "titleTemplate": "🔄 [단어 재시험] {student_name}의 담당자가 바뀌었어요",
+      "bodyTemplate": "[학생] {student_name}\n[변경] {before_assignee} → {after_assignee}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "이서연 학생",
+        "before_assignee": "미배정",
+        "after_assignee": "김철수님",
+        "progress_line": "[진행] 김철수님의 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "🔄 [단어 재시험] 이서연 학생의 담당자가 바뀌었어요",
+      "expectedBody": "[학생] 이서연 학생\n[변경] 미배정 → 김철수님\n[진행] 김철수님의 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.schedule_changed",
+      "titleTemplate": "🔄 [단어 재시험] {student_name}의 시험 일정이 바뀌었어요",
+      "bodyTemplate": "[학생] {student_name}\n[변경] {before_test_date} → {after_test_date}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "이서연 학생",
+        "before_test_date": "일정 없음",
+        "after_test_date": "8월 7일(금) 17:00",
+        "progress_line": "[진행] 김철수님의 변경 일정 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "🔄 [단어 재시험] 이서연 학생의 시험 일정이 바뀌었어요",
+      "expectedBody": "[학생] 이서연 학생\n[변경] 일정 없음 → 8월 7일(금) 17:00\n[진행] 김철수님의 변경 일정 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.started",
+      "titleTemplate": "▶️ [단어 재시험] {student_name}의 재시험 처리가 시작됐어요",
+      "bodyTemplate": "[학생] {student_name}\n[수업] {class_name}\n[시험] {test_scope}\n[상태] {start_status}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "이서연 학생",
+        "class_name": "중2 영어 A반",
+        "test_scope": "Lesson 12 · 50문항",
+        "start_status": "재시험 처리가 시작됐어요.",
+        "progress_line": "[진행] 김철수님이 재시험 처리를 진행하고 있어요."
+      },
+      "expectedTitle": "▶️ [단어 재시험] 이서연 학생의 재시험 처리가 시작됐어요",
+      "expectedBody": "[학생] 이서연 학생\n[수업] 중2 영어 A반\n[시험] Lesson 12 · 50문항\n[상태] 재시험 처리가 시작됐어요.\n[진행] 김철수님이 재시험 처리를 진행하고 있어요."
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.result_reported",
+      "titleTemplate": "📝 [단어 재시험] {student_name}의 재시험 결과가 기록됐어요",
+      "bodyTemplate": "[학생] {student_name}\n[결과] {score} / 통과 기준 {pass_threshold} · {result}\n{memo_line}",
+      "representativePayload": {
+        "student_name": "이서연 학생",
+        "score": "46점",
+        "pass_threshold": "45점",
+        "result": "통과",
+        "memo_line": "[메모] 오답 4개 재확인 대상이에요."
+      },
+      "expectedTitle": "📝 [단어 재시험] 이서연 학생의 재시험 결과가 기록됐어요",
+      "expectedBody": "[학생] 이서연 학생\n[결과] 46점 / 통과 기준 45점 · 통과\n[메모] 오답 4개 재확인 대상이에요."
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.absent_reported",
+      "titleTemplate": "⛔ [단어 재시험] {student_name}이 미응시로 기록됐어요",
+      "bodyTemplate": "[학생] {student_name}\n[일정] {test_date}\n[결과] {result}\n{reason_line}\n{memo_line}",
+      "representativePayload": {
+        "student_name": "이서연 학생",
+        "test_date": "8월 7일(금) 17:00",
+        "result": "미응시",
+        "reason_line": "[사유] 보호자 확인 [연락처 숨김] [링크 포함]",
+        "memo_line": "[메모] 다음 일정 조율 필요"
+      },
+      "expectedTitle": "⛔ [단어 재시험] 이서연 학생이 미응시로 기록됐어요",
+      "expectedBody": "[학생] 이서연 학생\n[일정] 8월 7일(금) 17:00\n[결과] 미응시\n[사유] 보호자 확인 [연락처 숨김] [링크 포함]\n[메모] 다음 일정 조율 필요"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.revision_requested",
+      "titleTemplate": "↩️ [단어 재시험] {student_name}의 결과 보완 요청이 등록됐어요",
+      "bodyTemplate": "[학생] {student_name}\n[결과] {current_result}\n[상태] {request_actor}의 결과 보완 요청이 등록됐어요.\n{reason_line}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "이서연 학생",
+        "current_result": "40점 / 통과 기준 45점 · 불통과",
+        "request_actor": "박지영님",
+        "reason_line": "[사유] 채점표 재확인",
+        "progress_line": "[진행] 김철수님의 결과 보완을 기다리고 있어요."
+      },
+      "expectedTitle": "↩️ [단어 재시험] 이서연 학생의 결과 보완 요청이 등록됐어요",
+      "expectedBody": "[학생] 이서연 학생\n[결과] 40점 / 통과 기준 45점 · 불통과\n[상태] 박지영님의 결과 보완 요청이 등록됐어요.\n[사유] 채점표 재확인\n[진행] 김철수님의 결과 보완을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.retry_created",
+      "titleTemplate": "📥 [단어 재시험] {student_name}의 후속 재시험이 등록됐어요",
+      "bodyTemplate": "[학생] {student_name}\n[결과] 이전 재시험 {previous_result}\n[일정] 후속 재시험 {followup_schedule}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "이서연 학생",
+        "previous_result": "40점 / 통과 기준 45점 · 불통과",
+        "followup_schedule": "8월 7일(금) 17:00",
+        "progress_line": "[진행] 김철수님의 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "📥 [단어 재시험] 이서연 학생의 후속 재시험이 등록됐어요",
+      "expectedBody": "[학생] 이서연 학생\n[결과] 이전 재시험 40점 / 통과 기준 45점 · 불통과\n[일정] 후속 재시험 8월 7일(금) 17:00\n[진행] 김철수님의 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.completed",
+      "titleTemplate": "✅ [단어 재시험] {student_name}의 재시험 업무가 완료됐어요",
+      "bodyTemplate": "[학생] {student_name}\n[결과] {final_result}\n{memo_line}",
+      "representativePayload": {
+        "student_name": "이서연 학생",
+        "final_result": "46점 / 통과 기준 45점 · 통과",
+        "memo_line": "[메모] 최종 확인 완료"
+      },
+      "expectedTitle": "✅ [단어 재시험] 이서연 학생의 재시험 업무가 완료됐어요",
+      "expectedBody": "[학생] 이서연 학생\n[결과] 46점 / 통과 기준 45점 · 통과\n[메모] 최종 확인 완료"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.canceled",
+      "titleTemplate": "⛔ [단어 재시험] {student_name}의 재시험이 취소됐어요",
+      "bodyTemplate": "[학생] {student_name}\n[상태] {cancellation_status}\n{reason_line}",
+      "representativePayload": {
+        "student_name": "이서연 학생",
+        "cancellation_status": "재시험이 취소됐어요.",
+        "reason_line": "[사유] 중복 요청"
+      },
+      "expectedTitle": "⛔ [단어 재시험] 이서연 학생의 재시험이 취소됐어요",
+      "expectedBody": "[학생] 이서연 학생\n[상태] 재시험이 취소됐어요.\n[사유] 중복 요청"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.case_created",
+      "titleTemplate": "📥 [등록] {student_name}의 등록 문의가 들어왔어요",
+      "bodyTemplate": "[학생] {student_name} · {grade}\n[과목] {subjects}\n[문의] {inquiry_at}\n{memo_line}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "김민서 학생",
+        "grade": "중2",
+        "subjects": "영어 · 수학",
+        "inquiry_at": "8월 4일(화) 10:00",
+        "memo_line": "[메모] 방문상담을 희망해요.",
+        "progress_line": "[진행] 관리팀의 등록 내용 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "📥 [등록] 김민서 학생의 등록 문의가 들어왔어요",
+      "expectedBody": "[학생] 김민서 학생 · 중2\n[과목] 영어 · 수학\n[문의] 8월 4일(화) 10:00\n[메모] 방문상담을 희망해요.\n[진행] 관리팀의 등록 내용 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.registration_completed",
+      "titleTemplate": "✅ [등록] {student_name}의 등록 처리가 완료됐어요",
+      "bodyTemplate": "[과목] {registered_subjects}\n[수업] {registered_classes}\n[상태] {completion_status}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "김민서 학생",
+        "registered_subjects": "영어 · 수학",
+        "registered_classes": "중2 영어 A반 · 중2 수학 B반",
+        "completion_status": "등록 처리가 완료됐어요.",
+        "progress_line": ""
+      },
+      "expectedTitle": "✅ [등록] 김민서 학생의 등록 처리가 완료됐어요",
+      "expectedBody": "[과목] 영어 · 수학\n[수업] 중2 영어 A반 · 중2 수학 B반\n[상태] 등록 처리가 완료됐어요."
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.case_closed",
+      "titleTemplate": "⛔ [등록] {student_name}의 등록 문의가 종료됐어요",
+      "bodyTemplate": "[학생] {student_name}\n[과목] {subjects}\n[상태] {close_status}\n{reason_line}\n{memo_line}",
+      "representativePayload": {
+        "student_name": "김민서 학생",
+        "subjects": "영어 · 수학",
+        "close_status": "등록 문의가 종료됐어요.",
+        "reason_line": "[사유] 타 학원 등록 확정",
+        "memo_line": ""
+      },
+      "expectedTitle": "⛔ [등록] 김민서 학생의 등록 문의가 종료됐어요",
+      "expectedBody": "[학생] 김민서 학생\n[과목] 영어 · 수학\n[상태] 등록 문의가 종료됐어요.\n[사유] 타 학원 등록 확정"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.appointment_reminder_due",
+      "titleTemplate": "⏰ [등록] {student_name}의 상담 일정이 예정되어 있어요",
+      "bodyTemplate": "[상담] {appointment_kind}\n[학생] {student_name}\n[과목] {subjects}\n[일정] {scheduled_at}\n[장소] {place}\n{progress_line}",
+      "representativePayload": {
+        "appointment_kind": "방문상담",
+        "student_name": "김민서 학생",
+        "subjects": "영어 · 수학",
+        "scheduled_at": "8월 7일(금) 17:00",
+        "place": "본관 상담실",
+        "progress_line": "[진행] 영어팀과 수학팀 담당 원장님의 일정 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "⏰ [등록] 김민서 학생의 상담 일정이 예정되어 있어요",
+      "expectedBody": "[상담] 방문상담\n[학생] 김민서 학생\n[과목] 영어 · 수학\n[일정] 8월 7일(금) 17:00\n[장소] 본관 상담실\n[진행] 영어팀과 수학팀 담당 원장님의 일정 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.phone_consultation_ready",
+      "titleTemplate": "☎️ [등록] {student_name}의 전화상담을 기다리고 있어요",
+      "bodyTemplate": "[학생] {student_name}\n[과목] {subjects}\n[진행] {progress_actor}의 전화상담 확인을 기다리고 있어요.",
+      "representativePayload": {
+        "student_name": "김민서 학생",
+        "subjects": "영어",
+        "progress_actor": "김철수님"
+      },
+      "expectedTitle": "☎️ [등록] 김민서 학생의 전화상담을 기다리고 있어요",
+      "expectedBody": "[학생] 김민서 학생\n[과목] 영어\n[진행] 김철수님의 전화상담 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.visit_scheduled",
+      "titleTemplate": "📅 [등록] {student_name}의 방문상담이 예약됐어요",
+      "bodyTemplate": "[학생] {student_name}\n[과목] {subjects}\n[일정] {after_schedule}\n[장소] {after_place}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "김민서 학생",
+        "subjects": "영어 · 수학",
+        "after_schedule": "8월 7일(금) 17:00",
+        "after_place": "본관 상담실",
+        "progress_line": "[진행] 영어팀과 수학팀 담당 원장님의 일정 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "📅 [등록] 김민서 학생의 방문상담이 예약됐어요",
+      "expectedBody": "[학생] 김민서 학생\n[과목] 영어 · 수학\n[일정] 8월 7일(금) 17:00\n[장소] 본관 상담실\n[진행] 영어팀과 수학팀 담당 원장님의 일정 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.visit_rescheduled",
+      "titleTemplate": "🔄 [등록] {student_name}의 방문상담 일정이 바뀌었어요",
+      "bodyTemplate": "[학생] {student_name}\n[과목] {subjects}\n[변경] {before_schedule} → {after_schedule}\n[장소] {after_place}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "김민서 학생",
+        "subjects": "영어 · 수학",
+        "before_schedule": "8월 6일(목) 16:00",
+        "after_schedule": "8월 7일(금) 17:00",
+        "after_place": "본관 상담실",
+        "progress_line": "[진행] 영어팀과 수학팀 담당 원장님의 일정 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "🔄 [등록] 김민서 학생의 방문상담 일정이 바뀌었어요",
+      "expectedBody": "[학생] 김민서 학생\n[과목] 영어 · 수학\n[변경] 8월 6일(목) 16:00 → 8월 7일(금) 17:00\n[장소] 본관 상담실\n[진행] 영어팀과 수학팀 담당 원장님의 일정 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.visit_replaced",
+      "titleTemplate": "🔄 [등록] {student_name}의 방문상담 예약이 교체됐어요",
+      "bodyTemplate": "[학생] {student_name}\n[과목] {subjects}\n[변경] {before_appointment} → {after_appointment}\n[장소] {after_place}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "김민서 학생",
+        "subjects": "영어 · 수학",
+        "before_appointment": "8월 6일(목) 16:00 · 별관 상담실",
+        "after_appointment": "8월 7일(금) 17:00 · 본관 상담실",
+        "after_place": "본관 상담실",
+        "progress_line": "[진행] 영어팀과 수학팀 담당 원장님의 일정 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "🔄 [등록] 김민서 학생의 방문상담 예약이 교체됐어요",
+      "expectedBody": "[학생] 김민서 학생\n[과목] 영어 · 수학\n[변경] 8월 6일(목) 16:00 · 별관 상담실 → 8월 7일(금) 17:00 · 본관 상담실\n[장소] 본관 상담실\n[진행] 영어팀과 수학팀 담당 원장님의 일정 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.visit_subject_deselected",
+      "titleTemplate": "➖ [등록] {student_name}의 방문상담 과목이 제외됐어요",
+      "bodyTemplate": "[학생] {student_name}\n[제외] {deselected_subjects}\n[남은 과목] {other_active_subjects}\n[일정] {retained_schedule}\n[장소] {retained_place}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "김민서 학생",
+        "deselected_subjects": "수학",
+        "other_active_subjects": "영어",
+        "retained_schedule": "8월 7일(금) 17:00",
+        "retained_place": "본관 상담실",
+        "progress_line": "[진행] 영어팀과 수학팀 담당 원장님의 일정 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "➖ [등록] 김민서 학생의 방문상담 과목이 제외됐어요",
+      "expectedBody": "[학생] 김민서 학생\n[제외] 수학\n[남은 과목] 영어\n[일정] 8월 7일(금) 17:00\n[장소] 본관 상담실\n[진행] 영어팀과 수학팀 담당 원장님의 일정 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.visit_canceled",
+      "titleTemplate": "⛔ [등록] {student_name}의 방문상담이 취소됐어요",
+      "bodyTemplate": "[학생] {student_name}\n[과목] {subjects}\n[일정] {canceled_schedule}\n[장소] {canceled_place}\n{reason_line}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "김민서 학생",
+        "subjects": "영어 · 수학",
+        "canceled_schedule": "8월 7일(금) 17:00",
+        "canceled_place": "본관 상담실",
+        "reason_line": "[사유] 보호자 요청 [연락처 숨김] [링크 포함]",
+        "progress_line": ""
+      },
+      "expectedTitle": "⛔ [등록] 김민서 학생의 방문상담이 취소됐어요",
+      "expectedBody": "[학생] 김민서 학생\n[과목] 영어 · 수학\n[일정] 8월 7일(금) 17:00\n[장소] 본관 상담실\n[사유] 보호자 요청 [연락처 숨김] [링크 포함]"
+    },
+    {
+      "workflowKey": "transfer",
+      "eventKey": "transfer.submitted",
+      "titleTemplate": "📥 [전반] {student_name}의 반 이동 신청이 들어왔어요",
+      "bodyTemplate": "[변경] {before_class} → {after_class}\n[일정] {effective_date}부터 이동 예정이에요.\n[신청] {requester_name}\n{reason_line}\n{memo_line}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "김도윤 학생",
+        "before_class": "중2 수학 A반",
+        "after_class": "중2 수학 B반",
+        "effective_date": "8월 31일(월)",
+        "requester_name": "박지영님",
+        "reason_line": "[사유] 학생 일정 조정",
+        "memo_line": "[메모] 월요일부터 이동",
+        "progress_line": "[진행] 관리팀의 반 이동 일정 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "📥 [전반] 김도윤 학생의 반 이동 신청이 들어왔어요",
+      "expectedBody": "[변경] 중2 수학 A반 → 중2 수학 B반\n[일정] 8월 31일(월)부터 이동 예정이에요.\n[신청] 박지영님\n[사유] 학생 일정 조정\n[메모] 월요일부터 이동\n[진행] 관리팀의 반 이동 일정 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "transfer",
+      "eventKey": "transfer.completed",
+      "titleTemplate": "✅ [전반] {student_name}의 반 이동이 완료됐어요",
+      "bodyTemplate": "[변경] {before_class} → {after_class}\n[일정] 기존 반 {before_class_end_date}까지 · 새 반 {after_class_start_date}부터\n{progress_line}",
+      "representativePayload": {
+        "student_name": "김도윤 학생",
+        "before_class": "중2 수학 A반",
+        "after_class": "중2 수학 B반",
+        "before_class_end_date": "8월 28일(금)",
+        "after_class_start_date": "8월 31일(월)",
+        "progress_line": "[상태] 새 반으로 수강 정보가 반영됐어요."
+      },
+      "expectedTitle": "✅ [전반] 김도윤 학생의 반 이동이 완료됐어요",
+      "expectedBody": "[변경] 중2 수학 A반 → 중2 수학 B반\n[일정] 기존 반 8월 28일(금)까지 · 새 반 8월 31일(월)부터\n[상태] 새 반으로 수강 정보가 반영됐어요."
+    },
+    {
+      "workflowKey": "withdrawal",
+      "eventKey": "withdrawal.submitted",
+      "titleTemplate": "📥 [수강 제외] {student_name}의 {subjects} 수강 제외 신청이 들어왔어요",
+      "bodyTemplate": "[수업] {class_name}\n[일정] {withdrawal_date} · {withdrawal_round}부터 제외 예정이에요.\n[신청] {requester_name}\n{reason_line}\n{memo_line}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "김민서 학생",
+        "subjects": "수학",
+        "class_name": "중2 수학 A반",
+        "withdrawal_date": "8월 31일(월)",
+        "withdrawal_round": "8회차",
+        "requester_name": "박지영님",
+        "reason_line": "[사유] 학습 일정 조정",
+        "memo_line": "[메모] 8회차부터 제외",
+        "progress_line": "[진행] 관리팀의 수강 제외 일정 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "📥 [수강 제외] 김민서 학생의 수학 수강 제외 신청이 들어왔어요",
+      "expectedBody": "[수업] 중2 수학 A반\n[일정] 8월 31일(월) · 8회차부터 제외 예정이에요.\n[신청] 박지영님\n[사유] 학습 일정 조정\n[메모] 8회차부터 제외\n[진행] 관리팀의 수강 제외 일정 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "withdrawal",
+      "eventKey": "withdrawal.completed",
+      "titleTemplate": "✅ [수강 제외] {student_name}의 {subjects} 수강 제외 처리가 끝났어요",
+      "bodyTemplate": "[수업] {class_name}\n[일정] {withdrawal_date} · {withdrawal_round}부터 제외\n{progress_line}",
+      "representativePayload": {
+        "student_name": "김민서 학생",
+        "subjects": "수학",
+        "class_name": "중2 수학 A반",
+        "withdrawal_date": "8월 31일(월)",
+        "withdrawal_round": "8회차",
+        "progress_line": "[상태] 다른 과목 수강은 그대로 유지돼요."
+      },
+      "expectedTitle": "✅ [수강 제외] 김민서 학생의 수학 수강 제외 처리가 끝났어요",
+      "expectedBody": "[수업] 중2 수학 A반\n[일정] 8월 31일(월) · 8회차부터 제외\n[상태] 다른 과목 수강은 그대로 유지돼요."
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.submitted",
+      "titleTemplate": "📥 [휴보강] {class_name} {subjects} 휴보강 신청이 들어왔어요",
+      "bodyTemplate": "[수업] {subjects} · {teacher_name} 선생님 담당\n[일정] 휴강 {cancellation_date} → 보강 {makeup_schedule}\n[장소] {place}\n{reason_line}\n{memo_line}\n[진행] {progress_actor}의 결재를 기다리고 있어요.",
+      "representativePayload": {
+        "class_name": "대기고1A",
+        "subjects": "영어",
+        "teacher_name": "강부희",
+        "cancellation_date": "8월 5일(수)",
+        "makeup_schedule": "8월 7일(금) 10:00~12:00",
+        "place": "별관 3강",
+        "reason_line": "[사유] 개인 일정",
+        "memo_line": "[메모] 학생 안내 완료",
+        "progress_actor": "김철수님"
+      },
+      "expectedTitle": "📥 [휴보강] 대기고1A 영어 휴보강 신청이 들어왔어요",
+      "expectedBody": "[수업] 영어 · 강부희 선생님 담당\n[일정] 휴강 8월 5일(수) → 보강 8월 7일(금) 10:00~12:00\n[장소] 별관 3강\n[사유] 개인 일정\n[메모] 학생 안내 완료\n[진행] 김철수님의 결재를 기다리고 있어요."
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.refund_requested",
+      "titleTemplate": "💳 [휴보강] {class_name} {subjects} 휴보강 환불 신청이 들어왔어요",
+      "bodyTemplate": "[수업] {subjects} · {class_name}\n[대상] {target_schedule}\n[상태] {current_status}\n{reason_line}\n{progress_line}",
+      "representativePayload": {
+        "class_name": "대기고1A",
+        "subjects": "영어",
+        "target_schedule": "8월 7일(금) 10:00~12:00",
+        "current_status": "환불대기",
+        "reason_line": "[사유] 보강 일정 취소",
+        "progress_line": "[진행] 관리팀의 환불 확인을 기다리고 있어요."
+      },
+      "expectedTitle": "💳 [휴보강] 대기고1A 영어 휴보강 환불 신청이 들어왔어요",
+      "expectedBody": "[수업] 영어 · 대기고1A\n[대상] 8월 7일(금) 10:00~12:00\n[상태] 환불대기\n[사유] 보강 일정 취소\n[진행] 관리팀의 환불 확인을 기다리고 있어요."
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.approved",
+      "titleTemplate": "✅ [휴보강] {class_name} {subjects} 휴보강 신청이 승인됐어요",
+      "bodyTemplate": "[수업] {subjects} · {class_name}\n[일정] 휴강 {cancellation_date} → 보강 {makeup_schedule}\n[장소] {place}\n[승인] {approval_actor}\n{memo_line}",
+      "representativePayload": {
+        "class_name": "대기고1A",
+        "subjects": "영어",
+        "cancellation_date": "8월 5일(수)",
+        "makeup_schedule": "8월 7일(금) 10:00~12:00",
+        "place": "별관 3강",
+        "approval_actor": "이관리님",
+        "memo_line": "[메모] 보강 일정 확정"
+      },
+      "expectedTitle": "✅ [휴보강] 대기고1A 영어 휴보강 신청이 승인됐어요",
+      "expectedBody": "[수업] 영어 · 대기고1A\n[일정] 휴강 8월 5일(수) → 보강 8월 7일(금) 10:00~12:00\n[장소] 별관 3강\n[승인] 이관리님\n[메모] 보강 일정 확정"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.refund_completed",
+      "titleTemplate": "✅ [휴보강] {class_name} {subjects} 휴보강 환불 처리가 끝났어요",
+      "bodyTemplate": "[수업] {subjects} · {class_name}\n[상태] {current_status}\n[처리] {processed_at}\n{memo_line}",
+      "representativePayload": {
+        "class_name": "대기고1A",
+        "subjects": "영어",
+        "current_status": "완료",
+        "processed_at": "8월 4일(화) 15:30",
+        "memo_line": "[메모] 환불 접수 완료"
+      },
+      "expectedTitle": "✅ [휴보강] 대기고1A 영어 휴보강 환불 처리가 끝났어요",
+      "expectedBody": "[수업] 영어 · 대기고1A\n[상태] 완료\n[처리] 8월 4일(화) 15:30\n[메모] 환불 접수 완료"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.approval_canceled",
+      "titleTemplate": "↩️ [휴보강] {class_name} {subjects} 휴보강 승인이 취소됐어요",
+      "bodyTemplate": "[수업] {subjects} · {class_name}\n[상태] {current_status}\n[처리] {processed_at} · {processing_actor}\n{reason_line}\n{memo_line}",
+      "representativePayload": {
+        "class_name": "대기고1A",
+        "subjects": "영어",
+        "current_status": "승인 취소",
+        "processed_at": "8월 4일(화) 15:30",
+        "processing_actor": "이관리님",
+        "reason_line": "[사유] 학원 일정 변경",
+        "memo_line": "[메모] 수업 일정 재협의"
+      },
+      "expectedTitle": "↩️ [휴보강] 대기고1A 영어 휴보강 승인이 취소됐어요",
+      "expectedBody": "[수업] 영어 · 대기고1A\n[상태] 승인 취소\n[처리] 8월 4일(화) 15:30 · 이관리님\n[사유] 학원 일정 변경\n[메모] 수업 일정 재협의"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.revision_requested",
+      "titleTemplate": "📝 [휴보강] {class_name} {subjects} 휴보강 보완 요청이 등록됐어요",
+      "bodyTemplate": "[수업] {subjects} · {class_name}\n[상태] {current_status}\n[요청] {request_actor}\n{reason_line}\n{progress_line}",
+      "representativePayload": {
+        "class_name": "대기고1A",
+        "subjects": "영어",
+        "current_status": "보완 요청",
+        "request_actor": "이관리님",
+        "reason_line": "[사유] 보강 강의실 정보 부족",
+        "progress_line": ""
+      },
+      "expectedTitle": "📝 [휴보강] 대기고1A 영어 휴보강 보완 요청이 등록됐어요",
+      "expectedBody": "[수업] 영어 · 대기고1A\n[상태] 보완 요청\n[요청] 이관리님\n[사유] 보강 강의실 정보 부족"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.rejected",
+      "titleTemplate": "⛔ [휴보강] {class_name} {subjects} 휴보강 신청이 반려됐어요",
+      "bodyTemplate": "[수업] {subjects} · {class_name}\n[상태] {current_status}\n[반려] {return_actor}\n{reason_line}\n{memo_line}",
+      "representativePayload": {
+        "class_name": "대기고1A",
+        "subjects": "영어",
+        "current_status": "반려",
+        "return_actor": "이관리님",
+        "reason_line": "[사유] 일정 중복",
+        "memo_line": "[메모] 다른 일정 검토"
+      },
+      "expectedTitle": "⛔ [휴보강] 대기고1A 영어 휴보강 신청이 반려됐어요",
+      "expectedBody": "[수업] 영어 · 대기고1A\n[상태] 반려\n[반려] 이관리님\n[사유] 일정 중복\n[메모] 다른 일정 검토"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.created",
+      "titleTemplate": "📝 [전자결재] {document_title}가 작성됐어요",
+      "bodyTemplate": "[문서] {document_title} · 작성자 {author_name}\n[기간] {target_period}\n[상태] {current_status}\n{attachment_line}\n{memo_line}",
+      "representativePayload": {
+        "document_title": "7월 교재비 정산서",
+        "author_name": "박지영",
+        "target_period": "2026년 7월",
+        "current_status": "초안",
+        "attachment_line": "[첨부] 파일 2개 · PDF, 스프레드시트",
+        "memo_line": "[메모] 검토용 초안"
+      },
+      "expectedTitle": "📝 [전자결재] 7월 교재비 정산서가 작성됐어요",
+      "expectedBody": "[문서] 7월 교재비 정산서 · 작성자 박지영\n[기간] 2026년 7월\n[상태] 초안\n[첨부] 파일 2개 · PDF, 스프레드시트\n[메모] 검토용 초안"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.submitted",
+      "titleTemplate": "📥 [전자결재] {document_title}가 제출됐어요",
+      "bodyTemplate": "[문서] {document_title} · 작성자 {author_name}\n[기간] {target_period}\n[진행] {progress_actor}의 결재를 기다리고 있어요.\n{attachment_line}",
+      "representativePayload": {
+        "document_title": "7월 교재비 정산서",
+        "author_name": "박지영",
+        "target_period": "2026년 7월",
+        "progress_actor": "김철수님",
+        "attachment_line": "[첨부] 파일 2개 · PDF, 스프레드시트"
+      },
+      "expectedTitle": "📥 [전자결재] 7월 교재비 정산서가 제출됐어요",
+      "expectedBody": "[문서] 7월 교재비 정산서 · 작성자 박지영\n[기간] 2026년 7월\n[진행] 김철수님의 결재를 기다리고 있어요.\n[첨부] 파일 2개 · PDF, 스프레드시트"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.review_started",
+      "titleTemplate": "👀 [전자결재] {document_title} 검토가 시작됐어요",
+      "bodyTemplate": "[문서] {document_title}\n[검토] {reviewer_name}\n[상태] {current_status}\n{memo_line}",
+      "representativePayload": {
+        "document_title": "7월 교재비 정산서",
+        "reviewer_name": "김철수님",
+        "current_status": "검토 중",
+        "memo_line": "[메모] 검토를 시작했어요."
+      },
+      "expectedTitle": "👀 [전자결재] 7월 교재비 정산서 검토가 시작됐어요",
+      "expectedBody": "[문서] 7월 교재비 정산서\n[검토] 김철수님\n[상태] 검토 중\n[메모] 검토를 시작했어요."
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.approver_changed",
+      "titleTemplate": "🔄 [전자결재] {document_title} 결재자가 바뀌었어요",
+      "bodyTemplate": "[문서] {document_title}\n[변경] {before_approver} → {after_approver}\n{progress_line}",
+      "representativePayload": {
+        "document_title": "7월 교재비 정산서",
+        "before_approver": "이영희님",
+        "after_approver": "김철수님",
+        "progress_line": "[진행] 김철수님의 결재를 기다리고 있어요."
+      },
+      "expectedTitle": "🔄 [전자결재] 7월 교재비 정산서 결재자가 바뀌었어요",
+      "expectedBody": "[문서] 7월 교재비 정산서\n[변경] 이영희님 → 김철수님\n[진행] 김철수님의 결재를 기다리고 있어요."
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.approved",
+      "titleTemplate": "✅ [전자결재] {document_title} 결재가 승인됐어요",
+      "bodyTemplate": "[문서] {document_title}\n[승인] {approval_actor}\n[상태] {current_status}\n[처리] {processed_at}\n{memo_line}",
+      "representativePayload": {
+        "document_title": "7월 교재비 정산서",
+        "approval_actor": "김철수님",
+        "current_status": "승인 완료",
+        "processed_at": "8월 4일(화) 15:30",
+        "memo_line": "[메모] 이상 없음"
+      },
+      "expectedTitle": "✅ [전자결재] 7월 교재비 정산서 결재가 승인됐어요",
+      "expectedBody": "[문서] 7월 교재비 정산서\n[승인] 김철수님\n[상태] 승인 완료\n[처리] 8월 4일(화) 15:30\n[메모] 이상 없음"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.returned",
+      "titleTemplate": "↩️ [전자결재] {document_title} 결재가 반려됐어요",
+      "bodyTemplate": "[문서] {document_title}\n[반려] {return_actor}\n[상태] {current_status}\n{reason_line}\n{memo_line}",
+      "representativePayload": {
+        "document_title": "7월 교재비 정산서",
+        "return_actor": "김철수님",
+        "current_status": "반려",
+        "reason_line": "[사유] 증빙 자료 보완 필요",
+        "memo_line": "[메모] 8월 내 재상신"
+      },
+      "expectedTitle": "↩️ [전자결재] 7월 교재비 정산서 결재가 반려됐어요",
+      "expectedBody": "[문서] 7월 교재비 정산서\n[반려] 김철수님\n[상태] 반려\n[사유] 증빙 자료 보완 필요\n[메모] 8월 내 재상신"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.canceled",
+      "titleTemplate": "🚫 [전자결재] {document_title} 결재가 취소됐어요",
+      "bodyTemplate": "[문서] {document_title}\n[취소] {cancel_actor}\n[상태] {current_status}\n{reason_line}\n{memo_line}",
+      "representativePayload": {
+        "document_title": "7월 교재비 정산서",
+        "cancel_actor": "김철수님",
+        "current_status": "취소",
+        "reason_line": "[사유] 제출 대상 변경",
+        "memo_line": "[메모] 다음 달 양식 사용"
+      },
+      "expectedTitle": "🚫 [전자결재] 7월 교재비 정산서 결재가 취소됐어요",
+      "expectedBody": "[문서] 7월 교재비 정산서\n[취소] 김철수님\n[상태] 취소\n[사유] 제출 대상 변경\n[메모] 다음 달 양식 사용"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.resubmitted",
+      "titleTemplate": "🔁 [전자결재] {document_title}가 다시 제출됐어요",
+      "bodyTemplate": "[문서] {document_title}\n[재상신] {resubmitter_name}\n[진행] {progress_actor}의 결재를 기다리고 있어요.\n{attachment_line}",
+      "representativePayload": {
+        "document_title": "7월 교재비 정산서",
+        "resubmitter_name": "박지영님",
+        "progress_actor": "김철수님",
+        "attachment_line": "[첨부] 파일 2개 · PDF, 스프레드시트"
+      },
+      "expectedTitle": "🔁 [전자결재] 7월 교재비 정산서가 다시 제출됐어요",
+      "expectedBody": "[문서] 7월 교재비 정산서\n[재상신] 박지영님\n[진행] 김철수님의 결재를 기다리고 있어요.\n[첨부] 파일 2개 · PDF, 스프레드시트"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.comment_added",
+      "titleTemplate": "💬 [전자결재] {document_title}에 댓글이 등록됐어요",
+      "bodyTemplate": "[문서] {document_title}\n[댓글] {comment_author} · {comment_preview}\n{attachment_line}\n{progress_line}",
+      "representativePayload": {
+        "document_title": "7월 교재비 정산서",
+        "comment_author": "박지영님",
+      "comment_preview": "검토 내용이 등록됐어요.",
+        "attachment_line": "[첨부] 파일 2개 · PDF, 스프레드시트",
+        "progress_line": "[진행] 김철수님이 검토하고 있어요."
+      },
+      "expectedTitle": "💬 [전자결재] 7월 교재비 정산서에 댓글이 등록됐어요",
+    "expectedBody": "[문서] 7월 교재비 정산서\n[댓글] 박지영님 · 검토 내용이 등록됐어요.\n[첨부] 파일 2개 · PDF, 스프레드시트\n[진행] 김철수님이 검토하고 있어요."
+    }
+  ],
+  "ruleIdentities": [
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.approved",
+      "audienceKey": "approver_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.approved"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.approved",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.approved"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.approved",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.approved"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.approved",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.approved"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.approver_changed",
+      "audienceKey": "approver_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.approver_changed"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.approver_changed",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.approver_changed"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.approver_changed",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.approver_changed"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.approver_changed",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.approver_changed"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.canceled",
+      "audienceKey": "approver_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.canceled"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.canceled",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.canceled"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.canceled",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.canceled"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.canceled",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.canceled"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.comment_added",
+      "audienceKey": "approver_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.comment_added"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.comment_added",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.comment_added"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.comment_added",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.comment_added"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.comment_added",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.comment_added"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.created",
+      "audienceKey": "approver_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.created"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.created",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.created"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.created",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.created"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.created",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.created"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.resubmitted",
+      "audienceKey": "approver_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.resubmitted"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.resubmitted",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.resubmitted"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.resubmitted",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.resubmitted"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.resubmitted",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.resubmitted"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.returned",
+      "audienceKey": "approver_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.returned"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.returned",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.returned"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.returned",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.returned"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.returned",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.returned"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.review_started",
+      "audienceKey": "approver_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.review_started"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.review_started",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.review_started"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.review_started",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.review_started"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.review_started",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.review_started"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.submitted",
+      "audienceKey": "approver_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.submitted"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.submitted",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.submitted"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.submitted",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.submitted"
+    },
+    {
+      "workflowKey": "approvals",
+      "eventKey": "approval.submitted",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "approval.submitted"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.approval_canceled",
+      "audienceKey": "approver_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.approval_canceled"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.approval_canceled",
+      "audienceKey": "executive_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.approval_canceled"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.approval_canceled",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.approval_canceled"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.approval_canceled",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.approval_canceled"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.approval_canceled",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.approval_canceled"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.approval_canceled",
+      "audienceKey": "subject_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.approval_canceled"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.approved",
+      "audienceKey": "approver_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.approved"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.approved",
+      "audienceKey": "executive_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.approved"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.approved",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.approved"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.approved",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.approved"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.approved",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.approved"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.approved",
+      "audienceKey": "subject_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.approved"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.refund_completed",
+      "audienceKey": "approver_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.refund_completed"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.refund_completed",
+      "audienceKey": "executive_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.refund_completed"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.refund_completed",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.refund_completed"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.refund_completed",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.refund_completed"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.refund_completed",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.refund_completed"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.refund_completed",
+      "audienceKey": "subject_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.refund_completed"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.refund_requested",
+      "audienceKey": "approver_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.refund_requested"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.refund_requested",
+      "audienceKey": "executive_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.refund_requested"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.refund_requested",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.refund_requested"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.refund_requested",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.refund_requested"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.refund_requested",
+      "audienceKey": "subject_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.refund_requested"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.rejected",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.rejected"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.rejected",
+      "audienceKey": "subject_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.rejected"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.revision_requested",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.revision_requested"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.revision_requested",
+      "audienceKey": "subject_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.revision_requested"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.submitted",
+      "audienceKey": "approver_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.submitted"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.submitted",
+      "audienceKey": "executive_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.submitted"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.submitted",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.submitted"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.submitted",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.submitted"
+    },
+    {
+      "workflowKey": "makeup_requests",
+      "eventKey": "makeup.submitted",
+      "audienceKey": "subject_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "makeup.submitted"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.appointment_reminder_due",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "offset_before",
+      "goldenEventKey": "registration.appointment_reminder_due"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.appointment_reminder_due",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "previous_day_at",
+      "goldenEventKey": "registration.appointment_reminder_due"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.appointment_reminder_due",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "same_day_at",
+      "goldenEventKey": "registration.appointment_reminder_due"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.appointment_reminder_due",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "offset_before",
+      "goldenEventKey": "registration.appointment_reminder_due"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.appointment_reminder_due",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "previous_day_at",
+      "goldenEventKey": "registration.appointment_reminder_due"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.appointment_reminder_due",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "same_day_at",
+      "goldenEventKey": "registration.appointment_reminder_due"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.appointment_reminder_due",
+      "audienceKey": "track_director",
+      "channelKey": "in_app",
+      "ruleVariantKey": "offset_before",
+      "goldenEventKey": "registration.appointment_reminder_due"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.appointment_reminder_due",
+      "audienceKey": "track_director",
+      "channelKey": "in_app",
+      "ruleVariantKey": "previous_day_at",
+      "goldenEventKey": "registration.appointment_reminder_due"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.appointment_reminder_due",
+      "audienceKey": "track_director",
+      "channelKey": "in_app",
+      "ruleVariantKey": "same_day_at",
+      "goldenEventKey": "registration.appointment_reminder_due"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.case_closed",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "registration.case_closed"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.case_created",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "registration.case_created"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.phone_consultation_ready",
+      "audienceKey": "track_director",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "registration.phone_consultation_ready"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.registration_completed",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "registration.registration_completed"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.visit_canceled",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "registration.visit_canceled"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.visit_canceled",
+      "audienceKey": "track_director",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "registration.visit_canceled"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.visit_replaced",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "registration.visit_replaced"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.visit_replaced",
+      "audienceKey": "track_director",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "registration.visit_replaced"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.visit_rescheduled",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "registration.visit_rescheduled"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.visit_rescheduled",
+      "audienceKey": "track_director",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "registration.visit_rescheduled"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.visit_scheduled",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "registration.visit_scheduled"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.visit_scheduled",
+      "audienceKey": "track_director",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "registration.visit_scheduled"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.visit_subject_deselected",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "registration.visit_subject_deselected"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.visit_subject_deselected",
+      "audienceKey": "track_director",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "registration.visit_subject_deselected"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.assignee_changed",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.assignee_changed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.assignee_changed",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.assignee_changed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.assignee_changed",
+      "audienceKey": "primary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.assignee_changed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.assignee_changed",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.assignee_changed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.assignee_changed",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.assignee_changed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.canceled",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.canceled"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.canceled",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.canceled"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.canceled",
+      "audienceKey": "primary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.canceled"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.canceled",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.canceled"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.canceled",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.canceled"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.comment_added",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.comment_added"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.comment_added",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.comment_added"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.comment_added",
+      "audienceKey": "primary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.comment_added"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.comment_added",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.comment_added"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.comment_added",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.comment_added"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.completed",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.completed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.completed",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.completed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.completed",
+      "audienceKey": "primary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.completed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.completed",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.completed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.completed",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.completed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.created",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.created"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.created",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.created"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.created",
+      "audienceKey": "primary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.created"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.created",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.created"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.created",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.created"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.due_changed",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.due_changed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.due_changed",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.due_changed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.due_changed",
+      "audienceKey": "primary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.due_changed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.due_changed",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.due_changed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.due_changed",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.due_changed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.reopened",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.reopened"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.reopened",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.reopened"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.reopened",
+      "audienceKey": "primary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.reopened"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.reopened",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.reopened"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.reopened",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.reopened"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.status_changed",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.status_changed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.status_changed",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.status_changed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.status_changed",
+      "audienceKey": "primary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.status_changed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.status_changed",
+      "audienceKey": "requester_profile",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.status_changed"
+    },
+    {
+      "workflowKey": "tasks",
+      "eventKey": "task.status_changed",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "task.status_changed"
+    },
+    {
+      "workflowKey": "transfer",
+      "eventKey": "transfer.completed",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "transfer.completed"
+    },
+    {
+      "workflowKey": "transfer",
+      "eventKey": "transfer.submitted",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "transfer.submitted"
+    },
+    {
+      "workflowKey": "withdrawal",
+      "eventKey": "withdrawal.completed",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "withdrawal.completed"
+    },
+    {
+      "workflowKey": "withdrawal",
+      "eventKey": "withdrawal.submitted",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "withdrawal.submitted"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.absent_reported",
+      "audienceKey": "assigned_assistant",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.absent_reported"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.absent_reported",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.absent_reported"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.absent_reported",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.absent_reported"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.absent_reported",
+      "audienceKey": "requesting_teacher",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.absent_reported"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.absent_reported",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.absent_reported"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.assigned",
+      "audienceKey": "assigned_assistant",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.assigned"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.assigned",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.assigned"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.assigned",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.assigned"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.assigned",
+      "audienceKey": "requesting_teacher",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.assigned"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.assigned",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.assigned"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.canceled",
+      "audienceKey": "assigned_assistant",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.canceled"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.canceled",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.canceled"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.canceled",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.canceled"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.canceled",
+      "audienceKey": "requesting_teacher",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.canceled"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.canceled",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.canceled"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.completed",
+      "audienceKey": "assigned_assistant",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.completed"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.completed",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.completed"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.completed",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.completed"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.completed",
+      "audienceKey": "requesting_teacher",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.completed"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.completed",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.completed"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.created",
+      "audienceKey": "assigned_assistant",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.created"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.created",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.created"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.created",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.created"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.created",
+      "audienceKey": "requesting_teacher",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.created"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.created",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.created"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.result_reported",
+      "audienceKey": "assigned_assistant",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.result_reported"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.result_reported",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.result_reported"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.result_reported",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.result_reported"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.result_reported",
+      "audienceKey": "requesting_teacher",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.result_reported"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.result_reported",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.result_reported"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.retry_created",
+      "audienceKey": "assigned_assistant",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.retry_created"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.retry_created",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.retry_created"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.retry_created",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.retry_created"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.retry_created",
+      "audienceKey": "requesting_teacher",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.retry_created"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.retry_created",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.retry_created"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.revision_requested",
+      "audienceKey": "assigned_assistant",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.revision_requested"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.revision_requested",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.revision_requested"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.revision_requested",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.revision_requested"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.revision_requested",
+      "audienceKey": "requesting_teacher",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.revision_requested"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.revision_requested",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.revision_requested"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.schedule_changed",
+      "audienceKey": "assigned_assistant",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.schedule_changed"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.schedule_changed",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.schedule_changed"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.schedule_changed",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.schedule_changed"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.schedule_changed",
+      "audienceKey": "requesting_teacher",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.schedule_changed"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.schedule_changed",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.schedule_changed"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.started",
+      "audienceKey": "assigned_assistant",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.started"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.started",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.started"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.started",
+      "audienceKey": "management_team",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.started"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.started",
+      "audienceKey": "requesting_teacher",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.started"
+    },
+    {
+      "workflowKey": "word_retests",
+      "eventKey": "word_retest.started",
+      "audienceKey": "secondary_assignee",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "word_retest.started"
+    }
+  ]
+}
