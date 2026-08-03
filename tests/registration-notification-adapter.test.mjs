@@ -970,6 +970,11 @@ test("production read 경계는 Task 11 snake_case RPC와 jsonb cursor만 사용
     schedule_key: currentRule.scheduleKey,
     schedule_config: currentRule.scheduleConfig,
     enabled: currentRule.enabled,
+    template_checksum: "a".repeat(64),
+    template_allowed_variables: [
+      { key: "학생", token: "student_name", piiClass: "student_name" },
+    ],
+    content_contract_version: "1",
   }
   const sourceWire = {
     appointment_id: source.appointmentId,
@@ -987,9 +992,11 @@ test("production read 경계는 Task 11 snake_case RPC와 jsonb cursor만 사용
       track_id: item.trackId,
       subject: item.subject,
       director_profile_id: item.directorProfileId,
+      director_name: "영어 원장",
     })),
     director_profile_ids: source.directorProfileIds,
     management_profile_ids: source.managementProfileIds,
+    progress_actor: "영어팀 담당 원장님",
   }
   const calls = []
   const dependencies = createRegistrationNotificationRpcDependencies({
@@ -1035,6 +1042,8 @@ test("production read 경계는 Task 11 snake_case RPC와 jsonb cursor만 사용
   const snapshot = await dependencies.getSourceSnapshot(APPOINTMENT_A)
   assert.equal(snapshot.recipientRevision, "31")
   assert.deepEqual(snapshot.directorProfileIds, [PROFILE_A])
+  assert.equal(snapshot.progressActor, "영어팀 담당 원장님")
+  assert.equal(snapshot.participants[0].directorName, "영어 원장")
 
   const sources = await dependencies.listScheduledSources({ cursor: null, batchSize: 1 })
   assert.equal(
@@ -1331,4 +1340,90 @@ test("등록 adapter는 리마인더와 분리된 immediate core·phone·visit·
     target: visitTargets.targets[0],
   }), { ok: true })
   assert.equal(revalidationCalls[0].workflowKey, "registration")
+})
+
+test("등록 adapter는 방문상담 변경과 예약 리마인더를 새 presentation으로 렌더하고 관리팀 방만 유지한다", async () => {
+  const { createRegistrationNotificationAdapter } = await import(adapterModuleUrl)
+  const fixture = createFixtureDependencies({ current: visitSource() })
+  const adapter = createRegistrationNotificationAdapter(fixture.dependencies)
+  const managementRule = {
+    ruleId: RULE_CHAT,
+    ruleRevision: "1",
+    templateId: TEMPLATE_A,
+    audienceKey: "management_team",
+    channelKey: "google_chat",
+    connectionKey: "google_chat.management",
+    ruleVariantKey: "immediate",
+  }
+  const visitInput = {
+    eventId: EVENT_A,
+    workflowKey: "registration",
+    eventKey: "registration.visit_rescheduled",
+    sourceType: "registration_appointment",
+    sourceId: APPOINTMENT_A,
+    sourceRevision: "3",
+    payloadSchemaVersion: 2,
+    payload: {
+      task_id: TASK_A,
+      appointment_id: APPOINTMENT_A,
+      student_name: "김학생",
+      notification_revision: "3",
+      recipient_revision: BIG_GENERATION,
+      subjects: ["영어", "수학"],
+      scheduled_at: "2026-08-07T08:00:00.000Z",
+      place: "본관 상담실",
+      before_scheduled_at: "2026-08-06T07:00:00.000Z",
+      after_scheduled_at: "2026-08-07T08:00:00.000Z",
+      before_place: "별관 상담실",
+      after_place: "본관 상담실",
+      progress_actor: "영어팀과 수학팀 담당 원장님",
+      actor_name: "박지영",
+      actor_team: "관리팀",
+      occurred_at: "2026-08-04T01:00:00.000Z",
+    },
+    rule: managementRule,
+    scheduledFor: "2026-08-04T01:00:00.000Z",
+  }
+  const targets = await adapter.resolveTargets(visitInput)
+  assert.deepEqual(targets.targets.map((target) => target.connectionKey), ["google_chat.management"])
+  const context = await adapter.buildRenderContext({
+    ...visitInput,
+    targetGeneration: targets.targetGeneration,
+    target: targets.targets[0],
+    requestedContextKeys: [
+      "student_name", "subjects", "before_schedule", "after_schedule", "after_place", "progress_line",
+    ],
+  })
+  assert.equal(context.student_name, "김학생")
+  assert.equal(context.subjects, "영어 · 수학")
+  assert.equal(context.before_schedule, "8월 6일(목) 16:00")
+  assert.equal(context.after_schedule, "8월 7일(금) 17:00")
+  assert.equal(context.after_place, "본관 상담실")
+  assert.equal(context.progress_line, "[진행] 영어팀과 수학팀 담당 원장님의 일정 확인을 기다리고 있어요.")
+
+  const source = fixture.state.current
+  const reminderRule = {
+    ...source.currentRules[0],
+    audienceKey: "management_team",
+    channelKey: "google_chat",
+    connectionKey: "google_chat.management",
+  }
+  fixture.state.current = visitSource({
+    currentRules: [reminderRule],
+  })
+  const reminderTargets = await adapter.resolveTargets(resolveInput(fixture.state.current, reminderRule))
+  const reminderContext = await adapter.buildRenderContext({
+    ...resolveInput(fixture.state.current, reminderRule),
+    targetGeneration: reminderTargets.targetGeneration,
+    target: reminderTargets.targets[0],
+    requestedContextKeys: [
+      "appointment_kind", "student_name", "subjects", "scheduled_at", "place", "progress_line",
+    ],
+  })
+  assert.equal(reminderContext.appointment_kind, "방문상담")
+  assert.equal(reminderContext.student_name, "김학생")
+  assert.equal(reminderContext.subjects, "영어 · 수학")
+  assert.equal(reminderContext.scheduled_at, "7월 22일(수) 15:00")
+  assert.equal(reminderContext.place, "2층 상담실")
+  assert.equal(reminderContext.progress_line, "[진행] 영어팀과 수학팀 담당 원장님의 일정 확인을 기다리고 있어요.")
 })

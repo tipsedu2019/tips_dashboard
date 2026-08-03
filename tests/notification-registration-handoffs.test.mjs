@@ -6,6 +6,10 @@ const migrationUrl = new URL(
   "../supabase/migrations/20260716194000_notification_registration_handoffs.sql",
   import.meta.url,
 )
+const contentMigrationUrl = new URL(
+  "../supabase/migrations/20260803143000_notification_registration_content_payload.sql",
+  import.meta.url,
+)
 const serviceUrl = new URL("../src/features/tasks/registration-track-service.ts", import.meta.url)
 const workspaceUrl = new URL("../src/features/tasks/ops-task-workspace.tsx", import.meta.url)
 const opsRouteUrl = new URL("../src/app/api/notifications/legacy/ops-task/route.ts", import.meta.url)
@@ -466,4 +470,47 @@ test("customer_message delivery는 일반 수동 reconciliation으로 우회할 
   assert.match(reconcile, /v_delivery\.channel_key = 'customer_message'/)
   assert.match(reconcile, /notification_customer_message_specialized_executor_required/)
   assert.match(reconcile, /for update of delivery/)
+})
+
+test("전화상담 담당 배정은 active template canonical projection 하나만 남기고 직접 문구를 만들지 않는다", async () => {
+  const sql = await source(contentMigrationUrl)
+  const assign = functionBlock(sql, "dashboard_private.assign_registration_track_director_impl")
+  const phoneProjection = functionBlock(
+    sql,
+    "dashboard_private.materialize_registration_phone_legacy_v1",
+  )
+
+  assert.doesNotMatch(assign, /\[.*전화상담 대기|학생 상담을 확인하세요/)
+  assert.doesNotMatch(assign, /insert into public\.dashboard_notifications/)
+  assert.match(assign, /write_registration_track_event/)
+  assert.match(assign, /source_delivery_id is not null/)
+  assert.match(assign, /notification\.metadata ->> 'consultationId'/)
+  assert.match(assign, /notification_deliveries delivery/)
+  assert.match(assign, /v_notification_id is null and not v_canonical_projection_exists/)
+
+  assert.match(phoneProjection, /notification_rules rule/)
+  assert.match(phoneProjection, /rule\.active_template_id/)
+  assert.match(phoneProjection, /notification_templates template/)
+  assert.match(phoneProjection, /template\.allowed_variables/)
+  assert.match(phoneProjection, /registration_render_fixed_template_v2/)
+  assert.match(phoneProjection, /commit_legacy_notification_in_app_projection_v1/)
+  assert.doesNotMatch(phoneProjection, /\[.*전화상담 대기|학생 상담을 확인하세요/)
+})
+
+test("등록 event writer는 전후 일정·장소와 제외·잔여 과목을 명시적 null·빈 배열로 snapshot한다", async () => {
+  const sql = await source(contentMigrationUrl)
+  const writerEntry = functionBlock(sql, "dashboard_private.write_registration_track_event_v2")
+  const writer = functionBlock(sql, "dashboard_private.write_registration_track_event_payload_v3")
+  assert.match(writerEntry, /write_registration_track_event_payload_v3/)
+  for (const key of [
+    "before_scheduled_at", "after_scheduled_at", "before_place", "after_place",
+    "subjects", "deselected_subjects", "remaining_subjects", "actor_name", "actor_team",
+    "registered_subjects", "registered_classes", "progress_actor",
+  ]) assert.match(writer, new RegExp(`'${key}'`), `등록 표시 snapshot key 누락: ${key}`)
+
+  assert.match(writer, /v_metadata -> 'activeTrackIds'/)
+  assert.match(writer, /v_metadata -> 'canceledTrackIds'/)
+  assert.match(writer, /from dashboard_private\.notification_events previous_event/)
+  assert.match(writer, /jsonb_strip_nulls[\s\S]*\|\| pg_catalog\.jsonb_build_object\([\s\S]*'before_scheduled_at'/)
+  assert.match(writer, /record_notification_event_v1\([\s\S]*case when v_event_key in \([\s\S]*then 1 else 2 end/)
 })

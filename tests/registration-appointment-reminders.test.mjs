@@ -6,6 +6,10 @@ const migrationUrl = new URL(
   "../supabase/migrations/20260716130000_registration_appointment_reminder_producer.sql",
   import.meta.url,
 )
+const contentMigrationUrl = new URL(
+  "../supabase/migrations/20260803143000_notification_registration_content_payload.sql",
+  import.meta.url,
+)
 
 async function readProducer() {
   return readFile(migrationUrl, "utf8")
@@ -461,4 +465,33 @@ test("담당 원장 대상 재계산은 track_director 대시보드 알림만 �
   assert.equal((apply.match(/rule\.channel_key\s*=\s*'in_app'/g) ?? []).length, 3)
   assert.match(apply, /source_revision/)
   assert.match(apply, /is distinct from v_job\.source_revision/)
+})
+
+test("등록 content migration은 예약 규칙·source 표시 snapshot을 확장하되 고정 정책을 바꾸지 않는다", async () => {
+  const sql = await readFile(contentMigrationUrl, "utf8")
+  const ruleSnapshot = block(
+    sql,
+    "create or replace function dashboard_private.registration_appointment_rule_snapshot_v1",
+    "create or replace function dashboard_private.registration_appointment_source_snapshot_v1",
+  )
+  const sourceSnapshot = block(
+    sql,
+    "create or replace function dashboard_private.registration_appointment_source_snapshot_v1",
+    "commit;",
+  )
+
+  assert.match(ruleSnapshot, /rule\.active_template_id/)
+  assert.match(ruleSnapshot, /template\.allowed_variables/)
+  assert.match(ruleSnapshot, /template\.checksum/)
+  assert.match(ruleSnapshot, /content_contract_version/)
+  assert.match(sourceSnapshot, /'subjects'/)
+  assert.match(sourceSnapshot, /'participants'/)
+  assert.match(sourceSnapshot, /'director_profile_ids'/)
+  assert.match(sourceSnapshot, /profile\.name/)
+  assert.match(sourceSnapshot, /'progress_actor'/)
+
+  assert.doesNotMatch(sql, /update dashboard_private\.notification_rules[\s\S]{0,240}(?:enabled|audience_key|channel_key|connection_key)/i)
+  assert.doesNotMatch(sql, /update dashboard_private\.notification_runtime_flags/i)
+  assert.doesNotMatch(sql, /insert into dashboard_private\.notification_deliveries/i)
+  assert.doesNotMatch(sql, /record_notification_delivery/i)
 })

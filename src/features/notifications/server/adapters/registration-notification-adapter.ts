@@ -16,6 +16,7 @@ import type {
 } from "../notification-workflow-adapter.ts"
 import type { ImmediateNotificationAdapterDependencies } from "./immediate-notification-adapter.ts"
 import { immediateNotificationProductionDependencies } from "./immediate-notification-source-reader.ts"
+import { buildRegistrationNotificationPresentation } from "../presentation/registration-notification-presentation.ts"
 import {
   ACADEMIC_SUBJECT_VALUES,
   parseAcademicSubject,
@@ -30,6 +31,7 @@ export type RegistrationNotificationParticipant = Readonly<{
   trackId: string
   subject: RegistrationSubject
   directorProfileId: string | null
+  directorName?: string | null
 }>
 
 export type RegistrationNotificationRule = NotificationRuleSnapshot & Readonly<{
@@ -51,6 +53,7 @@ export type RegistrationNotificationSourceSnapshot = Readonly<{
   managementProfileIds: ReadonlyArray<string>
   directorProfileIds: ReadonlyArray<string>
   participants: ReadonlyArray<RegistrationNotificationParticipant>
+  progressActor?: string | null
   currentRules: ReadonlyArray<RegistrationNotificationRule>
 }>
 
@@ -120,6 +123,14 @@ const IMMEDIATE_MESSAGE_EVENTS = new Set([
   "registration.admission_message_reconciled",
   "registration.admission_message_retry_released",
 ])
+const PRESENTATION_EVENTS = new Set([
+  "registration.case_created",
+  "registration.registration_completed",
+  "registration.case_closed",
+  "registration.appointment_reminder_due",
+  "registration.phone_consultation_ready",
+  ...IMMEDIATE_VISIT_EVENTS,
+])
 const SEOUL_OFFSET_MILLISECONDS = 9 * 60 * 60 * 1_000
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const POSITIVE_DECIMAL_PATTERN = /^[1-9]\d*$/
@@ -166,6 +177,20 @@ function requireExactKeys(value: JsonRecord, expected: ReadonlyArray<string>) {
     actual.length !== normalizedExpected.length
     || actual.some((key, index) => key !== normalizedExpected[index])
   ) {
+    adapterError("payload_schema_unsupported")
+  }
+}
+
+function requireOneExactKeySet(
+  value: JsonRecord,
+  expectedSets: ReadonlyArray<ReadonlyArray<string>>,
+) {
+  const actual = Object.keys(value).sort()
+  if (!expectedSets.some((expected) => {
+    const normalized = [...expected].sort()
+    return actual.length === normalized.length
+      && actual.every((key, index) => key === normalized[index])
+  })) {
     adapterError("payload_schema_unsupported")
   }
 }
@@ -333,6 +358,13 @@ function normalizeSource(value: unknown): RegistrationNotificationSourceSnapshot
       trackId: requiredUuid(participant.trackId),
       subject,
       directorProfileId: nullableUuid(participant.directorProfileId),
+      ...(Object.prototype.hasOwnProperty.call(participant, "directorName")
+        ? {
+            directorName: participant.directorName === null
+              ? null
+              : requiredString(participant.directorName),
+          }
+        : {}),
     })
   }).sort((left, right) => (
     subjectOrder(left.subject) - subjectOrder(right.subject)
@@ -357,6 +389,13 @@ function normalizeSource(value: unknown): RegistrationNotificationSourceSnapshot
     managementProfileIds: Object.freeze([...new Set(value.managementProfileIds.map(requiredUuid))].sort()),
     directorProfileIds: Object.freeze([...new Set(value.directorProfileIds.map(requiredUuid))].sort()),
     participants: Object.freeze(participants),
+    ...(Object.prototype.hasOwnProperty.call(value, "progressActor")
+      ? {
+          progressActor: value.progressActor === null
+            ? null
+            : requiredString(value.progressActor),
+        }
+      : {}),
     currentRules: Object.freeze(value.currentRules.map((item) => normalizeRule(item, true))),
   })
 }
@@ -479,6 +518,69 @@ function immediateTargetSet(input: NotificationResolveInput) {
   })
 }
 
+function presentationInput(
+  input: NotificationRenderInput,
+  payload: Readonly<Record<string, unknown>>,
+) {
+  const requestedContextKeys = input.requestedContextKeys ?? []
+  if (
+    !Array.isArray(requestedContextKeys)
+    || requestedContextKeys.some((key) => typeof key !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(key))
+    || new Set(requestedContextKeys).size !== requestedContextKeys.length
+  ) adapterError("payload_schema_unsupported")
+  if (input.rule.channelKey !== "in_app" && input.rule.channelKey !== "google_chat") {
+    adapterError("payload_schema_unsupported")
+  }
+  let connectionKey = null
+  let destinationTeam = null
+  if (input.rule.channelKey === "google_chat") {
+    if (
+      input.target.targetKind !== "connection"
+      || input.target.connectionKey !== "google_chat.management"
+    ) adapterError("payload_schema_unsupported")
+    connectionKey = "google_chat.management" as const
+    destinationTeam = "management" as const
+  } else if (input.target.connectionKey !== null) {
+    adapterError("payload_schema_unsupported")
+  }
+  return Object.freeze({
+    workflowKey: input.workflowKey,
+    eventKey: input.eventKey,
+    ruleVariantKey: input.rule.ruleVariantKey,
+    payloadSchemaVersion: input.payloadSchemaVersion,
+    payload,
+    audienceKey: input.rule.audienceKey,
+    channelKey: input.rule.channelKey,
+    contractIdentity: Object.freeze({
+      workflowKey: input.workflowKey,
+      eventKey: input.eventKey,
+      audienceKey: input.rule.audienceKey,
+      channelKey: input.rule.channelKey,
+      ruleVariantKey: input.rule.ruleVariantKey,
+    }),
+    requestedContextKeys: Object.freeze([...requestedContextKeys]),
+    connectionKey,
+    destinationTeam,
+    scheduledFor: input.scheduledFor,
+  })
+}
+
+function mergePresentationContext(
+  input: NotificationRenderInput,
+  payload: Readonly<Record<string, unknown>>,
+  legacyContext: Readonly<Record<string, string>>,
+) {
+  const context = { ...legacyContext }
+  const presentation = buildRegistrationNotificationPresentation(presentationInput(input, payload))
+  for (const [key, value] of Object.entries(presentation)) {
+    if (!/^[a-z][a-z0-9_]{0,63}$/.test(key) || typeof value !== "string") {
+      adapterError("payload_schema_unsupported")
+    }
+    context[key] = value
+  }
+  return Object.freeze(context)
+}
+
 function immediateRenderContext(input: NotificationRenderInput): NotificationRenderContext {
   const payload = immediatePayload(input)
   const context: Record<string, string> = {}
@@ -490,7 +592,27 @@ function immediateRenderContext(input: NotificationRenderInput): NotificationRen
     if (typeof value === "string" && value.trim()) context[key] = value.trim()
     else if (typeof value === "boolean" || typeof value === "number") context[key] = String(value)
   }
-  return Object.freeze(context)
+  if (!PRESENTATION_EVENTS.has(input.eventKey)) return Object.freeze(context)
+  return mergePresentationContext(input, payload, context)
+}
+
+function reminderProgressActor(source: RegistrationNotificationSourceSnapshot) {
+  if (source.progressActor) return source.progressActor
+  const bySubject = new Map<RegistrationSubject, boolean>()
+  for (const participant of source.participants) {
+    bySubject.set(
+      participant.subject,
+      (bySubject.get(participant.subject) ?? true) && participant.directorProfileId !== null,
+    )
+  }
+  const subjects = [...bySubject.entries()]
+    .filter(([, directorReady]) => directorReady)
+    .map(([subject]) => subject)
+    .sort((left, right) => subjectOrder(left) - subjectOrder(right))
+  if (subjects.length !== bySubject.size || subjects.length === 0) return null
+  if (subjects.length === 1) return `${subjects[0]}팀 담당 원장님`
+  if (subjects.length === 2) return `${subjects[0]}팀과 ${subjects[1]}팀 담당 원장님`
+  return `${subjects.slice(0, -1).map((subject) => `${subject}팀`).join(", ")}과 ${subjects[subjects.length - 1]}팀 담당 원장님`
 }
 
 function immediateDeepLink(input: NotificationRenderInput) {
@@ -798,13 +920,24 @@ export function createRegistrationNotificationAdapter(
       currentResolveRule(input, source, dependencies.now())
       const subjects = [...new Set(source.participants.map((participant) => participant.subject))]
         .sort((left, right) => subjectOrder(left) - subjectOrder(right))
-      return Object.freeze({
+      const legacyContext = Object.freeze({
         student_name: source.studentName,
         appointment_kind: source.kind === "level_test" ? "레벨테스트" : "방문상담",
         scheduled_at: formatSeoulTimestamp(source.scheduledAt),
         place: source.place,
         subjects: subjects.join(" · "),
       })
+      return mergePresentationContext(input, Object.freeze({
+        ...input.payload,
+        task_id: source.taskId,
+        student_name: source.studentName,
+        appointment_kind: source.kind,
+        scheduled_at: source.scheduledAt,
+        place: source.place,
+        subjects: Object.freeze(subjects),
+        progress_actor: reminderProgressActor(source),
+        occurred_at: input.scheduledFor,
+      }), legacyContext)
     },
 
     async buildDeepLink(input) {
@@ -1069,7 +1202,7 @@ export function createRegistrationNotificationAdapter(
 
 function wireRule(value: unknown, scheduled: boolean) {
   if (!isRecord(value)) adapterError("payload_schema_unsupported")
-  requireExactKeys(value, [
+  const legacyKeys = [
     "audience_key",
     "channel_key",
     "connection_key",
@@ -1080,7 +1213,24 @@ function wireRule(value: unknown, scheduled: boolean) {
     "schedule_config",
     "schedule_key",
     "template_id",
-  ])
+  ]
+  const contentKeys = [
+    ...legacyKeys,
+    "content_contract_version",
+    "template_allowed_variables",
+    "template_checksum",
+  ]
+  requireOneExactKeySet(value, [legacyKeys, contentKeys])
+  if (Object.prototype.hasOwnProperty.call(value, "template_checksum")) {
+    if (
+      typeof value.template_checksum !== "string"
+      || !HASH_PATTERN.test(value.template_checksum)
+      || !Array.isArray(value.template_allowed_variables)
+    ) {
+      adapterError("payload_schema_unsupported")
+    }
+    positiveDecimal(value.content_contract_version)
+  }
   return normalizeRule({
     ruleId: value.rule_id,
     ruleRevision: value.rule_revision,
@@ -1097,7 +1247,7 @@ function wireRule(value: unknown, scheduled: boolean) {
 
 function wireSource(value: unknown): RegistrationNotificationSourceSnapshot {
   if (!isRecord(value)) adapterError("payload_schema_unsupported")
-  requireExactKeys(value, [
+  const legacyKeys = [
     "appointment_id",
     "current_rules",
     "director_profile_ids",
@@ -1113,7 +1263,8 @@ function wireSource(value: unknown): RegistrationNotificationSourceSnapshot {
     "subjects",
     "task_id",
     "track_ids",
-  ])
+  ]
+  requireOneExactKeySet(value, [legacyKeys, [...legacyKeys, "progress_actor"]])
   const trackIds = value.track_ids
   const subjects = value.subjects
   const directorIds = value.director_profile_ids
@@ -1155,12 +1306,28 @@ function wireSource(value: unknown): RegistrationNotificationSourceSnapshot {
     directorProfileIds: directorIds,
     participants: participantRows.map((participant) => {
       if (!isRecord(participant)) adapterError("payload_schema_unsupported")
+      requireOneExactKeySet(participant, [[
+        "director_profile_id",
+        "subject",
+        "track_id",
+      ], [
+        "director_name",
+        "director_profile_id",
+        "subject",
+        "track_id",
+      ]])
       return {
         trackId: participant.track_id,
         subject: participant.subject,
         directorProfileId: participant.director_profile_id,
+        ...(Object.prototype.hasOwnProperty.call(participant, "director_name")
+          ? { directorName: participant.director_name }
+          : {}),
       }
     }),
+    ...(Object.prototype.hasOwnProperty.call(value, "progress_actor")
+      ? { progressActor: value.progress_actor }
+      : {}),
     currentRules: value.current_rules.map((item) => wireRule(item, true)),
   })
   const participantPairs = new Set(

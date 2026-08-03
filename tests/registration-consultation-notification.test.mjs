@@ -36,6 +36,10 @@ const registrationServiceUrl = new URL(
   "../src/features/tasks/registration-track-service.ts",
   import.meta.url,
 );
+const notificationContentMigrationUrl = new URL(
+  "../supabase/migrations/20260803143000_notification_registration_content_payload.sql",
+  import.meta.url,
+);
 
 async function readOptionalSource(url) {
   try {
@@ -834,6 +838,22 @@ test("appointment processing UI is fail-closed and retry never replays save or c
   assert.doesNotMatch(source, /예약 저장과 알림 처리는 완료되었습니다/);
   assert.match(source, /notificationProcessingCompleted[\s\S]*예약 저장과 알림 재계산은 완료되었습니다/);
   assert.match(source, /notificationProcessingPhase === "succeeded"[\s\S]*알림 재계산 상태는 아직 확인되지 않았습니다/);
+});
+
+test("방문상담 legacy plan은 active template allowlist를 쓰고 관리팀 외 Chat 목적지를 만들지 않는다", async () => {
+  const sql = await readFile(notificationContentMigrationUrl, "utf8");
+  const start = sql.indexOf("create or replace function public.get_registration_visit_legacy_dispatch_plan_v1")
+  const end = sql.indexOf("\n$$;", start)
+  assert.ok(start >= 0 && end > start)
+  const plan = sql.slice(start, end + 4)
+
+  assert.match(plan, /notification_rules rule/)
+  assert.match(plan, /rule\.active_template_id/)
+  assert.match(plan, /template\.allowed_variables/)
+  assert.match(plan, /registration_render_fixed_template_v2/)
+  assert.match(plan, /'google_chat\.management'/)
+  assert.doesNotMatch(plan, /google_chat\.(?:english|math|science)/)
+  assert.doesNotMatch(plan, /body\.(?:title|message|target|href|recipient)/)
 });
 
 test("processing readiness is loaded from the fixed authenticated operations view", async () => {
