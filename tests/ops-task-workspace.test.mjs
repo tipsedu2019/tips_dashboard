@@ -1141,7 +1141,7 @@ test("registration labels canonical result links by subject and keeps legacy det
   assert.match(registrationDetailSource, /RegistrationExternalLinkInfo label="시험지·결과지 URL"/);
 });
 
-test("등록 예약 달력은 목록 흐름과 분리되고 정확한 예약 딥링크를 한 번만 연다", async () => {
+test("등록 예약 달력은 목록 흐름과 분리되고 딥링크 예약을 열린 편집기에 정확히 연결한다", async () => {
   const [workspaceSource, editorSource, calendarSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/registration-track-editor.tsx"),
@@ -1184,12 +1184,21 @@ test("등록 예약 달력은 목록 흐름과 분리되고 정확한 예약 딥
 
   assertIncludesAll(editorSource, [
     "initialAppointmentId?: string | null",
-    "onAppointmentOpenChange?: (appointmentId: string | null) => void",
-    "initialAppointmentAppliedRef",
     "initialAppointmentId",
-    "onAppointmentOpenChange?.(null)",
+    "activeLevelTestPlan",
+    "activeVisitPlan",
+    "activeLevelTestAppointment",
+    "activeVisitAppointment",
   ]);
-  assert.match(editorSource, /if \(initialAppointmentAppliedRef\.current === initialKey\) return/);
+  assert.match(
+    editorSource,
+    /plan\.kind === "level_test" && plan\.appointmentId === initialAppointmentId/,
+  );
+  assert.match(
+    editorSource,
+    /plan\.kind === "visit_consultation" && plan\.appointmentId === initialAppointmentId/,
+  );
+  assert.doesNotMatch(editorSource, /initialAppointmentAppliedRef|onAppointmentOpenChange\?\.\(null\)/);
 
   assertIncludesAll(calendarSource, [
     'type CalendarView = "month" | "week"',
@@ -1665,7 +1674,6 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
     "markRegistrationLegacyCreateStarted",
     "dispatchRegistrationVisitNotificationTargets",
     "registrationCreateAttemptRef",
-    'registrationPersistence.mode === "ready_atomic"',
     'createAttempt.writer === "atomic"',
     'createAttempt.writer === "canonical"',
     'createAttempt.writer === "legacy"',
@@ -1782,6 +1790,7 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
   assert.match(source, /setMessage\(getRegistrationCreateErrorMessage\(submissionForm\)\)/);
 
   assert.match(intakeWorkflowSource, /type RegistrationCreateAttempt = \{[\s\S]*?fingerprint: string[\s\S]*?requestKey: string[\s\S]*?inquiryAt: string[\s\S]*?normalizedInitialWorkflow:/);
+  assert.match(intakeWorkflowSource, /if \(mode === "ready_atomic"\) return "atomic"/);
   assert.match(source, /registrationCreateAttemptRef\.current = createRegistrationCreateAttempt/);
   assert.match(source, /persistenceMode: registrationPersistence\.mode/);
   assert.match(source, /assertRegistrationCreateAttemptPersistenceMode\([\s\S]*?registrationCreateAttemptRef\.current[\s\S]*?registrationPersistence\.mode/);
@@ -2236,32 +2245,28 @@ test("registration required inquiry fields remain invariant after the workflow a
   );
 });
 
-test("registration resolves and edits directors per subject in the canonical initial plan", async () => {
-  const [workspaceSource, createSource, initialPlanSource] = await Promise.all([
+test("registration create keeps counselor assignment out of inquiry-only intake", async () => {
+  const [workspaceSource, createSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/registration-application-create.tsx"),
-    readSource("src/features/tasks/registration-initial-plan-control.tsx"),
   ]);
+  const createFunctionSource = createSource.slice(
+    createSource.indexOf("export function RegistrationApplicationCreate"),
+  );
 
   assertIncludesAll(workspaceSource, [
     'from "./registration-application-create"',
-    "registrationResolvedDirectorIds",
-    "subjects: [subject]",
     "<RegistrationApplicationCreate",
   ]);
-  assertIncludesAll(createSource, [
-    "resolvedDirectorIds,",
-    "directorOptionsBySubject,",
+  assertIncludesAll(createFunctionSource, [
+    "RegistrationApplicationInquirySection",
+    "RegistrationSubjectPicker",
+    "RegistrationInquiryCommonFields",
   ]);
-  assertIncludesAll(initialPlanSource, [
-    "orderedSubjects.map((subject)",
-    "data-registration-consultation-slot",
-    "draft.directorOverrides[subject] || resolvedDirectorId",
-    "directorOptionsBySubject[subject]",
-    "[subject]: nextValue",
-    "`${subject} 상담 책임자`",
-  ]);
-  assert.doesNotMatch(workspaceSource, /function handleRegistrationCounselorChange/);
+  assert.doesNotMatch(
+    createFunctionSource,
+    /RegistrationInitialPlanControl|RegistrationInitialLevelTestFields|RegistrationInitialConsultationFields|resolvedDirectorIds|directorOptionsBySubject|상담 책임자/,
+  );
 });
 
 test("registration form actions remain in normal flow and wrap safely on narrow screens", async () => {
@@ -4747,7 +4752,7 @@ test("browser workflow scripts target the operation surfaces", async () => {
     "const opsTaskWorkspaceDataCache = new Map",
     "if (options.taskType) taskQuery = taskQuery.eq(\"type\", options.taskType)",
     'return readOpsRegistrationParentWorkspaceData(options, metrics)',
-    "loadRegistrationTrackSummaries(",
+    "loadRegistrationWorkspaceTrackSummaries(",
     "registrationTracks: tracksByTaskId.get(task.id) || []",
     "OPS_REGISTRATION_PARENT_LIST_COLUMNS",
     '"ops_registration_details(task_id,pipeline_status,school_grade,school_name,inquiry_at)"',
@@ -5042,11 +5047,11 @@ test("registration form saves common edits through the canonical common writer",
   assert.doesNotMatch(editSource, /updateOpsTask\(editingTask\.id, payload\)/);
 });
 
-test("pending registration edits do not re-render or mutate downstream completion controls", async () => {
+test("registration create keeps downstream scheduling and completion controls out of inquiry-only intake", async () => {
   const create = await readSource("src/features/tasks/registration-application-create.tsx");
 
-  assertIncludesAll(create, ["RegistrationApplicationInquirySection", "RegistrationInitialLevelTestFields", "RegistrationInitialConsultationFields"]);
-  assert.doesNotMatch(create, /RegistrationInitialRouteFields/);
+  assertIncludesAll(create, ["RegistrationApplicationInquirySection", "RegistrationSubjectPicker", "RegistrationInquiryCommonFields"]);
+  assert.doesNotMatch(create, /RegistrationInitialLevelTestFields|RegistrationInitialConsultationFields|RegistrationInitialPlanControl|RegistrationInitialRouteFields/);
   assert.doesNotMatch(create, /getRegistrationChecklistEditorState|completionIntentPipelineStatus|checked=\{registrationChecklistEditorState\.completed\}/);
 });
 
