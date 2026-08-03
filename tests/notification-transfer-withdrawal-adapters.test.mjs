@@ -41,6 +41,14 @@ const deepLinkMigrationUrl = new URL(
   "../supabase/migrations/20260730143100_notification_transfer_withdrawal_deep_links.sql",
   import.meta.url,
 )
+const transferContentMigrationUrl = new URL(
+  "../supabase/migrations/20260803144000_notification_transfer_content_payload.sql",
+  import.meta.url,
+)
+const transferAdapterUrl = new URL(
+  "../src/features/notifications/server/adapters/transfer-notification-adapter.ts",
+  import.meta.url,
+)
 
 test("전반·퇴원 canonical 링크는 event status snapshot의 flow를 정확히 사용한다", async () => {
   const { buildOpsTransitionNotificationDeepLink } = await import(deepLinkHelperUrl)
@@ -365,4 +373,87 @@ test("legacy dispatch plan은 원본 당시 rule snapshot·불변 template·정�
   assert.match(plan, /'\/admin\/transfer\?taskId='/)
   assert.match(plan, /'\/admin\/withdrawal\?taskId='/)
   assert.doesNotMatch(plan, /p_(?:title|body|text|recipient|webhook|channel)/i)
+})
+
+test("전반 adapter는 presentation builder를 사용하고 관리팀 Chat 목적지만 유지한다", async () => {
+  const { transferNotificationAdapter } = await import(transferAdapterUrl)
+  const input = {
+    eventId: "84000000-0000-4000-8000-000000000011",
+    workflowKey: "transfer",
+    eventKey: "transfer.submitted",
+    sourceType: "ops_task_event",
+    sourceId: "84000000-0000-4000-8000-000000000012",
+    sourceRevision: null,
+    payloadSchemaVersion: 1,
+    payload: {
+      task_id: "84000000-0000-4000-8000-000000000001",
+      student_name: "김도윤",
+      task_status: "requested",
+      status: "requested",
+      requester_name: "박지영",
+      teacher_name: "김수학",
+      before_class: "중2 수학 A반",
+      after_class: "중2 수학 B반",
+      requested_effective_date: "2026-08-31",
+      before_class_end_date: "2026-08-28",
+      after_class_start_date: "2026-08-31",
+      actor_name: "이관리",
+      reason: null,
+      memo: null,
+      occurred_at: "2026-08-04T01:00:00.000Z",
+      management_profile_ids: [],
+    },
+    rule: {
+      ruleId: "84000000-0000-4000-8000-000000000021",
+      ruleRevision: "1",
+      templateId: "84000000-0000-4000-8000-000000000022",
+      audienceKey: "management_team",
+      channelKey: "google_chat",
+      connectionKey: "google_chat.management",
+      ruleVariantKey: "immediate",
+    },
+    scheduledFor: "2026-08-04T01:00:00.000Z",
+  }
+  const targets = await transferNotificationAdapter.resolveTargets(input)
+  assert.deepEqual(targets.targets.map((target) => target.connectionKey), ["google_chat.management"])
+  const context = await transferNotificationAdapter.buildRenderContext({
+    ...input,
+    targetGeneration: targets.targetGeneration,
+    target: targets.targets[0],
+    requestedContextKeys: [
+      "student_name", "before_class", "after_class", "effective_date", "requester_name", "progress_line",
+    ],
+  })
+  assert.equal(context.student_name, "김도윤 학생")
+  assert.equal(context.before_class, "중2 수학 A반")
+  assert.equal(context.after_class, "중2 수학 B반")
+  assert.equal(context.effective_date, "8월 31일(월)")
+  assert.equal(context.requester_name, "박지영님")
+  assert.equal(context.progress_line, "[진행] 관리팀의 반 이동 일정 확인을 기다리고 있어요.")
+})
+
+test("전반 content migration은 신청자·수업 담당자와 제출·완료 날짜를 같은 event transaction에서 분리한다", async () => {
+  const sql = await source(transferContentMigrationUrl)
+  assert.match(
+    sql,
+    /record_notification_event_v1\(text,text,text,text,text,bigint,text,uuid,timestamptz,integer,jsonb,uuid,bigint\)/,
+  )
+  const writer = block(
+    sql,
+    "create or replace function dashboard_private.record_ops_transition_notification_source_v1",
+    "revoke all on function dashboard_private.record_ops_transition_notification_source_v1",
+  )
+  for (const key of [
+    "requester_name", "teacher_name", "before_class", "after_class",
+    "requested_effective_date", "before_class_end_date", "after_class_start_date",
+    "actor_name", "reason", "memo",
+  ]) assert.match(writer, new RegExp(`'${key}'`), `전반 표시 snapshot key 누락: ${key}`)
+
+  assert.match(writer, /profile\.id = p_task\.requested_by/)
+  assert.match(writer, /profile\.id = v_actor/)
+  assert.match(writer, /v_teacher_name := coalesce\(nullif\(v_transfer\.from_teacher_name/)
+  assert.doesNotMatch(writer, /v_requester_name\s*:=\s*v_teacher_name/)
+  assert.match(writer, /insert into public\.ops_task_events[\s\S]*record_notification_event_v1/)
+  assert.doesNotMatch(sql, /google_chat\.(?:english|math|science)/)
+  assert.doesNotMatch(sql, /notification_runtime_flags|record_notification_delivery|fetch\(|webhook/i)
 })
