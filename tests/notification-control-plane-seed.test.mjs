@@ -22,6 +22,14 @@ const runtimePgTapUrl = new URL(
   "../supabase/tests/notification_control_plane_runtime_test.sql",
   import.meta.url,
 )
+const contentContractMigrationUrl = new URL(
+  "../supabase/migrations/20260803140000_notification_content_contracts.sql",
+  import.meta.url,
+)
+const contentContractPgTapUrl = new URL(
+  "../supabase/tests/notification_content_contract_test.sql",
+  import.meta.url,
+)
 
 const WORKFLOWS = [
   ["tasks", "할 일"],
@@ -309,5 +317,32 @@ test("pgTAP packet covers registry shape, import idempotency, rejection, flags, 
     "all twelve notification runtime flags remain false after settings seed",
   ]) {
     assert.ok(pgTap.includes(contract), `missing pgTAP contract: ${contract}`)
+  }
+})
+
+test("content contract migration extends the seed additively and keeps fixed registration activation locked", async () => {
+  const [migration, pgTap] = await Promise.all([
+    readFile(contentContractMigrationUrl, "utf8"),
+    readFile(contentContractPgTapUrl, "utf8"),
+  ])
+
+  assert.match(migration.trim(), /^begin;[\s\S]*commit;$/i)
+  assert.doesNotMatch(migration, /\b(?:truncate|drop\s+table|delete\s+from\s+dashboard_private\.notification_(?:rules|templates))\b/i)
+  assert.match(migration, /on\s+conflict\s+do\s+nothing/i)
+  assert.match(migration, /fixed_policy_editable_template/i)
+  assert.match(migration, /'fixed_policy_editable_template'\s*,\s*true/i)
+  assert.match(migration, /content_contract_version/i)
+  assert.doesNotMatch(migration, /update\s+dashboard_private\.notification_runtime_flags/i)
+  assert.doesNotMatch(migration, /insert\s+into\s+dashboard_private\.notification_(?:events|deliveries|dispatch_ownership_claims)/i)
+
+  for (const evidence of [
+    "contract registry mirrors every in-scope UI rule identity",
+    "customer-message rules remain outside the editable content registry",
+    "fixed registration rules expose editable content with activation locked",
+    "v2 changed content appends one contract-versioned custom template",
+    "v2 retry is an exact no-op",
+    "activation-locked rules reject enabled patches",
+  ]) {
+    assert.ok(pgTap.includes(evidence), `missing pgTAP evidence: ${evidence}`)
   }
 })

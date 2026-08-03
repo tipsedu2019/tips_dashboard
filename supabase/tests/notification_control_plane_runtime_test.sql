@@ -1,5 +1,5 @@
 begin;
-select plan(234);
+select plan(244);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
@@ -27,6 +27,64 @@ select has_function(
   'save_notification_control_plane_with_override_v1',
   array['text', 'jsonb', 'jsonb', 'uuid', 'uuid', 'jsonb'],
   'conflict override save RPC exists'
+);
+select has_table(
+  'dashboard_private',
+  'notification_rule_content_contracts',
+  'content contract registry exists'
+);
+select has_table(
+  'dashboard_private',
+  'notification_template_compliance_audits',
+  'template compliance audit registry exists'
+);
+select has_column(
+  'dashboard_private',
+  'notification_settings_ui_registry',
+  'configuration_kind',
+  'settings registry exposes configuration kind'
+);
+select has_column(
+  'dashboard_private',
+  'notification_settings_ui_registry',
+  'activation_locked',
+  'settings registry exposes activation lock'
+);
+select has_column(
+  'dashboard_private',
+  'notification_templates',
+  'content_contract_version',
+  'template snapshots can record their content contract version'
+);
+select has_function(
+  'dashboard_private',
+  'notification_content_contract_for_rule_v1',
+  array['uuid'],
+  'rule content contract lookup exists'
+);
+select has_function(
+  'dashboard_private',
+  'notification_template_contract_violations_v1',
+  array['uuid', 'text', 'text'],
+  'template contract validator exists'
+);
+select has_function(
+  'dashboard_private',
+  'notification_template_compliance_v1',
+  array['uuid', 'uuid'],
+  'template compliance evaluator exists'
+);
+select has_function(
+  'public',
+  'save_notification_control_plane_v2',
+  array['text', 'jsonb', 'jsonb', 'jsonb', 'uuid'],
+  'contract-versioned settings save RPC exists'
+);
+select has_function(
+  'public',
+  'save_notification_control_plane_with_override_v2',
+  array['text', 'jsonb', 'jsonb', 'jsonb', 'uuid', 'uuid', 'jsonb'],
+  'contract-versioned conflict override RPC exists'
 );
 select has_function(
   'public',

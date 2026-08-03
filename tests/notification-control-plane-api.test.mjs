@@ -50,6 +50,10 @@ const scienceConnectionMigrationUrl = new URL(
   "../supabase/migrations/20260722120000_science_notification_connection.sql",
   import.meta.url,
 )
+const contentContractMigrationUrl = new URL(
+  "../supabase/migrations/20260803140000_notification_content_contracts.sql",
+  import.meta.url,
+)
 const deferredDeliveryRouteUrl = new URL(
   "../src/app/api/notifications/deliveries/[deliveryId]/route.ts",
   import.meta.url,
@@ -2365,4 +2369,24 @@ test("Task 6 SQL keeps connection mutations server-only and validates settings a
     safeConnection,
     /legacy_active[\s\S]+?notification_google_chat_webhook_mask_v1/i,
   )
+})
+
+test("content contract v2 RPCs keep v1 compatibility and expose only role-checked save entrypoints", async () => {
+  const migration = await readFile(contentContractMigrationUrl, "utf8")
+
+  for (const functionName of [
+    "save_notification_control_plane_v2",
+    "save_notification_control_plane_with_override_v2",
+  ]) {
+    assert.match(
+      migration,
+      new RegExp(`revoke\\s+all\\s+on\\s+function\\s+public\\.${functionName}\\([\\s\\S]+?from\\s+public\\s*,\\s*anon\\s*,\\s*authenticated\\s*,\\s*service_role`, "i"),
+    )
+    assert.match(
+      migration,
+      new RegExp(`grant\\s+execute\\s+on\\s+function\\s+public\\.${functionName}\\([\\s\\S]+?to\\s+authenticated`, "i"),
+    )
+  }
+  assert.doesNotMatch(migration, /grant\s+execute[\s\S]+?save_notification_control_plane_v2[\s\S]+?to\s+(?:anon|service_role)/i)
+  assert.match(migration, /security\s+definer[\s\S]+?set\s+search_path\s*=\s*''/i)
 })
