@@ -23,18 +23,20 @@ export function RegistrationSubjectPicker(props: RegistrationSubjectPickerProps)
         <h3 className="text-sm font-semibold">과목</h3>
         {props.action}
       </div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+      <div className="grid grid-cols-3 gap-2">
         {props.options.map((subject) => {
           const selected = props.value.includes(subject)
+          const locked = Boolean(props.disabledSubjects?.has(subject))
           const disabledReason = props.disabledReasonBySubject?.[subject] || ""
           return (
             <Button
               key={subject}
               type="button"
-              variant={selected ? "default" : "outline"}
+              variant={selected && locked ? "secondary" : selected ? "default" : "outline"}
+              className={locked ? "disabled:opacity-100" : undefined}
               aria-pressed={selected}
               aria-label={`${subject} 문의 과목 ${selected ? "선택됨" : "선택 안 됨"}`}
-              disabled={props.disabled || props.disabledSubjects?.has(subject) || Boolean(disabledReason)}
+              disabled={props.disabled || locked || Boolean(disabledReason)}
               title={disabledReason || undefined}
               data-registration-grade={props.grade}
               onClick={() => props.onToggle(subject, !selected)}

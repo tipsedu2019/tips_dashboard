@@ -29,6 +29,7 @@ export type RegistrationTrackSummary = {
   taskId?: string
   subject?: RegistrationSubject
   status: RegistrationTrackStatus
+  workflowStatus?: string | null
   directorProfileId?: string | null
   levelTestRetakeDecision?: "" | "required" | "not_required" | null
 }
@@ -93,10 +94,13 @@ type RegistrationAppointmentActivitySummary = {
 }
 
 type RegistrationConsultationSummary = {
+  id?: string | null
   trackId?: string | null
   directorProfileId?: string | null
   mode?: "phone" | "visit" | null
   status?: "waiting" | "scheduled" | "completed" | "canceled" | null
+  createdAt?: string | null
+  updatedAt?: string | null
 }
 
 type RegistrationPermissionInput = {
@@ -349,6 +353,22 @@ export function getRegistrationAdmissionRecoveryDelayMs(
   updatedAt?: string | null,
   now?: number,
 ): number | null
+
+export function getRegistrationConsultationOutcomeSaveState(input?: {
+  savedOutcome?: "" | "enrollment" | "waiting" | "not_registered" | null
+  draftOutcome?: "" | "enrollment" | "waiting" | "not_registered" | null
+  canCompleteConsultation?: boolean
+}): {
+  editable: boolean
+  dirty: boolean
+  canSave: boolean
+  label: "저장됨" | "상담 결과 저장" | "상담 결과를 선택하세요"
+}
+
+export function getRegistrationActiveConsultation<T extends RegistrationConsultationSummary>(input?: {
+  trackId?: string | null
+  consultations?: readonly T[]
+}): T | null
 
 export function getRegistrationSummaryActionPermissions(
   input?: Omit<RegistrationPermissionInput, "activeConsultation">,

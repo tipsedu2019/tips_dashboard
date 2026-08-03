@@ -1299,6 +1299,40 @@ test("fixture reducer applies independent subject mutations once per request rec
   }), /registration_subject_track_fixture_request_key_conflict/)
 })
 
+test("fixture saves a level-test result without moving the workflow stage", async () => {
+  const {
+    createRegistrationSubjectTrackFixtureState,
+    reduceRegistrationSubjectTrackFixture,
+  } = await loadFixtureModule()
+  const initial = createRegistrationSubjectTrackFixtureState()
+  const command = {
+    type: "saveRegistrationLevelTestResult",
+    requestKey: "fixture-request-save-english-result",
+    payload: {
+      attemptId: "fixture-attempt-dual-english",
+      status: "completed",
+      materialLink: "https://chat.google.com/room/fixture-result",
+    },
+  }
+
+  const saved = reduceRegistrationSubjectTrackFixture(initial, command)
+  const detail = saved.state.caseDetails["fixture-task-dual-test"]
+  const track = detail.tracks.find((item) => item.id === "fixture-track-dual-english")
+  const attempt = detail.levelTests.find((item) => item.id === "fixture-attempt-dual-english")
+
+  assert.deepEqual(plain(saved.result), {
+    attemptId: "fixture-attempt-dual-english",
+    trackId: "fixture-track-dual-english",
+    status: "completed",
+    materialLink: "https://chat.google.com/room/fixture-result",
+  })
+  assert.equal(track.status, "level_test_scheduled")
+  assert.equal(attempt.status, "completed")
+  assert.equal(attempt.materialLink, "https://chat.google.com/room/fixture-result")
+  assert.equal(Object.keys(saved.state.receipts).length, 1)
+  assert.deepEqual(saved.state.externalCallLedger, [])
+})
+
 test("fixture runtime restores the previous mounted adapter and never enables unknown environments", async () => {
   const {
     executeRegistrationSubjectTrackFixtureAction,
@@ -2413,8 +2447,10 @@ test("every fixture UI mutation is declared and produces an idempotency receipt"
     "cancelRegistrationAppointment",
     "startRegistrationLevelTestAttempt",
     "completeRegistrationLevelTestAttempt",
+    "saveRegistrationLevelTestResult",
     "closeRegistrationLevelTestTrack",
     "completeRegistrationConsultation",
+    "saveRegistrationPhoneConsultation",
     "transitionRegistrationWaiting",
     "routeRegistrationEnrollmentDecision",
     "saveRegistrationEnrollmentRows",

@@ -716,15 +716,21 @@ const WITHDRAWAL_VIEW_TABS: Array<{ key: WithdrawalViewKey; label: string }> = [
 ]
 
 const REGISTRATION_VIEW_TABS: Array<{ key: RegistrationViewKey; label: string }> = [
-  { key: "inquiry", label: "등록 문의" },
+  { key: "inquiry", label: "문의" },
   { key: "level_test", label: "레벨테스트 신청" },
   { key: "consultation_requested", label: "상담 신청" },
   { key: "consultation_completed", label: "상담 완료" },
   { key: "waiting", label: "대기 신청" },
   { key: "enrollment", label: "등록 신청" },
-  { key: "payment", label: "수납 진행 중" },
+  { key: "payment", label: "입학 진행" },
   { key: "completed", label: "완료" },
 ]
+
+const REGISTRATION_VIEWS_REQUIRING_LINKED_LABELS = new Set<RegistrationViewKey>([
+  "waiting",
+  "enrollment",
+  "completed",
+])
 
 const REGISTRATION_CALENDAR_KIND_TABS = [
   { key: "all", label: "전체 일정" },
@@ -8951,6 +8957,15 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }, [ensureRegistrationOptions])
 
   useEffect(() => {
+    if (
+      !isRegistrationWorkspace
+      || registrationMode !== "list"
+      || !REGISTRATION_VIEWS_REQUIRING_LINKED_LABELS.has(registrationView)
+    ) return
+    void ensureRegistrationOptions()
+  }, [ensureRegistrationOptions, isRegistrationWorkspace, registrationMode, registrationView])
+
+  useEffect(() => {
     const nextView = searchParams.get("view")
     const nextFocus = searchParams.get("focus")
     const nextWordRetestRole = searchParams.get("role") || ""
@@ -12817,6 +12832,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	              items={visibleRegistrationCaseItems}
 	              viewerId={registrationViewerId}
 	              viewerRole={registrationViewerRole}
+	              classes={classes}
+	              textbooks={textbooks}
 	              loading={loading}
 	              disabled={saving}
 	              onOpen={(taskId, trackId) => void openRegistrationTrack(taskId, trackId)}

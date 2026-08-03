@@ -14,13 +14,13 @@ export const REGISTRATION_WORKFLOW_STATUSES = Object.freeze([
 ])
 
 export const REGISTRATION_WORKFLOW_VIEWS = Object.freeze([
-  ["inquiry", "등록 문의"],
+  ["inquiry", "문의"],
   ["level_test", "레벨테스트 신청"],
   ["consultation_requested", "상담 신청"],
   ["consultation_completed", "상담 완료"],
   ["waiting", "대기 신청"],
   ["enrollment", "등록 신청"],
-  ["payment", "수납 진행 중"],
+  ["payment", "입학 진행"],
   ["completed", "완료"],
 ])
 
@@ -33,7 +33,7 @@ export const REGISTRATION_WORKFLOW_STATUS_LABELS = Object.freeze({
   waiting_new_class: "신규반 대기 신청",
   waiting_next_opening: "다음 개강 알림 요청",
   enrollment_requested: "등록 신청",
-  payment_in_progress: "수납 진행 중",
+  payment_in_progress: "입학 진행 중",
   registered: "등록 완료",
   not_registered: "미등록",
   inquiry_only: "문의만",

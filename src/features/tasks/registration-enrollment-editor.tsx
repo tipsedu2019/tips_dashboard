@@ -22,6 +22,7 @@ import {
   type RegistrationAdmissionProgressSteps,
 } from "./registration-admission-progress"
 import { RegistrationSelect } from "./registration-select"
+import { RegistrationSaveButton } from "./registration-save-button"
 
 import {
   loadOpsRegistrationClassDetails,
@@ -97,6 +98,25 @@ const WAITING_KIND_OPTIONS: Array<{ value: Exclude<RegistrationWaitingKind, "">;
   { value: "current_term_opening", label: "현재 학기 개강반 대기" },
   { value: "next_term_opening", label: "다음 학기 개강반 대기" },
 ]
+
+const REGISTRATION_REFRESH_TIMEOUT_MS = 10_000
+
+async function withRegistrationRefreshTimeout(result: void | Promise<void>) {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      Promise.resolve(result),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error("registration_refresh_timeout")),
+          REGISTRATION_REFRESH_TIMEOUT_MS,
+        )
+      }),
+    ])
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId)
+  }
+}
 
 function registrationDateKey(value: Date | string) {
   const date = value instanceof Date ? value : new Date(value)
@@ -523,7 +543,7 @@ export function RegistrationEnrollmentEditor({
     onDirtyChange?.(owner, false)
     setOwnerRefreshPending(owner, true)
     try {
-      await onReload()
+      await withRegistrationRefreshTimeout(onReload())
       setOwnerRefreshPending(owner, false)
       return true
     } catch {
@@ -535,7 +555,7 @@ export function RegistrationEnrollmentEditor({
 
   async function retryEnrollmentReload(owner: RegistrationEnrollmentDirtyScope) {
     try {
-      await onReload()
+      await withRegistrationRefreshTimeout(onReload())
       setOwnerRefreshPending(owner, false)
       if (owner.kind === "cancellation") setCancelEnrollmentId("")
     } catch {
@@ -561,6 +581,7 @@ export function RegistrationEnrollmentEditor({
     const logicalId = `${track.id}:${payloadFingerprint}`
     const requestKey = submissionKeys.getOrCreate("enrollment-rows", logicalId)
     setSaving(true)
+    onWarning("")
     try {
       await saveRegistrationEnrollmentDetails({ trackId: track.id, rows, requestKey })
       initialDraftRowsRef.current = JSON.stringify(draftRows)
@@ -737,9 +758,17 @@ export function RegistrationEnrollmentEditor({
             <Plus className="size-4" aria-hidden="true" />
             수업 추가
           </Button>
-          <Button type="button" data-registration-primary-action={`${track.subject}:enrollment-row-save`} aria-label={`${track.subject} 등록 정보 저장`} onClick={() => void saveRows()} disabled={saving || rowsRefreshPending || draftRows.length === 0}>
-            {saving ? "저장 중" : "등록 정보 저장"}
-          </Button>
+          <RegistrationSaveButton
+            type="button"
+            data-registration-primary-action={`${track.subject}:enrollment-row-save`}
+            dirty={rowsDirty}
+            saving={saving}
+            blocked={rowsRefreshPending || draftRows.length === 0}
+            actionLabel="등록 정보 저장"
+            cleanLabel={draftRows.some((row) => row.classId) ? "저장됨" : "수업을 선택하세요"}
+            aria-label={`${track.subject} 등록 정보 저장`}
+            onClick={() => void saveRows()}
+          />
         </div>
       ) : null}
       </div>
@@ -1300,10 +1329,10 @@ export function RegistrationAdmissionPanel({
   ]
 
   return (
-    <section ref={admissionSectionRef} className="grid gap-3 rounded-md border p-3" aria-label="입학 처리">
-      <div className="flex items-center justify-between gap-2">
+    <section ref={admissionSectionRef} className="grid gap-4" aria-label="입학 처리">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">입학 처리</h3>
-        <Badge variant={openBatch ? "default" : "outline"}>{displayBatch ? `${displayBatch.revisionNumber}차 처리` : "대상 선택"}</Badge>
+        <Badge variant={openBatch ? "default" : "outline"}>{displayBatch ? `${displayBatch.revisionNumber}차 처리` : checklist.admissionNotice ? "수업 선택" : "시작 전"}</Badge>
       </div>
 
       <div role="group" aria-label={permissions.canManage ? undefined : "읽기 전용 입학 처리 상태"}>

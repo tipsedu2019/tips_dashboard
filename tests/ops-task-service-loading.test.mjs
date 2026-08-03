@@ -307,7 +307,7 @@ function createWorkspaceLoaderHarness({
       return {
         select(columns) {
           assert.ok(
-            columns === "*" || columns.includes("ops_registration_details(task_id,pipeline_status,school_grade,school_name,inquiry_at)"),
+            columns === "*" || columns.includes("ops_registration_details(task_id,pipeline_status,school_grade,school_name,parent_phone,student_phone,inquiry_at,level_test_at,level_test_completed_at,level_test_result,level_test_place,level_test_material_link,counselor,phone_consultation_at,visit_consultation_at,consultation_at,class_start_date,class_start_session,textbook_preparation,visit_consultation_place,admission_notice_sent,payment_checked,makeedu_registered,makeedu_invoice_sent,request_note)"),
             `unexpected ops task projection: ${columns}`,
           );
           counts.taskSelects.push(columns);
@@ -836,7 +836,10 @@ test("registration cold load uses the narrow parent projection and workspace tra
   }]);
   await load;
 
-  assert.match(harness.counts.taskSelects[0], /ops_registration_details\(task_id,pipeline_status,school_grade,school_name,inquiry_at\)/);
+  assert.match(
+    harness.counts.taskSelects[0],
+    /ops_registration_details\(task_id,pipeline_status,school_grade,school_name,parent_phone,student_phone,inquiry_at,level_test_at,level_test_completed_at,level_test_result,level_test_place,level_test_material_link,counselor,phone_consultation_at,visit_consultation_at,consultation_at,class_start_date,class_start_session,textbook_preparation,visit_consultation_place,admission_notice_sent,payment_checked,makeedu_registered,makeedu_invoice_sent,request_note\)/,
+  );
   assert.doesNotMatch(harness.counts.taskSelects[0], /ops_registration_details\(\*\)/);
   assert.doesNotMatch(harness.counts.taskSelects[0], /ops_task_comments/);
   assert.doesNotMatch(harness.counts.taskSelects[0], /ops_task_attachments/);

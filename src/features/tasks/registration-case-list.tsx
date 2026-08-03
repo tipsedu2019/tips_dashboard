@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { RegistrationSelect } from "./registration-select"
 import type { RegistrationCaseListViewItem } from "./registration-case-list-model"
 import { getRegistrationSummaryActionPermissions } from "./registration-track-model.js"
+import type { OpsClassOption, OpsTextbookOption } from "./ops-task-service"
 import type { OpsRegistrationWorkflowStatus } from "./registration-track-service"
 import { getRegistrationInlineWorkflowStatusOptions } from "./registration-workflow-status.js"
 
@@ -17,6 +18,8 @@ export type RegistrationCaseListProps = {
   loading?: boolean
   emptyLabel?: string
   disabled?: boolean
+  classes?: OpsClassOption[]
+  textbooks?: OpsTextbookOption[]
   onOpen: (taskId: string, preferredTrackId: string) => void
   onEdit: (taskId: string, preferredTrackId: string) => void
   onStatusChange: (
@@ -36,21 +39,28 @@ const TRACK_STATUS_LABELS: Record<OpsRegistrationWorkflowStatus, string> = {
   waiting_new_class: "신규반 대기 신청",
   waiting_next_opening: "다음 개강 알림 요청",
   enrollment_requested: "등록 신청",
-  payment_in_progress: "수납 진행 중",
+  payment_in_progress: "입학 진행 중",
   registered: "등록 완료",
   not_registered: "미등록",
   inquiry_only: "문의만",
 }
 
 const REGISTRATION_CASE_VIEW_COLUMNS = {
-  inquiry: ["학생", "진행상태", "학년 · 학교", "연락처", "문의 일시"],
-  level_test: ["학생", "진행상태", "예약 일시", "장소", "결과"],
-  consultation_requested: ["학생", "진행상태", "책임자", "기준 · 예약 일시", "장소"],
-  consultation_completed: ["학생", "진행상태", "책임자", "완료 일시"],
-  waiting: ["학생", "진행상태", "책임자", "단계 진입일시"],
-  enrollment: ["학생", "진행상태", "수업 시작", "교재 준비"],
-  payment: ["학생", "진행상태", "수업 시작", "교재 준비"],
-  completed: ["학생", "진행상태", "책임자", "완료 일시"],
+  inquiry: ["학생", "빠른 처리", "연락처", "문의 일시", "요청 사항"],
+  level_test: ["학생", "빠른 처리", "예약 일시", "장소", "레벨테스트 결과"],
+  consultation_requested: ["학생", "빠른 처리", "상담 방식", "책임자", "예약 일시 · 장소"],
+  consultation_completed: ["학생", "빠른 처리", "책임자", "완료 일시"],
+  waiting: ["학생", "빠른 처리", "책임자", "대기 유형 · 수업", "진입 일시"],
+  enrollment: ["학생", "빠른 처리", "수강 수업", "교재", "수업 시작"],
+  payment: ["학생", "빠른 처리", "입학신청서", "메이크에듀", "청구서", "수납"],
+  completed: ["학생", "빠른 처리", "책임자", "등록 수업", "완료 일시"],
+} as const
+
+const WAITING_KIND_LABELS = {
+  current_class: "현재반 대기",
+  current_term_opening: "신규반 대기",
+  next_term_opening: "다음 개강 알림",
+  "": "미정",
 } as const
 
 const REGISTRATION_CASE_INITIAL_RENDER_LIMIT = 40
@@ -61,19 +71,88 @@ const REGISTRATION_CASE_DATE_FORMATTER = new Intl.DateTimeFormat("ko-KR", {
   minute: "2-digit",
 })
 
+const REGISTRATION_CASE_PILL_TONE_CLASS_NAMES = {
+  neutral: "border-border/80 bg-muted/55 text-muted-foreground",
+  primary: "border-primary/20 bg-primary/5 text-primary",
+  success: "border-emerald-200/80 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300",
+  warning: "border-amber-200/80 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300",
+} as const
+
+type RegistrationCasePillTone = keyof typeof REGISTRATION_CASE_PILL_TONE_CLASS_NAMES
+
+function RegistrationCasePill({
+  children,
+  tone = "neutral",
+  className = "",
+}: {
+  children: ReactNode
+  tone?: RegistrationCasePillTone
+  className?: string
+}) {
+  return (
+    <span className={[
+      "inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4 [overflow-wrap:anywhere]",
+      REGISTRATION_CASE_PILL_TONE_CLASS_NAMES[tone],
+      className,
+    ].filter(Boolean).join(" ")}>
+      {children}
+    </span>
+  )
+}
+
+function RegistrationCaseStudentIdentity({
+  studentName,
+  schoolGrade,
+  schoolName,
+}: {
+  studentName: string
+  schoolGrade?: string | null
+  schoolName?: string | null
+}) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+      <span className="min-w-0 font-medium">{studentName}</span>
+      {schoolGrade ? <RegistrationCasePill>{schoolGrade}</RegistrationCasePill> : null}
+      {schoolName ? <RegistrationCasePill>{schoolName}</RegistrationCasePill> : null}
+    </div>
+  )
+}
+
+function RegistrationCaseTrackValue({
+  track,
+  children,
+}: {
+  track: RegistrationCaseListViewItem["matchingTracks"][number]
+  children: ReactNode
+}) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+      <RegistrationCasePill tone="primary" className="shrink-0">{track.subject}</RegistrationCasePill>
+      <div className="min-w-0">{children}</div>
+    </div>
+  )
+}
+
+function RegistrationCaseCompletionPill({
+  complete,
+  completeLabel,
+  pendingLabel,
+}: {
+  complete: boolean
+  completeLabel: string
+  pendingLabel: string
+}) {
+  return <RegistrationCasePill tone={complete ? "success" : "neutral"}>{complete ? completeLabel : pendingLabel}</RegistrationCasePill>
+}
+
 function RegistrationTrackStatusBadge({ status }: { status: OpsRegistrationWorkflowStatus }) {
   const completed = status === "registered" || status === "not_registered" || status === "inquiry_only"
   const attention = status === "waiting_current_class" || status === "waiting_new_class" || status === "waiting_next_opening"
 
   return (
-    <span className={`text-xs font-medium ${completed
-      ? "text-muted-foreground"
-      : attention
-        ? "text-amber-700"
-        : "text-primary"
-    }`}>
+    <RegistrationCasePill tone={completed ? "neutral" : attention ? "warning" : "primary"}>
       {TRACK_STATUS_LABELS[status]}
-    </span>
+    </RegistrationCasePill>
   )
 }
 
@@ -115,7 +194,7 @@ function RegistrationTrackStatusControl({
         disabled={disabled}
         size="sm"
         onValueChange={(value) => onStatusChange(track, value as OpsRegistrationWorkflowStatus)}
-        className="h-8 w-auto border-transparent bg-transparent px-2 text-xs font-medium text-primary shadow-none hover:border-border hover:bg-muted/40 focus-visible:ring-2 disabled:cursor-wait disabled:opacity-60"
+        className="h-8 w-full min-w-0 border-transparent bg-transparent px-2 text-xs font-medium text-primary shadow-none hover:border-border hover:bg-muted/40 focus-visible:ring-2 disabled:cursor-wait disabled:opacity-60"
       />
     </div>
   )
@@ -128,10 +207,17 @@ function formatRegistrationCaseTime(value: string) {
   return REGISTRATION_CASE_DATE_FORMATTER.format(date)
 }
 
+function getRegistrationCaseConsultationMode(track: RegistrationCaseListViewItem["matchingTracks"][number]) {
+  if (track.phoneReadyAt) return "phone"
+  if (track.visitScheduledAt) return "visit"
+  return ""
+}
+
 function getRegistrationCaseTrackTimeLabel(track: RegistrationCaseListViewItem["matchingTracks"][number]) {
-  if (track.status === "consultation_waiting") return formatRegistrationCaseTime(track.phoneReadyAt || "")
-  if (track.status === "visit_consultation_scheduled") return formatRegistrationCaseTime(track.visitScheduledAt)
-  return formatRegistrationCaseTime(track.stageEnteredAt)
+  const mode = getRegistrationCaseConsultationMode(track)
+  if (mode === "phone") return formatRegistrationCaseTime(track.phoneReadyAt || "")
+  if (mode === "visit") return formatRegistrationCaseTime(track.visitScheduledAt || "")
+  return "미정"
 }
 
 function RegistrationCaseCell({ label, children, cellRole }: { label: string; children: ReactNode; cellRole?: "cell" }) {
@@ -148,20 +234,41 @@ function RegistrationCaseProcessCells({
   viewerId,
   viewerRole,
   disabled = false,
+  classes = [],
+  textbooks = [],
   onStatusChange,
   cellRole,
-}: Pick<RegistrationCaseRowProps, "item" | "viewerId" | "viewerRole" | "disabled" | "onStatusChange" | "cellRole">) {
+}: Pick<RegistrationCaseRowProps, "item" | "viewerId" | "viewerRole" | "disabled" | "classes" | "textbooks" | "onStatusChange" | "cellRole">) {
   const registration = item.task.registration
-  const student = <div className="font-medium">{item.studentName}</div>
+  const student = <RegistrationCaseStudentIdentity
+    studentName={item.studentName}
+    schoolGrade={registration?.schoolGrade}
+    schoolName={registration?.schoolName}
+  />
+  const classLabelById = new Map(classes.map((classItem) => [classItem.id, classItem.label]))
+  const textbookLabelById = new Map(textbooks.map((textbook) => [textbook.id, textbook.label]))
   const trackLines = (render: (track: RegistrationCaseListViewItem["matchingTracks"][number]) => ReactNode) => (
     <div className="grid gap-1">{item.matchingTracks.map((track) => <div key={track.trackId}>{render(track)}</div>)}</div>
   )
+  const enrollmentRows = (track: RegistrationCaseListViewItem["matchingTracks"][number]) => track.enrollmentDetailRows || []
+  const enrollmentClassLabel = (track: RegistrationCaseListViewItem["matchingTracks"][number]) => {
+    const labels = enrollmentRows(track).map((row) => classLabelById.get(row.classId) || "수업 정보 확인 필요").filter(Boolean)
+    return labels.length > 0 ? labels.join(", ") : item.task.className || "미정"
+  }
+  const enrollmentTextbookLabel = (track: RegistrationCaseListViewItem["matchingTracks"][number]) => {
+    const labels = enrollmentRows(track).map((row) => row.textbookId ? textbookLabelById.get(row.textbookId) || "교재 정보 확인 필요" : "보유").filter(Boolean)
+    return labels.length > 0 ? labels.join(", ") : registration?.textbookPreparation || "미정"
+  }
+  const enrollmentStartLabel = (track: RegistrationCaseListViewItem["matchingTracks"][number]) => {
+    const labels = enrollmentRows(track).map((row) => [row.classStartDate, row.classStartSession].filter(Boolean).join(" · ")).filter(Boolean)
+    return labels.length > 0 ? labels.join(", ") : [registration?.classStartDate, registration?.classStartSession].filter(Boolean).join(" · ") || "미정"
+  }
   const status = (
-    <RegistrationCaseCell label="진행상태" cellRole={cellRole}>
+    <RegistrationCaseCell label="빠른 처리" cellRole={cellRole}>
       <div className="grid gap-1">
         {item.matchingTracks.map((track) => (
           <div key={track.trackId} className="flex min-w-0 items-center gap-1.5">
-            <span className="shrink-0 text-[11px] text-muted-foreground">{track.subject}</span>
+            <RegistrationCasePill tone="primary" className="shrink-0">{track.subject}</RegistrationCasePill>
             <RegistrationTrackStatusControl
               studentName={item.studentName}
               track={track}
@@ -179,60 +286,73 @@ function RegistrationCaseProcessCells({
   if (item.viewKey === "inquiry") return <>
     <RegistrationCaseCell label="학생" cellRole={cellRole}>{student}</RegistrationCaseCell>
     {status}
-    <RegistrationCaseCell label="학년 · 학교" cellRole={cellRole}>{[registration?.schoolGrade, registration?.schoolName].filter(Boolean).join(" · ")}</RegistrationCaseCell>
     <RegistrationCaseCell label="연락처" cellRole={cellRole}><div>학부모 {registration?.parentPhone || "미정"}</div>{registration?.studentPhone ? <div className="text-muted-foreground">학생 {registration.studentPhone}</div> : null}</RegistrationCaseCell>
     <RegistrationCaseCell label="문의 일시" cellRole={cellRole}>{formatRegistrationCaseTime(registration?.inquiryAt || item.representativeTrack.stageEnteredAt)}</RegistrationCaseCell>
+    <RegistrationCaseCell label="요청 사항" cellRole={cellRole}>{registration?.requestNote || "없음"}</RegistrationCaseCell>
   </>
 
   if (item.viewKey === "level_test") return <>
     <RegistrationCaseCell label="학생" cellRole={cellRole}>{student}</RegistrationCaseCell>
     {status}
-    <RegistrationCaseCell label="예약 일시" cellRole={cellRole}>{registration?.levelTestAt ? formatRegistrationCaseTime(registration.levelTestAt) : trackLines((track) => formatRegistrationCaseTime(track.stageEnteredAt))}</RegistrationCaseCell>
-    <RegistrationCaseCell label="장소" cellRole={cellRole}>{registration?.levelTestPlace}</RegistrationCaseCell>
-    <RegistrationCaseCell label="결과" cellRole={cellRole}>{registration?.levelTestResult || "미정"}</RegistrationCaseCell>
+    <RegistrationCaseCell label="예약 일시" cellRole={cellRole}>{registration?.levelTestAt ? formatRegistrationCaseTime(registration.levelTestAt) : "미정"}</RegistrationCaseCell>
+    <RegistrationCaseCell label="장소" cellRole={cellRole}><RegistrationCasePill>{registration?.levelTestPlace || "미정"}</RegistrationCasePill></RegistrationCaseCell>
+    <RegistrationCaseCell label="레벨테스트 결과" cellRole={cellRole}>{registration?.levelTestMaterialLink ? <a href={registration.levelTestMaterialLink} target="_blank" rel="noreferrer" className="font-medium text-primary underline-offset-4 hover:underline" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>결과 링크 열기</a> : <RegistrationCasePill tone={registration?.levelTestResult ? "primary" : "neutral"}>{registration?.levelTestResult || "미등록"}</RegistrationCasePill>}</RegistrationCaseCell>
   </>
 
   if (item.viewKey === "consultation_requested") return <>
     <RegistrationCaseCell label="학생" cellRole={cellRole}>{student}</RegistrationCaseCell>
     {status}
-    <RegistrationCaseCell label="책임자" cellRole={cellRole}>{trackLines((track) => `${track.subject} · ${track.directorName || "미지정"}`)}</RegistrationCaseCell>
-    <RegistrationCaseCell label="기준 · 예약 일시" cellRole={cellRole}>{trackLines((track) => `${track.subject} · ${getRegistrationCaseTrackTimeLabel(track)}`)}</RegistrationCaseCell>
-    <RegistrationCaseCell label="장소" cellRole={cellRole}>{trackLines((track) => track.visitPlace || (track.status === "consultation_waiting" ? "전화상담" : "미정"))}</RegistrationCaseCell>
+    <RegistrationCaseCell label="상담 방식" cellRole={cellRole}>{trackLines((track) => {
+      const mode = getRegistrationCaseConsultationMode(track)
+      return <RegistrationCaseTrackValue track={track}><RegistrationCasePill tone={mode ? "primary" : "neutral"}>{mode === "phone" ? "전화상담" : mode === "visit" ? "방문상담" : "미정"}</RegistrationCasePill></RegistrationCaseTrackValue>
+    })}</RegistrationCaseCell>
+    <RegistrationCaseCell label="책임자" cellRole={cellRole}>{trackLines((track) => <RegistrationCaseTrackValue track={track}>{track.directorName || "미지정"}</RegistrationCaseTrackValue>)}</RegistrationCaseCell>
+    <RegistrationCaseCell label="예약 일시 · 장소" cellRole={cellRole}>{trackLines((track) => {
+      const mode = getRegistrationCaseConsultationMode(track)
+      if (mode === "phone") return <RegistrationCaseTrackValue track={track}>{getRegistrationCaseTrackTimeLabel(track)} · 전화상담</RegistrationCaseTrackValue>
+      if (mode === "visit") return <RegistrationCaseTrackValue track={track}>{getRegistrationCaseTrackTimeLabel(track)} · <RegistrationCasePill>{track.visitPlace || "장소 미정"}</RegistrationCasePill></RegistrationCaseTrackValue>
+      return <RegistrationCaseTrackValue track={track}>미정</RegistrationCaseTrackValue>
+    })}</RegistrationCaseCell>
   </>
 
   if (item.viewKey === "consultation_completed") return <>
     <RegistrationCaseCell label="학생" cellRole={cellRole}>{student}</RegistrationCaseCell>
     {status}
-    <RegistrationCaseCell label="책임자" cellRole={cellRole}>{trackLines((track) => track.directorName || "미지정")}</RegistrationCaseCell>
-    <RegistrationCaseCell label="완료 일시" cellRole={cellRole}>{trackLines((track) => formatRegistrationCaseTime(track.workflowStatusEnteredAt))}</RegistrationCaseCell>
+    <RegistrationCaseCell label="책임자" cellRole={cellRole}>{trackLines((track) => <RegistrationCaseTrackValue track={track}>{track.directorName || "미지정"}</RegistrationCaseTrackValue>)}</RegistrationCaseCell>
+    <RegistrationCaseCell label="완료 일시" cellRole={cellRole}>{trackLines((track) => <RegistrationCaseTrackValue track={track}>{formatRegistrationCaseTime(track.workflowStatusEnteredAt)}</RegistrationCaseTrackValue>)}</RegistrationCaseCell>
   </>
 
   if (item.viewKey === "waiting") return <>
     <RegistrationCaseCell label="학생" cellRole={cellRole}>{student}</RegistrationCaseCell>
     {status}
-    <RegistrationCaseCell label="책임자" cellRole={cellRole}>{trackLines((track) => track.directorName || "미지정")}</RegistrationCaseCell>
-    <RegistrationCaseCell label="단계 진입일시" cellRole={cellRole}>{trackLines((track) => formatRegistrationCaseTime(track.stageEnteredAt))}</RegistrationCaseCell>
+    <RegistrationCaseCell label="책임자" cellRole={cellRole}>{trackLines((track) => <RegistrationCaseTrackValue track={track}>{track.directorName || "미지정"}</RegistrationCaseTrackValue>)}</RegistrationCaseCell>
+    <RegistrationCaseCell label="대기 유형 · 수업" cellRole={cellRole}>{trackLines((track) => <RegistrationCaseTrackValue track={track}><RegistrationCasePill tone="warning">{WAITING_KIND_LABELS[track.waitingDetailKind || track.waitingKind]}</RegistrationCasePill> <RegistrationCasePill>{track.waitingDetailClassId ? classLabelById.get(track.waitingDetailClassId) || track.waitingDetailClassId : "수업 미지정"}</RegistrationCasePill></RegistrationCaseTrackValue>)}</RegistrationCaseCell>
+    <RegistrationCaseCell label="진입 일시" cellRole={cellRole}>{trackLines((track) => <RegistrationCaseTrackValue track={track}>{formatRegistrationCaseTime(track.workflowStatusEnteredAt)}</RegistrationCaseTrackValue>)}</RegistrationCaseCell>
   </>
 
   if (item.viewKey === "enrollment") return <>
     <RegistrationCaseCell label="학생" cellRole={cellRole}>{student}</RegistrationCaseCell>
     {status}
-    <RegistrationCaseCell label="수업 시작" cellRole={cellRole}>{[registration?.classStartDate, registration?.classStartSession].filter(Boolean).join(" · ")}</RegistrationCaseCell>
-    <RegistrationCaseCell label="교재 준비" cellRole={cellRole}>{registration?.textbookPreparation || "미정"}</RegistrationCaseCell>
+    <RegistrationCaseCell label="수강 수업" cellRole={cellRole}>{trackLines((track) => <RegistrationCaseTrackValue track={track}><RegistrationCasePill tone="primary">{enrollmentClassLabel(track)}</RegistrationCasePill></RegistrationCaseTrackValue>)}</RegistrationCaseCell>
+    <RegistrationCaseCell label="교재" cellRole={cellRole}>{trackLines((track) => <RegistrationCaseTrackValue track={track}><RegistrationCasePill>{enrollmentTextbookLabel(track)}</RegistrationCasePill></RegistrationCaseTrackValue>)}</RegistrationCaseCell>
+    <RegistrationCaseCell label="수업 시작" cellRole={cellRole}>{trackLines((track) => <RegistrationCaseTrackValue track={track}>{enrollmentStartLabel(track)}</RegistrationCaseTrackValue>)}</RegistrationCaseCell>
   </>
 
   if (item.viewKey === "payment") return <>
     <RegistrationCaseCell label="학생" cellRole={cellRole}>{student}</RegistrationCaseCell>
     {status}
-    <RegistrationCaseCell label="수업 시작" cellRole={cellRole}>{[registration?.classStartDate, registration?.classStartSession].filter(Boolean).join(" · ")}</RegistrationCaseCell>
-    <RegistrationCaseCell label="교재 준비" cellRole={cellRole}>{registration?.textbookPreparation || "미정"}</RegistrationCaseCell>
+    <RegistrationCaseCell label="입학신청서" cellRole={cellRole}><RegistrationCaseCompletionPill complete={Boolean(registration?.admissionNoticeSent)} completeLabel="발송 완료" pendingLabel="발송 전" /></RegistrationCaseCell>
+    <RegistrationCaseCell label="메이크에듀" cellRole={cellRole}><RegistrationCaseCompletionPill complete={Boolean(registration?.makeeduRegistered)} completeLabel="등록 완료" pendingLabel="미등록" /></RegistrationCaseCell>
+    <RegistrationCaseCell label="청구서" cellRole={cellRole}><RegistrationCaseCompletionPill complete={Boolean(registration?.makeeduInvoiceSent)} completeLabel="발송 완료" pendingLabel="발송 전" /></RegistrationCaseCell>
+    <RegistrationCaseCell label="수납" cellRole={cellRole}><RegistrationCaseCompletionPill complete={Boolean(registration?.paymentChecked)} completeLabel="확인 완료" pendingLabel="확인 전" /></RegistrationCaseCell>
   </>
 
   return <>
     <RegistrationCaseCell label="학생" cellRole={cellRole}>{student}</RegistrationCaseCell>
     {status}
-    <RegistrationCaseCell label="책임자" cellRole={cellRole}>{trackLines((track) => track.directorName || "미지정")}</RegistrationCaseCell>
-    <RegistrationCaseCell label="완료 일시" cellRole={cellRole}>{trackLines((track) => formatRegistrationCaseTime(track.workflowStatusEnteredAt))}</RegistrationCaseCell>
+    <RegistrationCaseCell label="책임자" cellRole={cellRole}>{trackLines((track) => <RegistrationCaseTrackValue track={track}>{track.directorName || "미지정"}</RegistrationCaseTrackValue>)}</RegistrationCaseCell>
+    <RegistrationCaseCell label="등록 수업" cellRole={cellRole}>{trackLines((track) => <RegistrationCaseTrackValue track={track}><RegistrationCasePill tone="primary">{enrollmentClassLabel(track)}</RegistrationCasePill></RegistrationCaseTrackValue>)}</RegistrationCaseCell>
+    <RegistrationCaseCell label="완료 일시" cellRole={cellRole}>{trackLines((track) => <RegistrationCaseTrackValue track={track}>{formatRegistrationCaseTime(track.workflowStatusEnteredAt)}</RegistrationCaseTrackValue>)}</RegistrationCaseCell>
   </>
 }
 
@@ -268,6 +388,8 @@ export function RegistrationCaseListRow({
   viewerId,
   viewerRole,
   disabled,
+  classes,
+  textbooks,
   onStatusChange,
   canDelete,
   onDelete,
@@ -281,6 +403,8 @@ export function RegistrationCaseListRow({
         viewerId={viewerId}
         viewerRole={viewerRole}
         disabled={disabled}
+        classes={classes}
+        textbooks={textbooks}
         onStatusChange={onStatusChange}
         cellRole={cellRole}
       />
@@ -296,6 +420,8 @@ export function RegistrationCaseList({
   loading = false,
   emptyLabel = "표시할 등록 신청이 없습니다.",
   disabled = false,
+  classes = [],
+  textbooks = [],
   onOpen,
   onEdit,
   onStatusChange,
@@ -350,7 +476,7 @@ export function RegistrationCaseList({
                 onClick={() => openRegistrationCase(item)}
                 onKeyDown={(event) => handleRegistrationCaseKeyDown(event, item)}
               >
-                <RegistrationCaseListRow item={item} viewerId={viewerId} viewerRole={viewerRole} disabled={disabled} onOpen={onOpen} onEdit={onEdit} onStatusChange={onStatusChange} canDelete={canDelete} onDelete={onDelete} showActionColumn={showActionColumn} />
+                <RegistrationCaseListRow item={item} viewerId={viewerId} viewerRole={viewerRole} disabled={disabled} classes={classes} textbooks={textbooks} onOpen={onOpen} onEdit={onEdit} onStatusChange={onStatusChange} canDelete={canDelete} onDelete={onDelete} showActionColumn={showActionColumn} />
               </article>
             ))}
           </div>
@@ -371,7 +497,7 @@ export function RegistrationCaseList({
                 onClick={() => openRegistrationCase(item)}
                 onKeyDown={(event) => handleRegistrationCaseKeyDown(event, item)}
               >
-                <RegistrationCaseListRow item={item} viewerId={viewerId} viewerRole={viewerRole} disabled={disabled} onOpen={onOpen} onEdit={onEdit} onStatusChange={onStatusChange} canDelete={canDelete} onDelete={onDelete} cellRole="cell" showActionColumn={showActionColumn} />
+                <RegistrationCaseListRow item={item} viewerId={viewerId} viewerRole={viewerRole} disabled={disabled} classes={classes} textbooks={textbooks} onOpen={onOpen} onEdit={onEdit} onStatusChange={onStatusChange} canDelete={canDelete} onDelete={onDelete} cellRole="cell" showActionColumn={showActionColumn} />
               </div>
             ))}
           </div>

@@ -18,6 +18,8 @@ import {
   getRegistrationSelectedAdmissionEnrollmentIds,
   getRegistrationEnrollmentBlockers,
   getRegistrationLevelTestAppointmentStatus,
+  getRegistrationConsultationOutcomeSaveState,
+  getRegistrationActiveConsultation,
   getRegistrationSummaryActionPermissions,
   getRegistrationActionPermissions,
   getAllowedRegistrationTrackActions,
@@ -537,6 +539,29 @@ test("admission application state follows eligible child tracks and active messa
   }
 })
 
+test("manual enrollment status and persisted planned rows make admission actionable without legacy pipeline routing", () => {
+  assert.deepEqual(getRegistrationAdmissionApplicationState({
+    tracks: [
+      { id: "english", status: "inquiry", workflowStatus: "enrollment_requested" },
+      { id: "math", status: "inquiry", workflowStatus: "consultation_completed" },
+    ],
+    enrollments: [
+      { id: "row-english", trackId: "english", status: "planned", admissionBatchId: null },
+      { id: "row-math", trackId: "math", status: "planned", admissionBatchId: null },
+    ],
+    admissionNoticeSent: false,
+    admissionApplicationMessageStatus: "",
+    admissionApplicationMessageClaimActive: false,
+  }), {
+    targetTrackIds: ["english", "math"],
+    eligible: true,
+    delivered: false,
+    syncNeeded: false,
+    blocked: false,
+    canSend: true,
+  })
+})
+
 test("admission application targets decided and unbatched add-class tracks exactly once", () => {
   const tracks = [
     { id: "english", status: "enrollment_decided" },
@@ -802,7 +827,7 @@ test("UI action permissions mirror the database mutation matrix", () => {
     canCompleteConsultation: false,
     readOnly: true,
   })
-  assert.equal(getRegistrationActionPermissions({ viewerRole: "teacher", viewerId: "director-1", track, activeConsultation }).canCompleteConsultation, false)
+  assert.equal(getRegistrationActionPermissions({ viewerRole: "teacher", viewerId: "director-1", track, activeConsultation }).canCompleteConsultation, true)
   const scienceTrack = { ...track, id: "science", subject: "과학" }
   const scienceConsultation = { ...activeConsultation, trackId: "science" }
   assert.deepEqual(getRegistrationActionPermissions({
@@ -829,6 +854,67 @@ test("UI action permissions mirror the database mutation matrix", () => {
   }).canCompleteConsultation, false)
   assert.equal(getRegistrationSummaryActionPermissions({ viewerRole: "admin", viewerId: "director-1", track }).canOpenConsultationCompletion, true)
   assert.equal(getRegistrationSummaryActionPermissions({ viewerRole: "admin", viewerId: "director-2", track }).canOpenConsultationCompletion, false)
+})
+
+test("active consultation selection follows persisted activity instead of the legacy pipeline status", () => {
+  const consultations = [
+    { id: "completed", trackId: "eng", mode: "phone", status: "completed", updatedAt: "2026-08-03T01:00:00Z" },
+    { id: "visit", trackId: "eng", mode: "visit", status: "scheduled", updatedAt: "2026-08-03T02:00:00Z" },
+    { id: "phone", trackId: "eng", mode: "phone", status: "waiting", updatedAt: "2026-08-03T03:00:00Z" },
+    { id: "other", trackId: "math", mode: "phone", status: "waiting", updatedAt: "2026-08-03T04:00:00Z" },
+  ]
+
+  assert.equal(getRegistrationActiveConsultation({
+    trackId: "eng",
+    consultations,
+  })?.id, "phone")
+  assert.equal(getRegistrationActiveConsultation({
+    trackId: "missing",
+    consultations,
+  }), null)
+})
+
+test("consultation outcome save state distinguishes persisted, changed, and unauthorized views", () => {
+  assert.deepEqual(getRegistrationConsultationOutcomeSaveState({
+    savedOutcome: "waiting",
+    draftOutcome: "waiting",
+    canCompleteConsultation: true,
+  }), {
+    editable: true,
+    dirty: false,
+    canSave: false,
+    label: "저장됨",
+  })
+  assert.deepEqual(getRegistrationConsultationOutcomeSaveState({
+    savedOutcome: "waiting",
+    draftOutcome: "enrollment",
+    canCompleteConsultation: true,
+  }), {
+    editable: true,
+    dirty: true,
+    canSave: true,
+    label: "상담 결과 저장",
+  })
+  assert.deepEqual(getRegistrationConsultationOutcomeSaveState({
+    savedOutcome: "",
+    draftOutcome: "enrollment",
+    canCompleteConsultation: true,
+  }), {
+    editable: true,
+    dirty: true,
+    canSave: true,
+    label: "상담 결과 저장",
+  })
+  assert.deepEqual(getRegistrationConsultationOutcomeSaveState({
+    savedOutcome: "waiting",
+    draftOutcome: "enrollment",
+    canCompleteConsultation: false,
+  }), {
+    editable: false,
+    dirty: true,
+    canSave: false,
+    label: "상담 결과 저장",
+  })
 })
 
 test("a second admission batch cannot start while another batch is open", () => {

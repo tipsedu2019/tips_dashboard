@@ -3,6 +3,7 @@
 import { Children, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 
 import { RegistrationApplicationAdmissionSection } from "./registration-application-admission-section"
 import { RegistrationApplicationConsultationSection } from "./registration-application-consultation-section"
@@ -18,11 +19,13 @@ import {
   getRegistrationEnrollmentDirtyKey,
   getRegistrationApplicationSectionStates,
   getRegistrationApplicationTrackState,
+  getRegistrationConsultationModeDraft,
   resolveRegistrationActiveTrackId,
   settleRegistrationConflictComparison,
   updateRegistrationApplicationDirtyKeys,
   type RegistrationApplicationDirtyKey,
   type RegistrationApplicationSectionKey,
+  type RegistrationConsultationMode,
 } from "./registration-application-model"
 import { RegistrationApplicationPlacementSection } from "./registration-application-placement-section"
 import { RegistrationApplicationHistoryAction } from "./registration-application-history-action"
@@ -41,8 +44,10 @@ import {
   type RegistrationMigrationConflictState,
   type RegistrationMigrationDirtyScope,
   type RegistrationTrackActionPermissions,
+  type RegistrationTrackDirectorSectionHandle,
 } from "./registration-application-track-actions"
 import { RegistrationAppointmentEditor } from "./registration-appointment-editor"
+import { RegistrationSaveButton } from "./registration-save-button"
 import { clearRegistrationEnrollmentDrafts } from "./registration-enrollment-editor"
 import {
   RegistrationAdmissionPanel,
@@ -62,11 +67,13 @@ import type { RegistrationSubjectCapability } from "./registration-subject-capab
 import { ACADEMIC_SUBJECT_VALUES } from "../../lib/academic-subject-registry.ts"
 import {
   getRegistrationActionPermissions,
+  getRegistrationActiveConsultation,
   getRegistrationAdmissionApplicationState,
   getRegistrationCurrentClassWaitClassId,
 } from "./registration-track-model.js"
 import {
   saveRegistrationCaseInquiry,
+  saveRegistrationPhoneConsultation,
   setRegistrationWorkflowStatus,
   type OpsRegistrationAppointment,
   type OpsRegistrationCaseDetail,
@@ -256,6 +263,10 @@ export function RegistrationApplication({
   const [migrationDirectorResetVersion, setMigrationDirectorResetVersion] = useState(0)
   const [migrationReviewResetVersion, setMigrationReviewResetVersion] = useState(0)
   const [workflowStatusSaving, setWorkflowStatusSaving] = useState(false)
+  const [consultationModeDrafts, setConsultationModeDrafts] = useState<Record<string, RegistrationConsultationMode>>({})
+  const [consultationDirectorDirtyByTrackId, setConsultationDirectorDirtyByTrackId] = useState<Record<string, boolean>>({})
+  const [consultationSharedSaving, setConsultationSharedSaving] = useState(false)
+  const activeConsultationDirectorRef = useRef<RegistrationTrackDirectorSectionHandle | null>(null)
   const dirtyKeysRef = useRef<Set<RegistrationApplicationDirtyKey>>(new Set())
   const dirtyProducersRef = useRef(new Map<RegistrationApplicationDirtyKey, Set<string>>())
   const onDirtyChangeRef = useRef(onDirtyChange)
@@ -303,6 +314,9 @@ export function RegistrationApplication({
     setMigrationConflictRetrying(false)
     setMigrationDirectorResetVersion(0)
     setMigrationReviewResetVersion(0)
+    setConsultationModeDrafts({})
+    setConsultationDirectorDirtyByTrackId({})
+    setConsultationSharedSaving(false)
   }, [detail.task.id])
   useEffect(() => {
     setDirty("inquiry:migration-conflict", Boolean(activeMigrationConflictState))
@@ -361,11 +375,10 @@ export function RegistrationApplication({
   }
 
   const permissionsByTrackId = useMemo(() => new Map(orderedTracks.map((track) => {
-    const activeConsultation = detail.consultations.find((item) => (
-      item.trackId === track.id
-      && ((track.status === "consultation_waiting" && item.mode === "phone" && item.status === "waiting")
-        || (track.status === "visit_consultation_scheduled" && item.mode === "visit" && item.status === "scheduled"))
-    )) || null
+    const activeConsultation = getRegistrationActiveConsultation({
+      trackId: track.id,
+      consultations: detail.consultations,
+    })
     return [track.id, getRegistrationActionPermissions({ viewerId, viewerRole, track, activeConsultation }) as RegistrationTrackActionPermissions]
   })), [detail.consultations, orderedTracks, viewerId, viewerRole])
   const trackStates = orderedTracks.map((track) => getRegistrationApplicationTrackState({
@@ -374,11 +387,10 @@ export function RegistrationApplication({
     canCompleteConsultation: permissionsByTrackId.get(track.id)?.canCompleteConsultation || false,
   }))
   const trackContexts: TrackContext[] = orderedTracks.map((track) => {
-    const activeConsultation = detail.consultations.find((item) => (
-      item.trackId === track.id
-      && ((track.status === "consultation_waiting" && item.mode === "phone" && item.status === "waiting")
-        || (track.status === "visit_consultation_scheduled" && item.mode === "visit" && item.status === "scheduled"))
-    )) || null
+    const activeConsultation = getRegistrationActiveConsultation({
+      trackId: track.id,
+      consultations: detail.consultations,
+    })
     const visitConsultation = detail.consultations.find((item) => item.trackId === track.id && item.mode === "visit" && item.status === "scheduled") || null
     const latestConsultation = detail.consultations
       .filter((item) => item.trackId === track.id)
@@ -596,6 +608,14 @@ export function RegistrationApplication({
     return null
   }
 
+  function setConsultationDirectorDirty(trackId: string, dirty: boolean) {
+    setConsultationDirectorDirtyByTrackId((current) => {
+      if (Boolean(current[trackId]) === dirty) return current
+      return { ...current, [trackId]: dirty }
+    })
+    setDirty(`consultation:track-${trackId}`, dirty, `director:${trackId}`)
+  }
+
   function renderTrackFrames(section: RegistrationApplicationSectionKey, placementMode?: RegistrationPlacementMode) {
     return trackContexts
       .filter((context) => hasRegistrationTrackFrameContent({
@@ -655,6 +675,7 @@ export function RegistrationApplication({
         ) : null}
         {section === "consultation" && REGISTRATION_DIRECTOR_VISIBLE_STATUSES.has(context.track.status) && !context.track.migrationReviewRequired ? (
           <RegistrationTrackDirectorSection
+            ref={activeTrackId === context.track.id ? activeConsultationDirectorRef : undefined}
             task={task}
             detail={detail}
             track={context.track}
@@ -667,7 +688,8 @@ export function RegistrationApplication({
             onOpenVisit={onFocusTrack}
             onReload={onReload}
             onWarning={onWarning}
-            onDirtyChange={(dirty) => setDirty(`consultation:track-${context.track.id}`, dirty, `director:${context.track.id}`)}
+            onDirtyChange={(dirty) => setConsultationDirectorDirty(context.track.id, dirty)}
+            sharedSave
           />
         ) : null}
         {renderTrackActions(context, section, placementMode)}
@@ -678,7 +700,7 @@ export function RegistrationApplication({
               key={`consultation:${context.latestConsultation.id}:${context.latestConsultation.updatedAt}`}
               subject={context.track.subject}
               consultation={context.latestConsultation}
-              active
+              editable={context.permissions.canCompleteConsultation}
               onReload={onReload}
               onWarning={onWarning}
               onDirtyChange={(dirty) => setDirty(`consultation:track-${context.track.id}`, dirty, `outcome:${context.latestConsultation?.id || context.track.id}`)}
@@ -701,6 +723,56 @@ export function RegistrationApplication({
   const activeVisitAppointment = activeVisitPlan
     ? detail.appointments.find((item) => item.id === activeVisitPlan.appointmentId) || null
     : null
+  const phoneConsultation = activeTrack
+    ? detail.consultations.find((item) => (
+      item.trackId === activeTrack.id && item.mode === "phone" && item.status !== "canceled"
+    )) || null
+    : null
+  const activeConsultationMode = activeTrack ? getRegistrationConsultationModeDraft({
+    draftMode: consultationModeDrafts[activeTrack.id] || null,
+    hasVisitAppointment: Boolean(activeVisitAppointment),
+  }) : null
+  const activeConsultationDirectorDirty = activeTrack
+    ? Boolean(consultationDirectorDirtyByTrackId[activeTrack.id])
+    : false
+
+  function selectConsultationMode(mode: RegistrationConsultationMode) {
+    if (!activeTrack || !activeConsultationMode || (mode === "phone" && activeConsultationMode.phoneDisabled)) return
+    const next = getRegistrationConsultationModeDraft({
+      draftMode: mode,
+      hasVisitAppointment: Boolean(activeVisitAppointment),
+    })
+    setConsultationModeDrafts((current) => ({ ...current, [activeTrack.id]: next.mode }))
+    setDirty(`consultation:mode-${activeTrack.id}`, next.dirty)
+  }
+
+  async function saveActiveConsultationDirector() {
+    if (activeConsultationDirectorRef.current) {
+      return activeConsultationDirectorRef.current.savePending()
+    }
+    if (activeTrack?.directorProfileId) return true
+    onWarning("상담 책임자를 선택하세요.")
+    return false
+  }
+
+  async function savePhoneConsultation() {
+    if (!activeTrack || consultationSharedSaving) return
+    setConsultationSharedSaving(true)
+    try {
+      const saved = await saveActiveConsultationDirector()
+      if (!saved) return
+      await saveRegistrationPhoneConsultation({
+        trackId: activeTrack.id,
+        requestKey: `registration-phone-consultation:${activeTrack.id}:${crypto.randomUUID()}`,
+      })
+      setDirty(`consultation:mode-${activeTrack.id}`, false)
+      await onReload(activeTrack.id)
+    } catch (error) {
+      onWarning(errorMessage(error, "상담 정보를 저장하지 못했습니다."))
+    } finally {
+      setConsultationSharedSaving(false)
+    }
+  }
 
   return (
     <RegistrationApplicationShell
@@ -796,26 +868,74 @@ export function RegistrationApplication({
       )}
       consultation={(
         <RegistrationApplicationConsultationSection editable={openSectionStates.consultation.editable}>
-          {renderTrackFrames("consultation")}
-          {activeTrack ? (
-            <RegistrationAppointmentEditor
-              key={`visit_consultation:${activeTrack.id}:${activeVisitAppointment?.id || "new"}:${activeVisitAppointment?.notificationRevision ?? "new"}`}
-              kind="visit_consultation"
-              taskId={detail.task.id}
-              eligibleTracks={orderedTracks}
-              initialTrackId={activeTrack.id}
-              appointment={activeVisitAppointment}
-              activities={detail.consultations.filter((item) => item.mode === "visit")}
-              embedded
-              subjectScoped
-              visibleTrackId={activeTrack.id}
-              onSaved={handleAppointmentSaved}
-              onWarning={onWarning}
-              onReload={onReload}
-              notificationToken={notificationToken}
-              onDirtyChange={(dirty) => setDirty(`consultation:appointment-${activeVisitAppointment?.id || activeTrack.id}`, dirty)}
-            />
-          ) : null}
+          {activeTrack && activeConsultationMode ? (
+            <div className="grid gap-4">
+              <fieldset className="m-0 grid min-w-0 gap-1.5 border-0 p-0">
+                <legend className="text-sm font-medium">상담 방식</legend>
+                <div role="group" aria-label={`${activeTrack.subject} 상담 방식`} className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    aria-pressed={activeConsultationMode.mode === "phone"}
+                    variant={activeConsultationMode.mode === "phone" ? "default" : "outline"}
+                    className="h-10"
+                    onClick={() => selectConsultationMode("phone")}
+                    disabled={activeConsultationMode.phoneDisabled || consultationSharedSaving}
+                  >전화상담</Button>
+                  <Button
+                    type="button"
+                    aria-pressed={activeConsultationMode.mode === "visit"}
+                    variant={activeConsultationMode.mode === "visit" ? "default" : "outline"}
+                    className="h-10"
+                    onClick={() => selectConsultationMode("visit")}
+                    disabled={consultationSharedSaving}
+                  >방문상담</Button>
+                </div>
+              </fieldset>
+
+              {renderTrackFrames("consultation")}
+
+              {activeConsultationMode.mode === "visit" ? (
+                <RegistrationAppointmentEditor
+                  key={`visit_consultation:${activeTrack.id}:${activeVisitAppointment?.id || "new"}:${activeVisitAppointment?.notificationRevision ?? "new"}`}
+                  kind="visit_consultation"
+                  taskId={detail.task.id}
+                  eligibleTracks={orderedTracks}
+                  initialTrackId={activeTrack.id}
+                  appointment={activeVisitAppointment}
+                  activities={detail.consultations.filter((item) => item.mode === "visit")}
+                  embedded
+                  subjectScoped
+                  visibleTrackId={activeTrack.id}
+                  onSaved={async (saved) => {
+                    setDirty(`consultation:mode-${activeTrack.id}`, false)
+                    await handleAppointmentSaved(saved)
+                  }}
+                  onBeforeSave={saveActiveConsultationDirector}
+                  externalDirty={activeConsultationDirectorDirty || activeConsultationMode.dirty}
+                  actionLabel="상담 정보 저장"
+                  saveAriaLabel={`${activeTrack.subject} 상담 정보 저장`}
+                  onWarning={onWarning}
+                  onReload={onReload}
+                  notificationToken={notificationToken}
+                  onDirtyChange={(dirty) => setDirty(`consultation:appointment-${activeVisitAppointment?.id || activeTrack.id}`, dirty)}
+                />
+              ) : (
+                <div className="flex justify-end">
+                  <RegistrationSaveButton
+                    type="button"
+                    dirty={activeConsultationDirectorDirty || !phoneConsultation}
+                    saving={consultationSharedSaving}
+                    actionLabel="상담 정보 저장"
+                    cleanLabel={phoneConsultation ? "저장됨" : activeTrack.directorProfileId ? "상담 정보 저장" : "상담 책임자를 선택하세요"}
+                    aria-label={`${activeTrack.subject} 상담 정보 저장`}
+                    onClick={() => void savePhoneConsultation()}
+                  />
+                </div>
+              )}
+            </div>
+          ) : (
+            renderTrackFrames("consultation")
+          )}
         </RegistrationApplicationConsultationSection>
       )}
       waitingState={waitingState}

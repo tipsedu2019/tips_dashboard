@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, type JSX } from "react"
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type JSX } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -54,7 +54,10 @@ import {
   type RegistrationSubject,
   type RegistrationWaitingKind,
 } from "./registration-track-service"
+import { getRegistrationConsultationOutcomeSaveState } from "./registration-track-model.js"
+import { getRegistrationPersistenceErrorMessage } from "./registration-workflow.js"
 import { RegistrationSelect } from "./registration-select"
+import { RegistrationSaveButton } from "./registration-save-button"
 
 export function isRegistrationDirectorCatalogRefreshError(message: string) {
   return message.includes("registration_director_refresh_required")
@@ -140,21 +143,11 @@ function RegistrationTransitionConfirmDialog({
   )
 }
 
-export function RegistrationTrackDirectorSection({
-  task,
-  detail,
-  track,
-  permissions,
-  directorOptions,
-  teacherOptions,
-  directorCatalogStatus,
-  subjectCapabilities,
-  onRetryDirectorCatalog,
-  onOpenVisit,
-  onReload,
-  onWarning,
-  onDirtyChange,
-}: {
+export type RegistrationTrackDirectorSectionHandle = {
+  savePending: () => Promise<boolean>
+}
+
+export const RegistrationTrackDirectorSection = forwardRef<RegistrationTrackDirectorSectionHandle, {
   task: OpsTask
   detail: OpsRegistrationCaseDetail
   track: OpsRegistrationTrackSummary
@@ -168,7 +161,23 @@ export function RegistrationTrackDirectorSection({
   onReload: (preferredTrackId?: string) => void | Promise<void>
   onWarning: (message: string) => void
   onDirtyChange?: (dirty: boolean) => void
-}) {
+  sharedSave: boolean
+}>(function RegistrationTrackDirectorSection({
+  task,
+  detail,
+  track,
+  permissions,
+  directorOptions,
+  teacherOptions,
+  directorCatalogStatus,
+  subjectCapabilities,
+  onRetryDirectorCatalog,
+  onOpenVisit,
+  onReload,
+  onWarning,
+  onDirtyChange,
+  sharedSave,
+}, ref) {
   const activeDirectorProfileIds = useMemo(
     () => new Set(teacherOptions.map((teacher) => teacher.profileId).filter(Boolean)),
     [teacherOptions],
@@ -406,8 +415,12 @@ export function RegistrationTrackDirectorSection({
     onDirtyChange,
   )
 
-  async function saveManualDirector() {
-    if (!canEdit || !directorProfileId || !selectedDirectorIsAvailable || savingManual || automaticSaving || automaticRefreshError) return
+  async function saveManualDirector(): Promise<boolean> {
+    if (directorProfileId === serverDirectorProfileId && Boolean(directorProfileId)) return true
+    if (!canEdit || !directorProfileId || !selectedDirectorIsAvailable || savingManual || automaticSaving || automaticRefreshError) {
+      if (canEdit && !directorProfileId) onWarning("상담 책임자를 선택하세요.")
+      return false
+    }
     const logicalKey = `registration-director-manual:${track.id}:${directorProfileId}:${detail.commonRevision}`
     const attemptedDirector = {
       profileId: directorProfileId,
@@ -434,6 +447,7 @@ export function RegistrationTrackDirectorSection({
       await onReload(track.id)
       requestKeysRef.current.delete(logicalKey)
       setManualDirectorConflictAttempt(null)
+      return true
     } catch (error) {
       const message = errorMessage(error, "상담 책임자를 저장하지 못했습니다.")
       if (committed) {
@@ -465,10 +479,17 @@ export function RegistrationTrackDirectorSection({
       } else {
         onWarning(message)
       }
+      return false
     } finally {
       setSavingManual(false)
     }
   }
+
+  const saveManualDirectorRef = useRef(saveManualDirector)
+  saveManualDirectorRef.current = saveManualDirector
+  useImperativeHandle(ref, () => ({
+    savePending: () => saveManualDirectorRef.current(),
+  }), [])
 
   async function retryAutomaticRefresh() {
     if (!automaticRefreshError || automaticRefreshing) return
@@ -504,7 +525,11 @@ export function RegistrationTrackDirectorSection({
     && (catalogRefreshRequired || resolutions.some((resolution) => resolution.status === "unavailable"))
 
   return (
-    <section className="flex min-w-0 flex-wrap items-end gap-2 rounded-md border px-3 py-2" aria-label={`${track.subject} 상담 책임자`}>
+    <section
+      data-registration-consultation-director-field={sharedSave ? "shared-save" : ""}
+      className="grid min-w-0 gap-2"
+      aria-label={`${track.subject} 상담 책임자`}
+    >
       <RegistrationRefreshRecovery pending={Boolean(automaticRefreshError)} retrying={automaticRefreshing} onRetry={() => void retryAutomaticRefresh()} ownerLabel={track.subject} />
       {manualDirectorConflictAttempt ? (
         <Alert className="w-full border-amber-300 bg-amber-50 text-amber-950">
@@ -528,11 +553,11 @@ export function RegistrationTrackDirectorSection({
           </AlertDescription>
         </Alert>
       ) : null}
-      <Label className="grid min-w-[13rem] flex-1 gap-1 text-xs text-muted-foreground">
-        상담 책임자
+      <Label className="grid min-w-0 gap-1.5">
+        <span>상담 책임자</span>
         {canEdit ? (
           <RegistrationSelect
-            className="h-9"
+            className="h-10"
             aria-label={`${track.subject} 상담 책임자 선택`}
             value={directorProfileId}
             placeholder="원장 선택"
@@ -554,21 +579,9 @@ export function RegistrationTrackDirectorSection({
             disabled={Boolean(manualDirectorConflictAttempt) || directorSelectorLocked || savingManual || automaticSaving}
           />
         ) : (
-          <span className="flex h-9 items-center text-sm font-medium text-foreground">{track.directorName || "담당자 지정 필요"}</span>
+          <span className="flex h-10 items-center text-sm font-medium text-foreground">{track.directorName || "담당자 지정 필요"}</span>
         )}
       </Label>
-      {canEdit ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => void saveManualDirector()}
-          aria-label={`${track.subject} 상담 책임자 저장`}
-          disabled={Boolean(manualDirectorConflictAttempt) || !directorProfileId || !selectedDirectorIsAvailable || directorSelectorLocked || directorProfileId === (track.directorProfileId || "") || savingManual || automaticSaving}
-        >
-          담당 저장
-        </Button>
-      ) : null}
       {automaticSaving ? <span role="status" className="text-xs text-muted-foreground">규칙 확인 중</span> : null}
       {!automaticSaving && directorCatalogStatus === "loading" ? (
         <span role="status" className="text-xs text-muted-foreground">담당자 정보 확인 중</span>
@@ -588,7 +601,7 @@ export function RegistrationTrackDirectorSection({
       ) : null}
     </section>
   )
-}
+})
 
 const REGISTRATION_HISTORY_DATE_FORMATTER = new Intl.DateTimeFormat("ko-KR", {
   timeZone: "Asia/Seoul",
@@ -670,11 +683,6 @@ const WAITING_KIND_OPTIONS: Array<{ value: Exclude<RegistrationWaitingKind, "">;
   { value: "next_term_opening", label: "다음 학기 개강반 대기" },
 ]
 
-const WAITING_RETAKE_OPTIONS = [
-  { value: "required", label: "레벨테스트 재응시 필요" },
-  { value: "not_required", label: "재응시 없이 진행" },
-] as const
-
 const MIGRATION_GROUPS = [
   {
     key: "level_test" as const,
@@ -697,11 +705,12 @@ const MIGRATION_GROUPS = [
 ]
 
 function errorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message) return error.message
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message?: unknown }).message || fallback)
-  }
-  return fallback
+  const rawMessage = error instanceof Error && error.message
+    ? error.message
+    : error && typeof error === "object" && "message" in error
+      ? String((error as { message?: unknown }).message || "")
+      : ""
+  return getRegistrationPersistenceErrorMessage({ message: rawMessage }, rawMessage || fallback)
 }
 
 function useSubmissionKeys(): SubmissionKeys {
@@ -923,7 +932,6 @@ export function RegistrationWaitingDetailsEditor({
   classOptions,
   onReload,
   onWarning,
-  onOpenLevelTest,
   onDirtyChange,
 }: {
   track: OpsRegistrationTrackSummary
@@ -932,7 +940,6 @@ export function RegistrationWaitingDetailsEditor({
   classOptions: OpsClassOption[]
   onReload: () => void | Promise<void>
   onWarning: (message: string) => void
-  onOpenLevelTest?: () => void
   onDirtyChange?: (dirty: boolean) => void
 }) {
   const savedWaitingKind = track.waitingDetailKind || track.waitingKind || "current_term_opening"
@@ -940,20 +947,16 @@ export function RegistrationWaitingDetailsEditor({
   const savedRetakeDecision = track.waitingDetailRetakeDecision || track.levelTestRetakeDecision || "not_required"
   const [waitingKind, setWaitingKind] = useState<RegistrationWaitingKind>(savedWaitingKind)
   const [classId, setClassId] = useState(savedClassId)
-  const [retakeDecision, setRetakeDecision] = useState<"required" | "not_required">(savedRetakeDecision)
   const [saving, setSaving] = useState(false)
   const [refreshPending, setRefreshPending] = useState(false)
   const [validationError, setValidationError] = useState("")
   const sectionRef = useRef<HTMLElement | null>(null)
   const submissionKeys = useSubmissionKeys()
-  useOwnedDirtyState(
-    !refreshPending && (
-      waitingKind !== savedWaitingKind
-      || classId !== savedClassId
-      || retakeDecision !== savedRetakeDecision
-    ),
-    onDirtyChange,
+  const waitingDirty = !refreshPending && (
+    waitingKind !== savedWaitingKind
+    || classId !== savedClassId
   )
+  useOwnedDirtyState(waitingDirty, onDirtyChange)
 
   async function saveWaitingDetails() {
     if (saving || refreshPending || !permissions.canManage) return
@@ -970,21 +973,18 @@ export function RegistrationWaitingDetailsEditor({
         trackId: track.id,
         waitingKind,
         classId: waitingKind === "current_class" ? classId : "",
-        retakeDecision,
+        retakeDecision: savedRetakeDecision,
         requestKey,
       })
       submissionKeys.clear(kind, track.id)
       onDirtyChange?.(false)
       setRefreshPending(true)
-      let reloaded = false
       try {
         await onReload()
         setRefreshPending(false)
-        reloaded = true
       } catch {
         onWarning(COMMITTED_REFRESH_ERROR)
       }
-      if (retakeDecision === "required" && reloaded) onOpenLevelTest?.()
     } catch (error) {
       onWarning(errorMessage(error, "대기 정보를 저장하지 못했습니다."))
     } finally {
@@ -1005,15 +1005,12 @@ export function RegistrationWaitingDetailsEditor({
   }
 
   return (
-    <section ref={sectionRef} data-registration-action-owner={`${track.subject}:waiting-close`} className="grid min-w-0 gap-3 rounded-md border p-3" aria-label={`${track.subject} 대기 처리`}>
-      <div>
-        <h3 className="text-sm font-semibold">[{track.subject}] 대기 관리</h3>
-        <p className="text-xs text-muted-foreground">진행상태와 별도로 대기 정보만 저장합니다.</p>
-      </div>
+    <section ref={sectionRef} data-registration-action-owner={`${track.subject}:waiting-close`} className="grid min-w-0 gap-3" aria-label={`${track.subject} 대기 처리`}>
+      <h3 className="text-sm font-semibold">{track.subject} 대기 정보</h3>
       <RegistrationRefreshRecovery pending={refreshPending} retrying={saving} onRetry={() => void retryRefresh()} ownerLabel={track.subject} />
       {permissions.canManage && !refreshPending ? (
         <>
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2">
             <RegistrationSelect
               aria-label={`${track.subject} 대기 종류`}
               className="h-9"
@@ -1024,25 +1021,18 @@ export function RegistrationWaitingDetailsEditor({
               disabled={saving}
             />
             {waitingKind === "current_class" ? <SubjectClassSelect subject={track.subject} value={classId} onChange={setClassId} classOptions={classOptions} disabled={saving} /> : null}
-            <RegistrationSelect
-              aria-label={`${track.subject} 레벨테스트 재응시 여부`}
-              className="h-9"
-              value={retakeDecision}
-              placeholder="재응시 여부 선택"
-              options={[...WAITING_RETAKE_OPTIONS]}
-              onValueChange={(value) => setRetakeDecision(value as "required" | "not_required")}
-              disabled={saving}
-            />
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" aria-label={`${track.subject} 대기 정보 저장`} variant="outline" size="sm" onClick={() => void saveWaitingDetails()} disabled={saving}>
-              {saving ? "저장 중" : "대기 정보 저장"}
-            </Button>
-            {retakeDecision === "required" && onOpenLevelTest ? (
-              <Button type="button" aria-label={`${track.subject} 레벨테스트 예약`} variant="outline" size="sm" onClick={onOpenLevelTest} disabled={saving}>
-                레벨테스트 예약
-              </Button>
-            ) : null}
+          <div className="flex justify-end">
+            <RegistrationSaveButton
+              type="button"
+              dirty={waitingDirty}
+              saving={saving}
+              blocked={refreshPending}
+              actionLabel="대기 정보 저장"
+              cleanLabel="저장됨"
+              aria-label={`${track.subject} 대기 정보 저장`}
+              onClick={() => void saveWaitingDetails()}
+            />
           </div>
         </>
       ) : !refreshPending ? <p className="text-sm text-muted-foreground">관리 권한이 있는 사용자만 대기 정보를 저장할 수 있습니다.</p> : null}
@@ -1176,7 +1166,7 @@ export function RegistrationTrackStageEditor({
     return <InquiryStageEditor track={track} permissions={permissions} classOptions={classOptions} onReload={onReload} onWarning={onWarning} onOpenLevelTest={onOpenLevelTest} onDirtyChange={onDirtyChange} />
   }
   if (track.status === "waiting") {
-    return <RegistrationWaitingDetailsEditor track={track} currentClassWaitClassId={currentClassWaitClassId} permissions={permissions} classOptions={classOptions} onReload={onReload} onWarning={onWarning} onOpenLevelTest={onOpenLevelTest} onDirtyChange={onDirtyChange} />
+    return <RegistrationWaitingDetailsEditor track={track} currentClassWaitClassId={currentClassWaitClassId} permissions={permissions} classOptions={classOptions} onReload={onReload} onWarning={onWarning} onDirtyChange={onDirtyChange} />
   }
   if (track.status === "consultation_waiting") {
     return (
@@ -1264,7 +1254,7 @@ export function RegistrationEnrollmentTrackEditor({
 export type RegistrationConsultationOutcomeEditorProps = {
   subject: RegistrationSubject
   consultation: OpsRegistrationConsultation
-  active: boolean
+  editable: boolean
   onReload: () => void | Promise<void>
   onWarning: (message: string) => void
   onDirtyChange?: (dirty: boolean) => void
@@ -1273,19 +1263,24 @@ export type RegistrationConsultationOutcomeEditorProps = {
 export function RegistrationConsultationOutcomeEditor({
   subject,
   consultation,
-  active,
+  editable,
   onReload,
   onWarning,
   onDirtyChange,
 }: RegistrationConsultationOutcomeEditorProps): JSX.Element {
-  const [outcome, setOutcome] = useState<"enrollment" | "waiting" | "not_registered">(consultation.outcome || "enrollment")
+  const [outcome, setOutcome] = useState<"" | "enrollment" | "waiting" | "not_registered">(consultation.outcome || "")
   const [saving, setSaving] = useState(false)
   const [refreshPending, setRefreshPending] = useState(false)
   const submissionKeys = useSubmissionKeys()
-  useOwnedDirtyState(active && !refreshPending && outcome !== (consultation.outcome || "enrollment"), onDirtyChange)
+  const saveState = getRegistrationConsultationOutcomeSaveState({
+    savedOutcome: consultation.outcome,
+    draftOutcome: outcome,
+    canCompleteConsultation: editable,
+  })
+  useOwnedDirtyState(!refreshPending && saveState.canSave, onDirtyChange)
 
   async function submit() {
-    if (!active || saving || refreshPending) return
+    if (!outcome || !saveState.canSave || saving || refreshPending) return
     const normalizedDraft = JSON.stringify({ consultationId: consultation.id, outcome })
     const kind = "consultation-details"
     const requestKey = submissionKeys.getOrCreate(kind, normalizedDraft)
@@ -1298,7 +1293,8 @@ export function RegistrationConsultationOutcomeEditor({
         requestKey,
       })
     } catch (error) {
-      onWarning(errorMessage(error, "상담 결과를 저장하지 못했습니다."))
+      const message = errorMessage(error, "상담 결과를 저장하지 못했습니다.")
+      onWarning(message.includes("registration_access_denied") ? "상담 결과를 저장할 권한이 없습니다." : message)
       setSaving(false)
       return
     }
@@ -1345,13 +1341,26 @@ export function RegistrationConsultationOutcomeEditor({
           <fieldset className="grid gap-2">
             <legend className="text-sm font-medium">상담 결과</legend>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <Button type="button" aria-label={`${subject} 상담 결과 등록`} variant={outcome === "enrollment" ? "default" : "outline"} aria-pressed={outcome === "enrollment"} disabled={saving} onClick={() => setOutcome("enrollment")}>등록</Button>
-              <Button type="button" aria-label={`${subject} 상담 결과 대기`} variant={outcome === "waiting" ? "default" : "outline"} aria-pressed={outcome === "waiting"} disabled={saving} onClick={() => setOutcome("waiting")}>대기</Button>
-              <Button type="button" aria-label={`${subject} 상담 결과 미등록`} className="col-span-2 sm:col-span-1" variant={outcome === "not_registered" ? "default" : "outline"} aria-pressed={outcome === "not_registered"} disabled={saving} onClick={() => setOutcome("not_registered")}>미등록</Button>
+              <Button type="button" aria-label={`${subject} 상담 결과 등록`} variant={outcome === "enrollment" ? "default" : "outline"} aria-pressed={outcome === "enrollment"} disabled={saving || !saveState.editable} onClick={() => setOutcome("enrollment")}>등록</Button>
+              <Button type="button" aria-label={`${subject} 상담 결과 대기`} variant={outcome === "waiting" ? "default" : "outline"} aria-pressed={outcome === "waiting"} disabled={saving || !saveState.editable} onClick={() => setOutcome("waiting")}>대기</Button>
+              <Button type="button" aria-label={`${subject} 상담 결과 미등록`} className="col-span-2 sm:col-span-1" variant={outcome === "not_registered" ? "default" : "outline"} aria-pressed={outcome === "not_registered"} disabled={saving || !saveState.editable} onClick={() => setOutcome("not_registered")}>미등록</Button>
             </div>
           </fieldset>
+          {!saveState.editable && consultation.status !== "completed" ? (
+            <p className="text-xs text-muted-foreground">상담 책임자만 결과를 수정할 수 있습니다.</p>
+          ) : null}
           <div className="flex justify-end">
-          <Button type="button" data-registration-primary-action={`${subject}:consultation-outcome-save`} aria-label={`${subject} 상담 결과 저장`} onClick={() => void submit()} disabled={saving}>{saving ? "저장 중" : "상담 결과 저장"}</Button>
+            <RegistrationSaveButton
+              type="button"
+              data-registration-primary-action={`${subject}:consultation-outcome-save`}
+              dirty={saveState.canSave}
+              saving={saving}
+              blocked={refreshPending}
+              actionLabel="상담 결과 저장"
+              cleanLabel={saveState.label}
+              aria-label={`${subject} 상담 결과 저장`}
+              onClick={() => void submit()}
+            />
           </div>
         </>
       )}

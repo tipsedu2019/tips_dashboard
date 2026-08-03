@@ -230,6 +230,14 @@ test("R09e registration persistence failures use operator-facing guidance", () =
     getRegistrationPersistenceErrorMessage({ message: "registration_fixture_forced_failure" }),
     "등록을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.",
   );
+  assert.equal(
+    getRegistrationPersistenceErrorMessage({ message: "registration_access_denied" }),
+    "등록 정보를 저장할 권한이 없습니다.",
+  );
+  assert.equal(
+    getRegistrationPersistenceErrorMessage({ message: "upstream request timeout" }),
+    "서버 응답이 지연되었습니다. 잠시 후 다시 시도해 주세요.",
+  );
 });
 
 test("R10 grade choices cover every school grade without a stale year prefix", () => {

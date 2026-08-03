@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 
-import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { DateTimePickerControl } from "@/components/ui/date-time-picker"
@@ -27,9 +26,9 @@ import {
   REGISTRATION_LEVEL_TEST_PLACES,
   normalizeRegistrationLevelTestPlace,
 } from "./registration-level-test-place.ts"
-import { REGISTRATION_TIME_OPTIONS } from "./registration-workflow.js"
+import { getRegistrationPersistenceErrorMessage, REGISTRATION_TIME_OPTIONS } from "./registration-workflow.js"
+import { RegistrationSaveButton } from "./registration-save-button"
 import { sendRegistrationVisitNotificationTarget } from "./registration-consultation-notification.js"
-import { RegistrationSelect } from "./registration-select"
 import {
   buildRegistrationAppointmentConfirmation,
   compareRegistrationAppointmentDraft,
@@ -41,7 +40,6 @@ import {
   type RegistrationNotificationProcessingReadiness,
 } from "./registration-appointment-draft"
 import {
-  closeRegistrationLevelTestTrack,
   createRegistrationMutationRequestKey,
   getRegistrationNotificationProcessingReadiness,
   getRegistrationNotificationJobStatus,
@@ -49,7 +47,6 @@ import {
   retryRegistrationNotificationJob,
   saveRegistrationSharedAppointment,
   saveRegistrationLevelTestResult,
-  startRegistrationLevelTestAttempt,
   type OpsRegistrationAppointment,
   type OpsRegistrationConsultation,
   type OpsRegistrationLevelTest,
@@ -77,20 +74,15 @@ export type RegistrationAppointmentEditorProps = {
   notificationProcessingReadiness?: RegistrationNotificationProcessingReadiness | null
   onDirtyChange?: (dirty: boolean) => void
   onTrackDirtyChange?: (trackId: string, dirty: boolean) => void
+  onBeforeSave?: () => boolean | Promise<boolean>
+  externalDirty?: boolean
+  actionLabel?: string
+  saveAriaLabel?: string
 }
 
 type SubmissionKeys = {
   getOrCreate: (kind: string, logicalDraft: string) => string
   clear: (kind: string, logicalDraft: string) => void
-}
-
-const ACTIVITY_STATUS_LABELS: Record<RegistrationAppointmentActivity["status"], string> = {
-  waiting: "전화상담 대기",
-  scheduled: "예약",
-  in_progress: "진행",
-  completed: "완료",
-  absent: "미응시",
-  canceled: "취소",
 }
 
 type PersistedConflictDraft = {
@@ -110,11 +102,12 @@ const NOTIFICATION_JOB_POLL_ATTEMPTS = 8
 const NOTIFICATION_JOB_POLL_INTERVAL_MS = 750
 
 function errorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message) return error.message
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message?: unknown }).message || fallback)
-  }
-  return fallback
+  const rawMessage = error instanceof Error && error.message
+    ? error.message
+    : error && typeof error === "object" && "message" in error
+      ? String((error as { message?: unknown }).message || "")
+      : ""
+  return getRegistrationPersistenceErrorMessage({ message: rawMessage }, rawMessage || fallback)
 }
 
 function toLocalDateTime(value: string | null | undefined) {
@@ -155,15 +148,6 @@ function delay(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
 
-function RegistrationActivityStatusBadge({ status }: { status: RegistrationAppointmentActivity["status"] }) {
-  const variant = ["completed"].includes(status)
-    ? "default"
-    : ["absent", "canceled"].includes(status)
-      ? "secondary"
-      : "outline"
-  return <Badge variant={variant}>{ACTIVITY_STATUS_LABELS[status]}</Badge>
-}
-
 function useOwnedDirtyState(dirty: boolean, onDirtyChange?: (dirty: boolean) => void) {
   const reportedRef = useRef(false)
   const callbackRef = useRef(onDirtyChange)
@@ -197,6 +181,10 @@ export function RegistrationAppointmentEditor({
   notificationProcessingReadiness = null,
   onDirtyChange,
   onTrackDirtyChange,
+  onBeforeSave,
+  externalDirty = false,
+  actionLabel = "예약 저장",
+  saveAriaLabel = "",
 }: RegistrationAppointmentEditorProps) {
   const conflictScopeKey = `${taskId}:${kind}`
   const submissionKeys = useSubmissionKeys(conflictScopeKey)
@@ -257,7 +245,6 @@ export function RegistrationAppointmentEditor({
   ))
   const [showConflictComparison, setShowConflictComparison] = useState(Boolean(cachedConflictDraft && appointment))
   const [draftLinks, setDraftLinks] = useState<Record<string, string>>({})
-  const [closureReasons, setClosureReasons] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [activitySavingId, setActivitySavingId] = useState("")
   const [refreshPending, setRefreshPending] = useState(false)
@@ -358,7 +345,6 @@ export function RegistrationAppointmentEditor({
       .filter((activity) => (
         "attemptNumber" in activity
         && latestLevelTestActivityIds.has(activity.id)
-        && ["absent", "canceled"].includes(activity.status)
       ))
       .map((activity) => activity.id))
   }, [appointment, currentActivities, latestLevelTestActivityIds, matchingActivities])
@@ -398,8 +384,7 @@ export function RegistrationAppointmentEditor({
       if (!trackById.has(activity.trackId)) continue
       const linkDirty = "materialLink" in activity
         && (draftLinks[activity.id] ?? activity.materialLink ?? "") !== (activity.materialLink ?? "")
-      const reasonDirty = Boolean(closureReasons[activity.trackId])
-      if (linkDirty || reasonDirty) dirtyTrackIds.add(activity.trackId)
+      if (linkDirty) dirtyTrackIds.add(activity.trackId)
     }
     for (const trackId of new Set([...reportedTrackDirtyRef.current, ...dirtyTrackIds])) {
       const wasDirty = reportedTrackDirtyRef.current.has(trackId)
@@ -407,7 +392,7 @@ export function RegistrationAppointmentEditor({
       if (wasDirty !== isDirty) onTrackDirtyChangeRef.current?.(trackId, isDirty)
     }
     reportedTrackDirtyRef.current = dirtyTrackIds
-  }, [closureReasons, draftLinks, matchingActivities, trackById, trackRefreshPendingIds])
+  }, [draftLinks, matchingActivities, trackById, trackRefreshPendingIds])
   useEffect(() => () => {
     for (const trackId of reportedTrackDirtyRef.current) onTrackDirtyChangeRef.current?.(trackId, false)
   }, [])
@@ -441,14 +426,14 @@ export function RegistrationAppointmentEditor({
     kind,
     ...appointmentDraft,
   })
-  const canonicalLevelTestPlace = normalizeRegistrationLevelTestPlace(place)
+  const selectedPlace = normalizeRegistrationLevelTestPlace(place) ?? ""
   const legacyLevelTestPlace = appointment?.place
     && !normalizeRegistrationLevelTestPlace(appointment.place)
       ? appointment.place
       : ""
   const canSave = Boolean(
     scheduledAt
-    && canonicalLevelTestPlace
+    && selectedPlace
     && appointmentDraft.trackIds.length > 0
     && !saving
     && !mutationLocked
@@ -775,10 +760,19 @@ export function RegistrationAppointmentEditor({
       onWarning(message)
       const selector = !scheduledAt
         ? "[data-appointment-field=scheduled-at] input, [data-appointment-field=scheduled-at] button"
-        : !canonicalLevelTestPlace
-          ? "[data-appointment-field=place] [data-slot=select-trigger], [data-appointment-field=place] input"
-          : "[data-appointment-field=place] [data-slot=select-trigger], [data-appointment-field=place] input"
+        : !selectedPlace
+          ? "[data-appointment-field=place] button"
+          : "[data-appointment-field=place] button"
       window.requestAnimationFrame(() => sectionRef.current?.querySelector<HTMLElement>(selector)?.focus())
+      return
+    }
+    if (externalDirty && !appointmentDirty && appointment) {
+      setSaving(true)
+      try {
+        await onBeforeSave?.()
+      } finally {
+        setSaving(false)
+      }
       return
     }
     setSaving(true)
@@ -786,6 +780,10 @@ export function RegistrationAppointmentEditor({
   }
 
   async function performSaveAppointment() {
+    if (onBeforeSave && !(await onBeforeSave())) {
+      setSaving(false)
+      return
+    }
     const kindKey = "registration-appointment"
     const requestKey = submissionKeys.getOrCreate(kindKey, normalizedDraft)
     let saved: RegistrationAppointmentMutationResponse
@@ -796,7 +794,7 @@ export function RegistrationAppointmentEditor({
         taskId,
         kind,
         scheduledAt: toScheduledAt(scheduledAt),
-        place: canonicalLevelTestPlace || "",
+        place: selectedPlace,
         trackIds: appointmentDraft.trackIds,
         replaceRemaining: editMode === "replace_remaining",
         requestKey,
@@ -832,43 +830,23 @@ export function RegistrationAppointmentEditor({
     await performSaveAppointment()
   }
 
-  async function startAttempt(activity: OpsRegistrationLevelTest) {
-    if (trackRefreshPendingIds.has(activity.trackId)) return
-    const kindKey = "level-test-start"
-    const requestKey = submissionKeys.getOrCreate(kindKey, activity.id)
-    setActivitySavingId(activity.id)
-    try {
-      await startRegistrationLevelTestAttempt({ attemptId: activity.id, requestKey })
-    } catch (error) {
-      onWarning(errorMessage(error, "레벨테스트를 시작하지 못했습니다."))
-      setActivitySavingId("")
-      return
-    }
-    submissionKeys.clear(kindKey, activity.id)
-    await reloadAfterCommittedMutation(activity.trackId)
-    setActivitySavingId("")
-  }
-
-  async function completeAttempt(
-    activity: OpsRegistrationLevelTest,
-    status: "completed" | "absent" | "canceled",
-  ) {
+  async function completeAttempt(activity: OpsRegistrationLevelTest) {
     if (trackRefreshPendingIds.has(activity.trackId)) return
     const materialLink = (draftLinks[activity.id] || activity.materialLink || "").trim()
     const track = trackById.get(activity.trackId)
-    if (status === "completed" && !materialLink) {
+    if (!materialLink) {
       onWarning(`[${track?.subject || "해당 과목"}] 결과 링크를 입력하세요.`)
       return
     }
-    const logicalDraft = `${activity.id}:${status}:${materialLink}`
+    const logicalDraft = `${activity.id}:completed:${materialLink}`
     const kindKey = "level-test-result"
     const requestKey = submissionKeys.getOrCreate(kindKey, logicalDraft)
     setActivitySavingId(activity.id)
     try {
       await saveRegistrationLevelTestResult({
         attemptId: activity.id,
-        status,
-        materialLink: status === "completed" ? materialLink : "",
+        status: "completed",
+        materialLink,
         requestKey,
       })
     } catch (error) {
@@ -880,34 +858,6 @@ export function RegistrationAppointmentEditor({
     setDraftLinks((current) => {
       const next = { ...current }
       delete next[activity.id]
-      return next
-    })
-    await reloadAfterCommittedMutation(activity.trackId)
-    setActivitySavingId("")
-  }
-
-  async function closeInquiry(activity: OpsRegistrationLevelTest) {
-    if (trackRefreshPendingIds.has(activity.trackId)) return
-    const reason = (closureReasons[activity.trackId] || "").trim()
-    if (!reason) {
-      onWarning("문의 종료 사유를 입력하세요.")
-      return
-    }
-    const logicalDraft = `${activity.trackId}:${reason}`
-    const kindKey = "level-test-close-inquiry"
-    const requestKey = submissionKeys.getOrCreate(kindKey, logicalDraft)
-    setActivitySavingId(activity.id)
-    try {
-      await closeRegistrationLevelTestTrack({ trackId: activity.trackId, reason, requestKey })
-    } catch (error) {
-      onWarning(errorMessage(error, "문의를 종료하지 못했습니다."))
-      setActivitySavingId("")
-      return
-    }
-    submissionKeys.clear(kindKey, logicalDraft)
-    setClosureReasons((current) => {
-      const next = { ...current }
-      delete next[activity.trackId]
       return next
     })
     await reloadAfterCommittedMutation(activity.trackId)
@@ -1016,30 +966,42 @@ export function RegistrationAppointmentEditor({
               timeOptions={REGISTRATION_TIME_OPTIONS}
             />
           </Label>
-          <Label data-appointment-field="place" className="grid min-w-0 gap-1.5">
-            <span>장소 <span className="text-xs font-semibold text-primary">필수</span></span>
-            <RegistrationSelect
-              aria-label={`${appointmentParticipantSubjectLabel} 예약 장소`}
-              value={normalizeRegistrationLevelTestPlace(place) ?? ""}
-              placeholder="장소 선택"
-              options={[
-                { value: "", label: "장소 선택" },
-                ...REGISTRATION_LEVEL_TEST_PLACES.map((option) => ({ value: option, label: option })),
-              ]}
-              onValueChange={(value) => { setValidationError(""); setPlace(value) }}
-              disabled={saving || mutationLocked}
-              className="h-10"
-            />
+          <fieldset data-appointment-field="place" className="grid min-w-0 gap-1.5">
+            <legend>장소 <span className="text-xs font-semibold text-primary">필수</span></legend>
+            <div role="group" aria-label={`${appointmentParticipantSubjectLabel} 예약 장소`} className="grid grid-cols-2 gap-2">
+              {REGISTRATION_LEVEL_TEST_PLACES.map((option) => (
+                <Button
+                  key={option}
+                  type="button"
+                  aria-label={`${appointmentParticipantSubjectLabel} 예약 장소 ${option}`}
+                  aria-pressed={selectedPlace === option}
+                  variant={selectedPlace === option ? "default" : "outline"}
+                  className="h-10"
+                  onClick={() => { setValidationError(""); setPlace(option) }}
+                  disabled={saving || mutationLocked}
+                >
+                  {option}
+                </Button>
+              ))}
+            </div>
             {legacyLevelTestPlace ? (
               <span className="text-xs text-muted-foreground">기존 저장 장소: {appointment?.place}</span>
             ) : null}
-          </Label>
+          </fieldset>
         </div>
 
         <div className="flex justify-end">
-          <Button type="button" data-registration-primary-action={`${appointmentParticipantSubjectLabel}:appointment-save`} aria-label={`${appointmentParticipantSubjectLabel} 예약 저장`} onClick={() => void saveAppointment()} disabled={saving || mutationLocked || Boolean(conflict)}>
-            예약 저장
-          </Button>
+          <RegistrationSaveButton
+            type="button"
+            data-registration-primary-action={`${appointmentParticipantSubjectLabel}:appointment-save`}
+            dirty={appointmentDirty || externalDirty}
+            saving={saving}
+            blocked={mutationLocked || Boolean(conflict)}
+            actionLabel={actionLabel}
+            cleanLabel={appointment ? "저장됨" : "예약 정보를 입력하세요"}
+            aria-label={saveAriaLabel || `${appointmentParticipantSubjectLabel} 예약 저장`}
+            onClick={() => void saveAppointment()}
+          />
         </div>
       </div>
 
@@ -1049,64 +1011,46 @@ export function RegistrationAppointmentEditor({
             if (!("attemptNumber" in activity) || !displayActivityIds.has(activity.id)) return null
             const track = trackById.get(activity.trackId)
             const materialLink = draftLinks[activity.id] ?? activity.materialLink ?? ""
-            const terminal = ["completed", "absent", "canceled"].includes(activity.status)
             const trackRefreshPending = trackRefreshPendingIds.has(activity.trackId)
-            const canClose = ["absent", "canceled"].includes(activity.status)
-              && latestLevelTestActivityIds.has(activity.id)
-              && !matchingActivities.some((item) => item.trackId === activity.trackId && ["scheduled", "in_progress"].includes(item.status))
+            const resultDirty = materialLink !== (activity.materialLink || "")
             return (
-              <section key={activity.id} className="grid gap-2 rounded-md border p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <Badge variant="outline">{track?.subject || "과목"}</Badge>
-                  <RegistrationActivityStatusBadge status={activity.status} />
-                </div>
+              <section
+                key={activity.id}
+                className="grid gap-2 sm:grid-cols-[10rem_minmax(0,1fr)] sm:items-center"
+                aria-label={`${track?.subject || "과목"} 레벨테스트 결과`}
+              >
+                <h3 className="text-sm font-semibold">레벨테스트 결과</h3>
                 {trackRefreshPending ? (
-                  <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+                  <Alert className="border-amber-300 bg-amber-50 text-amber-950 sm:col-span-2">
                     <AlertTitle>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</AlertTitle>
                     <AlertDescription className="items-end">
                       <Button type="button" size="sm" variant="outline" aria-label={`${track?.subject || "과목"} 최신 내용 다시 불러오기`} onClick={() => void retryTrackRefresh(activity.trackId)} disabled={Boolean(trackRefreshRetryingId)}>최신 내용 다시 불러오기</Button>
                     </AlertDescription>
                   </Alert>
                 ) : null}
-                <Label className="grid gap-1.5">
-                  {track?.subject || "과목"} 결과 링크
-                  <Input
-                    type="url"
-                    aria-label={`${track?.subject || "과목"} 결과 링크`}
-                    value={materialLink}
-                    onChange={(event) => setDraftLinks((current) => ({ ...current, [activity.id]: event.target.value }))}
-                    placeholder="https://drive.google.com/..."
-                    disabled={terminal || trackRefreshPending || activitySavingId === activity.id}
-                  />
-                </Label>
-                {activity.status === "scheduled" ? (
-                  <div className="flex flex-wrap justify-end gap-2">
-                    <Button type="button" aria-label={`${track?.subject || "과목"} 미응시`} size="sm" variant="outline" onClick={() => void completeAttempt(activity, "absent")} disabled={trackRefreshPending || Boolean(activitySavingId)}>미응시</Button>
-                    <Button type="button" aria-label={`${track?.subject || "과목"} 과목 취소`} size="sm" variant="ghost" onClick={() => void completeAttempt(activity, "canceled")} disabled={trackRefreshPending || Boolean(activitySavingId)}>과목 취소</Button>
-                    <Button type="button" aria-label={`${track?.subject || "과목"} 시험 시작`} size="sm" onClick={() => void startAttempt(activity)} disabled={trackRefreshPending || Boolean(activitySavingId)}>시험 시작</Button>
-                  </div>
-                ) : activity.status === "in_progress" ? (
-                  <div className="grid gap-2">
-                    {!track?.directorProfileId ? <p className="text-xs text-amber-700">완료 전에 상담 책임자를 지정하세요.</p> : null}
-                    <div className="flex flex-wrap justify-end gap-2">
-                      <Button type="button" aria-label={`${track?.subject || "과목"} 미응시`} size="sm" variant="outline" onClick={() => void completeAttempt(activity, "absent")} disabled={trackRefreshPending || Boolean(activitySavingId)}>미응시</Button>
-                      <Button type="button" aria-label={`${track?.subject || "과목"} 과목 취소`} size="sm" variant="ghost" onClick={() => void completeAttempt(activity, "canceled")} disabled={trackRefreshPending || Boolean(activitySavingId)}>과목 취소</Button>
-                      <Button type="button" aria-label={`${track?.subject || "과목"} 결과 링크 저장`} size="sm" onClick={() => void completeAttempt(activity, "completed")} disabled={trackRefreshPending || Boolean(activitySavingId) || !materialLink.trim() || !track?.directorProfileId}>결과 링크 저장</Button>
-                    </div>
-                  </div>
-                ) : null}
-                {canClose ? (
-                  <div className="grid gap-2 border-t pt-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+                <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                  <Label className="min-w-0">
+                    <span className="sr-only">{track?.subject || "과목"} 레벨테스트 결과 링크</span>
                     <Input
-                      value={closureReasons[activity.trackId] || ""}
-                      aria-label={`${track?.subject || "과목"} 문의 종료 사유`}
-                      onChange={(event) => setClosureReasons((current) => ({ ...current, [activity.trackId]: event.target.value }))}
-                      placeholder="문의 종료 사유"
-                      disabled={trackRefreshPending || Boolean(activitySavingId)}
+                      type="url"
+                      aria-label={`${track?.subject || "과목"} 레벨테스트 결과 링크`}
+                      value={materialLink}
+                      onChange={(event) => setDraftLinks((current) => ({ ...current, [activity.id]: event.target.value }))}
+                      placeholder="https://chat.google.com/..."
+                      disabled={trackRefreshPending || activitySavingId === activity.id}
                     />
-                    <Button type="button" aria-label={`${track?.subject || "과목"} 문의 종료`} size="sm" variant="ghost" onClick={() => void closeInquiry(activity)} disabled={trackRefreshPending || Boolean(activitySavingId) || !(closureReasons[activity.trackId] || "").trim()}>문의 종료</Button>
-                  </div>
-                ) : null}
+                  </Label>
+                  <RegistrationSaveButton
+                    type="button"
+                    dirty={resultDirty}
+                    saving={activitySavingId === activity.id}
+                    blocked={trackRefreshPending || !materialLink.trim()}
+                    actionLabel="결과 저장"
+                    cleanLabel={activity.materialLink ? "저장됨" : "결과 링크를 입력하세요"}
+                    aria-label={`${track?.subject || "과목"} 레벨테스트 결과 저장`}
+                    onClick={() => void completeAttempt(activity)}
+                  />
+                </div>
               </section>
             )
           })}

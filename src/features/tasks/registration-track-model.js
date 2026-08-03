@@ -122,7 +122,7 @@ export function getRegistrationLevelTestAppointmentStatus(attempts = []) {
   return "completed"
 }
 
-export function canEditRegistrationAppointment(activities = []) {
+export function canEditRegistrationAppointment() {
   return true
 }
 
@@ -139,11 +139,6 @@ export function getEligibleSharedAppointmentTracks(
 
   return tracks.filter((track) => {
     const trackActivities = activities.filter((activity) => activity?.trackId === track?.id)
-    const latestActivity = trackActivities.reduce((latest, activity) => (
-      !latest || Number(activity?.attemptNumber || 0) > Number(latest?.attemptNumber || 0)
-        ? activity
-        : latest
-    ), null)
     const isScheduledOnCurrent = Boolean(currentId) && trackActivities.some((activity) => (
       activity?.appointmentId === currentId && activity?.status === "scheduled"
     ))
@@ -159,7 +154,7 @@ export function getEligibleSharedAppointmentTracks(
   })
 }
 
-export function getRegistrationAppointmentEditMode(activities = []) {
+export function getRegistrationAppointmentEditMode() {
   return "edit"
 }
 
@@ -216,7 +211,7 @@ export function getLatestRegistrationLevelTestActivityIds(activities = []) {
 export function getRegistrationAdmissionApplicationState(input = {}) {
   const tracks = Array.isArray(input.tracks) ? input.tracks : []
   const enrollments = Array.isArray(input.enrollments) ? input.enrollments : []
-  const addClassTrackIds = new Set(enrollments
+  const plannedTrackIds = new Set(enrollments
     .filter((enrollment) => (
       enrollment?.status === "planned"
       && !enrollment?.admissionBatchId
@@ -230,7 +225,8 @@ export function getRegistrationAdmissionApplicationState(input = {}) {
     if (!trackId || targetTrackIdSet.has(trackId)) continue
     if (
       track?.status !== "enrollment_decided"
-      && !(track?.status === "registered" && addClassTrackIds.has(trackId))
+      && track?.workflowStatus !== "enrollment_requested"
+      && !plannedTrackIds.has(trackId)
     ) continue
     targetTrackIdSet.add(trackId)
     targetTrackIds.push(trackId)
@@ -572,11 +568,45 @@ export function getRegistrationAdmissionRecoveryDelayMs(updatedAt, now = Date.no
   return Math.max(0, updatedTime + 15 * 60 * 1000 - currentTime)
 }
 
+const REGISTRATION_CONSULTATION_OUTCOMES = new Set(["enrollment", "waiting", "not_registered"])
+
+export function getRegistrationActiveConsultation(input = {}) {
+  const trackId = enrollmentText(input.trackId)
+  if (!trackId) return null
+  return (Array.isArray(input.consultations) ? input.consultations : [])
+    .filter((consultation) => (
+      enrollmentText(consultation?.trackId) === trackId
+      && ((consultation?.mode === "phone" && consultation?.status === "waiting")
+        || (consultation?.mode === "visit" && consultation?.status === "scheduled"))
+    ))
+    .sort((left, right) => (
+      enrollmentText(right?.updatedAt || right?.createdAt)
+        .localeCompare(enrollmentText(left?.updatedAt || left?.createdAt))
+    ))[0] || null
+}
+
+export function getRegistrationConsultationOutcomeSaveState(input = {}) {
+  const savedOutcome = REGISTRATION_CONSULTATION_OUTCOMES.has(String(input.savedOutcome || ""))
+    ? String(input.savedOutcome)
+    : ""
+  const draftOutcome = REGISTRATION_CONSULTATION_OUTCOMES.has(String(input.draftOutcome || ""))
+    ? String(input.draftOutcome)
+    : ""
+  const editable = Boolean(input.canCompleteConsultation)
+  const dirty = Boolean(draftOutcome) && draftOutcome !== savedOutcome
+  return {
+    editable,
+    dirty,
+    canSave: editable && dirty,
+    label: dirty ? "상담 결과 저장" : savedOutcome ? "저장됨" : "상담 결과를 선택하세요",
+  }
+}
+
 export function getRegistrationActionPermissions(input = {}) {
   const canManage = ["admin", "staff"].includes(String(input.viewerRole || ""))
   const consultation = input.activeConsultation
   const canCompleteOwnConsultation = Boolean(
-    (input.viewerRole === "admin" || (input.viewerRole === "teacher" && input.track?.subject === "과학"))
+    ["admin", "staff", "teacher"].includes(String(input.viewerRole || ""))
     && input.viewerId
     && input.track?.directorProfileId === input.viewerId
     && consultation?.trackId === input.track?.id

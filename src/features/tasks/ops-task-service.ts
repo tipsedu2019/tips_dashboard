@@ -377,7 +377,7 @@ const OPS_REGISTRATION_PARENT_LIST_COLUMNS = [
   "subject",
   "created_at",
   "updated_at",
-  "ops_registration_details(task_id,pipeline_status,school_grade,school_name,inquiry_at)",
+  "ops_registration_details(task_id,pipeline_status,school_grade,school_name,parent_phone,student_phone,inquiry_at,level_test_at,level_test_completed_at,level_test_result,level_test_place,level_test_material_link,counselor,phone_consultation_at,visit_consultation_at,consultation_at,class_start_date,class_start_session,textbook_preparation,visit_consultation_place,admission_notice_sent,payment_checked,makeedu_registered,makeedu_invoice_sent,request_note)",
 ].join(",")
 const OPS_REGISTRATION_CLASS_COLUMN_CANDIDATES = [
   "id,name,subject,grade,teacher,room,textbook_ids",

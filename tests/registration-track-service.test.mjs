@@ -435,6 +435,47 @@ test("manual workflow status uses only its dedicated revisioned RPC", async () =
   assert.equal(invalidations, 1);
 });
 
+test("phone consultation save materializes and maps the persisted consultation", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    rpcHandler(name, args) {
+      assert.equal(name, "save_registration_phone_consultation_v1");
+      assert.deepEqual({ ...args }, {
+        p_track_id: "track-phone",
+        p_request_key: "phone-request",
+      });
+      return {
+        data: {
+          id: "consultation-phone",
+          trackId: "track-phone",
+          appointmentId: null,
+          mode: "phone",
+          status: "waiting",
+          directorProfileId: "director-1",
+          readyAt: "2026-08-03T01:00:00.000Z",
+          readySource: "director_resolved",
+          completedAt: null,
+          outcome: null,
+          createdAt: "2026-08-03T01:00:00.000Z",
+          updatedAt: "2026-08-03T01:00:00.000Z",
+        },
+        error: null,
+      };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const consultation = await service.saveRegistrationPhoneConsultation({
+    trackId: "track-phone",
+    requestKey: "phone-request",
+  });
+
+  assert.equal(consultation.id, "consultation-phone");
+  assert.equal(consultation.mode, "phone");
+  assert.equal(consultation.status, "waiting");
+  assert.equal(consultation.readySource, "director_resolved");
+});
+
 test("calendar raw loader uses the canonical half-open scheduled query without caching", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const row = {
@@ -700,6 +741,11 @@ test("track summary loader uses the exact safe projection and skips profile look
         migration_review_required: false, stage_entered_at: "2026-07-12T01:00:00Z",
         phone_ready_at: null, phone_ready_source: null,
         visit_scheduled_at: "2026-07-13T01:00:00Z", visit_place: "상담실",
+        enrollment_detail_rows: [{
+          classId: "class-1", textbookId: null, classStartDate: "2026-08-10",
+          classStartSessionKey: null, classStartLessonSessionId: null,
+          classStartSession: "1회차", sortOrder: 0,
+        }],
         updated_at: "2026-07-12T02:00:00Z",
       }], error: null };
     },
@@ -709,7 +755,8 @@ test("track summary loader uses the exact safe projection and skips profile look
   const result = await service.loadTrackSummaries(["task-1"], "viewer-1");
 
   assert.equal(result.mode, "ready");
-  assert.deepEqual({ ...result.tracks[0] }, {
+  const { enrollmentDetailRows, ...track } = result.tracks[0];
+  assert.deepEqual({ ...track }, {
     id: "track-1", taskId: "task-1", subject: "영어",
     status: "visit_consultation_scheduled", workflowStatus: "consultation_requested",
     workflowRevision: 1, workflowStatusEnteredAt: "", legacy: false, directorProfileId: null,
@@ -719,9 +766,14 @@ test("track summary loader uses the exact safe projection and skips profile look
     phoneReadyAt: null, phoneReadySource: null,
     visitScheduledAt: "2026-07-13T01:00:00Z", visitPlace: "상담실",
   });
+  assert.deepEqual(JSON.parse(JSON.stringify(enrollmentDetailRows)), [{
+      classId: "class-1", textbookId: null, classStartDate: "2026-08-10",
+      classStartSessionKey: null, classStartLessonSessionId: null,
+      classStartSession: "1회차", sortOrder: 0,
+  }]);
   assert.equal(harness.queries.length, 1);
   assert.equal(harness.queries[0].columns,
-    "id,task_id,subject,pipeline_status,workflow_status,workflow_revision,workflow_status_entered_at,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,waiting_detail_kind,waiting_detail_class_id,waiting_detail_retake_decision,level_test_retake_decision,migration_review_required,stage_entered_at,phone_ready_at,phone_ready_source,updated_at,visit_scheduled_at,visit_place,director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)");
+    "id,task_id,subject,pipeline_status,workflow_status,workflow_revision,workflow_status_entered_at,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,waiting_detail_kind,waiting_detail_class_id,waiting_detail_retake_decision,level_test_retake_decision,migration_review_required,stage_entered_at,phone_ready_at,phone_ready_source,updated_at,visit_scheduled_at,visit_place,enrollment_detail_rows,director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)");
   assert.deepEqual(harness.queries[0].filters, [["in", "task_id", ["task-1"]]]);
   assert.doesNotMatch(harness.queries[0].columns, /schedule_plan|textbook|student_ids|waitlist_ids/);
   assert.doesNotMatch(harness.queries[0].columns, /consultations|appointments|\*/);

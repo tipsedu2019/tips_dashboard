@@ -872,13 +872,13 @@ test("registration workspace replaces Notion registration management with one ap
   ]);
 
   assertIncludesAll(workspaceSource, [
-    '{ key: "inquiry", label: "등록 문의" }',
+    '{ key: "inquiry", label: "문의" }',
     '{ key: "level_test", label: "레벨테스트 신청" }',
     '{ key: "consultation_requested", label: "상담 신청" }',
     '{ key: "consultation_completed", label: "상담 완료" }',
     '{ key: "waiting", label: "대기 신청" }',
     '{ key: "enrollment", label: "등록 신청" }',
-    '{ key: "payment", label: "수납 진행 중" }',
+    '{ key: "payment", label: "입학 진행" }',
     '{ key: "completed", label: "완료" }',
     'isRegistrationWorkspace ? registrationMode === "calendar" ? "등록 예약 종류" : "등록 흐름"',
     "const workspaceSurfaceClassName = isWithdrawalWorkspace || isTransferWorkspace || isRegistrationWorkspace",
@@ -1010,13 +1010,13 @@ test("registration exposes eight ordered work tabs with case rows retaining subj
   );
 
   const orderedTabs = [
-    '{ key: "inquiry", label: "등록 문의" }',
+    '{ key: "inquiry", label: "문의" }',
     '{ key: "level_test", label: "레벨테스트 신청" }',
     '{ key: "consultation_requested", label: "상담 신청" }',
     '{ key: "consultation_completed", label: "상담 완료" }',
     '{ key: "waiting", label: "대기 신청" }',
     '{ key: "enrollment", label: "등록 신청" }',
-    '{ key: "payment", label: "수납 진행 중" }',
+    '{ key: "payment", label: "입학 진행" }',
     '{ key: "completed", label: "완료" }',
   ];
   for (let index = 1; index < orderedTabs.length; index += 1) {
@@ -1137,7 +1137,7 @@ test("registration labels canonical result links by subject and keeps legacy det
   );
 
   assert.doesNotMatch(registrationFormSource, /시험지·결과지 URL|levelTestMaterialLink/);
-  assert.match(appointmentEditorSource, /\$\{track\?\.subject \|\| "과목"\} 결과 링크/);
+  assert.match(appointmentEditorSource, /\$\{track\?\.subject \|\| "과목"\} 레벨테스트 결과 링크/);
   assert.match(registrationDetailSource, /RegistrationExternalLinkInfo label="시험지·결과지 URL"/);
 });
 
@@ -1250,14 +1250,14 @@ test("registration rows expose process-specific columns and safe deletion", asyn
 
   assertIncludesAll(tableSource, [
     "REGISTRATION_CASE_VIEW_COLUMNS",
-    'inquiry: ["학생", "진행상태", "학년 · 학교", "연락처", "문의 일시"]',
-    'level_test: ["학생", "진행상태", "예약 일시", "장소", "결과"]',
-    'consultation_requested: ["학생", "진행상태", "책임자", "기준 · 예약 일시", "장소"]',
-    'consultation_completed: ["학생", "진행상태", "책임자", "완료 일시"]',
-    'waiting: ["학생", "진행상태", "책임자", "단계 진입일시"]',
-    'enrollment: ["학생", "진행상태", "수업 시작", "교재 준비"]',
-    'payment: ["학생", "진행상태", "수업 시작", "교재 준비"]',
-    'completed: ["학생", "진행상태", "책임자", "완료 일시"]',
+    'inquiry: ["학생", "빠른 처리", "연락처", "문의 일시", "요청 사항"]',
+    'level_test: ["학생", "빠른 처리", "예약 일시", "장소", "레벨테스트 결과"]',
+    'consultation_requested: ["학생", "빠른 처리", "상담 방식", "책임자", "예약 일시 · 장소"]',
+    'consultation_completed: ["학생", "빠른 처리", "책임자", "완료 일시"]',
+    'waiting: ["학생", "빠른 처리", "책임자", "대기 유형 · 수업", "진입 일시"]',
+    'enrollment: ["학생", "빠른 처리", "수강 수업", "교재", "수업 시작"]',
+    'payment: ["학생", "빠른 처리", "입학신청서", "메이크에듀", "청구서", "수납"]',
+    'completed: ["학생", "빠른 처리", "책임자", "등록 수업", "완료 일시"]',
     "onDelete",
     "삭제",
   ]);
@@ -1335,6 +1335,8 @@ test("registration list renders core data without starting option reads until a 
     "loadOpsTaskWorkspaceOptionData({",
     "viewerId: currentUserId",
     "mergeOpsTaskWorkspaceOptionData(current, enrichmentData)",
+    "REGISTRATION_VIEWS_REQUIRING_LINKED_LABELS",
+    "void ensureRegistrationOptions()",
     "workspaceLoadGenerationRef.current !== loadGeneration",
     "if (type === \"registration\") void ensureRegistrationOptions(true)",
     "if (task.type === \"registration\") void ensureRegistrationOptions(true)",
@@ -4755,7 +4757,7 @@ test("browser workflow scripts target the operation surfaces", async () => {
     "loadRegistrationWorkspaceTrackSummaries(",
     "registrationTracks: tracksByTaskId.get(task.id) || []",
     "OPS_REGISTRATION_PARENT_LIST_COLUMNS",
-    '"ops_registration_details(task_id,pipeline_status,school_grade,school_name,inquiry_at)"',
+    '"ops_registration_details(task_id,pipeline_status,school_grade,school_name,parent_phone,student_phone,inquiry_at,level_test_at,level_test_completed_at,level_test_result,level_test_place,level_test_material_link,counselor,phone_consultation_at,visit_consultation_at,consultation_at,class_start_date,class_start_session,textbook_preparation,visit_consultation_place,admission_notice_sent,payment_checked,makeedu_registered,makeedu_invoice_sent,request_note)"',
   ]);
 
 	  assertIncludesAll(workspaceSource, [

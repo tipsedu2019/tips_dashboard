@@ -31,6 +31,10 @@ export type RegistrationCaseListTrackItem = {
   viewKey: RegistrationWorkflowViewKey
   directorProfileId: string | null
   directorName: string
+  waitingKind: OpsRegistrationTrackSummary["waitingKind"]
+  waitingDetailKind: OpsRegistrationTrackSummary["waitingDetailKind"]
+  waitingDetailClassId: string | null
+  enrollmentDetailRows?: OpsRegistrationTrackSummary["enrollmentDetailRows"]
   stageEnteredAt: string
   phoneReadyAt: string | null
   migrationReviewRequired: boolean
@@ -72,6 +76,14 @@ const REGISTRATION_TRACK_VIEW_KEYS: RegistrationWorkflowViewKey[] = [
 ]
 
 const DELETABLE_WORKFLOW_STATUSES = new Set<OpsRegistrationWorkflowStatus>(["inquiry"])
+const DELETABLE_PIPELINE_STATUSES = new Set<OpsRegistrationTrackStatus>([
+  "inquiry",
+  "migration_review",
+  "level_test_scheduled",
+  "level_test_in_progress",
+  "consultation_waiting",
+  "visit_consultation_scheduled",
+])
 
 export function canDeleteRegistrationCase(
   task: Pick<OpsTask, "type" | "status" | "registrationTracks">,
@@ -80,7 +92,11 @@ export function canDeleteRegistrationCase(
   if (viewerRole !== "admin" || task.type !== "registration") return false
   if (task.status === "done" || task.status === "canceled") return false
   const tracks = task.registrationTracks || []
-  return tracks.length > 0 && tracks.every((track) => DELETABLE_WORKFLOW_STATUSES.has(track.workflowStatus))
+  return tracks.length > 0 && tracks.every((track) => (
+    DELETABLE_WORKFLOW_STATUSES.has(track.workflowStatus)
+    && DELETABLE_PIPELINE_STATUSES.has(track.status)
+    && (track.enrollmentDetailRows?.length || 0) === 0
+  ))
 }
 
 export function buildRegistrationCaseListItems(
@@ -103,6 +119,10 @@ export function buildRegistrationCaseListItems(
       viewKey: getRegistrationWorkflowViewKey(track.workflowStatus || getRegistrationWorkflowStatusFromLegacyTrack(track)) as RegistrationWorkflowViewKey,
       directorProfileId: track.directorProfileId,
       directorName: track.directorName,
+      waitingKind: track.waitingKind,
+      waitingDetailKind: track.waitingDetailKind,
+      waitingDetailClassId: track.waitingDetailClassId,
+      enrollmentDetailRows: track.enrollmentDetailRows,
       stageEnteredAt: track.stageEnteredAt,
       phoneReadyAt: track.phoneReadyAt,
       migrationReviewRequired: track.migrationReviewRequired,
@@ -186,9 +206,9 @@ export function getRegistrationCaseTrackTimeValue(
     "status" | "stageEnteredAt" | "phoneReadyAt" | "visitScheduledAt"
   >,
 ): string {
-  if (track.status === "consultation_waiting") return track.phoneReadyAt || ""
-  if (track.status === "visit_consultation_scheduled") return track.visitScheduledAt
-  return track.stageEnteredAt
+  if (track.phoneReadyAt) return track.phoneReadyAt
+  if (track.visitScheduledAt) return track.visitScheduledAt
+  return ""
 }
 
 function compareConsultationCaseItems(

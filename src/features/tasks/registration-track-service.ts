@@ -722,6 +722,7 @@ const TRACK_SUMMARY_COLUMNS = [
   "updated_at",
   "visit_scheduled_at",
   "visit_place",
+  "enrollment_detail_rows",
   "director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)",
 ].join(",")
 
@@ -2466,6 +2467,24 @@ export function createRegistrationTrackService(
     }
   }
 
+  async function saveRegistrationPhoneConsultation(input: {
+    trackId: string
+    requestKey: string
+  }): Promise<OpsRegistrationConsultation> {
+    const result = await callRpc<Row>("save_registration_phone_consultation_v1", {
+      p_track_id: input.trackId,
+      p_request_key: requireRequestKey(input.requestKey),
+    })
+    const consultation = mapConsultation(result)
+    if (!consultation.id
+      || consultation.trackId !== input.trackId
+      || consultation.mode !== "phone"
+      || consultation.status !== "waiting") {
+      throw new Error("registration_phone_consultation_response_invalid")
+    }
+    return consultation
+  }
+
   async function setRegistrationWorkflowStatus(input: {
     trackId: string
     workflowStatus: OpsRegistrationWorkflowStatus
@@ -2836,6 +2855,7 @@ export function createRegistrationTrackService(
     closeRegistrationLevelTestTrack,
     completeRegistrationConsultation,
     saveRegistrationConsultationDetails,
+    saveRegistrationPhoneConsultation,
     setRegistrationWorkflowStatus,
     transitionRegistrationWaiting,
     saveRegistrationWaitingDetails,
@@ -3126,6 +3146,14 @@ export function saveRegistrationConsultationDetails(
   const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationConsultationDetailsSaveResponse>("saveRegistrationConsultationDetails", input)
   if (fixture) return fixture
   return defaultRegistrationTrackService.saveRegistrationConsultationDetails(input)
+}
+
+export function saveRegistrationPhoneConsultation(
+  input: Parameters<typeof defaultRegistrationTrackService.saveRegistrationPhoneConsultation>[0],
+): Promise<OpsRegistrationConsultation> {
+  const fixture = executeRegistrationSubjectTrackFixtureAction<OpsRegistrationConsultation>("saveRegistrationPhoneConsultation", input)
+  if (fixture) return fixture
+  return defaultRegistrationTrackService.saveRegistrationPhoneConsultation(input)
 }
 
 export function setRegistrationWorkflowStatus(

@@ -21,6 +21,12 @@ export function RegistrationApplicationSubjectTabs({
   panelIdsByTrackId: Readonly<Record<string, readonly string[]>>
   onValueChange: (trackId: string) => void
 }) {
+  const mobileGridClass = tracks.length === 1
+    ? "grid-cols-1"
+    : tracks.length === 2
+      ? "grid-cols-2"
+      : "grid-cols-3"
+
   function handleSubjectTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, trackId: string) {
     const currentIndex = tracks.findIndex((track) => track.id === trackId)
     if (currentIndex < 0) return
@@ -40,7 +46,7 @@ export function RegistrationApplicationSubjectTabs({
   }
 
   return (
-    <div role="tablist" aria-label="과목별 등록 진행" className="flex min-w-0 gap-5 overflow-x-auto border-b">
+    <div role="tablist" aria-label="과목별 등록 진행" className={`grid ${mobileGridClass} border-b sm:flex sm:min-w-0 sm:gap-5`}>
       {tracks.map((track) => {
         const selected = track.id === value
         return (
@@ -50,10 +56,11 @@ export function RegistrationApplicationSubjectTabs({
             type="button"
             role="tab"
             variant="ghost"
+            aria-label={`${track.subject} ${track.statusLabel}`}
             aria-selected={selected}
             aria-controls={panelIdsByTrackId[track.id]?.join(" ")}
             tabIndex={selected ? 0 : -1}
-            className={`h-auto min-w-fit flex-none justify-start gap-2 rounded-none border-b-2 px-1 py-2.5 shadow-none ${selected
+            className={`h-auto min-w-0 justify-center gap-2 rounded-none border-b-2 px-2 py-2.5 shadow-none sm:min-w-fit sm:flex-none sm:justify-start sm:px-1 ${selected
               ? "border-primary text-foreground hover:bg-transparent"
               : "border-transparent text-muted-foreground hover:border-border hover:bg-transparent hover:text-foreground"
             }`}
@@ -61,7 +68,7 @@ export function RegistrationApplicationSubjectTabs({
             onClick={() => onValueChange(track.id)}
           >
             <span className="font-semibold">{track.subject}</span>
-            <span className="max-w-40 truncate text-xs font-normal opacity-70">{track.statusLabel}</span>
+            <span className="hidden sm:inline max-w-40 truncate text-xs font-normal opacity-70">{track.statusLabel}</span>
           </Button>
         )
       })}

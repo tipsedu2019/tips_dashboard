@@ -307,8 +307,9 @@ test("search spans common identity and all subject labels but limits director an
   assert.equal(filterRegistrationCaseListItems(items, "inquiry", "상담실").length, 0)
 })
 
-test("case track time values retain the status-specific date source", () => {
+test("case track time values prefer active canonical consultation dates without a stage fallback", () => {
   assert.equal(getRegistrationCaseTrackTimeValue({ status: "consultation_waiting", stageEnteredAt: "stage", phoneReadyAt: "phone", visitScheduledAt: "visit" }), "phone")
   assert.equal(getRegistrationCaseTrackTimeValue({ status: "visit_consultation_scheduled", stageEnteredAt: "stage", phoneReadyAt: null, visitScheduledAt: "visit" }), "visit")
-  assert.equal(getRegistrationCaseTrackTimeValue({ status: "waiting", stageEnteredAt: "stage", phoneReadyAt: null, visitScheduledAt: "visit" }), "stage")
+  assert.equal(getRegistrationCaseTrackTimeValue({ status: "waiting", stageEnteredAt: "stage", phoneReadyAt: null, visitScheduledAt: "visit" }), "visit")
+  assert.equal(getRegistrationCaseTrackTimeValue({ status: "waiting", stageEnteredAt: "stage", phoneReadyAt: null, visitScheduledAt: "" }), "")
 })

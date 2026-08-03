@@ -72,8 +72,10 @@ export const REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS = [
   "cancelRegistrationAppointment",
   "startRegistrationLevelTestAttempt",
   "completeRegistrationLevelTestAttempt",
+  "saveRegistrationLevelTestResult",
   "closeRegistrationLevelTestTrack",
   "completeRegistrationConsultation",
+  "saveRegistrationPhoneConsultation",
   "transitionRegistrationWaiting",
   "routeRegistrationEnrollmentDecision",
   "saveRegistrationEnrollmentRows",
@@ -2605,6 +2607,22 @@ export function reduceRegistrationSubjectTrackFixture(
       result = { taskId: detail.task.id, trackId: selected.id, attemptId: attempt.id, appointmentId: attempt.appointmentId, attemptNumber: attempt.attemptNumber, status: attempt.status, trackStatus: selected.status, appointmentStatus: appointment?.status || "completed", completedAt: attempt.completedAt, materialLink: attempt.materialLink, consultationId }
       break
     }
+    case "saveRegistrationLevelTestResult": {
+      const detail = requireCase(findCaseByAttemptId(state, asText(payload, "attemptId")), "attempt_not_found")
+      const attempt = requireCase(detail.levelTests.find((item) => item.id === payload.attemptId), "attempt_not_found")
+      const selected = requireCase(detail.tracks.find((item) => item.id === attempt.trackId), "track_not_found")
+      attempt.status = payload.status as OpsRegistrationLevelTest["status"]
+      attempt.materialLink = payload.status === "completed" ? asText(payload, "materialLink") : null
+      attempt.completedAt ||= FIXTURE_NOW
+      syncCase(state, detail)
+      result = {
+        attemptId: attempt.id,
+        trackId: selected.id,
+        status: attempt.status,
+        materialLink: attempt.materialLink,
+      }
+      break
+    }
     case "closeRegistrationLevelTestTrack": {
       const detail = requireCase(findCaseByTrackId(state, asText(payload, "trackId")), "track_not_found")
       const selected = requireCase(detail.tracks.find((item) => item.id === payload.trackId), "track_not_found")
@@ -2628,6 +2646,34 @@ export function reduceRegistrationSubjectTrackFixture(
       selected.stageEnteredAt = FIXTURE_NOW
       syncCase(state, detail)
       result = { consultation, track: selected }
+      break
+    }
+    case "saveRegistrationPhoneConsultation": {
+      const detail = requireCase(findCaseByTrackId(state, asText(payload, "trackId")), "track_not_found")
+      const selected = requireCase(detail.tracks.find((item) => item.id === payload.trackId), "track_not_found")
+      if (!selected.directorProfileId) throw new Error("registration_director_required")
+      let consultation = detail.consultations.find((item) => (
+        item.trackId === selected.id && item.mode === "phone" && item.status === "waiting"
+      ))
+      if (!consultation) {
+        consultation = {
+          id: nextId(state, "consultation"),
+          trackId: selected.id,
+          appointmentId: null,
+          mode: "phone",
+          status: "waiting",
+          directorProfileId: selected.directorProfileId,
+          readyAt: FIXTURE_NOW,
+          readySource: "director_resolved",
+          completedAt: null,
+          outcome: null,
+          createdAt: FIXTURE_NOW,
+          updatedAt: FIXTURE_NOW,
+        }
+        detail.consultations.push(consultation)
+      }
+      syncCase(state, detail)
+      result = consultation
       break
     }
     case "transitionRegistrationWaiting": {

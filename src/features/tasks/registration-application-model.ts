@@ -51,6 +51,53 @@ export type RegistrationApplicationSectionState = {
 
 export type RegistrationCreateCatalogStatus = "ready" | "loading" | "partial" | "error"
 
+export type RegistrationSaveActionPresentation = {
+  disabled: boolean
+  emphasis: "muted" | "primary"
+  label: string
+}
+
+export type RegistrationConsultationMode = "phone" | "visit"
+
+export function getRegistrationConsultationModeDraft(input: {
+  draftMode: RegistrationConsultationMode | null
+  hasVisitAppointment: boolean
+}): {
+  mode: RegistrationConsultationMode
+  savedMode: RegistrationConsultationMode
+  dirty: boolean
+  phoneDisabled: boolean
+} {
+  const savedMode = input.hasVisitAppointment ? "visit" : "phone"
+  const mode = input.hasVisitAppointment ? "visit" : input.draftMode || savedMode
+  return {
+    mode,
+    savedMode,
+    dirty: mode !== savedMode,
+    phoneDisabled: input.hasVisitAppointment,
+  }
+}
+
+export function getRegistrationSaveActionPresentation(input: {
+  dirty: boolean
+  saving?: boolean
+  blocked?: boolean
+  actionLabel: string
+  cleanLabel?: string
+}): RegistrationSaveActionPresentation {
+  const saving = Boolean(input.saving)
+  const dirty = Boolean(input.dirty)
+  return {
+    disabled: saving || Boolean(input.blocked) || !dirty,
+    emphasis: saving || dirty ? "primary" : "muted",
+    label: saving
+      ? "저장 중"
+      : dirty
+        ? input.actionLabel
+        : input.cleanLabel || "저장됨",
+  }
+}
+
 export function resolveRegistrationActiveTrackId(
   tracks: readonly Pick<OpsRegistrationTrackSummary, "id">[],
   requestedTrackId: string | null,
@@ -207,7 +254,7 @@ const REGISTRATION_APPLICATION_PROGRESS_LABELS: Record<
   level_test: "레벨테스트",
   consultation: "상담",
   waiting: "대기",
-  registration: "등록",
+  registration: "등록 신청",
   admission: "입학",
 }
 

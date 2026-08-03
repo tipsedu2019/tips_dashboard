@@ -32,15 +32,17 @@ test("registration workflow exposes the Notion status order and eight list views
     "not_registered",
     "inquiry_only",
   ])
+  assert.equal(REGISTRATION_WORKFLOW_STATUS_LABELS.inquiry, "등록 문의")
+  assert.equal(REGISTRATION_WORKFLOW_STATUS_LABELS.payment_in_progress, "입학 진행 중")
   assert.equal(REGISTRATION_WORKFLOW_STATUS_LABELS.waiting_next_opening, "다음 개강 알림 요청")
   assert.deepEqual(REGISTRATION_WORKFLOW_VIEWS, [
-    ["inquiry", "등록 문의"],
+    ["inquiry", "문의"],
     ["level_test", "레벨테스트 신청"],
     ["consultation_requested", "상담 신청"],
     ["consultation_completed", "상담 완료"],
     ["waiting", "대기 신청"],
     ["enrollment", "등록 신청"],
-    ["payment", "수납 진행 중"],
+    ["payment", "입학 진행"],
     ["completed", "완료"],
   ])
   assert.equal(getRegistrationWorkflowViewKey("waiting_next_opening"), "waiting")

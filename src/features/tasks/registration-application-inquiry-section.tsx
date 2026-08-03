@@ -18,6 +18,7 @@ import {
 } from "./registration-application-model"
 import { getRegistrationSchoolChoices } from "./registration-school-options"
 import { RegistrationSubjectPicker } from "./registration-subject-picker"
+import { RegistrationSaveButton } from "./registration-save-button"
 import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
 import { getRegistrationSubjectPickerAvailability } from "./registration-intake-workflow"
 import type {
@@ -501,9 +502,17 @@ export function RegistrationInquiryEditor({
       />
       {canEdit ? (
         <div className="flex justify-end">
-          <Button type="button" size="sm" onClick={() => void submit()} disabled={saving || refreshPending || Boolean(conflictAttempt)}>
-            {saving ? "저장 중" : "저장"}
-          </Button>
+          <RegistrationSaveButton
+            type="button"
+            size="sm"
+            dirty={dirty}
+            saving={saving}
+            blocked={refreshPending || Boolean(conflictAttempt)}
+            actionLabel="변경사항 저장"
+            cleanLabel="저장됨"
+            aria-label="문의 정보 저장"
+            onClick={() => void submit()}
+          />
         </div>
       ) : null}
       {validationError ? <p role="alert" className="text-xs text-destructive">{validationError}</p> : null}

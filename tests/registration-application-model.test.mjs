@@ -17,7 +17,9 @@ const {
   resolveRegistrationCreateCatalogStatus,
   getRegistrationCreateSectionStates,
   getRegistrationCommonConflictRows,
+  getRegistrationConsultationModeDraft,
   getRegistrationEnrollmentDirtyKey,
+  getRegistrationSaveActionPresentation,
   beginRegistrationConflictComparison,
   isRegistrationApplicationSectionContentDisabled,
   reconcileRegistrationEnrollmentDraft,
@@ -25,6 +27,73 @@ const {
   settleRegistrationConflictComparison,
   updateRegistrationApplicationDirtyKeys,
 } = application
+
+test("consultation mode stays simple before a visit is saved and locks to the saved visit", () => {
+  assert.deepEqual(getRegistrationConsultationModeDraft({
+    draftMode: null,
+    hasVisitAppointment: false,
+  }), {
+    mode: "phone",
+    savedMode: "phone",
+    dirty: false,
+    phoneDisabled: false,
+  })
+  assert.deepEqual(getRegistrationConsultationModeDraft({
+    draftMode: "visit",
+    hasVisitAppointment: false,
+  }), {
+    mode: "visit",
+    savedMode: "phone",
+    dirty: true,
+    phoneDisabled: false,
+  })
+  assert.deepEqual(getRegistrationConsultationModeDraft({
+    draftMode: "phone",
+    hasVisitAppointment: true,
+  }), {
+    mode: "visit",
+    savedMode: "visit",
+    dirty: false,
+    phoneDisabled: true,
+  })
+})
+
+test("save action presentation keeps unchanged forms quiet and dirty forms actionable", () => {
+  assert.deepEqual(getRegistrationSaveActionPresentation({
+    dirty: false,
+    actionLabel: "변경사항 저장",
+  }), {
+    disabled: true,
+    emphasis: "muted",
+    label: "저장됨",
+  })
+  assert.deepEqual(getRegistrationSaveActionPresentation({
+    dirty: true,
+    actionLabel: "변경사항 저장",
+  }), {
+    disabled: false,
+    emphasis: "primary",
+    label: "변경사항 저장",
+  })
+  assert.deepEqual(getRegistrationSaveActionPresentation({
+    dirty: true,
+    saving: true,
+    actionLabel: "변경사항 저장",
+  }), {
+    disabled: true,
+    emphasis: "primary",
+    label: "저장 중",
+  })
+  assert.deepEqual(getRegistrationSaveActionPresentation({
+    dirty: false,
+    actionLabel: "등록 정보 저장",
+    cleanLabel: "수업을 선택하세요",
+  }), {
+    disabled: true,
+    emphasis: "muted",
+    label: "수업을 선택하세요",
+  })
+})
 
 test("visible application body excludes history while internal state retains it", () => {
   assert.deepEqual(REGISTRATION_APPLICATION_BODY_SECTION_ORDER, [

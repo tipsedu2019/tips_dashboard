@@ -117,6 +117,53 @@ test("status-independent enrollment details stay separate from roster enrollment
   assert.doesNotMatch(sql, /transition_registration_track_status/)
 })
 
+test("registration workflow integrity repair materializes phone consultations and canonical planned rows", async () => {
+  const sql = await readMigration("registration_workflow_data_integrity")
+  const trimmed = sql.trim()
+
+  assert.match(trimmed, /^begin;/i)
+  assert.match(trimmed, /commit;$/i)
+  assert.match(sql, /create or replace function dashboard_private\.save_registration_phone_consultation_v1_impl\(/)
+  assert.match(sql, /insert into public\.ops_registration_consultations\([\s\S]*?'phone'[\s\S]*?'waiting'[\s\S]*?'director_resolved'/)
+  assert.match(sql, /create or replace function public\.save_registration_phone_consultation_v1\(/)
+  assert.match(sql, /grant execute on function public\.save_registration_phone_consultation_v1\(uuid, text\)\s+to authenticated/)
+  assert.match(sql, /pg_get_functiondef\(\s*'dashboard_private\.save_registration_enrollment_rows_impl\(uuid,jsonb,text\)'::regprocedure\s*\)/)
+  assert.match(sql, /dashboard\.registration_status_independent_enrollment/)
+  assert.match(sql, /public\.save_registration_enrollment_rows\([\s\S]*?p_request_key \|\| ':canonical-rows'/)
+  assert.match(sql, /update public\.ops_registration_subject_tracks[\s\S]*?enrollment_detail_rows = p_rows/)
+  assert.match(sql, /pg_get_functiondef\(\s*'dashboard_private\.claim_registration_admission_message_impl\(uuid,text\)'::regprocedure\s*\)/)
+  assert.match(sql, /track\.workflow_status = 'enrollment_requested'/)
+  assert.match(sql, /pg_get_functiondef\(\s*'dashboard_private\.start_registration_admission_batch_impl\(uuid,uuid\[\],uuid\[\],text\)'::regprocedure\s*\)/)
+  assert.doesNotMatch(sql, /send_google_chat|send_web_push|solapi|http_post|net\.http/i)
+})
+
+test("registration enrollment detail bridge preserves schedule-session compatibility", async () => {
+  const sql = await readMigration("registration_enrollment_details_canonical_bridge")
+  assert.match(sql.trim(), /^begin;[\s\S]*commit;$/i)
+  assert.match(sql, /create or replace function dashboard_private\.save_registration_enrollment_details_impl\(/)
+  assert.match(sql, /dashboard\.registration_status_independent_enrollment/)
+  assert.match(sql, /public\.save_registration_enrollment_rows\([\s\S]*?p_request_key \|\| ':canonical-rows'/)
+  assert.doesNotMatch(sql, /dashboard_private\.save_registration_enrollment_rows_impl\(/)
+  assert.match(sql, /enrollment_detail_rows = p_rows/)
+  assert.doesNotMatch(sql, /send_google_chat|send_web_push|solapi|http_post|net\.http/i)
+})
+
+test("registration summary view exposes saved enrollment details to process tables", async () => {
+  const sql = await readMigration("registration_summary_enrollment_details")
+  const viewStart = sql.indexOf("create or replace view public.ops_registration_subject_track_summaries")
+  const viewEnd = sql.indexOf("from public.ops_registration_subject_tracks track", viewStart)
+  const projection = sql.slice(viewStart, viewEnd)
+
+  assert.match(sql.trim(), /^begin;[\s\S]*commit;$/i)
+  assert.match(sql, /with \(security_invoker = true\)/)
+  assert.match(sql, /notify pgrst, 'reload schema'/)
+  assertInOrder(projection, [
+    "track.waiting_detail_retake_decision",
+    "track.enrollment_detail_rows",
+  ])
+  assert.doesNotMatch(sql, /insert into|update public\.|delete from|send_google_chat|send_web_push|solapi|http_post|net\.http/i)
+})
+
 test("withdrawal completion migration scopes roster release to the selected class", async () => {
   const sql = await readMigration("withdrawal_subject_scoped_completion")
   const withdrawal = readFunctionBlock(
