@@ -950,9 +950,10 @@ test("makeup notification controls can preview and edit per-process content temp
   assert.match(serviceSource, /function getDefaultMakeupNotificationBodyTemplate/);
   assert.match(serviceSource, /function renderMakeupNotificationTemplate/);
   assert.match(serviceSource, /export async function updateMakeupNotificationTriggerContent/);
-  assert.match(serviceSource, /MAKEUP_NOTIFICATION_CHANNELS\.map\(\(channel\) => \(\{/);
-  assert.match(serviceSource, /title_template: titleTemplate/);
-  assert.match(serviceSource, /body_template: bodyTemplate/);
+  assert.match(serviceSource, /saveCanonicalMakeupNotificationRules/);
+  assert.match(serviceSource, /\(\) => \(\{ titleTemplate, bodyTemplate \}\)/);
+  assert.doesNotMatch(serviceSource, /title_template: titleTemplate/);
+  assert.doesNotMatch(serviceSource, /body_template: bodyTemplate/);
   assert.match(notificationMakeupAdapterMigrationSource, /notification_makeup_render_template_v1/);
   assert.match(notificationMakeupAdapterMigrationSource, /'\{보강 강의실\}'/);
   assert.match(notificationMakeupAdapterMigrationSource, /'\{승인 메모\}'/);
@@ -1009,6 +1010,20 @@ test("makeup notification controls can preview and edit per-process content temp
   assert.match(workspaceSource, /function getMakeupApprovalNoteValue/);
   assert.match(workspaceSource, /case "finalNote":[\s\S]*getMakeupApprovalNoteValue\(request\)/);
   assert.doesNotMatch(workspaceSource, /case "finalNote":[\s\S]*return request\.finalNote \|\| "-"/);
+});
+
+test("legacy makeup editor delegates toggles and content saves to the canonical v2 command", () => {
+  assert.match(serviceSource, /createNotificationControlPlaneService/);
+  assert.match(serviceSource, /getControlPlane\(\{\s*workflowKey:\s*"makeup_requests"\s*\}\)/);
+  assert.match(serviceSource, /saveControlPlane\(\{[\s\S]*workflowKey:\s*"makeup_requests"/);
+  assert.match(serviceSource, /expectedRuleRevisions/);
+  assert.match(serviceSource, /expectedContractVersions/);
+  assert.doesNotMatch(
+    serviceSource,
+    /\.from\("makeup_notification_settings"\)[\s\S]{0,240}\.upsert\(/,
+  );
+  assert.match(workspaceSource, /toggleMakeupNotificationSetting\(/);
+  assert.match(workspaceSource, /updateMakeupNotificationTriggerContent\(/);
 });
 
 test("makeup workspace keeps terminal requests in the approval result tab", () => {

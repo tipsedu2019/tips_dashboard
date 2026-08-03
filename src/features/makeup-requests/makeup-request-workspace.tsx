@@ -2293,10 +2293,10 @@ export function MakeupRequestWorkspace() {
       return
     }
     await runAction(
-      () => toggleMakeupNotificationSetting(setting.triggerKind, setting.channel, !setting.enabled, currentUserId),
+      () => toggleMakeupNotificationSetting(setting.triggerKind, setting.channel, !setting.enabled),
       "알림 설정을 저장했습니다.",
     )
-  }, [currentUserId, isManager, runAction])
+  }, [isManager, runAction])
 
   const handleOpenWebhookInfo = useCallback(async (channel: MakeupNotificationSetting["channel"]) => {
     const googleChatChannel = MAKEUP_GOOGLE_CHAT_CHANNEL_MAP[channel]
@@ -2421,7 +2421,6 @@ export function MakeupRequestWorkspace() {
         selectedNotificationSetting.triggerKind,
         notificationTemplateInput.titleTemplate,
         notificationTemplateInput.bodyTemplate,
-        currentUserId,
       ),
       "알림 내용을 저장했습니다.",
     )
@@ -2429,7 +2428,7 @@ export function MakeupRequestWorkspace() {
       setSelectedNotificationSetting(null)
       setNotificationTemplateInput(EMPTY_NOTIFICATION_TEMPLATE_INPUT)
     }
-  }, [currentUserId, isManager, notificationTemplateInput, runAction, selectedNotificationSetting])
+  }, [isManager, notificationTemplateInput, runAction, selectedNotificationSetting])
 
   const handleEditForRevision = useCallback((request: MakeupRequest) => {
     const requestClass = data.classes.find((classItem) => classItem.id === request.classId) || null

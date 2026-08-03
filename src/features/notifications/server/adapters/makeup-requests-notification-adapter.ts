@@ -1,4 +1,22 @@
+import { buildMakeupNotificationPresentation } from "../presentation/makeup-notification-presentation.ts"
 import { createImmediateNotificationAdapter } from "./immediate-notification-adapter.ts"
+
+const LEGACY_MAKEUP_CONTEXT_KEYS = Object.freeze([
+  "process", "status", "class_name", "subject", "teacher_name", "reason", "cancel_date",
+  "makeup_at", "makeup_room_spaced", "makeup_room", "requester_name", "submitted_at",
+  "revision_requested_at", "revision_reason", "approved_at", "approval_note", "rejected_at",
+  "rejected_reason", "canceled_at", "canceled_note", "approver_name", "fallback_title", "fallback_body",
+])
+
+function buildMakeupAdapterPresentation(
+  input: Parameters<typeof buildMakeupNotificationPresentation>[0],
+) {
+  if (input.requestedContextKeys.length > 0) return buildMakeupNotificationPresentation(input)
+  return buildMakeupNotificationPresentation({
+    ...input,
+    requestedContextKeys: LEGACY_MAKEUP_CONTEXT_KEYS,
+  })
+}
 
 export const makeupRequestsNotificationAdapter = createImmediateNotificationAdapter({
   workflowKey: "makeup_requests",
@@ -22,29 +40,6 @@ export const makeupRequestsNotificationAdapter = createImmediateNotificationAdap
     executive_team: ["executive_profile_ids"],
     subject_team: ["subject_profile_ids"],
   },
-  renderFields: {
-    process: ["process"],
-    status: ["status", "workflow_status"],
-    class_name: ["class_name"],
-    subject: ["subject"],
-    teacher_name: ["teacher_name"],
-    reason: ["reason"],
-    cancel_date: ["cancel_date"],
-    makeup_at: ["makeup_at"],
-    makeup_room_spaced: ["makeup_room_spaced"],
-    makeup_room: ["makeup_room"],
-    requester_name: ["requester_name"],
-    submitted_at: ["submitted_at"],
-    revision_requested_at: ["revision_requested_at"],
-    revision_reason: ["revision_reason"],
-    approved_at: ["approved_at"],
-    approval_note: ["approval_note"],
-    rejected_at: ["rejected_at"],
-    rejected_reason: ["rejected_reason"],
-    canceled_at: ["canceled_at"],
-    canceled_note: ["canceled_note"],
-    approver_name: ["approver_name"],
-    fallback_title: ["fallback_title"],
-    fallback_body: ["fallback_body"],
-  },
+  renderFields: {},
+  presentationBuilder: buildMakeupAdapterPresentation,
 })

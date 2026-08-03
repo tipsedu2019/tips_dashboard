@@ -14,6 +14,7 @@ import {
   type MakeupRequestKind,
 } from "./makeup-request-model.js"
 import { runIdempotentMakeupCreate } from "./makeup-create-attempt.js"
+import { createNotificationControlPlaneService } from "@/features/notifications/notification-control-plane-service"
 import {
   mapDashboardNotificationInboxWire,
   mapDashboardNotificationReadWire,
@@ -243,6 +244,15 @@ export const MAKEUP_NOTIFICATION_CHANNEL_LABELS: Record<MakeupNotificationChanne
 const MAKEUP_NOTIFICATION_TRIGGERS = Object.keys(MAKEUP_NOTIFICATION_TRIGGER_LABELS) as ActiveMakeupNotificationTrigger[]
 const MAKEUP_NOTIFICATION_CHANNELS = Object.keys(MAKEUP_NOTIFICATION_CHANNEL_LABELS) as MakeupNotificationChannel[]
 const MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT = 40
+const MAKEUP_NOTIFICATION_EVENT_BY_TRIGGER: Readonly<Record<MakeupNotificationTrigger, string>> = Object.freeze({
+  submitted: "makeup.submitted",
+  refund_requested: "makeup.refund_requested",
+  approved: "makeup.approved",
+  completed: "makeup.refund_completed",
+  canceled: "makeup.approval_canceled",
+  returned: "makeup.revision_requested",
+  rejected: "makeup.rejected",
+})
 export function getMakeupNotificationTriggerLabel(triggerKind: string) {
   if (triggerKind === "completed") return MAKEUP_NOTIFICATION_TRIGGER_LABELS.approved
   return MAKEUP_NOTIFICATION_TRIGGER_LABELS[triggerKind as ActiveMakeupNotificationTrigger] || triggerKind
@@ -277,11 +287,6 @@ export function renderMakeupNotificationTemplate(template: string, context: Reco
 
 function text(value: unknown) {
   return String(value || "").trim()
-}
-
-function nullable(value: unknown) {
-  const resolved = text(value)
-  return resolved || null
 }
 
 function parseObject(value: unknown): Row {
@@ -1070,52 +1075,83 @@ export async function deleteMakeupRequest(requestId: string, actorId: string) {
   return result.request
 }
 
+function canonicalRuleMatchesLegacyChannel(
+  rule: Readonly<{ audienceKey: string; channelKey: string }>,
+  channel: MakeupNotificationChannel,
+) {
+  if (channel === "dashboard_personal") {
+    return rule.channelKey === "in_app"
+      && (rule.audienceKey === "requester_profile" || rule.audienceKey === "approver_profile")
+  }
+  if (channel === "dashboard_management") {
+    return rule.channelKey === "in_app" && rule.audienceKey === "management_team"
+  }
+  if (channel === "google_chat_executive") {
+    return rule.channelKey === "google_chat" && rule.audienceKey === "executive_team"
+  }
+  if (channel === "google_chat_admin") {
+    return rule.channelKey === "google_chat" && rule.audienceKey === "management_team"
+  }
+  return rule.channelKey === "google_chat" && rule.audienceKey === "subject_team"
+}
+
+async function saveCanonicalMakeupNotificationRules(
+  triggerKind: MakeupNotificationTrigger,
+  selectRule: (rule: Readonly<{ audienceKey: string; channelKey: string }>) => boolean,
+  patchForRule: () => Readonly<{ enabled?: boolean; titleTemplate?: string; bodyTemplate?: string }>,
+) {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const { data: authData, error: authError } = await supabase.auth.getSession()
+  if (authError) throw authError
+  const session = authData.session
+  if (!session?.access_token) throw new Error("로그인 세션을 확인할 수 없습니다.")
+
+  const controlPlane = createNotificationControlPlaneService({
+    baseUrl: window.location.origin,
+    getAccessToken: async () => session.access_token,
+  })
+  const snapshot = await controlPlane.getControlPlane({ workflowKey: "makeup_requests" })
+  const eventKey = MAKEUP_NOTIFICATION_EVENT_BY_TRIGGER[triggerKind]
+  const rules = snapshot.rules.filter((rule) => rule.eventKey === eventKey && selectRule(rule))
+  if (rules.length === 0) throw new Error("저장할 휴보강 알림 규칙을 찾을 수 없습니다.")
+
+  return controlPlane.saveControlPlane({
+    workflowKey: "makeup_requests",
+    expectedRuleRevisions: Object.fromEntries(rules.map((rule) => [rule.id, rule.revision])),
+    expectedContractVersions: Object.fromEntries(
+      rules.map((rule) => [rule.id, rule.contentContract.contractVersion]),
+    ),
+    patch: {
+      rules: Object.fromEntries(rules.map((rule) => [rule.id, patchForRule()])),
+    },
+    requestId: crypto.randomUUID(),
+  })
+}
+
 export async function toggleMakeupNotificationSetting(
   triggerKind: MakeupNotificationTrigger,
   channel: MakeupNotificationChannel,
   enabled: boolean,
-  actorId: string,
 ) {
-  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
-  const channels: MakeupNotificationChannel[] =
-    channel === "google_chat_english" || channel === "google_chat_math"
-      ? ["google_chat_english", "google_chat_math"]
-      : [channel]
-  const updatedAt = new Date().toISOString()
-  const rows = channels.map((targetChannel) => ({
-    trigger_kind: triggerKind,
-    channel: targetChannel,
-    enabled,
-    updated_by: nullable(actorId),
-    updated_at: updatedAt,
-  }))
-  const { error } = await supabase
-    .from("makeup_notification_settings")
-    .upsert(rows, { onConflict: "trigger_kind,channel" })
-  if (error) throw error
+  return saveCanonicalMakeupNotificationRules(
+    triggerKind,
+    (rule) => canonicalRuleMatchesLegacyChannel(rule, channel),
+    () => ({ enabled }),
+  )
 }
 
 export async function updateMakeupNotificationTriggerContent(
   triggerKind: MakeupNotificationTrigger,
   inputTitleTemplate: string,
   inputBodyTemplate: string,
-  actorId: string,
 ) {
-  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const titleTemplate = text(inputTitleTemplate) || getDefaultMakeupNotificationTitleTemplate(triggerKind)
   const bodyTemplate = text(inputBodyTemplate) || getDefaultMakeupNotificationBodyTemplate()
-  const rows = MAKEUP_NOTIFICATION_CHANNELS.map((channel) => ({
-    trigger_kind: triggerKind,
-    channel,
-    title_template: titleTemplate,
-    body_template: bodyTemplate,
-    updated_by: nullable(actorId),
-    updated_at: new Date().toISOString(),
-  }))
-  const { error } = await supabase
-    .from("makeup_notification_settings")
-    .upsert(rows, { onConflict: "trigger_kind,channel" })
-  if (error) throw error
+  return saveCanonicalMakeupNotificationRules(
+    triggerKind,
+    () => true,
+    () => ({ titleTemplate, bodyTemplate }),
+  )
 }
 
 export async function loadDashboardNotifications(

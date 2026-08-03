@@ -35,6 +35,14 @@ const serviceUrl = new URL(
   "../src/features/makeup-requests/makeup-request-service.ts",
   import.meta.url,
 )
+const adapterUrl = new URL(
+  "../src/features/notifications/server/adapters/makeup-requests-notification-adapter.ts",
+  import.meta.url,
+)
+const contentSingleWriterMigrationUrl = new URL(
+  "../supabase/migrations/20260803150000_notification_makeup_content_single_writer.sql",
+  import.meta.url,
+)
 
 async function optionalSource(url) {
   return existsSync(url) ? readFile(url, "utf8") : ""
@@ -258,6 +266,119 @@ test("고정 전이 명령만 허용하고 상태·행위자·삭제 권한을 �
   assert.match(sql, /makeup_request_transition_forbidden/)
   assert.match(sql, /makeup_request_delete_forbidden/)
   assert.doesNotMatch(domainRpcSource, /p_(?:title|body|href|recipient|target|webhook)/i)
+})
+
+test("휴보강 과목팀 adapter는 영어·수학·과학 중 payload가 정한 한 방만 만든다", async () => {
+  const { makeupRequestsNotificationAdapter } = await import(adapterUrl)
+  for (const fixture of [
+    { subject: "영어", approvalGroup: "english", connectionKey: "google_chat.english" },
+    { subject: "수학", approvalGroup: "math_high", connectionKey: "google_chat.math" },
+    { subject: "과학", approvalGroup: "science", connectionKey: "google_chat.science" },
+  ]) {
+    const input = {
+      eventId: "86000000-0000-4000-8000-000000000011",
+      workflowKey: "makeup_requests",
+      eventKey: "makeup.submitted",
+      sourceType: "makeup_request_event",
+      sourceId: "86000000-0000-4000-8000-000000000012",
+      sourceRevision: null,
+      payloadSchemaVersion: 1,
+      payload: {
+        makeup_request_id: "86000000-0000-4000-8000-000000000001",
+        class_name: "대기고1A",
+        subject: fixture.subject,
+        approval_group: fixture.approvalGroup,
+        teacher_name: "강부희",
+        status: "approval_pending",
+        workflow_status: "approval_pending",
+        cancel_date: "2026-08-05",
+        makeup_schedule: [{
+          start_at: "2026-08-07T01:00:00.000Z",
+          end_at: "2026-08-07T03:00:00.000Z",
+          place: "별관 3강",
+        }],
+        approver_name: "김철수",
+        reason: "개인 일정",
+        occurred_at: "2026-08-04T01:00:00.000Z",
+        subject_profile_ids: [],
+      },
+      rule: {
+        ruleId: "86000000-0000-4000-8000-000000000021",
+        ruleRevision: "1",
+        templateId: "86000000-0000-4000-8000-000000000022",
+        audienceKey: "subject_team",
+        channelKey: "google_chat",
+        connectionKey: fixture.connectionKey,
+        ruleVariantKey: "immediate",
+      },
+      scheduledFor: "2026-08-04T01:00:00.000Z",
+    }
+    const targets = await makeupRequestsNotificationAdapter.resolveTargets(input)
+    assert.equal(targets.targets.length, 1, fixture.subject)
+    assert.deepEqual(
+      targets.targets.map((target) => target.connectionKey),
+      [fixture.connectionKey],
+      fixture.subject,
+    )
+    for (const other of [
+      "google_chat.executive", "google_chat.management", "google_chat.english",
+      "google_chat.math", "google_chat.science",
+    ].filter((connectionKey) => connectionKey !== fixture.connectionKey)) {
+      assert.equal(
+        targets.targets.filter((target) => target.connectionKey === other).length,
+        0,
+        `${fixture.subject} 알림이 ${other}에도 생기면 안 됩니다.`,
+      )
+    }
+    const context = await makeupRequestsNotificationAdapter.buildRenderContext({
+      ...input,
+      targetGeneration: targets.targetGeneration,
+      target: targets.targets[0],
+      requestedContextKeys: ["class_name", "subjects", "progress_actor"],
+    })
+    assert.deepEqual(context, {
+      class_name: "대기고1A",
+      subjects: fixture.subject,
+      progress_actor: "김철수님",
+    })
+  }
+})
+
+test("휴보강 content migration은 v2 저장만 canonical·legacy를 함께 쓰는 권위로 둔다", async () => {
+  const sql = await optionalSource(contentSingleWriterMigrationUrl)
+  const mirror = createFunctionBlock(
+    sql,
+    "dashboard_private.mirror_makeup_notification_template_v1",
+    "dashboard_private.notification_makeup_payload_v1",
+  )
+  const payload = createFunctionBlock(
+    sql,
+    "dashboard_private.notification_makeup_payload_v1",
+    "public.save_notification_control_plane_v2",
+  )
+  const save = createFunctionBlock(sql, "public.save_notification_control_plane_v2")
+
+  assert.match(sql, /revoke\s+insert\s*,\s*update\s*,\s*delete[\s\S]*public\.makeup_notification_settings[\s\S]*from authenticated/i)
+  assert.match(sql, /drop trigger if exists reconcile_makeup_notification_settings_after_write_v1/i)
+  assert.match(mirror, /dashboard_private\.notification_templates/)
+  assert.match(mirror, /dashboard_private\.notification_rules/)
+  assert.match(mirror, /metadata\.mapped_rule_ids\s*@>/)
+  assert.match(mirror, /update public\.makeup_notification_settings/)
+  assert.match(mirror, /notification_makeup_setting_checksum_v1/)
+  assert.match(mirror, /notification_settings_import_metadata/)
+  assert.match(save, /save_notification_control_plane_unmirrored_v2/)
+  assert.match(save, /mirror_makeup_notification_template_v1/)
+  assert.ok(
+    save.indexOf("save_notification_control_plane_unmirrored_v2")
+      < save.indexOf("mirror_makeup_notification_template_v1"),
+    "canonical pointer 저장 뒤 legacy mirror를 같은 v2 transaction에서 실행해야 합니다.",
+  )
+  for (const key of [
+    "request_kind", "requester_name", "approver_name", "actor_name", "status_changed_at",
+    "makeup_schedule", "makeup_places", "attachment_count", "attachment_types",
+  ]) assert.match(payload, new RegExp(`'${key}'`), `휴보강 payload snapshot 누락: ${key}`)
+  assert.doesNotMatch(payload, /file_name|filename|storage_path|attachment_url/i)
+  assert.doesNotMatch(sql, /update\s+dashboard_private\.notification_runtime_flags|update\s+dashboard_private\.notification_dispatch_ownership_claims|fetch\s*\(|http_post|net\.http/i)
 })
 
 test("조교 휴보강 권한은 restrictive RLS·DML trigger·공개 RPC 입구에서 모두 차단한다", async () => {
@@ -814,7 +935,7 @@ test("휴보강 Google Chat·웹푸시는 준비 뒤 외부 시도 등록기를 
   assert.match(sql, /'templateChecksum',\s*child_template\.checksum/)
 })
 
-test("공통 과목팀 규칙으로 합쳐진 영어·수학 레거시 토글은 한 문장으로 함께 저장한다", async () => {
+test("영어·수학 레거시 토글은 공통 과목팀 canonical rule 한 건으로 저장한다", async () => {
   const service = await optionalSource(serviceUrl)
   const toggle = functionBlock(
     service,
@@ -822,10 +943,10 @@ test("공통 과목팀 규칙으로 합쳐진 영어·수학 레거시 토글은
     "updateMakeupNotificationTriggerContent",
   )
 
-  assert.match(toggle, /channel === "google_chat_english" \|\| channel === "google_chat_math"/)
-  assert.match(toggle, /\["google_chat_english", "google_chat_math"\]/)
-  assert.match(toggle, /channels\.map\(\(targetChannel\) =>/)
-  assert.match(toggle, /\.upsert\(rows,/)
+  assert.match(toggle, /saveCanonicalMakeupNotificationRules/)
+  assert.match(toggle, /canonicalRuleMatchesLegacyChannel\(rule, channel\)/)
+  assert.match(service, /rule\.channelKey === "google_chat" && rule\.audienceKey === "subject_team"/)
+  assert.doesNotMatch(toggle, /\.upsert\(/)
 })
 
 test("pgTAP 패킷은 재실행 무변경·원본 계보·스냅샷·최종 parity를 검증한다", async () => {
