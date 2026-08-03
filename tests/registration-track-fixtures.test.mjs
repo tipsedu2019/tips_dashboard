@@ -13,6 +13,9 @@ import {
   REGISTRATION_WORKFLOW_STATUSES,
   getRegistrationWorkflowStatusFromLegacyTrack,
 } from "../src/features/tasks/registration-workflow-status.js"
+import {
+  createRegistrationNotificationProcessingReadinessLoader,
+} from "../src/features/tasks/registration-notification-processing-readiness.ts"
 
 const academicSubjectRegistry = {
   ACADEMIC_SUBJECT_VALUES,
@@ -170,6 +173,9 @@ async function loadServiceBoundary({
           probeRegistrationSubjectTrackRuntime: async () => ({ mode: "ready", version: 1 }),
           invalidateRegistrationSubjectTrackRuntimeAfterReadyFailure(error) { throw error },
         }
+      }
+      if (specifier === "./registration-notification-processing-readiness") {
+        return { createRegistrationNotificationProcessingReadinessLoader }
       }
       if (specifier === "./registration-level-test-place.ts") {
         return {
