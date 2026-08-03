@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
+import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import test from "node:test"
 
@@ -12,20 +13,31 @@ const registryUrl = new URL(
   import.meta.url,
 )
 
-const EXPECTED_SCOPES = [
-  "tasks",
-  "word_retests",
-  "approvals",
-  "transfer",
-  "withdrawal",
-  "makeup_requests",
-  "registration",
-  "registration_phone",
-  "registration_visit",
-  "registration_solapi",
-]
+const coverageFixture = JSON.parse(readFileSync(
+  new URL("./fixtures/notification-content-coverage-manifest.json", import.meta.url),
+  "utf8",
+))
 
-test("preview fixture runner는 고정 10개 범위를 실제 adapter로 독립 비교한다", async () => {
+const identityKey = ({ workflowKey, eventKey, audienceKey, channelKey, ruleVariantKey }) =>
+  [workflowKey, eventKey, audienceKey, channelKey, ruleVariantKey].join("|")
+
+const EXPECTED_IDENTITIES = coverageFixture.ruleGroups
+  .filter((group) => group.scopeState === "in_scope")
+  .flatMap((group) => group.eventKeys.flatMap((eventKey) => (
+    group.cells.flatMap((cell) => cell.ruleVariantKeys.map((ruleVariantKey) => ({
+      workflowKey: group.workflowKey,
+      eventKey,
+      audienceKey: cell.audienceKey,
+      channelKey: cell.channelKey,
+      ruleVariantKey,
+      dispatchOwner: group.dispatchOwner,
+    })))
+  )))
+  .sort((left, right) => identityKey(left).localeCompare(identityKey(right)))
+
+const EXPECTED_IDENTITY_KEYS = EXPECTED_IDENTITIES.map(identityKey)
+
+test("preview fixture runner는 전체 185개 in-scope identity를 exact content와 단일 destination으로 독립 비교한다", async () => {
   const originalFetch = globalThis.fetch
   let networkRequests = 0
   globalThis.fetch = async () => {
@@ -38,11 +50,11 @@ test("preview fixture runner는 고정 10개 범위를 실제 adapter로 독립 
     const first = await runner.runNotificationShadowPreviewFixtures()
     const second = await runner.runNotificationShadowPreviewFixtures()
 
-    assert.deepEqual(runner.NOTIFICATION_SHADOW_PREVIEW_SCOPES, EXPECTED_SCOPES)
+    assert.deepEqual(runner.NOTIFICATION_SHADOW_PREVIEW_IDENTITIES, EXPECTED_IDENTITY_KEYS)
     assert.equal(first.passed, true)
-    assert.deepEqual(first.scopeOrder, EXPECTED_SCOPES)
-    assert.equal(first.cycles.length, 10)
-    assert.equal(first.totals.completedScopes, 10)
+    assert.deepEqual(first.identityOrder, EXPECTED_IDENTITY_KEYS)
+    assert.equal(first.cycles.length, 185)
+    assert.equal(first.totals.completedIdentities, 185)
     assert.equal(first.totals.externalRequests, 0)
     assert.equal(first.totals.providerAttempts, 0)
     assert.equal(first.totals.canonicalInboxProjections, 0)
@@ -52,14 +64,25 @@ test("preview fixture runner는 고정 10개 범위를 실제 adapter로 독립 
     assert.deepEqual(second, first, "동일 실행은 byte-stable 증거를 만들어야 한다")
 
     for (const [index, cycle] of first.cycles.entries()) {
-      assert.equal(cycle.owner, EXPECTED_SCOPES[index])
-      assert.equal(cycle.scopeKey, EXPECTED_SCOPES[index])
+      assert.equal(cycle.identityKey, EXPECTED_IDENTITY_KEYS[index])
+      assert.deepEqual(cycle.identity, EXPECTED_IDENTITIES[index])
       assert.equal(cycle.complete, true)
-      assert.equal(cycle.adapterSource, "notification-workflow-registry")
+      assert.equal(
+        cycle.adapterSource,
+        "notification-content-manifest+representative-workflow-registry",
+      )
       assert.equal(cycle.rendererSource, "notification-worker.renderNotificationSnapshot")
       assert.equal(cycle.legacyTransport, "injected_recorder")
       assert.equal(cycle.comparison.matched, true)
       assert.deepEqual(cycle.comparison.mismatches, [])
+      assert.equal(cycle.comparison.exactTitle, true)
+      assert.equal(cycle.comparison.exactBody, true)
+      assert.equal(cycle.comparison.exactHref, true)
+      assert.equal(cycle.comparison.normalizedHash, true)
+      assert.deepEqual(cycle.comparison.errorParity, {
+        missing: "render_validation_failed",
+        null: "render_validation_failed",
+      })
       assert.ok(cycle.recordedLegacyIntents >= 1)
       assert.ok(cycle.canonicalRows.length >= 1)
       assert.ok(cycle.canonicalRows.every((row) => (
@@ -73,7 +96,20 @@ test("preview fixture runner는 고정 10개 범위를 실제 adapter로 독립 
       assert.equal(cycle.duplicateExternalRequests, 0)
       assert.equal(cycle.databaseOperations, 0)
       assert.match(cycle.intentDigest, /^[a-f0-9]{64}$/)
+      const googleChatTotal = Object.values(cycle.destinationCounts).reduce((sum, count) => sum + count, 0)
+      assert.equal(googleChatTotal, cycle.identity.channelKey === "google_chat" ? 1 : 0)
+      if (cycle.identity.channelKey === "google_chat") {
+        assert.equal(cycle.destinationCounts[cycle.expectedDestination], 1)
+        assert.equal(Object.values(cycle.destinationCounts).filter((count) => count === 0).length, 4)
+      }
     }
+
+    assert.deepEqual(first.excludedChannelCoverage, [{
+      identityKey: "registration|registration.admission_message_requested|applicant_guardian|customer_message|immediate",
+      scopeState: "excluded_channel",
+      completionClaim: false,
+      providerAttempts: 0,
+    }])
 
     assert.deepEqual(first.manifest, {
       algorithm: "sha256",
@@ -83,14 +119,14 @@ test("preview fixture runner는 고정 10개 범위를 실제 adapter로 독립 
     assert.match(first.manifest.digest, /^[a-f0-9]{64}$/)
     assert.equal(runner.verifyNotificationShadowPreviewManifest(first), true)
 
-    const taskCycle = first.cycles.find((cycle) => cycle.scopeKey === "tasks")
+    const taskCycle = first.cycles.find((cycle) => cycle.identity.eventKey === "task.created")
     assert.ok(taskCycle, "할 일 legacy custom preview 증거가 필요합니다")
     assert.equal(taskCycle.comparison.matched, true)
     assert.equal(taskCycle.recordedLegacyIntents, 1)
     assert.equal(taskCycle.externalRequests, 0)
     assert.equal(taskCycle.databaseOperations, 0)
 
-    const wordRetestCycle = first.cycles.find((cycle) => cycle.scopeKey === "word_retests")
+    const wordRetestCycle = first.cycles.find((cycle) => cycle.identity.eventKey === "word_retest.created")
     assert.ok(wordRetestCycle, "단어 재시험 legacy custom preview 증거가 필요합니다")
     assert.equal(wordRetestCycle.comparison.matched, true)
     assert.equal(wordRetestCycle.recordedLegacyIntents, 1)
@@ -181,7 +217,8 @@ test("CLI는 환경 변수 없이 JSON 증거와 검증 가능한 SHA256 manifes
   assert.equal(result.stderr, "")
   const evidence = JSON.parse(result.stdout)
   assert.equal(evidence.passed, true)
-  assert.deepEqual(evidence.scopeOrder, EXPECTED_SCOPES)
+  assert.deepEqual(evidence.identityOrder, EXPECTED_IDENTITY_KEYS)
+  assert.equal(evidence.totals.completedIdentities, 185)
   assert.equal(evidence.totals.externalRequests, 0)
   assert.equal(evidence.totals.canonicalInboxProjections, 0)
   assert.match(evidence.manifest.digest, /^[a-f0-9]{64}$/)

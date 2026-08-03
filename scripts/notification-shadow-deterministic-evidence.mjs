@@ -8,6 +8,13 @@ import { compareNotificationShadowIntents } from "./verify-notification-workflow
 const TEMPLATE_CHECKSUM = /^(?:[a-f0-9]{32}|[a-f0-9]{64})$/
 const TOKEN_PATTERN = /\{([^{}]+)\}/g
 const FETCH_GUARD_KEY = Symbol.for("tips.notificationShadowDeterministicFetchGuard.v1")
+const GOOGLE_CHAT_DESTINATIONS = Object.freeze([
+  "google_chat.management",
+  "google_chat.executive",
+  "google_chat.english",
+  "google_chat.math",
+  "google_chat.science",
+])
 
 function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : null
@@ -76,12 +83,23 @@ function renderLegacyTemplate(template, context, href) {
   ).replace(TOKEN_PATTERN, (_match, token) => {
     const key = tokenToKey.get(token)
     const value = key ? values[key] : null
-    if (typeof value !== "string") throw new Error("notification_shadow_deterministic_legacy_render_invalid")
+    if (typeof value !== "string") throw new Error("render_validation_failed")
     return value
   })
+  const normalizeBody = (value) => {
+    const lines = value.replace(/\r\n?/g, "\n").split("\n").map((line) => line.replace(/[ \t]+$/g, ""))
+    while (lines.length > 0 && lines[0].trim() === "") lines.shift()
+    while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop()
+    const normalized = []
+    for (const line of lines) {
+      if (line.trim() === "" && normalized[normalized.length - 1]?.trim() === "") continue
+      normalized.push(line)
+    }
+    return normalized.join("\n")
+  }
   return Object.freeze({
     title: render(snapshot.titleTemplate),
-    body: render(snapshot.bodyTemplate),
+    body: normalizeBody(render(snapshot.bodyTemplate)),
     href: href === null ? null : requiredString(href, "notification_shadow_deterministic_plan_invalid"),
   })
 }
@@ -108,6 +126,9 @@ function legacyIntents(plan) {
       targetKey: requiredString(target?.targetKey, "notification_shadow_deterministic_plan_invalid"),
       targetGeneration: requiredString(target?.targetGeneration, "notification_shadow_deterministic_plan_invalid"),
       templateChecksum: checksum,
+      renderedTitle: rendered.title,
+      renderedBody: rendered.body,
+      href: rendered.href,
       normalizedRenderedContentHash: normalizedNotificationRenderedHash(rendered),
     })
   })
@@ -192,6 +213,9 @@ async function canonicalIntents(plan, dependencies) {
         targetKey: requiredString(target.targetKey, "notification_shadow_deterministic_plan_invalid"),
         targetGeneration: requiredString(targetSet.targetGeneration, "notification_shadow_deterministic_plan_invalid"),
         templateChecksum: checksum,
+        renderedTitle: rendered.renderedTitle,
+        renderedBody: rendered.renderedBody,
+        href: rendered.href,
         normalizedRenderedContentHash: normalizedNotificationRenderedHash({
           title: rendered.renderedTitle,
           body: rendered.renderedBody,
@@ -201,6 +225,91 @@ async function canonicalIntents(plan, dependencies) {
     }
   }
   return intents
+}
+
+function intentExactKey(intent) {
+  return [
+    intent.workflowKey,
+    intent.eventKey,
+    intent.occurrenceKey,
+    intent.audienceKey,
+    intent.channelKey,
+    intent.targetKey,
+    intent.targetGeneration,
+  ].join("\u001f")
+}
+
+function renderError(callback) {
+  try {
+    callback()
+    return null
+  } catch (error) {
+    if (!error || typeof error !== "object") return String(error)
+    if (typeof error.code === "string" && error.code) return error.code
+    if (typeof error.message === "string" && error.message) return error.message
+    return "notification_shadow_deterministic_unknown_render_error"
+  }
+}
+
+function deterministicRenderErrorParity(plan, dependencies) {
+  const fixture = record(plan.fixture)
+  const canonical = record(fixture?.canonical)
+  const legacy = record(fixture?.legacy)
+  const template = record(canonical?.template)
+  const context = record(legacy?.context)
+  if (!canonical || !legacy || !template || !context || !Array.isArray(template.allowedVariables)) {
+    throw new Error("notification_shadow_deterministic_plan_invalid")
+  }
+  const usedToken = [...requiredString(template.titleTemplate, "notification_shadow_deterministic_plan_invalid").matchAll(TOKEN_PATTERN)][0]?.[1]
+    ?? [...requiredString(template.bodyTemplate, "notification_shadow_deterministic_plan_invalid").matchAll(TOKEN_PATTERN)][0]?.[1]
+  if (!usedToken) return Object.freeze({ missing: "not_applicable", null: "not_applicable" })
+  const definition = template.allowedVariables.find((item) => record(item)?.token === usedToken)
+  const key = requiredString(record(definition)?.key, "notification_shadow_deterministic_plan_invalid")
+  const missing = { ...context }
+  delete missing[key]
+  const nullValue = { ...context, [key]: null }
+  const check = (renderContext) => {
+    const canonicalError = renderError(() => dependencies.renderSnapshot({
+      workflowKey: canonical.workflowKey,
+      payloadSchemaVersion: canonical.payloadSchemaVersion,
+      template,
+      renderContext,
+      href: legacy.href,
+    }))
+    const legacyError = renderError(() => renderLegacyTemplate(template, renderContext, legacy.href))
+    if (canonicalError !== legacyError || canonicalError !== "render_validation_failed") {
+      throw new Error(`notification_shadow_deterministic_error_parity_mismatch:${plan.scopeKey}`)
+    }
+    return canonicalError
+  }
+  return Object.freeze({ missing: check(missing), null: check(nullValue) })
+}
+
+function contentParityEvidence(plan, canonical, legacy, dependencies) {
+  const canonicalByKey = new Map(canonical.map((intent) => [intentExactKey(intent), intent]))
+  let exact = canonical.length === legacy.length
+  for (const legacyIntent of legacy) {
+    const canonicalIntent = canonicalByKey.get(intentExactKey(legacyIntent))
+    if (
+      !canonicalIntent ||
+      canonicalIntent.renderedTitle !== legacyIntent.renderedTitle ||
+      canonicalIntent.renderedBody !== legacyIntent.renderedBody ||
+      canonicalIntent.href !== legacyIntent.href ||
+      canonicalIntent.normalizedRenderedContentHash !== legacyIntent.normalizedRenderedContentHash
+    ) exact = false
+  }
+  if (!exact) throw new Error(`notification_shadow_deterministic_exact_content_mismatch:${plan.scopeKey}`)
+  const googleChatDestinations = Object.fromEntries(GOOGLE_CHAT_DESTINATIONS.map((destination) => [
+    destination,
+    canonical.filter((intent) => (
+      intent.channelKey === "google_chat" && intent.targetKey === `connection:${destination}`
+    )).length,
+  ]))
+  return Object.freeze({
+    exact,
+    errorParity: deterministicRenderErrorParity(plan, dependencies),
+    googleChatDestinations: Object.freeze(googleChatDestinations),
+  })
 }
 
 export async function evaluateNotificationShadowDeterministicPlan(plan, input = {}) {
@@ -227,6 +336,7 @@ export async function evaluateNotificationShadowDeterministicPlan(plan, input = 
       schemaVersion: 1,
       canonicalIntents: Object.freeze(canonical),
       legacyIntents: Object.freeze(legacy),
+      contentParity: contentParityEvidence(plan, canonical, legacy, dependencies),
     })
   })
 }

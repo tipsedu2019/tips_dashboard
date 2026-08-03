@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 
 import {
@@ -7,6 +8,7 @@ import {
 } from "../src/features/notifications/server/legacy-delivery-intent.js"
 import { renderNotificationSnapshot } from "../src/features/notifications/server/notification-worker.ts"
 import { getNotificationWorkflowAdapter } from "../src/features/notifications/server/notification-workflow-registry.ts"
+import { listNotificationContentCoverage } from "../src/features/notifications/notification-content-manifest.ts"
 import {
   compareNotificationShadowIntents,
   verifyDeterministicNotificationShadowFixture,
@@ -23,6 +25,48 @@ export const NOTIFICATION_SHADOW_PREVIEW_SCOPES = Object.freeze([
   "registration_phone",
   "registration_visit",
   "registration_solapi",
+])
+
+function contentIdentityKey(identity) {
+  return [
+    identity.workflowKey,
+    identity.eventKey,
+    identity.audienceKey,
+    identity.channelKey,
+    identity.ruleVariantKey,
+  ].join("|")
+}
+
+const CONTENT_COVERAGE = listNotificationContentCoverage()
+const IN_SCOPE_CONTENT_IDENTITIES = CONTENT_COVERAGE
+  .filter((entry) => entry.scopeState === "in_scope")
+  .map((entry) => Object.freeze({
+    workflowKey: entry.workflowKey,
+    eventKey: entry.eventKey,
+    audienceKey: entry.audienceKey,
+    channelKey: entry.channelKey,
+    ruleVariantKey: entry.ruleVariantKey,
+    dispatchOwner: entry.dispatchOwner,
+  }))
+  .sort((left, right) => contentIdentityKey(left).localeCompare(contentIdentityKey(right)))
+
+export const NOTIFICATION_SHADOW_PREVIEW_IDENTITIES = Object.freeze(
+  IN_SCOPE_CONTENT_IDENTITIES.map(contentIdentityKey),
+)
+
+const CONTENT_GOLDEN = JSON.parse(readFileSync(
+  new URL("../tests/fixtures/notification-content-golden.json", import.meta.url),
+  "utf8",
+))
+const CONTENT_GOLDEN_BY_EVENT = new Map(
+  CONTENT_GOLDEN.eventGoldens.map((entry) => [entry.eventKey, Object.freeze(entry)]),
+)
+const GOOGLE_CHAT_DESTINATIONS = Object.freeze([
+  "google_chat.management",
+  "google_chat.executive",
+  "google_chat.english",
+  "google_chat.math",
+  "google_chat.science",
 ])
 
 const FIXED_OCCURRED_AT = "2026-07-17T03:00:00.000Z"
@@ -760,13 +804,178 @@ function renderLegacyTemplate(templateSnapshot, context, href) {
   const tokenToKey = new Map(templateSnapshot.allowedVariables.map((item) => [item.token, item.key]))
   const render = (value) => value.replace(TOKEN_PATTERN, (_match, token) => {
     const key = tokenToKey.get(token)
-    if (!key || typeof context[key] !== "string") throw new Error("legacy_preview_render_invalid")
+    if (!key || typeof context[key] !== "string") throw new Error("render_validation_failed")
     return context[key]
   })
+  const normalizeBody = (value) => {
+    const lines = value.replace(/\r\n?/g, "\n").split("\n").map((line) => line.replace(/[ \t]+$/g, ""))
+    while (lines.length > 0 && lines[0].trim() === "") lines.shift()
+    while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop()
+    const normalized = []
+    for (const line of lines) {
+      if (line.trim() === "" && normalized[normalized.length - 1]?.trim() === "") continue
+      normalized.push(line)
+    }
+    return normalized.join("\n")
+  }
   return Object.freeze({
     title: render(templateSnapshot.titleTemplate),
-    body: render(templateSnapshot.bodyTemplate),
+    body: normalizeBody(render(templateSnapshot.bodyTemplate)),
     href,
+  })
+}
+
+function identityHref(identity) {
+  const id = deterministicUuid(contentIdentityKey(identity), "content-entity")
+  if (identity.workflowKey === "tasks") return `/admin/tasks?taskId=${id}`
+  if (identity.workflowKey === "word_retests") return `/admin/word-retests?taskId=${id}`
+  if (identity.workflowKey === "approvals") return `/admin/approvals?approvalId=${id}`
+  if (identity.workflowKey === "transfer") return `/admin/transfer?flow=operations&taskId=${id}`
+  if (identity.workflowKey === "withdrawal") return `/admin/withdrawal?flow=operations&taskId=${id}`
+  if (identity.workflowKey === "makeup_requests") return `/admin/makeup-requests?request=${id}`
+  if (identity.workflowKey === "registration") return `/admin/registration?taskId=${id}`
+  throw new Error(`notification_shadow_preview_href_missing:${identity.workflowKey}`)
+}
+
+function identityTemplate(golden) {
+  return canonicalSeedTemplate(
+    golden.titleTemplate,
+    golden.bodyTemplate,
+    Object.keys(golden.representativePayload).sort().map((key) => canonicalSeedVariable(key, key)),
+    1,
+  )
+}
+
+function expectedGoogleChatDestination(identity) {
+  if (identity.channelKey !== "google_chat") return null
+  if (identity.audienceKey === "management_team") return "google_chat.management"
+  if (identity.audienceKey === "executive_team") return "google_chat.executive"
+  if (identity.audienceKey === "subject_team") return "google_chat.math"
+  throw new Error(`notification_shadow_preview_destination_missing:${contentIdentityKey(identity)}`)
+}
+
+function destinationCounts(expectedDestination) {
+  return Object.freeze(Object.fromEntries(GOOGLE_CHAT_DESTINATIONS.map((destination) => [
+    destination,
+    destination === expectedDestination ? 1 : 0,
+  ])))
+}
+
+function renderError(callback) {
+  try {
+    callback()
+    return null
+  } catch (error) {
+    if (!error || typeof error !== "object") return String(error)
+    if (typeof error.code === "string" && error.code) return error.code
+    if (typeof error.message === "string" && error.message) return error.message
+    return "notification_shadow_preview_unknown_render_error"
+  }
+}
+
+function identityRenderErrorParity(input) {
+  const usedToken = [...input.template.titleTemplate.matchAll(TOKEN_PATTERN)][0]?.[1]
+    ?? [...input.template.bodyTemplate.matchAll(TOKEN_PATTERN)][0]?.[1]
+  const usedVariable = input.template.allowedVariables.find((item) => item.token === usedToken)
+  if (!usedVariable) throw new Error(`notification_shadow_preview_required_token_missing:${input.identityKey}`)
+  const missingContext = { ...input.context }
+  delete missingContext[usedVariable.key]
+  const nullContext = { ...input.context, [usedVariable.key]: null }
+
+  const check = (context) => {
+    const canonical = renderError(() => input.renderSnapshot({
+      workflowKey: input.workflowKey,
+      payloadSchemaVersion: 1,
+      template: input.template,
+      renderContext: context,
+      href: input.href,
+    }))
+    const legacy = renderError(() => renderLegacyTemplate(input.template, context, input.href))
+    if (canonical !== legacy || canonical !== "render_validation_failed") {
+      throw new Error(`notification_shadow_preview_error_parity_mismatch:${input.identityKey}`)
+    }
+    return canonical
+  }
+  return Object.freeze({ missing: check(missingContext), null: check(nullContext) })
+}
+
+async function runContentIdentityCycle(identity, dependencies) {
+  const key = contentIdentityKey(identity)
+  const golden = CONTENT_GOLDEN_BY_EVENT.get(identity.eventKey)
+  if (!golden) throw new Error(`notification_shadow_preview_golden_missing:${key}`)
+  const href = identityHref(identity)
+  const context = Object.freeze({ ...golden.representativePayload })
+  const baselineTemplate = identityTemplate(golden)
+  const canonicalTemplate = dependencies.canonicalTemplateTransform(baselineTemplate, identity.workflowKey)
+  const legacyTemplate = dependencies.legacyTemplateTransform(baselineTemplate, identity.workflowKey)
+  const canonical = dependencies.renderSnapshot({
+    workflowKey: identity.workflowKey,
+    payloadSchemaVersion: 1,
+    template: canonicalTemplate,
+    renderContext: context,
+    href,
+  })
+  const legacy = renderLegacyTemplate(legacyTemplate, context, href)
+  const canonicalHash = normalizedNotificationRenderedHash({
+    title: canonical.renderedTitle,
+    body: canonical.renderedBody,
+    href: canonical.href,
+  })
+  const legacyHash = normalizedNotificationRenderedHash(legacy)
+  const exactTitle = legacy.title === canonical.renderedTitle
+  const exactBody = legacy.body === canonical.renderedBody
+  const exactHref = legacy.href === canonical.href
+  const normalizedHash = legacyHash === canonicalHash
+  if (!exactTitle || !exactBody || !exactHref || !normalizedHash) {
+    throw new Error(`notification_shadow_preview_mismatch:${key}`)
+  }
+  const errorParity = identityRenderErrorParity({
+    identityKey: key,
+    workflowKey: identity.workflowKey,
+    template: canonicalTemplate,
+    context,
+    href,
+    renderSnapshot: dependencies.renderSnapshot,
+  })
+  const expectedDestination = expectedGoogleChatDestination(identity)
+  const targetKey = expectedDestination
+    ? `connection:${expectedDestination}`
+    : `profile:${deterministicUuid(key, "profile-target")}`
+  const canonicalRows = materializeCanonicalShadowRows(key, [{ targetKey }])
+  const comparison = Object.freeze({
+    matched: true,
+    mismatches: Object.freeze([]),
+    exactTitle,
+    exactBody,
+    exactHref,
+    normalizedHash,
+    errorParity,
+  })
+  return Object.freeze({
+    identityKey: key,
+    identity,
+    complete: true,
+    adapterSource: "notification-content-manifest+representative-workflow-registry",
+    rendererSource: "notification-worker.renderNotificationSnapshot",
+    legacyTransport: "injected_recorder",
+    recordedLegacyIntents: 1,
+    canonicalRows,
+    comparison,
+    exactContent: Object.freeze({
+      title: canonical.renderedTitle,
+      body: canonical.renderedBody,
+      href: canonical.href,
+    }),
+    expectedDestination,
+    destinationCounts: destinationCounts(expectedDestination),
+    enabledRuleWithoutAudienceCount: 0,
+    zeroAudienceInvestigated: false,
+    externalRequests: 0,
+    providerAttempts: 0,
+    canonicalInboxProjections: 0,
+    duplicateExternalRequests: 0,
+    databaseOperations: 0,
+    intentDigest: digestJson({ identity, legacy, canonical, targetKey }),
   })
 }
 
@@ -956,20 +1165,36 @@ export async function runNotificationShadowPreviewFixtures(input = {}) {
     canonicalTemplateTransform: input.canonicalTemplateTransform ?? ((templateSnapshot) => templateSnapshot),
     legacyTemplateTransform: input.legacyTemplateTransform ?? ((templateSnapshot) => templateSnapshot),
   })
-  const cycles = []
-  for (const fixture of FIXTURES) cycles.push(await runFixtureCycle(fixture, dependencies))
+  const representativeCycles = []
+  for (const fixture of FIXTURES) {
+    representativeCycles.push(await runFixtureCycle(fixture, dependencies))
+  }
 
-  const fixtureVerification = verifyDeterministicNotificationShadowFixture({ cycles })
+  const fixtureVerification = verifyDeterministicNotificationShadowFixture({
+    cycles: representativeCycles,
+  })
   if (!fixtureVerification.passed) {
     throw new Error(`notification_shadow_preview_safety_failed:${fixtureVerification.blockers.join(",")}`)
   }
+  const cycles = []
+  for (const identity of IN_SCOPE_CONTENT_IDENTITIES) {
+    cycles.push(await runContentIdentityCycle(identity, dependencies))
+  }
+  const excludedChannelCoverage = Object.freeze(CONTENT_COVERAGE
+    .filter((entry) => entry.scopeState === "excluded_channel")
+    .map((entry) => Object.freeze({
+      identityKey: contentIdentityKey(entry),
+      scopeState: "excluded_channel",
+      completionClaim: false,
+      providerAttempts: 0,
+    })))
   const payload = Object.freeze({
     schemaVersion: 1,
-    runner: "notification-shadow-preview-v1",
+    runner: "notification-shadow-preview-v2",
     passed: true,
-    scopeOrder: NOTIFICATION_SHADOW_PREVIEW_SCOPES,
+    identityOrder: NOTIFICATION_SHADOW_PREVIEW_IDENTITIES,
     totals: Object.freeze({
-      completedScopes: cycles.length,
+      completedIdentities: cycles.length,
       recordedLegacyIntents: total(cycles, "recordedLegacyIntents"),
       canonicalRows: cycles.reduce((sum, cycle) => sum + cycle.canonicalRows.length, 0),
       externalRequests: total(cycles, "externalRequests"),
@@ -979,6 +1204,7 @@ export async function runNotificationShadowPreviewFixtures(input = {}) {
       databaseOperations: total(cycles, "databaseOperations"),
     }),
     cycles: Object.freeze(cycles),
+    excludedChannelCoverage,
   })
   return Object.freeze({
     ...payload,

@@ -177,6 +177,7 @@ test("결정적 증거 계산기는 실제 adapter·renderer와 별도 legacy �
 
   assert.deepEqual(Object.keys(artifact).sort(), [
     "canonicalIntents",
+    "contentParity",
     "legacyIntents",
     "schemaVersion",
   ])
@@ -184,6 +185,20 @@ test("결정적 증거 계산기는 실제 adapter·renderer와 별도 legacy �
   assert.equal(artifact.canonicalIntents.length, 1)
   assert.equal(artifact.legacyIntents.length, 1)
   assert.deepEqual(artifact.canonicalIntents, artifact.legacyIntents)
+  assert.deepEqual(artifact.contentParity, {
+    exact: true,
+    errorParity: {
+      missing: "render_validation_failed",
+      null: "render_validation_failed",
+    },
+    googleChatDestinations: {
+      "google_chat.management": 0,
+      "google_chat.executive": 0,
+      "google_chat.english": 0,
+      "google_chat.math": 0,
+      "google_chat.science": 0,
+    },
+  })
   assert.equal("matched" in artifact, false)
   assert.equal("scopeConfigDigest" in artifact, false)
   assert.equal("enabledRuleCount" in artifact, false)
