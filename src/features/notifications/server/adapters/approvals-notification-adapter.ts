@@ -2,6 +2,7 @@ import {
   createImmediateNotificationAdapter,
   type ImmediateNotificationAdapterDependencies,
 } from "./immediate-notification-adapter.ts"
+import { buildApprovalNotificationPresentation } from "../presentation/approval-notification-presentation.ts"
 
 const approvalsNotificationAdapterConfig = Object.freeze({
   workflowKey: "approvals",
@@ -27,6 +28,7 @@ const approvalsNotificationAdapterConfig = Object.freeze({
     management_team: ["management_profile_ids"],
   },
   renderFields: {},
+  presentationBuilder: buildApprovalNotificationPresentation,
 })
 
 export function createApprovalsNotificationAdapter(

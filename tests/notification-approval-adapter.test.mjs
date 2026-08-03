@@ -6,6 +6,10 @@ const migrationUrl = new URL(
   "../supabase/migrations/20260716193000_notification_approval_producers.sql",
   import.meta.url,
 )
+const contentPayloadMigrationUrl = new URL(
+  "../supabase/migrations/20260803151000_notification_approval_content_payload.sql",
+  import.meta.url,
+)
 const serviceUrl = new URL("../src/features/approvals/approval-service.ts", import.meta.url)
 const workspaceUrl = new URL("../src/features/approvals/approval-workspace.tsx", import.meta.url)
 const adapterUrl = new URL(
@@ -392,6 +396,87 @@ test("전자결재 adapter는 권위 재검증 의존성을 주입해 provider 0
   assert.match(adapter, /export function createApprovalsNotificationAdapter/)
   assert.match(adapter, /dependencies\?: ImmediateNotificationAdapterDependencies/)
   assert.match(adapter, /createImmediateNotificationAdapter\([\s\S]*approvalsNotificationAdapterConfig,[\s\S]*dependencies/)
+})
+
+test("전자결재 adapter는 rich presentation을 사용하고 producer는 표시용 snapshot을 함께 기록한다", async () => {
+  const { approvalsNotificationAdapter } = await import(adapterUrl)
+  const adapterInput = {
+    eventId: "87000000-0000-4000-8000-000000000011",
+    workflowKey: "approvals",
+    eventKey: "approval.submitted",
+    sourceType: "approval_event",
+    sourceId: "87000000-0000-4000-8000-000000000012",
+    sourceRevision: null,
+    payloadSchemaVersion: 1,
+    payload: {
+      approval_id: "87000000-0000-4000-8000-000000000001",
+      title: "7월 교재비 정산서",
+      status: "submitted",
+      author_name: "박지영",
+      current_approver_name: "김철수",
+      target_period: "2026년 7월",
+      occurred_at: "2026-08-04T06:30:00.000Z",
+      management_profile_ids: [],
+    },
+    rule: {
+      ruleId: "87000000-0000-4000-8000-000000000021",
+      ruleRevision: "1",
+      templateId: "87000000-0000-4000-8000-000000000022",
+      audienceKey: "management_team",
+      channelKey: "google_chat",
+      connectionKey: "google_chat.management",
+      ruleVariantKey: "immediate",
+    },
+    scheduledFor: "2026-08-04T06:30:00.000Z",
+  }
+  const targets = await approvalsNotificationAdapter.resolveTargets(adapterInput)
+  assert.deepEqual(targets.targets.map((target) => target.connectionKey), ["google_chat.management"])
+  const context = await approvalsNotificationAdapter.buildRenderContext({
+    ...adapterInput,
+    targetGeneration: targets.targetGeneration,
+    target: targets.targets[0],
+    requestedContextKeys: ["document_title", "author_name", "target_period", "progress_actor"],
+  })
+  assert.deepEqual(context, {
+    workflow_label: "전자결재",
+    event_label: "제출",
+    occurred_at: "2026-08-04T06:30:00.000Z",
+    deep_link: "/admin/approvals?approvalId=87000000-0000-4000-8000-000000000001",
+    document_title: "7월 교재비 정산서",
+    author_name: "박지영",
+    target_period: "2026년 7월",
+    progress_actor: "김철수님",
+  })
+
+  const migration = await source(contentPayloadMigrationUrl)
+  const adapterSource = await source(adapterUrl)
+  const eventWriter = block(
+    migration,
+    "create or replace function dashboard_private.write_approval_notification_event_v2",
+    "create or replace function dashboard_private.write_approval_comment_notification_v2",
+  )
+  const commentWriter = block(
+    migration,
+    "create or replace function dashboard_private.write_approval_comment_notification_v2",
+    "drop trigger if exists write_approval_notification_event_v2",
+  )
+
+  assert.match(
+    migration,
+    /record_notification_event_v1\(text,text,text,text,text,bigint,text,uuid,timestamptz,integer,jsonb,uuid,bigint\)/,
+  )
+  assert.match(adapterSource, /buildApprovalNotificationPresentation/)
+  assert.match(adapterSource, /presentationBuilder:\s*buildApprovalNotificationPresentation/)
+  for (const field of [
+    "author_name", "current_approver_name", "before_approver_name", "after_approver_name",
+    "actor_name", "target_period", "status_changed_at", "attachment_count", "attachment_types",
+  ]) assert.match(eventWriter, new RegExp(`'${field}'`), `event payload snapshot 누락: ${field}`)
+  for (const field of ["comment_author_name", "comment_body", "attachment_count", "attachment_types"]) {
+    assert.match(commentWriter, new RegExp(`'${field}'`), `comment payload snapshot 누락: ${field}`)
+  }
+  assert.doesNotMatch(eventWriter, /'attachment_links'|'file_name'|'filename'|'storage_path'/i)
+  assert.doesNotMatch(commentWriter, /'attachment_links'|'file_name'|'filename'|'storage_path'/i)
+  assert.doesNotMatch(migration, /set enabled = true|fetch\s*\(|http_post|net\.http/i)
 })
 
 test("pgTAP은 권한·불변성·NULL·최소 삭제 영수증 회귀를 실행한다", async () => {
