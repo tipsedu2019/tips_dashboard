@@ -20,6 +20,8 @@ import test from "node:test"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
 const parentProjectRef = "slnjqlzzhewblvttiidk"
+const expectedSupabaseGoCliPath =
+  "/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supabase/cli-darwin-arm64/bin/supabase-go"
 const runnerUrl = new URL("../scripts/run-notification-isolated-db-qa.mjs", import.meta.url)
 const repoRoot = fileURLToPath(new URL("..", import.meta.url))
 const runnerSource = readFileSync(runnerUrl, "utf8")
@@ -35,6 +37,55 @@ const expectedPgTapFiles = Object.freeze([
   "supabase/tests/notification_approval_adapter_test.sql",
   "supabase/tests/notification_system_template_vnext_test.sql",
 ])
+const exactLocalOrchestrationSteps = Object.freeze([
+  "preexisting-resource-check",
+  "internal-network-create",
+  "local-db-start",
+  "public-default-privileges",
+  "schema-restore",
+  "local-catalog-postflight",
+  "remote-migration-repair",
+  "pending-migrations-copy",
+  "runtime-activation-scan",
+  "local-migration-push",
+  "synthetic-fixture-install",
+  "safety-preflight",
+  "read-only-evidence",
+  "disposable-round-trip",
+  "pgtap",
+  "safety-postflight",
+  "cleanup",
+])
+const expectedFixtureCounts = Object.freeze({
+  authUsers: 1,
+  profiles: 1,
+  workflows: 7,
+  eventKeys: 48,
+  settingsRegistry: 185,
+  rules: 186,
+  historicalTemplates: 186,
+  vNextTemplates: 185,
+  templates: 371,
+  contentContracts: 185,
+  complianceAudits: 185,
+  legacySettings: 42,
+  importMetadata: 42,
+  runtimeFlags: 12,
+  reminderApplicability: 4,
+  operationalRows: 0,
+})
+const injectedRandomBytes = Buffer.from("a1b2c3d4e5f6", "hex")
+const expectedRuntimeProjectId = "tips_notification_db_qa_a1b2c3d4e5f6"
+const expectedOwnershipLabelKey = "com.tips.notification-local-db-qa.owner"
+const expectedDockerNetworkId = "9".repeat(64)
+const pendingMigrationFixture = Object.freeze({
+  version: "20260803142000",
+  name: "notification_word_retest_content_payload",
+  fileName: "20260803142000_notification_word_retest_content_payload.sql",
+  relativePath:
+    "supabase/migrations/20260803142000_notification_word_retest_content_payload.sql",
+  sha256: "c".repeat(64),
+})
 const localMigrations = Object.freeze([
   Object.freeze({
     fileName: "20260803140000_notification_content_contracts.sql",
@@ -52,6 +103,16 @@ const localMigrations = Object.freeze([
     sha256: "c".repeat(64),
   }),
 ])
+const migrationCatalogFixture = Object.freeze(localMigrations.map((entry) => {
+  const match = /^(\d{14})_([a-z0-9_]+)\.sql$/u.exec(entry.fileName)
+  return Object.freeze({
+    version: match[1],
+    name: match[2],
+    fileName: entry.fileName,
+    relativePath: entry.relativePath,
+    sha256: entry.sha256,
+  })
+}))
 const remotePrefix = Object.freeze([
   Object.freeze({ version: "20260803140000", name: "notification_content_contracts" }),
   Object.freeze({ version: "20260803141000", name: "notification_task_content_payload" }),
@@ -151,6 +212,334 @@ function remoteMetadataFixture(migrations = remotePrefix) {
 
 async function loadSubject() {
   return import(runnerUrl.href)
+}
+
+function fixtureContractFixture() {
+  return {
+    manifest: {
+      version: 1,
+      sqlSha256: "d".repeat(64),
+      expectedCounts: { ...expectedFixtureCounts },
+      identities: {
+        namespace: "notification-content-local-qa-v1",
+        roundTrip: {
+          workflowKey: "tasks",
+          eventKey: "task.created",
+          audienceKey: "requester_profile",
+          channelKey: "in_app",
+          ruleVariantKey: "immediate",
+          ruleId: "08c5fd0c-36bb-5798-869a-1f9ff46a902a",
+          activeTemplateId: "222914cb-f640-55b9-862c-0343f547480d",
+        },
+      },
+    },
+    fixture: {
+      relativePath: "supabase/tests/fixtures/notification_content_local_qa_fixture.sql",
+      sha256: "d".repeat(64),
+    },
+    pgTap: {
+      fileCount: 10,
+      sha256: "e".repeat(64),
+      files: expectedPgTapFiles.map((relativePath, index) => ({
+        relativePath,
+        sha256: index.toString(16).padStart(64, "0"),
+      })),
+    },
+  }
+}
+
+async function loadRepositoryMigrationCatalog() {
+  const migrationDirectory = join(repoRoot, "supabase", "migrations")
+  const migrationFileNames = (await readdir(migrationDirectory))
+    .filter((fileName) => /^(\d{14})_([a-z0-9_]+)\.sql$/u.test(fileName))
+    .sort()
+  const migrationCatalog = []
+  for (const fileName of migrationFileNames) {
+    const match = /^(\d{14})_([a-z0-9_]+)\.sql$/u.exec(fileName)
+    migrationCatalog.push({
+      version: match[1],
+      name: match[2],
+      fileName,
+      relativePath: `supabase/migrations/${fileName}`,
+      sha256: sha256(await readFile(join(migrationDirectory, fileName))),
+    })
+  }
+  return migrationCatalog
+}
+
+async function buildRuntimeManifest(t) {
+  const tempRoot = await mkdtemp(join(tmpdir(), "tips-notification-runtime-"))
+  await chmod(tempRoot, 0o700)
+  t.after(() => rm(tempRoot, { recursive: true, force: true }))
+  const randomCalls = []
+  const portCalls = []
+  const { buildNotificationLocalRuntimeManifest } = await loadSubject()
+  const manifest = await buildNotificationLocalRuntimeManifest({
+    randomBytes: (size) => {
+      randomCalls.push(size)
+      return Buffer.from(injectedRandomBytes)
+    },
+    allocateLoopbackPort: async (host) => {
+      portCalls.push(host)
+      return 55432
+    },
+    tempRoot,
+    migrationCatalog: migrationCatalogFixture,
+    pendingMigrations: [{ ...pendingMigrationFixture }],
+    fixtureContract: fixtureContractFixture(),
+  })
+  return { manifest, portCalls, randomCalls, tempRoot }
+}
+
+function remoteCollectionFixture(manifest) {
+  const migrationManifestCore = {
+    version: 2,
+    applied: remotePrefix,
+    catalog: manifest.migrationCatalog,
+    pending: manifest.pendingMigrations,
+  }
+  return {
+    project: {
+      projectRef: parentProjectRef,
+      region: "ap-northeast-2",
+    },
+    remote: {
+      transactionReadOnly: true,
+      serverVersionNum: 170006,
+      postgresMajor: 17,
+      migrations: remotePrefix,
+    },
+    migrationManifest: {
+      ...migrationManifestCore,
+      sha256: sha256(JSON.stringify(migrationManifestCore)),
+    },
+    artifacts: {
+      schemaDumpPath: join(manifest.tempRoot, "notification-remote-schema.sql"),
+      schemaDumpSha256: "1".repeat(64),
+    },
+    safety: {
+      rowDataCopied: 0,
+      productionMutationCount: 0,
+    },
+  }
+}
+
+function sourceEnvironmentFixture() {
+  return {
+    HOME: "/Users/qa",
+    LANG: "ko_KR.UTF-8",
+    LC_ALL: "C",
+    PATH: "/usr/bin:/bin",
+    TMPDIR: "/private/tmp",
+    SUPABASE_ACCESS_TOKEN: "sbp_remote-access-secret",
+    SUPABASE_DB_PASSWORD: "remote-database-secret",
+    GOOGLE_CHAT_WEBHOOK_URL:
+      "https://chat.googleapis.com/v1/spaces/private/messages?key=provider-secret",
+    GOOGLE_CHAT_SERVICE_ACCOUNT_JSON: "provider-service-account-secret",
+    SLACK_WEBHOOK_URL: "https://hooks.slack.test/provider-secret",
+    RESEND_API_KEY: "provider-email-secret",
+    TWILIO_AUTH_TOKEN: "provider-sms-secret",
+  }
+}
+
+function successfulStepEvidence(step, manifest) {
+  switch (step) {
+    case "preexisting-resource-check":
+      return { dockerServerMajor: 28, ownedResourceCount: 0, resources: [] }
+    case "internal-network-create":
+      return {
+        networkId: expectedDockerNetworkId,
+        networkName: manifest.dockerNetwork.name,
+        driver: "bridge",
+        hostBindingIpv4: "127.0.0.1",
+        internal: true,
+      }
+    case "local-db-start":
+      return {
+        projectId: manifest.projectId,
+        databaseHost: "127.0.0.1",
+        databasePort: 55432,
+        ownedResourceCount: 3,
+        serviceContainersRemaining: 0,
+        started: true,
+      }
+    case "public-default-privileges":
+      return { publicDefaultPrivilegesRevoked: true }
+    case "schema-restore":
+      return { restored: true, rowDataCopied: 0, schemaSha256: "1".repeat(64) }
+    case "local-catalog-postflight":
+      return { ownerGrantRlsExtensionChecksPassed: true }
+    case "remote-migration-repair":
+      return {
+        stagedCatalog: manifest.migrationCatalog.map(({ fileName }) => fileName),
+        repairedVersions: remotePrefix.map(({ version }) => version),
+      }
+    case "pending-migrations-copy":
+      return {
+        migrationCatalog: manifest.migrationCatalog,
+        pendingMigrations: manifest.pendingMigrations,
+      }
+    case "runtime-activation-scan":
+      return { unsafeActivationCount: 0 }
+    case "local-migration-push":
+      return {
+        dryRunPassed: true,
+        appliedPendingVersions: manifest.pendingMigrations.map(({ version }) => version),
+      }
+    case "synthetic-fixture-install":
+      return { fixtureSqlSha256: "d".repeat(64), counts: expectedFixtureCounts }
+    case "safety-preflight":
+    case "safety-postflight":
+      return {
+        egressBlocked: true,
+        workerProcesses: 0,
+        queueRows: 0,
+        enabledDispatchFlags: 0,
+      }
+    case "read-only-evidence":
+      return {
+        mode: "read-only",
+        settingsRegistry: 185,
+        rules: 186,
+        templates: 371,
+        contentContracts: 185,
+        operationalRows: 0,
+      }
+    case "disposable-round-trip":
+      return {
+        mode: "round-trip",
+        mutationTarget: "loopback",
+        restored: true,
+        residualRows: 0,
+        enabledDispatchFlags: 0,
+      }
+    case "pgtap":
+      return {
+        fileCount: 10,
+        passed: 10,
+        failed: 0,
+        files: expectedPgTapFiles,
+      }
+    case "cleanup":
+      return {
+        ownedResourcesRemaining: 0,
+        containersRemaining: 0,
+        volumesRemaining: 0,
+        networksRemaining: 0,
+      }
+    default:
+      assert.fail(`unexpected fake step: ${step}`)
+  }
+}
+
+function actualEvidenceModuleQueryResult(step) {
+  if (step === "read-only-evidence") {
+    return {
+      mode: "read-only",
+      runtimeFlagsAllFalseBefore: true,
+      runtimeFlagsAllFalseAfter: true,
+      connectionValues: "[redacted]",
+      connectionCount: 0,
+      operationalDeltas: {
+        pendingClaimedSending: 0,
+        inbox: 0,
+        providerAttempts: 0,
+        audit: 0,
+      },
+    }
+  }
+  if (step === "disposable-round-trip") {
+    return {
+      mode: "round-trip",
+      runtimeFlagsAllFalseBefore: true,
+      runtimeFlagsAllFalseAfter: true,
+      rolledBack: true,
+      conflictCode: "notification_revision_conflict",
+      conflictPreserved: true,
+      noOpPreserved: true,
+      titleTemplate: "🌿 [업무 알림] {task_title} 내용을 함께 확인해요",
+      bodyTemplate: [
+        "[담당] {current_assignee}",
+        "[업무] {task_title}",
+        "[상태] {current_status}",
+        "[안내] 필요한 내용을 한눈에 볼 수 있어요.",
+      ].join("\n"),
+      renderContext: {
+        task_title: "2학기 수학 교재 주문",
+        current_assignee: "김철수님",
+        current_status: "요청됐어요.",
+      },
+      expectedTitle: "🌿 [업무 알림] 2학기 수학 교재 주문 내용을 함께 확인해요",
+      expectedBody: [
+        "[담당] 김철수님",
+        "[업무] 2학기 수학 교재 주문",
+        "[상태] 요청됐어요.",
+        "[안내] 필요한 내용을 한눈에 볼 수 있어요.",
+      ].join("\n"),
+      fixtureWrites: { ruleRevisionDelta: 1, templateDelta: 1, auditDelta: 1 },
+      operationalDeltas: { pendingClaimedSending: 0, inbox: 0, providerAttempts: 0 },
+    }
+  }
+  assert.fail(`unexpected evidence step: ${step}`)
+}
+
+function makeFakeExecutor(manifest, calls, { failStep, cleanupFails = false } = {}) {
+  return async (invocation) => {
+    calls.push(invocation)
+    if (invocation.step === "local-db-start") {
+      assert.equal(invocation.state.localStartAttempted, true)
+    }
+    if (invocation.step === "cleanup" && cleanupFails) {
+      return {
+        code: 19,
+        stdout: "postgresql://postgres:cleanup-secret@127.0.0.1:55432/postgres",
+        stderr: "sbp_cleanup-secret",
+      }
+    }
+    if (invocation.step === failStep) {
+      return {
+        code: 17,
+        stdout: "postgresql://postgres:primary-secret@127.0.0.1:55432/postgres",
+        stderr:
+          "https://chat.googleapis.com/v1/spaces/private/messages?key=provider-secret",
+      }
+    }
+    return {
+      code: 0,
+      stdout: "",
+      stderr: "",
+      evidence: successfulStepEvidence(invocation.step, manifest),
+    }
+  }
+}
+
+function controlledEvidenceRunner(calls) {
+  return async ({ databaseUrl, disposable, query }) => {
+    assert.equal(
+      databaseUrl,
+      "postgresql://postgres:postgres@127.0.0.1:55432/postgres",
+    )
+    assert.equal(typeof query, "function")
+    calls.push({ databaseUrl, disposable, query })
+    return query({
+      databaseUrl,
+      sql: disposable === true
+        ? "select 'controlled-disposable-round-trip';"
+        : "select 'controlled-read-only-evidence';",
+    })
+  }
+}
+
+function orchestrationContext(manifest, execute, { evidenceCalls = [] } = {}) {
+  return {
+    approved: true,
+    runtimeManifest: manifest,
+    remoteCollection: remoteCollectionFixture(manifest),
+    fixtureContract: fixtureContractFixture(),
+    sourceEnvironment: sourceEnvironmentFixture(),
+    execute,
+    runEvidence: controlledEvidenceRunner(evidenceCalls),
+  }
 }
 
 test("linked project metadata는 production ref와 허용 region만 보존한다", async () => {
@@ -429,7 +818,7 @@ test("remote collector는 metadata→schema dump→동일 metadata 순서만 실
 
   const result = await collectRemoteSchemaMetadata({
     approved: true,
-    cliPath: "/opt/supabase",
+    cliPath: "/opt/supabase-go",
     artifactRoot,
     linkedProjectMetadata: {
       project_ref: parentProjectRef,
@@ -461,7 +850,7 @@ test("remote collector는 metadata→schema dump→동일 metadata 순서만 실
     "--file", join(artifactRoot, "notification-remote-schema.sql"),
   ])
   assert.deepEqual(calls[2].args, calls[0].args)
-  assert.equal(calls.every((call) => call.command === "/opt/supabase"), true)
+  assert.equal(calls.every((call) => call.command === "/opt/supabase-go"), true)
   assert.equal(calls.every((call) => call.cwd === canonicalRoot), true)
   assert.equal(calls.every((call) => Object.isFrozen(call) && Object.isFrozen(call.args)), true)
   assert.equal("SUPABASE_DB_PASSWORD" in calls[0].env, false)
@@ -491,6 +880,16 @@ test("remote collector는 metadata→schema dump→동일 metadata 순서만 실
   assert.equal(result.remote.serverVersionNum, 170006)
   assert.equal(result.remote.postgresMajor, 17)
   assert.deepEqual(result.remote.migrations, remotePrefix)
+  assert.equal(result.migrationManifest.version, 2)
+  assert.match(result.migrationManifest.sha256, /^[a-f0-9]{64}$/u)
+  assert.equal(result.migrationManifest.catalog.length, 3)
+  assert.deepEqual(
+    result.migrationManifest.catalog.map(({ version, name }) => ({ version, name })),
+    [...remotePrefix, {
+      version: "20260803142000",
+      name: "notification_word_retest_content_payload",
+    }],
+  )
   assert.equal(result.migrationManifest.pending.length, 1)
   assert.equal(
     result.migrationManifest.pending[0].sha256,
@@ -499,6 +898,7 @@ test("remote collector는 metadata→schema dump→동일 metadata 순서만 실
   assert.deepEqual(result.safety, { rowDataCopied: 0, productionMutationCount: 0 })
   assert.equal(Object.isFrozen(result), true)
   assert.equal(Object.isFrozen(result.remote), true)
+  assert.equal(Object.isFrozen(result.migrationManifest.catalog), true)
   assert.equal(Object.isFrozen(result.migrationManifest.pending), true)
   assert.doesNotMatch(
     JSON.stringify(result),
@@ -519,6 +919,325 @@ test("remote collector는 metadata→schema dump→동일 metadata 순서만 실
   assert.deepEqual(JSON.parse(await readFile(result.artifacts.metadataPath, "utf8")), result.remote)
 })
 
+test("remote collector signal은 active child close 뒤 artifact를 정리한다", async (t) => {
+  const fileName = "20260803140000_notification_content_contracts.sql"
+  const { root } = await makeMigrationRepo(t, { [fileName]: "select 1;\n" })
+  await writeLinkedProject(root)
+  const artifactRoot = await makeArtifactRoot(t)
+  const abortController = new AbortController()
+  let markStarted
+  const started = new Promise((resolvePromise) => { markStarted = resolvePromise })
+  let childDrained = false
+  const {
+    buildNotificationRemoteCollectorRuntime,
+    collectRemoteSchemaMetadata,
+  } = await loadCollectorSubject(root)
+  const collectorRuntime = await buildNotificationRemoteCollectorRuntime({
+    tempRoot: artifactRoot,
+    randomBytes: () => Buffer.from("102030405060", "hex"),
+  })
+  const outcome = collectRemoteSchemaMetadata({
+    approved: true,
+    cliPath: "/opt/supabase-go",
+    artifactRoot,
+    linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
+    sourceEnvironment: { SUPABASE_DB_PASSWORD: "qa-password" },
+    abortSignal: abortController.signal,
+  }, async (invocation) => {
+    assert.equal(invocation.abortSignal, abortController.signal)
+    assert.equal(invocation.cwd, collectorRuntime.workdir)
+    markStarted()
+    return new Promise((resolvePromise) => {
+      invocation.abortSignal.addEventListener("abort", () => {
+        setTimeout(() => {
+          childDrained = true
+          resolvePromise({ code: 1, stdout: "", stderr: "" })
+        }, 10)
+      }, { once: true })
+    })
+  }, { collectorRuntime }).then((value) => ({ value }), (error) => ({ error }))
+  await started
+
+  abortController.abort(new Error("notification_local_db_signal_received"))
+  const { error, value } = await outcome
+
+  assert.equal(value, undefined)
+  assert.equal(childDrained, true)
+  assert.match(String(error), /notification_local_db_signal_received/u)
+  assert.deepEqual(await readdir(artifactRoot), ["remote-collector"])
+})
+
+test("remote collector는 production ref와 run-unique Docker label을 분리하고 exact container만 정리한다", async (t) => {
+  const artifactRoot = await makeArtifactRoot(t)
+  const {
+    buildNotificationRemoteCollectorRuntime,
+    createNotificationRemoteCollectorCleanupController,
+  } = await loadSubject()
+  const runtime = await buildNotificationRemoteCollectorRuntime({
+    tempRoot: artifactRoot,
+    randomBytes: (size) => {
+      assert.equal(size, 6)
+      return Buffer.from("a0b1c2d3e4f5", "hex")
+    },
+  })
+  const containerId = "a".repeat(64)
+  const calls = []
+  let listCallCount = 0
+  const controller = createNotificationRemoteCollectorCleanupController({
+    runtime,
+    sourceEnvironment: {
+      PATH: "/usr/bin:/bin",
+      SUPABASE_ACCESS_TOKEN: "sbp_must-not-reach-docker",
+      SUPABASE_DB_PASSWORD: "db-password-must-not-reach-docker",
+      GOOGLE_CHAT_WEBHOOK_URL: "https://chat.googleapis.com/must-not-reach-docker",
+    },
+    executeProcess: async (invocation) => {
+      calls.push(invocation)
+      if (invocation.args[0] === "ps") {
+        listCallCount += 1
+        return {
+          code: 0,
+          stdout: listCallCount === 1
+            ? `${"c".repeat(64)}|${parentProjectRef}\n`
+            : listCallCount === 2 ? `${containerId}\n` : "",
+          stderr: "",
+        }
+      }
+      assert.deepEqual(invocation.args, ["rm", "--force", containerId])
+      return { code: 0, stdout: containerId, stderr: "" }
+    },
+  })
+  const abortController = new AbortController()
+
+  assert.deepEqual(await controller.preflight(abortController.signal), {
+    ownedContainersBefore: 0,
+  })
+  assert.deepEqual(await controller.cleanup(), {
+    cleanupCode: "notification_local_db_cleanup_ok",
+    evidence: { ownedContainersRemaining: 0, removedContainerCount: 1 },
+  })
+  assert.deepEqual(await controller.cleanup(), {
+    cleanupCode: "notification_local_db_cleanup_ok",
+    evidence: { ownedContainersRemaining: 0, removedContainerCount: 1 },
+  })
+
+  assert.equal(runtime.projectId, "tips_notify_collector_qa_a0b1c2d3e4f5")
+  assert.equal(
+    await readFile(join(runtime.workdir, "supabase", "config.toml"), "utf8"),
+    `project_id = "${runtime.projectId}"\n`,
+  )
+  assert.equal(
+    await readFile(join(runtime.workdir, "supabase", ".temp", "project-ref"), "utf8"),
+    `${parentProjectRef}\n`,
+  )
+  for (const path of [
+    runtime.workdir,
+    join(runtime.workdir, "supabase"),
+    join(runtime.workdir, "supabase", ".temp"),
+  ]) {
+    assert.equal((await lstat(path)).mode & 0o777, 0o700)
+  }
+  for (const path of [
+    join(runtime.workdir, "supabase", "config.toml"),
+    join(runtime.workdir, "supabase", ".temp", "project-ref"),
+  ]) {
+    assert.equal((await lstat(path)).mode & 0o777, 0o600)
+  }
+  assert.equal(calls.length, 4)
+  assert.deepEqual(calls.map(({ args }) => args[0]), ["ps", "ps", "rm", "ps"])
+  assert.equal(calls[0].abortSignal, abortController.signal)
+  assert.equal(calls.slice(1).every((call) => call.abortSignal === undefined), true)
+  assert.equal(calls.every((call) => call.cwd === runtime.workdir), true)
+  assert.equal(calls.every((call) => call.env.PATH === "/usr/bin:/bin"), true)
+  assert.equal(calls.every((call) => !("SUPABASE_ACCESS_TOKEN" in call.env)), true)
+  assert.equal(calls.every((call) => !("SUPABASE_DB_PASSWORD" in call.env)), true)
+  assert.equal(calls.every((call) => !("GOOGLE_CHAT_WEBHOOK_URL" in call.env)), true)
+  assert.deepEqual(calls[0].args, [
+    "ps", "-a", "--no-trunc",
+    "--filter", "label=com.supabase.cli.project",
+    "--format", "{{.ID}}|{{.Label \"com.supabase.cli.project\"}}",
+  ])
+  assert.match(calls[1].args.at(-1), new RegExp(`${runtime.projectId}$`, "u"))
+})
+
+test("remote collector label 충돌은 소유권 획득·삭제 전에 거부한다", async (t) => {
+  const artifactRoot = await makeArtifactRoot(t)
+  const {
+    buildNotificationRemoteCollectorRuntime,
+    createNotificationRemoteCollectorCleanupController,
+  } = await loadSubject()
+  const runtime = await buildNotificationRemoteCollectorRuntime({
+    tempRoot: artifactRoot,
+    randomBytes: () => Buffer.from("001122334455", "hex"),
+  })
+  const previousProjectId = "tips_notify_collector_qa_deadbeefcafe"
+  const calls = []
+  const controller = createNotificationRemoteCollectorCleanupController({
+    runtime,
+    sourceEnvironment: { PATH: "/usr/bin:/bin" },
+    executeProcess: async (invocation) => {
+      calls.push(invocation)
+      return {
+        code: 0,
+        stdout: `${"b".repeat(64)}|${previousProjectId}\n`,
+        stderr: "",
+      }
+    },
+  })
+
+  await assert.rejects(
+    () => controller.preflight(),
+    /notification_local_db_remote_container_preexisting_refused/u,
+  )
+  assert.deepEqual(await controller.cleanup(), {
+    cleanupCode: "notification_local_db_cleanup_not_required",
+    evidence: { ownedContainersRemaining: 0, removedContainerCount: 0 },
+  })
+  assert.equal(calls.length, 1)
+  assert.equal(calls.some((call) => call.args[0] === "rm"), false)
+})
+
+test("remote collector 실패와 container cleanup 실패를 safe evidence로 함께 보존한다", async (t) => {
+  const artifactRoot = await makeArtifactRoot(t)
+  const {
+    buildNotificationRemoteCollectorRuntime,
+    runNotificationRemoteCollectorWithCleanup,
+  } = await loadSubject()
+  const collectorRuntime = await buildNotificationRemoteCollectorRuntime({
+    tempRoot: artifactRoot,
+    randomBytes: () => Buffer.from("112233445566", "hex"),
+  })
+  const calls = []
+  let caught
+
+  try {
+    await runNotificationRemoteCollectorWithCleanup({
+      collectorContext: { approved: true },
+      collectorRuntime,
+      cleanupController: {
+        preflight: async () => { calls.push("preflight") },
+        cleanup: async () => {
+          calls.push("cleanup")
+          return { cleanupCode: "notification_local_db_cleanup_failed" }
+        },
+      },
+      collect: async () => {
+        calls.push("collect")
+        throw new Error("notification_local_db_remote_schema_dump_failed:raw-secret")
+      },
+      execute: async () => assert.fail("fake collector owns execution in this scenario"),
+    })
+  } catch (error) {
+    caught = error
+  }
+
+  assert.equal(caught?.code, "notification_local_db_remote_schema_dump_failed")
+  assert.deepEqual(caught?.evidence, {
+    primaryCode: "notification_local_db_remote_schema_dump_failed",
+    cleanupCode: "notification_local_db_cleanup_failed",
+  })
+  assert.doesNotMatch(String(caught), /raw-secret/u)
+  assert.deepEqual(calls, ["preflight", "collect", "cleanup"])
+})
+
+for (const [scenario, cleanup] of [
+  ["failed 결과", async () => ({ cleanupCode: "notification_local_db_cleanup_failed" })],
+  ["throw", async () => { throw new Error("cleanup-raw-secret") }],
+]) {
+  test(`remote collector 성공 뒤 cleanup ${scenario}만 발생해도 local 단계 전에 닫힌다`, async (t) => {
+    const artifactRoot = await makeArtifactRoot(t)
+    const {
+      buildNotificationRemoteCollectorRuntime,
+      runNotificationRemoteCollectorWithCleanup,
+    } = await loadSubject()
+    const collectorRuntime = await buildNotificationRemoteCollectorRuntime({
+      tempRoot: artifactRoot,
+      randomBytes: () => Buffer.from("223344556677", "hex"),
+    })
+    let localStartCalls = 0
+    let caught
+
+    try {
+      await runNotificationRemoteCollectorWithCleanup({
+        collectorContext: { approved: true },
+        collectorRuntime,
+        cleanupController: {
+          preflight: async () => ({ ownedContainersBefore: 0 }),
+          cleanup,
+        },
+        collect: async () => ({ collected: true }),
+        execute: async () => {
+          localStartCalls += 1
+          return { code: 0, stdout: "", stderr: "" }
+        },
+      })
+    } catch (error) {
+      caught = error
+    }
+
+    assert.equal(caught?.code, "notification_local_db_remote_collector_failed")
+    assert.deepEqual(caught?.evidence, {
+      primaryCode: "notification_local_db_remote_collector_failed",
+      cleanupCode: "notification_local_db_cleanup_failed",
+    })
+    assert.doesNotMatch(String(caught), /cleanup-raw-secret/u)
+    assert.equal(localStartCalls, 0)
+  })
+}
+
+test("remote container cleanup 도중 signal이 와도 cleanup drain 후 signal evidence로 닫힌다", async (t) => {
+  const artifactRoot = await makeArtifactRoot(t)
+  const {
+    buildNotificationRemoteCollectorRuntime,
+    runNotificationRemoteCollectorWithCleanup,
+  } = await loadSubject()
+  const collectorRuntime = await buildNotificationRemoteCollectorRuntime({
+    tempRoot: artifactRoot,
+    randomBytes: () => Buffer.from("66778899aabb", "hex"),
+  })
+  const abortController = new AbortController()
+  let markCleanupStarted
+  const cleanupStarted = new Promise((resolvePromise) => { markCleanupStarted = resolvePromise })
+  let releaseCleanup
+  const cleanupReleased = new Promise((resolvePromise) => { releaseCleanup = resolvePromise })
+  const calls = []
+  const outcome = runNotificationRemoteCollectorWithCleanup({
+    collectorContext: { approved: true, abortSignal: abortController.signal },
+    collectorRuntime,
+    cleanupController: {
+      preflight: async (signal) => {
+        assert.equal(signal, abortController.signal)
+        calls.push("preflight")
+      },
+      cleanup: async () => {
+        calls.push("cleanup-start")
+        markCleanupStarted()
+        await cleanupReleased
+        calls.push("cleanup-end")
+        return { cleanupCode: "notification_local_db_cleanup_ok" }
+      },
+    },
+    collect: async () => {
+      calls.push("collect")
+      return { collected: true }
+    },
+    execute: async () => assert.fail("fake collector owns execution in this scenario"),
+  }).then((value) => ({ value }), (error) => ({ error }))
+
+  await cleanupStarted
+  abortController.abort(new Error("notification_local_db_signal_received"))
+  releaseCleanup()
+  const { error, value } = await outcome
+
+  assert.equal(value, undefined)
+  assert.equal(error?.code, "notification_local_db_signal_received")
+  assert.deepEqual(error?.evidence, {
+    primaryCode: "notification_local_db_signal_received",
+    cleanupCode: "notification_local_db_cleanup_ok",
+  })
+  assert.deepEqual(calls, ["preflight", "collect", "cleanup-start", "cleanup-end"])
+})
+
 test("DB credential이 없으면 artifact와 child process 전에 닫힌다", async (t) => {
   const { root } = await makeMigrationRepo(t, {
     "20260803140000_notification_content_contracts.sql": "select 1;\n",
@@ -531,7 +1250,7 @@ test("DB credential이 없으면 artifact와 child process 전에 닫힌다", as
   await assert.rejects(
     () => collectRemoteSchemaMetadata({
       approved: true,
-      cliPath: "/opt/supabase",
+      cliPath: "/opt/supabase-go",
       artifactRoot,
       linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
       sourceEnvironment: { SUPABASE_ACCESS_TOKEN: "sbp_not-enough" },
@@ -557,7 +1276,7 @@ test("collector는 caller가 repoRoot를 덮어쓰지 못하게 한다", async (
   await assert.rejects(
     () => collectRemoteSchemaMetadata({
       approved: true,
-      cliPath: "/opt/supabase",
+      cliPath: "/opt/supabase-go",
       repoRoot: root,
       artifactRoot,
       linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
@@ -585,7 +1304,7 @@ test("artifact root는 비어 있는 exact 0700 directory만 허용한다", asyn
   await assert.rejects(
     () => collectRemoteSchemaMetadata({
       approved: true,
-      cliPath: "/opt/supabase",
+      cliPath: "/opt/supabase-go",
       artifactRoot,
       linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
       sourceEnvironment: { SUPABASE_DB_PASSWORD: "qa-password" },
@@ -609,7 +1328,7 @@ test("remote child 오류의 raw stderr를 버리고 exact artifact만 정리한
   try {
     await collectRemoteSchemaMetadata({
       approved: true,
-      cliPath: "/opt/supabase",
+      cliPath: "/opt/supabase-go",
       artifactRoot,
       linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
       sourceEnvironment: { SUPABASE_DB_PASSWORD: "bare-password-must-not-leak" },
@@ -638,7 +1357,7 @@ test("metadata query SQL이 child 실행 중 바뀌면 다음 remote call 전에
   await assert.rejects(
     () => collectRemoteSchemaMetadata({
       approved: true,
-      cliPath: "/opt/supabase",
+      cliPath: "/opt/supabase-go",
       artifactRoot,
       linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
       sourceEnvironment: { SUPABASE_DB_PASSWORD: "qa-password" },
@@ -673,7 +1392,7 @@ test("artifact cleanup 실패는 primary 오류와 함께 보존한다", async (
   try {
     await collectRemoteSchemaMetadata({
       approved: true,
-      cliPath: "/opt/supabase",
+      cliPath: "/opt/supabase-go",
       artifactRoot,
       linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
       sourceEnvironment: { SUPABASE_DB_PASSWORD: "bare-password-must-not-leak" },
@@ -718,7 +1437,7 @@ test("metadata 전후 snapshot이 다르면 schema artifact를 폐기한다", as
   await assert.rejects(
     () => collectRemoteSchemaMetadata({
       approved: true,
-      cliPath: "/opt/supabase",
+      cliPath: "/opt/supabase-go",
       artifactRoot,
       linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
       sourceEnvironment: { SUPABASE_DB_PASSWORD: "qa-password" },
@@ -755,7 +1474,7 @@ test("read-only metadata shape와 schema-only marker를 엄격히 검사한다",
     await assert.rejects(
       () => collectRemoteSchemaMetadata({
         approved: true,
-        cliPath: "/opt/supabase",
+        cliPath: "/opt/supabase-go",
         artifactRoot,
         linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
         sourceEnvironment: { SUPABASE_DB_PASSWORD: "qa-password" },
@@ -842,7 +1561,7 @@ test("명령 증거에서 DB 자격 증명과 공급자 비밀을 가린다", as
   assert.match(evidence, /\[redacted-google-chat-webhook\]/u)
 })
 
-test("승인되지 않은 실행과 승인된 미구현 실행 모두 child process 전에 닫힌다", async () => {
+test("승인되지 않은 실행은 child process 전에 닫힌다", async () => {
   const { runNotificationIsolatedDbQa } = await loadSubject()
   let executeCallCount = 0
   const execute = async () => {
@@ -853,10 +1572,6 @@ test("승인되지 않은 실행과 승인된 미구현 실행 모두 child proc
   await assert.rejects(
     () => runNotificationIsolatedDbQa({ approved: false, execute }),
     /notification_local_db_approval_required/u,
-  )
-  await assert.rejects(
-    () => runNotificationIsolatedDbQa({ approved: true, execute }),
-    /notification_local_db_runner_not_implemented/u,
   )
   assert.equal(executeCallCount, 0)
 })
@@ -885,6 +1600,11 @@ test("CLI 기본 모드는 무료 티어 계획만 출력하고 자원을 만들
       localDatabaseProjectPattern: "tips_notification_db_qa_<random>",
       localDatabasePort: "dynamic-loopback",
       internalDockerNetwork: true,
+      databaseBootstrap: {
+        supabaseCliVersion: "2.103.0",
+        authSchemaMigrator: "one-shot-internal-network",
+        steadyStateContainers: ["database"],
+      },
       syntheticFixture: {
         settingsRegistry: 185,
         rules: 186,
@@ -911,20 +1631,1380 @@ for (const args of [
   })
 }
 
-test("새 full flag도 구현 전에는 외부 명령 없이 닫힌다", () => {
-  const result = spawnSync(process.execPath, [
-    runnerUrl.pathname,
-    "--execute",
-    "--approved-local-db",
-  ], { encoding: "utf8" })
-
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /notification_local_db_runner_not_implemented/u)
-})
-
 test("runner source에는 Preview Branch command가 남지 않는다", () => {
   assert.doesNotMatch(
     runnerSource,
     /["']branches["']\s*,\s*["'](?:list|create|get|delete)["']/u,
   )
+})
+
+test("주입된 random과 loopback port로 deterministic validated runtime manifest를 만든다", async (t) => {
+  const { manifest, portCalls, randomCalls, tempRoot } = await buildRuntimeManifest(t)
+  const {
+    assertNotificationLocalRuntimeManifest,
+    buildNotificationLocalRuntimeManifest,
+  } = await loadSubject()
+
+  assert.deepEqual(randomCalls, [6])
+  assert.deepEqual(portCalls, ["127.0.0.1"])
+  assert.equal(manifest.version, 1)
+  assert.equal(manifest.projectId, expectedRuntimeProjectId)
+  assert.equal(manifest.tempRoot, tempRoot)
+  assert.deepEqual(manifest.database, {
+    host: "127.0.0.1",
+    port: 55432,
+    database: "postgres",
+    url: "postgresql://postgres:postgres@127.0.0.1:55432/postgres",
+  })
+  assert.deepEqual(manifest.dockerNetwork, {
+    name: `${expectedRuntimeProjectId}_internal`,
+    driver: "bridge",
+    hostBindingIpv4: "127.0.0.1",
+    internal: true,
+    minimumServerMajor: 28,
+  })
+  assert.deepEqual(manifest.migrationCatalog, migrationCatalogFixture)
+  assert.deepEqual(manifest.pendingMigrations, [pendingMigrationFixture])
+  assert.deepEqual(manifest.ownership.label, {
+    key: expectedOwnershipLabelKey,
+    value: expectedRuntimeProjectId,
+  })
+  assert.deepEqual(manifest.ownership.containers, [`supabase_db_${expectedRuntimeProjectId}`])
+  assert.deepEqual(manifest.ownership.volumes, [`supabase_db_${expectedRuntimeProjectId}`])
+  assert.deepEqual(manifest.ownership.networks, [`${expectedRuntimeProjectId}_internal`])
+  assert.equal(manifest.fixture.sqlSha256, "d".repeat(64))
+  assert.deepEqual(manifest.pgTap.files.map(({ relativePath }) => relativePath), expectedPgTapFiles)
+  assert.match(manifest.sha256, /^[a-f0-9]{64}$/u)
+  assert.equal(assertNotificationLocalRuntimeManifest(manifest), manifest)
+  assert.equal(Object.isFrozen(manifest), true)
+  assert.equal(Object.isFrozen(manifest.pendingMigrations), true)
+  assert.equal(Object.isFrozen(manifest.ownership), true)
+
+  const second = await buildNotificationLocalRuntimeManifest({
+    randomBytes: () => Buffer.from(injectedRandomBytes),
+    allocateLoopbackPort: async () => 55432,
+    tempRoot,
+    migrationCatalog: migrationCatalogFixture.map((entry) => ({ ...entry })),
+    pendingMigrations: [{ ...pendingMigrationFixture }],
+    fixtureContract: fixtureContractFixture(),
+  })
+  assert.deepEqual(second, manifest)
+})
+
+test("runtime manifest의 loopback·internal network·owned label·pending hash drift를 거부한다", async (t) => {
+  const { manifest } = await buildRuntimeManifest(t)
+  const { assertNotificationLocalRuntimeManifest } = await loadSubject()
+  const mutations = [
+    (value) => { value.projectId = "tips_notification_db_qa_../../outside" },
+    (value) => { value.database.host = "host.docker.internal" },
+    (value) => { value.database.port = 5432 },
+    (value) => { value.dockerNetwork.internal = false },
+    (value) => { value.dockerNetwork.name = "bridge" },
+    (value) => { value.dockerNetwork.driver = "host" },
+    (value) => { value.dockerNetwork.hostBindingIpv4 = "0.0.0.0" },
+    (value) => { value.dockerNetwork.minimumServerMajor = 27 },
+    (value) => { value.ownership.label.key = "unowned" },
+    (value) => { value.ownership.containers[0] = "preexisting-container" },
+    (value) => { value.ownership.networks = [] },
+    (value) => { value.migrationCatalog[0].sha256 = "not-a-hash" },
+    (value) => { value.migrationCatalog.splice(1, 1) },
+    (value) => { value.pendingMigrations[0].relativePath = "../outside.sql" },
+    (value) => { value.pendingMigrations[0] = value.migrationCatalog[0] },
+    (value) => { value.pendingMigrations[0].sha256 = "not-a-hash" },
+    (value) => { value.sha256 = "0".repeat(64) },
+  ]
+
+  for (const mutate of mutations) {
+    const candidate = structuredClone(manifest)
+    mutate(candidate)
+    assert.throws(
+      () => assertNotificationLocalRuntimeManifest(candidate),
+      /notification_local_db_runtime_manifest_refused/u,
+    )
+  }
+})
+
+test("runtime manifest builder는 0700 real temp directory가 아니면 random·port 전에 거부한다", async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), "tips-notification-runtime-root-"))
+  const realRoot = join(parent, "real")
+  const linkedRoot = join(parent, "linked")
+  await mkdir(realRoot, { mode: 0o700 })
+  await symlink(realRoot, linkedRoot)
+  t.after(() => rm(parent, { recursive: true, force: true }))
+  const { buildNotificationLocalRuntimeManifest } = await loadSubject()
+  let randomCalls = 0
+  let portCalls = 0
+  const options = (tempRoot) => ({
+    randomBytes: () => {
+      randomCalls += 1
+      return Buffer.from(injectedRandomBytes)
+    },
+    allocateLoopbackPort: async () => {
+      portCalls += 1
+      return 55432
+    },
+    tempRoot,
+    migrationCatalog: migrationCatalogFixture,
+    pendingMigrations: [{ ...pendingMigrationFixture }],
+    fixtureContract: fixtureContractFixture(),
+  })
+
+  await assert.rejects(
+    () => buildNotificationLocalRuntimeManifest(options(linkedRoot)),
+    /notification_local_db_runtime_manifest_refused/u,
+  )
+  await chmod(realRoot, 0o755)
+  await assert.rejects(
+    () => buildNotificationLocalRuntimeManifest(options(realRoot)),
+    /notification_local_db_runtime_manifest_refused/u,
+  )
+  assert.equal(randomCalls, 0)
+  assert.equal(portCalls, 0)
+})
+
+test("Docker 28+·internal bridge·loopback 기본 bind를 DB start 전에 exact 검증한다", async (t) => {
+  const { manifest } = await buildRuntimeManifest(t)
+  const {
+    assertNotificationDockerNetworkContract,
+    assertNotificationDockerServerVersion,
+  } = await loadSubject()
+  const network = {
+    Id: expectedDockerNetworkId,
+    Name: manifest.dockerNetwork.name,
+    Driver: "bridge",
+    Scope: "local",
+    Internal: true,
+    EnableIPv6: false,
+    Labels: {
+      [expectedOwnershipLabelKey]: manifest.projectId,
+      "com.supabase.cli.project": manifest.projectId,
+    },
+    Options: {
+      "com.docker.network.bridge.host_binding_ipv4": "127.0.0.1",
+    },
+  }
+
+  assert.equal(assertNotificationDockerServerVersion('"28.0.0"', 28), 28)
+  assert.equal(assertNotificationDockerServerVersion('"29.1.2"', 28), 29)
+  for (const value of ['"27.5.1"', '"dev"', "", "null"]) {
+    assert.throws(
+      () => assertNotificationDockerServerVersion(value, 28),
+      /notification_local_db_docker_version_refused/u,
+    )
+  }
+  assert.deepEqual(
+    assertNotificationDockerNetworkContract(JSON.stringify(network), manifest),
+    { networkId: expectedDockerNetworkId },
+  )
+
+  for (const mutate of [
+    (value) => { value.Driver = "overlay" },
+    (value) => { value.Scope = "swarm" },
+    (value) => { value.Internal = false },
+    (value) => { value.EnableIPv6 = true },
+    (value) => { value.Options["com.docker.network.bridge.host_binding_ipv4"] = "0.0.0.0" },
+    (value) => { value.Labels[expectedOwnershipLabelKey] = "another-run" },
+    (value) => { value.Labels["com.supabase.cli.project"] = "another-run" },
+  ]) {
+    const candidate = structuredClone(network)
+    mutate(candidate)
+    assert.throws(
+      () => assertNotificationDockerNetworkContract(JSON.stringify(candidate), manifest),
+      /notification_local_db_network_contract_refused/u,
+    )
+  }
+})
+
+test("Supabase CLI는 검토한 2.103.0만 허용한다", async () => {
+  const { assertNotificationSupabaseCliVersion } = await loadSubject()
+  assert.equal(assertNotificationSupabaseCliVersion("2.103.0\n"), "2.103.0")
+  for (const value of ["2.102.9", "2.104.0", "v2.103.0", "2.103.0 extra", "", null]) {
+    assert.throws(
+      () => assertNotificationSupabaseCliVersion(value),
+      /notification_local_db_supabase_version_refused/u,
+    )
+  }
+})
+
+test("DB container는 exact network 하나와 127.0.0.1 port binding 하나만 허용한다", async (t) => {
+  const { manifest } = await buildRuntimeManifest(t)
+  const { assertNotificationLocalDatabaseContainerContract } = await loadSubject()
+  const container = {
+    Name: `/${manifest.ownership.containers[0]}`,
+    Config: { Labels: { "com.supabase.cli.project": manifest.projectId } },
+    HostConfig: { NetworkMode: manifest.dockerNetwork.name },
+    NetworkSettings: {
+      Ports: {
+        "5432/tcp": [{ HostIp: "127.0.0.1", HostPort: "55432" }],
+      },
+      Networks: {
+        [manifest.dockerNetwork.name]: { NetworkID: expectedDockerNetworkId },
+      },
+    },
+  }
+
+  assert.deepEqual(
+    assertNotificationLocalDatabaseContainerContract(
+      JSON.stringify(container),
+      manifest,
+      expectedDockerNetworkId,
+    ),
+    { databasePort: 55432, networkId: expectedDockerNetworkId },
+  )
+
+  for (const mutate of [
+    (value) => { value.NetworkSettings.Ports["5432/tcp"][0].HostIp = "0.0.0.0" },
+    (value) => { value.NetworkSettings.Ports["5432/tcp"][0].HostIp = "::" },
+    (value) => { value.NetworkSettings.Ports["5432/tcp"].push({ HostIp: "::1", HostPort: "55432" }) },
+    (value) => { value.NetworkSettings.Ports["5432/tcp"][0].HostPort = "55433" },
+    (value) => { value.NetworkSettings.Ports["8080/tcp"] = [{ HostIp: "127.0.0.1", HostPort: "58080" }] },
+    (value) => { value.NetworkSettings.Networks.bridge = { NetworkID: "8".repeat(64) } },
+    (value) => { value.HostConfig.NetworkMode = expectedDockerNetworkId },
+  ]) {
+    const candidate = structuredClone(container)
+    mutate(candidate)
+    assert.throws(
+      () => assertNotificationLocalDatabaseContainerContract(
+        JSON.stringify(candidate),
+        manifest,
+        expectedDockerNetworkId,
+      ),
+      /notification_local_db_start_binding_refused/u,
+    )
+  }
+})
+
+test("DB start 뒤에는 DB container·volume·internal network만 남아야 한다", async (t) => {
+  const { manifest } = await buildRuntimeManifest(t)
+  const { assertNotificationLocalRuntimeResourceSet } = await loadSubject()
+  const expected = [
+    { kind: "container", name: manifest.ownership.containers[0] },
+    { kind: "volume", name: manifest.ownership.volumes[0] },
+    { kind: "network", name: manifest.ownership.networks[0] },
+  ]
+
+  assert.deepEqual(assertNotificationLocalRuntimeResourceSet(expected, manifest), expected)
+  for (const resources of [
+    expected.slice(0, -1),
+    [...expected, { kind: "container", name: `supabase_auth_${manifest.projectId}` }],
+    expected.map((entry, index) => index === 0 ? { ...entry, name: "another-db" } : entry),
+    [expected[1], expected[0], expected[2]],
+  ]) {
+    assert.throws(
+      () => assertNotificationLocalRuntimeResourceSet(resources, manifest),
+      /notification_local_db_start_resource_refused/u,
+    )
+  }
+})
+
+test("전체 verified migration catalog를 stage하고 pending은 exact suffix로만 유지한다", async (t) => {
+  const files = {
+    "20260803140000_notification_content_contracts.sql": "select 'applied-a';\n",
+    "20260803141000_notification_task_content_payload.sql": "select 'applied-b';\n",
+    "20260803142000_notification_word_retest_content_payload.sql": "select 'pending-c';\n",
+  }
+  const { root } = await makeMigrationRepo(t, files)
+  const catalog = Object.entries(files).map(([fileName, contents]) => {
+    const match = /^(\d{14})_([a-z0-9_]+)\.sql$/u.exec(fileName)
+    return {
+      version: match[1],
+      name: match[2],
+      fileName,
+      relativePath: `supabase/migrations/${fileName}`,
+      sha256: sha256(contents),
+    }
+  })
+  const tempRoot = await mkdtemp(join(tmpdir(), "tips-notification-catalog-runtime-"))
+  await chmod(tempRoot, 0o700)
+  t.after(() => rm(tempRoot, { recursive: true, force: true }))
+  const {
+    assertNotificationLocalRuntimeManifest,
+    buildNotificationLocalRuntimeManifest,
+    stageNotificationMigrationCatalog,
+  } = await loadSubject()
+  const manifest = await buildNotificationLocalRuntimeManifest({
+    randomBytes: () => Buffer.from(injectedRandomBytes),
+    allocateLoopbackPort: async () => 55432,
+    tempRoot,
+    migrationCatalog: catalog,
+    pendingMigrations: [catalog.at(-1)],
+    fixtureContract: fixtureContractFixture(),
+  })
+  await mkdir(join(tempRoot, "supabase", "migrations"), { recursive: true, mode: 0o700 })
+
+  const staged = await stageNotificationMigrationCatalog(manifest, { repoRoot: root })
+
+  assert.deepEqual(staged, manifest.migrationCatalog)
+  assert.deepEqual(
+    (await readdir(join(tempRoot, "supabase", "migrations"))).sort(),
+    Object.keys(files).sort(),
+  )
+  for (const [fileName, contents] of Object.entries(files)) {
+    const destination = join(tempRoot, "supabase", "migrations", fileName)
+    assert.equal(await readFile(destination, "utf8"), contents)
+    assert.equal(Number((await lstat(destination)).mode & 0o777), 0o600)
+  }
+
+  const driftRoot = await mkdtemp(join(tmpdir(), "tips-notification-catalog-drift-"))
+  await chmod(driftRoot, 0o700)
+  t.after(() => rm(driftRoot, { recursive: true, force: true }))
+  const driftManifest = await buildNotificationLocalRuntimeManifest({
+    randomBytes: () => Buffer.from("010203040506", "hex"),
+    allocateLoopbackPort: async () => 55433,
+    tempRoot: driftRoot,
+    migrationCatalog: catalog,
+    pendingMigrations: [catalog.at(-1)],
+    fixtureContract: fixtureContractFixture(),
+  })
+  await mkdir(join(driftRoot, "supabase", "migrations"), { recursive: true, mode: 0o700 })
+  await writeFile(
+    join(root, catalog.at(-1).relativePath),
+    "select 'source-drift';\n",
+    { mode: 0o600 },
+  )
+  await assert.rejects(
+    () => stageNotificationMigrationCatalog(driftManifest, { repoRoot: root }),
+    /notification_local_db_migration_failed/u,
+  )
+
+  const invalidPending = structuredClone(manifest)
+  invalidPending.pendingMigrations = [invalidPending.migrationCatalog[0]]
+  assert.throws(
+    () => assertNotificationLocalRuntimeManifest(invalidPending),
+    /notification_local_db_runtime_manifest_refused/u,
+  )
+})
+
+test("dry-run은 stdout·stderr를 합쳐 exact pending filename 집합만 허용한다", async () => {
+  const { parseNotificationMigrationDryRun } = await loadSubject()
+  const expected = [pendingMigrationFixture]
+  assert.deepEqual(
+    parseNotificationMigrationDryRun({
+      stdout: "",
+      stderr: [
+        "Connecting to local database...",
+        "Would push these migrations:",
+        ` • ${pendingMigrationFixture.fileName}`,
+      ].join("\n"),
+    }, expected),
+    [pendingMigrationFixture.fileName],
+  )
+  assert.deepEqual(
+    parseNotificationMigrationDryRun({
+      stdout: "Local database is up to date.\n",
+      stderr: "",
+    }, []),
+    [],
+  )
+
+  for (const result of [
+    { stdout: "", stderr: "Would push these migrations:" },
+    { stdout: pendingMigrationFixture.version, stderr: "Would push these migrations:" },
+    {
+      stdout: `warning about ${pendingMigrationFixture.fileName}`,
+      stderr: "Would push these migrations:",
+    },
+    {
+      stdout: "",
+      stderr: `Would push these migrations:\n${pendingMigrationFixture.fileName}\n20260803143000_extra.sql`,
+    },
+  ]) {
+    assert.throws(
+      () => parseNotificationMigrationDryRun(result, expected),
+      /notification_local_db_migration_failed/u,
+    )
+  }
+})
+
+test("pgTAP은 raw plan line 대신 pg_prove의 exact 10-file PASS summary를 판정한다", async () => {
+  const { assertNotificationPgTapSummary } = await loadSubject()
+  const success = [
+    "All tests successful.",
+    "Files=10, Tests=59,  3 wallclock secs",
+    "Result: PASS",
+  ].join("\n")
+  assert.deepEqual(assertNotificationPgTapSummary(success, 10), {
+    fileCount: 10,
+    testCount: 59,
+  })
+
+  for (const output of [
+    "All tests successful.\nFiles=9, Tests=59\nResult: PASS",
+    "All tests successful.\nFiles=10, Tests=0\nResult: PASS",
+    "Files=10, Tests=59\nResult: PASS",
+    "All tests successful.\nFiles=10, Tests=59\nResult: FAIL",
+    "All tests successful.\nFiles=10, Tests=59\nResult: PASS\nDubious, test returned 1",
+    "All tests successful.\nFiles=10, Tests=59\nResult: PASS\nnot ok 3",
+  ]) {
+    assert.throws(
+      () => assertNotificationPgTapSummary(output, 10),
+      /notification_local_db_pgtap_failed/u,
+    )
+  }
+})
+
+test("remote child env와 local env를 분리하고 local에서 remote/provider secret을 제거한다", async (t) => {
+  const { manifest } = await buildRuntimeManifest(t)
+  const { buildNotificationQaChildEnvironments } = await loadSubject()
+  const sourceEnvironment = sourceEnvironmentFixture()
+  const environments = buildNotificationQaChildEnvironments({
+    sourceEnvironment,
+    runtimeManifest: manifest,
+  })
+
+  assert.equal(
+    environments.remoteMetadata.SUPABASE_ACCESS_TOKEN,
+    sourceEnvironment.SUPABASE_ACCESS_TOKEN,
+  )
+  assert.equal("SUPABASE_DB_PASSWORD" in environments.remoteMetadata, false)
+  assert.equal(
+    environments.remoteSchema.SUPABASE_ACCESS_TOKEN,
+    sourceEnvironment.SUPABASE_ACCESS_TOKEN,
+  )
+  assert.equal(
+    environments.remoteSchema.SUPABASE_DB_PASSWORD,
+    sourceEnvironment.SUPABASE_DB_PASSWORD,
+  )
+  assert.equal(environments.local.PGHOST, "127.0.0.1")
+  assert.equal(environments.local.PGPORT, "55432")
+  assert.equal(environments.local.PGDATABASE, "postgres")
+  assert.equal(environments.local.PGUSER, "postgres")
+  assert.equal(environments.local.PGPASSWORD, "postgres")
+  assert.equal(environments.local.SUPABASE_PROJECT_ID, expectedRuntimeProjectId)
+  assert.equal(environments.local.DOCKER_NETWORK_NAME, manifest.dockerNetwork.name)
+  assert.equal("SUPABASE_ACCESS_TOKEN" in environments.local, false)
+  assert.equal("SUPABASE_DB_PASSWORD" in environments.local, false)
+  assert.equal(
+    Object.keys(environments.local).some((key) => (
+      /GOOGLE_CHAT|WEBHOOK|SLACK|RESEND|TWILIO/u.test(key)
+    )),
+    false,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(environments.local),
+    /remote-access-secret|remote-database-secret|provider-secret|service-account-secret|email-secret|sms-secret/u,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(environments),
+    /provider-secret|service-account-secret|email-secret|sms-secret/u,
+  )
+  assert.equal(Object.isFrozen(environments), true)
+  assert.equal(Object.isFrozen(environments.remoteMetadata), true)
+  assert.equal(Object.isFrozen(environments.remoteSchema), true)
+  assert.equal(Object.isFrozen(environments.local), true)
+})
+
+test("trusted executor는 fake subprocess transcript로 17단계 command를 실제 조합한다", async (t) => {
+  const migrationCatalog = await loadRepositoryMigrationCatalog()
+  assert.ok(migrationCatalog.length > 1)
+  const pendingMigrations = [migrationCatalog.at(-1)]
+  const appliedMigrations = migrationCatalog
+    .slice(0, -1)
+    .map(({ version, name }) => ({ version, name }))
+  const fixtureModule = await import(
+    new URL("../scripts/notification-content-local-qa-fixture.mjs", import.meta.url).href
+  )
+  const fixtureContract = await fixtureModule.loadNotificationContentLocalQaContract()
+  const tempRoot = await mkdtemp(join(tmpdir(), "tips-notification-trusted-executor-"))
+  await chmod(tempRoot, 0o700)
+  t.after(() => rm(tempRoot, { recursive: true, force: true }))
+  const schemaContents = "-- schema-only trusted executor fixture\ncreate schema dashboard_private;\n"
+  const schemaDumpPath = join(tempRoot, "notification-remote-schema.sql")
+  await writeFile(schemaDumpPath, schemaContents, { mode: 0o600 })
+  const {
+    buildNotificationLocalRuntimeManifest,
+    createNotificationLocalQaExecutor,
+    runNotificationIsolatedDbQa,
+  } = await loadSubject()
+  const manifest = await buildNotificationLocalRuntimeManifest({
+    randomBytes: () => Buffer.from(injectedRandomBytes),
+    allocateLoopbackPort: async () => 55432,
+    tempRoot,
+    migrationCatalog,
+    pendingMigrations,
+    fixtureContract,
+  })
+  const migrationManifestCore = {
+    version: 2,
+    applied: appliedMigrations,
+    catalog: manifest.migrationCatalog,
+    pending: manifest.pendingMigrations,
+  }
+  const remoteCollection = {
+    project: { projectRef: parentProjectRef, region: "ap-northeast-2" },
+    remote: {
+      transactionReadOnly: true,
+      serverVersionNum: 170006,
+      postgresMajor: 17,
+      migrations: appliedMigrations,
+    },
+    migrationManifest: {
+      ...migrationManifestCore,
+      sha256: sha256(JSON.stringify(migrationManifestCore)),
+    },
+    artifacts: {
+      schemaDumpPath,
+      schemaDumpSha256: sha256(schemaContents),
+    },
+    safety: { rowDataCopied: 0, productionMutationCount: 0 },
+  }
+  const networkPayload = JSON.stringify({
+    Id: expectedDockerNetworkId,
+    Name: manifest.dockerNetwork.name,
+    Driver: "bridge",
+    Scope: "local",
+    Internal: true,
+    EnableIPv6: false,
+    Labels: {
+      [expectedOwnershipLabelKey]: manifest.projectId,
+      "com.supabase.cli.project": manifest.projectId,
+    },
+    Options: {
+      "com.docker.network.bridge.host_binding_ipv4": "127.0.0.1",
+    },
+  })
+  const containerPayload = JSON.stringify({
+    Name: `/${manifest.ownership.containers[0]}`,
+    Config: { Labels: { "com.supabase.cli.project": manifest.projectId } },
+    HostConfig: { NetworkMode: manifest.dockerNetwork.name },
+    NetworkSettings: {
+      Ports: {
+        "5432/tcp": [{ HostIp: "127.0.0.1", HostPort: "55432" }],
+      },
+      Networks: {
+        [manifest.dockerNetwork.name]: { NetworkID: expectedDockerNetworkId },
+      },
+    },
+  })
+  const jsonAlias = (alias, value) => JSON.stringify([{ [alias]: value }])
+  const safetyEvidence = {
+    workerProcesses: 0,
+    workerHeartbeats: 0,
+    cronJobs: 0,
+    pgNetQueuedRequests: 0,
+    foreignServers: 0,
+    queueRows: 0,
+    enabledDispatchFlags: 0,
+    outboundExtensions: [],
+  }
+  const processCalls = []
+  let localConfigContractChecked = false
+  const executeProcess = async (call) => {
+    processCalls.push(call)
+    const args = call.args
+    const filePath = args[args.indexOf("--file") + 1]
+    const fileName = typeof filePath === "string" ? filePath.split("/").at(-1) : ""
+    const success = (stdout = "", stderr = "") => ({ code: 0, stdout, stderr })
+
+    if (args[0] === "version") return success('"28.0.0"\n')
+    if (call.step === "preexisting-resource-check") return success()
+    if (call.step === "internal-network-create" && args[1] === "create") {
+      return success(`${expectedDockerNetworkId}\n`)
+    }
+    if (args[0] === "network" && args[1] === "inspect") return success(networkPayload)
+    if (call.step === "local-db-start" && args[0] === "db" && args[1] === "start") {
+      const configPath = join(tempRoot, "supabase", "config.toml")
+      const configStat = await lstat(configPath)
+      const config = await readFile(configPath, "utf8")
+      const sectionEnabled = (section) => {
+        const escaped = section.replaceAll(".", "\\.")
+        const block = new RegExp(
+          `(?:^|\\n)\\[${escaped}\\]\\n([\\s\\S]*?)(?=\\n\\[|$)`,
+          "u",
+        ).exec(config)?.[1]
+        return /^enabled = (true|false)$/mu.exec(block ?? "")?.[1]
+      }
+      assert.equal(configStat.isFile(), true)
+      assert.equal(configStat.isSymbolicLink(), false)
+      assert.equal(configStat.mode & 0o777, 0o600)
+      assert.equal(sectionEnabled("api"), "false")
+      assert.equal(sectionEnabled("db.pooler"), "false")
+      assert.equal(sectionEnabled("db.seed"), "false")
+      assert.equal(sectionEnabled("realtime"), "false")
+      assert.equal(sectionEnabled("storage"), "false")
+      assert.equal(sectionEnabled("auth"), "true")
+      assert.equal(sectionEnabled("studio"), "false")
+      assert.equal(sectionEnabled("inbucket"), "false")
+      assert.equal(sectionEnabled("edge_runtime"), "false")
+      assert.equal(sectionEnabled("analytics"), "false")
+      assert.doesNotMatch(config, /SMTP|TWILIO|WEBHOOK|GOOGLE_CHAT|provider-secret/iu)
+      localConfigContractChecked = true
+      return success()
+    }
+    if (call.step === "local-db-start" && args[0] === "inspect") {
+      return success(containerPayload)
+    }
+    if (call.step === "local-db-start" && args[0] === "ps") {
+      return success(`${manifest.projectId}|${manifest.ownership.containers[0]}\n`)
+    }
+    if (call.step === "local-db-start" && args[0] === "volume") {
+      return success(`${manifest.projectId}|${manifest.ownership.volumes[0]}\n`)
+    }
+    if (
+      call.step === "local-db-start"
+      && args[0] === "network"
+      && args[1] === "ls"
+    ) {
+      return success(`${manifest.projectId}|${manifest.ownership.networks[0]}\n`)
+    }
+    if (fileName === "local-catalog-postflight.sql") {
+      return success(jsonAlias("notification_local_qa_catalog_postflight", {
+        roles_ok: true,
+        schemas_ok: true,
+        extensions_ok: true,
+        unexpected_owner_count: 0,
+        rls_relation_count: 1,
+        rls_policy_count: 1,
+        unexpected_public_create_grants: 0,
+      }))
+    }
+    if (call.step === "remote-migration-repair" && args[0] === "migration") {
+      return success()
+    }
+    if (fileName === "local-migration-history-postflight.sql"
+      || fileName === "local-migration-history-before-push.sql") {
+      return success(jsonAlias("notification_local_qa_migration_history", appliedMigrations))
+    }
+    if (call.step === "local-migration-push" && args.includes("--dry-run")) {
+      return success("", [
+        "Would push these migrations:",
+        pendingMigrations[0].fileName,
+      ].join("\n"))
+    }
+    if (call.step === "local-migration-push" && args[0] === "db" && args[1] === "push") {
+      return success()
+    }
+    if (fileName === "local-migration-history-after-push.sql") {
+      return success(jsonAlias(
+        "notification_local_qa_migration_history",
+        migrationCatalog.map(({ version, name }) => ({ version, name })),
+      ))
+    }
+    if (fileName === "fixture-postflight.sql") {
+      return success(jsonAlias("notification_local_qa_fixture_postflight", {
+        ...fixtureContract.manifest.expectedCounts,
+        enabledDispatchFlags: 0,
+        connectionSecretRows: 0,
+      }))
+    }
+    if (fileName === "local-safety-postflight.sql") {
+      return success(jsonAlias("notification_local_qa_safety", safetyEvidence))
+    }
+    if (fileName === "evidence-read-only.sql") {
+      return success(jsonAlias(
+        "notification_content_db_evidence",
+        actualEvidenceModuleQueryResult("read-only-evidence"),
+      ))
+    }
+    if (fileName === "evidence-round-trip.sql") {
+      return success(jsonAlias(
+        "notification_content_db_evidence",
+        actualEvidenceModuleQueryResult("disposable-round-trip"),
+      ))
+    }
+    if (call.step === "pgtap" && args[0] === "test") {
+      return success("All tests successful.\nFiles=10, Tests=59, 1 wallclock secs\nResult: PASS\n")
+    }
+    if (call.step === "cleanup") return success()
+    if (args[0] === "db" && args[1] === "query") return success()
+    throw new Error(`unexpected fake subprocess: ${call.step} ${args.join(" ")}`)
+  }
+  const execute = createNotificationLocalQaExecutor({ executeProcess })
+
+  const result = await runNotificationIsolatedDbQa({
+    approved: true,
+    runtimeManifest: manifest,
+    remoteCollection,
+    fixtureContract,
+    sourceEnvironment: sourceEnvironmentFixture(),
+    execute,
+  })
+
+  assert.equal(result.status, "passed")
+  assert.equal(localConfigContractChecked, true)
+  assert.equal(result.pgTap.fileCount, 10)
+  const networkCreate = processCalls.find(({ step, args }) => (
+    step === "internal-network-create" && args[1] === "create"
+  ))
+  assert.equal(networkCreate.args.includes("--internal"), true)
+  assert.equal(networkCreate.args.includes("--opt"), true)
+  const start = processCalls.find(({ step, args }) => step === "local-db-start" && args[0] === "db")
+  assert.equal(start.args[start.args.indexOf("--network-id") + 1], manifest.dockerNetwork.name)
+  assert.equal(
+    processCalls.filter(({ step, args }) => step === "local-db-start" && (
+      args[0] === "ps" || args[0] === "volume" || (args[0] === "network" && args[1] === "ls")
+    )).length,
+    3,
+  )
+  const repair = processCalls.find(({ args }) => args[0] === "migration" && args[1] === "repair")
+  assert.deepEqual(
+    repair.args.slice(2, 2 + appliedMigrations.length),
+    appliedMigrations.map(({ version }) => version),
+  )
+  const pushes = processCalls.filter(({ args }) => args[0] === "db" && args[1] === "push")
+  assert.equal(pushes.length, 2)
+  assert.equal(pushes[0].args.includes("--dry-run"), true)
+  assert.equal(pushes[1].args.includes("--dry-run"), false)
+  assert.equal(pushes[1].args.includes("--yes"), true)
+  assert.equal(processCalls.some(({ args }) => args[0] === "stop"), true)
+  const supabaseCalls = processCalls.filter(({ args }) => (
+    args[0] === "db" || args[0] === "migration"
+  ))
+  assert.ok(supabaseCalls.length > 10)
+  assert.equal(
+    supabaseCalls.every(({ command }) => command === expectedSupabaseGoCliPath),
+    true,
+  )
+  assert.equal(processCalls.every(({ env }) => !Object.keys(env).some((key) => (
+    /SUPABASE_(?:ACCESS_TOKEN|DB_PASSWORD)|GOOGLE_CHAT|WEBHOOK|SLACK|RESEND|TWILIO/u.test(key)
+  ))), true)
+})
+
+test("trusted migration push는 pending 0개면 dry-run과 history만 확인하고 actual을 생략한다", async (t) => {
+  const migrationCatalog = await loadRepositoryMigrationCatalog()
+  const appliedMigrations = migrationCatalog.map(({ version, name }) => ({ version, name }))
+  const tempRoot = await mkdtemp(join(tmpdir(), "tips-notification-noop-push-"))
+  await chmod(tempRoot, 0o700)
+  t.after(() => rm(tempRoot, { recursive: true, force: true }))
+  const {
+    buildNotificationLocalQaInvocation,
+    buildNotificationLocalRuntimeManifest,
+    buildNotificationQaChildEnvironments,
+    createNotificationLocalQaExecutor,
+    stageNotificationMigrationCatalog,
+  } = await loadSubject()
+  const manifest = await buildNotificationLocalRuntimeManifest({
+    randomBytes: () => Buffer.from("0a0b0c0d0e0f", "hex"),
+    allocateLoopbackPort: async () => 55434,
+    tempRoot,
+    migrationCatalog,
+    pendingMigrations: [],
+    fixtureContract: fixtureContractFixture(),
+  })
+  await mkdir(join(tempRoot, "supabase", "migrations"), { recursive: true, mode: 0o700 })
+  await stageNotificationMigrationCatalog(manifest)
+  const environments = buildNotificationQaChildEnvironments({
+    sourceEnvironment: sourceEnvironmentFixture(),
+    runtimeManifest: manifest,
+  })
+  const processCalls = []
+  const executeProcess = async (call) => {
+    processCalls.push(call)
+    const filePath = call.args[call.args.indexOf("--file") + 1]
+    const fileName = typeof filePath === "string" ? filePath.split("/").at(-1) : ""
+    if (
+      fileName === "local-migration-history-before-push.sql"
+      || fileName === "local-migration-history-after-push.sql"
+    ) {
+      return {
+        code: 0,
+        stdout: JSON.stringify([{
+          notification_local_qa_migration_history: appliedMigrations,
+        }]),
+        stderr: "",
+      }
+    }
+    if (call.args[0] === "db" && call.args[1] === "push" && call.args.includes("--dry-run")) {
+      return { code: 0, stdout: "Local database is up to date.\n", stderr: "" }
+    }
+    throw new Error(`unexpected no-op subprocess: ${call.args.join(" ")}`)
+  }
+  const execute = createNotificationLocalQaExecutor({ executeProcess })
+  const invocation = buildNotificationLocalQaInvocation("local-migration-push", {
+    runtimeManifest: manifest,
+    localEnvironment: environments.local,
+    state: {
+      localStartAttempted: true,
+      signalReceived: false,
+      dockerNetworkId: expectedDockerNetworkId,
+    },
+    executionContract: { appliedMigrations },
+  })
+
+  const result = await execute(invocation)
+
+  assert.equal(result.code, 0)
+  assert.deepEqual(result.evidence, {
+    dryRunPassed: true,
+    appliedPendingVersions: [],
+  })
+  const pushes = processCalls.filter(({ args }) => args[0] === "db" && args[1] === "push")
+  assert.equal(pushes.length, 1)
+  assert.equal(pushes[0].args.includes("--dry-run"), true)
+})
+
+test("fake executor로 17개 local orchestration을 exact order로 실행하고 cleanup 0 evidence를 남긴다", async (t) => {
+  const { manifest } = await buildRuntimeManifest(t)
+  const calls = []
+  const evidenceCalls = []
+  const execute = makeFakeExecutor(manifest, calls)
+  const { runNotificationIsolatedDbQa } = await loadSubject()
+
+  const result = await runNotificationIsolatedDbQa(orchestrationContext(
+    manifest,
+    execute,
+    { evidenceCalls },
+  ))
+
+  assert.deepEqual(calls.map(({ step }) => step), exactLocalOrchestrationSteps)
+  assert.equal(calls.filter(({ step }) => step === "cleanup").length, 1)
+  assert.equal(calls.every(Object.isFrozen), true)
+  assert.equal(calls.every(({ args, env }) => Object.isFrozen(args) && Object.isFrozen(env)), true)
+  const networkCall = calls.find(({ step }) => step === "internal-network-create")
+  assert.equal(networkCall.command, "docker")
+  assert.deepEqual(networkCall.args.slice(0, 2), ["network", "create"])
+  assert.equal(networkCall.args.includes("--internal"), true)
+  assert.deepEqual(
+    networkCall.args.slice(
+      networkCall.args.indexOf("--opt"),
+      networkCall.args.indexOf("--opt") + 2,
+    ),
+    ["--opt", "com.docker.network.bridge.host_binding_ipv4=127.0.0.1"],
+  )
+  assert.equal(
+    networkCall.args.includes(`${expectedOwnershipLabelKey}=${expectedRuntimeProjectId}`),
+    true,
+  )
+  assert.equal(networkCall.args.at(-1), manifest.dockerNetwork.name)
+  const startCall = calls.find(({ step }) => step === "local-db-start")
+  assert.equal(startCall.command, expectedSupabaseGoCliPath)
+  assert.deepEqual(startCall.args.slice(0, 2), ["db", "start"])
+  assert.equal(startCall.args[startCall.args.indexOf("--workdir") + 1], manifest.tempRoot)
+  assert.equal(
+    startCall.args[startCall.args.indexOf("--network-id") + 1],
+    manifest.dockerNetwork.name,
+  )
+  const pgTapCall = calls.find(({ step }) => step === "pgtap")
+  assert.equal(
+    pgTapCall.args[pgTapCall.args.indexOf("--network-id") + 1],
+    manifest.dockerNetwork.name,
+  )
+  const localCalls = calls.filter(({ step }) => step !== "preexisting-resource-check")
+  assert.equal(localCalls.every(({ env }) => env.PGHOST === "127.0.0.1"), true)
+  assert.equal(localCalls.every(({ env }) => !("SUPABASE_ACCESS_TOKEN" in env)), true)
+  assert.equal(localCalls.every(({ env }) => !("SUPABASE_DB_PASSWORD" in env)), true)
+  assert.doesNotMatch(
+    JSON.stringify(calls),
+    /remote-access-secret|remote-database-secret|provider-secret|service-account-secret|email-secret|sms-secret/u,
+  )
+  assert.deepEqual(evidenceCalls.map(({ disposable }) => disposable), [false, true])
+  assert.equal(evidenceCalls.every(({ query }) => typeof query === "function"), true)
+
+  assert.equal(result.status, "passed")
+  assert.equal(result.runtimeManifestSha256, manifest.sha256)
+  assert.deepEqual(result.orchestration.steps, exactLocalOrchestrationSteps)
+  assert.equal(result.orchestration.localStartAttempted, true)
+  assert.deepEqual(result.counts, expectedFixtureCounts)
+  assert.deepEqual(result.pgTap, { fileCount: 10, passed: 10, failed: 0 })
+  assert.deepEqual(result.safety, {
+    productionRowDataCopied: 0,
+    productionMutationCount: 0,
+    providerEgressBlocked: true,
+    workerProcesses: 0,
+    queueDelta: 0,
+    preflightEnabledDispatchFlags: 0,
+    postflightEnabledDispatchFlags: 0,
+  })
+  assert.deepEqual(result.cleanup, {
+    attempts: 1,
+    ownedResourcesRemaining: 0,
+    containersRemaining: 0,
+    volumesRemaining: 0,
+    networksRemaining: 0,
+  })
+  assert.equal(Object.isFrozen(result), true)
+})
+
+test("실제 evidence 모듈도 controlled query adapter를 통해서만 두 mode를 검증한다", async (t) => {
+  const { manifest } = await buildRuntimeManifest(t)
+  const calls = []
+  const baseExecute = makeFakeExecutor(manifest, calls)
+  const execute = async (invocation) => {
+    if (invocation.step === "read-only-evidence" || invocation.step === "disposable-round-trip") {
+      calls.push(invocation)
+      return {
+        code: 0,
+        stdout: "",
+        stderr: "",
+        evidence: actualEvidenceModuleQueryResult(invocation.step),
+      }
+    }
+    return baseExecute(invocation)
+  }
+  const context = orchestrationContext(manifest, execute)
+  delete context.runEvidence
+  const { runNotificationIsolatedDbQa } = await loadSubject()
+
+  const result = await runNotificationIsolatedDbQa(context)
+
+  assert.equal(result.status, "passed")
+  assert.deepEqual(
+    calls.filter(({ step }) => /evidence|round-trip/u.test(step)).map(({ step }) => step),
+    ["read-only-evidence", "disposable-round-trip"],
+  )
+  assert.equal(
+    calls.some(({ command, args }) => (
+      command === process.execPath
+      && args.some((value) => /notification-content-db-evidence/u.test(value))
+    )),
+    false,
+  )
+})
+
+test("caller-supplied manifest는 trusted default executor에 직접 연결되지 않는다", async (t) => {
+  const { manifest } = await buildRuntimeManifest(t)
+  const { runNotificationIsolatedDbQa } = await loadSubject()
+  const context = orchestrationContext(manifest, undefined)
+
+  await assert.rejects(
+    () => runNotificationIsolatedDbQa(context),
+    /notification_local_db_executor_refused/u,
+  )
+})
+
+test("remote migration catalog 분해와 manifest SHA drift는 local command 전에 거부한다", async (t) => {
+  const { manifest } = await buildRuntimeManifest(t)
+  const calls = []
+  const context = orchestrationContext(manifest, makeFakeExecutor(manifest, calls))
+  context.remoteCollection = structuredClone(context.remoteCollection)
+  context.remoteCollection.migrationManifest.sha256 = "0".repeat(64)
+  const { runNotificationIsolatedDbQa } = await loadSubject()
+
+  await assert.rejects(
+    () => runNotificationIsolatedDbQa(context),
+    /notification_local_db_execution_contract_refused/u,
+  )
+  assert.equal(calls.length, 0)
+})
+
+test("exact owned label의 pre-existing resource가 하나라도 있으면 생성·cleanup 전에 거부한다", async (t) => {
+  const { manifest } = await buildRuntimeManifest(t)
+  const calls = []
+  const { runNotificationIsolatedDbQa } = await loadSubject()
+  const execute = async (invocation) => {
+    calls.push(invocation)
+    return {
+      code: 0,
+      stdout: "",
+      stderr: "",
+      evidence: {
+        dockerServerMajor: 28,
+        ownedResourceCount: 1,
+        resources: [{ kind: "container", name: manifest.ownership.containers[0] }],
+      },
+    }
+  }
+  let caught
+
+  try {
+    await runNotificationIsolatedDbQa(orchestrationContext(manifest, execute))
+  } catch (error) {
+    caught = error
+  }
+
+  assert.equal(caught?.code, "notification_local_db_preexisting_resource_refused")
+  assert.deepEqual(calls.map(({ step }) => step), ["preexisting-resource-check"])
+  assert.equal(calls.some(({ step }) => step === "internal-network-create"), false)
+  assert.equal(calls.some(({ step }) => step === "local-db-start"), false)
+  assert.equal(calls.some(({ step }) => step === "cleanup"), false)
+})
+
+test("internal network create partial failure도 start 없이 exact cleanup 1회로 닫힌다", async (t) => {
+  const { manifest } = await buildRuntimeManifest(t)
+  const calls = []
+  const execute = makeFakeExecutor(manifest, calls, { failStep: "internal-network-create" })
+  const { runNotificationIsolatedDbQa } = await loadSubject()
+  let caught
+
+  try {
+    await runNotificationIsolatedDbQa(orchestrationContext(manifest, execute))
+  } catch (error) {
+    caught = error
+  }
+
+  assert.equal(caught?.code, "notification_local_db_network_failed")
+  assert.deepEqual(caught?.evidence, {
+    primaryCode: "notification_local_db_network_failed",
+    cleanupCode: "notification_local_db_cleanup_ok",
+  })
+  assert.equal(calls.some(({ step }) => step === "local-db-start"), false)
+  assert.equal(calls.filter(({ step }) => step === "cleanup").length, 1)
+})
+
+for (const [failStep, primaryCode] of [
+  ["local-db-start", "notification_local_db_start_failed"],
+  ["schema-restore", "notification_local_db_restore_failed"],
+  ["local-migration-push", "notification_local_db_migration_failed"],
+  ["synthetic-fixture-install", "notification_local_db_fixture_failed"],
+  ["read-only-evidence", "notification_local_db_evidence_failed"],
+  ["disposable-round-trip", "notification_local_db_evidence_failed"],
+  ["pgtap", "notification_local_db_pgtap_failed"],
+]) {
+  test(`${failStep} 실패는 localStartAttempted 이후 exact cleanup 1회와 safe code를 보존한다`, async (t) => {
+    const { manifest } = await buildRuntimeManifest(t)
+    const calls = []
+    const execute = makeFakeExecutor(manifest, calls, { failStep })
+    const { runNotificationIsolatedDbQa } = await loadSubject()
+    let caught
+
+    try {
+      await runNotificationIsolatedDbQa(orchestrationContext(manifest, execute))
+    } catch (error) {
+      caught = error
+    }
+
+    assert.equal(caught?.code, primaryCode)
+    assert.deepEqual(caught?.evidence, {
+      primaryCode,
+      cleanupCode: "notification_local_db_cleanup_ok",
+    })
+    assert.equal(Object.isFrozen(caught?.evidence), true)
+    assert.equal(calls.filter(({ step }) => step === "cleanup").length, 1)
+    assert.equal(calls.at(-1).step, "cleanup")
+    const startCall = calls.find(({ step }) => step === "local-db-start")
+    assert.equal(startCall?.state.localStartAttempted, true)
+    assert.doesNotMatch(
+      `${String(caught)}\n${JSON.stringify(caught?.evidence)}`,
+      /primary-secret|cleanup-secret|provider-secret|chat\.googleapis|sbp_/u,
+    )
+  })
+}
+
+test("primary 실패와 cleanup 실패를 raw 출력 없이 두 개의 safe code로 함께 보존한다", async (t) => {
+  const { manifest } = await buildRuntimeManifest(t)
+  const calls = []
+  const execute = makeFakeExecutor(manifest, calls, {
+    failStep: "read-only-evidence",
+    cleanupFails: true,
+  })
+  const { runNotificationIsolatedDbQa } = await loadSubject()
+  let caught
+
+  try {
+    await runNotificationIsolatedDbQa(orchestrationContext(manifest, execute))
+  } catch (error) {
+    caught = error
+  }
+
+  assert.equal(caught?.code, "notification_local_db_evidence_failed")
+  assert.deepEqual(caught?.evidence, {
+    primaryCode: "notification_local_db_evidence_failed",
+    cleanupCode: "notification_local_db_cleanup_failed",
+  })
+  assert.equal(calls.filter(({ step }) => step === "cleanup").length, 1)
+  assert.doesNotMatch(
+    `${String(caught)}\n${JSON.stringify(caught?.evidence)}`,
+    /primary-secret|cleanup-secret|provider-secret|chat\.googleapis|sbp_/u,
+  )
+})
+
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  test(`${signal}은 동일 signal handler의 idempotent cleanup controller로 들어간다`, async (t) => {
+    const { manifest } = await buildRuntimeManifest(t)
+    const calls = []
+    const execute = makeFakeExecutor(manifest, calls)
+    const { buildNotificationQaChildEnvironments, createNotificationLocalCleanupController } =
+      await loadSubject()
+    const environments = buildNotificationQaChildEnvironments({
+      sourceEnvironment: sourceEnvironmentFixture(),
+      runtimeManifest: manifest,
+    })
+    const controller = createNotificationLocalCleanupController({
+      runtimeManifest: manifest,
+      localEnvironment: environments.local,
+      execute,
+    })
+
+    assert.equal(controller.signalHandlers.SIGINT, controller.signalHandlers.SIGTERM)
+    const first = await controller.signalHandlers[signal](signal)
+    const second = await controller.signalHandlers[signal](signal)
+
+    assert.deepEqual(first, {
+      primaryCode: "notification_local_db_signal_received",
+      cleanupCode: "notification_local_db_cleanup_deferred",
+    })
+    assert.deepEqual(second, first)
+    assert.equal(calls.filter(({ step }) => step === "cleanup").length, 0)
+    const cleanup = await controller.cleanup()
+    assert.equal(cleanup.cleanupCode, "notification_local_db_cleanup_ok")
+    assert.equal(calls.filter(({ step }) => step === "cleanup").length, 1)
+    assert.equal(Object.isFrozen(controller), true)
+  })
+}
+
+test("설치된 signal lifecycle은 child abort를 먼저 표시하고 cleanup을 finally로 미룬다", async (t) => {
+  const { manifest } = await buildRuntimeManifest(t)
+  const calls = []
+  const state = { localStartAttempted: true, signalReceived: false }
+  const execute = makeFakeExecutor(manifest, calls)
+  const {
+    buildNotificationQaChildEnvironments,
+    createNotificationLocalCleanupController,
+    installLocalQaSignalLifecycle,
+  } = await loadSubject()
+  const environments = buildNotificationQaChildEnvironments({
+    sourceEnvironment: sourceEnvironmentFixture(),
+    runtimeManifest: manifest,
+  })
+  const controller = createNotificationLocalCleanupController({
+    runtimeManifest: manifest,
+    localEnvironment: environments.local,
+    execute,
+    state,
+  })
+  const abortController = new AbortController()
+  const existingHandlers = new Set(process.listeners("SIGTERM"))
+  const existingInterruptHandlers = new Set(process.listeners("SIGINT"))
+  const previousExitCode = process.exitCode
+  const dispose = installLocalQaSignalLifecycle(controller, abortController)
+  t.after(() => {
+    dispose()
+    process.exitCode = previousExitCode
+  })
+  const handler = process.listeners("SIGTERM")
+    .find((candidate) => !existingHandlers.has(candidate))
+  const interruptHandler = process.listeners("SIGINT")
+    .find((candidate) => !existingInterruptHandlers.has(candidate))
+  assert.equal(typeof handler, "function")
+  assert.equal(typeof interruptHandler, "function")
+
+  const evidence = await handler()
+  const repeatedEvidence = await interruptHandler()
+
+  assert.equal(state.signalReceived, true)
+  assert.equal(abortController.signal.aborted, true)
+  assert.deepEqual(evidence, {
+    primaryCode: "notification_local_db_signal_received",
+    cleanupCode: "notification_local_db_cleanup_deferred",
+  })
+  assert.deepEqual(repeatedEvidence, evidence)
+  assert.equal(process.exitCode, 143)
+  assert.equal(calls.length, 0)
+  await controller.cleanup()
+  assert.equal(calls.filter(({ step }) => step === "cleanup").length, 1)
+})
+
+test("active invocation signal은 drain 완료 후 finally에서 exact cleanup 1회를 실행한다", async (t) => {
+  const { manifest } = await buildRuntimeManifest(t)
+  const calls = []
+  let releaseStarted
+  const started = new Promise((resolvePromise) => { releaseStarted = resolvePromise })
+  let childDrained = false
+  const execute = async (invocation) => {
+    calls.push(invocation)
+    if (invocation.step === "preexisting-resource-check") {
+      return {
+        code: 0,
+        stdout: "",
+        stderr: "",
+        evidence: successfulStepEvidence(invocation.step, manifest),
+      }
+    }
+    if (invocation.step === "internal-network-create") {
+      releaseStarted()
+      return new Promise((resolvePromise) => {
+        invocation.abortSignal.addEventListener("abort", () => {
+          setTimeout(() => {
+            childDrained = true
+            resolvePromise({ code: 1, stdout: "", stderr: "" })
+          }, 10)
+        }, { once: true })
+      })
+    }
+    if (invocation.step === "cleanup") {
+      assert.equal(childDrained, true)
+      return {
+        code: 0,
+        stdout: "",
+        stderr: "",
+        evidence: successfulStepEvidence(invocation.step, manifest),
+      }
+    }
+    assert.fail(`unexpected step after signal: ${invocation.step}`)
+  }
+  const existingHandlers = new Set(process.listeners("SIGTERM"))
+  const previousExitCode = process.exitCode
+  t.after(() => { process.exitCode = previousExitCode })
+  const { runNotificationIsolatedDbQa } = await loadSubject()
+  const run = runNotificationIsolatedDbQa(orchestrationContext(manifest, execute))
+  await started
+  const handler = process.listeners("SIGTERM")
+    .find((candidate) => !existingHandlers.has(candidate))
+  assert.equal(typeof handler, "function")
+
+  const signalEvidence = await handler()
+  let caught
+  try {
+    await run
+  } catch (error) {
+    caught = error
+  }
+
+  assert.deepEqual(signalEvidence, {
+    primaryCode: "notification_local_db_signal_received",
+    cleanupCode: "notification_local_db_cleanup_deferred",
+  })
+  assert.equal(caught?.code, "notification_local_db_signal_received")
+  assert.deepEqual(caught?.evidence, {
+    primaryCode: "notification_local_db_signal_received",
+    cleanupCode: "notification_local_db_cleanup_ok",
+  })
+  assert.equal(calls.filter(({ step }) => step === "cleanup").length, 1)
+  assert.equal(calls.at(-1).step, "cleanup")
+})
+
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  test(`${signal}이 cleanup 도중 들어와도 passed로 반환하지 않는다`, async (t) => {
+    const { manifest } = await buildRuntimeManifest(t)
+    const calls = []
+    const baseExecute = makeFakeExecutor(manifest, calls)
+    let markCleanupStarted
+    let releaseCleanup
+    const cleanupStarted = new Promise((resolvePromise) => {
+      markCleanupStarted = resolvePromise
+    })
+    const cleanupReleased = new Promise((resolvePromise) => {
+      releaseCleanup = resolvePromise
+    })
+    const execute = async (invocation) => {
+      if (invocation.step !== "cleanup") return baseExecute(invocation)
+      calls.push(invocation)
+      markCleanupStarted()
+      await cleanupReleased
+      return {
+        code: 0,
+        stdout: "",
+        stderr: "",
+        evidence: successfulStepEvidence(invocation.step, manifest),
+      }
+    }
+    const existingHandlers = new Set(process.listeners(signal))
+    const previousExitCode = process.exitCode
+    t.after(() => { process.exitCode = previousExitCode })
+    const { runNotificationIsolatedDbQa } = await loadSubject()
+    const outcome = runNotificationIsolatedDbQa(orchestrationContext(manifest, execute))
+      .then((value) => ({ value }), (error) => ({ error }))
+    await cleanupStarted
+    const handler = process.listeners(signal)
+      .find((candidate) => !existingHandlers.has(candidate))
+    assert.equal(typeof handler, "function")
+
+    const signalEvidence = await handler()
+    releaseCleanup()
+    const { error, value } = await outcome
+
+    assert.equal(value, undefined)
+    assert.deepEqual(signalEvidence, {
+      primaryCode: "notification_local_db_signal_received",
+      cleanupCode: "notification_local_db_cleanup_deferred",
+    })
+    assert.equal(error?.code, "notification_local_db_signal_received")
+    assert.deepEqual(error?.evidence, {
+      primaryCode: "notification_local_db_signal_received",
+      cleanupCode: "notification_local_db_cleanup_ok",
+    })
+    assert.equal(calls.filter(({ step }) => step === "cleanup").length, 1)
+    assert.equal(calls.at(-1).step, "cleanup")
+  })
+}
+
+test("CLI full flags는 외부 주입 없이 trusted default executor의 orchestrator만 호출한다", () => {
+  const mainStart = runnerSource.indexOf("async function main()")
+  const mainEnd = runnerSource.indexOf("if (fileURLToPath(import.meta.url)", mainStart)
+  assert.ok(mainStart >= 0 && mainEnd > mainStart)
+  const mainSource = runnerSource.slice(mainStart, mainEnd)
+  const runStart = runnerSource.indexOf("export async function runNotificationIsolatedDbQa")
+  const runEnd = runnerSource.indexOf("async function main()", runStart)
+  assert.ok(runStart >= 0 && runEnd > runStart)
+  const runSource = runnerSource.slice(runStart, runEnd)
+  const prepareStart = runnerSource.indexOf("async function prepareNotificationLocalQaContext")
+  const prepareEnd = runnerSource.indexOf("async function planEvidence", prepareStart)
+  assert.ok(prepareStart >= 0 && prepareEnd > prepareStart)
+  const prepareSource = runnerSource.slice(prepareStart, prepareEnd)
+  const remoteRunStart = runnerSource.indexOf(
+    "export async function runNotificationRemoteCollectorWithCleanup",
+  )
+  const remoteRunEnd = runnerSource.indexOf("function successfulLocalResult", remoteRunStart)
+  assert.ok(remoteRunStart >= 0 && remoteRunEnd > remoteRunStart)
+  const remoteRunSource = runnerSource.slice(remoteRunStart, remoteRunEnd)
+  const versionStart = runnerSource.indexOf("async function verifyPinnedSupabaseCli")
+  const versionEnd = runnerSource.indexOf("async function removeNotificationRuntimeRoot", versionStart)
+  assert.ok(versionStart >= 0 && versionEnd > versionStart)
+  const versionSource = runnerSource.slice(versionStart, versionEnd)
+  const localQueryStart = runnerSource.indexOf("async function runLocalQueryFile")
+  const localQueryEnd = runnerSource.indexOf("async function assertInternalNetwork", localQueryStart)
+  assert.ok(localQueryStart >= 0 && localQueryEnd > localQueryStart)
+  const localQuerySource = runnerSource.slice(localQueryStart, localQueryEnd)
+
+  assert.match(
+    runnerSource,
+    /async function executeNotificationLocalQaInvocation\s*\(/u,
+  )
+  assert.match(
+    runnerSource,
+    /context\.execute\s*\?\?\s*executeNotificationLocalQaInvocation/u,
+  )
+  assert.match(
+    runnerSource,
+    /import\(\s*["']\.\/notification-content-db-evidence\.mjs["']\s*\)/u,
+  )
+  assert.match(
+    runnerSource,
+    /const DEFAULT_SUPABASE_GO_CLI_PATH\s*=\s*[\s\S]{0,200}\/supabase-go["']/u,
+  )
+  assert.equal(
+    runnerSource.split(expectedSupabaseGoCliPath).length - 1,
+    1,
+  )
+  assert.doesNotMatch(runnerSource, /DEFAULT_SUPABASE_CLI_PATH/u)
+  assert.match(
+    runnerSource,
+    /execute === executeBoundedProcess && collectorRuntime === undefined/u,
+  )
+  assert.match(
+    runnerSource,
+    /runNotificationContentDbEvidence\(\{[\s\S]*?query\s*:/u,
+  )
+  assert.doesNotMatch(
+    runnerSource,
+    /command\s*:\s*process\.execPath[\s\S]{0,400}notification-content-db-evidence/u,
+  )
+  assert.match(
+    mainSource,
+    /await runNotificationIsolatedDbQa\(\{ approved: true \}\)/u,
+  )
+  assert.doesNotMatch(
+    mainSource,
+    /execute\s*:|runtimeManifest\s*:|fixtureContract\s*:|sourceEnvironment\s*:/u,
+  )
+  assert.doesNotMatch(
+    runnerSource,
+    /NOTIFICATION_(?:LOCAL_)?QA_(?:CONTEXT|EXECUTOR|MANIFEST)|JSON\.parse\(process\.env/u,
+  )
+  assert.ok(
+    runSource.indexOf("installLocalQaSignalLifecycle")
+      < runSource.indexOf("await prepareNotificationLocalQaContext"),
+  )
+  assert.match(runSource, /prepareNotificationLocalQaContext\(context,\s*\{\s*abortSignal:/u)
+  assert.match(runnerSource, /sourceEnvironment: process\.env,\s*abortSignal,/u)
+  assert.match(runnerSource, /process\.on\(signal, handlers\[signal\]\)/u)
+  assert.match(versionSource, /command: DEFAULT_SUPABASE_GO_CLI_PATH/u)
+  assert.match(localQuerySource, /command: DEFAULT_SUPABASE_GO_CLI_PATH/u)
+  assert.match(prepareSource, /cliPath: DEFAULT_SUPABASE_GO_CLI_PATH/u)
+  assert.match(prepareSource, /execute: executeBoundedProcess/u)
+  assert.match(prepareSource, /await runNotificationRemoteCollectorWithCleanup/u)
+  assert.doesNotMatch(prepareSource, /local-db-start|buildNotificationLocalQaInvocation/u)
+  assert.ok(remoteRunSource.indexOf("await cleanupController.preflight(abortSignal)")
+    < remoteRunSource.indexOf("remoteCollection = await collect"))
+  assert.ok(remoteRunSource.indexOf("remoteCollection = await collect")
+    < remoteRunSource.indexOf("await cleanupController.cleanup()"))
+  assert.match(
+    remoteRunSource,
+    /\{ collectorRuntime: runtime \}/u,
+  )
+  assert.match(
+    runnerSource,
+    /child\.kill\(basename\(command\) === "supabase-go" \? "SIGINT" : "SIGTERM"\)/u,
+  )
+  assert.match(runnerSource, /child\.kill\("SIGKILL"\)/u)
 })
