@@ -15,6 +15,7 @@
     "verify:ops-browser": "node scripts/verify-ops-task-browser-workflow.mjs",
     "verify:admin-guard": "node scripts/verify-admin-guard-smoke.mjs",
     "verify:notification-content:no-send": "node --experimental-strip-types scripts/run-notification-content-no-send-qa.mjs",
+    "verify:notification-content:isolated-db": "node --experimental-strip-types scripts/run-notification-isolated-db-qa.mjs",
     "verify:notification-content:browser": "node scripts/verify-notification-content-browser.mjs"
   },
   "dependencies": {

@@ -165,17 +165,19 @@ Stop for review before adding branch creation.
 - Produces: `runNotificationIsolatedDbQa({ approved, cliPath, nodePath, now, execute }): Promise<SafeEvidence>`
 - Produces: `SafeEvidence`의 공개 필드는 branch name, branch ref 앞 6자, runtime flags, zero-counts, 로컬 DB 결과, pgTAP 결과, cleanup 결과뿐이다.
 
-- [ ] **Step 1: 명령 allowlist·승인 gate RED 테스트 작성**
+- [x] **Step 1: 명령 allowlist·승인 gate RED 테스트 작성**
 
 허용 명령은 다음 exact family로 제한한다.
 
 ```text
-supabase branches list --project-ref slnjqlzzhewblvttiidk
-supabase branches create $QA_BRANCH_NAME --project-ref slnjqlzzhewblvttiidk --region ap-northeast-2 --size nano
-supabase branches get $QA_BRANCH_REF --project-ref slnjqlzzhewblvttiidk
+supabase branches list --project-ref slnjqlzzhewblvttiidk --output-format json
+supabase branches create $QA_BRANCH_NAME --project-ref slnjqlzzhewblvttiidk --region ap-northeast-2 --size nano --output-format json
+supabase branches get $QA_BRANCH_REF --project-ref slnjqlzzhewblvttiidk --output-format json
 supabase db push --db-url $QA_BRANCH_DB_URL --dry-run --include-all
 supabase db push --db-url $QA_BRANCH_DB_URL --include-all
-supabase db query --db-url $QA_BRANCH_DB_URL --file $QA_PREFLIGHT_SQL
+supabase migration list --db-url $QA_BRANCH_DB_URL
+supabase db query --db-url $QA_BRANCH_DB_URL --file $QA_RELATION_PREFLIGHT_SQL --output json
+supabase db query --db-url $QA_BRANCH_DB_URL --file $QA_PREFLIGHT_SQL --output json
 supabase db dump --db-url $QA_BRANCH_DB_URL --schema public,dashboard_private --file $QA_SCHEMA_SQL
 supabase db dump --db-url $QA_BRANCH_DB_URL --schema public,dashboard_private --data-only --use-copy --file $QA_DATA_SQL
 supabase db start
@@ -188,7 +190,7 @@ supabase branches delete $QA_BRANCH_REF --project-ref slnjqlzzhewblvttiidk --yes
 
 테스트는 `approved: false`일 때 첫 child process 전에 `notification_preview_approval_required`가 발생하는지, production ref를 DB URL에 넣으면 `notification_preview_production_target_refused`가 발생하는지 확인한다.
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run:
 
@@ -198,7 +200,7 @@ Run:
 
 Expected: FAIL on missing approval gate and command policy.
 
-- [ ] **Step 3: preview branch 생성과 건강 상태 대기 구현**
+- [x] **Step 3: preview branch 생성과 건강 상태 대기 구현**
 
 `branches list`가 빈 배열이거나 같은 이름이 없음을 확인한 뒤 다음 명령을 child process로 실행한다.
 
@@ -210,9 +212,9 @@ Expected: FAIL on missing approval gate and command policy.
   --output-format json
 ```
 
-`--with-data`, `--persistent`, `--notify-url`은 넣지 않는다. 생성 직후 ref를 메모리에 보관하고, `branches get`을 최대 10분 동안 15초 간격으로 조회한다. `ACTIVE_HEALTHY` 외 terminal failure면 중단한다. 대기 중 사용자 업데이트 간격은 60초를 넘기지 않는다.
+`--with-data`, `--persistent`, `--notify-url`은 넣지 않는다. 생성 직후 ref를 메모리에 보관하고, `branches get`을 최대 10분 동안 15초 간격으로 조회한다. 생성 직후 `CREATING_PROJECT`는 대기 상태로 처리하고, `ACTIVE_HEALTHY` 외 terminal failure면 중단한다. 대기 중 사용자 업데이트 간격은 60초를 넘기지 않는다.
 
-- [ ] **Step 4: branch 데이터·공급자 사전 점검 구현**
+- [x] **Step 4: branch 데이터·공급자 사전 점검 구현**
 
 branch DB에서 다음 safe aggregate만 읽는다.
 
@@ -235,13 +237,13 @@ select jsonb_build_object(
 rollback;
 ```
 
-`auth_users`, `profiles`, `students`, `classes`, `deliveries`, `inbox`, `runtime_flags_enabled`, `connection_secret_rows`가 모두 0이 아니면 dump와 migration push를 실행하지 않고 정리 단계로 이동한다. relation이 아직 없으면 migration push 전 preflight는 base business 네 항목만 검사하고, push 후 전체 여덟 항목을 다시 검사한다.
+`auth_users`, `profiles`, `students`, `classes`, `deliveries`, `inbox`, `runtime_flags_enabled`, `connection_secret_rows`가 모두 0이 아니면 dump와 migration push를 실행하지 않고 정리 단계로 이동한다. relation이 아직 없으면 `to_regclass` catalog preflight로 존재 여부를 먼저 확인하고, 존재하는 base business relation만 정확히 세며, push 후 전체 여덟 항목을 다시 검사한다.
 
-- [ ] **Step 5: preview branch에만 migration dry-run과 apply 구현**
+- [x] **Step 5: preview branch에만 migration dry-run과 apply 구현**
 
-branch metadata의 ref와 DB hostname이 동일한지 다시 검사한 뒤 `db push --dry-run --include-all`을 실행한다. dry-run SQL에 `notification_worker_schedule`, `cron.schedule`, runtime flag `true`가 있으면 actual push를 거부한다. 통과하면 같은 exact branch URL에 `db push --include-all`을 한 번 실행하고 migration list를 재확인한다.
+branch metadata의 ref와 DB hostname이 동일한지 다시 검사한 뒤 `db push --dry-run --include-all`을 실행한다. CLI dry-run 출력과 로컬 migration SQL을 함께 검사해 `notification_worker_schedule`, `cron.schedule`, runtime flag `true`가 있으면 actual push를 거부한다. 통과하면 같은 exact branch URL에 `db push --include-all`을 한 번 실행하고 migration list를 재확인한다.
 
-- [ ] **Step 6: schema·system seed dump와 로컬 복원 구현**
+- [x] **Step 6: schema·system seed dump와 로컬 복원 구현**
 
 전체 preflight가 0인 branch에서 `public,dashboard_private` schema dump와 data-only dump를 mode `0600` 임시 파일로 만든다. 임시 workdir의 `supabase/config.toml`은 project id `tips_notification_db_qa`, DB port `54322`, Postgres major `17`로 고정하고 migrations 폴더는 비워 둔다. `supabase db start` 후 schema dump, data dump 순서로 로컬 URL에 적용한다.
 
@@ -262,7 +264,7 @@ SUPABASE_CLI_PATH="$SUPABASE_CLI" \
   --disposable
 ```
 
-- [ ] **Step 7: 정확한 아홉 pgTAP 실행**
+- [x] **Step 7: 정확한 아홉 pgTAP 실행**
 
 ```bash
 "$SUPABASE_CLI" test db \
@@ -280,7 +282,7 @@ SUPABASE_CLI_PATH="$SUPABASE_CLI" \
 
 Expected: 모든 파일 PASS, 각 파일 transaction rollback, provider request 0.
 
-- [ ] **Step 8: package entrypoint 추가**
+- [x] **Step 8: package entrypoint 추가**
 
 ```json
 {
@@ -290,7 +292,7 @@ Expected: 모든 파일 PASS, 각 파일 transaction rollback, provider request 
 
 실제 실행에는 CLI에서 `--execute --approved-preview-branch` 두 플래그를 모두 요구한다. 플래그가 없으면 계획·필요 권한·예상 생성 자원만 JSON으로 출력하고 exit 0한다.
 
-- [ ] **Step 9: mock GREEN 확인**
+- [x] **Step 9: mock GREEN 확인**
 
 Run:
 
