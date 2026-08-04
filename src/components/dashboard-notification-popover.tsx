@@ -1,9 +1,9 @@
 "use client"
 
 import * as React from "react"
-import Link from "next/link"
 import { Bell } from "lucide-react"
 
+import { DashboardNotificationContent } from "@/components/dashboard-notification-content"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -50,42 +50,6 @@ import {
   type DashboardPushState,
 } from "@/lib/dashboard-push-client"
 import { useAuth } from "@/providers/auth-provider"
-
-function formatNotificationTime(value: string) {
-  if (!value) return ""
-  const date = new Date(value)
-  if (!Number.isFinite(date.getTime())) return ""
-
-  return new Intl.DateTimeFormat("ko-KR", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date)
-}
-
-const NOTIFICATION_BODY_ISO_DATE_TIME_PATTERN = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})\b/g
-const notificationBodyDateTimeFormatter = new Intl.DateTimeFormat("en-US", {
-  timeZone: "Asia/Seoul",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-})
-
-function formatNotificationBody(value: string) {
-  return value.replace(NOTIFICATION_BODY_ISO_DATE_TIME_PATTERN, (isoDateTime) => {
-    const date = new Date(isoDateTime)
-    if (!Number.isFinite(date.getTime())) return isoDateTime
-
-    const parts = Object.fromEntries(
-      notificationBodyDateTimeFormatter.formatToParts(date).map((part) => [part.type, part.value]),
-    )
-    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`
-  })
-}
 
 function getPushStateLabel(state: DashboardPushState) {
   const labels: Record<DashboardPushState, string> = {
@@ -364,14 +328,20 @@ export function DashboardNotificationPopover() {
     void startMarkRead(notification)
   }, [startMarkRead])
 
-  const handleMarkReadButton = React.useCallback((
-    event: React.MouseEvent<HTMLButtonElement>,
-    notification: DashboardNotification,
-  ) => {
-    event.preventDefault()
-    event.stopPropagation()
+  const handleMarkReadButton = React.useCallback((notification: DashboardNotification) => {
     void startMarkRead(notification)
   }, [startMarkRead])
+
+  const keepFocusedNotificationVisible = React.useCallback((event: React.FocusEvent<HTMLDivElement>) => {
+    const container = event.currentTarget
+    const target = event.target
+    if (!(target instanceof HTMLElement) || target === container) return
+    const containerRect = container.getBoundingClientRect()
+    const targetRect = target.getBoundingClientRect()
+    if (targetRect.top < containerRect.top || targetRect.bottom > containerRect.bottom) {
+      target.scrollIntoView({ block: "nearest" })
+    }
+  }, [])
 
   const runPushAction = React.useCallback(async (
     action: () => Promise<DashboardPushReadiness>,
@@ -451,22 +421,43 @@ export function DashboardNotificationPopover() {
 
   const pushPrimaryActionLabel = getPushPrimaryActionLabel(pushState)
   const canDisablePush = ["ready", "self_test_sent", "self_test_expired", "self_test_failed"].includes(pushState)
+  const notificationTriggerLabel = unreadCount > 0
+    ? `알림, 읽지 않은 알림 ${unreadCount}개`
+    : "알림, 읽지 않은 알림 없음"
 
   return (
     <>
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button type="button" variant="outline" size="icon" aria-label="알림" title="알림" className="relative">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          aria-label={notificationTriggerLabel}
+          title={notificationTriggerLabel}
+          className="relative"
+        >
           <Bell className="size-4" aria-hidden="true" />
-          <span className="sr-only">알림</span>
           {unreadCount > 0 ? (
-            <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
-              {unreadCount > 9 ? "9+" : unreadCount}
+            <span
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground"
+            >
+              <span aria-hidden="true">{unreadCount > 9 ? "9+" : unreadCount}</span>
+              <span className="sr-only">읽지 않은 알림 {unreadCount}개</span>
             </span>
           ) : null}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" sideOffset={8} className="w-80 rounded-lg p-0">
+      <PopoverContent
+        align="end"
+        sideOffset={8}
+        collisionPadding={8}
+        data-testid="dashboard-notification-popover"
+        className="flex max-h-[min(calc(100dvh-1rem),var(--radix-popover-content-available-height))] w-[min(24rem,calc(100vw-1rem))] flex-col rounded-lg p-0"
+      >
         <div className="flex items-center justify-between border-b px-3 py-2">
           <div className="text-sm font-semibold">알림</div>
           <Button type="button" variant="ghost" size="sm" onClick={() => void refresh()} disabled={loading}>
@@ -510,61 +501,30 @@ export function DashboardNotificationPopover() {
             {notificationError}
           </div>
         ) : null}
-        <div className="max-h-96 overflow-y-auto">
+        <div
+          role="list"
+          aria-label="대시보드 알림 목록"
+          data-testid="dashboard-notification-list"
+          onFocusCapture={keepFocusedNotificationVisible}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+        >
           {loading && notifications.length === 0 ? (
             <div className="px-3 py-8 text-center text-sm text-muted-foreground">불러오는 중입니다.</div>
           ) : notificationError && notifications.length === 0 ? (
             null
           ) : notifications.length === 0 ? (
             <div className="px-3 py-8 text-center text-sm text-muted-foreground">새 알림이 없습니다.</div>
-          ) : notifications.map((notification) => {
-            const content = (
-              <div className="grid gap-1 px-3 py-2 text-left">
-                <div className="flex items-start justify-between gap-2">
-                  <span className="text-sm font-medium">{notification.title}</span>
-                  {!notification.readAt ? <span className="mt-1 size-2 rounded-full bg-primary" aria-hidden="true" /> : null}
-                </div>
-                {notification.body ? <span className="text-xs text-muted-foreground">{formatNotificationBody(notification.body)}</span> : null}
-                <span className="text-[11px] text-muted-foreground">{formatNotificationTime(notification.createdAt)}</span>
-              </div>
-            )
-
-            return (
-              <div
-                key={notification.id}
-                className="grid grid-cols-[minmax(0,1fr)_auto] items-start border-b last:border-b-0 hover:bg-accent"
-              >
-                {notification.href ? (
-                  <Link
-                    href={notification.href}
-                    onClick={() => handleNotificationLinkClick(notification)}
-                    className="min-w-0"
-                  >
-                    {content}
-                  </Link>
-                ) : (
-                  <div className="min-w-0">{content}</div>
-                )}
-                {!notification.readAt ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={(event) => handleMarkReadButton(event, notification)}
-                    disabled={pendingReadIds.has(notification.id)}
-                    className="mr-2 mt-2 h-7 shrink-0 px-2 text-xs"
-                  >
-                    {pendingReadIds.has(notification.id) ? "처리 중" : "읽음"}
-                  </Button>
-                ) : null}
-                {readErrors[notification.id] ? (
-                  <div role="alert" className="col-span-2 px-3 pb-2 text-xs text-destructive">
-                    {readErrors[notification.id]}
-                  </div>
-                ) : null}
-              </div>
-            )
-          })}
+          ) : notifications.map((notification) => (
+            <DashboardNotificationContent
+              key={notification.id}
+              notification={notification}
+              isRead={Boolean(notification.readAt)}
+              isMarkingRead={pendingReadIds.has(notification.id)}
+              readError={readErrors[notification.id] || ""}
+              onOpen={handleNotificationLinkClick}
+              onMarkRead={handleMarkReadButton}
+            />
+          ))}
         </div>
       </PopoverContent>
     </Popover>

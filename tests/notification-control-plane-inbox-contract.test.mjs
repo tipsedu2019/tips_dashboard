@@ -90,6 +90,22 @@ test("inbox cursor is a stable descending created_at and id pair", async () => {
   )
 })
 
+test("inbox list keeps complete self-contained content and semantic timestamps without truncation", async () => {
+  const migration = await readFile(migrationUrl, "utf8")
+  const inbox = functionBlock(migration, "public.get_dashboard_notification_inbox_v1")
+
+  for (const [wireKey, column] of [
+    ["title", "title"],
+    ["body", "body"],
+    ["href", "href"],
+    ["read_at", "read_at"],
+    ["created_at", "created_at"],
+  ]) {
+    assert.match(inbox, new RegExp(`'${wireKey}'\\s*,\\s*numbered\\.${column}`, "i"))
+  }
+  assert.doesNotMatch(inbox, /(?:left|substring|substr)\s*\(\s*numbered\.(?:title|body)/i)
+})
+
 test("mark locks identity and base row before one atomic visible recheck and receipt", async () => {
   const migration = await readFile(migrationUrl, "utf8")
   const mark = functionBlock(migration, "public.mark_dashboard_notification_read_v1")

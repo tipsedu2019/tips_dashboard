@@ -587,17 +587,41 @@ test("대시보드 알림함은 viewer ID 없이 서버의 세 RPC 결과만 사
   assert.doesNotMatch(popoverSource, /nextNotifications\.filter\(\(item\) => !item\.readAt\)/)
 })
 
-test("읽지 않은 알림은 Link 바깥의 형제 읽음 버튼과 항목별 상태를 사용한다", async () => {
-  const source = await readOptionalSource("src/components/dashboard-notification-popover.tsx")
+test("읽지 않은 알림은 추출된 표시 컴포넌트와 항목별 상태를 사용한다", async () => {
+  const [source, contentSource] = await Promise.all([
+    readOptionalSource("src/components/dashboard-notification-popover.tsx"),
+    readOptionalSource("src/components/dashboard-notification-content.tsx"),
+  ])
   const rows = source.slice(source.indexOf("notifications.map"))
 
-  assert.match(rows, /grid-cols-\[minmax\(0,1fr\)_auto\]/)
-  assert.match(rows, /<Link[\s\S]*<\/Link>[\s\S]*<Button[\s\S]*읽음[\s\S]*<\/Button>/)
-  assert.doesNotMatch(rows, /<Link[\s\S]{0,1200}<Button[\s\S]{0,600}<\/Link>/)
+  assert.match(source, /import \{ DashboardNotificationContent \}/)
+  assert.match(rows, /<DashboardNotificationContent/)
+  assert.match(rows, /isRead=\{Boolean\(notification\.readAt\)\}/)
+  assert.match(rows, /isMarkingRead=\{pendingReadIds\.has\(notification\.id\)\}/)
+  assert.match(rows, /readError=\{readErrors\[notification\.id\] \|\| ""\}/)
+  assert.match(contentSource, /grid-cols-\[minmax\(0,1fr\)_auto\]/)
+  assert.match(contentSource, /<Link[\s\S]*<\/Link>[\s\S]*<Button[\s\S]*읽음[\s\S]*<\/Button>/)
+  assert.doesNotMatch(contentSource, /<Link[\s\S]{0,1600}<Button[\s\S]{0,600}<\/Link>/)
   assert.match(source, /pendingReadIds/)
   assert.match(source, /readErrors/)
-  assert.match(source, /preventDefault\(\)/)
-  assert.match(source, /stopPropagation\(\)/)
+  assert.match(contentSource, /preventDefault\(\)/)
+  assert.match(contentSource, /stopPropagation\(\)/)
+})
+
+test("대시보드 알림 popover는 작은 화면·확대·키보드 탐색 경계를 갖는다", async () => {
+  const source = await readOptionalSource("src/components/dashboard-notification-popover.tsx")
+
+  assert.match(source, /w-\[min\(24rem,calc\(100vw-1rem\)\)\]/)
+  assert.match(
+    source,
+    /max-h-\[min\(calc\(100dvh-1rem\),var\(--radix-popover-content-available-height\)\)\]/,
+  )
+  assert.match(source, /collisionPadding=\{8\}/)
+  assert.match(source, /min-h-0 flex-1 overflow-y-auto/)
+  assert.match(source, /aria-label=\{notificationTriggerLabel\}/)
+  assert.match(source, /aria-live="polite"/)
+  assert.match(source, /읽지 않은 알림 \$\{unreadCount\}개/)
+  assert.match(source, /onFocusCapture=\{keepFocusedNotificationVisible\}/)
 })
 
 test("알림 링크는 읽음 RPC를 동기 시작하지만 이동을 기다리거나 닫지 않는다", async () => {
