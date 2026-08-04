@@ -472,6 +472,18 @@ test("customer_message delivery는 일반 수동 reconciliation으로 우회할 
   assert.match(reconcile, /for update of delivery/)
 })
 
+test("등록 알림 KST 형식 함수는 PostgreSQL extract 문법을 사용한다", async () => {
+  const sql = await source(contentMigrationUrl)
+  const formatter = functionBlock(
+    sql,
+    "dashboard_private.registration_notification_kst_datetime_v1",
+  )
+
+  assert.match(formatter, /\bextract\(year from p_value at time zone 'Asia\/Seoul'\)/i)
+  assert.match(formatter, /\bextract\(dow from p_value at time zone 'Asia\/Seoul'\)/i)
+  assert.doesNotMatch(formatter, /pg_catalog\.extract\s*\(/i)
+})
+
 test("전화상담 담당 배정은 active template canonical projection 하나만 남기고 직접 문구를 만들지 않는다", async () => {
   const sql = await source(contentMigrationUrl)
   const assign = functionBlock(sql, "dashboard_private.assign_registration_track_director_impl")

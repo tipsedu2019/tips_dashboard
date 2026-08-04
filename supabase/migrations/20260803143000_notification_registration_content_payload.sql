@@ -14,13 +14,13 @@ security definer
 set search_path = ''
 as $$
   select case
-    when pg_catalog.extract(year from p_value at time zone 'Asia/Seoul')
-      = pg_catalog.extract(year from p_reference at time zone 'Asia/Seoul')
+    when extract(year from p_value at time zone 'Asia/Seoul')
+      = extract(year from p_reference at time zone 'Asia/Seoul')
       then pg_catalog.to_char(p_value at time zone 'Asia/Seoul', 'FMMM"월 "FMDD"일"')
     else pg_catalog.to_char(p_value at time zone 'Asia/Seoul', 'YYYY"년 "FMMM"월 "FMDD"일"')
   end
   || '(' || (array['일','월','화','수','목','금','토'])[
-    pg_catalog.extract(dow from p_value at time zone 'Asia/Seoul')::integer + 1
+    extract(dow from p_value at time zone 'Asia/Seoul')::integer + 1
   ] || ') '
   || pg_catalog.to_char(p_value at time zone 'Asia/Seoul', 'HH24:MI');
 $$;
