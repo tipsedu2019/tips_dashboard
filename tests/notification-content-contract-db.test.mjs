@@ -59,6 +59,14 @@ test("migration creates private five-part contracts and immutable compliance evi
   assert.equal((migration.match(/^begin;$/gim) ?? []).length, 1)
   assert.equal((migration.match(/^commit;$/gim) ?? []).length, 1)
   assert.match(migration, /set\s+local\s+lock_timeout\s*=\s*'5s'/i)
+  const deferredContract = migration.indexOf("deferrable initially deferred")
+  const constraintFlush = migration.search(/set\s+constraints\s+all\s+immediate\s*;/i)
+  const ownershipChange = migration.indexOf(
+    "alter table dashboard_private.notification_rule_content_contracts owner to postgres;",
+  )
+  assert.ok(deferredContract >= 0, "content contract registry FK must stay deferrable for seeding")
+  assert.ok(constraintFlush > deferredContract, "deferred contract events must be flushed")
+  assert.ok(constraintFlush < ownershipChange, "constraint flush must precede ownership DDL")
   assert.match(
     migration,
     /create\s+table\s+dashboard_private\.notification_rule_content_contracts\s*\([\s\S]+?primary\s+key\s*\(\s*workflow_key\s*,\s*event_key\s*,\s*audience_key\s*,\s*channel_key\s*,\s*rule_variant_key\s*\)/i,

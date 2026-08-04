@@ -1797,6 +1797,10 @@ as $$
   );
 $$;
 
+-- The contracts registry foreign key is intentionally deferred while its
+-- canonical rows are seeded above. Flush those events before ownership DDL.
+set constraints all immediate;
+
 alter table dashboard_private.notification_rule_content_contracts owner to postgres;
 alter table dashboard_private.notification_template_compliance_audits owner to postgres;
 
