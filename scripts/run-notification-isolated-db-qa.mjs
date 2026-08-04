@@ -1,5 +1,9 @@
 import { spawn } from "node:child_process"
-import { createHash, randomBytes as secureRandomBytes } from "node:crypto"
+import {
+  createHash,
+  randomBytes as secureRandomBytes,
+  X509Certificate,
+} from "node:crypto"
 import { constants as fileConstants } from "node:fs"
 import {
   chmod,
@@ -28,17 +32,6 @@ const LOCAL_DATABASE_HOSTS = new Set(["127.0.0.1", "localhost", "::1"])
 const DOCKER_LOOPBACK_BIND_OPTION =
   "com.docker.network.bridge.host_binding_ipv4=127.0.0.1"
 const MINIMUM_DOCKER_SERVER_MAJOR = 28
-const REMOTE_SAFE_ENV_KEYS = Object.freeze([
-  "HOME",
-  "LANG",
-  "LC_ALL",
-  "PATH",
-  "SSL_CERT_DIR",
-  "SSL_CERT_FILE",
-  "SUPABASE_ACCESS_TOKEN",
-  "TMPDIR",
-  "USER",
-])
 const REQUIRED_ROLES = Object.freeze([
   "anon",
   "authenticated",
@@ -90,6 +83,63 @@ const DEFAULT_SUPABASE_GO_CLI_PATH =
   "/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supabase/cli-darwin-arm64/bin/supabase-go"
 const PINNED_SUPABASE_CLI_VERSION = "2.103.0"
 const DEFAULT_DOCKER_CLI_PATH = "/Users/hyunjun/.local/bin/docker"
+const REMOTE_POOLER_ROUTE = deepFreeze({
+  mode: "shared-supavisor-session",
+  projectRef: PARENT_PROJECT_REF,
+  region: ALLOWED_REGION,
+  host: "aws-1-ap-northeast-2.pooler.supabase.com",
+  port: 5432,
+  user: `postgres.${PARENT_PROJECT_REF}`,
+  database: "postgres",
+  sslmode: "verify-full",
+  sslrootcert: "/qa/prod-ca-2021.crt",
+})
+const REMOTE_CLIENT_IMAGE = deepFreeze({
+  tag: "public.ecr.aws/supabase/postgres:17.6.1.132",
+  digest: "sha256:e09e93a61ed1560caf4be79c9eb29401875bea74b12aec4657cb08bf34ea3a13",
+  reference:
+    "public.ecr.aws/supabase/postgres:17.6.1.132@sha256:e09e93a61ed1560caf4be79c9eb29401875bea74b12aec4657cb08bf34ea3a13",
+  major: 17,
+})
+const REMOTE_CA_FILE_SHA256 =
+  "700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7"
+const REMOTE_CA_FINGERPRINT256 =
+  "80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA"
+const REMOTE_CA_RELATIVE_PATH = "supabase/certs/prod-ca-2021.crt"
+const REMOTE_POSTGRES_ENVIRONMENT = deepFreeze({
+  PGHOST: "aws-1-ap-northeast-2.pooler.supabase.com",
+  PGPORT: "5432",
+  PGUSER: "postgres.slnjqlzzhewblvttiidk",
+  PGDATABASE: "postgres",
+  PGSSLMODE: "verify-full",
+  PGSSLROOTCERT: "/qa/prod-ca-2021.crt",
+  PGCONNECT_TIMEOUT: "30",
+})
+const REMOTE_POSTGRES_ENV_KEYS = Object.freeze([
+  "PGHOST",
+  "PGPORT",
+  "PGUSER",
+  "PGDATABASE",
+  "PGSSLMODE",
+  "PGSSLROOTCERT",
+  "PGCONNECT_TIMEOUT",
+])
+const REMOTE_DOCKER_STEPS = Object.freeze([
+  "image-inspect",
+  "psql-version",
+  "pg-dump-version",
+  "metadata-before",
+  "schema-dump",
+  "metadata-after",
+])
+const REMOTE_DOCKER_CONTAINER_STEPS = Object.freeze([
+  "psql-version",
+  "pg-dump-version",
+  "metadata-before",
+  "schema-dump",
+  "metadata-after",
+])
+const DATABASE_PASSWORD_STDIN_MODE = "database-password-prompt"
 const TRUSTED_PROCESS_EXECUTOR = Symbol("notificationLocalQaTrustedProcessExecutor")
 const LOCAL_ENV_SOURCE_KEYS = Object.freeze([
   "LANG",
@@ -143,7 +193,10 @@ const REMOTE_METADATA_SQL = `begin read only;
 set local statement_timeout = '30s';
 set local lock_timeout = '5s';
 
-select pg_catalog.jsonb_build_object(
+select pg_catalog.jsonb_build_array(
+  pg_catalog.jsonb_build_object(
+    'notification_local_qa_remote_metadata',
+    pg_catalog.jsonb_build_object(
   'transaction_read_only', pg_catalog.current_setting('transaction_read_only') = 'on',
   'server_version_num', pg_catalog.current_setting('server_version_num')::integer,
   'migrations', (
@@ -194,8 +247,9 @@ select pg_catalog.jsonb_build_object(
     'notification_templates', pg_catalog.to_regclass('dashboard_private.notification_templates') is not null,
     'profiles', pg_catalog.to_regclass('public.profiles') is not null,
     'students', pg_catalog.to_regclass('public.students') is not null
+    )
   )
-) as notification_local_qa_remote_metadata;
+)::text;
 rollback;
 `
 
@@ -385,6 +439,100 @@ function isEnvironmentRecord(value) {
 function hasExactKeys(value, expectedKeys) {
   return isPlainRecord(value)
     && JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...expectedKeys].sort())
+}
+
+export function assertNotificationRemotePoolerRoute(value) {
+  const keys = Object.keys(REMOTE_POOLER_ROUTE)
+  if (
+    !hasExactKeys(value, keys)
+    || keys.some((key) => value[key] !== REMOTE_POOLER_ROUTE[key])
+  ) {
+    throw new Error("notification_local_db_remote_pooler_route_refused")
+  }
+  return REMOTE_POOLER_ROUTE
+}
+
+export function assertNotificationRemoteClientImage(value) {
+  const keys = Object.keys(REMOTE_CLIENT_IMAGE)
+  if (
+    !hasExactKeys(value, keys)
+    || keys.some((key) => value[key] !== REMOTE_CLIENT_IMAGE[key])
+  ) {
+    throw new Error("notification_local_db_remote_client_image_refused")
+  }
+  return REMOTE_CLIENT_IMAGE
+}
+
+export function assertNotificationRemoteClientVersion(stdout, executable) {
+  if (executable !== "psql" && executable !== "pg_dump" || typeof stdout !== "string") {
+    throw new Error("notification_local_db_remote_client_version_refused")
+  }
+  const pattern = new RegExp(
+    `^${executable} \\(PostgreSQL\\) (\\d+)\\.\\d+(?:\\.\\d+)?$`,
+    "u",
+  )
+  const match = stdout.trim().match(pattern)
+  if (Number(match?.[1]) !== REMOTE_CLIENT_IMAGE.major) {
+    throw new Error("notification_local_db_remote_client_version_refused")
+  }
+  return REMOTE_CLIENT_IMAGE.major
+}
+
+export async function inspectNotificationRemoteTlsCa({
+  repoRoot = ROOT,
+  now = Date.now(),
+} = {}) {
+  let fileHandle
+  try {
+    if (
+      typeof repoRoot !== "string"
+      || !isAbsolute(repoRoot)
+      || !Number.isFinite(now)
+    ) {
+      throw new Error("notification_local_db_remote_tls_ca_refused")
+    }
+    const caPath = join(resolve(repoRoot), REMOTE_CA_RELATIVE_PATH)
+    const entry = await lstat(caPath, { bigint: true })
+    if (entry.isSymbolicLink() || !entry.isFile()) {
+      throw new Error("notification_local_db_remote_tls_ca_refused")
+    }
+    fileHandle = await open(
+      caPath,
+      fileConstants.O_RDONLY | (fileConstants.O_NOFOLLOW ?? 0),
+    )
+    const before = await fileHandle.stat({ bigint: true })
+    if (
+      !before.isFile()
+      || !sameFileSnapshot(entry, before)
+      || (before.mode & 0o777n) !== 0o644n
+    ) {
+      throw new Error("notification_local_db_remote_tls_ca_refused")
+    }
+    const bytes = await fileHandle.readFile()
+    const after = await fileHandle.stat({ bigint: true })
+    const certificate = new X509Certificate(bytes)
+    const notAfterMs = Date.parse(certificate.validTo)
+    if (
+      !sameFileSnapshot(before, after)
+      || sha256(bytes) !== REMOTE_CA_FILE_SHA256
+      || certificate.fingerprint256 !== REMOTE_CA_FINGERPRINT256
+      || !Number.isFinite(notAfterMs)
+      || notAfterMs <= now
+    ) {
+      throw new Error("notification_local_db_remote_tls_ca_refused")
+    }
+    return deepFreeze({
+      path: caPath,
+      sha256: REMOTE_CA_FILE_SHA256,
+      fingerprint256: REMOTE_CA_FINGERPRINT256,
+      notAfter: new Date(notAfterMs).toISOString(),
+    })
+  } catch (error) {
+    if (error?.message === "notification_local_db_remote_tls_ca_refused") throw error
+    throw new Error("notification_local_db_remote_tls_ca_refused")
+  } finally {
+    await fileHandle?.close().catch(() => {})
+  }
 }
 
 function isPathInside(parent, candidate) {
@@ -711,17 +859,6 @@ export function buildNotificationQaChildEnvironments({
   const manifest = assertNotificationLocalRuntimeManifest(runtimeManifest)
   if (!isEnvironmentRecord(sourceEnvironment)) runtimeManifestRefused()
 
-  const remoteBase = {}
-  for (const key of REMOTE_SAFE_ENV_KEYS) {
-    if (typeof sourceEnvironment[key] === "string") remoteBase[key] = sourceEnvironment[key]
-  }
-  const remoteMetadata = { ...remoteBase }
-  delete remoteMetadata.SUPABASE_DB_PASSWORD
-  const remoteSchema = { ...remoteBase }
-  if (typeof sourceEnvironment.SUPABASE_DB_PASSWORD === "string") {
-    remoteSchema.SUPABASE_DB_PASSWORD = sourceEnvironment.SUPABASE_DB_PASSWORD
-  }
-
   const local = {}
   for (const key of LOCAL_ENV_SOURCE_KEYS) {
     if (typeof sourceEnvironment[key] === "string") local[key] = sourceEnvironment[key]
@@ -741,7 +878,7 @@ export function buildNotificationQaChildEnvironments({
     NOTIFICATION_CONTENT_DB_SCOPE: "local",
   })
 
-  return deepFreeze({ remoteMetadata, remoteSchema, local })
+  return deepFreeze({ local })
 }
 
 function normalizeLocalMigrationFiles(localFiles) {
@@ -879,20 +1016,6 @@ async function loadLocalMigrationCatalog(repoRoot) {
     if (error?.message === "notification_local_db_migration_drift") throw error
     migrationDrift()
   }
-}
-
-export function assertLinkedProjectMetadata(value) {
-  if (
-    value?.project_ref !== PARENT_PROJECT_REF
-    || value?.region !== ALLOWED_REGION
-  ) {
-    throw new Error("notification_local_db_project_metadata_refused")
-  }
-
-  return Object.freeze({
-    projectRef: PARENT_PROJECT_REF,
-    region: ALLOWED_REGION,
-  })
 }
 
 export function normalizeRemoteMigrationVersions(payload, localFiles) {
@@ -1059,23 +1182,6 @@ function parseRemoteMetadataOutput(stdout) {
   })
 }
 
-async function assertLinkedProjectState(repoRoot) {
-  try {
-    const linkedProjectPath = join(repoRoot, "supabase", ".temp", "linked-project.json")
-    const linkedStat = await lstat(linkedProjectPath)
-    if (!linkedStat.isFile() || linkedStat.isSymbolicLink() || linkedStat.size > 64 * 1024) {
-      throw new Error("notification_local_db_linked_project_refused")
-    }
-    const linked = JSON.parse(await readFile(linkedProjectPath, "utf8"))
-    if (!isPlainRecord(linked) || linked.ref !== PARENT_PROJECT_REF) {
-      throw new Error("notification_local_db_linked_project_refused")
-    }
-  } catch (error) {
-    if (error?.message === "notification_local_db_linked_project_refused") throw error
-    throw new Error("notification_local_db_linked_project_refused")
-  }
-}
-
 async function prepareArtifactRoot(artifactRoot, expectedEntries = []) {
   if (typeof artifactRoot !== "string" || !isAbsolute(artifactRoot)) {
     throw new Error("notification_local_db_remote_artifact_refused")
@@ -1109,17 +1215,26 @@ async function prepareArtifactRoot(artifactRoot, expectedEntries = []) {
 export async function buildNotificationRemoteCollectorRuntime({
   tempRoot,
   randomBytes = secureRandomBytes,
+  getUid = process.getuid,
+  getGid = process.getgid,
 } = {}) {
   try {
-    const rootStat = await lstat(tempRoot)
+    const requestedRoot = resolve(tempRoot)
+    const rootStat = await lstat(requestedRoot)
     const realTemporaryRoot = await realpath(tmpdir())
-    const realRoot = await realpath(tempRoot)
+    const realRoot = await realpath(requestedRoot)
+    const uid = getUid?.()
+    const gid = getGid?.()
     if (
       typeof randomBytes !== "function"
       || !rootStat.isDirectory()
       || rootStat.isSymbolicLink()
       || (rootStat.mode & 0o777) !== 0o700
       || !isPathInside(realTemporaryRoot, realRoot)
+      || !Number.isSafeInteger(uid)
+      || uid < 0
+      || !Number.isSafeInteger(gid)
+      || gid < 0
     ) throw new Error("notification_local_db_remote_runtime_refused")
     const randomValue = randomBytes(6)
     if (!(randomValue instanceof Uint8Array) || randomValue.byteLength !== 6) {
@@ -1129,23 +1244,31 @@ export async function buildNotificationRemoteCollectorRuntime({
     if (!REMOTE_COLLECTOR_PROJECT_PATTERN.test(projectId)) {
       throw new Error("notification_local_db_remote_runtime_refused")
     }
-    const workdir = join(tempRoot, "remote-collector")
-    const supabaseDir = join(workdir, "supabase")
-    const linkedDir = join(supabaseDir, ".temp")
+    const workdir = join(requestedRoot, "remote-collector")
     await mkdir(workdir, { mode: 0o700 })
-    await mkdir(supabaseDir, { mode: 0o700 })
-    await mkdir(linkedDir, { mode: 0o700 })
-    await writePrivateFile(
-      join(supabaseDir, "config.toml"),
-      `project_id = "${projectId}"\n`,
-    )
-    await writePrivateFile(join(linkedDir, "project-ref"), `${PARENT_PROJECT_REF}\n`)
+    await chmod(workdir, 0o700)
     return deepFreeze({
-      version: 1,
+      version: 2,
       projectId,
-      tempRoot,
+      tempRoot: requestedRoot,
       workdir,
+      uid,
+      gid,
       label: { key: "com.supabase.cli.project", value: projectId },
+      route: REMOTE_POOLER_ROUTE,
+      client: REMOTE_CLIENT_IMAGE,
+      files: {
+        caPath: join(ROOT, REMOTE_CA_RELATIVE_PATH),
+        queryPath: join(requestedRoot, "notification-remote-metadata.sql"),
+        schemaDumpPath: join(requestedRoot, "notification-remote-schema.sql"),
+      },
+      containers: {
+        "psql-version": `${projectId}-psql-version`,
+        "pg-dump-version": `${projectId}-pg-dump-version`,
+        "metadata-before": `${projectId}-metadata-before`,
+        "schema-dump": `${projectId}-schema-dump`,
+        "metadata-after": `${projectId}-metadata-after`,
+      },
     })
   } catch (error) {
     if (error?.message === "notification_local_db_remote_runtime_refused") throw error
@@ -1154,16 +1277,11 @@ export async function buildNotificationRemoteCollectorRuntime({
 }
 
 function assertNotificationRemoteCollectorRuntime(value) {
-  if (
-    !hasExactKeys(value, ["label", "projectId", "tempRoot", "version", "workdir"])
-    || value.version !== 1
-    || !REMOTE_COLLECTOR_PROJECT_PATTERN.test(value.projectId ?? "")
-    || value.workdir !== join(value.tempRoot, "remote-collector")
-    || !hasExactKeys(value.label, ["key", "value"])
-    || value.label.key !== "com.supabase.cli.project"
-    || value.label.value !== value.projectId
-  ) throw new Error("notification_local_db_remote_runtime_refused")
-  return value
+  try {
+    return assertNotificationRemoteDockerRuntime(value)
+  } catch {
+    throw new Error("notification_local_db_remote_runtime_refused")
+  }
 }
 
 async function assertNotificationRemoteCollectorWorkdir(runtime, artifactRoot) {
@@ -1172,28 +1290,14 @@ async function assertNotificationRemoteCollectorWorkdir(runtime, artifactRoot) {
     if (value.tempRoot !== artifactRoot) {
       throw new Error("notification_local_db_remote_runtime_refused")
     }
-    for (const directory of [
-      value.workdir,
-      join(value.workdir, "supabase"),
-      join(value.workdir, "supabase", ".temp"),
-    ]) {
-      const stat = await lstat(directory)
-      if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o777) !== 0o700) {
-        throw new Error("notification_local_db_remote_runtime_refused")
-      }
-    }
-    const expectedFiles = [
-      [join(value.workdir, "supabase", "config.toml"), `project_id = "${value.projectId}"\n`],
-      [join(value.workdir, "supabase", ".temp", "project-ref"), `${PARENT_PROJECT_REF}\n`],
-    ]
-    for (const [filePath, expected] of expectedFiles) {
-      const stat = await lstat(filePath)
-      if (
-        !stat.isFile()
-        || stat.isSymbolicLink()
-        || (stat.mode & 0o777) !== 0o600
-        || await readFile(filePath, "utf8") !== expected
-      ) throw new Error("notification_local_db_remote_runtime_refused")
+    const stat = await lstat(value.workdir)
+    if (
+      !stat.isDirectory()
+      || stat.isSymbolicLink()
+      || (stat.mode & 0o777) !== 0o700
+      || (await readdir(value.workdir)).length !== 0
+    ) {
+      throw new Error("notification_local_db_remote_runtime_refused")
     }
     return value.workdir
   } catch (error) {
@@ -1202,39 +1306,184 @@ async function assertNotificationRemoteCollectorWorkdir(runtime, artifactRoot) {
   }
 }
 
-function buildRemoteEnvironment(sourceEnvironment, includeDatabasePassword) {
-  const environment = {}
-  for (const key of REMOTE_SAFE_ENV_KEYS) {
-    if (typeof sourceEnvironment[key] === "string") environment[key] = sourceEnvironment[key]
-  }
-  if (includeDatabasePassword) {
-    environment.SUPABASE_DB_PASSWORD = sourceEnvironment.SUPABASE_DB_PASSWORD
-  }
-  return Object.freeze(environment)
+function remoteDockerContextRefused() {
+  throw new Error("notification_local_db_remote_context_refused")
 }
 
-function buildRemoteInvocation({
-  step,
-  command,
-  args,
-  cwd,
-  env,
-  timeoutMs,
-  maxStdoutBytes,
-  abortSignal,
-}) {
+function isSafeRemoteDockerHostPath(value) {
+  return typeof value === "string"
+    && isAbsolute(value)
+    && resolve(value) === value
+    && !/[,\0\r\n]/u.test(value)
+}
+
+function assertNotificationRemoteDockerRuntime(value) {
+  if (
+    !hasExactKeys(value, [
+      "client",
+      "containers",
+      "files",
+      "gid",
+      "label",
+      "projectId",
+      "route",
+      "tempRoot",
+      "uid",
+      "version",
+      "workdir",
+    ])
+    || value.version !== 2
+    || !REMOTE_COLLECTOR_PROJECT_PATTERN.test(value.projectId ?? "")
+    || !isSafeRemoteDockerHostPath(value.tempRoot)
+    || value.workdir !== join(value.tempRoot, "remote-collector")
+    || !Number.isSafeInteger(value.uid)
+    || value.uid < 0
+    || !Number.isSafeInteger(value.gid)
+    || value.gid < 0
+    || !hasExactKeys(value.label, ["key", "value"])
+    || value.label.key !== "com.supabase.cli.project"
+    || value.label.value !== value.projectId
+    || !hasExactKeys(value.files, ["caPath", "queryPath", "schemaDumpPath"])
+    || value.files.caPath !== join(ROOT, REMOTE_CA_RELATIVE_PATH)
+    || value.files.queryPath !== join(value.tempRoot, "notification-remote-metadata.sql")
+    || value.files.schemaDumpPath !== join(value.tempRoot, "notification-remote-schema.sql")
+    || !Object.values(value.files).every(isSafeRemoteDockerHostPath)
+    || !hasExactKeys(value.containers, REMOTE_DOCKER_CONTAINER_STEPS)
+    || REMOTE_DOCKER_CONTAINER_STEPS.some(
+      (step) => value.containers[step] !== `${value.projectId}-${step}`,
+    )
+  ) {
+    remoteDockerContextRefused()
+  }
+  const route = assertNotificationRemotePoolerRoute(value.route)
+  const client = assertNotificationRemoteClientImage(value.client)
+  return deepFreeze({
+    version: 2,
+    projectId: value.projectId,
+    tempRoot: value.tempRoot,
+    workdir: value.workdir,
+    uid: value.uid,
+    gid: value.gid,
+    label: { key: value.label.key, value: value.label.value },
+    route,
+    client,
+    files: {
+      caPath: value.files.caPath,
+      queryPath: value.files.queryPath,
+      schemaDumpPath: value.files.schemaDumpPath,
+    },
+    containers: Object.fromEntries(
+      REMOTE_DOCKER_CONTAINER_STEPS.map((step) => [step, value.containers[step]]),
+    ),
+  })
+}
+
+function remoteRunBaseArgs(runtime, step, { interactive, network }) {
+  const containerName = runtime.containers[step]
+  return [
+    "run", "--rm", "--pull", "never",
+    ...(interactive ? ["--interactive"] : []),
+    "--name", containerName,
+    "--label", `${runtime.label.key}=${runtime.label.value}`,
+    "--read-only",
+    "--user", `${runtime.uid}:${runtime.gid}`,
+    "--cap-drop", "ALL",
+    "--security-opt", "no-new-privileges",
+    "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=16m",
+    "--network", network,
+  ]
+}
+
+function freezeNotificationRemoteDockerInvocation(value) {
   return Object.freeze({
+    ...value,
+    args: Object.freeze([...value.args]),
+    env: Object.freeze({ ...value.env }),
+  })
+}
+
+export function buildNotificationRemoteDockerInvocation(step, {
+  runtime,
+  sourceEnvironment,
+  abortSignal,
+} = {}) {
+  if (
+    !REMOTE_DOCKER_STEPS.includes(step)
+    || !isEnvironmentRecord(sourceEnvironment)
+    || (abortSignal !== undefined && !(abortSignal instanceof AbortSignal))
+  ) {
+    remoteDockerContextRefused()
+  }
+  const collectorRuntime = assertNotificationRemoteDockerRuntime(runtime)
+  const base = {
     step,
-    command,
-    args: Object.freeze(args),
-    cwd,
-    env,
+    command: DEFAULT_DOCKER_CLI_PATH,
+    cwd: collectorRuntime.workdir,
     shell: false,
-    stdin: "ignore",
-    timeoutMs,
-    maxStdoutBytes,
     maxStderrBytes: MAX_STDERR_BYTES,
     ...(abortSignal instanceof AbortSignal ? { abortSignal } : {}),
+  }
+  const safeEnvironment = buildRemoteCollectorDockerEnvironment(sourceEnvironment)
+  if (step === "image-inspect") {
+    return freezeNotificationRemoteDockerInvocation({
+      ...base,
+      args: ["image", "inspect", "--format", "{{json .RepoDigests}}", collectorRuntime.client.tag],
+      env: safeEnvironment,
+      stdin: "ignore",
+      timeoutMs: 30 * 1000,
+      maxStdoutBytes: MAX_STATUS_STDOUT_BYTES,
+    })
+  }
+  if (step === "psql-version" || step === "pg-dump-version") {
+    const executable = step === "psql-version" ? "psql" : "pg_dump"
+    return freezeNotificationRemoteDockerInvocation({
+      ...base,
+      args: [
+        ...remoteRunBaseArgs(collectorRuntime, step, { interactive: false, network: "none" }),
+        "--entrypoint", executable,
+        collectorRuntime.client.reference,
+        "--version",
+      ],
+      env: safeEnvironment,
+      stdin: "ignore",
+      timeoutMs: 30 * 1000,
+      maxStdoutBytes: MAX_STATUS_STDOUT_BYTES,
+    })
+  }
+
+  const environment = deepFreeze({ ...safeEnvironment, ...REMOTE_POSTGRES_ENVIRONMENT })
+  const environmentArgs = REMOTE_POSTGRES_ENV_KEYS.flatMap((key) => ["--env", key])
+  const isMetadata = step === "metadata-before" || step === "metadata-after"
+  const fileMount = isMetadata
+    ? `type=bind,src=${collectorRuntime.files.queryPath},dst=/qa/notification-remote-metadata.sql,readonly`
+    : `type=bind,src=${collectorRuntime.files.schemaDumpPath},dst=/qa/notification-remote-schema.sql`
+  const executable = isMetadata ? "psql" : "pg_dump"
+  const commandArgs = isMetadata
+    ? [
+        "--no-psqlrc", "--password", "--quiet", "--tuples-only", "--no-align",
+        "--set", "ON_ERROR_STOP=1", "--file", "/qa/notification-remote-metadata.sql",
+      ]
+    : [
+        "--password", "--schema-only",
+        "--schema", "public", "--schema", "dashboard_private",
+        "--file", "/qa/notification-remote-schema.sql",
+      ]
+  return freezeNotificationRemoteDockerInvocation({
+    ...base,
+    args: [
+      ...remoteRunBaseArgs(collectorRuntime, step, { interactive: true, network: "bridge" }),
+      ...environmentArgs,
+      "--mount",
+      `type=bind,src=${collectorRuntime.files.caPath},dst=/qa/prod-ca-2021.crt,readonly`,
+      "--mount", fileMount,
+      "--entrypoint", executable,
+      collectorRuntime.client.reference,
+      ...commandArgs,
+    ],
+    env: environment,
+    stdinMode: DATABASE_PASSWORD_STDIN_MODE,
+    timeoutMs: isMetadata ? 60 * 1000 : 20 * 60 * 1000,
+    maxStdoutBytes: isMetadata ? MAX_METADATA_BYTES : MAX_STATUS_STDOUT_BYTES,
   })
 }
 
@@ -1244,11 +1493,11 @@ function assertNotificationRunNotAborted(abortSignal) {
   }
 }
 
-async function executeRemoteStep(invocation, execute, failureCode) {
+async function executeRemoteStep(invocation, execute, failureCode, secretInputProvider) {
   assertNotificationRunNotAborted(invocation.abortSignal)
   let result
   try {
-    result = await execute(invocation)
+    result = await execute(invocation, secretInputProvider)
   } catch {
     assertNotificationRunNotAborted(invocation.abortSignal)
     throw new Error(failureCode)
@@ -1269,6 +1518,52 @@ async function executeRemoteStep(invocation, execute, failureCode) {
   return result.stdout
 }
 
+export async function writeNotificationDatabasePasswordPrompt(childStdin, secretInputProvider) {
+  let secretBuffer
+  try {
+    if (typeof secretInputProvider !== "function") {
+      throw new Error("notification_local_db_remote_credential_required")
+    }
+    const password = secretInputProvider()
+    if (
+      typeof password !== "string"
+      || password.length === 0
+      || Buffer.byteLength(password, "utf8") > 4096
+      || /[\0\r\n]/u.test(password)
+    ) {
+      throw new Error("notification_local_db_remote_credential_required")
+    }
+    if (
+      childStdin === null
+      || typeof childStdin !== "object"
+      || typeof childStdin.once !== "function"
+      || typeof childStdin.off !== "function"
+      || typeof childStdin.end !== "function"
+    ) {
+      throw new Error("notification_local_db_remote_credential_write_failed")
+    }
+    secretBuffer = Buffer.from(`${password}\n`, "utf8")
+    await new Promise((resolvePromise, rejectPromise) => {
+      const onError = () => {
+        childStdin.off("error", onError)
+        rejectPromise(new Error("notification_local_db_remote_credential_write_failed"))
+      }
+      childStdin.once("error", onError)
+      childStdin.end(secretBuffer, () => {
+        childStdin.off("error", onError)
+        resolvePromise()
+      })
+    })
+  } catch (error) {
+    if (/^notification_local_db_remote_credential_(?:required|write_failed)$/u.test(error?.message)) {
+      throw error
+    }
+    throw new Error("notification_local_db_remote_credential_write_failed")
+  } finally {
+    secretBuffer?.fill(0)
+  }
+}
+
 async function writePrivateFile(filePath, contents) {
   await writeFile(filePath, contents, { flag: "wx", mode: 0o600 })
   await chmod(filePath, 0o600)
@@ -1276,7 +1571,12 @@ async function writePrivateFile(filePath, contents) {
   if (!fileStat.isFile() || fileStat.isSymbolicLink() || (fileStat.mode & 0o777n) !== 0o600n) {
     throw new Error("notification_local_db_remote_artifact_refused")
   }
-  return Object.freeze({ dev: fileStat.dev, ino: fileStat.ino })
+  return Object.freeze({
+    dev: fileStat.dev,
+    ino: fileStat.ino,
+    uid: fileStat.uid,
+    gid: fileStat.gid,
+  })
 }
 
 async function inspectQueryContract(queryPath, expectedIdentity) {
@@ -1292,6 +1592,8 @@ async function inspectQueryContract(queryPath, expectedIdentity) {
       !fileStat.isFile()
       || fileStat.dev !== expectedIdentity?.dev
       || fileStat.ino !== expectedIdentity?.ino
+      || fileStat.uid !== expectedIdentity?.uid
+      || fileStat.gid !== expectedIdentity?.gid
       || fileStat.size !== BigInt(expectedBytes.byteLength)
       || (fileStat.mode & 0o777n) !== 0o600n
     ) {
@@ -1329,15 +1631,18 @@ async function inspectSchemaDump(schemaDumpPath, expectedIdentity) {
       !openedStat.isFile()
       || openedStat.dev !== expectedIdentity?.dev
       || openedStat.ino !== expectedIdentity?.ino
+      || openedStat.uid !== expectedIdentity?.uid
+      || openedStat.gid !== expectedIdentity?.gid
     ) {
       throw new Error("notification_local_db_remote_schema_dump_refused")
     }
-    await fileHandle.chmod(0o600)
     const fileStat = await fileHandle.stat({ bigint: true })
     if (
       !fileStat.isFile()
       || fileStat.size === 0n
       || fileStat.size > BigInt(MAX_SCHEMA_DUMP_BYTES)
+      || fileStat.uid !== expectedIdentity?.uid
+      || fileStat.gid !== expectedIdentity?.gid
       || (fileStat.mode & 0o777n) !== 0o600n
     ) {
       throw new Error("notification_local_db_remote_schema_dump_refused")
@@ -1348,6 +1653,8 @@ async function inspectSchemaDump(schemaDumpPath, expectedIdentity) {
     if (
       BigInt(contents.byteLength) !== fileStat.size
       || !sameFileSnapshot(fileStat, afterReadStat)
+      || afterReadStat.uid !== expectedIdentity?.uid
+      || afterReadStat.gid !== expectedIdentity?.gid
     ) {
       throw new Error("notification_local_db_remote_schema_dump_refused")
     }
@@ -1415,6 +1722,37 @@ function buildMigrationManifest(remote, catalog, pending) {
   })
 }
 
+function assertNotificationRemoteImageInspectOutput(stdout) {
+  let digests
+  try {
+    digests = JSON.parse(stdout.trim())
+  } catch {
+    throw new Error("notification_local_db_remote_client_image_refused")
+  }
+  const expectedDigest =
+    "public.ecr.aws/supabase/postgres@sha256:e09e93a61ed1560caf4be79c9eb29401875bea74b12aec4657cb08bf34ea3a13"
+  if (
+    !Array.isArray(digests)
+    || digests.length !== 1
+    || digests[0] !== expectedDigest
+  ) {
+    throw new Error("notification_local_db_remote_client_image_refused")
+  }
+  return expectedDigest
+}
+
+function assertNotificationRemoteDatabasePassword(value) {
+  if (
+    typeof value !== "string"
+    || value.length === 0
+    || Buffer.byteLength(value, "utf8") > 4096
+    || /[\0\r\n]/u.test(value)
+  ) {
+    throw new Error("notification_local_db_remote_credential_required")
+  }
+  return value
+}
+
 export async function collectRemoteSchemaMetadata(context, execute, { collectorRuntime } = {}) {
   if (context?.approved !== true) {
     throw new Error("notification_local_db_approval_required")
@@ -1422,117 +1760,96 @@ export async function collectRemoteSchemaMetadata(context, execute, { collectorR
   if (typeof execute !== "function") {
     throw new Error("notification_local_db_remote_context_refused")
   }
-  if (execute === executeBoundedProcess && collectorRuntime === undefined) {
-    throw new Error("notification_local_db_remote_runtime_refused")
-  }
   if (
-    typeof context.cliPath !== "string"
-    || !isAbsolute(context.cliPath)
-    || basename(context.cliPath) !== "supabase-go"
-    || !isEnvironmentRecord(context.sourceEnvironment)
+    !isEnvironmentRecord(context.sourceEnvironment)
     || (context.abortSignal !== undefined && !(context.abortSignal instanceof AbortSignal))
     || Object.hasOwn(context, "repoRoot")
   ) {
     throw new Error("notification_local_db_remote_context_refused")
   }
 
-  const project = assertLinkedProjectMetadata(context.linkedProjectMetadata)
   assertNotificationRunNotAborted(context.abortSignal)
-  const databasePassword = context.sourceEnvironment.SUPABASE_DB_PASSWORD
-  if (
-    typeof databasePassword !== "string"
-    || databasePassword.length === 0
-    || databasePassword.includes("\0")
-  ) {
-    throw new Error("notification_local_db_remote_credential_required")
-  }
+  const databasePassword = assertNotificationRemoteDatabasePassword(
+    context.sourceEnvironment.SUPABASE_DB_PASSWORD,
+  )
 
   const localBefore = await loadLocalMigrationCatalog(ROOT)
-  await assertLinkedProjectState(localBefore.repoRoot)
-  const normalizedCollectorRuntime = collectorRuntime === undefined
-    ? undefined
-    : assertNotificationRemoteCollectorRuntime(collectorRuntime)
+  const normalizedCollectorRuntime = assertNotificationRemoteCollectorRuntime(collectorRuntime)
   const artifactRoot = await prepareArtifactRoot(
     context.artifactRoot,
-    normalizedCollectorRuntime ? [basename(normalizedCollectorRuntime.workdir)] : [],
+    [basename(normalizedCollectorRuntime.workdir)],
   )
-  const cliWorkdir = normalizedCollectorRuntime === undefined
-    ? localBefore.repoRoot
-    : await assertNotificationRemoteCollectorWorkdir(normalizedCollectorRuntime, artifactRoot)
-  const queryPath = join(artifactRoot, "notification-remote-metadata.sql")
+  await assertNotificationRemoteCollectorWorkdir(normalizedCollectorRuntime, artifactRoot)
+  const queryPath = normalizedCollectorRuntime.files.queryPath
   const metadataPath = join(artifactRoot, "notification-remote-metadata.json")
-  const schemaDumpPath = join(artifactRoot, "notification-remote-schema.sql")
+  const schemaDumpPath = normalizedCollectorRuntime.files.schemaDumpPath
   const collectorArtifacts = [queryPath, metadataPath, schemaDumpPath]
-  const metadataEnvironment = buildRemoteEnvironment(context.sourceEnvironment, false)
-  const dumpEnvironment = buildRemoteEnvironment(context.sourceEnvironment, true)
+  const caEvidence = await inspectNotificationRemoteTlsCa({ repoRoot: ROOT })
+  if (caEvidence.path !== normalizedCollectorRuntime.files.caPath) {
+    throw new Error("notification_local_db_remote_tls_ca_refused")
+  }
+  const dockerOptions = Object.freeze({
+    runtime: normalizedCollectorRuntime,
+    sourceEnvironment: context.sourceEnvironment,
+    ...(context.abortSignal instanceof AbortSignal ? { abortSignal: context.abortSignal } : {}),
+  })
+  const secretInputProvider = () => databasePassword
+  const project = deepFreeze({
+    projectRef: REMOTE_POOLER_ROUTE.projectRef,
+    region: REMOTE_POOLER_ROUTE.region,
+  })
 
   try {
     const queryIdentity = await writePrivateFile(queryPath, REMOTE_METADATA_SQL)
     const schemaDumpIdentity = await writePrivateFile(schemaDumpPath, "")
 
-    const metadataArgs = [
-      "db", "query", "--linked",
-      "--file", queryPath,
-      "--output", "json",
-    ]
-    const dumpArgs = [
-      "db", "dump", "--linked",
-      "--schema", "public,dashboard_private",
-      "--file", schemaDumpPath,
-    ]
+    const imageInspect = await executeRemoteStep(
+      buildNotificationRemoteDockerInvocation("image-inspect", dockerOptions),
+      execute,
+      "notification_local_db_remote_client_image_refused",
+    )
+    assertNotificationRemoteImageInspectOutput(imageInspect)
 
-    await assertLinkedProjectState(localBefore.repoRoot)
+    for (const [step, executable] of [
+      ["psql-version", "psql"],
+      ["pg-dump-version", "pg_dump"],
+    ]) {
+      const stdout = await executeRemoteStep(
+        buildNotificationRemoteDockerInvocation(step, dockerOptions),
+        execute,
+        "notification_local_db_remote_client_version_refused",
+      )
+      assertNotificationRemoteClientVersion(stdout, executable)
+    }
+
     let queryContract = await inspectQueryContract(queryPath, queryIdentity)
     const metadataBeforeStdout = await executeRemoteStep(
-      buildRemoteInvocation({
-        step: "metadata-before",
-        command: context.cliPath,
-        args: metadataArgs,
-        cwd: cliWorkdir,
-        env: metadataEnvironment,
-        timeoutMs: 60 * 1000,
-        maxStdoutBytes: MAX_METADATA_BYTES,
-        abortSignal: context.abortSignal,
-      }),
+      buildNotificationRemoteDockerInvocation("metadata-before", dockerOptions),
       execute,
       "notification_local_db_remote_metadata_query_failed",
+      secretInputProvider,
     )
     queryContract = await inspectQueryContract(queryPath, queryIdentity)
     const metadataBefore = parseRemoteMetadataOutput(metadataBeforeStdout)
+    if (metadataBefore.postgresMajor !== REMOTE_CLIENT_IMAGE.major) {
+      throw new Error("notification_local_db_remote_client_version_refused")
+    }
     buildPendingFromCatalog({ migrations: metadataBefore.migrations }, localBefore.migrations)
 
-    await assertLinkedProjectState(localBefore.repoRoot)
     await executeRemoteStep(
-      buildRemoteInvocation({
-        step: "schema-dump",
-        command: context.cliPath,
-        args: dumpArgs,
-        cwd: cliWorkdir,
-        env: dumpEnvironment,
-        timeoutMs: 20 * 60 * 1000,
-        maxStdoutBytes: MAX_STATUS_STDOUT_BYTES,
-        abortSignal: context.abortSignal,
-      }),
+      buildNotificationRemoteDockerInvocation("schema-dump", dockerOptions),
       execute,
       "notification_local_db_remote_schema_dump_failed",
+      secretInputProvider,
     )
     const schemaDump = await inspectSchemaDump(schemaDumpPath, schemaDumpIdentity)
 
-    await assertLinkedProjectState(localBefore.repoRoot)
     queryContract = await inspectQueryContract(queryPath, queryIdentity)
     const metadataAfterStdout = await executeRemoteStep(
-      buildRemoteInvocation({
-        step: "metadata-after",
-        command: context.cliPath,
-        args: metadataArgs,
-        cwd: cliWorkdir,
-        env: metadataEnvironment,
-        timeoutMs: 60 * 1000,
-        maxStdoutBytes: MAX_METADATA_BYTES,
-        abortSignal: context.abortSignal,
-      }),
+      buildNotificationRemoteDockerInvocation("metadata-after", dockerOptions),
       execute,
       "notification_local_db_remote_metadata_query_failed",
+      secretInputProvider,
     )
     queryContract = await inspectQueryContract(queryPath, queryIdentity)
     const metadataAfter = parseRemoteMetadataOutput(metadataAfterStdout)
@@ -1540,7 +1857,6 @@ export async function collectRemoteSchemaMetadata(context, execute, { collectorR
       throw new Error("notification_local_db_remote_snapshot_changed")
     }
 
-    await assertLinkedProjectState(localBefore.repoRoot)
     const localAfter = await loadLocalMigrationCatalog(localBefore.repoRoot)
     assertCatalogUnchanged(localBefore.migrations, localAfter.migrations)
     const pending = buildPendingFromCatalog(
@@ -1570,16 +1886,17 @@ export async function collectRemoteSchemaMetadata(context, execute, { collectorR
       },
     })
   } catch (error) {
-    const primaryCode = typeof error?.message === "string"
-      && /^notification_local_db_[a-z0-9_]+$/u.test(error.message)
-      ? error.message
-      : "notification_local_db_remote_collector_failed"
+    const primaryCode = primaryCodeFromError(
+      error,
+      "notification_local_db_remote_collector_failed",
+    )
+    let cleanupCode = "notification_local_db_cleanup_ok"
     try {
       await cleanupCollectorArtifacts(collectorArtifacts)
     } catch {
-      throw new Error(`${primaryCode}:notification_local_db_remote_artifact_cleanup_failed`)
+      cleanupCode = "notification_local_db_cleanup_failed"
     }
-    throw new Error(primaryCode)
+    throw new NotificationLocalDbQaError(primaryCode, cleanupCode)
   }
 }
 
@@ -1630,6 +1947,17 @@ function safeFailureCode(value, fallback) {
   return typeof value === "string" && /^notification_local_db_[a-z0-9_]+$/u.test(value)
     ? value
     : fallback
+}
+
+function primaryCodeFromError(error, fallback) {
+  return safeFailureCode(
+    error?.evidence?.primaryCode ?? error?.code ?? error?.message,
+    fallback,
+  )
+}
+
+function cleanupFailedIn(error) {
+  return error?.evidence?.cleanupCode === "notification_local_db_cleanup_failed"
 }
 
 class NotificationLocalDbQaError extends Error {
@@ -1938,15 +2266,17 @@ function executeBoundedProcess({
   maxStdoutBytes = MAX_LOCAL_STDOUT_BYTES,
   maxStderrBytes = MAX_STDERR_BYTES,
   abortSignal,
-}) {
+  stdinMode,
+} = {}, secretInputProvider) {
+  const usesDatabasePasswordPrompt = stdinMode === DATABASE_PASSWORD_STDIN_MODE
+  if (
+    (stdinMode !== undefined && !usesDatabasePasswordPrompt)
+    || (usesDatabasePasswordPrompt && typeof secretInputProvider !== "function")
+    || (!usesDatabasePasswordPrompt && secretInputProvider !== undefined)
+  ) {
+    return Promise.reject(new Error("notification_local_db_remote_context_refused"))
+  }
   return new Promise((resolvePromise) => {
-    const child = spawn(command, args, {
-      cwd,
-      env,
-      shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    })
     const stdout = []
     const stderr = []
     let stdoutBytes = 0
@@ -1955,19 +2285,23 @@ function executeBoundedProcess({
     let overflowed = false
     let aborted = false
     let spawnErrored = false
+    let stdinFailed = false
     let terminationRequested = false
     let timeout
     let forceKillTimeout
     let forceFinishTimeout
-    const finish = (code) => {
+    let child
+    let stdinPromise = Promise.resolve()
+    const finish = async (code) => {
       if (settled) return
       settled = true
       clearTimeout(timeout)
       clearTimeout(forceKillTimeout)
       clearTimeout(forceFinishTimeout)
       abortSignal?.removeEventListener?.("abort", handleAbort)
+      await stdinPromise.catch(() => {})
       resolvePromise({
-        code: overflowed || aborted || spawnErrored
+        code: overflowed || aborted || spawnErrored || stdinFailed
           ? 1
           : Number.isInteger(code) ? code : 1,
         stdout: Buffer.concat(stdout).toString("utf8"),
@@ -1980,7 +2314,7 @@ function executeBoundedProcess({
       const gracefulTimeoutMs = basename(command) === "supabase-go" ? 30 * 1000 : 5 * 1000
       child.kill(basename(command) === "supabase-go" ? "SIGINT" : "SIGTERM")
       forceKillTimeout = setTimeout(() => child.kill("SIGKILL"), gracefulTimeoutMs)
-      forceFinishTimeout = setTimeout(() => finish(1), gracefulTimeoutMs + 5 * 1000)
+      forceFinishTimeout = setTimeout(() => { void finish(1) }, gracefulTimeoutMs + 5 * 1000)
     }
     const handleAbort = () => {
       aborted = true
@@ -2001,14 +2335,34 @@ function executeBoundedProcess({
       overflowed = true
       terminate()
     }, timeoutMs)
+    try {
+      child = spawn(command, args, {
+        cwd,
+        env,
+        shell: false,
+        stdio: [usesDatabasePasswordPrompt ? "pipe" : "ignore", "pipe", "pipe"],
+        windowsHide: true,
+      })
+    } catch {
+      spawnErrored = true
+      void finish(1)
+      return
+    }
+    if (usesDatabasePasswordPrompt) {
+      stdinPromise = writeNotificationDatabasePasswordPrompt(child.stdin, secretInputProvider)
+      stdinPromise.catch(() => {
+        stdinFailed = true
+        terminate()
+      })
+    }
     child.stdout.on("data", (chunk) => append(stdout, chunk, "stdout"))
     child.stderr.on("data", (chunk) => append(stderr, chunk, "stderr"))
     child.once("error", () => {
       spawnErrored = true
       if (child.pid) terminate()
-      else finish(1)
+      else void finish(1)
     })
-    child.once("close", finish)
+    child.once("close", (code) => { void finish(code) })
     if (abortSignal instanceof AbortSignal) {
       if (abortSignal.aborted) handleAbort()
       else abortSignal.addEventListener("abort", handleAbort, { once: true })
@@ -2214,14 +2568,17 @@ export async function runNotificationRemoteCollectorWithCleanup({
   } catch {
     collectorCleanup = { cleanupCode: "notification_local_db_cleanup_failed" }
   }
-  const cleanupCode = collectorCleanup?.cleanupCode === "notification_local_db_cleanup_ok"
-    ? "notification_local_db_cleanup_ok"
-    : "notification_local_db_cleanup_failed"
+  const cleanupCode = cleanupFailedIn(remoteCollectionError)
+      || collectorCleanup?.cleanupCode !== "notification_local_db_cleanup_ok"
+    ? "notification_local_db_cleanup_failed"
+    : "notification_local_db_cleanup_ok"
   if (remoteCollectionError !== undefined || abortSignal?.aborted || cleanupCode !== "notification_local_db_cleanup_ok") {
-    const rawRemoteCode = String(remoteCollectionError?.message ?? "").split(":", 1)[0]
     const primaryCode = abortSignal?.aborted
       ? "notification_local_db_signal_received"
-      : safeFailureCode(rawRemoteCode, "notification_local_db_remote_collector_failed")
+      : primaryCodeFromError(
+        remoteCollectionError,
+        "notification_local_db_remote_collector_failed",
+      )
     throw new NotificationLocalDbQaError(primaryCode, cleanupCode)
   }
   return remoteCollection
@@ -3270,9 +3627,7 @@ async function prepareNotificationLocalQaContext(context, { abortSignal } = {}) 
     const remoteCollection = await runNotificationRemoteCollectorWithCleanup({
       collectorContext: {
         approved: true,
-        cliPath: DEFAULT_SUPABASE_GO_CLI_PATH,
         artifactRoot: tempRoot,
-        linkedProjectMetadata: { project_ref: PARENT_PROJECT_REF, region: ALLOWED_REGION },
         sourceEnvironment: process.env,
         abortSignal,
       },
@@ -3310,10 +3665,9 @@ async function prepareNotificationLocalQaContext(context, { abortSignal } = {}) 
           || rootCleanupCode === "notification_local_db_cleanup_ok"
         ? "notification_local_db_cleanup_ok"
         : "notification_local_db_cleanup_not_required"
-    const rawCode = String(error?.code ?? error?.message ?? "").split(":", 1)[0]
     const primaryCode = abortSignal?.aborted
       ? "notification_local_db_signal_received"
-      : safeFailureCode(rawCode, "notification_local_db_preparation_failed")
+      : primaryCodeFromError(error, "notification_local_db_preparation_failed")
     throw new NotificationLocalDbQaError(primaryCode, cleanupCode)
   }
 }
@@ -3348,6 +3702,17 @@ async function planEvidence() {
       pgTapFileCount: fixtureContract.pgTap.fileCount,
       pgTapFiles: fixtureContract.pgTap.files.map((entry) => entry.relativePath),
       providerEgressBlocked: true,
+      remoteCollector: {
+        mode: REMOTE_POOLER_ROUTE.mode,
+        host: REMOTE_POOLER_ROUTE.host,
+        port: REMOTE_POOLER_ROUTE.port,
+        sslmode: REMOTE_POOLER_ROUTE.sslmode,
+        clientImage: REMOTE_CLIENT_IMAGE.reference,
+        clientMajor: REMOTE_CLIENT_IMAGE.major,
+        schemas: ["public", "dashboard_private"],
+        productionRowDataCopied: 0,
+        productionMutationCount: 0,
+      },
     },
   }
 }

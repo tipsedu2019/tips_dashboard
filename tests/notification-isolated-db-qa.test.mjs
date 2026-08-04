@@ -4,12 +4,12 @@ import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import {
   chmod,
+  copyFile,
   lstat,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
-  realpath,
   rm,
   symlink,
   writeFile,
@@ -117,6 +117,30 @@ const remotePrefix = Object.freeze([
   Object.freeze({ version: "20260803140000", name: "notification_content_contracts" }),
   Object.freeze({ version: "20260803141000", name: "notification_task_content_payload" }),
 ])
+const expectedRemotePoolerRoute = Object.freeze({
+  mode: "shared-supavisor-session",
+  projectRef: "slnjqlzzhewblvttiidk",
+  region: "ap-northeast-2",
+  host: "aws-1-ap-northeast-2.pooler.supabase.com",
+  port: 5432,
+  user: "postgres.slnjqlzzhewblvttiidk",
+  database: "postgres",
+  sslmode: "verify-full",
+  sslrootcert: "/qa/prod-ca-2021.crt",
+})
+const expectedRemoteClientImage = Object.freeze({
+  tag: "public.ecr.aws/supabase/postgres:17.6.1.132",
+  digest: "sha256:e09e93a61ed1560caf4be79c9eb29401875bea74b12aec4657cb08bf34ea3a13",
+  reference:
+    "public.ecr.aws/supabase/postgres:17.6.1.132@sha256:e09e93a61ed1560caf4be79c9eb29401875bea74b12aec4657cb08bf34ea3a13",
+  major: 17,
+})
+const expectedRemoteTlsCa = Object.freeze({
+  sha256: "700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7",
+  fingerprint256:
+    "80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA",
+  notAfter: "2031-04-26T10:56:53.000Z",
+})
 
 const requiredRoles = Object.freeze([
   "anon",
@@ -161,7 +185,11 @@ function migrationIdentity(fileName) {
 async function makeMigrationRepo(t, files) {
   const root = await mkdtemp(join(tmpdir(), "tips-notification-manifest-"))
   const migrationsDir = join(root, "supabase", "migrations")
+  const certificatePath = join(root, "supabase", "certs", "prod-ca-2021.crt")
   await mkdir(migrationsDir, { recursive: true, mode: 0o700 })
+  await mkdir(join(root, "supabase", "certs"), { recursive: true, mode: 0o700 })
+  await copyFile(join(repoRoot, "supabase", "certs", "prod-ca-2021.crt"), certificatePath)
+  await chmod(certificatePath, 0o644)
   for (const [fileName, contents] of Object.entries(files)) {
     await writeFile(join(migrationsDir, fileName), contents, { mode: 0o600 })
   }
@@ -174,16 +202,6 @@ async function makeArtifactRoot(t) {
   await chmod(root, 0o700)
   t.after(() => rm(root, { recursive: true, force: true }))
   return root
-}
-
-async function writeLinkedProject(root, ref = parentProjectRef) {
-  const linkedDir = join(root, "supabase", ".temp")
-  await mkdir(linkedDir, { recursive: true, mode: 0o700 })
-  await writeFile(
-    join(linkedDir, "linked-project.json"),
-    `${JSON.stringify({ ref, name: "TIPS QA" })}\n`,
-    { mode: 0o600 },
-  )
 }
 
 async function loadCollectorSubject(root) {
@@ -542,37 +560,480 @@ function orchestrationContext(manifest, execute, { evidenceCalls = [] } = {}) {
   }
 }
 
-test("linked project metadata는 production ref와 허용 region만 보존한다", async () => {
-  const { assertLinkedProjectMetadata } = await loadSubject()
-  const metadata = assertLinkedProjectMetadata({
-    project_ref: parentProjectRef,
-    region: "ap-northeast-2",
-    database_password: "must-not-survive",
-    postgres_url: "postgresql://postgres:must-not-survive@example.test/postgres",
-  })
+test("고정 Session Pooler route와 client image 이외의 remote 연결 입력을 거부한다", async () => {
+  const {
+    assertNotificationRemoteClientImage,
+    assertNotificationRemoteClientVersion,
+    assertNotificationRemotePoolerRoute,
+  } = await loadSubject()
 
-  assert.deepEqual(metadata, {
-    projectRef: parentProjectRef,
-    region: "ap-northeast-2",
-  })
-  assert.equal(Object.isFrozen(metadata), true)
-  assert.doesNotMatch(JSON.stringify(metadata), /must-not-survive/u)
+  assert.deepEqual(
+    assertNotificationRemotePoolerRoute(expectedRemotePoolerRoute),
+    expectedRemotePoolerRoute,
+  )
+  assert.deepEqual(
+    assertNotificationRemoteClientImage(expectedRemoteClientImage),
+    expectedRemoteClientImage,
+  )
+  assert.equal(Object.isFrozen(assertNotificationRemotePoolerRoute(expectedRemotePoolerRoute)), true)
+  assert.equal(Object.isFrozen(assertNotificationRemoteClientImage(expectedRemoteClientImage)), true)
+  assert.equal(
+    assertNotificationRemoteClientVersion("psql (PostgreSQL) 17.6\n", "psql"),
+    17,
+  )
+  assert.equal(
+    assertNotificationRemoteClientVersion("pg_dump (PostgreSQL) 17.6\n", "pg_dump"),
+    17,
+  )
+
+  for (const [name, value] of [
+    ["other mode", { ...expectedRemotePoolerRoute, mode: "direct" }],
+    ["other project ref", { ...expectedRemotePoolerRoute, projectRef: "abcdefghijklmnopqrst" }],
+    ["direct host", { ...expectedRemotePoolerRoute, host: "db.slnjqlzzhewblvttiidk.supabase.co" }],
+    ["other region", { ...expectedRemotePoolerRoute, region: "ap-southeast-1" }],
+    ["transaction port", { ...expectedRemotePoolerRoute, port: 6543 }],
+    ["other user", { ...expectedRemotePoolerRoute, user: "postgres" }],
+    ["other database", { ...expectedRemotePoolerRoute, database: "template1" }],
+    ["weaker TLS", { ...expectedRemotePoolerRoute, sslmode: "require" }],
+    ["missing CA mount", { ...expectedRemotePoolerRoute, sslrootcert: "" }],
+    ["control character", { ...expectedRemotePoolerRoute, host: "aws-1-ap-northeast-2.pooler.supabase.com\n" }],
+    ["extra key", { ...expectedRemotePoolerRoute, unsafeOverride: true }],
+  ]) {
+    assert.throws(
+      () => assertNotificationRemotePoolerRoute(value),
+      /notification_local_db_remote_pooler_route_refused/u,
+      name,
+    )
+  }
+
+  for (const [name, value] of [
+    ["tag-only reference", { ...expectedRemoteClientImage, reference: expectedRemoteClientImage.tag }],
+    ["digest drift", { ...expectedRemoteClientImage, digest: `sha256:${"0".repeat(64)}` }],
+    ["major drift", { ...expectedRemoteClientImage, major: 16 }],
+    ["extra key", { ...expectedRemoteClientImage, mutable: true }],
+  ]) {
+    assert.throws(
+      () => assertNotificationRemoteClientImage(value),
+      /notification_local_db_remote_client_image_refused/u,
+      name,
+    )
+  }
+
+  for (const [stdout, executable] of [
+    ["psql (PostgreSQL) 16.9", "psql"],
+    ["pg_dump (PostgreSQL) 16.9", "pg_dump"],
+    ["psql (PostgreSQL) 17.6", "postgres"],
+    ["unexpected client output", "psql"],
+  ]) {
+    assert.throws(
+      () => assertNotificationRemoteClientVersion(stdout, executable),
+      /notification_local_db_remote_client_version_refused/u,
+    )
+  }
 })
 
-for (const value of [
-  null,
-  { project_ref: "abcdefghijklmnopqrst", region: "ap-northeast-2" },
-  { project_ref: parentProjectRef, region: "us-east-1" },
-  { project_ref: parentProjectRef },
-]) {
-  test(`허용되지 않은 linked metadata를 거부한다: ${JSON.stringify(value)}`, async () => {
-    const { assertLinkedProjectMetadata } = await loadSubject()
-    assert.throws(
-      () => assertLinkedProjectMetadata(value),
-      /notification_local_db_project_metadata_refused/u,
-    )
+test("Supabase 공개 CA의 file identity와 certificate identity를 함께 검증한다", async (t) => {
+  const { inspectNotificationRemoteTlsCa } = await loadSubject()
+  const expectedPath = join(repoRoot, "supabase", "certs", "prod-ca-2021.crt")
+  const evidence = await inspectNotificationRemoteTlsCa({
+    repoRoot,
+    now: Date.parse("2026-08-04T00:00:00Z"),
   })
+
+  assert.deepEqual(evidence, { path: expectedPath, ...expectedRemoteTlsCa })
+  await assert.rejects(
+    () => inspectNotificationRemoteTlsCa({
+      repoRoot,
+      now: Date.parse("2031-04-26T10:56:54Z"),
+    }),
+    /notification_local_db_remote_tls_ca_refused/u,
+  )
+
+  const tamperedRoot = await mkdtemp(join(tmpdir(), "tips-notification-ca-"))
+  const tamperedCaPath = join(tamperedRoot, "supabase", "certs", "prod-ca-2021.crt")
+  t.after(() => rm(tamperedRoot, { recursive: true, force: true }))
+  await mkdir(join(tamperedRoot, "supabase", "certs"), { recursive: true, mode: 0o700 })
+  await copyFile(expectedPath, tamperedCaPath)
+  await chmod(tamperedCaPath, 0o644)
+  await writeFile(tamperedCaPath, "tampered certificate\n", { mode: 0o644 })
+  await assert.rejects(
+    () => inspectNotificationRemoteTlsCa({ repoRoot: tamperedRoot }),
+    /notification_local_db_remote_tls_ca_refused/u,
+  )
+
+  await rm(tamperedCaPath)
+  await symlink(expectedPath, tamperedCaPath)
+  await assert.rejects(
+    () => inspectNotificationRemoteTlsCa({ repoRoot: tamperedRoot }),
+    /notification_local_db_remote_tls_ca_refused/u,
+  )
+})
+
+test("remote collector runtime은 numeric caller UID/GID 없이는 workdir를 만들지 않는다", async (t) => {
+  const artifactRoot = await makeArtifactRoot(t)
+  const { buildNotificationRemoteCollectorRuntime } = await loadSubject()
+
+  for (const [getUid, getGid] of [
+    [() => undefined, () => 20],
+    [() => -1, () => 20],
+    [() => 501.5, () => 20],
+    [() => 501, () => undefined],
+    [() => 501, () => -1],
+    [() => 501, () => 20.5],
+  ]) {
+    await assert.rejects(
+      () => buildNotificationRemoteCollectorRuntime({
+        tempRoot: artifactRoot,
+        randomBytes: () => Buffer.from("a0b1c2d3e4f5", "hex"),
+        getUid,
+        getGid,
+      }),
+      /notification_local_db_remote_runtime_refused/u,
+    )
+  }
+  assert.deepEqual(await readdir(artifactRoot), [])
+})
+
+async function remoteDockerRuntimeFixture(t) {
+  const artifactRoot = await makeArtifactRoot(t)
+  const projectId = "tips_notify_collector_qa_a0b1c2d3e4f5"
+  return {
+    artifactRoot,
+    runtime: {
+      version: 2,
+      projectId,
+      tempRoot: artifactRoot,
+      workdir: join(artifactRoot, "remote-collector"),
+      uid: 501,
+      gid: 20,
+      label: { key: "com.supabase.cli.project", value: projectId },
+      route: expectedRemotePoolerRoute,
+      client: expectedRemoteClientImage,
+      files: {
+        caPath: join(repoRoot, "supabase", "certs", "prod-ca-2021.crt"),
+        queryPath: join(artifactRoot, "notification-remote-metadata.sql"),
+        schemaDumpPath: join(artifactRoot, "notification-remote-schema.sql"),
+      },
+      containers: {
+        "psql-version": `${projectId}-psql-version`,
+        "pg-dump-version": `${projectId}-pg-dump-version`,
+        "metadata-before": `${projectId}-metadata-before`,
+        "schema-dump": `${projectId}-schema-dump`,
+        "metadata-after": `${projectId}-metadata-after`,
+      },
+    },
+  }
 }
+
+async function buildRemoteCollectorRuntimeFixture(t, subject, randomHex = "a0b1c2d3e4f5") {
+  const artifactRoot = await makeArtifactRoot(t)
+  const collectorRuntime = await subject.buildNotificationRemoteCollectorRuntime({
+    tempRoot: artifactRoot,
+    randomBytes: () => Buffer.from(randomHex, "hex"),
+    getUid: () => process.getuid(),
+    getGid: () => process.getgid(),
+  })
+  return { artifactRoot, collectorRuntime }
+}
+
+async function prepareRemoteCollectorCall(t, root, randomHex = "a0b1c2d3e4f5") {
+  const subject = await loadCollectorSubject(root)
+  const { artifactRoot, collectorRuntime } = await buildRemoteCollectorRuntimeFixture(
+    t,
+    subject,
+    randomHex,
+  )
+  return { ...subject, artifactRoot, collectorRuntime }
+}
+
+function remoteCollectorContext(artifactRoot, sourceEnvironment, extra = {}) {
+  return { approved: true, artifactRoot, sourceEnvironment, ...extra }
+}
+
+function remoteDockerPreflightResult(invocation) {
+  if (invocation.step === "image-inspect") {
+    return {
+      code: 0,
+      stdout: JSON.stringify([
+        "public.ecr.aws/supabase/postgres@sha256:e09e93a61ed1560caf4be79c9eb29401875bea74b12aec4657cb08bf34ea3a13",
+      ]),
+      stderr: "",
+    }
+  }
+  if (invocation.step === "psql-version") {
+    return { code: 0, stdout: "psql (PostgreSQL) 17.6\n", stderr: "" }
+  }
+  if (invocation.step === "pg-dump-version") {
+    return { code: 0, stdout: "pg_dump (PostgreSQL) 17.6\n", stderr: "" }
+  }
+  return undefined
+}
+
+test("remote Docker invocation은 고정 route만 전달하고 비밀값을 포함하지 않는다", async (t) => {
+  const { buildNotificationRemoteDockerInvocation } = await loadSubject()
+  const { artifactRoot, runtime } = await remoteDockerRuntimeFixture(t)
+  const sourceEnvironment = {
+    ...sourceEnvironmentFixture(),
+    PGHOST: "override.example.test",
+    PGPORT: "6543",
+    PGUSER: "override-user",
+    PGDATABASE: "override-db",
+    PGSSLMODE: "disable",
+    PGSSLROOTCERT: "/tmp/override-ca.crt",
+    DATABASE_URL: "postgresql://postgres:override-password@override.example.test:6543/override-db",
+  }
+  const commonEnvironment = {
+    LANG: "ko_KR.UTF-8",
+    LC_ALL: "C",
+    PATH: "/usr/bin:/bin",
+    TMPDIR: "/private/tmp",
+  }
+  const remoteEnvironment = {
+    ...commonEnvironment,
+    PGHOST: "aws-1-ap-northeast-2.pooler.supabase.com",
+    PGPORT: "5432",
+    PGUSER: "postgres.slnjqlzzhewblvttiidk",
+    PGDATABASE: "postgres",
+    PGSSLMODE: "verify-full",
+    PGSSLROOTCERT: "/qa/prod-ca-2021.crt",
+    PGCONNECT_TIMEOUT: "30",
+  }
+  const dockerRunBase = [
+    "run", "--rm", "--pull", "never", "--interactive",
+    "--name", "tips_notify_collector_qa_a0b1c2d3e4f5-metadata-before",
+    "--label", "com.supabase.cli.project=tips_notify_collector_qa_a0b1c2d3e4f5",
+    "--read-only",
+    "--user", "501:20",
+    "--cap-drop", "ALL",
+    "--security-opt", "no-new-privileges",
+    "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=16m",
+    "--network", "bridge",
+    "--env", "PGHOST",
+    "--env", "PGPORT",
+    "--env", "PGUSER",
+    "--env", "PGDATABASE",
+    "--env", "PGSSLMODE",
+    "--env", "PGSSLROOTCERT",
+    "--env", "PGCONNECT_TIMEOUT",
+    "--mount",
+    `type=bind,src=${join(repoRoot, "supabase", "certs", "prod-ca-2021.crt")},dst=/qa/prod-ca-2021.crt,readonly`,
+  ]
+  const metadataBefore = buildNotificationRemoteDockerInvocation("metadata-before", {
+    runtime,
+    sourceEnvironment,
+  })
+  const schemaDump = buildNotificationRemoteDockerInvocation("schema-dump", {
+    runtime,
+    sourceEnvironment,
+  })
+  const metadataAfter = buildNotificationRemoteDockerInvocation("metadata-after", {
+    runtime,
+    sourceEnvironment,
+  })
+  const psqlVersion = buildNotificationRemoteDockerInvocation("psql-version", {
+    runtime,
+    sourceEnvironment,
+  })
+  const pgDumpVersion = buildNotificationRemoteDockerInvocation("pg-dump-version", {
+    runtime,
+    sourceEnvironment,
+  })
+  const imageInspect = buildNotificationRemoteDockerInvocation("image-inspect", {
+    runtime,
+    sourceEnvironment,
+  })
+
+  assert.deepEqual(metadataBefore, {
+    step: "metadata-before",
+    command: "/Users/hyunjun/.local/bin/docker",
+    args: [
+      ...dockerRunBase,
+      "--mount",
+      `type=bind,src=${join(artifactRoot, "notification-remote-metadata.sql")},dst=/qa/notification-remote-metadata.sql,readonly`,
+      "--entrypoint", "psql",
+      "public.ecr.aws/supabase/postgres:17.6.1.132@sha256:e09e93a61ed1560caf4be79c9eb29401875bea74b12aec4657cb08bf34ea3a13",
+      "--no-psqlrc", "--password", "--quiet", "--tuples-only", "--no-align",
+      "--set", "ON_ERROR_STOP=1", "--file", "/qa/notification-remote-metadata.sql",
+    ],
+    cwd: join(artifactRoot, "remote-collector"),
+    shell: false,
+    env: remoteEnvironment,
+    stdinMode: "database-password-prompt",
+    timeoutMs: 60_000,
+    maxStdoutBytes: 2_097_152,
+    maxStderrBytes: 65_536,
+  })
+  assert.deepEqual(schemaDump, {
+    step: "schema-dump",
+    command: "/Users/hyunjun/.local/bin/docker",
+    args: [
+      ...dockerRunBase.map((entry) => entry === "tips_notify_collector_qa_a0b1c2d3e4f5-metadata-before"
+        ? "tips_notify_collector_qa_a0b1c2d3e4f5-schema-dump" : entry),
+      "--mount",
+      `type=bind,src=${join(artifactRoot, "notification-remote-schema.sql")},dst=/qa/notification-remote-schema.sql`,
+      "--entrypoint", "pg_dump",
+      "public.ecr.aws/supabase/postgres:17.6.1.132@sha256:e09e93a61ed1560caf4be79c9eb29401875bea74b12aec4657cb08bf34ea3a13",
+      "--password", "--schema-only",
+      "--schema", "public", "--schema", "dashboard_private",
+      "--file", "/qa/notification-remote-schema.sql",
+    ],
+    cwd: join(artifactRoot, "remote-collector"),
+    shell: false,
+    env: remoteEnvironment,
+    stdinMode: "database-password-prompt",
+    timeoutMs: 1_200_000,
+    maxStdoutBytes: 65_536,
+    maxStderrBytes: 65_536,
+  })
+  assert.deepEqual(metadataAfter.args, [
+    ...dockerRunBase.map((entry) => entry === "tips_notify_collector_qa_a0b1c2d3e4f5-metadata-before"
+      ? "tips_notify_collector_qa_a0b1c2d3e4f5-metadata-after" : entry),
+    "--mount",
+    `type=bind,src=${join(artifactRoot, "notification-remote-metadata.sql")},dst=/qa/notification-remote-metadata.sql,readonly`,
+    "--entrypoint", "psql",
+    "public.ecr.aws/supabase/postgres:17.6.1.132@sha256:e09e93a61ed1560caf4be79c9eb29401875bea74b12aec4657cb08bf34ea3a13",
+    "--no-psqlrc", "--password", "--quiet", "--tuples-only", "--no-align",
+    "--set", "ON_ERROR_STOP=1", "--file", "/qa/notification-remote-metadata.sql",
+  ])
+  assert.deepEqual(psqlVersion, {
+    step: "psql-version",
+    command: "/Users/hyunjun/.local/bin/docker",
+    args: [
+      "run", "--rm", "--pull", "never",
+      "--name", "tips_notify_collector_qa_a0b1c2d3e4f5-psql-version",
+      "--label", "com.supabase.cli.project=tips_notify_collector_qa_a0b1c2d3e4f5",
+      "--read-only",
+      "--user", "501:20",
+      "--cap-drop", "ALL",
+      "--security-opt", "no-new-privileges",
+      "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=16m",
+      "--network", "none",
+      "--entrypoint", "psql",
+      "public.ecr.aws/supabase/postgres:17.6.1.132@sha256:e09e93a61ed1560caf4be79c9eb29401875bea74b12aec4657cb08bf34ea3a13",
+      "--version",
+    ],
+    cwd: join(artifactRoot, "remote-collector"),
+    shell: false,
+    env: commonEnvironment,
+    stdin: "ignore",
+    timeoutMs: 30_000,
+    maxStdoutBytes: 65_536,
+    maxStderrBytes: 65_536,
+  })
+  assert.deepEqual(pgDumpVersion.args, [
+    "run", "--rm", "--pull", "never",
+    "--name", "tips_notify_collector_qa_a0b1c2d3e4f5-pg-dump-version",
+    "--label", "com.supabase.cli.project=tips_notify_collector_qa_a0b1c2d3e4f5",
+    "--read-only",
+    "--user", "501:20",
+    "--cap-drop", "ALL",
+    "--security-opt", "no-new-privileges",
+    "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=16m",
+    "--network", "none",
+    "--entrypoint", "pg_dump",
+    "public.ecr.aws/supabase/postgres:17.6.1.132@sha256:e09e93a61ed1560caf4be79c9eb29401875bea74b12aec4657cb08bf34ea3a13",
+    "--version",
+  ])
+  assert.deepEqual(imageInspect, {
+    step: "image-inspect",
+    command: "/Users/hyunjun/.local/bin/docker",
+    args: [
+      "image", "inspect", "--format", "{{json .RepoDigests}}",
+      "public.ecr.aws/supabase/postgres:17.6.1.132",
+    ],
+    cwd: join(artifactRoot, "remote-collector"),
+    shell: false,
+    env: commonEnvironment,
+    stdin: "ignore",
+    timeoutMs: 30_000,
+    maxStdoutBytes: 65_536,
+    maxStderrBytes: 65_536,
+  })
+  for (const invocation of [metadataBefore, schemaDump, metadataAfter, psqlVersion, pgDumpVersion, imageInspect]) {
+    assert.equal(Object.isFrozen(invocation), true)
+    assert.equal(Object.isFrozen(invocation.args), true)
+    assert.equal(Object.isFrozen(invocation.env), true)
+    assert.doesNotMatch(
+      JSON.stringify(invocation),
+      /remote-database-secret|sbp_remote-access-secret|provider-secret|PGPASSWORD|override-password|override\.example/u,
+    )
+  }
+  assert.throws(
+    () => buildNotificationRemoteDockerInvocation("metadata-before", {
+      runtime: {
+        ...runtime,
+        files: { ...runtime.files, caPath: `${runtime.files.caPath},unsafe` },
+      },
+      sourceEnvironment,
+    }),
+    /notification_local_db_remote_context_refused/u,
+  )
+})
+
+test("database password는 stdin 완료 뒤에만 zeroize하고 invalid input은 실행 전에 거부한다", async () => {
+  const { writeNotificationDatabasePasswordPrompt } = await loadSubject()
+  const listeners = new Map()
+  let capturedBuffer
+  let finishWrite
+  const childStdin = {
+    once(event, listener) {
+      listeners.set(event, listener)
+    },
+    off(event, listener) {
+      if (listeners.get(event) === listener) listeners.delete(event)
+    },
+    end(buffer, callback) {
+      capturedBuffer = buffer
+      finishWrite = callback
+    },
+  }
+  let providerCalls = 0
+  const writing = writeNotificationDatabasePasswordPrompt(childStdin, () => {
+    providerCalls += 1
+    return "sentinel-database-password"
+  })
+
+  assert.equal(capturedBuffer.toString("utf8"), "sentinel-database-password\n")
+  assert.equal(capturedBuffer.every((byte) => byte === 0), false)
+  finishWrite()
+  await writing
+  assert.equal(providerCalls, 1)
+  assert.equal(capturedBuffer.every((byte) => byte === 0), true)
+
+  const failingListeners = new Map()
+  let failedBuffer
+  const failingStdin = {
+    once(event, listener) {
+      failingListeners.set(event, listener)
+    },
+    off(event, listener) {
+      if (failingListeners.get(event) === listener) failingListeners.delete(event)
+    },
+    end(buffer) {
+      failedBuffer = buffer
+      failingListeners.get("error")(new Error("write failed"))
+    },
+  }
+  await assert.rejects(
+    () => writeNotificationDatabasePasswordPrompt(failingStdin, () => "sentinel-database-password"),
+    /notification_local_db_remote_credential_write_failed/u,
+  )
+  assert.equal(failedBuffer.every((byte) => byte === 0), true)
+
+  for (const provider of [
+    undefined,
+    () => "",
+    () => "a".repeat(4097),
+    () => "contains\u0000nul",
+    () => "contains\rreturn",
+    () => "contains\nnewline",
+  ]) {
+    await assert.rejects(
+      () => writeNotificationDatabasePasswordPrompt(childStdin, provider),
+      /notification_local_db_remote_credential_required/u,
+    )
+  }
+})
 
 test("remote migration은 repository-known prefix로만 정규화한다", async () => {
   const { normalizeRemoteMigrationVersions } = await loadSubject()
@@ -790,6 +1251,214 @@ test("현재 저장소 migration도 실제 마지막 파일 hash로 manifest를 
   assert.equal(pending[0].sha256, sha256(expectedBytes))
 })
 
+test("IPv4 Session Pooler collector는 image·client 검증 뒤 schema만 여섯 단계로 수집한다", async (t) => {
+  const files = {
+    "20260803140000_notification_content_contracts.sql": "select 'content';\n",
+    "20260803141000_notification_task_content_payload.sql": "select 'task';\n",
+    "20260803142000_notification_word_retest_content_payload.sql": "select 'word';\n",
+  }
+  const { root } = await makeMigrationRepo(t, files)
+  const artifactRoot = await makeArtifactRoot(t)
+  const {
+    buildNotificationRemoteCollectorRuntime,
+    collectRemoteSchemaMetadata,
+  } = await loadCollectorSubject(root)
+  const collectorRuntime = await buildNotificationRemoteCollectorRuntime({
+    tempRoot: artifactRoot,
+    randomBytes: () => Buffer.from("a0b1c2d3e4f5", "hex"),
+    getUid: () => 501,
+    getGid: () => 20,
+  })
+  const metadataRows = JSON.stringify([{
+    notification_local_qa_remote_metadata: remoteMetadataFixture(),
+  }])
+  const calls = []
+  let promptCalls = 0
+  const result = await collectRemoteSchemaMetadata({
+    approved: true,
+    artifactRoot,
+    sourceEnvironment: {
+      ...sourceEnvironmentFixture(),
+      SUPABASE_DB_PASSWORD: "sentinel-database-password",
+    },
+  }, async (invocation, secretInputProvider) => {
+    calls.push(invocation)
+    if (invocation.step === "image-inspect") {
+      return {
+        code: 0,
+        stdout: JSON.stringify([
+          "public.ecr.aws/supabase/postgres@sha256:e09e93a61ed1560caf4be79c9eb29401875bea74b12aec4657cb08bf34ea3a13",
+        ]),
+        stderr: "",
+      }
+    }
+    if (invocation.step === "psql-version") {
+      return { code: 0, stdout: "psql (PostgreSQL) 17.6\n", stderr: "" }
+    }
+    if (invocation.step === "pg-dump-version") {
+      return { code: 0, stdout: "pg_dump (PostgreSQL) 17.6\n", stderr: "" }
+    }
+    promptCalls += 1
+    assert.equal(secretInputProvider(), "sentinel-database-password")
+    if (invocation.step === "schema-dump") {
+      await writeFile(
+        collectorRuntime.files.schemaDumpPath,
+        "-- PostgreSQL database dump\ncreate schema if not exists dashboard_private;\n",
+      )
+      return { code: 0, stdout: "", stderr: "Password: " }
+    }
+    return { code: 0, stdout: metadataRows, stderr: "Password: " }
+  }, { collectorRuntime })
+
+  assert.deepEqual(calls.map(({ step }) => step), [
+    "image-inspect",
+    "psql-version",
+    "pg-dump-version",
+    "metadata-before",
+    "schema-dump",
+    "metadata-after",
+  ])
+  assert.equal(promptCalls, 3)
+  assert.equal(result.remote.postgresMajor, 17)
+  assert.deepEqual(result.safety, { rowDataCopied: 0, productionMutationCount: 0 })
+  assert.doesNotMatch(
+    JSON.stringify(calls),
+    /sentinel-database-password|remote-database-secret|sbp_remote-access-secret|provider-secret|PGPASSWORD/u,
+  )
+})
+
+test("CA 검증 실패는 Docker child를 만들기 전에 닫힌다", async (t) => {
+  const { root } = await makeMigrationRepo(t, {
+    "20260803140000_notification_content_contracts.sql": "select 'content';\n",
+  })
+  await writeFile(
+    join(root, "supabase", "certs", "prod-ca-2021.crt"),
+    "tampered certificate\n",
+    { mode: 0o644 },
+  )
+  const {
+    collectRemoteSchemaMetadata,
+    artifactRoot,
+    collectorRuntime,
+  } = await prepareRemoteCollectorCall(t, root, "b0b1b2b3b4b5")
+  let executeCallCount = 0
+
+  await assert.rejects(
+    () => collectRemoteSchemaMetadata(remoteCollectorContext(
+      artifactRoot,
+      { SUPABASE_DB_PASSWORD: "qa-password" },
+    ), async () => {
+      executeCallCount += 1
+      return { code: 0, stdout: "", stderr: "" }
+    }, { collectorRuntime }),
+    /notification_local_db_remote_tls_ca_refused/u,
+  )
+  assert.equal(executeCallCount, 0)
+  assert.deepEqual(await readdir(artifactRoot), ["remote-collector"])
+})
+
+test("image·client·server-major preflight 실패는 schema dump 전에 exact 단계에서 닫힌다", async (t) => {
+  const files = {
+    "20260803140000_notification_content_contracts.sql": "select 'content';\n",
+    "20260803141000_notification_task_content_payload.sql": "select 'task';\n",
+    "20260803142000_notification_word_retest_content_payload.sql": "select 'word';\n",
+  }
+  const { root } = await makeMigrationRepo(t, files)
+  const subject = await loadCollectorSubject(root)
+  const cases = [
+    {
+      name: "image digest drift",
+      randomHex: "b1b2b3b4b5b6",
+      expectedSteps: ["image-inspect"],
+      expectedCode: "notification_local_db_remote_client_image_refused",
+      imageDigests: ["public.ecr.aws/supabase/postgres@sha256:0000000000000000000000000000000000000000000000000000000000000000"],
+    },
+    {
+      name: "psql major 16",
+      randomHex: "b2b3b4b5b6b7",
+      expectedSteps: ["image-inspect", "psql-version"],
+      expectedCode: "notification_local_db_remote_client_version_refused",
+      psqlVersion: "psql (PostgreSQL) 16.9\n",
+    },
+    {
+      name: "pg_dump major 16",
+      randomHex: "b3b4b5b6b7b8",
+      expectedSteps: ["image-inspect", "psql-version", "pg-dump-version"],
+      expectedCode: "notification_local_db_remote_client_version_refused",
+      pgDumpVersion: "pg_dump (PostgreSQL) 16.9\n",
+    },
+    {
+      name: "server major 16",
+      randomHex: "b4b5b6b7b8b9",
+      expectedSteps: [
+        "image-inspect",
+        "psql-version",
+        "pg-dump-version",
+        "metadata-before",
+      ],
+      expectedCode: "notification_local_db_remote_client_version_refused",
+      serverVersionNum: 160009,
+    },
+  ]
+
+  for (const scenario of cases) {
+    const { artifactRoot, collectorRuntime } = await buildRemoteCollectorRuntimeFixture(
+      t,
+      subject,
+      scenario.randomHex,
+    )
+    const calls = []
+    await assert.rejects(
+      () => subject.collectRemoteSchemaMetadata(remoteCollectorContext(
+        artifactRoot,
+        { SUPABASE_DB_PASSWORD: "qa-password" },
+      ), async (invocation, secretInputProvider) => {
+        calls.push(invocation.step)
+        if (invocation.step === "image-inspect") {
+          assert.equal(secretInputProvider, undefined)
+          return {
+            code: 0,
+            stdout: JSON.stringify(scenario.imageDigests ?? [
+              "public.ecr.aws/supabase/postgres@sha256:e09e93a61ed1560caf4be79c9eb29401875bea74b12aec4657cb08bf34ea3a13",
+            ]),
+            stderr: "",
+          }
+        }
+        if (invocation.step === "psql-version") {
+          assert.equal(secretInputProvider, undefined)
+          return {
+            code: 0,
+            stdout: scenario.psqlVersion ?? "psql (PostgreSQL) 17.6\n",
+            stderr: "",
+          }
+        }
+        if (invocation.step === "pg-dump-version") {
+          assert.equal(secretInputProvider, undefined)
+          return {
+            code: 0,
+            stdout: scenario.pgDumpVersion ?? "pg_dump (PostgreSQL) 17.6\n",
+            stderr: "",
+          }
+        }
+        assert.equal(invocation.step, "metadata-before")
+        assert.equal(typeof secretInputProvider, "function")
+        const metadata = remoteMetadataFixture()
+        metadata.server_version_num = scenario.serverVersionNum
+        return {
+          code: 0,
+          stdout: JSON.stringify([{ notification_local_qa_remote_metadata: metadata }]),
+          stderr: "",
+        }
+      }, { collectorRuntime }),
+      new RegExp(scenario.expectedCode, "u"),
+      scenario.name,
+    )
+    assert.deepEqual(calls, scenario.expectedSteps, scenario.name)
+    assert.equal(calls.includes("schema-dump"), false, scenario.name)
+    assert.deepEqual(await readdir(artifactRoot), ["remote-collector"], scenario.name)
+  }
+})
+
 test("remote collector는 metadata→schema dump→동일 metadata 순서만 실행한다", async (t) => {
   const files = {
     "20260803140000_notification_content_contracts.sql": "select 'content';\n",
@@ -797,34 +1466,46 @@ test("remote collector는 metadata→schema dump→동일 metadata 순서만 실
     "20260803142000_notification_word_retest_content_payload.sql": "select 'word';\n",
   }
   const { root } = await makeMigrationRepo(t, files)
-  await writeLinkedProject(root)
-  const artifactRoot = await makeArtifactRoot(t)
+  const subject = await loadCollectorSubject(root)
+  const { artifactRoot, collectorRuntime } = await buildRemoteCollectorRuntimeFixture(
+    t,
+    subject,
+    "a1b2c3d4e5f6",
+  )
   const calls = []
   const metadataRows = JSON.stringify([{
     notification_local_qa_remote_metadata: remoteMetadataFixture(),
   }])
   const schemaSource = "-- schema-only fixture\ncreate schema if not exists dashboard_private;\n"
-  const execute = async (invocation) => {
+  const execute = async (invocation, secretInputProvider) => {
     calls.push(invocation)
+    if (invocation.step === "image-inspect") {
+      return {
+        code: 0,
+        stdout: JSON.stringify([
+          "public.ecr.aws/supabase/postgres@sha256:e09e93a61ed1560caf4be79c9eb29401875bea74b12aec4657cb08bf34ea3a13",
+        ]),
+        stderr: "",
+      }
+    }
+    if (invocation.step === "psql-version") {
+      return { code: 0, stdout: "psql (PostgreSQL) 17.6\n", stderr: "" }
+    }
+    if (invocation.step === "pg-dump-version") {
+      return { code: 0, stdout: "pg_dump (PostgreSQL) 17.6\n", stderr: "" }
+    }
+    assert.equal(secretInputProvider(), "database-password-must-not-leak")
     if (invocation.step === "schema-dump") {
-      const fileIndex = invocation.args.indexOf("--file")
-      await writeFile(invocation.args[fileIndex + 1], schemaSource)
+      await writeFile(collectorRuntime.files.schemaDumpPath, schemaSource)
       return { code: 0, stdout: "Dumped schema.\n", stderr: "" }
     }
     return { code: 0, stdout: metadataRows, stderr: "" }
   }
-  const { collectRemoteSchemaMetadata } = await loadCollectorSubject(root)
-  const canonicalRoot = await realpath(root)
+  const { collectRemoteSchemaMetadata } = subject
 
   const result = await collectRemoteSchemaMetadata({
     approved: true,
-    cliPath: "/opt/supabase-go",
     artifactRoot,
-    linkedProjectMetadata: {
-      project_ref: parentProjectRef,
-      region: "ap-northeast-2",
-      database_password: "must-not-survive",
-    },
     sourceEnvironment: Object.assign(Object.create({ processEnvironmentLike: true }), {
       HOME: "/Users/qa",
       PATH: "/usr/bin:/bin",
@@ -832,36 +1513,26 @@ test("remote collector는 metadata→schema dump→동일 metadata 순서만 실
       SUPABASE_DB_PASSWORD: "database-password-must-not-leak",
       GOOGLE_CHAT_WEBHOOK_URL: "https://chat.googleapis.com/v1/spaces/private/messages?key=secret",
     }),
-  }, execute)
+  }, execute, { collectorRuntime })
 
   assert.deepEqual(calls.map((call) => call.step), [
+    "image-inspect",
+    "psql-version",
+    "pg-dump-version",
     "metadata-before",
     "schema-dump",
     "metadata-after",
   ])
-  assert.deepEqual(calls[0].args, [
-    "db", "query", "--linked",
-    "--file", join(artifactRoot, "notification-remote-metadata.sql"),
-    "--output", "json",
-  ])
-  assert.deepEqual(calls[1].args, [
-    "db", "dump", "--linked",
-    "--schema", "public,dashboard_private",
-    "--file", join(artifactRoot, "notification-remote-schema.sql"),
-  ])
-  assert.deepEqual(calls[2].args, calls[0].args)
-  assert.equal(calls.every((call) => call.command === "/opt/supabase-go"), true)
-  assert.equal(calls.every((call) => call.cwd === canonicalRoot), true)
+  assert.equal(calls.every((call) => call.command === "/Users/hyunjun/.local/bin/docker"), true)
+  assert.equal(calls.every((call) => call.cwd === collectorRuntime.workdir), true)
   assert.equal(calls.every((call) => Object.isFrozen(call) && Object.isFrozen(call.args)), true)
-  assert.equal("SUPABASE_DB_PASSWORD" in calls[0].env, false)
-  assert.equal(calls[1].env.SUPABASE_DB_PASSWORD, "database-password-must-not-leak")
-  assert.equal("SUPABASE_DB_PASSWORD" in calls[2].env, false)
+  assert.equal(calls.every((call) => !("SUPABASE_DB_PASSWORD" in call.env)), true)
   assert.equal(calls.every((call) => !("GOOGLE_CHAT_WEBHOOK_URL" in call.env)), true)
-  assert.equal(calls.every((call) => call.env.SUPABASE_ACCESS_TOKEN === "sbp_remote-access-secret"), true)
+  assert.equal(calls.every((call) => !("SUPABASE_ACCESS_TOKEN" in call.env)), true)
   assert.equal(calls.every((call) => Object.isFrozen(call.env)), true)
   assert.doesNotMatch(
     JSON.stringify(calls.map(({ command, args, cwd }) => ({ command, args, cwd }))),
-    /database-password|remote-access-secret|chat\.googleapis/u,
+    /database-password|remote-access-secret|chat\.googleapis|PGPASSWORD/u,
   )
 
   const querySql = await readFile(join(artifactRoot, "notification-remote-metadata.sql"), "utf8")
@@ -909,8 +1580,9 @@ test("remote collector는 metadata→schema dump→동일 metadata 순서만 실
     "notification-remote-metadata.json",
     "notification-remote-metadata.sql",
     "notification-remote-schema.sql",
+    "remote-collector",
   ])
-  for (const fileName of await readdir(artifactRoot)) {
+  for (const fileName of (await readdir(artifactRoot)).filter((value) => value !== "remote-collector")) {
     const fileStat = await lstat(join(artifactRoot, fileName))
     assert.equal(fileStat.isFile(), true)
     assert.equal(fileStat.mode & 0o777, 0o600)
@@ -922,7 +1594,6 @@ test("remote collector는 metadata→schema dump→동일 metadata 순서만 실
 test("remote collector signal은 active child close 뒤 artifact를 정리한다", async (t) => {
   const fileName = "20260803140000_notification_content_contracts.sql"
   const { root } = await makeMigrationRepo(t, { [fileName]: "select 1;\n" })
-  await writeLinkedProject(root)
   const artifactRoot = await makeArtifactRoot(t)
   const abortController = new AbortController()
   let markStarted
@@ -935,12 +1606,12 @@ test("remote collector signal은 active child close 뒤 artifact를 정리한다
   const collectorRuntime = await buildNotificationRemoteCollectorRuntime({
     tempRoot: artifactRoot,
     randomBytes: () => Buffer.from("102030405060", "hex"),
+    getUid: () => process.getuid(),
+    getGid: () => process.getgid(),
   })
   const outcome = collectRemoteSchemaMetadata({
     approved: true,
-    cliPath: "/opt/supabase-go",
     artifactRoot,
-    linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
     sourceEnvironment: { SUPABASE_DB_PASSWORD: "qa-password" },
     abortSignal: abortController.signal,
   }, async (invocation) => {
@@ -1022,27 +1693,20 @@ test("remote collector는 production ref와 run-unique Docker label을 분리하
   })
 
   assert.equal(runtime.projectId, "tips_notify_collector_qa_a0b1c2d3e4f5")
-  assert.equal(
-    await readFile(join(runtime.workdir, "supabase", "config.toml"), "utf8"),
-    `project_id = "${runtime.projectId}"\n`,
-  )
-  assert.equal(
-    await readFile(join(runtime.workdir, "supabase", ".temp", "project-ref"), "utf8"),
-    `${parentProjectRef}\n`,
-  )
-  for (const path of [
-    runtime.workdir,
-    join(runtime.workdir, "supabase"),
-    join(runtime.workdir, "supabase", ".temp"),
-  ]) {
-    assert.equal((await lstat(path)).mode & 0o777, 0o700)
-  }
-  for (const path of [
-    join(runtime.workdir, "supabase", "config.toml"),
-    join(runtime.workdir, "supabase", ".temp", "project-ref"),
-  ]) {
-    assert.equal((await lstat(path)).mode & 0o777, 0o600)
-  }
+  assert.equal(runtime.version, 2)
+  assert.equal(runtime.uid, process.getuid())
+  assert.equal(runtime.gid, process.getgid())
+  assert.deepEqual(runtime.route, expectedRemotePoolerRoute)
+  assert.deepEqual(runtime.client, expectedRemoteClientImage)
+  assert.deepEqual(Object.keys(runtime.containers).sort(), [
+    "metadata-after",
+    "metadata-before",
+    "pg-dump-version",
+    "psql-version",
+    "schema-dump",
+  ])
+  assert.equal((await lstat(runtime.workdir)).mode & 0o777, 0o700)
+  assert.deepEqual(await readdir(runtime.workdir), [])
   assert.equal(calls.length, 4)
   assert.deepEqual(calls.map(({ args }) => args[0]), ["ps", "ps", "rm", "ps"])
   assert.equal(calls[0].abortSignal, abortController.signal)
@@ -1123,7 +1787,13 @@ test("remote collector 실패와 container cleanup 실패를 safe evidence로 �
       },
       collect: async () => {
         calls.push("collect")
-        throw new Error("notification_local_db_remote_schema_dump_failed:raw-secret")
+        const failure = new Error("raw-secret")
+        failure.code = "notification_local_db_remote_schema_dump_failed"
+        failure.evidence = {
+          primaryCode: "notification_local_db_remote_schema_dump_failed",
+          cleanupCode: "notification_local_db_cleanup_ok",
+        }
+        throw failure
       },
       execute: async () => assert.fail("fake collector owns execution in this scenario"),
     })
@@ -1242,129 +1912,132 @@ test("DB credential이 없으면 artifact와 child process 전에 닫힌다", as
   const { root } = await makeMigrationRepo(t, {
     "20260803140000_notification_content_contracts.sql": "select 1;\n",
   })
-  await writeLinkedProject(root)
-  const artifactRoot = await makeArtifactRoot(t)
+  const {
+    collectRemoteSchemaMetadata,
+    artifactRoot,
+    collectorRuntime,
+  } = await prepareRemoteCollectorCall(t, root, "001122334455")
   let executeCallCount = 0
-  const { collectRemoteSchemaMetadata } = await loadCollectorSubject(root)
 
   await assert.rejects(
-    () => collectRemoteSchemaMetadata({
-      approved: true,
-      cliPath: "/opt/supabase-go",
+    () => collectRemoteSchemaMetadata(remoteCollectorContext(
       artifactRoot,
-      linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
-      sourceEnvironment: { SUPABASE_ACCESS_TOKEN: "sbp_not-enough" },
-    }, async () => {
+      { SUPABASE_ACCESS_TOKEN: "sbp_not-enough" },
+    ), async () => {
       executeCallCount += 1
       return { code: 0, stdout: "", stderr: "" }
-    }),
+    }, { collectorRuntime }),
     /notification_local_db_remote_credential_required/u,
   )
   assert.equal(executeCallCount, 0)
-  assert.deepEqual(await readdir(artifactRoot), [])
+  assert.deepEqual(await readdir(artifactRoot), ["remote-collector"])
 })
 
 test("collector는 caller가 repoRoot를 덮어쓰지 못하게 한다", async (t) => {
   const { root } = await makeMigrationRepo(t, {
     "20260803140000_notification_content_contracts.sql": "select 1;\n",
   })
-  await writeLinkedProject(root)
-  const artifactRoot = await makeArtifactRoot(t)
-  const { collectRemoteSchemaMetadata } = await loadCollectorSubject(root)
+  const {
+    collectRemoteSchemaMetadata,
+    artifactRoot,
+    collectorRuntime,
+  } = await prepareRemoteCollectorCall(t, root, "112233445566")
   let executeCallCount = 0
 
   await assert.rejects(
-    () => collectRemoteSchemaMetadata({
-      approved: true,
-      cliPath: "/opt/supabase-go",
-      repoRoot: root,
+    () => collectRemoteSchemaMetadata(remoteCollectorContext(
       artifactRoot,
-      linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
-      sourceEnvironment: { SUPABASE_DB_PASSWORD: "qa-password" },
-    }, async () => {
+      { SUPABASE_DB_PASSWORD: "qa-password" },
+      {
+      repoRoot: root,
+      },
+    ), async () => {
       executeCallCount += 1
       return { code: 0, stdout: "[]", stderr: "" }
-    }),
+    }, { collectorRuntime }),
     /notification_local_db_remote_context_refused/u,
   )
   assert.equal(executeCallCount, 0)
-  assert.deepEqual(await readdir(artifactRoot), [])
+  assert.deepEqual(await readdir(artifactRoot), ["remote-collector"])
 })
 
 test("artifact root는 비어 있는 exact 0700 directory만 허용한다", async (t) => {
   const { root } = await makeMigrationRepo(t, {
     "20260803140000_notification_content_contracts.sql": "select 1;\n",
   })
-  await writeLinkedProject(root)
-  const artifactRoot = await makeArtifactRoot(t)
+  const {
+    collectRemoteSchemaMetadata,
+    artifactRoot,
+    collectorRuntime,
+  } = await prepareRemoteCollectorCall(t, root, "223344556677")
   await chmod(artifactRoot, 0o500)
   let executeCallCount = 0
-  const { collectRemoteSchemaMetadata } = await loadCollectorSubject(root)
 
   await assert.rejects(
-    () => collectRemoteSchemaMetadata({
-      approved: true,
-      cliPath: "/opt/supabase-go",
+    () => collectRemoteSchemaMetadata(remoteCollectorContext(
       artifactRoot,
-      linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
-      sourceEnvironment: { SUPABASE_DB_PASSWORD: "qa-password" },
-    }, async () => {
+      { SUPABASE_DB_PASSWORD: "qa-password" },
+    ), async () => {
       executeCallCount += 1
       return { code: 0, stdout: "", stderr: "" }
-    }),
+    }, { collectorRuntime }),
     /notification_local_db_remote_artifact_refused/u,
   )
   assert.equal(executeCallCount, 0)
+  await chmod(artifactRoot, 0o700)
 })
 
 test("remote child 오류의 raw stderr를 버리고 exact artifact만 정리한다", async (t) => {
   const { root } = await makeMigrationRepo(t, {
     "20260803140000_notification_content_contracts.sql": "select 1;\n",
   })
-  await writeLinkedProject(root)
-  const artifactRoot = await makeArtifactRoot(t)
-  const { collectRemoteSchemaMetadata } = await loadCollectorSubject(root)
+  const {
+    collectRemoteSchemaMetadata,
+    artifactRoot,
+    collectorRuntime,
+  } = await prepareRemoteCollectorCall(t, root, "334455667788")
   let caught
   try {
-    await collectRemoteSchemaMetadata({
-      approved: true,
-      cliPath: "/opt/supabase-go",
+    await collectRemoteSchemaMetadata(remoteCollectorContext(
       artifactRoot,
-      linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
-      sourceEnvironment: { SUPABASE_DB_PASSWORD: "bare-password-must-not-leak" },
-    }, async () => ({
-      code: 1,
-      stdout: "postgresql://postgres:bare-password-must-not-leak@db.example.test/postgres",
-      stderr: "sb_secret_must-not-leak https://chat.googleapis.com/v1/spaces/private/messages?key=secret",
-    }))
+      { SUPABASE_DB_PASSWORD: "bare-password-must-not-leak" },
+    ), async (invocation) => {
+      const preflight = remoteDockerPreflightResult(invocation)
+      if (preflight) return preflight
+      return {
+        code: 1,
+        stdout: "postgresql://postgres:bare-password-must-not-leak@db.example.test/postgres",
+        stderr: "sb_secret_must-not-leak https://chat.googleapis.com/v1/spaces/private/messages?key=secret",
+      }
+    }, { collectorRuntime })
   } catch (error) {
     caught = error
   }
 
   assert.match(String(caught), /notification_local_db_remote_metadata_query_failed/u)
   assert.doesNotMatch(String(caught), /must-not-leak|db\.example|chat\.googleapis/u)
-  assert.deepEqual(await readdir(artifactRoot), [])
+  assert.deepEqual(await readdir(artifactRoot), ["remote-collector"])
 })
 
 test("metadata query SQL이 child 실행 중 바뀌면 다음 remote call 전에 거부한다", async (t) => {
   const fileName = "20260803140000_notification_content_contracts.sql"
   const { root } = await makeMigrationRepo(t, { [fileName]: "select 1;\n" })
-  await writeLinkedProject(root)
-  const artifactRoot = await makeArtifactRoot(t)
-  const { collectRemoteSchemaMetadata } = await loadCollectorSubject(root)
+  const {
+    collectRemoteSchemaMetadata,
+    artifactRoot,
+    collectorRuntime,
+  } = await prepareRemoteCollectorCall(t, root, "445566778899")
   let executeCallCount = 0
 
   await assert.rejects(
-    () => collectRemoteSchemaMetadata({
-      approved: true,
-      cliPath: "/opt/supabase-go",
+    () => collectRemoteSchemaMetadata(remoteCollectorContext(
       artifactRoot,
-      linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
-      sourceEnvironment: { SUPABASE_DB_PASSWORD: "qa-password" },
-    }, async (invocation) => {
+      { SUPABASE_DB_PASSWORD: "qa-password" },
+    ), async (invocation) => {
       executeCallCount += 1
-      const queryPath = invocation.args[invocation.args.indexOf("--file") + 1]
-      await writeFile(queryPath, "delete from public.students;\n")
+      const preflight = remoteDockerPreflightResult(invocation)
+      if (preflight) return preflight
+      await writeFile(collectorRuntime.files.queryPath, "delete from public.students;\n")
       return {
         code: 0,
         stdout: JSON.stringify([{
@@ -1374,46 +2047,89 @@ test("metadata query SQL이 child 실행 중 바뀌면 다음 remote call 전에
         }]),
         stderr: "",
       }
-    }),
+    }, { collectorRuntime }),
     /notification_local_db_remote_query_contract_refused/u,
   )
-  assert.equal(executeCallCount, 1)
-  assert.deepEqual(await readdir(artifactRoot), [])
+  assert.equal(executeCallCount, 4)
+  assert.deepEqual(await readdir(artifactRoot), ["remote-collector"])
 })
 
 test("artifact cleanup 실패는 primary 오류와 함께 보존한다", async (t) => {
   const fileName = "20260803140000_notification_content_contracts.sql"
   const { root } = await makeMigrationRepo(t, { [fileName]: "select 1;\n" })
-  await writeLinkedProject(root)
-  const artifactRoot = await makeArtifactRoot(t)
-  const { collectRemoteSchemaMetadata } = await loadCollectorSubject(root)
+  const {
+    collectRemoteSchemaMetadata,
+    artifactRoot,
+    collectorRuntime,
+  } = await prepareRemoteCollectorCall(t, root, "5566778899aa")
   let caught
 
   try {
-    await collectRemoteSchemaMetadata({
-      approved: true,
-      cliPath: "/opt/supabase-go",
+    await collectRemoteSchemaMetadata(remoteCollectorContext(
       artifactRoot,
-      linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
-      sourceEnvironment: { SUPABASE_DB_PASSWORD: "bare-password-must-not-leak" },
-    }, async (invocation) => {
-      const queryPath = invocation.args[invocation.args.indexOf("--file") + 1]
-      await rm(queryPath)
-      await mkdir(queryPath, { mode: 0o700 })
+      { SUPABASE_DB_PASSWORD: "bare-password-must-not-leak" },
+    ), async (invocation) => {
+      const preflight = remoteDockerPreflightResult(invocation)
+      if (preflight) return preflight
+      await rm(collectorRuntime.files.queryPath)
+      await mkdir(collectorRuntime.files.queryPath, { mode: 0o700 })
       return {
         code: 1,
         stdout: "",
         stderr: "bare-password-must-not-leak",
       }
-    })
+    }, { collectorRuntime })
   } catch (error) {
     caught = error
   }
 
-  assert.match(String(caught), /notification_local_db_remote_metadata_query_failed/u)
-  assert.match(String(caught), /notification_local_db_remote_artifact_cleanup_failed/u)
+  assert.equal(caught?.code, "notification_local_db_remote_metadata_query_failed")
+  assert.deepEqual(caught?.evidence, {
+    primaryCode: "notification_local_db_remote_metadata_query_failed",
+    cleanupCode: "notification_local_db_cleanup_failed",
+  })
   assert.doesNotMatch(String(caught), /bare-password-must-not-leak/u)
   assert.equal((await lstat(join(artifactRoot, "notification-remote-metadata.sql"))).isDirectory(), true)
+})
+
+test("schema collector 실패와 artifact cleanup 실패를 분리된 evidence로 보존한다", async (t) => {
+  const fileName = "20260803140000_notification_content_contracts.sql"
+  const { root } = await makeMigrationRepo(t, { [fileName]: "select 1;\n" })
+  const {
+    collectRemoteSchemaMetadata,
+    artifactRoot,
+    collectorRuntime,
+  } = await prepareRemoteCollectorCall(t, root, "66778899aabb")
+  const metadataRows = JSON.stringify([{
+    notification_local_qa_remote_metadata: remoteMetadataFixture([migrationIdentity(fileName)]),
+  }])
+  let caught
+
+  try {
+    await collectRemoteSchemaMetadata(remoteCollectorContext(
+      artifactRoot,
+      { SUPABASE_DB_PASSWORD: "bare-password-must-not-leak" },
+    ), async (invocation) => {
+      const preflight = remoteDockerPreflightResult(invocation)
+      if (preflight) return preflight
+      if (invocation.step === "metadata-before") {
+        return { code: 0, stdout: metadataRows, stderr: "" }
+      }
+      await rm(collectorRuntime.files.schemaDumpPath)
+      await mkdir(collectorRuntime.files.schemaDumpPath, { mode: 0o700 })
+      return { code: 1, stdout: "", stderr: "bare-password-must-not-leak" }
+    }, { collectorRuntime })
+  } catch (error) {
+    caught = error
+  }
+
+  assert.equal(caught?.code, "notification_local_db_remote_schema_dump_failed")
+  assert.deepEqual(caught?.evidence, {
+    primaryCode: "notification_local_db_remote_schema_dump_failed",
+    cleanupCode: "notification_local_db_cleanup_failed",
+  })
+  assert.doesNotMatch(String(caught), /bare-password-must-not-leak/u)
+  assert.equal((await lstat(join(artifactRoot, "notification-remote-schema.sql"))).isDirectory(), true)
 })
 
 test("metadata 전후 snapshot이 다르면 schema artifact를 폐기한다", async (t) => {
@@ -1421,8 +2137,11 @@ test("metadata 전후 snapshot이 다르면 schema artifact를 폐기한다", as
     "20260803140000_notification_content_contracts.sql": "select 1;\n",
     "20260803141000_notification_task_content_payload.sql": "select 2;\n",
   })
-  await writeLinkedProject(root)
-  const artifactRoot = await makeArtifactRoot(t)
+  const {
+    collectRemoteSchemaMetadata,
+    artifactRoot,
+    collectorRuntime,
+  } = await prepareRemoteCollectorCall(t, root, "778899aabbcc")
   const rows = [
     remoteMetadataFixture([migrationIdentity("20260803140000_notification_content_contracts.sql")]),
     remoteMetadataFixture([
@@ -1432,19 +2151,17 @@ test("metadata 전후 snapshot이 다르면 schema artifact를 폐기한다", as
   ]
   let metadataIndex = 0
   let executeCallCount = 0
-  const { collectRemoteSchemaMetadata } = await loadCollectorSubject(root)
 
   await assert.rejects(
-    () => collectRemoteSchemaMetadata({
-      approved: true,
-      cliPath: "/opt/supabase-go",
+    () => collectRemoteSchemaMetadata(remoteCollectorContext(
       artifactRoot,
-      linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
-      sourceEnvironment: { SUPABASE_DB_PASSWORD: "qa-password" },
-    }, async (invocation) => {
+      { SUPABASE_DB_PASSWORD: "qa-password" },
+    ), async (invocation) => {
       executeCallCount += 1
+      const preflight = remoteDockerPreflightResult(invocation)
+      if (preflight) return preflight
       if (invocation.step === "schema-dump") {
-        await writeFile(invocation.args.at(-1), "create schema dashboard_private;\n")
+        await writeFile(collectorRuntime.files.schemaDumpPath, "create schema dashboard_private;\n")
         return { code: 0, stdout: "", stderr: "" }
       }
       const metadata = rows[metadataIndex]
@@ -1454,34 +2171,47 @@ test("metadata 전후 snapshot이 다르면 schema artifact를 폐기한다", as
         stdout: JSON.stringify([{ notification_local_qa_remote_metadata: metadata }]),
         stderr: "",
       }
-    }),
+    }, { collectorRuntime }),
     /notification_local_db_remote_snapshot_changed/u,
   )
-  assert.equal(executeCallCount, 3)
-  assert.deepEqual(await readdir(artifactRoot), [])
+  assert.equal(executeCallCount, 6)
+  assert.deepEqual(await readdir(artifactRoot), ["remote-collector"])
 })
 
-test("read-only metadata shape와 schema-only marker를 엄격히 검사한다", async (t) => {
+test("read-only metadata shape와 schema-only artifact identity를 엄격히 검사한다", async (t) => {
   const { root } = await makeMigrationRepo(t, {
     "20260803140000_notification_content_contracts.sql": "select 1;\n",
   })
-  await writeLinkedProject(root)
-  const { collectRemoteSchemaMetadata } = await loadCollectorSubject(root)
+  const subject = await loadCollectorSubject(root)
+  const { collectRemoteSchemaMetadata } = subject
 
-  for (const scenario of ["not-read-only", "data-dump", "replaced-dump"]) {
-    const artifactRoot = await makeArtifactRoot(t)
+  for (const scenario of [
+    "not-read-only",
+    "object-only",
+    "data-dump",
+    "mode-drift",
+    "replaced-dump",
+  ]) {
+    const { artifactRoot, collectorRuntime } = await buildRemoteCollectorRuntimeFixture(
+      t,
+      subject,
+      scenario === "not-read-only"
+        ? "8899aabbccdd"
+        : scenario === "object-only" ? "99aabbccddee"
+          : scenario === "data-dump" ? "aabbccddeeff"
+            : scenario === "mode-drift" ? "bbccddee0011" : "ccddee001122",
+    )
     let executeCallCount = 0
     await assert.rejects(
-      () => collectRemoteSchemaMetadata({
-        approved: true,
-        cliPath: "/opt/supabase-go",
+      () => collectRemoteSchemaMetadata(remoteCollectorContext(
         artifactRoot,
-        linkedProjectMetadata: { project_ref: parentProjectRef, region: "ap-northeast-2" },
-        sourceEnvironment: { SUPABASE_DB_PASSWORD: "qa-password" },
-      }, async (invocation) => {
+        { SUPABASE_DB_PASSWORD: "qa-password" },
+      ), async (invocation) => {
         executeCallCount += 1
+        const preflight = remoteDockerPreflightResult(invocation)
+        if (preflight) return preflight
         if (invocation.step === "schema-dump") {
-          const schemaPath = invocation.args.at(-1)
+          const schemaPath = collectorRuntime.files.schemaDumpPath
           if (scenario === "replaced-dump") await rm(schemaPath)
           await writeFile(
             schemaPath,
@@ -1490,6 +2220,7 @@ test("read-only metadata shape와 schema-only marker를 엄격히 검사한다",
               : "create schema dashboard_private;\n",
             { mode: 0o600 },
           )
+          if (scenario === "mode-drift") await chmod(schemaPath, 0o644)
           return { code: 0, stdout: "", stderr: "" }
         }
         const metadata = remoteMetadataFixture([
@@ -1498,16 +2229,23 @@ test("read-only metadata shape와 schema-only marker를 엄격히 검사한다",
         if (scenario === "not-read-only") metadata.transaction_read_only = false
         return {
           code: 0,
-          stdout: JSON.stringify([{ notification_local_qa_remote_metadata: metadata }]),
+          stdout: JSON.stringify(
+            scenario === "object-only"
+              ? metadata
+              : [{ notification_local_qa_remote_metadata: metadata }],
+          ),
           stderr: "",
         }
-      }),
-      scenario === "not-read-only"
+      }, { collectorRuntime }),
+      scenario === "not-read-only" || scenario === "object-only"
         ? /notification_local_db_remote_metadata_invalid/u
         : /notification_local_db_remote_schema_dump_refused/u,
     )
-    assert.equal(executeCallCount, scenario === "not-read-only" ? 1 : 2)
-    assert.deepEqual(await readdir(artifactRoot), [])
+    assert.equal(
+      executeCallCount,
+      scenario === "not-read-only" || scenario === "object-only" ? 4 : 5,
+    )
+    assert.deepEqual(await readdir(artifactRoot), ["remote-collector"])
   }
 })
 
@@ -1613,6 +2351,18 @@ test("CLI 기본 모드는 무료 티어 계획만 출력하고 자원을 만들
       pgTapFileCount: 10,
       pgTapFiles: expectedPgTapFiles,
       providerEgressBlocked: true,
+      remoteCollector: {
+        mode: "shared-supavisor-session",
+        host: "aws-1-ap-northeast-2.pooler.supabase.com",
+        port: 5432,
+        sslmode: "verify-full",
+        clientImage:
+          "public.ecr.aws/supabase/postgres:17.6.1.132@sha256:e09e93a61ed1560caf4be79c9eb29401875bea74b12aec4657cb08bf34ea3a13",
+        clientMajor: 17,
+        schemas: ["public", "dashboard_private"],
+        productionRowDataCopied: 0,
+        productionMutationCount: 0,
+      },
     },
   })
 })
@@ -2043,7 +2793,7 @@ test("pgTAP은 raw plan line 대신 pg_prove의 exact 10-file PASS summary를 �
   }
 })
 
-test("remote child env와 local env를 분리하고 local에서 remote/provider secret을 제거한다", async (t) => {
+test("child environment는 local만 만들고 remote/provider secret을 제거한다", async (t) => {
   const { manifest } = await buildRuntimeManifest(t)
   const { buildNotificationQaChildEnvironments } = await loadSubject()
   const sourceEnvironment = sourceEnvironmentFixture()
@@ -2052,19 +2802,7 @@ test("remote child env와 local env를 분리하고 local에서 remote/provider 
     runtimeManifest: manifest,
   })
 
-  assert.equal(
-    environments.remoteMetadata.SUPABASE_ACCESS_TOKEN,
-    sourceEnvironment.SUPABASE_ACCESS_TOKEN,
-  )
-  assert.equal("SUPABASE_DB_PASSWORD" in environments.remoteMetadata, false)
-  assert.equal(
-    environments.remoteSchema.SUPABASE_ACCESS_TOKEN,
-    sourceEnvironment.SUPABASE_ACCESS_TOKEN,
-  )
-  assert.equal(
-    environments.remoteSchema.SUPABASE_DB_PASSWORD,
-    sourceEnvironment.SUPABASE_DB_PASSWORD,
-  )
+  assert.deepEqual(Object.keys(environments), ["local"])
   assert.equal(environments.local.PGHOST, "127.0.0.1")
   assert.equal(environments.local.PGPORT, "55432")
   assert.equal(environments.local.PGDATABASE, "postgres")
@@ -2089,8 +2827,6 @@ test("remote child env와 local env를 분리하고 local에서 remote/provider 
     /provider-secret|service-account-secret|email-secret|sms-secret/u,
   )
   assert.equal(Object.isFrozen(environments), true)
-  assert.equal(Object.isFrozen(environments.remoteMetadata), true)
-  assert.equal(Object.isFrozen(environments.remoteSchema), true)
   assert.equal(Object.isFrozen(environments.local), true)
 })
 
@@ -2935,6 +3671,19 @@ test("CLI full flags는 외부 주입 없이 trusted default executor의 orchest
   const localQueryEnd = runnerSource.indexOf("async function assertInternalNetwork", localQueryStart)
   assert.ok(localQueryStart >= 0 && localQueryEnd > localQueryStart)
   const localQuerySource = runnerSource.slice(localQueryStart, localQueryEnd)
+  const collectorStart = runnerSource.indexOf("export async function collectRemoteSchemaMetadata")
+  const collectorEnd = runnerSource.indexOf("export function assertLocalMutationTarget", collectorStart)
+  assert.ok(collectorStart >= 0 && collectorEnd > collectorStart)
+  const collectorSource = runnerSource.slice(collectorStart, collectorEnd)
+  const remoteInvocationStart = runnerSource.indexOf(
+    "export function buildNotificationRemoteDockerInvocation",
+  )
+  const remoteInvocationEnd = runnerSource.indexOf(
+    "function assertNotificationRunNotAborted",
+    remoteInvocationStart,
+  )
+  assert.ok(remoteInvocationStart >= 0 && remoteInvocationEnd > remoteInvocationStart)
+  const remoteInvocationSource = runnerSource.slice(remoteInvocationStart, remoteInvocationEnd)
 
   assert.match(
     runnerSource,
@@ -2957,9 +3706,9 @@ test("CLI full flags는 외부 주입 없이 trusted default executor의 orchest
     1,
   )
   assert.doesNotMatch(runnerSource, /DEFAULT_SUPABASE_CLI_PATH/u)
-  assert.match(
+  assert.doesNotMatch(
     runnerSource,
-    /execute === executeBoundedProcess && collectorRuntime === undefined/u,
+    /REMOTE_SAFE_ENV_KEYS|assertLinkedProject(?:Metadata|State)|buildRemoteEnvironment|buildRemoteInvocation/u,
   )
   assert.match(
     runnerSource,
@@ -2990,10 +3739,20 @@ test("CLI full flags는 외부 주입 없이 trusted default executor의 orchest
   assert.match(runnerSource, /process\.on\(signal, handlers\[signal\]\)/u)
   assert.match(versionSource, /command: DEFAULT_SUPABASE_GO_CLI_PATH/u)
   assert.match(localQuerySource, /command: DEFAULT_SUPABASE_GO_CLI_PATH/u)
-  assert.match(prepareSource, /cliPath: DEFAULT_SUPABASE_GO_CLI_PATH/u)
+  assert.match(
+    prepareSource,
+    /collectorContext:\s*\{\s*approved: true,\s*artifactRoot: tempRoot,\s*sourceEnvironment: process\.env,\s*abortSignal,/u,
+  )
+  assert.doesNotMatch(prepareSource, /cliPath:|linkedProjectMetadata:/u)
   assert.match(prepareSource, /execute: executeBoundedProcess/u)
   assert.match(prepareSource, /await runNotificationRemoteCollectorWithCleanup/u)
   assert.doesNotMatch(prepareSource, /local-db-start|buildNotificationLocalQaInvocation/u)
+  assert.match(collectorSource, /buildNotificationRemoteDockerInvocation\("image-inspect"/u)
+  assert.doesNotMatch(collectorSource, /--linked|db", "(?:query|dump)"/u)
+  assert.doesNotMatch(
+    remoteInvocationSource,
+    /SUPABASE_(?:ACCESS_TOKEN|DB_PASSWORD)|PGPASSWORD|--linked|db", "(?:query|dump)"/u,
+  )
   assert.ok(remoteRunSource.indexOf("await cleanupController.preflight(abortSignal)")
     < remoteRunSource.indexOf("remoteCollection = await collect"))
   assert.ok(remoteRunSource.indexOf("remoteCollection = await collect")
