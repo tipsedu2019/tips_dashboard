@@ -212,6 +212,18 @@ test("결재 대상 기간 형식 함수는 PostgreSQL substring 문법을 사�
   assert.doesNotMatch(formatter, /pg_catalog\.substring\s*\(/i)
 })
 
+test("결재 첨부 표시 함수는 PostgreSQL coalesce 문법을 사용한다", async () => {
+  const sql = await source(contentPayloadMigrationUrl)
+  const formatter = block(
+    sql,
+    "create or replace function dashboard_private.approval_attachment_snapshot_v1",
+    "create or replace function dashboard_private.write_approval_notification_event_v2",
+  )
+
+  assert.match(formatter, /\bcoalesce\(p_attachment_links, ''\)/i)
+  assert.doesNotMatch(formatter, /pg_catalog\.coalesce\s*\(/i)
+})
+
 test("클라이언트 서비스는 고정 RPC만 호출하고 요청·댓글·이벤트에 직접 쓰지 않는다", async () => {
   const service = await source(serviceUrl)
 

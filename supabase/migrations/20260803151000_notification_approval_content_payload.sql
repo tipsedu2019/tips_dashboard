@@ -65,7 +65,7 @@ as $$
   with attachment_lines as (
     select pg_catalog.btrim(candidate.value) as value
     from pg_catalog.regexp_split_to_table(
-      pg_catalog.coalesce(p_attachment_links, ''),
+      coalesce(p_attachment_links, ''),
       E'\\r?\\n'
     ) candidate(value)
     where nullif(pg_catalog.btrim(candidate.value), '') is not null
