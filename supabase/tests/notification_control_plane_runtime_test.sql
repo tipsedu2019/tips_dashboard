@@ -160,7 +160,7 @@ select has_function(
   'dashboard_private',
   'notification_seed_workflow_settings_v1',
   array[]::text[],
-  'idempotent settings seed helper exists'
+  'historical settings seed helper remains installed without rerunning it after graph extensions'
 );
 select has_function(
   'public',
@@ -174,8 +174,8 @@ select is(
     select pg_catalog.count(*)
     from dashboard_private.notification_settings_ui_registry
   ),
-  165::bigint,
-  'closed registry contains only the approved Task 8 baseline cells'
+  185::bigint,
+  'closed registry contains the complete reviewed 185-cell graph'
 );
 select results_eq(
   $$
@@ -195,19 +195,186 @@ select results_eq(
   'registry preserves the canonical seven-workflow Korean order'
 );
 select is_empty($$
-  select registry.event_key, registry.audience_key, registry.channel_key
-  from dashboard_private.notification_settings_ui_registry registry
-  where registry.workflow_key = 'registration'
-    and not (
-      registry.event_key in (
-        'registration.case_created',
+  with expected(
+    event_key,
+    audience_key,
+    channel_key,
+    rule_variant_key,
+    delivery_mode,
+    configuration_kind,
+    activation_locked
+  ) as (
+    values
+      (
+        'registration.case_created'::text,
+        'management_team'::text,
+        'google_chat'::text,
+        'immediate'::text,
+        'immediate'::text,
+        'editable_rule'::text,
+        false
+      ),
+      (
         'registration.registration_completed',
-        'registration.case_closed'
+        'management_team',
+        'google_chat',
+        'immediate',
+        'immediate',
+        'editable_rule',
+        false
+      ),
+      (
+        'registration.case_closed',
+        'management_team',
+        'google_chat',
+        'immediate',
+        'immediate',
+        'editable_rule',
+        false
       )
-      and registry.audience_key = 'management_team'
-      and registry.channel_key = 'google_chat'
+
+    union all
+
+    select
+      'registration.appointment_reminder_due',
+      cell.audience_key,
+      cell.channel_key,
+      variant.rule_variant_key,
+      'scheduled',
+      'editable_rule',
+      false
+    from (
+      values
+        ('previous_day_at'::text),
+        ('same_day_at'::text),
+        ('offset_before'::text)
+    ) variant(rule_variant_key)
+    cross join (
+      values
+        ('management_team'::text, 'in_app'::text),
+        ('track_director'::text, 'in_app'::text),
+        ('management_team'::text, 'google_chat'::text)
+    ) cell(audience_key, channel_key)
+
+    union all
+
+    select
+      'registration.phone_consultation_ready',
+      'track_director',
+      'in_app',
+      'immediate',
+      'immediate',
+      'fixed_policy_editable_template',
+      true
+
+    union all
+
+    select
+      event.event_key,
+      cell.audience_key,
+      cell.channel_key,
+      'immediate',
+      'immediate',
+      'fixed_policy_editable_template',
+      true
+    from (
+      values
+        ('registration.visit_scheduled'::text),
+        ('registration.visit_rescheduled'::text),
+        ('registration.visit_replaced'::text),
+        ('registration.visit_subject_deselected'::text),
+        ('registration.visit_canceled'::text)
+    ) event(event_key)
+    cross join (
+      values
+        ('track_director'::text, 'in_app'::text),
+        ('management_team'::text, 'google_chat'::text)
+    ) cell(audience_key, channel_key)
+  ), actual as (
+    select
+      registry.event_key,
+      registry.audience_key,
+      registry.channel_key,
+      registry.rule_variant_key,
+      registry.delivery_mode,
+      registry.configuration_kind,
+      registry.activation_locked
+    from dashboard_private.notification_settings_ui_registry registry
+    where registry.workflow_key = 'registration'
+  ), violations as (
+    select pg_catalog.concat_ws(
+      '|',
+      'unexpected',
+      actual.event_key,
+      actual.audience_key,
+      actual.channel_key,
+      actual.rule_variant_key
+    ) as violation
+    from actual
+    where not exists (
+      select 1
+      from expected
+      where row(
+        expected.event_key,
+        expected.audience_key,
+        expected.channel_key,
+        expected.rule_variant_key,
+        expected.delivery_mode,
+        expected.configuration_kind,
+        expected.activation_locked
+      ) = row(
+        actual.event_key,
+        actual.audience_key,
+        actual.channel_key,
+        actual.rule_variant_key,
+        actual.delivery_mode,
+        actual.configuration_kind,
+        actual.activation_locked
+      )
     )
-$$, 'registration baseline exposes only the three proven management Chat cells');
+
+    union all
+
+    select pg_catalog.concat_ws(
+      '|',
+      'missing',
+      expected.event_key,
+      expected.audience_key,
+      expected.channel_key,
+      expected.rule_variant_key
+    )
+    from expected
+    where not exists (
+      select 1
+      from actual
+      where row(
+        actual.event_key,
+        actual.audience_key,
+        actual.channel_key,
+        actual.rule_variant_key,
+        actual.delivery_mode,
+        actual.configuration_kind,
+        actual.activation_locked
+      ) = row(
+        expected.event_key,
+        expected.audience_key,
+        expected.channel_key,
+        expected.rule_variant_key,
+        expected.delivery_mode,
+        expected.configuration_kind,
+        expected.activation_locked
+      )
+    )
+
+    union all
+
+    select 'registration-count:' || pg_catalog.count(*)::text
+    from actual
+    having pg_catalog.count(*) <> 23
+  )
+  select violation
+  from violations
+$$, 'registration registry matches the exact current 23-cell graph');
 select is_empty($$
   select registry.event_key, registry.audience_key, registry.channel_key
   from dashboard_private.notification_settings_ui_registry registry
@@ -360,38 +527,113 @@ $$, 'legacy source channels map only to their exact approved registry cells');
 select is_empty($$
   select registry.rule_id
   from dashboard_private.notification_settings_ui_registry registry
-  join dashboard_private.notification_rules rule_row on rule_row.id = registry.rule_id
-  join dashboard_private.notification_templates template_row
+  left join dashboard_private.notification_rules rule_row on rule_row.id = registry.rule_id
+  left join dashboard_private.notification_templates template_row
     on template_row.rule_id = rule_row.id
    and template_row.version = 1
-  where rule_row.created_by is not null
+  where rule_row.id is null
+    or template_row.id is null
+    or rule_row.created_by is not null
     or rule_row.created_actor_kind <> 'system'
     or template_row.created_by is not null
     or template_row.created_actor_kind <> 'system'
-    or template_row.id <> dashboard_private.notification_deterministic_uuid_v1(
-      'notification-template-v1',
-      registry.rule_id::text || '|1'
-    )
-$$, 'seed rules and immutable version-one templates use deterministic IDs and system actors');
+    or rule_row.id is distinct from case registry.configuration_kind
+      when 'editable_rule' then
+        dashboard_private.notification_deterministic_uuid_v1(
+          'notification-rule-v1',
+          pg_catalog.concat_ws(
+            '|',
+            'global',
+            registry.workflow_key,
+            registry.event_key,
+            registry.audience_key,
+            registry.channel_key,
+            registry.rule_variant_key
+          )
+        )
+      when 'fixed_policy_editable_template' then
+        dashboard_private.notification_deterministic_uuid_v1(
+          'registration-handoff-rule-v1',
+          pg_catalog.concat_ws(
+            '|',
+            registry.event_key,
+            registry.audience_key,
+            registry.channel_key
+          )
+        )
+    end
+    or template_row.id is distinct from case registry.configuration_kind
+      when 'editable_rule' then
+        dashboard_private.notification_deterministic_uuid_v1(
+          'notification-template-v1',
+          registry.rule_id::text || '|1'
+        )
+      when 'fixed_policy_editable_template' then
+        dashboard_private.notification_deterministic_uuid_v1(
+          'registration-handoff-template-v1',
+          pg_catalog.concat_ws(
+            '|',
+            registry.event_key,
+            registry.audience_key,
+            registry.channel_key,
+            '1'
+          )
+        )
+    end
+$$, 'editable and fixed registry rules use their exact deterministic rule/template namespaces and system actors');
 
-create temporary table notification_seed_idempotency_results (
-  result_order integer primary key,
-  payload jsonb not null
-) on commit drop;
-insert into notification_seed_idempotency_results(result_order, payload)
-values (1, dashboard_private.notification_seed_workflow_settings_v1());
-insert into notification_seed_idempotency_results(result_order, payload)
-values (2, dashboard_private.notification_seed_workflow_settings_v1());
-select is(
-  (select payload from notification_seed_idempotency_results where result_order = 2),
-  (select payload from notification_seed_idempotency_results where result_order = 1),
-  'notification seed rerun keeps rule/template/import counts and checksums stable'
-);
+select is_empty($$
+  select registry.rule_id
+  from dashboard_private.notification_settings_ui_registry registry
+  left join dashboard_private.notification_rules rule_row
+    on rule_row.id = registry.rule_id
+  left join dashboard_private.notification_templates template_row
+    on template_row.id = rule_row.active_template_id
+   and template_row.rule_id = rule_row.id
+  left join dashboard_private.notification_rule_content_contracts contract_row
+    on contract_row.rule_id = registry.rule_id
+  where rule_row.id is null
+    or template_row.id is null
+    or contract_row.rule_id is null
+    or rule_row.scope_key <> 'global'
+    or row(
+      rule_row.workflow_key,
+      rule_row.event_key,
+      rule_row.audience_key,
+      rule_row.channel_key,
+      rule_row.rule_variant_key,
+      rule_row.delivery_mode,
+      rule_row.schedule_key,
+      rule_row.schedule_config
+    ) is distinct from row(
+      registry.workflow_key,
+      registry.event_key,
+      registry.audience_key,
+      registry.channel_key,
+      registry.rule_variant_key,
+      registry.delivery_mode,
+      registry.schedule_key,
+      registry.schedule_config
+    )
+    or row(
+      contract_row.workflow_key,
+      contract_row.event_key,
+      contract_row.audience_key,
+      contract_row.channel_key,
+      contract_row.rule_variant_key
+    ) is distinct from row(
+      registry.workflow_key,
+      registry.event_key,
+      registry.audience_key,
+      registry.channel_key,
+      registry.rule_variant_key
+    )
+$$, 'current 185-cell registry graph resolves exact rules, active templates, and content contracts');
 select is_empty($$
   select flag_row.flag_key
   from dashboard_private.notification_runtime_flags flag_row
   where flag_row.enabled
-$$, 'all twelve notification runtime flags remain false after settings seed');
+$$, 'all twelve notification runtime flags remain false in the current graph');
 select ok(
   pg_catalog.strpos(
     pg_catalog.pg_get_functiondef(
@@ -1029,36 +1271,47 @@ grant execute on function pg_temp.notification_runtime_expected_revision(text, t
 grant execute on function pg_temp.notification_runtime_rule_patch(text, jsonb)
   to authenticated;
 
--- Missing either English or math legacy source, or disagreeing enabled values,
--- must stop the generic subject-team import for operator review.
-savepoint notification_runtime_subject_pair_missing;
-delete from public.makeup_notification_settings
-where trigger_kind = 'submitted'
-  and channel = 'google_chat_math';
-select ok(
-  pg_temp.notification_runtime_throws(
-    $sql$select dashboard_private.notification_seed_workflow_settings_v1()$sql$,
-    'notification_makeup_subject_settings_review_required'
-  ),
-  'subject import rejects a missing English or math source row'
-);
-rollback to savepoint notification_runtime_subject_pair_missing;
-release savepoint notification_runtime_subject_pair_missing;
-
-savepoint notification_runtime_subject_pair_mismatch;
-update public.makeup_notification_settings
-set enabled = not enabled
-where trigger_kind = 'submitted'
-  and channel = 'google_chat_math';
-select ok(
-  pg_temp.notification_runtime_throws(
-    $sql$select dashboard_private.notification_seed_workflow_settings_v1()$sql$,
-    'notification_makeup_subject_settings_review_required'
-  ),
-  'subject import rejects disagreeing English and math enabled values'
-);
-rollback to savepoint notification_runtime_subject_pair_mismatch;
-release savepoint notification_runtime_subject_pair_mismatch;
+-- The historical seed helper is intentionally not rerun after later migrations
+-- extend the graph. Validate the current registration graph in place instead.
+select is_empty($$
+  select registry.rule_id
+  from dashboard_private.notification_settings_ui_registry registry
+  join dashboard_private.notification_rules rule_row on rule_row.id = registry.rule_id
+  where registry.workflow_key = 'registration'
+    and registry.event_key = 'registration.appointment_reminder_due'
+    and (
+      registry.rule_variant_key not in (
+        'previous_day_at',
+        'same_day_at',
+        'offset_before'
+      )
+      or registry.delivery_mode is distinct from 'scheduled'
+      or registry.schedule_key is distinct from registry.rule_variant_key
+      or registry.schedule_config ->> 'anchor_key'
+        is distinct from 'appointment_scheduled_at'
+      or registry.schedule_config ->> 'timezone' is distinct from 'Asia/Seoul'
+      or rule_row.enabled
+    )
+$$, 'current registration reminder graph preserves three disabled schedule variants across reviewed destinations');
+select is_empty($$
+  select registry.rule_id
+  from dashboard_private.notification_settings_ui_registry registry
+  join dashboard_private.notification_rules rule_row on rule_row.id = registry.rule_id
+  where registry.workflow_key = 'registration'
+    and registry.configuration_kind = 'fixed_policy_editable_template'
+    and (
+      not registry.activation_locked
+      or not rule_row.enabled
+      or registry.event_key not in (
+        'registration.phone_consultation_ready',
+        'registration.visit_scheduled',
+        'registration.visit_rescheduled',
+        'registration.visit_replaced',
+        'registration.visit_subject_deselected',
+        'registration.visit_canceled'
+      )
+    )
+$$, 'current fixed registration handoff graph keeps eleven enabled rules activation locked');
 
 select ok(
   pg_temp.notification_runtime_seed_rule_id('task_chat') is not null

@@ -949,12 +949,18 @@ test("영어·수학 레거시 토글은 공통 과목팀 canonical rule 한 건
   assert.doesNotMatch(toggle, /\.upsert\(/)
 })
 
-test("pgTAP 패킷은 재실행 무변경·원본 계보·스냅샷·최종 parity를 검증한다", async () => {
+test("pgTAP 패킷은 single-writer 경계·원본 계보·스냅샷·최종 parity를 검증한다", async () => {
   const sql = await optionalSource(pgTapUrl)
 
-  assert.match(sql, /notification_reconcile_makeup_settings_v1/)
+  assert.match(sql, /select plan\(85\)/)
+  assert.match(sql, /mirror_makeup_notification_template_v1/)
+  assert.match(sql, /hasnt_trigger\([\s\S]*?reconcile_makeup_notification_settings_after_write_v1/)
+  assert.match(sql, /authenticated direct legacy setting writers remain closed/)
+  assert.match(sql, /current canonical makeup graph resolves every registry rule/)
+  assert.match(sql, /single-writer mirror keeps legacy compatibility checksums current/)
+  assert.doesNotMatch(sql, /select dashboard_private\.notification_reconcile_makeup_settings_v1\(\)/)
+  assert.doesNotMatch(sql, /task17-install-v1/)
   assert.match(sql, /notification_import_makeup_retained_state_v1/)
-  assert.match(sql, /operator-edited|운영자 수정/)
   assert.match(sql, /rule_id/)
   assert.match(sql, /revision/)
   assert.match(sql, /enabled/)
@@ -966,7 +972,6 @@ test("pgTAP 패킷은 재실행 무변경·원본 계보·스냅샷·최종 pari
   assert.match(sql, /notification_assert_makeup_retained_import_complete_v1/)
   assert.match(sql, /가장 최신 재제출 이벤트를 occurrence로 사용한다/)
   assert.match(sql, /NULL 전이 명령/)
-  assert.match(sql, /task17-install-v1/)
   assert.match(sql, /transition_makeup_request_v2/)
   assert.match(sql, /makeup\.revision_requested/)
   assert.match(sql, /같은 요청 ID 재실행/)

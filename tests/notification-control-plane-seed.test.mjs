@@ -297,7 +297,7 @@ test("final runtime marker is capability-only and locked to authenticated and se
   assert.match(marker, /public\.save_notification_control_plane_with_override_v1\(text,jsonb,jsonb,uuid,uuid,jsonb\)/i)
 })
 
-test("pgTAP packet covers registry shape, import idempotency, rejection, flags, and marker privileges", async () => {
+test("pgTAP packet covers the current registry graph, import evidence, flags, and marker privileges", async () => {
   const pgTap = await readFile(runtimePgTapUrl, "utf8")
 
   for (const contract of [
@@ -310,14 +310,19 @@ test("pgTAP packet covers registry shape, import idempotency, rejection, flags, 
     "override request replays one response and writes one safe conflict audit",
     "override request ID rejects a changed fingerprint",
     "registry-external rule is rejected before the unchecked save implementation",
-    "subject import rejects a missing English or math source row",
-    "subject import rejects disagreeing English and math enabled values",
+    "registration registry matches the exact current 23-cell graph",
+    "editable and fixed registry rules use their exact deterministic rule/template namespaces and system actors",
+    "current 185-cell registry graph resolves exact rules, active templates, and content contracts",
+    "current registration reminder graph preserves three disabled schedule variants across reviewed destinations",
+    "current fixed registration handoff graph keeps eleven enabled rules activation locked",
     "runtime fixtures reuse seeded registry IDs for save and CAS coverage",
-    "notification seed rerun keeps rule/template/import counts and checksums stable",
-    "all twelve notification runtime flags remain false after settings seed",
+    "all twelve notification runtime flags remain false in the current graph",
   ]) {
     assert.ok(pgTap.includes(contract), `missing pgTAP contract: ${contract}`)
   }
+  assert.match(pgTap, /185::bigint/u)
+  assert.doesNotMatch(pgTap, /165::bigint/u)
+  assert.doesNotMatch(pgTap, /notification_seed_workflow_settings_v1\(\)/u)
 })
 
 test("content contract migration extends the seed additively and keeps fixed registration activation locked", async () => {
@@ -339,6 +344,7 @@ test("content contract migration extends the seed additively and keeps fixed reg
     "contract registry mirrors every in-scope UI rule identity",
     "customer-message rules remain outside the editable content registry",
     "fixed registration rules expose editable content with activation locked",
+    "one reviewed vNext template exists for every content contract",
     "v2 changed content appends one contract-versioned custom template",
     "v2 retry is an exact no-op",
     "activation-locked rules reject enabled patches",

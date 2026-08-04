@@ -1443,8 +1443,30 @@ select ok(pg_catalog.has_table_privilege('authenticated', 'public.dashboard_push
 select ok(pg_catalog.has_table_privilege('authenticated', 'public.dashboard_push_subscriptions', 'UPDATE'), 'push subscription update remains');
 select ok(pg_catalog.has_table_privilege('authenticated', 'public.dashboard_push_subscriptions', 'DELETE'), 'push subscription delete remains');
 select ok(pg_catalog.has_table_privilege('authenticated', 'public.makeup_notification_settings', 'SELECT'), 'makeup settings select remains');
-select ok(pg_catalog.has_table_privilege('authenticated', 'public.makeup_notification_settings', 'INSERT'), 'makeup settings insert remains');
-select ok(pg_catalog.has_table_privilege('authenticated', 'public.makeup_notification_settings', 'UPDATE'), 'makeup settings update remains');
+select ok(
+  not pg_catalog.has_table_privilege(
+    'authenticated',
+    'public.makeup_notification_settings',
+    'INSERT'
+  ),
+  'authenticated callers cannot insert legacy makeup settings directly'
+);
+select ok(
+  not pg_catalog.has_table_privilege(
+    'authenticated',
+    'public.makeup_notification_settings',
+    'UPDATE'
+  ),
+  'authenticated callers cannot update legacy makeup settings directly'
+);
+select ok(
+  not pg_catalog.has_table_privilege(
+    'authenticated',
+    'public.makeup_notification_settings',
+    'DELETE'
+  ),
+  'authenticated callers cannot delete legacy makeup settings directly'
+);
 select ok(pg_catalog.has_table_privilege('authenticated', 'public.makeup_notification_deliveries', 'SELECT'), 'makeup delivery select remains');
 select ok(pg_catalog.has_table_privilege('authenticated', 'public.makeup_notification_deliveries', 'INSERT'), 'makeup delivery insert remains');
 select ok(pg_catalog.has_table_privilege('authenticated', 'public.ops_registration_messages', 'SELECT'), 'registration message status read remains');

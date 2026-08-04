@@ -23,6 +23,18 @@ const parentProjectRef = "slnjqlzzhewblvttiidk"
 const runnerUrl = new URL("../scripts/run-notification-isolated-db-qa.mjs", import.meta.url)
 const repoRoot = fileURLToPath(new URL("..", import.meta.url))
 const runnerSource = readFileSync(runnerUrl, "utf8")
+const expectedPgTapFiles = Object.freeze([
+  "supabase/tests/notification_control_plane_schema_test.sql",
+  "supabase/tests/notification_content_contract_test.sql",
+  "supabase/tests/notification_makeup_single_writer_test.sql",
+  "supabase/tests/notification_control_plane_runtime_test.sql",
+  "supabase/tests/notification_ops_task_adapters_test.sql",
+  "supabase/tests/notification_registration_handoffs_test.sql",
+  "supabase/tests/notification_transfer_withdrawal_adapters_test.sql",
+  "supabase/tests/notification_makeup_adapter_test.sql",
+  "supabase/tests/notification_approval_adapter_test.sql",
+  "supabase/tests/notification_system_template_vnext_test.sql",
+])
 const localMigrations = Object.freeze([
   Object.freeze({
     fileName: "20260803140000_notification_content_contracts.sql",
@@ -873,7 +885,13 @@ test("CLI 기본 모드는 무료 티어 계획만 출력하고 자원을 만들
       localDatabaseProjectPattern: "tips_notification_db_qa_<random>",
       localDatabasePort: "dynamic-loopback",
       internalDockerNetwork: true,
+      syntheticFixture: {
+        settingsRegistry: 185,
+        rules: 186,
+        operationalRows: 0,
+      },
       pgTapFileCount: 10,
+      pgTapFiles: expectedPgTapFiles,
       providerEgressBlocked: true,
     },
   })

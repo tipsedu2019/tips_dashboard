@@ -9,9 +9,9 @@ set constraints all deferred;
 
 select has_function(
   'dashboard_private',
-  'notification_reconcile_makeup_settings_v1',
-  array[]::text[],
-  'Task 8 기준 뒤 변경된 휴보강 설정만 조정하는 함수가 있다'
+  'mirror_makeup_notification_template_v1',
+  array['uuid', 'uuid', 'uuid'],
+  'canonical content를 legacy 호환 행으로 내리는 단방향 mirror가 있다'
 );
 select has_function(
   'dashboard_private',
@@ -76,162 +76,144 @@ select has_function(
   array['uuid', 'uuid', 'bigint', 'uuid', 'text', 'text'],
   '구글챗 결과를 소유권과 canonical delivery에 함께 확정한다'
 );
-select has_trigger(
+select hasnt_trigger(
   'public',
   'makeup_notification_settings',
   'reconcile_makeup_notification_settings_after_write_v1',
-  '레거시 설정 변경은 같은 트랜잭션에서 Task 8 기준과 조정된다'
+  'legacy 설정을 canonical로 올리던 trigger는 제거된다'
 );
 
-create temporary table makeup_adapter_before as
-select
-  rule_row.id as rule_id,
-  rule_row.revision,
-  rule_row.enabled,
-  rule_row.active_template_id,
-  template_row.checksum
-from dashboard_private.notification_rules rule_row
-join dashboard_private.notification_templates template_row
-  on template_row.id = rule_row.active_template_id
-where rule_row.workflow_key = 'makeup_requests';
-
-select lives_ok(
-  $$select dashboard_private.notification_reconcile_makeup_settings_v1()$$,
-  '변경이 없으면 설정 조정은 안전한 no-op이다'
+select has_function(
+  'public',
+  'save_notification_control_plane_v2',
+  array['text', 'jsonb', 'jsonb', 'jsonb', 'uuid'],
+  '휴보강 설정과 content는 공통 v2 command로만 저장한다'
 );
-select lives_ok(
-  $$select dashboard_private.notification_reconcile_makeup_settings_v1()$$,
-  '설정 조정 두 번째 실행도 안전한 no-op이다'
+select ok(
+  pg_catalog.has_table_privilege(
+    'authenticated', 'public.makeup_notification_settings', 'SELECT'
+  )
+  and not pg_catalog.has_table_privilege(
+    'authenticated', 'public.makeup_notification_settings', 'INSERT'
+  )
+  and not pg_catalog.has_table_privilege(
+    'authenticated', 'public.makeup_notification_settings', 'UPDATE'
+  )
+  and not pg_catalog.has_table_privilege(
+    'authenticated', 'public.makeup_notification_settings', 'DELETE'
+  ),
+  'authenticated direct legacy setting writers remain closed'
+);
+select ok(
+  not pg_catalog.has_function_privilege(
+    'anon',
+    'public.reconcile_makeup_notification_settings_after_write_v1()',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.reconcile_makeup_notification_settings_after_write_v1()',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'service_role',
+    'public.reconcile_makeup_notification_settings_after_write_v1()',
+    'EXECUTE'
+  ),
+  'obsolete legacy-to-canonical trigger function is closed to every API role'
 );
 select is_empty($$
-  select before.rule_id
-  from makeup_adapter_before before
-  join dashboard_private.notification_rules rule_row on rule_row.id = before.rule_id
+  select registry.rule_id
+  from dashboard_private.notification_settings_ui_registry registry
+  left join dashboard_private.notification_rules rule_row
+    on rule_row.id = registry.rule_id
+  left join dashboard_private.notification_templates template_row
+    on template_row.id = rule_row.active_template_id
+   and template_row.rule_id = rule_row.id
+  left join dashboard_private.notification_rule_content_contracts contract_row
+    on contract_row.rule_id = registry.rule_id
+  where registry.workflow_key = 'makeup_requests'
+    and (
+      rule_row.id is null
+      or template_row.id is null
+      or contract_row.rule_id is null
+      or row(
+        rule_row.workflow_key,
+        rule_row.event_key,
+        rule_row.audience_key,
+        rule_row.channel_key,
+        rule_row.rule_variant_key
+      ) is distinct from row(
+        contract_row.workflow_key,
+        contract_row.event_key,
+        contract_row.audience_key,
+        contract_row.channel_key,
+        contract_row.rule_variant_key
+      )
+    )
+$$, 'current canonical makeup graph resolves every registry rule, active template, and content contract');
+select is_empty($$
+  select metadata.source_key, mapped_rule.rule_id_text
+  from dashboard_private.notification_settings_import_metadata metadata
+  cross join lateral pg_catalog.jsonb_array_elements_text(
+    metadata.mapped_rule_ids
+  ) mapped_rule(rule_id_text)
+  join dashboard_private.notification_rules rule_row
+    on rule_row.id::text = mapped_rule.rule_id_text
   join dashboard_private.notification_templates template_row
     on template_row.id = rule_row.active_template_id
-  where row(before.revision, before.enabled, before.active_template_id, before.checksum)
-    is distinct from row(
-      rule_row.revision,
-      rule_row.enabled,
-      rule_row.active_template_id,
-      template_row.checksum
+  join public.makeup_notification_settings legacy_setting
+    on metadata.source_key = 'makeup_notification_settings:'
+      || legacy_setting.trigger_kind || ':' || legacy_setting.channel
+  where metadata.source_table = 'public.makeup_notification_settings'
+    and legacy_setting.channel = 'dashboard_personal'
+    and (
+      legacy_setting.title_template is distinct from template_row.title_template
+      or legacy_setting.body_template is distinct from template_row.body_template
     )
-$$, '변경 없는 재실행은 rule ID/revision/enabled/template checksum을 보존한다');
+$$, 'canonical active content remains mirrored to mapped legacy renderer rows');
 select is_empty($$
-  select audit.rule_id
-  from dashboard_private.notification_makeup_reconcile_audits audit
-  where audit.audit_key = 'task17-install-v1'
-    and not audit.source_changed
-    and row(
-      audit.before_revision,
-      audit.before_enabled,
-      audit.before_template_id,
-      audit.before_template_checksum,
-      audit.before_updated_by,
-      audit.before_updated_actor_kind
-    ) is distinct from row(
-      audit.after_revision,
-      audit.after_enabled,
-      audit.after_template_id,
-      audit.after_template_checksum,
-      audit.after_updated_by,
-      audit.after_updated_actor_kind
-    )
-$$, 'Task 8 뒤 원본이 그대로인 규칙은 Task 17 설치 전후 ID·revision·enabled·checksum·운영자 소유권이 같다');
+  select metadata.source_key
+  from dashboard_private.notification_settings_import_metadata metadata
+  join public.makeup_notification_settings legacy_setting
+    on metadata.source_key = 'makeup_notification_settings:'
+      || legacy_setting.trigger_kind || ':' || legacy_setting.channel
+  where metadata.source_table = 'public.makeup_notification_settings'
+    and metadata.source_checksum is distinct from
+      dashboard_private.notification_makeup_setting_checksum_v1(
+        legacy_setting.trigger_kind,
+        legacy_setting.channel,
+        legacy_setting.enabled,
+        legacy_setting.title_template,
+        legacy_setting.body_template
+      )
+$$, 'single-writer mirror keeps legacy compatibility checksums current');
 
-insert into public.profiles(id, role)
-values ('6ec17167-a617-4ee7-81e8-e6977a309abc'::uuid, 'viewer')
-on conflict (id) do nothing;
-
-create temporary table makeup_adapter_operator_case as
-select
-  metadata.source_key,
-  metadata.source_checksum,
-  legacy_setting.trigger_kind,
-  legacy_setting.channel,
-  (metadata.mapped_rule_ids ->> 0)::uuid as rule_id
-from dashboard_private.notification_settings_import_metadata metadata
-join public.makeup_notification_settings legacy_setting
-  on metadata.source_key = 'makeup_notification_settings:'
-    || legacy_setting.trigger_kind || ':' || legacy_setting.channel
-where metadata.source_table = 'public.makeup_notification_settings'
-  and pg_catalog.jsonb_array_length(metadata.mapped_rule_ids) > 0
-order by metadata.source_key
-limit 1;
-
-update dashboard_private.notification_rules rule_row
-set enabled = not rule_row.enabled,
-    revision = rule_row.revision + 1,
-    updated_by = '6ec17167-a617-4ee7-81e8-e6977a309abc'::uuid,
-    updated_actor_kind = 'user',
-    updated_at = pg_catalog.clock_timestamp()
-where rule_row.id = (select rule_id from makeup_adapter_operator_case);
-
-create temporary table makeup_adapter_operator_rule_before as
-select rule_row.id, rule_row.revision, rule_row.enabled, rule_row.active_template_id,
-       rule_row.updated_by, rule_row.updated_actor_kind
-from dashboard_private.notification_rules rule_row
-where rule_row.id = (select rule_id from makeup_adapter_operator_case);
-
-select lives_ok(
-  $$select dashboard_private.notification_reconcile_makeup_settings_v1()$$,
-  '레거시 원본이 그대로면 공통 UI 운영자 수정은 조정 대상이 아니다'
-);
-select is_empty($$
-  select before.id
-  from makeup_adapter_operator_rule_before before
-  join dashboard_private.notification_rules rule_row on rule_row.id = before.id
-  where row(
-    rule_row.revision,
-    rule_row.enabled,
-    rule_row.active_template_id,
-    rule_row.updated_by,
-    rule_row.updated_actor_kind
-  ) is distinct from row(
-    before.revision,
-    before.enabled,
-    before.active_template_id,
-    before.updated_by,
-    before.updated_actor_kind
-  )
-$$, '레거시 변경이 없으면 운영자 rule revision/enabled를 그대로 보존한다');
-
+set local role authenticated;
 select throws_ok(
   $$
-    update public.makeup_notification_settings legacy_setting
-    set enabled = not legacy_setting.enabled
-    where (legacy_setting.trigger_kind, legacy_setting.channel) = (
-      select trigger_kind, channel from makeup_adapter_operator_case
+    update public.makeup_notification_settings
+    set enabled = not enabled
+    where trigger_kind = 'submitted'
+      and channel = 'dashboard_personal'
+  $$,
+  '42501',
+  'permission denied for table makeup_notification_settings',
+  'authenticated direct legacy UPDATE fails at the table privilege boundary'
+);
+select throws_ok(
+  $$
+    insert into public.makeup_notification_settings(
+      trigger_kind, channel, enabled, title_template, body_template
+    ) values (
+      'submitted', 'dashboard_personal', true, 'direct insert', 'direct insert'
     )
   $$,
-  '55000',
-  'notification_makeup_operator_edit_conflict',
-  '운영자 수정 규칙과 변경된 레거시 설정이 충돌하면 저장 트랜잭션을 중단한다'
+  '42501',
+  'permission denied for table makeup_notification_settings',
+  'authenticated direct legacy INSERT fails at the table privilege boundary'
 );
-select is_empty($$
-  select before.id
-  from makeup_adapter_operator_rule_before before
-  join dashboard_private.notification_rules rule_row on rule_row.id = before.id
-  where row(
-    rule_row.revision,
-    rule_row.enabled,
-    rule_row.active_template_id,
-    rule_row.updated_by,
-    rule_row.updated_actor_kind
-  ) is distinct from row(
-    before.revision,
-    before.enabled,
-    before.active_template_id,
-    before.updated_by,
-    before.updated_actor_kind
-  )
-  union all
-  select null::uuid
-  from makeup_adapter_operator_case operator_case
-  join dashboard_private.notification_settings_import_metadata metadata
-    on metadata.source_key = operator_case.source_key
-  where metadata.source_checksum is distinct from operator_case.source_checksum
-$$, '충돌 시 운영자 규칙과 Task 8 기준 checksum을 그대로 보존한다');
+reset role;
 
 insert into public.makeup_requests(
   id,

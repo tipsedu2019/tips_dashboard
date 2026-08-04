@@ -132,10 +132,42 @@ select is_empty($$
     or pg_catalog.jsonb_typeof(contract_row.contract_json -> 'destinationPolicy') <> 'object'
 $$, 'every seeded contract has one complete version-one JSON snapshot');
 select is_empty($$
-  select template_row.id
-  from dashboard_private.notification_templates template_row
-  where template_row.content_contract_version is not null
-$$, 'migration preserves all historical template snapshot bytes and contract nullability');
+  with reviewed_vnext as (
+    select
+      contract_row.rule_id,
+      contract_row.contract_version,
+      dashboard_private.notification_deterministic_uuid_v1(
+        'notification-template-vnext-v1',
+        contract_row.rule_id::text || '|content-contract-'
+          || contract_row.contract_version
+      ) as expected_template_id
+    from dashboard_private.notification_rule_content_contracts contract_row
+  ), violations as (
+    select reviewed.rule_id::text as violation
+    from reviewed_vnext reviewed
+    left join dashboard_private.notification_templates template_row
+      on template_row.id = reviewed.expected_template_id
+     and template_row.rule_id = reviewed.rule_id
+    group by reviewed.rule_id, reviewed.contract_version, reviewed.expected_template_id
+    having pg_catalog.count(template_row.id) <> 1
+      or pg_catalog.count(template_row.id) filter (
+        where template_row.content_contract_version = reviewed.contract_version
+          and template_row.created_by is null
+          and template_row.created_actor_kind = 'system'
+      ) <> 1
+
+    union all
+
+    select historical.id::text
+    from dashboard_private.notification_templates historical
+    where historical.version = 1
+      and historical.created_by is null
+      and historical.created_actor_kind = 'system'
+      and historical.content_contract_version is not null
+  )
+  select violation
+  from violations
+$$, 'one reviewed vNext template exists for every content contract while historical templates retain null contract versions');
 select ok(
   pg_catalog.has_function_privilege(
     'authenticated',

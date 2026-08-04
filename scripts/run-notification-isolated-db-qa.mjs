@@ -928,7 +928,12 @@ export function redactCommandEvidence(value) {
     )
 }
 
-function planEvidence() {
+async function planEvidence() {
+  const { loadNotificationContentLocalQaContract } = await import(
+    "./notification-content-local-qa-fixture.mjs"
+  )
+  const fixtureContract = await loadNotificationContentLocalQaContract()
+
   return {
     mode: "plan",
     approved: false,
@@ -940,7 +945,13 @@ function planEvidence() {
       localDatabaseProjectPattern: "tips_notification_db_qa_<random>",
       localDatabasePort: "dynamic-loopback",
       internalDockerNetwork: true,
-      pgTapFileCount: 10,
+      syntheticFixture: {
+        settingsRegistry: fixtureContract.manifest.expectedCounts.settingsRegistry,
+        rules: fixtureContract.manifest.expectedCounts.rules,
+        operationalRows: fixtureContract.manifest.expectedCounts.operationalRows,
+      },
+      pgTapFileCount: fixtureContract.pgTap.fileCount,
+      pgTapFiles: fixtureContract.pgTap.files.map((entry) => entry.relativePath),
       providerEgressBlocked: true,
     },
   }
@@ -957,7 +968,7 @@ export async function runNotificationIsolatedDbQa({ approved = false } = {}) {
 async function main() {
   const args = process.argv.slice(2)
   if (args.length === 0) {
-    process.stdout.write(`${JSON.stringify(planEvidence(), null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify(await planEvidence(), null, 2)}\n`)
     return
   }
 

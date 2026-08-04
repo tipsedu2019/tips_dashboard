@@ -596,6 +596,16 @@ test("pgTAP schema packet covers both optional-source states and every security 
   assert.match(source, /dashboard_notification_read_receipts_select_own/i)
   assert.match(source, /has_table_privilege\(\s*'authenticated'/i)
   assert.match(source, /has_table_privilege\(\s*'service_role'/i)
+  for (const privilege of ["INSERT", "UPDATE", "DELETE"]) {
+    assert.match(
+      source,
+      new RegExp(
+        `not\\s+pg_catalog\\.has_table_privilege\\(\\s*'authenticated',\\s*'public\\.makeup_notification_settings',\\s*'${privilege}'`,
+        "i",
+      ),
+      `authenticated ${privilege} on legacy makeup settings must remain closed`,
+    )
+  }
   assert.match(source, /notification_worker_heartbeats_run_terminal_uidx/i)
   assert.match(source, /dispatch_token/i)
   assert.match(source, /coalesce\(definitions\.source\s*,\s*''\)/i)
