@@ -199,6 +199,19 @@ test("전자결재 규칙은 생산자 배포 후에도 모두 비활성 상태�
   assert.doesNotMatch(sql, /set enabled = true/)
 })
 
+test("결재 대상 기간 형식 함수는 PostgreSQL substring 문법을 사용한다", async () => {
+  const sql = await source(contentPayloadMigrationUrl)
+  const formatter = block(
+    sql,
+    "create or replace function dashboard_private.approval_target_period_v1",
+    "create or replace function dashboard_private.approval_attachment_snapshot_v1",
+  )
+
+  assert.match(formatter, /\bsubstring\(p_report_month from 1 for 4\)/i)
+  assert.match(formatter, /\bsubstring\(p_report_month from 6 for 2\)/i)
+  assert.doesNotMatch(formatter, /pg_catalog\.substring\s*\(/i)
+})
+
 test("클라이언트 서비스는 고정 RPC만 호출하고 요청·댓글·이벤트에 직접 쓰지 않는다", async () => {
   const service = await source(serviceUrl)
 

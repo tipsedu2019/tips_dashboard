@@ -46,9 +46,9 @@ set search_path = ''
 as $$
   select case
     when p_report_month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'
-      then pg_catalog.substring(p_report_month from 1 for 4)
+      then substring(p_report_month from 1 for 4)
         || '년 '
-        || (pg_catalog.substring(p_report_month from 6 for 2)::integer)::text
+        || (substring(p_report_month from 6 for 2)::integer)::text
         || '월'
     else '기간 미지정'
   end;
