@@ -11,6 +11,10 @@ const promotionMigrationUrl = new URL(
   "../supabase/migrations/20260805100000_notification_system_template_vnext_promotion.sql",
   import.meta.url,
 )
+const templateVariableWireMigrationUrl = new URL(
+  "../supabase/migrations/20260805101000_notification_control_plane_template_variable_wire_contract.sql",
+  import.meta.url,
+)
 const pgTapUrl = new URL(
   "../supabase/tests/notification_system_template_vnext_test.sql",
   import.meta.url,
@@ -33,6 +37,10 @@ async function loadMigration() {
 
 async function loadPromotionMigration() {
   return readFile(promotionMigrationUrl, "utf8")
+}
+
+async function loadTemplateVariableWireMigration() {
+  return readFile(templateVariableWireMigrationUrl, "utf8")
 }
 
 function render(template, payload) {
@@ -167,6 +175,31 @@ test("vNext promotion changes only active system defaults and preserves custom t
   assert.doesNotMatch(
     promotion,
     /notification_(?:deliveries|dispatch_ownership_claims|rule_reconciliation_jobs|target_reconciliation_jobs)|dashboard_notifications|makeup_notification_deliveries|webhook|https?:\/\//iu,
+  )
+})
+
+test("control-plane snapshot normalizes the persisted contract variable casing for the settings wire", async () => {
+  const migration = await loadTemplateVariableWireMigration()
+
+  assert.match(migration, /^begin;[\s\S]*commit;\s*$/u)
+  assert.match(migration, /pg_get_functiondef[\s\S]*notification_control_plane_snapshot_v1/iu)
+  assert.match(migration, /notification_control_plane_snapshot_raw_v1/iu)
+  assert.match(migration, /pg_catalog\.strpos\([\s\S]*notification_control_plane_snapshot_raw_v1/iu)
+  assert.match(
+    migration,
+    /jsonb_set\([\s\S]*\{template,allowed_variables\}[\s\S]*jsonb_array_elements/iu,
+  )
+  assert.match(
+    migration,
+    /'pii_class'[\s\S]*coalesce\([\s\S]*'piiClass'[\s\S]*'pii_class'/iu,
+  )
+  assert.match(
+    migration,
+    /revoke all on function dashboard_private\.notification_control_plane_snapshot_raw_v1\(text, boolean\)[\s\S]*from public, anon, authenticated, service_role/iu,
+  )
+  assert.doesNotMatch(
+    migration,
+    /notification_(?:deliveries|dispatch_ownership_claims|rule_reconciliation_jobs|target_reconciliation_jobs)|dashboard_notifications|webhook|https?:\/\//iu,
   )
 })
 
