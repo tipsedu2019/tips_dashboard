@@ -44,6 +44,7 @@ const pushClientSource = readOptionalSource("src/lib/dashboard-push-client.ts");
 const pushSubscriptionsRouteSource = readOptionalSource("src/app/api/push-subscriptions/route.ts");
 const webPushRouteSource = readOptionalSource("src/app/api/web-push/route.ts");
 const notificationPopoverSource = readFileSync("src/components/dashboard-notification-popover.tsx", "utf8");
+const notificationContentSource = readFileSync("src/components/dashboard-notification-content.tsx", "utf8");
 const inFlightRequestModule = await import("../src/lib/in-flight-request.js").catch(() => ({}));
 const allMigrationSource = readdirSync("supabase/migrations")
   .filter((name) => name.endsWith(".sql"))
@@ -117,9 +118,9 @@ function loadMakeupRequestViewHelpers() {
 
 function loadNotificationBodyFormatter() {
   const source = sourceBetween(
-    notificationPopoverSource,
-    "function formatNotificationTime",
-    "function getPushStateLabel",
+    notificationContentSource,
+    "const NOTIFICATION_BODY_ISO_DATE_TIME_PATTERN",
+    "function splitKnownLeadingStatusEmoji",
   );
   return transpileAndLoad(source, ["formatNotificationBody"]);
 }

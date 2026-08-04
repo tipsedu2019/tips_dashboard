@@ -67,13 +67,13 @@ export async function scanNotificationWorkflowEntrypoints(rootUrl) {
 
 async function probeRoutes(baseUrl) {
   const viewports = [{ width: 1440, height: 900 }, { width: 390, height: 844 }]
-  const providerRequests = []
+  const observer = createNotificationProviderRequestObserver(fetch)
   const routeResults = []
   for (const viewport of viewports) {
     for (const entry of NOTIFICATION_WORKFLOW_ENTRYPOINTS) {
       let response
       try {
-        response = await fetch(new URL(entry.route, baseUrl), {
+        response = await observer.fetch(new URL(entry.route, baseUrl), {
           redirect: "manual",
           headers: { "X-Notification-Verification-Viewport": `${viewport.width}x${viewport.height}` },
         })
@@ -89,7 +89,33 @@ async function probeRoutes(baseUrl) {
       if (status >= 500) throw new Error(`route_probe_failed:${entry.route}`)
     }
   }
-  return { routeResults, providerRequests }
+  return { routeResults, providerRequests: observer.providerRequests }
+}
+
+const PROVIDER_ENDPOINTS = Object.freeze([
+  { origin: "https://chat.googleapis.com", pathname: /^\/v1\/spaces\/[^/]+\/messages$/u },
+  { origin: "https://fcm.googleapis.com", pathname: /^\/v1\/projects\/[^/]+\/messages:send$/u },
+])
+
+export function createNotificationProviderRequestObserver(fetchImpl = fetch) {
+  if (typeof fetchImpl !== "function") throw new Error("provider_request_observer_fetch_invalid")
+  const providerRequests = []
+  return {
+    providerRequests,
+    async fetch(input, init) {
+      const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url)
+      if (PROVIDER_ENDPOINTS.some((endpoint) => (
+        endpoint.origin === url.origin && endpoint.pathname.test(url.pathname)
+      ))) {
+        providerRequests.push({
+          method: String(init?.method || (typeof input === "object" && input?.method) || "GET").toUpperCase(),
+          origin: url.origin,
+          pathname: url.pathname,
+        })
+      }
+      return fetchImpl(input, init)
+    },
+  }
 }
 
 async function main() {
