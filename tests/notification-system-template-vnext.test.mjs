@@ -7,6 +7,10 @@ const migrationUrl = new URL(
   "../supabase/migrations/20260803152000_notification_system_templates_vnext.sql",
   import.meta.url,
 )
+const promotionMigrationUrl = new URL(
+  "../supabase/migrations/20260805100000_notification_system_template_vnext_promotion.sql",
+  import.meta.url,
+)
 const pgTapUrl = new URL(
   "../supabase/tests/notification_system_template_vnext_test.sql",
   import.meta.url,
@@ -25,6 +29,10 @@ async function loadFixture() {
 
 async function loadMigration() {
   return readFile(migrationUrl, "utf8")
+}
+
+async function loadPromotionMigration() {
+  return readFile(promotionMigrationUrl, "utf8")
 }
 
 function render(template, payload) {
@@ -140,6 +148,26 @@ test("migration installs one deterministic append-only system template from the 
   assert.doesNotMatch(install, /\bupdate\s+dashboard_private\.notification_(?:rules|templates)/iu)
   assert.doesNotMatch(install, /\bdelete\s+from\s+dashboard_private\.notification_templates/iu)
   assert.doesNotMatch(install, /\bactive_template_id\s*=/iu)
+})
+
+test("vNext promotion changes only active system defaults and preserves custom templates", async () => {
+  const promotion = await loadPromotionMigration()
+
+  assert.match(promotion, /^begin;[\s\S]*commit;\s*$/u)
+  assert.match(promotion, /notification_system_template_vnext_baseline_missing/iu)
+  assert.match(promotion, /active_template\.created_by is null/iu)
+  assert.match(promotion, /active_template\.created_actor_kind = 'system'/iu)
+  assert.match(promotion, /notification-template-vnext-v1/iu)
+  assert.match(promotion, /update\s+dashboard_private\.notification_rules/iu)
+  assert.match(promotion, /active_template_id = eligible\.next_template_id/iu)
+  assert.match(promotion, /revision = rule_row\.revision \+ 1/iu)
+  assert.match(promotion, /updated_actor_kind = 'system'/iu)
+  assert.match(promotion, /notification_template_compliance_v1/iu)
+  assert.match(promotion, /user_custom_templates_preserved/iu)
+  assert.doesNotMatch(
+    promotion,
+    /notification_(?:deliveries|dispatch_ownership_claims|rule_reconciliation_jobs|target_reconciliation_jobs)|dashboard_notifications|makeup_notification_deliveries|webhook|https?:\/\//iu,
+  )
 })
 
 test("service-role audit is idempotent, safe, and does not expose activation or delivery side effects", async () => {
