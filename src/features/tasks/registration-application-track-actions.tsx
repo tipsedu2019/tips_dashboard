@@ -58,6 +58,7 @@ import { getRegistrationConsultationOutcomeSaveState } from "./registration-trac
 import { getRegistrationPersistenceErrorMessage } from "./registration-workflow.js"
 import { RegistrationSelect } from "./registration-select"
 import { RegistrationSaveButton } from "./registration-save-button"
+import type { RegistrationCustomerMessageTarget } from "./registration-customer-message-contract"
 
 export function isRegistrationDirectorCatalogRefreshError(message: string) {
   return message.includes("registration_director_refresh_required")
@@ -933,6 +934,7 @@ export function RegistrationWaitingDetailsEditor({
   onReload,
   onWarning,
   onDirtyChange,
+  onOpenCustomerMessage,
 }: {
   track: OpsRegistrationTrackSummary
   currentClassWaitClassId: string
@@ -941,6 +943,7 @@ export function RegistrationWaitingDetailsEditor({
   onReload: () => void | Promise<void>
   onWarning: (message: string) => void
   onDirtyChange?: (dirty: boolean) => void
+  onOpenCustomerMessage?: (target: RegistrationCustomerMessageTarget) => void
 }) {
   const savedWaitingKind = track.waitingDetailKind || track.waitingKind || "current_term_opening"
   const savedClassId = track.waitingDetailClassId || currentClassWaitClassId
@@ -956,6 +959,14 @@ export function RegistrationWaitingDetailsEditor({
     waitingKind !== savedWaitingKind
     || classId !== savedClassId
   )
+  const savedWaitingComplete = track.status === "waiting"
+    && Boolean(track.waitingDetailKind)
+    && (
+      (track.workflowStatus === "waiting_current_class" && track.waitingDetailKind === "current_class" && Boolean(track.waitingDetailClassId))
+      || (track.workflowStatus === "waiting_new_class" && track.waitingDetailKind === "current_term_opening")
+      || (track.workflowStatus === "waiting_next_opening" && track.waitingDetailKind === "next_term_opening")
+    )
+  const customerMessageBlocked = waitingDirty || saving || refreshPending || !savedWaitingComplete
   useOwnedDirtyState(waitingDirty, onDirtyChange)
 
   async function saveWaitingDetails() {
@@ -1022,7 +1033,7 @@ export function RegistrationWaitingDetailsEditor({
             />
             {waitingKind === "current_class" ? <SubjectClassSelect subject={track.subject} value={classId} onChange={setClassId} classOptions={classOptions} disabled={saving} /> : null}
           </div>
-          <div className="flex justify-end">
+          <div className="flex flex-wrap justify-end gap-2">
             <RegistrationSaveButton
               type="button"
               dirty={waitingDirty}
@@ -1033,7 +1044,17 @@ export function RegistrationWaitingDetailsEditor({
               aria-label={`${track.subject} 대기 정보 저장`}
               onClick={() => void saveWaitingDetails()}
             />
+            <Button
+              type="button"
+              className="min-h-11 min-w-11"
+              variant="outline"
+              disabled={customerMessageBlocked}
+              onClick={() => onOpenCustomerMessage?.({ messageKind: "waiting_notice", sourceId: track.id })}
+            >
+              대기 안내 알림톡
+            </Button>
           </div>
+          {customerMessageBlocked ? <p className="text-right text-xs text-muted-foreground">대기 정보를 저장한 뒤 알림톡을 보낼 수 있습니다.</p> : null}
         </>
       ) : !refreshPending ? <p className="text-sm text-muted-foreground">관리 권한이 있는 사용자만 대기 정보를 저장할 수 있습니다.</p> : null}
       {validationError ? <p role="alert" className="text-xs text-destructive">{validationError}</p> : null}

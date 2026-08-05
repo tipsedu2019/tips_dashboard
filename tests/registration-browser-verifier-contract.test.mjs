@@ -6,6 +6,10 @@ const verifierUrl = new URL("../scripts/verify-ops-task-browser-workflow.mjs", i
 const intakeWorkflowUrl = new URL("../src/features/tasks/registration-intake-workflow.ts", import.meta.url)
 const fixtureUrl = new URL("../src/features/tasks/registration-track-fixtures.ts", import.meta.url)
 const fixtureRuntimeUrl = new URL("../src/features/tasks/registration-track-fixture-runtime.ts", import.meta.url)
+const customerMessageVerifierUrl = new URL(
+  "../scripts/verify-registration-customer-message-browser.mjs",
+  import.meta.url,
+)
 
 function registrationVerifier(source) {
   const start = source.indexOf("async function verifyRegistrationSubjectTrackFixture")
@@ -361,4 +365,77 @@ test("saved-detail browser verification requires one unified inquiry save and no
   assert.match(duplicateHelper, /for \(const locator of forbiddenSummaryLocators\)[\s\S]*?const count = await locator\.count\(\)[\s\S]*?if \(count !== 0\)[\s\S]*?throw new Error/)
   assert.doesNotMatch(verifier, /공통 정보 저장[\s\S]{0,120}click\(/)
   assert.doesNotMatch(verifier, /과목 저장[\s\S]{0,120}click\(/)
+})
+
+test("customer message verifier covers the exact fixture route, five kinds, and five app endpoints", async () => {
+  const source = await readFile(customerMessageVerifierUrl, "utf8")
+
+  assert.match(source, /\/admin\/registration\?fixture=registration-subject-tracks&fixtureRole=english_admin/)
+  for (const kind of [
+    "level_test_booking",
+    "visit_consultation_booking",
+    "appointment_reminder",
+    "waiting_notice",
+    "admission_application",
+  ]) assert.match(source, new RegExp(kind))
+  for (const endpoint of ["preview", "send", "messages", "check", "admin"]) {
+    assert.match(source, new RegExp(`/api/solapi/registration/${endpoint}`))
+  }
+  assert.doesNotMatch(source, /\/api\/solapi\/registration\/customer-message\//)
+  assert.match(source, /url\.pathname\.startsWith\("\/api\/solapi\/registration"\)/)
+  assert.match(source, /unexpectedRegistrationApiRequests/)
+  assert.match(source, /api\.solapi\.com/)
+  assert.match(source, /route\.abort\("blockedbyclient"\)/)
+  assert.match(source, /providerRequests\.length !== 0/)
+  assert.match(source, /unexpectedExternalRequests: 0/)
+})
+
+test("customer message verifier asserts exact copy, masking, confirmation, history, locks, and unknown check", async () => {
+  const source = await readFile(customerMessageVerifierUrl, "utf8")
+
+  for (const body of [
+    "TIPS 레벨테스트 예약 안내",
+    "TIPS 방문상담 예약 안내",
+    "TIPS 예약 리마인드",
+    "TIPS 대기 안내",
+    "TIPS 입학신청서 안내",
+  ]) assert.ok(source.includes(body), `missing exact body marker ${body}`)
+  for (const marker of [
+    "끝 5678",
+    "확인 후 발송",
+    "SOLAPI 접수 완료",
+    "duplicate_locked",
+    "source_dirty",
+    "발송 결과 확인 필요",
+    "상태 확인",
+    "setNextCustomerMessageStatus",
+    "currentStatus",
+  ]) assert.ok(source.includes(marker), `missing UX evidence marker ${marker}`)
+  assert.doesNotMatch(source, /010[- ]?\d{4}[- ]?\d{4}/)
+  assert.match(source, /full phone leaked/i)
+  assert.match(source, /\/010\[\\s-\]\?\\d\{4\}\[\\s-\]\?\\d\{4\}\//)
+})
+
+test("customer message verifier runs desktop and mobile accessibility and layout checks", async () => {
+  const source = await readFile(customerMessageVerifierUrl, "utf8")
+
+  assert.match(source, /width:\s*1349,\s*height:\s*987/)
+  assert.match(source, /width:\s*390,\s*height:\s*844/)
+  assert.match(source, /document\.activeElement/)
+  assert.match(source, /keyboard\.press\("Escape"\)/)
+  assert.match(source, /minHeight < 44/)
+  assert.match(source, /minWidth < 44/)
+  assert.match(source, /boundingBox\(\)/)
+  assert.match(source, /getAnimations\(\{ subtree: true \}\)/)
+  assert.match(source, /animation\.finished/)
+  assert.match(source, /dirty-disabled-trigger/)
+  assert.match(source, /enabled-trigger/)
+  assert.match(source, /confirm-send/)
+  assert.match(source, /dialog-close/)
+  assert.match(source, /Math\.min\(\.\.\.evidence\.controlMeasurements\.map/)
+  assert.doesNotMatch(source, /minimumControlHeight:\s*44/)
+  assert.match(source, /scrollWidth > clientWidth/)
+  assert.match(source, /consoleErrors\.length/)
+  assert.match(source, /pageErrors\.length/)
+  assert.match(source, /overlayErrors/)
 })

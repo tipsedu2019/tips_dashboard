@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useSyncExternalStore } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
 import { Skeleton } from "@/components/ui/skeleton"
+import { shouldEnableRegistrationSubjectTrackFixture } from "@/features/tasks/registration-track-fixture-runtime"
 import { useAuth } from "@/providers/auth-provider"
 
 const ASSISTANT_ALLOWED_ADMIN_PATHS = [
@@ -24,6 +25,10 @@ function canAssistantAccessPath(pathname: string) {
   return ASSISTANT_ALLOWED_ADMIN_PATHS.some((path) => (
     normalizedPath === path || normalizedPath.startsWith(`${path}/`)
   ))
+}
+
+function subscribeToClientReady() {
+  return () => {}
 }
 
 function AdminShellLoadingState() {
@@ -119,6 +124,11 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
+  const registrationFixtureClientReady = useSyncExternalStore(
+    subscribeToClientReady,
+    () => true,
+    () => false,
+  )
   const queryString = searchParams.toString()
   const {
     user,
@@ -128,8 +138,12 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     defaultAdminPath,
   } = useAuth()
   const canAccessCurrentRoute = !canUseAssistantOperations || canAssistantAccessPath(pathname)
+  const registrationFixtureAuthBypass = pathname === "/admin/registration"
+    && searchParams.get("fixtureRole") === "english_admin"
+    && shouldEnableRegistrationSubjectTrackFixture(process.env.NODE_ENV, searchParams.get("fixture"))
 
   useEffect(() => {
+    if (registrationFixtureAuthBypass) return
     if (loading) {
       return
     }
@@ -149,7 +163,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     if (!canAccessCurrentRoute) {
       router.replace(defaultAdminPath)
     }
-  }, [canAccessCurrentRoute, canAccessDashboard, defaultAdminPath, loading, pathname, queryString, router, user])
+  }, [registrationFixtureAuthBypass, canAccessCurrentRoute, canAccessDashboard, defaultAdminPath, loading, pathname, queryString, router, user])
+
+  if (registrationFixtureAuthBypass && !registrationFixtureClientReady) return <AdminShellLoadingState />
+  if (registrationFixtureAuthBypass && registrationFixtureClientReady) return <>{children}</>
 
   if (loading || !user || !canAccessDashboard || !canAccessCurrentRoute) {
     return <AdminShellLoadingState />

@@ -30,6 +30,16 @@ const PREPARE_ACL_MIGRATION_FILE = "20260722130000_notification_prepare_acl_hard
 const PREPARE_ACL_MIGRATION_SHA256 = "970d203f816736b05ed56d973d415a75e00e2f659f55f84c7831c60db8c261a3"
 const CLAIM_RECONCILE_BASELINE_FILE = "20260716112000_notification_control_plane_worker_rpc.sql"
 const CLAIM_RECONCILE_BASELINE_SHA256 = "4ab9c5f48f018d655c000e1898057df8d13883eaeeee00974cb4760bdb615250"
+const REMOTE_HISTORY_ALIGNED_SQL = Object.freeze([
+  ["20260730161538_notification_google_chat_connection_catalog.sql", "a3f72d4ec2a410796d5796019649859d5a329d5bec0e3e83f48242272dd88dda"],
+  ["20260731011040_notification_transfer_withdrawal_deep_links.sql", "ed5dfb81c2cb5d1bc6dca5c38de62745c02d88b5a4b858ec57e8f0d2c6afb5ab"],
+  ["20260731011229_notification_owner_aware_delivery_summary.sql", "eb06042e4e70e05d4fc745053dccc52ac01fa253928f3f04fa442f5ec9704b54"],
+])
+const OBSOLETE_REMOTE_HISTORY_SQL = Object.freeze([
+  "20260730143000_notification_google_chat_connection_catalog.sql",
+  "20260730143100_notification_transfer_withdrawal_deep_links.sql",
+  "20260730143200_notification_owner_aware_delivery_summary.sql",
+])
 
 const EXPECTED_SQL = Object.freeze([
   ["20260716195000_notification_workflow_legacy_closure.sql", "e9131131f0d9419a4a8fdf5d69a58a1047a41583f98d9ef7b5b376374ee52975"],
@@ -148,6 +158,58 @@ function workflowWithEarlySecretScope({
 
 after(async () => {
   await Promise.all(fixtureRoots.map((fixtureRoot) => rm(fixtureRoot, { force: true, recursive: true })))
+})
+
+test("원격 이력과 정렬한 세 migration identity와 바이트를 독립 상수로 고정한다", async () => {
+  for (const [file, expectedHash] of REMOTE_HISTORY_ALIGNED_SQL) {
+    let actualHash
+    try {
+      actualHash = await sha256(join(activeDir, file))
+    } catch (error) {
+      assert.fail(`expected remote-history-aligned migration ${file}: ${error.code ?? error.message}`)
+    }
+    assert.equal(actualHash, expectedHash, file)
+  }
+
+  for (const file of OBSOLETE_REMOTE_HISTORY_SQL) {
+    await assert.rejects(
+      readFile(join(activeDir, file)),
+      (error) => error?.code === "ENOENT",
+      `obsolete local timestamp must stay absent: ${file}`,
+    )
+  }
+})
+
+test("원격 이력 정렬 migration의 누락·변조·구 timestamp 재등장을 거부한다", async () => {
+  const [alignedFile] = REMOTE_HISTORY_ALIGNED_SQL[0]
+  const obsoleteFile = OBSOLETE_REMOTE_HISTORY_SQL[0]
+
+  const missingFixture = await createRepoFixture()
+  await rm(join(missingFixture, "supabase", "migrations", alignedFile), { force: true })
+  assertIncludesErrorForFile(
+    await validateSupabaseMigrationLayout({ repoRoot: missingFixture }),
+    "remote_history_aligned_migration_not_regular",
+    alignedFile,
+  )
+
+  const hashFixture = await createRepoFixture()
+  await appendFile(join(hashFixture, "supabase", "migrations", alignedFile), "\n")
+  assertIncludesErrorForFile(
+    await validateSupabaseMigrationLayout({ repoRoot: hashFixture }),
+    "remote_history_aligned_migration_hash_mismatch",
+    alignedFile,
+  )
+
+  const obsoleteFixture = await createRepoFixture()
+  await copyFile(
+    join(obsoleteFixture, "supabase", "migrations", alignedFile),
+    join(obsoleteFixture, "supabase", "migrations", obsoleteFile),
+  )
+  assertIncludesErrorForFile(
+    await validateSupabaseMigrationLayout({ repoRoot: obsoleteFixture }),
+    "remote_history_obsolete_timestamp_present",
+    obsoleteFile,
+  )
 })
 
 test("cutover SQL은 active lane 밖의 immutable quarantine에만 존재한다", async () => {

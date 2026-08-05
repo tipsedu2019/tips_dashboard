@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 
 import { RegistrationApplicationAdmissionSection } from "./registration-application-admission-section"
+import { RegistrationAlimtalkPreviewDialog } from "./registration-alimtalk-preview-dialog"
 import { RegistrationApplicationConsultationSection } from "./registration-application-consultation-section"
 import {
   RegistrationApplicationInquirySection,
@@ -49,10 +50,11 @@ import {
 import { RegistrationAppointmentEditor } from "./registration-appointment-editor"
 import { RegistrationSaveButton } from "./registration-save-button"
 import { clearRegistrationEnrollmentDrafts } from "./registration-enrollment-editor"
-import {
-  RegistrationAdmissionPanel,
-  type RegistrationAdmissionPanelProps,
-} from "./registration-enrollment-editor"
+import { RegistrationAdmissionPanel } from "./registration-enrollment-editor"
+import type {
+  RegistrationCustomerMessageClient,
+  RegistrationCustomerMessageTarget,
+} from "./registration-customer-message-contract"
 import type {
   OpsClassOption,
   OpsProfileOption,
@@ -112,13 +114,7 @@ export type RegistrationApplicationProps = {
   onRetrySchools?: () => void
   classOptions?: OpsClassOption[]
   textbookOptions?: OpsTextbookOption[]
-  admissionActions: Pick<
-    RegistrationAdmissionPanelProps,
-    | "onSendAdmissionMessage"
-    | "onCheckAdmissionMessage"
-    | "onReconcileAdmissionMessage"
-    | "onReleaseAdmissionMessageRetry"
-  >
+  customerMessageClient: RegistrationCustomerMessageClient
   initialAppointmentId?: string | null
   onAppointmentOpenChange?: (appointmentId: string | null) => void
   onDirtyChange?: (dirty: boolean) => void
@@ -252,12 +248,16 @@ export function RegistrationApplication({
   onRetrySchools,
   classOptions = [],
   textbookOptions = [],
-  admissionActions,
+  customerMessageClient,
   initialAppointmentId = null,
   onDirtyChange,
   notificationToken = "",
   closeAction,
 }: RegistrationApplicationProps) {
+  const [customerMessageTarget, setCustomerMessageTarget] = useState<RegistrationCustomerMessageTarget | null>(null)
+  const customerMessageTriggerRef = useRef<HTMLElement | null>(null)
+  const customerMessageReloadGenerationRef = useRef(0)
+  const customerMessageTaskIdRef = useRef(detail.task.id)
   const [migrationConflictState, setMigrationConflictState] = useState<RegistrationMigrationConflictState | null>(null)
   const [migrationConflictRetrying, setMigrationConflictRetrying] = useState(false)
   const [migrationDirectorResetVersion, setMigrationDirectorResetVersion] = useState(0)
@@ -276,6 +276,27 @@ export function RegistrationApplication({
     initialFocusRequestRef.current = { taskId: detail.task.id, trackId: focusTrackId }
   }
   const canManageCase = viewerRole === "admin" || viewerRole === "staff"
+  const openCustomerMessage = useCallback((target: RegistrationCustomerMessageTarget) => {
+    if (!canManageCase) return
+    customerMessageTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+    setCustomerMessageTarget(target)
+  }, [canManageCase])
+  if (customerMessageTaskIdRef.current !== detail.task.id) {
+    customerMessageTaskIdRef.current = detail.task.id
+    customerMessageReloadGenerationRef.current += 1
+  }
+  const reloadAfterCustomerMessageSend = useCallback(async () => {
+    if (!canManageCase) return
+    const taskId = detail.task.id
+    const generation = ++customerMessageReloadGenerationRef.current
+    await onReload()
+    if (
+      generation !== customerMessageReloadGenerationRef.current
+      || taskId !== customerMessageTaskIdRef.current
+    ) return
+  }, [canManageCase, detail.task.id, onReload])
   const orderedTracks = useMemo(() => [...detail.tracks].sort((left, right) => (
     ACADEMIC_SUBJECT_VALUES.indexOf(left.subject) - ACADEMIC_SUBJECT_VALUES.indexOf(right.subject)
     || left.id.localeCompare(right.id)
@@ -407,6 +428,13 @@ export function RegistrationApplication({
         : null,
     }
   })
+  const activeCustomerMessageTarget = canManageCase && customerMessageTarget && (
+    customerMessageTarget.messageKind === "admission_application"
+      ? customerMessageTarget.sourceId === detail.task.id
+      : customerMessageTarget.messageKind === "waiting_notice"
+        ? orderedTracks.some((track) => track.id === customerMessageTarget.sourceId)
+        : detail.appointments.some((appointment) => appointment.id === customerMessageTarget.sourceId)
+  ) ? customerMessageTarget : null
   const admissionApplicationState = getRegistrationAdmissionApplicationState({
     tracks: orderedTracks,
     enrollments: detail.enrollments,
@@ -586,6 +614,7 @@ export function RegistrationApplication({
           onReload={onReload}
           onWarning={onWarning}
           onDirtyChange={(dirty) => setDirty(`placement:track-${track.id}`, dirty)}
+          onOpenCustomerMessage={openCustomerMessage}
         />
       )
     }
@@ -775,6 +804,7 @@ export function RegistrationApplication({
   }
 
   return (
+    <>
     <RegistrationApplicationShell
       mode="detail"
       studentName={detail.task.studentName || detail.task.title}
@@ -862,6 +892,8 @@ export function RegistrationApplication({
               notificationToken={notificationToken}
               onDirtyChange={(dirty) => setDirty(`level_test:appointment-${activeLevelTestAppointment?.id || activeTrack.id}`, dirty)}
               onTrackDirtyChange={(trackId, dirty) => setDirty(`level_test:track-${trackId}`, dirty)}
+              canOpenCustomerMessage={canManageCase}
+              onOpenCustomerMessage={openCustomerMessage}
             />
           ) : null}
         </RegistrationApplicationLevelTestSection>
@@ -918,6 +950,8 @@ export function RegistrationApplication({
                   onReload={onReload}
                   notificationToken={notificationToken}
                   onDirtyChange={(dirty) => setDirty(`consultation:appointment-${activeVisitAppointment?.id || activeTrack.id}`, dirty)}
+                  canOpenCustomerMessage={canManageCase}
+                  onOpenCustomerMessage={openCustomerMessage}
                 />
               ) : (
                 <div className="flex justify-end">
@@ -979,22 +1013,31 @@ export function RegistrationApplication({
                 batches={detail.admissionBatches}
                 classes={classOptions}
                 admissionNoticeSent={Boolean(detail.task.registration?.admissionNoticeSent)}
-                admissionApplicationMessageId={detail.admissionApplicationMessageId}
                 admissionApplicationMessageStatus={detail.admissionApplicationMessageStatus}
-                admissionApplicationMessageClaimActive={detail.admissionApplicationMessageClaimActive}
-                admissionApplicationMessageUpdatedAt={detail.admissionApplicationMessageUpdatedAt}
                 permissions={{ canManage: canManageCase, readOnly: !canManageCase }}
-                {...admissionActions}
+                onOpenCustomerMessage={openCustomerMessage}
                 onReload={onReload}
                 onWarning={onWarning}
-                onDirtyChange={(scope, dirty) => setDirty(scope.kind === "message_evidence"
-                  ? "admission:message"
-                  : `admission:batch-${scope.batchId}`, dirty)}
+                onDirtyChange={(scope, dirty) => setDirty(`admission:batch-${scope.batchId}`, dirty)}
               />
             </div>
           )}
         />
       )}
     />
+    <RegistrationAlimtalkPreviewDialog
+      open={Boolean(activeCustomerMessageTarget)}
+      onOpenChange={(open) => {
+        if (!open) setCustomerMessageTarget(null)
+      }}
+      target={activeCustomerMessageTarget}
+      client={customerMessageClient}
+      viewerRole={viewerRole || "assistant"}
+      triggerRef={customerMessageTriggerRef}
+      onSendSuccess={async () => {
+        await reloadAfterCustomerMessageSend()
+      }}
+    />
+    </>
   )
 }

@@ -16,6 +16,10 @@ const opsRouteUrl = new URL("../src/app/api/notifications/legacy/ops-task/route.
 const visitRouteUrl = new URL("../src/app/api/registration/consultation-notification/route.ts", import.meta.url)
 const solapiRouteUrl = new URL("../src/app/api/solapi/registration/route.ts", import.meta.url)
 const solapiCoreUrl = new URL("../src/app/api/solapi/registration/core.js", import.meta.url)
+const customerMessageSolapiUrl = new URL(
+  "../src/features/tasks/server/registration-customer-message-solapi.ts",
+  import.meta.url,
+)
 const workerMigrationUrl = new URL(
   "../supabase/pending-migrations/notification-cutover/20260716195500_notification_worker_schedule.sql",
   import.meta.url,
@@ -220,17 +224,24 @@ test("visit route accepts only appointmentId and delegates rendering and ownersh
   assert.match(route, /finalize_registration_visit_legacy_google_chat_v1/)
 })
 
-test("SOLAPI route acquires shared ownership before provider work and finalizes unknown", async () => {
+test("legacy SOLAPI route is compatibility-only and cannot acquire or finalize delivery ownership", async () => {
   const [route, core] = await Promise.all([source(solapiRouteUrl), source(solapiCoreUrl)])
-  assert.match(route, /begin_registration_admission_delivery_v1/)
-  assert.match(route, /complete_registration_admission_delivery_v1/)
-  assert.match(core, /deps\.beginDelivery/)
-  assert.match(core, /deps\.completeDelivery/)
-  const begin = core.indexOf("await deps.beginDelivery")
-  const send = core.indexOf("await deps.fetch(SOLAPI_SEND_URL")
-  assert.ok(begin >= 0 && send > begin)
-  assert.match(core, /result:\s*"unknown"/)
-  assert.match(core, /outcome:\s*"delivery_unknown"/)
+  assert.match(route, /createProductionRegistrationCustomerMessageRouteHandlers/)
+  assert.match(core, /handleLegacyRegistrationGet/)
+  assert.match(core, /handleLegacyRegistrationPost/)
+  assert.doesNotMatch(`${route}\n${core}`, /begin_registration_admission_delivery_v1|complete_registration_admission_delivery_v1|deps\.beginDelivery|deps\.completeDelivery|SOLAPI_SEND_URL/)
+})
+
+test("registration customer message adapter is the only reachable SOLAPI provider owner", async () => {
+  const [rootRoute, rootCore, customerMessageSolapi] = await Promise.all([
+    source(solapiRouteUrl),
+    source(solapiCoreUrl),
+    source(customerMessageSolapiUrl),
+  ])
+
+  assert.doesNotMatch(`${rootRoute}\n${rootCore}`, /send-many\/detail|await deps\.fetch|register_notification_external_attempt_v1/)
+  assert.match(customerMessageSolapi, /SOLAPI_SEND_MANY_URL = "https:\/\/api\.solapi\.com\/messages\/v4\/send-many\/detail"/)
+  assert.match(customerMessageSolapi, /disableSms: true/)
 })
 
 test("등록 외부 발송은 소유권 확보 뒤 시도 등록기를 통과해야만 provider를 호출한다", async () => {
@@ -261,27 +272,10 @@ test("등록 외부 발송은 소유권 확보 뒤 시도 등록기를 통과해
       && visitProvider > visitRegister,
   )
 
-  assert.match(solapiRoute, /record_legacy_notification_delivery_intent_v1/)
   assert.match(visitRoute, /legacyTemplateChecksum:\s*item\.templateChecksum/)
   assert.match(visitRoute, /TEMPLATE_CHECKSUM\.test\(item\.templateChecksum\)/)
   assert.match(visitRoute, /p_legacy_template_checksum:\s*intent\.legacyTemplateChecksum/)
-  assert.match(solapiCore, /const legacyTemplateChecksum = text\(delivery\.templateChecksum\)/)
-  assert.match(solapiCore, /TEMPLATE_CHECKSUM\.test\(legacyTemplateChecksum\)/)
-  assert.match(solapiCore, /legacyTemplateChecksum,\s*\n\s*title:/)
-  assert.match(solapiRoute, /p_legacy_template_checksum:\s*input\.legacyTemplateChecksum/)
-  assert.match(solapiRoute, /register_notification_external_attempt_v1/)
-  assert.match(solapiRoute, /p_delivery_id:\s*input\.claimToken\s*\?\s*input\.deliveryId\s*:\s*null/)
-  assert.match(solapiRoute, /p_request_id:\s*input\.dispatchToken/)
-  const solapiBegin = solapiCore.indexOf("await deps.beginDelivery")
-  const solapiIntent = solapiCore.indexOf("recordLegacyNotificationDeliveryIntent", solapiBegin)
-  const solapiRegister = solapiCore.indexOf("deps.registerExternalAttempt")
-  const solapiProvider = solapiCore.indexOf("await deps.fetch(SOLAPI_SEND_URL")
-  assert.ok(
-    solapiBegin >= 0
-      && solapiIntent > solapiBegin
-      && solapiRegister > solapiIntent
-      && solapiProvider > solapiRegister,
-  )
+  assert.doesNotMatch(`${solapiRoute}\n${solapiCore}`, /record_legacy_notification_delivery_intent_v1|register_notification_external_attempt_v1|await deps\.fetch|SOLAPI_SEND_URL/)
 })
 
 test("등록 방문·SOLAPI legacy plan은 provider 직전에 불변 template checksum을 반환한다", async () => {
@@ -385,10 +379,9 @@ test("SOLAPI는 일반 worker가 아닌 canonical specialized claim과 원자 �
   assert.doesNotMatch(workerSql, /delivery\.channel_key <> 'customer_message'/)
   assert.match(providerClaimSql, /create or replace function public\.claim_notification_deliveries_v1/)
   assert.match(providerClaimSql, /delivery\.channel_key <> 'customer_message'/)
-  assert.match(route, /complete_registration_admission_delivery_v1/)
-  assert.doesNotMatch(route, /finalize_registration_admission_delivery_v1/)
-  assert.match(core, /deps\.completeDelivery/)
-  assert.doesNotMatch(core, /await deps\.finalize\([\s\S]{0,500}await deps\.finalizeDelivery/)
+  assert.match(route, /createProductionRegistrationCustomerMessageRouteHandlers/)
+  assert.doesNotMatch(route, /complete_registration_admission_delivery_v1|finalize_registration_admission_delivery_v1/)
+  assert.doesNotMatch(core, /deps\.completeDelivery|await deps\.finalize|await deps\.finalizeDelivery/)
 })
 
 test("SOLAPI business claim replay can reach begin before any provider dispatch", async () => {

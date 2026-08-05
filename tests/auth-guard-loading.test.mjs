@@ -27,6 +27,28 @@ test("admin auth guard preserves protected query strings for login return", asyn
   assert.match(source, /encodeURIComponent\(nextPath\)/);
 });
 
+test("admin auth guard bypasses auth only for the exact dev registration fixture", async () => {
+  const source = await readFile(new URL("src/components/auth/auth-guard.tsx", root), "utf8");
+
+  assert.match(source, /shouldEnableRegistrationSubjectTrackFixture/);
+  assert.match(source, /pathname === "\/admin\/registration"/);
+  assert.match(source, /searchParams\.get\("fixtureRole"\) === "english_admin"/);
+  assert.match(
+    source,
+    /shouldEnableRegistrationSubjectTrackFixture\(process\.env\.NODE_ENV, searchParams\.get\("fixture"\)\)/,
+  );
+  assert.match(source, /if \(registrationFixtureAuthBypass\) return/);
+  assert.match(source, /useSyncExternalStore/);
+  assert.match(source, /const registrationFixtureClientReady = useSyncExternalStore\([^;]+\)/s);
+  assert.match(source, /\(\) => true,[^)]*\(\) => false/s);
+  assert.doesNotMatch(source, /setRegistrationFixtureClientReady/);
+  assert.match(source, /if \(registrationFixtureAuthBypass && !registrationFixtureClientReady\)[^}]+<AdminShellLoadingState \/>/);
+  assert.match(source, /if \(registrationFixtureAuthBypass && registrationFixtureClientReady\) return <>{children}<\/>/);
+  assert.match(source, /\[registrationFixtureAuthBypass,[^\]]*user\]/);
+  assert.doesNotMatch(source, /NODE_ENV\s*!==\s*"production"/);
+  assert.doesNotMatch(source, /pathname\.startsWith\("\/admin\/registration"\)/);
+});
+
 test("root metadata only points at existing icon assets", async () => {
   const source = await readFile(new URL("src/app/layout.tsx", root), "utf8");
   const favicon = await stat(new URL("public/favicon.ico", root));

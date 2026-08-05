@@ -3,11 +3,11 @@ import { readFile } from "node:fs/promises"
 import test from "node:test"
 
 const catalogUrl = new URL(
-  "../supabase/migrations/20260730143000_notification_google_chat_connection_catalog.sql",
+  "../supabase/migrations/20260730161538_notification_google_chat_connection_catalog.sql",
   import.meta.url,
 )
 const ownerUrl = new URL(
-  "../supabase/migrations/20260730143200_notification_owner_aware_delivery_summary.sql",
+  "../supabase/migrations/20260731011229_notification_owner_aware_delivery_summary.sql",
   import.meta.url,
 )
 

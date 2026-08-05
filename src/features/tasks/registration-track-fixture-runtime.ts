@@ -5,6 +5,7 @@ import type {
 } from "./registration-appointment-calendar-model"
 import type { OpsRegistrationCaseDetail, OpsRegistrationWorkspaceOptionData } from "./registration-track-service"
 import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
+import type { RegistrationCustomerMessageClient } from "./registration-customer-message-contract"
 
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_VALUE = "registration-subject-tracks"
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL = "__TIPS_REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG__"
@@ -52,6 +53,11 @@ export type RegistrationSubjectTrackFixtureDebugActionBehavior = {
   error?: string
 }
 
+export type RegistrationSubjectTrackFixtureCustomerMessageStatus =
+  | "accepted"
+  | "unknown"
+  | "failed_hold"
+
 export type RegistrationSubjectTrackFixtureDebugFault =
   | { kind: "option_data_once"; error: string }
   | {
@@ -72,12 +78,17 @@ export type RegistrationSubjectTrackFixtureAdapter = {
   loadSubjectCapabilities: () => Promise<readonly RegistrationSubjectCapability[]>
   loadScienceConsultationClassOptions: () => Promise<OpsClassOption[]>
   loadClassDetails: (classIds: string[]) => Promise<Record<string, OpsRegistrationClassDetail>>
+  customerMessageClient: RegistrationCustomerMessageClient
   debugSnapshot?: () => RegistrationSubjectTrackFixtureDebugSnapshot
   debugReplayLastCreate?: () => Promise<RegistrationSubjectTrackFixtureDebugReplay>
   debugSetNextActionBehavior?: (behavior: RegistrationSubjectTrackFixtureDebugActionBehavior) => void
   debugSetNextFault?: (
     fault: RegistrationSubjectTrackFixtureDebugFault,
   ) => void
+  debugSetNextCustomerMessageStatus?: (
+    status: RegistrationSubjectTrackFixtureCustomerMessageStatus,
+  ) => void
+  debugResetCustomerMessageStatus?: () => void
 }
 
 const activeFixtureAdapters: RegistrationSubjectTrackFixtureAdapter[] = []
@@ -116,6 +127,16 @@ const fixtureDebugBridge = {
     const adapter = getActiveFixtureAdapter()
     if (!adapter?.debugSetNextFault) throw new Error("registration_subject_track_fixture_debug_unavailable")
     adapter.debugSetNextFault(fault)
+  },
+  setNextCustomerMessageStatus(status: RegistrationSubjectTrackFixtureCustomerMessageStatus) {
+    if (!(["accepted", "unknown", "failed_hold"] as const).includes(status)) {
+      throw new Error("registration_subject_track_fixture_customer_message_status_invalid")
+    }
+    const adapter = getActiveFixtureAdapter()
+    if (!adapter?.debugSetNextCustomerMessageStatus) {
+      throw new Error("registration_subject_track_fixture_debug_unavailable")
+    }
+    adapter.debugSetNextCustomerMessageStatus(status)
   },
 }
 
@@ -166,6 +187,7 @@ export function installRegistrationSubjectTrackFixtureRuntime(
   activeFixtureAdapters.push(adapter)
   installFixtureDebugBridge()
   return () => {
+    adapter.debugResetCustomerMessageStatus?.()
     const index = activeFixtureAdapters.lastIndexOf(adapter)
     if (index >= 0) activeFixtureAdapters.splice(index, 1)
     uninstallFixtureDebugBridge()

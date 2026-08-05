@@ -12,7 +12,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
@@ -33,11 +32,9 @@ import {
 import {
   applyRegistrationEnrollmentClassSelection,
   createRegistrationEnrollmentDraft,
-  getRegistrationAdmissionApplicationState,
   getRegistrationAdmissionBatchCancellationGroups,
   getRegistrationAdmissionBatchChecklist,
   getRegistrationAdmissionProgressDisplay,
-  getRegistrationAdmissionRecoveryDelayMs,
   getRegistrationEnrollmentBlockers,
   getRegistrationEnrollmentCancellationState,
   getRegistrationSelectedAdmissionEnrollmentIds,
@@ -62,9 +59,9 @@ import {
   type OpsRegistrationAdmissionBatch,
   type OpsRegistrationEnrollment,
   type OpsRegistrationTrackSummary,
-  type RegistrationAdmissionProviderEvidence,
   type RegistrationWaitingKind,
 } from "./registration-track-service"
+import type { RegistrationCustomerMessageTarget } from "./registration-customer-message-contract"
 
 type RegistrationManagementPermissions = {
   canManage: boolean
@@ -200,17 +197,6 @@ function useSubmissionKeys(): SubmissionKeys {
       keysRef.current.delete(`${kind}:${entityId}`)
     },
   }
-}
-
-function useAdmissionRecoveryAvailable(updatedAt: string | null) {
-  const [recoveryClock, setRecoveryClock] = useState(() => Date.now())
-  useEffect(() => {
-    const delay = getRegistrationAdmissionRecoveryDelayMs(updatedAt, Date.now())
-    if (delay === null || delay === 0) return
-    const timer = setTimeout(() => setRecoveryClock(Date.now()), delay + 1)
-    return () => clearTimeout(timer)
-  }, [updatedAt])
-  return getRegistrationAdmissionRecoveryDelayMs(updatedAt, recoveryClock) === 0
 }
 
 function RegistrationRefreshAlert({
@@ -876,7 +862,7 @@ export function RegistrationEnrollmentEditor({
   )
 }
 
-export type AdmissionDirtyScope = { kind: "message_evidence" } | { kind: "batch"; batchId: string }
+export type AdmissionDirtyScope = { kind: "batch"; batchId: string }
 
 export type RegistrationAdmissionPanelProps = {
   taskId: string
@@ -885,26 +871,9 @@ export type RegistrationAdmissionPanelProps = {
   batches: OpsRegistrationAdmissionBatch[]
   classes: OpsClassOption[]
   admissionNoticeSent: boolean
-  admissionApplicationMessageId: string | null
   admissionApplicationMessageStatus: "" | "pending" | "accepted" | "unknown" | "failed_hold"
-  admissionApplicationMessageClaimActive: boolean
-  admissionApplicationMessageUpdatedAt: string | null
   permissions: RegistrationManagementPermissions
-  onSendAdmissionMessage: (input: { taskId: string; requestKey: string }) => Promise<void>
-  onCheckAdmissionMessage: (input: { messageId: string }) => Promise<void>
-  onReconcileAdmissionMessage: (input: {
-    messageId: string
-    resolution: "accepted" | "failed"
-    providerEvidence: RegistrationAdmissionProviderEvidence
-    reason: string
-    requestKey: string
-  }) => Promise<void>
-  onReleaseAdmissionMessageRetry: (input: {
-    messageId: string
-    providerEvidence: RegistrationAdmissionProviderEvidence
-    reason: string
-    requestKey: string
-  }) => Promise<void>
+  onOpenCustomerMessage?: (target: RegistrationCustomerMessageTarget) => void
   onReload: () => void | Promise<void>
   onWarning: (message: string) => void
   onDirtyChange?: (scope: AdmissionDirtyScope, dirty: boolean) => void
@@ -917,15 +886,9 @@ export function RegistrationAdmissionPanel({
   batches,
   classes,
   admissionNoticeSent,
-  admissionApplicationMessageId,
   admissionApplicationMessageStatus,
-  admissionApplicationMessageClaimActive,
-  admissionApplicationMessageUpdatedAt,
   permissions,
-  onSendAdmissionMessage,
-  onCheckAdmissionMessage,
-  onReconcileAdmissionMessage,
-  onReleaseAdmissionMessageRetry,
+  onOpenCustomerMessage,
   onReload,
   onWarning,
   onDirtyChange,
@@ -933,10 +896,7 @@ export function RegistrationAdmissionPanel({
   const submissionKeys = useSubmissionKeys()
   const [selectedEnrollmentIds, setSelectedEnrollmentIds] = useState<Set<string>>(() => new Set())
   const [busyAction, setBusyAction] = useState("")
-  const [messageRefreshPending, setMessageRefreshPending] = useState(false)
   const [batchRefreshPending, setBatchRefreshPending] = useState(false)
-  const [evidenceText, setEvidenceText] = useState("{}")
-  const [messageReason, setMessageReason] = useState("")
   const [cancelBatchOpen, setCancelBatchOpen] = useState(false)
   const [cancelBatchReason, setCancelBatchReason] = useState("")
   const [cancelDestinations, setCancelDestinations] = useState<Record<string, "" | "waiting" | "not_registered">>({})
@@ -970,92 +930,36 @@ export function RegistrationAdmissionPanel({
   const selectedTrackIds = Array.from(new Set(unbatchedPlannedEnrollments
     .filter((enrollment) => activeSelectedEnrollmentIdSet.has(enrollment.id))
     .map((enrollment) => enrollment.trackId)))
-  const applicationState = getRegistrationAdmissionApplicationState({
-    tracks,
-    enrollments,
-    admissionNoticeSent,
-    admissionApplicationMessageStatus,
-    admissionApplicationMessageClaimActive,
-  })
   const checklist = getRegistrationAdmissionBatchChecklist({
     admissionNoticeSent,
     enrollments: currentBatchEnrollments,
     batch: displayBatch,
   })
-  const messageRecoveryAvailable = useAdmissionRecoveryAvailable(admissionApplicationMessageUpdatedAt)
-  const messageDirty = !messageRefreshPending && (evidenceText !== "{}" || Boolean(messageReason))
   const batchScope: AdmissionDirtyScope = { kind: "batch", batchId: openBatch?.id || "new" }
   const batchDirty = !batchRefreshPending && (openBatch
     ? Boolean(cancelBatchOpen || cancelBatchReason || Object.keys(cancelDestinations).length || Object.keys(cancelWaitingKinds).length || Object.keys(cancelClassIds).length)
     : selectedEnrollmentIds.size > 0)
-  useScopedDirtyState({ kind: "message_evidence" }, messageDirty, onDirtyChange)
   useScopedDirtyState(batchScope, batchDirty, onDirtyChange)
 
-  async function afterCommitted(owner: "message" | "batch") {
-    const setPending = owner === "message" ? setMessageRefreshPending : setBatchRefreshPending
-    setPending(true)
+  async function afterCommitted() {
+    setBatchRefreshPending(true)
     try {
       await onReload()
-      setPending(false)
+      setBatchRefreshPending(false)
     } catch {
-      setPending(true)
+      setBatchRefreshPending(true)
       onWarning("저장은 완료됐지만 최신 내용을 불러오지 못했습니다")
     }
   }
 
-  async function retryAdmissionReload(owner: "message" | "batch") {
-    const setPending = owner === "message" ? setMessageRefreshPending : setBatchRefreshPending
+  async function retryAdmissionReload() {
     try {
       await onReload()
-      setPending(false)
+      setBatchRefreshPending(false)
     } catch {
-      setPending(true)
+      setBatchRefreshPending(true)
       onWarning("최신 입학 처리 내용을 다시 불러오지 못했습니다.")
     }
-  }
-
-  async function runMessageAction(
-    action: string,
-    mutation: (requestKey: string) => Promise<void>,
-    entityId: string,
-  ) {
-    if (busyAction || messageRefreshPending) return
-    const requestKey = submissionKeys.getOrCreate(action, entityId)
-    setBusyAction(action)
-    try {
-      await mutation(requestKey)
-      submissionKeys.clear(action, entityId)
-      setEvidenceText("{}")
-      setMessageReason("")
-      onDirtyChange?.({ kind: "message_evidence" }, false)
-      await afterCommitted("message")
-    } catch (error) {
-      onWarning(errorMessage(error, "입학신청서 상태를 변경하지 못했습니다."))
-    } finally {
-      setBusyAction("")
-    }
-  }
-
-  function parsedEvidence(): RegistrationAdmissionProviderEvidence | null {
-    try {
-      const value = JSON.parse(evidenceText) as RegistrationAdmissionProviderEvidence
-      if (!value || typeof value !== "object" || !value.observedState) return null
-      return value
-    } catch {
-      return null
-    }
-  }
-
-  function requireMessageEvidence(retryCopy = false) {
-    const providerEvidence = parsedEvidence()
-    if (providerEvidence && messageReason.trim()) return providerEvidence
-    const message = retryCopy ? "제공사 증빙과 재발송 사유를 입력하세요." : "제공사 증빙과 확인 사유를 입력하세요."
-    setValidationError(message)
-    onWarning(message)
-    window.requestAnimationFrame(() => admissionSectionRef.current
-      ?.querySelector<HTMLElement>(!providerEvidence ? "[aria-label='입학신청서 제공사 확인 증빙']" : "[aria-label='입학신청서 확인 사유']")
-      ?.focus())
-    return null
   }
 
   async function startBatch() {
@@ -1073,7 +977,7 @@ export function RegistrationAdmissionPanel({
       submissionKeys.clear("batch-start", entityId)
       setSelectedEnrollmentIds(new Set())
       onDirtyChange?.(batchScope, false)
-      await afterCommitted("batch")
+      await afterCommitted()
     } catch (error) {
       onWarning(errorMessage(error, "입학 처리를 시작하지 못했습니다."))
     } finally {
@@ -1089,7 +993,7 @@ export function RegistrationAdmissionPanel({
     try {
       await setRegistrationEnrollmentMakeedu({ enrollmentId: enrollment.id, registered: !enrollment.makeeduRegistered, requestKey })
       submissionKeys.clear("batch-makeedu", logicalId)
-      await afterCommitted("batch")
+      await afterCommitted()
     } catch (error) {
       onWarning(errorMessage(error, "메이크에듀 등록 상태를 변경하지 못했습니다."))
     } finally {
@@ -1105,7 +1009,7 @@ export function RegistrationAdmissionPanel({
     try {
       await advanceRegistrationAdmissionBatch({ batchId: openBatch.id, action, requestKey })
       submissionKeys.clear(kind, openBatch.id)
-      await afterCommitted("batch")
+      await afterCommitted()
     } catch (error) {
       onWarning(errorMessage(error, "입학 처리 상태를 변경하지 못했습니다."))
     } finally {
@@ -1120,7 +1024,7 @@ export function RegistrationAdmissionPanel({
     try {
       await completeRegistrationAdmissionBatch({ batchId: openBatch.id, requestKey })
       submissionKeys.clear("batch-complete", openBatch.id)
-      await afterCommitted("batch")
+      await afterCommitted()
     } catch (error) {
       onWarning(errorMessage(error, "등록을 완료하지 못했습니다."))
     } finally {
@@ -1177,7 +1081,7 @@ export function RegistrationAdmissionPanel({
       setCancelClassIds({})
       setCancelBatchReason("")
       onDirtyChange?.(batchScope, false)
-      await afterCommitted("batch")
+      await afterCommitted()
     } catch (error) {
       onWarning(errorMessage(error, "입학 처리를 취소하지 못했습니다."))
     } finally {
@@ -1196,53 +1100,20 @@ export function RegistrationAdmissionPanel({
   const admissionProgressSteps: RegistrationAdmissionProgressSteps = [
     {
       key: "admissionNotice",
-      label: "입학신청서 발송",
+      label: "입학신청서 알림톡",
       complete: checklist.admissionNotice,
       content: (
         <div className="grid gap-2 text-sm">
           <span className="text-xs text-muted-foreground">{messageStatusLabel}</span>
-          {messageRefreshPending ? (
-            <RegistrationRefreshAlert>
-              <Button type="button" aria-label="입학신청서 최신 내용 다시 불러오기" variant="outline" size="sm" className="w-fit" onClick={() => void retryAdmissionReload("message")}>
-                <RefreshCw className="size-4" aria-hidden="true" />
-                최신 내용 다시 불러오기
-              </Button>
-            </RegistrationRefreshAlert>
-          ) : null}
-          {permissions.canManage && applicationState.canSend ? (
-            <Button type="button" size="sm" className="w-fit" onClick={() => void runMessageAction("admission-send", (requestKey) => onSendAdmissionMessage({ taskId, requestKey }), taskId)} disabled={Boolean(busyAction) || messageRefreshPending}>입학신청서 발송</Button>
-          ) : null}
-          {permissions.canManage && applicationState.syncNeeded ? (
-            <Button type="button" size="sm" variant="outline" className="w-fit" onClick={() => void runMessageAction("admission-sync", (requestKey) => onSendAdmissionMessage({ taskId, requestKey }), admissionApplicationMessageId || taskId)} disabled={Boolean(busyAction) || messageRefreshPending}>상태 동기화</Button>
-          ) : null}
-          {permissions.canManage && admissionApplicationMessageStatus === "pending" && admissionApplicationMessageId ? (
-            <>
-              <Button type="button" size="sm" variant="outline" className="w-fit" onClick={() => void runMessageAction("admission-check", () => onCheckAdmissionMessage({ messageId: admissionApplicationMessageId }), admissionApplicationMessageId)} disabled={Boolean(busyAction) || messageRefreshPending || !messageRecoveryAvailable}>발송 상태 확인</Button>
-              {!messageRecoveryAvailable ? <p className="text-xs text-muted-foreground">발송 후 15분이 지나면 확인할 수 있습니다.</p> : null}
-            </>
-          ) : null}
-          {permissions.canManage && ["unknown", "failed_hold"].includes(admissionApplicationMessageStatus) && admissionApplicationMessageId ? (
-            <div className="grid gap-2">
-              <Textarea aria-label="입학신청서 제공사 확인 증빙" value={evidenceText} onChange={(event) => setEvidenceText(event.target.value)} placeholder="제공사 확인 증빙 JSON" className="font-mono text-xs" disabled={messageRefreshPending} />
-              <Input aria-label="입학신청서 확인 사유" value={messageReason} onChange={(event) => setMessageReason(event.target.value)} placeholder="확인 사유" disabled={messageRefreshPending} />
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" size="sm" variant="outline" disabled={messageRefreshPending} onClick={() => {
-                  const providerEvidence = requireMessageEvidence()
-                  if (!providerEvidence) return
-                  void runMessageAction("admission-reconcile", (requestKey) => onReconcileAdmissionMessage({ messageId: admissionApplicationMessageId, resolution: "accepted", providerEvidence, reason: messageReason.trim(), requestKey }), `${admissionApplicationMessageId}:accepted:${evidenceText}:${messageReason.trim()}`)
-                }}>접수 확인</Button>
-                {admissionApplicationMessageStatus === "unknown" ? <Button type="button" size="sm" variant="destructive" disabled={messageRefreshPending} onClick={() => {
-                  const providerEvidence = requireMessageEvidence()
-                  if (!providerEvidence) return
-                  void runMessageAction("admission-reconcile", (requestKey) => onReconcileAdmissionMessage({ messageId: admissionApplicationMessageId, resolution: "failed", providerEvidence, reason: messageReason.trim(), requestKey }), `${admissionApplicationMessageId}:failed:${evidenceText}:${messageReason.trim()}`)
-                }}>미접수 기록</Button> : null}
-                {admissionApplicationMessageStatus === "failed_hold" ? <Button type="button" size="sm" variant="outline" disabled={messageRefreshPending || !messageRecoveryAvailable} onClick={() => {
-                  const providerEvidence = requireMessageEvidence(true)
-                  if (!providerEvidence) return
-                  void runMessageAction("admission-release", (requestKey) => onReleaseAdmissionMessageRetry({ messageId: admissionApplicationMessageId, providerEvidence, reason: messageReason.trim(), requestKey }), `${admissionApplicationMessageId}:${evidenceText}:${messageReason.trim()}`)
-                }}>재발송 허용</Button> : null}
-              </div>
-            </div>
+          {permissions.canManage ? (
+            <Button
+              type="button"
+              size="sm"
+              className="min-h-11 min-w-11 w-fit"
+              onClick={() => onOpenCustomerMessage?.({ messageKind: "admission_application", sourceId: taskId })}
+            >
+              입학신청서 알림톡
+            </Button>
           ) : null}
         </div>
       ),
@@ -1255,7 +1126,7 @@ export function RegistrationAdmissionPanel({
         <div className="grid gap-2">
           {batchRefreshPending ? (
             <RegistrationRefreshAlert>
-              <Button type="button" aria-label="입학 처리 최신 내용 다시 불러오기" variant="outline" size="sm" className="w-fit" onClick={() => void retryAdmissionReload("batch")}>
+              <Button type="button" aria-label="입학 처리 최신 내용 다시 불러오기" variant="outline" size="sm" className="w-fit" onClick={() => void retryAdmissionReload()}>
                 <RefreshCw className="size-4" aria-hidden="true" />
                 최신 내용 다시 불러오기
               </Button>

@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type TouchEvent, type WheelEvent } from "react"
-import { ArrowDown, ArrowUp, Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, Copy, FileText, Filter, Inbox, List, MessageSquareText, Plus, RefreshCw, Search, Send, Trash2, UserRound, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, FileText, Filter, Inbox, List, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -125,7 +125,6 @@ import {
 } from "./word-retest-browser-fixture"
 import {
   canEditRegistrationTask,
-  canSendRegistrationAdmissionMessage,
   getRegistrationBlockerFocusKey,
   getRegistrationBlockerSection,
   getRegistrationBranchActions,
@@ -136,7 +135,6 @@ import {
   getRegistrationGradeOptions,
   getSelectableRegistrationScheduleSessions,
   getRegistrationMobileSections,
-  getManualAdmissionCompletionStatus,
   getRegistrationPersistenceErrorMessage,
   getRegistrationPipelinePrefix,
   getRegistrationPrefillPipelineStatus,
@@ -189,6 +187,8 @@ import {
   preloadRegistrationApplication,
   RegistrationApplication,
 } from "./registration-application-lazy"
+import { createRegistrationCustomerMessageClient } from "./registration-customer-message-service"
+import type { RegistrationCustomerMessageClient } from "./registration-customer-message-contract"
 import {
   createRegistrationCase,
   createRegistrationCaseWithInitialWorkflow,
@@ -226,7 +226,6 @@ import {
   sendRegistrationVisitNotificationTarget,
 } from "./registration-consultation-notification.js"
 import {
-  executeRegistrationSubjectTrackFixtureAction,
   installRegistrationSubjectTrackFixtureRuntime,
   loadRegistrationSubjectTrackFixtureCapabilities,
   loadRegistrationSubjectTrackFixtureOptionData,
@@ -297,24 +296,6 @@ type WithdrawalGoogleChatWebhookInfoResponse = {
   maskedUrl?: string
   error?: string
 }
-type RegistrationCustomerMessageHistory = {
-  id: string
-  status: "pending" | "accepted" | "failed" | "unknown"
-  recipient_last4?: string
-  provider_status_code?: string
-  provider_status_message?: string
-  created_at?: string
-}
-type RegistrationCustomerMessageStatus = {
-  configured: boolean
-  missing: string[]
-  studentName: string
-  recipientLast4: string
-  admissionNoticeSent: boolean
-  pipelineStatus: string
-  history: RegistrationCustomerMessageHistory[]
-}
-
 type WordRetestMode = "assistant" | "teacher"
 type WordRetestEditMode = "full" | "expected_only"
 type WordRetestEditIntent = "standard_edit" | "expected_quick"
@@ -780,42 +761,6 @@ const WITHDRAWAL_NOTIFICATION_CHANNELS: Array<{ key: WithdrawalNotificationChann
 
 const WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP: Partial<Record<WithdrawalNotificationChannelKey, "admin">> = {
   google_chat_admin: "admin",
-}
-
-const REGISTRATION_ADMISSION_FORM_URL = "https://bit.ly/3rurm5t"
-const REGISTRATION_MAKEEDU_APP_URL = "http://www.makeedu.co.kr/app.html"
-
-function getRegistrationAdmissionSolapiMessage(studentName: string) {
-  const studentLabel = studentName
-    ? studentName.endsWith("학생") ? studentName : `${studentName} 학생`
-    : "학생"
-  return `[팁스영어수학학원] 입학신청서 작성 안내
-
-안녕하세요. ${studentLabel}의 입학 절차를 안내드립니다.
-
-최종 원생 등록 및 교육비 납부 안내를 위해 입학신청서를 제출해 주세요.
-
-입학신청서에는 원내 수강 규정, 원생의 건강·정서 상태 고지 의무, CCTV 활용 등 학원 생활에 필요한 중요 약관이 포함되어 있습니다. 내용을 확인하신 후 서명을 완료해 주세요.
-
-아래 버튼에서 입학신청서를 작성할 수 있습니다.`
-}
-
-function getRegistrationMakeEduAdmissionMessage(studentName: string) {
-  const greeting = studentName ? `${studentName} 학생의 입학을` : "입학을"
-  return `[팁스영어수학학원] 입학 환영 및 신청서 작성 안내
-
-안녕하세요! 팁스영어수학학원 ${greeting} 진심으로 환영합니다. ^^
-
-안전하고 철저한 학사 관리를 위해 [입학신청서]를 먼저 제출해 주셔야 최종 원생 등록 및 교육비 납부 안내가 진행됩니다.
-
-하단 링크의 입학신청서에는 '원내 수강 규정', '원생의 건강/정서 상태 고지 의무', 'CCTV 활용' 등 학원 생활에 필요한 중요 약관이 포함되어 있습니다. 내용을 꼼꼼히 확인하신 후 서명을 완료해 주시기 바랍니다.
-
-▶ 1단계: 모바일 입학신청서 작성하기 (${REGISTRATION_ADMISSION_FORM_URL})
-▶ 2단계: 메이크에듀 앱 설치 (출결 확인용) (${REGISTRATION_MAKEEDU_APP_URL})
-
-🔗 팁스학원 공식 홈페이지: https://tipsedu.co.kr/
-
-목표 달성까지 팁스가 가장 확실한 페이스메이커가 되겠습니다. 감사합니다.`
 }
 
 const WORKSPACE_TASK_TYPE: Record<WorkspaceKey, OpsTaskType> = {
@@ -7425,238 +7370,6 @@ function RegistrationNotificationSettingsDialog(props: Omit<Parameters<typeof Wi
   return <WithdrawalNotificationSettingsDialog {...props} workflowLabel="등록" />
 }
 
-function RegistrationCustomerMessageDialog({
-  open,
-  onOpenChange,
-  task,
-  sessionToken,
-  canSend,
-  onSent,
-  onManualSent,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  task: OpsTask | null
-  sessionToken: string
-  canSend: boolean
-  onSent: (taskId: string) => Promise<void>
-  onManualSent: (taskId: string) => Promise<void>
-}) {
-  const [registrationCustomerMessageStatus, setRegistrationCustomerMessageStatus] = useState<RegistrationCustomerMessageStatus | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [sending, setSending] = useState(false)
-  const [message, setMessage] = useState("")
-  const [notice, setNotice] = useState("")
-  const latestRegistrationMessageTaskId = useRef(task?.id || "")
-
-  useEffect(() => {
-    latestRegistrationMessageTaskId.current = task?.id || ""
-  }, [task?.id])
-
-  const loadRegistrationCustomerMessageStatus = useCallback(async (signal?: AbortSignal) => {
-    if (!task?.id || !sessionToken) return
-    const requestTaskId = task.id
-    setLoading(true)
-    setMessage("")
-    try {
-      const response = await fetch(`/api/solapi/registration?taskId=${encodeURIComponent(task.id)}`, {
-        headers: { Authorization: `Bearer ${sessionToken}` },
-        signal,
-      })
-      const payload = await response.json().catch(() => ({})) as Partial<RegistrationCustomerMessageStatus> & { error?: string }
-      if (!response.ok) throw new Error(payload.error || "메시지 연결 상태를 불러오지 못했습니다.")
-      if (signal?.aborted || latestRegistrationMessageTaskId.current !== requestTaskId) return
-      setRegistrationCustomerMessageStatus({
-        configured: Boolean(payload.configured),
-        missing: Array.isArray(payload.missing) ? payload.missing.map(String) : [],
-        studentName: String(payload.studentName || task.studentName || ""),
-        recipientLast4: String(payload.recipientLast4 || ""),
-        admissionNoticeSent: Boolean(payload.admissionNoticeSent),
-        pipelineStatus: String(payload.pipelineStatus || task.registration?.pipelineStatus || ""),
-        history: Array.isArray(payload.history) ? payload.history as RegistrationCustomerMessageHistory[] : [],
-      })
-    } catch (error) {
-      if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) return
-      setMessage(error instanceof Error ? error.message : "메시지 연결 상태를 불러오지 못했습니다.")
-    } finally {
-      if (!signal?.aborted && latestRegistrationMessageTaskId.current === requestTaskId) setLoading(false)
-    }
-  }, [sessionToken, task])
-
-  useEffect(() => {
-    if (!open) {
-      setRegistrationCustomerMessageStatus(null)
-      setMessage("")
-      setNotice("")
-      return
-    }
-    const controller = new AbortController()
-    void loadRegistrationCustomerMessageStatus(controller.signal)
-    return () => controller.abort()
-  }, [loadRegistrationCustomerMessageStatus, open])
-
-  async function copyMakeEduAdmissionMessage() {
-    if (!task) return
-    setMessage("")
-    setNotice("")
-    try {
-      await navigator.clipboard.writeText(getRegistrationMakeEduAdmissionMessage(task.studentName))
-      setNotice("메이크에듀용 안내 내용을 복사했습니다.")
-    } catch {
-      setMessage("안내 내용을 복사하지 못했습니다.")
-    }
-  }
-
-  async function completeManualRegistrationAdmissionMessage() {
-    if (!task?.id || !canSend) return
-    setSending(true)
-    setMessage("")
-    setNotice("")
-    try {
-      await onManualSent(task.id)
-      await loadRegistrationCustomerMessageStatus()
-      setNotice("메이크에듀 발송 완료를 등록 단계에 반영했습니다.")
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "메이크에듀 발송 완료를 반영하지 못했습니다.")
-    } finally {
-      setSending(false)
-    }
-  }
-
-  async function sendRegistrationAdmissionMessage() {
-    if (!task?.id || !sessionToken || !registrationCustomerMessageStatus?.configured) return
-    setSending(true)
-    setMessage("")
-    setNotice("")
-    let providerAccepted = false
-    try {
-      const requestKey = globalThis.crypto?.randomUUID?.() || `${task.id}-${Date.now()}`
-      const response = await fetch("/api/solapi/registration", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${sessionToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ taskId: task.id, requestKey }),
-      })
-      const payload = await response.json().catch(() => ({})) as { error?: string; syncWarning?: string }
-      if (!response.ok) throw new Error(payload.error || "알림톡을 접수하지 못했습니다.")
-      providerAccepted = true
-      try {
-        await onSent(task.id)
-        await loadRegistrationCustomerMessageStatus()
-        setNotice(payload.syncWarning || "입학신청서 알림톡을 접수했습니다.")
-      } catch {
-        setNotice("알림톡은 접수됐지만 화면 새로고침에 실패했습니다. 잠시 후 다시 확인하세요.")
-      }
-    } catch (error) {
-      if (providerAccepted) {
-        setNotice("알림톡은 접수됐지만 화면 새로고침에 실패했습니다. 잠시 후 다시 확인하세요.")
-      } else {
-        setMessage(error instanceof Error ? error.message : "알림톡을 접수하지 못했습니다.")
-      }
-    } finally {
-      setSending(false)
-    }
-  }
-
-  const studentName = registrationCustomerMessageStatus?.studentName || task?.studentName || "학생"
-  const recipientLast4 = registrationCustomerMessageStatus?.recipientLast4 || ""
-  const history = registrationCustomerMessageStatus?.history || []
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>입학신청서 발송</DialogTitle>
-          <DialogDescription className="sr-only">입학신청서 안내를 확인하고 메이크에듀용 내용을 복사하거나 알림톡으로 발송합니다.</DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-4">
-          <div className="flex flex-wrap items-center gap-2 border-b pb-3 text-sm">
-            <span className="font-medium">{studentName}</span>
-            <span className="text-muted-foreground">학부모 전화 · 끝 {recipientLast4 || "미입력"}</span>
-            <Badge variant={registrationCustomerMessageStatus?.configured ? "default" : "outline"} className="ml-auto">
-              {loading ? "확인 중" : registrationCustomerMessageStatus?.configured ? "SOLAPI 연결됨" : "검수/설정 대기"}
-            </Badge>
-          </div>
-
-          {message ? <div role="alert" className="rounded-md border border-destructive/30 px-3 py-2 text-sm text-destructive">{message}</div> : null}
-          {message ? (
-            <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => void loadRegistrationCustomerMessageStatus()} disabled={loading}>
-              <RefreshCw className="size-4" aria-hidden="true" />
-              다시 확인
-            </Button>
-          ) : null}
-          {notice ? <div role="status" className="rounded-md border border-primary/25 bg-primary/5 px-3 py-2 text-sm text-primary">{notice}</div> : null}
-
-          {!loading && registrationCustomerMessageStatus && !registrationCustomerMessageStatus.configured ? (
-            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              <span>연결 대기:</span>
-              {registrationCustomerMessageStatus.missing.map((item) => <Badge key={item} variant="outline">{item}</Badge>)}
-            </div>
-          ) : null}
-
-          <section className="grid gap-2 border-b pb-4">
-            <h3 className="text-sm font-semibold">알림톡 미리보기</h3>
-            <div className="whitespace-pre-wrap rounded-md bg-muted/35 px-3 py-3 text-sm leading-6">
-              {getRegistrationAdmissionSolapiMessage(studentName)}
-            </div>
-            <a href={REGISTRATION_ADMISSION_FORM_URL} target="_blank" rel="noreferrer" className="w-fit text-sm font-medium text-primary underline-offset-4 hover:underline">
-              입학신청서 열기
-            </a>
-          </section>
-
-          {history.length > 0 ? (
-            <section className="grid gap-2">
-              <h3 className="text-sm font-semibold">최근 발송</h3>
-              <div className="divide-y rounded-md border">
-                {history.map((item) => (
-                  <div key={item.id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs">
-                    <Badge variant={item.status === "accepted" ? "default" : item.status === "failed" ? "destructive" : "outline"}>
-                      {item.status === "accepted" ? "접수" : item.status === "failed" ? "실패" : item.status === "unknown" ? "확인 필요" : "처리 중"}
-                    </Badge>
-                    <span>{dateLabel(item.created_at || "")}</span>
-                    <span className="text-muted-foreground">끝 {item.recipient_last4 || "-"}</span>
-                    <span className="ml-auto text-muted-foreground">{item.provider_status_message || item.provider_status_code || "-"}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
-        </div>
-
-        <DialogFooter className="gap-2 sm:justify-between">
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Button type="button" variant="outline" onClick={() => void copyMakeEduAdmissionMessage()}>
-              <Copy className="size-4" aria-hidden="true" />
-              메이크에듀용 내용 복사
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void completeManualRegistrationAdmissionMessage()}
-              disabled={sending || loading || !canSend || Boolean(registrationCustomerMessageStatus?.admissionNoticeSent)}
-            >
-              <Check className="size-4" aria-hidden="true" />
-              메이크에듀 발송 완료
-            </Button>
-          </div>
-          <Button
-            type="button"
-            onClick={() => void sendRegistrationAdmissionMessage()}
-            disabled={sending || loading || !canSend || !recipientLast4 || !registrationCustomerMessageStatus?.configured}
-            title={!registrationCustomerMessageStatus?.configured ? "SOLAPI 승인 템플릿 연결 후 발송할 수 있습니다." : undefined}
-          >
-            <Send className="size-4" aria-hidden="true" />
-            {sending ? "접수 중" : "알림톡 발송"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 function DashboardMetric({
   label,
   value,
@@ -7802,11 +7515,6 @@ function getRegistrationDecisionActionsForTask(task: Pick<OpsTask, "type" | "sta
 
 function isRegistrationDecisionPending(task: Pick<OpsTask, "type" | "status" | "registration">) {
   return getRegistrationDecisionActionsForTask(task).length > 0
-}
-
-function canOpenRegistrationCustomerMessage(task: Pick<OpsTask, "type" | "status" | "registration">) {
-  if (task.type !== "registration" || task.status === "on_hold") return false
-  return canSendRegistrationAdmissionMessage(task.registration?.pipelineStatus)
 }
 
 type RegistrationBranchAction = {
@@ -8457,13 +8165,21 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const registrationFixtureRequested = isRegistrationWorkspace
     && shouldEnableRegistrationSubjectTrackFixture(process.env.NODE_ENV, registrationFixtureValue)
   const registrationNotificationSessionToken = registrationFixtureRequested ? "" : notificationSessionToken
+  const registrationCustomerMessageClient = useMemo(
+    () => createRegistrationCustomerMessageClient({
+      getAccessToken: async () => registrationNotificationSessionToken || null,
+    }),
+    [registrationNotificationSessionToken],
+  )
   const [registrationFixtureModule, setRegistrationFixtureModule] = useState<RegistrationSubjectTrackFixtureModule | null>(null)
   const registrationFixtureStateRef = useRef<RegistrationSubjectTrackFixtureState | null>(null)
+  const registrationFixtureCustomerMessageClientRef = useRef<RegistrationCustomerMessageClient | null>(null)
   const [registrationFixtureRevision, setRegistrationFixtureRevision] = useState(0)
   const [registrationFixtureRuntimeReady, setRegistrationFixtureRuntimeReady] = useState(false)
   useEffect(() => {
     if (!registrationFixtureRequested) {
       registrationFixtureStateRef.current = null
+      registrationFixtureCustomerMessageClientRef.current = null
       setRegistrationFixtureModule(null)
       setRegistrationFixtureRuntimeReady(false)
       return
@@ -8561,7 +8277,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [transferNotificationOpen, setTransferNotificationOpen] = useState(false)
   const [registrationNotificationOpen, setRegistrationNotificationOpen] = useState(false)
   const [canonicalNotificationOpen, setCanonicalNotificationOpen] = useState(false)
-  const [registrationCustomerMessageTask, setRegistrationCustomerMessageTask] = useState<OpsTask | null>(null)
   const [formOpen, setFormOpen] = useState(false)
   const [formDetailStep, setFormDetailStep] = useState<FormDetailStepKey>("registration_contact")
   const [wordRetestEditMode, setWordRetestEditMode] = useState<WordRetestEditMode>("full")
@@ -8733,6 +8448,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         error: registrationFixtureFaultError,
       })
     if (registrationFixtureFault) adapter.debugSetNextFault?.(registrationFixtureFault)
+    registrationFixtureCustomerMessageClientRef.current = adapter.customerMessageClient
     const uninstallFixtureRuntime = installRegistrationSubjectTrackFixtureRuntime(
       process.env.NODE_ENV,
       registrationFixtureValue,
@@ -8742,6 +8458,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setRegistrationFixtureRevision((current) => current + 1)
     return () => {
       setRegistrationFixtureRuntimeReady(false)
+      registrationFixtureCustomerMessageClientRef.current = null
       setData(null)
       setLoading(true)
       uninstallFixtureRuntime()
@@ -8808,7 +8525,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setFormOpen(false)
       setDetailOpen(false)
       setRegistrationApplicationHost({ kind: "closed" })
-      setRegistrationCustomerMessageTask(null)
       setConfirmingFormClose(false)
       setFormCompletionBlockers([])
       setFormCompletionIntent(null)
@@ -10143,18 +9859,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     return () => window.cancelAnimationFrame(animationFrame)
   }, [formOpen, wordRetestEditMode, wordRetestPendingFocus])
 
-  const openRegistrationCustomerMessage = useCallback((task: OpsTask) => {
-    setDetailOpen(false)
-    setSelectedRegistrationTrackId(null)
-    setSelectedRegistrationAppointmentId(null)
-    setRegistrationCaseDetail(null)
-    registrationTrackSelectionRef.current = ""
-    syncTaskDeepLink(null)
-    setRegistrationCustomerMessageTask(task)
-    setMessage("")
-    setNotice("")
-  }, [syncTaskDeepLink])
-
   const openRegistrationTrack = useCallback(async (
     taskId: string,
     trackId: string,
@@ -10454,34 +10158,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       })
     }
   }
-
-  const postRegistrationAdmissionAction = useCallback(async (payload: Record<string, unknown>) => {
-    if (registrationFixtureEnabled) {
-      const fixture = payload.action === "check"
-        ? executeRegistrationSubjectTrackFixtureAction("checkRegistrationAdmissionMessage", payload)
-        : payload.action === "reconcile"
-          ? executeRegistrationSubjectTrackFixtureAction("reconcileRegistrationAdmissionMessage", payload)
-          : payload.action === "release"
-            ? executeRegistrationSubjectTrackFixtureAction("releaseRegistrationAdmissionMessageRetry", payload)
-            : executeRegistrationSubjectTrackFixtureAction("sendRegistrationAdmissionMessage", payload)
-      if (!fixture) throw new Error("registration_subject_track_fixture_runtime_unavailable")
-      await fixture
-      return
-    }
-    const sessionToken = registrationNotificationSessionToken
-    if (!sessionToken) throw new Error("인증 정보를 다시 확인하세요.")
-    const response = await fetch("/api/solapi/registration", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${sessionToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    })
-    const result = await response.json().catch(() => ({})) as { error?: string; warning?: string }
-    if (!response.ok) throw new Error(result.error || "입학신청서 상태를 변경하지 못했습니다.")
-    if (result.warning) setNotice(result.warning)
-  }, [registrationFixtureEnabled, registrationNotificationSessionToken])
 
   const handleRegistrationWorkflowStatusChange = useCallback(async (
     track: RegistrationCaseListViewItem["matchingTracks"][number],
@@ -10877,36 +10553,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     })
     setSelectedTask((current) => current?.id === nextTask.id ? nextTask : current)
     return true
-  }
-
-  const handleRegistrationCustomerMessageSent = async (taskId: string) => {
-    const syncedTask = await loadOpsTaskById(taskId)
-    if (syncedTask && replaceTaskInState(syncedTask)) {
-      setRegistrationCustomerMessageTask(syncedTask)
-    }
-    setNotice("입학신청서 발송을 반영했습니다.")
-  }
-
-  const completeManualRegistrationAdmissionMessage = async (taskId: string) => {
-    const task = taskById.get(taskId) || registrationCustomerMessageTask
-    if (!task || task.type !== "registration") throw new Error("등록 업무 데이터를 다시 불러오세요.")
-    const pipelineStatus = getManualAdmissionCompletionStatus(task.registration?.pipelineStatus)
-    if (!pipelineStatus) throw new Error("입학 등록 결정 단계에서 발송 완료를 반영할 수 있습니다.")
-
-    const payload = normalizeFormForSubmit({
-      ...formFromTask(task),
-      registration: {
-        ...(task.registration || {}),
-        admissionNoticeSent: true,
-        pipelineStatus,
-      },
-    })
-    await updateOpsTask(task.id, payload)
-    const syncedTask = await loadOpsTaskById(task.id)
-    if (!syncedTask) throw new Error("발송 완료 후 등록 업무를 다시 불러오지 못했습니다.")
-    if (replaceTaskInState(syncedTask)) {
-      setRegistrationCustomerMessageTask(syncedTask)
-    }
   }
 
   const updateTaskInState = (taskId: string, updater: (task: OpsTask) => OpsTask) => {
@@ -13010,18 +12656,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         />
       )}
 
-      <RegistrationCustomerMessageDialog
-        open={workspaceDataBelongsToCurrentViewer && Boolean(registrationCustomerMessageTask)}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) setRegistrationCustomerMessageTask(null)
-        }}
-        task={registrationCustomerMessageTask}
-        sessionToken={registrationNotificationSessionToken}
-        canSend={canManageRegistrationWorkflow}
-        onSent={handleRegistrationCustomerMessageSent}
-        onManualSent={completeManualRegistrationAdmissionMessage}
-      />
-
       {registrationApplicationHost.kind === "closed" ? (
       <Dialog open={workspaceDataBelongsToCurrentViewer && formOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className={[
@@ -13577,12 +13211,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       classOptions={data?.classes || EMPTY_CLASS_OPTIONS}
                       textbookOptions={data?.textbooks || EMPTY_TEXTBOOK_OPTIONS}
                       closeAction={registrationDetailCloseAction}
-                      admissionActions={{
-                        onSendAdmissionMessage: ({ taskId, requestKey }) => postRegistrationAdmissionAction({ taskId, requestKey }),
-                        onCheckAdmissionMessage: ({ messageId }) => postRegistrationAdmissionAction({ taskId: registrationCaseDetail.task.id, action: "check", messageId }),
-                        onReconcileAdmissionMessage: ({ messageId, resolution, providerEvidence, reason, requestKey }) => postRegistrationAdmissionAction({ taskId: registrationCaseDetail.task.id, action: "reconcile", messageId, resolution, providerEvidence, reason, requestKey }),
-                        onReleaseAdmissionMessageRetry: ({ messageId, providerEvidence, reason, requestKey }) => postRegistrationAdmissionAction({ taskId: registrationCaseDetail.task.id, action: "release", messageId, providerEvidence, reason, requestKey }),
-                      }}
+                      customerMessageClient={registrationFixtureEnabled
+                        ? registrationFixtureCustomerMessageClientRef.current || registrationCustomerMessageClient
+                        : registrationCustomerMessageClient}
                     />
                   ) : isCanonicalRegistrationTrackDetail ? (
                     registrationDetailLoadError ? (
@@ -13669,19 +13300,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       onSelect={(task, pipelineStatus) => void changeRegistrationPipeline(task, pipelineStatus)}
                       disabled={saving || !canManageRegistrationWorkflow}
                     />
-                  ) : null}
-                  {selectedTaskFresh.type === "registration" && !isCanonicalRegistrationTrackDetail && canOpenRegistrationCustomerMessage(selectedTaskFresh) ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={selectedTaskFresh.registration?.admissionNoticeSent ? "outline" : "default"}
-                      className="w-full sm:w-auto"
-                      onClick={() => openRegistrationCustomerMessage(selectedTaskFresh)}
-                      disabled={saving || !canManageRegistrationWorkflow}
-                    >
-                      <MessageSquareText className="size-4" aria-hidden="true" />
-                      {selectedTaskFresh.registration?.admissionNoticeSent ? "입학신청서 다시 발송" : "입학신청서 발송"}
-                    </Button>
                   ) : null}
                   {selectedTaskFresh.type === "registration" && selectedRegistrationReopenStatus ? (
                     <Button
@@ -14022,12 +13640,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 classOptions={data?.classes || EMPTY_CLASS_OPTIONS}
                 textbookOptions={data?.textbooks || EMPTY_TEXTBOOK_OPTIONS}
                 closeAction={registrationDetailCloseAction}
-                admissionActions={{
-                  onSendAdmissionMessage: ({ taskId, requestKey }) => postRegistrationAdmissionAction({ taskId, requestKey }),
-                  onCheckAdmissionMessage: ({ messageId }) => postRegistrationAdmissionAction({ taskId: registrationCaseDetail.task.id, action: "check", messageId }),
-                  onReconcileAdmissionMessage: ({ messageId, resolution, providerEvidence, reason, requestKey }) => postRegistrationAdmissionAction({ taskId: registrationCaseDetail.task.id, action: "reconcile", messageId, resolution, providerEvidence, reason, requestKey }),
-                  onReleaseAdmissionMessageRetry: ({ messageId, providerEvidence, reason, requestKey }) => postRegistrationAdmissionAction({ taskId: registrationCaseDetail.task.id, action: "release", messageId, providerEvidence, reason, requestKey }),
-                }}
+                customerMessageClient={registrationFixtureEnabled
+                  ? registrationFixtureCustomerMessageClientRef.current || registrationCustomerMessageClient
+                  : registrationCustomerMessageClient}
               />
             </div>
           ) : null}

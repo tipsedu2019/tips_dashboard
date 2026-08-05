@@ -243,6 +243,71 @@ test("fixture gate is exact and production always ignores the query", async () =
   assert.equal(shouldEnableRegistrationSubjectTrackFixture("development", ""), false)
 })
 
+test("fixture customer message client keeps all five preview/send states in memory without provider ledger entries", async () => {
+  const fixture = await loadFixtureModule()
+  let state = fixture.createRegistrationSubjectTrackFixtureState()
+  const client = fixture.createRegistrationSubjectTrackFixtureCustomerMessageClient()
+  const targets = [
+    ["level_test_booking", "fixture-appointment-dual-test"],
+    ["visit_consultation_booking", "fixture-appointment-split-visit"],
+    ["appointment_reminder", "fixture-appointment-dual-test"],
+    ["waiting_notice", "fixture-track-waiting-notice-english"],
+    ["admission_application", "fixture-task-multiple-classes"],
+  ]
+
+  for (const [messageKind, sourceId] of targets) {
+    const preview = await client.preview({ messageKind, sourceId })
+    assert.equal(preview.previewId !== null, true)
+    assert.equal(preview.readiness.sendAllowed, true)
+    assert.equal(preview.body.includes("010"), false)
+  }
+
+  const acceptedPreview = await client.preview({
+    messageKind: "level_test_booking",
+    sourceId: "fixture-appointment-dual-test",
+  })
+  const accepted = await client.send({ previewId: acceptedPreview.previewId, requestKey: "fixture-customer-message-accepted" })
+  assert.equal(accepted.currentStatus, "accepted")
+  const replay = await client.send({ previewId: acceptedPreview.previewId, requestKey: "fixture-customer-message-accepted" })
+  assert.equal(replay.messageId, accepted.messageId)
+  assert.equal(replay.currentStatus, accepted.currentStatus)
+  assert.equal(replay.idempotent, true)
+  const locked = await client.preview({ messageKind: "level_test_booking", sourceId: "fixture-appointment-dual-test" })
+  assert.deepEqual(Array.from(locked.readiness.blockers), ["duplicate_locked"])
+  const unrelatedPreview = await client.preview({ messageKind: "level_test_booking", sourceId: "fixture-appointment-calendar-neighbor" })
+  assert.equal(unrelatedPreview.latestMessage, null)
+  assert.deepEqual(
+    plain(await client.list({ messageKind: "level_test_booking", sourceId: "fixture-appointment-calendar-neighbor" })),
+    [],
+  )
+
+  client.debugSetNextStatus("unknown")
+  const unknownPreview = await client.preview({ messageKind: "visit_consultation_booking", sourceId: "fixture-appointment-split-visit" })
+  const unknown = await client.send({ previewId: unknownPreview.previewId, requestKey: "fixture-customer-message-unknown" })
+  assert.equal(unknown.currentStatus, "unknown")
+  assert.equal(unknown.canCheck, true)
+
+  client.debugSetNextStatus("failed_hold")
+  const failedPreview = await client.preview({ messageKind: "appointment_reminder", sourceId: "fixture-appointment-dual-test" })
+  const failed = await client.send({ previewId: failedPreview.previewId, requestKey: "fixture-customer-message-failed" })
+  assert.equal(failed.currentStatus, "failed_hold")
+  assert.equal((await client.preview({ messageKind: "appointment_reminder", sourceId: "fixture-appointment-dual-test" })).previewId, null)
+
+  const replayFirst = await client.preview({ messageKind: "waiting_notice", sourceId: "fixture-track-waiting-notice-english" })
+  const replaySecond = await client.preview({ messageKind: "waiting_notice", sourceId: "fixture-track-waiting-notice-english" })
+  await client.send({ previewId: replayFirst.previewId, requestKey: "fixture-customer-message-bound-key" })
+  await assert.rejects(
+    client.send({ previewId: replaySecond.previewId, requestKey: "fixture-customer-message-bound-key" }),
+    /registration_customer_message_confirmation_conflict/,
+  )
+
+  client.debugSetSourceDirty("fixture-track-waiting-notice-english", true)
+  const dirty = await client.preview({ messageKind: "waiting_notice", sourceId: "fixture-track-waiting-notice-english" })
+  assert.equal(dirty.previewId, null)
+  assert.deepEqual(Array.from(dirty.readiness.blockers), ["source_dirty"])
+  assert.equal(state.externalCallLedger.length, 0)
+})
+
 test("fixture query action behavior only accepts an exact safe one-shot control", async () => {
   const fixture = await loadFixtureModule()
   const parse = fixture.parseRegistrationSubjectTrackFixtureQueryActionBehavior
@@ -432,6 +497,7 @@ test("fixture reset is deterministic and contains the approved workflow samples"
     "partial registration with later batch",
     "all subject tracks terminal",
     "multiple English classes",
+    "saved waiting notice",
     "enrollment decided add-button",
     "admission panel with non-enrollment sibling",
     "migration review",
@@ -535,6 +601,17 @@ test("fixture reset is deterministic and contains the approved workflow samples"
   assert.equal(sibling.tracks.some((track) => track.status === "enrollment_processing"), true)
   assert.equal(sibling.admissionBatches.some((batch) => batch.status === "draft"), true)
   assert.equal(first.caseDetails["fixture-task-migration-review"].tracks.every((track) => track.migrationReviewRequired), true)
+})
+
+test("saved waiting-notice fixture is complete and immediately message-eligible", async () => {
+  const fixture = await loadFixtureModule()
+  const state = fixture.createRegistrationSubjectTrackFixtureState()
+  const detail = state.caseDetails["fixture-task-waiting-notice"]
+  const track = detail.tracks.find((item) => item.id === "fixture-track-waiting-notice-english")
+
+  assert.equal(track.status, "waiting")
+  assert.equal(track.workflowStatus, "waiting_new_class")
+  assert.equal(track.waitingDetailKind, "current_term_opening")
 })
 
 test("fixture cases project once per workflow tab with stable cross-view identity", async () => {
@@ -1473,6 +1550,22 @@ test("fixture runtime exposes a dev-only replay bridge and removes it on cleanup
   assert.equal(typeof bridge?.replayLastCreate, "function")
   assert.equal(typeof bridge?.setNextActionBehavior, "function")
   assert.equal(typeof bridge?.setNextFault, "function")
+  assert.equal(typeof bridge?.setNextCustomerMessageStatus, "function")
+  bridge.setNextCustomerMessageStatus("unknown")
+  assert.throws(
+    () => bridge.setNextCustomerMessageStatus("pending"),
+    /registration_subject_track_fixture_customer_message_status_invalid/,
+  )
+  const customerPreview = await adapter.customerMessageClient.preview({
+    messageKind: "admission_application",
+    sourceId: "fixture-task-multiple-classes",
+  })
+  const customerResult = await adapter.customerMessageClient.send({
+    previewId: customerPreview.previewId,
+    requestKey: "40000000-0000-4000-8000-000000000001",
+  })
+  assert.equal(customerResult.currentStatus, "unknown")
+  assert.equal(customerResult.canCheck, true)
   const initialSnapshot = plain(bridge.snapshot())
   assert.equal(initialSnapshot.lastCreate, null)
   assert.deepEqual(initialSnapshot.notificationTargetHistory, plain(state.notificationTargetHistory))
@@ -1485,8 +1578,8 @@ test("fixture runtime exposes a dev-only replay bridge and removes it on cleanup
   assert.deepEqual(before.lastCreate.command.payload, plain(input))
   assert.deepEqual(before.lastCreate.result, plain(originalResult))
   assert.deepEqual(before.lastCreate.result.notificationJobs, [])
-  assert.equal(before.counts.cases, 11)
-  assert.equal(before.counts.tracks, 19)
+  assert.equal(before.counts.cases, 12)
+  assert.equal(before.counts.tracks, 20)
   assert.equal(before.counts.appointments, 6)
   assert.equal(before.counts.externalCalls, 1)
   assert.equal(before.counts.notificationReceipts, 1)
@@ -1499,8 +1592,25 @@ test("fixture runtime exposes a dev-only replay bridge and removes it on cleanup
   assert.deepEqual(after.counts, before.counts)
   assert.deepEqual(after.lastCreate.command, before.lastCreate.command)
 
+  bridge.setNextCustomerMessageStatus("unknown")
   cleanup()
   assert.equal(context[runtime.REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL], undefined)
+
+  const cleanupAgain = runtime.installRegistrationSubjectTrackFixtureRuntime(
+    "test",
+    "registration-subject-tracks",
+    adapter,
+  )
+  const resetPreview = await adapter.customerMessageClient.preview({
+    messageKind: "waiting_notice",
+    sourceId: "fixture-track-waiting-notice-english",
+  })
+  const resetResult = await adapter.customerMessageClient.send({
+    previewId: resetPreview.previewId,
+    requestKey: "40000000-0000-4000-8000-000000000002",
+  })
+  assert.equal(resetResult.currentStatus, "accepted")
+  cleanupAgain()
 })
 
 test("fixture option fault is scoped to one option load and never records an external call", async () => {
@@ -2556,7 +2666,7 @@ test("workspace mounts the real list/editor and exposes create only to fixture m
   assert.doesNotMatch(source, /NODE_ENV === "production"[\s\S]*registration-subject-tracks/)
 })
 
-test("all registration service, exact class detail, notification, and admission paths consult the in-memory adapter first", async () => {
+test("all registration service, exact class detail, notification, and customer-message paths consult the in-memory adapter first", async () => {
   const [service, opsService, notification, workspace] = await Promise.all([
     readFile(serviceUrl, "utf8"),
     readFile(opsServiceUrl, "utf8"),
@@ -2572,10 +2682,10 @@ test("all registration service, exact class detail, notification, and admission 
   assert.match(opsService, /loadRegistrationSubjectTrackFixtureClassDetails/)
   assert.match(notification, /registration-track-fixture-runtime/)
   assert.match(notification, /executeRegistrationSubjectTrackFixtureAction/)
-  assert.match(workspace, /executeRegistrationSubjectTrackFixtureAction\("sendRegistrationAdmissionMessage"/)
-  assert.match(workspace, /executeRegistrationSubjectTrackFixtureAction\("checkRegistrationAdmissionMessage"/)
-  assert.match(workspace, /executeRegistrationSubjectTrackFixtureAction\("reconcileRegistrationAdmissionMessage"/)
-  assert.match(workspace, /executeRegistrationSubjectTrackFixtureAction\("releaseRegistrationAdmissionMessageRetry"/)
+  assert.match(workspace, /createRegistrationCustomerMessageClient/)
+  assert.match(workspace, /registrationFixtureCustomerMessageClientRef\.current = adapter\.customerMessageClient/)
+  assert.match(workspace, /customerMessageClient=\{registrationFixtureEnabled[\s\S]*registrationFixtureCustomerMessageClientRef\.current[\s\S]*registrationCustomerMessageClient/)
+  assert.doesNotMatch(workspace, /executeRegistrationSubjectTrackFixtureAction\("(?:send|check|reconcile|release)RegistrationAdmissionMessage"/)
 })
 
 test("fixture unified inquiry save rejects stale common and subject expectations without mutation", async () => {

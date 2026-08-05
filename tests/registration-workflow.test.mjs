@@ -9,7 +9,6 @@ import {
   compareRegistrationTasks,
   ensureRegistrationInquiryAt,
   getEmptyRegistrationFilters,
-  getManualAdmissionCompletionStatus,
   getRegistrationBlockerFocusKey,
   getRegistrationBlockerSection,
   getRegistrationBranchActions,
@@ -357,29 +356,44 @@ test("R20 changing waitlist classes restores the previous waitlist when the new 
 });
 
 // Set 5: admission-form messaging.
-test("R21 MakeEdu manual sending has an explicit completion action", async () => {
-  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  assert.match(source, /메이크에듀 발송 완료/);
-  assert.match(source, /completeManualRegistrationAdmissionMessage/);
-  assert.equal(getManualAdmissionCompletionStatus("5. 입학 등록 결정"), "5-1. 입학신청서 발송 완료");
+test("R21 legacy admission POST is preview-required and reaches neither history nor provider", async () => {
+  const { createRegistrationAdmissionRouteHandlers } = await import("../src/app/api/solapi/registration/core.js");
+  let listCalls = 0;
+  const handlers = createRegistrationAdmissionRouteHandlers({
+    listAdmissionMessages: async () => { listCalls += 1; return Response.json({ ok: true }); },
+  });
+  const response = await handlers.post(new Request("http://localhost/api/solapi/registration", { method: "POST" }));
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "REGISTRATION_CUSTOMER_MESSAGE_PREVIEW_REQUIRED");
+  assert.equal(listCalls, 0);
 });
 
-test("R22 SOLAPI status loading surfaces registration-detail query failures", async () => {
-  const routeSource = await readSource("src/app/api/solapi/registration/route.ts");
-  assert.match(routeSource, /detailResult/);
-  assert.match(routeSource, /throwQueryError\(detailResult\.error\)/);
+test("R22 legacy admission GET preserves masked history and readiness envelopes", async () => {
+  const { createRegistrationAdmissionRouteHandlers } = await import("../src/app/api/solapi/registration/core.js");
+  const envelope = { ok: true, messageKind: "admission_application", readiness: { sendAllowed: false }, history: [] };
+  const handlers = createRegistrationAdmissionRouteHandlers({
+    listAdmissionMessages: async () => Response.json(envelope),
+  });
+  const response = await handlers.get(new Request("http://localhost/api/solapi/registration?taskId=00000000-0000-4000-8000-000000000001"));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), envelope);
 });
 
-test("R23 SOLAPI status loading surfaces message-history query failures", async () => {
-  const routeSource = await readSource("src/app/api/solapi/registration/route.ts");
-  assert.match(routeSource, /messageResult/);
-  assert.match(routeSource, /throwQueryError\(messageResult\.error\)/);
+test("R23 legacy admission GET preserves public readiness and history errors", async () => {
+  const { createRegistrationAdmissionRouteHandlers } = await import("../src/app/api/solapi/registration/core.js");
+  const handlers = createRegistrationAdmissionRouteHandlers({
+    listAdmissionMessages: async () => Response.json({ ok: false, code: "registration_customer_message_readiness_unavailable" }, { status: 503 }),
+  });
+  const response = await handlers.get(new Request("http://localhost/api/solapi/registration?taskId=00000000-0000-4000-8000-000000000001"));
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { ok: false, code: "registration_customer_message_readiness_unavailable" });
 });
 
 test("R24 an indeterminate provider request is not left as forever-pending", async () => {
-  const coreSource = await readSource("src/app/api/solapi/registration/core.js");
-  assert.match(coreSource, /result: "unknown"/);
-  assert.match(coreSource, /deps\.finalize/);
+  const routeSource = await readSource("src/features/tasks/server/registration-customer-message-route.ts");
+  assert.match(routeSource, /outcome: "unknown"[\s\S]*provider_dispatch_uncertain/);
+  assert.match(routeSource, /dependencies\.finalizeMessage/);
+  assert.match(routeSource, /unknownAfterMarker\(claim\)/);
 });
 
 test("R25 admission messages cannot be sent after registration is closed", () => {
@@ -623,15 +637,22 @@ test("R48 a failed non-final update rolls registration detail and waitlist effec
 });
 
 test("R49 message-status loading aborts stale responses when the selected task changes", async () => {
-  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const source = await readSource("src/features/tasks/registration-alimtalk-preview-dialog.tsx");
   assert.match(source, /AbortController/);
-  assert.match(source, /requestTaskId/);
+  assert.match(source, /generationRef/);
+  assert.match(source, /\[client, open, targetMessageKind, targetSourceId\]/);
+  assert.match(source, /if \(generation !== generationRef\.current\) return[\s\S]*applyResult\(next\)/);
 });
 
 test("R50 an accepted provider send is not reported as failed when local refresh fails", async () => {
-  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  assert.match(source, /providerAccepted/);
-  assert.match(source, /알림톡은 접수됐지만 화면 새로고침/);
+  const [dialog, application] = await Promise.all([
+    readSource("src/features/tasks/registration-alimtalk-preview-dialog.tsx"),
+    readSource("src/features/tasks/registration-track-editor.tsx"),
+  ]);
+  assert.match(dialog, /applyResult\(next\)[\s\S]*onSendSuccess/);
+  assert.match(dialog, /catch[\s\S]*알림톡은 접수됐지만 최신 내용을 불러오지 못했습니다/);
+  assert.match(application, /const reloadAfterCustomerMessageSend = useCallback\(async \(\) => \{[\s\S]*await onReload\(\)/);
+  assert.match(application, /onSendSuccess=\{async \(\) => \{[\s\S]*reloadAfterCustomerMessageSend\(\)/);
 });
 
 // Set 11: annotated add-modal feedback.
