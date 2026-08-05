@@ -20,6 +20,7 @@ const CLI_PATH =
   "/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supabase/cli-darwin-arm64/bin/supabase-go";
 const CLI_VERSION = "2.103.0";
 const PROJECT_ID_PREFIX = "tips_registration_solapi_qa_";
+const PROJECT_ID_PATTERN = /^tips_registration_solapi_qa_[a-f0-9]{12}$/u;
 const WORKDIR_PREFIX = "tips-registration-solapi-qa-";
 const PG_TAP_PATH =
   "supabase/tests/registration_customer_solapi_messages_test.sql";
@@ -30,21 +31,38 @@ const MESSAGE_MIGRATIONS = [
 ];
 const CONTAINER_PREFIX = `supabase_db_${PROJECT_ID_PREFIX}`;
 const FORBIDDEN_OPTIONS = new Set(["--linked", "--remote", "--production"]);
-const GUARDED_ENVIRONMENT_KEYS = [
+const GUARDED_ENVIRONMENT_EXACT_KEYS = new Set([
+  "APP_ENV",
   "DATABASE_URL",
   "DIRECT_URL",
-  "SUPABASE_ACCESS_TOKEN",
-  "SUPABASE_DB_PASSWORD",
-  "SUPABASE_PROJECT_ID",
-  "SUPABASE_PROJECT_REF",
-  "NEXT_PUBLIC_SUPABASE_URL",
-  "SOLAPI_API_KEY",
-  "SOLAPI_API_SECRET",
-  "SOLAPI_PF_ID",
-  "NOTIFICATION_WORKER_ENABLED",
-  "NOTIFICATION_WORKER_SECRET",
-  "CRON_SECRET",
-  "VERCEL_CRON_SECRET",
+  "ENV",
+  "ENVIRONMENT",
+  "NODE_ENV",
+]);
+const GUARDED_ENVIRONMENT_PREFIXES = [
+  "CRON_",
+  "NEXT_PUBLIC_SUPABASE_",
+  "NOTIFICATION_WORKER_",
+  "PG",
+  "POSTGRES_",
+  "REGISTRATION_SOLAPI_",
+  "SOLAPI_",
+  "SUPABASE_",
+  "VERCEL_",
+  "VITE_SUPABASE_",
+];
+const LOCAL_CHILD_ENVIRONMENT_KEYS = [
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "LOGNAME",
+  "PATH",
+  "SHELL",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "USER",
 ];
 
 function fail(code, detail = "") {
@@ -110,20 +128,38 @@ function validateExactLoopback(url, dbUrl) {
   }
 }
 
-function assertSafeEnvironment(environment) {
-  const present = GUARDED_ENVIRONMENT_KEYS.filter(
-    (key) => typeof environment[key] === "string" && environment[key].length > 0,
-  );
+export function assertRegistrationCustomerSolapiSafeEnvironment(environment) {
+  const present = Object.keys(environment).filter((key) => {
+    const value = environment[key];
+    if (typeof value !== "string" || value.length === 0) return false;
+    if (["APP_ENV", "ENV", "ENVIRONMENT", "NODE_ENV"].includes(key)) {
+      return ["prod", "production"].includes(value.toLowerCase());
+    }
+    return GUARDED_ENVIRONMENT_EXACT_KEYS.has(key)
+      || GUARDED_ENVIRONMENT_PREFIXES.some((prefix) => key.startsWith(prefix));
+  });
   if (present.length > 0) {
-    fail("registration_local_db_forbidden_environment", present.join(","));
+    fail("registration_local_db_forbidden_environment", present.sort().join(","));
   }
 }
 
-function childEnvironment(environment = process.env) {
-  const safe = { ...environment };
-  for (const key of GUARDED_ENVIRONMENT_KEYS) delete safe[key];
+export function buildRegistrationCustomerSolapiLocalEnvironment(environment = process.env) {
+  const safe = {};
+  for (const key of LOCAL_CHILD_ENVIRONMENT_KEYS) {
+    if (typeof environment[key] === "string" && environment[key].length > 0) {
+      safe[key] = environment[key];
+    }
+  }
   safe.SUPABASE_INTERNAL_IMAGE_REGISTRY = "";
   return safe;
+}
+
+function exactResourceManifest(projectId) {
+  return [
+    { kind: "container", name: `supabase_db_${projectId}`, projectId },
+    { kind: "network", name: `supabase_network_${projectId}`, projectId },
+    { kind: "volume", name: `supabase_db_${projectId}`, projectId },
+  ];
 }
 
 export function buildRegistrationCustomerSolapiQaPlan({
@@ -174,6 +210,7 @@ export function buildRegistrationCustomerSolapiQaPlan({
     ],
     repositoryRoot,
     containerName: `supabase_db_${projectId}`,
+    resourceManifest: exactResourceManifest(projectId),
   };
 }
 
@@ -487,7 +524,7 @@ async function runCommandDefault(command, _label, options = {}) {
   try {
     return await execFileAsync(executable, args, {
       cwd: options.cwd,
-      env: childEnvironment(),
+      env: buildRegistrationCustomerSolapiLocalEnvironment(),
       maxBuffer: 64 * 1024 * 1024,
     });
   } catch (error) {
@@ -502,23 +539,101 @@ async function runCommandDefault(command, _label, options = {}) {
 }
 
 async function inspectResourcesDefault(projectId) {
+  const labelKey = "com.supabase.cli.project";
   const resourceCommands = [
-    ["container", ["ps", "-a", "--filter", `name=${projectId}`, "--format", "{{.Names}}"]],
-    ["network", ["network", "ls", "--filter", `name=${projectId}`, "--format", "{{.Name}}"]],
-    ["volume", ["volume", "ls", "--filter", `name=${projectId}`, "--format", "{{.Name}}"]],
+    ["container", ["ps", "-a", "--filter", `label=${labelKey}=${projectId}`, "--format", `{{.Label \"${labelKey}\"}}|{{.Names}}`]],
+    ["network", ["network", "ls", "--filter", `label=${labelKey}=${projectId}`, "--format", `{{.Label \"${labelKey}\"}}|{{.Name}}`]],
+    ["volume", ["volume", "ls", "--filter", `label=${labelKey}=${projectId}`, "--format", `{{.Label \"${labelKey}\"}}|{{.Name}}`]],
   ];
-  const leftovers = [];
+  const resources = [];
   for (const [kind, args] of resourceCommands) {
-    const { stdout } = await execFileAsync("docker", args, { env: childEnvironment() });
-    leftovers.push(
+    const { stdout } = await execFileAsync("docker", args, {
+      env: buildRegistrationCustomerSolapiLocalEnvironment(),
+    });
+    resources.push(
       ...stdout
         .split("\n")
         .map((value) => value.trim())
-        .filter((value) => value.includes(projectId))
-        .map((value) => `${kind}:${value}`),
+        .filter(Boolean)
+        .map((value) => {
+          const [label, name] = value.split("|", 2);
+          return { kind, name, projectId: label };
+        }),
     );
   }
-  return leftovers;
+  return resources;
+}
+
+function assertExecutionProvenance(options) {
+  if (!PROJECT_ID_PATTERN.test(options.projectId ?? "")) {
+    fail("registration_local_db_project_identity_rejected");
+  }
+  const resolvedRuntimeRoot = path.resolve(options.runtimeRoot ?? "");
+  const expectedParent = path.resolve(os.tmpdir());
+  const basename = path.basename(resolvedRuntimeRoot);
+  if (
+    path.dirname(resolvedRuntimeRoot) !== expectedParent
+    || !basename.startsWith(WORKDIR_PREFIX)
+    || !/^[A-Za-z0-9_-]+$/u.test(basename.slice(WORKDIR_PREFIX.length))
+  ) {
+    fail("registration_local_db_runtime_provenance_rejected");
+  }
+  validateExactLoopback(options.url, options.dbUrl);
+}
+
+function exactOwnedResources(resources, projectId) {
+  if (!Array.isArray(resources)) fail("registration_local_db_resource_inspection_invalid");
+  const expected = exactResourceManifest(projectId);
+  const expectedKeys = new Set(expected.map(({ kind, name }) => `${kind}:${name}`));
+  const owned = [];
+  for (const resource of resources) {
+    if (resource?.projectId !== projectId) continue;
+    if (
+      !["container", "network", "volume"].includes(resource.kind)
+      || typeof resource.name !== "string"
+      || !expectedKeys.has(`${resource.kind}:${resource.name}`)
+    ) {
+      fail("registration_local_db_resource_ownership_rejected");
+    }
+    owned.push(Object.freeze({
+      kind: resource.kind,
+      name: resource.name,
+      projectId,
+    }));
+  }
+  return owned;
+}
+
+function assertCreatedResourceManifest(resources, expected) {
+  const actualKeys = resources.map(({ kind, name }) => `${kind}:${name}`).sort();
+  const expectedKeys = expected.map(({ kind, name }) => `${kind}:${name}`).sort();
+  if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {
+    fail("registration_local_db_created_resource_manifest_rejected");
+  }
+}
+
+async function removeResourcesDefault(resources, projectId) {
+  const owned = exactOwnedResources(resources, projectId);
+  const commands = {
+    container: ["rm", "-f"],
+    volume: ["volume", "rm"],
+    network: ["network", "rm"],
+  };
+  const errors = [];
+  for (const kind of ["container", "volume", "network"]) {
+    for (const resource of owned.filter((entry) => entry.kind === kind)) {
+      try {
+        await execFileAsync("docker", [...commands[kind], resource.name], {
+          env: buildRegistrationCustomerSolapiLocalEnvironment(),
+        });
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+  }
+  if (errors.length > 0) {
+    throw new Error(`registration_local_db_exact_fallback_failed: ${errors.length}`);
+  }
 }
 
 async function removeRuntimeDefault(target) {
@@ -729,41 +844,120 @@ export async function runRegistrationCustomerSolapiLocalDbQa(
   options,
   dependencies = {},
 ) {
+  assertExecutionProvenance(options);
+  assertRegistrationCustomerSolapiSafeEnvironment(
+    dependencies.environment ?? process.env,
+  );
   const plan = buildRegistrationCustomerSolapiQaPlan(options);
   const prepareRuntime = dependencies.prepareRuntime ?? prepareRuntimeDefault;
   const runCommand = dependencies.runCommand ?? runCommandDefault;
   const inspectResources = dependencies.inspectResources ?? inspectResourcesDefault;
+  const removeResources = dependencies.removeResources ?? removeResourcesDefault;
   const removeRuntime = dependencies.removeRuntime ?? removeRuntimeDefault;
   const runConcurrencyProbe =
     dependencies.runConcurrencyProbe ?? runConcurrencyProbeDefault;
-  let primaryError;
+  const errors = [];
+  const leftoverEvidence = [];
   let probe;
+  let preflightPassed = false;
+  let startAttempted = false;
 
   try {
-    await prepareRuntime(options);
-    await runCommand(plan.startCommand, "dbStart", { cwd: options.repositoryRoot });
-    await runCommand(plan.pgTapCommand, "pgTap", { cwd: options.runtimeRoot });
-    probe = await runConcurrencyProbe(plan, runCommand);
-  } catch (error) {
-    primaryError = error;
-  } finally {
     try {
-      await runCommand(plan.cleanupCommand, "cleanup", {
-        cwd: options.repositoryRoot,
-      });
-    } catch (cleanupError) {
-      if (!primaryError) primaryError = cleanupError;
-    }
-    const leftovers = await inspectResources(options.projectId);
-    await removeRuntime(options.runtimeRoot);
-    if (leftovers.length > 0 && !primaryError) {
-      primaryError = new Error(
-        `registration_local_db_cleanup_leftovers: ${leftovers.join(",")}`,
+      const preflight = exactOwnedResources(
+        await inspectResources(options.projectId),
+        options.projectId,
       );
+      if (preflight.length > 0) {
+        throw new Error(
+          `registration_local_db_preexisting_resources: ${preflight.map(({ kind, name }) => `${kind}:${name}`).join(",")}`,
+        );
+      }
+      preflightPassed = true;
+    } catch (error) {
+      errors.push({ stage: "preflight", error });
+    }
+
+    if (preflightPassed) {
+      try {
+        await prepareRuntime(options);
+        startAttempted = true;
+        await runCommand(plan.startCommand, "dbStart", { cwd: options.repositoryRoot });
+        const createdResources = exactOwnedResources(
+          await inspectResources(options.projectId),
+          options.projectId,
+        );
+        assertCreatedResourceManifest(createdResources, plan.resourceManifest);
+        await runCommand(plan.pgTapCommand, "pgTap", { cwd: options.runtimeRoot });
+        probe = await runConcurrencyProbe(plan, runCommand);
+      } catch (error) {
+        errors.push({ stage: "execution", error });
+      }
+    }
+  } finally {
+    if (startAttempted) {
+      try {
+        await runCommand(plan.cleanupCommand, "cleanup", {
+          cwd: options.repositoryRoot,
+        });
+      } catch (error) {
+        errors.push({ stage: "cleanup-command", error });
+      }
+
+      let leftovers = [];
+      try {
+        leftovers = exactOwnedResources(
+          await inspectResources(options.projectId),
+          options.projectId,
+        );
+        leftoverEvidence.push(...leftovers);
+      } catch (error) {
+        errors.push({ stage: "cleanup-inspection", error });
+      }
+
+      if (leftovers.length > 0) {
+        try {
+          await removeResources(leftovers, options.projectId);
+        } catch (error) {
+          errors.push({ stage: "cleanup-fallback", error });
+        } finally {
+          try {
+            const remaining = exactOwnedResources(
+              await inspectResources(options.projectId),
+              options.projectId,
+            );
+            if (remaining.length > 0) {
+              leftoverEvidence.push(...remaining);
+              errors.push({
+                stage: "cleanup-leftovers",
+                error: new Error("registration_local_db_cleanup_leftovers"),
+              });
+            }
+          } catch (error) {
+            errors.push({ stage: "cleanup-reinspection", error });
+          }
+        }
+      }
+    }
+
+    try {
+      await removeRuntime(options.runtimeRoot);
+    } catch (error) {
+      errors.push({ stage: "workdir-removal", error });
     }
   }
 
-  if (primaryError) throw primaryError;
+  if (errors.length > 0) {
+    const safeDetails = errors.map(({ stage, error }) => {
+      const message = String(error?.message ?? "unknown")
+        .replace(/:\/\/[^\s:@/]+:[^\s@/]+@/gu, "://<redacted>@")
+        .split("\n", 1)[0];
+      return `${stage}=${message}`;
+    });
+    const evidence = [...new Set(leftoverEvidence.map(({ kind, name }) => `${kind}:${name}`))];
+    if (evidence.length > 0) safeDetails.push(`leftovers=${evidence.join(",")}`);
+    throw new Error(`registration_local_db_qa_failed: ${safeDetails.join(" | ")}`);
+  }
   return {
     mode: "executed-local-db",
     url: options.url,
@@ -794,7 +988,7 @@ async function main() {
     return;
   }
 
-  assertSafeEnvironment(process.env);
+  assertRegistrationCustomerSolapiSafeEnvironment(process.env);
   const suffix = randomBytes(6).toString("hex");
   const projectId = `${PROJECT_ID_PREFIX}${suffix}`;
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), WORKDIR_PREFIX));

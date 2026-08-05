@@ -8,11 +8,11 @@ const VIEWPORTS = Object.freeze([
   { name: "mobile-390x844", width: 390, height: 844 },
 ])
 const APP_ENDPOINTS = new Set([
-  "/api/solapi/registration/customer-message/preview",
-  "/api/solapi/registration/customer-message/send",
-  "/api/solapi/registration/customer-message/list",
-  "/api/solapi/registration/customer-message/check",
-  "/api/solapi/registration/customer-message/reconcile",
+  "/api/solapi/registration/preview",
+  "/api/solapi/registration/send",
+  "/api/solapi/registration/messages",
+  "/api/solapi/registration/check",
+  "/api/solapi/registration/admin",
 ])
 const CASES = Object.freeze([
   {
@@ -101,11 +101,15 @@ async function installSafetyRoutes(page, evidence) {
     }
     if (url.origin === evidence.baseOrigin && APP_ENDPOINTS.has(url.pathname)) {
       evidence.appEndpointRequests.push(url.pathname)
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ ok: true, fixture: true }),
-      })
+      await route.abort("blockedbyclient")
+      return
+    }
+    if (
+      url.origin === evidence.baseOrigin
+      && url.pathname.startsWith("/api/solapi/registration")
+    ) {
+      evidence.unexpectedRegistrationApiRequests.push(url.pathname)
+      await route.abort("blockedbyclient")
       return
     }
     if (url.origin !== evidence.baseOrigin && !["blob:", "data:"].includes(url.protocol)) {
@@ -124,7 +128,27 @@ async function waitForApplication(page) {
   return host
 }
 
-async function assertLayout(page, dialog) {
+async function waitForDialogAnimations(dialog) {
+  await dialog.evaluate(async (element) => {
+    const animations = element.getAnimations({ subtree: true })
+    await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)))
+  })
+}
+
+async function measureControl(control, label, evidence) {
+  const bounds = await control.boundingBox()
+  if (!bounds) throw new Error(`${label} has no rendered bounding box`)
+  const measurement = { label, width: bounds.width, height: bounds.height }
+  evidence.controlMeasurements.push(measurement)
+  const minWidth = measurement.width
+  const minHeight = measurement.height
+  if (minWidth < 44 || minHeight < 44) {
+    throw new Error(`customer message control below 44x44: ${JSON.stringify(measurement)}`)
+  }
+  return measurement
+}
+
+async function assertLayout(page, dialog, evidence) {
   await page.waitForTimeout(250)
   const pageOverflow = await page.evaluate(() => {
     const { scrollWidth, clientWidth } = document.documentElement
@@ -136,14 +160,18 @@ async function assertLayout(page, dialog) {
     return scrollWidth > clientWidth
   })
   if (dialogOverflow) throw new Error("customer message dialog has horizontal overflow")
-  const shortButtons = await dialog.getByRole("button").evaluateAll((buttons) => (
-    buttons.filter((button) => button.getBoundingClientRect().height < 44).map((button) => ({
+  const buttonMeasurements = await dialog.getByRole("button").evaluateAll((buttons) => (
+    buttons.filter((button) => button.getClientRects().length > 0).map((button) => ({
       label: button.textContent?.trim() || button.getAttribute("aria-label") || "button",
-      minHeight: button.getBoundingClientRect().height,
+      width: button.getBoundingClientRect().width,
+      height: button.getBoundingClientRect().height,
     }))
   ))
-  if (shortButtons.some(({ minHeight }) => minHeight < 44)) {
-    throw new Error(`customer message controls below 44px: ${JSON.stringify(shortButtons)}`)
+  evidence.controlMeasurements.push(...buttonMeasurements)
+  if (buttonMeasurements.some(({ width: minWidth, height: minHeight }) => (
+    minWidth < 44 || minHeight < 44
+  ))) {
+    throw new Error(`customer message controls below 44x44: ${JSON.stringify(buttonMeasurements)}`)
   }
 }
 
@@ -154,7 +182,7 @@ async function assertDialogFocus(page, dialog) {
   await dialog.waitFor({ state: "hidden", timeout: 5_000 })
 }
 
-async function openDialog(page, host, triggerName) {
+async function openDialog(page, host, triggerName, evidence) {
   const triggers = host.getByRole("button", { name: triggerName, exact: true })
   await triggers.first().waitFor({ state: "visible", timeout: 8_000 })
   let trigger = null
@@ -173,13 +201,15 @@ async function openDialog(page, host, triggerName) {
     })))
     throw new Error(`${triggerName} is unexpectedly disabled: ${JSON.stringify(states)}`)
   }
+  await measureControl(trigger, "enabled-trigger", evidence)
   await trigger.click()
   const dialog = page.getByRole("dialog", { name: "알림톡 미리보기" })
   await dialog.waitFor({ state: "visible", timeout: 8_000 })
+  await waitForDialogAnimations(dialog)
   return { trigger, dialog }
 }
 
-async function verifyDirtySourceBlock(page, baseUrl) {
+async function verifyDirtySourceBlock(page, baseUrl, evidence) {
   const item = CASES[0]
   await page.goto(caseUrl(baseUrl, item), { waitUntil: "domcontentloaded" })
   const host = await waitForApplication(page)
@@ -191,11 +221,12 @@ async function verifyDirtySourceBlock(page, baseUrl) {
   await choices.nth(alternate).click()
   const blocked = host.getByRole("button", { name: "예약 안내 알림톡", exact: true }).first()
   if (!(await blocked.isDisabled())) throw new Error("source_dirty appointment still allows customer message preview")
+  await measureControl(blocked, "dirty-disabled-trigger", evidence)
   await host.getByText("예약을 저장한 뒤 알림톡을 보낼 수 있습니다.", { exact: true }).waitFor({ state: "visible" })
   return "source_dirty"
 }
 
-async function verifyMessageCase(page, baseUrl, item) {
+async function verifyMessageCase(page, baseUrl, item, evidence) {
   await page.goto(caseUrl(baseUrl, item), { waitUntil: "domcontentloaded" })
   const host = await waitForApplication(page)
   const triggerScope = host
@@ -206,26 +237,40 @@ async function verifyMessageCase(page, baseUrl, item) {
     })
   }
 
-  let { trigger, dialog } = await openDialog(page, triggerScope, item.trigger)
+  let { trigger, dialog } = await openDialog(page, triggerScope, item.trigger, evidence)
   await dialog.getByText("끝 5678", { exact: false }).first().waitFor({ state: "visible" })
+  const maskedDialogText = (await dialog.textContent()) || ""
+  if (!maskedDialogText.includes("끝 5678")) throw new Error("masked recipient last4 is missing")
+  if (/010[\s-]?\d{4}[\s-]?\d{4}/u.test(maskedDialogText)) {
+    throw new Error("full phone leaked into customer message dialog")
+  }
   await dialog.getByText(item.body, { exact: true }).waitFor({ state: "visible" })
   await dialog.getByText("준비 상태 · 발송 가능", { exact: true }).waitFor({ state: "visible" })
-  await assertLayout(page, dialog)
+  await assertLayout(page, dialog, evidence)
+  await measureControl(
+    dialog.getByRole("button", { name: "알림톡 미리보기 닫기", exact: true }),
+    "dialog-close",
+    evidence,
+  )
   await assertDialogFocus(page, dialog)
   const focusReturned = await trigger.evaluate((button) => document.activeElement === button)
   if (!focusReturned) throw new Error("Escape did not return focus to the Alimtalk trigger")
 
-  ;({ trigger, dialog } = await openDialog(page, triggerScope, item.trigger))
-  await dialog.getByRole("button", { name: "확인 후 발송", exact: true }).click()
+  ;({ trigger, dialog } = await openDialog(page, triggerScope, item.trigger, evidence))
+  const confirmButton = dialog.getByRole("button", { name: "확인 후 발송", exact: true })
+  await measureControl(confirmButton, "confirm-send", evidence)
+  await confirmButton.click()
   if (item.unknown) {
     await dialog.getByText("발송 결과 확인 필요", { exact: true }).waitFor({ state: "visible" })
     await dialog.getByRole("button", { name: "상태 확인", exact: true }).click()
   }
   await dialog.getByText("SOLAPI 접수 완료 · 학부모 전화 끝 5678", { exact: true }).waitFor({ state: "visible" })
-  await dialog.getByRole("button", { name: "돌아가기", exact: true }).click()
+  const acceptedCloseButton = dialog.getByRole("button", { name: "돌아가기", exact: true })
+  await measureControl(acceptedCloseButton, "dialog-close", evidence)
+  await acceptedCloseButton.click()
   await dialog.waitFor({ state: "hidden" })
 
-  ;({ dialog } = await openDialog(page, triggerScope, item.trigger))
+  ;({ dialog } = await openDialog(page, triggerScope, item.trigger, evidence))
   await page.waitForTimeout(300)
   const reopenedText = (await dialog.textContent()) || ""
   if (!reopenedText.includes("최근 상태 · SOLAPI 접수 완료")) {
@@ -235,7 +280,9 @@ async function verifyMessageCase(page, baseUrl, item) {
   if (!(await dialog.getByRole("button", { name: "확인 후 발송", exact: true }).isDisabled())) {
     throw new Error("duplicate_locked preview exposes another send")
   }
-  await dialog.getByRole("button", { name: "돌아가기", exact: true }).click()
+  const historyCloseButton = dialog.getByRole("button", { name: "돌아가기", exact: true })
+  await measureControl(historyCloseButton, "dialog-close", evidence)
+  await historyCloseButton.click()
   return {
     messageKind: item.messageKind,
     currentStatus: "accepted",
@@ -252,7 +299,9 @@ async function verifyViewport(browser, baseUrl, viewport) {
     baseOrigin: new URL(baseUrl).origin,
     providerRequests: [],
     appEndpointRequests: [],
+    unexpectedRegistrationApiRequests: [],
     unexpectedExternalRequests: [],
+    controlMeasurements: [],
   }
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text())
@@ -260,11 +309,11 @@ async function verifyViewport(browser, baseUrl, viewport) {
   page.on("pageerror", (error) => pageErrors.push(error.message))
   await installSafetyRoutes(page, evidence)
   try {
-    const dirtySource = await verifyDirtySourceBlock(page, baseUrl)
+    const dirtySource = await verifyDirtySourceBlock(page, baseUrl, evidence)
     const kinds = []
     for (const item of CASES) {
       try {
-        kinds.push(await verifyMessageCase(page, baseUrl, item))
+        kinds.push(await verifyMessageCase(page, baseUrl, item, evidence))
       } catch (error) {
         throw new Error(`${viewport.name}/${item.messageKind}: ${error.message}`)
       }
@@ -278,6 +327,14 @@ async function verifyViewport(browser, baseUrl, viewport) {
     if (evidence.providerRequests.length !== 0) {
       throw new Error(`api.solapi.com requests observed: ${evidence.providerRequests.join(", ")}`)
     }
+    if (evidence.appEndpointRequests.length !== 0) {
+      throw new Error(`registration app endpoints observed: ${evidence.appEndpointRequests.join(", ")}`)
+    }
+    if (evidence.unexpectedRegistrationApiRequests.length !== 0) {
+      throw new Error(
+        `unexpected registration API requests observed: ${evidence.unexpectedRegistrationApiRequests.join(", ")}`,
+      )
+    }
     if (evidence.unexpectedExternalRequests.length !== 0) {
       throw new Error(
         `unexpected external requests observed: ${evidence.unexpectedExternalRequests.join(", ")}`,
@@ -288,13 +345,15 @@ async function verifyViewport(browser, baseUrl, viewport) {
       kinds,
       dirtySource,
       appEndpointRequests: evidence.appEndpointRequests.length,
+      unexpectedRegistrationApiRequests: 0,
       unexpectedExternalRequests: 0,
       providerCalls: 0,
       consoleErrors: 0,
       pageErrors: 0,
       overlayErrors: 0,
       overflow: false,
-      minimumControlHeight: 44,
+      minimumControlWidth: Math.min(...evidence.controlMeasurements.map(({ width }) => width)),
+      minimumControlHeight: Math.min(...evidence.controlMeasurements.map(({ height }) => height)),
     }
   } finally {
     await context.close()

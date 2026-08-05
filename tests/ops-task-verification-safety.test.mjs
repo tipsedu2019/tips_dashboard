@@ -97,14 +97,15 @@ test("verification scripts always run the four subject-track samples in memory",
 
 test("registration customer-message browser QA stays exact-fixture and provider-zero", () => {
   assertIncludesAll(customerMessageBrowserSource, [
-    '"/api/solapi/registration/customer-message/preview"',
-    '"/api/solapi/registration/customer-message/send"',
-    '"/api/solapi/registration/customer-message/list"',
-    '"/api/solapi/registration/customer-message/check"',
-    '"/api/solapi/registration/customer-message/reconcile"',
+    '"/api/solapi/registration/preview"',
+    '"/api/solapi/registration/send"',
+    '"/api/solapi/registration/messages"',
+    '"/api/solapi/registration/check"',
+    '"/api/solapi/registration/admin"',
     'url.hostname === "api.solapi.com"',
     "unexpectedExternalRequests",
     'url.origin !== evidence.baseOrigin',
+    'url.pathname.startsWith("/api/solapi/registration")',
     'route.abort("blockedbyclient")',
     "providerCalls: 0",
   ])

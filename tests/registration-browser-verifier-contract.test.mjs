@@ -378,9 +378,12 @@ test("customer message verifier covers the exact fixture route, five kinds, and 
     "waiting_notice",
     "admission_application",
   ]) assert.match(source, new RegExp(kind))
-  for (const endpoint of ["preview", "send", "list", "check", "reconcile"]) {
-    assert.match(source, new RegExp(`/api/solapi/registration/customer-message/${endpoint}`))
+  for (const endpoint of ["preview", "send", "messages", "check", "admin"]) {
+    assert.match(source, new RegExp(`/api/solapi/registration/${endpoint}`))
   }
+  assert.doesNotMatch(source, /\/api\/solapi\/registration\/customer-message\//)
+  assert.match(source, /url\.pathname\.startsWith\("\/api\/solapi\/registration"\)/)
+  assert.match(source, /unexpectedRegistrationApiRequests/)
   assert.match(source, /api\.solapi\.com/)
   assert.match(source, /route\.abort\("blockedbyclient"\)/)
   assert.match(source, /providerRequests\.length !== 0/)
@@ -409,6 +412,8 @@ test("customer message verifier asserts exact copy, masking, confirmation, histo
     "currentStatus",
   ]) assert.ok(source.includes(marker), `missing UX evidence marker ${marker}`)
   assert.doesNotMatch(source, /010[- ]?\d{4}[- ]?\d{4}/)
+  assert.match(source, /full phone leaked/i)
+  assert.match(source, /\/010\[\\s-\]\?\\d\{4\}\[\\s-\]\?\\d\{4\}\//)
 })
 
 test("customer message verifier runs desktop and mobile accessibility and layout checks", async () => {
@@ -419,6 +424,16 @@ test("customer message verifier runs desktop and mobile accessibility and layout
   assert.match(source, /document\.activeElement/)
   assert.match(source, /keyboard\.press\("Escape"\)/)
   assert.match(source, /minHeight < 44/)
+  assert.match(source, /minWidth < 44/)
+  assert.match(source, /boundingBox\(\)/)
+  assert.match(source, /getAnimations\(\{ subtree: true \}\)/)
+  assert.match(source, /animation\.finished/)
+  assert.match(source, /dirty-disabled-trigger/)
+  assert.match(source, /enabled-trigger/)
+  assert.match(source, /confirm-send/)
+  assert.match(source, /dialog-close/)
+  assert.match(source, /Math\.min\(\.\.\.evidence\.controlMeasurements\.map/)
+  assert.doesNotMatch(source, /minimumControlHeight:\s*44/)
   assert.match(source, /scrollWidth > clientWidth/)
   assert.match(source, /consoleErrors\.length/)
   assert.match(source, /pageErrors\.length/)
