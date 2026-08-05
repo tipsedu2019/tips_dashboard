@@ -1,5 +1,5 @@
 begin;
-select plan(25);
+select no_plan();
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
@@ -38,6 +38,7 @@ select is_empty($$
       ('appointment_id'),
       ('message_kind'),
       ('source_fingerprint'),
+      ('source_facts_checksum'),
       ('source_revision'),
       ('recipient_hash'),
       ('recipient_last4'),
@@ -71,6 +72,7 @@ select is_empty($$
       ('appointment_id'),
       ('message_kind'),
       ('source_fingerprint'),
+      ('source_facts_checksum'),
       ('source_revision'),
       ('recipient_hash'),
       ('recipient_last4'),
@@ -121,9 +123,11 @@ select is_empty($$
       ('public', 'ops_registration_customer_message_previews', 'task_id', 'uuid', 'NO'),
       ('public', 'ops_registration_customer_message_previews', 'track_id', 'uuid', 'YES'),
       ('public', 'ops_registration_customer_message_previews', 'appointment_id', 'uuid', 'YES'),
+      ('public', 'ops_registration_customer_message_previews', 'source_facts_checksum', 'text', 'NO'),
       ('public', 'ops_registration_customer_message_previews', 'source_revision', 'int8', 'YES'),
       ('public', 'ops_registration_customer_message_previews', 'recipient_last4', 'text', 'NO'),
       ('public', 'ops_registration_customer_messages', 'preview_id', 'uuid', 'NO'),
+      ('public', 'ops_registration_customer_messages', 'source_facts_checksum', 'text', 'NO'),
       ('public', 'ops_registration_customer_messages', 'claim_active', 'bool', 'NO'),
       ('public', 'ops_registration_customer_messages', 'claim_token', 'uuid', 'YES'),
       ('public', 'ops_registration_customer_messages', 'dispatch_token', 'uuid', 'NO'),
@@ -361,7 +365,7 @@ insert into public.ops_tasks(
 select throws_ok(
   $$
     insert into public.ops_registration_customer_message_previews(
-      id, task_id, message_kind, source_fingerprint, recipient_hash,
+      id, task_id, message_kind, source_fingerprint, source_facts_checksum, recipient_hash,
       recipient_last4, template_key, template_revision, template_checksum,
       rendered_variables_checksum, rendered_body_checksum,
       rendered_buttons_checksum, created_by
@@ -370,6 +374,7 @@ select throws_ok(
       '95000000-0000-4000-8000-000000000002',
       'admission_application',
       repeat('a', 64),
+      repeat('0', 64),
       repeat('b', 64),
       '123',
       'admission_application',
@@ -389,7 +394,7 @@ select throws_ok(
 select throws_ok(
   $$
     insert into public.ops_registration_customer_message_previews(
-      id, task_id, message_kind, source_fingerprint, recipient_hash,
+      id, task_id, message_kind, source_fingerprint, source_facts_checksum, recipient_hash,
       recipient_last4, template_key, template_revision, template_checksum,
       rendered_variables_checksum, rendered_body_checksum,
       rendered_buttons_checksum, created_by
@@ -398,6 +403,7 @@ select throws_ok(
       '95000000-0000-4000-8000-000000000002',
       'admission_application',
       'not-a-checksum',
+      repeat('0', 64),
       repeat('b', 64),
       '1234',
       'admission_application',
@@ -417,7 +423,7 @@ select throws_ok(
 select throws_ok(
   $$
     insert into public.ops_registration_customer_message_previews(
-      id, task_id, message_kind, source_fingerprint, recipient_hash,
+      id, task_id, message_kind, source_fingerprint, source_facts_checksum, recipient_hash,
       recipient_last4, template_key, template_revision, template_checksum,
       rendered_variables_checksum, rendered_body_checksum,
       rendered_buttons_checksum, created_by
@@ -426,6 +432,7 @@ select throws_ok(
       '95000000-0000-4000-8000-000000000002',
       'level_test_booking',
       repeat('a', 64),
+      repeat('0', 64),
       repeat('b', 64),
       '1234',
       'level_test_booking',
@@ -443,7 +450,7 @@ select throws_ok(
 );
 
 insert into public.ops_registration_customer_message_previews(
-  id, task_id, message_kind, source_fingerprint, recipient_hash,
+  id, task_id, message_kind, source_fingerprint, source_facts_checksum, recipient_hash,
   recipient_last4, template_key, template_revision, template_checksum,
   rendered_variables_checksum, rendered_body_checksum,
   rendered_buttons_checksum, created_by
@@ -452,6 +459,7 @@ insert into public.ops_registration_customer_message_previews(
   '95000000-0000-4000-8000-000000000002',
   'admission_application',
   repeat('a', 64),
+  repeat('0', 64),
   repeat('b', 64),
   '1234',
   'admission_application',
@@ -466,7 +474,7 @@ insert into public.ops_registration_customer_message_previews(
 select throws_ok(
   $$
     insert into public.ops_registration_customer_messages(
-      id, preview_id, task_id, message_kind, source_fingerprint,
+      id, preview_id, task_id, message_kind, source_fingerprint, source_facts_checksum,
       recipient_hash, recipient_last4, template_key, template_revision,
       template_checksum, rendered_variables_checksum,
       rendered_body_checksum, rendered_buttons_checksum, dedupe_key,
@@ -478,6 +486,7 @@ select throws_ok(
       '95000000-0000-4000-8000-000000000002',
       'admission_application',
       repeat('a', 64),
+      repeat('0', 64),
       repeat('b', 64),
       '1234',
       'admission_application',
@@ -503,7 +512,7 @@ select throws_ok(
 select throws_ok(
   $$
     insert into public.ops_registration_customer_messages(
-      id, preview_id, task_id, message_kind, source_fingerprint,
+      id, preview_id, task_id, message_kind, source_fingerprint, source_facts_checksum,
       recipient_hash, recipient_last4, template_key, template_revision,
       template_checksum, rendered_variables_checksum,
       rendered_body_checksum, rendered_buttons_checksum, dedupe_key,
@@ -516,6 +525,7 @@ select throws_ok(
       '95000000-0000-4000-8000-000000000002',
       'admission_application',
       repeat('a', 64),
+      repeat('0', 64),
       repeat('b', 64),
       '1234',
       'admission_application',
@@ -547,7 +557,7 @@ select throws_ok(
 select throws_ok(
   $$
     insert into public.ops_registration_customer_messages(
-      id, preview_id, task_id, message_kind, source_fingerprint,
+      id, preview_id, task_id, message_kind, source_fingerprint, source_facts_checksum,
       recipient_hash, recipient_last4, template_key, template_revision,
       template_checksum, rendered_variables_checksum,
       rendered_body_checksum, rendered_buttons_checksum, dedupe_key,
@@ -559,6 +569,7 @@ select throws_ok(
       '95000000-0000-4000-8000-000000000002',
       'admission_application',
       repeat('a', 64),
+      repeat('0', 64),
       repeat('b', 64),
       '1234',
       'admission_application',
@@ -625,5 +636,1646 @@ select throws_ok(
   null,
   'activation live evidence must be paired'
 );
+
+-- Task 3 RPC contract and disposable state-machine fixtures.
+select has_function('public', 'resolve_registration_customer_message_source_v1', array['uuid', 'text', 'uuid']);
+select has_function('public', 'create_registration_customer_message_preview_v1', array['uuid', 'text', 'uuid', 'jsonb']);
+select has_function('public', 'claim_registration_customer_message_v1', array['uuid', 'uuid', 'text', 'jsonb']);
+select has_function('public', 'mark_registration_customer_message_attempt_started_v1', array['uuid', 'uuid', 'uuid', 'jsonb']);
+select has_function('public', 'release_registration_customer_message_pre_send_claim_v1', array['uuid', 'uuid', 'text']);
+select has_function('public', 'release_registration_customer_message_pre_send_claim_admin_v1', array['uuid', 'uuid', 'text', 'text']);
+select has_function('public', 'finalize_registration_customer_message_v1', array['uuid', 'uuid', 'text', 'jsonb']);
+select has_function('public', 'list_registration_customer_messages_v1', array['uuid', 'text', 'uuid', 'integer']);
+select has_function('public', 'record_registration_customer_message_provider_check_v1', array['uuid', 'uuid', 'text', 'jsonb', 'text']);
+select has_function('public', 'reconcile_registration_customer_message_v1', array['uuid', 'uuid', 'text', 'jsonb', 'text', 'text']);
+
+select function_privs_are('public', 'resolve_registration_customer_message_source_v1', array['uuid', 'text', 'uuid'], 'service_role', array['EXECUTE']);
+select function_privs_are('public', 'create_registration_customer_message_preview_v1', array['uuid', 'text', 'uuid', 'jsonb'], 'service_role', array['EXECUTE']);
+select function_privs_are('public', 'claim_registration_customer_message_v1', array['uuid', 'uuid', 'text', 'jsonb'], 'service_role', array['EXECUTE']);
+select function_privs_are('public', 'mark_registration_customer_message_attempt_started_v1', array['uuid', 'uuid', 'uuid', 'jsonb'], 'service_role', array['EXECUTE']);
+select function_privs_are('public', 'release_registration_customer_message_pre_send_claim_v1', array['uuid', 'uuid', 'text'], 'service_role', array['EXECUTE']);
+select function_privs_are('public', 'release_registration_customer_message_pre_send_claim_admin_v1', array['uuid', 'uuid', 'text', 'text'], 'service_role', array['EXECUTE']);
+select function_privs_are('public', 'finalize_registration_customer_message_v1', array['uuid', 'uuid', 'text', 'jsonb'], 'service_role', array['EXECUTE']);
+select function_privs_are('public', 'list_registration_customer_messages_v1', array['uuid', 'text', 'uuid', 'integer'], 'service_role', array['EXECUTE']);
+select function_privs_are('public', 'record_registration_customer_message_provider_check_v1', array['uuid', 'uuid', 'text', 'jsonb', 'text'], 'service_role', array['EXECUTE']);
+select function_privs_are('public', 'reconcile_registration_customer_message_v1', array['uuid', 'uuid', 'text', 'jsonb', 'text', 'text'], 'service_role', array['EXECUTE']);
+
+select is_empty($$
+  select routine_name, grantee
+  from information_schema.routine_privileges
+  where routine_schema = 'public'
+    and routine_name in (
+      'resolve_registration_customer_message_source_v1',
+      'create_registration_customer_message_preview_v1',
+      'claim_registration_customer_message_v1',
+      'mark_registration_customer_message_attempt_started_v1',
+      'release_registration_customer_message_pre_send_claim_v1',
+      'release_registration_customer_message_pre_send_claim_admin_v1',
+      'finalize_registration_customer_message_v1',
+      'list_registration_customer_messages_v1',
+      'record_registration_customer_message_provider_check_v1',
+      'reconcile_registration_customer_message_v1'
+    )
+    and grantee in ('PUBLIC', 'anon', 'authenticated')
+    and privilege_type = 'EXECUTE'
+$$, 'message RPC execute is unavailable to PUBLIC anon and authenticated');
+
+insert into public.profiles(id, role, name, email, created_at, updated_at)
+values
+  ('95000000-0000-4000-8000-000000000011', 'staff', 'Registration SOLAPI Staff', 'registration-solapi-staff@example.invalid', now(), now()),
+  ('95000000-0000-4000-8000-000000000012', 'teacher', 'Registration SOLAPI Teacher', 'registration-solapi-teacher@example.invalid', now(), now()),
+  ('95000000-0000-4000-8000-000000000013', 'teacher', 'Registration SOLAPI Other', 'registration-solapi-other@example.invalid', now(), now())
+on conflict (id) do update
+set role = excluded.role, name = excluded.name, email = excluded.email, updated_at = excluded.updated_at;
+
+insert into public.classes(
+  id, name, class_type, subject, grade, teacher, schedule, room,
+  capacity, fee, status, student_ids, waitlist_ids, textbook_ids,
+  lessons, schedule_plan
+) values (
+  '95000000-0000-4000-8000-000000000020',
+  '등록 SOLAPI 현재반',
+  '정규',
+  '영어',
+  '중1',
+  'Registration SOLAPI Teacher',
+  '월 18:00',
+  '본관',
+  12,
+  100000,
+  '수업 진행 중',
+  '[]'::jsonb,
+  '[]'::jsonb,
+  '[]'::jsonb,
+  '[]'::jsonb,
+  '{"sessions":[]}'::jsonb
+);
+
+insert into public.ops_tasks(
+  id, title, type, status, priority, requested_by, assignee_id, student_name
+) values
+  ('95000000-0000-4000-8000-000000000500', 'Registration SOLAPI canonical', 'registration', 'in_progress', 'normal', '95000000-0000-4000-8000-000000000001', '95000000-0000-4000-8000-000000000012', '정상학생'),
+  ('95000000-0000-4000-8000-000000000501', 'Registration SOLAPI inaccessible', 'registration', 'in_progress', 'normal', '95000000-0000-4000-8000-000000000013', null, '다른학생'),
+  ('95000000-0000-4000-8000-000000000502', 'Registration SOLAPI invalid phone', 'registration', 'in_progress', 'normal', '95000000-0000-4000-8000-000000000001', null, '번호오류'),
+  ('95000000-0000-4000-8000-000000000503', 'Registration SOLAPI missing name', 'registration', 'in_progress', 'normal', '95000000-0000-4000-8000-000000000001', null, null),
+  ('95000000-0000-4000-8000-000000000504', 'Registration SOLAPI wrong type', 'general', 'in_progress', 'normal', '95000000-0000-4000-8000-000000000001', null, '일반업무');
+
+insert into public.ops_registration_details(
+  task_id, parent_phone, common_revision, admission_notice_sent
+) values
+  ('95000000-0000-4000-8000-000000000500', '010-1234-5678', 1, false),
+  ('95000000-0000-4000-8000-000000000501', '010-2234-5678', 1, false),
+  ('95000000-0000-4000-8000-000000000502', '02-1234-5678', 1, false),
+  ('95000000-0000-4000-8000-000000000503', '010-3234-5678', 1, false),
+  ('95000000-0000-4000-8000-000000000504', '010-4234-5678', 1, false);
+
+insert into public.ops_registration_subject_tracks(
+  id, task_id, subject, pipeline_status, director_profile_id,
+  director_assignment_source, director_assigned_at, waiting_kind,
+  migration_review_required, workflow_status, workflow_revision,
+  workflow_status_entered_at, waiting_detail_kind, waiting_detail_class_id
+) values
+  (
+    '95000000-0000-4000-8000-000000000540',
+    '95000000-0000-4000-8000-000000000500',
+    '영어', 'inquiry', '95000000-0000-4000-8000-000000000012',
+    'manual', now(), null, false, 'waiting_current_class', 3, now(),
+    'current_class', '95000000-0000-4000-8000-000000000020'
+  ),
+  (
+    '95000000-0000-4000-8000-000000000541',
+    '95000000-0000-4000-8000-000000000500',
+    '수학', 'inquiry', '95000000-0000-4000-8000-000000000012',
+    'manual', now(), null, false, 'enrollment_requested', 4, now(),
+    null, null
+  ),
+  (
+    '95000000-0000-4000-8000-000000000542',
+    '95000000-0000-4000-8000-000000000500',
+    '과학', 'enrollment_decided', '95000000-0000-4000-8000-000000000012',
+    'manual', now(), null, false, 'inquiry', 5, now(),
+    null, null
+  );
+
+insert into public.ops_registration_enrollments(
+  id, track_id, class_id, status, sort_order
+) values (
+  '95000000-0000-4000-8000-000000000550',
+  '95000000-0000-4000-8000-000000000540',
+  '95000000-0000-4000-8000-000000000020',
+  'planned',
+  0
+);
+
+insert into public.ops_registration_appointments(
+  id, task_id, kind, scheduled_at, place, status,
+  notification_revision, created_by
+) values
+  ('95000000-0000-4000-8000-000000000601', '95000000-0000-4000-8000-000000000500', 'level_test', clock_timestamp() + interval '1 day', '본관', 'scheduled', 2, '95000000-0000-4000-8000-000000000001'),
+  ('95000000-0000-4000-8000-000000000602', '95000000-0000-4000-8000-000000000500', 'visit_consultation', clock_timestamp() + interval '2 days', '별관', 'scheduled', 3, '95000000-0000-4000-8000-000000000001'),
+  ('95000000-0000-4000-8000-000000000603', '95000000-0000-4000-8000-000000000500', 'level_test', clock_timestamp() + interval '3 days', '본관', 'canceled', 1, '95000000-0000-4000-8000-000000000001'),
+  ('95000000-0000-4000-8000-000000000604', '95000000-0000-4000-8000-000000000500', 'level_test', clock_timestamp() - interval '1 day', '본관', 'scheduled', 1, '95000000-0000-4000-8000-000000000001'),
+  ('95000000-0000-4000-8000-000000000605', '95000000-0000-4000-8000-000000000500', 'level_test', clock_timestamp() + interval '4 days', '본관', 'scheduled', 1, '95000000-0000-4000-8000-000000000001');
+
+insert into public.ops_registration_level_tests(
+  id, track_id, appointment_id, attempt_number, status
+) values
+  ('95000000-0000-4000-8000-000000000611', '95000000-0000-4000-8000-000000000540', '95000000-0000-4000-8000-000000000601', 1, 'scheduled'),
+  ('95000000-0000-4000-8000-000000000612', '95000000-0000-4000-8000-000000000541', '95000000-0000-4000-8000-000000000601', 1, 'scheduled'),
+  ('95000000-0000-4000-8000-000000000613', '95000000-0000-4000-8000-000000000540', '95000000-0000-4000-8000-000000000603', 2, 'scheduled'),
+  ('95000000-0000-4000-8000-000000000614', '95000000-0000-4000-8000-000000000540', '95000000-0000-4000-8000-000000000604', 3, 'scheduled');
+
+insert into public.ops_registration_consultations(
+  id, track_id, appointment_id, mode, status, director_profile_id
+) values
+  ('95000000-0000-4000-8000-000000000621', '95000000-0000-4000-8000-000000000540', '95000000-0000-4000-8000-000000000602', 'visit', 'scheduled', '95000000-0000-4000-8000-000000000012'),
+  ('95000000-0000-4000-8000-000000000622', '95000000-0000-4000-8000-000000000542', '95000000-0000-4000-8000-000000000602', 'visit', 'scheduled', '95000000-0000-4000-8000-000000000012');
+
+create function pg_temp.registration_solapi_contract(
+  p_source jsonb,
+  p_message_kind text,
+  p_source_fingerprint text default repeat('a', 64)
+)
+returns jsonb
+language sql
+as $$
+  select pg_catalog.jsonb_build_object(
+    'parentPhoneDigits', p_source ->> 'parentPhoneDigits',
+    'sourceFingerprint', p_source_fingerprint,
+    'recipientHash', repeat('b', 64),
+    'templateKey', p_message_kind,
+    'templateRevision', 1,
+    'templateChecksum', repeat('c', 64),
+    'renderedVariablesChecksum', repeat('d', 64),
+    'renderedBodyChecksum', repeat('e', 64),
+    'renderedButtonsChecksum', repeat('f', 64)
+  );
+$$;
+
+create temporary table registration_solapi_rpc_results (
+  label text primary key,
+  response jsonb not null
+) on commit drop;
+grant select, insert, update on table registration_solapi_rpc_results to service_role;
+
+set local role service_role;
+select set_config(
+  'request.jwt.claims',
+  '{"role":"service_role","sub":"95000000-0000-4000-8000-000000000001"}',
+  true
+);
+
+insert into registration_solapi_rpc_results(label, response)
+values
+  ('level source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'level_test_booking', '95000000-0000-4000-8000-000000000601')),
+  ('visit source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000011', 'visit_consultation_booking', '95000000-0000-4000-8000-000000000602')),
+  ('reminder source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'appointment_reminder', '95000000-0000-4000-8000-000000000601')),
+  ('waiting source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'waiting_notice', '95000000-0000-4000-8000-000000000540')),
+  ('admission source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'admission_application', '95000000-0000-4000-8000-000000000500'));
+
+reset role;
+
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'provider evidence seoul',
+  dashboard_private.registration_customer_message_provider_evidence_v1(
+    pg_catalog.jsonb_build_object(
+      'statusCode', '202',
+      'statusMessage', 'accepted',
+      'observedAt', '2026-08-05T12:00:00+09:00',
+      'requestKeyMatched', true
+    )
+  )
+);
+
+set local timezone = 'UTC';
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'level source utc',
+  public.resolve_registration_customer_message_source_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'level_test_booking',
+    '95000000-0000-4000-8000-000000000601'
+  )
+);
+reset role;
+
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'provider evidence utc',
+  dashboard_private.registration_customer_message_provider_evidence_v1(
+    pg_catalog.jsonb_build_object(
+      'statusCode', '202',
+      'statusMessage', 'accepted',
+      'observedAt', '2026-08-05T03:00:00+00:00',
+      'requestKeyMatched', true
+    )
+  )
+);
+
+set local timezone = 'Asia/Seoul';
+
+select is(
+  (select response from registration_solapi_rpc_results where label = 'level source'),
+  (select response from registration_solapi_rpc_results where label = 'level source utc'),
+  'resolved appointment source is invariant across session time zones'
+);
+
+select is(
+  dashboard_private.registration_customer_message_source_facts_checksum_v1(
+    (select response from registration_solapi_rpc_results where label = 'level source')
+  ),
+  dashboard_private.registration_customer_message_source_facts_checksum_v1(
+    (select response from registration_solapi_rpc_results where label = 'level source utc')
+  ),
+  'source facts checksum is invariant across session time zones'
+);
+
+select is(
+  (select response from registration_solapi_rpc_results where label = 'provider evidence seoul'),
+  (select response from registration_solapi_rpc_results where label = 'provider evidence utc'),
+  'provider evidence canonicalization is invariant across session time zones'
+);
+
+select is(
+  (select response ->> 'parentPhoneDigits' from registration_solapi_rpc_results where label = 'level source'),
+  '01012345678',
+  'valid level-test source resolves the normalized phone'
+);
+select is(
+  (select response -> 'subjects' from registration_solapi_rpc_results where label = 'level source'),
+  '["영어", "수학"]'::jsonb,
+  'level-test source resolves only active participants in stable subject order'
+);
+select is(
+  (select response -> 'subjects' from registration_solapi_rpc_results where label = 'visit source'),
+  '["영어", "과학"]'::jsonb,
+  'valid visit source resolves scheduled visit participants'
+);
+select is(
+  (select response ->> 'appointmentKind' from registration_solapi_rpc_results where label = 'reminder source'),
+  'level_test',
+  'reminder source retains the canonical appointment kind'
+);
+select is(
+  (select response ->> 'waitingClassName' from registration_solapi_rpc_results where label = 'waiting source'),
+  '등록 SOLAPI 현재반',
+  'valid waiting source resolves the saved current class'
+);
+select is(
+  pg_catalog.jsonb_array_length((select response -> 'tracks' from registration_solapi_rpc_results where label = 'admission source')),
+  3,
+  'admission source includes workflow legacy and planned eligibility paths'
+);
+
+set local role service_role;
+select throws_ok(
+  $$select public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'level_test_booking', '95000000-0000-4000-8000-000000000603')$$,
+  '22023', 'registration_customer_message_source_invalid',
+  'canceled appointment is rejected'
+);
+select throws_ok(
+  $$select public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'level_test_booking', '95000000-0000-4000-8000-000000000604')$$,
+  '22023', 'registration_customer_message_source_invalid',
+  'past appointment is rejected'
+);
+select throws_ok(
+  $$select public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'level_test_booking', '95000000-0000-4000-8000-000000000605')$$,
+  '22023', 'registration_customer_message_source_invalid',
+  'appointment without active participants is rejected'
+);
+select throws_ok(
+  $$select public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'admission_application', '95000000-0000-4000-8000-000000000502')$$,
+  '22023', 'registration_customer_message_source_invalid',
+  'invalid parent phone is rejected'
+);
+select throws_ok(
+  $$select public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'admission_application', '95000000-0000-4000-8000-000000000503')$$,
+  '22023', 'registration_customer_message_source_invalid',
+  'missing student name is rejected'
+);
+select throws_ok(
+  $$select public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'admission_application', '95000000-0000-4000-8000-000000000504')$$,
+  '22023', 'registration_customer_message_source_invalid',
+  'wrong task type is rejected'
+);
+select throws_ok(
+  $$select public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000013', 'waiting_notice', '95000000-0000-4000-8000-000000000540')$$,
+  '42501', 'registration_customer_message_access_denied',
+  'other actor cannot resolve an unrelated task'
+);
+select throws_ok(
+  $$select public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000012', 'waiting_notice', '95000000-0000-4000-8000-000000000540')$$,
+  '42501', 'registration_customer_message_access_denied',
+  'assigned teacher cannot create a send source'
+);
+reset role;
+
+update public.ops_registration_subject_tracks
+set pipeline_status = 'waiting', waiting_kind = 'next_term_opening'
+where id = '95000000-0000-4000-8000-000000000540';
+set local role service_role;
+select throws_ok(
+  $$select public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'waiting_notice', '95000000-0000-4000-8000-000000000540')$$,
+  '22023', 'registration_customer_message_waiting_source_inconsistent',
+  'inconsistent waiting detail and populated legacy waiting value are rejected'
+);
+reset role;
+update public.ops_registration_subject_tracks
+set pipeline_status = 'inquiry', waiting_kind = null
+where id = '95000000-0000-4000-8000-000000000540';
+
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'level participant stale preview',
+  public.create_registration_customer_message_preview_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'level_test_booking',
+    '95000000-0000-4000-8000-000000000601',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'level source'),
+      'level_test_booking',
+      repeat('7', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'level participant stale claim',
+  public.claim_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'level participant stale preview') ->> 'previewId')::uuid,
+    '95000000-0000-4000-8000-000000000762',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'level source'),
+      'level_test_booking',
+      repeat('7', 64)
+    )
+  )
+);
+reset role;
+update public.ops_registration_level_tests
+set status = 'canceled',
+    completed_at = pg_catalog.clock_timestamp()
+where id = '95000000-0000-4000-8000-000000000611';
+set local role service_role;
+select throws_ok(
+  $$select public.mark_registration_customer_message_attempt_started_v1(
+      ((select response from registration_solapi_rpc_results where label = 'level participant stale claim') ->> 'messageId')::uuid,
+      ((select response from registration_solapi_rpc_results where label = 'level participant stale claim') ->> 'claimToken')::uuid,
+      ((select response from registration_solapi_rpc_results where label = 'level participant stale claim') ->> 'dispatchToken')::uuid,
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'level source'),
+        'level_test_booking',
+        repeat('7', 64)
+      )
+    )$$,
+  '40001', 'registration_customer_message_preview_stale',
+  'level-test participant status or subject fact change is stale'
+);
+reset role;
+update public.ops_registration_level_tests
+set status = 'scheduled',
+    completed_at = null
+where id = '95000000-0000-4000-8000-000000000611';
+
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'visit participant stale preview',
+  public.create_registration_customer_message_preview_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'visit_consultation_booking',
+    '95000000-0000-4000-8000-000000000602',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'visit source'),
+      'visit_consultation_booking',
+      repeat('8', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'visit participant stale claim',
+  public.claim_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'visit participant stale preview') ->> 'previewId')::uuid,
+    '95000000-0000-4000-8000-000000000761',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'visit source'),
+      'visit_consultation_booking',
+      repeat('8', 64)
+    )
+  )
+);
+reset role;
+update public.ops_registration_consultations
+set status = 'canceled'
+where id = '95000000-0000-4000-8000-000000000622';
+set local role service_role;
+select throws_ok(
+  $$select public.mark_registration_customer_message_attempt_started_v1(
+      ((select response from registration_solapi_rpc_results where label = 'visit participant stale claim') ->> 'messageId')::uuid,
+      ((select response from registration_solapi_rpc_results where label = 'visit participant stale claim') ->> 'claimToken')::uuid,
+      ((select response from registration_solapi_rpc_results where label = 'visit participant stale claim') ->> 'dispatchToken')::uuid,
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'visit source'),
+        'visit_consultation_booking',
+        repeat('8', 64)
+      )
+    )$$,
+  '40001', 'registration_customer_message_preview_stale',
+  'visit participant status or subject fact change is stale'
+);
+reset role;
+update public.ops_registration_consultations
+set status = 'scheduled'
+where id = '95000000-0000-4000-8000-000000000622';
+
+set local role service_role;
+select throws_ok(
+  $$select public.create_registration_customer_message_preview_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'waiting_notice',
+      '95000000-0000-4000-8000-000000000540',
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'waiting source'),
+        'waiting_notice'
+      ) || '{"phone":"01012345678"}'::jsonb
+    )$$,
+  '22023', 'registration_customer_message_contract_invalid',
+  'preview contract rejects unexpected keys'
+);
+select throws_ok(
+  $$select public.create_registration_customer_message_preview_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'waiting_notice',
+      '95000000-0000-4000-8000-000000000540',
+      null
+    )$$,
+  '22023', 'registration_customer_message_contract_invalid',
+  'preview contract rejects SQL null explicitly'
+);
+
+insert into registration_solapi_rpc_results(label, response)
+values
+  (
+    'waiting preview first',
+    public.create_registration_customer_message_preview_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'waiting_notice',
+      '95000000-0000-4000-8000-000000000540',
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'waiting source'),
+        'waiting_notice'
+      )
+    )
+  ),
+  (
+    'waiting preview second',
+    public.create_registration_customer_message_preview_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'waiting_notice',
+      '95000000-0000-4000-8000-000000000540',
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'waiting source'),
+        'waiting_notice'
+      )
+    )
+  ),
+  (
+    'staff owned preview',
+    public.create_registration_customer_message_preview_v1(
+      '95000000-0000-4000-8000-000000000011',
+      'waiting_notice',
+      '95000000-0000-4000-8000-000000000540',
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'waiting source'),
+        'waiting_notice',
+        repeat('1', 64)
+      )
+    )
+  ),
+  (
+    'stale contract preview',
+    public.create_registration_customer_message_preview_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'waiting_notice',
+      '95000000-0000-4000-8000-000000000540',
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'waiting source'),
+        'waiting_notice',
+        repeat('2', 64)
+      )
+    )
+  ),
+  (
+    'expired preview',
+    public.create_registration_customer_message_preview_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'waiting_notice',
+      '95000000-0000-4000-8000-000000000540',
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'waiting source'),
+        'waiting_notice',
+        repeat('3', 64)
+      )
+    )
+  );
+
+select throws_ok(
+  $$select public.claim_registration_customer_message_v1(
+      '95000000-0000-4000-8000-000000000001',
+      ((select response from registration_solapi_rpc_results where label = 'staff owned preview') ->> 'previewId')::uuid,
+      '95000000-0000-4000-8000-000000000701',
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'waiting source'),
+        'waiting_notice', repeat('1', 64)
+      )
+    )$$,
+  '42501', 'registration_customer_message_preview_owner_mismatch',
+  'other actor cannot claim a preview'
+);
+
+select throws_ok(
+  $$select public.claim_registration_customer_message_v1(
+      '95000000-0000-4000-8000-000000000001',
+      ((select response from registration_solapi_rpc_results where label = 'stale contract preview') ->> 'previewId')::uuid,
+      '95000000-0000-4000-8000-000000000702',
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'waiting source'),
+        'waiting_notice', repeat('4', 64)
+      )
+    )$$,
+  '40001', 'registration_customer_message_preview_stale',
+  'stale source fingerprint cannot consume a preview'
+);
+reset role;
+
+update public.ops_registration_customer_message_previews
+set created_at = statement_timestamp() - interval '16 minutes',
+    expires_at = statement_timestamp() - interval '1 minute'
+where id = ((select response from registration_solapi_rpc_results where label = 'expired preview') ->> 'previewId')::uuid;
+
+set local role service_role;
+select throws_ok(
+  $$select public.claim_registration_customer_message_v1(
+      '95000000-0000-4000-8000-000000000001',
+      ((select response from registration_solapi_rpc_results where label = 'expired preview') ->> 'previewId')::uuid,
+      '95000000-0000-4000-8000-000000000703',
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'waiting source'),
+        'waiting_notice', repeat('3', 64)
+      )
+    )$$,
+  '40001', 'registration_customer_message_preview_expired',
+  'expired preview cannot be claimed'
+);
+
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting claim first',
+  public.claim_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'waiting preview first') ->> 'previewId')::uuid,
+    '95000000-0000-4000-8000-000000000710',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      'waiting_notice'
+    )
+  )
+);
+
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting exact replay',
+  public.claim_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'waiting preview first') ->> 'previewId')::uuid,
+    '95000000-0000-4000-8000-000000000710',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      'waiting_notice'
+    )
+  )
+);
+
+select throws_ok(
+  $$select public.claim_registration_customer_message_v1(
+      '95000000-0000-4000-8000-000000000001',
+      ((select response from registration_solapi_rpc_results where label = 'waiting preview first') ->> 'previewId')::uuid,
+      '95000000-0000-4000-8000-000000000711',
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'waiting source'),
+        'waiting_notice'
+      )
+    )$$,
+  '23505', 'registration_customer_message_preview_consumed',
+  'consumed preview rejects a different request key'
+);
+
+select throws_ok(
+  $$select public.claim_registration_customer_message_v1(
+      '95000000-0000-4000-8000-000000000001',
+      ((select response from registration_solapi_rpc_results where label = 'waiting preview second') ->> 'previewId')::uuid,
+      '95000000-0000-4000-8000-000000000710',
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'waiting source'),
+        'waiting_notice'
+      )
+    )$$,
+  '23505', 'registration_customer_message_request_key_conflict',
+  'request key conflict is detected before any consumed-preview detail leaks'
+);
+
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting duplicate claim',
+  public.claim_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'waiting preview second') ->> 'previewId')::uuid,
+    '95000000-0000-4000-8000-000000000712',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      'waiting_notice'
+    )
+  )
+);
+reset role;
+
+select is(
+  (select response ->> 'messageId' from registration_solapi_rpc_results where label = 'waiting exact replay'),
+  (select response ->> 'messageId' from registration_solapi_rpc_results where label = 'waiting claim first'),
+  'exact replay returns the same masked message identity before consumed rejection'
+);
+select is(
+  (select (response ->> 'owner')::boolean from registration_solapi_rpc_results where label = 'waiting duplicate claim'),
+  false,
+  'two previews produce only one permanent dedupe owner'
+);
+select is(
+  (
+    select count(*)
+    from public.ops_registration_customer_messages
+    where message_kind = 'waiting_notice'
+      and source_fingerprint = repeat('a', 64)
+      and recipient_hash = repeat('b', 64)
+  ),
+  1::bigint,
+  'DB dedupe serializes identical facts to one outbox row'
+);
+select is(
+  (
+    select dedupe_key
+    from public.ops_registration_customer_messages
+    where id = ((select response from registration_solapi_rpc_results where label = 'waiting claim first') ->> 'messageId')::uuid
+  ),
+  dashboard_private.notification_sha256_hex_v1(
+    dashboard_private.notification_canonical_json_v1(
+      pg_catalog.jsonb_build_object(
+        'messageKind', 'waiting_notice',
+        'sourceId', '95000000-0000-4000-8000-000000000540',
+        'sourceFingerprint', repeat('a', 64),
+        'recipientHash', repeat('b', 64)
+      )
+    )
+  ),
+  'DB computes dedupe from kind source fingerprint and recipient hash'
+);
+
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting released',
+  public.release_registration_customer_message_pre_send_claim_v1(
+    ((select response from registration_solapi_rpc_results where label = 'waiting claim first') ->> 'messageId')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'waiting claim first') ->> 'claimToken')::uuid,
+    'pre_send_render_failed'
+  )
+);
+
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting reacquired',
+  public.claim_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'waiting preview first') ->> 'previewId')::uuid,
+    '95000000-0000-4000-8000-000000000710',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      'waiting_notice'
+    )
+  )
+);
+reset role;
+
+select isnt(
+  (select response ->> 'claimToken' from registration_solapi_rpc_results where label = 'waiting reacquired'),
+  (select response ->> 'claimToken' from registration_solapi_rpc_results where label = 'waiting claim first'),
+  'pre-marker exact replay reacquires a new claim token'
+);
+select is(
+  (select response ->> 'dispatchToken' from registration_solapi_rpc_results where label = 'waiting reacquired'),
+  (select response ->> 'dispatchToken' from registration_solapi_rpc_results where label = 'waiting claim first'),
+  'pre-marker replay preserves the one dispatch identity'
+);
+
+update public.classes
+set name = '등록 SOLAPI 변경반'
+where id = '95000000-0000-4000-8000-000000000020';
+set local role service_role;
+select throws_ok(
+  $$select public.mark_registration_customer_message_attempt_started_v1(
+      ((select response from registration_solapi_rpc_results where label = 'waiting reacquired') ->> 'messageId')::uuid,
+      ((select response from registration_solapi_rpc_results where label = 'waiting reacquired') ->> 'claimToken')::uuid,
+      ((select response from registration_solapi_rpc_results where label = 'waiting reacquired') ->> 'dispatchToken')::uuid,
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'waiting source'),
+        'waiting_notice'
+      )
+    )$$,
+  '40001', 'registration_customer_message_preview_stale',
+  'waiting class-name fact change is stale without a workflow revision change'
+);
+reset role;
+update public.classes
+set name = '등록 SOLAPI 현재반'
+where id = '95000000-0000-4000-8000-000000000020';
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting marker',
+  public.mark_registration_customer_message_attempt_started_v1(
+    ((select response from registration_solapi_rpc_results where label = 'waiting reacquired') ->> 'messageId')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'waiting reacquired') ->> 'claimToken')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'waiting reacquired') ->> 'dispatchToken')::uuid,
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      'waiting_notice'
+    )
+  )
+);
+
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting marker replay',
+  public.mark_registration_customer_message_attempt_started_v1(
+    ((select response from registration_solapi_rpc_results where label = 'waiting reacquired') ->> 'messageId')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'waiting reacquired') ->> 'claimToken')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'waiting reacquired') ->> 'dispatchToken')::uuid,
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      'waiting_notice'
+    )
+  )
+);
+
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting replay after marker',
+  public.claim_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'waiting preview first') ->> 'previewId')::uuid,
+    '95000000-0000-4000-8000-000000000710',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      'waiting_notice'
+    )
+  )
+);
+reset role;
+
+select is(
+  (select (response ->> 'allowed')::boolean from registration_solapi_rpc_results where label = 'waiting marker'),
+  true,
+  'attempt marker authorizes one provider call only after commit'
+);
+select is(
+  (select (response ->> 'allowed')::boolean from registration_solapi_rpc_results where label = 'waiting marker replay'),
+  false,
+  'attempt marker replay cannot authorize another provider call'
+);
+select is(
+  (select response ->> 'currentStatus' from registration_solapi_rpc_results where label = 'waiting replay after marker'),
+  'unknown',
+  'pending attempt marker replay closes atomically to unknown'
+);
+select is(
+  (select (response ->> 'owner')::boolean from registration_solapi_rpc_results where label = 'waiting replay after marker'),
+  false,
+  'marker recovery returns provider ownership false'
+);
+select is(
+  (
+    select resolution_source
+    from public.ops_registration_customer_messages
+    where id = ((select response from registration_solapi_rpc_results where label = 'waiting claim first') ->> 'messageId')::uuid
+  ),
+  'marker_recovery',
+  'marker recovery records the conservative resolution source'
+);
+
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting finalized after recovery',
+  public.finalize_registration_customer_message_v1(
+    ((select response from registration_solapi_rpc_results where label = 'waiting reacquired') ->> 'messageId')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'waiting reacquired') ->> 'dispatchToken')::uuid,
+    'accepted',
+    pg_catalog.jsonb_build_object(
+      'providerMessageId', 'provider-waiting-accepted',
+      'statusCode', '202',
+      'statusMessage', 'accepted',
+      'observedAt', pg_catalog.clock_timestamp()::text,
+      'requestKeyMatched', true
+    )
+  )
+);
+reset role;
+select is(
+  (select response ->> 'currentStatus' from registration_solapi_rpc_results where label = 'waiting finalized after recovery'),
+  'accepted',
+  'original dispatch finalization can correct marker-recovery unknown'
+);
+
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'admission preview',
+  public.create_registration_customer_message_preview_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'admission_application',
+    '95000000-0000-4000-8000-000000000500',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'admission source'),
+      'admission_application', repeat('5', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'admission claim',
+  public.claim_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'admission preview') ->> 'previewId')::uuid,
+    '95000000-0000-4000-8000-000000000720',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'admission source'),
+      'admission_application', repeat('5', 64)
+    )
+  )
+);
+reset role;
+update public.ops_registration_subject_tracks
+set workflow_revision = workflow_revision + 1
+where id = '95000000-0000-4000-8000-000000000541';
+set local role service_role;
+select throws_ok(
+  $$select public.mark_registration_customer_message_attempt_started_v1(
+      ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'messageId')::uuid,
+      ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'claimToken')::uuid,
+      ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'dispatchToken')::uuid,
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'admission source'),
+        'admission_application', repeat('5', 64)
+      )
+    )$$,
+  '40001', 'registration_customer_message_preview_stale',
+  'admission track fact change is stale even when common revision is unchanged'
+);
+reset role;
+update public.ops_registration_subject_tracks
+set workflow_revision = workflow_revision - 1
+where id = '95000000-0000-4000-8000-000000000541';
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'admission marker',
+  public.mark_registration_customer_message_attempt_started_v1(
+    ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'messageId')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'claimToken')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'dispatchToken')::uuid,
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'admission source'),
+      'admission_application', repeat('5', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'admission accepted',
+  public.finalize_registration_customer_message_v1(
+    ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'messageId')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'dispatchToken')::uuid,
+    'accepted',
+    pg_catalog.jsonb_build_object(
+      'providerMessageId', 'provider-admission-accepted',
+      'providerGroupId', 'group-admission-accepted',
+      'statusCode', '202',
+      'statusMessage', 'accepted',
+      'observedAt', '2026-08-05T12:00:00+09:00',
+      'requestKeyMatched', true
+    )
+  )
+);
+reset role;
+
+set local timezone = 'UTC';
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'admission accepted timezone replay',
+  public.finalize_registration_customer_message_v1(
+    ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'messageId')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'dispatchToken')::uuid,
+    'accepted',
+    pg_catalog.jsonb_build_object(
+      'providerMessageId', 'provider-admission-accepted',
+      'providerGroupId', 'group-admission-accepted',
+      'statusCode', '202',
+      'statusMessage', 'accepted',
+      'observedAt', '2026-08-05T03:00:00+00:00',
+      'requestKeyMatched', true
+    )
+  )
+);
+reset role;
+set local timezone = 'Asia/Seoul';
+
+select is(
+  (select response from registration_solapi_rpc_results where label = 'admission accepted timezone replay'),
+  (select response from registration_solapi_rpc_results where label = 'admission accepted'),
+  'finalize replay is invariant across session time zones'
+);
+
+select is(
+  (select admission_notice_sent from public.ops_registration_details where task_id = '95000000-0000-4000-8000-000000000500'),
+  true,
+  'admission accepted atomically updates compatibility flag'
+);
+select is(
+  (
+    select count(*)
+    from public.ops_task_events
+    where task_id = '95000000-0000-4000-8000-000000000500'
+      and event_type = 'customer_message_sent'
+      and field_name = 'registration_customer_message:' || ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'messageId')
+  ),
+  1::bigint,
+  'admission accepted writes one sanitized customer_message_sent event'
+);
+select unlike(
+  (
+    select after_value
+    from public.ops_task_events
+    where task_id = '95000000-0000-4000-8000-000000000500'
+      and event_type = 'customer_message_sent'
+      and field_name = 'registration_customer_message:' || ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'messageId')
+  ),
+  '%01012345678%',
+  'admission audit event stores no full recipient phone'
+);
+select unlike(
+  (
+    select after_value
+    from public.ops_task_events
+    where task_id = '95000000-0000-4000-8000-000000000500'
+      and event_type = 'customer_message_sent'
+      and field_name = 'registration_customer_message:' || ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'messageId')
+  ),
+  '%provider-admission-accepted%',
+  'admission audit event stores no provider evidence'
+);
+
+set local role service_role;
+select throws_ok(
+  $$select public.finalize_registration_customer_message_v1(
+      ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'messageId')::uuid,
+      ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'dispatchToken')::uuid,
+      'accepted',
+      pg_catalog.jsonb_build_object(
+        'statusCode', '202', 'statusMessage', 'accepted',
+        'observedAt', pg_catalog.clock_timestamp()::text,
+        'requestKeyMatched', true, 'rawBody', 'forbidden'
+      )
+    )$$,
+  '22023', 'registration_customer_message_provider_evidence_invalid',
+  'provider evidence rejects raw or unexpected keys'
+);
+reset role;
+
+-- Create explicit unknown and failed_hold finalization paths on independent facts.
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'level preview unknown',
+  public.create_registration_customer_message_preview_v1(
+    '95000000-0000-4000-8000-000000000001', 'level_test_booking',
+    '95000000-0000-4000-8000-000000000601',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'level source'),
+      'level_test_booking', repeat('6', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'level claim unknown',
+  public.claim_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'level preview unknown') ->> 'previewId')::uuid,
+    '95000000-0000-4000-8000-000000000730',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'level source'),
+      'level_test_booking', repeat('6', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'level marker unknown',
+  public.mark_registration_customer_message_attempt_started_v1(
+    ((select response from registration_solapi_rpc_results where label = 'level claim unknown') ->> 'messageId')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'level claim unknown') ->> 'claimToken')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'level claim unknown') ->> 'dispatchToken')::uuid,
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'level source'),
+      'level_test_booking', repeat('6', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'level finalized unknown',
+  public.finalize_registration_customer_message_v1(
+    ((select response from registration_solapi_rpc_results where label = 'level claim unknown') ->> 'messageId')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'level claim unknown') ->> 'dispatchToken')::uuid,
+    'unknown',
+    pg_catalog.jsonb_build_object(
+      'statusCode', 'timeout', 'statusMessage', 'lookup required',
+      'observedAt', pg_catalog.clock_timestamp()::text,
+      'requestKeyMatched', true
+    )
+  )
+);
+
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'visit preview failed',
+  public.create_registration_customer_message_preview_v1(
+    '95000000-0000-4000-8000-000000000001', 'visit_consultation_booking',
+    '95000000-0000-4000-8000-000000000602',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'visit source'),
+      'visit_consultation_booking', repeat('7', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'visit claim failed',
+  public.claim_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'visit preview failed') ->> 'previewId')::uuid,
+    '95000000-0000-4000-8000-000000000731',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'visit source'),
+      'visit_consultation_booking', repeat('7', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'visit marker failed',
+  public.mark_registration_customer_message_attempt_started_v1(
+    ((select response from registration_solapi_rpc_results where label = 'visit claim failed') ->> 'messageId')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'visit claim failed') ->> 'claimToken')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'visit claim failed') ->> 'dispatchToken')::uuid,
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'visit source'),
+      'visit_consultation_booking', repeat('7', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'visit finalized failed',
+  public.finalize_registration_customer_message_v1(
+    ((select response from registration_solapi_rpc_results where label = 'visit claim failed') ->> 'messageId')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'visit claim failed') ->> 'dispatchToken')::uuid,
+    'failed_hold',
+    pg_catalog.jsonb_build_object(
+      'statusCode', '400', 'statusMessage', 'rejected',
+      'observedAt', pg_catalog.clock_timestamp()::text,
+      'requestKeyMatched', true
+    )
+  )
+);
+reset role;
+
+select is(
+  (select response ->> 'currentStatus' from registration_solapi_rpc_results where label = 'level finalized unknown'),
+  'unknown',
+  'unprovable provider result finalizes to unknown'
+);
+select is(
+  (select response ->> 'currentStatus' from registration_solapi_rpc_results where label = 'visit finalized failed'),
+  'failed_hold',
+  'explicit provider rejection finalizes to failed_hold'
+);
+
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'level terminal preview',
+  public.create_registration_customer_message_preview_v1(
+    '95000000-0000-4000-8000-000000000001', 'level_test_booking',
+    '95000000-0000-4000-8000-000000000601',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'level source'),
+      'level_test_booking', repeat('6', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'level terminal duplicate',
+  public.claim_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'level terminal preview') ->> 'previewId')::uuid,
+    '95000000-0000-4000-8000-000000000732',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'level source'),
+      'level_test_booking', repeat('6', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'visit terminal preview',
+  public.create_registration_customer_message_preview_v1(
+    '95000000-0000-4000-8000-000000000001', 'visit_consultation_booking',
+    '95000000-0000-4000-8000-000000000602',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'visit source'),
+      'visit_consultation_booking', repeat('7', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'visit terminal duplicate',
+  public.claim_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'visit terminal preview') ->> 'previewId')::uuid,
+    '95000000-0000-4000-8000-000000000733',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'visit source'),
+      'visit_consultation_booking', repeat('7', 64)
+    )
+  )
+);
+reset role;
+
+select is(
+  (select response ->> 'messageId' from registration_solapi_rpc_results where label = 'level terminal duplicate'),
+  (select response ->> 'messageId' from registration_solapi_rpc_results where label = 'level claim unknown'),
+  'unknown terminal state keeps the original dedupe row'
+);
+select is(
+  (select (response ->> 'owner')::boolean from registration_solapi_rpc_results where label = 'level terminal duplicate'),
+  false,
+  'unknown terminal duplicate receives no provider-call ownership'
+);
+select is(
+  (select response ->> 'messageId' from registration_solapi_rpc_results where label = 'visit terminal duplicate'),
+  (select response ->> 'messageId' from registration_solapi_rpc_results where label = 'visit claim failed'),
+  'failed_hold terminal state keeps the original dedupe row'
+);
+select is(
+  (select (response ->> 'owner')::boolean from registration_solapi_rpc_results where label = 'visit terminal duplicate'),
+  false,
+  'failed_hold terminal duplicate receives no provider-call ownership'
+);
+select is(
+  (
+    select provider_attempt_count
+    from public.ops_registration_customer_messages
+    where id = ((select response from registration_solapi_rpc_results where label = 'level claim unknown') ->> 'messageId')::uuid
+  ),
+  1,
+  'unknown terminal duplicate cannot increment the provider attempt count'
+);
+select is(
+  (
+    select provider_attempt_count
+    from public.ops_registration_customer_messages
+    where id = ((select response from registration_solapi_rpc_results where label = 'visit claim failed') ->> 'messageId')::uuid
+  ),
+  1,
+  'failed_hold terminal duplicate cannot increment the provider attempt count'
+);
+
+-- Age the unknown attempt and confirm exact provider-check evidence can resolve it.
+update public.ops_registration_customer_messages
+set created_at = clock_timestamp() - interval '20 minutes',
+    confirmed_at = clock_timestamp() - interval '20 minutes',
+    provider_attempt_started_at = clock_timestamp() - interval '16 minutes'
+where id = ((select response from registration_solapi_rpc_results where label = 'level claim unknown') ->> 'messageId')::uuid;
+
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'level provider lookup context',
+  public.record_registration_customer_message_provider_check_v1(
+    '95000000-0000-4000-8000-000000000011',
+    ((select response from registration_solapi_rpc_results where label = 'level claim unknown') ->> 'messageId')::uuid,
+    'lookup_context',
+    '{}'::jsonb,
+    null
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'level provider checked',
+  public.record_registration_customer_message_provider_check_v1(
+    '95000000-0000-4000-8000-000000000011',
+    ((select response from registration_solapi_rpc_results where label = 'level claim unknown') ->> 'messageId')::uuid,
+    'accepted',
+    pg_catalog.jsonb_build_object(
+      'providerMessageId', 'provider-level-checked',
+      'statusCode', '202', 'statusMessage', 'accepted on lookup',
+      'observedAt', pg_catalog.clock_timestamp()::text,
+      'requestKeyMatched', true
+    ),
+    '95000000-0000-4000-8000-000000000730'
+  )
+);
+reset role;
+select is(
+  (select response ->> 'requestKey' from registration_solapi_rpc_results where label = 'level provider lookup context'),
+  '95000000-0000-4000-8000-000000000730',
+  'provider check server context returns the private original request key'
+);
+select is(
+  (
+    select response - array['messageId', 'providerMessageId', 'providerGroupId', 'requestKey']::text[]
+    from registration_solapi_rpc_results
+    where label = 'level provider lookup context'
+  ),
+  '{}'::jsonb,
+  'provider check server context exposes no phone body hash or token fields'
+);
+select is(
+  (select response ->> 'currentStatus' from registration_solapi_rpc_results where label = 'level provider checked'),
+  'accepted',
+  'provider check resolves an aged unknown with exact request evidence'
+);
+
+-- Admin-only expired pre-send release keeps the dedupe row and exact replay lane.
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'admin release preview',
+  public.create_registration_customer_message_preview_v1(
+    '95000000-0000-4000-8000-000000000011', 'waiting_notice',
+    '95000000-0000-4000-8000-000000000540',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      'waiting_notice', repeat('9', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'admin release claim',
+  public.claim_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000011',
+    ((select response from registration_solapi_rpc_results where label = 'admin release preview') ->> 'previewId')::uuid,
+    '95000000-0000-4000-8000-000000000740',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      'waiting_notice', repeat('9', 64)
+    )
+  )
+);
+reset role;
+
+update public.ops_registration_customer_messages
+set created_at = clock_timestamp() - interval '10 minutes',
+    confirmed_at = clock_timestamp() - interval '10 minutes',
+    claim_expires_at = clock_timestamp() - interval '1 minute'
+where id = ((select response from registration_solapi_rpc_results where label = 'admin release claim') ->> 'messageId')::uuid;
+
+set local role service_role;
+select throws_ok(
+  $$select public.mark_registration_customer_message_attempt_started_v1(
+      ((select response from registration_solapi_rpc_results where label = 'admin release claim') ->> 'messageId')::uuid,
+      ((select response from registration_solapi_rpc_results where label = 'admin release claim') ->> 'claimToken')::uuid,
+      ((select response from registration_solapi_rpc_results where label = 'admin release claim') ->> 'dispatchToken')::uuid,
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'waiting source'),
+        'waiting_notice', repeat('9', 64)
+      )
+    )$$,
+  '40001', 'registration_customer_message_claim_invalid',
+  'an expired claim cannot commit the provider attempt marker'
+);
+select throws_ok(
+  $$select public.release_registration_customer_message_pre_send_claim_admin_v1(
+      '95000000-0000-4000-8000-000000000011',
+      ((select response from registration_solapi_rpc_results where label = 'admin release claim') ->> 'messageId')::uuid,
+      'staff may not release another claim',
+      '95000000-0000-4000-8000-000000000741'
+    )$$,
+  '42501', 'registration_customer_message_admin_required',
+  'staff cannot perform admin pre-send release'
+);
+
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'admin released expired claim',
+  public.release_registration_customer_message_pre_send_claim_admin_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'admin release claim') ->> 'messageId')::uuid,
+    'expired worker claim',
+    '95000000-0000-4000-8000-000000000742'
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'admin release replay',
+  public.release_registration_customer_message_pre_send_claim_admin_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'admin release claim') ->> 'messageId')::uuid,
+    'expired worker claim',
+    '95000000-0000-4000-8000-000000000742'
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'admin release reacquired',
+  public.claim_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000011',
+    ((select response from registration_solapi_rpc_results where label = 'admin release preview') ->> 'previewId')::uuid,
+    '95000000-0000-4000-8000-000000000740',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      'waiting_notice', repeat('9', 64)
+    )
+  )
+);
+select throws_ok(
+  $$select public.release_registration_customer_message_pre_send_claim_admin_v1(
+      '95000000-0000-4000-8000-000000000001',
+      ((select response from registration_solapi_rpc_results where label = 'admin release claim') ->> 'messageId')::uuid,
+      'different reason',
+      '95000000-0000-4000-8000-000000000742'
+    )$$,
+  '23505', 'registration_customer_message_mutation_conflict',
+  'admin release action key cannot be reused with a different reason'
+);
+reset role;
+
+select is(
+  (select response from registration_solapi_rpc_results where label = 'admin release replay'),
+  (select response from registration_solapi_rpc_results where label = 'admin released expired claim'),
+  'admin release action request key replays exactly'
+);
+select is(
+  (select (response ->> 'owner')::boolean from registration_solapi_rpc_results where label = 'admin release reacquired'),
+  true,
+  'only pending count zero without a marker can reacquire after admin release'
+);
+
+-- Manual reconcile is admin-only, terminal-only, and action-key idempotent.
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'reminder preview reconcile',
+  public.create_registration_customer_message_preview_v1(
+    '95000000-0000-4000-8000-000000000001', 'appointment_reminder',
+    '95000000-0000-4000-8000-000000000601',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'reminder source'),
+      'appointment_reminder', repeat('8', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'reminder claim reconcile',
+  public.claim_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'reminder preview reconcile') ->> 'previewId')::uuid,
+    '95000000-0000-4000-8000-000000000750',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'reminder source'),
+      'appointment_reminder', repeat('8', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'reminder marker reconcile',
+  public.mark_registration_customer_message_attempt_started_v1(
+    ((select response from registration_solapi_rpc_results where label = 'reminder claim reconcile') ->> 'messageId')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'reminder claim reconcile') ->> 'claimToken')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'reminder claim reconcile') ->> 'dispatchToken')::uuid,
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'reminder source'),
+      'appointment_reminder', repeat('8', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'reminder unknown reconcile',
+  public.finalize_registration_customer_message_v1(
+    ((select response from registration_solapi_rpc_results where label = 'reminder claim reconcile') ->> 'messageId')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'reminder claim reconcile') ->> 'dispatchToken')::uuid,
+    'unknown',
+    pg_catalog.jsonb_build_object(
+      'statusCode', 'timeout', 'statusMessage', 'lookup required',
+      'observedAt', pg_catalog.clock_timestamp()::text,
+      'requestKeyMatched', true
+    )
+  )
+);
+select throws_ok(
+  $$select public.reconcile_registration_customer_message_v1(
+      '95000000-0000-4000-8000-000000000001',
+      ((select response from registration_solapi_rpc_results where label = 'reminder claim reconcile') ->> 'messageId')::uuid,
+      'failed_hold',
+      pg_catalog.jsonb_build_object(
+        'statusCode', '404', 'statusMessage', 'not accepted',
+        'observedAt', pg_catalog.clock_timestamp()::text,
+        'requestKeyMatched', true
+      ),
+      'provider dashboard reviewed',
+      '95000000-0000-4000-8000-000000000742'
+    )$$,
+  '23505', 'registration_customer_message_mutation_conflict',
+  'admin action request key cannot cross from release to reconcile'
+);
+select throws_ok(
+  $$select public.reconcile_registration_customer_message_v1(
+      '95000000-0000-4000-8000-000000000011',
+      ((select response from registration_solapi_rpc_results where label = 'reminder claim reconcile') ->> 'messageId')::uuid,
+      'failed_hold',
+      pg_catalog.jsonb_build_object(
+        'statusCode', '404', 'statusMessage', 'not accepted',
+        'observedAt', pg_catalog.clock_timestamp()::text,
+        'requestKeyMatched', true
+      ),
+      'provider dashboard reviewed',
+      '95000000-0000-4000-8000-000000000751'
+    )$$,
+  '42501', 'registration_customer_message_admin_required',
+  'staff cannot reconcile a provider result'
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'reminder reconciled',
+  public.reconcile_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'reminder claim reconcile') ->> 'messageId')::uuid,
+    'failed_hold',
+    pg_catalog.jsonb_build_object(
+      'statusCode', '404', 'statusMessage', 'not accepted',
+      'observedAt', '2026-08-05T12:00:00+09:00',
+      'requestKeyMatched', true
+    ),
+    'provider dashboard reviewed',
+    '95000000-0000-4000-8000-000000000752'
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'reminder reconcile replay',
+  public.reconcile_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'reminder claim reconcile') ->> 'messageId')::uuid,
+    'failed_hold',
+    pg_catalog.jsonb_build_object(
+      'statusCode', '404', 'statusMessage', 'not accepted',
+      'observedAt', '2026-08-05T12:00:00+09:00',
+      'requestKeyMatched', true
+    ),
+    'provider dashboard reviewed',
+    '95000000-0000-4000-8000-000000000752'
+  )
+);
+select throws_ok(
+  $$select public.reconcile_registration_customer_message_v1(
+      '95000000-0000-4000-8000-000000000001',
+      ((select response from registration_solapi_rpc_results where label = 'reminder claim reconcile') ->> 'messageId')::uuid,
+      'accepted',
+      pg_catalog.jsonb_build_object(
+        'statusCode', '202', 'statusMessage', 'accepted',
+        'observedAt', '2026-08-05T12:00:00+09:00',
+        'requestKeyMatched', true
+      ),
+      'conflicting action',
+      '95000000-0000-4000-8000-000000000752'
+    )$$,
+  '23505', 'registration_customer_message_mutation_conflict',
+  'reconcile action request key cannot target a different resolution'
+);
+reset role;
+
+select is(
+  (select response from registration_solapi_rpc_results where label = 'reminder reconcile replay'),
+  (select response from registration_solapi_rpc_results where label = 'reminder reconciled'),
+  'admin reconcile exact action replay returns the same masked result'
+);
+
+-- A terminal row permanently keeps its dedupe across a fresh preview.
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting terminal preview',
+  public.create_registration_customer_message_preview_v1(
+    '95000000-0000-4000-8000-000000000001', 'waiting_notice',
+    '95000000-0000-4000-8000-000000000540',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      'waiting_notice'
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting terminal duplicate',
+  public.claim_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'waiting terminal preview') ->> 'previewId')::uuid,
+    '95000000-0000-4000-8000-000000000760',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      'waiting_notice'
+    )
+  )
+);
+
+insert into registration_solapi_rpc_results(label, response)
+values
+  (
+    'staff waiting history',
+    public.list_registration_customer_messages_v1(
+      '95000000-0000-4000-8000-000000000011', 'waiting_notice',
+      '95000000-0000-4000-8000-000000000540', 20
+    )
+  ),
+  (
+    'teacher waiting history',
+    public.list_registration_customer_messages_v1(
+      '95000000-0000-4000-8000-000000000012', 'waiting_notice',
+      '95000000-0000-4000-8000-000000000540', 20
+    )
+  );
+select throws_ok(
+  $$select public.list_registration_customer_messages_v1(
+      '95000000-0000-4000-8000-000000000013', 'waiting_notice',
+      '95000000-0000-4000-8000-000000000540', 20
+    )$$,
+  '42501', 'registration_customer_message_access_denied',
+  'unrelated teacher cannot list task message history'
+);
+reset role;
+
+select is(
+  (select (response ->> 'owner')::boolean from registration_solapi_rpc_results where label = 'waiting terminal duplicate'),
+  false,
+  'accepted terminal state permanently locks the same dedupe'
+);
+select ok(
+  ((select response -> 0 from registration_solapi_rpc_results where label = 'staff waiting history') ? 'recipientLast4'),
+  'admin and staff history includes only masked last4 recipient evidence'
+);
+select ok(
+  not ((select response -> 0 from registration_solapi_rpc_results where label = 'teacher waiting history') ? 'recipientLast4'),
+  'assigned teacher history omits the recipientLast4 key entirely'
+);
+select unlike(
+  (select response::text from registration_solapi_rpc_results where label = 'teacher waiting history'),
+  '%recipientHash%',
+  'teacher history contains no recipient hash'
+);
+select unlike(
+  (select response::text from registration_solapi_rpc_results where label = 'teacher waiting history'),
+  '%providerEvidence%',
+  'teacher history contains no provider evidence'
+);
+select unlike(
+  (select response::text from registration_solapi_rpc_results where label = 'teacher waiting history'),
+  '%confirmedBy%',
+  'teacher history contains no confirmer identity'
+);
+
+select * from finish();
 
 rollback;
