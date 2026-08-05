@@ -906,7 +906,7 @@ test("registration workspace replaces Notion registration management with one ap
     'label="학년"',
     "RegistrationApplicationCreate",
     "RegistrationApplication",
-    "admissionActions",
+    "customerMessageClient",
   ]);
   assertIncludesAll(initialPlanSource, [
     "ProcessSubjectPicker",
@@ -1376,7 +1376,7 @@ test("local task mutations invalidate stale background workspace reloads before 
   for (const [start, end] of [
     ["const applyTaskPatch", "const prependTask"],
     ["const prependTask", "const replaceTaskInState"],
-    ["const replaceTaskInState", "const handleRegistrationCustomerMessageSent"],
+    ["const replaceTaskInState", "const updateTaskInState"],
     ["const updateTaskInState", "const appendTaskComment"],
     ["const removeTaskFromState", "const buildLocalTaskFromInput"],
   ]) {
@@ -1472,7 +1472,7 @@ test("viewer transitions hide and reset the previous viewer's workspace state be
   assert.match(reloadSource, /setEditingTask\(null\)/);
   assert.match(reloadSource, /setFormOpen\(false\)/);
   assert.match(reloadSource, /setDetailOpen\(false\)/);
-  assert.match(reloadSource, /setRegistrationCustomerMessageTask\(null\)/);
+  assert.doesNotMatch(reloadSource, /setRegistrationCustomerMessageTask\(null\)/);
   assert.match(reloadSource, /setDeleteTarget\(null\)/);
   assert.match(reloadSource, /setBulkDeleteTargets\(\[\]\)/);
   assert.match(reloadSource, /workspaceDataViewerIdRef\.current = currentUserId[\s\S]*setData/);
@@ -1543,7 +1543,6 @@ test("registration follows the real decision waitlist admission form and manual 
     readSource("supabase/migrations/20260710053001_registration_message_least_privilege.sql"),
     readSource("supabase/migrations/20260710053144_registration_message_policy_performance.sql"),
   ]);
-  const combined = `${workspaceSource}\n${serviceSource}\n${routeSource}\n${migrationSource}\n${leastPrivilegeMigrationSource}\n${policyPerformanceMigrationSource}`;
   const detailDialogSource = workspaceSource.slice(
     workspaceSource.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen}"),
     workspaceSource.indexOf("<Dialog open={Boolean(deleteTarget)}"),
@@ -1554,11 +1553,8 @@ test("registration follows the real decision waitlist admission form and manual 
     "RegistrationDecisionActions",
     "getRegistrationBranchActions",
     "getRegistrationPipelineActionBlockers",
-    'studentName.endsWith("학생")',
-    "RegistrationCustomerMessageDialog",
-    "openRegistrationCustomerMessage",
-    "sendRegistrationAdmissionMessage",
-    "copyMakeEduAdmissionMessage",
+    "createRegistrationCustomerMessageClient",
+    "registrationCustomerMessageClient",
     'label: "등록"',
     "현재 학기 수강반 대기",
     "현재 학기 개강반 대기",
@@ -1566,8 +1562,6 @@ test("registration follows the real decision waitlist admission form and manual 
     "미등록 완료",
     "문의 완료",
     "레벨테스트 재응시",
-    "입학신청서 발송",
-    "메이크에듀용 내용 복사",
     "레벨테스트 예약일시",
     "상담 예약일시",
     "상담 완료일시",
@@ -1582,22 +1576,14 @@ test("registration follows the real decision waitlist admission form and manual 
     "previousTask",
   ]);
   assertIncludesAll(`${routeSource}\n${routeCoreSource}\n${legacyRouteSource}`, [
-    'from "node:crypto"',
-    "createHmac",
-    "randomBytes",
-    "SOLAPI_API_KEY",
-    "SOLAPI_API_SECRET",
-    "SOLAPI_KAKAO_PF_ID",
-    "SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID",
-    "https://api.solapi.com/messages/v4/send-many/detail",
-    'type: "ATA"',
-    "disableSms: true",
-    '"#{학생명}"',
-    "template_key: ADMISSION_TEMPLATE_KEY",
-    'event_type: "customer_message_sent"',
-    'status: "pending"',
-    "claimMessageRecord",
+    "createProductionRegistrationCustomerMessageRouteHandlers",
+    "listAdmissionMessages",
+    "handleLegacyRegistrationGet",
+    "handleLegacyRegistrationPost",
+    "REGISTRATION_CUSTOMER_MESSAGE_PREVIEW_REQUIRED",
+    'messageKind: "admission_application"',
   ]);
+  assert.doesNotMatch(`${routeCoreSource}\n${legacyRouteSource}`, /send-many\/detail|api\.solapi\.com|\bfetch\s*\(/);
   assertIncludesAll(migrationSource, [
     "create table if not exists public.ops_registration_messages",
     "recipient_last4",
@@ -1620,16 +1606,26 @@ test("registration follows the real decision waitlist admission form and manual 
     "(select public.current_dashboard_role())",
     "(select auth.uid())",
   ]);
-  assertIncludesAll(combined, [
-    "입학신청서 작성 안내",
-    "https://bit.ly/3rurm5t",
-  ]);
+  assert.doesNotMatch(workspaceSource, /입학신청서 작성 안내|https:\/\/bit\.ly\/3rurm5t/);
   assert.match(
     detailDialogSource,
     /selectedTaskFresh\.type !== "registration" && selectedTaskFresh\.type !== "word_retest" && !isProcessDetail/,
     "registration detail should not render the generic comment and attachment rail",
   );
 });
+
+test("registration workspace supplies one stable real-or-fixture customer message client without a legacy dialog", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+
+  assert.match(source, /createRegistrationCustomerMessageClient/);
+  assert.match(source, /const registrationCustomerMessageClient = useMemo\(/);
+  assert.match(source, /getAccessToken: async \(\) => registrationNotificationSessionToken \|\| null/);
+  assert.match(source, /registrationFixtureCustomerMessageClientRef\.current = adapter\.customerMessageClient/);
+  assert.match(source, /customerMessageClient=\{registrationFixtureEnabled[\s\S]*registrationFixtureCustomerMessageClientRef\.current[\s\S]*registrationCustomerMessageClient/);
+  assert.doesNotMatch(source, /RegistrationCustomerMessageDialog|getRegistrationAdmissionSolapiMessage|openRegistrationCustomerMessage|sendRegistrationAdmissionMessage/);
+  assert.doesNotMatch(source, /fetch\("\/api\/solapi\/registration"/);
+  assert.doesNotMatch(source, /메이크에듀용 내용 복사|입학신청서 다시 발송/);
+})
 
 test("registration create uses the canonical initial plan, exact runtime matrix, and frozen retry envelope", async () => {
   const [source, createSource, inquiryFieldsSource, subjectPickerSource, initialPlanSource, intakeWorkflowSource, registrationWorkflowSource, sampleWorkflowSource, browserWorkflowSource] = await Promise.all([
@@ -2427,7 +2423,7 @@ test("withdrawal workspace follows request processing and completed queues", asy
   );
   const notificationDialogWrappersSource = source.slice(
     source.indexOf("function TransferNotificationSettingsDialog"),
-    source.indexOf("function RegistrationCustomerMessageDialog"),
+    source.indexOf("function DashboardMetric"),
   );
 
   assertIncludesAll(source, [
@@ -4249,7 +4245,7 @@ test("word retest expected schedule keeps reference-only editing, approved form 
 
   const editorSource = workspaceSource.slice(
     workspaceSource.indexOf("const openWordRetestEditor"),
-    workspaceSource.indexOf("const openRegistrationCustomerMessage"),
+    workspaceSource.indexOf("const openRegistrationTrack"),
   );
   assert.match(editorSource, /if \(isClosedOpsTask\(task\)\)[\s\S]*openDetail\(task\)/);
   assert.match(editorSource, /intent === "expected_quick"[\s\S]*\? "expected_only"/);
@@ -4978,7 +4974,7 @@ test("registration create omits placement while canonical track editors own enro
   assert.doesNotMatch(create, /RegistrationApplicationPlacementSection/);
   assert.doesNotMatch(create, /수업 시작 일정|focusKey="classStartDate"/);
   assert.doesNotMatch(create, /classStartSession|fillRegistration/);
-  assertIncludesAll(source, ["RegistrationApplication", "admissionActions"]);
+  assertIncludesAll(source, ["RegistrationApplication", "customerMessageClient"]);
 });
 
 test("registration canonical editors own class and textbook changes after create omits placement", async () => {
@@ -4992,7 +4988,7 @@ test("registration canonical editors own class and textbook changes after create
     "requestToken !== registrationClassDetailRequestRef.current",
     "detail.id !== selectedClassId",
     "registrationClassDetailResult.viewerId === selectedRegistrationViewerId",
-    "admissionActions",
+    "customerMessageClient",
   ]);
   assert.doesNotMatch(registrationFormSource, /textbookBillingIssued|registrationTextbookDefaultPendingClassRef|registrationTextbookClearedClassRef/);
 });
@@ -5130,7 +5126,7 @@ test("post-commit refresh failure is load-only and remains in the registration h
   const helperEnd = source.indexOf("\n  const openDetail", helperStart);
   const helper = source.slice(helperStart, helperEnd);
   const retryStart = source.indexOf("function retryCommittedRegistrationCaseRefresh");
-  const retryEnd = source.indexOf("\n  const postRegistrationAdmissionAction", retryStart);
+  const retryEnd = source.indexOf("\n  const handleRegistrationWorkflowStatusChange", retryStart);
   const retry = source.slice(retryStart, retryEnd);
 
   assert.match(helper, /kind: "refresh_failed"/);

@@ -2622,7 +2622,7 @@ test("workspace mounts the real list/editor and exposes create only to fixture m
   assert.doesNotMatch(source, /NODE_ENV === "production"[\s\S]*registration-subject-tracks/)
 })
 
-test("all registration service, exact class detail, notification, and admission paths consult the in-memory adapter first", async () => {
+test("all registration service, exact class detail, notification, and customer-message paths consult the in-memory adapter first", async () => {
   const [service, opsService, notification, workspace] = await Promise.all([
     readFile(serviceUrl, "utf8"),
     readFile(opsServiceUrl, "utf8"),
@@ -2638,10 +2638,10 @@ test("all registration service, exact class detail, notification, and admission 
   assert.match(opsService, /loadRegistrationSubjectTrackFixtureClassDetails/)
   assert.match(notification, /registration-track-fixture-runtime/)
   assert.match(notification, /executeRegistrationSubjectTrackFixtureAction/)
-  assert.match(workspace, /executeRegistrationSubjectTrackFixtureAction\("sendRegistrationAdmissionMessage"/)
-  assert.match(workspace, /executeRegistrationSubjectTrackFixtureAction\("checkRegistrationAdmissionMessage"/)
-  assert.match(workspace, /executeRegistrationSubjectTrackFixtureAction\("reconcileRegistrationAdmissionMessage"/)
-  assert.match(workspace, /executeRegistrationSubjectTrackFixtureAction\("releaseRegistrationAdmissionMessageRetry"/)
+  assert.match(workspace, /createRegistrationCustomerMessageClient/)
+  assert.match(workspace, /registrationFixtureCustomerMessageClientRef\.current = adapter\.customerMessageClient/)
+  assert.match(workspace, /customerMessageClient=\{registrationFixtureEnabled[\s\S]*registrationFixtureCustomerMessageClientRef\.current[\s\S]*registrationCustomerMessageClient/)
+  assert.doesNotMatch(workspace, /executeRegistrationSubjectTrackFixtureAction\("(?:send|check|reconcile|release)RegistrationAdmissionMessage"/)
 })
 
 test("fixture unified inquiry save rejects stale common and subject expectations without mutation", async () => {

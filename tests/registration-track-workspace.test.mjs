@@ -1130,7 +1130,7 @@ test("terminal subjects do not gate common edits and progressed subjects cannot 
   assert.match(inquiry, /registration_subject_removal_blocked/)
 })
 
-test("two decided subjects share one admission send action and expose two badges", async () => {
+test("two decided subjects share one admission preview action and expose two badges", async () => {
   const [application, enrollment] = await Promise.all([
     readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8"),
@@ -1148,7 +1148,7 @@ test("two decided subjects share one admission send action and expose two badges
   assert.match(application, /admissionApplicationState\.canSend/)
   assert.match(application, /admissionApplicationState\.targetTrackIds/)
   assert.match(application, /admissionTargetTracks\.map/)
-  assert.equal((enrollment.match(/>입학신청서 발송<\/Button>/g) || []).length, 1)
+  assert.equal((enrollment.match(/>\s*입학신청서 알림톡\s*<\/Button>/g) || []).length, 1)
 })
 
 test("saved and create applications share the intake shell while saved detail owns later stages", async () => {
@@ -1194,7 +1194,7 @@ test("saved application keeps exception actions in their owning sections", async
   const inquiry = sourceBetween(source, "inquiry={(\n", "levelTest={(\n")
   const waiting = sourceBetween(source, "waiting={(\n", "registration={(\n")
   const registration = sourceBetween(source, "registration={(\n", "admission={(\n")
-  const admission = sourceBetween(source, "admission={(\n", "\n    />\n  )\n}")
+  const admission = sourceBetween(source, "admission={(\n", "<RegistrationAlimtalkPreviewDialog")
 
   assert.match(source, /RegistrationMigrationReviewEditor/)
   assert.match(inquiry, /renderTrackFrames\("inquiry"\)/)
@@ -1202,7 +1202,7 @@ test("saved application keeps exception actions in their owning sections", async
   assert.match(registration, /renderTrackFrames\("placement", "registration"\)/)
   assert.match(source, /section === "placement"[\s\S]*?<RegistrationEnrollmentTrackEditor/)
   assert.match(admission, /RegistrationAdmissionPanel/)
-  assert.match(admission, /cancelRegistrationAdmissionBatch|admissionActions/)
+  assert.match(admission, /cancelRegistrationAdmissionBatch|onOpenCustomerMessage/)
 })
 
 test("canonical track detail resolves and persists director defaults only for management roles", async () => {
@@ -1382,7 +1382,7 @@ test("waiting details save separately from the status selector", async () => {
   assert.match(source, /대기 정보 저장/)
   assert.doesNotMatch(waiting, /레벨테스트 재응시 여부|WAITING_RETAKE_OPTIONS|레벨테스트 예약/)
   assert.match(waiting, /retakeDecision: savedRetakeDecision/)
-  assert.match(waiting, /className="flex justify-end"[\s\S]*?<RegistrationSaveButton[\s\S]*?dirty=\{waitingDirty\}[\s\S]*?aria-label=\{`\$\{track\.subject\} 대기 정보 저장`\}/)
+  assert.match(waiting, /className="flex flex-wrap justify-end gap-2"[\s\S]*?<RegistrationSaveButton[\s\S]*?dirty=\{waitingDirty\}[\s\S]*?aria-label=\{`\$\{track\.subject\} 대기 정보 저장`\}/)
   assert.match(source, /saveRegistrationWaitingDetails/)
   assert.doesNotMatch(source, /대기 상태 변경/)
   assert.doesNotMatch(source, /대기 종료 · 미등록/)
@@ -1432,7 +1432,7 @@ test("workspace preloads the unified editor while canonical subject detail data 
   assert.match(source, /detail=\{registrationCaseDetail\}/)
   assert.match(source, /focusTrackId=\{selectedRegistrationTrackId\}/)
   assert.match(source, /onFocusTrack=\{handleSelectRegistrationTrack\}/)
-  assert.match(source, /admissionActions=/)
+  assert.match(source, /customerMessageClient=/)
 })
 
 test("canonical detail renders before option catalogs begin loading", async () => {
@@ -1712,7 +1712,7 @@ test("case admission panel selects exact rows and renders the ordered mixed-subj
   assert.match(source, /completeRegistrationAdmissionBatch/)
   assert.match(source, /cancelRegistrationAdmissionBatch/)
   assert.match(source, /cancelRegistrationEnrollment/)
-  assert.match(source, /입학신청서 발송/)
+  assert.match(source, /입학신청서 알림톡/)
   assert.match(source, /메이크에듀 등록/)
   assert.match(source, /청구서 발송/)
   assert.match(source, /수납 완료 확인/)
@@ -1727,7 +1727,7 @@ test("saved admission section owns one ordered flat action list", async () => {
     readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8"),
   ])
   const labels = [
-    "입학신청서 발송",
+    "입학신청서 알림톡",
     "메이크에듀 등록(수업, 교재)",
     "청구서 발송",
     "수납 완료 확인",
@@ -1844,7 +1844,7 @@ test("a completed saved admission case renders five complete rows", async () => 
   assert.equal((html.match(/data-registration-admission-state="active"/g) || []).length, 0)
 })
 
-test("ordered admission steps retain explicit message reconciliation and batch RPC controls", async () => {
+test("ordered admission steps use preview-first messaging and retain batch RPC controls", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
   const panel = source.slice(source.indexOf("export function RegistrationAdmissionPanel"))
 
@@ -1856,10 +1856,8 @@ test("ordered admission steps retain explicit message reconciliation and batch R
   ]) {
     assert.equal((panel.match(new RegExp(`${action}\\(\\{`, "g")) || []).length, 1, action)
   }
-  assert.equal((panel.match(/onSendAdmissionMessage\(\{/g) || []).length, 2)
-  assert.equal((panel.match(/onCheckAdmissionMessage\(\{/g) || []).length, 1)
-  assert.equal((panel.match(/onReconcileAdmissionMessage\(\{/g) || []).length, 2)
-  assert.equal((panel.match(/onReleaseAdmissionMessageRetry\(\{/g) || []).length, 1)
+  assert.equal((panel.match(/onOpenCustomerMessage\?\.\(\{ messageKind: "admission_application", sourceId: taskId \}\)/g) || []).length, 1)
+  assert.doesNotMatch(panel, /onSendAdmissionMessage|onCheckAdmissionMessage|onReconcileAdmissionMessage|onReleaseAdmissionMessageRetry/)
   assert.match(panel, /openBatch && permissions\.canManage \? <Button[\s\S]*?setMakeedu\(enrollment\)/)
   assert.equal((panel.match(/content: openBatch && permissions\.canManage \? \(/g) || []).length, 3)
   assert.match(panel, /\{openBatch \? \([\s\S]*?입학 처리 취소/)
@@ -1869,22 +1867,21 @@ test("ordered admission steps retain explicit message reconciliation and batch R
   assert.match(panel, /disabled=\{batchRefreshPending \|\| !checklist\.payment \|\| checklist\.complete \|\| Boolean\(busyAction\)\}/)
 })
 
-test("case admission message states stay actionable independently of the selected subject", async () => {
+test("case admission message state remains readable while actions use the shared preview dialog", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
-  assert.match(source, /getRegistrationAdmissionApplicationState/)
+  assert.match(source, /admissionApplicationMessageStatus/)
   assert.match(source, /발송 처리 중/)
   assert.match(source, /발송 접수됨 · 상태 동기화 필요/)
   assert.match(source, /발송 결과 확인 필요/)
   assert.match(source, /미접수 확인 · 재발송 잠금/)
-  assert.match(source, /onCheckAdmissionMessage/)
-  assert.match(source, /onReconcileAdmissionMessage/)
-  assert.match(source, /onReleaseAdmissionMessageRetry/)
-  assert.match(source, /onSendAdmissionMessage/)
+  assert.match(source, /onOpenCustomerMessage/)
+  assert.match(source, /messageKind: "admission_application", sourceId: taskId/)
+  assert.doesNotMatch(source, /onCheckAdmissionMessage|onReconcileAdmissionMessage|onReleaseAdmissionMessageRetry|onSendAdmissionMessage/)
 })
 
 test("case admission badges use the same decided and add-class eligibility as the send action", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
-  const admission = sourceBetween(source, "admission={(\n", "\n    />\n  )\n}")
+  const admission = sourceBetween(source, "admission={(\n", "<RegistrationAlimtalkPreviewDialog")
 
   assert.match(source, /admissionApplicationState\.targetTrackIds/)
   assert.match(source, /admissionTargetTracks/)
@@ -1902,8 +1899,49 @@ test("unified track editor and workspace mount subject rows plus one case-level 
 
   const shell = await readWorkspaceSource()
   assert.match(shell, /<RegistrationApplication/)
-  assert.match(shell, /admissionActions=\{/)
+  assert.match(shell, /customerMessageClient=\{/)
   assert.doesNotMatch(shell, /<RegistrationAdmissionPanel/)
+})
+
+test("canonical registration editors expose five preview-first alimtalk targets through one dialog owner", async () => {
+  const [appointment, actions, enrollment, application] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+  ])
+
+  assert.equal((application.match(/<RegistrationAlimtalkPreviewDialog/g) || []).length, 1)
+  assert.match(application, /useState<RegistrationCustomerMessageTarget \| null>\(null\)/)
+  assert.match(application, /client=\{customerMessageClient\}/)
+  assert.match(application, /viewerRole=\{viewerRole \|\| "assistant"\}/)
+  assert.match(application, /triggerRef=\{customerMessageTriggerRef\}/)
+
+  const appointmentSave = appointment.indexOf("<RegistrationSaveButton")
+  const bookingTrigger = appointment.indexOf("예약 안내 알림톡", appointmentSave)
+  const reminderTrigger = appointment.indexOf("리마인드 알림톡", appointmentSave)
+  assert.ok(appointmentSave >= 0 && bookingTrigger > appointmentSave && reminderTrigger > bookingTrigger)
+  assert.match(appointment, /messageKind: kind === "level_test" \? "level_test_booking" : "visit_consultation_booking",\s*sourceId: appointment\.id/)
+  assert.match(appointment, /messageKind: "appointment_reminder",\s*sourceId: appointment\.id/)
+  assert.match(appointment, /appointmentDirty \|\| externalDirty \|\| saving \|\| refreshPending \|\| Boolean\(conflict\) \|\| appointment\?\.status !== "scheduled"/)
+  assert.match(appointment, /예약을 저장한 뒤 알림톡을 보낼 수 있습니다\./)
+
+  const waiting = sourceBetween(actions, "export function RegistrationWaitingDetailsEditor", "function TerminalStageEditor")
+  const waitingSave = waiting.indexOf("<RegistrationSaveButton")
+  const waitingTrigger = waiting.indexOf("대기 안내 알림톡", waitingSave)
+  assert.ok(waitingSave >= 0 && waitingTrigger > waitingSave)
+  assert.match(waiting, /messageKind: "waiting_notice", sourceId: track\.id/)
+  assert.match(waiting, /permissions\.canManage/)
+  assert.match(waiting, /waitingDirty \|\| saving \|\| refreshPending \|\| !savedWaitingComplete/)
+
+  const admission = enrollment.slice(enrollment.indexOf("export function RegistrationAdmissionPanel"))
+  assert.match(admission, /입학신청서 알림톡/)
+  assert.match(admission, /messageKind: "admission_application", sourceId: taskId/)
+  assert.match(admission, /permissions\.canManage/)
+  assert.doesNotMatch(admission, /onSendAdmissionMessage|onReconcileAdmissionMessage|onReleaseAdmissionMessageRetry|제공사 확인 증빙|재발송 허용/)
+
+  assert.equal((application.match(/onOpenCustomerMessage=\{openCustomerMessage\}/g) || []).length, 4)
+  assert.doesNotMatch(application, /admissionActions/)
 })
 
 test("always-open appointment and enrollment editors use disjoint React key namespaces", async () => {
@@ -1933,7 +1971,7 @@ test("enrollment stages show the real work surface without a redundant placehold
   assert.match(source, /REGISTRATION_DIRECTOR_VISIBLE_STATUSES\.has\(context\.track\.status\)/)
 })
 
-test("committed enrollment and admission saves recover refresh without resubmitting mutations", async () => {
+test("committed enrollment and admission batch saves recover refresh without resubmitting mutations", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
   const enrollmentBlock = sourceBetween(source, "export function RegistrationEnrollmentEditor", "export type RegistrationAdmissionPanelProps")
   const admissionBlock = sourceBetween(source, "export function RegistrationAdmissionPanel", "return (\n    <section")
@@ -1942,11 +1980,10 @@ test("committed enrollment and admission saves recover refresh without resubmitt
   assert.match(enrollmentBlock, /async function retryEnrollmentReload/)
   assert.match(enrollmentBlock, /await withRegistrationRefreshTimeout\(onReload\(\)\)[\s\S]*setOwnerRefreshPending\(owner, false\)[\s\S]*catch[\s\S]*setOwnerRefreshPending\(owner, true\)/)
   assert.doesNotMatch(enrollmentBlock, /setOwnerRefreshPending\([^,]+, true\)\s*\n\s*await reloadCommitted/)
-  assert.match(admissionBlock, /async function retryAdmissionReload/)
-  assert.match(admissionBlock, /const setPending = owner === "message" \? setMessageRefreshPending : setBatchRefreshPending[\s\S]*await onReload\(\)[\s\S]*setPending\(false\)[\s\S]*catch[\s\S]*setPending\(true\)/)
+  assert.match(admissionBlock, /async function retryAdmissionReload\(\)[\s\S]*await onReload\(\)[\s\S]*setBatchRefreshPending\(false\)[\s\S]*catch[\s\S]*setBatchRefreshPending\(true\)/)
   assert.match(source, /onClick=\{\(\) => void retryEnrollmentReload\(\{ kind: "rows" \}\)\}/)
-  assert.match(source, /onClick=\{\(\) => void retryAdmissionReload\("message"\)\}/)
-  assert.match(source, /onClick=\{\(\) => void retryAdmissionReload\("batch"\)\}/)
+  assert.match(source, /onClick=\{\(\) => void retryAdmissionReload\(\)\}/)
+  assert.doesNotMatch(source, /retryAdmissionReload\("message"\)|setMessageRefreshPending/)
 })
 
 test("registered add-class starts empty and cannot submit an empty draft list", async () => {
@@ -1966,12 +2003,11 @@ test("persisted planned rows cancel explicitly and class detail failures can be 
   assert.match(source, /activeEnrollmentRows/)
 })
 
-test("batch cancellation requires each first-admission destination and message recovery respects the server delay", async () => {
+test("batch cancellation requires each first-admission destination without a legacy message recovery owner", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
   assert.match(source, /cancelDestinations\[trackId\] \|\| ""/)
   assert.match(source, /resolutions\.some\(\(item\) => !item\.destination\)/)
-  assert.match(source, /messageRecoveryAvailable/)
-  assert.match(source, /발송 후 15분이 지나면 확인할 수 있습니다/)
+  assert.doesNotMatch(source, /messageRecoveryAvailable|발송 후 15분이 지나면 확인할 수 있습니다|재발송 허용/)
 })
 
 test("enrollment and batch cancellation UI consumes the canonical history classifiers", async () => {
@@ -2018,20 +2054,19 @@ test("admission batch selection ignores stale IDs when enabling and submitting",
   assert.match(source, /const enrollmentIds = activeSelectedEnrollmentIds/)
 })
 
-test("admission recovery schedules a rerender at the canonical available time", async () => {
+test("admission panel leaves provider recovery timing to the shared dialog", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
-  assert.match(source, /useAdmissionRecoveryAvailable/)
-  assert.match(source, /getRegistrationAdmissionRecoveryDelayMs/)
-  assert.match(source, /setTimeout\(/)
-  assert.match(source, /clearTimeout\(/)
+  assert.doesNotMatch(source, /useAdmissionRecoveryAvailable|getRegistrationAdmissionRecoveryDelayMs/)
+  assert.doesNotMatch(source, /재발송 허용|onReleaseAdmissionMessageRetry/)
 })
 
-test("enrollment and admission saves lock after a committed refresh failure", async () => {
+test("enrollment and admission batch saves lock after a committed refresh failure", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
   const startBlock = sourceBetween(source, "async function startBatch", "async function setMakeedu")
   assert.match(startBlock, /busyAction \|\| batchRefreshPending/)
   assert.match(source, /<RegistrationSaveButton[\s\S]*?blocked=\{rowsRefreshPending \|\| draftRows\.length === 0\}/)
-  assert.match(source, /disabled=\{Boolean\(busyAction\) \|\| messageRefreshPending\}/)
+  assert.match(source, /disabled=\{batchRefreshPending \|\| Boolean\(busyAction\)/)
+  assert.doesNotMatch(source, /messageRefreshPending/)
 })
 
 test("enrollment form contains no secondary decision-routing controls", async () => {
@@ -2052,7 +2087,6 @@ test("registration application owns the exact stable dirty-key aggregates", asyn
     "level_test:track-${trackId}",
     "consultation:track-${context.track.id}",
     "placement:track-${track.id}",
-    "admission:message",
     "admission:batch-${scope.batchId}",
   ]) assert.ok(source.includes(key), `missing dirty owner ${key}`)
   assert.match(editor, /getRegistrationEnrollmentDirtyKey\(track\.id, scope\)/)
@@ -2184,9 +2218,9 @@ test("committed refresh failures clear only their dirty owner and lock mutation 
   assert.doesNotMatch(appointment, /reasonDirty/)
   assert.match(enrollment, /rowsRefreshPending/)
   assert.match(enrollment, /cancellationRefreshPending/)
-  assert.match(enrollment, /messageRefreshPending/)
   assert.match(enrollment, /batchRefreshPending/)
-  assert.match(enrollment, /afterCommitted\(owner: "message" \| "batch"\)/)
+  assert.match(enrollment, /async function afterCommitted\(\)/)
+  assert.doesNotMatch(enrollment, /messageRefreshPending|afterCommitted\(owner: "message" \| "batch"\)/)
   assert.doesNotMatch(sourceBetween(source, "async function retryRefresh()", "return ("), /completeRegistrationConsultation/)
 })
 
