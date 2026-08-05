@@ -53,6 +53,11 @@ export type RegistrationSubjectTrackFixtureDebugActionBehavior = {
   error?: string
 }
 
+export type RegistrationSubjectTrackFixtureCustomerMessageStatus =
+  | "accepted"
+  | "unknown"
+  | "failed_hold"
+
 export type RegistrationSubjectTrackFixtureDebugFault =
   | { kind: "option_data_once"; error: string }
   | {
@@ -80,6 +85,10 @@ export type RegistrationSubjectTrackFixtureAdapter = {
   debugSetNextFault?: (
     fault: RegistrationSubjectTrackFixtureDebugFault,
   ) => void
+  debugSetNextCustomerMessageStatus?: (
+    status: RegistrationSubjectTrackFixtureCustomerMessageStatus,
+  ) => void
+  debugResetCustomerMessageStatus?: () => void
 }
 
 const activeFixtureAdapters: RegistrationSubjectTrackFixtureAdapter[] = []
@@ -118,6 +127,16 @@ const fixtureDebugBridge = {
     const adapter = getActiveFixtureAdapter()
     if (!adapter?.debugSetNextFault) throw new Error("registration_subject_track_fixture_debug_unavailable")
     adapter.debugSetNextFault(fault)
+  },
+  setNextCustomerMessageStatus(status: RegistrationSubjectTrackFixtureCustomerMessageStatus) {
+    if (!(["accepted", "unknown", "failed_hold"] as const).includes(status)) {
+      throw new Error("registration_subject_track_fixture_customer_message_status_invalid")
+    }
+    const adapter = getActiveFixtureAdapter()
+    if (!adapter?.debugSetNextCustomerMessageStatus) {
+      throw new Error("registration_subject_track_fixture_debug_unavailable")
+    }
+    adapter.debugSetNextCustomerMessageStatus(status)
   },
 }
 
@@ -168,6 +187,7 @@ export function installRegistrationSubjectTrackFixtureRuntime(
   activeFixtureAdapters.push(adapter)
   installFixtureDebugBridge()
   return () => {
+    adapter.debugResetCustomerMessageStatus?.()
     const index = activeFixtureAdapters.lastIndexOf(adapter)
     if (index >= 0) activeFixtureAdapters.splice(index, 1)
     uninstallFixtureDebugBridge()

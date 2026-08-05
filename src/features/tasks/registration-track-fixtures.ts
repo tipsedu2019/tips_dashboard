@@ -473,6 +473,7 @@ export function createRegistrationSubjectTrackFixtureAdapter(
   let lastCreate: RegistrationSubjectTrackFixtureDebugSnapshot["lastCreate"] = null
   let nextActionBehavior: Required<RegistrationSubjectTrackFixtureDebugActionBehavior> | null = null
   let nextFault: RegistrationSubjectTrackFixtureDebugFault | null = null
+  const customerMessageClient = createRegistrationSubjectTrackFixtureCustomerMessageClient()
 
   function debugCounts(state: RegistrationSubjectTrackFixtureState): RegistrationSubjectTrackFixtureDebugCounts {
     const details = Object.values(state.caseDetails)
@@ -522,7 +523,9 @@ export function createRegistrationSubjectTrackFixtureAdapter(
 
   return {
     intakeWorkflowRuntimeVersion: 1,
-    customerMessageClient: createRegistrationSubjectTrackFixtureCustomerMessageClient(),
+    customerMessageClient,
+    debugSetNextCustomerMessageStatus: (status) => customerMessageClient.debugSetNextStatus(status),
+    debugResetCustomerMessageStatus: () => customerMessageClient.debugSetNextStatus("accepted"),
     executeAction: <T = unknown>(type: string, payload: Record<string, unknown>) => {
       const behavior = nextActionBehavior?.type === type ? nextActionBehavior : null
       if (behavior) nextActionBehavior = null
@@ -1171,7 +1174,7 @@ function buildFixtureCases() {
     id: "fixture-track-waiting-notice-english",
     taskId: waitingTaskId,
     subject: "영어",
-    status: "consultation_waiting",
+    status: "waiting",
     workflowStatus: "waiting_new_class",
   })]
   waitingTracks[0] = {

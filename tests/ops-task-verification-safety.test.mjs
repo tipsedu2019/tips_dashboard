@@ -26,6 +26,10 @@ const opsTaskWorkspaceSource = await readFile(
   new URL("../src/features/tasks/ops-task-workspace.tsx", import.meta.url),
   "utf8",
 )
+const customerMessageBrowserSource = await readFile(
+  new URL("../scripts/verify-registration-customer-message-browser.mjs", import.meta.url),
+  "utf8",
+)
 
 function assertIncludesAll(source, snippets) {
   for (const snippet of snippets) {
@@ -89,6 +93,24 @@ test("verification scripts always run the four subject-track samples in memory",
     const enabledIndex = source.lastIndexOf("requireEnabled()")
     assert.ok(verifyIndex !== -1 && verifyIndex < enabledIndex, "in-memory samples must run before any enabled network lane")
   }
+})
+
+test("registration customer-message browser QA stays exact-fixture and provider-zero", () => {
+  assertIncludesAll(customerMessageBrowserSource, [
+    '"/api/solapi/registration/customer-message/preview"',
+    '"/api/solapi/registration/customer-message/send"',
+    '"/api/solapi/registration/customer-message/list"',
+    '"/api/solapi/registration/customer-message/check"',
+    '"/api/solapi/registration/customer-message/reconcile"',
+    'url.hostname === "api.solapi.com"',
+    "unexpectedExternalRequests",
+    'url.origin !== evidence.baseOrigin',
+    'route.abort("blockedbyclient")',
+    "providerCalls: 0",
+  ])
+  assert.match(customerMessageBrowserSource, /hostname !== "127\.0\.0\.1"/)
+  assert.doesNotMatch(customerMessageBrowserSource, /https:\/\/(?!127\.0\.0\.1)/)
+  assert.doesNotMatch(customerMessageBrowserSource, /SOLAPI_API_(?:KEY|SECRET)/)
 })
 
 test("ready-mode verification seeds only empty roster projections and never writes history directly", () => {

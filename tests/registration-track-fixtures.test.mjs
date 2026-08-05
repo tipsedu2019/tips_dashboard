@@ -603,6 +603,17 @@ test("fixture reset is deterministic and contains the approved workflow samples"
   assert.equal(first.caseDetails["fixture-task-migration-review"].tracks.every((track) => track.migrationReviewRequired), true)
 })
 
+test("saved waiting-notice fixture is complete and immediately message-eligible", async () => {
+  const fixture = await loadFixtureModule()
+  const state = fixture.createRegistrationSubjectTrackFixtureState()
+  const detail = state.caseDetails["fixture-task-waiting-notice"]
+  const track = detail.tracks.find((item) => item.id === "fixture-track-waiting-notice-english")
+
+  assert.equal(track.status, "waiting")
+  assert.equal(track.workflowStatus, "waiting_new_class")
+  assert.equal(track.waitingDetailKind, "current_term_opening")
+})
+
 test("fixture cases project once per workflow tab with stable cross-view identity", async () => {
   const { createRegistrationSubjectTrackFixtureState } = await loadFixtureModule()
   const {
@@ -1539,6 +1550,22 @@ test("fixture runtime exposes a dev-only replay bridge and removes it on cleanup
   assert.equal(typeof bridge?.replayLastCreate, "function")
   assert.equal(typeof bridge?.setNextActionBehavior, "function")
   assert.equal(typeof bridge?.setNextFault, "function")
+  assert.equal(typeof bridge?.setNextCustomerMessageStatus, "function")
+  bridge.setNextCustomerMessageStatus("unknown")
+  assert.throws(
+    () => bridge.setNextCustomerMessageStatus("pending"),
+    /registration_subject_track_fixture_customer_message_status_invalid/,
+  )
+  const customerPreview = await adapter.customerMessageClient.preview({
+    messageKind: "admission_application",
+    sourceId: "fixture-task-multiple-classes",
+  })
+  const customerResult = await adapter.customerMessageClient.send({
+    previewId: customerPreview.previewId,
+    requestKey: "40000000-0000-4000-8000-000000000001",
+  })
+  assert.equal(customerResult.currentStatus, "unknown")
+  assert.equal(customerResult.canCheck, true)
   const initialSnapshot = plain(bridge.snapshot())
   assert.equal(initialSnapshot.lastCreate, null)
   assert.deepEqual(initialSnapshot.notificationTargetHistory, plain(state.notificationTargetHistory))
@@ -1565,8 +1592,25 @@ test("fixture runtime exposes a dev-only replay bridge and removes it on cleanup
   assert.deepEqual(after.counts, before.counts)
   assert.deepEqual(after.lastCreate.command, before.lastCreate.command)
 
+  bridge.setNextCustomerMessageStatus("unknown")
   cleanup()
   assert.equal(context[runtime.REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL], undefined)
+
+  const cleanupAgain = runtime.installRegistrationSubjectTrackFixtureRuntime(
+    "test",
+    "registration-subject-tracks",
+    adapter,
+  )
+  const resetPreview = await adapter.customerMessageClient.preview({
+    messageKind: "waiting_notice",
+    sourceId: "fixture-track-waiting-notice-english",
+  })
+  const resetResult = await adapter.customerMessageClient.send({
+    previewId: resetPreview.previewId,
+    requestKey: "40000000-0000-4000-8000-000000000002",
+  })
+  assert.equal(resetResult.currentStatus, "accepted")
+  cleanupAgain()
 })
 
 test("fixture option fault is scoped to one option load and never records an external call", async () => {
