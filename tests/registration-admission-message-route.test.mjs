@@ -9,17 +9,39 @@ const coreUrl = new URL("../src/app/api/solapi/registration/core.js", import.met
 test("root compatibility route delegates masked admission GET and blocks POST before provider access", async () => {
   const { createRegistrationAdmissionRouteHandlers } = await import(coreUrl)
   const calls = []
+  const envelope = {
+    ok: true,
+    messageKind: "admission_application",
+    readiness: {
+      runtimeReady: true,
+      activationMode: "live",
+      activationEligible: true,
+      credentialsConfigured: true,
+      pfConfigured: true,
+      templateConfigured: true,
+      templateVerified: true,
+      verifiedAt: "2026-08-05T00:00:00.000Z",
+      sourceValid: true,
+      sendAllowed: false,
+      blockers: ["duplicate_locked"],
+    },
+    history: [{
+      messageId: "message-1",
+      messageKind: "admission_application",
+      recipientLast4: "5678",
+      currentStatus: "accepted",
+      confirmedAt: "2026-08-05T00:01:00.000Z",
+      updatedAt: "2026-08-05T00:01:00.000Z",
+      canCheck: false,
+    }],
+  }
   const handlers = createRegistrationAdmissionRouteHandlers({
     listAdmissionMessages: async (request) => {
       calls.push({
         url: request.url,
         authorization: request.headers.get("authorization"),
       })
-      return Response.json([{
-        messageId: "message-1",
-        recipientLast4: "5678",
-        currentStatus: "accepted",
-      }])
+      return Response.json(envelope)
     },
   })
 
@@ -27,11 +49,7 @@ test("root compatibility route delegates masked admission GET and blocks POST be
     headers: { Authorization: "Bearer fixture" },
   }))
   assert.equal(getResponse.status, 200)
-  assert.deepEqual(await getResponse.json(), [{
-    messageId: "message-1",
-    recipientLast4: "5678",
-    currentStatus: "accepted",
-  }])
+  assert.deepEqual(await getResponse.json(), envelope)
   assert.equal(calls.length, 1)
   const projectionUrl = new URL(calls[0].url)
   assert.equal(projectionUrl.pathname, "/api/solapi/registration/messages")

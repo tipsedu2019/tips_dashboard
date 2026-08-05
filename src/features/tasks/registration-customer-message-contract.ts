@@ -69,6 +69,13 @@ export type RegistrationCustomerMessageHistoryItem = Readonly<{
   canCheck: boolean
 }>
 
+export type RegistrationCustomerMessageHistoryResponse = Readonly<{
+  ok: true
+  messageKind: RegistrationCustomerMessageKind
+  readiness: RegistrationCustomerMessageReadiness
+  history: ReadonlyArray<RegistrationCustomerMessageHistoryItem>
+}>
+
 export type RegistrationCustomerMessagePreviewResponse = Readonly<{
   ok: true
   previewId: string | null
@@ -219,6 +226,7 @@ const REGISTRATION_CUSTOMER_MESSAGE_PUBLIC_RESPONSE_KEYS = new Set([
   "expiresAt",
   "facts",
   "host",
+  "history",
   "idempotent",
   "latestMessage",
   "messageId",

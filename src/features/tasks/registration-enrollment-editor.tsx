@@ -1109,7 +1109,7 @@ export function RegistrationAdmissionPanel({
             <Button
               type="button"
               size="sm"
-              className="w-fit"
+              className="min-h-11 min-w-11 w-fit"
               onClick={() => onOpenCustomerMessage?.({ messageKind: "admission_application", sourceId: taskId })}
             >
               입학신청서 알림톡

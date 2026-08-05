@@ -596,8 +596,15 @@ test("history uses strict query input and masks teacher-only fields", async () =
       `/messages?messageKind=${TARGET.messageKind}&sourceId=${TARGET.sourceId}`,
     )))
     assert.equal(result.response.status, 200)
-    assert.deepEqual(result.body, expected)
-    assert.equal(calls.resolve, 0)
+    assert.deepEqual(result.body, {
+      ok: true,
+      messageKind: TARGET.messageKind,
+      readiness: ACTIVE_READINESS,
+      history: expected,
+    })
+    assert.equal(calls.resolve, 1)
+    assert.equal(calls.readiness, 1)
+    assert.equal(calls.history, 1)
     assert.equal(calls.resolveTaskId, role === "teacher" ? 0 : 1)
   }
 })
@@ -624,6 +631,29 @@ test("assigned-teacher history delegates visibility to the masked service RPC", 
     code: "registration_customer_message_source_not_found",
   })
   assert.equal(calls.authorize, 0)
+})
+
+test("history and readiness failures stay public, stable, and provider-free", async () => {
+  for (const [overrides, expectedCode] of [
+    [{ getReadiness: async () => ({}) }, "registration_customer_message_readiness_unavailable"],
+    [{
+      listHistory: async () => {
+        throw new RegistrationCustomerMessageHttpError(
+          503,
+          "registration_customer_message_history_unavailable",
+        )
+      },
+    }, "registration_customer_message_history_unavailable"],
+  ]) {
+    const { deps, calls } = makeDeps(overrides)
+    const result = await json(await createRegistrationCustomerMessageRouteHandlers(deps).messages(
+      request(`/messages?messageKind=${TARGET.messageKind}&sourceId=${TARGET.sourceId}`),
+    ))
+    assert.equal(result.response.status, 503)
+    assert.deepEqual(result.body, { ok: false, code: expectedCode })
+    assert.equal(calls.providerSend, 0)
+    assert.equal(calls.providerLookup, 0)
+  }
 })
 
 test("history adapter maps access and invalid-source SQLSTATEs to the same stable 404", () => {

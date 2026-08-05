@@ -2,6 +2,7 @@ import type {
   RegistrationCustomerMessageCheckInput,
   RegistrationCustomerMessageClient,
   RegistrationCustomerMessageHistoryItem,
+  RegistrationCustomerMessageHistoryResponse,
   RegistrationCustomerMessagePreviewResponse,
   RegistrationCustomerMessageSendInput,
   RegistrationCustomerMessageSendResult,
@@ -53,11 +54,11 @@ export function createRegistrationCustomerMessageClient(
     },
     list(target: RegistrationCustomerMessageTarget, signal?: AbortSignal) {
       const params = new URLSearchParams({ messageKind: target.messageKind, sourceId: target.sourceId })
-      return requestJson<RegistrationCustomerMessageHistoryItem[]>(
+      return requestJson<RegistrationCustomerMessageHistoryResponse>(
         options,
         `/api/solapi/registration/messages?${params.toString()}`,
         { method: "GET", signal },
-      )
+      ).then((payload) => [...payload.history] as RegistrationCustomerMessageHistoryItem[])
     },
     check(input: RegistrationCustomerMessageCheckInput) {
       return requestJson<RegistrationCustomerMessageSendResult>(options, "/api/solapi/registration/check", {

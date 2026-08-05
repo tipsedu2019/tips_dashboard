@@ -29,6 +29,10 @@ type RegistrationAlimtalkPreviewDialogProps = Readonly<{
   viewerRole: "admin" | "staff" | "teacher" | "assistant"
   triggerRef?: RefObject<HTMLElement | null>
   canReleasePreSend?: boolean
+  onSendSuccess?: (input: Readonly<{
+    target: RegistrationCustomerMessageTarget
+    result: RegistrationCustomerMessageSendResult
+  }>) => void | Promise<void>
 }>
 
 function createRequestKey() {
@@ -73,6 +77,7 @@ export function RegistrationAlimtalkPreviewDialog({
   viewerRole,
   triggerRef,
   canReleasePreSend,
+  onSendSuccess,
 }: RegistrationAlimtalkPreviewDialogProps) {
   const generationRef = useRef(0)
   const requestKeyRef = useRef<string | null>(null)
@@ -83,6 +88,7 @@ export function RegistrationAlimtalkPreviewDialog({
   const [sending, setSending] = useState(false)
   const [error, setError] = useState("")
   const [result, setResult] = useState<RegistrationCustomerMessageSendResult | null>(null)
+  const [refreshWarning, setRefreshWarning] = useState("")
   const [clockTick, setClockTick] = useState(0)
   const [reason, setReason] = useState("")
   const [recoveryResolution, setRecoveryResolution] = useState<"accepted" | "failed_hold">("accepted")
@@ -102,6 +108,7 @@ export function RegistrationAlimtalkPreviewDialog({
     setSending(false)
     setError("")
     setResult(null)
+    setRefreshWarning("")
     setPreview(null)
     setLatestMessage(null)
     setReason("")
@@ -174,8 +181,9 @@ export function RegistrationAlimtalkPreviewDialog({
   }
 
   async function confirm() {
-    if (confirmDisabled || !preview?.previewId) return
+    if (confirmDisabled || !preview?.previewId || !target) return
     const generation = generationRef.current
+    const confirmedTarget = target
     requestKeyRef.current ??= createRequestKey()
     setSending(true)
     setError("")
@@ -184,6 +192,15 @@ export function RegistrationAlimtalkPreviewDialog({
       if (generation !== generationRef.current) return
       confirmationLockedRef.current = true
       applyResult(next)
+      if (next.ok && onSendSuccess) {
+        try {
+          await onSendSuccess({ target: confirmedTarget, result: next })
+        } catch {
+          if (generation === generationRef.current) {
+            setRefreshWarning("알림톡은 접수됐지만 최신 내용을 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
+          }
+        }
+      }
     } catch (cause) {
       if (generation !== generationRef.current) return
       setError(cause instanceof Error ? cause.message : "발송 요청을 처리하지 못했습니다.")
@@ -275,6 +292,7 @@ export function RegistrationAlimtalkPreviewDialog({
         </DialogHeader>
 
         {error ? <p role="alert" className="rounded-md border border-destructive/40 px-3 py-2 text-sm">{error}</p> : null}
+        {refreshWarning ? <p role="status" className="rounded-md border border-amber-300 px-3 py-2 text-sm">{refreshWarning}</p> : null}
         {currentStatus === "accepted" ? <p role="status" className="text-sm">SOLAPI 접수 완료 · 학부모 전화 끝 {last4}</p> : null}
         {currentStatus === "unknown" ? <p role="alert" className="text-sm">발송 결과 확인 필요</p> : null}
         {currentStatus === "failed_hold" ? <p role="alert" className="text-sm">발송 실패 · 같은 내용 재발송 불가</p> : null}

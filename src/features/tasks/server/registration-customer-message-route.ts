@@ -840,19 +840,44 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
         const target = historyTarget(request)
         const context = await dependencies.authenticate(request)
         requireRole(context, HISTORY_ROLES)
+        let authorizedTaskId: string | null = null
         if (context.role !== "teacher") {
-          const taskId = await dependencies.resolveTaskId({ ...target, context })
-          if (!taskId || !await dependencies.authorizeTask(context, taskId)) {
+          authorizedTaskId = await dependencies.resolveTaskId({ ...target, context })
+          if (!authorizedTaskId || !await dependencies.authorizeTask(context, authorizedTaskId)) {
             httpError(404, "registration_customer_message_source_not_found")
           }
         }
-        const result = history(await dependencies.listHistory({
+        const source = await resolvePreviewSource(dependencies, {
           actorProfileId: context.actorProfileId,
           ...target,
-          limit: 20,
           context,
-        }), context.role, target.messageKind)
-        return json(assertRegistrationCustomerMessagePublicPayload(result))
+        })
+        if (authorizedTaskId && source.taskId !== authorizedTaskId) {
+          httpError(503, "registration_customer_message_source_unavailable")
+        }
+        const privateSource = dependencies.readPrivateSource(source)
+        const [readinessValue, historyValue] = await Promise.all([
+          dependencies.getReadiness({
+            actorProfileId: context.actorProfileId,
+            taskId: source.taskId,
+            ...target,
+            contract: privateSource.readinessContract,
+            context,
+          }),
+          dependencies.listHistory({
+            actorProfileId: context.actorProfileId,
+            ...target,
+            limit: 20,
+            context,
+          }),
+        ])
+        const payload = Object.freeze({
+          ok: true,
+          messageKind: target.messageKind,
+          readiness: readiness(readinessValue),
+          history: history(historyValue, context.role, target.messageKind),
+        })
+        return json(assertRegistrationCustomerMessagePublicPayload(payload))
       } catch (error) {
         return errorResponse(error)
       }

@@ -256,6 +256,8 @@ export function RegistrationApplication({
 }: RegistrationApplicationProps) {
   const [customerMessageTarget, setCustomerMessageTarget] = useState<RegistrationCustomerMessageTarget | null>(null)
   const customerMessageTriggerRef = useRef<HTMLElement | null>(null)
+  const customerMessageReloadGenerationRef = useRef(0)
+  const customerMessageTaskIdRef = useRef(detail.task.id)
   const [migrationConflictState, setMigrationConflictState] = useState<RegistrationMigrationConflictState | null>(null)
   const [migrationConflictRetrying, setMigrationConflictRetrying] = useState(false)
   const [migrationDirectorResetVersion, setMigrationDirectorResetVersion] = useState(0)
@@ -275,11 +277,26 @@ export function RegistrationApplication({
   }
   const canManageCase = viewerRole === "admin" || viewerRole === "staff"
   const openCustomerMessage = useCallback((target: RegistrationCustomerMessageTarget) => {
+    if (!canManageCase) return
     customerMessageTriggerRef.current = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null
     setCustomerMessageTarget(target)
-  }, [])
+  }, [canManageCase])
+  if (customerMessageTaskIdRef.current !== detail.task.id) {
+    customerMessageTaskIdRef.current = detail.task.id
+    customerMessageReloadGenerationRef.current += 1
+  }
+  const reloadAfterCustomerMessageSend = useCallback(async () => {
+    if (!canManageCase) return
+    const taskId = detail.task.id
+    const generation = ++customerMessageReloadGenerationRef.current
+    await onReload()
+    if (
+      generation !== customerMessageReloadGenerationRef.current
+      || taskId !== customerMessageTaskIdRef.current
+    ) return
+  }, [canManageCase, detail.task.id, onReload])
   const orderedTracks = useMemo(() => [...detail.tracks].sort((left, right) => (
     ACADEMIC_SUBJECT_VALUES.indexOf(left.subject) - ACADEMIC_SUBJECT_VALUES.indexOf(right.subject)
     || left.id.localeCompare(right.id)
@@ -411,7 +428,7 @@ export function RegistrationApplication({
         : null,
     }
   })
-  const activeCustomerMessageTarget = customerMessageTarget && (
+  const activeCustomerMessageTarget = canManageCase && customerMessageTarget && (
     customerMessageTarget.messageKind === "admission_application"
       ? customerMessageTarget.sourceId === detail.task.id
       : customerMessageTarget.messageKind === "waiting_notice"
@@ -875,6 +892,7 @@ export function RegistrationApplication({
               notificationToken={notificationToken}
               onDirtyChange={(dirty) => setDirty(`level_test:appointment-${activeLevelTestAppointment?.id || activeTrack.id}`, dirty)}
               onTrackDirtyChange={(trackId, dirty) => setDirty(`level_test:track-${trackId}`, dirty)}
+              canOpenCustomerMessage={canManageCase}
               onOpenCustomerMessage={openCustomerMessage}
             />
           ) : null}
@@ -932,6 +950,7 @@ export function RegistrationApplication({
                   onReload={onReload}
                   notificationToken={notificationToken}
                   onDirtyChange={(dirty) => setDirty(`consultation:appointment-${activeVisitAppointment?.id || activeTrack.id}`, dirty)}
+                  canOpenCustomerMessage={canManageCase}
                   onOpenCustomerMessage={openCustomerMessage}
                 />
               ) : (
@@ -1015,6 +1034,9 @@ export function RegistrationApplication({
       client={customerMessageClient}
       viewerRole={viewerRole || "assistant"}
       triggerRef={customerMessageTriggerRef}
+      onSendSuccess={async () => {
+        await reloadAfterCustomerMessageSend()
+      }}
     />
     </>
   )

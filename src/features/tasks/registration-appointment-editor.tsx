@@ -79,6 +79,7 @@ export type RegistrationAppointmentEditorProps = {
   externalDirty?: boolean
   actionLabel?: string
   saveAriaLabel?: string
+  canOpenCustomerMessage?: boolean
   onOpenCustomerMessage?: (target: RegistrationCustomerMessageTarget) => void
 }
 
@@ -187,6 +188,7 @@ export function RegistrationAppointmentEditor({
   externalDirty = false,
   actionLabel = "예약 저장",
   saveAriaLabel = "",
+  canOpenCustomerMessage = false,
   onOpenCustomerMessage,
 }: RegistrationAppointmentEditorProps) {
   const conflictScopeKey = `${taskId}:${kind}`
@@ -1006,33 +1008,39 @@ export function RegistrationAppointmentEditor({
             aria-label={saveAriaLabel || `${appointmentParticipantSubjectLabel} 예약 저장`}
             onClick={() => void saveAppointment()}
           />
-          <Button
-            type="button"
-            variant="outline"
-            disabled={customerMessageBlocked}
-            onClick={() => {
-              if (!appointment || customerMessageBlocked) return
-              onOpenCustomerMessage?.({
-                messageKind: kind === "level_test" ? "level_test_booking" : "visit_consultation_booking",
-                sourceId: appointment.id,
-              })
-            }}
-          >
-            예약 안내 알림톡
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={customerMessageBlocked}
-            onClick={() => {
-              if (!appointment || customerMessageBlocked) return
-              onOpenCustomerMessage?.({ messageKind: "appointment_reminder", sourceId: appointment.id })
-            }}
-          >
-            리마인드 알림톡
-          </Button>
+          {canOpenCustomerMessage ? (
+            <>
+              <Button
+                type="button"
+                className="min-h-11 min-w-11"
+                variant="outline"
+                disabled={customerMessageBlocked}
+                onClick={() => {
+                  if (!appointment || customerMessageBlocked) return
+                  onOpenCustomerMessage?.({
+                    messageKind: kind === "level_test" ? "level_test_booking" : "visit_consultation_booking",
+                    sourceId: appointment.id,
+                  })
+                }}
+              >
+                예약 안내 알림톡
+              </Button>
+              <Button
+                type="button"
+                className="min-h-11 min-w-11"
+                variant="outline"
+                disabled={customerMessageBlocked}
+                onClick={() => {
+                  if (!appointment || customerMessageBlocked) return
+                  onOpenCustomerMessage?.({ messageKind: "appointment_reminder", sourceId: appointment.id })
+                }}
+              >
+                리마인드 알림톡
+              </Button>
+            </>
+          ) : null}
         </div>
-        {customerMessageBlocked ? <p className="text-right text-xs text-muted-foreground">예약을 저장한 뒤 알림톡을 보낼 수 있습니다.</p> : null}
+        {canOpenCustomerMessage && customerMessageBlocked ? <p className="text-right text-xs text-muted-foreground">예약을 저장한 뒤 알림톡을 보낼 수 있습니다.</p> : null}
       </div>
 
       {kind === "level_test" ? (

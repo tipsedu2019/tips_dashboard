@@ -45,7 +45,9 @@ test("registration customer message client sends only strict target and confirma
     calls.push({ url, init: { ...init, headers: { ...init.headers } } })
     return {
       ok: true,
-      json: async () => ({ ok: true, messageId: "message" }),
+      json: async () => url.includes("/messages?")
+        ? ({ ok: true, messageKind: "waiting_notice", readiness: { sendAllowed: false }, history: [{ messageId: "history-message" }] })
+        : ({ ok: true, messageId: "message" }),
     }
   })
   const client = service.createRegistrationCustomerMessageClient({
@@ -54,7 +56,7 @@ test("registration customer message client sends only strict target and confirma
 
   await client.preview({ messageKind: "level_test_booking", sourceId: "source-id" })
   await client.send({ previewId: "preview-id", requestKey: "request-key" })
-  await client.list({ messageKind: "waiting_notice", sourceId: "waiting-id" })
+  const history = await client.list({ messageKind: "waiting_notice", sourceId: "waiting-id" })
   await client.check({ messageId: "message-id" })
   await client.reconcile({
     messageId: "message-id",
@@ -73,6 +75,8 @@ test("registration customer message client sends only strict target and confirma
     reason: "사전 발송 해제",
     requestKey: "release-request-key",
   })
+
+  assert.equal(JSON.stringify(history), JSON.stringify([{ messageId: "history-message" }]))
 
   assert.deepEqual(calls.map(({ url, init }) => [url, init.method, init.body]), [
     ["/api/solapi/registration/preview", "POST", JSON.stringify({ messageKind: "level_test_booking", sourceId: "source-id" })],
@@ -156,6 +160,9 @@ test("preview dialog remains a controlled accessible presentation surface", asyn
   assert.match(source, /requestKeyRef/)
   assert.match(source, /generationRef/)
   assert.match(source, /triggerRef/)
+  assert.match(source, /onSendSuccess\?:/)
+  assert.match(source, /generation !== generationRef\.current[\s\S]*confirmationLockedRef\.current = true[\s\S]*applyResult\(next\)[\s\S]*onSendSuccess/)
+  assert.match(source, /알림톡은 접수됐지만 최신 내용을 불러오지 못했습니다/)
   assert.match(source, /setTimeout/)
   assert.match(source, /showCloseButton=\{false\}/)
   assert.match(source, /<DialogClose asChild>/)

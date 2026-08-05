@@ -1046,6 +1046,7 @@ export function RegistrationWaitingDetailsEditor({
             />
             <Button
               type="button"
+              className="min-h-11 min-w-11"
               variant="outline"
               disabled={customerMessageBlocked}
               onClick={() => onOpenCustomerMessage?.({ messageKind: "waiting_notice", sourceId: track.id })}

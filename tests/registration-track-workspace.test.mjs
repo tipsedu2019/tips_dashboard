@@ -1916,6 +1916,11 @@ test("canonical registration editors expose five preview-first alimtalk targets 
   assert.match(application, /client=\{customerMessageClient\}/)
   assert.match(application, /viewerRole=\{viewerRole \|\| "assistant"\}/)
   assert.match(application, /triggerRef=\{customerMessageTriggerRef\}/)
+  assert.match(application, /if \(!canManageCase\) return[\s\S]*setCustomerMessageTarget\(target\)/)
+  assert.match(application, /const activeCustomerMessageTarget = canManageCase && customerMessageTarget/)
+  assert.equal((application.match(/canOpenCustomerMessage=\{canManageCase\}/g) || []).length, 2)
+  assert.match(application, /const reloadAfterCustomerMessageSend = useCallback\(async \(\) => \{[\s\S]*await onReload\(\)/)
+  assert.match(application, /onSendSuccess=\{async \(\) => \{[\s\S]*reloadAfterCustomerMessageSend\(\)/)
 
   const appointmentSave = appointment.indexOf("<RegistrationSaveButton")
   const bookingTrigger = appointment.indexOf("예약 안내 알림톡", appointmentSave)
@@ -1925,6 +1930,9 @@ test("canonical registration editors expose five preview-first alimtalk targets 
   assert.match(appointment, /messageKind: "appointment_reminder",\s*sourceId: appointment\.id/)
   assert.match(appointment, /appointmentDirty \|\| externalDirty \|\| saving \|\| refreshPending \|\| Boolean\(conflict\) \|\| appointment\?\.status !== "scheduled"/)
   assert.match(appointment, /예약을 저장한 뒤 알림톡을 보낼 수 있습니다\./)
+  assert.match(appointment, /canOpenCustomerMessage\?: boolean/)
+  assert.match(appointment, /\{canOpenCustomerMessage \? \([\s\S]*예약 안내 알림톡[\s\S]*리마인드 알림톡/)
+  assert.equal((appointment.match(/className="min-h-11 min-w-11"/g) || []).length, 2)
 
   const waiting = sourceBetween(actions, "export function RegistrationWaitingDetailsEditor", "function TerminalStageEditor")
   const waitingSave = waiting.indexOf("<RegistrationSaveButton")
@@ -1933,11 +1941,13 @@ test("canonical registration editors expose five preview-first alimtalk targets 
   assert.match(waiting, /messageKind: "waiting_notice", sourceId: track\.id/)
   assert.match(waiting, /permissions\.canManage/)
   assert.match(waiting, /waitingDirty \|\| saving \|\| refreshPending \|\| !savedWaitingComplete/)
+  assert.match(waiting, /className="min-h-11 min-w-11"[\s\S]*대기 안내 알림톡/)
 
   const admission = enrollment.slice(enrollment.indexOf("export function RegistrationAdmissionPanel"))
   assert.match(admission, /입학신청서 알림톡/)
   assert.match(admission, /messageKind: "admission_application", sourceId: taskId/)
   assert.match(admission, /permissions\.canManage/)
+  assert.match(admission, /className="min-h-11 min-w-11 w-fit"[\s\S]*입학신청서 알림톡/)
   assert.doesNotMatch(admission, /onSendAdmissionMessage|onReconcileAdmissionMessage|onReleaseAdmissionMessageRetry|제공사 확인 증빙|재발송 허용/)
 
   assert.equal((application.match(/onOpenCustomerMessage=\{openCustomerMessage\}/g) || []).length, 4)
