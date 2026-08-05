@@ -38,7 +38,7 @@ const deepLinkHelperUrl = new URL(
   import.meta.url,
 )
 const deepLinkMigrationUrl = new URL(
-  "../supabase/migrations/20260730143100_notification_transfer_withdrawal_deep_links.sql",
+  "../supabase/migrations/20260731011040_notification_transfer_withdrawal_deep_links.sql",
   import.meta.url,
 )
 const transferContentMigrationUrl = new URL(

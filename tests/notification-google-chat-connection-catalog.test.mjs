@@ -10,7 +10,7 @@ import {
 } from "../scripts/preflight-google-chat-connection-fallbacks.mjs"
 
 const migrationUrl = new URL(
-  "../supabase/migrations/20260730143000_notification_google_chat_connection_catalog.sql",
+  "../supabase/migrations/20260730161538_notification_google_chat_connection_catalog.sql",
   import.meta.url,
 )
 const preflightUrl = new URL(

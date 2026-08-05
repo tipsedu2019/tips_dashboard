@@ -25,6 +25,16 @@ const CLAIM_RECONCILE_MARKER_IDS = Object.freeze([
   "registration_provider_claim.claim_rpc",
   "registration_provider_claim.reconcile_rpc",
 ])
+const REMOTE_HISTORY_ALIGNED_SQL = Object.freeze([
+  ["20260730161538_notification_google_chat_connection_catalog.sql", "a3f72d4ec2a410796d5796019649859d5a329d5bec0e3e83f48242272dd88dda"],
+  ["20260731011040_notification_transfer_withdrawal_deep_links.sql", "ed5dfb81c2cb5d1bc6dca5c38de62745c02d88b5a4b858ec57e8f0d2c6afb5ab"],
+  ["20260731011229_notification_owner_aware_delivery_summary.sql", "eb06042e4e70e05d4fc745053dccc52ac01fa253928f3f04fa442f5ec9704b54"],
+])
+const OBSOLETE_REMOTE_HISTORY_SQL = Object.freeze([
+  "20260730143000_notification_google_chat_connection_catalog.sql",
+  "20260730143100_notification_transfer_withdrawal_deep_links.sql",
+  "20260730143200_notification_owner_aware_delivery_summary.sql",
+])
 
 const EXPECTED_POLICY = Object.freeze({
   schemaVersion: 1,
@@ -913,6 +923,35 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
   const activeStat = await statKind(activeDir)
   if (!activeStat?.isDirectory()) {
     addError(errors, "active_migration_directory_not_regular", relative(resolvedRoot, activeDir))
+  }
+  for (const [file, expectedHash] of REMOTE_HISTORY_ALIGNED_SQL) {
+    const migrationPath = join(activeDir, file)
+    const stat = await statKind(migrationPath)
+    if (!stat?.isFile()) {
+      addError(
+        errors,
+        "remote_history_aligned_migration_not_regular",
+        relative(resolvedRoot, migrationPath),
+      )
+      continue
+    }
+    if (sha256(await readFile(migrationPath)) !== expectedHash) {
+      addError(
+        errors,
+        "remote_history_aligned_migration_hash_mismatch",
+        relative(resolvedRoot, migrationPath),
+      )
+    }
+  }
+  for (const file of OBSOLETE_REMOTE_HISTORY_SQL) {
+    const obsoletePath = join(activeDir, file)
+    if (await statKind(obsoletePath)) {
+      addError(
+        errors,
+        "remote_history_obsolete_timestamp_present",
+        relative(resolvedRoot, obsoletePath),
+      )
+    }
   }
   const quarantineTimestamps = new Set(EXPECTED_SQL.map(([file]) => file.slice(0, 14)))
   const quarantineHashes = new Set(EXPECTED_SQL.map(([, hash]) => hash))
