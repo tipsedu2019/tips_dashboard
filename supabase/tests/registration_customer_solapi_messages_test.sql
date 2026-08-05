@@ -1627,9 +1627,14 @@ reset role;
 set local timezone = 'Asia/Seoul';
 
 select is(
-  (select response from registration_solapi_rpc_results where label = 'admission accepted timezone replay'),
-  (select response from registration_solapi_rpc_results where label = 'admission accepted'),
+  (select response - 'idempotent' from registration_solapi_rpc_results where label = 'admission accepted timezone replay'),
+  (select response - 'idempotent' from registration_solapi_rpc_results where label = 'admission accepted'),
   'finalize replay is invariant across session time zones'
+);
+select is(
+  (select (response ->> 'idempotent')::boolean from registration_solapi_rpc_results where label = 'admission accepted timezone replay'),
+  true,
+  'finalize exact replay reports idempotent'
 );
 
 select is(

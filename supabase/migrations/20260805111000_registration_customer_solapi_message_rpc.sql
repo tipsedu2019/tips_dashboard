@@ -113,16 +113,19 @@ begin
       using errcode = '42501';
   end if;
 
-  v_visible := v_actor_role in ('admin', 'staff')
-    or v_task.requested_by = p_actor_profile_id
-    or v_task.assignee_id = p_actor_profile_id
-    or v_task.secondary_assignee_id = p_actor_profile_id
-    or exists (
-      select 1
-      from public.ops_registration_subject_tracks track
-      where track.task_id = p_task_id
-        and track.director_profile_id = p_actor_profile_id
-    );
+  v_visible := coalesce(
+    v_actor_role in ('admin', 'staff')
+      or v_task.requested_by = p_actor_profile_id
+      or v_task.assignee_id = p_actor_profile_id
+      or v_task.secondary_assignee_id = p_actor_profile_id
+      or exists (
+        select 1
+        from public.ops_registration_subject_tracks track
+        where track.task_id = p_task_id
+          and track.director_profile_id = p_actor_profile_id
+      ),
+    false
+  );
 
   if not v_visible then
     raise exception 'registration_customer_message_access_denied'

@@ -575,6 +575,14 @@ test("all ten message RPC signatures are service-role-only security definers", a
     )),
     /requested_by = p_actor_profile_id[^;]+assignee_id = p_actor_profile_id[^;]+secondary_assignee_id = p_actor_profile_id/,
   )
+  assert.match(
+    normalizeSql(functionBlock(
+      source,
+      "dashboard_private.registration_customer_message_assert_actor_v1",
+    )),
+    /v_visible := coalesce\([^;]+, false\s*\)/,
+    "nullable task assignees must not turn an unrelated actor visibility decision into NULL",
+  )
   assert.doesNotMatch(normalized, /grant execute[^;]+to authenticated/)
 
   for (const name of [
@@ -1133,6 +1141,7 @@ test("pgTAP packet exercises storage behavior without production or provider dep
     "provider evidence rejects raw or unexpected keys",
     "provider evidence canonicalization is invariant across session time zones",
     "finalize replay is invariant across session time zones",
+    "finalize exact replay reports idempotent",
     "provider check resolves an aged unknown",
     "provider check server context returns the private original request key",
     "staff cannot perform admin pre-send release",
