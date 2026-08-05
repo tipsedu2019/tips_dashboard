@@ -8,6 +8,8 @@ const STORAGE_MIGRATION =
   "20260805110000_registration_customer_solapi_storage.sql"
 const RPC_MIGRATION =
   "20260805111000_registration_customer_solapi_message_rpc.sql"
+const ACTIVATION_MIGRATION =
+  "20260805112000_registration_customer_solapi_activation.sql"
 const PREVIOUS_MIGRATION =
   "20260805101000_notification_control_plane_template_variable_wire_contract.sql"
 const storageMigrationUrl = new URL(
@@ -16,6 +18,10 @@ const storageMigrationUrl = new URL(
 )
 const rpcMigrationUrl = new URL(
   "../supabase/migrations/" + RPC_MIGRATION,
+  import.meta.url,
+)
+const activationMigrationUrl = new URL(
+  "../supabase/migrations/" + ACTIVATION_MIGRATION,
   import.meta.url,
 )
 const migrationsUrl = new URL("../supabase/migrations/", import.meta.url)
@@ -574,6 +580,182 @@ test("all ten message RPC signatures are service-role-only security definers", a
   }
 })
 
+test("activation migration follows the message RPC migration and creates the runtime marker last", async () => {
+  const filenames = (await readdir(migrationsUrl))
+    .filter((name) => /^\d{14}_.+\.sql$/.test(name))
+    .sort()
+  const source = await readRequired(activationMigrationUrl, "activation migration")
+  const normalized = normalizeSql(source)
+  const trimmed = source.trim()
+
+  assert.equal(filenames.includes(ACTIVATION_MIGRATION), true)
+  assert.equal(
+    filenames.filter((name) => name < ACTIVATION_MIGRATION).at(-1),
+    RPC_MIGRATION,
+  )
+  assert.match(trimmed, /^begin;\s*/i)
+  assert.match(trimmed, /commit;$/i)
+  assert.equal((trimmed.match(/^begin;$/gim) || []).length, 1)
+  assert.equal((trimmed.match(/^commit;$/gim) || []).length, 1)
+  assert.match(normalized, /set local lock_timeout = '5s'/)
+  assert.match(normalized, /set local statement_timeout = '120s'/)
+  assert.doesNotMatch(normalized, /\bdrop\s+(?:table|column|constraint)\b|\btruncate\b/)
+  assert.doesNotMatch(
+    normalized,
+    /https?:\/\/|api\.solapi\.com|send-many|messages\/v4|authorization|solapi_api_(?:key|secret)/,
+  )
+  assert.doesNotMatch(
+    normalized,
+    /grant (?:select|insert|update|delete|all)[^;]+(?:ops_registration_customer_message|registration_customer_solapi_)/,
+  )
+
+  const runtimeCreate = "create function public.registration_customer_solapi_runtime_version()"
+  assert.match(
+    normalized,
+    /create function public\.registration_customer_solapi_runtime_version\(\) returns integer language sql immutable security invoker set search_path = '' as \$\$ select 1 \$\$/,
+  )
+  assert.equal(
+    normalized.lastIndexOf("create "),
+    normalized.indexOf(runtimeCreate),
+    "runtime marker must be the literal last created object",
+  )
+  assert.match(
+    normalized,
+    /revoke all on function public\.registration_customer_solapi_runtime_version\(\) from public, anon, authenticated, service_role/,
+  )
+  assert.match(
+    normalized,
+    /grant execute on function public\.registration_customer_solapi_runtime_version\(\) to authenticated, service_role/,
+  )
+})
+
+test("template receipts activation transitions and readiness are fail-closed", async () => {
+  const source = await readRequired(activationMigrationUrl, "activation migration")
+  const normalized = normalizeSql(source)
+  const signatures = [
+    ["record_registration_customer_solapi_template_receipt_v1", "uuid, text, jsonb"],
+    ["set_registration_customer_solapi_activation_v1", "uuid, text, text, jsonb"],
+    ["record_registration_customer_solapi_live_test_receipt_v1", "uuid, text, uuid, timestamptz, text"],
+    ["get_registration_customer_solapi_readiness_v1", "uuid, text, uuid, jsonb"],
+  ]
+
+  for (const [name, signature] of signatures) {
+    const escapedName = escapeRegex(name)
+    const escapedSignature = escapeRegex(signature)
+    const block = normalizeSql(functionBlock(source, "public." + name))
+    assert.match(block, /security definer[^;]+set search_path = ''/)
+    assert.match(
+      normalized,
+      new RegExp(
+        "revoke all on function public\\." + escapedName + "\\("
+          + escapedSignature
+          + "\\) from public, anon, authenticated, service_role",
+      ),
+    )
+    assert.match(
+      normalized,
+      new RegExp(
+        "grant execute on function public\\." + escapedName + "\\("
+          + escapedSignature + "\\) to service_role",
+      ),
+    )
+  }
+
+  const receiptBlock = normalizeSql(functionBlock(
+    source,
+    "public.record_registration_customer_solapi_template_receipt_v1",
+  ))
+  const activationBlock = normalizeSql(functionBlock(
+    source,
+    "public.set_registration_customer_solapi_activation_v1",
+  ))
+  const liveReceiptBlock = normalizeSql(functionBlock(
+    source,
+    "public.record_registration_customer_solapi_live_test_receipt_v1",
+  ))
+  const readinessBlock = normalizeSql(functionBlock(
+    source,
+    "public.get_registration_customer_solapi_readiness_v1",
+  ))
+  const deliveryGateBlock = normalizeSql(functionBlock(
+    source,
+    "dashboard_private.enforce_registration_customer_solapi_delivery_gate_v1",
+  ))
+
+  assert.match(receiptBlock, /registration_customer_solapi_assert_admin_v1/)
+  assert.match(receiptBlock, /p_receipt - array\[[^;]+\]::text\[\] (?:=|<>) '\{\}'::jsonb/)
+  assert.match(receiptBlock, /providerstatus[^;]+sendable/)
+  assert.match(receiptBlock, /catalogchecksum[^;]+providerchecksum/)
+  assert.match(receiptBlock, /registration_customer_solapi_activation[^;]+for update/)
+  assert.match(receiptBlock, /v_activation\.mode <> 'off'.+receipt_change_requires_off/)
+  assert.match(receiptBlock, /insert into dashboard_private\.registration_customer_solapi_template_receipts[^;]+on conflict \(message_kind\) do update/)
+
+  assert.match(activationBlock, /registration_customer_solapi_assert_admin_v1/)
+  assert.match(activationBlock, /v_current_mode = 'off' and p_mode = 'verification'/)
+  assert.match(activationBlock, /v_current_mode = 'verification' and p_mode in \('live', 'off'\)/)
+  assert.match(activationBlock, /v_current_mode = 'live' and p_mode = 'off'/)
+  assert.match(activationBlock, /registration_customer_solapi_template_receipts[^;]+for share/)
+  assert.match(activationBlock, /message\.status = 'accepted'/)
+  assert.match(activationBlock, /message\.message_kind = p_message_kind/)
+  assert.match(activationBlock, /message\.task_id = v_activation\.verification_task_id/)
+  assert.match(activationBlock, /message\.recipient_hash = v_activation\.verification_recipient_hash/)
+  assert.match(activationBlock, /ops_registration_mutations/)
+
+  assert.match(liveReceiptBlock, /registration_customer_solapi_assert_admin_v1/)
+  assert.match(liveReceiptBlock, /v_activation\.mode <> 'verification'/)
+  assert.match(liveReceiptBlock, /message\.status = 'accepted'/)
+  assert.match(liveReceiptBlock, /message\.message_kind = p_message_kind/)
+  assert.match(liveReceiptBlock, /message\.task_id = v_activation\.verification_task_id/)
+  assert.match(liveReceiptBlock, /message\.recipient_hash = v_activation\.verification_recipient_hash/)
+  assert.match(liveReceiptBlock, /message\.template_checksum = v_receipt\.catalog_checksum/)
+  assert.match(liveReceiptBlock, /ops_registration_mutations/)
+
+  for (const key of [
+    "runtimeReady",
+    "activationMode",
+    "activationEligible",
+    "credentialsConfigured",
+    "pfConfigured",
+    "templateConfigured",
+    "templateVerified",
+    "verifiedAt",
+    "sourceValid",
+    "sendAllowed",
+    "blockers",
+  ]) {
+    assert.match(readinessBlock, new RegExp("'" + key.toLowerCase() + "'"))
+  }
+  for (const blocker of [
+    "activation_off",
+    "verification_scope_mismatch",
+    "credentials_missing",
+    "pf_missing",
+    "template_missing",
+    "template_not_verified",
+    "template_drift",
+    "source_invalid",
+    "source_dirty",
+    "duplicate_locked",
+  ]) {
+    assert.match(readinessBlock, new RegExp("'" + blocker + "'"))
+  }
+  assert.doesNotMatch(
+    readinessBlock,
+    /jsonb_build_object\([^;]+(?:verificationtaskid|verificationrecipienthash|livetestmessageid|templateid|pfid|recipienthash|providermessageid)/,
+  )
+
+  assert.match(deliveryGateBlock, /v_activation\.mode = 'off'/)
+  assert.match(deliveryGateBlock, /v_activation\.mode = 'verification'/)
+  assert.match(deliveryGateBlock, /new\.task_id is distinct from v_activation\.verification_task_id/)
+  assert.match(deliveryGateBlock, /new\.recipient_hash is distinct from v_activation\.verification_recipient_hash/)
+  assert.match(deliveryGateBlock, /v_activation\.mode = 'live'/)
+  assert.match(deliveryGateBlock, /message\.status = 'accepted'/)
+  assert.match(
+    normalized,
+    /create trigger enforce_registration_customer_solapi_delivery_gate_v1 after insert or update on public\.ops_registration_customer_messages for each row execute function dashboard_private\.enforce_registration_customer_solapi_delivery_gate_v1\(\)/,
+  )
+})
+
 test("canonical resolver enforces source authority and exposes a phone only ephemerally", async () => {
   const source = await readRequired(rpcMigrationUrl, "message RPC migration")
   const normalized = normalizeSql(source)
@@ -935,6 +1117,25 @@ test("pgTAP packet exercises storage behavior without production or provider dep
     "unknown terminal state keeps the original dedupe row",
     "failed_hold terminal state keeps the original dedupe row",
     "assigned teacher history omits the recipientlast4 key entirely",
+    "activation rpcs are service-role-only and runtime marker is exact",
+    "staff cannot record a template receipt",
+    "template receipt rejects drifted or unexpected evidence",
+    "an active receipt cannot be replaced behind verification evidence",
+    "off readiness returns independent safe blockers without private identifiers",
+    "activation off blocks outbox claim",
+    "verification scope mismatch blocks outbox claim",
+    "activation off blocks provider attempt marker",
+    "staff cannot change customer solapi activation",
+    "activation transition cannot skip verification",
+    "verification requires the current template receipt",
+    "live-test receipt is allowed only during verification",
+    "accepted evidence must match kind task recipient and current receipt",
+    "live transition requires accepted user-confirmed evidence",
+    "activation action request keys replay exactly and conflict safely",
+    "live-test receipt request key replays exactly after activation changes",
+    "live readiness allows a clean source without exposing private evidence",
+    "off retains accepted live-test evidence without authorizing sends",
+    "re-entering verification requires an explicit task and current recipient hash",
   ]) {
     assert.match(normalized, new RegExp(escapeRegex(behavior)))
   }

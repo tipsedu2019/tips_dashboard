@@ -986,6 +986,27 @@ update public.ops_registration_subject_tracks
 set pipeline_status = 'inquiry', waiting_kind = null
 where id = '95000000-0000-4000-8000-000000000540';
 
+-- Task 3 state-machine fixtures run only inside the synthetic verification scope.
+insert into dashboard_private.registration_customer_solapi_template_receipts(
+  message_kind, template_id, pf_id, catalog_checksum,
+  provider_checksum, provider_status, verified_by
+)
+select
+  activation.message_kind,
+  'task3-template-' || activation.message_kind,
+  'task3-pf',
+  repeat('c', 64),
+  repeat('c', 64),
+  'sendable',
+  '95000000-0000-4000-8000-000000000001'
+from dashboard_private.registration_customer_solapi_activation activation;
+
+update dashboard_private.registration_customer_solapi_activation
+set mode = 'verification',
+    verification_task_id = '95000000-0000-4000-8000-000000000500',
+    verification_recipient_hash = repeat('b', 64),
+    updated_by = '95000000-0000-4000-8000-000000000001';
+
 set local role service_role;
 insert into registration_solapi_rpc_results(label, response)
 values (
@@ -2275,6 +2296,779 @@ select unlike(
   '%confirmedBy%',
   'teacher history contains no confirmer identity'
 );
+
+-- Task 4 template receipt, activation, readiness, and delivery-gate contract.
+select has_function('public', 'record_registration_customer_solapi_template_receipt_v1', array['uuid', 'text', 'jsonb']);
+select has_function('public', 'set_registration_customer_solapi_activation_v1', array['uuid', 'text', 'text', 'jsonb']);
+select has_function('public', 'record_registration_customer_solapi_live_test_receipt_v1', array['uuid', 'text', 'uuid', 'timestamp with time zone', 'text']);
+select has_function('public', 'get_registration_customer_solapi_readiness_v1', array['uuid', 'text', 'uuid', 'jsonb']);
+select has_function('public', 'registration_customer_solapi_runtime_version', array[]::text[]);
+
+select function_privs_are('public', 'record_registration_customer_solapi_template_receipt_v1', array['uuid', 'text', 'jsonb'], 'service_role', array['EXECUTE']);
+select function_privs_are('public', 'set_registration_customer_solapi_activation_v1', array['uuid', 'text', 'text', 'jsonb'], 'service_role', array['EXECUTE']);
+select function_privs_are('public', 'record_registration_customer_solapi_live_test_receipt_v1', array['uuid', 'text', 'uuid', 'timestamp with time zone', 'text'], 'service_role', array['EXECUTE']);
+select function_privs_are('public', 'get_registration_customer_solapi_readiness_v1', array['uuid', 'text', 'uuid', 'jsonb'], 'service_role', array['EXECUTE']);
+select function_privs_are('public', 'registration_customer_solapi_runtime_version', array[]::text[], 'authenticated', array['EXECUTE']);
+select function_privs_are('public', 'registration_customer_solapi_runtime_version', array[]::text[], 'service_role', array['EXECUTE']);
+
+select is_empty($$
+  select routine_name, grantee
+  from information_schema.routine_privileges
+  where routine_schema = 'public'
+    and routine_name in (
+      'record_registration_customer_solapi_template_receipt_v1',
+      'set_registration_customer_solapi_activation_v1',
+      'record_registration_customer_solapi_live_test_receipt_v1',
+      'get_registration_customer_solapi_readiness_v1'
+    )
+    and grantee in ('PUBLIC', 'anon', 'authenticated')
+    and privilege_type = 'EXECUTE'
+$$, 'activation RPCs are service-role-only and runtime marker is exact');
+
+select is(
+  public.registration_customer_solapi_runtime_version(),
+  1,
+  'runtime marker returns the exact activation contract version'
+);
+
+update dashboard_private.registration_customer_solapi_activation
+set mode = 'off',
+    verification_task_id = null,
+    verification_recipient_hash = null,
+    live_test_message_id = null,
+    live_test_confirmed_at = null,
+    updated_by = null;
+delete from dashboard_private.registration_customer_solapi_template_receipts;
+
+insert into public.ops_registration_subject_tracks(
+  id, task_id, subject, pipeline_status, director_profile_id,
+  director_assignment_source, director_assigned_at, waiting_kind,
+  migration_review_required, workflow_status, workflow_revision,
+  workflow_status_entered_at, waiting_detail_kind, waiting_detail_class_id
+) values (
+  '95000000-0000-4000-8000-000000000543',
+  '95000000-0000-4000-8000-000000000501',
+  '과학', 'inquiry', null,
+  null, null, null,
+  false, 'waiting_next_opening', 1,
+  pg_catalog.clock_timestamp(), 'next_term_opening', null
+);
+
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'other waiting source',
+  public.resolve_registration_customer_message_source_v1(
+    '95000000-0000-4000-8000-000000000011',
+    'waiting_notice',
+    '95000000-0000-4000-8000-000000000543'
+  )
+);
+reset role;
+
+create function pg_temp.registration_solapi_readiness_contract(
+  p_source jsonb,
+  p_recipient_hash text,
+  p_source_fingerprint text default repeat('9', 64),
+  p_credentials_configured boolean default true,
+  p_pf_id text default 'pf-waiting',
+  p_template_id text default 'template-waiting',
+  p_catalog_checksum text default repeat('c', 64)
+)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select pg_catalog.jsonb_build_object(
+    'credentialsConfigured', p_credentials_configured,
+    'pfId', p_pf_id,
+    'templateId', p_template_id,
+    'catalogChecksum', p_catalog_checksum,
+    'recipientHash', p_recipient_hash,
+    'sourceFingerprint', p_source_fingerprint,
+    'sourceFactsChecksum',
+      dashboard_private.registration_customer_message_source_facts_checksum_v1(p_source)
+  );
+$$;
+grant execute on function pg_temp.registration_solapi_readiness_contract(jsonb, text, text, boolean, text, text, text)
+  to service_role;
+
+set local role service_role;
+select throws_ok(
+  $$select public.record_registration_customer_solapi_template_receipt_v1(
+      '95000000-0000-4000-8000-000000000011',
+      'waiting_notice',
+      pg_catalog.jsonb_build_object(
+        'templateId', 'template-waiting', 'pfId', 'pf-waiting',
+        'catalogChecksum', repeat('c', 64),
+        'providerChecksum', repeat('c', 64), 'providerStatus', 'sendable'
+      )
+    )$$,
+  '42501', 'registration_customer_message_admin_required',
+  'staff cannot record a template receipt'
+);
+select throws_ok(
+  $$select public.record_registration_customer_solapi_template_receipt_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'waiting_notice',
+      pg_catalog.jsonb_build_object(
+        'templateId', 'template-waiting', 'pfId', 'pf-waiting',
+        'catalogChecksum', repeat('c', 64),
+        'providerChecksum', repeat('d', 64), 'providerStatus', 'sendable'
+      )
+    )$$,
+  '22023', 'registration_customer_solapi_template_receipt_invalid',
+  'template receipt rejects drifted or unexpected evidence'
+);
+select throws_ok(
+  $$select public.record_registration_customer_solapi_template_receipt_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'waiting_notice',
+      pg_catalog.jsonb_build_object(
+        'templateId', 'template-waiting', 'pfId', 'pf-waiting',
+        'catalogChecksum', repeat('c', 64),
+        'providerChecksum', repeat('c', 64), 'providerStatus', 'sendable',
+        'rawBody', 'forbidden'
+      )
+    )$$,
+  '22023', 'registration_customer_solapi_template_receipt_invalid',
+  'template receipt rejects unexpected provider keys'
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting template receipt',
+  public.record_registration_customer_solapi_template_receipt_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'waiting_notice',
+    pg_catalog.jsonb_build_object(
+      'templateId', 'template-waiting', 'pfId', 'pf-waiting',
+      'catalogChecksum', repeat('c', 64),
+      'providerChecksum', repeat('c', 64), 'providerStatus', 'sendable'
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting readiness off',
+  public.get_registration_customer_solapi_readiness_v1(
+    '95000000-0000-4000-8000-000000000011',
+    'waiting_notice',
+    '95000000-0000-4000-8000-000000000540',
+    pg_temp.registration_solapi_readiness_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      repeat('b', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting readiness missing env',
+  public.get_registration_customer_solapi_readiness_v1(
+    '95000000-0000-4000-8000-000000000011',
+    'waiting_notice',
+    '95000000-0000-4000-8000-000000000540',
+    pg_temp.registration_solapi_readiness_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      repeat('b', 64), repeat('9', 64), false, null, null, repeat('c', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting readiness drift',
+  public.get_registration_customer_solapi_readiness_v1(
+    '95000000-0000-4000-8000-000000000011',
+    'waiting_notice',
+    '95000000-0000-4000-8000-000000000540',
+    pg_temp.registration_solapi_readiness_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      repeat('b', 64), repeat('9', 64), true,
+      'pf-waiting', 'template-drifted', repeat('c', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting readiness dirty',
+  public.get_registration_customer_solapi_readiness_v1(
+    '95000000-0000-4000-8000-000000000011',
+    'waiting_notice',
+    '95000000-0000-4000-8000-000000000540',
+    pg_catalog.jsonb_set(
+      pg_temp.registration_solapi_readiness_contract(
+        (select response from registration_solapi_rpc_results where label = 'waiting source'),
+        repeat('b', 64)
+      ),
+      array['sourceFactsChecksum']::text[],
+      pg_catalog.to_jsonb(repeat('8', 64)),
+      false
+    )
+  )
+);
+select throws_ok(
+  $$select public.record_registration_customer_solapi_live_test_receipt_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'waiting_notice',
+      ((select response from registration_solapi_rpc_results where label = 'waiting finalized after recovery') ->> 'messageId')::uuid,
+      pg_catalog.clock_timestamp(),
+      '95000000-0000-4000-8000-000000000800'
+    )$$,
+  '40001', 'registration_customer_solapi_live_test_not_allowed',
+  'live-test receipt is allowed only during verification'
+);
+select throws_ok(
+  $$select public.set_registration_customer_solapi_activation_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'waiting_notice', 'live',
+      pg_catalog.jsonb_build_object(
+        'requestKey', '95000000-0000-4000-8000-000000000801',
+        'templateId', 'template-waiting', 'pfId', 'pf-waiting',
+        'catalogChecksum', repeat('c', 64)
+      )
+    )$$,
+  '40001', 'registration_customer_solapi_activation_transition_invalid',
+  'activation transition cannot skip verification'
+);
+select throws_ok(
+  $$select public.set_registration_customer_solapi_activation_v1(
+      '95000000-0000-4000-8000-000000000011',
+      'waiting_notice', 'verification',
+      pg_catalog.jsonb_build_object(
+        'requestKey', '95000000-0000-4000-8000-000000000802',
+        'verificationTaskId', '95000000-0000-4000-8000-000000000500',
+        'verificationRecipientHash', repeat('b', 64),
+        'templateId', 'template-waiting', 'pfId', 'pf-waiting',
+        'catalogChecksum', repeat('c', 64)
+      )
+    )$$,
+  '42501', 'registration_customer_message_admin_required',
+  'staff cannot change customer SOLAPI activation'
+);
+
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'off claim preview',
+  public.create_registration_customer_message_preview_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'waiting_notice',
+    '95000000-0000-4000-8000-000000000540',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      'waiting_notice', repeat('4', 64)
+    )
+  )
+);
+select throws_ok(
+  $$select public.claim_registration_customer_message_v1(
+      '95000000-0000-4000-8000-000000000001',
+      ((select response from registration_solapi_rpc_results where label = 'off claim preview') ->> 'previewId')::uuid,
+      '95000000-0000-4000-8000-000000000900',
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'waiting source'),
+        'waiting_notice', repeat('4', 64)
+      )
+    )$$,
+  '40001', 'registration_customer_solapi_activation_off',
+  'activation off blocks outbox claim'
+);
+reset role;
+
+select ok(
+  (select (response ->> 'templateVerified')::boolean from registration_solapi_rpc_results where label = 'waiting template receipt'),
+  'matching sendable receipt is recorded without provider body storage'
+);
+select ok(
+  (select response -> 'blockers' from registration_solapi_rpc_results where label = 'waiting readiness off')
+    @> '["activation_off"]'::jsonb,
+  'off readiness returns independent safe blockers without private identifiers'
+);
+select ok(
+  (select response -> 'blockers' from registration_solapi_rpc_results where label = 'waiting readiness missing env')
+    @> '["credentials_missing", "pf_missing", "template_missing"]'::jsonb,
+  'readiness reports credential PF and template configuration independently'
+);
+select ok(
+  (select response -> 'blockers' from registration_solapi_rpc_results where label = 'waiting readiness drift')
+    @> '["template_drift"]'::jsonb,
+  'readiness distinguishes a drifted receipt from no receipt'
+);
+select ok(
+  (select response -> 'blockers' from registration_solapi_rpc_results where label = 'waiting readiness dirty')
+    @> '["source_dirty"]'::jsonb,
+  'readiness detects source facts changed after server rendering'
+);
+select unlike(
+  (select response::text from registration_solapi_rpc_results where label = 'waiting readiness off'),
+  '%verificationTaskId%',
+  'public readiness omits verification task identifiers'
+);
+select unlike(
+  (select response::text from registration_solapi_rpc_results where label = 'waiting readiness off'),
+  '%recipientHash%',
+  'public readiness omits recipient hashes'
+);
+select unlike(
+  (select response::text from registration_solapi_rpc_results where label = 'waiting readiness off'),
+  '%template-waiting%',
+  'public readiness omits template and PF identifiers'
+);
+
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'level template receipt',
+  public.record_registration_customer_solapi_template_receipt_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'level_test_booking',
+    pg_catalog.jsonb_build_object(
+      'templateId', 'template-level', 'pfId', 'pf-level',
+      'catalogChecksum', repeat('c', 64),
+      'providerChecksum', repeat('c', 64), 'providerStatus', 'sendable'
+    )
+  )
+);
+select throws_ok(
+  $$select public.set_registration_customer_solapi_activation_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'level_test_booking', 'verification',
+      pg_catalog.jsonb_build_object(
+        'requestKey', '95000000-0000-4000-8000-000000000809',
+        'verificationTaskId', '95000000-0000-4000-8000-000000000500',
+        'verificationRecipientHash', repeat('b', 64),
+        'templateId', 'template-level-drift', 'pfId', 'pf-level',
+        'catalogChecksum', repeat('c', 64)
+      )
+    )$$,
+  '40001', 'registration_customer_solapi_template_drift',
+  'verification requires the current template receipt'
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'level verification',
+  public.set_registration_customer_solapi_activation_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'level_test_booking', 'verification',
+    pg_catalog.jsonb_build_object(
+      'requestKey', '95000000-0000-4000-8000-000000000810',
+      'verificationTaskId', '95000000-0000-4000-8000-000000000500',
+      'verificationRecipientHash', repeat('b', 64),
+      'templateId', 'template-level', 'pfId', 'pf-level',
+      'catalogChecksum', repeat('c', 64)
+    )
+  )
+);
+select throws_ok(
+  $$select public.set_registration_customer_solapi_activation_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'level_test_booking', 'live',
+      pg_catalog.jsonb_build_object(
+        'requestKey', '95000000-0000-4000-8000-000000000811',
+        'templateId', 'template-level', 'pfId', 'pf-level',
+        'catalogChecksum', repeat('c', 64)
+      )
+    )$$,
+  '40001', 'registration_customer_solapi_live_evidence_missing',
+  'live transition requires accepted user-confirmed evidence'
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'level off',
+  public.set_registration_customer_solapi_activation_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'level_test_booking', 'off',
+    pg_catalog.jsonb_build_object(
+      'requestKey', '95000000-0000-4000-8000-000000000812'
+    )
+  )
+);
+
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting verification marker gate',
+  public.set_registration_customer_solapi_activation_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'waiting_notice', 'verification',
+    pg_catalog.jsonb_build_object(
+      'requestKey', '95000000-0000-4000-8000-000000000820',
+      'verificationTaskId', '95000000-0000-4000-8000-000000000500',
+      'verificationRecipientHash', repeat('b', 64),
+      'templateId', 'template-waiting', 'pfId', 'pf-waiting',
+      'catalogChecksum', repeat('c', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'verification mismatch preview',
+  public.create_registration_customer_message_preview_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'waiting_notice',
+    '95000000-0000-4000-8000-000000000543',
+    pg_catalog.jsonb_set(
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'other waiting source'),
+        'waiting_notice', repeat('5', 64)
+      ),
+      array['recipientHash']::text[],
+      pg_catalog.to_jsonb(repeat('9', 64)),
+      false
+    )
+  )
+);
+select throws_ok(
+  $$select public.claim_registration_customer_message_v1(
+      '95000000-0000-4000-8000-000000000001',
+      ((select response from registration_solapi_rpc_results where label = 'verification mismatch preview') ->> 'previewId')::uuid,
+      '95000000-0000-4000-8000-000000000901',
+      pg_catalog.jsonb_set(
+        pg_temp.registration_solapi_contract(
+          (select response from registration_solapi_rpc_results where label = 'other waiting source'),
+          'waiting_notice', repeat('5', 64)
+        ),
+        array['recipientHash']::text[],
+        pg_catalog.to_jsonb(repeat('9', 64)),
+        false
+      )
+    )$$,
+  '40001', 'registration_customer_solapi_verification_scope_mismatch',
+  'verification scope mismatch blocks outbox claim'
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'marker gate preview',
+  public.create_registration_customer_message_preview_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'waiting_notice',
+    '95000000-0000-4000-8000-000000000540',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      'waiting_notice', repeat('6', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'marker gate claim',
+  public.claim_registration_customer_message_v1(
+    '95000000-0000-4000-8000-000000000001',
+    ((select response from registration_solapi_rpc_results where label = 'marker gate preview') ->> 'previewId')::uuid,
+    '95000000-0000-4000-8000-000000000902',
+    pg_temp.registration_solapi_contract(
+      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      'waiting_notice', repeat('6', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting off before marker',
+  public.set_registration_customer_solapi_activation_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'waiting_notice', 'off',
+    pg_catalog.jsonb_build_object(
+      'requestKey', '95000000-0000-4000-8000-000000000821'
+    )
+  )
+);
+select throws_ok(
+  $$select public.mark_registration_customer_message_attempt_started_v1(
+      ((select response from registration_solapi_rpc_results where label = 'marker gate claim') ->> 'messageId')::uuid,
+      ((select response from registration_solapi_rpc_results where label = 'marker gate claim') ->> 'claimToken')::uuid,
+      ((select response from registration_solapi_rpc_results where label = 'marker gate claim') ->> 'dispatchToken')::uuid,
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'waiting source'),
+        'waiting_notice', repeat('6', 64)
+      )
+    )$$,
+  '40001', 'registration_customer_solapi_activation_off',
+  'activation off blocks provider attempt marker'
+);
+
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting verification wrong task',
+  public.set_registration_customer_solapi_activation_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'waiting_notice', 'verification',
+    pg_catalog.jsonb_build_object(
+      'requestKey', '95000000-0000-4000-8000-000000000822',
+      'verificationTaskId', '95000000-0000-4000-8000-000000000501',
+      'verificationRecipientHash', repeat('9', 64),
+      'templateId', 'template-waiting', 'pfId', 'pf-waiting',
+      'catalogChecksum', repeat('c', 64)
+    )
+  )
+);
+select throws_ok(
+  $$select public.record_registration_customer_solapi_live_test_receipt_v1(
+      '95000000-0000-4000-8000-000000000001', 'waiting_notice',
+      ((select response from registration_solapi_rpc_results where label = 'waiting finalized after recovery') ->> 'messageId')::uuid,
+      pg_catalog.clock_timestamp(),
+      '95000000-0000-4000-8000-000000000830'
+    )$$,
+  '40001', 'registration_customer_solapi_live_test_evidence_mismatch',
+  'accepted evidence must match kind task recipient and current receipt'
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting off after wrong task',
+  public.set_registration_customer_solapi_activation_v1(
+    '95000000-0000-4000-8000-000000000001', 'waiting_notice', 'off',
+    pg_catalog.jsonb_build_object('requestKey', '95000000-0000-4000-8000-000000000823')
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting verification wrong hash',
+  public.set_registration_customer_solapi_activation_v1(
+    '95000000-0000-4000-8000-000000000001', 'waiting_notice', 'verification',
+    pg_catalog.jsonb_build_object(
+      'requestKey', '95000000-0000-4000-8000-000000000824',
+      'verificationTaskId', '95000000-0000-4000-8000-000000000500',
+      'verificationRecipientHash', repeat('a', 64),
+      'templateId', 'template-waiting', 'pfId', 'pf-waiting',
+      'catalogChecksum', repeat('c', 64)
+    )
+  )
+);
+select throws_ok(
+  $$select public.record_registration_customer_solapi_live_test_receipt_v1(
+      '95000000-0000-4000-8000-000000000001', 'waiting_notice',
+      ((select response from registration_solapi_rpc_results where label = 'waiting finalized after recovery') ->> 'messageId')::uuid,
+      pg_catalog.clock_timestamp(),
+      '95000000-0000-4000-8000-000000000831'
+    )$$,
+  '40001', 'registration_customer_solapi_live_test_evidence_mismatch',
+  'accepted evidence with another recipient hash is rejected'
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting off after wrong hash',
+  public.set_registration_customer_solapi_activation_v1(
+    '95000000-0000-4000-8000-000000000001', 'waiting_notice', 'off',
+    pg_catalog.jsonb_build_object('requestKey', '95000000-0000-4000-8000-000000000825')
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting verification final',
+  public.set_registration_customer_solapi_activation_v1(
+    '95000000-0000-4000-8000-000000000001', 'waiting_notice', 'verification',
+    pg_catalog.jsonb_build_object(
+      'requestKey', '95000000-0000-4000-8000-000000000826',
+      'verificationTaskId', '95000000-0000-4000-8000-000000000500',
+      'verificationRecipientHash', repeat('b', 64),
+      'templateId', 'template-waiting', 'pfId', 'pf-waiting',
+      'catalogChecksum', repeat('c', 64)
+    )
+  )
+);
+select throws_ok(
+  $$select public.record_registration_customer_solapi_live_test_receipt_v1(
+      '95000000-0000-4000-8000-000000000001', 'waiting_notice',
+      ((select response from registration_solapi_rpc_results where label = 'admission accepted') ->> 'messageId')::uuid,
+      pg_catalog.clock_timestamp(),
+      '95000000-0000-4000-8000-000000000832'
+    )$$,
+  '40001', 'registration_customer_solapi_live_test_evidence_mismatch',
+  'accepted evidence of another message kind is rejected'
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting live receipt',
+  public.record_registration_customer_solapi_live_test_receipt_v1(
+    '95000000-0000-4000-8000-000000000001', 'waiting_notice',
+    ((select response from registration_solapi_rpc_results where label = 'waiting finalized after recovery') ->> 'messageId')::uuid,
+    pg_catalog.clock_timestamp(),
+    '95000000-0000-4000-8000-000000000833'
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting live receipt replay',
+  public.record_registration_customer_solapi_live_test_receipt_v1(
+    '95000000-0000-4000-8000-000000000001', 'waiting_notice',
+    ((select response from registration_solapi_rpc_results where label = 'waiting finalized after recovery') ->> 'messageId')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'waiting live receipt') ->> 'receivedAt')::timestamptz,
+    '95000000-0000-4000-8000-000000000833'
+  )
+);
+select throws_ok(
+  $$select public.record_registration_customer_solapi_live_test_receipt_v1(
+      '95000000-0000-4000-8000-000000000001', 'waiting_notice',
+      ((select response from registration_solapi_rpc_results where label = 'waiting finalized after recovery') ->> 'messageId')::uuid,
+      ((select response from registration_solapi_rpc_results where label = 'waiting live receipt') ->> 'receivedAt')::timestamptz,
+      '95000000-0000-4000-8000-000000000834'
+    )$$,
+  '23505', 'registration_customer_solapi_live_test_receipt_conflict',
+  'a second request key cannot replace retained live-test evidence'
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting live',
+  public.set_registration_customer_solapi_activation_v1(
+    '95000000-0000-4000-8000-000000000001', 'waiting_notice', 'live',
+    pg_catalog.jsonb_build_object(
+      'requestKey', '95000000-0000-4000-8000-000000000840',
+      'templateId', 'template-waiting', 'pfId', 'pf-waiting',
+      'catalogChecksum', repeat('c', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting live replay',
+  public.set_registration_customer_solapi_activation_v1(
+    '95000000-0000-4000-8000-000000000001', 'waiting_notice', 'live',
+    pg_catalog.jsonb_build_object(
+      'requestKey', '95000000-0000-4000-8000-000000000840',
+      'templateId', 'template-waiting', 'pfId', 'pf-waiting',
+      'catalogChecksum', repeat('c', 64)
+    )
+  )
+);
+select throws_ok(
+  $$select public.set_registration_customer_solapi_activation_v1(
+      '95000000-0000-4000-8000-000000000001', 'waiting_notice', 'off',
+      pg_catalog.jsonb_build_object('requestKey', '95000000-0000-4000-8000-000000000840')
+    )$$,
+  '23505', 'registration_customer_message_mutation_conflict',
+  'activation action request keys replay exactly and conflict safely'
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'other waiting readiness live',
+  public.get_registration_customer_solapi_readiness_v1(
+    '95000000-0000-4000-8000-000000000011',
+    'waiting_notice',
+    '95000000-0000-4000-8000-000000000543',
+    pg_temp.registration_solapi_readiness_contract(
+      (select response from registration_solapi_rpc_results where label = 'other waiting source'),
+      repeat('9', 64)
+    )
+  )
+);
+select throws_ok(
+  $$select public.record_registration_customer_solapi_template_receipt_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'waiting_notice',
+      pg_catalog.jsonb_build_object(
+        'templateId', 'template-waiting-replaced', 'pfId', 'pf-waiting',
+        'catalogChecksum', repeat('d', 64),
+        'providerChecksum', repeat('d', 64), 'providerStatus', 'sendable'
+      )
+    )$$,
+  '40001', 'registration_customer_solapi_receipt_change_requires_off',
+  'an active receipt cannot be replaced behind verification evidence'
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting off retained',
+  public.set_registration_customer_solapi_activation_v1(
+    '95000000-0000-4000-8000-000000000001', 'waiting_notice', 'off',
+    pg_catalog.jsonb_build_object('requestKey', '95000000-0000-4000-8000-000000000841')
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting live receipt replay after off',
+  public.record_registration_customer_solapi_live_test_receipt_v1(
+    '95000000-0000-4000-8000-000000000001', 'waiting_notice',
+    ((select response from registration_solapi_rpc_results where label = 'waiting finalized after recovery') ->> 'messageId')::uuid,
+    ((select response from registration_solapi_rpc_results where label = 'waiting live receipt') ->> 'receivedAt')::timestamptz,
+    '95000000-0000-4000-8000-000000000833'
+  )
+);
+reset role;
+
+select is(
+  (select response from registration_solapi_rpc_results where label = 'waiting live receipt replay'),
+  (select response from registration_solapi_rpc_results where label = 'waiting live receipt'),
+  'live-test receipt request key replays exactly'
+);
+select is(
+  (select response from registration_solapi_rpc_results where label = 'waiting live receipt replay after off'),
+  (select response from registration_solapi_rpc_results where label = 'waiting live receipt'),
+  'live-test receipt request key replays exactly after activation changes'
+);
+select is(
+  (select response from registration_solapi_rpc_results where label = 'waiting live replay'),
+  (select response from registration_solapi_rpc_results where label = 'waiting live'),
+  'activation request key exact replay returns the same public result'
+);
+select ok(
+  (select (response ->> 'sendAllowed')::boolean from registration_solapi_rpc_results where label = 'other waiting readiness live'),
+  'live readiness allows a clean source without exposing private evidence'
+);
+select is(
+  (
+    select mode
+    from dashboard_private.registration_customer_solapi_activation
+    where message_kind = 'waiting_notice'
+  ),
+  'off',
+  'off transition disables delivery'
+);
+select ok(
+  (
+    select live_test_message_id is not null and live_test_confirmed_at is not null
+    from dashboard_private.registration_customer_solapi_activation
+    where message_kind = 'waiting_notice'
+  ),
+  'off retains accepted live-test evidence without authorizing sends'
+);
+
+set local role service_role;
+select throws_ok(
+  $$select public.set_registration_customer_solapi_activation_v1(
+      '95000000-0000-4000-8000-000000000001', 'waiting_notice', 'verification',
+      pg_catalog.jsonb_build_object(
+        'requestKey', '95000000-0000-4000-8000-000000000842',
+        'verificationTaskId', '95000000-0000-4000-8000-000000000500',
+        'templateId', 'template-waiting', 'pfId', 'pf-waiting',
+        'catalogChecksum', repeat('c', 64)
+      )
+    )$$,
+  '22023', 'registration_customer_solapi_activation_evidence_invalid',
+  're-entering verification requires an explicit task and current recipient hash'
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting verification retained evidence',
+  public.set_registration_customer_solapi_activation_v1(
+    '95000000-0000-4000-8000-000000000001', 'waiting_notice', 'verification',
+    pg_catalog.jsonb_build_object(
+      'requestKey', '95000000-0000-4000-8000-000000000843',
+      'verificationTaskId', '95000000-0000-4000-8000-000000000500',
+      'verificationRecipientHash', repeat('b', 64),
+      'templateId', 'template-waiting', 'pfId', 'pf-waiting',
+      'catalogChecksum', repeat('c', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting live retained evidence',
+  public.set_registration_customer_solapi_activation_v1(
+    '95000000-0000-4000-8000-000000000001', 'waiting_notice', 'live',
+    pg_catalog.jsonb_build_object(
+      'requestKey', '95000000-0000-4000-8000-000000000844',
+      'templateId', 'template-waiting', 'pfId', 'pf-waiting',
+      'catalogChecksum', repeat('c', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting final off',
+  public.set_registration_customer_solapi_activation_v1(
+    '95000000-0000-4000-8000-000000000001', 'waiting_notice', 'off',
+    pg_catalog.jsonb_build_object('requestKey', '95000000-0000-4000-8000-000000000845')
+  )
+);
+reset role;
 
 select * from finish();
 
