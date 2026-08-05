@@ -243,6 +243,71 @@ test("fixture gate is exact and production always ignores the query", async () =
   assert.equal(shouldEnableRegistrationSubjectTrackFixture("development", ""), false)
 })
 
+test("fixture customer message client keeps all five preview/send states in memory without provider ledger entries", async () => {
+  const fixture = await loadFixtureModule()
+  let state = fixture.createRegistrationSubjectTrackFixtureState()
+  const client = fixture.createRegistrationSubjectTrackFixtureCustomerMessageClient()
+  const targets = [
+    ["level_test_booking", "fixture-appointment-dual-test"],
+    ["visit_consultation_booking", "fixture-appointment-split-visit"],
+    ["appointment_reminder", "fixture-appointment-dual-test"],
+    ["waiting_notice", "fixture-track-waiting-notice-english"],
+    ["admission_application", "fixture-task-multiple-classes"],
+  ]
+
+  for (const [messageKind, sourceId] of targets) {
+    const preview = await client.preview({ messageKind, sourceId })
+    assert.equal(preview.previewId !== null, true)
+    assert.equal(preview.readiness.sendAllowed, true)
+    assert.equal(preview.body.includes("010"), false)
+  }
+
+  const acceptedPreview = await client.preview({
+    messageKind: "level_test_booking",
+    sourceId: "fixture-appointment-dual-test",
+  })
+  const accepted = await client.send({ previewId: acceptedPreview.previewId, requestKey: "fixture-customer-message-accepted" })
+  assert.equal(accepted.currentStatus, "accepted")
+  const replay = await client.send({ previewId: acceptedPreview.previewId, requestKey: "fixture-customer-message-accepted" })
+  assert.equal(replay.messageId, accepted.messageId)
+  assert.equal(replay.currentStatus, accepted.currentStatus)
+  assert.equal(replay.idempotent, true)
+  const locked = await client.preview({ messageKind: "level_test_booking", sourceId: "fixture-appointment-dual-test" })
+  assert.deepEqual(Array.from(locked.readiness.blockers), ["duplicate_locked"])
+  const unrelatedPreview = await client.preview({ messageKind: "level_test_booking", sourceId: "fixture-appointment-calendar-neighbor" })
+  assert.equal(unrelatedPreview.latestMessage, null)
+  assert.deepEqual(
+    plain(await client.list({ messageKind: "level_test_booking", sourceId: "fixture-appointment-calendar-neighbor" })),
+    [],
+  )
+
+  client.debugSetNextStatus("unknown")
+  const unknownPreview = await client.preview({ messageKind: "visit_consultation_booking", sourceId: "fixture-appointment-split-visit" })
+  const unknown = await client.send({ previewId: unknownPreview.previewId, requestKey: "fixture-customer-message-unknown" })
+  assert.equal(unknown.currentStatus, "unknown")
+  assert.equal(unknown.canCheck, true)
+
+  client.debugSetNextStatus("failed_hold")
+  const failedPreview = await client.preview({ messageKind: "appointment_reminder", sourceId: "fixture-appointment-dual-test" })
+  const failed = await client.send({ previewId: failedPreview.previewId, requestKey: "fixture-customer-message-failed" })
+  assert.equal(failed.currentStatus, "failed_hold")
+  assert.equal((await client.preview({ messageKind: "appointment_reminder", sourceId: "fixture-appointment-dual-test" })).previewId, null)
+
+  const replayFirst = await client.preview({ messageKind: "waiting_notice", sourceId: "fixture-track-waiting-notice-english" })
+  const replaySecond = await client.preview({ messageKind: "waiting_notice", sourceId: "fixture-track-waiting-notice-english" })
+  await client.send({ previewId: replayFirst.previewId, requestKey: "fixture-customer-message-bound-key" })
+  await assert.rejects(
+    client.send({ previewId: replaySecond.previewId, requestKey: "fixture-customer-message-bound-key" }),
+    /registration_customer_message_confirmation_conflict/,
+  )
+
+  client.debugSetSourceDirty("fixture-track-waiting-notice-english", true)
+  const dirty = await client.preview({ messageKind: "waiting_notice", sourceId: "fixture-track-waiting-notice-english" })
+  assert.equal(dirty.previewId, null)
+  assert.deepEqual(Array.from(dirty.readiness.blockers), ["source_dirty"])
+  assert.equal(state.externalCallLedger.length, 0)
+})
+
 test("fixture query action behavior only accepts an exact safe one-shot control", async () => {
   const fixture = await loadFixtureModule()
   const parse = fixture.parseRegistrationSubjectTrackFixtureQueryActionBehavior
@@ -432,6 +497,7 @@ test("fixture reset is deterministic and contains the approved workflow samples"
     "partial registration with later batch",
     "all subject tracks terminal",
     "multiple English classes",
+    "saved waiting notice",
     "enrollment decided add-button",
     "admission panel with non-enrollment sibling",
     "migration review",
@@ -1485,8 +1551,8 @@ test("fixture runtime exposes a dev-only replay bridge and removes it on cleanup
   assert.deepEqual(before.lastCreate.command.payload, plain(input))
   assert.deepEqual(before.lastCreate.result, plain(originalResult))
   assert.deepEqual(before.lastCreate.result.notificationJobs, [])
-  assert.equal(before.counts.cases, 11)
-  assert.equal(before.counts.tracks, 19)
+  assert.equal(before.counts.cases, 12)
+  assert.equal(before.counts.tracks, 20)
   assert.equal(before.counts.appointments, 6)
   assert.equal(before.counts.externalCalls, 1)
   assert.equal(before.counts.notificationReceipts, 1)

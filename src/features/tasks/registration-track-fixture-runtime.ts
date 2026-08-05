@@ -5,6 +5,7 @@ import type {
 } from "./registration-appointment-calendar-model"
 import type { OpsRegistrationCaseDetail, OpsRegistrationWorkspaceOptionData } from "./registration-track-service"
 import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
+import type { RegistrationCustomerMessageClient } from "./registration-customer-message-contract"
 
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_VALUE = "registration-subject-tracks"
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL = "__TIPS_REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG__"
@@ -72,6 +73,7 @@ export type RegistrationSubjectTrackFixtureAdapter = {
   loadSubjectCapabilities: () => Promise<readonly RegistrationSubjectCapability[]>
   loadScienceConsultationClassOptions: () => Promise<OpsClassOption[]>
   loadClassDetails: (classIds: string[]) => Promise<Record<string, OpsRegistrationClassDetail>>
+  customerMessageClient: RegistrationCustomerMessageClient
   debugSnapshot?: () => RegistrationSubjectTrackFixtureDebugSnapshot
   debugReplayLastCreate?: () => Promise<RegistrationSubjectTrackFixtureDebugReplay>
   debugSetNextActionBehavior?: (behavior: RegistrationSubjectTrackFixtureDebugActionBehavior) => void

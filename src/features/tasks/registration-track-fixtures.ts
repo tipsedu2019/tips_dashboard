@@ -42,6 +42,14 @@ import {
   getRegistrationWorkflowStatusFromLegacyTrack,
 } from "./registration-workflow-status.js"
 import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
+import type {
+  RegistrationCustomerMessageClient,
+  RegistrationCustomerMessageKind,
+  RegistrationCustomerMessagePreviewResponse,
+  RegistrationCustomerMessageReadiness,
+  RegistrationCustomerMessageSendResult,
+  RegistrationCustomerMessageTarget,
+} from "./registration-customer-message-contract"
 import { ACADEMIC_SUBJECT_VALUES, sortAcademicSubjects } from "../../lib/academic-subject-registry.ts"
 
 const FIXTURE_NOW = "2026-07-13T09:00:00+09:00"
@@ -239,6 +247,212 @@ export type RegistrationSubjectTrackFixtureRuntime = {
   replaceState: (state: RegistrationSubjectTrackFixtureState) => void
 }
 
+export type RegistrationSubjectTrackFixtureCustomerMessageClient = RegistrationCustomerMessageClient & {
+  debugSetNextStatus: (status: "accepted" | "unknown" | "failed_hold") => void
+  debugSetSourceDirty: (sourceId: string, dirty: boolean) => void
+}
+
+const FIXTURE_CUSTOMER_MESSAGE_SOURCES: Record<RegistrationCustomerMessageKind, Record<string, Readonly<{
+  studentName: string
+  recipientLast4: string
+  facts: RegistrationCustomerMessagePreviewResponse["facts"]
+  body: string
+  buttons: RegistrationCustomerMessagePreviewResponse["buttons"]
+}>>> = {
+  level_test_booking: {
+    "fixture-appointment-dual-test": {
+      studentName: "김다미", recipientLast4: "5678",
+      facts: { subjectLabel: "영어, 수학", scheduleLabel: "2026년 7월 15일 10:00", placeLabel: "본관" },
+      body: "TIPS 레벨테스트 예약 안내\n김다미 학생의 영어, 수학 레벨테스트가 예약되었습니다.",
+      buttons: [{ name: "예약 확인", type: "WL", host: "tips.edu" }],
+    },
+    "fixture-appointment-calendar-neighbor": {
+      studentName: "오하늘", recipientLast4: "5678",
+      facts: { subjectLabel: "영어", scheduleLabel: "2026년 7월 15일 11:00", placeLabel: "본관" },
+      body: "TIPS 레벨테스트 예약 안내\n오하늘 학생의 영어 레벨테스트가 예약되었습니다.",
+      buttons: [{ name: "예약 확인", type: "WL", host: "tips.edu" }],
+    },
+  },
+  visit_consultation_booking: {
+    "fixture-appointment-split-visit": {
+      studentName: "박서준", recipientLast4: "5678",
+      facts: { subjectLabel: "영어", scheduleLabel: "2026년 7월 16일 14:00", placeLabel: "본관" },
+      body: "TIPS 방문상담 예약 안내\n박서준 학생의 방문상담이 예약되었습니다.",
+      buttons: [{ name: "상담 안내", type: "WL", host: "tips.edu" }],
+    },
+  },
+  appointment_reminder: {
+    "fixture-appointment-dual-test": {
+      studentName: "김다미", recipientLast4: "5678",
+      facts: { subjectLabel: "영어, 수학", scheduleLabel: "2026년 7월 15일 10:00", placeLabel: "본관" },
+      body: "TIPS 예약 리마인드\n김다미 학생의 레벨테스트 일정을 다시 안내드립니다.",
+      buttons: [{ name: "예약 확인", type: "WL", host: "tips.edu" }],
+    },
+  },
+  waiting_notice: {
+    "fixture-track-waiting-notice-english": {
+      studentName: "문하늘", recipientLast4: "5678",
+      facts: { subjectLabel: "영어", waitingKindLabel: "신규반 대기", waitingDetailLabel: "고1 영어 정규 A" },
+      body: "TIPS 대기 안내\n문하늘 학생의 영어 신규반 대기 신청이 접수되었습니다.",
+      buttons: [{ name: "대기 안내", type: "WL", host: "tips.edu" }],
+    },
+  },
+  admission_application: {
+    "fixture-task-multiple-classes": {
+      studentName: "최유진", recipientLast4: "5678",
+      facts: { subjectLabel: "영어" },
+      body: "TIPS 입학신청서 안내\n최유진 학생의 입학신청서를 확인해 주세요.",
+      buttons: [{ name: "입학신청서 작성", type: "WL", host: "tips.edu" }],
+    },
+  },
+}
+
+function fixtureCustomerMessageReadiness(blockers: RegistrationCustomerMessageReadiness["blockers"]): RegistrationCustomerMessageReadiness {
+  return {
+    runtimeReady: true,
+    activationMode: "verification",
+    activationEligible: true,
+    credentialsConfigured: true,
+    pfConfigured: true,
+    templateConfigured: true,
+    templateVerified: true,
+    verifiedAt: "2026-08-05T00:00:00.000Z",
+    sourceValid: blockers.length === 0,
+    sendAllowed: blockers.length === 0,
+    blockers,
+  }
+}
+
+export function createRegistrationSubjectTrackFixtureCustomerMessageClient(): RegistrationSubjectTrackFixtureCustomerMessageClient {
+  const previews = new Map<string, RegistrationCustomerMessageTarget>()
+  const results = new Map<string, RegistrationCustomerMessageSendResult>()
+  const resultTargets = new Map<string, RegistrationCustomerMessageTarget>()
+  const replayResultKeys = new Map<string, string>()
+  const requestKeyBindings = new Map<string, string>()
+  const lockedTargets = new Set<string>()
+  const dirtySources = new Set<string>()
+  let previewSequence = 0
+  let sendSequence = 0
+  let messageSequence = 0
+  let nextStatus: "accepted" | "unknown" | "failed_hold" = "accepted"
+  const targetKey = (target: RegistrationCustomerMessageTarget) => `${target.messageKind}:${target.sourceId}`
+  const previewId = () => `20000000-0000-4000-8000-${(++previewSequence).toString().padStart(12, "0")}`
+  const messageId = () => `30000000-0000-4000-8000-${(++messageSequence).toString().padStart(12, "0")}`
+  const resultFor = (target: RegistrationCustomerMessageTarget, status: "accepted" | "unknown" | "failed_hold"): RegistrationCustomerMessageSendResult => ({
+    ok: status === "accepted",
+    messageId: messageId(),
+    messageKind: target.messageKind,
+    currentStatus: status,
+    recipientLast4: FIXTURE_CUSTOMER_MESSAGE_SOURCES[target.messageKind][target.sourceId].recipientLast4,
+    confirmedAt: "2026-08-05T00:00:00.000Z",
+    updatedAt: "2026-08-05T00:00:00.000Z",
+    canCheck: status === "unknown",
+    idempotent: false,
+  })
+
+  return Object.freeze({
+    async preview(target) {
+      const source = FIXTURE_CUSTOMER_MESSAGE_SOURCES[target.messageKind]?.[target.sourceId]
+      if (!source) throw new Error("registration_customer_message_source_not_found")
+      const blockers = dirtySources.has(target.sourceId)
+        ? ["source_dirty"] as const
+        : lockedTargets.has(targetKey(target))
+          ? ["duplicate_locked"] as const
+          : [] as const
+      const readiness = fixtureCustomerMessageReadiness([...blockers])
+      const nextPreviewId = blockers.length ? null : previewId()
+      if (nextPreviewId) previews.set(nextPreviewId, { ...target })
+      const latest = [...results.entries()].reverse().find(([key]) => {
+        const resultTarget = resultTargets.get(key)
+        return resultTarget?.messageKind === target.messageKind && resultTarget.sourceId === target.sourceId
+      })?.[1]
+      return {
+        ok: true,
+        previewId: nextPreviewId,
+        expiresAt: nextPreviewId ? "2099-12-31T23:59:59.000Z" : null,
+        messageKind: target.messageKind,
+        studentName: source.studentName,
+        recipientLast4: source.recipientLast4,
+        facts: source.facts,
+        body: source.body,
+        buttons: source.buttons,
+        readiness,
+        latestMessage: latest ? {
+          messageId: latest.messageId,
+          messageKind: latest.messageKind,
+          currentStatus: latest.currentStatus,
+          confirmedAt: latest.confirmedAt,
+          updatedAt: latest.updatedAt,
+          recipientLast4: latest.recipientLast4,
+          canCheck: latest.canCheck,
+        } : null,
+      } satisfies RegistrationCustomerMessagePreviewResponse
+    },
+    async send(input) {
+      const replayKey = `${input.previewId}:${input.requestKey}`
+      const replay = results.get(replayResultKeys.get(replayKey) || "")
+      if (replay) return { ...replay, idempotent: true }
+      const target = previews.get(input.previewId)
+      const boundPreviewId = requestKeyBindings.get(input.requestKey)
+      if (boundPreviewId && boundPreviewId !== input.previewId) {
+        throw new Error("registration_customer_message_confirmation_conflict")
+      }
+      if (!target || lockedTargets.has(targetKey(target))) throw new Error("registration_customer_message_confirmation_conflict")
+      requestKeyBindings.set(input.requestKey, input.previewId)
+      const sendKey = `send-${++sendSequence}`
+      const status = nextStatus
+      nextStatus = "accepted"
+      const next = resultFor(target, status)
+      replayResultKeys.set(replayKey, sendKey)
+      results.set(sendKey, next)
+      resultTargets.set(sendKey, target)
+      lockedTargets.add(targetKey(target))
+      return next
+    },
+    async list(target) {
+      return [...results.entries()].filter(([key, item]) => {
+        const resultTarget = resultTargets.get(key)
+        return item.messageKind === target.messageKind && resultTarget?.sourceId === target.sourceId
+      }).map(([, item]) => ({
+        messageId: item.messageId,
+        messageKind: item.messageKind,
+        currentStatus: item.currentStatus,
+        confirmedAt: item.confirmedAt,
+        updatedAt: item.updatedAt,
+        recipientLast4: item.recipientLast4,
+        canCheck: item.canCheck,
+      }))
+    },
+    async check(input) {
+      const entry = [...results.entries()].find(([, item]) => item.messageId === input.messageId)
+      if (!entry) throw new Error("registration_customer_message_check_not_allowed")
+      const [key, current] = entry
+      const next = current.currentStatus === "unknown" ? { ...current, ok: true, currentStatus: "accepted" as const, canCheck: false } : current
+      results.set(key, next)
+      return next
+    },
+    async reconcile(input) {
+      const entry = [...results.entries()].find(([, item]) => item.messageId === input.messageId)
+      if (!entry || !input.reason.trim()) throw new Error("registration_customer_message_recovery_invalid")
+      const [key, current] = entry
+      const next = { ...current, ok: input.resolution === "accepted", currentStatus: input.resolution, canCheck: false }
+      results.set(key, next)
+      return next
+    },
+    async releasePreSend(input) {
+      if (!input.reason.trim()) throw new Error("registration_customer_message_recovery_invalid")
+      const entry = [...results.entries()].find(([, item]) => item.messageId === input.messageId)
+      if (!entry) throw new Error("registration_customer_message_recovery_invalid")
+      return entry[1]
+    },
+    debugSetNextStatus(status) { nextStatus = status },
+    debugSetSourceDirty(sourceId, dirty) {
+      if (dirty) dirtySources.add(sourceId)
+      else dirtySources.delete(sourceId)
+    },
+  })
+}
+
 export function getRegistrationSubjectTrackFixtureStateDigest(
   state: RegistrationSubjectTrackFixtureState,
 ) {
@@ -308,6 +522,7 @@ export function createRegistrationSubjectTrackFixtureAdapter(
 
   return {
     intakeWorkflowRuntimeVersion: 1,
+    customerMessageClient: createRegistrationSubjectTrackFixtureCustomerMessageClient(),
     executeAction: <T = unknown>(type: string, payload: Record<string, unknown>) => {
       const behavior = nextActionBehavior?.type === type ? nextActionBehavior : null
       if (behavior) nextActionBehavior = null
@@ -951,6 +1166,28 @@ function buildFixtureCases() {
     enrollment({ id: "fixture-enrollment-multiple-special", trackId: multipleTracks[0].id, classId: "fixture-class-eng-special", textbookId: null, admissionBatchId: null, classStartDate: "2026-07-21", classStartSessionKey: "2026-07-21:1", classStartSession: "1회차", status: "planned", sortOrder: 1 }),
   ]
 
+  const waitingTaskId = "fixture-task-waiting-notice"
+  const waitingTracks = [track({
+    id: "fixture-track-waiting-notice-english",
+    taskId: waitingTaskId,
+    subject: "영어",
+    status: "consultation_waiting",
+    workflowStatus: "waiting_new_class",
+  })]
+  waitingTracks[0] = {
+    ...waitingTracks[0],
+    waitingKind: "current_term_opening",
+    waitingDetailKind: "current_term_opening",
+    waitingDetailClassId: "fixture-class-eng-a",
+    waitingDetailRetakeDecision: "not_required",
+  }
+  const waitingTask = taskTemplate({
+    id: waitingTaskId,
+    studentName: "문하늘",
+    subject: "영어",
+    tracks: waitingTracks,
+  })
+
   const decidedTaskId = "fixture-task-enrollment-decided"
   const decidedTracks = [track({ id: "fixture-track-enrollment-decided-english", taskId: decidedTaskId, subject: "영어", status: "enrollment_decided" })]
   const decidedTask = taskTemplate({ id: decidedTaskId, studentName: "정하린", subject: "영어", tracks: decidedTracks })
@@ -1039,6 +1276,7 @@ function buildFixtureCases() {
     [partialTaskId]: caseDetail({ task: partialTask, tracks: partialTracks, admissionBatches: [completedAdmission, openAdmission], enrollments: partialEnrollments }),
     [allTerminalTaskId]: caseDetail({ task: allTerminalTask, tracks: allTerminalTracks, events: allTerminalEvents }),
     [multipleTaskId]: caseDetail({ task: multipleTask, tracks: multipleTracks, enrollments: multipleEnrollments }),
+    [waitingTaskId]: caseDetail({ task: waitingTask, tracks: waitingTracks }),
     [decidedTaskId]: caseDetail({ task: decidedTask, tracks: decidedTracks }),
     [siblingTaskId]: caseDetail({ task: siblingTask, tracks: siblingTracks, appointments: [siblingAppointment], levelTests: [siblingAttempt], admissionBatches: [siblingBatch], enrollments: [siblingEnrollment] }),
     [reviewTaskId]: caseDetail({ task: reviewTask, tracks: reviewTracks, migrationLegacy }),
@@ -1129,6 +1367,7 @@ export function createRegistrationSubjectTrackFixtureState(): RegistrationSubjec
       { name: "partial registration with later batch", taskId: "fixture-task-partial-registration" },
       { name: "all subject tracks terminal", taskId: "fixture-task-all-terminal" },
       { name: "multiple English classes", taskId: "fixture-task-multiple-classes" },
+      { name: "saved waiting notice", taskId: "fixture-task-waiting-notice" },
       { name: "enrollment decided add-button", taskId: "fixture-task-enrollment-decided" },
       { name: "admission panel with non-enrollment sibling", taskId: "fixture-task-admission-sibling" },
       { name: "migration review", taskId: "fixture-task-migration-review" },
