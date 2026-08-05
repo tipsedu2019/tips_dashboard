@@ -16,6 +16,9 @@ const IDS = Object.freeze({
   task: "00000000-0000-4000-8000-000000000003",
   preview: "00000000-0000-4000-8000-000000000004",
   message: "00000000-0000-4000-8000-000000000005",
+  request: "00000000-0000-4000-8000-000000000006",
+  claim: "00000000-0000-4000-8000-000000000007",
+  dispatch: "00000000-0000-4000-8000-000000000008",
 })
 
 const TARGET = Object.freeze({
@@ -40,6 +43,19 @@ const SOURCE = Object.freeze({
 })
 
 const PRIVATE_SOURCE = Object.freeze({
+  source: Object.freeze({}),
+  parentPhoneDigits: "01012345678",
+  recipientHash: "recipient-hash",
+  sourceFingerprint: "source-fingerprint",
+  sourceFactsChecksum: "facts-checksum",
+  rendered: Object.freeze({
+    kind: "waiting_notice",
+    body: SOURCE.body,
+    variables: Object.freeze({ 학생명: "김팁스", 과목: "수학", 대기종류: "현재반 대기", 대기내용: "중2 수학 A" }),
+    buttons: Object.freeze([]),
+    facts: SOURCE.facts,
+    checksums: Object.freeze({ variables: "variables-checksum", body: "body-checksum", buttons: "buttons-checksum" }),
+  }),
   previewContract: Object.freeze({
     parentPhoneDigits: "01012345678",
     sourceFingerprint: "source-fingerprint",
@@ -102,6 +118,18 @@ function makeDeps(overrides = {}) {
     readiness: 0,
     createPreview: 0,
     history: 0,
+    readPreviewTarget: 0,
+    claim: 0,
+    release: 0,
+    marker: 0,
+    providerSend: 0,
+    finalize: 0,
+    checkContext: 0,
+    providerLookup: 0,
+    recordCheck: 0,
+    preflight: 0,
+    receipt: 0,
+    admin: 0,
   }
   const deps = {
     now: () => new Date("2026-08-05T00:00:00.000Z"),
@@ -157,6 +185,119 @@ function makeDeps(overrides = {}) {
       calls.history += 1
       assert.equal(input.actorProfileId, IDS.actor)
       return HISTORY
+    },
+    async readPreviewTarget(input) {
+      calls.readPreviewTarget += 1
+      assert.equal(input.previewId, IDS.preview)
+      return { ...TARGET, taskId: IDS.task }
+    },
+    async claimMessage(input) {
+      calls.claim += 1
+      assert.equal(input.previewId, IDS.preview)
+      assert.equal(input.requestKey, IDS.request)
+      return {
+        ok: false,
+        messageId: IDS.message,
+        messageKind: TARGET.messageKind,
+        currentStatus: "pending",
+        recipientLast4: "5678",
+        confirmedAt: "2026-08-05T00:05:00.000Z",
+        updatedAt: "2026-08-05T00:05:00.000Z",
+        canCheck: false,
+        idempotent: false,
+        owner: true,
+        claimToken: IDS.claim,
+        dispatchToken: IDS.dispatch,
+      }
+    },
+    async releasePreSendClaim() {
+      calls.release += 1
+      return { released: true }
+    },
+    async markAttemptStarted(input) {
+      calls.marker += 1
+      assert.equal(input.claimToken, IDS.claim)
+      assert.equal(input.dispatchToken, IDS.dispatch)
+      return { allowed: true, messageId: IDS.message, currentStatus: "pending", dispatchToken: IDS.dispatch }
+    },
+    async sendProvider(input) {
+      calls.providerSend += 1
+      assert.equal(input.to, "01012345678")
+      assert.equal(input.requestKey, IDS.request)
+      return {
+        outcome: "accepted",
+        evidence: {
+          providerMessageId: "provider-message-1",
+          statusCode: "2000",
+          statusMessage: "접수",
+          observedAt: "2026-08-05T00:06:00.000Z",
+          requestKeyMatched: true,
+        },
+      }
+    },
+    async finalizeMessage(input) {
+      calls.finalize += 1
+      return {
+        ok: input.outcome === "accepted",
+        messageId: IDS.message,
+        messageKind: TARGET.messageKind,
+        currentStatus: input.outcome,
+        recipientLast4: "5678",
+        confirmedAt: "2026-08-05T00:05:00.000Z",
+        updatedAt: "2026-08-05T00:06:00.000Z",
+        canCheck: false,
+        idempotent: false,
+      }
+    },
+    async readCheckContext(input) {
+      calls.checkContext += 1
+      assert.equal(input.messageId, IDS.message)
+      return {
+        result: HISTORY[0],
+        providerMessageId: "provider-message-1",
+        providerGroupId: null,
+        requestKey: IDS.request,
+      }
+    },
+    async lookupProvider(input) {
+      calls.providerLookup += 1
+      assert.equal(input.requestKey, IDS.request)
+      return {
+        outcome: "accepted",
+        evidence: {
+          providerMessageId: "provider-message-1",
+          statusCode: "4000",
+          statusMessage: "성공",
+          observedAt: "2026-08-05T00:20:00.000Z",
+          requestKeyMatched: true,
+        },
+      }
+    },
+    async recordProviderCheck(input) {
+      calls.recordCheck += 1
+      assert.equal(input.requestKey, IDS.request)
+      return { ...HISTORY[0], ok: true, currentStatus: input.resolution, idempotent: false }
+    },
+    async preflightTemplate() {
+      calls.preflight += 1
+      return {
+        matched: true,
+        receipt: {
+          templateId: "template-id",
+          pfId: "pf-id",
+          catalogChecksum: "a".repeat(64),
+          providerChecksum: "a".repeat(64),
+          providerStatus: "sendable",
+        },
+      }
+    },
+    async recordTemplateReceipt() {
+      calls.receipt += 1
+      return { messageKind: TARGET.messageKind, templateVerified: true, verifiedAt: "2026-08-05T00:00:00.000Z" }
+    },
+    async performAdminAction(input) {
+      calls.admin += 1
+      return { ok: true, action: input.action.action }
     },
     ...overrides,
   }
@@ -525,4 +666,278 @@ test("history rejects unsupported roles and never calls a provider", async () =>
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test("send validates browser input before auth and never accepts provider-owned fields", async () => {
+  for (const body of [
+    "{",
+    JSON.stringify({ previewId: IDS.preview }),
+    JSON.stringify({ previewId: IDS.preview, requestKey: IDS.request, to: "01012345678" }),
+    JSON.stringify({ previewId: "bad", requestKey: IDS.request }),
+  ]) {
+    const { deps, calls } = makeDeps()
+    const result = await json(await createRegistrationCustomerMessageRouteHandlers(deps).send(
+      request("/send", { method: "POST", body }),
+    ))
+    assert.equal(result.response.status, 400)
+    assert.deepEqual(result.body, { ok: false, code: "registration_customer_message_send_input_invalid" })
+    assert.equal(calls.auth, 0)
+    assert.equal(calls.providerSend, 0)
+  }
+})
+
+test("send claims, re-reads canonical source, commits the marker, then calls SOLAPI once", async () => {
+  const order = []
+  const { deps, calls } = makeDeps({
+    async resolveSource() {
+      order.push("canonical-read")
+      return SOURCE
+    },
+    async claimMessage(input) {
+      order.push("claim-commit")
+      return makeDeps().deps.claimMessage(input)
+    },
+    async markAttemptStarted(input) {
+      order.push("marker-commit")
+      return makeDeps().deps.markAttemptStarted(input)
+    },
+    async sendProvider(input) {
+      order.push("provider")
+      return makeDeps().deps.sendProvider(input)
+    },
+    async finalizeMessage(input) {
+      order.push("finalize")
+      return makeDeps().deps.finalizeMessage(input)
+    },
+  })
+  const result = await json(await createRegistrationCustomerMessageRouteHandlers(deps).send(
+    request("/send", { method: "POST", body: JSON.stringify({ previewId: IDS.preview, requestKey: IDS.request }) }),
+  ))
+  assert.equal(result.response.status, 200)
+  assert.equal(result.body.currentStatus, "accepted")
+  assert.deepEqual(order, ["canonical-read", "claim-commit", "canonical-read", "marker-commit", "provider", "finalize"])
+  assert.equal(calls.providerSend, 0, "overridden provider owns the call counter")
+  assert.equal(JSON.stringify(result.body).includes("claimToken"), false)
+  assert.equal(JSON.stringify(result.body).includes("provider"), false)
+})
+
+test("dedupe/exact replay returns the existing masked result with provider zero", async () => {
+  for (const currentStatus of ["accepted", "unknown", "failed_hold"]) {
+    const { deps, calls } = makeDeps({
+      claimMessage: async () => ({
+        ok: currentStatus === "accepted",
+        messageId: IDS.message,
+        messageKind: TARGET.messageKind,
+        currentStatus,
+        recipientLast4: "5678",
+        confirmedAt: "2026-08-05T00:05:00.000Z",
+        updatedAt: "2026-08-05T00:06:00.000Z",
+        canCheck: currentStatus === "unknown",
+        idempotent: true,
+        owner: false,
+      }),
+    })
+    const result = await json(await createRegistrationCustomerMessageRouteHandlers(deps).send(
+      request("/send", { method: "POST", body: JSON.stringify({ previewId: IDS.preview, requestKey: IDS.request }) }),
+    ))
+    assert.equal(result.response.status, 200)
+    assert.equal(result.body.currentStatus, currentStatus)
+    assert.equal(result.body.idempotent, true)
+    assert.equal(calls.marker, 0)
+    assert.equal(calls.providerSend, 0)
+  }
+})
+
+test("claim conflicts are non-disclosing and stale state calls provider zero", async () => {
+  for (const code of ["23505", "40001", "P0002", "42501"]) {
+    const { deps, calls } = makeDeps({
+      claimMessage: async () => { throw Object.assign(new Error("raw database detail"), { code }) },
+    })
+    const result = await json(await createRegistrationCustomerMessageRouteHandlers(deps).send(
+      request("/send", { method: "POST", body: JSON.stringify({ previewId: IDS.preview, requestKey: IDS.request }) }),
+    ))
+    assert.equal(result.response.status, 409)
+    assert.deepEqual(result.body, { ok: false, code: "registration_customer_message_confirmation_conflict" })
+    assert.equal(calls.providerSend, 0)
+  }
+
+  const missingPreview = makeDeps({
+    readPreviewTarget: async () => {
+      throw Object.assign(new Error("raw preview owner detail"), { code: "P0002" })
+    },
+  })
+  const result = await json(await createRegistrationCustomerMessageRouteHandlers(missingPreview.deps).send(
+    request("/send", { method: "POST", body: JSON.stringify({ previewId: IDS.preview, requestKey: IDS.request }) }),
+  ))
+  assert.equal(result.response.status, 409)
+  assert.deepEqual(result.body, { ok: false, code: "registration_customer_message_confirmation_conflict" })
+  assert.equal(missingPreview.calls.claim, 0)
+  assert.equal(missingPreview.calls.providerSend, 0)
+})
+
+test("pre-marker preparation failure releases the count-0 claim and permits exact replay", async () => {
+  let reads = 0
+  const { deps, calls } = makeDeps({
+    async resolveSource() {
+      reads += 1
+      if (reads === 2) throw new Error("registration_customer_message_source_invalid")
+      return SOURCE
+    },
+  })
+  const result = await json(await createRegistrationCustomerMessageRouteHandlers(deps).send(
+    request("/send", { method: "POST", body: JSON.stringify({ previewId: IDS.preview, requestKey: IDS.request }) }),
+  ))
+  assert.equal(result.response.status, 503)
+  assert.deepEqual(result.body, { ok: false, code: "registration_customer_message_pre_send_failed" })
+  assert.equal(calls.release, 1)
+  assert.equal(calls.marker, 0)
+  assert.equal(calls.providerSend, 0)
+})
+
+test("marker message or dispatch-token drift fails closed before provider access", async () => {
+  for (const marker of [
+    { allowed: true, messageId: IDS.preview, currentStatus: "pending", dispatchToken: IDS.dispatch },
+    { allowed: true, messageId: IDS.message, currentStatus: "pending", dispatchToken: IDS.claim },
+    { allowed: true, messageId: IDS.message, currentStatus: "pending" },
+  ]) {
+    const { deps, calls } = makeDeps({ markAttemptStarted: async () => marker })
+    const result = await json(await createRegistrationCustomerMessageRouteHandlers(deps).send(
+      request("/send", { method: "POST", body: JSON.stringify({ previewId: IDS.preview, requestKey: IDS.request }) }),
+    ))
+    assert.equal(result.response.status, 503)
+    assert.equal(calls.release, 1)
+    assert.equal(calls.providerSend, 0)
+  }
+})
+
+test("post-marker finalization uncertainty returns unknown and never repeats the provider in-request", async () => {
+  const { deps, calls } = makeDeps({
+    finalizeMessage: async () => { throw new Error("database unavailable after provider response") },
+  })
+  const result = await json(await createRegistrationCustomerMessageRouteHandlers(deps).send(
+    request("/send", { method: "POST", body: JSON.stringify({ previewId: IDS.preview, requestKey: IDS.request }) }),
+  ))
+  assert.equal(result.response.status, 502)
+  assert.equal(result.body.currentStatus, "unknown")
+  assert.equal(result.body.ok, false)
+  assert.equal(calls.providerSend, 1)
+  assert.equal(calls.release, 0)
+})
+
+test("a provider exception after the marker is finalized as unknown without a second call", async () => {
+  const { deps, calls } = makeDeps({
+    sendProvider: async () => {
+      calls.providerSend += 1
+      throw new Error("raw provider exception with private data")
+    },
+  })
+  const result = await json(await createRegistrationCustomerMessageRouteHandlers(deps).send(
+    request("/send", { method: "POST", body: JSON.stringify({ previewId: IDS.preview, requestKey: IDS.request }) }),
+  ))
+  assert.equal(result.response.status, 200)
+  assert.equal(result.body.currentStatus, "unknown")
+  assert.equal(result.body.ok, false)
+  assert.equal(calls.providerSend, 1)
+  assert.equal(calls.finalize, 1)
+  assert.equal(JSON.stringify(result.body).includes("raw provider exception"), false)
+})
+
+test("check is operator-only, uses the stored request key, and records only exact provider evidence", async () => {
+  const { deps, calls } = makeDeps()
+  const result = await json(await createRegistrationCustomerMessageRouteHandlers(deps).check(
+    request("/check", { method: "POST", body: JSON.stringify({ messageId: IDS.message }) }),
+  ))
+  assert.equal(result.response.status, 200)
+  assert.equal(result.body.currentStatus, "accepted")
+  assert.equal(calls.providerLookup, 1)
+  assert.equal(calls.recordCheck, 1)
+
+  for (const overrides of [
+    { authenticate: async () => ({ actorProfileId: IDS.actor, role: "teacher", actorClient: {} }) },
+    { readCheckContext: async () => { throw Object.assign(new Error("too early"), { code: "40001" }) } },
+    { readCheckContext: async () => ({ result: HISTORY[0], providerMessageId: null, requestKey: IDS.request }) },
+    { lookupProvider: async () => ({ outcome: "unknown", evidence: { statusCode: "provider_request_key_mismatch", statusMessage: "mismatch", observedAt: "2026-08-05T00:20:00.000Z", requestKeyMatched: false } }) },
+  ]) {
+    const current = makeDeps(overrides)
+    const denied = await json(await createRegistrationCustomerMessageRouteHandlers(current.deps).check(
+      request("/check", { method: "POST", body: JSON.stringify({ messageId: IDS.message }) }),
+    ))
+    assert.equal(denied.response.status, overrides.authenticate ? 403 : 409)
+    assert.equal(current.calls.recordCheck, 0)
+  }
+})
+
+test("admin preflight records only an exact provider match and all admin mutations reject staff", async () => {
+  const preflight = makeDeps({
+    authenticate: async () => ({ actorProfileId: IDS.actor, role: "admin", actorClient: {} }),
+  })
+  const success = await json(await createRegistrationCustomerMessageRouteHandlers(preflight.deps).admin(
+    request("/admin", { method: "POST", body: JSON.stringify({ action: "preflight_template", messageKind: TARGET.messageKind }) }),
+  ))
+  assert.equal(success.response.status, 200)
+  assert.equal(success.body.templateVerified, true)
+  assert.equal(preflight.calls.receipt, 1)
+
+  const drift = makeDeps({
+    authenticate: async () => ({ actorProfileId: IDS.actor, role: "admin", actorClient: {} }),
+    preflightTemplate: async () => ({ matched: false, code: "template_drift" }),
+  })
+  const blocked = await json(await createRegistrationCustomerMessageRouteHandlers(drift.deps).admin(
+    request("/admin", { method: "POST", body: JSON.stringify({ action: "preflight_template", messageKind: TARGET.messageKind }) }),
+  ))
+  assert.equal(blocked.response.status, 409)
+  assert.equal(drift.calls.receipt, 0)
+
+  const outage = makeDeps({
+    authenticate: async () => ({ actorProfileId: IDS.actor, role: "admin", actorClient: {} }),
+    preflightTemplate: async () => ({ matched: false, code: "provider_unavailable" }),
+  })
+  const unavailable = await json(await createRegistrationCustomerMessageRouteHandlers(outage.deps).admin(
+    request("/admin", { method: "POST", body: JSON.stringify({ action: "preflight_template", messageKind: TARGET.messageKind }) }),
+  ))
+  assert.equal(unavailable.response.status, 503)
+  assert.equal(outage.calls.receipt, 0)
+
+  for (const action of [
+    { action: "set_activation", messageKind: TARGET.messageKind, mode: "off", requestKey: IDS.request },
+    { action: "record_live_test_receipt", messageKind: TARGET.messageKind, messageId: IDS.message, receivedAt: "2026-08-05T00:20:00.000Z", requestKey: IDS.request },
+    { action: "release_pre_send", messageId: IDS.message, reason: "확인", requestKey: IDS.request },
+    { action: "reconcile", messageId: IDS.message, resolution: "accepted", evidence: { providerMessageId: "provider-message-1", statusCode: "4000", statusMessage: "성공", observedAt: "2026-08-05T00:20:00.000Z", requestKeyMatched: true }, reason: "확인", requestKey: IDS.request },
+  ]) {
+    const staff = makeDeps()
+    const denied = await json(await createRegistrationCustomerMessageRouteHandlers(staff.deps).admin(
+      request("/admin", { method: "POST", body: JSON.stringify(action) }),
+    ))
+    assert.equal(denied.response.status, 403)
+    assert.equal(staff.calls.admin, 0)
+  }
+})
+
+test("admin mutation responses are reduced to action-specific public DTOs", async () => {
+  const { deps } = makeDeps({
+    authenticate: async () => ({ actorProfileId: IDS.actor, role: "admin", actorClient: {} }),
+    performAdminAction: async () => ({
+      messageKind: TARGET.messageKind,
+      activationMode: "off",
+      updatedAt: "2026-08-05T00:30:00.000Z",
+      liveTestRecorded: true,
+      providerEvidence: { secret: "must-not-escape" },
+    }),
+  })
+  const result = await json(await createRegistrationCustomerMessageRouteHandlers(deps).admin(
+    request("/admin", { method: "POST", body: JSON.stringify({
+      action: "set_activation",
+      messageKind: TARGET.messageKind,
+      mode: "off",
+      requestKey: IDS.request,
+    }) }),
+  ))
+  assert.equal(result.response.status, 200)
+  assert.deepEqual(result.body, {
+    ok: true,
+    messageKind: TARGET.messageKind,
+    activationMode: "off",
+    updatedAt: "2026-08-05T00:30:00.000Z",
+  })
+  assert.equal(JSON.stringify(result.body).includes("secret"), false)
 })
