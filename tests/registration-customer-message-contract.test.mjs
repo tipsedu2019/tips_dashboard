@@ -41,6 +41,7 @@ test("browser-safe runtime unions expose exactly the approved customer-message v
     "source_invalid",
     "source_dirty",
     "duplicate_locked",
+    "role_not_authorized",
   ])
 })
 

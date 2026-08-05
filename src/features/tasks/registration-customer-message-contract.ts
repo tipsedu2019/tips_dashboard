@@ -40,6 +40,7 @@ export const REGISTRATION_CUSTOMER_MESSAGE_READINESS_CODES = Object.freeze([
   "source_invalid",
   "source_dirty",
   "duplicate_locked",
+  "role_not_authorized",
 ] as const)
 
 export type RegistrationCustomerMessageReadinessCode =

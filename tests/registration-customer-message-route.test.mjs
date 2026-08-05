@@ -92,6 +92,20 @@ const ACTIVE_READINESS = Object.freeze({
   blockers: Object.freeze([]),
 })
 
+const TEACHER_HISTORY_READINESS = Object.freeze({
+  runtimeReady: false,
+  activationMode: "off",
+  activationEligible: false,
+  credentialsConfigured: false,
+  pfConfigured: false,
+  templateConfigured: false,
+  templateVerified: false,
+  verifiedAt: null,
+  sourceValid: false,
+  sendAllowed: false,
+  blockers: Object.freeze(["role_not_authorized"]),
+})
+
 const HISTORY = Object.freeze([{
   messageId: IDS.message,
   messageKind: "waiting_notice",
@@ -599,11 +613,11 @@ test("history uses strict query input and masks teacher-only fields", async () =
     assert.deepEqual(result.body, {
       ok: true,
       messageKind: TARGET.messageKind,
-      readiness: ACTIVE_READINESS,
+      readiness: role === "teacher" ? TEACHER_HISTORY_READINESS : ACTIVE_READINESS,
       history: expected,
     })
-    assert.equal(calls.resolve, 1)
-    assert.equal(calls.readiness, 1)
+    assert.equal(calls.resolve, role === "teacher" ? 0 : 1)
+    assert.equal(calls.readiness, role === "teacher" ? 0 : 1)
     assert.equal(calls.history, 1)
     assert.equal(calls.resolveTaskId, role === "teacher" ? 0 : 1)
   }
@@ -631,6 +645,76 @@ test("assigned-teacher history delegates visibility to the masked service RPC", 
     code: "registration_customer_message_source_not_found",
   })
   assert.equal(calls.authorize, 0)
+})
+
+test("teacher history stays masked and skips operator-only source and readiness dependencies", async () => {
+  const restrictedCalls = {
+    authorizeTask: 0,
+    resolveSource: 0,
+    getReadiness: 0,
+    history: 0,
+  }
+  const { deps, calls } = makeDeps({
+    authenticate: async () => ({ actorProfileId: IDS.actor, role: "teacher", actorClient: {} }),
+    authorizeTask: async () => {
+      restrictedCalls.authorizeTask += 1
+      throw new Error("teacher_must_not_authorize_operator_task")
+    },
+    resolveSource: async () => {
+      restrictedCalls.resolveSource += 1
+      throw new Error("teacher_must_not_resolve_operator_source")
+    },
+    getReadiness: async () => {
+      restrictedCalls.getReadiness += 1
+      throw new Error("teacher_must_not_read_operator_readiness")
+    },
+    listHistory: async (input) => {
+      restrictedCalls.history += 1
+      assert.deepEqual({
+        actorProfileId: input.actorProfileId,
+        messageKind: input.messageKind,
+        sourceId: input.sourceId,
+        limit: input.limit,
+        role: input.context.role,
+      }, {
+        actorProfileId: IDS.actor,
+        ...TARGET,
+        limit: 20,
+        role: "teacher",
+      })
+      return HISTORY
+    },
+  })
+
+  const result = await json(await createRegistrationCustomerMessageRouteHandlers(deps).messages(
+    request(`/messages?messageKind=${TARGET.messageKind}&sourceId=${TARGET.sourceId}`),
+  ))
+
+  assert.equal(result.response.status, 200)
+  assert.deepEqual(result.body, {
+    ok: true,
+    messageKind: TARGET.messageKind,
+    readiness: TEACHER_HISTORY_READINESS,
+    history: [{
+      messageKind: "waiting_notice",
+      currentStatus: "pending",
+      confirmedAt: "2026-08-05T00:05:00.000Z",
+      updatedAt: "2026-08-05T00:06:00.000Z",
+    }],
+  })
+  assert.deepEqual(restrictedCalls, {
+    authorizeTask: 0,
+    resolveSource: 0,
+    getReadiness: 0,
+    history: 1,
+  })
+  assert.equal(calls.resolveTaskId, 0)
+  assert.equal(calls.providerSend, 0)
+  assert.equal(calls.providerLookup, 0)
+  const serialized = JSON.stringify(result.body)
+  for (const forbidden of ["messageId", "recipientLast4", "canCheck", "providerMessageId", "providerGroupId"]) {
+    assert.equal(serialized.includes(forbidden), false, forbidden)
+  }
 })
 
 test("history and readiness failures stay public, stable, and provider-free", async () => {

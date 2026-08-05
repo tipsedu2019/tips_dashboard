@@ -173,6 +173,19 @@ const OPERATOR_ROLES = Object.freeze(["admin", "staff"])
 const HISTORY_ROLES = Object.freeze(["admin", "staff", "teacher"])
 const MESSAGE_STATUSES = new Set(["pending", "accepted", "unknown", "failed_hold"])
 const READINESS_CODES = new Set(REGISTRATION_CUSTOMER_MESSAGE_READINESS_CODES)
+const TEACHER_HISTORY_READINESS: RegistrationCustomerMessageReadiness = Object.freeze({
+  runtimeReady: false,
+  activationMode: "off",
+  activationEligible: false,
+  credentialsConfigured: false,
+  pfConfigured: false,
+  templateConfigured: false,
+  templateVerified: false,
+  verifiedAt: null,
+  sourceValid: false,
+  sendAllowed: false,
+  blockers: ["role_not_authorized"] as RegistrationCustomerMessageReadiness["blockers"],
+})
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -840,19 +853,31 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
         const target = historyTarget(request)
         const context = await dependencies.authenticate(request)
         requireRole(context, HISTORY_ROLES)
-        let authorizedTaskId: string | null = null
-        if (context.role !== "teacher") {
-          authorizedTaskId = await dependencies.resolveTaskId({ ...target, context })
-          if (!authorizedTaskId || !await dependencies.authorizeTask(context, authorizedTaskId)) {
-            httpError(404, "registration_customer_message_source_not_found")
-          }
+        if (context.role === "teacher") {
+          const historyValue = await dependencies.listHistory({
+            actorProfileId: context.actorProfileId,
+            ...target,
+            limit: 20,
+            context,
+          })
+          const payload = Object.freeze({
+            ok: true,
+            messageKind: target.messageKind,
+            readiness: TEACHER_HISTORY_READINESS,
+            history: history(historyValue, context.role, target.messageKind),
+          })
+          return json(assertRegistrationCustomerMessagePublicPayload(payload))
+        }
+        const authorizedTaskId = await dependencies.resolveTaskId({ ...target, context })
+        if (!authorizedTaskId || !await dependencies.authorizeTask(context, authorizedTaskId)) {
+          httpError(404, "registration_customer_message_source_not_found")
         }
         const source = await resolvePreviewSource(dependencies, {
           actorProfileId: context.actorProfileId,
           ...target,
           context,
         })
-        if (authorizedTaskId && source.taskId !== authorizedTaskId) {
+        if (source.taskId !== authorizedTaskId) {
           httpError(503, "registration_customer_message_source_unavailable")
         }
         const privateSource = dependencies.readPrivateSource(source)
