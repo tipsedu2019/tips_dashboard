@@ -109,7 +109,7 @@ create table public.ops_registration_customer_messages (
   source_fingerprint text not null check (source_fingerprint ~ '^[a-f0-9]{64}$'),
   source_revision bigint,
   recipient_hash text not null check (recipient_hash ~ '^[a-f0-9]{64}$'),
-  recipient_last4 text not null check (recipient_last4 ~ '^[0-9]{4}$'),
+  recipient_last4 text not null,
   template_key text not null,
   template_revision integer not null check (template_revision > 0),
   template_checksum text not null check (template_checksum ~ '^[a-f0-9]{64}$'),

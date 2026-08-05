@@ -178,6 +178,30 @@ test("storage migration is one bounded inert transaction", async () => {
   )
 })
 
+test("storage migration gives recipient_last4 one effective named check", async () => {
+  const source = await readRequired(storageMigrationUrl, "storage migration")
+  const outbox = createTableBlock(
+    source,
+    "public.ops_registration_customer_messages",
+  )
+  const normalized = normalizeSql(outbox)
+
+  assert.doesNotMatch(
+    normalized,
+    /recipient_last4 text not null check\s*\(/,
+    "an unnamed inline check collides with the explicit clean-migration constraint name",
+  )
+  assert.equal(
+    (
+      normalized.match(
+        /constraint ops_registration_customer_messages_recipient_last4_check check\s*\(/g,
+      ) || []
+    ).length,
+    1,
+    "recipient_last4 must retain exactly one explicit named check",
+  )
+})
+
 test("preview storage keeps only source identities, checksums, and masked recipient evidence", async () => {
   const source = await readRequired(storageMigrationUrl, "storage migration")
   const normalized = normalizeSql(source)
