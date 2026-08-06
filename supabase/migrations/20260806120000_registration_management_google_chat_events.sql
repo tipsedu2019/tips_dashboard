@@ -22,6 +22,16 @@ select $notification_contract_extension$
 $notification_contract_extension$::jsonb;
 -- notification_content_contract_extension_fixture_end
 
+-- notification_system_template_extension_fixture_begin
+select $notification_system_template_extension$
+[
+  {"workflowKey":"registration","eventKey":"registration.consultation_completed","titleTemplate":"✅ [등록] {student_name} 상담이 완료됐어요","bodyTemplate":"[학생] {student_name}\n[과목] {subjects}\n[상태] {current_status}\n{progress_line}"},
+  {"workflowKey":"registration","eventKey":"registration.waiting_transitioned","titleTemplate":"⏳ [등록] {student_name} 대기 신청이 접수됐어요","bodyTemplate":"[학생] {student_name}\n[과목] {subjects}\n[상태] {current_status}\n{progress_line}"},
+  {"workflowKey":"registration","eventKey":"registration.admission_started","titleTemplate":"📝 [등록] {student_name} 등록 신청이 접수됐어요","bodyTemplate":"[학생] {student_name}\n[과목] {subjects}\n[상태] {current_status}\n{progress_line}"}
+]
+$notification_system_template_extension$::jsonb;
+-- notification_system_template_extension_fixture_end
+
 with event_catalog(event_key, event_label, trigger_description, event_sort) as (
   values
     ('registration.consultation_completed'::text, '상담 완료'::text, '상담 완료 상태가 저장되었을 때'::text, 4),
@@ -189,18 +199,18 @@ with registry as (
   values
     (
       'registration.consultation_completed'::text,
-      '✅ [등록] {학생} 상담이 완료됐어요'::text,
-      E'[학생] {학생}\n[과목] {과목}\n[상태] {현재상태}\n{진행정보}'::text
+      '✅ [등록] {student_name} 상담이 완료됐어요'::text,
+      E'[학생] {student_name}\n[과목] {subjects}\n[상태] {current_status}\n{progress_line}'::text
     ),
     (
       'registration.waiting_transitioned'::text,
-      '⏳ [등록] {학생} 대기 신청이 접수됐어요'::text,
-      E'[학생] {학생}\n[과목] {과목}\n[상태] {현재상태}\n{진행정보}'::text
+      '⏳ [등록] {student_name} 대기 신청이 접수됐어요'::text,
+      E'[학생] {student_name}\n[과목] {subjects}\n[상태] {current_status}\n{progress_line}'::text
     ),
     (
       'registration.admission_started'::text,
-      '📝 [등록] {학생} 등록 신청이 접수됐어요'::text,
-      E'[학생] {학생}\n[과목] {과목}\n[상태] {현재상태}\n{진행정보}'::text
+      '📝 [등록] {student_name} 등록 신청이 접수됐어요'::text,
+      E'[학생] {student_name}\n[과목] {subjects}\n[상태] {current_status}\n{progress_line}'::text
     )
 ), candidates as (
   select

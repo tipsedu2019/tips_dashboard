@@ -8,6 +8,7 @@ import type {
   NotificationTemplateWarning,
   NotificationWorkflowKey,
 } from "./notification-control-plane-types.ts"
+import { toNotificationKoreanTemplate } from "./notification-template-preview.ts"
 
 export type NotificationRuleDraft = {
   enabled: boolean
@@ -132,8 +133,14 @@ export function createNotificationDraft(
     rules[rule.id] = {
       enabled: rule.enabled,
       scheduleConfig: cloneScheduleConfig(rule.scheduleConfig),
-      titleTemplate: rule.template.titleTemplate,
-      bodyTemplate: rule.template.bodyTemplate,
+      titleTemplate: toNotificationKoreanTemplate(
+        rule.template.titleTemplate,
+        rule.contentContract.availableVariables,
+      ),
+      bodyTemplate: toNotificationKoreanTemplate(
+        rule.template.bodyTemplate,
+        rule.contentContract.availableVariables,
+      ),
     }
   }
   return { workflowKey: snapshot.workflowKey, rules }
@@ -202,7 +209,7 @@ function validateTemplate(
   const path = `rules.${rule.id}.${field}`
   const { tokens, malformed } = extractTemplateTokens(value)
   const allowedTokens = new Set(
-    rule.contentContract.availableVariables.map(({ key }) => key),
+    rule.contentContract.availableVariables.map(({ token }) => token),
   )
 
   if (malformed) {
@@ -250,12 +257,12 @@ function validateContentContract(
 
   for (const token of rule.contentContract.requiredTokens) {
     const variable = variableByToken.get(token)
-    if (variable && !combined.includes(`{${variable.key}}`)) {
+    if (variable && !combined.includes(`{${variable.token}}`)) {
       issues.push(
         createIssue(
           "template_required_token_missing",
           `rules.${rule.id}.bodyTemplate`,
-          `{${variable.key}} 필수 변수를 제목이나 본문에 넣어 주세요.`,
+          `{${variable.token}} 필수 변수를 제목이나 본문에 넣어 주세요.`,
         ),
       )
     }
@@ -265,7 +272,7 @@ function validateContentContract(
   for (const token of rule.contentContract.optionalLineTokens) {
     const variable = variableByToken.get(token)
     if (!variable) continue
-    const marker = `{${variable.key}}`
+    const marker = `{${variable.token}}`
     if (
       combined.includes(marker) &&
       (draft.titleTemplate.includes(marker) || !bodyLines.includes(marker))

@@ -48,6 +48,7 @@ import {
   type NotificationWorkflowKey,
 } from "./notification-control-plane-types"
 import { GOOGLE_CHAT_CONNECTION_LABELS } from "./notification-google-chat-catalog"
+import { buildNotificationTemplatePreview } from "./notification-template-preview"
 import { useNotificationNavigationGuard } from "./use-notification-navigation-guard"
 
 export type NotificationControlPlaneAvailability = {
@@ -618,6 +619,11 @@ function TemplateEditor({ snapshot, rule, draft, saving, onOpenChange, onChange 
   )
   const requiredTokens = new Set(rule.contentContract.requiredTokens)
   const optionalLineTokens = new Set(rule.contentContract.optionalLineTokens)
+  const preview = buildNotificationTemplatePreview({
+    titleTemplate: value.titleTemplate,
+    bodyTemplate: value.bodyTemplate,
+    availableVariables: rule.contentContract.availableVariables,
+  })
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
@@ -667,6 +673,17 @@ function TemplateEditor({ snapshot, rule, draft, saving, onOpenChange, onChange 
               rows={7}
               onChange={(event) => onChange(rule.id, { bodyTemplate: event.target.value })}
             />
+          </div>
+          <div aria-label="알림 내용 미리보기" className="space-y-2">
+            <p className="text-sm font-medium">미리보기</p>
+            <div className="rounded-lg border bg-background p-4 shadow-sm">
+              <p className="font-semibold leading-6">
+                {preview.title || "제목을 입력해 주세요."}
+              </p>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                {preview.body || "본문을 입력해 주세요."}
+              </p>
+            </div>
           </div>
           {schedule && "leadMinutes" in schedule ? (
             <div className="space-y-2">
@@ -720,8 +737,7 @@ function TemplateEditor({ snapshot, rule, draft, saving, onOpenChange, onChange 
                       variant={required ? "default" : "secondary"}
                       className="gap-1.5"
                     >
-                      <code>{`{${variable.key}}`}</code>
-                      <span>{variable.token}</span>
+                      <code>{`{${variable.token}}`}</code>
                       <span className="opacity-70">
                         {required ? "필수" : optionalLine ? "선택 행" : "선택"}
                       </span>

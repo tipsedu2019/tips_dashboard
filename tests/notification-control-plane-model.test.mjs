@@ -459,6 +459,25 @@ test("builds an explicit minimal patch from operator-changed fields only", () =>
   assert.deepEqual(buildNotificationPatch(base, structuredClone(base)), { rules: {} })
 })
 
+test("편집 초안은 내부 키를 숨기고 한국어 변수만 검증·저장한다", () => {
+  const snapshot = parseSnapshot()
+  const draft = createNotificationDraft(snapshot)
+  const rule = draft.rules["rule-registration-visit-management"]
+
+  assert.equal(rule.titleTemplate, "[방문상담] {학생}")
+  assert.equal(
+    rule.bodyTemplate,
+    "[학생] {학생}\n[과목] {과목}\n[일정] {새일정}\n[장소] {새장소}\n{진행정보}",
+  )
+  assert.equal(validateNotificationDraft(snapshot, draft).ok, true)
+
+  rule.bodyTemplate += "\n{subjects}"
+  assert.equal(
+    issueCodes(validateNotificationDraft(snapshot, draft)).includes("template_token_not_allowed"),
+    true,
+  )
+})
+
 test("rejects extra schedule fields and emits only the closed schedule patch", () => {
   const wire = createWireSnapshot()
   wire.rules[0].delivery_mode = "scheduled"
@@ -519,7 +538,7 @@ test("blocks a draft that omits a current-contract required variable", () => {
   const draft = createNotificationDraft(snapshot)
   draft.rules["rule-registration-visit-management"].bodyTemplate =
     draft.rules["rule-registration-visit-management"].bodyTemplate.replace(
-      "[과목] {subjects}\n",
+      "[과목] {과목}\n",
       "",
     )
 
@@ -532,8 +551,8 @@ test("blocks an optional complete-line variable placed inside explanatory copy",
   const draft = createNotificationDraft(snapshot)
   draft.rules["rule-registration-visit-management"].bodyTemplate =
     draft.rules["rule-registration-visit-management"].bodyTemplate.replace(
-      "{progress_line}",
-      "[진행] {progress_line}",
+      "{진행정보}",
+      "[진행] {진행정보}",
     )
 
   const result = validateNotificationDraft(snapshot, draft)
@@ -564,7 +583,7 @@ test("counts Korean title guidance by grapheme cluster without blocking save", (
   const snapshot = parseSnapshot()
   const draft = createNotificationDraft(snapshot)
   draft.rules["rule-registration-visit-management"].titleTemplate =
-    `${"👨‍👩‍👧‍👦".repeat(61)} {student_name}`
+    `${"👨‍👩‍👧‍👦".repeat(61)} {학생}`
 
   const result = notificationControlPlaneModel.evaluateNotificationDraft(snapshot, draft)
   assert.equal(result.validation.ok, true)

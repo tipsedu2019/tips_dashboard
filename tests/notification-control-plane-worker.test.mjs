@@ -2351,7 +2351,25 @@ test("Google Chat provider는 주입 fetch만 쓰고 확정 성공·429·영구 
   assert.equal(provider.send.length, 1, "provider send는 begun context 한 인자만 받아야 한다")
   assertProviderResult(await provider.send(createBegunGoogleChatContext()), "sent", null)
   assert.deepEqual(JSON.parse(ledger[0].init.body), {
-    text: "새 할 일\n\n확인할 할 일이 있습니다.\n\nhttps://tipsedu.co.kr/admin/tasks",
+    cardsV2: [{
+      cardId: "tips-dashboard-notification",
+      card: {
+        header: { title: "새 할 일" },
+        sections: [{
+          widgets: [
+            { textParagraph: { text: "확인할 할 일이 있습니다." } },
+            {
+              buttonList: {
+                buttons: [{
+                  text: "대시보드에서 보기",
+                  onClick: { openLink: { url: "https://tipsedu.co.kr/admin/tasks" } },
+                }],
+              },
+            },
+          ],
+        }],
+      },
+    }],
   })
   assertProviderResult(
     await provider.send(createBegunGoogleChatContext()),

@@ -11,6 +11,10 @@ const promotionMigrationUrl = new URL(
   "../supabase/migrations/20260805100000_notification_system_template_vnext_promotion.sql",
   import.meta.url,
 )
+const registrationManagementMigrationUrl = new URL(
+  "../supabase/migrations/20260806120000_registration_management_google_chat_events.sql",
+  import.meta.url,
+)
 const templateVariableWireMigrationUrl = new URL(
   "../supabase/migrations/20260805101000_notification_control_plane_template_variable_wire_contract.sql",
   import.meta.url,
@@ -64,6 +68,14 @@ function embeddedEventTemplates(migration) {
   return JSON.parse(match[1])
 }
 
+function embeddedEventTemplateExtension(migration) {
+  const match = migration.match(
+    /notification_system_template_extension_fixture_begin\s*select\s*\$notification_system_template_extension\$([\s\S]*?)\$notification_system_template_extension\$::jsonb;\s*-- notification_system_template_extension_fixture_end/u,
+  )
+  assert.ok(match, "registration migration must embed the reviewed template extension")
+  return JSON.parse(match[1])
+}
+
 function functionBlock(source, qualifiedName) {
   const escaped = qualifiedName.replaceAll(".", "\\.")
   const match = source.match(new RegExp(
@@ -85,7 +97,7 @@ test("golden fixture resolves an exact self-contained message for every registry
 
   assert.equal(fixture.schemaVersion, 1)
   assert.equal(fixture.contractVersion, "1")
-  assert.equal(fixture.eventGoldens.length, 48)
+  assert.equal(fixture.eventGoldens.length, 51)
   assert.equal(fixture.ruleIdentities.length, contracts.length)
   assert.equal(actualIdentities.size, fixture.ruleIdentities.length)
   assert.deepEqual([...actualIdentities].sort(), [...expectedIdentities].sort())
@@ -129,18 +141,23 @@ test("fixture keeps the three approved representative messages byte-exact", asyn
   ])
 })
 
-test("migration installs one deterministic append-only system template from the latest contract", async () => {
-  const [fixture, migration] = await Promise.all([loadFixture(), loadMigration()])
+test("migrations install deterministic append-only system templates from the latest contract", async () => {
+  const [fixture, migration, extensionMigration] = await Promise.all([
+    loadFixture(),
+    loadMigration(),
+    readFile(registrationManagementMigrationUrl, "utf8"),
+  ])
   const embedded = embeddedEventTemplates(migration)
-  assert.deepEqual(
-    embedded,
-    fixture.eventGoldens.map(({ workflowKey, eventKey, titleTemplate, bodyTemplate }) => ({
+  const extension = embeddedEventTemplateExtension(extensionMigration)
+  const expected = fixture.eventGoldens.map(({ workflowKey, eventKey, titleTemplate, bodyTemplate }) => ({
       workflowKey,
       eventKey,
       titleTemplate,
       bodyTemplate,
-    })),
-  )
+    }))
+  const extensionKeys = new Set(extension.map(({ eventKey }) => eventKey))
+  assert.deepEqual(embedded, expected.filter(({ eventKey }) => !extensionKeys.has(eventKey)))
+  assert.deepEqual(extension, expected.filter(({ eventKey }) => extensionKeys.has(eventKey)))
 
   const install = functionBlock(
     migration,

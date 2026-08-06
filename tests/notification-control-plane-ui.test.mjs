@@ -134,6 +134,24 @@ test("템플릿 편집기는 최신 계약의 필수 값과 선택 행을 구분
   assert.doesNotMatch(editorSource, /rule\.template\.allowedVariables\.map/)
 })
 
+test("템플릿 편집기는 한국어 변수만 보여주고 제목·본문 실시간 미리보기를 제공한다", async () => {
+  const source = await readOptionalSource(
+    "src/features/notifications/notification-control-panel.tsx",
+  )
+  const editorSource = source.slice(
+    source.indexOf("function TemplateEditor"),
+    source.indexOf("type ConnectionsViewProps"),
+  )
+
+  assert.match(source, /buildNotificationTemplatePreview/)
+  assert.match(editorSource, /aria-label="알림 내용 미리보기"/)
+  assert.match(editorSource, />미리보기</)
+  assert.match(editorSource, /preview\.title/)
+  assert.match(editorSource, /preview\.body/)
+  assert.match(editorSource, /\{`\{\$\{variable\.token\}\}`\}/)
+  assert.doesNotMatch(editorSource, /\{`\{\$\{variable\.key\}\}`\}/)
+})
+
 test("고정 등록 전달 정책은 스위치 없이 잠금 상태와 44px 내용 수정 동작만 제공한다", async () => {
   const source = await readOptionalSource(
     "src/features/notifications/notification-control-panel.tsx",
