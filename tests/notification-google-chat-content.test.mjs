@@ -34,24 +34,42 @@ function context(overrides = {}) {
   }
 }
 
-test("Google Chat 최종 payload는 제목·본문·고정 origin 링크를 빈 줄로 구분하고 URL을 한 번만 담는다", async () => {
-  const { buildGoogleChatTextPayload, createGoogleChatProvider } = await import(providerUrl.href)
-  const built = buildGoogleChatTextPayload(context())
+test("Google Chat 최종 payload는 URL 없는 카드 본문과 대시보드 버튼을 담는다", async () => {
+  const { buildGoogleChatCardPayload, createGoogleChatProvider } = await import(providerUrl.href)
+  const built = buildGoogleChatCardPayload(context())
   const expectedUrl =
     "https://tipsedu.co.kr/admin/registration?taskId=10000000-0000-4000-8000-000000000004"
-  const expectedText = [
-    "📥 [등록] 김학생의 등록 문의가 들어왔어요",
-    "[학생] 김학생 · 중1\n[과목] 수학\n[진행] 관리팀의 확인을 기다리고 있어요.",
-    expectedUrl,
-  ].join("\n\n")
+  const expectedPayload = {
+    cardsV2: [{
+      cardId: "tips-dashboard-notification",
+      card: {
+        header: { title: "📥 [등록] 김학생의 등록 문의가 들어왔어요" },
+        sections: [{
+          widgets: [
+            { textParagraph: { text: "[학생] 김학생 · 중1<br>[과목] 수학<br>[진행] 관리팀의 확인을 기다리고 있어요." } },
+            {
+              buttonList: {
+                buttons: [{
+                  text: "대시보드에서 보기",
+                  onClick: { openLink: { url: expectedUrl } },
+                }],
+              },
+            },
+          ],
+        }],
+      },
+    }],
+  }
 
   assert.deepEqual(built, {
     ok: true,
-    text: expectedText,
+    payload: expectedPayload,
     absoluteUrl: expectedUrl,
-    byteLength: Buffer.byteLength(expectedText, "utf8"),
+    byteLength: Buffer.byteLength(JSON.stringify(expectedPayload), "utf8"),
   })
-  assert.equal(built.text.split(expectedUrl).length - 1, 1)
+  assert.equal(JSON.stringify(built.payload).split(expectedUrl).length - 1, 1)
+  assert.doesNotMatch(expectedPayload.cardsV2[0].card.header.title, /https?:\/\//u)
+  assert.doesNotMatch(expectedPayload.cardsV2[0].card.sections[0].widgets[0].textParagraph.text, /https?:\/\//u)
 
   const calls = []
   const provider = createGoogleChatProvider({
@@ -67,11 +85,24 @@ test("Google Chat 최종 payload는 제목·본문·고정 origin 링크를 빈 
 
   assert.equal(sent.status, "sent")
   assert.equal(calls.length, 1)
-  assert.deepEqual(JSON.parse(calls[0].init.body), { text: expectedText })
+  assert.deepEqual(JSON.parse(calls[0].init.body), expectedPayload)
+})
+
+test("Google Chat 카드 본문은 HTML을 escape하고 줄바꿈만 보존한다", async () => {
+  const { buildGoogleChatCardPayload } = await import(providerUrl.href)
+  const built = buildGoogleChatCardPayload(context({
+    rendered_body: `A < B & "C" 'D'\n둘째 줄`,
+  }))
+
+  assert.equal(built.ok, true)
+  assert.equal(
+    built.payload.cardsV2[0].card.sections[0].widgets[0].textParagraph.text,
+    "A &lt; B &amp; &quot;C&quot; &#39;D&#39;<br>둘째 줄",
+  )
 })
 
 test("악성·모호한 링크는 transport 전에 render_validation_failed로 닫힌다", async () => {
-  const { buildGoogleChatTextPayload, createGoogleChatProvider } = await import(providerUrl.href)
+  const { buildGoogleChatCardPayload, createGoogleChatProvider } = await import(providerUrl.href)
   const calls = []
   const provider = createGoogleChatProvider({
     async fetch() {
@@ -94,7 +125,7 @@ test("악성·모호한 링크는 transport 전에 render_validation_failed로 �
   ]
 
   for (const href of invalidHrefs) {
-    assert.deepEqual(buildGoogleChatTextPayload(context({ href })), {
+    assert.deepEqual(buildGoogleChatCardPayload(context({ href })), {
       ok: false,
       errorCode: "render_validation_failed",
     })
@@ -107,7 +138,7 @@ test("악성·모호한 링크는 transport 전에 render_validation_failed로 �
 })
 
 test("UTF-8 32,000바이트 경계를 넘거나 본문에 URL이 중복되면 transport를 호출하지 않는다", async () => {
-  const { buildGoogleChatTextPayload, createGoogleChatProvider } = await import(providerUrl.href)
+  const { buildGoogleChatCardPayload, createGoogleChatProvider } = await import(providerUrl.href)
   let calls = 0
   const provider = createGoogleChatProvider({
     async fetch() {
@@ -121,7 +152,7 @@ test("UTF-8 32,000바이트 경계를 넘거나 본문에 URL이 중복되면 tr
   ]
 
   for (const input of inputs) {
-    assert.deepEqual(buildGoogleChatTextPayload(input), {
+    assert.deepEqual(buildGoogleChatCardPayload(input), {
       ok: false,
       errorCode: "render_validation_failed",
     })
@@ -133,14 +164,17 @@ test("UTF-8 32,000바이트 경계를 넘거나 본문에 URL이 중복되면 tr
 })
 
 test("UTF-8 최종 payload는 정확히 32,000바이트까지 허용한다", async () => {
-  const { buildGoogleChatTextPayload } = await import(providerUrl.href)
-  const renderedTitle = "경계"
-  const absoluteUrl = "https://tipsedu.co.kr/admin/tasks"
-  const fixedBytes = Buffer.byteLength(`${renderedTitle}\n\n\n\n${absoluteUrl}`, "utf8")
-  const renderedBody = "a".repeat(32_000 - fixedBytes)
+  const { buildGoogleChatCardPayload } = await import(providerUrl.href)
+  const base = buildGoogleChatCardPayload(context({
+    rendered_title: "경계",
+    rendered_body: "a",
+    href: "/admin/tasks",
+  }))
+  assert.equal(base.ok, true)
+  const renderedBody = "a".repeat(32_000 - base.byteLength + 1)
 
-  const result = buildGoogleChatTextPayload(context({
-    rendered_title: renderedTitle,
+  const result = buildGoogleChatCardPayload(context({
+    rendered_title: "경계",
     rendered_body: renderedBody,
     href: "/admin/tasks",
   }))

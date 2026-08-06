@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url"
 
 import { listNotificationContentContracts } from "../src/features/notifications/notification-content-contract-registry.ts"
 import {
-  buildGoogleChatTextPayload,
+  buildGoogleChatCardPayload,
   createGoogleChatProvider,
 } from "../src/features/notifications/server/providers/google-chat-provider.ts"
 
@@ -231,13 +231,13 @@ export async function runNotificationContentNoSendQa() {
         rendered_body: renderedBody,
         href,
       }
-      const expected = buildGoogleChatTextPayload(context)
+      const expected = buildGoogleChatCardPayload(context)
       assert.equal(expected.ok, true)
       const beforeCalls = fakeFormattingCalls.length
       const sent = await provider.send(context)
       assert.equal(sent.status, "sent")
       assert.equal(fakeFormattingCalls.length, beforeCalls + 1)
-      assert.deepEqual(fakeFormattingCalls.at(-1).payload, { text: expected.text })
+      assert.deepEqual(fakeFormattingCalls.at(-1).payload, expected.payload)
       exactPayloadCount += 1
     }
 

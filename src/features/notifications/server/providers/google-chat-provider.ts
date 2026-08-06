@@ -35,7 +35,9 @@ const GOOGLE_CHAT_APP_ORIGIN = "https://tipsedu.co.kr"
 const EXTERNAL_URL_PATTERN = /(?:https?:\/\/|\/\/)/iu
 const ENCODED_PATH_SEPARATOR_OR_TRAVERSAL = /%(?:2e|2f|5c)/iu
 const RAW_PATH_SEPARATOR_OR_TRAVERSAL = /(?:\\|(?:^|\/)\.{1,2}(?:\/|$))/u
-const MAX_GOOGLE_CHAT_TEXT_BYTES = 32_000
+const MAX_GOOGLE_CHAT_MESSAGE_BYTES = 32_000
+const GOOGLE_CHAT_CARD_ID = "tips-dashboard-notification"
+const GOOGLE_CHAT_BUTTON_TEXT = "대시보드에서 보기"
 const GOOGLE_CHAT_LINK_QUERY_KEYS: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
   "/admin/tasks": new Set(["taskId", "focus"]),
   "/admin/word-retests": new Set(["taskId"]),
@@ -46,10 +48,34 @@ const GOOGLE_CHAT_LINK_QUERY_KEYS: Readonly<Record<string, ReadonlySet<string>>>
   "/admin/approvals": new Set(["approvalId"]),
 })
 
-export type GoogleChatTextPayloadResult =
+export type GoogleChatCardPayload = Readonly<{
+  cardsV2: ReadonlyArray<Readonly<{
+    cardId: string
+    card: Readonly<{
+      header: Readonly<{ title: string }>
+      sections: ReadonlyArray<Readonly<{
+        widgets: ReadonlyArray<
+          | Readonly<{ textParagraph: Readonly<{ text: string }> }>
+          | Readonly<{
+              buttonList: Readonly<{
+                buttons: ReadonlyArray<Readonly<{
+                  text: string
+                  onClick: Readonly<{
+                    openLink: Readonly<{ url: string }>
+                  }>
+                }>>
+              }>
+            }>
+        >
+      }>>
+    }>
+  }>>
+}>
+
+export type GoogleChatCardPayloadResult =
   | Readonly<{
       ok: true
-      text: string
+      payload: GoogleChatCardPayload
       absoluteUrl: string
       byteLength: number
     }>
@@ -131,10 +157,21 @@ function absoluteGoogleChatAppHref(value: unknown) {
   }
 }
 
-export function buildGoogleChatTextPayload(input: Pick<
+function escapeGoogleChatCardText(value: string) {
+  return value
+    .replace(/&/gu, "&amp;")
+    .replace(/</gu, "&lt;")
+    .replace(/>/gu, "&gt;")
+    .replace(/"/gu, "&quot;")
+    .replace(/'/gu, "&#39;")
+    .replace(/\r\n?/gu, "\n")
+    .replace(/\n/gu, "<br>")
+}
+
+export function buildGoogleChatCardPayload(input: Pick<
   GoogleChatBegunDeliveryContext,
   "rendered_title" | "rendered_body" | "href"
->): GoogleChatTextPayloadResult {
+>): GoogleChatCardPayloadResult {
   if (
     !input ||
     typeof input.rendered_title !== "string" ||
@@ -147,12 +184,38 @@ export function buildGoogleChatTextPayload(input: Pick<
 
   const absoluteUrl = absoluteGoogleChatAppHref(input.href)
   if (!absoluteUrl) return { ok: false, errorCode: "render_validation_failed" }
-  const text = `${input.rendered_title}\n\n${input.rendered_body}\n\n${absoluteUrl}`
-  const byteLength = Buffer.byteLength(text, "utf8")
-  if (byteLength > MAX_GOOGLE_CHAT_TEXT_BYTES) {
+  const payload: GoogleChatCardPayload = Object.freeze({
+    cardsV2: Object.freeze([Object.freeze({
+      cardId: GOOGLE_CHAT_CARD_ID,
+      card: Object.freeze({
+        header: Object.freeze({ title: input.rendered_title }),
+        sections: Object.freeze([Object.freeze({
+          widgets: Object.freeze([
+            Object.freeze({
+              textParagraph: Object.freeze({
+                text: escapeGoogleChatCardText(input.rendered_body),
+              }),
+            }),
+            Object.freeze({
+              buttonList: Object.freeze({
+                buttons: Object.freeze([Object.freeze({
+                  text: GOOGLE_CHAT_BUTTON_TEXT,
+                  onClick: Object.freeze({
+                    openLink: Object.freeze({ url: absoluteUrl }),
+                  }),
+                })]),
+              }),
+            }),
+          ]),
+        })]),
+      }),
+    })]),
+  })
+  const byteLength = Buffer.byteLength(JSON.stringify(payload), "utf8")
+  if (byteLength > MAX_GOOGLE_CHAT_MESSAGE_BYTES) {
     return { ok: false, errorCode: "render_validation_failed" }
   }
-  return { ok: true, text, absoluteUrl, byteLength }
+  return { ok: true, payload, absoluteUrl, byteLength }
 }
 
 function nextRetryAt() {
@@ -213,8 +276,8 @@ export function createGoogleChatProvider(input: {
           errorSummary: "provider connection unavailable",
         })
       }
-      const payload = buildGoogleChatTextPayload(context)
-      if (!payload.ok) {
+      const built = buildGoogleChatCardPayload(context)
+      if (!built.ok) {
         return result("failed", "render_validation_failed", {
           errorCode: "render_validation_failed",
           errorSummary: "notification content invalid",
@@ -226,9 +289,7 @@ export function createGoogleChatProvider(input: {
         response = await transport(webhookUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: payload.text,
-          }),
+          body: JSON.stringify(built.payload),
         })
       } catch (error) {
         return classifyTransportError(error)
