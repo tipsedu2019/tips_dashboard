@@ -45,6 +45,7 @@ export type RegistrationCustomerMessageMaskedHistoryItem =
   | Readonly<{
       messageKind: RegistrationCustomerMessageKind
       currentStatus: RegistrationCustomerMessageStatus
+      confirmedByName: string
       confirmedAt: string
       updatedAt: string
     }>
@@ -363,12 +364,14 @@ function historyItem(
     !isRegistrationCustomerMessageKind(value.messageKind)
     || value.messageKind !== expectedKind
     || !MESSAGE_STATUSES.has(value.currentStatus as string)
+    || !text(value.confirmedByName, 100)
     || !isTimestamp(value.confirmedAt)
     || !isTimestamp(value.updatedAt)
   ) httpError(503, "registration_customer_message_history_unavailable")
   const base = {
     messageKind: value.messageKind,
     currentStatus: value.currentStatus as RegistrationCustomerMessageStatus,
+    confirmedByName: text(value.confirmedByName, 100),
     confirmedAt: value.confirmedAt as string,
     updatedAt: value.updatedAt as string,
   }
@@ -428,6 +431,7 @@ function sendResult(value: unknown): PrivateSendResult {
     || !isRegistrationCustomerMessageKind(value.messageKind)
     || !MESSAGE_STATUSES.has(value.currentStatus as string)
     || !/^\d{4}$/u.test(text(value.recipientLast4))
+    || !text(value.confirmedByName, 100)
     || !isTimestamp(value.confirmedAt)
     || !isTimestamp(value.updatedAt)
     || typeof value.canCheck !== "boolean"
@@ -442,6 +446,7 @@ function sendResult(value: unknown): PrivateSendResult {
     messageKind: value.messageKind,
     currentStatus: value.currentStatus as RegistrationCustomerMessageStatus,
     recipientLast4: value.recipientLast4 as string,
+    confirmedByName: text(value.confirmedByName, 100),
     confirmedAt: value.confirmedAt as string,
     updatedAt: value.updatedAt as string,
     canCheck: value.canCheck,
@@ -459,6 +464,7 @@ function publicSendResult(value: PrivateSendResult): RegistrationCustomerMessage
     messageKind: value.messageKind,
     currentStatus: value.currentStatus,
     recipientLast4: value.recipientLast4,
+    confirmedByName: value.confirmedByName,
     confirmedAt: value.confirmedAt,
     updatedAt: value.updatedAt,
     canCheck: value.canCheck,

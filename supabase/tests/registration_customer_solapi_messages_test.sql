@@ -184,7 +184,10 @@ select is_empty($$
       ('ops_registration_customer_messages_preview_id_key'),
       ('ops_registration_customer_messages_dedupe_key_key'),
       ('ops_registration_customer_messages_request_key_key'),
-      ('ops_registration_customer_messages_dispatch_token_key')
+      ('ops_registration_customer_messages_dispatch_token_key'),
+      ('ops_reg_customer_msg_appointment_once_idx'),
+      ('ops_reg_customer_msg_waiting_once_idx'),
+      ('ops_reg_customer_msg_admission_once_idx')
   )
   select expected.index_name
   from expected
@@ -775,7 +778,8 @@ insert into public.ops_registration_appointments(
   ('95000000-0000-4000-8000-000000000602', '95000000-0000-4000-8000-000000000500', 'visit_consultation', clock_timestamp() + interval '2 days', '별관', 'scheduled', 3, '95000000-0000-4000-8000-000000000001'),
   ('95000000-0000-4000-8000-000000000603', '95000000-0000-4000-8000-000000000500', 'level_test', clock_timestamp() + interval '3 days', '본관', 'canceled', 1, '95000000-0000-4000-8000-000000000001'),
   ('95000000-0000-4000-8000-000000000604', '95000000-0000-4000-8000-000000000500', 'level_test', clock_timestamp() - interval '1 day', '본관', 'scheduled', 1, '95000000-0000-4000-8000-000000000001'),
-  ('95000000-0000-4000-8000-000000000605', '95000000-0000-4000-8000-000000000500', 'level_test', clock_timestamp() + interval '4 days', '본관', 'scheduled', 1, '95000000-0000-4000-8000-000000000001');
+  ('95000000-0000-4000-8000-000000000605', '95000000-0000-4000-8000-000000000500', 'level_test', clock_timestamp() + interval '4 days', '본관', 'scheduled', 1, '95000000-0000-4000-8000-000000000001'),
+  ('95000000-0000-4000-8000-000000000606', '95000000-0000-4000-8000-000000000500', 'level_test', clock_timestamp() + interval '5 days', '본관', 'scheduled', 1, '95000000-0000-4000-8000-000000000001');
 
 insert into public.ops_registration_level_tests(
   id, track_id, appointment_id, attempt_number, status
@@ -783,7 +787,8 @@ insert into public.ops_registration_level_tests(
   ('95000000-0000-4000-8000-000000000611', '95000000-0000-4000-8000-000000000540', '95000000-0000-4000-8000-000000000601', 1, 'scheduled'),
   ('95000000-0000-4000-8000-000000000612', '95000000-0000-4000-8000-000000000541', '95000000-0000-4000-8000-000000000601', 1, 'scheduled'),
   ('95000000-0000-4000-8000-000000000613', '95000000-0000-4000-8000-000000000540', '95000000-0000-4000-8000-000000000603', 2, 'scheduled'),
-  ('95000000-0000-4000-8000-000000000614', '95000000-0000-4000-8000-000000000540', '95000000-0000-4000-8000-000000000604', 3, 'scheduled');
+  ('95000000-0000-4000-8000-000000000614', '95000000-0000-4000-8000-000000000540', '95000000-0000-4000-8000-000000000604', 3, 'scheduled'),
+  ('95000000-0000-4000-8000-000000000615', '95000000-0000-4000-8000-000000000540', '95000000-0000-4000-8000-000000000606', 4, 'scheduled');
 
 insert into public.ops_registration_consultations(
   id, track_id, appointment_id, mode, status, director_profile_id
@@ -830,6 +835,7 @@ values
   ('level source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'level_test_booking', '95000000-0000-4000-8000-000000000601')),
   ('visit source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000011', 'visit_consultation_booking', '95000000-0000-4000-8000-000000000602')),
   ('reminder source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'appointment_reminder', '95000000-0000-4000-8000-000000000601')),
+  ('marker source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'level_test_booking', '95000000-0000-4000-8000-000000000606')),
   ('waiting source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'waiting_notice', '95000000-0000-4000-8000-000000000540')),
   ('admission source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'admission_application', '95000000-0000-4000-8000-000000000500'));
 
@@ -1363,7 +1369,7 @@ select is(
       )
     )
   ),
-  'DB computes dedupe from kind source fingerprint and recipient hash'
+  'DB preserves the exact replay key while process indexes add broader locking'
 );
 
 set local role service_role;
@@ -1694,6 +1700,12 @@ select throws_ok(
 reset role;
 
 -- Create explicit unknown and failed_hold finalization paths on independent facts.
+update public.ops_registration_appointments
+set notification_revision = notification_revision + 1
+where id in (
+  '95000000-0000-4000-8000-000000000601',
+  '95000000-0000-4000-8000-000000000602'
+);
 set local role service_role;
 insert into registration_solapi_rpc_results(label, response)
 values (
@@ -1967,11 +1979,11 @@ insert into registration_solapi_rpc_results(label, response)
 values (
   'admin release preview',
   public.create_registration_customer_message_preview_v1(
-    '95000000-0000-4000-8000-000000000011', 'waiting_notice',
-    '95000000-0000-4000-8000-000000000540',
+    '95000000-0000-4000-8000-000000000011', 'appointment_reminder',
+    '95000000-0000-4000-8000-000000000602',
     pg_temp.registration_solapi_contract(
-      (select response from registration_solapi_rpc_results where label = 'waiting source'),
-      'waiting_notice', repeat('9', 64)
+      (select response from registration_solapi_rpc_results where label = 'visit source'),
+      'appointment_reminder', repeat('9', 64)
     )
   )
 );
@@ -1983,8 +1995,8 @@ values (
     ((select response from registration_solapi_rpc_results where label = 'admin release preview') ->> 'previewId')::uuid,
     '95000000-0000-4000-8000-000000000740',
     pg_temp.registration_solapi_contract(
-      (select response from registration_solapi_rpc_results where label = 'waiting source'),
-      'waiting_notice', repeat('9', 64)
+      (select response from registration_solapi_rpc_results where label = 'visit source'),
+      'appointment_reminder', repeat('9', 64)
     )
   )
 );
@@ -2003,8 +2015,8 @@ select throws_ok(
       ((select response from registration_solapi_rpc_results where label = 'admin release claim') ->> 'claimToken')::uuid,
       ((select response from registration_solapi_rpc_results where label = 'admin release claim') ->> 'dispatchToken')::uuid,
       pg_temp.registration_solapi_contract(
-        (select response from registration_solapi_rpc_results where label = 'waiting source'),
-        'waiting_notice', repeat('9', 64)
+        (select response from registration_solapi_rpc_results where label = 'visit source'),
+        'appointment_reminder', repeat('9', 64)
       )
     )$$,
   '40001', 'registration_customer_message_claim_invalid',
@@ -2049,8 +2061,8 @@ values (
     ((select response from registration_solapi_rpc_results where label = 'admin release preview') ->> 'previewId')::uuid,
     '95000000-0000-4000-8000-000000000740',
     pg_temp.registration_solapi_contract(
-      (select response from registration_solapi_rpc_results where label = 'waiting source'),
-      'waiting_notice', repeat('9', 64)
+      (select response from registration_solapi_rpc_results where label = 'visit source'),
+      'appointment_reminder', repeat('9', 64)
     )
   )
 );
@@ -2286,6 +2298,16 @@ select ok(
   not ((select response -> 0 from registration_solapi_rpc_results where label = 'teacher waiting history') ? 'recipientLast4'),
   'assigned teacher history omits the recipientLast4 key entirely'
 );
+select is(
+  (select response -> 0 ->> 'confirmedByName' from registration_solapi_rpc_results where label = 'staff waiting history'),
+  'Registration SOLAPI Storage Admin',
+  'staff history names the operator who requested the send'
+);
+select is(
+  (select response -> 0 ->> 'confirmedByName' from registration_solapi_rpc_results where label = 'teacher waiting history'),
+  'Registration SOLAPI Storage Admin',
+  'assigned teacher history keeps the safe operator display name'
+);
 select unlike(
   (select response::text from registration_solapi_rpc_results where label = 'teacher waiting history'),
   '%recipientHash%',
@@ -2298,8 +2320,8 @@ select unlike(
 );
 select unlike(
   (select response::text from registration_solapi_rpc_results where label = 'teacher waiting history'),
-  '%confirmedBy%',
-  'teacher history contains no confirmer identity'
+  '%"confirmedBy":%',
+  'teacher history contains no confirmer profile id'
 );
 
 -- Task 4 template receipt, activation, readiness, and delivery-gate contract.
@@ -2558,9 +2580,9 @@ values (
   public.create_registration_customer_message_preview_v1(
     '95000000-0000-4000-8000-000000000001',
     'waiting_notice',
-    '95000000-0000-4000-8000-000000000540',
+    '95000000-0000-4000-8000-000000000543',
     pg_temp.registration_solapi_contract(
-      (select response from registration_solapi_rpc_results where label = 'waiting source'),
+      (select response from registration_solapi_rpc_results where label = 'other waiting source'),
       'waiting_notice', repeat('4', 64)
     )
   )
@@ -2571,7 +2593,7 @@ select throws_ok(
       ((select response from registration_solapi_rpc_results where label = 'off claim preview') ->> 'previewId')::uuid,
       '95000000-0000-4000-8000-000000000900',
       pg_temp.registration_solapi_contract(
-        (select response from registration_solapi_rpc_results where label = 'waiting source'),
+        (select response from registration_solapi_rpc_results where label = 'other waiting source'),
         'waiting_notice', repeat('4', 64)
       )
     )$$,
@@ -2588,6 +2610,11 @@ select ok(
   (select response -> 'blockers' from registration_solapi_rpc_results where label = 'waiting readiness off')
     @> '["activation_off"]'::jsonb,
   'off readiness returns independent safe blockers without private identifiers'
+);
+select ok(
+  (select response -> 'blockers' from registration_solapi_rpc_results where label = 'waiting readiness off')
+    @> '["duplicate_locked"]'::jsonb,
+  'waiting process remains locked even when recipient or rendered facts differ'
 );
 select ok(
   (select response -> 'blockers' from registration_solapi_rpc_results where label = 'waiting readiness missing env')
@@ -2742,14 +2769,29 @@ select throws_ok(
 );
 insert into registration_solapi_rpc_results(label, response)
 values (
+  'level verification marker gate',
+  public.set_registration_customer_solapi_activation_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'level_test_booking', 'verification',
+    pg_catalog.jsonb_build_object(
+      'requestKey', '95000000-0000-4000-8000-000000000818',
+      'verificationTaskId', '95000000-0000-4000-8000-000000000500',
+      'verificationRecipientHash', repeat('b', 64),
+      'templateId', 'template-level', 'pfId', 'pf-level',
+      'catalogChecksum', repeat('c', 64)
+    )
+  )
+);
+insert into registration_solapi_rpc_results(label, response)
+values (
   'marker gate preview',
   public.create_registration_customer_message_preview_v1(
     '95000000-0000-4000-8000-000000000001',
-    'waiting_notice',
-    '95000000-0000-4000-8000-000000000540',
+    'level_test_booking',
+    '95000000-0000-4000-8000-000000000606',
     pg_temp.registration_solapi_contract(
-      (select response from registration_solapi_rpc_results where label = 'waiting source'),
-      'waiting_notice', repeat('6', 64)
+      (select response from registration_solapi_rpc_results where label = 'marker source'),
+      'level_test_booking', repeat('6', 64)
     )
   )
 );
@@ -2761,17 +2803,17 @@ values (
     ((select response from registration_solapi_rpc_results where label = 'marker gate preview') ->> 'previewId')::uuid,
     '95000000-0000-4000-8000-000000000902',
     pg_temp.registration_solapi_contract(
-      (select response from registration_solapi_rpc_results where label = 'waiting source'),
-      'waiting_notice', repeat('6', 64)
+      (select response from registration_solapi_rpc_results where label = 'marker source'),
+      'level_test_booking', repeat('6', 64)
     )
   )
 );
 insert into registration_solapi_rpc_results(label, response)
 values (
-  'waiting off before marker',
+  'level off before marker',
   public.set_registration_customer_solapi_activation_v1(
     '95000000-0000-4000-8000-000000000001',
-    'waiting_notice', 'off',
+    'level_test_booking', 'off',
     pg_catalog.jsonb_build_object(
       'requestKey', '95000000-0000-4000-8000-000000000821'
     )
@@ -2783,12 +2825,24 @@ select throws_ok(
       ((select response from registration_solapi_rpc_results where label = 'marker gate claim') ->> 'claimToken')::uuid,
       ((select response from registration_solapi_rpc_results where label = 'marker gate claim') ->> 'dispatchToken')::uuid,
       pg_temp.registration_solapi_contract(
-        (select response from registration_solapi_rpc_results where label = 'waiting source'),
-        'waiting_notice', repeat('6', 64)
+        (select response from registration_solapi_rpc_results where label = 'marker source'),
+        'level_test_booking', repeat('6', 64)
       )
     )$$,
   '40001', 'registration_customer_solapi_activation_off',
   'activation off blocks provider attempt marker'
+);
+
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'waiting off before wrong task',
+  public.set_registration_customer_solapi_activation_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'waiting_notice', 'off',
+    pg_catalog.jsonb_build_object(
+      'requestKey', '95000000-0000-4000-8000-000000000899'
+    )
+  )
 );
 
 insert into registration_solapi_rpc_results(label, response)

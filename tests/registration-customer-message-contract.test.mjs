@@ -248,6 +248,7 @@ test("public response guard permits only the exact approved DTO field names", ()
     messageKind: "level_test_booking",
     currentStatus: "accepted",
     recipientLast4: "1234",
+    confirmedByName: "김관리",
     confirmedAt: "2026-08-05T03:04:05.000Z",
     updatedAt: "2026-08-05T03:04:06.000Z",
     canCheck: true,

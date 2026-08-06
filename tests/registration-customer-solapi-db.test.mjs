@@ -10,6 +10,8 @@ const RPC_MIGRATION =
   "20260805111000_registration_customer_solapi_message_rpc.sql"
 const ACTIVATION_MIGRATION =
   "20260805112000_registration_customer_solapi_activation.sql"
+const AUDIT_DEDUPE_MIGRATION =
+  "20260806130000_registration_customer_message_audit_dedupe.sql"
 const PREVIOUS_MIGRATION =
   "20260805101000_notification_control_plane_template_variable_wire_contract.sql"
 const storageMigrationUrl = new URL(
@@ -22,6 +24,10 @@ const rpcMigrationUrl = new URL(
 )
 const activationMigrationUrl = new URL(
   "../supabase/migrations/" + ACTIVATION_MIGRATION,
+  import.meta.url,
+)
+const auditDedupeMigrationUrl = new URL(
+  "../supabase/migrations/" + AUDIT_DEDUPE_MIGRATION,
   import.meta.url,
 )
 const migrationsUrl = new URL("../supabase/migrations/", import.meta.url)
@@ -176,6 +182,43 @@ test("storage migration is one bounded inert transaction", async () => {
     normalized,
     /notification_control_plane_dispatch_registration_enabled/,
   )
+})
+
+test("audit and process dedupe migration enforces the approved one-shot policy", async () => {
+  const source = await readRequired(auditDedupeMigrationUrl, "audit dedupe migration")
+  const normalized = normalizeSql(source)
+
+  assert.match(source.trim(), /^begin;[\s\S]+commit;$/i)
+  assert.match(normalized, /set local lock_timeout = '5s'/)
+  assert.match(normalized, /set local statement_timeout = '120s'/)
+  assert.doesNotMatch(normalized, /(?:https?:\/\/|api\.solapi\.com|send-many|messages\/v4)/)
+
+  assert.match(normalized, /create unique index ops_reg_customer_msg_appointment_once_idx[^;]+\(\s*appointment_id, message_kind, source_revision\s*\)[^;]+message_kind in \(\s*'level_test_booking', 'visit_consultation_booking', 'appointment_reminder'\s*\)/)
+  assert.match(normalized, /create unique index ops_reg_customer_msg_waiting_once_idx[^;]+\(track_id, message_kind\)[^;]+message_kind = 'waiting_notice'/)
+  assert.match(normalized, /create unique index ops_reg_customer_msg_admission_once_idx[^;]+\(task_id, message_kind\)[^;]+message_kind = 'admission_application'/)
+
+  const readiness = normalizeSql(functionBlock(
+    source,
+    "public.get_registration_customer_solapi_readiness_v1",
+  ))
+  assert.match(readiness, /message\.appointment_id = p_source_id[^;]+message\.source_revision = nullif\(v_source ->> 'sourcerevision', ''\)::bigint/)
+  assert.match(readiness, /p_message_kind = 'waiting_notice'[^;]+message\.track_id = p_source_id/)
+  assert.match(readiness, /p_message_kind = 'admission_application'[^;]+message\.task_id = p_source_id/)
+  assert.doesNotMatch(readiness, /message\.source_fingerprint = v_source_fingerprint/)
+  assert.doesNotMatch(readiness, /message\.recipient_hash = v_recipient_hash/)
+
+  const result = normalizeSql(functionBlock(
+    source,
+    "dashboard_private.registration_customer_message_result_v1",
+  ))
+  const history = normalizeSql(functionBlock(
+    source,
+    "public.list_registration_customer_messages_v1",
+  ))
+  assert.match(result, /'confirmedbyname'/)
+  assert.match(result, /profile\.name/)
+  assert.match(history, /'confirmedbyname'/)
+  assert.match(history, /public\.profiles/)
 })
 
 test("storage migration gives recipient_last4 one effective named check", async () => {

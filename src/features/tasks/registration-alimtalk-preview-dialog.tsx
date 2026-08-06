@@ -44,6 +44,7 @@ function toHistory(result: RegistrationCustomerMessageSendResult): RegistrationC
     messageId: result.messageId,
     messageKind: result.messageKind,
     currentStatus: result.currentStatus,
+    confirmedByName: result.confirmedByName,
     confirmedAt: result.confirmedAt,
     updatedAt: result.updatedAt,
     recipientLast4: result.recipientLast4,
@@ -67,6 +68,15 @@ function previewExpiryTime(preview: RegistrationCustomerMessagePreviewResponse |
 function normalizedTimestamp(value: string) {
   const timestamp = Date.parse(value)
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null
+}
+
+function formatAuditTimestamp(value: string) {
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp)) return value
+  return new Intl.DateTimeFormat("ko-KR", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(timestamp))
 }
 
 export function RegistrationAlimtalkPreviewDialog({
@@ -154,7 +164,7 @@ export function RegistrationAlimtalkPreviewDialog({
   const duplicateLocked = preview?.readiness.blockers.includes("duplicate_locked") || false
   const expired = !expiryTime || expiryTime <= now
   const confirmDisabled = loading || sending || confirmationLockedRef.current || !preview?.previewId || expired
-    || !preview.readiness.sendAllowed || duplicateLocked || currentStatus === "pending" || currentStatus === "unknown" || currentStatus === "failed_hold"
+    || !preview.readiness.sendAllowed || duplicateLocked || currentStatus === "pending" || currentStatus === "accepted" || currentStatus === "unknown" || currentStatus === "failed_hold"
   const canReconcile = viewerRole === "admin" && currentStatus === "unknown"
   const releasePreSendEligible = canReleasePreSend ?? false
   const activeMessageId = result?.messageId || latestMessage?.messageId || ""
@@ -271,6 +281,12 @@ export function RegistrationAlimtalkPreviewDialog({
   }
 
   const last4 = result?.recipientLast4 || preview?.recipientLast4 || latestMessage?.recipientLast4 || ""
+  const auditMessage = result || latestMessage
+  const confirmLabel = sending
+    ? "처리 중"
+    : duplicateLocked || Boolean(currentStatus)
+      ? "이미 발송 요청됨"
+      : "확인 후 발송"
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -312,6 +328,7 @@ export function RegistrationAlimtalkPreviewDialog({
             {preview.buttons.map((button) => <p key={`${button.name}:${button.host}`} className="break-words text-muted-foreground">카카오 버튼 · {button.name} ({button.host})</p>)}
             <p className="text-muted-foreground">준비 상태 · {preview.readiness.sendAllowed ? "발송 가능" : preview.readiness.blockers.join(", ") || "발송 불가"}</p>
             {latestMessage ? <p className="text-muted-foreground">최근 상태 · {statusLabel(latestMessage.currentStatus)}</p> : null}
+            {auditMessage ? <p className="text-muted-foreground">발송 요청 · {auditMessage.confirmedByName} · {formatAuditTimestamp(auditMessage.confirmedAt)}</p> : null}
           </div>
         ) : null}
 
@@ -338,7 +355,7 @@ export function RegistrationAlimtalkPreviewDialog({
         <DialogFooter>
           <Button type="button" className="min-h-11" variant="outline" onClick={() => handleOpenChange(false)}>돌아가기</Button>
           {(currentStatus === "unknown" && canCheck) || canCheckPending ? <Button type="button" className="min-h-11" disabled={sending} onClick={() => void check()}>상태 확인</Button> : (
-            <Button type="button" className="min-h-11" disabled={confirmDisabled} onClick={() => void confirm()}>{sending ? "처리 중" : "확인 후 발송"}</Button>
+            <Button type="button" className="min-h-11" disabled={confirmDisabled} onClick={() => void confirm()}>{confirmLabel}</Button>
           )}
         </DialogFooter>
       </DialogContent>

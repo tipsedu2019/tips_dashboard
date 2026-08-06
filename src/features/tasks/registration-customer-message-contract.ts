@@ -64,6 +64,7 @@ export type RegistrationCustomerMessageHistoryItem = Readonly<{
   messageId: string
   messageKind: RegistrationCustomerMessageKind
   currentStatus: RegistrationCustomerMessageStatus
+  confirmedByName: string
   confirmedAt: string
   updatedAt: string
   recipientLast4?: string
@@ -103,6 +104,7 @@ export type RegistrationCustomerMessageSendResult = Readonly<{
   messageKind: RegistrationCustomerMessageKind
   currentStatus: RegistrationCustomerMessageStatus
   recipientLast4: string
+  confirmedByName: string
   confirmedAt: string
   updatedAt: string
   canCheck: boolean
@@ -221,6 +223,7 @@ const REGISTRATION_CUSTOMER_MESSAGE_PUBLIC_RESPONSE_KEYS = new Set([
   "body",
   "buttons",
   "canCheck",
+  "confirmedByName",
   "confirmedAt",
   "credentialsConfigured",
   "currentStatus",
