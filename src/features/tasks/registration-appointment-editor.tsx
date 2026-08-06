@@ -5,14 +5,6 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { DateTimePickerControl } from "@/components/ui/date-time-picker"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
@@ -258,6 +250,7 @@ export function RegistrationAppointmentEditor({
   const [validationError, setValidationError] = useState("")
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingAppointmentConfirmation | null>(null)
   const sectionRef = useRef<HTMLElement | null>(null)
+  const confirmationRef = useRef<HTMLDivElement | null>(null)
   const [committedAppointment, setCommittedAppointment] = useState<RegistrationAppointmentMutationResponse | null>(null)
   const [pendingNotificationTargets, setPendingNotificationTargets] = useState<RegistrationAppointmentMutationResponse["notificationTargets"]>([])
   const [notificationJobStatuses, setNotificationJobStatuses] = useState<RegistrationNotificationJobStatus[]>([])
@@ -287,6 +280,11 @@ export function RegistrationAppointmentEditor({
       window.clearInterval(intervalId)
     }
   }, [notificationProcessingReadiness, notificationToken])
+
+  useEffect(() => {
+    if (!pendingConfirmation) return
+    window.requestAnimationFrame(() => confirmationRef.current?.focus())
+  }, [pendingConfirmation])
 
   useEffect(() => {
     const workerCreatedAt = Date.parse(String(effectiveProcessingReadiness?.workerHeartbeat?.createdAt || ""))
@@ -1041,6 +1039,27 @@ export function RegistrationAppointmentEditor({
           ) : null}
         </div>
         {canOpenCustomerMessage && customerMessageBlocked ? <p className="text-right text-xs text-muted-foreground">예약을 저장한 뒤 알림톡을 보낼 수 있습니다.</p> : null}
+        {pendingConfirmation ? (
+          <div
+            ref={confirmationRef}
+            role="alertdialog"
+            aria-labelledby="registration-appointment-confirmation-title"
+            aria-describedby="registration-appointment-confirmation-description"
+            tabIndex={-1}
+            className="grid gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-950 outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          >
+            <div className="grid gap-1">
+              <h4 id="registration-appointment-confirmation-title" className="font-semibold">예약을 저장할까요?</h4>
+              <p id="registration-appointment-confirmation-description" className="whitespace-pre-line text-sm">
+                {pendingConfirmation.message}
+              </p>
+            </div>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button type="button" variant="outline" onClick={dismissAppointmentConfirmation}>돌아가기</Button>
+              <Button type="button" onClick={() => void confirmPreparedAppointmentMutation()}>저장</Button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {kind === "level_test" ? (
@@ -1095,30 +1114,6 @@ export function RegistrationAppointmentEditor({
         </div>
       ) : null}
 
-      <Dialog
-        open={Boolean(pendingConfirmation)}
-        onOpenChange={(open) => {
-          if (!open && pendingConfirmation) dismissAppointmentConfirmation()
-        }}
-      >
-        <DialogContent showCloseButton={false}>
-          <DialogHeader>
-            <DialogTitle>예약을 저장할까요?</DialogTitle>
-            <DialogDescription className="whitespace-pre-line">
-              {pendingConfirmation?.message}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={dismissAppointmentConfirmation}>돌아가기</Button>
-            <Button
-              type="button"
-              onClick={() => void confirmPreparedAppointmentMutation()}
-            >
-              저장
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </section>
   )
 }

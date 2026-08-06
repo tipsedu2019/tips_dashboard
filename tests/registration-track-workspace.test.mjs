@@ -2338,6 +2338,16 @@ test("level-test result saving retains its draft until the mutation commits", as
   assert.doesNotMatch(appointment, /startAttempt|reasonDirty/)
 })
 
+test("appointment save confirmation stays visible inside the registration detail modal", async () => {
+  const appointment = await readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
+
+  assert.doesNotMatch(appointment, /from "@\/components\/ui\/dialog"/)
+  assert.match(appointment, /pendingConfirmation \? \([\s\S]*?role="alertdialog"/)
+  assert.match(appointment, /aria-labelledby="registration-appointment-confirmation-title"/)
+  assert.match(appointment, /id="registration-appointment-confirmation-title"[\s\S]*?예약을 저장할까요\?/)
+  assert.match(appointment, /onClick=\{\(\) => void confirmPreparedAppointmentMutation\(\)\}/)
+})
+
 test("enrollment cancellation validation is local and focuses subject-owned controls", async () => {
   const enrollment = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
   const cancellation = sourceBetween(enrollment, "async function cancelPersistedEnrollment", "const immutableHistory")
@@ -2492,9 +2502,8 @@ test("saved-detail descendants use shared dashboard controls instead of native c
   ]) {
     assert.match(sourceByFile[file], /import \{ RegistrationSelect \} from "\.\/registration-select"/)
   }
-  for (const file of ["registration-application-track-actions.tsx", "registration-appointment-editor.tsx"]) {
-    assert.match(sourceByFile[file], /from "@\/components\/ui\/dialog"/)
-  }
+  assert.match(sourceByFile["registration-application-track-actions.tsx"], /from "@\/components\/ui\/dialog"/)
+  assert.doesNotMatch(sourceByFile["registration-appointment-editor.tsx"], /from "@\/components\/ui\/dialog"/)
   for (const file of ["registration-enrollment-editor.tsx", "registration-history-timeline.tsx"]) {
     assert.match(sourceByFile[file], /from "@\/components\/ui\/collapsible"/)
   }
