@@ -51,7 +51,7 @@ async function loadSubject() {
   return import(fixtureModuleUrl.href)
 }
 
-test("합성 fixture manifest는 현재 185개 설정 graph와 고정 identity를 잠근다", async () => {
+test("합성 fixture manifest는 현재 188개 설정 graph와 고정 identity를 잠근다", async () => {
   const { loadNotificationContentLocalQaContract } = await loadSubject()
   const contract = await loadNotificationContentLocalQaContract()
 
@@ -67,14 +67,14 @@ test("합성 fixture manifest는 현재 185개 설정 graph와 고정 identity�
     authUsers: 1,
     profiles: 1,
     workflows: 7,
-    eventKeys: 48,
-    settingsRegistry: 185,
-    rules: 186,
-    historicalTemplates: 186,
-    vNextTemplates: 185,
-    templates: 371,
-    contentContracts: 185,
-    complianceAudits: 185,
+    eventKeys: 51,
+    settingsRegistry: 188,
+    rules: 189,
+    historicalTemplates: 189,
+    vNextTemplates: 188,
+    templates: 377,
+    contentContracts: 188,
+    complianceAudits: 188,
     legacySettings: 42,
     importMetadata: 42,
     runtimeFlags: 12,
@@ -94,15 +94,15 @@ test("합성 fixture manifest는 현재 185개 설정 graph와 고정 identity�
     contract.manifest.identities.actor.userId,
     "31500000-0000-4000-8000-000000000001",
   )
-  assert.equal(contract.manifest.identities.configuration.count, 185)
+  assert.equal(contract.manifest.identities.configuration.count, 188)
   assert.equal(
     contract.manifest.identities.configuration.sha256,
-    "9da69d7da440a519239ac7599629c94b27beb0c78ba55bb079e2081a01e2b137",
+    "2b09a1c44db7beb0c67b7bce13baf931e7c91677d423cdb0247acd7a1d50a178",
   )
   assert.deepEqual(contract.manifest.identities.configuration.byWorkflow, {
     approvals: 36,
     makeup_requests: 32,
-    registration: 23,
+    registration: 26,
     tasks: 40,
     transfer: 2,
     withdrawal: 2,
@@ -111,7 +111,7 @@ test("합성 fixture manifest는 현재 185개 설정 graph와 고정 identity�
   assert.deepEqual(contract.manifest.identities.configuration.ruleByWorkflow, {
     approvals: 36,
     makeup_requests: 32,
-    registration: 24,
+    registration: 27,
     tasks: 40,
     transfer: 2,
     withdrawal: 2,
@@ -235,7 +235,7 @@ test("round-trip SQL은 settings UI flag만 임시 true로 만들고 false 복�
   )
 })
 
-test("allowlist pgTAP은 최신 185 identity와 single-writer/vNext 상태를 서로 모순 없이 검증한다", async () => {
+test("allowlist pgTAP은 최신 188 identity와 single-writer/vNext 상태를 서로 모순 없이 검증한다", async () => {
   const [runtime, schema, makeup, content] = await Promise.all([
     readFile(runtimePgTapUrl, "utf8"),
     readFile(schemaPgTapUrl, "utf8"),
@@ -243,7 +243,7 @@ test("allowlist pgTAP은 최신 185 identity와 single-writer/vNext 상태를 �
     readFile(contentPgTapUrl, "utf8"),
   ])
 
-  assert.match(runtime, /185::bigint/u)
+  assert.match(runtime, /188::bigint/u)
   assert.doesNotMatch(runtime, /165::bigint/u)
   assert.match(runtime, /registration\.appointment_reminder_due/u)
   assert.match(runtime, /registration\.visit_subject_deselected/u)
@@ -272,8 +272,8 @@ test("isolated DB runner plan은 fixture count와 exact pgTAP 10개를 출력하
   assert.equal(result.status, 0, result.stderr)
   const plan = JSON.parse(result.stdout)
   assert.equal(plan.mode, "plan")
-  assert.equal(plan.expectedResources.syntheticFixture.settingsRegistry, 185)
-  assert.equal(plan.expectedResources.syntheticFixture.rules, 186)
+  assert.equal(plan.expectedResources.syntheticFixture.settingsRegistry, 188)
+  assert.equal(plan.expectedResources.syntheticFixture.rules, 189)
   assert.equal(plan.expectedResources.syntheticFixture.operationalRows, 0)
   assert.equal(plan.expectedResources.pgTapFileCount, 10)
   assert.deepEqual(plan.expectedResources.pgTapFiles, expectedPgTapFiles)

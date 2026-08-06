@@ -265,6 +265,7 @@ async function verifyMessageCase(page, baseUrl, item, evidence) {
     await dialog.getByRole("button", { name: "상태 확인", exact: true }).click()
   }
   await dialog.getByText("SOLAPI 접수 완료 · 학부모 전화 끝 5678", { exact: true }).waitFor({ state: "visible" })
+  await dialog.getByText(/^발송 요청 · 김관리 ·/u).waitFor({ state: "visible" })
   const acceptedCloseButton = dialog.getByRole("button", { name: "돌아가기", exact: true })
   await measureControl(acceptedCloseButton, "dialog-close", evidence)
   await acceptedCloseButton.click()
@@ -276,8 +277,11 @@ async function verifyMessageCase(page, baseUrl, item, evidence) {
   if (!reopenedText.includes("최근 상태 · SOLAPI 접수 완료")) {
     throw new Error(`accepted/history evidence missing for ${item.messageKind}: ${reopenedText}`)
   }
+  if (!reopenedText.includes("발송 요청 · 김관리 ·")) {
+    throw new Error(`send actor audit missing for ${item.messageKind}: ${reopenedText}`)
+  }
   await dialog.getByText("준비 상태 · duplicate_locked", { exact: true }).waitFor({ state: "visible" })
-  if (!(await dialog.getByRole("button", { name: "확인 후 발송", exact: true }).isDisabled())) {
+  if (!(await dialog.getByRole("button", { name: "이미 발송 요청됨", exact: true }).isDisabled())) {
     throw new Error("duplicate_locked preview exposes another send")
   }
   const historyCloseButton = dialog.getByRole("button", { name: "돌아가기", exact: true })

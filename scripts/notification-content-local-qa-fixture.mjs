@@ -13,7 +13,7 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/u
 const FIXTURE_EMAIL = "notification-content-local-qa@runtime.invalid"
 const FIXTURE_NAMESPACE = "notification-content-local-qa-v1"
 const CONFIGURATION_IDENTITY_SHA256 =
-  "9da69d7da440a519239ac7599629c94b27beb0c78ba55bb079e2081a01e2b137"
+  "2b09a1c44db7beb0c67b7bce13baf931e7c91677d423cdb0247acd7a1d50a178"
 const RULE_GROUPS_JSON_TAG = "$notification_content_local_qa_rule_groups$"
 const RULE_GROUPS_JSON_BEGIN = "notification_content_local_qa_rule_groups_json_begin"
 const RULE_GROUPS_JSON_END = "notification_content_local_qa_rule_groups_json_end"
@@ -35,14 +35,14 @@ export const NOTIFICATION_CONTENT_LOCAL_QA_EXPECTED_COUNTS = deepFreeze({
   authUsers: 1,
   profiles: 1,
   workflows: 7,
-  eventKeys: 48,
-  settingsRegistry: 185,
-  rules: 186,
-  historicalTemplates: 186,
-  vNextTemplates: 185,
-  templates: 371,
-  contentContracts: 185,
-  complianceAudits: 185,
+  eventKeys: 51,
+  settingsRegistry: 188,
+  rules: 189,
+  historicalTemplates: 189,
+  vNextTemplates: 188,
+  templates: 377,
+  contentContracts: 188,
+  complianceAudits: 188,
   legacySettings: 42,
   importMetadata: 42,
   runtimeFlags: 12,
@@ -51,12 +51,12 @@ export const NOTIFICATION_CONTENT_LOCAL_QA_EXPECTED_COUNTS = deepFreeze({
 })
 
 const EXPECTED_CONFIGURATION_IDENTITY = deepFreeze({
-  count: 185,
+  count: 188,
   sha256: CONFIGURATION_IDENTITY_SHA256,
   byWorkflow: {
     approvals: 36,
     makeup_requests: 32,
-    registration: 23,
+    registration: 26,
     tasks: 40,
     transfer: 2,
     withdrawal: 2,
@@ -65,7 +65,7 @@ const EXPECTED_CONFIGURATION_IDENTITY = deepFreeze({
   ruleByWorkflow: {
     approvals: 36,
     makeup_requests: 32,
-    registration: 24,
+    registration: 27,
     tasks: 40,
     transfer: 2,
     withdrawal: 2,
@@ -381,7 +381,7 @@ function reviewRuleGroupsManifest(manifest) {
     "not_applicable",
   ])
   const allowedEnabledStates = new Set(["disabled", "enabled"])
-  const allowedDispatchOwners = new Set(["legacy", "none"])
+  const allowedDispatchOwners = new Set(["canonical", "legacy", "none"])
   const allEntries = []
 
   for (const group of manifest.ruleGroups) {

@@ -310,9 +310,9 @@ test("pgTAP packet covers the current registry graph, import evidence, flags, an
     "override request replays one response and writes one safe conflict audit",
     "override request ID rejects a changed fingerprint",
     "registry-external rule is rejected before the unchecked save implementation",
-    "registration registry matches the exact current 23-cell graph",
+    "registration registry matches the exact current 26-cell graph",
     "editable and fixed registry rules use their exact deterministic rule/template namespaces and system actors",
-    "current 185-cell registry graph resolves exact rules, active templates, and content contracts",
+    "current 188-cell registry graph resolves exact rules, active templates, and content contracts",
     "current registration reminder graph preserves three disabled schedule variants across reviewed destinations",
     "current fixed registration handoff graph keeps eleven enabled rules activation locked",
     "runtime fixtures reuse seeded registry IDs for save and CAS coverage",
@@ -320,7 +320,7 @@ test("pgTAP packet covers the current registry graph, import evidence, flags, an
   ]) {
     assert.ok(pgTap.includes(contract), `missing pgTAP contract: ${contract}`)
   }
-  assert.match(pgTap, /185::bigint/u)
+  assert.match(pgTap, /188::bigint/u)
   assert.doesNotMatch(pgTap, /165::bigint/u)
   assert.doesNotMatch(pgTap, /notification_seed_workflow_settings_v1\(\)/u)
 })

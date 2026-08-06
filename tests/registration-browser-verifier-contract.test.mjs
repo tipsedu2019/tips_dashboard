@@ -403,6 +403,8 @@ test("customer message verifier asserts exact copy, masking, confirmation, histo
   for (const marker of [
     "끝 5678",
     "확인 후 발송",
+    "이미 발송 요청됨",
+    "발송 요청 · 김관리 ·",
     "SOLAPI 접수 완료",
     "duplicate_locked",
     "source_dirty",

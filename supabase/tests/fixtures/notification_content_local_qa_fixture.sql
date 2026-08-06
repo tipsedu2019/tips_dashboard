@@ -342,6 +342,12 @@ $notification_content_local_qa_rule_groups$
       "scopeState":"in_scope","configurationKind":"editable_rule","enabledState":"enabled","dispatchOwner":"legacy"
     },
     {
+      "workflowKey":"registration",
+      "eventKeys":["registration.consultation_completed","registration.waiting_transitioned","registration.admission_started"],
+      "cells":[{"audienceKey":"management_team","channelKey":"google_chat","ruleVariantKeys":["immediate"]}],
+      "scopeState":"in_scope","configurationKind":"editable_rule","enabledState":"enabled","dispatchOwner":"canonical"
+    },
+    {
       "workflowKey":"transfer",
       "eventKeys":["transfer.submitted","transfer.completed"],
       "cells":[{"audienceKey":"management_team","channelKey":"google_chat","ruleVariantKeys":["immediate"]}],
@@ -428,10 +434,7 @@ $notification_content_local_qa_rule_groups$
     {"workflowKey":"registration","eventKey":"registration.level_test_completed"},
     {"workflowKey":"registration","eventKey":"registration.level_test_absent"},
     {"workflowKey":"registration","eventKey":"registration.level_test_canceled"},
-    {"workflowKey":"registration","eventKey":"registration.consultation_completed"},
-    {"workflowKey":"registration","eventKey":"registration.waiting_transitioned"},
     {"workflowKey":"registration","eventKey":"registration.enrollment_decided"},
-    {"workflowKey":"registration","eventKey":"registration.admission_started"},
     {"workflowKey":"registration","eventKey":"registration.admission_advanced"},
     {"workflowKey":"registration","eventKey":"registration.admission_canceled"},
     {"workflowKey":"registration","eventKey":"registration.track_reopened"},
@@ -493,12 +496,12 @@ cross join lateral pg_catalog.jsonb_array_elements_text(cell_item.value -> 'rule
 
 do $$
 begin
-  if (select pg_catalog.count(*) from notification_content_local_qa_identities) <> 186
+  if (select pg_catalog.count(*) from notification_content_local_qa_identities) <> 189
     or (
       select pg_catalog.count(*)
       from notification_content_local_qa_identities
       where scope_state = 'in_scope'
-    ) <> 185
+    ) <> 188
     or (
       select pg_catalog.count(*)
       from notification_content_local_qa_identities
@@ -513,7 +516,7 @@ begin
       select pg_catalog.count(distinct (workflow_key, event_key))
       from notification_content_local_qa_identities
       where scope_state = 'in_scope'
-    ) <> 48
+    ) <> 51
   then
     raise exception 'notification_content_local_qa_rule_groups_invalid'
       using errcode = '55000';
@@ -531,7 +534,7 @@ begin
     )
     from notification_content_local_qa_identities
     where scope_state = 'in_scope'
-  ) <> '9da69d7da440a519239ac7599629c94b27beb0c78ba55bb079e2081a01e2b137' then
+  ) <> '2b09a1c44db7beb0c67b7bce13baf931e7c91677d423cdb0247acd7a1d50a178' then
     raise exception 'notification_content_local_qa_identity_hash_mismatch'
       using errcode = '55000';
   end if;
@@ -668,7 +671,7 @@ begin
   if (
     select pg_catalog.count(*)
     from dashboard_private.notification_settings_ui_registry
-  ) <> 174 then
+  ) <> 177 then
     raise exception 'notification_content_local_qa_editable_registry_install_incomplete'
       using errcode = '55000';
   end if;
@@ -679,8 +682,8 @@ select dashboard_private.notification_seed_workflow_settings_v1();
 
 do $$
 begin
-  if (select pg_catalog.count(*) from dashboard_private.notification_rules) <> 174
-    or (select pg_catalog.count(*) from dashboard_private.notification_templates) <> 174
+  if (select pg_catalog.count(*) from dashboard_private.notification_rules) <> 177
+    or (select pg_catalog.count(*) from dashboard_private.notification_templates) <> 177
     or (
       select pg_catalog.count(*)
       from dashboard_private.notification_settings_import_metadata
@@ -870,13 +873,13 @@ order by event_catalog.event_sort, fixed.audience_key;
 
 do $$
 begin
-  if (select pg_catalog.count(*) from dashboard_private.notification_settings_ui_registry) <> 185
-    or (select pg_catalog.count(*) from dashboard_private.notification_rules) <> 186
+  if (select pg_catalog.count(*) from dashboard_private.notification_settings_ui_registry) <> 188
+    or (select pg_catalog.count(*) from dashboard_private.notification_rules) <> 189
     or (
       select pg_catalog.count(*)
       from dashboard_private.notification_templates
       where content_contract_version is null
-    ) <> 186
+    ) <> 189
     or (
       select pg_catalog.count(*)
       from dashboard_private.notification_settings_ui_registry
@@ -1003,27 +1006,27 @@ begin
       using errcode = '55000';
   end if;
 
-  if (select pg_catalog.count(*) from dashboard_private.notification_settings_ui_registry) <> 185
-    or (select pg_catalog.count(*) from dashboard_private.notification_rules) <> 186
-    or (select pg_catalog.count(*) from dashboard_private.notification_templates) <> 371
+  if (select pg_catalog.count(*) from dashboard_private.notification_settings_ui_registry) <> 188
+    or (select pg_catalog.count(*) from dashboard_private.notification_rules) <> 189
+    or (select pg_catalog.count(*) from dashboard_private.notification_templates) <> 377
     or (
       select pg_catalog.count(*)
       from dashboard_private.notification_templates
       where content_contract_version is null
-    ) <> 186
+    ) <> 189
     or (
       select pg_catalog.count(*)
       from dashboard_private.notification_templates
       where content_contract_version = '1'
-    ) <> 185
+    ) <> 188
     or (
       select pg_catalog.count(*)
       from dashboard_private.notification_rule_content_contracts
-    ) <> 185
+    ) <> 188
     or (
       select pg_catalog.count(*)
       from dashboard_private.notification_template_compliance_audits
-    ) <> 185
+    ) <> 188
     or (
       select pg_catalog.count(*)
       from public.makeup_notification_settings
@@ -1148,7 +1151,7 @@ begin
       ) as identity_key
       from dashboard_private.notification_settings_ui_registry registry
     ) identities
-  ) <> '9da69d7da440a519239ac7599629c94b27beb0c78ba55bb079e2081a01e2b137' then
+  ) <> '2b09a1c44db7beb0c67b7bce13baf931e7c91677d423cdb0247acd7a1d50a178' then
     raise exception 'notification_content_local_qa_registry_identity_hash_mismatch'
       using errcode = '55000';
   end if;

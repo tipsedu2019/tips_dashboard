@@ -2344,8 +2344,8 @@ test("CLI 기본 모드는 무료 티어 계획만 출력하고 자원을 만들
         steadyStateContainers: ["database"],
       },
       syntheticFixture: {
-        settingsRegistry: 185,
-        rules: 186,
+        settingsRegistry: 188,
+        rules: 189,
         operationalRows: 0,
       },
       pgTapFileCount: 10,

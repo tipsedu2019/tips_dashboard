@@ -174,8 +174,8 @@ select is(
     select pg_catalog.count(*)
     from dashboard_private.notification_settings_ui_registry
   ),
-  185::bigint,
-  'closed registry contains the complete reviewed 185-cell graph'
+  188::bigint,
+  'closed registry contains the complete reviewed 188-cell graph'
 );
 select results_eq(
   $$
@@ -225,6 +225,33 @@ select is_empty($$
       ),
       (
         'registration.case_closed',
+        'management_team',
+        'google_chat',
+        'immediate',
+        'immediate',
+        'editable_rule',
+        false
+      ),
+      (
+        'registration.consultation_completed',
+        'management_team',
+        'google_chat',
+        'immediate',
+        'immediate',
+        'editable_rule',
+        false
+      ),
+      (
+        'registration.waiting_transitioned',
+        'management_team',
+        'google_chat',
+        'immediate',
+        'immediate',
+        'editable_rule',
+        false
+      ),
+      (
+        'registration.admission_started',
         'management_team',
         'google_chat',
         'immediate',
@@ -370,11 +397,11 @@ select is_empty($$
 
     select 'registration-count:' || pg_catalog.count(*)::text
     from actual
-    having pg_catalog.count(*) <> 23
+    having pg_catalog.count(*) <> 26
   )
   select violation
   from violations
-$$, 'registration registry matches the exact current 23-cell graph');
+$$, 'registration registry matches the exact current 26-cell graph');
 select is_empty($$
   select registry.event_key, registry.audience_key, registry.channel_key
   from dashboard_private.notification_settings_ui_registry registry
@@ -628,7 +655,7 @@ select is_empty($$
       registry.channel_key,
       registry.rule_variant_key
     )
-$$, 'current 185-cell registry graph resolves exact rules, active templates, and content contracts');
+$$, 'current 188-cell registry graph resolves exact rules, active templates, and content contracts');
 select is_empty($$
   select flag_row.flag_key
   from dashboard_private.notification_runtime_flags flag_row
