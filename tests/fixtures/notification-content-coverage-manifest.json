@@ -90,6 +90,21 @@
       "dispatchOwner": "legacy"
     },
     {
+      "workflowKey": "registration",
+      "eventKeys": [
+        "registration.consultation_completed",
+        "registration.waiting_transitioned",
+        "registration.admission_started"
+      ],
+      "cells": [
+        { "audienceKey": "management_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] }
+      ],
+      "scopeState": "in_scope",
+      "configurationKind": "editable_rule",
+      "enabledState": "enabled",
+      "dispatchOwner": "canonical"
+    },
+    {
       "workflowKey": "transfer",
       "eventKeys": ["transfer.submitted", "transfer.completed"],
       "cells": [
@@ -217,10 +232,7 @@
     { "workflowKey": "registration", "eventKey": "registration.level_test_completed" },
     { "workflowKey": "registration", "eventKey": "registration.level_test_absent" },
     { "workflowKey": "registration", "eventKey": "registration.level_test_canceled" },
-    { "workflowKey": "registration", "eventKey": "registration.consultation_completed" },
-    { "workflowKey": "registration", "eventKey": "registration.waiting_transitioned" },
     { "workflowKey": "registration", "eventKey": "registration.enrollment_decided" },
-    { "workflowKey": "registration", "eventKey": "registration.admission_started" },
     { "workflowKey": "registration", "eventKey": "registration.admission_advanced" },
     { "workflowKey": "registration", "eventKey": "registration.admission_canceled" },
     { "workflowKey": "registration", "eventKey": "registration.track_reopened" },

@@ -179,6 +179,9 @@ const EVENT_SPECS = Object.freeze({
   "word_retest.canceled": spec(["학생", "취소상태"], { optionalLineTokens: ["사유정보"], mustHaveFacts: ["target", "event", "current_state"], freeTextVisibility: { reason: "show" }, freeTextPriority: ["reason"] }),
 
   "registration.case_created": spec(["학생", "학년", "과목", "문의시각"], { optionalLineTokens: ["메모정보", "진행정보"], mustHaveFacts: ["target", "event", "schedule"] }),
+  "registration.consultation_completed": spec(["학생", "과목", "현재상태"], { optionalLineTokens: ["진행정보"], mustHaveFacts: ["target", "event", "current_state"], supportedPayloadVersions: [2] }),
+  "registration.waiting_transitioned": spec(["학생", "과목", "현재상태"], { optionalLineTokens: ["진행정보"], mustHaveFacts: ["target", "event", "current_state"], supportedPayloadVersions: [2] }),
+  "registration.admission_started": spec(["학생", "과목", "현재상태"], { optionalLineTokens: ["진행정보"], mustHaveFacts: ["target", "event", "current_state"], supportedPayloadVersions: [2] }),
   "registration.registration_completed": spec(["학생", "등록과목", "등록수업", "완료상태"], { optionalLineTokens: ["진행정보"], mustHaveFacts: ["target", "event", "current_state"] }),
   "registration.case_closed": spec(["학생", "과목", "종료상태"], { optionalLineTokens: ["사유정보", "메모정보"], mustHaveFacts: ["target", "event", "current_state"], freeTextVisibility: { reason: "show", memo: "show" }, freeTextPriority: ["reason", "memo"] }),
   "registration.appointment_reminder_due": spec(["상담종류", "학생", "과목", "일정", "장소"], { optionalLineTokens: ["진행정보"], mustHaveFacts: ["target", "event", "schedule", "location"], supportedPayloadVersions: [2] }),

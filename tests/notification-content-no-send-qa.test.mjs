@@ -10,15 +10,15 @@ test("provider-zero lane은 모든 golden identity를 렌더링하고 Google Cha
   const evidence = await runNotificationContentNoSendQa()
 
   assert.equal(evidence.passed, true)
-  assert.equal(evidence.goldenIdentityCount, 185)
+  assert.equal(evidence.goldenIdentityCount, 188)
   assert.equal(evidence.renderedIdentityCount, evidence.goldenIdentityCount)
-  assert.equal(evidence.googleChatIdentityCount, 59)
+  assert.equal(evidence.googleChatIdentityCount, 62)
   assert.equal(evidence.fakeFormattingTransportCallCount, evidence.googleChatIdentityCount)
   assert.equal(evidence.exactPayloadCount, evidence.googleChatIdentityCount)
   assert.equal(evidence.externalRequestCount, 0)
   assert.equal(evidence.providerAttemptRowCount, 0)
   assert.deepEqual(evidence.destinationCounts, {
-    "google_chat.management": 47,
+    "google_chat.management": 50,
     "google_chat.executive": 5,
     "google_chat.english": 7,
     "google_chat.math": 0,

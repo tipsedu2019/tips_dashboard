@@ -6,6 +6,10 @@ const migrationUrl = new URL(
   "../supabase/migrations/20260803140000_notification_content_contracts.sql",
   import.meta.url,
 )
+const registrationManagementMigrationUrl = new URL(
+  "../supabase/migrations/20260806120000_registration_management_google_chat_events.sql",
+  import.meta.url,
+)
 const registryUrl = new URL(
   "../src/features/notifications/notification-content-contract-registry.ts",
   import.meta.url,
@@ -52,6 +56,21 @@ function embeddedContractFixture(source) {
   return JSON.parse(matches[0][1])
 }
 
+function embeddedContractExtension(source) {
+  const startMarker = "-- notification_content_contract_extension_fixture_begin"
+  const endMarker = "-- notification_content_contract_extension_fixture_end"
+  const start = source.indexOf(startMarker)
+  const end = source.indexOf(endMarker, start + startMarker.length)
+  assert.notEqual(start, -1, "missing embedded contract extension fixture start marker")
+  assert.notEqual(end, -1, "missing embedded contract extension fixture end marker")
+  const fixtureBlock = source.slice(start + startMarker.length, end)
+  const match = fixtureBlock.match(
+    /\$notification_contract_extension\$([\s\S]*?)\$notification_contract_extension\$/,
+  )
+  assert.ok(match, "embedded contract extension must use one closed dollar-quoted JSON value")
+  return JSON.parse(match[1])
+}
+
 test("migration creates private five-part contracts and immutable compliance evidence", async () => {
   const migration = await readMigration()
 
@@ -91,18 +110,30 @@ test("migration creates private five-part contracts and immutable compliance evi
   }
 })
 
-test("embedded SQL contract fixture stays byte-for-byte equivalent to TypeScript contract inputs", async () => {
-  const [migration, fixture, registry] = await Promise.all([
+test("embedded SQL contract fixtures stay byte-for-byte equivalent to TypeScript contract inputs", async () => {
+  const [migration, extensionMigration, fixture, registry] = await Promise.all([
     readMigration(),
+    readFile(registrationManagementMigrationUrl, "utf8"),
     readFile(fixtureUrl, "utf8").then(JSON.parse),
     import(registryUrl.href),
   ])
-  assert.equal(fixture.eventContracts.length, 48)
+  const extensionEventKeys = new Set([
+    "registration.consultation_completed",
+    "registration.waiting_transitioned",
+    "registration.admission_started",
+  ])
+  const baseFixture = {
+    ...fixture,
+    eventContracts: fixture.eventContracts.filter(({ eventKey }) => !extensionEventKeys.has(eventKey)),
+  }
+  const extensionFixture = fixture.eventContracts.filter(({ eventKey }) => extensionEventKeys.has(eventKey))
+  assert.equal(fixture.eventContracts.length, 51)
   assert.equal(
     new Set(registry.listNotificationContentContracts().map(({ eventKey }) => eventKey)).size,
-    48,
+    51,
   )
-  assert.deepEqual(embeddedContractFixture(migration), fixture)
+  assert.deepEqual(embeddedContractFixture(migration), baseFixture)
+  assert.deepEqual(embeddedContractExtension(extensionMigration), extensionFixture)
 
   const variableBlock = functionBlock(
     migration,
@@ -125,6 +156,20 @@ test("embedded SQL contract fixture stays byte-for-byte equivalent to TypeScript
     [...sqlVariables.entries()].sort(([left], [right]) => left.localeCompare(right)),
     [...expectedVariables.entries()].sort(([left], [right]) => left.localeCompare(right)),
   )
+})
+
+test("registration management extension is additive and cannot activate runtime or dispatch history", async () => {
+  const migration = await readFile(registrationManagementMigrationUrl, "utf8")
+
+  assert.match(migration.trim(), /^begin;[\s\S]*commit;$/i)
+  assert.match(migration, /registration\.consultation_completed/i)
+  assert.match(migration, /registration\.waiting_transitioned/i)
+  assert.match(migration, /registration\.admission_started/i)
+  assert.match(migration, /notification_settings_ui_registry/i)
+  assert.match(migration, /notification_rule_content_contracts/i)
+  assert.match(migration, /notification_templates/i)
+  assert.doesNotMatch(migration, /notification_runtime_flags/i)
+  assert.doesNotMatch(migration, /notification_(?:events|deliveries|provider_attempts)/i)
 })
 
 test("v2 save locks rule and contract revisions and derives template snapshots only from the server contract", async () => {

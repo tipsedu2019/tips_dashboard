@@ -22,14 +22,14 @@ function eventContractMap(entries) {
   return new Map(entries.map((entry) => [entry.eventKey, entry]))
 }
 
-test("48 approved event meanings resolve one consistent semantic contract across every rule identity", async () => {
+test("51 approved event meanings resolve one consistent semantic contract across every rule identity", async () => {
   const [registry, fixture] = await Promise.all([loadRegistry(), readFixture()])
   const expectedByEvent = eventContractMap(fixture.eventContracts)
   const entries = registry.listNotificationContentContracts()
   const actualEvents = new Set(entries.map((entry) => entry.eventKey))
 
-  assert.equal(expectedByEvent.size, 48)
-  assert.equal(actualEvents.size, 48)
+  assert.equal(expectedByEvent.size, 51)
+  assert.equal(actualEvents.size, 51)
   assert.deepEqual([...actualEvents].sort(), [...expectedByEvent.keys()].sort())
 
   for (const entry of entries) {

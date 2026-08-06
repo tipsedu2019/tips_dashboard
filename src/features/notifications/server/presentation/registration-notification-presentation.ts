@@ -12,6 +12,11 @@ const CORE_EVENTS = new Set([
   "registration.registration_completed",
   "registration.case_closed",
 ])
+const MANAGEMENT_PROGRESS_EVENTS = new Set([
+  "registration.consultation_completed",
+  "registration.waiting_transitioned",
+  "registration.admission_started",
+])
 const VISIT_EVENTS = new Set([
   "registration.visit_scheduled",
   "registration.visit_rescheduled",
@@ -21,6 +26,7 @@ const VISIT_EVENTS = new Set([
 ])
 const REGISTRATION_EVENTS = new Set([
   ...CORE_EVENTS,
+  ...MANAGEMENT_PROGRESS_EVENTS,
   "registration.appointment_reminder_due",
   "registration.phone_consultation_ready",
   ...VISIT_EVENTS,
@@ -161,7 +167,7 @@ function validateDestination(input: NotificationPresentationInput) {
     && input.connectionKey === null
     && input.destinationTeam === null
 
-  const allowed = CORE_EVENTS.has(input.eventKey)
+  const allowed = CORE_EVENTS.has(input.eventKey) || MANAGEMENT_PROGRESS_EVENTS.has(input.eventKey)
     ? isManagementChat
     : input.eventKey === "registration.phone_consultation_ready"
       ? isDirectorInbox
@@ -176,6 +182,15 @@ function validateDestination(input: NotificationPresentationInput) {
 function progressLine(input: NotificationPresentationInput) {
   if (input.eventKey === "registration.case_created") {
     return "[진행] 관리팀의 등록 내용 확인을 기다리고 있어요."
+  }
+  if (input.eventKey === "registration.consultation_completed") {
+    return "[진행] 상담 결과에 따른 다음 단계를 확인하고 있어요."
+  }
+  if (input.eventKey === "registration.waiting_transitioned") {
+    return "[진행] 관리팀이 대기 명단을 확인하고 있어요."
+  }
+  if (input.eventKey === "registration.admission_started") {
+    return "[진행] 관리팀이 등록 절차를 진행하고 있어요."
   }
   const actor = structuredText(input.payload.progress_actor, false)
   if (!actor) return ""
@@ -228,6 +243,12 @@ export function buildRegistrationNotificationPresentation(
   add("inquiry_at", () => dateTime(input, "inquiry_at"))
   add("registered_subjects", () => subjectsDisplay(input.payload, "registered_subjects"))
   add("registered_classes", () => structuredListDisplay(input.payload, "registered_classes"))
+  add("current_status", () => {
+    if (input.eventKey === "registration.consultation_completed") return "상담이 완료됐어요."
+    if (input.eventKey === "registration.waiting_transitioned") return "대기 신청이 접수됐어요."
+    if (input.eventKey === "registration.admission_started") return "등록 절차가 시작됐어요."
+    presentationError("notification_registration_event_state_mismatch")
+  })
   add("completion_status", () => {
     const status = requiredStructuredText(input.payload, "status")
     if (!["registered", "done", "completed"].includes(status)) {

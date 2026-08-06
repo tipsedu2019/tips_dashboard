@@ -23,6 +23,10 @@ const registrationFixedSeedUrl = new URL(
   "../supabase/migrations/20260716194000_notification_registration_handoffs.sql",
   import.meta.url,
 )
+const registrationManagementSeedUrl = new URL(
+  "../supabase/migrations/20260806120000_registration_management_google_chat_events.sql",
+  import.meta.url,
+)
 
 async function loadManifest() {
   const manifest = await import(manifestUrl.href).catch(() => null)
@@ -85,7 +89,7 @@ function sqlBetween(source, startMarker, endMarker) {
   return source.slice(start, end)
 }
 
-function extractSeedIdentityKeys(settingsSeed, reminderSeed, registrationFixedSeed) {
+function extractSeedIdentityKeys(settingsSeed, reminderSeed, registrationFixedSeed, registrationManagementSeed) {
   const identities = new Set()
 
   const baseEvents = [...sqlBetween(settingsSeed, "event_catalog(\n", "),\ncell_catalog(")
@@ -154,6 +158,17 @@ function extractSeedIdentityKeys(settingsSeed, reminderSeed, registrationFixedSe
     identities.add(["registration", eventKey, audienceKey, channelKey, "immediate"].join("|"))
   }
 
+  const managementIdentityBlock = sqlBetween(
+    registrationManagementSeed,
+    "-- registration_management_google_chat_identity_fixture_begin",
+    "-- registration_management_google_chat_identity_fixture_end",
+  )
+  const managementIdentityMatch = managementIdentityBlock.match(
+    /\$registration_management_identities\$([\s\S]*?)\$registration_management_identities\$/,
+  )
+  assert.ok(managementIdentityMatch, "registration management identity fixture must exist")
+  for (const identity of JSON.parse(managementIdentityMatch[1])) identities.add(identity)
+
   return [...identities].sort()
 }
 
@@ -195,6 +210,7 @@ test("manifest and the actual rule seeds match bidirectionally without a hardcod
     await readFile(settingsSeedUrl, "utf8"),
     await readFile(reminderSeedUrl, "utf8"),
     await readFile(registrationFixedSeedUrl, "utf8"),
+    await readFile(registrationManagementSeedUrl, "utf8"),
   )
 
   assert.deepEqual(actualRuleKeys, expectedRuleKeys)

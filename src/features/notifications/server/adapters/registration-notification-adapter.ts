@@ -125,6 +125,9 @@ const IMMEDIATE_MESSAGE_EVENTS = new Set([
 ])
 const PRESENTATION_EVENTS = new Set([
   "registration.case_created",
+  "registration.consultation_completed",
+  "registration.waiting_transitioned",
+  "registration.admission_started",
   "registration.registration_completed",
   "registration.case_closed",
   "registration.appointment_reminder_due",

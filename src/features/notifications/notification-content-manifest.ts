@@ -100,6 +100,21 @@ const RULE_GROUPS = [
     dispatchOwner: "legacy",
   },
   {
+    workflowKey: "registration",
+    eventKeys: [
+      "registration.consultation_completed",
+      "registration.waiting_transitioned",
+      "registration.admission_started",
+    ],
+    cells: [
+      { audienceKey: "management_team", channelKey: "google_chat", ruleVariantKeys: IMMEDIATE },
+    ],
+    scopeState: "in_scope",
+    configurationKind: "editable_rule",
+    enabledState: "enabled",
+    dispatchOwner: "canonical",
+  },
+  {
     workflowKey: "transfer",
     eventKeys: ["transfer.submitted", "transfer.completed"],
     cells: [

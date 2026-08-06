@@ -1342,6 +1342,65 @@ test("등록 adapter는 리마인더와 분리된 immediate core·phone·visit·
   assert.equal(revalidationCalls[0].workflowKey, "registration")
 })
 
+test("등록 adapter는 상담 완료·대기 신청·등록 신청을 관리팀용 한국어 상태와 상세 링크로 렌더한다", async () => {
+  const { createRegistrationNotificationAdapter } = await import(adapterModuleUrl)
+  const fixture = createFixtureDependencies()
+  const adapter = createRegistrationNotificationAdapter(fixture.dependencies)
+  const rule = {
+    ruleId: RULE_CHAT,
+    ruleRevision: "1",
+    templateId: TEMPLATE_A,
+    audienceKey: "management_team",
+    channelKey: "google_chat",
+    connectionKey: "google_chat.management",
+    ruleVariantKey: "immediate",
+  }
+  const cases = [
+    ["registration.consultation_completed", "상담이 완료됐어요.", "[진행] 상담 결과에 따른 다음 단계를 확인하고 있어요."],
+    ["registration.waiting_transitioned", "대기 신청이 접수됐어요.", "[진행] 관리팀이 대기 명단을 확인하고 있어요."],
+    ["registration.admission_started", "등록 절차가 시작됐어요.", "[진행] 관리팀이 등록 절차를 진행하고 있어요."],
+  ]
+
+  for (const [eventKey, expectedStatus, expectedProgress] of cases) {
+    const input = {
+      eventId: EVENT_A,
+      workflowKey: "registration",
+      eventKey,
+      sourceType: "ops_task_event",
+      sourceId: EVENT_B,
+      sourceRevision: null,
+      payloadSchemaVersion: 2,
+      payload: {
+        task_id: TASK_A,
+        track_id: TRACK_MATH,
+        student_name: "김학생",
+        subject: "수학",
+        status: "internal_status_must_not_render",
+        occurred_at: "2026-08-06T06:00:00.000Z",
+      },
+      rule,
+      scheduledFor: "2026-08-06T06:00:00.000Z",
+    }
+    const targets = await adapter.resolveTargets(input)
+    assert.deepEqual(targets.targets.map((target) => target.connectionKey), ["google_chat.management"])
+    const renderInput = {
+      ...input,
+      targetGeneration: targets.targetGeneration,
+      target: targets.targets[0],
+      requestedContextKeys: ["student_name", "subjects", "current_status", "progress_line"],
+    }
+    assert.deepEqual(await adapter.buildRenderContext(renderInput), {
+      student_name: "김학생",
+      subject: "수학",
+      status: "internal_status_must_not_render",
+      subjects: "수학",
+      current_status: expectedStatus,
+      progress_line: expectedProgress,
+    })
+    assert.equal(await adapter.buildDeepLink(renderInput), `/admin/registration?taskId=${TASK_A}`)
+  }
+})
+
 test("등록 adapter는 방문상담 변경과 예약 리마인더를 새 presentation으로 렌더하고 관리팀 방만 유지한다", async () => {
   const { createRegistrationNotificationAdapter } = await import(adapterModuleUrl)
   const fixture = createFixtureDependencies({ current: visitSource() })

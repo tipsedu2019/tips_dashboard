@@ -293,6 +293,48 @@
     },
     {
       "workflowKey": "registration",
+      "eventKey": "registration.consultation_completed",
+      "titleTemplate": "✅ [등록] {student_name} 상담이 완료됐어요",
+      "bodyTemplate": "[학생] {student_name}\n[과목] {subjects}\n[상태] {current_status}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "김민서 학생",
+        "subjects": "영어 · 수학",
+        "current_status": "상담이 완료됐어요.",
+        "progress_line": "[진행] 상담 결과에 따른 다음 단계를 확인하고 있어요."
+      },
+      "expectedTitle": "✅ [등록] 김민서 학생 상담이 완료됐어요",
+      "expectedBody": "[학생] 김민서 학생\n[과목] 영어 · 수학\n[상태] 상담이 완료됐어요.\n[진행] 상담 결과에 따른 다음 단계를 확인하고 있어요."
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.waiting_transitioned",
+      "titleTemplate": "⏳ [등록] {student_name} 대기 신청이 접수됐어요",
+      "bodyTemplate": "[학생] {student_name}\n[과목] {subjects}\n[상태] {current_status}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "김민서 학생",
+        "subjects": "영어 · 수학",
+        "current_status": "대기 신청이 접수됐어요.",
+        "progress_line": "[진행] 관리팀이 대기 명단을 확인하고 있어요."
+      },
+      "expectedTitle": "⏳ [등록] 김민서 학생 대기 신청이 접수됐어요",
+      "expectedBody": "[학생] 김민서 학생\n[과목] 영어 · 수학\n[상태] 대기 신청이 접수됐어요.\n[진행] 관리팀이 대기 명단을 확인하고 있어요."
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.admission_started",
+      "titleTemplate": "📝 [등록] {student_name} 등록 신청이 접수됐어요",
+      "bodyTemplate": "[학생] {student_name}\n[과목] {subjects}\n[상태] {current_status}\n{progress_line}",
+      "representativePayload": {
+        "student_name": "김민서 학생",
+        "subjects": "영어 · 수학",
+        "current_status": "등록 절차가 시작됐어요.",
+        "progress_line": "[진행] 관리팀이 등록 절차를 진행하고 있어요."
+      },
+      "expectedTitle": "📝 [등록] 김민서 학생 등록 신청이 접수됐어요",
+      "expectedBody": "[학생] 김민서 학생\n[과목] 영어 · 수학\n[상태] 등록 절차가 시작됐어요.\n[진행] 관리팀이 등록 절차를 진행하고 있어요."
+    },
+    {
+      "workflowKey": "registration",
       "eventKey": "registration.registration_completed",
       "titleTemplate": "✅ [등록] {student_name}의 등록 처리가 완료됐어요",
       "bodyTemplate": "[과목] {registered_subjects}\n[수업] {registered_classes}\n[상태] {completion_status}\n{progress_line}",
@@ -1295,6 +1337,14 @@
     },
     {
       "workflowKey": "registration",
+      "eventKey": "registration.admission_started",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "registration.admission_started"
+    },
+    {
+      "workflowKey": "registration",
       "eventKey": "registration.appointment_reminder_due",
       "audienceKey": "management_team",
       "channelKey": "google_chat",
@@ -1383,6 +1433,14 @@
     },
     {
       "workflowKey": "registration",
+      "eventKey": "registration.consultation_completed",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "registration.consultation_completed"
+    },
+    {
+      "workflowKey": "registration",
       "eventKey": "registration.phone_consultation_ready",
       "audienceKey": "track_director",
       "channelKey": "in_app",
@@ -1404,6 +1462,14 @@
       "channelKey": "google_chat",
       "ruleVariantKey": "immediate",
       "goldenEventKey": "registration.visit_canceled"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.waiting_transitioned",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "goldenEventKey": "registration.waiting_transitioned"
     },
     {
       "workflowKey": "registration",
