@@ -265,3 +265,86 @@ export function createNotificationOperationsMetricsReader(input: Readonly<{
     },
   })
 }
+
+export type RegistrationNotificationProcessingReadinessPayload = Readonly<{
+  registrationRuntimeVersion: 0 | 1
+  adaptersRuntimeVersion: 0 | 1
+  workerHeartbeat: Readonly<{
+    kind: "worker"
+    phase: "started" | "succeeded" | "failed"
+    createdAt: string
+  }> | null
+  watchdogHeartbeat: Readonly<{
+    kind: "watchdog"
+    phase: "started" | "succeeded" | "failed" | "skipped"
+    createdAt: string
+  }> | null
+}>
+
+const REGISTRATION_PROCESSING_KEYS = Object.freeze([
+  "adapters_runtime_version",
+  "registration_runtime_version",
+  "watchdog_heartbeat",
+  "worker_heartbeat",
+])
+const PROCESSING_HEARTBEAT_KEYS = Object.freeze(["created_at", "kind", "phase"])
+
+function runtimeVersion(value: unknown): 0 | 1 {
+  if (value !== 0 && value !== 1) fail()
+  return value
+}
+
+function processingHeartbeat(
+  value: unknown,
+  kind: "worker",
+): RegistrationNotificationProcessingReadinessPayload["workerHeartbeat"]
+function processingHeartbeat(
+  value: unknown,
+  kind: "watchdog",
+): RegistrationNotificationProcessingReadinessPayload["watchdogHeartbeat"]
+function processingHeartbeat(value: unknown, kind: "worker" | "watchdog") {
+  if (value === null) return null
+  if (!isRecord(value) || !hasExactKeys(value, PROCESSING_HEARTBEAT_KEYS)) fail()
+  if (value.kind !== kind) fail()
+  const phase = String(value.phase)
+  const createdAt = timestamp(value.created_at) as string
+  if (kind === "worker") {
+    if (!new Set(["started", "succeeded", "failed"]).has(phase)) fail()
+    return Object.freeze({
+      kind,
+      phase: phase as "started" | "succeeded" | "failed",
+      createdAt,
+    })
+  }
+  if (!new Set(["started", "succeeded", "failed", "skipped"]).has(phase)) fail()
+  return Object.freeze({
+    kind,
+    phase: phase as "started" | "succeeded" | "failed" | "skipped",
+    createdAt,
+  })
+}
+
+export function normalizeRegistrationNotificationProcessingReadiness(
+  value: unknown,
+): RegistrationNotificationProcessingReadinessPayload {
+  if (!isRecord(value) || !hasExactKeys(value, REGISTRATION_PROCESSING_KEYS)) fail()
+  return Object.freeze({
+    registrationRuntimeVersion: runtimeVersion(value.registration_runtime_version),
+    adaptersRuntimeVersion: runtimeVersion(value.adapters_runtime_version),
+    workerHeartbeat: processingHeartbeat(value.worker_heartbeat, "worker"),
+    watchdogHeartbeat: processingHeartbeat(value.watchdog_heartbeat, "watchdog"),
+  })
+}
+
+export function createRegistrationProcessingReadinessReader(input: Readonly<{
+  rpc(name: string, parameters?: Readonly<Record<string, never>>): Promise<unknown>
+}>) {
+  if (!input || typeof input.rpc !== "function") fail()
+  return Object.freeze({
+    async read() {
+      return normalizeRegistrationNotificationProcessingReadiness(
+        await input.rpc("get_registration_notification_processing_readiness_v1", {}),
+      )
+    },
+  })
+}

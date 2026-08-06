@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js"
 import { NextResponse } from "next/server"
 
 import {
+  createRegistrationProcessingReadinessReader,
   normalizeNotificationOperationsMetrics,
   notificationOperationsBlockers,
 } from "@/features/notifications/server/notification-operations-metrics"
@@ -59,6 +60,21 @@ export async function GET(request: Request) {
   const role = text((profile as { role?: unknown } | null)?.role)
   if (profileError || !["admin", "staff"].includes(role)) {
     return response({ ok: false, error: "Forbidden" }, 403)
+  }
+
+  if (new URL(request.url).searchParams.get("view") === "registration-processing-readiness") {
+    try {
+      const readiness = await createRegistrationProcessingReadinessReader({
+        async rpc(name, parameters) {
+          const { data, error } = await context.service.rpc(name, parameters)
+          if (error) throw error
+          return data
+        },
+      }).read()
+      return response({ ok: true, ...readiness })
+    } catch {
+      return response({ ok: false, error: "registration_notification_processing_readiness_unavailable" }, 503)
+    }
   }
 
   const { data, error } = await context.service.rpc("get_notification_operations_metrics_v1")

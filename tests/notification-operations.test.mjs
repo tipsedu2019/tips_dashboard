@@ -78,6 +78,43 @@ test("운영 metrics mapper는 닫힌 숫자 계약만 반환하고 PII 키를 �
   )
 })
 
+test("등록 처리 준비도는 전용 고정 RPC를 읽고 worker와 watchdog 상태만 반환한다", async () => {
+  const operations = await import(metricsUrl.href)
+  assert.equal(typeof operations.createRegistrationProcessingReadinessReader, "function")
+
+  const calls = []
+  const reader = operations.createRegistrationProcessingReadinessReader({
+    async rpc(name, parameters) {
+      calls.push({ name, parameters })
+      return {
+        registration_runtime_version: 1,
+        adapters_runtime_version: 0,
+        worker_heartbeat: {
+          kind: "worker",
+          phase: "succeeded",
+          created_at: "2026-08-06T13:30:00.000Z",
+        },
+        watchdog_heartbeat: null,
+      }
+    },
+  })
+
+  assert.deepEqual(await reader.read(), {
+    registrationRuntimeVersion: 1,
+    adaptersRuntimeVersion: 0,
+    workerHeartbeat: {
+      kind: "worker",
+      phase: "succeeded",
+      createdAt: "2026-08-06T13:30:00.000Z",
+    },
+    watchdogHeartbeat: null,
+  })
+  assert.deepEqual(calls, [{
+    name: "get_registration_notification_processing_readiness_v1",
+    parameters: {},
+  }])
+})
+
 test("stop threshold는 shadow side effect, unknown, 3 missed heartbeat, 5분 lag를 즉시 차단한다", async () => {
   const metrics = await import(metricsUrl.href)
   const unsafe = healthyMetrics()
