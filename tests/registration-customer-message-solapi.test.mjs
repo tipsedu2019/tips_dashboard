@@ -10,6 +10,7 @@ import {
 } from "../src/features/tasks/server/registration-customer-message-solapi.ts"
 import {
   createRegistrationCustomerMessageCatalog,
+  renderRegistrationCustomerMessage,
 } from "../src/features/tasks/server/registration-customer-message-catalog.ts"
 
 const NOW = new Date("2026-08-05T01:02:03.456Z")
@@ -91,7 +92,7 @@ test("send uses the official detailed ATA endpoint and an exact no-SMS-fallback 
   const result = await adapter.send({
     to: "01012345678",
     templateId: "template-admission",
-    variables: { 학생명: "김팁스" },
+    variables: { "#{학생명}": "김팁스" },
     buttons: [{
       name: "입학신청서 작성",
       type: "WL",
@@ -135,6 +136,42 @@ test("send uses the official detailed ATA endpoint and an exact no-SMS-fallback 
     statusMessage: "접수",
     observedAt: NOW.toISOString(),
     requestKeyMatched: true,
+  })
+})
+
+test("send preserves canonical renderer variable tokens exactly once", async () => {
+  const calls = []
+  const adapter = makeAdapter(async (url, init) => {
+    calls.push({ url: String(url), init })
+    return response({
+      groupInfo: { groupId: "provider-group-1" },
+      messageList: [{ messageId: MESSAGE_ID, statusCode: "2000", statusMessage: "접수" }],
+      failedMessageList: [],
+    })
+  })
+  const rendered = renderRegistrationCustomerMessage({
+    kind: "waiting_notice",
+    facts: {
+      studentName: "김팁스 학생",
+      subjects: ["영어"],
+      waitingKind: "current_term_opening",
+    },
+  })
+
+  await adapter.send({
+    to: "01012345678",
+    templateId: "template-waiting",
+    variables: rendered.variables,
+    buttons: rendered.buttons,
+    requestKey: REQUEST_KEY,
+  })
+
+  const payload = JSON.parse(calls[0].init.body)
+  assert.deepEqual(payload.messages[0].kakaoOptions.variables, {
+    "#{학생명}": "김팁스",
+    "#{과목}": "영어",
+    "#{대기종류}": "신규반 대기",
+    "#{대기내용}": "신규반 개설 대기",
   })
 })
 

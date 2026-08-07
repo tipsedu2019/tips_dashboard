@@ -212,9 +212,7 @@ export function createRegistrationCustomerMessageSolapi(dependencies: SolapiDepe
                 pfId: dependencies.pfId,
                 templateId: input.templateId,
                 disableSms: true,
-                variables: Object.fromEntries(
-                  Object.entries(input.variables).map(([key, value]) => [`#{${key}}`, value]),
-                ),
+                variables: input.variables,
                 buttons: input.buttons.map((button) => ({
                   buttonName: button.name,
                   buttonType: button.type,
