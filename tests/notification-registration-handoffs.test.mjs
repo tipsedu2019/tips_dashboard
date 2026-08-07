@@ -10,6 +10,10 @@ const contentMigrationUrl = new URL(
   "../supabase/migrations/20260803143000_notification_registration_content_payload.sql",
   import.meta.url,
 )
+const koreanRendererMigrationUrl = new URL(
+  "../supabase/migrations/20260807025103_registration_korean_template_renderer.sql",
+  import.meta.url,
+)
 const serviceUrl = new URL("../src/features/tasks/registration-track-service.ts", import.meta.url)
 const workspaceUrl = new URL("../src/features/tasks/ops-task-workspace.tsx", import.meta.url)
 const opsRouteUrl = new URL("../src/app/api/notifications/legacy/ops-task/route.ts", import.meta.url)
@@ -500,6 +504,23 @@ test("전화상담 담당 배정은 active template canonical projection 하나�
   assert.match(phoneProjection, /registration_render_fixed_template_v2/)
   assert.match(phoneProjection, /commit_legacy_notification_in_app_projection_v1/)
   assert.doesNotMatch(phoneProjection, /\[.*전화상담 대기|학생 상담을 확인하세요/)
+})
+
+test("등록 전용 renderer는 한국어 token을 영문 payload key로 매핑하고 legacy key도 유지한다", async () => {
+  const sql = await source(koreanRendererMigrationUrl)
+  const renderer = functionBlock(
+    sql,
+    "dashboard_private.registration_render_fixed_template_v2",
+  )
+
+  assert.match(renderer, /variable\.item ->> 'key' as key/)
+  assert.match(renderer, /variable\.item ->> 'token' as token/)
+  assert.match(renderer, /p_payload -> v_variable\.key/)
+  assert.match(renderer, /p_payload ->> v_variable\.key/)
+  assert.match(renderer, /'\{' \|\| v_variable\.key \|\| '\}'/)
+  assert.match(renderer, /'\{' \|\| v_variable\.token \|\| '\}'/)
+  assert.match(renderer, /registration_notification_template_token_not_allowed/)
+  assert.doesNotMatch(sql, /notification_runtime_flags|send_google_chat|solapi|http_post|net\.http/i)
 })
 
 test("등록 event writer는 전후 일정·장소와 제외·잔여 과목을 명시적 null·빈 배열로 snapshot한다", async () => {
