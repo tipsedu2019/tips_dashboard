@@ -116,7 +116,7 @@
 - SOLAPI `disableSms=true`
 - 본문·버튼 checksum
 
-신규 템플릿 네 개를 만들고 기존 입학 템플릿 하나를 재사용한다. 모든 메시지는 정보성 기본형이며 문자 대체발송을 사용하지 않는다.
+다섯 종류 모두 catalog와 정확히 일치하는 승인 템플릿을 사용한다. 입학 템플릿은 기존 Bitly 승인본을 재사용하지 않고 MakeEdu 원본 주소를 고정한 새 템플릿으로 교체한다. 모든 메시지는 정보성 기본형이며 문자 대체발송을 사용하지 않는다.
 
 ### 6.1 레벨테스트 예약 안내
 
@@ -212,7 +212,7 @@
 
 환경 변수: `SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID`
 
-현재 SOLAPI에서 발송 가능 상태인 `등록_입학신청서_작성안내` 템플릿과 고정 웹링크 버튼 `입학신청서 작성`을 재사용한다. 허용 변수는 `학생명` 하나다. 고정 모바일·PC 링크는 현재 승인된 `https://bit.ly/3rurm5t`와 catalog 값이 정확히 같아야 한다.
+고정 웹링크 버튼 `입학신청서 작성`은 모바일·PC 모두 MakeEdu 원본 주소 `https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8`을 사용한다. 허용 변수는 `학생명` 하나다. 기존 Bitly 승인 템플릿은 재사용하지 않고, 이 원본 주소와 catalog 값이 정확히 일치하는 템플릿의 승인을 받은 뒤 발송 가능 상태로 전환한다.
 
 입학 미리보기와 provider 요청은 이 catalog의 동일 renderer를 사용한다. 구형 화면의 별도 `getRegistrationAdmissionSolapiMessage()` 문자열은 제거하거나 동일 catalog 소비자로 바꿔 두 문구 소유자를 하나로 만든다.
 
@@ -507,10 +507,10 @@ DB에는 다섯 message kind의 activation row를 모두 `off`로 설치한다. 
 
 ### 12.1 SOLAPI
 
-1. `tipsedu` 채널에 신규 템플릿 네 개를 등록한다.
-2. 본문·변수·버튼·문자 대체발송 설정을 catalog와 대조한다.
-3. 네 템플릿 모두 카카오 검수를 요청한다.
-4. 모두 발송 가능 상태가 된 뒤 template ID를 기록한다.
+1. 기존 네 종류의 승인 템플릿은 유지하고, `tipsedu` 채널에 MakeEdu 원본 주소를 고정한 입학 교체본을 새로 등록한다.
+2. 기존 네 템플릿과 입학 교체본의 본문·변수·버튼·문자 대체발송 설정을 catalog와 대조한다.
+3. 입학 교체본만 카카오 검수를 요청한다.
+4. 입학 교체본이 발송 가능 상태가 되면 새 template ID를 기록하고, 기존 네 템플릿도 계속 발송 가능한지 확인한다.
 5. `tips-dashboard-production-solapi` 전용 API Key를 새로 만든다.
 6. API Secret은 생성 화면에서 한 번만 읽어 Vercel Production secret으로 바로 전달하며 파일·채팅·로그·clipboard history에 남기지 않는다.
 
@@ -600,11 +600,11 @@ provider-zero fixture로 다섯 종류를 desktop과 390 CSS px에서 확인한�
 2. provider-zero 단위·DB·브라우저·빌드 검증을 통과한다.
 3. 최신 remote migration history와 DB health를 read-only로 확인한다.
 4. forward migration을 적용하고 runtime marker·모든 gate `off`를 확인한다.
-5. Production code를 배포하되 credential이 없으면 fail-closed인지 확인한다.
-6. SOLAPI 신규 템플릿 네 개를 등록·검수 요청한다.
-7. 모두 발송 가능 상태가 될 때까지 provider 상태만 확인한다.
-8. 전용 API Key를 만들고 Production 환경 변수에 직접 저장한다.
-9. Production을 재배포하고 template drift preflight와 readiness를 확인한다.
+5. 기존 승인 템플릿은 유지한 채 MakeEdu 원본 주소를 고정한 입학 교체본만 새로 등록·검수 요청한다.
+6. 입학 교체본이 발송 가능 상태가 되고 기존 네 템플릿도 계속 발송 가능한지 provider 상태를 확인한다.
+7. 입학 교체본의 템플릿 ID가 달라졌다면 `SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID`만 갱신하고, 기존 전용 API credential과 나머지 네 template ID는 그대로 유지한다.
+8. 다섯 activation gate가 모두 `off`인 상태로 Production code를 배포하고, 설정 불일치는 fail-closed인지 확인한다.
+9. 다섯 템플릿의 template drift preflight와 readiness가 모두 catalog와 일치하는지 확인한다.
 10. 사용자가 TIPS에 `SOLAPI 테스트` 가상 등록 건을 만들고 본인 번호를 직접 입력한다. 실제 학생 데이터를 사용하지 않는다.
 11. admin-only RPC로 한 종류씩 합성 task ID와 recipient hash를 묶어 `verification`으로 전환한다. 다른 등록 건의 preview/send가 차단되는지 먼저 확인한다.
 12. 해당 종류에서 미리보기 → 확인 후 발송 → SOLAPI accepted → 실제 카카오 수신 → 마스킹 이력을 확인하고 live-test 증거를 기록한다.
@@ -664,7 +664,7 @@ API Key/Secret 노출이 의심되면 SOLAPI에서 전용 키를 폐기하고 �
 3. 모든 발송은 마스킹 수신자와 실제 provider 본문 확인을 거친다.
 4. 중복 클릭·request replay·동시 발송이 provider 요청을 한 번만 만든다.
 5. `unknown`은 자동 재발송되지 않고 조회·수동 조정 경로를 가진다.
-6. 신규 네 템플릿과 기존 입학 템플릿이 catalog drift 없이 발송 가능 상태다.
+6. MakeEdu 원본 주소의 입학 교체본을 포함한 다섯 템플릿이 catalog drift 없이 발송 가능 상태다.
 7. Production에만 전용 API credential과 다섯 template ID가 설정돼 있다.
 8. 운영 migration, Vercel Production 배포, DB activation gate, provider 상태가 각각 검증됐다.
 9. `SOLAPI 테스트` 합성 등록 건으로 다섯 종류가 각각 한 번 실제 수신됐다.

@@ -6,7 +6,7 @@ import {
   type RegistrationCustomerMessageKind,
 } from "../registration-customer-message-contract.ts"
 
-export const REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION = 2 as const
+export const REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION = 3 as const
 
 export type RegistrationCustomerMessageTemplateEnvKey =
   | "SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID"
@@ -32,7 +32,7 @@ export const REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_REVISIONS: Readonly<
   visit_consultation_booking: 2,
   appointment_reminder: 2,
   waiting_notice: 1,
-  admission_application: 1,
+  admission_application: 2,
 })
 
 export type RegistrationCustomerMessageServerEnv = Readonly<{
@@ -158,7 +158,7 @@ const SEND_DEFINITION: RegistrationCustomerMessageSendDefinition = Object.freeze
   type: "ATA",
   disableSms: true,
 })
-const ADMISSION_FORM_URL = "https://bit.ly/3rurm5t"
+const ADMISSION_FORM_URL = "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8"
 const PLACE_IDS = Object.freeze({
   본관: "1218797840",
   별관: "1962638110",

@@ -89,7 +89,7 @@ function sha256(value) {
 }
 
 test("catalog maps exactly five kinds to the approved server-only environment keys", () => {
-  assert.equal(REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION, 2)
+  assert.equal(REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION, 3)
   assert.deepEqual(REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS, {
     level_test_booking: "SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID",
     visit_consultation_booking: "SOLAPI_REGISTRATION_VISIT_BOOKING_TEMPLATE_ID",
@@ -102,7 +102,7 @@ test("catalog maps exactly five kinds to the approved server-only environment ke
     visit_consultation_booking: 2,
     appointment_reminder: 2,
     waiting_notice: 1,
-    admission_application: 1,
+    admission_application: 2,
   })
   assert.equal(Object.isFrozen(REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_REVISIONS), true)
   assert.throws(() => {
@@ -214,8 +214,8 @@ test("catalog pins exact approved copy and place-aware Naver buttons", () => {
       buttons: [{
         name: "입학신청서 작성",
         type: "WL",
-        linkMobile: "https://bit.ly/3rurm5t",
-        linkPc: "https://bit.ly/3rurm5t",
+        linkMobile: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
+        linkPc: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
       }],
     },
   }
@@ -371,8 +371,8 @@ test("renderer uses only each template allowlist and produces the exact approved
   assert.deepEqual(admission.buttons, [{
     name: "입학신청서 작성",
     type: "WL",
-    linkMobile: "https://bit.ly/3rurm5t",
-    linkPc: "https://bit.ly/3rurm5t",
+    linkMobile: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
+    linkPc: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
   }])
   assert.equal(Object.values(admission.variables).length, 1)
 })
@@ -397,7 +397,7 @@ test("renderer replaces template tokens once without reinterpreting variable val
 test("template and rendered checksums use canonical UTF-8 SHA-256", () => {
   const catalog = createRegistrationCustomerMessageCatalog(FULL_ENV)
   const template = catalog.templates.admission_application
-  const canonical = `{"buttons":[{"linkMobile":"https://bit.ly/3rurm5t","linkPc":"https://bit.ly/3rurm5t","name":"입학신청서 작성","type":"WL"}],"content":${JSON.stringify(ADMISSION_BODY)},"variables":["학생명"]}`
+  const canonical = `{"buttons":[{"linkMobile":"https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8","linkPc":"https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8","name":"입학신청서 작성","type":"WL"}],"content":${JSON.stringify(ADMISSION_BODY)},"variables":["학생명"]}`
 
   assert.equal(checksumRegistrationCustomerMessageTemplate(template), sha256(canonical))
   assert.equal(template.checksums.template, sha256(canonical))
@@ -405,7 +405,7 @@ test("template and rendered checksums use canonical UTF-8 SHA-256", () => {
   assert.equal(template.checksums.variables, sha256('["학생명"]'))
   assert.equal(
     template.checksums.buttons,
-    sha256('[{"linkMobile":"https://bit.ly/3rurm5t","linkPc":"https://bit.ly/3rurm5t","name":"입학신청서 작성","type":"WL"}]'),
+    sha256('[{"linkMobile":"https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8","linkPc":"https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8","name":"입학신청서 작성","type":"WL"}]'),
   )
 
   const providerNormalizedTemplate = {

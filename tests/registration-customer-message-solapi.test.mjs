@@ -96,8 +96,8 @@ test("send uses the official detailed ATA endpoint and an exact no-SMS-fallback 
     buttons: [{
       name: "입학신청서 작성",
       type: "WL",
-      linkMobile: "https://bit.ly/3rurm5t",
-      linkPc: "https://bit.ly/3rurm5t",
+      linkMobile: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
+      linkPc: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
     }],
     requestKey: REQUEST_KEY,
   })
@@ -118,8 +118,8 @@ test("send uses the official detailed ATA endpoint and an exact no-SMS-fallback 
         buttons: [{
           buttonName: "입학신청서 작성",
           buttonType: "WL",
-          linkMo: "https://bit.ly/3rurm5t",
-          linkPc: "https://bit.ly/3rurm5t",
+          linkMo: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
+          linkPc: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
         }],
       },
       customFields: { registrationRequestKey: REQUEST_KEY },

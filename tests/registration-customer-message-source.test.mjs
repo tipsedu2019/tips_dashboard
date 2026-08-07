@@ -181,7 +181,7 @@ test("waiting and admission variants normalize their canonical facts", async () 
   assert.deepEqual(admission.buttons, [{
     name: "입학신청서 작성",
     type: "WL",
-    host: "bit.ly",
+    host: "pay.makeedu.co.kr",
   }])
   const privateSource = readRegistrationCustomerMessagePrivateSource(admission)
   assert.deepEqual(
@@ -330,7 +330,7 @@ test("public source serialization never exposes full phone, hashes, provider ide
     "pf-id",
     "checksum",
     "linkMobile",
-    "https://bit.ly/3rurm5t",
+    "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
   ]) {
     assert.equal(serialized.includes(forbidden), false, forbidden)
   }
@@ -340,7 +340,10 @@ test("public source serialization never exposes full phone, hashes, provider ide
   assert.equal(privateSource.previewContract.templateKey, "admission_application")
   assert.equal(privateSource.readinessContract.templateId, "template-admission")
   assert.equal(privateSource.readinessContract.pfId, "pf-id")
-  assert.equal(privateSource.rendered.buttons[0].linkMobile, "https://bit.ly/3rurm5t")
+  assert.equal(
+    privateSource.rendered.buttons[0].linkMobile,
+    "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
+  )
 
   assert.throws(
     () => readRegistrationCustomerMessagePrivateSource(structuredClone(source)),
