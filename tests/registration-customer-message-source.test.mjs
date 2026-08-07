@@ -152,7 +152,11 @@ test("appointment source is normalized, stably sorted, and rendered in KST", asy
       placeLabel: "팁스학원 3층",
     },
     body: undefined,
-    buttons: [],
+    buttons: [{
+      name: "학원 위치 보기",
+      type: "WL",
+      host: "map.naver.com",
+    }],
   })
   assert.match(resolved.body, /김팁스 학생의 레벨테스트 예약/u)
   assert.match(resolved.body, /일시: 2026년 8월 5일 수요일 오후 3:30/u)
@@ -269,7 +273,7 @@ test("recipient HMAC is domain separated and every material fact changes the fin
       ...baseCatalog.templates,
       level_test_booking: {
         ...baseCatalog.templates.level_test_booking,
-        revision: 2,
+        revision: 3,
       },
     },
   }

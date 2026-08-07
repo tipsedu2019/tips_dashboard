@@ -6,7 +6,7 @@ import {
   type RegistrationCustomerMessageKind,
 } from "../registration-customer-message-contract.ts"
 
-export const REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION = 1 as const
+export const REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION = 2 as const
 
 export type RegistrationCustomerMessageTemplateEnvKey =
   | "SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID"
@@ -28,9 +28,9 @@ export const REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS: Readonly<
 export const REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_REVISIONS: Readonly<
   Record<RegistrationCustomerMessageKind, number>
 > = Object.freeze({
-  level_test_booking: 1,
-  visit_consultation_booking: 1,
-  appointment_reminder: 1,
+  level_test_booking: 2,
+  visit_consultation_booking: 2,
+  appointment_reminder: 2,
   waiting_notice: 1,
   admission_application: 1,
 })
@@ -69,6 +69,7 @@ export type RegistrationCustomerMessageVariableName =
   | "예약종류"
   | "예약일시"
   | "장소"
+  | "장소ID"
   | "과목"
   | "대기종류"
   | "대기내용"
@@ -158,6 +159,18 @@ const SEND_DEFINITION: RegistrationCustomerMessageSendDefinition = Object.freeze
   disableSms: true,
 })
 const ADMISSION_FORM_URL = "https://bit.ly/3rurm5t"
+const PLACE_IDS = Object.freeze({
+  본관: "1218797840",
+  별관: "1962638110",
+} as const)
+const PLACE_BUTTONS = Object.freeze([
+  Object.freeze({
+    name: "학원 위치 보기",
+    type: "WL" as const,
+    linkMobile: "https://map.naver.com/p/entry/place/#{장소ID}",
+    linkPc: "https://map.naver.com/p/entry/place/#{장소ID}",
+  }),
+] as const)
 
 const TEMPLATE_DEFINITIONS: Readonly<
   Record<RegistrationCustomerMessageKind, TemplateDefinition>
@@ -173,8 +186,8 @@ const TEMPLATE_DEFINITIONS: Readonly<
 과목: #{과목}
 
 일정 변경이 필요하시면 학원으로 연락해 주세요.`,
-    variables: Object.freeze(["학생명", "예약일시", "장소", "과목"] as const),
-    buttons: Object.freeze([] as const),
+    variables: Object.freeze(["학생명", "예약일시", "장소", "과목", "장소ID"] as const),
+    buttons: PLACE_BUTTONS,
   }),
   visit_consultation_booking: Object.freeze({
     kind: "visit_consultation_booking",
@@ -187,8 +200,8 @@ const TEMPLATE_DEFINITIONS: Readonly<
 과목: #{과목}
 
 일정 변경이 필요하시면 학원으로 연락해 주세요.`,
-    variables: Object.freeze(["학생명", "예약일시", "장소", "과목"] as const),
-    buttons: Object.freeze([] as const),
+    variables: Object.freeze(["학생명", "예약일시", "장소", "과목", "장소ID"] as const),
+    buttons: PLACE_BUTTONS,
   }),
   appointment_reminder: Object.freeze({
     kind: "appointment_reminder",
@@ -201,8 +214,8 @@ const TEMPLATE_DEFINITIONS: Readonly<
 과목: #{과목}
 
 변경이 필요하시면 학원으로 연락해 주세요.`,
-    variables: Object.freeze(["학생명", "예약종류", "예약일시", "장소", "과목"] as const),
-    buttons: Object.freeze([] as const),
+    variables: Object.freeze(["학생명", "예약종류", "예약일시", "장소", "과목", "장소ID"] as const),
+    buttons: PLACE_BUTTONS,
   }),
   waiting_notice: Object.freeze({
     kind: "waiting_notice",
@@ -474,7 +487,13 @@ function appointmentVariables(
     facts.scheduledAt as string | Date,
   )
   const place = requiredText(facts.place, "registration_customer_message_place_invalid")
-  return { schedule, place }
+  const placeId = place === "본관" || /^팁스학원(?:\s|$)/u.test(place)
+    ? PLACE_IDS.본관
+    : place === "별관" || /^제주수학학원(?:\s|$)/u.test(place)
+      ? PLACE_IDS.별관
+      : null
+  if (!placeId) catalogError("registration_customer_message_place_invalid")
+  return { schedule, place, placeId }
 }
 
 function renderVariables(
@@ -504,6 +523,7 @@ function renderVariables(
     const appointment = appointmentVariables(kind, facts)
     values.예약일시 = appointment.schedule
     values.장소 = appointment.place
+    values.장소ID = appointment.placeId
     labels.scheduleLabel = appointment.schedule
     labels.placeLabel = appointment.place
     if (kind === "appointment_reminder") {

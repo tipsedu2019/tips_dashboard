@@ -89,7 +89,7 @@ function sha256(value) {
 }
 
 test("catalog maps exactly five kinds to the approved server-only environment keys", () => {
-  assert.equal(REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION, 1)
+  assert.equal(REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION, 2)
   assert.deepEqual(REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS, {
     level_test_booking: "SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID",
     visit_consultation_booking: "SOLAPI_REGISTRATION_VISIT_BOOKING_TEMPLATE_ID",
@@ -98,9 +98,9 @@ test("catalog maps exactly five kinds to the approved server-only environment ke
     admission_application: "SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID",
   })
   assert.deepEqual(REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_REVISIONS, {
-    level_test_booking: 1,
-    visit_consultation_booking: 1,
-    appointment_reminder: 1,
+    level_test_booking: 2,
+    visit_consultation_booking: 2,
+    appointment_reminder: 2,
     waiting_notice: 1,
     admission_application: 1,
   })
@@ -179,23 +179,29 @@ test("catalog never falls back to process.env at import or factory time", () => 
   })
 })
 
-test("catalog pins all exact approved bodies variables and the admission web links", () => {
+test("catalog pins exact approved copy and place-aware Naver buttons", () => {
   const catalog = createRegistrationCustomerMessageCatalog(FULL_ENV)
+  const placeButton = [{
+    name: "학원 위치 보기",
+    type: "WL",
+    linkMobile: "https://map.naver.com/p/entry/place/#{장소ID}",
+    linkPc: "https://map.naver.com/p/entry/place/#{장소ID}",
+  }]
   const expected = {
     level_test_booking: {
       content: LEVEL_TEST_BODY,
-      variables: ["학생명", "예약일시", "장소", "과목"],
-      buttons: [],
+      variables: ["학생명", "예약일시", "장소", "과목", "장소ID"],
+      buttons: placeButton,
     },
     visit_consultation_booking: {
       content: VISIT_BODY,
-      variables: ["학생명", "예약일시", "장소", "과목"],
-      buttons: [],
+      variables: ["학생명", "예약일시", "장소", "과목", "장소ID"],
+      buttons: placeButton,
     },
     appointment_reminder: {
       content: REMINDER_BODY,
-      variables: ["학생명", "예약종류", "예약일시", "장소", "과목"],
-      buttons: [],
+      variables: ["학생명", "예약종류", "예약일시", "장소", "과목", "장소ID"],
+      buttons: placeButton,
     },
     waiting_notice: {
       content: WAITING_BODY,
@@ -301,7 +307,14 @@ test("renderer uses only each template allowlist and produces the exact approved
     "#{예약일시}": "2026년 8월 8일 토요일 오후 2:00",
     "#{장소}": "본관",
     "#{과목}": "영어 · 수학 · 과학",
+    "#{장소ID}": "1218797840",
   })
+  assert.deepEqual(level.buttons, [{
+    name: "학원 위치 보기",
+    type: "WL",
+    linkMobile: "https://map.naver.com/p/entry/place/#{장소ID}",
+    linkPc: "https://map.naver.com/p/entry/place/#{장소ID}",
+  }])
   assert.equal(level.body, LEVEL_TEST_BODY
     .replace("#{학생명}", "김팁스")
     .replace("#{예약일시}", "2026년 8월 8일 토요일 오후 2:00")
@@ -315,10 +328,11 @@ test("renderer uses only each template allowlist and produces the exact approved
 
   const visit = renderRegistrationCustomerMessage({
     kind: "visit_consultation_booking",
-    facts: { ...appointmentFacts, appointmentKind: "visit_consultation" },
+    facts: { ...appointmentFacts, place: "별관", appointmentKind: "visit_consultation" },
   })
   assert.match(visit.body, /방문상담 예약을 안내드립니다/)
-  assert.deepEqual(Object.keys(visit.variables), ["#{학생명}", "#{예약일시}", "#{장소}", "#{과목}"])
+  assert.deepEqual(Object.keys(visit.variables), ["#{학생명}", "#{예약일시}", "#{장소}", "#{과목}", "#{장소ID}"])
+  assert.equal(visit.variables["#{장소ID}"], "1962638110")
 
   const reminder = renderRegistrationCustomerMessage({
     kind: "appointment_reminder",
@@ -326,6 +340,11 @@ test("renderer uses only each template allowlist and produces the exact approved
   })
   assert.equal(reminder.variables["#{예약종류}"], "레벨테스트")
   assert.match(reminder.body, /김팁스 학생의 레벨테스트 일정을 다시 안내드립니다/)
+
+  assert.throws(() => renderRegistrationCustomerMessage({
+    kind: "appointment_reminder",
+    facts: { ...appointmentFacts, place: "임의 장소" },
+  }), /registration_customer_message_place_invalid/)
 
   const waiting = renderRegistrationCustomerMessage({
     kind: "waiting_notice",
