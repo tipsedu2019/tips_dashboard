@@ -35,6 +35,9 @@ async function loadProbeFactory() {
   vm.runInNewContext(compiled, {
     module: sandboxModule,
     exports: sandboxModule.exports,
+    AbortController,
+    clearTimeout,
+    setTimeout,
   });
   return sandboxModule.exports;
 }
@@ -226,6 +229,59 @@ test("reset during an in-flight probe prevents the stale result from repopulatin
   assert.deepEqual({ ...(await fresh) }, { mode: "ready", version: 1 });
   assert.deepEqual({ ...(await runtime.probe()) }, { mode: "ready", version: 1 });
   assert.equal(harness.calls.rpc, 2);
+});
+
+test("a stalled readiness request times out and releases the shared in-flight probe", async () => {
+  const { createRegistrationRuntimeProbe } = await loadProbeFactory();
+  const stalledReadiness = deferred();
+  const harness = createClient({
+    readiness: [stalledReadiness.promise, { data: 1, error: null }],
+  });
+  const runtime = createRegistrationRuntimeProbe(harness.client, { timeoutMs: 5 });
+  const firstProbe = runtime.probe();
+
+  assert.strictEqual(runtime.probe(), firstProbe);
+
+  const outcome = await Promise.race([
+    firstProbe.then(
+      () => ({ kind: "resolved" }),
+      (error) => ({ kind: "rejected", error }),
+    ),
+    new Promise((resolve) => setTimeout(() => resolve({ kind: "still_pending" }), 30)),
+  ]);
+
+  assert.equal(outcome.kind, "rejected");
+  assert.equal(outcome.error?.code, "REGISTRATION_REQUEST_TIMEOUT");
+  assert.match(outcome.error?.message || "", /registration_runtime_probe_timeout/);
+  stalledReadiness.resolve({ data: 0, error: null });
+  assert.deepEqual({ ...(await runtime.probe()) }, { mode: "ready", version: 1 });
+  assert.equal(harness.calls.rpc, 2);
+});
+
+test("the readiness RPC and fallback child probe share one timeout budget", async () => {
+  const { createRegistrationRuntimeProbe } = await loadProbeFactory();
+  const stalledChild = deferred();
+  const delayedMissingReadiness = new Promise((resolve) => {
+    setTimeout(() => resolve({ data: null, error: { code: "PGRST202" } }), 15);
+  });
+  const harness = createClient({
+    readiness: [delayedMissingReadiness],
+    child: [stalledChild.promise],
+  });
+  const runtime = createRegistrationRuntimeProbe(harness.client, { timeoutMs: 20 });
+
+  const outcome = await Promise.race([
+    runtime.probe().then(
+      () => ({ kind: "resolved" }),
+      (error) => ({ kind: "rejected", error }),
+    ),
+    new Promise((resolve) => setTimeout(() => resolve({ kind: "still_pending" }), 28)),
+  ]);
+  stalledChild.resolve({ data: null, error: { code: "PGRST205" } });
+
+  assert.equal(outcome.kind, "rejected");
+  assert.equal(outcome.error?.code, "REGISTRATION_REQUEST_TIMEOUT");
+  assert.equal(harness.calls.child, 1);
 });
 
 test("a ready-state integrity failure resets the cache and throws an explicit error", async () => {

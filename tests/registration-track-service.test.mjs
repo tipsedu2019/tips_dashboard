@@ -46,11 +46,14 @@ async function loadFactory(extraGlobals = {}) {
   vm.runInNewContext(compiled, {
     module: sandboxModule,
     exports: sandboxModule.exports,
+    AbortController,
+    clearTimeout,
     crypto: { randomUUID: () => "uuid-from-crypto" },
     normalizeRegistrationLevelTestPlace,
     parseAcademicSubject,
     REGISTRATION_WORKFLOW_STATUSES,
     getRegistrationWorkflowStatusFromLegacyTrack,
+    setTimeout,
     ...extraGlobals,
   });
   return sandboxModule.exports;
@@ -279,6 +282,7 @@ function createClient({ queryHandler, rpcHandler } = {}) {
   const rpcCalls = [];
   let activeQueries = 0;
   let maxActiveQueries = 0;
+  let abortedQueries = 0;
 
   function execute(query) {
     queries.push({
@@ -304,6 +308,14 @@ function createClient({ queryHandler, rpcHandler } = {}) {
       single: false,
     };
     const fluent = {
+      abortSignal(signal) {
+        if (signal.aborted) {
+          abortedQueries += 1;
+        } else {
+          signal.addEventListener("abort", () => { abortedQueries += 1; }, { once: true });
+        }
+        return fluent;
+      },
       select(columns, options) {
         query.columns = columns;
         query.options = options;
@@ -347,6 +359,7 @@ function createClient({ queryHandler, rpcHandler } = {}) {
   return {
     queries,
     rpcCalls,
+    getAbortedQueryCount: () => abortedQueries,
     getMaxActiveQueries: () => maxActiveQueries,
     client: {
       from: builder,
@@ -1066,6 +1079,66 @@ test("case detail reads overlap a delayed runtime readiness check", async () => 
   const detail = await pending;
   assert.equal(detail.task.id, "task-1");
   assert.deepEqual(detail.tracks.map((track) => track.id), ["track-1"]);
+});
+
+test("a stalled case-detail read times out and a forced retry can start fresh", async () => {
+  const { createRegistrationTrackService } = await loadFactory({ setTimeout, clearTimeout });
+  const stalledEvents = deferred();
+  let shouldStallEvents = true;
+  const harness = createClient({
+    queryHandler(query) {
+      if (query.table === "ops_task_events" && shouldStallEvents) return stalledEvents.promise;
+      return detailRows(query.table);
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    requestTimeoutMs: 5,
+  }));
+  const firstDetail = service.loadCaseDetail("task-1", "viewer-1", { force: true });
+
+  assert.strictEqual(service.loadCaseDetail("task-1", "viewer-1"), firstDetail);
+
+  const outcome = await Promise.race([
+    firstDetail.then(
+      () => ({ kind: "resolved" }),
+      (error) => ({ kind: "rejected", error }),
+    ),
+    new Promise((resolve) => setTimeout(() => resolve({ kind: "still_pending" }), 30)),
+  ]);
+
+  assert.equal(outcome.kind, "rejected");
+  assert.equal(outcome.error?.code, "REGISTRATION_REQUEST_TIMEOUT");
+  assert.match(outcome.error?.message || "", /registration_query_timeout/);
+
+  shouldStallEvents = false;
+  const detail = await service.loadCaseDetail("task-1", "viewer-1", { force: true });
+  assert.equal(detail.task.id, "task-1");
+  assert.equal(harness.queries.filter((query) => query.table === "ops_task_events").length, 2);
+  stalledEvents.resolve(detailRows("ops_task_events"));
+  await Promise.resolve();
+  assert.strictEqual(await service.loadCaseDetail("task-1", "viewer-1"), detail);
+  assert.equal(harness.queries.length, 12);
+});
+
+test("a runtime-probe failure aborts the parallel case-detail reads", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const stalledReads = deferred();
+  const runtimeError = new Error("registration_runtime_probe_timeout");
+  runtimeError.code = "REGISTRATION_REQUEST_TIMEOUT";
+  const harness = createClient({
+    queryHandler: () => stalledReads.promise,
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    probeRuntime: async () => { throw runtimeError; },
+    requestTimeoutMs: 50,
+  }));
+
+  await assert.rejects(
+    service.loadCaseDetail("task-1", "viewer-1", { force: true }),
+    (error) => error === runtimeError,
+  );
+  assert.equal(harness.queries.length, 6);
+  assert.equal(harness.getAbortedQueryCount(), 6);
 });
 
 test("detail loader embeds track children in six scoped reads, maps rows, and shares same-viewer in-flight work", async () => {

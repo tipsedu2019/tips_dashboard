@@ -673,6 +673,7 @@ export type RegistrationMeasure = {
 
 type QueryResult = { data: unknown; error: unknown }
 type QueryBuilder = PromiseLike<QueryResult> & {
+  abortSignal?: (signal: AbortSignal) => QueryBuilder
   select: (columns: string, options?: Record<string, unknown>) => QueryBuilder
   eq: (column: string, value: unknown) => QueryBuilder
   gte: (column: string, value: unknown) => QueryBuilder
@@ -697,6 +698,7 @@ export type RegistrationTrackServiceOptions = {
   now?: () => number
   randomUUID?: () => string
   onMutationSuccess?: () => void
+  requestTimeoutMs?: number
 }
 
 const TRACK_SUMMARY_COLUMNS = [
@@ -1438,6 +1440,33 @@ function isClearlyInactiveStatus(input: unknown) {
 }
 
 const SCIENCE_CONSULTATION_CLASS_OPTION_CACHE_TTL_MS = 60_000
+const REGISTRATION_CASE_DETAIL_REQUEST_TIMEOUT_MS = 15_000
+
+function registrationRequestTimeout(message: string) {
+  const error = new Error(message) as Error & { code?: string }
+  error.name = "RegistrationRequestTimeoutError"
+  error.code = "REGISTRATION_REQUEST_TIMEOUT"
+  return error
+}
+
+function withRegistrationRequestTimeout<T>(
+  request: Promise<T>,
+  timeoutMs: number,
+  message: string,
+  onTimeout?: () => void,
+): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      onTimeout?.()
+      reject(registrationRequestTimeout(message))
+    }, timeoutMs)
+  })
+
+  return Promise.race([request, timeout]).finally(() => {
+    if (timeoutHandle !== null) clearTimeout(timeoutHandle)
+  })
+}
 
 export function createRegistrationTrackService(
   client: RegistrationTrackClient,
@@ -1467,6 +1496,9 @@ export function createRegistrationTrackService(
   const scienceConsultationClassOptionEpochs = new Map<string, number>()
   let cacheGeneration = 0
   let measureSequence = 0
+  const requestTimeoutMs = Number.isFinite(options.requestTimeoutMs) && Number(options.requestTimeoutMs) > 0
+    ? Number(options.requestTimeoutMs)
+    : REGISTRATION_CASE_DETAIL_REQUEST_TIMEOUT_MS
 
   function clearCaches() {
     cacheGeneration += 1
@@ -1513,16 +1545,30 @@ export function createRegistrationTrackService(
       })
   }
 
-  async function queryRows(builder: QueryBuilder, metrics: { queryCount: number }) {
+  async function queryRows(
+    builder: QueryBuilder,
+    metrics: { queryCount: number },
+    signal?: AbortSignal,
+  ) {
     metrics.queryCount += 1
-    const { data, error } = await builder
+    const request = signal && typeof builder.abortSignal === "function"
+      ? builder.abortSignal(signal)
+      : builder
+    const { data, error } = await request
     if (error) throw error
     return rows(data)
   }
 
-  async function queryOne(builder: QueryBuilder, metrics: { queryCount: number }) {
+  async function queryOne(
+    builder: QueryBuilder,
+    metrics: { queryCount: number },
+    signal?: AbortSignal,
+  ) {
     metrics.queryCount += 1
-    const { data, error } = await builder
+    const request = signal && typeof builder.abortSignal === "function"
+      ? builder.abortSignal(signal)
+      : builder
+    const { data, error } = await request
     if (error) throw error
     const row = firstRow(data)
     if (!row) throw new Error("등록 업무를 찾을 수 없습니다.")
@@ -1738,19 +1784,25 @@ export function createRegistrationTrackService(
     const generation = cacheGeneration
     const requestEpoch = detailEpochs.get(cacheKey) || 0
 
-    const request = measure("registration:case-detail", false, async (metrics) => {
+    const request = measure("registration:case-detail", false, (metrics) => {
+      const controller = typeof AbortController === "function" ? new AbortController() : null
+      const signal = controller?.signal
+      const detailRequest = (async () => {
       const phaseOneRequest = Promise.all([
         queryOne(
           client.from("ops_tasks").select(PARENT_DETAIL_COLUMNS).eq("id", safeTaskId).single(),
           metrics,
+          signal,
         ),
         ...TASK_SCOPED_CASE_READS.map(([table, columns]) => queryRows(
           client.from(table).select(columns).eq("task_id", safeTaskId),
           metrics,
+          signal,
         )),
         queryRows(
           client.from("ops_task_events").select(EVENT_COLUMNS).eq("task_id", safeTaskId),
           metrics,
+          signal,
         ),
         queryRows(
           client.from("ops_registration_messages")
@@ -1760,6 +1812,7 @@ export function createRegistrationTrackService(
             .eq("claim_active", true)
             .limit(1),
           metrics,
+          signal,
         ),
       ])
         .then(
@@ -1812,7 +1865,17 @@ export function createRegistrationTrackService(
         if (missingSchemaError(error)) return invalidateReadyRuntime(error)
         throw error
       }
+      })()
+      return withRegistrationRequestTimeout(
+        detailRequest,
+        requestTimeoutMs,
+        "registration_query_timeout",
+        () => controller?.abort(),
+      ).catch((error) => {
+        controller?.abort()
+        throw error
       })
+    })
       .then((result) => {
         if (
           generation === cacheGeneration

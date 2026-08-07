@@ -11,16 +11,24 @@ type RegistrationRuntimeProbeResult = {
   error: unknown
 }
 
+type RegistrationRuntimeProbeRequest = PromiseLike<RegistrationRuntimeProbeResult> & {
+  abortSignal?: (signal: AbortSignal) => PromiseLike<RegistrationRuntimeProbeResult>
+}
+
 export type RegistrationRuntimeProbeClient = {
-  rpc: (name: string) => PromiseLike<RegistrationRuntimeProbeResult>
+  rpc: (name: string) => RegistrationRuntimeProbeRequest
   from: (table: string) => {
     select: (
       columns: string,
       options: { head: true; count: "exact" },
     ) => {
-      limit: (count: number) => PromiseLike<RegistrationRuntimeProbeResult>
+      limit: (count: number) => RegistrationRuntimeProbeRequest
     }
   }
+}
+
+export type RegistrationRuntimeProbeOptions = {
+  timeoutMs?: number
 }
 
 export type RegistrationRuntimeProbe = {
@@ -31,6 +39,43 @@ export type RegistrationRuntimeProbe = {
 
 const REGISTRATION_RUNTIME_VERSION_RPC = "registration_subject_tracks_runtime_version"
 const REGISTRATION_TRACK_TABLE = "ops_registration_subject_tracks"
+const REGISTRATION_RUNTIME_PROBE_TIMEOUT_MS = 15_000
+
+function registrationRequestTimeout(message: string) {
+  const error = new Error(message) as Error & { code?: string }
+  error.name = "RegistrationRequestTimeoutError"
+  error.code = "REGISTRATION_REQUEST_TIMEOUT"
+  return error
+}
+
+function withRegistrationRequestTimeout<T>(
+  request: Promise<T>,
+  timeoutMs: number,
+  message: string,
+  onTimeout?: () => void,
+): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      onTimeout?.()
+      reject(registrationRequestTimeout(message))
+    }, timeoutMs)
+  })
+
+  return Promise.race([request, timeout]).finally(() => {
+    if (timeoutHandle !== null) clearTimeout(timeoutHandle)
+  })
+}
+
+function awaitRegistrationRuntimeRequest(
+  request: RegistrationRuntimeProbeRequest,
+  signal?: AbortSignal,
+) {
+  const abortableRequest = signal && typeof request.abortSignal === "function"
+    ? request.abortSignal(signal)
+    : request
+  return Promise.resolve(abortableRequest)
+}
 
 function errorCode(error: unknown) {
   if (!error || typeof error !== "object" || !("code" in error)) return ""
@@ -59,12 +104,16 @@ function isMissingTrackTable(error: unknown) {
 
 async function detectRegistrationRuntime(
   client: RegistrationRuntimeProbeClient | null,
+  signal?: AbortSignal,
 ): Promise<RegistrationRuntimeState> {
   if (!client) {
     throw new Error("Registration runtime client is unavailable.")
   }
 
-  const readiness = await client.rpc(REGISTRATION_RUNTIME_VERSION_RPC)
+  const readiness = await awaitRegistrationRuntimeRequest(
+    client.rpc(REGISTRATION_RUNTIME_VERSION_RPC),
+    signal,
+  )
   if (!readiness.error) {
     return readiness.data === 1
       ? { mode: "ready", version: 1 }
@@ -72,10 +121,13 @@ async function detectRegistrationRuntime(
   }
   if (!isMissingReadinessFunction(readiness.error)) throw readiness.error
 
-  const childProbe = await client
-    .from(REGISTRATION_TRACK_TABLE)
-    .select("id", { head: true, count: "exact" })
-    .limit(0)
+  const childProbe = await awaitRegistrationRuntimeRequest(
+    client
+      .from(REGISTRATION_TRACK_TABLE)
+      .select("id", { head: true, count: "exact" })
+      .limit(0),
+    signal,
+  )
   if (!childProbe.error) return { mode: "maintenance", version: 0 }
   if (isMissingTrackTable(childProbe.error)) return { mode: "legacy", version: 0 }
   throw childProbe.error
@@ -94,10 +146,14 @@ export class RegistrationRuntimeIntegrityError extends Error {
 
 export function createRegistrationRuntimeProbe(
   client: RegistrationRuntimeProbeClient | null,
+  options: RegistrationRuntimeProbeOptions = {},
 ): RegistrationRuntimeProbe {
   let cachedState: RegistrationRuntimeState | null = null
   let inFlight: Promise<RegistrationRuntimeState> | null = null
   let generation = 0
+  const timeoutMs = Number.isFinite(options.timeoutMs) && Number(options.timeoutMs) > 0
+    ? Number(options.timeoutMs)
+    : REGISTRATION_RUNTIME_PROBE_TIMEOUT_MS
 
   function reset() {
     generation += 1
@@ -110,7 +166,13 @@ export function createRegistrationRuntimeProbe(
     if (inFlight) return inFlight
 
     const requestGeneration = generation
-    const request = detectRegistrationRuntime(client)
+    const controller = typeof AbortController === "function" ? new AbortController() : null
+    const request = withRegistrationRequestTimeout(
+      detectRegistrationRuntime(client, controller?.signal),
+      timeoutMs,
+      "registration_runtime_probe_timeout",
+      () => controller?.abort(),
+    )
       .then((state) => {
         if (requestGeneration === generation) cachedState = state
         return state
