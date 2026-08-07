@@ -127,7 +127,21 @@ export async function dispatchRegistrationManagementNotificationSources(
       },
       body: JSON.stringify({ sourceEventId }),
     })
-    if (!response.ok) throw new Error("registration_management_notification_dispatch_failed")
+    const payload = await response.json().catch(() => null)
+    const sent = Number(payload?.sent)
+    const deduped = Number(payload?.deduped)
+    const failed = Number(payload?.failed)
+    if (
+      !response.ok
+      || payload?.ok !== true
+      || !Number.isInteger(sent)
+      || !Number.isInteger(deduped)
+      || !Number.isInteger(failed)
+      || failed > 0
+      || sent + deduped < 1
+    ) {
+      throw new Error("registration_management_notification_dispatch_failed")
+    }
   }))
 
   return {

@@ -134,16 +134,29 @@ test("registration management dispatch deduplicates opaque sources and reports e
   globalThis.fetch = async (url, init) => {
     calls.push([url, init])
     const sourceEventId = JSON.parse(init.body).sourceEventId
-    if (sourceEventId === "event-failed") return { ok: false }
-    return { ok: true }
+    if (sourceEventId === "event-failed") {
+      return { ok: false, json: async () => ({ ok: false }) }
+    }
+    if (sourceEventId === "event-provider-failed") {
+      return {
+        ok: true,
+        json: async () => ({ ok: true, sent: 0, deduped: 0, failed: 1 }),
+      }
+    }
+    return {
+      ok: true,
+      json: async () => ({ ok: true, sent: 1, deduped: 0, failed: 0 }),
+    }
   }
   try {
     const result = await dispatch(
-      ["event-ok", "event-ok", "event-failed", ""],
+      ["event-ok", "event-ok", "event-failed", "event-provider-failed", ""],
       "session-token",
     )
-    assert.deepEqual(result, { failedSourceEventIds: ["event-failed"] })
-    assert.equal(calls.length, 2)
+    assert.deepEqual(result, {
+      failedSourceEventIds: ["event-failed", "event-provider-failed"],
+    })
+    assert.equal(calls.length, 3)
     assert.deepEqual(calls.map(([url, init]) => ({
       url,
       method: init.method,
@@ -161,6 +174,12 @@ test("registration management dispatch deduplicates opaque sources and reports e
         method: "POST",
         authorization: "Bearer session-token",
         body: { sourceEventId: "event-failed" },
+      },
+      {
+        url: "/api/notifications/legacy/ops-task",
+        method: "POST",
+        authorization: "Bearer session-token",
+        body: { sourceEventId: "event-provider-failed" },
       },
     ])
   } finally {
