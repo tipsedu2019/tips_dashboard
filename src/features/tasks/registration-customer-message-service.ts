@@ -1,14 +1,16 @@
 import type {
   RegistrationCustomerMessageCheckInput,
+  RegistrationCustomerMessageAdminClient,
   RegistrationCustomerMessageClient,
   RegistrationCustomerMessageHistoryItem,
   RegistrationCustomerMessageHistoryResponse,
   RegistrationCustomerMessagePreviewResponse,
+  RegistrationCustomerMessageReadiness,
   RegistrationCustomerMessageSendInput,
   RegistrationCustomerMessageSendResult,
   RegistrationCustomerMessageTarget,
-} from "./registration-customer-message-contract"
-import { assertRegistrationCustomerMessagePublicPayload } from "./registration-customer-message-contract"
+} from "./registration-customer-message-contract.ts"
+import { assertRegistrationCustomerMessagePublicPayload } from "./registration-customer-message-contract.ts"
 
 type RegistrationCustomerMessageServiceOptions = Readonly<{
   getAccessToken: () => Promise<string | null>
@@ -95,6 +97,42 @@ export function createRegistrationCustomerMessageClient(
           reason: input.reason,
           requestKey: input.requestKey,
         }),
+      })
+    },
+  })
+}
+
+export function createRegistrationCustomerMessageAdminClient(
+  options: RegistrationCustomerMessageServiceOptions,
+): RegistrationCustomerMessageAdminClient {
+  const adminRequest = (body: Record<string, unknown>) => (
+    requestJson<RegistrationCustomerMessageReadiness>(
+      options,
+      "/api/solapi/registration/admin",
+      { method: "POST", body: JSON.stringify(body) },
+    )
+  )
+
+  return Object.freeze({
+    preflightTemplate(messageKind) {
+      return adminRequest({ action: "preflight_template", messageKind })
+    },
+    setActivation(input) {
+      return adminRequest({
+        action: "set_activation",
+        messageKind: input.messageKind,
+        mode: input.mode,
+        ...(input.verificationTaskId ? { verificationTaskId: input.verificationTaskId } : {}),
+        requestKey: input.requestKey,
+      })
+    },
+    recordLiveTestReceipt(input) {
+      return adminRequest({
+        action: "record_live_test_receipt",
+        messageKind: input.messageKind,
+        messageId: input.messageId,
+        receivedAt: input.receivedAt,
+        requestKey: input.requestKey,
       })
     },
   })

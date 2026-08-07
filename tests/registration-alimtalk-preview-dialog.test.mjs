@@ -30,7 +30,10 @@ async function loadService(fetch) {
     fetch,
     URLSearchParams,
     require(specifier) {
-      if (specifier === "./registration-customer-message-contract") {
+      if (
+        specifier === "./registration-customer-message-contract"
+        || specifier === "./registration-customer-message-contract.ts"
+      ) {
         return { assertRegistrationCustomerMessagePublicPayload }
       }
       throw new Error(`unexpected require: ${specifier}`)
