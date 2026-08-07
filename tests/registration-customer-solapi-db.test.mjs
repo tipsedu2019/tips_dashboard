@@ -12,6 +12,8 @@ const ACTIVATION_MIGRATION =
   "20260805112000_registration_customer_solapi_activation.sql"
 const AUDIT_DEDUPE_MIGRATION =
   "20260806130000_registration_customer_message_audit_dedupe.sql"
+const PREVIEW_TARGET_MIGRATION =
+  "20260807125500_registration_customer_message_preview_target_rpc.sql"
 const PREVIOUS_MIGRATION =
   "20260805101000_notification_control_plane_template_variable_wire_contract.sql"
 const storageMigrationUrl = new URL(
@@ -28,6 +30,10 @@ const activationMigrationUrl = new URL(
 )
 const auditDedupeMigrationUrl = new URL(
   "../supabase/migrations/" + AUDIT_DEDUPE_MIGRATION,
+  import.meta.url,
+)
+const previewTargetMigrationUrl = new URL(
+  "../supabase/migrations/" + PREVIEW_TARGET_MIGRATION,
   import.meta.url,
 )
 const migrationsUrl = new URL("../supabase/migrations/", import.meta.url)
@@ -1215,4 +1221,26 @@ test("pgTAP packet exercises storage behavior without production or provider dep
   ]) {
     assert.match(normalized, new RegExp(escapeRegex(behavior)))
   }
+})
+
+test("preview target lookup stays behind a service-role security definer", async () => {
+  const source = await readRequired(previewTargetMigrationUrl, "preview target RPC migration")
+  const normalized = normalizeSql(source)
+  const block = normalizeSql(functionBlock(
+    source,
+    "public.read_registration_customer_message_preview_target_v1",
+  ))
+
+  assert.match(source.trim(), /^begin;\s*/i)
+  assert.match(source.trim(), /commit;$/i)
+  assert.match(block, /security definer/)
+  assert.match(block, /set search_path = ''/)
+  assert.match(block, /from public\.ops_registration_customer_message_previews/)
+  assert.match(block, /preview\.created_by <> p_actor_profile_id/)
+  assert.match(block, /registration_customer_message_assert_actor_v1/)
+  assert.match(
+    normalized,
+    /grant execute on function public\.read_registration_customer_message_preview_target_v1\(uuid, uuid\) to service_role/,
+  )
+  assert.doesNotMatch(normalized, /grant (?:select|insert|update|delete|all) on table/)
 })

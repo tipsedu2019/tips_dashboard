@@ -1092,21 +1092,15 @@ export function createProductionRegistrationCustomerMessageRouteHandlers() {
         p_limit: input.limit,
       })
     },
-    async readPreviewTarget(input) {
-      const result = await serviceClient(input.context)
-        .from("ops_registration_customer_message_previews")
-        .select("task_id,track_id,appointment_id,message_kind,created_by")
-        .eq("id", input.previewId)
-        .maybeSingle()
-      if (result.error) throw result.error
-      const row = result.data as JsonRecord | null
-      if (!row || text(row.created_by).toLowerCase() !== input.actorProfileId) {
-        throw Object.assign(new Error("preview_unavailable"), { code: "P0002" })
-      }
-      const messageKind = row.message_kind
-      const taskId = text(row.task_id).toLowerCase()
-      const sourceId = text(row.appointment_id || row.track_id || row.task_id).toLowerCase()
-      return { messageKind, sourceId, taskId }
+    readPreviewTarget(input) {
+      return exactRpc(
+        input.context,
+        "read_registration_customer_message_preview_target_v1",
+        {
+          p_actor_profile_id: input.actorProfileId,
+          p_preview_id: input.previewId,
+        },
+      )
     },
     claimMessage(input) {
       return exactRpc(input.context, "claim_registration_customer_message_v1", {

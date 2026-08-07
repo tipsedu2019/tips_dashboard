@@ -28,6 +28,10 @@ const customerMessageSolapiUrl = new URL(
   "../src/features/tasks/server/registration-customer-message-solapi.ts",
   import.meta.url,
 )
+const customerMessageRouteUrl = new URL(
+  "../src/features/tasks/server/registration-customer-message-route.ts",
+  import.meta.url,
+)
 const workerMigrationUrl = new URL(
   "../supabase/pending-migrations/notification-cutover/20260716195500_notification_worker_schedule.sql",
   import.meta.url,
@@ -294,6 +298,15 @@ test("registration customer message adapter is the only reachable SOLAPI provide
   assert.doesNotMatch(`${rootRoute}\n${rootCore}`, /send-many\/detail|await deps\.fetch|register_notification_external_attempt_v1/)
   assert.match(customerMessageSolapi, /SOLAPI_SEND_MANY_URL = "https:\/\/api\.solapi\.com\/messages\/v4\/send-many\/detail"/)
   assert.match(customerMessageSolapi, /disableSms: true/)
+})
+
+test("registration customer message send reads preview ownership through the hardened RPC", async () => {
+  const route = await source(customerMessageRouteUrl)
+  assert.match(route, /read_registration_customer_message_preview_target_v1/)
+  assert.doesNotMatch(
+    route,
+    /\.from\(["']ops_registration_customer_message_previews["']\)/,
+  )
 })
 
 test("등록 외부 발송은 소유권 확보 뒤 시도 등록기를 통과해야만 provider를 호출한다", async () => {
