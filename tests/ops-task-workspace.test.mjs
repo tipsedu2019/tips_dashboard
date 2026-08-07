@@ -1313,7 +1313,7 @@ test("registration list renders core data without starting option reads until a 
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const reloadSource = workspaceSource.slice(
     workspaceSource.indexOf("const reload = useCallback"),
-    workspaceSource.indexOf("useEffect(() => {\n    void reload()"),
+    workspaceSource.indexOf("const deferRegistrationWorkspaceLoad"),
   );
 
   assertIncludesAll(workspaceSource, [
@@ -1395,7 +1395,7 @@ test("registration option enrichment survives a slower core revalidation", async
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const reloadSource = workspaceSource.slice(
     workspaceSource.indexOf("const reload = useCallback"),
-    workspaceSource.indexOf("useEffect(() => {\n    void reload()"),
+    workspaceSource.indexOf("const deferRegistrationWorkspaceLoad"),
   );
   const optionSource = workspaceSource.slice(
     workspaceSource.indexOf("const ensureRegistrationOptions = useCallback"),
@@ -2096,6 +2096,22 @@ test("completed word retest deep links do not re-open an already open detail dia
       < wordRetestDeepLink.indexOf("openWordRetestEditor(deepLinkedTask)"),
     "the re-entry guard must run before opening the word-retest editor",
   );
+});
+
+test("an in-flight direct registration detail owns its link before stale workspace fallback", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const deepLinkStart = source.indexOf("useEffect(() => {\n    if (deleteTarget) return");
+  const deepLinkEnd = source.indexOf("\n  function handleDetailOpenChange", deepLinkStart);
+  const deepLink = source.slice(deepLinkStart, deepLinkEnd);
+  const ownershipGuard = deepLink.indexOf('registrationApplicationHost.taskId === deepLinkedTaskId');
+  const staleTaskLookup = deepLink.indexOf("const deepLinkedTask = taskById.get(deepLinkedTaskId)");
+
+  assert.match(
+    deepLink,
+    /\["loading_detail", "detail", "refresh_failed"\]\.includes\(registrationApplicationHost\.kind\)[\s\S]*?registrationApplicationHost\.taskId === deepLinkedTaskId[\s\S]*?return/,
+  );
+  assert.ok(ownershipGuard >= 0, "the active registration host must own its direct link");
+  assert.ok(staleTaskLookup > ownershipGuard, "host ownership must win before a stale list can clear the link");
 });
 
 test("successful legacy registration create closes and resets its common application before another submit", async () => {

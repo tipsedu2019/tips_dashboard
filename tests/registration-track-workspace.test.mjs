@@ -1437,8 +1437,8 @@ test("subject removal renders the deployed history-block error inline", async ()
 test("workspace preloads the unified editor while canonical subject detail data loads", async () => {
   const source = await readWorkspaceSource()
   assert.match(source, /import \{\s*preloadRegistrationApplication,\s*RegistrationApplication,\s*\} from "\.\/registration-application-lazy"/)
-  assert.equal(source.match(/const editorReady = preloadRegistrationApplication\(\)/g)?.length, 2)
-  assert.equal(source.match(/Promise\.all\(\[\s*loadRegistrationCaseForWorkspace\(taskId\),[\s\S]*?editorReady,\s*\]\)/g)?.length, 2)
+  assert.equal(source.match(/const editorReady = preloadRegistrationApplication\(\)/g)?.length, 3)
+  assert.equal(source.match(/Promise\.all\(\[\s*loadRegistrationCaseForWorkspace\(taskId\),[\s\S]*?editorReady,\s*\]\)/g)?.length, 3)
   assert.match(source, /const \[registrationCaseDetail, setRegistrationCaseDetail\] = useState/)
   assert.match(source, /setRegistrationCaseDetail\(detail\)/)
   assert.match(source, /registrationCaseDetail && isCanonicalRegistrationTrackDetail/)
@@ -1454,6 +1454,10 @@ test("canonical detail renders before option catalogs begin loading", async () =
   const blocks = [
     source.slice(
       source.indexOf("const openRegistrationTrack = useCallback"),
+      source.indexOf("\n  const openRegistrationCase"),
+    ),
+    source.slice(
+      source.indexOf("const openRegistrationCase = useCallback"),
       source.indexOf("\n  const editRegistrationTrack"),
     ),
     source.slice(

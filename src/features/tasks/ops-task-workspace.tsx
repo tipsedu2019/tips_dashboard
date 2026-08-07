@@ -180,6 +180,7 @@ import {
   isRegistrationConsultationViewKey,
   normalizeRegistrationConsultationOwnerScope,
   normalizeRegistrationWorkspaceCalendarKind,
+  shouldDeferRegistrationWorkspaceLoad,
   type RegistrationConsultationOwnerScope,
   type RegistrationWorkspaceRouteTarget,
 } from "./registration-workspace-route"
@@ -8603,13 +8604,23 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
   }, [])
 
+  const deferRegistrationWorkspaceLoad = isRegistrationWorkspace && shouldDeferRegistrationWorkspaceLoad({
+    viewerId: registrationViewerId,
+    taskId: searchParams.get("taskId") || "",
+    trackId: searchParams.get("trackId") || "",
+    appointmentId: searchParams.get("appointmentId") || "",
+    workspaceReady: Boolean(data && workspaceDataViewerIdRef.current === currentUserId),
+    applicationHostKind: registrationApplicationHost.kind,
+  })
+
   useEffect(() => {
+    if (deferRegistrationWorkspaceLoad) return
     void reload()
     return () => {
       workspaceLoadGenerationRef.current += 1
       registrationOptionsLoadGenerationRef.current += 1
     }
-  }, [reload])
+  }, [deferRegistrationWorkspaceLoad, reload])
 
   const ensureRegistrationOptions = useCallback(async (force = false) => {
     if (registrationFixtureRequested && !registrationFixtureEnabled) return false
@@ -9958,6 +9969,81 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
   }, [canManageRegistrationWorkflow, currentUserId, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, openDetail, syncTaskDeepLink, taskById])
 
+  const openRegistrationCase = useCallback(async (
+    taskId: string,
+    options: { allowDirectLoad?: boolean } = {},
+  ) => {
+    const task = taskById.get(taskId)
+    if ((!task && !options.allowDirectLoad) || (task && task.type !== "registration")) {
+      setMessage("선택한 등록 업무를 찾을 수 없습니다. 목록을 다시 불러오세요.")
+      return null
+    }
+
+    const selectionKey = `case:${taskId}`
+    registrationTrackSelectionRef.current = selectionKey
+    registrationCommittedReceiptRef.current = null
+    setFormOpen(false)
+    setDetailOpen(false)
+    setRegistrationApplicationDirty(false)
+    setRegistrationCaseDetail(null)
+    setSelectedTask(task || null)
+    setSelectedRegistrationTrackId(null)
+    setSelectedRegistrationAppointmentId(null)
+    setRegistrationDetailLoadError("")
+    setRegistrationApplicationHost({
+      kind: "loading_detail",
+      taskId,
+      focusTrackId: null,
+      appointmentId: null,
+    })
+    syncTaskDeepLink(taskId, null, null, "push")
+    setMessage("")
+    setNotice("")
+
+    const editorReady = preloadRegistrationApplication()
+    try {
+      const [detail] = await Promise.all([
+        loadRegistrationCaseForWorkspace(taskId),
+        editorReady,
+      ])
+      if (
+        registrationTrackSelectionRef.current !== selectionKey
+        || (!task && latestWorkspaceViewerIdRef.current !== currentUserId)
+      ) return null
+
+      const canonicalTrack = detail.tracks.find((track) => !track.legacy) || null
+      const exactTask = { ...detail.task, registrationTracks: detail.tracks }
+      const focusTrackId = canonicalTrack?.id || null
+      if (!task) workspaceDataViewerIdRef.current = currentUserId
+      registrationTrackSelectionRef.current = focusTrackId ? `${taskId}:${focusTrackId}` : selectionKey
+      setRegistrationDetailLoadError("")
+      setRegistrationCaseDetail(detail)
+      setSelectedTask(exactTask)
+      setSelectedRegistrationTrackId(focusTrackId)
+      setRegistrationApplicationHost({
+        kind: "detail",
+        taskId,
+        focusTrackId,
+        appointmentId: null,
+      })
+      if (canManageRegistrationWorkflow) void ensureRegistrationOptions(true)
+      syncTaskDeepLink(taskId, focusTrackId)
+      return { task: exactTask, track: canonicalTrack, detail }
+    } catch {
+      if (registrationTrackSelectionRef.current === selectionKey) {
+        setRegistrationDetailLoadError("등록 상세를 불러오지 못했습니다.")
+        setRegistrationApplicationHost({
+          kind: "refresh_failed",
+          taskId,
+          focusTrackId: null,
+          appointmentId: null,
+          message: "등록 상세를 불러오지 못했습니다.",
+        })
+      }
+      return null
+    }
+  }, [canManageRegistrationWorkflow, currentUserId, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, syncTaskDeepLink, taskById])
+
   const editRegistrationTrack = useCallback(async (taskId: string, trackId: string) => {
     const selection = await openRegistrationTrack(taskId, trackId)
     if (!selection) return
@@ -10298,6 +10384,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         )
         return
       }
+      if (directRegistrationTarget.kind === "case") {
+        void openRegistrationCase(
+          directRegistrationTarget.taskId,
+          { allowDirectLoad: true },
+        )
+        return
+      }
       setSelectedRegistrationAppointmentId(null)
       setSelectedRegistrationTrackId(directRegistrationTarget.trackId)
       void openRegistrationTrack(
@@ -10307,6 +10400,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       )
       return
     }
+    if (
+      ["loading_detail", "detail", "refresh_failed"].includes(registrationApplicationHost.kind)
+      && "taskId" in registrationApplicationHost
+      && registrationApplicationHost.taskId === deepLinkedTaskId
+    ) return
     if (!data || !workspaceDataBelongsToCurrentViewer) return
     const deepLinkedTask = taskById.get(deepLinkedTaskId)
     if (!deepLinkedTask) {
@@ -10345,11 +10443,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       return
     }
     if (deepLinkedTask.type === "registration") {
-      if (
-        registrationApplicationHost.kind !== "closed"
-        && "taskId" in registrationApplicationHost
-        && registrationApplicationHost.taskId === deepLinkedTaskId
-      ) return
       const canonicalTrack = deepLinkedTask.registrationTracks?.find((track) => !track.legacy) || null
       if (canonicalTrack) {
         if (
@@ -10367,7 +10460,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     registrationTrackSelectionRef.current = ""
     setSelectedTask(deepLinkedTask)
     setDetailOpen(true)
-  }, [data, deleteTarget, detailOpen, openRegistrationAppointment, openRegistrationTrack, openWordRetestEditor, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, registrationViewerId, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
+  }, [data, deleteTarget, detailOpen, openRegistrationAppointment, openRegistrationCase, openRegistrationTrack, openWordRetestEditor, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, registrationViewerId, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
 
   function handleDetailOpenChange(nextOpen: boolean) {
     setDetailOpen(nextOpen)

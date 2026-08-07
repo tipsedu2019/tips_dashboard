@@ -625,7 +625,7 @@ function immediateDeepLink(input: NotificationRenderInput) {
   if (IMMEDIATE_VISIT_EVENTS.has(input.eventKey)) {
     query.set("appointmentId", requiredUuid(payload.appointment_id))
     query.set("view", "calendar")
-  } else if (input.eventKey === "registration.phone_consultation_ready") {
+  } else {
     const trackId = nullableUuid(payload.track_id)
     if (trackId) query.set("trackId", trackId)
   }

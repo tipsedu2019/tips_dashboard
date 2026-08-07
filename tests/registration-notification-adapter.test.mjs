@@ -1241,6 +1241,20 @@ test("등록 adapter는 리마인더와 분리된 immediate core·phone·visit·
   })
   assert.equal(
     await adapter.buildDeepLink(coreRenderInput),
+    `/admin/registration?taskId=${TASK_A}&trackId=${TRACK_ENGLISH}`,
+  )
+  await assert.rejects(
+    adapter.buildDeepLink({
+      ...coreRenderInput,
+      payload: { ...coreRenderInput.payload, track_id: "not-a-uuid" },
+    }),
+    /payload_schema_unsupported/,
+  )
+  assert.equal(
+    await adapter.buildDeepLink({
+      ...coreRenderInput,
+      payload: { ...coreRenderInput.payload, track_id: null },
+    }),
     `/admin/registration?taskId=${TASK_A}`,
   )
 
@@ -1397,7 +1411,10 @@ test("등록 adapter는 상담 완료·대기 신청·등록 신청을 관리팀
       current_status: expectedStatus,
       progress_line: expectedProgress,
     })
-    assert.equal(await adapter.buildDeepLink(renderInput), `/admin/registration?taskId=${TASK_A}`)
+    assert.equal(
+      await adapter.buildDeepLink(renderInput),
+      `/admin/registration?taskId=${TASK_A}&trackId=${TRACK_MATH}`,
+    )
   }
 })
 

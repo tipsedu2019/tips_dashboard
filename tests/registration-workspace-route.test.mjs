@@ -1,6 +1,8 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import * as registrationWorkspaceRoute from "../src/features/tasks/registration-workspace-route.ts"
+
 import {
   buildRegistrationWorkspaceSearchParams,
   getRegistrationDirectDeepLinkTarget,
@@ -39,14 +41,6 @@ test("explicit canonical track deep links start before the workspace list is rea
   assert.equal(getRegistrationDirectDeepLinkTarget({
     viewerId: "viewer-1",
     taskId: "task-1",
-    trackId: "track-1",
-    appointmentId: "",
-    workspaceReady: true,
-    currentSelectionKey: "",
-  }), null)
-  assert.equal(getRegistrationDirectDeepLinkTarget({
-    viewerId: "viewer-1",
-    taskId: "task-1",
     trackId: "legacy:task-1:영어",
     appointmentId: "",
     workspaceReady: false,
@@ -60,6 +54,74 @@ test("explicit canonical track deep links start before the workspace list is rea
     workspaceReady: false,
     currentSelectionKey: "task-1:track-1",
   }), null)
+
+  assert.deepEqual(getRegistrationDirectDeepLinkTarget({
+    viewerId: "viewer-1",
+    taskId: "task-1",
+    trackId: "track-1",
+    appointmentId: "",
+    workspaceReady: true,
+    currentSelectionKey: "",
+  }), target)
+})
+
+test("task-only registration deep links start before the workspace list is ready", () => {
+  const target = getRegistrationDirectDeepLinkTarget({
+    viewerId: "viewer-1",
+    taskId: "task-1",
+    trackId: "",
+    appointmentId: "",
+    workspaceReady: false,
+    currentSelectionKey: "",
+  })
+
+  assert.deepEqual(target, {
+    kind: "case",
+    taskId: "task-1",
+  })
+  assert.equal(getRegistrationDirectDeepLinkTarget({
+    viewerId: "viewer-1",
+    taskId: "task-1",
+    trackId: "",
+    appointmentId: "",
+    workspaceReady: false,
+    currentSelectionKey: "case:task-1",
+  }), null)
+  assert.deepEqual(getRegistrationDirectDeepLinkTarget({
+    viewerId: "viewer-1",
+    taskId: "task-1",
+    trackId: "",
+    appointmentId: "",
+    workspaceReady: true,
+    currentSelectionKey: "",
+  }), target)
+  assert.equal(getRegistrationDirectDeepLinkTarget({
+    viewerId: "viewer-1",
+    taskId: "task-1",
+    trackId: "",
+    appointmentId: "",
+    workspaceReady: false,
+    currentSelectionKey: "task-1:track-1",
+  }), null)
+})
+
+test("direct registration details defer the competing workspace list until detail settles", () => {
+  const shouldDefer = registrationWorkspaceRoute.shouldDeferRegistrationWorkspaceLoad
+  assert.equal(typeof shouldDefer, "function")
+
+  const baseInput = {
+    viewerId: "viewer-1",
+    taskId: "task-1",
+    trackId: "track-1",
+    appointmentId: "",
+    workspaceReady: false,
+  }
+  assert.equal(shouldDefer?.({ ...baseInput, applicationHostKind: "closed" }), true)
+  assert.equal(shouldDefer?.({ ...baseInput, applicationHostKind: "loading_detail" }), true)
+  assert.equal(shouldDefer?.({ ...baseInput, applicationHostKind: "detail" }), false)
+  assert.equal(shouldDefer?.({ ...baseInput, applicationHostKind: "refresh_failed" }), false)
+  assert.equal(shouldDefer?.({ ...baseInput, workspaceReady: true, applicationHostKind: "closed" }), true)
+  assert.equal(shouldDefer?.({ ...baseInput, trackId: "legacy:task-1:영어", applicationHostKind: "closed" }), false)
 })
 
 test("explicit appointment deep links start before the workspace list is ready", () => {
@@ -88,6 +150,15 @@ test("explicit appointment deep links start before the workspace list is ready",
     currentSelectionKey: "task-1:track-1",
     currentAppointmentId: "appointment-1",
   }), null)
+
+  assert.deepEqual(getRegistrationDirectDeepLinkTarget({
+    viewerId: "viewer-1",
+    taskId: "task-1",
+    trackId: "",
+    appointmentId: "appointment-1",
+    workspaceReady: true,
+    currentSelectionKey: "",
+  }), target)
 })
 
 test("calendar target removes list state and preserves fixture context", () => {

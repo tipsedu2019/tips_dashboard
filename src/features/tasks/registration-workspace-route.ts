@@ -20,6 +20,9 @@ export type RegistrationDirectDeepLinkTarget = {
   taskId: string
   trackId: string
 } | {
+  kind: "case"
+  taskId: string
+} | {
   kind: "appointment"
   taskId: string
   trackId: string | null
@@ -60,10 +63,12 @@ export function getRegistrationDirectDeepLinkTarget(input: {
   const trackId = input.trackId.trim()
   const appointmentId = input.appointmentId.trim()
   if (
-    input.workspaceReady
-    || !viewerId
+    !viewerId
     || !taskId
   ) return null
+
+  // A persisted workspace list can be stale. Exact URL targets remain authoritative
+  // even when cached list data is already available.
 
   if (appointmentId) {
     if (
@@ -79,13 +84,42 @@ export function getRegistrationDirectDeepLinkTarget(input: {
     }
   }
 
+  if (!trackId) {
+    if (
+      input.currentSelectionKey === `case:${taskId}`
+      || input.currentSelectionKey.startsWith(`${taskId}:`)
+    ) return null
+
+    return { kind: "case", taskId }
+  }
+
   if (
-    !trackId
-    || trackId.startsWith("legacy:")
+    trackId.startsWith("legacy:")
     || input.currentSelectionKey === `${taskId}:${trackId}`
   ) return null
 
   return { kind: "track", taskId, trackId }
+}
+
+export function shouldDeferRegistrationWorkspaceLoad(input: {
+  viewerId: string
+  taskId: string
+  trackId: string
+  appointmentId: string
+  workspaceReady: boolean
+  applicationHostKind: "closed" | "create" | "loading_detail" | "detail" | "refresh_failed"
+}): boolean {
+  const viewerId = input.viewerId.trim()
+  const taskId = input.taskId.trim()
+  const trackId = input.trackId.trim()
+  const appointmentId = input.appointmentId.trim()
+  if (
+    !viewerId
+    || !taskId
+    || (!appointmentId && trackId.startsWith("legacy:"))
+  ) return false
+
+  return input.applicationHostKind === "closed" || input.applicationHostKind === "loading_detail"
 }
 
 export function buildRegistrationWorkspaceSearchParams(
