@@ -6,6 +6,7 @@ import {
 import {
   buildSchedulePlanForSave,
   deriveSelectedDaysFromSchedule,
+  isDateWithinScheduleBillingPeriods,
   parseDateValue,
 } from "../../lib/class-schedule-planner.js";
 import { resolveAcademicDirector } from "../../lib/academic-director-assignment.js";
@@ -723,6 +724,10 @@ export function applyMakeupRequestToSchedulePlan(rawPlan = {}, classRecord = {},
   const makeupDate = toDateKey(makeupSlots[0]?.startAt);
   const defaults = buildSchedulePlanDefaults(rawPlan, classRecord);
   const previousState = rawPlan?.sessionStates?.[cancelDate] || {};
+  const cancelDateIsMaterialized =
+    hasCancel &&
+    isDateWithinScheduleBillingPeriods(rawPlan, defaults, cancelDate);
+  const linkedMakeupDate = cancelDateIsMaterialized ? makeupDate : "";
   const makeupMemo = makeupSlots
     .map((slot) => {
       const slotClassroom = firstValue(slot.classroom, classroom);
@@ -731,6 +736,7 @@ export function applyMakeupRequestToSchedulePlan(rawPlan = {}, classRecord = {},
     .join(" · ");
   const makeupStateEntries = Object.fromEntries(
     [...new Set(makeupSlots.map((slot) => toDateKey(slot.startAt)).filter(Boolean))]
+      .filter((slotDate) => slotDate !== linkedMakeupDate)
       .map((slotDate) => {
         const slotRooms = [...new Set(
           makeupSlots

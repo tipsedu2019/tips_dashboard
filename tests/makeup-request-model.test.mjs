@@ -272,9 +272,205 @@ test("approved makeup request reflects cancellation and makeup into schedule pla
   assert.match(reflected.sessionStates["2026-07-06"].makeupMemo, /별관 7강/);
   assert.match(reflected.sessionStates["2026-07-06"].makeupMemo, /2026-07-08 19:00-20:00/);
   assert.match(reflected.sessionStates["2026-07-06"].makeupMemo, /2026-07-09 20:00-21:00/);
-  assert.ok(reflected.sessions.some((session) => session.scheduleState === "makeup" && session.date === "2026-07-08"));
-  assert.ok(reflected.sessions.some((session) => session.scheduleState === "makeup" && session.date === "2026-07-09"));
+  assert.equal(
+    reflected.sessions.filter(
+      (session) => session.scheduleState === "makeup" && session.date === "2026-07-08",
+    ).length,
+    1,
+  );
+  assert.equal(
+    reflected.sessions.find(
+      (session) => session.scheduleState === "makeup" && session.date === "2026-07-08",
+    )?.originalDate,
+    "2026-07-06",
+  );
+  assert.equal(
+    reflected.sessions.filter(
+      (session) => session.scheduleState === "makeup" && session.date === "2026-07-09",
+    ).length,
+    1,
+  );
   assert.ok(reflected.sessions.some((session) => Array.isArray(session.textbookEntries)));
+});
+
+test("approved makeup remains visible when its canceled date is outside the billing period", () => {
+  const reflected = applyMakeupRequestToSchedulePlan(
+    {
+      subject: "수학",
+      className: "중2 수학 A",
+      selectedDays: [3],
+      billingPeriods: [
+        {
+          id: "2026-07",
+          month: 7,
+          label: "7월",
+          startDate: "2026-07-08",
+          endDate: "2026-07-20",
+        },
+      ],
+      sessions: [],
+    },
+    { subject: "수학", name: "중2 수학 A", schedule: "수 19:00-20:00" },
+    {
+      id: "request-outside-period",
+      reason: "학교 행사",
+      cancelDate: "2026-07-06",
+      makeupSlots: [
+        {
+          startAt: "2026-07-08T19:00:00+09:00",
+          endAt: "2026-07-08T20:00:00+09:00",
+        },
+      ],
+      makeupClassroom: "본관 3강",
+    },
+  );
+
+  const makeupSessions = reflected.sessions.filter(
+    (session) => session.scheduleState === "makeup" && session.date === "2026-07-08",
+  );
+
+  assert.equal(makeupSessions.length, 1);
+  assert.equal(makeupSessions[0].originalDate, "");
+});
+
+test("a separate makeup-only request remains visible on a linked makeup date", () => {
+  const basePlan = {
+    subject: "수학",
+    className: "중2 수학 A",
+    selectedDays: [1],
+    billingPeriods: [
+      {
+        id: "2026-07",
+        month: 7,
+        label: "7월",
+        startDate: "2026-07-06",
+        endDate: "2026-07-20",
+      },
+    ],
+    sessions: [],
+  };
+  const withLinkedMakeup = applyMakeupRequestToSchedulePlan(
+    basePlan,
+    { subject: "수학", name: "중2 수학 A", schedule: "월 18:00-20:00" },
+    {
+      id: "request-linked",
+      reason: "학교 행사",
+      cancelDate: "2026-07-06",
+      makeupSlots: [
+        {
+          startAt: "2026-07-08T19:00:00+09:00",
+          endAt: "2026-07-08T20:00:00+09:00",
+        },
+      ],
+    },
+  );
+  const withIndependentMakeup = applyMakeupRequestToSchedulePlan(
+    withLinkedMakeup,
+    { subject: "수학", name: "중2 수학 A", schedule: "월 18:00-20:00" },
+    {
+      id: "request-independent",
+      requestKind: "makeup_only",
+      reason: "추가 보강",
+      cancelDate: "",
+      makeupSlots: [
+        {
+          startAt: "2026-07-08T21:00:00+09:00",
+          endAt: "2026-07-08T22:00:00+09:00",
+        },
+      ],
+    },
+  );
+
+  assert.equal(
+    withIndependentMakeup.sessions.filter(
+      (session) => session.scheduleState === "makeup" && session.date === "2026-07-08",
+    ).length,
+    2,
+  );
+});
+
+test("a linked makeup session is materialized once across overlapping billing periods", () => {
+  const reflected = applyMakeupRequestToSchedulePlan(
+    {
+      subject: "수학",
+      className: "중2 수학 A",
+      selectedDays: [1],
+      billingPeriods: [
+        {
+          id: "2026-07-a",
+          month: 7,
+          label: "7월 A",
+          startDate: "2026-07-01",
+          endDate: "2026-07-15",
+        },
+        {
+          id: "2026-07-b",
+          month: 7,
+          label: "7월 B",
+          startDate: "2026-07-06",
+          endDate: "2026-07-20",
+        },
+      ],
+      sessions: [],
+    },
+    { subject: "수학", name: "중2 수학 A", schedule: "월 18:00-20:00" },
+    {
+      id: "request-overlap",
+      reason: "학교 행사",
+      cancelDate: "2026-07-06",
+      makeupSlots: [
+        {
+          startAt: "2026-07-08T19:00:00+09:00",
+          endAt: "2026-07-08T20:00:00+09:00",
+        },
+      ],
+    },
+  );
+
+  assert.equal(
+    reflected.sessions.filter(
+      (session) => session.scheduleState === "makeup" && session.date === "2026-07-08",
+    ).length,
+    1,
+  );
+});
+
+test("a linked makeup session is materialized once for an automatically ended billing period", () => {
+  const reflected = applyMakeupRequestToSchedulePlan(
+    {
+      subject: "수학",
+      className: "중2 수학 A",
+      selectedDays: [1],
+      billingPeriods: [
+        {
+          id: "2026-07",
+          month: 7,
+          label: "7월",
+          startDate: "2026-07-06",
+        },
+      ],
+      sessions: [],
+    },
+    { subject: "수학", name: "중2 수학 A", schedule: "월 18:00-20:00" },
+    {
+      id: "request-auto-end",
+      reason: "학교 행사",
+      cancelDate: "2026-07-06",
+      makeupSlots: [
+        {
+          startAt: "2026-07-08T19:00:00+09:00",
+          endAt: "2026-07-08T20:00:00+09:00",
+        },
+      ],
+    },
+  );
+
+  const makeupSessions = reflected.sessions.filter(
+    (session) => session.scheduleState === "makeup" && session.date === "2026-07-08",
+  );
+
+  assert.equal(makeupSessions.length, 1);
+  assert.equal(makeupSessions[0].originalDate, "2026-07-06");
 });
 
 test("approved cancel-only request marks the canceled class date without completing a makeup session", () => {

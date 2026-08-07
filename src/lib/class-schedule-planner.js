@@ -615,6 +615,38 @@ function createInitialBillingPeriods(
   ]);
 }
 
+export function isDateWithinScheduleBillingPeriods(
+  rawPlan = {},
+  defaults = {},
+  dateValue = "",
+) {
+  const date = parseDateValue(dateValue);
+  if (!date) return false;
+
+  const selectedDays = uniqueSortedDays(
+    rawPlan?.selectedDays?.length
+      ? rawPlan.selectedDays
+      : deriveSelectedDaysFromSchedule(defaults.schedule || ""),
+  );
+  const billingPeriods = createInitialBillingPeriods(
+    rawPlan,
+    defaults,
+    selectedDays,
+    getRecommendedSessionCount(selectedDays),
+  );
+
+  return billingPeriods.some((period) => {
+    const periodStart = parseDateValue(period.startDate);
+    const periodEnd = parseDateValue(period.endDate);
+    return (
+      periodStart &&
+      periodEnd &&
+      periodStart <= date &&
+      date <= periodEnd
+    );
+  });
+}
+
 function normalizeRangeType(value, fallback = "custom") {
   if (value === "pages" || value === "lessons" || value === "custom") {
     return value;
@@ -1187,6 +1219,7 @@ export function calculateSchedulePlan(planInput) {
   const editorEntriesByPeriod = {};
   const sessions = [];
   const claimedExistingSessionIds = new Set();
+  const materializedLinkedMakeups = new Set();
   let minDate = null;
   let maxDate = null;
 
@@ -1230,12 +1263,20 @@ export function calculateSchedulePlan(planInput) {
 
         if (overrideState === "exception" && override?.makeupDate) {
           const makeupDateObj = parseDateValue(override.makeupDate);
-          if (makeupDateObj) {
+          const makeupDateString = makeupDateObj
+            ? toDateString(makeupDateObj)
+            : "";
+          const linkedMakeupKey = `${dateString}:${makeupDateString}`;
+          if (
+            makeupDateObj &&
+            !materializedLinkedMakeups.has(linkedMakeupKey)
+          ) {
+            materializedLinkedMakeups.add(linkedMakeupKey);
             baseEntries.push({
               billingId: period.id,
               billingLabel: period.label,
               billingColor: period.color,
-              date: toDateString(makeupDateObj),
+              date: makeupDateString,
               dateObj: makeupDateObj,
               state: "makeup",
               rawState: "makeup",
