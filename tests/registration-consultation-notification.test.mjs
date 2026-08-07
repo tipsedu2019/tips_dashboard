@@ -124,6 +124,50 @@ test("visit notification key is scoped by appointment revision, track, and direc
   }), "registration:visit:appointment-1:revision:2:track:english:director:director-1")
 })
 
+test("registration management dispatch deduplicates opaque sources and reports exact failures", async () => {
+  const dispatch = notificationModel.dispatchRegistrationManagementNotificationSources
+  assert.equal(typeof dispatch, "function")
+  if (typeof dispatch !== "function") return
+
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, init) => {
+    calls.push([url, init])
+    const sourceEventId = JSON.parse(init.body).sourceEventId
+    if (sourceEventId === "event-failed") return { ok: false }
+    return { ok: true }
+  }
+  try {
+    const result = await dispatch(
+      ["event-ok", "event-ok", "event-failed", ""],
+      "session-token",
+    )
+    assert.deepEqual(result, { failedSourceEventIds: ["event-failed"] })
+    assert.equal(calls.length, 2)
+    assert.deepEqual(calls.map(([url, init]) => ({
+      url,
+      method: init.method,
+      authorization: init.headers.Authorization,
+      body: JSON.parse(init.body),
+    })), [
+      {
+        url: "/api/notifications/legacy/ops-task",
+        method: "POST",
+        authorization: "Bearer session-token",
+        body: { sourceEventId: "event-ok" },
+      },
+      {
+        url: "/api/notifications/legacy/ops-task",
+        method: "POST",
+        authorization: "Bearer session-token",
+        body: { sourceEventId: "event-failed" },
+      },
+    ])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test("notification result partition preserves every failed target and every warning", () => {
   const partition = notificationModel.partitionRegistrationVisitNotificationResults
   assert.equal(typeof partition, "function")
@@ -576,6 +620,40 @@ test("registration no longer has a generic browser Google Chat sender", () => {
   assert.match(workspaceSource, /loadRegistrationLegacyNotificationSourceIds/);
   assert.match(workspaceSource, /dispatchLegacyOpsTaskSources/);
 });
+
+test("registration saves state before producing and dispatching its management notification", async () => {
+  const editor = await readFile(new URL(
+    "../src/features/tasks/registration-track-editor.tsx",
+    import.meta.url,
+  ), "utf8")
+  const editorStatus = editor.slice(
+    editor.indexOf("async function changeWorkflowStatus"),
+    editor.indexOf("const migrationReviewPanelId"),
+  )
+  assert.match(editorStatus, /await setRegistrationWorkflowStatus/)
+  assert.match(editorStatus, /ensureRegistrationWorkflowNotificationSourceIds/)
+  assert.match(editorStatus, /dispatchRegistrationManagementNotificationSources/)
+  assert.ok(
+    editorStatus.indexOf("await setRegistrationWorkflowStatus")
+      < editorStatus.indexOf("ensureRegistrationWorkflowNotificationSourceIds"),
+  )
+
+  const workspaceStatus = workspaceSource.slice(
+    workspaceSource.indexOf("const handleRegistrationWorkflowStatusChange"),
+    workspaceSource.indexOf("const closeRegistrationApplicationHost"),
+  )
+  assert.match(workspaceStatus, /await setRegistrationWorkflowStatus/)
+  assert.match(workspaceStatus, /ensureRegistrationWorkflowNotificationSourceIds/)
+  assert.match(workspaceStatus, /dispatchRegistrationManagementNotificationSources/)
+
+  const atomicCreate = workspaceSource.slice(
+    workspaceSource.indexOf('if (createAttempt.writer === "atomic")'),
+    workspaceSource.indexOf("const inquiryOnlyPayload"),
+  )
+  assert.match(atomicCreate, /ensureRegistrationCaseCreatedNotificationSourceIds/)
+  assert.match(atomicCreate, /dispatchRegistrationManagementNotificationSources/)
+  assert.match(atomicCreate, /구글챗 알림은 전송하지 못했습니다/)
+})
 
 test("initial-plan counselor selectors preserve per-subject defaults and explicit choices", () => {
   assert.match(initialPlanSource, /resolvedDirectorIds\[subject\]/);

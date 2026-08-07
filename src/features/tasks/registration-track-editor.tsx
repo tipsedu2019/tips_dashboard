@@ -74,6 +74,7 @@ import {
   getRegistrationCurrentClassWaitClassId,
 } from "./registration-track-model.js"
 import {
+  ensureRegistrationWorkflowNotificationSourceIds,
   saveRegistrationCaseInquiry,
   saveRegistrationPhoneConsultation,
   setRegistrationWorkflowStatus,
@@ -83,6 +84,10 @@ import {
   type OpsRegistrationTrackSummary,
   type RegistrationAppointmentMutationResponse,
 } from "./registration-track-service"
+import {
+  dispatchRegistrationManagementNotificationSources,
+  isRegistrationManagementNotificationWorkflowStatus,
+} from "./registration-consultation-notification.js"
 import {
   REGISTRATION_WORKFLOW_STATUS_LABELS,
   getRegistrationWorkflowStatusOptions,
@@ -510,13 +515,33 @@ export function RegistrationApplication({
     if (!activeTrack || nextStatus === activeTrack.workflowStatus || workflowStatusSaving) return
     setWorkflowStatusSaving(true)
     try {
-      await setRegistrationWorkflowStatus({
+      const savedStatus = await setRegistrationWorkflowStatus({
         trackId: activeTrack.id,
         workflowStatus: nextStatus as typeof activeTrack.workflowStatus,
         expectedWorkflowRevision: activeTrack.workflowRevision,
         requestKey: `registration-workflow-status:${activeTrack.id}:${crypto.randomUUID()}`,
       })
+      let managementNotificationFailed = false
+      if (notificationToken && isRegistrationManagementNotificationWorkflowStatus(nextStatus)) {
+        try {
+          const sourceEventIds = await ensureRegistrationWorkflowNotificationSourceIds({
+            trackId: savedStatus.trackId,
+            workflowRevision: savedStatus.workflowRevision,
+          })
+          const dispatchResult = await dispatchRegistrationManagementNotificationSources(
+            sourceEventIds,
+            notificationToken,
+          )
+          managementNotificationFailed = sourceEventIds.length === 0
+            || dispatchResult.failedSourceEventIds.length > 0
+        } catch {
+          managementNotificationFailed = true
+        }
+      }
       await onReload(activeTrack.id)
+      if (managementNotificationFailed) {
+        onWarning("진행상태는 저장됐지만 관리팀 구글챗 알림은 전송하지 못했습니다.")
+      }
     } catch (error) {
       onWarning(errorMessage(error, "진행상태를 변경하지 못했습니다. 최신 정보를 확인해 주세요."))
     } finally {

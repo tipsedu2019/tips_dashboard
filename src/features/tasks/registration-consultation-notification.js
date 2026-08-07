@@ -108,6 +108,45 @@ export async function dispatchRegistrationVisitNotificationTargets(targets = [],
   return partitionRegistrationVisitNotificationResults(normalizedTargets, results)
 }
 
+export async function dispatchRegistrationManagementNotificationSources(
+  sourceEventIds = [],
+  sessionToken = "",
+) {
+  const normalizedSourceEventIds = Array.from(new Set(
+    (Array.isArray(sourceEventIds) ? sourceEventIds : []).map(text).filter(Boolean),
+  ))
+  const token = text(sessionToken)
+  if (!token) return { failedSourceEventIds: normalizedSourceEventIds }
+
+  const results = await Promise.allSettled(normalizedSourceEventIds.map(async (sourceEventId) => {
+    const response = await fetch("/api/notifications/legacy/ops-task", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ sourceEventId }),
+    })
+    if (!response.ok) throw new Error("registration_management_notification_dispatch_failed")
+  }))
+
+  return {
+    failedSourceEventIds: normalizedSourceEventIds.filter((_, index) => (
+      results[index]?.status !== "fulfilled"
+    )),
+  }
+}
+
+export function isRegistrationManagementNotificationWorkflowStatus(status) {
+  return [
+    "consultation_completed",
+    "waiting_current_class",
+    "waiting_new_class",
+    "waiting_next_opening",
+    "enrollment_requested",
+  ].includes(text(status))
+}
+
 export function getRegistrationVisitNotificationDedupeKey(input = {}) {
   return [
     "registration:visit",

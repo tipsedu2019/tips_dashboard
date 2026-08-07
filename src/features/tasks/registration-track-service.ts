@@ -2629,6 +2629,30 @@ export function createRegistrationTrackService(
     return stringList(value(row, "source_event_ids", "sourceEventIds"))
   }
 
+  async function ensureRegistrationCaseCreatedNotificationSourceIds(taskId: string): Promise<string[]> {
+    const normalizedTaskId = text(taskId)
+    if (!normalizedTaskId) throw new Error("registration_task_id_invalid")
+    const result = await callRpc<Row>("ensure_registration_case_created_notification_v1", {
+      p_task_id: normalizedTaskId,
+    })
+    return Array.from(new Set(stringList(value(result, "source_event_ids", "sourceEventIds"))))
+  }
+
+  async function ensureRegistrationWorkflowNotificationSourceIds(input: {
+    trackId: string
+    workflowRevision: number
+  }): Promise<string[]> {
+    const normalizedTrackId = text(input.trackId)
+    if (!normalizedTrackId || !Number.isInteger(input.workflowRevision) || input.workflowRevision < 1) {
+      throw new Error("registration_workflow_notification_source_invalid")
+    }
+    const result = await callRpc<Row>("ensure_registration_workflow_notification_v1", {
+      p_track_id: normalizedTrackId,
+      p_workflow_revision: input.workflowRevision,
+    })
+    return Array.from(new Set(stringList(value(result, "source_event_ids", "sourceEventIds"))))
+  }
+
   async function reconcileRegistrationAdmissionMessage(input: {
     messageId: string
     resolution: "accepted" | "failed"
@@ -2863,6 +2887,8 @@ export function createRegistrationTrackService(
     saveRegistrationEnrollmentRows,
     saveRegistrationEnrollmentDetails,
     listRegistrationLegacySourceIds,
+    ensureRegistrationCaseCreatedNotificationSourceIds,
+    ensureRegistrationWorkflowNotificationSourceIds,
     claimRegistrationAdmissionMessage,
     reconcileRegistrationAdmissionMessage,
     releaseRegistrationAdmissionMessageRetry,
@@ -3210,6 +3236,16 @@ export function claimRegistrationAdmissionMessage(
 
 export function loadRegistrationLegacyNotificationSourceIds(taskId: string): Promise<string[]> {
   return defaultRegistrationTrackService.listRegistrationLegacySourceIds(taskId)
+}
+
+export function ensureRegistrationCaseCreatedNotificationSourceIds(taskId: string): Promise<string[]> {
+  return defaultRegistrationTrackService.ensureRegistrationCaseCreatedNotificationSourceIds(taskId)
+}
+
+export function ensureRegistrationWorkflowNotificationSourceIds(
+  input: Parameters<typeof defaultRegistrationTrackService.ensureRegistrationWorkflowNotificationSourceIds>[0],
+): Promise<string[]> {
+  return defaultRegistrationTrackService.ensureRegistrationWorkflowNotificationSourceIds(input)
 }
 
 export function reconcileRegistrationAdmissionMessage(

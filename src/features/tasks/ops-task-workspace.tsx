@@ -193,6 +193,8 @@ import {
   createRegistrationCase,
   createRegistrationCaseWithInitialWorkflow,
   createRegistrationMutationRequestKey,
+  ensureRegistrationCaseCreatedNotificationSourceIds,
+  ensureRegistrationWorkflowNotificationSourceIds,
   loadRegistrationLegacyNotificationSourceIds,
   probeRegistrationIntakeWorkflowRuntime,
   probeRegistrationSubjectTrackRuntime,
@@ -219,7 +221,9 @@ import {
   type RegistrationInitialWorkflowDraft,
 } from "./registration-intake-workflow"
 import {
+  dispatchRegistrationManagementNotificationSources,
   dispatchRegistrationVisitNotificationTargets,
+  isRegistrationManagementNotificationWorkflowStatus,
   isRegistrationSubmissionOwnershipCurrent,
   mergeRegistrationVisitNotificationTargets,
   reconcileRegistrationVisitNotificationRetryTargets,
@@ -10167,20 +10171,43 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setSaving(true)
     setMessage("")
     try {
-      await setRegistrationWorkflowStatus({
+      const savedStatus = await setRegistrationWorkflowStatus({
         trackId: track.trackId,
         workflowStatus,
         expectedWorkflowRevision: track.workflowRevision,
         requestKey: createRegistrationMutationRequestKey("registration-workflow-status", track.trackId),
       })
+      let managementNotificationFailed = false
+      if (
+        registrationNotificationSessionToken
+        && isRegistrationManagementNotificationWorkflowStatus(workflowStatus)
+      ) {
+        try {
+          const sourceEventIds = await ensureRegistrationWorkflowNotificationSourceIds({
+            trackId: savedStatus.trackId,
+            workflowRevision: savedStatus.workflowRevision,
+          })
+          const dispatchResult = await dispatchRegistrationManagementNotificationSources(
+            sourceEventIds,
+            registrationNotificationSessionToken,
+          )
+          managementNotificationFailed = sourceEventIds.length === 0
+            || dispatchResult.failedSourceEventIds.length > 0
+        } catch {
+          managementNotificationFailed = true
+        }
+      }
       await reload(true, false)
+      if (managementNotificationFailed) {
+        setMessage("진행상태는 저장됐지만 관리팀 구글챗 알림은 전송하지 못했습니다.")
+      }
     } catch (error) {
       setMessage(getOpsTaskActionErrorMessage(error, "진행상태를 변경하지 못했습니다. 최신 정보를 확인해 주세요."))
       await reload(true, false).catch(() => undefined)
     } finally {
       setSaving(false)
     }
-  }, [reload, saving])
+  }, [registrationNotificationSessionToken, reload, saving])
 
   const closeRegistrationApplicationHost = useCallback(() => {
     setRegistrationApplicationHost({ kind: "closed" })
@@ -10862,6 +10889,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     let savedWithRefreshWarning = false
     let savedWithNotificationDeliveryFailure = false
     let savedWithNotificationAuditWarning = false
+    let savedWithManagementNotificationFailure = false
     const legacyOpsTaskSourceEventIds: string[] = []
     const loadSavedTaskOrFallback = async (taskId: string, input: OpsTaskInput, existing?: OpsTask) => {
       try {
@@ -11152,11 +11180,26 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                   savedWithNotificationDeliveryFailure = true
                 }
               }
+              if (submissionRegistrationNotificationSessionToken) {
+                try {
+                  const sourceEventIds = await ensureRegistrationCaseCreatedNotificationSourceIds(response.taskId)
+                  const dispatchResult = await dispatchRegistrationManagementNotificationSources(
+                    sourceEventIds,
+                    submissionRegistrationNotificationSessionToken,
+                  )
+                  savedWithManagementNotificationFailure = sourceEventIds.length === 0
+                    || dispatchResult.failedSourceEventIds.length > 0
+                } catch {
+                  savedWithManagementNotificationFailure = true
+                }
+              }
               setFormCompletionBlockers([])
               setFormCompletionIntent(null)
               setConfirmingFormClose(false)
               setQuery("")
-              setNotice(savedWithNotificationAuditWarning && savedWithNotificationDeliveryFailure
+              setNotice(savedWithManagementNotificationFailure
+                ? "등록을 추가했습니다. 관리팀 구글챗 알림은 전송하지 못했습니다. 업무는 정상 저장되었습니다."
+                : savedWithNotificationAuditWarning && savedWithNotificationDeliveryFailure
                 ? "등록을 추가했습니다. 일부 방문상담 알림의 전달 상태와 감사 이력을 확인하세요. 업무는 정상 저장되었습니다."
                 : savedWithNotificationAuditWarning
                   ? "등록을 추가했습니다. 방문상담 알림 전달은 접수됐습니다. 감사 이력을 확인하세요."
@@ -11183,11 +11226,26 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 tracks: response.tracks,
               }
               if (!registrationSubmissionStillOwnsWorkspace()) return
+              if (submissionRegistrationNotificationSessionToken) {
+                try {
+                  const sourceEventIds = await ensureRegistrationCaseCreatedNotificationSourceIds(response.taskId)
+                  const dispatchResult = await dispatchRegistrationManagementNotificationSources(
+                    sourceEventIds,
+                    submissionRegistrationNotificationSessionToken,
+                  )
+                  savedWithManagementNotificationFailure = sourceEventIds.length === 0
+                    || dispatchResult.failedSourceEventIds.length > 0
+                } catch {
+                  savedWithManagementNotificationFailure = true
+                }
+              }
               setFormCompletionBlockers([])
               setFormCompletionIntent(null)
               setConfirmingFormClose(false)
               setQuery("")
-              setNotice("등록을 추가했습니다.")
+              setNotice(savedWithManagementNotificationFailure
+                ? "등록을 추가했습니다. 관리팀 구글챗 알림은 전송하지 못했습니다. 업무는 정상 저장되었습니다."
+                : "등록을 추가했습니다.")
               await rehydrateCommittedRegistrationCase(committed)
               if (!registrationSubmissionStillOwnsWorkspace()) return
               return

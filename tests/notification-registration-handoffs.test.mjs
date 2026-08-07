@@ -14,6 +14,10 @@ const koreanRendererMigrationUrl = new URL(
   "../supabase/migrations/20260807025103_registration_korean_template_renderer.sql",
   import.meta.url,
 )
+const managementDispatchMigrationUrl = new URL(
+  "../supabase/migrations/20260807110530_registration_management_google_chat_dispatch.sql",
+  import.meta.url,
+)
 const serviceUrl = new URL("../src/features/tasks/registration-track-service.ts", import.meta.url)
 const workspaceUrl = new URL("../src/features/tasks/ops-task-workspace.tsx", import.meta.url)
 const opsRouteUrl = new URL("../src/app/api/notifications/legacy/ops-task/route.ts", import.meta.url)
@@ -212,6 +216,50 @@ test("browser registration core sends only stable source event IDs", async () =>
   assert.match(plan, /jsonb_array_elements\(v_canonical\.rule_snapshot\)/)
   assert.match(plan, /template\.id = \(snapshot\.item ->> 'template_id'\)::uuid/)
   assert.doesNotMatch(plan, /notification_rules|active_template_id/)
+})
+
+test("registration management Chat bridge is producer-scoped, deduplicated, and worker-independent", async () => {
+  const sql = await source(managementDispatchMigrationUrl)
+  const recorder = functionBlock(
+    sql,
+    "dashboard_private.record_registration_management_notification_v1",
+  )
+  const caseProducer = functionBlock(
+    sql,
+    "public.ensure_registration_case_created_notification_v1",
+  )
+  const workflowProducer = functionBlock(
+    sql,
+    "public.ensure_registration_workflow_notification_v1",
+  )
+  const list = functionBlock(sql, "public.list_registration_legacy_source_ids_v1")
+  const plan = functionBlock(sql, "public.get_registration_core_legacy_dispatch_plan_v1")
+
+  assert.match(recorder, /record_notification_event_v1/)
+  assert.match(recorder, /source_type[\s\S]*ops_task_event/i)
+  assert.match(caseProducer, /registration_case_created/)
+  assert.match(caseProducer, /pg_advisory_xact_lock/)
+  assert.match(workflowProducer, /registration_workflow_status_changed/)
+  assert.match(workflowProducer, /p_workflow_revision/)
+  assert.match(workflowProducer, /consultation_completed[\s\S]*registration\.consultation_completed/)
+  assert.match(workflowProducer, /waiting_current_class[\s\S]*registration\.waiting_transitioned/)
+  assert.match(workflowProducer, /enrollment_requested[\s\S]*registration\.admission_started/)
+
+  for (const eventKey of [
+    "registration.case_created",
+    "registration.consultation_completed",
+    "registration.waiting_transitioned",
+    "registration.admission_started",
+  ]) {
+    assert.match(list, new RegExp(eventKey.replace(".", "\\.")))
+    assert.match(plan, new RegExp(eventKey.replace(".", "\\.")))
+  }
+  assert.match(plan, /registration_render_fixed_template_v2/)
+  assert.match(plan, /template\.allowed_variables/)
+  assert.match(plan, /&trackId=/)
+  assert.match(plan, /google_chat\.management/)
+  assert.doesNotMatch(sql, /notification_control_plane_dispatch_registration_enabled[\s\S]*true/)
+  assert.doesNotMatch(sql, /assert_notification_worker_run_allowed|process_notification|notification_event_fanout_jobs[\s\S]*(?:delete|update)/i)
 })
 
 test("visit route accepts only appointmentId and delegates rendering and ownership to server RPCs", async () => {

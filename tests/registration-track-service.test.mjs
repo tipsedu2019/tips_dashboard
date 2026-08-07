@@ -435,6 +435,44 @@ test("manual workflow status uses only its dedicated revisioned RPC", async () =
   assert.equal(invalidations, 1);
 });
 
+test("registration management notification producers return only server-issued source IDs", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    rpcHandler(name, args) {
+      if (name === "ensure_registration_case_created_notification_v1") {
+        assert.deepEqual({ ...args }, { p_task_id: "task-1" });
+        return {
+          data: { sourceEventIds: ["case-event", "", null] },
+          error: null,
+        };
+      }
+      assert.equal(name, "ensure_registration_workflow_notification_v1");
+      assert.deepEqual({ ...args }, {
+        p_track_id: "track-1",
+        p_workflow_revision: 4,
+      });
+      return {
+        data: { source_event_ids: ["workflow-event", "workflow-event", null] },
+        error: null,
+      };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  assert.deepEqual(
+    Array.from(await service.ensureRegistrationCaseCreatedNotificationSourceIds("task-1")),
+    ["case-event"],
+  );
+  assert.deepEqual(
+    Array.from(await service.ensureRegistrationWorkflowNotificationSourceIds({
+      trackId: "track-1",
+      workflowRevision: 4,
+    })),
+    ["workflow-event"],
+  );
+  assert.equal(harness.queries.length, 0);
+});
+
 test("phone consultation save materializes and maps the persisted consultation", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient({
