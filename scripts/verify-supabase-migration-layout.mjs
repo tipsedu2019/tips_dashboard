@@ -25,6 +25,14 @@ const CLAIM_RECONCILE_MARKER_IDS = Object.freeze([
   "registration_provider_claim.claim_rpc",
   "registration_provider_claim.reconcile_rpc",
 ])
+const PROCESSING_READINESS_PROBE_FILE =
+  "20260806133000_registration_notification_processing_readiness.sql"
+const PROCESSING_READINESS_PROBE_SHA256 =
+  "4e6fcbafb63d48bcd547cecb19d050148776554fed1a56f58903039e61a569d8"
+const PROCESSING_READINESS_PROBE_MARKER_IDS = Object.freeze([
+  "worker_schedule.watchdog_heartbeats",
+  "worker_schedule.runtime_version",
+])
 const REMOTE_HISTORY_ALIGNED_SQL = Object.freeze([
   ["20260730161538_notification_google_chat_connection_catalog.sql", "a3f72d4ec2a410796d5796019649859d5a329d5bec0e3e83f48242272dd88dda"],
   ["20260731011040_notification_transfer_withdrawal_deep_links.sql", "ed5dfb81c2cb5d1bc6dca5c38de62745c02d88b5a4b858ec57e8f0d2c6afb5ab"],
@@ -769,6 +777,30 @@ function prepareAclMigrationContractValid(source) {
     && !/\b(?:insert\s+into|update|delete\s+from|merge\s+into|truncate)\b/i.test(source)
 }
 
+function processingReadinessProbeContractValid(source) {
+  const definitions = functionDefinitionSources(
+    source,
+    "public.get_registration_notification_processing_readiness_v1",
+  )
+  if (definitions.length !== 1) return false
+  const definition = definitions[0]
+  return (source.match(/\bcreate\s+(?:or\s+replace\s+)?function\b/gi) ?? []).length === 1
+    && /\bstable\b/i.test(definition)
+    && /\bsecurity\s+definer\b/i.test(definition)
+    && /\bset\s+search_path\s*=\s*''/i.test(definition)
+    && /auth\.role\(\)\)\s*<>\s*'service_role'/i.test(definition)
+    && definition.includes("pg_catalog.to_regprocedure(")
+    && definition.includes("pg_catalog.to_regclass(")
+    && definition.includes("dashboard_private.notification_worker_heartbeats")
+    && definition.includes("dashboard_private.notification_watchdog_heartbeats")
+    && definition.includes("public.registration_appointment_reminders_runtime_version()")
+    && definition.includes("public.notification_workflow_adapters_runtime_version()")
+    && /revoke\s+all\s+on\s+function\s+public\.get_registration_notification_processing_readiness_v1\(\)\s+from\s+public\s*,\s*anon\s*,\s*authenticated\s*;/i.test(source)
+    && /grant\s+execute\s+on\s+function\s+public\.get_registration_notification_processing_readiness_v1\(\)\s+to\s+service_role\s*;/i.test(source)
+    && !/\b(?:insert\s+into|update|delete\s+from|merge\s+into|truncate|drop|alter)\b/i.test(source)
+    && !/\b(?:activate_notification_dispatch_cutover_v1|manage_notification_worker_schedule_v1|cron\.|net\.)\b/i.test(source)
+}
+
 function hasJobBoundary(lines, startIndex, endIndex) {
   return lines
     .slice(startIndex + 1, endIndex)
@@ -1009,6 +1041,9 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       const activeRelativePath = relative(resolvedRoot, entryPath)
       const isExactClaimReconcileBaseline = entry === CLAIM_RECONCILE_BASELINE_FILE
         && sourceHash === CLAIM_RECONCILE_BASELINE_SHA256
+      const isExactProcessingReadinessProbe = entry === PROCESSING_READINESS_PROBE_FILE
+        && sourceHash === PROCESSING_READINESS_PROBE_SHA256
+        && processingReadinessProbeContractValid(sourceText)
 
       for (const family of COMPILED_CUTOVER_MARKER_FAMILIES) {
         const reservedMarkerIds = matchingMarkerIds(sourceMarkerTokens, family.reserved)
@@ -1018,6 +1053,10 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
           familyMarkerIds.includes(id))
 
         for (const markerId of reservedMarkerIds) {
+          if (
+            isExactProcessingReadinessProbe
+            && PROCESSING_READINESS_PROBE_MARKER_IDS.includes(markerId)
+          ) continue
           addError(
             errors,
             "cutover_reserved_object_present_in_active_lane",
@@ -1040,9 +1079,14 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
           )
         }
 
-        const thresholdMarkerIds = isExactClaimReconcileBaseline
+        let thresholdMarkerIds = isExactClaimReconcileBaseline
           ? familyMarkerIds.filter((id) => !CLAIM_RECONCILE_MARKER_IDS.includes(id))
           : familyMarkerIds
+        if (isExactProcessingReadinessProbe) {
+          thresholdMarkerIds = thresholdMarkerIds.filter(
+            (id) => !PROCESSING_READINESS_PROBE_MARKER_IDS.includes(id),
+          )
+        }
         if (new Set(thresholdMarkerIds).size >= 2) {
           addError(
             errors,

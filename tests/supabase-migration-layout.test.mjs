@@ -30,6 +30,10 @@ const PREPARE_ACL_MIGRATION_FILE = "20260722130000_notification_prepare_acl_hard
 const PREPARE_ACL_MIGRATION_SHA256 = "970d203f816736b05ed56d973d415a75e00e2f659f55f84c7831c60db8c261a3"
 const CLAIM_RECONCILE_BASELINE_FILE = "20260716112000_notification_control_plane_worker_rpc.sql"
 const CLAIM_RECONCILE_BASELINE_SHA256 = "4ab9c5f48f018d655c000e1898057df8d13883eaeeee00974cb4760bdb615250"
+const PROCESSING_READINESS_PROBE_FILE =
+  "20260806133000_registration_notification_processing_readiness.sql"
+const PROCESSING_READINESS_PROBE_SHA256 =
+  "4e6fcbafb63d48bcd547cecb19d050148776554fed1a56f58903039e61a569d8"
 const REMOTE_HISTORY_ALIGNED_SQL = Object.freeze([
   ["20260730161538_notification_google_chat_connection_catalog.sql", "a3f72d4ec2a410796d5796019649859d5a329d5bec0e3e83f48242272dd88dda"],
   ["20260731011040_notification_transfer_withdrawal_deep_links.sql", "ed5dfb81c2cb5d1bc6dca5c38de62745c02d88b5a4b858ec57e8f0d2c6afb5ab"],
@@ -547,6 +551,36 @@ test("claim/reconcile baseline marker는 각각 exact path와 raw hash에만 허
     await validateSupabaseMigrationLayout({ repoRoot: splitFixture }),
     "cutover_marker_allowlist_mismatch",
     splitFile,
+  )
+})
+
+test("등록 처리 준비도 probe는 읽기 전용 원문과 exact path에만 허용한다", async () => {
+  assert.equal(
+    await sha256(join(activeDir, PROCESSING_READINESS_PROBE_FILE)),
+    PROCESSING_READINESS_PROBE_SHA256,
+  )
+
+  const driftFixture = await createRepoFixture()
+  await appendFile(
+    join(driftFixture, "supabase", "migrations", PROCESSING_READINESS_PROBE_FILE),
+    "\n-- semantic no-op raw drift\n",
+  )
+  assertIncludesErrorForFile(
+    await validateSupabaseMigrationLayout({ repoRoot: driftFixture }),
+    "cutover_reserved_object_present_in_active_lane",
+    PROCESSING_READINESS_PROBE_FILE,
+  )
+
+  const renameFixture = await createRepoFixture()
+  const renamedProbeFile = "20990103000002_renamed_registration_processing_readiness.sql"
+  await copyFile(
+    join(renameFixture, "supabase", "migrations", PROCESSING_READINESS_PROBE_FILE),
+    join(renameFixture, "supabase", "migrations", renamedProbeFile),
+  )
+  assertIncludesErrorForFile(
+    await validateSupabaseMigrationLayout({ repoRoot: renameFixture }),
+    "cutover_reserved_object_present_in_active_lane",
+    renamedProbeFile,
   )
 })
 
