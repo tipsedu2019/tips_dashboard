@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  createRegistrationCustomerMessageClient,
   createRegistrationCustomerMessageAdminClient,
 } from "../src/features/tasks/registration-customer-message-service.ts"
 
@@ -121,4 +122,22 @@ test("admin client refuses to call the rollout endpoint without a session", asyn
     /registration_customer_message_auth_required/,
   )
   assert.equal(calls, 0)
+})
+
+test("customer message client preserves the server error code", async () => {
+  const client = createRegistrationCustomerMessageClient({
+    getAccessToken: async () => "test-session-token",
+    fetch: async () => new Response(JSON.stringify({
+      ok: false,
+      code: "registration_customer_message_confirmation_conflict",
+    }), {
+      status: 409,
+      headers: { "content-type": "application/json" },
+    }),
+  })
+
+  await assert.rejects(
+    client.send({ previewId: MESSAGE_ID, requestKey: REQUEST_KEY }),
+    /registration_customer_message_confirmation_conflict/,
+  )
 })
