@@ -26,6 +26,7 @@ import {
   buildRegistrationAppointmentConfirmation,
   compareRegistrationAppointmentDraft,
   getRegistrationAppointmentParticipantSubjects,
+  getRegistrationResultLinkHref,
   isRegistrationNotificationProcessingReady,
   rebaseRegistrationAppointmentDraft,
   type RegistrationAppointmentConflict,
@@ -1068,6 +1069,7 @@ export function RegistrationAppointmentEditor({
             if (!("attemptNumber" in activity) || !displayActivityIds.has(activity.id)) return null
             const track = trackById.get(activity.trackId)
             const materialLink = draftLinks[activity.id] ?? activity.materialLink ?? ""
+            const resultLinkHref = getRegistrationResultLinkHref(materialLink)
             const trackRefreshPending = trackRefreshPendingIds.has(activity.trackId)
             const resultDirty = materialLink !== (activity.materialLink || "")
             return (
@@ -1097,16 +1099,30 @@ export function RegistrationAppointmentEditor({
                       disabled={trackRefreshPending || activitySavingId === activity.id}
                     />
                   </Label>
-                  <RegistrationSaveButton
-                    type="button"
-                    dirty={resultDirty}
-                    saving={activitySavingId === activity.id}
-                    blocked={trackRefreshPending || !materialLink.trim()}
-                    actionLabel="결과 저장"
-                    cleanLabel={activity.materialLink ? "저장됨" : "결과 링크를 입력하세요"}
-                    aria-label={`${track?.subject || "과목"} 레벨테스트 결과 저장`}
-                    onClick={() => void completeAttempt(activity)}
-                  />
+                  <div className="flex items-center justify-end gap-2">
+                    {resultLinkHref ? (
+                      <Button asChild type="button" variant="outline">
+                        <a
+                          href={resultLinkHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label={`${track?.subject || "과목"} 레벨테스트 결과 링크 열기`}
+                        >
+                          결과 열기
+                        </a>
+                      </Button>
+                    ) : null}
+                    <RegistrationSaveButton
+                      type="button"
+                      dirty={resultDirty}
+                      saving={activitySavingId === activity.id}
+                      blocked={trackRefreshPending || !materialLink.trim()}
+                      actionLabel="결과 저장"
+                      cleanLabel={activity.materialLink ? "저장됨" : "결과 링크를 입력하세요"}
+                      aria-label={`${track?.subject || "과목"} 레벨테스트 결과 저장`}
+                      onClick={() => void completeAttempt(activity)}
+                    />
+                  </div>
                 </div>
               </section>
             )

@@ -35,6 +35,10 @@ async function readRegistrationApplicationSource() {
   return `${actions}\n${application}\n${subjectTabs}\n${inquiry}`
 }
 
+async function readRegistrationAppointmentEditorSource() {
+  return readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
+}
+
 async function readAdmissionProgressSource() {
   return readFile(new URL("../src/features/tasks/registration-admission-progress.tsx", import.meta.url), "utf8")
 }
@@ -1313,6 +1317,16 @@ test("consultation editor restores phone and visit choice with one shared save a
   assert.match(source, /phoneConsultation/)
   assert.match(source, /dirty=\{activeConsultationDirectorDirty \|\| !phoneConsultation\}/)
   assert.doesNotMatch(source, />\s*담당 저장\s*</)
+})
+
+test("레벨테스트 결과는 안전한 URL만 새 탭 링크로 연다", async () => {
+  const source = await readRegistrationAppointmentEditorSource()
+
+  assert.match(source, /getRegistrationResultLinkHref\(materialLink\)/)
+  assert.match(source, /aria-label=\{`\$\{track\?\.subject \|\| "과목"\} 레벨테스트 결과 링크 열기`\}/)
+  assert.match(source, /target="_blank"/)
+  assert.match(source, /rel="noopener noreferrer"/)
+  assert.match(source, />\s*결과 열기\s*</)
 })
 
 test("operational detail omits the internal subject event log", async () => {

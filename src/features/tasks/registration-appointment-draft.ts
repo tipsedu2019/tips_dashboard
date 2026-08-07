@@ -56,6 +56,15 @@ export type RegistrationNotificationProcessingReadiness = {
 
 const PROCESSING_HEARTBEAT_MAX_AGE_MS = 3 * 60 * 1000
 
+export function getRegistrationResultLinkHref(value: string) {
+  try {
+    const url = new URL(String(value || "").trim())
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null
+  } catch {
+    return null
+  }
+}
+
 function normalizedTrackIds(trackIds: readonly string[]) {
   return Array.from(new Set(trackIds.map((trackId) => String(trackId).trim()).filter(Boolean))).sort()
 }

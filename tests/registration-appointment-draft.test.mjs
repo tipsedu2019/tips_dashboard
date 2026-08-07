@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import * as registrationAppointmentDraft from "../src/features/tasks/registration-appointment-draft.ts"
 import {
   buildRegistrationAppointmentConfirmation,
   compareRegistrationAppointmentDraft,
@@ -8,6 +9,22 @@ import {
   isRegistrationNotificationProcessingReady,
   rebaseRegistrationAppointmentDraft,
 } from "../src/features/tasks/registration-appointment-draft.ts"
+
+test("레벨테스트 결과 링크는 절대 HTTP 주소만 새 탭 대상으로 허용한다", () => {
+  assert.equal(
+    typeof registrationAppointmentDraft.getRegistrationResultLinkHref,
+    "function",
+    "결과 링크 URL 검증 함수가 필요하다",
+  )
+  const getHref = registrationAppointmentDraft.getRegistrationResultLinkHref
+
+  assert.equal(getHref(" https://chat.google.com/result?q=1 "), "https://chat.google.com/result?q=1")
+  assert.equal(getHref("http://example.test/result"), "http://example.test/result")
+  assert.equal(getHref("javascript:alert(1)"), null)
+  assert.equal(getHref("/admin/registration"), null)
+  assert.equal(getHref("not a url"), null)
+  assert.equal(getHref(""), null)
+})
 
 function appointment(overrides = {}) {
   return {
