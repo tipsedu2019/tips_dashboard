@@ -59,6 +59,24 @@ export type RegistrationSaveActionPresentation = {
 
 export type RegistrationConsultationMode = "phone" | "visit"
 
+export function isRegistrationWaitingMessageSourceComplete(
+  track: Pick<
+    OpsRegistrationTrackSummary,
+    "workflowStatus" | "waitingDetailKind" | "waitingDetailClassId"
+  >,
+) {
+  if (!track.waitingDetailKind) return false
+  return (
+    (track.workflowStatus === "waiting_current_class"
+      && track.waitingDetailKind === "current_class"
+      && Boolean(track.waitingDetailClassId))
+    || (track.workflowStatus === "waiting_new_class"
+      && track.waitingDetailKind === "current_term_opening")
+    || (track.workflowStatus === "waiting_next_opening"
+      && track.waitingDetailKind === "next_term_opening")
+  )
+}
+
 export function getRegistrationConsultationModeDraft(input: {
   draftMode: RegistrationConsultationMode | null
   hasVisitAppointment: boolean

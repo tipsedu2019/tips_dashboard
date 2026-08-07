@@ -27,6 +27,7 @@ import type {
 } from "./ops-task-service"
 import {
   beginRegistrationConflictComparison,
+  isRegistrationWaitingMessageSourceComplete,
   settleRegistrationConflictComparison,
   type RegistrationConflictComparison,
 } from "./registration-application-model"
@@ -959,13 +960,7 @@ export function RegistrationWaitingDetailsEditor({
     waitingKind !== savedWaitingKind
     || classId !== savedClassId
   )
-  const savedWaitingComplete = track.status === "waiting"
-    && Boolean(track.waitingDetailKind)
-    && (
-      (track.workflowStatus === "waiting_current_class" && track.waitingDetailKind === "current_class" && Boolean(track.waitingDetailClassId))
-      || (track.workflowStatus === "waiting_new_class" && track.waitingDetailKind === "current_term_opening")
-      || (track.workflowStatus === "waiting_next_opening" && track.waitingDetailKind === "next_term_opening")
-    )
+  const savedWaitingComplete = isRegistrationWaitingMessageSourceComplete(track)
   const customerMessageBlocked = waitingDirty || saving || refreshPending || !savedWaitingComplete
   useOwnedDirtyState(waitingDirty, onDirtyChange)
 

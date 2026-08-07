@@ -35,6 +35,23 @@ import {
   buildRegistrationCaseListItems,
   getRegistrationCaseTabCounts,
 } from "../src/features/tasks/registration-case-list-model.ts"
+import { isRegistrationWaitingMessageSourceComplete } from "../src/features/tasks/registration-application-model.ts"
+
+test("waiting message readiness follows the manual workflow source contract", () => {
+  assert.equal(isRegistrationWaitingMessageSourceComplete({
+    status: "inquiry",
+    workflowStatus: "waiting_next_opening",
+    waitingDetailKind: "next_term_opening",
+    waitingDetailClassId: null,
+  }), true)
+
+  assert.equal(isRegistrationWaitingMessageSourceComplete({
+    status: "waiting",
+    workflowStatus: "waiting_new_class",
+    waitingDetailKind: "next_term_opening",
+    waitingDetailClassId: null,
+  }), false)
+})
 
 test("allowed actions are returned as a fresh view of the authoritative status matrix", () => {
   const first = getAllowedRegistrationTrackActions("consultation_waiting")
