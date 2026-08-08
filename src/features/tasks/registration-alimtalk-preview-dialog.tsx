@@ -20,6 +20,7 @@ import type {
   RegistrationCustomerMessageSendResult,
   RegistrationCustomerMessageTarget,
 } from "./registration-customer-message-contract"
+import { getRegistrationCustomerMessageErrorMessage } from "./registration-customer-message-errors"
 
 type RegistrationAlimtalkPreviewDialogProps = Readonly<{
   open: boolean
@@ -147,7 +148,7 @@ export function RegistrationAlimtalkPreviewDialog({
       })
       .catch((cause: unknown) => {
         if (generation !== generationRef.current) return
-        setError(cause instanceof Error ? cause.message : "미리보기를 불러오지 못했습니다.")
+        setError(getRegistrationCustomerMessageErrorMessage(cause, "미리보기를 불러오지 못했습니다."))
       })
       .finally(() => {
         if (generation === generationRef.current) setLoading(false)
@@ -219,7 +220,7 @@ export function RegistrationAlimtalkPreviewDialog({
       }
     } catch (cause) {
       if (generation !== generationRef.current) return
-      setError(cause instanceof Error ? cause.message : "발송 요청을 처리하지 못했습니다.")
+      setError(getRegistrationCustomerMessageErrorMessage(cause, "발송 요청을 처리하지 못했습니다."))
     } finally {
       if (generation === generationRef.current) setSending(false)
     }
@@ -235,7 +236,7 @@ export function RegistrationAlimtalkPreviewDialog({
       const next = await client.check({ messageId })
       if (generation === generationRef.current) applyResult(next)
     } catch (cause) {
-      if (generation === generationRef.current) setError(cause instanceof Error ? cause.message : "상태를 확인하지 못했습니다.")
+      if (generation === generationRef.current) setError(getRegistrationCustomerMessageErrorMessage(cause, "상태를 확인하지 못했습니다."))
     } finally {
       if (generation === generationRef.current) setSending(false)
     }
@@ -264,7 +265,7 @@ export function RegistrationAlimtalkPreviewDialog({
       })
       if (generation === generationRef.current) applyResult(next)
     } catch (cause) {
-      if (generation === generationRef.current) setError(cause instanceof Error ? cause.message : "관리자 복구를 처리하지 못했습니다.")
+      if (generation === generationRef.current) setError(getRegistrationCustomerMessageErrorMessage(cause, "관리자 복구를 처리하지 못했습니다."))
     } finally {
       if (generation === generationRef.current) setSending(false)
     }
@@ -280,7 +281,7 @@ export function RegistrationAlimtalkPreviewDialog({
       const next = await client.releasePreSend({ messageId, reason: reason.trim(), requestKey: createRequestKey() })
       if (generation === generationRef.current) applyResult(next)
     } catch (cause) {
-      if (generation === generationRef.current) setError(cause instanceof Error ? cause.message : "사전 발송 해제를 처리하지 못했습니다.")
+      if (generation === generationRef.current) setError(getRegistrationCustomerMessageErrorMessage(cause, "사전 발송 해제를 처리하지 못했습니다."))
     } finally {
       if (generation === generationRef.current) setSending(false)
     }
@@ -331,6 +332,18 @@ export function RegistrationAlimtalkPreviewDialog({
               {preview.facts.placeLabel ? <div><dt className="inline text-muted-foreground">장소 · </dt><dd className="inline">{preview.facts.placeLabel}</dd></div> : null}
               {preview.facts.waitingKindLabel ? <div><dt className="inline text-muted-foreground">대기 · </dt><dd className="inline">{preview.facts.waitingKindLabel} {preview.facts.waitingDetailLabel || ""}</dd></div> : null}
             </dl>
+            {preview.facts.admissionPlans?.map((plan, index) => (
+              <section key={`${plan.subjectLabel}:${plan.className}:${index}`} className="rounded-md border p-3">
+                <dl className="grid gap-1">
+                  <div><dt className="inline text-muted-foreground">과목/수업 · </dt><dd className="inline">[{plan.subjectLabel}] {plan.className}</dd></div>
+                  <div><dt className="inline text-muted-foreground">교재 · </dt><dd className="inline">{plan.textbookLabel}</dd></div>
+                  <div><dt className="inline text-muted-foreground">요일/시간 · </dt><dd className="inline">{plan.scheduleLabel}</dd></div>
+                  <div><dt className="inline text-muted-foreground">선생님 · </dt><dd className="inline">{plan.teacherLabel}</dd></div>
+                  <div><dt className="inline text-muted-foreground">강의실 · </dt><dd className="inline">{plan.classroomLabel}</dd></div>
+                  <div className="mt-2 border-t pt-2 font-semibold"><dt className="inline">첫 수업일 · </dt><dd className="inline">{plan.firstLessonLabel}</dd></div>
+                </dl>
+              </section>
+            ))}
             <p className="whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-3">{preview.body}</p>
             {preview.buttons.map((button) => <p key={`${button.name}:${button.host}`} className="break-words text-muted-foreground">카카오 버튼 · {button.name} ({button.host})</p>)}
             <p className="text-muted-foreground">준비 상태 · {preview.readiness.sendAllowed ? "발송 가능" : preview.readiness.blockers.join(", ") || "발송 불가"}</p>

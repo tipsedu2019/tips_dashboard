@@ -40,6 +40,11 @@ import {
 } from "./registration-customer-message-source.ts"
 
 type JsonRecord = Record<string, unknown>
+const SAFE_SOURCE_ERROR_CODES = new Set([
+  "registration_customer_message_source_ineligible",
+  "registration_customer_message_admission_schedule_incomplete",
+  "registration_customer_message_body_too_long",
+])
 export type RegistrationCustomerMessageMaskedHistoryItem =
   | RegistrationCustomerMessageHistoryItem
   | Readonly<{
@@ -241,6 +246,9 @@ async function resolvePreviewSource(
     return await dependencies.resolveSource(input)
   } catch (error) {
     if (error instanceof RegistrationCustomerMessageHttpError) throw error
+    if (error instanceof Error && SAFE_SOURCE_ERROR_CODES.has(error.message)) {
+      httpError(422, error.message)
+    }
     if (
       error instanceof Error
       && error.message.startsWith("registration_customer_message_")
@@ -960,16 +968,30 @@ async function sourceRpc(context: HandlerAuthContext, args: JsonRecord) {
     args,
   )
   if (result.error) {
-    const code = text((result.error as { code?: unknown }).code)
-    if (code === "42501" || code === "P0002") {
-      httpError(404, "registration_customer_message_source_not_found")
-    }
-    if (code === "22023" || code === "23505") {
-      throw new Error("registration_customer_message_source_invalid")
-    }
-    httpError(503, "registration_customer_message_runtime_unavailable")
+    throw registrationCustomerMessageSourceRpcError(result.error)
   }
   return result.data
+}
+
+export function registrationCustomerMessageSourceRpcError(error: unknown) {
+  const code = isRecord(error) ? text(error.code) : ""
+  if (code === "42501" || code === "P0002") {
+    return new RegistrationCustomerMessageHttpError(
+      404,
+      "registration_customer_message_source_not_found",
+    )
+  }
+  if (code === "22023" || code === "23505") {
+    const message = isRecord(error) ? text(error.message) : ""
+    const safeCode = [...SAFE_SOURCE_ERROR_CODES].find((candidate) => (
+      message.includes(candidate)
+    ))
+    return new Error(safeCode || "registration_customer_message_source_invalid")
+  }
+  return new RegistrationCustomerMessageHttpError(
+    503,
+    "registration_customer_message_runtime_unavailable",
+  )
 }
 
 export function registrationCustomerMessageHistoryRpcError(error: unknown) {

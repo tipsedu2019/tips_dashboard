@@ -8,6 +8,7 @@ import {
 import {
   createRegistrationCustomerMessageRouteHandlers,
   registrationCustomerMessageHistoryRpcError,
+  registrationCustomerMessageSourceRpcError,
 } from "../src/features/tasks/server/registration-customer-message-route.ts"
 
 const IDS = Object.freeze({
@@ -480,7 +481,24 @@ test("preview enforces authentication, operator role, and task visibility", asyn
   }
 })
 
-test("preview maps source validation failures to one stable public code", async () => {
+test("preview preserves only safe actionable source validation codes", async () => {
+  for (const code of [
+    "registration_customer_message_source_ineligible",
+    "registration_customer_message_admission_schedule_incomplete",
+    "registration_customer_message_body_too_long",
+  ]) {
+    const { deps } = makeDeps({
+      resolveSource: async () => {
+        throw new Error(code)
+      },
+    })
+    const result = await json(await createRegistrationCustomerMessageRouteHandlers(deps).preview(
+      request("/preview", { method: "POST", body: JSON.stringify(TARGET) }),
+    ))
+    assert.equal(result.response.status, 422)
+    assert.deepEqual(result.body, { ok: false, code })
+  }
+
   const { deps } = makeDeps({
     resolveSource: async () => {
       throw new Error("registration_customer_message_phone_invalid")
@@ -491,6 +509,37 @@ test("preview maps source validation failures to one stable public code", async 
   ))
   assert.equal(result.response.status, 422)
   assert.deepEqual(result.body, { ok: false, code: "registration_customer_message_source_invalid" })
+})
+
+test("production source RPC strips database details and retains exact safe codes", () => {
+  assert.equal(
+    registrationCustomerMessageSourceRpcError({
+      code: "22023",
+      message: "registration_customer_message_source_ineligible: secret detail",
+    }).message,
+    "registration_customer_message_source_ineligible",
+  )
+  assert.equal(
+    registrationCustomerMessageSourceRpcError({
+      code: "22023",
+      message: "registration_customer_message_admission_schedule_incomplete",
+    }).message,
+    "registration_customer_message_admission_schedule_incomplete",
+  )
+  assert.equal(
+    registrationCustomerMessageSourceRpcError({
+      code: "22023",
+      message: "raw postgres validation detail",
+    }).message,
+    "registration_customer_message_source_invalid",
+  )
+  const unavailable = registrationCustomerMessageSourceRpcError({
+    code: "XX000",
+    message: "connection secret",
+  })
+  assert.equal(unavailable.status, 503)
+  assert.equal(unavailable.code, "registration_customer_message_runtime_unavailable")
+  assert.equal(unavailable.message.includes("connection secret"), false)
 })
 
 test("preview establishes actor task visibility before the service-only source RPC", async () => {

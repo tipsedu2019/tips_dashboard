@@ -5,6 +5,7 @@ import {
   createRegistrationCustomerMessageClient,
   createRegistrationCustomerMessageAdminClient,
 } from "../src/features/tasks/registration-customer-message-service.ts"
+import { getRegistrationCustomerMessageErrorMessage } from "../src/features/tasks/registration-customer-message-errors.ts"
 
 const TASK_ID = "96000000-0000-4000-8000-000000000001"
 const MESSAGE_ID = "96000000-0000-4000-8000-000000000002"
@@ -184,5 +185,69 @@ test("customer message client preserves the server error code", async () => {
   await assert.rejects(
     client.send({ previewId: MESSAGE_ID, requestKey: REQUEST_KEY }),
     /registration_customer_message_confirmation_conflict/,
+  )
+})
+
+test("customer message errors use stable operator-facing Korean guidance", () => {
+  const cases = [
+    [
+      "registration_customer_message_source_ineligible",
+      "현재 이 예약을 진행하는 과목이 없습니다. 과목별 진행상태를 확인해 주세요.",
+    ],
+    [
+      "registration_customer_message_admission_schedule_incomplete",
+      "수업의 요일·시간, 선생님, 강의실, 첫 수업일을 모두 저장한 뒤 다시 시도해 주세요.",
+    ],
+    [
+      "registration_customer_message_confirmation_conflict",
+      "등록 수업 정보가 변경되었습니다. 새 미리보기를 확인해 주세요.",
+    ],
+    [
+      "registration_customer_message_template_drift",
+      "새 알림톡 템플릿 승인 후 발송할 수 있습니다.",
+    ],
+    [
+      "registration_customer_message_body_too_long",
+      "등록 수업 정보가 길어 알림톡을 만들 수 없습니다. 수업 정보를 확인해 주세요.",
+    ],
+  ]
+
+  for (const [code, expected] of cases) {
+    assert.equal(
+      getRegistrationCustomerMessageErrorMessage(new Error(code), "fallback"),
+      expected,
+    )
+    assert.equal(
+      getRegistrationCustomerMessageErrorMessage(new Error(`request failed: ${code}`), "fallback"),
+      expected,
+    )
+  }
+  assert.equal(getRegistrationCustomerMessageErrorMessage({ message: cases[0][0] }, "fallback"), "fallback")
+  assert.equal(getRegistrationCustomerMessageErrorMessage(new Error("raw provider detail"), "fallback"), "fallback")
+})
+
+test("customer message client never exposes non-code server errors", async () => {
+  const responses = [
+    new Response(JSON.stringify({ ok: false, error: "raw database detail" }), {
+      status: 503,
+      headers: { "content-type": "application/json" },
+    }),
+    new Response("upstream HTML error", {
+      status: 502,
+      headers: { "content-type": "text/html" },
+    }),
+  ]
+  const client = createRegistrationCustomerMessageClient({
+    getAccessToken: async () => "test-session-token",
+    fetch: async () => responses.shift(),
+  })
+
+  await assert.rejects(
+    client.send({ previewId: MESSAGE_ID, requestKey: REQUEST_KEY }),
+    /^Error: registration_customer_message_request_failed$/,
+  )
+  await assert.rejects(
+    client.send({ previewId: MESSAGE_ID, requestKey: REQUEST_KEY }),
+    /^Error: registration_customer_message_request_failed$/,
   )
 })

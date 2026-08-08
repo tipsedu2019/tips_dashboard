@@ -35,9 +35,17 @@ async function requestJson<T>(
       ...init.headers,
     },
   })
-  const payload = await response.json() as T & { error?: string; code?: string }
+  let payload: T & { code?: unknown }
+  try {
+    payload = await response.json() as T & { code?: unknown }
+  } catch {
+    throw new Error("registration_customer_message_request_failed")
+  }
   if (!response.ok) {
-    throw new Error(payload.error || payload.code || "registration_customer_message_request_failed")
+    const code = typeof payload.code === "string" && payload.code.trim()
+      ? payload.code.trim()
+      : "registration_customer_message_request_failed"
+    throw new Error(code)
   }
   return assertRegistrationCustomerMessagePublicPayload(payload)
 }

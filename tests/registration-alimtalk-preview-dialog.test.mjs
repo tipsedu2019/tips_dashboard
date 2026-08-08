@@ -9,6 +9,7 @@ import { assertRegistrationCustomerMessagePublicPayload } from "../src/features/
 const serviceUrl = new URL("../src/features/tasks/registration-customer-message-service.ts", import.meta.url)
 const dialogUrl = new URL("../src/features/tasks/registration-alimtalk-preview-dialog.tsx", import.meta.url)
 const sharedDialogUrl = new URL("../src/components/ui/dialog.tsx", import.meta.url)
+const fixturesUrl = new URL("../src/features/tasks/registration-track-fixtures.ts", import.meta.url)
 
 async function sourceOrEmpty(url) {
   try {
@@ -209,4 +210,36 @@ test("알림톡 미리보기의 배경과 내용은 등록 상세 모달보다 �
     source,
     /<DialogContent[\s\S]*?overlayClassName="z-\[90\]"[\s\S]*?className="z-\[90\][^"]*"/,
   )
+})
+
+test("입학 미리보기는 정규 수업 정보를 먼저 보여주고 첫 수업일을 마지막에 강조한다", async () => {
+  const source = await sourceOrEmpty(dialogUrl)
+  const labels = ["과목/수업 · ", "교재 · ", "요일/시간 · ", "선생님 · ", "강의실 · ", "첫 수업일 · "]
+  const positions = labels.map((label) => source.indexOf(label))
+
+  assert.equal(positions.every((position) => position >= 0), true)
+  assert.deepEqual(positions, [...positions].sort((left, right) => left - right))
+  assert.match(source, /preview\.facts\.admissionPlans\?\.map/)
+  assert.match(source, /className="mt-2 border-t pt-2 font-semibold"/)
+  assert.match(source, /className="whitespace-pre-wrap break-words rounded-md border bg-muted\/30 p-3"/)
+})
+
+test("미리보기의 모든 실패 경로는 내부 오류 코드를 운영자 안내로 바꾼다", async () => {
+  const source = await sourceOrEmpty(dialogUrl)
+
+  assert.match(source, /getRegistrationCustomerMessageErrorMessage/)
+  assert.equal((source.match(/setError\(getRegistrationCustomerMessageErrorMessage\(/g) || []).length, 5)
+})
+
+test("등록 fixture도 입학 수업정보와 모든 문의하기 버튼을 실제 미리보기처럼 제공한다", async () => {
+  const source = await sourceOrEmpty(fixturesUrl)
+
+  assert.match(source, /admissionPlans:\s*\[/)
+  assert.match(source, /subjectLabel:\s*"영어"[\s\S]*className:\s*"중2 영어 A반"/)
+  assert.match(source, /textbookLabel:\s*"능률 VOCA"/)
+  assert.match(source, /scheduleLabel:\s*"월·수 오후 6:00–8:00"/)
+  assert.match(source, /teacherLabel:\s*"홍길동"/)
+  assert.match(source, /classroomLabel:\s*"본관 301호"/)
+  assert.match(source, /firstLessonLabel:\s*"8월 17일 월요일 오후 6:00–8:00"/)
+  assert.equal((source.match(/host:\s*"tipsedu\.channel\.io"/g) || []).length, 6)
 })
