@@ -14,6 +14,14 @@ async function migrationSource() {
   return sources.join("\n").toLowerCase().replace(/\s+/gu, " ")
 }
 
+function lastFunctionBody(sql, signature) {
+  const start = sql.lastIndexOf(`create or replace function ${signature}`)
+  assert.ok(start >= 0, `${signature} follow-up definition must exist`)
+  const end = sql.indexOf("alter function", start)
+  assert.ok(end > start, `${signature} follow-up definition must terminate`)
+  return sql.slice(start, end)
+}
+
 test("자동 리마인드 설정은 private singleton이며 기본 OFF·3시간이다", async () => {
   const sql = await migrationSource()
 
@@ -145,6 +153,38 @@ test("Cron은 Vault·HTTPS 고정 host를 검증하고 함수로만 설치하며
   const managerEnd = sql.lastIndexOf("$$;")
   assert.ok(managerEnd < commitIndex)
   assert.doesNotMatch(sql.slice(managerEnd, commitIndex), /cron\.schedule\(/)
+})
+
+test("OFF 리마인드는 cron·Vault·heartbeat 작업을 만들지 않고 ON 변경만 원자 활성화한다", async () => {
+  const sql = await migrationSource()
+  const scheduleReady = lastFunctionBody(
+    sql,
+    "dashboard_private.registration_customer_reminder_schedule_ready_v1()",
+  )
+  const invoke = lastFunctionBody(
+    sql,
+    "dashboard_private.invoke_registration_customer_reminder_worker_v1()",
+  )
+  const claim = lastFunctionBody(
+    sql,
+    "public.claim_registration_customer_reminder_job_v1()",
+  )
+  const syncTrigger = lastFunctionBody(
+    sql,
+    "dashboard_private.sync_registration_customer_reminder_cron_active_v1()",
+  )
+
+  assert.doesNotMatch(scheduleReady, /heartbeat|bool_and\(job\.active\)/)
+  assert.match(scheduleReady, /job\.schedule = '\* \* \* \* \*'/)
+  assert.match(scheduleReady, /invoke_registration_customer_reminder_worker_v1/)
+
+  assert.ok(invoke.indexOf("settings.enabled") < invoke.indexOf("registration_customer_reminder_worker_vault_v1"))
+  assert.ok(claim.indexOf("if not v_settings.enabled") < claim.indexOf("registration_customer_reminder_worker_heartbeats"))
+
+  assert.match(sql, /create trigger sync_registration_customer_reminder_cron_active/)
+  assert.match(syncTrigger, /set_registration_customer_reminder_cron_active_v1\(new\.enabled\)/)
+  assert.match(sql, /cron\.alter_job\([^;]+active := p_active/)
+  assert.match(sql, /perform dashboard_private\.set_registration_customer_reminder_cron_active_v1\(v_enabled\)/)
 })
 
 test("Vault 비밀키 회전은 service role 전용이며 값이나 URL을 클라이언트가 선택하지 못한다", async () => {

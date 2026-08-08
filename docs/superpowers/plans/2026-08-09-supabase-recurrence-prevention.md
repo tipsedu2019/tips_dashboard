@@ -189,7 +189,7 @@ Commit: `fix: bound Supabase read retries`
 
 **Interfaces:**
 - Replaces: `dashboard_private.registration_customer_reminder_schedule_ready_v1()` with structural readiness
-- Replaces: `public.set_registration_customer_reminder_settings_v1(...)` to reconcile cron active state transactionally
+- Produces: settings `enabled` trigger that reconciles cron active state transactionally for every write path
 - Replaces: `dashboard_private.invoke_registration_customer_reminder_worker_v1()` to return `null` while OFF before Vault access
 - Replaces: `public.claim_registration_customer_reminder_job_v1()` to update heartbeat only while ON
 
@@ -200,7 +200,8 @@ The new tests must extract the last `create or replace function` body and assert
 ```js
 assert.ok(invoke.indexOf("settings.enabled") < invoke.indexOf("registration_customer_reminder_worker_vault_v1"))
 assert.ok(claim.indexOf("if not v_settings.enabled") < claim.indexOf("registration_customer_reminder_worker_heartbeats"))
-assert.match(setter, /cron\.alter_job\([^;]+active := p_enabled/)
+assert.match(sql, /create trigger sync_registration_customer_reminder_cron_active/)
+assert.match(syncTrigger, /set_registration_customer_reminder_cron_active_v1\(new\.enabled\)/)
 assert.doesNotMatch(scheduleReady, /heartbeat|bool_and\(job\.active\)/)
 ```
 
@@ -216,7 +217,7 @@ Expected: FAIL on all four new contracts.
 
 Create a private helper `dashboard_private.set_registration_customer_reminder_cron_active_v1(p_active boolean)` that finds exactly the named cron job and calls `cron.alter_job`. Structural readiness checks one exact job name, schedule, and command only.
 
-The settings setter must retain all current revision/template/live checks, acquire the existing settings row lock, update settings, call the helper with `p_enabled`, and preserve claimed-job release on OFF. `invoke` must read the setting before Vault. `claim` must read the setting before inserting heartbeat. `manage ... install` must activate according to the current singleton setting. End the migration by reconciling the existing job to the current setting; because production is OFF this disables the current minute cron without sending.
+Keep the settings setter unchanged so all current revision/template/live checks and claimed-job release remain authoritative. Add an `after insert or update of enabled` trigger whose function calls the cron helper; an ON transition additionally validates the exact cron structure and Vault before activation, so trigger failure rolls the settings update back. `invoke` must read the setting before Vault. `claim` must read the setting before inserting heartbeat. `manage ... install` must activate according to the current singleton setting. End the migration by reconciling the existing job to the current setting; because production is OFF this disables the current minute cron without sending.
 
 - [ ] **Step 4: Run GREEN plus worker/route regressions**
 
