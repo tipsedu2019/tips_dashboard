@@ -51,12 +51,14 @@ function DialogContent({
   children,
   closeButtonLabel = "모달 닫기",
   onCloseButtonClick,
+  overlayClassName,
   showCloseButton = true,
   showCloseButtonText = false,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   closeButtonLabel?: string
   onCloseButtonClick?: React.MouseEventHandler<HTMLButtonElement>
+  overlayClassName?: string
   showCloseButton?: boolean
   showCloseButtonText?: boolean
 }) {
@@ -75,7 +77,7 @@ function DialogContent({
 
   return (
     <DialogPortal data-slot="dialog-portal">
-      <DialogOverlay />
+      <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(

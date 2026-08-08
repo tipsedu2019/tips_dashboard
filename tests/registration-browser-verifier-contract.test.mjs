@@ -424,6 +424,8 @@ test("customer message verifier runs desktop and mobile accessibility and layout
   assert.match(source, /width:\s*1349,\s*height:\s*987/)
   assert.match(source, /width:\s*390,\s*height:\s*844/)
   assert.match(source, /document\.activeElement/)
+  assert.match(source, /document\.elementFromPoint/)
+  assert.match(source, /customer message dialog is not the topmost layer/)
   assert.match(source, /keyboard\.press\("Escape"\)/)
   assert.match(source, /minHeight < 44/)
   assert.match(source, /minWidth < 44/)

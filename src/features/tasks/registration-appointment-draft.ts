@@ -36,15 +36,6 @@ export type RegistrationAppointmentRebase = {
   draft: RegistrationAppointmentDraft
 }
 
-export type RegistrationAppointmentConfirmationInput = {
-  action: "save" | "cancel"
-  previous: RegistrationAppointmentDraft | null
-  next: RegistrationAppointmentDraft | null
-  previousReminderRoundCount: number | null
-  nextReminderRoundCount: number | null
-  trackLabels?: Record<string, string>
-}
-
 export type RegistrationNotificationProcessingReadiness = {
   registrationRuntimeMarker: "registration_appointment_reminders_runtime_version"
   registrationRuntimeVersion: unknown
@@ -134,37 +125,6 @@ export function rebaseRegistrationAppointmentDraft(
     expectedNotificationRevision: conflict.server.notificationRevision,
     draft: cloneDraft(conflict.local),
   }
-}
-
-function roundCountLabel(value: number | null) {
-  return Number.isInteger(value) && Number(value) >= 0 ? `${value}회` : "확인 불가"
-}
-
-function draftLabel(
-  draft: RegistrationAppointmentDraft | null,
-  trackLabels: Record<string, string>,
-  emptyLabel: string,
-) {
-  if (!draft) return emptyLabel
-  const tracks = normalizedTrackIds(draft.trackIds)
-    .map((trackId) => trackLabels[trackId] || trackId)
-    .join(", ") || "적용 과목 없음"
-  return `${draft.scheduledAt || "일시 없음"} · ${draft.place || "장소 없음"} · ${tracks}`
-}
-
-export function buildRegistrationAppointmentConfirmation(
-  input: RegistrationAppointmentConfirmationInput,
-) {
-  const title = input.action === "cancel"
-    ? "예약 취소 내용을 확인해 주세요."
-    : "예약 변경 내용을 확인해 주세요."
-  const labels = input.trackLabels || {}
-  return [
-    title,
-    `이전 · ${draftLabel(input.previous, labels, "예약 없음")}`,
-    `이후 · ${draftLabel(input.next, labels, input.action === "cancel" ? "예약 취소" : "예약 없음")}`,
-    `미래 알림 · ${roundCountLabel(input.previousReminderRoundCount)} → ${roundCountLabel(input.nextReminderRoundCount)}`,
-  ].join("\n")
 }
 
 function hasRecentSuccessfulHeartbeat(

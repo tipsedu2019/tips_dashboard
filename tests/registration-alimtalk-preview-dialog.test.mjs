@@ -8,6 +8,7 @@ import { assertRegistrationCustomerMessagePublicPayload } from "../src/features/
 
 const serviceUrl = new URL("../src/features/tasks/registration-customer-message-service.ts", import.meta.url)
 const dialogUrl = new URL("../src/features/tasks/registration-alimtalk-preview-dialog.tsx", import.meta.url)
+const sharedDialogUrl = new URL("../src/components/ui/dialog.tsx", import.meta.url)
 
 async function sourceOrEmpty(url) {
   try {
@@ -194,4 +195,18 @@ test("preview dialog remains a controlled accessible presentation surface", asyn
   assert.match(source, /releasePreSend/)
   assert.doesNotMatch(source, /fetch\(\s*["']\/api\/solapi\/registration/)
   assert.doesNotMatch(source, /parentPhone|templateId|renderedBody/)
+})
+
+test("알림톡 미리보기의 배경과 내용은 등록 상세 모달보다 위에 열린다", async () => {
+  const [source, sharedDialogSource] = await Promise.all([
+    sourceOrEmpty(dialogUrl),
+    sourceOrEmpty(sharedDialogUrl),
+  ])
+
+  assert.match(sharedDialogSource, /overlayClassName\?:\s*string/)
+  assert.match(sharedDialogSource, /<DialogOverlay className=\{overlayClassName\}/)
+  assert.match(
+    source,
+    /<DialogContent[\s\S]*?overlayClassName="z-\[90\]"[\s\S]*?className="z-\[90\][^"]*"/,
+  )
 })

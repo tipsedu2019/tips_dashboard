@@ -135,6 +135,17 @@ async function waitForDialogAnimations(dialog) {
   })
 }
 
+async function assertDialogIsTopmost(dialog) {
+  const isTopmost = await dialog.evaluate((element) => {
+    const bounds = element.getBoundingClientRect()
+    const x = Math.min(window.innerWidth - 1, Math.max(0, bounds.left + bounds.width / 2))
+    const y = Math.min(window.innerHeight - 1, Math.max(0, bounds.top + bounds.height / 2))
+    const topmostElement = document.elementFromPoint(x, y)
+    return Boolean(topmostElement && element.contains(topmostElement))
+  })
+  if (!isTopmost) throw new Error("customer message dialog is not the topmost layer")
+}
+
 async function measureControl(control, label, evidence) {
   const bounds = await control.boundingBox()
   if (!bounds) throw new Error(`${label} has no rendered bounding box`)
@@ -206,6 +217,7 @@ async function openDialog(page, host, triggerName, evidence) {
   const dialog = page.getByRole("dialog", { name: "알림톡 미리보기" })
   await dialog.waitFor({ state: "visible", timeout: 8_000 })
   await waitForDialogAnimations(dialog)
+  await assertDialogIsTopmost(dialog)
   return { trigger, dialog }
 }
 
@@ -223,6 +235,24 @@ async function verifyDirtySourceBlock(page, baseUrl, evidence) {
   if (!(await blocked.isDisabled())) throw new Error("source_dirty appointment still allows customer message preview")
   await measureControl(blocked, "dirty-disabled-trigger", evidence)
   await host.getByText("예약을 저장한 뒤 알림톡을 보낼 수 있습니다.", { exact: true }).waitFor({ state: "visible" })
+  const saveButton = host.locator('[data-registration-primary-action$=":appointment-save"]').first()
+  await saveButton.click()
+  const confirmation = host.getByRole("alertdialog", { name: "예약을 저장할까요?" })
+  await confirmation.waitFor({ state: "visible", timeout: 1_000 })
+  const confirmationText = (await confirmation.textContent()) || ""
+  for (const forbiddenSummary of ["이전 ·", "이후 ·", "미래 알림 ·", "T12:00:00.000Z"]) {
+    if (confirmationText.includes(forbiddenSummary)) {
+      throw new Error(`appointment confirmation still exposes a redundant summary: ${forbiddenSummary}`)
+    }
+  }
+  if ((await saveButton.textContent())?.includes("저장 중")) {
+    throw new Error("appointment confirmation reports saving before the mutation starts")
+  }
+  await measureControl(confirmation.getByRole("button", { name: "저장", exact: true }), "confirmation-save", evidence)
+  const backButton = confirmation.getByRole("button", { name: "돌아가기", exact: true })
+  await measureControl(backButton, "confirmation-back", evidence)
+  await backButton.click()
+  await confirmation.waitFor({ state: "hidden", timeout: 1_000 })
   return "source_dirty"
 }
 

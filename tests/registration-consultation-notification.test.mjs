@@ -900,6 +900,9 @@ test("notification job status rejects another workflow and unknown states", asyn
 test("appointment editor preserves conflict drafts, keeps cancellation out, and retains common ownership", async () => {
   const source = await readFile(appointmentEditorUrl, "utf8");
   const conflictBlock = sourceBlock(source, "async function handleRevisionConflict", "async function compareLatestAppointment");
+  const saveBlock = sourceBlock(source, "async function saveAppointment", "async function performSaveAppointment");
+  const performSaveBlock = sourceBlock(source, "async function performSaveAppointment", "function dismissAppointmentConfirmation");
+  const confirmBlock = sourceBlock(source, "async function confirmPreparedAppointmentMutation", "async function completeAttempt");
 
   assert.match(source, /최신 예약 비교/);
   assert.match(source, /다시 적용/);
@@ -913,9 +916,13 @@ test("appointment editor preserves conflict drafts, keeps cancellation out, and 
   assert.doesNotMatch(source, /cancelReason/);
   assert.doesNotMatch(source, /예약 취소 사유/);
   assert.doesNotMatch(source, /cancelRegistrationAppointment/);
-  assert.match(source, /type PendingAppointmentConfirmation = \{[\s\S]*?action: "save"/);
-  assert.match(source, /prepareAppointmentConfirmation\("save", appointmentDraft\)/);
-  assert.match(source, /buildRegistrationAppointmentConfirmation/);
+  assert.match(source, /const confirmationPending = Boolean\(pendingConfirmation\)/);
+  assert.match(saveBlock, /setPendingConfirmation\(true\)/);
+  assert.doesNotMatch(saveBlock, /setSaving\(true\)\s*\n\s*await prepareAppointmentConfirmation/);
+  assert.doesNotMatch(source, /prepareAppointmentConfirmation|buildRegistrationAppointmentConfirmation/);
+  assert.doesNotMatch(source, /previewRegistrationAppointmentReminders/);
+  assert.doesNotMatch(performSaveBlock, /setSaving\(/);
+  assert.match(confirmBlock, /setSaving\(true\)[\s\S]*?try \{[\s\S]*?await performSaveAppointment\(\)[\s\S]*?finally \{[\s\S]*?setSaving\(false\)/);
   assert.doesNotMatch(source, /NotificationControlPanel/);
 });
 

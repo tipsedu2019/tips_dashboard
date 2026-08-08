@@ -3,7 +3,6 @@ import test from "node:test"
 
 import * as registrationAppointmentDraft from "../src/features/tasks/registration-appointment-draft.ts"
 import {
-  buildRegistrationAppointmentConfirmation,
   compareRegistrationAppointmentDraft,
   getRegistrationAppointmentParticipantSubjects,
   isRegistrationNotificationProcessingReady,
@@ -106,54 +105,11 @@ test("로컬 초안은 명시적으로 다시 적용할 때만 최신 revision �
   assert.deepEqual(conflict, untouched, "다시 적용도 입력 객체를 변경하면 안 된다")
 })
 
-test("저장 확인은 이전·이후 예약과 미래 알림 라운드 수를 함께 보여 준다", () => {
-  const message = buildRegistrationAppointmentConfirmation({
-    action: "save",
-    previous: {
-      scheduledAt: "2026-07-20T06:00:00.000Z",
-      place: "본관 201호",
-      trackIds: ["track-english"],
-      replaceRemaining: false,
-    },
-    next: {
-      scheduledAt: "2026-07-21T07:30:00.000Z",
-      place: "신관 상담실",
-      trackIds: ["track-english", "track-math"],
-      replaceRemaining: false,
-    },
-    previousReminderRoundCount: 2,
-    nextReminderRoundCount: 3,
-    trackLabels: {
-      "track-english": "영어",
-      "track-math": "수학",
-    },
-  })
-
-  assert.match(message, /예약 변경 내용을 확인해 주세요/)
-  assert.match(message, /이전.*본관 201호.*영어/s)
-  assert.match(message, /이후.*신관 상담실.*영어, 수학/s)
-  assert.match(message, /미래 알림.*2회.*3회/s)
-})
-
-test("취소 확인은 이후 상태와 0개 라운드를 보여 주며 사유를 요구하지 않는다", () => {
-  const message = buildRegistrationAppointmentConfirmation({
-    action: "cancel",
-    previous: {
-      scheduledAt: "2026-07-20T06:00:00.000Z",
-      place: "본관 201호",
-      trackIds: ["track-english"],
-      replaceRemaining: false,
-    },
-    next: null,
-    previousReminderRoundCount: 2,
-    nextReminderRoundCount: 0,
-    trackLabels: { "track-english": "영어" },
-  })
-
-  assert.match(message, /예약 취소 내용을 확인해 주세요/)
-  assert.match(message, /이후.*예약 취소/s)
-  assert.match(message, /미래 알림.*2회.*0회/s)
-  assert.doesNotMatch(message, /사유/)
+test("예약 저장 확인은 초안 요약 문자열을 만들지 않는다", () => {
+  assert.equal(
+    "buildRegistrationAppointmentConfirmation" in registrationAppointmentDraft,
+    false,
+  )
 })
 
 test("공유 예약에서 과목을 해제해 저장한 뒤 다시 열면 draft의 활성 참가 과목만 라벨로 복원한다", () => {

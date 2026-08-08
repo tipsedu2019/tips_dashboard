@@ -1946,11 +1946,15 @@ test("canonical registration editors expose five preview-first alimtalk targets 
   assert.ok(appointmentSave >= 0 && bookingTrigger > appointmentSave && reminderTrigger > bookingTrigger)
   assert.match(appointment, /messageKind: kind === "level_test" \? "level_test_booking" : "visit_consultation_booking",\s*sourceId: appointment\.id/)
   assert.match(appointment, /messageKind: "appointment_reminder",\s*sourceId: appointment\.id/)
-  assert.match(appointment, /appointmentDirty \|\| externalDirty \|\| saving \|\| refreshPending \|\| Boolean\(conflict\) \|\| appointment\?\.status !== "scheduled"/)
+  assert.match(appointment, /appointmentDirty \|\| externalDirty \|\| saving \|\| confirmationPending \|\| refreshPending \|\| Boolean\(conflict\) \|\| appointment\?\.status !== "scheduled"/)
   assert.match(appointment, /예약을 저장한 뒤 알림톡을 보낼 수 있습니다\./)
   assert.match(appointment, /canOpenCustomerMessage\?: boolean/)
   assert.match(appointment, /\{canOpenCustomerMessage \? \([\s\S]*예약 안내 알림톡[\s\S]*리마인드 알림톡/)
-  assert.equal((appointment.match(/className="min-h-11 min-w-11"/g) || []).length, 2)
+  const customerMessageControls = appointment.slice(
+    appointment.indexOf("{canOpenCustomerMessage ? ("),
+    appointment.indexOf("</>", appointment.indexOf("{canOpenCustomerMessage ? (")),
+  )
+  assert.equal((customerMessageControls.match(/className="min-h-11 min-w-11"/g) || []).length, 2)
 
   const waiting = sourceBetween(actions, "export function RegistrationWaitingDetailsEditor", "function TerminalStageEditor")
   const waitingSave = waiting.indexOf("<RegistrationSaveButton")
@@ -2363,7 +2367,11 @@ test("appointment save confirmation stays visible inside the registration detail
   assert.match(appointment, /pendingConfirmation \? \([\s\S]*?role="alertdialog"/)
   assert.match(appointment, /aria-labelledby="registration-appointment-confirmation-title"/)
   assert.match(appointment, /id="registration-appointment-confirmation-title"[\s\S]*?예약을 저장할까요\?/)
-  assert.match(appointment, /onClick=\{\(\) => void confirmPreparedAppointmentMutation\(\)\}/)
+  assert.doesNotMatch(appointment, /registration-appointment-confirmation-description|pendingConfirmation\.message/)
+  assert.match(appointment, /className="min-h-11 min-w-11" variant="outline" onClick=\{dismissAppointmentConfirmation\} disabled=\{saving\}>돌아가기<\/Button>/)
+  assert.match(appointment, /className="min-h-11 min-w-11" onClick=\{\(\) => void confirmPreparedAppointmentMutation\(\)\} disabled=\{saving\}>저장<\/Button>/)
+  assert.match(appointment, /blocked=\{mutationLocked \|\| confirmationPending \|\| Boolean\(conflict\)\}/)
+  assert.match(appointment, /disabled=\{saving \|\| confirmationPending \|\| mutationLocked\}/)
 })
 
 test("enrollment cancellation validation is local and focuses subject-owned controls", async () => {

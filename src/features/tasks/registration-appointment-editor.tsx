@@ -23,7 +23,6 @@ import { RegistrationSaveButton } from "./registration-save-button"
 import type { RegistrationCustomerMessageTarget } from "./registration-customer-message-contract"
 import { sendRegistrationVisitNotificationTarget } from "./registration-consultation-notification.js"
 import {
-  buildRegistrationAppointmentConfirmation,
   compareRegistrationAppointmentDraft,
   getRegistrationAppointmentParticipantSubjects,
   getRegistrationResultLinkHref,
@@ -37,7 +36,6 @@ import {
   createRegistrationMutationRequestKey,
   getRegistrationNotificationProcessingReadiness,
   getRegistrationNotificationJobStatus,
-  previewRegistrationAppointmentReminders,
   retryRegistrationNotificationJob,
   saveRegistrationSharedAppointment,
   saveRegistrationLevelTestResult,
@@ -85,11 +83,6 @@ type PersistedConflictDraft = {
   local: RegistrationAppointmentDraft
   appointmentId: string | null
   expectedNotificationRevision: number | null
-}
-
-type PendingAppointmentConfirmation = {
-  action: "save"
-  message: string
 }
 
 const persistedAppointmentSubmissionKeys = new Map<string, string>()
@@ -249,7 +242,8 @@ export function RegistrationAppointmentEditor({
   const [trackRefreshPendingIds, setTrackRefreshPendingIds] = useState<Set<string>>(() => new Set())
   const [trackRefreshRetryingId, setTrackRefreshRetryingId] = useState("")
   const [validationError, setValidationError] = useState("")
-  const [pendingConfirmation, setPendingConfirmation] = useState<PendingAppointmentConfirmation | null>(null)
+  const [pendingConfirmation, setPendingConfirmation] = useState(false)
+  const confirmationPending = Boolean(pendingConfirmation)
   const sectionRef = useRef<HTMLElement | null>(null)
   const confirmationRef = useRef<HTMLDivElement | null>(null)
   const [committedAppointment, setCommittedAppointment] = useState<RegistrationAppointmentMutationResponse | null>(null)
@@ -376,7 +370,7 @@ export function RegistrationAppointmentEditor({
     replaceRemaining: initialDraft?.replaceRemaining ?? editMode === "replace_remaining",
   })
   const appointmentDirty = JSON.stringify(appointmentDraft) !== JSON.stringify(initialAppointmentDraftRef.current)
-  const customerMessageBlocked = appointmentDirty || externalDirty || saving || refreshPending || Boolean(conflict) || appointment?.status !== "scheduled"
+  const customerMessageBlocked = appointmentDirty || externalDirty || saving || confirmationPending || refreshPending || Boolean(conflict) || appointment?.status !== "scheduled"
   useOwnedDirtyState(!mutationLocked && appointmentDirty, onDirtyChange)
   const reportedTrackDirtyRef = useRef(new Set<string>())
   const onTrackDirtyChangeRef = useRef(onTrackDirtyChange)
@@ -441,6 +435,7 @@ export function RegistrationAppointmentEditor({
     && selectedPlace
     && appointmentDraft.trackIds.length > 0
     && !saving
+    && !confirmationPending
     && !mutationLocked
     && !conflict,
   )
@@ -511,40 +506,6 @@ export function RegistrationAppointmentEditor({
   function continueEditingConflictDraft() {
     persistConflictDraft()
     setShowConflictComparison(false)
-  }
-
-  async function reminderRoundCount(draft: RegistrationAppointmentDraft | null) {
-    if (!draft || !draft.scheduledAt || draft.trackIds.length === 0) return 0
-    try {
-      return (await previewRegistrationAppointmentReminders({
-        kind,
-        scheduledAt: draft.scheduledAt,
-        trackIds: draft.trackIds,
-      })).length
-    } catch {
-      return null
-    }
-  }
-
-  async function prepareAppointmentConfirmation(
-    action: "save",
-    next: RegistrationAppointmentDraft | null,
-  ) {
-    const [previousReminderRoundCount, nextReminderRoundCount] = await Promise.all([
-      reminderRoundCount(previousAppointmentDraft),
-      reminderRoundCount(next),
-    ])
-    setPendingConfirmation({
-      action,
-      message: buildRegistrationAppointmentConfirmation({
-        action,
-        previous: previousAppointmentDraft,
-        next,
-        previousReminderRoundCount,
-        nextReminderRoundCount,
-        trackLabels,
-      }),
-    })
   }
 
   async function dispatchNotificationTargets(
@@ -759,6 +720,7 @@ export function RegistrationAppointmentEditor({
   }
 
   async function saveAppointment() {
+    if (confirmationPending) return
     if (!canSave) {
       const message = "예약 일시와 장소를 모두 입력하세요."
       setValidationError(message)
@@ -780,15 +742,11 @@ export function RegistrationAppointmentEditor({
       }
       return
     }
-    setSaving(true)
-    await prepareAppointmentConfirmation("save", appointmentDraft)
+    setPendingConfirmation(true)
   }
 
   async function performSaveAppointment() {
-    if (onBeforeSave && !(await onBeforeSave())) {
-      setSaving(false)
-      return
-    }
+    if (onBeforeSave && !(await onBeforeSave())) return
     const kindKey = "registration-appointment"
     const requestKey = submissionKeys.getOrCreate(kindKey, normalizedDraft)
     let saved: RegistrationAppointmentMutationResponse
@@ -808,11 +766,9 @@ export function RegistrationAppointmentEditor({
       const message = errorMessage(error, "예약을 저장하지 못했습니다.")
       if (message.includes("registration_appointment_revision_conflict")) {
         await handleRevisionConflict()
-        setSaving(false)
         return
       }
       onWarning(message)
-      setSaving(false)
       return
     }
     submissionKeys.clear(kindKey, normalizedDraft)
@@ -821,18 +777,22 @@ export function RegistrationAppointmentEditor({
     setConflict(null)
     setShowConflictComparison(false)
     await finishAppointmentSave(saved)
-    setSaving(false)
   }
 
   function dismissAppointmentConfirmation() {
-    setPendingConfirmation(null)
-    setSaving(false)
+    if (saving) return
+    setPendingConfirmation(false)
   }
 
   async function confirmPreparedAppointmentMutation() {
-    if (!pendingConfirmation) return
-    setPendingConfirmation(null)
-    await performSaveAppointment()
+    if (!pendingConfirmation || saving) return
+    setSaving(true)
+    try {
+      await performSaveAppointment()
+    } finally {
+      setPendingConfirmation(false)
+      setSaving(false)
+    }
   }
 
   async function completeAttempt(activity: OpsRegistrationLevelTest) {
@@ -966,7 +926,7 @@ export function RegistrationAppointmentEditor({
               timeAriaLabel={`${appointmentParticipantSubjectLabel} 예약 시각`}
               clearAriaLabel={`${appointmentParticipantSubjectLabel} 예약 날짜와 시각 지우기`}
               required
-              disabled={saving || mutationLocked}
+              disabled={saving || confirmationPending || mutationLocked}
               disablePortal
               timeOptions={REGISTRATION_TIME_OPTIONS}
             />
@@ -983,7 +943,7 @@ export function RegistrationAppointmentEditor({
                   variant={selectedPlace === option ? "default" : "outline"}
                   className="h-10"
                   onClick={() => { setValidationError(""); setPlace(option) }}
-                  disabled={saving || mutationLocked}
+                  disabled={saving || confirmationPending || mutationLocked}
                 >
                   {option}
                 </Button>
@@ -1001,7 +961,7 @@ export function RegistrationAppointmentEditor({
             data-registration-primary-action={`${appointmentParticipantSubjectLabel}:appointment-save`}
             dirty={appointmentDirty || externalDirty}
             saving={saving}
-            blocked={mutationLocked || Boolean(conflict)}
+            blocked={mutationLocked || confirmationPending || Boolean(conflict)}
             actionLabel={actionLabel}
             cleanLabel={appointment ? "저장됨" : "예약 정보를 입력하세요"}
             aria-label={saveAriaLabel || `${appointmentParticipantSubjectLabel} 예약 저장`}
@@ -1045,19 +1005,13 @@ export function RegistrationAppointmentEditor({
             ref={confirmationRef}
             role="alertdialog"
             aria-labelledby="registration-appointment-confirmation-title"
-            aria-describedby="registration-appointment-confirmation-description"
             tabIndex={-1}
             className="grid gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-950 outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           >
-            <div className="grid gap-1">
-              <h4 id="registration-appointment-confirmation-title" className="font-semibold">예약을 저장할까요?</h4>
-              <p id="registration-appointment-confirmation-description" className="whitespace-pre-line text-sm">
-                {pendingConfirmation.message}
-              </p>
-            </div>
+            <h4 id="registration-appointment-confirmation-title" className="font-semibold">예약을 저장할까요?</h4>
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button type="button" variant="outline" onClick={dismissAppointmentConfirmation}>돌아가기</Button>
-              <Button type="button" onClick={() => void confirmPreparedAppointmentMutation()}>저장</Button>
+              <Button type="button" className="min-h-11 min-w-11" variant="outline" onClick={dismissAppointmentConfirmation} disabled={saving}>돌아가기</Button>
+              <Button type="button" className="min-h-11 min-w-11" onClick={() => void confirmPreparedAppointmentMutation()} disabled={saving}>저장</Button>
             </div>
           </div>
         ) : null}
