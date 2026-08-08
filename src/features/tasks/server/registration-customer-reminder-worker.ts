@@ -1,0 +1,135 @@
+import { createHash, timingSafeEqual } from "node:crypto"
+
+import type { RegistrationCustomerMessageButton } from "./registration-customer-message-catalog.ts"
+import type { RegistrationCustomerMessageProviderResult } from "./registration-customer-message-solapi.ts"
+
+type JsonRecord = Record<string, unknown>
+
+export type RegistrationCustomerReminderClaim = Readonly<{
+  jobId: string
+  appointmentId: string
+  claimToken: string
+  sourceRevision: number
+  scheduledFor: string
+  requestKey: string
+}>
+
+export type RegistrationCustomerReminderPrepared = Readonly<{
+  to: string
+  templateId: string
+  variables: Readonly<Record<string, string>>
+  buttons: ReadonlyArray<RegistrationCustomerMessageButton>
+  contract: Readonly<JsonRecord>
+}>
+
+export type RegistrationCustomerReminderBegin = Readonly<{
+  allowed: boolean
+  messageId: string
+  dispatchToken: string
+  currentStatus: "pending" | "accepted" | "unknown" | "failed_hold"
+}>
+
+type RegistrationCustomerReminderWorkerDependencies = Readonly<{
+  claim(): Promise<RegistrationCustomerReminderClaim | null>
+  prepare(claim: RegistrationCustomerReminderClaim): Promise<RegistrationCustomerReminderPrepared>
+  begin(input: Readonly<{
+    claim: RegistrationCustomerReminderClaim
+    prepared: RegistrationCustomerReminderPrepared
+  }>): Promise<RegistrationCustomerReminderBegin>
+  release(input: Readonly<{
+    claim: RegistrationCustomerReminderClaim
+    errorCode: string
+  }>): Promise<void>
+  send(input: Readonly<{
+    claim: RegistrationCustomerReminderClaim
+    prepared: RegistrationCustomerReminderPrepared
+  }>): Promise<RegistrationCustomerMessageProviderResult>
+  finalize(input: Readonly<{
+    claim: RegistrationCustomerReminderClaim
+    begin: RegistrationCustomerReminderBegin
+    provider: RegistrationCustomerMessageProviderResult
+  }>): Promise<void>
+  now?: () => Date
+}>
+
+export type RegistrationCustomerReminderWorkerResult = Readonly<{
+  ok: true
+  processed: boolean
+  providerAttempted: boolean
+  outcome: "idle" | "held" | "skipped" | "accepted" | "failed_hold" | "unknown"
+}>
+
+function secretDigest(value: string) {
+  return createHash("sha256").update(value, "utf8").digest()
+}
+
+export function authorizeRegistrationCustomerReminderWorker(
+  request: Request,
+  configuredSecret: string,
+) {
+  const expected = configuredSecret.trim()
+  const match = request.headers.get("authorization")?.match(/^Bearer ([^\s]+)$/u)
+  const actual = match?.[1] ?? ""
+  if (!expected || !actual) return false
+  return timingSafeEqual(secretDigest(actual), secretDigest(expected))
+}
+
+function result(
+  outcome: RegistrationCustomerReminderWorkerResult["outcome"],
+  providerAttempted: boolean,
+  processed = true,
+): RegistrationCustomerReminderWorkerResult {
+  return Object.freeze({ ok: true, processed, providerAttempted, outcome })
+}
+
+export function createRegistrationCustomerReminderWorker(
+  dependencies: RegistrationCustomerReminderWorkerDependencies,
+) {
+  const now = dependencies.now ?? (() => new Date())
+
+  return Object.freeze({
+    async runOnce(): Promise<RegistrationCustomerReminderWorkerResult> {
+      const claim = await dependencies.claim()
+      if (!claim) return result("idle", false, false)
+
+      let prepared: RegistrationCustomerReminderPrepared
+      let begin: RegistrationCustomerReminderBegin
+      try {
+        prepared = await dependencies.prepare(claim)
+        begin = await dependencies.begin({ claim, prepared })
+      } catch {
+        try {
+          await dependencies.release({ claim, errorCode: "pre_send_preparation_failed" })
+        } catch {
+          // The lease expires without crossing the provider boundary.
+        }
+        return result("held", false)
+      }
+
+      if (!begin.allowed) return result("skipped", false)
+
+      let provider: RegistrationCustomerMessageProviderResult
+      try {
+        provider = await dependencies.send({ claim, prepared })
+      } catch {
+        provider = Object.freeze({
+          outcome: "unknown",
+          evidence: Object.freeze({
+            statusCode: "provider_dispatch_uncertain",
+            statusMessage: "SOLAPI 호출 결과를 확인할 수 없습니다.",
+            observedAt: now().toISOString(),
+            requestKeyMatched: true,
+          }),
+        })
+      }
+
+      try {
+        await dependencies.finalize({ claim, begin, provider })
+      } catch {
+        return result("unknown", true)
+      }
+      return result(provider.outcome, true)
+    },
+  })
+}
+
