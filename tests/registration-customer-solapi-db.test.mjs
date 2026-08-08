@@ -14,6 +14,8 @@ const AUDIT_DEDUPE_MIGRATION =
   "20260806130000_registration_customer_message_audit_dedupe.sql"
 const PREVIEW_TARGET_MIGRATION =
   "20260807125500_registration_customer_message_preview_target_rpc.sql"
+const SUBJECT_ADMISSION_DETAILS_SUFFIX =
+  "_registration_customer_message_subject_admission_details.sql"
 const PREVIOUS_MIGRATION =
   "20260805101000_notification_control_plane_template_variable_wire_contract.sql"
 const storageMigrationUrl = new URL(
@@ -39,6 +41,10 @@ const previewTargetMigrationUrl = new URL(
 const migrationsUrl = new URL("../supabase/migrations/", import.meta.url)
 const pgTapUrl = new URL(
   "../supabase/tests/registration_customer_solapi_messages_test.sql",
+  import.meta.url,
+)
+const isolatedRunnerUrl = new URL(
+  "../scripts/run-registration-customer-solapi-local-db-qa.mjs",
   import.meta.url,
 )
 
@@ -899,6 +905,48 @@ test("canonical resolver enforces source authority and exposes a phone only ephe
   )
 })
 
+test("subject-scoped appointment and authoritative admission facts use one forward-only migration", async () => {
+  const filenames = (await readdir(migrationsUrl))
+    .filter((name) => name.endsWith(SUBJECT_ADMISSION_DETAILS_SUFFIX))
+    .sort()
+
+  assert.equal(
+    filenames.length,
+    1,
+    "exactly one subject/admission details migration must exist",
+  )
+
+  const source = await readRequired(
+    new URL(filenames[0], migrationsUrl),
+    "subject/admission details migration",
+  )
+  const normalized = normalizeSql(source)
+
+  assert.match(
+    normalized,
+    /create or replace function dashboard_private\.resolve_registration_customer_message_source_v1_impl\(p_message_kind text, p_source_id uuid\)/,
+  )
+  assert.match(normalized, /track\.workflow_status = 'level_test_requested'/)
+  assert.match(normalized, /track\.workflow_status = 'consultation_requested'/)
+  assert.match(
+    normalized,
+    /public\.continuous_class_schedule_runtime_version\(\) = 1[^;]+schedule_storage_mode = 'normalized'/,
+  )
+  assert.match(normalized, /registration_customer_message_source_ineligible/)
+  assert.match(
+    normalized,
+    /registration_customer_message_admission_schedule_incomplete/,
+  )
+  assert.match(
+    normalized,
+    /when v_error_code = 'source_ineligible' then 'canceled'/,
+  )
+  assert.doesNotMatch(
+    normalized,
+    /\bdrop\s+(?:table|column|constraint)\b|\btruncate\b/,
+  )
+})
+
 test("preview and claim use strict contracts, current facts, and permanent DB dedupe", async () => {
   const source = await readRequired(rpcMigrationUrl, "message RPC migration")
   const normalized = normalizeSql(source)
@@ -1173,7 +1221,17 @@ test("pgTAP packet exercises storage behavior without production or provider dep
     "valid visit source",
     "resolved appointment source is invariant across session time zones",
     "source facts checksum is invariant across session time zones",
-    "admission source includes workflow legacy and planned",
+    "admission source includes only planned unbatched enrollment-requested tracks",
+    "level-test source keeps only tracks in the current level-test stage",
+    "level-test source becomes ineligible when no current participant remains",
+    "visit source keeps only tracks in the current consultation stage",
+    "admission source keeps exact authoritative enrollment plan keys",
+    "normalized admission uses current slot and session snapshots",
+    "legacy admission ignores normalized rows outside normalized authority",
+    "incomplete admission schedule is rejected",
+    "admission material fact change is stale",
+    "source-ineligible reminder release cancels without provider message",
+    "private source helpers are unavailable to application roles",
     "inconsistent waiting detail",
     "preview contract rejects unexpected keys",
     "expired preview cannot be claimed",
@@ -1221,6 +1279,33 @@ test("pgTAP packet exercises storage behavior without production or provider dep
   ]) {
     assert.match(normalized, new RegExp(escapeRegex(behavior)))
   }
+})
+
+test("isolated DB runner applies the source migration and seeds complete synthetic admission facts", async () => {
+  const source = await readRequired(isolatedRunnerUrl, "registration customer SOLAPI isolated runner")
+  const normalized = normalizeSql(source)
+
+  assert.match(
+    normalized,
+    /20260808120425_registration_customer_message_subject_admission_details\.sql/,
+  )
+  assert.match(normalized, /create table public\.class_schedule_slots/)
+  assert.match(normalized, /create table public\.class_lesson_sessions/)
+  assert.match(normalized, /create table public\.textbooks/)
+  assert.match(
+    normalized,
+    /create table dashboard_private\.registration_customer_reminder_jobs/,
+  )
+  assert.match(normalized, /class_start_lesson_session_id uuid/)
+  assert.match(
+    normalized,
+    /insert into public\.classes[^;]+synthetic admission class[^;]+월수 18:00-20:00/,
+  )
+  assert.match(
+    normalized,
+    /insert into public\.ops_registration_enrollments[^;]+2026-08-17[^;]+2026-08-17:1/,
+  )
+  assert.match(normalized, /providercalls: 0/)
 })
 
 test("preview target lookup stays behind a service-role security definer", async () => {

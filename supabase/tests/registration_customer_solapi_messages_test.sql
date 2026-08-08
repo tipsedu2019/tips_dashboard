@@ -683,6 +683,19 @@ select is_empty($$
     and privilege_type = 'EXECUTE'
 $$, 'message RPC execute is unavailable to PUBLIC anon and authenticated');
 
+select is_empty($$
+  select routine_name, grantee
+  from information_schema.routine_privileges
+  where routine_schema = 'dashboard_private'
+    and routine_name in (
+      'registration_customer_message_legacy_slots_v1',
+      'registration_customer_message_admission_plan_v1',
+      'resolve_registration_customer_message_source_v1_impl'
+    )
+    and grantee in ('PUBLIC', 'anon', 'authenticated', 'service_role')
+    and privilege_type = 'EXECUTE'
+$$, 'private source helpers are unavailable to application roles');
+
 insert into public.profiles(id, role, name, email, created_at, updated_at)
 values
   ('95000000-0000-4000-8000-000000000011', 'staff', 'Registration SOLAPI Staff', 'registration-solapi-staff@example.invalid', now(), now()),
@@ -694,25 +707,48 @@ set role = excluded.role, name = excluded.name, email = excluded.email, updated_
 insert into public.classes(
   id, name, class_type, subject, grade, teacher, schedule, room,
   capacity, fee, status, student_ids, waitlist_ids, textbook_ids,
-  lessons, schedule_plan
-) values (
-  '95000000-0000-4000-8000-000000000020',
-  '등록 SOLAPI 현재반',
-  '정규',
-  '영어',
-  '중1',
-  'Registration SOLAPI Teacher',
-  '월 18:00',
-  '본관',
-  12,
-  100000,
-  '수업 진행 중',
-  '[]'::jsonb,
-  '[]'::jsonb,
-  '[]'::jsonb,
-  '[]'::jsonb,
-  '{"sessions":[]}'::jsonb
-);
+  lessons, schedule_plan, schedule_revision, schedule_storage_mode
+) values
+  (
+    '95000000-0000-4000-8000-000000000020',
+    '등록 SOLAPI 현재반',
+    '정규',
+    '영어',
+    '중1',
+    'Registration SOLAPI Teacher',
+    '월 18:00',
+    '본관',
+    12,
+    100000,
+    '수업 진행 중',
+    '[]'::jsonb,
+    '[]'::jsonb,
+    '[]'::jsonb,
+    '[]'::jsonb,
+    '{"sessions":[]}'::jsonb,
+    0,
+    'legacy'
+  ),
+  (
+    '95000000-0000-4000-8000-000000000021',
+    '중2 수학 A반',
+    '정규',
+    '수학',
+    '중2',
+    '홍길동',
+    '월수 18:00-20:00',
+    '본관 301호',
+    12,
+    100000,
+    '수업 진행 중',
+    '[]'::jsonb,
+    '[]'::jsonb,
+    '[]'::jsonb,
+    '[]'::jsonb,
+    '{"sessions":[{"date":"2026-08-17","sessionNumber":1,"scheduleState":"active","startTime":"18:00","endTime":"20:00"}]}'::jsonb,
+    4,
+    'legacy'
+  );
 
 insert into public.ops_tasks(
   id, title, type, status, priority, requested_by, assignee_id, student_name
@@ -742,14 +778,14 @@ insert into public.ops_registration_subject_tracks(
     '95000000-0000-4000-8000-000000000540',
     '95000000-0000-4000-8000-000000000500',
     '영어', 'inquiry', '95000000-0000-4000-8000-000000000012',
-    'manual', now(), null, false, 'waiting_current_class', 3, now(),
-    'current_class', '95000000-0000-4000-8000-000000000020'
+    'manual', now(), null, false, 'level_test_requested', 3, now(),
+    null, null
   ),
   (
     '95000000-0000-4000-8000-000000000541',
     '95000000-0000-4000-8000-000000000500',
     '수학', 'inquiry', '95000000-0000-4000-8000-000000000012',
-    'manual', now(), null, false, 'enrollment_requested', 4, now(),
+    'manual', now(), null, false, 'level_test_requested', 4, now(),
     null, null
   ),
   (
@@ -761,11 +797,15 @@ insert into public.ops_registration_subject_tracks(
   );
 
 insert into public.ops_registration_enrollments(
-  id, track_id, class_id, status, sort_order
+  id, track_id, class_id, class_start_date, class_start_session_key,
+  class_start_session, status, sort_order
 ) values (
   '95000000-0000-4000-8000-000000000550',
-  '95000000-0000-4000-8000-000000000540',
-  '95000000-0000-4000-8000-000000000020',
+  '95000000-0000-4000-8000-000000000541',
+  '95000000-0000-4000-8000-000000000021',
+  '2026-08-17',
+  '2026-08-17:1',
+  '1회차',
   'planned',
   0
 );
@@ -833,9 +873,54 @@ select set_config(
 insert into registration_solapi_rpc_results(label, response)
 values
   ('level source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'level_test_booking', '95000000-0000-4000-8000-000000000601')),
-  ('visit source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000011', 'visit_consultation_booking', '95000000-0000-4000-8000-000000000602')),
   ('reminder source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'appointment_reminder', '95000000-0000-4000-8000-000000000601')),
-  ('marker source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'level_test_booking', '95000000-0000-4000-8000-000000000606')),
+  ('marker source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'level_test_booking', '95000000-0000-4000-8000-000000000606'));
+
+reset role;
+update public.ops_registration_subject_tracks
+set workflow_status = case
+      when id in (
+        '95000000-0000-4000-8000-000000000540',
+        '95000000-0000-4000-8000-000000000542'
+      ) then 'consultation_requested'
+      else workflow_status
+    end,
+    waiting_detail_kind = null,
+    waiting_detail_class_id = null
+where id in (
+  '95000000-0000-4000-8000-000000000540',
+  '95000000-0000-4000-8000-000000000542'
+);
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'visit source',
+  public.resolve_registration_customer_message_source_v1(
+    '95000000-0000-4000-8000-000000000011',
+    'visit_consultation_booking',
+    '95000000-0000-4000-8000-000000000602'
+  )
+);
+
+reset role;
+update public.ops_registration_subject_tracks
+set workflow_status = 'waiting_current_class',
+    waiting_detail_kind = 'current_class',
+    waiting_detail_class_id = '95000000-0000-4000-8000-000000000020'
+where id = '95000000-0000-4000-8000-000000000540';
+update public.ops_registration_subject_tracks
+set workflow_status = 'enrollment_requested',
+    waiting_detail_kind = null,
+    waiting_detail_class_id = null
+where id = '95000000-0000-4000-8000-000000000541';
+update public.ops_registration_subject_tracks
+set workflow_status = 'inquiry',
+    waiting_detail_kind = null,
+    waiting_detail_class_id = null
+where id = '95000000-0000-4000-8000-000000000542';
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values
   ('waiting source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'waiting_notice', '95000000-0000-4000-8000-000000000540')),
   ('admission source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'admission_application', '95000000-0000-4000-8000-000000000500'));
 
@@ -854,6 +939,14 @@ values (
   )
 );
 
+update public.ops_registration_subject_tracks
+set workflow_status = 'level_test_requested',
+    waiting_detail_kind = null,
+    waiting_detail_class_id = null
+where id in (
+  '95000000-0000-4000-8000-000000000540',
+  '95000000-0000-4000-8000-000000000541'
+);
 set local timezone = 'UTC';
 set local role service_role;
 insert into registration_solapi_rpc_results(label, response)
@@ -866,6 +959,15 @@ values (
   )
 );
 reset role;
+
+update public.ops_registration_subject_tracks
+set workflow_status = 'waiting_current_class',
+    waiting_detail_kind = 'current_class',
+    waiting_detail_class_id = '95000000-0000-4000-8000-000000000020'
+where id = '95000000-0000-4000-8000-000000000540';
+update public.ops_registration_subject_tracks
+set workflow_status = 'enrollment_requested'
+where id = '95000000-0000-4000-8000-000000000541';
 
 insert into registration_solapi_rpc_results(label, response)
 values (
@@ -912,12 +1014,12 @@ select is(
 select is(
   (select response -> 'subjects' from registration_solapi_rpc_results where label = 'level source'),
   '["영어", "수학"]'::jsonb,
-  'level-test source resolves only active participants in stable subject order'
+  'level-test source keeps only tracks in the current level-test stage'
 );
 select is(
   (select response -> 'subjects' from registration_solapi_rpc_results where label = 'visit source'),
   '["영어", "과학"]'::jsonb,
-  'valid visit source resolves scheduled visit participants'
+  'valid visit source keeps only tracks in the current consultation stage'
 );
 select is(
   (select response ->> 'appointmentKind' from registration_solapi_rpc_results where label = 'reminder source'),
@@ -931,9 +1033,217 @@ select is(
 );
 select is(
   pg_catalog.jsonb_array_length((select response -> 'tracks' from registration_solapi_rpc_results where label = 'admission source')),
-  3,
-  'admission source includes workflow legacy and planned eligibility paths'
+  1,
+  'admission source includes only planned unbatched enrollment-requested tracks'
 );
+select results_eq(
+  $$
+    select key
+    from pg_catalog.jsonb_object_keys(
+      (select response -> 'enrollmentPlans' -> 0 from registration_solapi_rpc_results where label = 'admission source')
+    ) key
+    order by key
+  $$,
+  $$
+    values
+      ('authority'::text),
+      ('classId'::text),
+      ('className'::text),
+      ('classSubject'::text),
+      ('classUpdatedAt'::text),
+      ('enrollmentId'::text),
+      ('enrollmentUpdatedAt'::text),
+      ('firstLesson'::text),
+      ('runtimeVersion'::text),
+      ('scheduleHash'::text),
+      ('scheduleRevision'::text),
+      ('slots'::text),
+      ('sortOrder'::text),
+      ('storageMode'::text),
+      ('subject'::text),
+      ('textbookId'::text),
+      ('textbookName'::text),
+      ('textbookUpdatedAt'::text),
+      ('trackId'::text),
+      ('workflowRevision'::text),
+      ('workflowStatus'::text)
+  $$,
+  'admission source keeps exact authoritative enrollment plan keys'
+);
+select is(
+  (select response -> 'enrollmentPlans' -> 0 ->> 'className' from registration_solapi_rpc_results where label = 'admission source'),
+  '중2 수학 A반',
+  'legacy admission resolves the selected class name'
+);
+select is(
+  (select response -> 'enrollmentPlans' -> 0 -> 'textbookName' from registration_solapi_rpc_results where label = 'admission source'),
+  'null'::jsonb,
+  'admission permits an intentionally unselected textbook'
+);
+
+insert into public.class_schedule_slots(
+  id, class_id, weekday, start_time, end_time,
+  teacher_name, classroom_name, sort_order
+) values
+  (
+    '95000000-0000-4000-8000-000000000031',
+    '95000000-0000-4000-8000-000000000021',
+    1, '18:00', '20:00', '홍길동', '본관 301호', 0
+  ),
+  (
+    '95000000-0000-4000-8000-000000000032',
+    '95000000-0000-4000-8000-000000000021',
+    3, '18:00', '20:00', '홍길동', '본관 301호', 1
+  );
+insert into public.class_lesson_sessions(
+  id, class_id, session_key, source_schedule_slot_id,
+  session_date, schedule_state, start_time, end_time,
+  teacher_name_snapshot, classroom_name_snapshot, origin, revision
+) values (
+  '95000000-0000-4000-8000-000000000041',
+  '95000000-0000-4000-8000-000000000021',
+  '2026-08-17:1',
+  '95000000-0000-4000-8000-000000000031',
+  '2026-08-17', 'active', '18:00', '20:00',
+  '홍길동', '본관 301호', 'manual', 2
+);
+update dashboard_private.continuous_class_schedule_runtime
+set version = 1
+where singleton = true;
+update public.classes
+set schedule_storage_mode = 'normalized'
+where id = '95000000-0000-4000-8000-000000000021';
+update public.ops_registration_enrollments
+set class_start_lesson_session_id = '95000000-0000-4000-8000-000000000041'
+where id = '95000000-0000-4000-8000-000000000550';
+
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'normalized admission source',
+  public.resolve_registration_customer_message_source_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'admission_application',
+    '95000000-0000-4000-8000-000000000500'
+  )
+);
+reset role;
+select is(
+  (select response -> 'enrollmentPlans' -> 0 ->> 'authority' from registration_solapi_rpc_results where label = 'normalized admission source'),
+  'normalized',
+  'normalized admission uses current slot and session snapshots'
+);
+select is(
+  (select response -> 'enrollmentPlans' -> 0 -> 'slots' -> 0 ->> 'slotId' from registration_solapi_rpc_results where label = 'normalized admission source'),
+  '95000000-0000-4000-8000-000000000031',
+  'normalized admission records the authoritative slot identity'
+);
+select is(
+  (select response -> 'enrollmentPlans' -> 0 -> 'firstLesson' ->> 'sessionId' from registration_solapi_rpc_results where label = 'normalized admission source'),
+  '95000000-0000-4000-8000-000000000041',
+  'normalized admission records the authoritative first lesson identity'
+);
+
+update public.class_lesson_sessions
+set start_time = null,
+    end_time = null
+where id = '95000000-0000-4000-8000-000000000041';
+set local role service_role;
+select throws_ok(
+  $$select public.resolve_registration_customer_message_source_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'admission_application',
+      '95000000-0000-4000-8000-000000000500'
+    )$$,
+  '22023', 'registration_customer_message_admission_schedule_incomplete',
+  'normalized admission rejects an invalid first lesson snapshot'
+);
+reset role;
+update public.class_lesson_sessions
+set start_time = '18:00',
+    end_time = '20:00'
+where id = '95000000-0000-4000-8000-000000000041';
+
+update public.classes
+set schedule_storage_mode = 'shadow'
+where id = '95000000-0000-4000-8000-000000000021';
+update public.ops_registration_enrollments
+set class_start_lesson_session_id = null
+where id = '95000000-0000-4000-8000-000000000550';
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values (
+  'legacy fallback admission source',
+  public.resolve_registration_customer_message_source_v1(
+    '95000000-0000-4000-8000-000000000001',
+    'admission_application',
+    '95000000-0000-4000-8000-000000000500'
+  )
+);
+reset role;
+select is(
+  (select response -> 'enrollmentPlans' -> 0 ->> 'authority' from registration_solapi_rpc_results where label = 'legacy fallback admission source'),
+  'legacy',
+  'legacy admission ignores normalized rows outside normalized authority'
+);
+select is(
+  (select response -> 'enrollmentPlans' -> 0 -> 'slots' -> 0 -> 'slotId' from registration_solapi_rpc_results where label = 'legacy fallback admission source'),
+  'null'::jsonb,
+  'legacy admission never leaks a shadow slot identity'
+);
+
+update dashboard_private.continuous_class_schedule_runtime
+set version = 0
+where singleton = true;
+update public.classes
+set schedule_storage_mode = 'legacy',
+    teacher = ''
+where id = '95000000-0000-4000-8000-000000000021';
+set local role service_role;
+select throws_ok(
+  $$select public.resolve_registration_customer_message_source_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'admission_application',
+      '95000000-0000-4000-8000-000000000500'
+    )$$,
+  '22023', 'registration_customer_message_admission_schedule_incomplete',
+  'incomplete admission schedule is rejected'
+);
+reset role;
+update public.classes
+set teacher = '홍길동',
+    schedule = E'월 18:00-20:00\n월 19:00-21:00',
+    schedule_plan = '{"sessions":[{"date":"2026-08-17","sessionNumber":1,"scheduleState":"active"}]}'::jsonb
+where id = '95000000-0000-4000-8000-000000000021';
+set local role service_role;
+select throws_ok(
+  $$select public.resolve_registration_customer_message_source_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'admission_application',
+      '95000000-0000-4000-8000-000000000500'
+    )$$,
+  '22023', 'registration_customer_message_admission_schedule_incomplete',
+  'ambiguous legacy first lesson inference is rejected'
+);
+reset role;
+update public.classes
+set schedule = '월수 18:00-20:00',
+    schedule_plan = '{"sessions":[{"date":"2026-08-17","sessionNumber":1,"scheduleState":"makeup"}]}'::jsonb
+where id = '95000000-0000-4000-8000-000000000021';
+set local role service_role;
+select throws_ok(
+  $$select public.resolve_registration_customer_message_source_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'admission_application',
+      '95000000-0000-4000-8000-000000000500'
+    )$$,
+  '22023', 'registration_customer_message_admission_schedule_incomplete',
+  'legacy makeup first lesson requires explicit times'
+);
+reset role;
+update public.classes
+set schedule_plan = '{"sessions":[{"date":"2026-08-17","sessionNumber":1,"scheduleState":"active","startTime":"18:00","endTime":"20:00"}]}'::jsonb
+where id = '95000000-0000-4000-8000-000000000021';
 
 set local role service_role;
 select throws_ok(
@@ -948,8 +1258,8 @@ select throws_ok(
 );
 select throws_ok(
   $$select public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'level_test_booking', '95000000-0000-4000-8000-000000000605')$$,
-  '22023', 'registration_customer_message_source_invalid',
-  'appointment without active participants is rejected'
+  '22023', 'registration_customer_message_source_ineligible',
+  'level-test source becomes ineligible when no current participant remains'
 );
 select throws_ok(
   $$select public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'admission_application', '95000000-0000-4000-8000-000000000502')$$,
@@ -977,6 +1287,78 @@ select throws_ok(
   'assigned teacher cannot create a send source'
 );
 reset role;
+
+insert into dashboard_private.registration_customer_reminder_jobs(
+  appointment_id, task_id, source_revision, scheduled_for, due_at,
+  available_at, request_key, status, claim_token, claim_expires_at
+) values
+  (
+    '95000000-0000-4000-8000-000000000605',
+    '95000000-0000-4000-8000-000000000500',
+    1, pg_catalog.clock_timestamp() + interval '4 days',
+    pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp(),
+    '95000000-0000-4000-8000-000000000851', 'claimed',
+    '95000000-0000-4000-8000-000000000852',
+    pg_catalog.clock_timestamp() + interval '5 minutes'
+  ),
+  (
+    '95000000-0000-4000-8000-000000000606',
+    '95000000-0000-4000-8000-000000000500',
+    1, pg_catalog.clock_timestamp() + interval '5 days',
+    pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp(),
+    '95000000-0000-4000-8000-000000000853', 'claimed',
+    '95000000-0000-4000-8000-000000000854',
+    pg_catalog.clock_timestamp() + interval '5 minutes'
+  );
+set local role service_role;
+insert into registration_solapi_rpc_results(label, response)
+values
+  (
+    'source ineligible reminder release',
+    public.release_registration_customer_reminder_job_v1(
+      '95000000-0000-4000-8000-000000000605',
+      '95000000-0000-4000-8000-000000000852',
+      'source_ineligible'
+    )
+  ),
+  (
+    'retryable reminder release',
+    public.release_registration_customer_reminder_job_v1(
+      '95000000-0000-4000-8000-000000000606',
+      '95000000-0000-4000-8000-000000000854',
+      'source_read_failed'
+    )
+  );
+reset role;
+select is(
+  (
+    select status || ':' || coalesce(last_error_code, '') || ':'
+      || case when available_at is null then 'no_retry' else 'retry' end
+    from dashboard_private.registration_customer_reminder_jobs
+    where appointment_id = '95000000-0000-4000-8000-000000000605'
+  ),
+  'canceled:source_ineligible:no_retry',
+  'source-ineligible reminder release cancels without provider message'
+);
+select is(
+  (
+    select status || ':' || coalesce(last_error_code, '') || ':'
+      || case when available_at is null then 'no_retry' else 'retry' end
+    from dashboard_private.registration_customer_reminder_jobs
+    where appointment_id = '95000000-0000-4000-8000-000000000606'
+  ),
+  'pending:source_read_failed:retry',
+  'retryable reminder release preserves the delayed retry path'
+);
+select is(
+  (
+    select pg_catalog.count(*)
+    from public.ops_registration_customer_messages
+    where appointment_id = '95000000-0000-4000-8000-000000000605'
+  ),
+  0::bigint,
+  'terminal reminder release creates no provider outbox row'
+);
 
 update public.ops_registration_subject_tracks
 set pipeline_status = 'waiting', waiting_kind = 'next_term_opening'
@@ -1013,6 +1395,14 @@ set mode = 'verification',
     verification_recipient_hash = repeat('b', 64),
     updated_by = '95000000-0000-4000-8000-000000000001';
 
+update public.ops_registration_subject_tracks
+set workflow_status = 'level_test_requested',
+    waiting_detail_kind = null,
+    waiting_detail_class_id = null
+where id in (
+  '95000000-0000-4000-8000-000000000540',
+  '95000000-0000-4000-8000-000000000541'
+);
 set local role service_role;
 insert into registration_solapi_rpc_results(label, response)
 values (
@@ -1068,6 +1458,14 @@ set status = 'scheduled',
     completed_at = null
 where id = '95000000-0000-4000-8000-000000000611';
 
+update public.ops_registration_subject_tracks
+set workflow_status = 'consultation_requested',
+    waiting_detail_kind = null,
+    waiting_detail_class_id = null
+where id in (
+  '95000000-0000-4000-8000-000000000540',
+  '95000000-0000-4000-8000-000000000542'
+);
 set local role service_role;
 insert into registration_solapi_rpc_results(label, response)
 values (
@@ -1121,6 +1519,21 @@ update public.ops_registration_consultations
 set status = 'scheduled'
 where id = '95000000-0000-4000-8000-000000000622';
 
+update public.ops_registration_subject_tracks
+set workflow_status = 'waiting_current_class',
+    waiting_detail_kind = 'current_class',
+    waiting_detail_class_id = '95000000-0000-4000-8000-000000000020'
+where id = '95000000-0000-4000-8000-000000000540';
+update public.ops_registration_subject_tracks
+set workflow_status = 'enrollment_requested',
+    waiting_detail_kind = null,
+    waiting_detail_class_id = null
+where id = '95000000-0000-4000-8000-000000000541';
+update public.ops_registration_subject_tracks
+set workflow_status = 'inquiry',
+    waiting_detail_kind = null,
+    waiting_detail_class_id = null
+where id = '95000000-0000-4000-8000-000000000542';
 set local role service_role;
 select throws_ok(
   $$select public.create_registration_customer_message_preview_v1(
@@ -1577,6 +1990,27 @@ reset role;
 update public.ops_registration_subject_tracks
 set workflow_revision = workflow_revision - 1
 where id = '95000000-0000-4000-8000-000000000541';
+update public.classes
+set schedule = '화목 18:00-20:00'
+where id = '95000000-0000-4000-8000-000000000021';
+set local role service_role;
+select throws_ok(
+  $$select public.mark_registration_customer_message_attempt_started_v1(
+      ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'messageId')::uuid,
+      ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'claimToken')::uuid,
+      ((select response from registration_solapi_rpc_results where label = 'admission claim') ->> 'dispatchToken')::uuid,
+      pg_temp.registration_solapi_contract(
+        (select response from registration_solapi_rpc_results where label = 'admission source'),
+        'admission_application', repeat('5', 64)
+      )
+    )$$,
+  '40001', 'registration_customer_message_preview_stale',
+  'admission material fact change is stale'
+);
+reset role;
+update public.classes
+set schedule = '월수 18:00-20:00'
+where id = '95000000-0000-4000-8000-000000000021';
 set local role service_role;
 insert into registration_solapi_rpc_results(label, response)
 values (
@@ -1706,6 +2140,14 @@ where id in (
   '95000000-0000-4000-8000-000000000601',
   '95000000-0000-4000-8000-000000000602'
 );
+update public.ops_registration_subject_tracks
+set workflow_status = 'level_test_requested',
+    waiting_detail_kind = null,
+    waiting_detail_class_id = null
+where id in (
+  '95000000-0000-4000-8000-000000000540',
+  '95000000-0000-4000-8000-000000000541'
+);
 set local role service_role;
 insert into registration_solapi_rpc_results(label, response)
 values (
@@ -1760,6 +2202,16 @@ values (
   )
 );
 
+reset role;
+update public.ops_registration_subject_tracks
+set workflow_status = 'consultation_requested',
+    waiting_detail_kind = null,
+    waiting_detail_class_id = null
+where id in (
+  '95000000-0000-4000-8000-000000000540',
+  '95000000-0000-4000-8000-000000000542'
+);
+set local role service_role;
 insert into registration_solapi_rpc_results(label, response)
 values (
   'visit preview failed',
@@ -1825,6 +2277,14 @@ select is(
   'explicit provider rejection finalizes to failed_hold'
 );
 
+update public.ops_registration_subject_tracks
+set workflow_status = 'level_test_requested',
+    waiting_detail_kind = null,
+    waiting_detail_class_id = null
+where id in (
+  '95000000-0000-4000-8000-000000000540',
+  '95000000-0000-4000-8000-000000000541'
+);
 set local role service_role;
 insert into registration_solapi_rpc_results(label, response)
 values (
@@ -1851,6 +2311,16 @@ values (
     )
   )
 );
+reset role;
+update public.ops_registration_subject_tracks
+set workflow_status = 'consultation_requested',
+    waiting_detail_kind = null,
+    waiting_detail_class_id = null
+where id in (
+  '95000000-0000-4000-8000-000000000540',
+  '95000000-0000-4000-8000-000000000542'
+);
+set local role service_role;
 insert into registration_solapi_rpc_results(label, response)
 values (
   'visit terminal preview',
@@ -2003,9 +2473,12 @@ values (
 reset role;
 
 update public.ops_registration_customer_messages
-set created_at = clock_timestamp() - interval '10 minutes',
-    confirmed_at = clock_timestamp() - interval '10 minutes',
+set created_at = aged.aged_at,
+    confirmed_at = aged.aged_at,
     claim_expires_at = clock_timestamp() - interval '1 minute'
+from (
+  select clock_timestamp() - interval '10 minutes' as aged_at
+) as aged
 where id = ((select response from registration_solapi_rpc_results where label = 'admin release claim') ->> 'messageId')::uuid;
 
 set local role service_role;
@@ -2232,6 +2705,11 @@ select is(
 );
 
 -- A terminal row permanently keeps its dedupe across a fresh preview.
+update public.ops_registration_subject_tracks
+set workflow_status = 'waiting_current_class',
+    waiting_detail_kind = 'current_class',
+    waiting_detail_class_id = '95000000-0000-4000-8000-000000000020'
+where id = '95000000-0000-4000-8000-000000000540';
 set local role service_role;
 insert into registration_solapi_rpc_results(label, response)
 values (
@@ -2782,6 +3260,13 @@ values (
     )
   )
 );
+reset role;
+update public.ops_registration_subject_tracks
+set workflow_status = 'level_test_requested',
+    waiting_detail_kind = null,
+    waiting_detail_class_id = null
+where id = '95000000-0000-4000-8000-000000000540';
+set local role service_role;
 insert into registration_solapi_rpc_results(label, response)
 values (
   'marker gate preview',

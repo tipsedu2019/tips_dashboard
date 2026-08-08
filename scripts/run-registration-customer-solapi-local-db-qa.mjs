@@ -13,9 +13,9 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_URL = "http://127.0.0.1:54321";
+const DEFAULT_URL = "http://127.0.0.1:55421";
 const DEFAULT_DB_URL =
-  "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+  "postgresql://postgres:postgres@127.0.0.1:55422/postgres";
 const CLI_PATH =
   "/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supabase/cli-darwin-arm64/bin/supabase-go";
 const CLI_VERSION = "2.103.0";
@@ -29,6 +29,7 @@ const MESSAGE_MIGRATIONS = [
   "20260805111000_registration_customer_solapi_message_rpc.sql",
   "20260805112000_registration_customer_solapi_activation.sql",
   "20260806130000_registration_customer_message_audit_dedupe.sql",
+  "20260808120425_registration_customer_message_subject_admission_details.sql",
 ];
 const CONTAINER_PREFIX = `supabase_db_${PROJECT_ID_PREFIX}`;
 const FORBIDDEN_OPTIONS = new Set(["--linked", "--remote", "--production"]);
@@ -117,12 +118,12 @@ function validateExactLoopback(url, dbUrl) {
     url === DEFAULT_URL &&
     parsedUrl.protocol === "http:" &&
     parsedUrl.hostname === "127.0.0.1" &&
-    parsedUrl.port === "54321";
+    parsedUrl.port === "55421";
   const dbIsExact =
     dbUrl === DEFAULT_DB_URL &&
     parsedDbUrl.protocol === "postgresql:" &&
     parsedDbUrl.hostname === "127.0.0.1" &&
-    parsedDbUrl.port === "54322" &&
+    parsedDbUrl.port === "55422" &&
     parsedDbUrl.pathname === "/postgres";
   if (!urlIsExact || !dbIsExact) {
     fail("registration_local_db_loopback_required");
@@ -280,11 +281,11 @@ async function prepareRuntimeDefault({ repositoryRoot, runtimeRoot, projectId })
       "",
       "[api]",
       "enabled = false",
-      "port = 54321",
+      "port = 55421",
       "",
       "[db]",
-      "port = 54322",
-      "shadow_port = 54320",
+      "port = 55422",
+      "shadow_port = 55420",
       "major_version = 15",
       "",
       "[db.migrations]",
@@ -341,9 +342,65 @@ create table public.classes (
   textbook_ids jsonb default '[]'::jsonb,
   lessons jsonb default '[]'::jsonb,
   schedule_plan jsonb,
+  schedule_revision bigint not null default 0,
+  schedule_storage_mode text not null default 'legacy',
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+create table public.textbooks (
+  id uuid primary key,
+  name text not null,
+  title text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create table public.class_schedule_slots (
+  id uuid primary key default gen_random_uuid(),
+  class_id uuid not null references public.classes(id) on delete cascade,
+  weekday smallint not null,
+  start_time time not null,
+  end_time time not null,
+  teacher_name text not null default '',
+  classroom_name text not null default '',
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table public.class_lesson_sessions (
+  id uuid primary key default gen_random_uuid(),
+  class_id uuid not null references public.classes(id) on delete restrict,
+  session_key text not null,
+  source_schedule_slot_id uuid
+    references public.class_schedule_slots(id) on delete set null,
+  session_date date not null,
+  schedule_state text not null,
+  start_time time,
+  end_time time,
+  teacher_name_snapshot text not null default '',
+  classroom_name_snapshot text not null default '',
+  origin text not null default 'manual',
+  revision bigint not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(class_id, session_key)
+);
+
+create table dashboard_private.continuous_class_schedule_runtime (
+  singleton boolean primary key default true check (singleton),
+  version integer not null default 0 check (version in (0, 1))
+);
+insert into dashboard_private.continuous_class_schedule_runtime(singleton, version)
+values (true, 0);
+
+create function public.continuous_class_schedule_runtime_version()
+returns integer language sql stable security definer set search_path = '' as $$
+  select version
+  from dashboard_private.continuous_class_schedule_runtime
+  where singleton = true;
+$$;
 
 create table public.ops_tasks (
   id uuid primary key default gen_random_uuid(),
@@ -402,6 +459,25 @@ create table public.ops_registration_appointments (
   updated_at timestamptz not null default now()
 );
 
+create table dashboard_private.registration_customer_reminder_jobs (
+  appointment_id uuid primary key
+    references public.ops_registration_appointments(id) on delete restrict,
+  task_id uuid not null references public.ops_tasks(id) on delete restrict,
+  source_revision bigint not null,
+  scheduled_for timestamptz not null,
+  due_at timestamptz not null,
+  available_at timestamptz,
+  request_key uuid not null unique default gen_random_uuid(),
+  status text not null default 'pending'
+    check (status in ('pending', 'claimed', 'dispatching', 'completed', 'canceled')),
+  claim_token uuid,
+  claim_expires_at timestamptz,
+  message_id uuid,
+  last_error_code text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table public.ops_registration_level_tests (
   id uuid primary key default gen_random_uuid(),
   track_id uuid not null references public.ops_registration_subject_tracks(id) on delete cascade,
@@ -434,7 +510,13 @@ create table public.ops_registration_enrollments (
   id uuid primary key default gen_random_uuid(),
   track_id uuid not null references public.ops_registration_subject_tracks(id) on delete cascade,
   class_id uuid not null references public.classes(id) on delete restrict,
+  textbook_id uuid references public.textbooks(id) on delete restrict,
   admission_batch_id uuid,
+  class_start_date date,
+  class_start_session_key text,
+  class_start_session text,
+  class_start_lesson_session_id uuid
+    references public.class_lesson_sessions(id) on delete set null,
   status text not null default 'planned',
   sort_order integer not null default 0,
   created_at timestamptz not null default now(),
@@ -703,6 +785,28 @@ insert into public.ops_registration_subject_tracks(
   '영어', 'inquiry', 'unassigned', null, false, 'enrollment_requested', 1,
   now(), null, null
 );
+insert into public.classes(
+  id, name, class_type, subject, grade, teacher, schedule, room,
+  capacity, fee, status, student_ids, waitlist_ids, textbook_ids,
+  lessons, schedule_plan, schedule_revision, schedule_storage_mode
+) values (
+  '96000000-0000-4000-8000-000000000004',
+  'Synthetic admission class',
+  '정규', '영어', '중2', '홍길동', '월수 18:00-20:00', '본관 301호',
+  12, 100000, '수업 진행 중', '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
+  '[]'::jsonb,
+  '{"sessions":[{"date":"2026-08-17","sessionNumber":1,"scheduleState":"active","startTime":"18:00","endTime":"20:00"}]}'::jsonb,
+  1, 'legacy'
+);
+insert into public.ops_registration_enrollments(
+  id, track_id, class_id, class_start_date, class_start_session_key,
+  class_start_session, status, sort_order
+) values (
+  '96000000-0000-4000-8000-000000000005',
+  '96000000-0000-4000-8000-000000000003',
+  '96000000-0000-4000-8000-000000000004',
+  '2026-08-17', '2026-08-17:1', '1회차', 'planned', 0
+);
 insert into dashboard_private.registration_customer_solapi_template_receipts(
   message_kind, template_id, pf_id, catalog_checksum, provider_checksum,
   provider_status, verified_by
@@ -950,9 +1054,15 @@ export async function runRegistrationCustomerSolapiLocalDbQa(
 
   if (errors.length > 0) {
     const safeDetails = errors.map(({ stage, error }) => {
-      const message = String(error?.message ?? "unknown")
+      const redacted = String(error?.message ?? "unknown")
         .replace(/:\/\/[^\s:@/]+:[^\s@/]+@/gu, "://<redacted>@")
-        .split("\n", 1)[0];
+      const lines = redacted
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const message = lines.length <= 1
+        ? (lines[0] ?? "unknown")
+        : `${lines[0]} :: ${lines.slice(-5).join(" | ")}`;
       return `${stage}=${message}`;
     });
     const evidence = [...new Set(leftoverEvidence.map(({ kind, name }) => `${kind}:${name}`))];
