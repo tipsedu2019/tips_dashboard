@@ -676,6 +676,7 @@ export type RegistrationMeasure = {
 type QueryResult = { data: unknown; error: unknown }
 type QueryBuilder = PromiseLike<QueryResult> & {
   abortSignal?: (signal: AbortSignal) => QueryBuilder
+  retry?: (enabled: boolean) => QueryBuilder
   select: (columns: string, options?: Record<string, unknown>) => QueryBuilder
   eq: (column: string, value: unknown) => QueryBuilder
   gte: (column: string, value: unknown) => QueryBuilder
@@ -688,7 +689,9 @@ type QueryBuilder = PromiseLike<QueryResult> & {
 
 export type RegistrationTrackClient = {
   from: (table: string) => QueryBuilder
-  rpc: (name: string, args: Record<string, unknown>) => PromiseLike<QueryResult>
+  rpc: (name: string, args: Record<string, unknown>) => PromiseLike<QueryResult> & {
+    retry?: (enabled: boolean) => PromiseLike<QueryResult>
+  }
 }
 
 export type RegistrationTrackServiceOptions = {
@@ -2132,7 +2135,10 @@ export function createRegistrationTrackService(
     callOptions: { runtimeChecked?: boolean } = {},
   ): Promise<T> {
     if (!callOptions.runtimeChecked) await requireReadyRuntime()
-    const { data, error } = await client.rpc(name, args)
+    const request = client.rpc(name, args)
+    const { data, error } = await (
+      typeof request.retry === "function" ? request.retry(false) : request
+    )
     if (error) throw error
     clearCaches()
     try {

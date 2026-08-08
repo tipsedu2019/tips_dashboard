@@ -1986,6 +1986,44 @@ test("appointment creation and director default clearing send nullable canonical
   assert.match(source, /ruleKey: string \| null/);
 });
 
+test("registration mutations explicitly disable PostgREST automatic retries", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const retryArguments = [];
+  const rpcCalls = [];
+  const client = {
+    from() {
+      throw new Error("unexpected table read");
+    },
+    rpc(name, args) {
+      rpcCalls.push([name, args]);
+      const response = Promise.resolve({ data: { ok: true }, error: null });
+      const builder = {
+        retry(enabled) {
+          retryArguments.push(enabled);
+          return builder;
+        },
+        then(resolve, reject) {
+          return response.then(resolve, reject);
+        },
+      };
+      return builder;
+    },
+  };
+  const service = createRegistrationTrackService(client, readyOptions());
+
+  await service.assignRegistrationTrackDirector({
+    trackId: "track-1",
+    directorProfileId: "profile-1",
+    assignmentSource: "default",
+    ruleKey: "academic-director-v1:2026:영어:중1",
+    expectedCommonRevision: 2,
+    requestKey: "director-default-key",
+  });
+
+  assert.deepEqual(rpcCalls.map(([name]) => name), ["assign_registration_track_director"]);
+  assert.deepEqual(retryArguments, [false]);
+});
+
 test("appointment save constrains only level-test places", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient();

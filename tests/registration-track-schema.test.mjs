@@ -117,6 +117,18 @@ test("status-independent enrollment details stay separate from roster enrollment
   assert.doesNotMatch(sql, /transition_registration_track_status/)
 })
 
+test("director default conflicts leave the retryable SQLSTATE before reaching PostgREST", async () => {
+  const sql = await readMigration("registration_director_retry_circuit_breaker")
+  const wrapper = readFunctionBlock(sql, "public", "assign_registration_track_director")
+
+  assert.match(wrapper, /language plpgsql/)
+  assert.match(wrapper, /security invoker/)
+  assert.match(wrapper, /exception[\s\S]*?when serialization_failure then/)
+  assert.match(wrapper, /sqlerrm = 'registration_director_default_stale'/)
+  assert.match(wrapper, /errcode = 'P0001'/)
+  assert.match(wrapper, /else[\s\S]*?raise;[\s\S]*?end if;/)
+})
+
 test("registration workflow integrity repair materializes phone consultations and canonical planned rows", async () => {
   const sql = await readMigration("registration_workflow_data_integrity")
   const trimmed = sql.trim()
