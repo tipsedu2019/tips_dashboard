@@ -20,6 +20,7 @@ export type RegistrationCustomerReminderPrepared = Readonly<{
   variables: Readonly<Record<string, string>>
   buttons: ReadonlyArray<RegistrationCustomerMessageButton>
   contract: Readonly<JsonRecord>
+  readinessContract: Readonly<JsonRecord>
 }>
 
 export type RegistrationCustomerReminderBegin = Readonly<{
@@ -132,4 +133,3 @@ export function createRegistrationCustomerReminderWorker(
     },
   })
 }
-

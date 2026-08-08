@@ -21,6 +21,7 @@ const PREPARED = Object.freeze({
   variables: Object.freeze({ "#{학생명}": "김팁스" }),
   buttons: Object.freeze([]),
   contract: Object.freeze({ sourceFingerprint: "f".repeat(64) }),
+  readinessContract: Object.freeze({ catalogChecksum: "a".repeat(64) }),
 })
 
 const BEGIN = Object.freeze({
@@ -192,4 +193,3 @@ test("provider 호출 뒤 finalize가 실패해도 unknown을 반환하고 두 �
   assert.equal(calls.send, 1)
   assert.equal(calls.finalize, 1)
 })
-
