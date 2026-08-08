@@ -803,7 +803,7 @@ test("case list renders application-scoped desktop and mobile rows", async () =>
   assert.match(source, /textbookLabelById\.get\(row\.textbookId\) \|\| "교재 정보 확인 필요"/);
 });
 
-test("level-test list never invents a reservation time from a workflow transition", async () => {
+test("level-test list uses only active canonical appointment values", async () => {
   const source = await readListSource();
   const levelTestCells = sourceBetween(
     source,
@@ -811,9 +811,9 @@ test("level-test list never invents a reservation time from a workflow transitio
     'if (item.viewKey === "consultation_requested")',
   );
 
-  assert.match(levelTestCells, /registration\?\.levelTestAt/);
+  assert.match(levelTestCells, /getRegistrationCaseLevelTestAppointments/);
   assert.match(levelTestCells, /"미정"/);
-  assert.doesNotMatch(levelTestCells, /stageEnteredAt|workflowStatusEnteredAt/);
+  assert.doesNotMatch(levelTestCells, /registration\?\.levelTestAt|registration\?\.levelTestPlace|stageEnteredAt|workflowStatusEnteredAt/);
 });
 
 test("consultation-requested list uses only an active phone or visit reservation", async () => {

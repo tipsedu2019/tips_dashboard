@@ -791,6 +791,7 @@ test("track summary loader uses the exact safe projection and skips profile look
         waiting_kind: null, level_test_retake_decision: null,
         migration_review_required: false, stage_entered_at: "2026-07-12T01:00:00Z",
         phone_ready_at: null, phone_ready_source: null,
+        level_test_scheduled_at: "2026-07-12T05:00:00Z", level_test_place: "본관",
         visit_scheduled_at: "2026-07-13T01:00:00Z", visit_place: "상담실",
         enrollment_detail_rows: [{
           classId: "class-1", textbookId: null, classStartDate: "2026-08-10",
@@ -815,6 +816,7 @@ test("track summary loader uses the exact safe projection and skips profile look
     waitingKind: "", waitingDetailKind: "", waitingDetailClassId: null, waitingDetailRetakeDecision: "", levelTestRetakeDecision: "", migrationReviewRequired: false,
     stageEnteredAt: "2026-07-12T01:00:00Z",
     phoneReadyAt: null, phoneReadySource: null,
+    levelTestScheduledAt: "2026-07-12T05:00:00Z", levelTestPlace: "본관",
     visitScheduledAt: "2026-07-13T01:00:00Z", visitPlace: "상담실",
   });
   assert.deepEqual(JSON.parse(JSON.stringify(enrollmentDetailRows)), [{
@@ -824,7 +826,7 @@ test("track summary loader uses the exact safe projection and skips profile look
   }]);
   assert.equal(harness.queries.length, 1);
   assert.equal(harness.queries[0].columns,
-    "id,task_id,subject,pipeline_status,workflow_status,workflow_revision,workflow_status_entered_at,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,waiting_detail_kind,waiting_detail_class_id,waiting_detail_retake_decision,level_test_retake_decision,migration_review_required,stage_entered_at,phone_ready_at,phone_ready_source,updated_at,visit_scheduled_at,visit_place,enrollment_detail_rows,director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)");
+    "id,task_id,subject,pipeline_status,workflow_status,workflow_revision,workflow_status_entered_at,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,waiting_detail_kind,waiting_detail_class_id,waiting_detail_retake_decision,level_test_retake_decision,migration_review_required,stage_entered_at,phone_ready_at,phone_ready_source,updated_at,level_test_scheduled_at,level_test_place,visit_scheduled_at,visit_place,enrollment_detail_rows,director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)");
   assert.deepEqual(harness.queries[0].filters, [["in", "task_id", ["task-1"]]]);
   assert.doesNotMatch(harness.queries[0].columns, /schedule_plan|textbook|student_ids|waitlist_ids/);
   assert.doesNotMatch(harness.queries[0].columns, /consultations|appointments|\*/);

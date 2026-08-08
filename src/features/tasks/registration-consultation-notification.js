@@ -153,6 +153,7 @@ export async function dispatchRegistrationManagementNotificationSources(
 
 export function isRegistrationManagementNotificationWorkflowStatus(status) {
   return [
+    "consultation_requested",
     "consultation_completed",
     "waiting_current_class",
     "waiting_new_class",

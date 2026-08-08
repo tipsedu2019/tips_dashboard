@@ -37,6 +37,8 @@ export type RegistrationCaseListTrackItem = {
   enrollmentDetailRows?: OpsRegistrationTrackSummary["enrollmentDetailRows"]
   stageEnteredAt: string
   phoneReadyAt: string | null
+  levelTestScheduledAt: string
+  levelTestPlace: string
   migrationReviewRequired: boolean
   visitScheduledAt: string
   visitPlace: string
@@ -125,6 +127,8 @@ export function buildRegistrationCaseListItems(
       enrollmentDetailRows: track.enrollmentDetailRows,
       stageEnteredAt: track.stageEnteredAt,
       phoneReadyAt: track.phoneReadyAt,
+      levelTestScheduledAt: track.levelTestScheduledAt || "",
+      levelTestPlace: track.levelTestPlace || "",
       migrationReviewRequired: track.migrationReviewRequired,
       visitScheduledAt: track.visitScheduledAt || "",
       visitPlace: track.visitPlace || "",
@@ -132,6 +136,25 @@ export function buildRegistrationCaseListItems(
       track,
     })),
   }))
+}
+
+export function getRegistrationCaseLevelTestAppointments(
+  tracks: readonly RegistrationCaseListTrackItem[],
+): Array<{ scheduledAt: string; place: string; subjects: RegistrationSubject[] }> {
+  const appointments = new Map<string, { scheduledAt: string; place: string; subjects: RegistrationSubject[] }>()
+  for (const track of tracks) {
+    const scheduledAt = track.levelTestScheduledAt.trim()
+    if (!scheduledAt) continue
+    const place = track.levelTestPlace.trim()
+    const key = `${scheduledAt}\u0000${place}`
+    const current = appointments.get(key)
+    if (current) {
+      if (!current.subjects.includes(track.subject)) current.subjects.push(track.subject)
+      continue
+    }
+    appointments.set(key, { scheduledAt, place, subjects: [track.subject] })
+  }
+  return Array.from(appointments.values())
 }
 
 export function getRegistrationCaseMatchedTracks(

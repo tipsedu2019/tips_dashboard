@@ -18,6 +18,8 @@ function track({
   directorProfileId = null,
   stageEnteredAt = "2026-07-12T00:00:00Z",
   phoneReadyAt = null,
+  levelTestScheduledAt = "",
+  levelTestPlace = "",
   visitScheduledAt = "",
   visitPlace = "",
 } = {}) {
@@ -31,6 +33,8 @@ function track({
     directorProfileId,
     stageEnteredAt,
     phoneReadyAt,
+    levelTestScheduledAt,
+    levelTestPlace,
     visitScheduledAt,
     visitPlace,
     migrationReviewRequired: false,
@@ -94,6 +98,62 @@ test("one open case appears once in each of its non-completed views", () => {
   assert.equal(filterRegistrationCaseListItems(items, "inquiry").length, 1)
   assert.equal(filterRegistrationCaseListItems(items, "waiting").length, 1)
   assert.equal(filterRegistrationCaseListItems(items, "closed").length, 0)
+})
+
+test("level-test rows use active canonical appointments and collapse a shared reservation", async () => {
+  const { getRegistrationCaseLevelTestAppointments } = await import(
+    "../src/features/tasks/registration-case-list-model.ts"
+  )
+  assert.equal(typeof getRegistrationCaseLevelTestAppointments, "function")
+  const items = buildRegistrationCaseListItems([
+    registrationCase({
+      id: "case-1",
+      registration: {
+        levelTestAt: "",
+        levelTestPlace: "",
+      },
+      registrationTracks: [
+        track({
+          id: "eng",
+          subject: "영어",
+          workflowStatus: "level_test_requested",
+          levelTestScheduledAt: "2026-08-10T06:00:00Z",
+          levelTestPlace: "본관",
+        }),
+        track({
+          id: "math",
+          subject: "수학",
+          workflowStatus: "level_test_requested",
+          levelTestScheduledAt: "2026-08-10T06:00:00Z",
+          levelTestPlace: "본관",
+        }),
+        track({
+          id: "science",
+          subject: "과학",
+          workflowStatus: "level_test_requested",
+          levelTestScheduledAt: "2026-08-11T09:00:00Z",
+          levelTestPlace: "별관",
+        }),
+      ],
+    }),
+  ])
+  const [levelTestCase] = filterRegistrationCaseListItems(items, "level_test")
+
+  assert.deepEqual(
+    getRegistrationCaseLevelTestAppointments(levelTestCase.matchingTracks),
+    [
+      {
+        scheduledAt: "2026-08-10T06:00:00Z",
+        place: "본관",
+        subjects: ["영어", "수학"],
+      },
+      {
+        scheduledAt: "2026-08-11T09:00:00Z",
+        place: "별관",
+        subjects: ["과학"],
+      },
+    ],
+  )
 })
 
 test("same-view subject tracks remain in one case row and counts increment once", () => {

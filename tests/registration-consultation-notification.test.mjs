@@ -40,6 +40,10 @@ const notificationContentMigrationUrl = new URL(
   "../supabase/migrations/20260803143000_notification_registration_content_payload.sql",
   import.meta.url,
 );
+const levelTestSummaryConsultationChatMigrationUrl = new URL(
+  "../supabase/migrations/20260808043659_registration_level_test_summary_consultation_chat.sql",
+  import.meta.url,
+);
 
 async function readOptionalSource(url) {
   try {
@@ -185,6 +189,19 @@ test("registration management dispatch deduplicates opaque sources and reports e
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test("registration management Chat is triggered by consultation request, never level-test request", () => {
+  const shouldNotify = notificationModel.isRegistrationManagementNotificationWorkflowStatus
+  assert.equal(typeof shouldNotify, "function")
+  if (typeof shouldNotify !== "function") return
+
+  assert.equal(shouldNotify("inquiry"), false)
+  assert.equal(shouldNotify("level_test_requested"), false)
+  assert.equal(shouldNotify("consultation_requested"), true)
+  assert.equal(shouldNotify("consultation_completed"), true)
+  assert.equal(shouldNotify("waiting_current_class"), true)
+  assert.equal(shouldNotify("enrollment_requested"), true)
 })
 
 test("notification result partition preserves every failed target and every warning", () => {
@@ -640,7 +657,7 @@ test("registration no longer has a generic browser Google Chat sender", () => {
   assert.match(workspaceSource, /dispatchLegacyOpsTaskSources/);
 });
 
-test("registration saves state before producing and dispatching its management notification", async () => {
+test("registration saves state before dispatching a status notification and does not notify on case creation", async () => {
   const editor = await readFile(new URL(
     "../src/features/tasks/registration-track-editor.tsx",
     import.meta.url,
@@ -669,9 +686,19 @@ test("registration saves state before producing and dispatching its management n
     workspaceSource.indexOf('if (createAttempt.writer === "atomic")'),
     workspaceSource.indexOf("const inquiryOnlyPayload"),
   )
-  assert.match(atomicCreate, /ensureRegistrationCaseCreatedNotificationSourceIds/)
-  assert.match(atomicCreate, /dispatchRegistrationManagementNotificationSources/)
-  assert.match(atomicCreate, /구글챗 알림은 전송하지 못했습니다/)
+  assert.doesNotMatch(atomicCreate, /ensureRegistrationCaseCreatedNotificationSourceIds/)
+  assert.doesNotMatch(atomicCreate, /dispatchRegistrationManagementNotificationSources/)
+  assert.doesNotMatch(atomicCreate, /관리팀 구글챗 알림/)
+})
+
+test("registration summary exposes active level-test appointments and maps consultation request to Chat", async () => {
+  const sql = await readFile(levelTestSummaryConsultationChatMigrationUrl, "utf8")
+
+  assert.match(sql, /active_level_test\.scheduled_at as level_test_scheduled_at/)
+  assert.match(sql, /active_level_test\.place as level_test_place/)
+  assert.match(sql, /from public\.ops_registration_level_tests level_test[\s\S]*?join public\.ops_registration_appointments appointment/)
+  assert.match(sql, /v_destination = 'consultation_requested'[\s\S]*?then 'registration\.case_created'/)
+  assert.doesNotMatch(sql, /v_destination = 'level_test_requested'[\s\S]*?then 'registration\.case_created'/)
 })
 
 test("initial-plan counselor selectors preserve per-subject defaults and explicit choices", () => {

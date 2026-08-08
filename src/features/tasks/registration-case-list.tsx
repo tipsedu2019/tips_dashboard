@@ -5,7 +5,10 @@ import { useState, type KeyboardEvent, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 
 import { RegistrationSelect } from "./registration-select"
-import type { RegistrationCaseListViewItem } from "./registration-case-list-model"
+import {
+  getRegistrationCaseLevelTestAppointments,
+  type RegistrationCaseListViewItem,
+} from "./registration-case-list-model"
 import { getRegistrationSummaryActionPermissions } from "./registration-track-model.js"
 import type { OpsClassOption, OpsTextbookOption } from "./ops-task-service"
 import type { OpsRegistrationWorkflowStatus } from "./registration-track-service"
@@ -291,13 +294,17 @@ function RegistrationCaseProcessCells({
     <RegistrationCaseCell label="요청 사항" cellRole={cellRole}>{registration?.requestNote || "없음"}</RegistrationCaseCell>
   </>
 
-  if (item.viewKey === "level_test") return <>
-    <RegistrationCaseCell label="학생" cellRole={cellRole}>{student}</RegistrationCaseCell>
-    {status}
-    <RegistrationCaseCell label="예약 일시" cellRole={cellRole}>{registration?.levelTestAt ? formatRegistrationCaseTime(registration.levelTestAt) : "미정"}</RegistrationCaseCell>
-    <RegistrationCaseCell label="장소" cellRole={cellRole}><RegistrationCasePill>{registration?.levelTestPlace || "미정"}</RegistrationCasePill></RegistrationCaseCell>
-    <RegistrationCaseCell label="레벨테스트 결과" cellRole={cellRole}>{registration?.levelTestMaterialLink ? <a href={registration.levelTestMaterialLink} target="_blank" rel="noreferrer" className="font-medium text-primary underline-offset-4 hover:underline" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>결과 링크 열기</a> : <RegistrationCasePill tone={registration?.levelTestResult ? "primary" : "neutral"}>{registration?.levelTestResult || "미등록"}</RegistrationCasePill>}</RegistrationCaseCell>
-  </>
+  if (item.viewKey === "level_test") {
+    const levelTestAppointments = getRegistrationCaseLevelTestAppointments(item.matchingTracks)
+    const showSubjects = levelTestAppointments.length > 1
+    return <>
+      <RegistrationCaseCell label="학생" cellRole={cellRole}>{student}</RegistrationCaseCell>
+      {status}
+      <RegistrationCaseCell label="예약 일시" cellRole={cellRole}>{levelTestAppointments.length > 0 ? <div className="grid gap-1">{levelTestAppointments.map((appointment) => <div key={`${appointment.scheduledAt}:${appointment.place}`} className="flex min-w-0 flex-wrap items-center gap-1.5">{showSubjects ? <RegistrationCasePill tone="primary">{appointment.subjects.join(" · ")}</RegistrationCasePill> : null}<span>{formatRegistrationCaseTime(appointment.scheduledAt)}</span></div>)}</div> : "미정"}</RegistrationCaseCell>
+      <RegistrationCaseCell label="장소" cellRole={cellRole}>{levelTestAppointments.length > 0 ? <div className="grid gap-1">{levelTestAppointments.map((appointment) => <div key={`${appointment.scheduledAt}:${appointment.place}`} className="flex min-w-0 flex-wrap items-center gap-1.5">{showSubjects ? <RegistrationCasePill tone="primary">{appointment.subjects.join(" · ")}</RegistrationCasePill> : null}<RegistrationCasePill>{appointment.place || "미정"}</RegistrationCasePill></div>)}</div> : <RegistrationCasePill>미정</RegistrationCasePill>}</RegistrationCaseCell>
+      <RegistrationCaseCell label="레벨테스트 결과" cellRole={cellRole}>{registration?.levelTestMaterialLink ? <a href={registration.levelTestMaterialLink} target="_blank" rel="noreferrer" className="font-medium text-primary underline-offset-4 hover:underline" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>결과 링크 열기</a> : <RegistrationCasePill tone={registration?.levelTestResult ? "primary" : "neutral"}>{registration?.levelTestResult || "미등록"}</RegistrationCasePill>}</RegistrationCaseCell>
+    </>
+  }
 
   if (item.viewKey === "consultation_requested") return <>
     <RegistrationCaseCell label="학생" cellRole={cellRole}>{student}</RegistrationCaseCell>

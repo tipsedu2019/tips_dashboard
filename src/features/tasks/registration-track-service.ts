@@ -138,6 +138,8 @@ export type OpsRegistrationTrackSummary = {
   stageEnteredAt: string
   phoneReadyAt: string | null
   phoneReadySource: RegistrationPhoneReadySource | null
+  levelTestScheduledAt?: string
+  levelTestPlace?: string
   visitScheduledAt?: string
   visitPlace?: string
 }
@@ -722,6 +724,8 @@ const TRACK_SUMMARY_COLUMNS = [
   "phone_ready_at",
   "phone_ready_source",
   "updated_at",
+  "level_test_scheduled_at",
+  "level_test_place",
   "visit_scheduled_at",
   "visit_place",
   "enrollment_detail_rows",
@@ -1001,6 +1005,8 @@ function embeddedDirector(row: Row) {
 function mapTrack(row: Row, directorNames = new Map<string, string>(), legacy = false): OpsRegistrationTrackSummary {
   const directorProfileId = nullableText(value(row, "director_profile_id", "directorProfileId"))
   const director = embeddedDirector(row)
+  const levelTestScheduledAt = text(value(row, "level_test_scheduled_at", "levelTestScheduledAt"))
+  const levelTestPlace = text(value(row, "level_test_place", "levelTestPlace"))
   const visitScheduledAt = text(value(row, "visit_scheduled_at", "visitScheduledAt"))
   const visitPlace = text(value(row, "visit_place", "visitPlace"))
   return {
@@ -1039,6 +1045,7 @@ function mapTrack(row: Row, directorNames = new Map<string, string>(), legacy = 
     stageEnteredAt: text(value(row, "stage_entered_at", "stageEnteredAt")),
     phoneReadyAt: nullableText(value(row, "phone_ready_at", "phoneReadyAt")),
     phoneReadySource: phoneReadySource(value(row, "phone_ready_source", "phoneReadySource")),
+    ...(levelTestScheduledAt ? { levelTestScheduledAt, levelTestPlace } : {}),
     ...(visitScheduledAt ? { visitScheduledAt, visitPlace } : {}),
   }
 }
@@ -1425,6 +1432,8 @@ function missingTrackSummaryOptionalColumnError(error: unknown) {
     "waiting_detail_kind",
     "waiting_detail_class_id",
     "waiting_detail_retake_decision",
+    "level_test_scheduled_at",
+    "level_test_place",
   ].some((column) => message.includes(column))
 }
 
