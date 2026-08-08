@@ -174,19 +174,87 @@ function loadMakeupTableReaders(supabase) {
   );
   return transpileAndLoad(
     source,
-    ["readTable", "readNotificationDeliveryRows"],
+    [
+      "readTable",
+      "readNotificationDeliveryRows",
+      "loadMakeupClassSchedulePlan: typeof loadMakeupClassSchedulePlan === 'function' ? loadMakeupClassSchedulePlan : undefined",
+    ],
     {
       AbortSignal,
       MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT: 40,
       MAKEUP_TABLE_TIMEOUT_MS: 12_000,
       isMissingRelationError: () => false,
       isPermissionError: () => false,
+      parseObject: (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {},
       supabase,
     },
   );
 }
 
-function createCompleteMakeupQueryBuilder(calls) {
+function loadMakeupWorkspaceDataLoader(supabase) {
+  const projectionSource = sourceBetween(
+    serviceSource,
+    "const MAKEUP_CLASS_LIST_SELECT",
+    "export const MAKEUP_NOTIFICATION_TRIGGER_LABELS",
+  );
+  const readerSource = sourceBetween(
+    serviceSource,
+    "async function readTable",
+    "function findTeacherByName",
+  );
+  const loaderSource = sourceBetween(
+    serviceSource,
+    "export async function loadMakeupRequestWorkspaceData",
+    "function buildCreatePayload",
+  );
+  return transpileAndLoad(
+    `${projectionSource}\n${readerSource}\n${loaderSource}`,
+    ["loadMakeupRequestWorkspaceData"],
+    {
+      AbortSignal,
+      EMPTY_WORKSPACE_DATA: {
+        schemaReady: true,
+        requests: [],
+        profiles: [],
+        teachers: [],
+        classes: [],
+        classrooms: [],
+        academicEvents: [],
+        notificationSettings: [],
+        notificationDeliveries: [],
+      },
+      MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT: 40,
+      MAKEUP_TABLE_TIMEOUT_MS: 12_000,
+      getMakeupWorkspaceLoadErrorMessage: () => "load error",
+      isMissingRelationError: () => false,
+      isPermissionError: () => false,
+      mapClass: (row) => row,
+      mapEvent: (row) => row,
+      mapNotificationDelivery: (row) => row,
+      mapNotificationSetting: (row) => row,
+      mapProfile: (row) => row,
+      mapRequest: (row) => row,
+      mapTeacher: (row) => row,
+      mergeNotificationSettings: (rows) => rows,
+      parseObject: (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {},
+      supabase,
+      text: (value) => String(value ?? "").trim(),
+    },
+  );
+}
+
+function loadMakeupClassSchedulePlanLoadCache() {
+  const startIndex = workspaceSource.indexOf("function createMakeupClassSchedulePlanLoadCache");
+  if (startIndex === -1) return undefined;
+  const endIndex = workspaceSource.indexOf("export function MakeupRequestWorkspace", startIndex);
+  assert.notEqual(endIndex, -1, "missing makeup workspace component marker");
+  return transpileAndLoad(
+    workspaceSource.slice(startIndex, endIndex),
+    ["createMakeupClassSchedulePlanLoadCache"],
+  ).createMakeupClassSchedulePlanLoadCache;
+}
+
+function createCompleteMakeupQueryBuilder(calls, response = { data: [], error: null }) {
   return {
     select(...args) {
       calls.push({ method: "select", args });
@@ -200,13 +268,21 @@ function createCompleteMakeupQueryBuilder(calls) {
       calls.push({ method: "limit", args });
       return this;
     },
+    eq(...args) {
+      calls.push({ method: "eq", args });
+      return this;
+    },
+    maybeSingle(...args) {
+      calls.push({ method: "maybeSingle", args });
+      return this;
+    },
     abortSignal(...args) {
       calls.push({ method: "abortSignal", args });
       return this;
     },
     retry(...args) {
       calls.push({ method: "retry", args });
-      return Promise.resolve({ data: [], error: null });
+      return Promise.resolve(response);
     },
   };
 }
@@ -277,6 +353,128 @@ test("휴보강 초기 테이블 조회는 모든 PostgREST 경로에 취소 신
     assert.equal(typeof abortCall.args[0]?.addEventListener, "function");
     assert.deepEqual(calls.at(-1), { method: "retry", args: [false] });
   }
+});
+
+test("휴보강 초기 목록은 일정 원본과 요청 스냅샷을 제외한 projection만 조회한다", async () => {
+  const calls = [];
+  const supabase = {
+    from(table) {
+      const tableCalls = [];
+      calls.push({ table, calls: tableCalls });
+      return createCompleteMakeupQueryBuilder(tableCalls);
+    },
+  };
+  const { loadMakeupRequestWorkspaceData } = loadMakeupWorkspaceDataLoader(supabase);
+
+  await loadMakeupRequestWorkspaceData();
+
+  const classSelect = calls.find((entry) => entry.table === "classes")?.calls.find((call) => call.method === "select");
+  const requestSelect = calls.find((entry) => entry.table === "makeup_requests")?.calls.find((call) => call.method === "select");
+  assert.deepEqual(classSelect?.args, [
+    "id,name,subject,grade,teacher,room,schedule,schedule_storage_mode,textbook_ids",
+  ]);
+  assert.deepEqual(requestSelect?.args, [
+    "id,status,subject,approval_group,requester_id,teacher_catalog_id,teacher_profile_id,class_id,class_name,request_kind,reason,cancel_date,makeup_start_at,makeup_end_at,makeup_classroom,makeup_slots,approver_teacher_catalog_id,approver_profile_id,returned_reason,rejected_reason,final_note,approved_by,approved_at,completed_by,completed_at,canceled_by,canceled_at,cancel_academic_event_id,makeup_academic_event_id,makeup_academic_event_ids,created_at,updated_at",
+  ]);
+});
+
+test("legacy 휴보강 수업 일정은 한 행만 12초 경계에서 자동 재시도 없이 조회한다", async () => {
+  const calls = [];
+  let table = "";
+  const schedulePlan = { sessions: [{ date: "2026-08-10", sessionNumber: 3 }] };
+  const supabase = {
+    from(value) {
+      table = value;
+      return createCompleteMakeupQueryBuilder(calls, {
+        data: { id: "class-legacy", schedule_plan: schedulePlan },
+        error: null,
+      });
+    },
+  };
+  const { loadMakeupClassSchedulePlan } = loadMakeupTableReaders(supabase);
+
+  assert.equal(typeof loadMakeupClassSchedulePlan, "function");
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(await loadMakeupClassSchedulePlan("class-legacy"))),
+    schedulePlan,
+  );
+  assert.equal(table, "classes");
+  assert.deepEqual(calls.find((call) => call.method === "select")?.args, ["id,schedule_plan"]);
+  assert.deepEqual(calls.find((call) => call.method === "eq")?.args, ["id", "class-legacy"]);
+  assert.deepEqual(calls.find((call) => call.method === "maybeSingle")?.args, []);
+  const abortCall = calls.find((call) => call.method === "abortSignal");
+  assert.equal(typeof abortCall?.args[0]?.addEventListener, "function");
+  assert.deepEqual(calls.at(-1), { method: "retry", args: [false] });
+});
+
+test("선택 수업 일정 cache는 normalized를 건너뛰고 legacy 조회를 dedupe하며 refresh에서 초기화한다", async () => {
+  const createLoadCache = loadMakeupClassSchedulePlanLoadCache();
+  assert.equal(typeof createLoadCache, "function");
+
+  const calls = [];
+  const pendingResolvers = [];
+  const cache = createLoadCache((classId) => {
+    calls.push(classId);
+    return new Promise((resolve) => pendingResolvers.push(resolve));
+  });
+  const normalizedClass = { id: "class-normalized", scheduleStorageMode: "normalized", schedulePlan: {} };
+  const legacyClass = { id: "class-legacy", scheduleStorageMode: "legacy", schedulePlan: {} };
+
+  assert.equal(cache.load(normalizedClass), null);
+  assert.deepEqual(calls, []);
+
+  const firstLoad = cache.load(legacyClass);
+  const duplicateLoad = cache.load(legacyClass);
+  assert.strictEqual(duplicateLoad, firstLoad);
+  assert.deepEqual(calls, ["class-legacy"]);
+  pendingResolvers.shift()({ sessions: [{ date: "2026-08-10" }] });
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(await firstLoad)),
+    { classId: "class-legacy", schedulePlan: { sessions: [{ date: "2026-08-10" }] } },
+  );
+  assert.equal(cache.load(legacyClass), null);
+
+  const staleLoad = cache.load({ id: "class-shadow", scheduleStorageMode: "shadow", schedulePlan: {} });
+  cache.reset();
+  pendingResolvers.shift()({ session_list: [{ session_date: "2026-08-11" }] });
+  assert.equal(await staleLoad, null);
+  const refreshedLoad = cache.load(legacyClass);
+  assert.deepEqual(calls, ["class-legacy", "class-shadow", "class-legacy"]);
+  pendingResolvers.shift()({ sessions: [] });
+  await refreshedLoad;
+});
+
+test("선택 수업 일정 cache는 실패 후 자동 반복하지 않고 명시적인 다음 호출만 허용한다", async () => {
+  const createLoadCache = loadMakeupClassSchedulePlanLoadCache();
+  assert.equal(typeof createLoadCache, "function");
+
+  let attempts = 0;
+  const cache = createLoadCache(async () => {
+    attempts += 1;
+    throw new Error("schedule plan unavailable");
+  });
+  const legacyClass = { id: "class-legacy", scheduleStorageMode: "legacy", schedulePlan: {} };
+
+  await assert.rejects(cache.load(legacyClass), /schedule plan unavailable/);
+  await Promise.resolve();
+  assert.equal(attempts, 1);
+  await assert.rejects(cache.load(legacyClass), /schedule plan unavailable/);
+  assert.equal(attempts, 2);
+});
+
+test("선택 수업 일정 cache는 refresh 이전 요청의 늦은 실패를 무시한다", async () => {
+  const createLoadCache = loadMakeupClassSchedulePlanLoadCache();
+  assert.equal(typeof createLoadCache, "function");
+
+  let rejectLoad;
+  const cache = createLoadCache(() => new Promise((resolve, reject) => {
+    rejectLoad = reject;
+  }));
+  const staleLoad = cache.load({ id: "class-legacy", scheduleStorageMode: "legacy", schedulePlan: {} });
+
+  cache.reset();
+  rejectLoad(new Error("stale schedule plan failure"));
+  assert.equal(await staleLoad, null);
 });
 
 test("휴보강 오류 알림은 기존 refresh 경로를 실행하는 다시 불러오기 버튼을 제공한다", () => {
@@ -1308,6 +1506,12 @@ test("휴보강 서비스는 업무 저장과 서버 알림 브리지를 분리�
     "create or replace function public.prune_makeup_notification_deliveries",
     "create or replace function dashboard_private.notification_makeup_event_key_v1",
   );
+  const classSchedulePlanReadSource = sourceBetween(
+    serviceSource,
+    "export async function loadMakeupClassSchedulePlan",
+    "function findTeacherByName",
+  );
+  const serviceWithoutClassSchedulePlanRead = serviceSource.replace(classSchedulePlanReadSource, "");
 
   assert.match(serviceSource, /create_makeup_request_v2/);
   assert.match(serviceSource, /transition_makeup_request_v2/);
@@ -1335,7 +1539,9 @@ test("휴보강 서비스는 업무 저장과 서버 알림 브리지를 분리�
   assert.match(makeupApprovalRouteSource, /calendar_events: calendarEvents/);
   assert.match(notificationMakeupAdapterMigrationSource, /notification_apply_makeup_calendar_effects_v1/);
   assert.match(notificationMakeupAdapterMigrationSource, /notification_revert_makeup_calendar_effects_v1/);
-  assert.doesNotMatch(serviceSource, /\.from\("classes"\)/);
+  assert.match(classSchedulePlanReadSource, /\.from\("classes"\)[\s\S]*\.select\("id,schedule_plan"\)/);
+  assert.doesNotMatch(classSchedulePlanReadSource, /\.(?:insert|update|upsert|delete)\(/);
+  assert.doesNotMatch(serviceWithoutClassSchedulePlanRead, /\.from\("classes"\)/);
   assert.doesNotMatch(serviceSource, /\.from\("academic_events"\)\.(?:upsert|delete)/);
   assert.match(makeupApprovalRouteSource, /buildMakeupCalendarDrafts/);
   assert.match(serviceSource, /requestKind: MakeupRequestKind/);

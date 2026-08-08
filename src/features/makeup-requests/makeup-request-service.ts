@@ -224,6 +224,9 @@ const EMPTY_WORKSPACE_DATA: MakeupRequestWorkspaceData = {
   notificationDeliveries: [],
 }
 
+const MAKEUP_CLASS_LIST_SELECT = "id,name,subject,grade,teacher,room,schedule,schedule_storage_mode,textbook_ids"
+const MAKEUP_REQUEST_LIST_SELECT = "id,status,subject,approval_group,requester_id,teacher_catalog_id,teacher_profile_id,class_id,class_name,request_kind,reason,cancel_date,makeup_start_at,makeup_end_at,makeup_classroom,makeup_slots,approver_teacher_catalog_id,approver_profile_id,returned_reason,rejected_reason,final_note,approved_by,approved_at,completed_by,completed_at,canceled_by,canceled_at,cancel_academic_event_id,makeup_academic_event_id,makeup_academic_event_ids,created_at,updated_at"
+
 export const MAKEUP_NOTIFICATION_TRIGGER_LABELS: Record<ActiveMakeupNotificationTrigger, string> = {
   submitted: "신청 제출",
   approved: "결재 승인",
@@ -570,6 +573,24 @@ async function readNotificationDeliveryRows() {
   return ((data || []) as unknown) as Row[]
 }
 
+export async function loadMakeupClassSchedulePlan(classId: string): Promise<Row> {
+  if (!supabase) {
+    throw new Error("Supabase 연결 설정이 필요합니다.")
+  }
+
+  const { data, error } = await supabase
+    .from("classes")
+    .select("id,schedule_plan")
+    .eq("id", classId)
+    .abortSignal(AbortSignal.timeout(MAKEUP_TABLE_TIMEOUT_MS))
+    .maybeSingle()
+    .retry(false)
+
+  if (error) throw error
+  if (!data) throw new Error("수업 일정을 찾을 수 없습니다.")
+  return parseObject((data as Row).schedule_plan)
+}
+
 function findTeacherByName(teachers: MakeupTeacherOption[], name: string) {
   const normalized = text(name)
   return teachers.find((teacher) => teacher.name === normalized)
@@ -672,10 +693,10 @@ export async function loadMakeupRequestWorkspaceData(): Promise<MakeupRequestWor
     const [profilesRows, teacherRows, classRows, classroomRows, academicEventRows, requestRows, notificationSettingRows, notificationDeliveryRows, lessonSessionRows] = await Promise.all([
       readTable("profiles", "id,email,name,role,login_id,teacher_catalog_id", true),
       readTable("teacher_catalogs", "id,name,subjects,is_visible,sort_order,profile_id,account_email,dashboard_role", true),
-      readTable("classes", "*", true),
+      readTable("classes", MAKEUP_CLASS_LIST_SELECT, true),
       readTable("classroom_catalogs", "*", true),
       readTable("academic_events", "*", true),
-      readTable("makeup_requests", "*", false),
+      readTable("makeup_requests", MAKEUP_REQUEST_LIST_SELECT, false),
       readTable("makeup_notification_settings", "*", true),
       readNotificationDeliveryRows(),
       readTable("class_lesson_sessions", "id,class_id,session_date,schedule_state", true),

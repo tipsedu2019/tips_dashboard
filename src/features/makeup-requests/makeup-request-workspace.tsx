@@ -54,6 +54,7 @@ import {
   completeMakeupRefund,
   createMakeupRequest,
   getMakeupNotificationTriggerLabel,
+  loadMakeupClassSchedulePlan,
   loadMakeupRequestWorkspaceData,
   MAKEUP_NOTIFICATION_CHANNEL_LABELS,
   MAKEUP_NOTIFICATION_TRIGGER_LABELS,
@@ -1806,6 +1807,55 @@ function hasSlotRoomCollision(
   return slots.some((slot) => Boolean(getSlotRoomCollisionState(slot, data, currentRequestId, subject, canIgnoreOrphanedMakeupEvents)?.collisions.length))
 }
 
+function createMakeupClassSchedulePlanLoadCache(
+  loader: (classId: string) => Promise<Record<string, unknown>>,
+) {
+  const settledClassIds = new Set<string>()
+  const inFlightLoads = new Map<string, Promise<{ classId: string; schedulePlan: Record<string, unknown> } | null>>()
+  let generation = 0
+
+  return {
+    load(classItem: MakeupClassOption | null) {
+      if (
+        !classItem?.id ||
+        classItem.scheduleStorageMode === "normalized" ||
+        settledClassIds.has(classItem.id) ||
+        Object.keys(classItem.schedulePlan || {}).length > 0
+      ) {
+        return null
+      }
+
+      const existingLoad = inFlightLoads.get(classItem.id)
+      if (existingLoad) return existingLoad
+
+      const classId = classItem.id
+      const loadGeneration = generation
+      const request = loader(classId)
+        .then((schedulePlan) => {
+          if (generation !== loadGeneration) return null
+          settledClassIds.add(classId)
+          return { classId, schedulePlan }
+        })
+        .catch((error) => {
+          if (generation !== loadGeneration) return null
+          throw error
+        })
+        .finally(() => {
+          if (generation === loadGeneration) {
+            inFlightLoads.delete(classId)
+          }
+        })
+      inFlightLoads.set(classId, request)
+      return request
+    },
+    reset() {
+      generation += 1
+      settledClassIds.clear()
+      inFlightLoads.clear()
+    },
+  }
+}
+
 export function MakeupRequestWorkspace() {
   const { user, role, loading: authLoading, session } = useAuth()
   const searchParams = useSearchParams()
@@ -1850,6 +1900,10 @@ export function MakeupRequestWorkspace() {
   const [requestDialogOpen, setRequestDialogOpen] = useState(false)
   const [selectedDetailRequest, setSelectedDetailRequest] = useState<MakeupRequest | null>(null)
   const consumedDeepLinkRequestIdRef = useRef("")
+  const schedulePlanLoadCacheRef = useRef<ReturnType<typeof createMakeupClassSchedulePlanLoadCache> | null>(null)
+  if (!schedulePlanLoadCacheRef.current) {
+    schedulePlanLoadCacheRef.current = createMakeupClassSchedulePlanLoadCache(loadMakeupClassSchedulePlan)
+  }
 
   const currentUserId = user?.id || ""
   const selectedClass = useMemo(() => findSelectedClass(data, input), [data, input])
@@ -1872,6 +1926,7 @@ export function MakeupRequestWorkspace() {
   }, [selectedWebhookInfo, webhookInfoError])
 
   const refresh = useCallback(async () => {
+    schedulePlanLoadCacheRef.current?.reset()
     setLoading(true)
     setError("")
     try {
@@ -1886,6 +1941,27 @@ export function MakeupRequestWorkspace() {
       setLoading(false)
     }
   }, [])
+
+  useEffect(() => {
+    const schedulePlanRequest = schedulePlanLoadCacheRef.current?.load(selectedClass) || null
+    if (!schedulePlanRequest) return
+
+    void schedulePlanRequest
+      .then((result) => {
+        if (!result) return
+        setData((current) => ({
+          ...current,
+          classes: current.classes.map((classItem) => (
+            classItem.id === result.classId
+              ? { ...classItem, schedulePlan: result.schedulePlan }
+              : classItem
+          )),
+        }))
+      })
+      .catch(() => {
+        setError("수업 일정을 불러오지 못했습니다. 다시 불러오기를 눌러 재시도해 주세요.")
+      })
+  }, [selectedClass])
 
   useEffect(() => {
     if (!authLoading) {
