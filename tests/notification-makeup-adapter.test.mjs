@@ -715,6 +715,12 @@ test("클라이언트는 원자적 RPC 성공 뒤 sourceEventId 후처리를 완
     optionalSource(approvalRouteUrl),
   ])
   const dispatch = functionBlock(service, "dispatchLegacyMakeupNotification", "runMakeupMutationRpc")
+  const classSchedulePlanRead = functionBlock(
+    service,
+    "loadMakeupClassSchedulePlan",
+    "findTeacherByName",
+  )
+  const serviceWithoutClassSchedulePlanRead = service.replace(classSchedulePlanRead, "")
 
   assert.match(service, /create_makeup_request_v2/)
   assert.match(service, /transition_makeup_request_v2/)
@@ -738,7 +744,9 @@ test("클라이언트는 원자적 RPC 성공 뒤 sourceEventId 후처리를 완
   assert.match(dispatch, /keepalive: true/)
   assert.doesNotMatch(service, /\.from\("makeup_request_events"\)\.insert/)
   assert.doesNotMatch(service, /\.from\("makeup_notification_deliveries"\)\.insert/)
-  assert.doesNotMatch(service, /\.from\("classes"\)/)
+  assert.match(classSchedulePlanRead, /\.from\("classes"\)\s*\.select\("id,schedule_plan"\)/)
+  assert.doesNotMatch(classSchedulePlanRead, /\.(?:insert|update|upsert|delete)\(/)
+  assert.doesNotMatch(serviceWithoutClassSchedulePlanRead, /\.from\("classes"\)/)
   assert.doesNotMatch(service, /\.from\("academic_events"\)\.(?:upsert|delete)/)
   assert.doesNotMatch(service, /fetch\("\/api\/(?:google-chat|web-push)"/)
 })
