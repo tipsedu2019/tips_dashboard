@@ -6,6 +6,10 @@ import {
   buildDashboardMetrics,
   createEmptyDashboardMetrics,
 } from "@/features/dashboard/metrics"
+import {
+  attachDashboardClassSessionDates,
+  buildDashboardSessionDateWindow,
+} from "@/features/dashboard/session-dates"
 import { supabase } from "@/lib/supabase"
 
 type DashboardMetricsData = Record<string, unknown> & {
@@ -36,41 +40,6 @@ type DashboardMetrics = DashboardMetricsState & {
 type DashboardCoreData = {
   classes: unknown[]
   students: unknown[]
-}
-
-function dayKey(value: Date) {
-  return value.toISOString().slice(0, 10)
-}
-
-async function attachNormalizedLessonSessions(classes: unknown[]) {
-  if (!supabase) return classes
-  const normalizedIds = classes
-    .filter((row) => typeof row === "object" && row !== null && String((row as { schedule_storage_mode?: unknown }).schedule_storage_mode || "") === "normalized")
-    .map((row) => String((row as { id?: unknown }).id || "")).filter(Boolean)
-  if (normalizedIds.length === 0) return classes
-  const from = new Date()
-  const to = new Date(from)
-  to.setDate(to.getDate() + 180)
-  const { data, error } = await supabase.from("class_lesson_sessions")
-    .select("id,class_id,session_date,schedule_state")
-    .in("class_id", normalizedIds)
-    .gte("session_date", dayKey(from))
-    .lte("session_date", dayKey(to))
-  if (error) return classes
-  const byClassId = new Map<string, unknown[]>()
-  for (const row of data || []) {
-    const classId = String((row as { class_id?: unknown }).class_id || "")
-    const list = byClassId.get(classId) || []
-    list.push(row)
-    byClassId.set(classId, list)
-  }
-  const sessionsByClass = classes.map((row) => {
-    if (typeof row !== "object" || row === null) return row
-    const record = row as Record<string, unknown>
-    return { ...record, lessonSessions: byClassId.get(String(record.id || "")) || [] }
-  })
-  classes.splice(0, classes.length, ...sessionsByClass)
-  return classes
 }
 
 const buildMetrics = buildDashboardMetrics as unknown as (args: Record<string, unknown>) => DashboardMetricsData
@@ -107,7 +76,21 @@ type DashboardTableReadResult = {
 }
 
 const DASHBOARD_TABLE_COLUMNS: Record<string, string> = {
-  classes: "*",
+  classes: [
+    "id",
+    "name",
+    "subject",
+    "grade",
+    "teacher",
+    "room",
+    "schedule",
+    "status",
+    "start_date",
+    "end_date",
+    "student_ids",
+    "waitlist_ids",
+    "schedule_storage_mode",
+  ].join(","),
   students: [
     "id",
     "name",
@@ -147,31 +130,26 @@ function isMissingColumnError(error: unknown) {
   return code === "PGRST204" || message.includes("Could not find") || message.includes("column")
 }
 
-function withTableTimeout<T>(
-  request: PromiseLike<T>,
-  tableName: string,
-  { timeoutMs }: { optional: boolean; timeoutMs: number },
-): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<T>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error(`${tableName} 데이터를 불러오지 못했습니다.`))
-    }, timeoutMs)
-  })
-
-  return Promise.race([Promise.resolve(request), timeout]).finally(() => {
-    if (timer) {
-      clearTimeout(timer)
-    }
-  })
+async function queryTable(tableName: string, columns: string, timeoutMs: number) {
+  return supabase!
+    .from(tableName)
+    .select(columns)
+    .abortSignal(AbortSignal.timeout(timeoutMs))
+    .retry(false) as unknown as PromiseLike<SupabaseTableResult>
 }
 
-async function queryTable(tableName: string, columns: string, optional: boolean, timeoutMs: number) {
-  return withTableTimeout<SupabaseTableResult>(
-    supabase!.from(tableName).select(columns) as unknown as PromiseLike<SupabaseTableResult>,
-    tableName,
-    { optional, timeoutMs },
-  )
+async function readDashboardSessionDates() {
+  const { dateFrom, dateTo } = buildDashboardSessionDateWindow(new Date())
+  const { data, error } = await supabase!
+    .rpc("list_dashboard_class_session_dates_v1", {
+      p_date_from: dateFrom,
+      p_date_to: dateTo,
+    })
+    .abortSignal(AbortSignal.timeout(DASHBOARD_CORE_TABLE_TIMEOUT_MS))
+    .retry(false)
+
+  if (error) throw error
+  return data || []
 }
 
 async function readTableResult(
@@ -190,10 +168,10 @@ async function readTableResult(
   const timeoutMs = options.timeoutMs || (optional ? DASHBOARD_OPTIONAL_TABLE_TIMEOUT_MS : DASHBOARD_CORE_TABLE_TIMEOUT_MS)
 
   try {
-    let result = await queryTable(tableName, columns, optional, timeoutMs)
+    let result = await queryTable(tableName, columns, timeoutMs)
 
-    if (result.error && columns !== "*" && isMissingColumnError(result.error)) {
-      result = await queryTable(tableName, "*", optional, timeoutMs)
+    if (result.error && columns !== "*" && tableName !== "classes" && isMissingColumnError(result.error)) {
+      result = await queryTable(tableName, "*", timeoutMs)
     }
 
     return {
@@ -266,8 +244,12 @@ export function useTipsDashboardMetrics() {
       }
 
       try {
-        const [classes, students] = await Promise.all([readTable("classes"), readTable("students")])
-        await attachNormalizedLessonSessions(classes)
+        const [classRows, students, sessionDates] = await Promise.all([
+          readTable("classes"),
+          readTable("students"),
+          readDashboardSessionDates(),
+        ])
+        const classes = attachDashboardClassSessionDates(classRows, sessionDates)
 
         if (isMounted) {
           setMetrics({
