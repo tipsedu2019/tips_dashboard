@@ -305,7 +305,7 @@ Commit: `perf: consolidate high-frequency RLS policies`
 
 - [ ] **Step 1: Write failing helper security and policy wiring tests**
 
-Require both helpers to be `stable security definer set search_path = ''`, owned by postgres, revoked from `public, anon, authenticated, service_role`, and to use primary-key predicates. Require task-id child policies to call `can_read_ops_task_v1` and track-id child policies to call `can_read_registration_track_v1` without an `EXISTS (... ops_tasks ...)` RLS subquery.
+Require both helpers to be `stable security definer set search_path = ''`, owned by postgres, revoked from `public, anon, service_role`, granted only to `authenticated` so RLS can evaluate them, and to use primary-key predicates. Require task-id child policies to call `can_read_ops_task_v1` and track-id child policies to call `can_read_registration_track_v1` without an `EXISTS (... ops_tasks ...)` RLS subquery.
 
 - [ ] **Step 2: Run the tests and confirm RED**
 

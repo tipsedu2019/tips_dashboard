@@ -6,6 +6,10 @@ const consolidationUrl = new URL(
   "../supabase/migrations/20260809092000_rls_policy_initplan_consolidation.sql",
   import.meta.url,
 )
+const registrationReadUrl = new URL(
+  "../supabase/migrations/20260809093000_ops_registration_read_policy_optimization.sql",
+  import.meta.url,
+)
 
 function normalized(value) {
   return value.toLowerCase().replace(/\s+/gu, " ")
@@ -106,4 +110,57 @@ test("ops_tasks preserves business predicates while caching zero-argument auth h
   const remove = policyBody(sql, "ops_tasks_delete_v2")
   assert.match(update, /not dashboard_private\.registration_task_has_subject_tracks\(id\)/)
   assert.match(remove, /not dashboard_private\.registration_task_has_subject_tracks\(id\)/)
+})
+
+test("registration read helpers bypass nested RLS with authenticated-only execution", async () => {
+  const sql = normalized(await readFile(registrationReadUrl, "utf8"))
+
+  for (const signature of [
+    "dashboard_private.can_read_ops_task_v1",
+    "dashboard_private.can_read_registration_track_v1",
+  ]) {
+    const start = sql.indexOf(`create or replace function ${signature}`)
+    assert.ok(start >= 0, `${signature} must exist`)
+    const end = sql.indexOf("alter function", start)
+    const body = sql.slice(start, end)
+    assert.match(body, /stable security definer set search_path = ''/)
+    assert.match(body, /where [^;]+\.id = p_/)
+    assert.match(sql, new RegExp(`revoke all on function ${signature.replaceAll(".", "\\.")}\\(uuid\\) from public, anon, authenticated, service_role`))
+    assert.match(sql, new RegExp(`grant execute on function ${signature.replaceAll(".", "\\.")}\\(uuid\\) to authenticated`))
+  }
+
+  const taskHelperStart = sql.indexOf("create or replace function dashboard_private.can_read_ops_task_v1")
+  const taskHelperEnd = sql.indexOf("alter function", taskHelperStart)
+  const taskHelper = sql.slice(taskHelperStart, taskHelperEnd)
+  assert.match(taskHelper, /requested_by = v_actor/)
+  assert.match(taskHelper, /assignee_id = v_actor/)
+  assert.match(taskHelper, /secondary_assignee_id = v_actor/)
+  assert.match(taskHelper, /is_ops_word_retest_teacher\(task\.id\)/)
+})
+
+test("registration child SELECT policies delegate exact task visibility without ops_tasks subqueries", async () => {
+  const sql = normalized(await readFile(registrationReadUrl, "utf8"))
+  const taskPolicies = [
+    ["ops_task_events_select_v2", "task_id"],
+    ["ops_registration_subject_tracks_select_v2", "task_id"],
+    ["ops_registration_appointments_select_v2", "task_id"],
+    ["ops_registration_admission_batches_select_v2", "task_id"],
+    ["ops_registration_details_select_v2", "task_id"],
+  ]
+  const trackPolicies = [
+    ["ops_registration_level_tests_select_v2", "track_id"],
+    ["ops_registration_consultations_select_v2", "track_id"],
+    ["ops_registration_enrollments_select_v2", "track_id"],
+  ]
+
+  for (const [name, column] of taskPolicies) {
+    const body = policyBody(sql, name)
+    assert.match(body, new RegExp(`can_read_ops_task_v1\\(${column}\\)`))
+    assert.doesNotMatch(body, /exists|from public\.ops_tasks/)
+  }
+  for (const [name, column] of trackPolicies) {
+    const body = policyBody(sql, name)
+    assert.match(body, new RegExp(`can_read_registration_track_v1\\(${column}\\)`))
+    assert.doesNotMatch(body, /exists|from public\.ops_tasks/)
+  }
 })
