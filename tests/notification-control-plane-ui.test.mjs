@@ -186,20 +186,15 @@ test("등록 예약 알림은 세 한국어 시점 라벨을 데스크톱과 모
   assert.doesNotMatch(source, />\{rule\.ruleVariantKey\}</)
 })
 
-test("등록 예약 알림이 모두 꺼져 있으면 경고하고 첫 적용 가능한 스위치로 초점을 이동한다", async () => {
+test("등록 예약 알림은 내부 규칙 대신 전용 자동 발송 설정을 사용한다", async () => {
   const source = await readOptionalSource(
     "src/features/notifications/notification-control-panel.tsx",
   )
 
   assert.match(source, /registration\.appointment_reminder_due/)
-  assert.match(source, /allAppointmentRemindersDisabled/)
-  assert.match(source, /현재 예약 알림이 발송되지 않습니다/)
-  assert.match(source, /첫 예약 알림 설정하기/)
-  assert.match(source, /notification-rule-switch-\$\{surfaceKey\}-\$\{rule\.id\}/)
-  assert.match(source, /surfaceKey="desktop"/)
-  assert.match(source, /surfaceKey="mobile"/)
-  assert.match(source, /querySelectorAll<HTMLElement>\([\s\S]*data-notification-rule-switch[\s\S]*offsetParent !== null[\s\S]*\?\.focus\(\)/)
-  assert.match(source, /data-notification-rule-switch/)
+  assert.match(source, /rule\.eventKey !== "registration\.appointment_reminder_due"/)
+  assert.match(source, /RegistrationCustomerReminderSettings/)
+  assert.doesNotMatch(source, /현재 예약 알림이 발송되지 않습니다/)
 })
 
 test("예약 시각 편집은 KST 벽시각과 1분부터 7일 범위만 초안에 허용한다", async () => {

@@ -48,6 +48,7 @@ import {
   type NotificationWorkflowKey,
 } from "./notification-control-plane-types"
 import { GOOGLE_CHAT_CONNECTION_LABELS } from "./notification-google-chat-catalog"
+import { RegistrationCustomerReminderSettings } from "./registration-customer-reminder-settings"
 import { buildNotificationTemplatePreview } from "./notification-template-preview"
 import { useNotificationNavigationGuard } from "./use-notification-navigation-guard"
 
@@ -463,17 +464,13 @@ function RulesView({
   onChange,
   onEditTemplate,
 }: RulesViewProps) {
-  const groups = React.useMemo(() => groupServerRules(rules), [rules])
-  const appointmentReminderRules = React.useMemo(
+  const visibleRules = React.useMemo(
     () => rules.filter((rule) => (
-      rule.workflowKey === "registration" &&
-      rule.eventKey === "registration.appointment_reminder_due"
+      rule.eventKey !== "registration.appointment_reminder_due"
     )),
     [rules],
   )
-  const allAppointmentRemindersDisabled = appointmentReminderRules.length > 0 &&
-    appointmentReminderRules.every((rule) => !draft.rules[rule.id]?.enabled)
-  const firstAppointmentReminderRule = appointmentReminderRules[0]
+  const groups = React.useMemo(() => groupServerRules(visibleRules), [visibleRules])
   if (groups.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
@@ -484,32 +481,6 @@ function RulesView({
 
   return (
     <div data-notification-draft-source="shared">
-      {allAppointmentRemindersDisabled && firstAppointmentReminderRule ? (
-        <div
-          role="status"
-          className="mb-3 flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-950 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <div>
-            <p className="text-sm font-semibold">현재 예약 알림이 발송되지 않습니다</p>
-            <p className="text-xs text-amber-800">
-              필요한 시점과 대상을 켠 뒤 변경사항을 저장해 주세요.
-            </p>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={saving}
-            onClick={() => {
-              Array.from(document.querySelectorAll<HTMLElement>(
-                `[data-notification-rule-switch="${firstAppointmentReminderRule.id}"]`,
-              )).find((element) => element.offsetParent !== null)?.focus()
-            }}
-          >
-            첫 예약 알림 설정하기
-          </Button>
-        </div>
-      ) : null}
       <div className="hidden overflow-x-auto rounded-lg border border-border/70 bg-background md:block">
         <table className="w-full min-w-[900px] table-fixed border-collapse text-left text-sm">
           <thead>
@@ -1416,6 +1387,11 @@ export function NotificationControlPanel({
           ) : null}
         </TabsList>
         <TabsContent value="rules" className="mt-3">
+          {activeWorkflow === "registration" ? (
+            <div className="mb-3">
+              <RegistrationCustomerReminderSettings />
+            </div>
+          ) : null}
           <RulesView
             rules={snapshot.rules}
             draft={draft}

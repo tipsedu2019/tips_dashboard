@@ -79,6 +79,12 @@ function formatAuditTimestamp(value: string) {
   }).format(new Date(timestamp))
 }
 
+function auditActorLabel(confirmedByName: string) {
+  return confirmedByName === "자동 발송"
+    ? "자동 발송"
+    : `발송 요청 · ${confirmedByName}`
+}
+
 export function RegistrationAlimtalkPreviewDialog({
   open,
   onOpenChange,
@@ -329,7 +335,7 @@ export function RegistrationAlimtalkPreviewDialog({
             {preview.buttons.map((button) => <p key={`${button.name}:${button.host}`} className="break-words text-muted-foreground">카카오 버튼 · {button.name} ({button.host})</p>)}
             <p className="text-muted-foreground">준비 상태 · {preview.readiness.sendAllowed ? "발송 가능" : preview.readiness.blockers.join(", ") || "발송 불가"}</p>
             {latestMessage ? <p className="text-muted-foreground">최근 상태 · {statusLabel(latestMessage.currentStatus)}</p> : null}
-            {auditMessage ? <p className="text-muted-foreground">발송 요청 · {auditMessage.confirmedByName} · {formatAuditTimestamp(auditMessage.confirmedAt)}</p> : null}
+            {auditMessage ? <p className="text-muted-foreground">{auditActorLabel(auditMessage.confirmedByName)} · {formatAuditTimestamp(auditMessage.confirmedAt)}</p> : null}
           </div>
         ) : null}
 
