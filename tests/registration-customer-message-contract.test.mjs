@@ -222,6 +222,15 @@ test("public response guard permits only the exact approved DTO field names", ()
       subjectLabel: "영어 · 수학",
       scheduleLabel: "2026년 8월 8일 토요일 오후 2:00",
       placeLabel: "본관",
+      admissionPlans: [{
+        subjectLabel: "영어",
+        className: "중2 영어 A반",
+        textbookLabel: "능률 VOCA",
+        scheduleLabel: "월·수 오후 6:00–8:00",
+        teacherLabel: "홍길동",
+        classroomLabel: "본관 301호",
+        firstLessonLabel: "8월 17일 월요일 오후 6:00–8:00",
+      }],
     },
     body: "실제 승인 템플릿과 같은 미리보기 본문",
     buttons: [],
@@ -280,6 +289,16 @@ test("public response guard permits only the exact approved DTO field names", ()
     "bodyChecksum",
     "templateRevision",
     "rawEvidence",
+    "enrollmentId",
+    "trackId",
+    "classId",
+    "textbookId",
+    "sessionId",
+    "slotId",
+    "workflowRevision",
+    "scheduleRevision",
+    "scheduleHash",
+    "sourceFingerprint",
   ]) {
     assert.throws(
       () => contract.assertRegistrationCustomerMessagePublicPayload({

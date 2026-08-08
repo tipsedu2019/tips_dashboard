@@ -78,6 +78,16 @@ export type RegistrationCustomerMessageHistoryResponse = Readonly<{
   history: ReadonlyArray<RegistrationCustomerMessageHistoryItem>
 }>
 
+export type RegistrationCustomerMessageAdmissionPreviewPlan = Readonly<{
+  subjectLabel: string
+  className: string
+  textbookLabel: string
+  scheduleLabel: string
+  teacherLabel: string
+  classroomLabel: string
+  firstLessonLabel: string
+}>
+
 export type RegistrationCustomerMessagePreviewResponse = Readonly<{
   ok: true
   previewId: string | null
@@ -91,6 +101,7 @@ export type RegistrationCustomerMessagePreviewResponse = Readonly<{
     placeLabel?: string
     waitingKindLabel?: string
     waitingDetailLabel?: string
+    admissionPlans?: ReadonlyArray<RegistrationCustomerMessageAdmissionPreviewPlan>
   }>
   body: string
   buttons: ReadonlyArray<Readonly<{ name: string; type: "WL"; host: string }>>
@@ -219,16 +230,20 @@ const RFC3339_TIMESTAMP_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{
 const REGISTRATION_CUSTOMER_MESSAGE_PUBLIC_RESPONSE_KEYS = new Set([
   "activationEligible",
   "activationMode",
+  "admissionPlans",
   "blockers",
   "body",
   "buttons",
   "canCheck",
+  "className",
+  "classroomLabel",
   "confirmedByName",
   "confirmedAt",
   "credentialsConfigured",
   "currentStatus",
   "expiresAt",
   "facts",
+  "firstLessonLabel",
   "host",
   "history",
   "idempotent",
@@ -250,6 +265,8 @@ const REGISTRATION_CUSTOMER_MESSAGE_PUBLIC_RESPONSE_KEYS = new Set([
   "subjectLabel",
   "templateConfigured",
   "templateVerified",
+  "teacherLabel",
+  "textbookLabel",
   "type",
   "updatedAt",
   "verifiedAt",

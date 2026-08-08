@@ -5,6 +5,7 @@ import type {
 } from "../registration-customer-message-contract.ts"
 import {
   renderRegistrationCustomerMessage,
+  type RegistrationCustomerMessageAdmissionPlan,
   type RegistrationCustomerMessageButton,
   type RegistrationCustomerMessageCanonicalFacts,
   type RegistrationCustomerMessageCatalog,
@@ -80,6 +81,9 @@ type SourceResolverDependencies = Readonly<{
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
 const PHONE_PATTERN = /^01(?:0|1|[6-9])[0-9]{7,8}$/u
 const RFC3339_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/iu
+const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/u
+const CLOCK_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u
+const HASH_PATTERN = /^[0-9a-f]{64}$/iu
 const SUBJECT_ORDER: ReadonlyArray<RegistrationCustomerMessageSubject> = ["영어", "수학", "과학"]
 const WAITING_WORKFLOW_KIND: Readonly<Record<string, RegistrationCustomerMessageWaitingKind>> = {
   waiting_current_class: "current_class",
@@ -102,6 +106,12 @@ function sourceError(code: string): never {
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function hasExactKeys(value: JsonRecord, keys: ReadonlyArray<string>) {
+  const actual = Object.keys(value)
+  return actual.length === keys.length
+    && keys.every((key) => Object.prototype.hasOwnProperty.call(value, key))
 }
 
 function canonicalJson(value: unknown): string {
@@ -142,6 +152,42 @@ function sourceRevision(value: unknown) {
     : sourceError("registration_customer_message_source_revision_invalid")
 }
 
+function nonnegativeInteger(value: unknown, code: string) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : sourceError(code)
+}
+
+function requiredHash(value: unknown, code: string) {
+  const normalized = requiredText(value, code).toLowerCase()
+  return HASH_PATTERN.test(normalized) ? normalized : sourceError(code)
+}
+
+function requiredClock(value: unknown, code: string) {
+  const normalized = requiredText(value, code)
+  if (!CLOCK_PATTERN.test(normalized)) sourceError(code)
+  const [hour, minute] = normalized.split(":").map(Number)
+  return { value: normalized, minutes: hour * 60 + minute }
+}
+
+function requiredDate(value: unknown, code: string) {
+  const normalized = requiredText(value, code)
+  const match = normalized.match(DATE_PATTERN)
+  if (!match) sourceError(code)
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const date = new Date(`${normalized}T00:00:00.000Z`)
+  if (
+    year < 1
+    || !Number.isFinite(date.getTime())
+    || date.getUTCFullYear() !== year
+    || date.getUTCMonth() + 1 !== month
+    || date.getUTCDate() !== day
+  ) sourceError(code)
+  return normalized
+}
+
 function subjects(value: unknown) {
   if (!Array.isArray(value) || value.length === 0) {
     sourceError("registration_customer_message_subject_invalid")
@@ -161,10 +207,13 @@ function cloneJson<T>(value: T): T {
   return structuredClone(value)
 }
 
-function parsedTimestamp(value: unknown) {
-  const text = requiredText(value, "registration_customer_message_schedule_invalid")
+function parsedTimestamp(
+  value: unknown,
+  code = "registration_customer_message_schedule_invalid",
+) {
+  const text = requiredText(value, code)
   const match = text.match(RFC3339_PATTERN)
-  if (!match) sourceError("registration_customer_message_schedule_invalid")
+  if (!match) sourceError(code)
   const year = Number(match[1])
   const month = Number(match[2])
   const day = Number(match[3])
@@ -186,18 +235,18 @@ function parsedTimestamp(value: unknown) {
     || second > 59
     || offsetHour > 23
     || offsetMinute > 59
-  ) sourceError("registration_customer_message_schedule_invalid")
+  ) sourceError(code)
   const fraction = match[7] ?? ""
-  if (fraction.length > 6) sourceError("registration_customer_message_schedule_invalid")
+  if (fraction.length > 6) sourceError(code)
   const wholeSecond = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}${offset}`
   const wholeSecondMillis = Date.parse(wholeSecond)
   if (!Number.isFinite(wholeSecondMillis) || wholeSecondMillis % 1_000 !== 0) {
-    sourceError("registration_customer_message_schedule_invalid")
+    sourceError(code)
   }
   const microseconds = Number((fraction + "000000").slice(0, 6))
   const epochMicroseconds = wholeSecondMillis * 1_000 + microseconds
   if (!Number.isSafeInteger(epochMicroseconds)) {
-    sourceError("registration_customer_message_schedule_invalid")
+    sourceError(code)
   }
   const absolute = Math.abs(epochMicroseconds)
   const epoch = `${epochMicroseconds < 0 ? "-" : ""}${Math.trunc(absolute / 1_000_000)}.${String(absolute % 1_000_000).padStart(6, "0")}`
@@ -208,11 +257,81 @@ function parsedTimestamp(value: unknown) {
   }
 }
 
+function nullableTimestampEpoch(value: unknown, code: string) {
+  return value === null ? null : parsedTimestamp(value, code).epoch
+}
+
+function compareCodePointText(left: string, right: string) {
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
+function sameSubjects(
+  left: ReadonlyArray<RegistrationCustomerMessageSubject>,
+  right: ReadonlyArray<RegistrationCustomerMessageSubject>,
+) {
+  return left.length === right.length && left.every((subject, index) => subject === right[index])
+}
+
+const APPOINTMENT_PARTICIPANT_KEYS = Object.freeze([
+  "trackId",
+  "subject",
+  "workflowStatus",
+  "workflowRevision",
+  "activityId",
+  "activityStatus",
+])
+
+function appointmentParticipants(
+  appointmentKind: "level_test" | "visit_consultation",
+  rawValue: unknown,
+  normalizedSubjects: ReadonlyArray<RegistrationCustomerMessageSubject>,
+) {
+  const code = "registration_customer_message_appointment_participants_invalid"
+  if (!Array.isArray(rawValue) || rawValue.length === 0) sourceError(code)
+  const workflowStatus = appointmentKind === "level_test"
+    ? "level_test_requested"
+    : "consultation_requested"
+  const participants = rawValue.map((value) => {
+    if (!isRecord(value) || !hasExactKeys(value, APPOINTMENT_PARTICIPANT_KEYS)) sourceError(code)
+    const subject = value.subject
+    if (!SUBJECT_ORDER.includes(subject as RegistrationCustomerMessageSubject)) sourceError(code)
+    const activityStatus = requiredText(value.activityStatus, code)
+    if (
+      value.workflowStatus !== workflowStatus
+      || (appointmentKind === "level_test"
+        ? activityStatus !== "scheduled" && activityStatus !== "in_progress"
+        : activityStatus !== "scheduled")
+    ) sourceError(code)
+    return Object.freeze({
+      trackId: requiredUuid(value.trackId, code),
+      subject: subject as RegistrationCustomerMessageSubject,
+      workflowStatus,
+      workflowRevision: nonnegativeInteger(value.workflowRevision, code),
+      activityId: requiredUuid(value.activityId, code),
+      activityStatus,
+    })
+  }).sort((left, right) => (
+    SUBJECT_ORDER.indexOf(left.subject) - SUBJECT_ORDER.indexOf(right.subject)
+    || compareCodePointText(left.trackId, right.trackId)
+    || compareCodePointText(left.activityId, right.activityId)
+  ))
+  if (
+    new Set(participants.map(({ trackId }) => trackId)).size !== participants.length
+    || new Set(participants.map(({ subject }) => subject)).size !== participants.length
+  ) sourceError(code)
+  const participantSubjects = subjects(participants.map(({ subject }) => subject))
+  if (!sameSubjects(participantSubjects, normalizedSubjects)) {
+    sourceError("registration_customer_message_subject_invalid")
+  }
+  return Object.freeze(participants)
+}
+
 function appointmentFacts(
   kind: RegistrationCustomerMessageKind,
   raw: JsonRecord,
   inputSourceId: string,
   now: Date,
+  normalizedSubjects: ReadonlyArray<RegistrationCustomerMessageSubject>,
 ) {
   if (requiredUuid(raw.appointmentId) !== inputSourceId || raw.trackId !== null) {
     sourceError("registration_customer_message_source_mismatch")
@@ -225,6 +344,7 @@ function appointmentFacts(
     (kind === "level_test_booking" && appointmentKind !== "level_test")
     || (kind === "visit_consultation_booking" && appointmentKind !== "visit_consultation")
   ) sourceError("registration_customer_message_appointment_kind_mismatch")
+  const participants = appointmentParticipants(appointmentKind, raw.participants, normalizedSubjects)
   const scheduledAt = parsedTimestamp(raw.scheduledAt)
   if (scheduledAt.epochMicroseconds <= now.getTime() * 1_000) {
     sourceError("registration_customer_message_schedule_not_future")
@@ -241,6 +361,7 @@ function appointmentFacts(
       appointmentKind,
       scheduledAtEpoch: scheduledAt.epoch,
       place: requiredText(raw.place, "registration_customer_message_place_invalid"),
+      participants,
     },
   } as const
 }
@@ -284,7 +405,115 @@ function waitingFacts(raw: JsonRecord, inputSourceId: string) {
   } as const
 }
 
-function admissionFacts(raw: JsonRecord, inputSourceId: string) {
+const ADMISSION_TRACK_KEYS = Object.freeze([
+  "trackId",
+  "subject",
+  "workflowStatus",
+  "workflowRevision",
+  "pipelineStatus",
+])
+const ADMISSION_PLAN_KEYS = Object.freeze([
+  "enrollmentId",
+  "trackId",
+  "subject",
+  "sortOrder",
+  "workflowStatus",
+  "workflowRevision",
+  "enrollmentUpdatedAt",
+  "classId",
+  "classSubject",
+  "className",
+  "classUpdatedAt",
+  "textbookId",
+  "textbookName",
+  "textbookUpdatedAt",
+  "runtimeVersion",
+  "storageMode",
+  "authority",
+  "scheduleRevision",
+  "scheduleHash",
+  "slots",
+  "firstLesson",
+])
+const ADMISSION_SLOT_KEYS = Object.freeze([
+  "slotId",
+  "weekday",
+  "startTime",
+  "endTime",
+  "teacherName",
+  "classroomName",
+  "sortOrder",
+  "updatedAt",
+])
+const ADMISSION_FIRST_LESSON_KEYS = Object.freeze([
+  "sessionId",
+  "sessionKey",
+  "sessionDate",
+  "scheduleState",
+  "startTime",
+  "endTime",
+  "revision",
+  "updatedAt",
+])
+
+function admissionSlot(value: unknown, authority: "normalized" | "legacy") {
+  const code = "registration_customer_message_admission_schedule_incomplete"
+  if (!isRecord(value) || !hasExactKeys(value, ADMISSION_SLOT_KEYS)) sourceError(code)
+  const weekday = nonnegativeInteger(value.weekday, code)
+  if (weekday > 6) sourceError(code)
+  const start = requiredClock(value.startTime, code)
+  const end = requiredClock(value.endTime, code)
+  if (end.minutes <= start.minutes) sourceError(code)
+  const slotId = nullableUuid(value.slotId, code)
+  const updatedAt = nullableTimestampEpoch(value.updatedAt, code)
+  if (
+    (authority === "normalized" && (!slotId || !updatedAt))
+    || (authority === "legacy" && (slotId !== null || updatedAt !== null))
+  ) sourceError("registration_customer_message_admission_plan_invalid")
+  return Object.freeze({
+    slotId,
+    weekday: weekday as 0 | 1 | 2 | 3 | 4 | 5 | 6,
+    startTime: start.value,
+    endTime: end.value,
+    teacherName: requiredText(value.teacherName, code),
+    classroomName: requiredText(value.classroomName, code),
+    sortOrder: nonnegativeInteger(value.sortOrder, code),
+    updatedAt,
+  })
+}
+
+function admissionFirstLesson(value: unknown, authority: "normalized" | "legacy") {
+  const code = "registration_customer_message_admission_schedule_incomplete"
+  if (!isRecord(value) || !hasExactKeys(value, ADMISSION_FIRST_LESSON_KEYS)) sourceError(code)
+  const start = requiredClock(value.startTime, code)
+  const end = requiredClock(value.endTime, code)
+  if (end.minutes <= start.minutes) sourceError(code)
+  const scheduleState = requiredText(value.scheduleState, code)
+  if (scheduleState !== "active" && scheduleState !== "makeup") sourceError(code)
+  const sessionId = nullableUuid(value.sessionId, code)
+  const revision = value.revision === null ? null : nonnegativeInteger(value.revision, code)
+  const updatedAt = nullableTimestampEpoch(value.updatedAt, code)
+  if (
+    (authority === "normalized" && (!sessionId || revision === null || !updatedAt))
+    || (authority === "legacy" && (sessionId !== null || revision !== null || updatedAt !== null))
+  ) sourceError("registration_customer_message_admission_plan_invalid")
+  return Object.freeze({
+    sessionId,
+    sessionKey: requiredText(value.sessionKey, code),
+    sessionDate: requiredDate(value.sessionDate, code),
+    scheduleState,
+    startTime: start.value,
+    endTime: end.value,
+    revision,
+    updatedAt,
+  })
+}
+
+function admissionFacts(
+  raw: JsonRecord,
+  inputSourceId: string,
+  normalizedSubjects: ReadonlyArray<RegistrationCustomerMessageSubject>,
+) {
   if (requiredUuid(raw.taskId) !== inputSourceId || raw.trackId !== null || raw.appointmentId !== null) {
     sourceError("registration_customer_message_source_mismatch")
   }
@@ -292,33 +521,143 @@ function admissionFacts(raw: JsonRecord, inputSourceId: string) {
     sourceError("registration_customer_message_admission_tracks_invalid")
   }
   const tracks = raw.tracks.map((value) => {
-    if (!isRecord(value)) sourceError("registration_customer_message_admission_tracks_invalid")
+    const code = "registration_customer_message_admission_tracks_invalid"
+    if (!isRecord(value) || !hasExactKeys(value, ADMISSION_TRACK_KEYS)) sourceError(code)
     const subject = value.subject
     if (!SUBJECT_ORDER.includes(subject as RegistrationCustomerMessageSubject)) {
-      sourceError("registration_customer_message_admission_tracks_invalid")
+      sourceError(code)
     }
-    const workflowRevision = value.workflowRevision
-    if (typeof workflowRevision !== "number" || !Number.isSafeInteger(workflowRevision) || workflowRevision < 0) {
-      sourceError("registration_customer_message_admission_tracks_invalid")
-    }
-    return {
-      trackId: requiredUuid(value.trackId, "registration_customer_message_admission_tracks_invalid"),
+    if (value.workflowStatus !== "enrollment_requested") sourceError(code)
+    return Object.freeze({
+      trackId: requiredUuid(value.trackId, code),
       subject: subject as RegistrationCustomerMessageSubject,
-      workflowStatus: requiredText(
-        value.workflowStatus,
-        "registration_customer_message_admission_tracks_invalid",
-      ),
-      workflowRevision,
-      pipelineStatus: requiredText(
-        value.pipelineStatus,
-        "registration_customer_message_admission_tracks_invalid",
-      ),
-    }
+      workflowStatus: "enrollment_requested" as const,
+      workflowRevision: nonnegativeInteger(value.workflowRevision, code),
+      pipelineStatus: requiredText(value.pipelineStatus, code),
+    })
   }).sort((left, right) => (
     SUBJECT_ORDER.indexOf(left.subject) - SUBJECT_ORDER.indexOf(right.subject)
-    || left.trackId.localeCompare(right.trackId)
+    || compareCodePointText(left.trackId, right.trackId)
   ))
-  return { facts: {}, source: { trackId: null, appointmentId: null, tracks } } as const
+  if (
+    new Set(tracks.map(({ trackId }) => trackId)).size !== tracks.length
+    || new Set(tracks.map(({ subject }) => subject)).size !== tracks.length
+  ) sourceError("registration_customer_message_admission_tracks_invalid")
+  if (!Array.isArray(raw.enrollmentPlans) || raw.enrollmentPlans.length === 0) {
+    sourceError("registration_customer_message_admission_schedule_incomplete")
+  }
+  const tracksById = new Map(tracks.map((track) => [track.trackId, track]))
+  const plans = raw.enrollmentPlans.map((value) => {
+    const code = "registration_customer_message_admission_plan_invalid"
+    if (!isRecord(value) || !hasExactKeys(value, ADMISSION_PLAN_KEYS)) sourceError(code)
+    const trackId = requiredUuid(value.trackId, code)
+    const track = tracksById.get(trackId)
+    const subject = value.subject
+    if (!track || !SUBJECT_ORDER.includes(subject as RegistrationCustomerMessageSubject)) sourceError(code)
+    if (
+      value.workflowStatus !== "enrollment_requested"
+      || subject !== track.subject
+      || value.classSubject !== subject
+    ) sourceError(code)
+    const workflowRevision = nonnegativeInteger(value.workflowRevision, code)
+    if (workflowRevision !== track.workflowRevision) sourceError(code)
+    const runtimeVersion = nonnegativeInteger(value.runtimeVersion, code)
+    const storageMode = value.storageMode
+    if (storageMode !== "normalized" && storageMode !== "legacy" && storageMode !== "shadow") {
+      sourceError(code)
+    }
+    const authority = value.authority
+    if (authority !== "normalized" && authority !== "legacy") sourceError(code)
+    if (
+      (authority === "normalized" && !(runtimeVersion === 1 && storageMode === "normalized"))
+      || (authority === "legacy" && runtimeVersion === 1 && storageMode === "normalized")
+    ) sourceError(code)
+    const textbookId = nullableUuid(value.textbookId, code)
+    const textbookName = value.textbookName === null
+      ? null
+      : requiredText(value.textbookName, code)
+    const textbookUpdatedAt = nullableTimestampEpoch(value.textbookUpdatedAt, code)
+    if (
+      (textbookId === null && (textbookName !== null || textbookUpdatedAt !== null))
+      || (textbookId !== null && (!textbookName || !textbookUpdatedAt))
+    ) sourceError(code)
+    if (!Array.isArray(value.slots) || value.slots.length === 0) {
+      sourceError("registration_customer_message_admission_schedule_incomplete")
+    }
+    const slots = value.slots.map((slot) => admissionSlot(slot, authority)).sort((left, right) => (
+      left.sortOrder - right.sortOrder
+      || left.weekday - right.weekday
+      || compareCodePointText(left.startTime, right.startTime)
+      || compareCodePointText(left.slotId ?? "", right.slotId ?? "")
+    ))
+    const firstLesson = admissionFirstLesson(value.firstLesson, authority)
+    return Object.freeze({
+      enrollmentId: requiredUuid(value.enrollmentId, code),
+      trackId,
+      subject: subject as RegistrationCustomerMessageSubject,
+      sortOrder: nonnegativeInteger(value.sortOrder, code),
+      workflowStatus: "enrollment_requested" as const,
+      workflowRevision,
+      enrollmentUpdatedAt: parsedTimestamp(value.enrollmentUpdatedAt, code).epoch,
+      classId: requiredUuid(value.classId, code),
+      classSubject: subject as RegistrationCustomerMessageSubject,
+      className: requiredText(value.className, code),
+      classUpdatedAt: parsedTimestamp(value.classUpdatedAt, code).epoch,
+      textbookId,
+      textbookName,
+      textbookUpdatedAt,
+      runtimeVersion,
+      storageMode,
+      authority,
+      scheduleRevision: nonnegativeInteger(value.scheduleRevision, code),
+      scheduleHash: requiredHash(value.scheduleHash, code),
+      slots: Object.freeze(slots),
+      firstLesson,
+    })
+  }).sort((left, right) => (
+    SUBJECT_ORDER.indexOf(left.subject) - SUBJECT_ORDER.indexOf(right.subject)
+    || left.sortOrder - right.sortOrder
+    || compareCodePointText(left.className, right.className)
+    || compareCodePointText(left.enrollmentId, right.enrollmentId)
+  ))
+  if (new Set(plans.map(({ enrollmentId }) => enrollmentId)).size !== plans.length) {
+    sourceError("registration_customer_message_admission_plan_invalid")
+  }
+  const planSubjects = subjects(plans.map(({ subject }) => subject))
+  const planTrackIds = new Set(plans.map(({ trackId }) => trackId))
+  if (
+    !sameSubjects(planSubjects, normalizedSubjects)
+    || planTrackIds.size !== tracks.length
+    || tracks.some(({ trackId }) => !planTrackIds.has(trackId))
+  ) sourceError("registration_customer_message_subject_invalid")
+  const enrollmentPlans = Object.freeze(plans.map((plan) => Object.freeze({
+    enrollmentId: plan.enrollmentId,
+    subject: plan.subject,
+    sortOrder: plan.sortOrder,
+    className: plan.className,
+    textbookName: plan.textbookName,
+    slots: Object.freeze(plan.slots.map((slot) => Object.freeze({
+      weekday: slot.weekday,
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+      teacherName: slot.teacherName,
+      classroomName: slot.classroomName,
+    }))),
+    firstLesson: Object.freeze({
+      sessionDate: plan.firstLesson.sessionDate,
+      startTime: plan.firstLesson.startTime,
+      endTime: plan.firstLesson.endTime,
+    }),
+  }) satisfies RegistrationCustomerMessageAdmissionPlan))
+  return {
+    facts: { enrollmentPlans },
+    source: {
+      trackId: null,
+      appointmentId: null,
+      tracks: Object.freeze(tracks),
+      enrollmentPlans: Object.freeze(plans),
+    },
+  } as const
 }
 
 function normalizedSource(
@@ -347,8 +686,8 @@ function normalizedSource(
   const variant = kind === "waiting_notice"
     ? waitingFacts(raw, sourceId)
     : kind === "admission_application"
-      ? admissionFacts(raw, sourceId)
-      : appointmentFacts(kind, raw, sourceId, now)
+      ? admissionFacts(raw, sourceId, normalizedSubjects)
+      : appointmentFacts(kind, raw, sourceId, now, normalizedSubjects)
   return {
     taskId,
     studentName,
