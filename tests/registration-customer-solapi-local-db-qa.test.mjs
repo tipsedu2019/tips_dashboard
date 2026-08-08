@@ -12,9 +12,9 @@ const runnerPath = path.join(
   repositoryRoot,
   "scripts/run-registration-customer-solapi-local-db-qa.mjs",
 );
-const expectedUrl = "http://127.0.0.1:54321";
+const expectedUrl = "http://127.0.0.1:55421";
 const expectedDbUrl =
-  "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+  "postgresql://postgres:postgres@127.0.0.1:55422/postgres";
 
 function exactResourceManifest(projectId) {
   return [

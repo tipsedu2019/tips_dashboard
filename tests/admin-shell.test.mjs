@@ -459,14 +459,21 @@ test("dashboard metrics renders the core snapshot before optional enrichment", a
 
   assert.match(source, /const DASHBOARD_CORE_TABLE_TIMEOUT_MS = 15000/);
   assert.match(source, /const DASHBOARD_OPTIONAL_TABLE_TIMEOUT_MS = 5000/);
-  assert.match(source, /classes: "\*"/);
+  assert.match(source, /classes:\s*\[[\s\S]*"schedule_storage_mode"[\s\S]*\]\.join\(","\)/);
+  assert.doesNotMatch(
+    source.match(/classes:\s*([\s\S]*?),\n\s*students:/)?.[1] || "",
+    /schedule_plan|["']\*["']/,
+  );
   assert.match(source, /students:\s*\[[\s\S]*"school"[\s\S]*"grade"[\s\S]*"class_ids"/);
   assert.match(source, /academic_events: "\*"/);
   assert.match(source, /teacher_catalogs: "id,name,profile_id,subjects,is_visible"/);
   assert.match(source, /classroom_catalogs: "id,name,subjects,is_visible"/);
   assert.match(source, /function isMissingColumnError/);
-  assert.match(source, /result = await queryTable\(tableName, "\*", optional, timeoutMs\)/);
-  assert.match(source, /const \[classes, students\] = await Promise\.all/);
+  assert.match(source, /tableName !== "classes" && isMissingColumnError\(result\.error\)/);
+  assert.match(source, /result = await queryTable\(tableName, "\*", timeoutMs\)/);
+  assert.match(source, /rpc\("list_dashboard_class_session_dates_v1"/);
+  assert.match(source, /const \[classRows, students, sessionDates\] = await Promise\.all/);
+  assert.match(source, /const classes = attachDashboardClassSessionDates\(classRows, sessionDates\)/);
   assert.match(source, /buildMetrics\(\{\s*classes,\s*students,\s*\}\)/);
   assert.match(source, /readTable\("class_terms", \{ optional: true \}\)/);
   assert.match(source, /type ConflictSourceStatus = "loading" \| "ready" \| "error"/);
