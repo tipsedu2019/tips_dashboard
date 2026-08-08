@@ -190,7 +190,13 @@ test("production route는 service RPC·canonical renderer·기존 SOLAPI adapter
   assert.match(source, /createRegistrationCustomerMessageSourceResolver/)
   assert.match(source, /createRegistrationCustomerMessageSolapi/)
   assert.match(source, /const REGISTRATION_CUSTOMER_REMINDER_RPC_TIMEOUT_MS = 12_000/)
+  assert.match(source, /type ServiceRpcOptions = Readonly<\{ sourceIneligibleIsTerminal\?: boolean \}>/)
   assert.match(source, /client\.rpc\(name, args\)[\s\S]*\.abortSignal\(AbortSignal\.timeout\(REGISTRATION_CUSTOMER_REMINDER_RPC_TIMEOUT_MS\)\)[\s\S]*\.retry\(false\)/)
+  assert.match(
+    source,
+    /read_registration_customer_reminder_source_v1[\s\S]*sourceIneligibleIsTerminal:\s*true/,
+  )
+  assert.match(source, /new RegistrationCustomerReminderSourceIneligibleError\(\)/)
   for (const rpc of [
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",

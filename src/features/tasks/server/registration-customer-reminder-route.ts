@@ -14,14 +14,17 @@ import {
   createRegistrationCustomerMessageSourceResolver,
   readRegistrationCustomerMessagePrivateSource,
 } from "./registration-customer-message-source.ts"
-import { authorizeRegistrationCustomerReminderWorker } from "./registration-customer-reminder-worker.ts"
+import {
+  RegistrationCustomerReminderSourceIneligibleError,
+  authorizeRegistrationCustomerReminderWorker,
+  createRegistrationCustomerReminderWorker,
+} from "./registration-customer-reminder-worker.ts"
 import type {
   RegistrationCustomerReminderBegin,
   RegistrationCustomerReminderClaim,
   RegistrationCustomerReminderPrepared,
   RegistrationCustomerReminderWorkerResult,
 } from "./registration-customer-reminder-worker.ts"
-import { createRegistrationCustomerReminderWorker } from "./registration-customer-reminder-worker.ts"
 
 type JsonRecord = Record<string, unknown>
 
@@ -268,6 +271,7 @@ export function createRegistrationCustomerReminderRouteHandlers(
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
 const REGISTRATION_CUSTOMER_REMINDER_RPC_TIMEOUT_MS = 12_000
+type ServiceRpcOptions = Readonly<{ sourceIneligibleIsTerminal?: boolean }>
 
 function environmentText(value: unknown) {
   return typeof value === "string" ? value.trim() : ""
@@ -284,8 +288,14 @@ function serviceClient() {
   })
 }
 
-function rpcFailure(error: unknown): never {
+function rpcFailure(error: unknown, options: ServiceRpcOptions = {}): never {
   const message = isRecord(error) ? text(error.message) : ""
+  if (
+    options.sourceIneligibleIsTerminal
+    && message.includes("registration_customer_message_source_ineligible")
+  ) {
+    throw new RegistrationCustomerReminderSourceIneligibleError()
+  }
   if (message.includes("registration_customer_reminder_not_ready")) {
     throw new RegistrationCustomerReminderHttpError(409, "registration_customer_reminder_not_ready")
   }
@@ -298,11 +308,16 @@ function rpcFailure(error: unknown): never {
   throw new RegistrationCustomerReminderHttpError(503, "registration_customer_reminder_runtime_unavailable")
 }
 
-async function serviceRpc(client: SupabaseClient, name: string, args: JsonRecord = {}) {
+async function serviceRpc(
+  client: SupabaseClient,
+  name: string,
+  args: JsonRecord = {},
+  options: ServiceRpcOptions = {},
+) {
   const result = await client.rpc(name, args)
     .abortSignal(AbortSignal.timeout(REGISTRATION_CUSTOMER_REMINDER_RPC_TIMEOUT_MS))
     .retry(false)
-  if (result.error) rpcFailure(result.error)
+  if (result.error) rpcFailure(result.error, options)
   return result.data
 }
 
@@ -394,6 +409,8 @@ export function createProductionRegistrationCustomerReminderRouteHandlers() {
       const rawSource = await serviceRpc(client, "read_registration_customer_reminder_source_v1", {
         p_job_id: claim.jobId,
         p_claim_token: claim.claimToken,
+      }, {
+        sourceIneligibleIsTerminal: true,
       })
       const resolver = createRegistrationCustomerMessageSourceResolver({
         catalog,

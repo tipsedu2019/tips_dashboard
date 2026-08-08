@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  RegistrationCustomerReminderSourceIneligibleError,
   authorizeRegistrationCustomerReminderWorker,
   createRegistrationCustomerReminderWorker,
 } from "../src/features/tasks/server/registration-customer-reminder-worker.ts"
@@ -98,14 +99,80 @@ test("도래한 작업이 없으면 provider를 호출하지 않는다", async (
 })
 
 test("사전 준비가 실패하면 claim을 안전하게 해제하고 provider를 호출하지 않는다", async () => {
+  let releaseInput
   const { calls, worker } = makeDependencies({
     prepare: async () => { throw new Error("template_drift") },
+    async release(input) {
+      calls.release += 1
+      releaseInput = input
+    },
   })
   const result = await worker.runOnce()
 
   assert.equal(result.outcome, "held")
   assert.equal(result.providerAttempted, false)
   assert.equal(calls.release, 1)
+  assert.equal(releaseInput.errorCode, "pre_send_preparation_failed")
+  assert.equal(calls.send, 0)
+  assert.equal(calls.finalize, 0)
+})
+
+test("대상 과목이 사라진 자동 리마인드는 terminal 취소되고 provider를 호출하지 않는다", async () => {
+  let releaseInput
+  const { calls, worker } = makeDependencies({
+    prepare: async () => { throw new RegistrationCustomerReminderSourceIneligibleError() },
+    async release(input) {
+      calls.release += 1
+      releaseInput = input
+    },
+  })
+
+  const result = await worker.runOnce()
+
+  assert.deepEqual(result, {
+    ok: true,
+    processed: true,
+    providerAttempted: false,
+    outcome: "skipped",
+  })
+  assert.equal(releaseInput.errorCode, "source_ineligible")
+  assert.equal(calls.send, 0)
+  assert.equal(calls.finalize, 0)
+})
+
+test("terminal 취소 기록이 실패해도 provider 경계를 넘지 않고 held로 남긴다", async () => {
+  const { calls, worker } = makeDependencies({
+    prepare: async () => { throw new RegistrationCustomerReminderSourceIneligibleError() },
+    async release() {
+      calls.release += 1
+      throw new Error("database unavailable")
+    },
+  })
+
+  const result = await worker.runOnce()
+
+  assert.equal(result.outcome, "held")
+  assert.equal(result.providerAttempted, false)
+  assert.equal(calls.release, 1)
+  assert.equal(calls.send, 0)
+  assert.equal(calls.finalize, 0)
+})
+
+test("DB 시도 마커 준비가 실패하면 generic hold로 해제하고 provider를 호출하지 않는다", async () => {
+  let releaseInput
+  const { calls, worker } = makeDependencies({
+    begin: async () => { throw new Error("database unavailable") },
+    async release(input) {
+      calls.release += 1
+      releaseInput = input
+    },
+  })
+
+  const result = await worker.runOnce()
+
+  assert.equal(result.outcome, "held")
+  assert.equal(result.providerAttempted, false)
+  assert.equal(releaseInput.errorCode, "pre_send_preparation_failed")
   assert.equal(calls.send, 0)
   assert.equal(calls.finalize, 0)
 })

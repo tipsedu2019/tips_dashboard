@@ -60,6 +60,13 @@ export type RegistrationCustomerReminderWorkerResult = Readonly<{
   outcome: "idle" | "held" | "skipped" | "accepted" | "failed_hold" | "unknown"
 }>
 
+export class RegistrationCustomerReminderSourceIneligibleError extends Error {
+  constructor() {
+    super("registration_customer_message_source_ineligible")
+    this.name = "RegistrationCustomerReminderSourceIneligibleError"
+  }
+}
+
 function secretDigest(value: string) {
   return createHash("sha256").update(value, "utf8").digest()
 }
@@ -94,9 +101,27 @@ export function createRegistrationCustomerReminderWorker(
       if (!claim) return result("idle", false, false)
 
       let prepared: RegistrationCustomerReminderPrepared
-      let begin: RegistrationCustomerReminderBegin
       try {
         prepared = await dependencies.prepare(claim)
+      } catch (error) {
+        if (error instanceof RegistrationCustomerReminderSourceIneligibleError) {
+          try {
+            await dependencies.release({ claim, errorCode: "source_ineligible" })
+            return result("skipped", false)
+          } catch {
+            return result("held", false)
+          }
+        }
+        try {
+          await dependencies.release({ claim, errorCode: "pre_send_preparation_failed" })
+        } catch {
+          // The lease expires without crossing the provider boundary.
+        }
+        return result("held", false)
+      }
+
+      let begin: RegistrationCustomerReminderBegin
+      try {
         begin = await dependencies.begin({ claim, prepared })
       } catch {
         try {
