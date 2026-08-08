@@ -10,6 +10,7 @@ import {
   REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_REVISIONS,
   checksumRegistrationCustomerMessageTemplate,
   createRegistrationCustomerMessageCatalog,
+  formatRegistrationCustomerMessageAdmissionPlans,
   formatRegistrationCustomerMessageSchedule,
   formatRegistrationCustomerMessageSubjects,
   renderRegistrationCustomerMessage,
@@ -24,7 +25,7 @@ const LEVEL_TEST_BODY = `[팁스영어수학학원] 레벨테스트 예약 안�
 장소: #{장소}
 과목: #{과목}
 
-일정 변경이 필요하시면 학원으로 연락해 주세요.`
+일정 변경 및 문의는 아래 문의하기 버튼을 이용해 주세요.`
 
 const VISIT_BODY = `[팁스영어수학학원] 방문상담 예약 안내
 
@@ -34,7 +35,7 @@ const VISIT_BODY = `[팁스영어수학학원] 방문상담 예약 안내
 장소: #{장소}
 과목: #{과목}
 
-일정 변경이 필요하시면 학원으로 연락해 주세요.`
+일정 변경 및 문의는 아래 문의하기 버튼을 이용해 주세요.`
 
 const REMINDER_BODY = `[팁스영어수학학원] 예약 리마인드
 
@@ -44,7 +45,7 @@ const REMINDER_BODY = `[팁스영어수학학원] 예약 리마인드
 장소: #{장소}
 과목: #{과목}
 
-변경이 필요하시면 학원으로 연락해 주세요.`
+일정 변경 및 문의는 아래 문의하기 버튼을 이용해 주세요.`
 
 const WAITING_BODY = `[팁스영어수학학원] 대기 신청 접수 안내
 
@@ -52,17 +53,105 @@ const WAITING_BODY = `[팁스영어수학학원] 대기 신청 접수 안내
 
 대기 내용: #{대기내용}
 
-변동 사항이 확인되는 대로 다시 안내드리겠습니다.`
+변동 사항이 확인되는 대로 다시 안내드리겠습니다.
+
+변동사항 및 문의는 아래 문의하기 버튼을 이용해 주세요.`
 
 const ADMISSION_BODY = `[팁스영어수학학원] 입학신청서 작성 안내
 
 안녕하세요. #{학생명} 학생의 입학 절차를 안내드립니다.
 
+[등록 수업 정보]
+#{등록수업안내}
+
+자세한 수업 일정은 학원 홈페이지에서 확인해 주세요.
+
 최종 원생 등록 및 교육비 납부 안내를 위해 입학신청서를 제출해 주세요.
 
 입학신청서에는 원내 수강 규정, 원생의 건강·정서 상태 고지 의무, CCTV 활용 등 학원 생활에 필요한 중요 약관이 포함되어 있습니다. 내용을 확인하신 후 서명을 완료해 주세요.
 
-아래 버튼에서 입학신청서를 작성할 수 있습니다.`
+아래 버튼에서 입학신청서를 작성할 수 있습니다.
+변동사항 및 문의는 아래 문의하기 버튼을 이용해 주세요.`
+
+const CONTACT_BUTTON = Object.freeze({
+  name: "문의하기",
+  type: "WL",
+  linkMobile: "https://tipsedu.channel.io",
+  linkPc: "https://tipsedu.channel.io",
+})
+
+const ADMISSION_FORM_BUTTON = Object.freeze({
+  name: "입학신청서 작성",
+  type: "WL",
+  linkMobile: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
+  linkPc: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
+})
+
+const ENGLISH_PLAN = Object.freeze({
+  enrollmentId: "00000000-0000-4000-8000-000000000101",
+  subject: "영어",
+  sortOrder: 0,
+  className: "중2 영어 A반",
+  textbookName: "능률 VOCA",
+  slots: Object.freeze([
+    Object.freeze({
+      weekday: 1,
+      startTime: "18:00",
+      endTime: "20:00",
+      teacherName: "홍길동",
+      classroomName: "본관 301호",
+    }),
+    Object.freeze({
+      weekday: 3,
+      startTime: "18:00",
+      endTime: "20:00",
+      teacherName: "홍길동",
+      classroomName: "본관 301호",
+    }),
+  ]),
+  firstLesson: Object.freeze({
+    sessionDate: "2026-08-17",
+    startTime: "18:00",
+    endTime: "20:00",
+  }),
+})
+
+const ENGLISH_PLAN_VARIABLE = `과목/수업: [영어] 중2 영어 A반
+교재: 능률 VOCA
+요일/시간: 월·수 오후 6:00–8:00
+선생님: 홍길동
+강의실: 본관 301호
+
+첫 수업일: 8월 17일 월요일 오후 6:00–8:00`
+
+const MATH_PLAN = Object.freeze({
+  enrollmentId: "00000000-0000-4000-8000-000000000102",
+  subject: "수학",
+  sortOrder: 1,
+  className: "중2 수학 B반",
+  textbookName: null,
+  slots: Object.freeze([
+    Object.freeze({
+      weekday: 2,
+      startTime: "16:00",
+      endTime: "18:00",
+      teacherName: "김길동",
+      classroomName: "별관 201호",
+    }),
+    Object.freeze({
+      weekday: 4,
+      startTime: "16:00",
+      endTime: "18:00",
+      teacherName: "이길동",
+      classroomName: "별관 202호",
+    }),
+  ]),
+  firstLesson: Object.freeze({
+    sessionDate: "2026-08-18",
+    startTime: "16:00",
+    endTime: "18:00",
+  }),
+})
 
 const TEMPLATE_IDS = {
   level_test_booking: "template-level",
@@ -89,7 +178,7 @@ function sha256(value) {
 }
 
 test("catalog maps exactly five kinds to the approved server-only environment keys", () => {
-  assert.equal(REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION, 3)
+  assert.equal(REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION, 4)
   assert.deepEqual(REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS, {
     level_test_booking: "SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID",
     visit_consultation_booking: "SOLAPI_REGISTRATION_VISIT_BOOKING_TEMPLATE_ID",
@@ -98,11 +187,11 @@ test("catalog maps exactly five kinds to the approved server-only environment ke
     admission_application: "SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID",
   })
   assert.deepEqual(REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_REVISIONS, {
-    level_test_booking: 2,
-    visit_consultation_booking: 2,
-    appointment_reminder: 2,
-    waiting_notice: 1,
-    admission_application: 2,
+    level_test_booking: 3,
+    visit_consultation_booking: 3,
+    appointment_reminder: 3,
+    waiting_notice: 2,
+    admission_application: 3,
   })
   assert.equal(Object.isFrozen(REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_REVISIONS), true)
   assert.throws(() => {
@@ -128,6 +217,7 @@ test("catalog maps exactly five kinds to the approved server-only environment ke
     assert.equal(entry.envKey, REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS[kind])
     assert.equal(entry.templateId, TEMPLATE_IDS[kind])
     assert.equal(entry.templateConfigured, true)
+    assert.deepEqual(entry.buttons.at(-1), CONTACT_BUTTON)
   }
 
   const serialized = JSON.stringify(catalog)
@@ -191,32 +281,27 @@ test("catalog pins exact approved copy and place-aware Naver buttons", () => {
     level_test_booking: {
       content: LEVEL_TEST_BODY,
       variables: ["학생명", "예약일시", "장소", "과목", "장소ID"],
-      buttons: placeButton,
+      buttons: [...placeButton, CONTACT_BUTTON],
     },
     visit_consultation_booking: {
       content: VISIT_BODY,
       variables: ["학생명", "예약일시", "장소", "과목", "장소ID"],
-      buttons: placeButton,
+      buttons: [...placeButton, CONTACT_BUTTON],
     },
     appointment_reminder: {
       content: REMINDER_BODY,
       variables: ["학생명", "예약종류", "예약일시", "장소", "과목", "장소ID"],
-      buttons: placeButton,
+      buttons: [...placeButton, CONTACT_BUTTON],
     },
     waiting_notice: {
       content: WAITING_BODY,
       variables: ["학생명", "과목", "대기종류", "대기내용"],
-      buttons: [],
+      buttons: [CONTACT_BUTTON],
     },
     admission_application: {
       content: ADMISSION_BODY,
-      variables: ["학생명"],
-      buttons: [{
-        name: "입학신청서 작성",
-        type: "WL",
-        linkMobile: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
-        linkPc: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
-      }],
+      variables: ["학생명", "등록수업안내"],
+      buttons: [ADMISSION_FORM_BUTTON, CONTACT_BUTTON],
     },
   }
 
@@ -314,7 +399,7 @@ test("renderer uses only each template allowlist and produces the exact approved
     type: "WL",
     linkMobile: "https://map.naver.com/p/entry/place/#{장소ID}",
     linkPc: "https://map.naver.com/p/entry/place/#{장소ID}",
-  }])
+  }, CONTACT_BUTTON])
   assert.equal(level.body, LEVEL_TEST_BODY
     .replace("#{학생명}", "김팁스")
     .replace("#{예약일시}", "2026년 8월 8일 토요일 오후 2:00")
@@ -365,16 +450,67 @@ test("renderer uses only each template allowlist and produces the exact approved
 
   const admission = renderRegistrationCustomerMessage({
     kind: "admission_application",
-    facts: { studentName: "김팁스", subjects: ["영어", "수학"] },
+    facts: {
+      studentName: "김팁스",
+      subjects: ["영어"],
+      enrollmentPlans: [ENGLISH_PLAN],
+    },
   })
-  assert.equal(admission.body, ADMISSION_BODY.replace("#{학생명}", "김팁스"))
-  assert.deepEqual(admission.buttons, [{
-    name: "입학신청서 작성",
-    type: "WL",
-    linkMobile: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
-    linkPc: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
+  assert.deepEqual(admission.variables, {
+    "#{학생명}": "김팁스",
+    "#{등록수업안내}": ENGLISH_PLAN_VARIABLE,
+  })
+  assert.equal(
+    admission.body,
+    ADMISSION_BODY
+      .replace("#{학생명}", "김팁스")
+      .replace("#{등록수업안내}", ENGLISH_PLAN_VARIABLE),
+  )
+  assert.deepEqual(admission.buttons, [ADMISSION_FORM_BUTTON, CONTACT_BUTTON])
+  assert.deepEqual(admission.facts.admissionPlans, [{
+    subjectLabel: "영어",
+    className: "중2 영어 A반",
+    textbookLabel: "능률 VOCA",
+    scheduleLabel: "월·수 오후 6:00–8:00",
+    teacherLabel: "홍길동",
+    classroomLabel: "본관 301호",
+    firstLessonLabel: "8월 17일 월요일 오후 6:00–8:00",
   }])
-  assert.equal(Object.values(admission.variables).length, 1)
+})
+
+test("admission plans sort deterministically and preserve weekday-specific assignments", () => {
+  const formatted = formatRegistrationCustomerMessageAdmissionPlans([MATH_PLAN, ENGLISH_PLAN])
+
+  assert.equal(formatted.variable, `과목/수업: [영어] 중2 영어 A반
+교재: 능률 VOCA
+요일/시간: 월·수 오후 6:00–8:00
+선생님: 홍길동
+강의실: 본관 301호
+
+첫 수업일: 8월 17일 월요일 오후 6:00–8:00
+
+과목/수업: [수학] 중2 수학 B반
+교재: 선택 안 함(이미 보유)
+요일/시간: 화·목 오후 4:00–6:00
+선생님: 화 김길동 · 목 이길동
+강의실: 화 별관 201호 · 목 별관 202호
+
+첫 수업일: 8월 18일 화요일 오후 4:00–6:00`)
+  assert.deepEqual(formatted.plans.map((plan) => plan.subjectLabel), ["영어", "수학"])
+})
+
+test("renderer blocks completed AlimTalk bodies over 1,000 Unicode code points", () => {
+  assert.throws(
+    () => renderRegistrationCustomerMessage({
+      kind: "admission_application",
+      facts: {
+        studentName: "김팁스",
+        subjects: ["영어"],
+        enrollmentPlans: [{ ...ENGLISH_PLAN, className: "가".repeat(1001) }],
+      },
+    }),
+    { message: "registration_customer_message_body_too_long" },
+  )
 })
 
 test("renderer replaces template tokens once without reinterpreting variable values", () => {
@@ -397,15 +533,15 @@ test("renderer replaces template tokens once without reinterpreting variable val
 test("template and rendered checksums use canonical UTF-8 SHA-256", () => {
   const catalog = createRegistrationCustomerMessageCatalog(FULL_ENV)
   const template = catalog.templates.admission_application
-  const canonical = `{"buttons":[{"linkMobile":"https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8","linkPc":"https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8","name":"입학신청서 작성","type":"WL"}],"content":${JSON.stringify(ADMISSION_BODY)},"variables":["학생명"]}`
+  const canonical = `{"buttons":[{"linkMobile":"https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8","linkPc":"https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8","name":"입학신청서 작성","type":"WL"},{"linkMobile":"https://tipsedu.channel.io","linkPc":"https://tipsedu.channel.io","name":"문의하기","type":"WL"}],"content":${JSON.stringify(ADMISSION_BODY)},"variables":["학생명","등록수업안내"]}`
 
   assert.equal(checksumRegistrationCustomerMessageTemplate(template), sha256(canonical))
   assert.equal(template.checksums.template, sha256(canonical))
   assert.equal(template.checksums.content, sha256(ADMISSION_BODY))
-  assert.equal(template.checksums.variables, sha256('["학생명"]'))
+  assert.equal(template.checksums.variables, sha256('["학생명","등록수업안내"]'))
   assert.equal(
     template.checksums.buttons,
-    sha256('[{"linkMobile":"https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8","linkPc":"https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8","name":"입학신청서 작성","type":"WL"}]'),
+    sha256('[{"linkMobile":"https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8","linkPc":"https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8","name":"입학신청서 작성","type":"WL"},{"linkMobile":"https://tipsedu.channel.io","linkPc":"https://tipsedu.channel.io","name":"문의하기","type":"WL"}]'),
   )
 
   const providerNormalizedTemplate = {
@@ -429,12 +565,12 @@ test("template and rendered checksums use canonical UTF-8 SHA-256", () => {
 
   const rendered = renderRegistrationCustomerMessage({
     kind: "admission_application",
-    facts: { studentName: "김팁스", subjects: ["영어"] },
+    facts: { studentName: "김팁스", subjects: ["영어"], enrollmentPlans: [ENGLISH_PLAN] },
   })
   assert.equal(rendered.checksums.body, sha256(rendered.body))
   assert.equal(rendered.checksums.buttons, template.checksums.buttons)
   assert.equal(
     rendered.checksums.variables,
-    sha256('{"#{학생명}":"김팁스"}'),
+    sha256(`{"#{등록수업안내}":${JSON.stringify(ENGLISH_PLAN_VARIABLE)},"#{학생명}":"김팁스"}`),
   )
 })

@@ -98,6 +98,11 @@ test("send uses the official detailed ATA endpoint and an exact no-SMS-fallback 
       type: "WL",
       linkMobile: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
       linkPc: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
+    }, {
+      name: "문의하기",
+      type: "WL",
+      linkMobile: "https://tipsedu.channel.io",
+      linkPc: "https://tipsedu.channel.io",
     }],
     requestKey: REQUEST_KEY,
   })
@@ -120,6 +125,11 @@ test("send uses the official detailed ATA endpoint and an exact no-SMS-fallback 
           buttonType: "WL",
           linkMo: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
           linkPc: "https://pay.makeedu.co.kr/join/4A214239B585F87D809C141B2712F9D8",
+        }, {
+          buttonName: "문의하기",
+          buttonType: "WL",
+          linkMo: "https://tipsedu.channel.io",
+          linkPc: "https://tipsedu.channel.io",
         }],
       },
       customFields: { registrationRequestKey: REQUEST_KEY },
