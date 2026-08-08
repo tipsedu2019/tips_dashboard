@@ -6,7 +6,9 @@ const migrationsUrl = new URL("../supabase/migrations/", import.meta.url)
 
 async function migrationSource() {
   const names = await readdir(migrationsUrl)
-  const selected = names.filter((value) => value.includes("_registration_customer_reminder_"))
+  const selected = names
+    .filter((value) => value.includes("_registration_customer_reminder_"))
+    .sort()
   assert.ok(selected.some((value) => value.endsWith("_registration_customer_reminder_automation.sql")), "registration customer reminder automation migration must exist")
   const sources = await Promise.all(selected.map((name) => readFile(new URL(name, migrationsUrl), "utf8")))
   return sources.join("\n").toLowerCase().replace(/\s+/gu, " ")
@@ -155,4 +157,16 @@ test("Vault 비밀키 회전은 service role 전용이며 값이나 URL을 클�
   assert.match(sql, /vault\.update_secret\(/)
   assert.match(sql, /grant execute on function public\.configure_registration_customer_reminder_worker_secret_v1\(text\)\s+to service_role/)
   assert.doesNotMatch(sql, /grant execute on function public\.configure_registration_customer_reminder_worker_secret_v1\(text\)\s+to (?:anon|authenticated)/)
+})
+
+test("Vault 회전 RPC는 UUID 집계를 사용하지 않고 단일 secret ID를 안전하게 선택한다", async () => {
+  const sql = await migrationSource()
+  const start = sql.lastIndexOf("create or replace function public.configure_registration_customer_reminder_worker_secret_v1")
+  const end = sql.indexOf("alter function public.configure_registration_customer_reminder_worker_secret_v1", start)
+  const body = sql.slice(start, end)
+
+  assert.ok(start >= 0 && end > start)
+  assert.doesNotMatch(body, /pg_catalog\.min\(secret\.id\)/)
+  assert.match(body, /order by secret\.id\s+limit 1/)
+  assert.match(body, /select pg_catalog\.count\(\*\)::integer/)
 })
