@@ -220,6 +220,37 @@ test("휴보강 초기 조회의 timeout과 네트워크 오류를 재시도 가
 
   assert.equal(makeupRequestLoadingModule.getMakeupWorkspaceLoadErrorMessage(abortError), expected);
   assert.equal(makeupRequestLoadingModule.getMakeupWorkspaceLoadErrorMessage(new TypeError("Failed to fetch")), expected);
+  assert.equal(
+    makeupRequestLoadingModule.getMakeupWorkspaceLoadErrorMessage({ name: "AbortError", message: "signal timed out" }),
+    expected,
+  );
+  assert.equal(makeupRequestLoadingModule.getMakeupWorkspaceLoadErrorMessage({ message: "Failed to fetch" }), expected);
+  assert.equal(
+    makeupRequestLoadingModule.getMakeupWorkspaceLoadErrorMessage({
+      code: "57014",
+      message: "canceling statement due to statement timeout",
+    }),
+    expected,
+  );
+  assert.equal(
+    makeupRequestLoadingModule.getMakeupWorkspaceLoadErrorMessage({ code: "57014", message: "query canceled" }),
+    expected,
+  );
+  assert.equal(
+    makeupRequestLoadingModule.getMakeupWorkspaceLoadErrorMessage({ details: "upstream request timed out" }),
+    expected,
+  );
+  assert.equal(
+    makeupRequestLoadingModule.getMakeupWorkspaceLoadErrorMessage({ hint: "network request failed" }),
+    expected,
+  );
+  assert.equal(
+    makeupRequestLoadingModule.getMakeupWorkspaceLoadErrorMessage({
+      code: "42501",
+      message: "permission denied for table makeup_requests",
+    }),
+    "permission denied for table makeup_requests",
+  );
 });
 
 test("휴보강 초기 테이블 조회는 모든 PostgREST 경로에 취소 신호를 연결하고 자동 재시도를 끈다", async () => {
