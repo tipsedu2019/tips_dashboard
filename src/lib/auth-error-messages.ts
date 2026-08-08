@@ -2,6 +2,20 @@ export function getAuthErrorMessage(error: unknown, fallbackMessage: string) {
   const rawMessage = error instanceof Error ? error.message : String(error || "")
   const message = rawMessage.trim()
   const normalizedMessage = message.toLowerCase()
+  const errorCode =
+    typeof error === "object" && error && "code" in error
+      ? String(error.code || "").trim().toLowerCase()
+      : ""
+
+  if (
+    errorCode === "auth_operation_timeout" ||
+    normalizedMessage.includes("auth_operation_timeout") ||
+    normalizedMessage.includes("failed to fetch") ||
+    normalizedMessage.includes("network request failed") ||
+    normalizedMessage.includes("load failed")
+  ) {
+    return "서버 연결이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."
+  }
 
   if (normalizedMessage.includes("invalid login credentials")) {
     return "아이디 또는 비밀번호가 올바르지 않습니다."

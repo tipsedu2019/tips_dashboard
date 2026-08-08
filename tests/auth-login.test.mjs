@@ -2,6 +2,12 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { getAuthErrorMessage } from "../src/lib/auth-error-messages.ts";
+import {
+  loadAuthSession,
+  signInWithPassword,
+} from "../src/lib/supabase-auth-operations.ts";
+
 const root = new URL("../", import.meta.url);
 
 async function readSource(pathname) {
@@ -136,7 +142,7 @@ test("bare Gmail ids are normalized to full Gmail email addresses", async () => 
   assert.match(authProviderSource, /normalizeEmail\(identifier\)/);
   assert.match(
     authProviderSource,
-    /signInWithPassword\(\{\s*email: normalizedEmail,\s*password,/,
+    /signInWithPassword\(supabase, \{\s*email: normalizedEmail,\s*password,/,
   );
   assert.match(authProviderSource, /getAuthErrorMessage/);
   assert.match(authProviderSource, /로그인 상태를 확인하지 못했습니다/);
@@ -160,12 +166,59 @@ test("stale refresh token sessions recover to a clean sign-in state", async () =
   assert.doesNotMatch(source, /Invalid Refresh Token/);
 });
 
+test("initial auth session lookup stops waiting at its deadline", async () => {
+  const client = {
+    auth: {
+      getSession: () => new Promise(() => {}),
+    },
+  };
+
+  await assert.rejects(
+    loadAuthSession(client, 5),
+    (error) => error?.code === "auth_operation_timeout",
+  );
+});
+
+test("password sign-in stops waiting at its deadline", async () => {
+  const client = {
+    auth: {
+      signInWithPassword: () => new Promise(() => {}),
+    },
+  };
+
+  await assert.rejects(
+    signInWithPassword(
+      client,
+      { email: "teacher@gmail.com", password: "password" },
+      5,
+    ),
+    (error) => error?.code === "auth_operation_timeout",
+  );
+});
+
+test("retryable auth failures use stable Korean guidance", () => {
+  const expected = "서버 연결이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.";
+
+  for (const message of [
+    "auth_operation_timeout",
+    "Failed to fetch",
+    "Network request failed",
+    "Load failed",
+  ]) {
+    assert.equal(
+      getAuthErrorMessage(new Error(message), "fallback"),
+      expected,
+      message,
+    );
+  }
+});
+
 test("auth initialization survives React strict-effect replay without duplicate session locks", async () => {
   const source = await readSource("src/providers/auth-provider.tsx");
 
   assert.match(source, /let initialAuthSessionPromise/);
   assert.match(source, /function loadInitialAuthSession/);
-  assert.match(source, /initialAuthSessionPromise \|\|= client\.auth\.getSession\(\)/);
+  assert.match(source, /initialAuthSessionPromise \|\|= loadAuthSession\(client\)\.finally/);
   assert.match(source, /loadInitialAuthSession\(client\)/);
   assert.match(source, /type ResolvedDashboardProfile/);
   assert.match(source, /await inflight\.promise/);

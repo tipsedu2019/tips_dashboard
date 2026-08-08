@@ -27,6 +27,10 @@ import {
 } from "@/lib/auth-utils"
 import { getAuthErrorMessage } from "@/lib/auth-error-messages"
 import { createAuthResolutionCoordinator } from "@/lib/auth-resolution-coordinator.js"
+import {
+  loadAuthSession,
+  signInWithPassword,
+} from "@/lib/supabase-auth-operations"
 
 type DashboardUser = User & {
   name?: string
@@ -79,7 +83,7 @@ let initialAuthSessionPromise: Promise<InitialAuthSessionResult> | null = null
 const PROFILE_QUERY_TIMEOUT_MS = 10_000
 
 function loadInitialAuthSession(client: SupabaseClient) {
-  initialAuthSessionPromise ||= client.auth.getSession().finally(() => {
+  initialAuthSessionPromise ||= loadAuthSession(client).finally(() => {
     initialAuthSessionPromise = null
   })
 
@@ -394,7 +398,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         setAuthError(null)
         const normalizedEmail = normalizeEmail(identifier)
-        const { error } = await supabase.auth.signInWithPassword({
+        const { error } = await signInWithPassword(supabase, {
           email: normalizedEmail,
           password,
         })
