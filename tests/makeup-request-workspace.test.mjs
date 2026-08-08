@@ -46,6 +46,7 @@ const webPushRouteSource = readOptionalSource("src/app/api/web-push/route.ts");
 const notificationPopoverSource = readFileSync("src/components/dashboard-notification-popover.tsx", "utf8");
 const notificationContentSource = readFileSync("src/components/dashboard-notification-content.tsx", "utf8");
 const inFlightRequestModule = await import("../src/lib/in-flight-request.js").catch(() => ({}));
+const makeupRequestLoadingModule = await import("../src/features/makeup-requests/makeup-request-loading.ts").catch(() => ({}));
 const allMigrationSource = readdirSync("supabase/migrations")
   .filter((name) => name.endsWith(".sql"))
   .map((name) => readFileSync(`supabase/migrations/${name}`, "utf8"))
@@ -164,6 +165,101 @@ function loadMakeupPayloadValidation() {
     },
   );
 }
+
+function loadMakeupTableReaders(supabase) {
+  const source = sourceBetween(
+    serviceSource,
+    "async function readTable",
+    "function findTeacherByName",
+  );
+  return transpileAndLoad(
+    source,
+    ["readTable", "readNotificationDeliveryRows"],
+    {
+      AbortSignal,
+      MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT: 40,
+      MAKEUP_TABLE_TIMEOUT_MS: 12_000,
+      isMissingRelationError: () => false,
+      isPermissionError: () => false,
+      supabase,
+    },
+  );
+}
+
+function createCompleteMakeupQueryBuilder(calls) {
+  return {
+    select(...args) {
+      calls.push({ method: "select", args });
+      return this;
+    },
+    order(...args) {
+      calls.push({ method: "order", args });
+      return this;
+    },
+    limit(...args) {
+      calls.push({ method: "limit", args });
+      return this;
+    },
+    abortSignal(...args) {
+      calls.push({ method: "abortSignal", args });
+      return this;
+    },
+    retry(...args) {
+      calls.push({ method: "retry", args });
+      return Promise.resolve({ data: [], error: null });
+    },
+  };
+}
+
+test("휴보강 초기 조회의 timeout과 네트워크 오류를 재시도 가능한 안내로 정규화한다", () => {
+  assert.equal(typeof makeupRequestLoadingModule.getMakeupWorkspaceLoadErrorMessage, "function");
+
+  const abortError = new Error("The operation was aborted");
+  abortError.name = "AbortError";
+  const expected = "서버 응답이 지연되었습니다. 잠시 후 다시 시도해 주세요.";
+
+  assert.equal(makeupRequestLoadingModule.getMakeupWorkspaceLoadErrorMessage(abortError), expected);
+  assert.equal(makeupRequestLoadingModule.getMakeupWorkspaceLoadErrorMessage(new TypeError("Failed to fetch")), expected);
+});
+
+test("휴보강 초기 테이블 조회는 모든 PostgREST 경로에 취소 신호를 연결하고 자동 재시도를 끈다", async () => {
+  const tableCalls = [];
+  const deliveryCalls = [];
+  const builders = [
+    createCompleteMakeupQueryBuilder(tableCalls),
+    createCompleteMakeupQueryBuilder(deliveryCalls),
+  ];
+  const supabase = {
+    from() {
+      return builders.shift();
+    },
+  };
+  const { readTable, readNotificationDeliveryRows } = loadMakeupTableReaders(supabase);
+
+  await readTable("profiles", "id", true);
+  await readNotificationDeliveryRows();
+
+  for (const calls of [tableCalls, deliveryCalls]) {
+    const abortCall = calls.find((call) => call.method === "abortSignal");
+    assert.ok(abortCall, "the PostgREST builder must receive an abort signal");
+    assert.equal(abortCall.args.length, 1);
+    assert.equal(typeof abortCall.args[0]?.addEventListener, "function");
+    assert.deepEqual(calls.at(-1), { method: "retry", args: [false] });
+  }
+});
+
+test("휴보강 오류 알림은 기존 refresh 경로를 실행하는 다시 불러오기 버튼을 제공한다", () => {
+  const errorAlertSource = sourceBetween(
+    workspaceSource,
+    "{error ?",
+    '<div className="grid min-w-0 gap-4">',
+  );
+
+  assert.match(
+    errorAlertSource,
+    /<Button[\s\S]*variant="outline"[\s\S]*size="sm"[\s\S]*onClick=\{\(\) => void refresh\(\)\}[\s\S]*disabled=\{loading\}[\s\S]*>[\s\S]*다시 불러오기[\s\S]*<\/Button>/,
+  );
+});
 
 test("휴보강 상신 DB 검증 실패는 원시 코드 대신 운영자 안내로 표시한다", () => {
   const { getMakeupActionErrorMessage } = loadMakeupActionErrorMessage();

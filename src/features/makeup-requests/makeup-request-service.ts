@@ -14,6 +14,7 @@ import {
   type MakeupRequestKind,
 } from "./makeup-request-model.js"
 import { runIdempotentMakeupCreate } from "./makeup-create-attempt.js"
+import { getMakeupWorkspaceLoadErrorMessage, MAKEUP_TABLE_TIMEOUT_MS } from "./makeup-request-loading"
 import { createNotificationControlPlaneService } from "@/features/notifications/notification-control-plane-service"
 import {
   mapDashboardNotificationInboxWire,
@@ -533,7 +534,11 @@ async function readTable(table: string, select = "*", optional = false) {
     throw new Error("Supabase 연결 설정이 필요합니다.")
   }
 
-  const { data, error } = await supabase.from(table).select(select)
+  const { data, error } = await supabase
+    .from(table)
+    .select(select)
+    .abortSignal(AbortSignal.timeout(MAKEUP_TABLE_TIMEOUT_MS))
+    .retry(false)
   if (error) {
     if (optional && (isMissingRelationError(error) || isPermissionError(error))) {
       return [] as Row[]
@@ -554,6 +559,8 @@ async function readNotificationDeliveryRows() {
     .select("*")
     .order("created_at", { ascending: false })
     .limit(MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT)
+    .abortSignal(AbortSignal.timeout(MAKEUP_TABLE_TIMEOUT_MS))
+    .retry(false)
 
   if (error) {
     if (isMissingRelationError(error) || isPermissionError(error)) return [] as Row[]
@@ -726,7 +733,7 @@ export async function loadMakeupRequestWorkspaceData(): Promise<MakeupRequestWor
     return {
       ...EMPTY_WORKSPACE_DATA,
       schemaReady: false,
-      error: error instanceof Error ? error.message : "휴보강 신청서 데이터를 불러오지 못했습니다.",
+      error: getMakeupWorkspaceLoadErrorMessage(error),
     }
   }
 }

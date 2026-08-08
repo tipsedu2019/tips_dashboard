@@ -2532,7 +2532,20 @@ export function MakeupRequestWorkspace() {
       </div>
 
       {message ? <div role="status" className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-primary">{message}</div> : null}
-      {error ? <div role="alert" className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div> : null}
+      {error ? (
+        <div role="alert" className="flex items-center justify-between gap-3 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <span>{error}</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void refresh()}
+            disabled={loading}
+          >
+            다시 불러오기
+          </Button>
+        </div>
+      ) : null}
 
       <div className="grid min-w-0 gap-4">
         <Dialog open={requestDialogOpen} onOpenChange={(open) => {
