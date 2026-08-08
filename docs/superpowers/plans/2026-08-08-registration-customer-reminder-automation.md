@@ -61,10 +61,10 @@
 ### Task 5: 통합 검증·migration·운영 배포
 
 - [x] 로컬 diff 코드 리뷰와 Supabase 보안·성능 자문 결과를 반영한다.
-- [ ] 관련 전체 테스트, ESLint, TypeScript, `next build --webpack`, `git diff --check`를 통과한다.
+- [x] 관련 전체 테스트, ESLint, TypeScript, `next build --webpack`, `git diff --check`를 통과한다.
 - [x] migration을 운영 Supabase에 적용하고 기본 OFF·무발송·중복 잠금을 읽기 검증한다.
-- [ ] 최신 `origin/main`을 확인하고 커밋을 GitHub main에 반영한다.
-- [ ] Vercel Production READY와 정확한 Git SHA, endpoint 200/401 경계를 확인한다.
-- [ ] worker secret을 Vercel과 Vault에 노출 없이 설치하고 Cron을 활성화하되 설정은 OFF로 유지한다.
-- [ ] SOLAPI 승인 영수증·템플릿 checksum·버튼 URL을 사전 검증한다.
+- [x] 최신 `origin/main`을 확인하고 커밋을 GitHub main에 반영한다.
+- [x] Vercel Production READY와 정확한 Git SHA, endpoint 200/401 경계를 확인한다.
+- [x] worker secret을 Vercel과 Vault에 노출 없이 설치하고 Cron을 활성화하되 설정은 OFF로 유지한다.
+- [ ] SOLAPI 승인 영수증·템플릿 checksum·버튼 URL을 사전 검증한다. (공급자 재승인 완료 후 재검증 필요)
 - [ ] 사용자가 명시적으로 승인한 테스트 수신 후에만 자동 발송을 ON으로 전환한다.

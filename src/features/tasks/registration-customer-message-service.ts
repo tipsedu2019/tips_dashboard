@@ -15,7 +15,10 @@ import { assertRegistrationCustomerMessagePublicPayload } from "./registration-c
 type RegistrationCustomerMessageServiceOptions = Readonly<{
   getAccessToken: () => Promise<string | null>
   fetch?: typeof globalThis.fetch
+  adminTimeoutMs?: number
 }>
+
+const DEFAULT_ADMIN_TIMEOUT_MS = 15_000
 
 async function requestJson<T>(
   options: RegistrationCustomerMessageServiceOptions,
@@ -37,6 +40,43 @@ async function requestJson<T>(
     throw new Error(payload.error || payload.code || "registration_customer_message_request_failed")
   }
   return assertRegistrationCustomerMessagePublicPayload(payload)
+}
+
+function requestAdminJson<T>(
+  options: RegistrationCustomerMessageServiceOptions,
+  url: string,
+  init: RequestInit,
+) {
+  const configuredTimeout = Number(options.adminTimeoutMs)
+  const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+    ? configuredTimeout
+    : DEFAULT_ADMIN_TIMEOUT_MS
+  const controller = new AbortController()
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false
+    const timeout = setTimeout(() => {
+      if (settled) return
+      settled = true
+      controller.abort()
+      reject(new Error("registration_customer_message_admin_timeout"))
+    }, timeoutMs)
+
+    void requestJson<T>(options, url, { ...init, signal: controller.signal }).then(
+      (value) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        resolve(value)
+      },
+      (error) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        reject(error)
+      },
+    )
+  })
 }
 
 export function createRegistrationCustomerMessageClient(
@@ -108,7 +148,7 @@ export function createRegistrationCustomerMessageAdminClient(
   options: RegistrationCustomerMessageServiceOptions,
 ): RegistrationCustomerMessageAdminClient {
   const adminRequest = (body: Record<string, unknown>) => (
-    requestJson<RegistrationCustomerMessageReadiness>(
+    requestAdminJson<RegistrationCustomerMessageReadiness>(
       options,
       "/api/solapi/registration/admin",
       { method: "POST", body: JSON.stringify(body) },

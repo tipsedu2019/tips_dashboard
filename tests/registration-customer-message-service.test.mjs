@@ -17,6 +17,15 @@ function response(body) {
   })
 }
 
+function withinTestDeadline(promise) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("test_deadline_exceeded")), 100)
+    }),
+  ])
+}
+
 test("admin client authenticates and sends the exact SOLAPI rollout actions", async () => {
   const requests = []
   const client = createRegistrationCustomerMessageAdminClient({
@@ -122,6 +131,42 @@ test("admin client refuses to call the rollout endpoint without a session", asyn
     /registration_customer_message_auth_required/,
   )
   assert.equal(calls, 0)
+})
+
+test("admin client stops waiting for stalled auth and provider preparation", async () => {
+  let authFetchCalls = 0
+  const stalledAuthClient = createRegistrationCustomerMessageAdminClient({
+    adminTimeoutMs: 5,
+    getAccessToken: async () => new Promise(() => {}),
+    fetch: async () => {
+      authFetchCalls += 1
+      throw new Error("must_not_call")
+    },
+  })
+
+  await assert.rejects(
+    withinTestDeadline(stalledAuthClient.preflightTemplate("waiting_notice")),
+    /registration_customer_message_admin_timeout/,
+  )
+  assert.equal(authFetchCalls, 0)
+
+  let requestAborted = false
+  const stalledRequestClient = createRegistrationCustomerMessageAdminClient({
+    adminTimeoutMs: 5,
+    getAccessToken: async () => "test-session-token",
+    fetch: async (_url, init) => new Promise((resolve, reject) => {
+      init.signal.addEventListener("abort", () => {
+        requestAborted = true
+        reject(init.signal.reason)
+      }, { once: true })
+    }),
+  })
+
+  await assert.rejects(
+    withinTestDeadline(stalledRequestClient.preflightTemplate("waiting_notice")),
+    /registration_customer_message_admin_timeout/,
+  )
+  assert.equal(requestAborted, true)
 })
 
 test("customer message client preserves the server error code", async () => {
