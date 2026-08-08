@@ -21,7 +21,6 @@ async function getAccessToken() {
   if (error) return null
   return data.session?.access_token ?? null
 }
-
 function statusLabel(settings: Settings) {
   if (settings.status === "ready") {
     return settings.enabled ? "자동 발송 중" : "발송 준비 완료"
@@ -155,4 +154,3 @@ export function RegistrationCustomerReminderSettings() {
     </Card>
   )
 }
-

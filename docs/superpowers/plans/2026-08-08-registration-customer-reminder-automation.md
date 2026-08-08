@@ -27,10 +27,10 @@
 - Modify: `tests/registration-customer-solapi-db.test.mjs`
 - Create: `tests/registration-customer-reminder-scheduler.test.mjs`
 
-- [ ] `supabase migration new`으로 새 migration을 생성한다.
-- [ ] RED: 기본 OFF/3시간, 관리자 RPC, appointment lifetime unique lock, queue lease, attempt-before-dispatch, cron 함수 사용 계약을 작성한다.
-- [ ] GREEN: private settings/jobs, RPC, RLS/grants, outbox origin, 감사 projection, scheduler 관리 함수를 구현한다.
-- [ ] 로컬 SQL 정적 계약과 가능한 격리 DB QA를 통과한다.
+- [x] `supabase migration new`으로 새 migration을 생성한다.
+- [x] RED: 기본 OFF/3시간, 관리자 RPC, appointment lifetime unique lock, queue lease, attempt-before-dispatch, cron 함수 사용 계약을 작성한다.
+- [x] GREEN: private settings/jobs, RPC, RLS/grants, outbox origin, 감사 projection, scheduler 관리 함수를 구현한다.
+- [x] SQL 정적 계약과 운영 트랜잭션 적용·읽기 검증을 통과한다.
 
 ### Task 3: 전용 worker/settings API
 
@@ -40,9 +40,9 @@
 - Create: `src/features/tasks/server/registration-customer-reminder-route.ts`
 - Create: `tests/registration-customer-reminder-route.test.mjs`
 
-- [ ] RED: worker secret 401, 관리자 설정 권한, OFF/준비 미완료 차단, provider 결과 finalize 테스트를 작성한다.
-- [ ] GREEN: 상수시간 비밀키 검증, service RPC orchestration, 설정 read/write route를 구현한다.
-- [ ] route 테스트·타입·lint를 검증한다.
+- [x] RED: worker secret 401, 관리자 설정 권한, OFF/준비 미완료 차단, provider 결과 finalize 테스트를 작성한다.
+- [x] GREEN: 상수시간 비밀키 검증, service RPC orchestration, 설정 read/write route를 구현한다.
+- [x] route 테스트·타입·lint를 검증한다.
 
 ### Task 4: 알림 설정 UI와 자동 감사 표시
 
@@ -54,15 +54,15 @@
 - Modify: `tests/notification-control-plane-ui.test.mjs`
 - Modify: `tests/registration-alimtalk-preview-dialog.test.mjs`
 
-- [ ] RED: 등록 화면에는 고객 자동 발송/몇 시간 전만 보이고 내부 예약 규칙은 숨겨진다는 테스트를 작성한다.
-- [ ] GREEN: 최소 설정 카드와 안전 상태, `자동 발송 · 시각` 감사 문구를 구현한다.
-- [ ] 모바일/데스크톱 source 계약과 접근성을 검증한다.
+- [x] RED: 등록 화면에는 고객 자동 발송/몇 시간 전만 보이고 내부 예약 규칙은 숨겨진다는 테스트를 작성한다.
+- [x] GREEN: 최소 설정 카드와 안전 상태, `자동 발송 · 시각` 감사 문구를 구현한다.
+- [x] 모바일/데스크톱 source 계약과 접근성을 검증한다.
 
 ### Task 5: 통합 검증·migration·운영 배포
 
-- [ ] 독립 코드 리뷰와 보안 리뷰 결과를 반영한다.
+- [x] 로컬 diff 코드 리뷰와 Supabase 보안·성능 자문 결과를 반영한다.
 - [ ] 관련 전체 테스트, ESLint, TypeScript, `next build --webpack`, `git diff --check`를 통과한다.
-- [ ] migration을 운영 Supabase에 적용하고 기본 OFF·무발송·중복 잠금을 읽기 검증한다.
+- [x] migration을 운영 Supabase에 적용하고 기본 OFF·무발송·중복 잠금을 읽기 검증한다.
 - [ ] 최신 `origin/main`을 확인하고 커밋을 GitHub main에 반영한다.
 - [ ] Vercel Production READY와 정확한 Git SHA, endpoint 200/401 경계를 확인한다.
 - [ ] worker secret을 Vercel과 Vault에 노출 없이 설치하고 Cron을 활성화하되 설정은 OFF로 유지한다.
