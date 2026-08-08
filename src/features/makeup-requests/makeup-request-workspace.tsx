@@ -166,6 +166,7 @@ const MAKEUP_ACTION_NOTE_CONFIG: Record<MakeupActionNoteKind, {
 const SUBJECT_SORT_ORDER = ["영어", "수학", "과학"]
 const MAKEUP_FILTER_SUBJECTS = SUBJECT_SORT_ORDER
 const MAKEUP_MANAGER_APPROVER_NAMES = new Set(Object.values(APPROVER_NAMES_BY_GROUP).flat())
+const MAKEUP_CLASS_SCHEDULE_PLAN_LOAD_ERROR = "수업 일정을 불러오지 못했습니다. 다시 불러오기를 눌러 재시도해 주세요."
 
 const NOTIFICATION_DELIVERY_STATUS_LABELS: Record<string, string> = {
   sent: "발송",
@@ -1807,10 +1808,17 @@ function hasSlotRoomCollision(
   return slots.some((slot) => Boolean(getSlotRoomCollisionState(slot, data, currentRequestId, subject, canIgnoreOrphanedMakeupEvents)?.collisions.length))
 }
 
+function isMakeupClassSchedulePlanReady(classItem: MakeupClassOption | null) {
+  return Boolean(classItem && (
+    classItem.scheduleStorageMode === "normalized" || classItem.schedulePlanLoaded
+  ))
+}
+
 function createMakeupClassSchedulePlanLoadCache(
   loader: (classId: string) => Promise<Record<string, unknown>>,
 ) {
   const settledClassIds = new Set<string>()
+  const failedClassIds = new Set<string>()
   const inFlightLoads = new Map<string, Promise<{ classId: string; schedulePlan: Record<string, unknown> } | null>>()
   let generation = 0
 
@@ -1818,9 +1826,9 @@ function createMakeupClassSchedulePlanLoadCache(
     load(classItem: MakeupClassOption | null) {
       if (
         !classItem?.id ||
-        classItem.scheduleStorageMode === "normalized" ||
+        isMakeupClassSchedulePlanReady(classItem) ||
         settledClassIds.has(classItem.id) ||
-        Object.keys(classItem.schedulePlan || {}).length > 0
+        failedClassIds.has(classItem.id)
       ) {
         return null
       }
@@ -1834,10 +1842,13 @@ function createMakeupClassSchedulePlanLoadCache(
         .then((schedulePlan) => {
           if (generation !== loadGeneration) return null
           settledClassIds.add(classId)
+          failedClassIds.delete(classId)
           return { classId, schedulePlan }
         })
         .catch((error) => {
           if (generation !== loadGeneration) return null
+          settledClassIds.add(classId)
+          failedClassIds.add(classId)
           throw error
         })
         .finally(() => {
@@ -1848,9 +1859,13 @@ function createMakeupClassSchedulePlanLoadCache(
       inFlightLoads.set(classId, request)
       return request
     },
+    hasFailed(classId: string) {
+      return failedClassIds.has(classId)
+    },
     reset() {
       generation += 1
       settledClassIds.clear()
+      failedClassIds.clear()
       inFlightLoads.clear()
     },
   }
@@ -1900,6 +1915,7 @@ export function MakeupRequestWorkspace() {
   const [requestDialogOpen, setRequestDialogOpen] = useState(false)
   const [selectedDetailRequest, setSelectedDetailRequest] = useState<MakeupRequest | null>(null)
   const consumedDeepLinkRequestIdRef = useRef("")
+  const selectedClassIdRef = useRef("")
   const schedulePlanLoadCacheRef = useRef<ReturnType<typeof createMakeupClassSchedulePlanLoadCache> | null>(null)
   if (!schedulePlanLoadCacheRef.current) {
     schedulePlanLoadCacheRef.current = createMakeupClassSchedulePlanLoadCache(loadMakeupClassSchedulePlan)
@@ -1907,6 +1923,7 @@ export function MakeupRequestWorkspace() {
 
   const currentUserId = user?.id || ""
   const selectedClass = useMemo(() => findSelectedClass(data, input), [data, input])
+  selectedClassIdRef.current = selectedClass?.id || ""
   const isManager = canUserManage(role)
   const showNotificationSettingsLauncher = legacyNotificationEnabled || (canonicalNotificationEnabled && isManager)
   const editingRequest = useMemo(() => (
@@ -1943,7 +1960,13 @@ export function MakeupRequestWorkspace() {
   }, [])
 
   useEffect(() => {
-    const schedulePlanRequest = schedulePlanLoadCacheRef.current?.load(selectedClass) || null
+    const schedulePlanLoadCache = schedulePlanLoadCacheRef.current
+    if (!selectedClass || !schedulePlanLoadCache) return
+    if (schedulePlanLoadCache.hasFailed(selectedClass.id)) {
+      setError(MAKEUP_CLASS_SCHEDULE_PLAN_LOAD_ERROR)
+      return
+    }
+    const schedulePlanRequest = schedulePlanLoadCache.load(selectedClass)
     if (!schedulePlanRequest) return
 
     void schedulePlanRequest
@@ -1953,13 +1976,14 @@ export function MakeupRequestWorkspace() {
           ...current,
           classes: current.classes.map((classItem) => (
             classItem.id === result.classId
-              ? { ...classItem, schedulePlan: result.schedulePlan }
+              ? { ...classItem, schedulePlan: result.schedulePlan, schedulePlanLoaded: true }
               : classItem
           )),
         }))
       })
       .catch(() => {
-        setError("수업 일정을 불러오지 못했습니다. 다시 불러오기를 눌러 재시도해 주세요.")
+        if (selectedClassIdRef.current !== selectedClass.id) return
+        setError(MAKEUP_CLASS_SCHEDULE_PLAN_LOAD_ERROR)
       })
   }, [selectedClass])
 
@@ -2042,6 +2066,7 @@ export function MakeupRequestWorkspace() {
   const selectedClassScheduleDateOptions = useMemo(() => (
     getMakeupClassScheduleDateOptions(selectedClass)
   ), [selectedClass])
+  const selectedClassSchedulePlanReady = isMakeupClassSchedulePlanReady(selectedClass)
   const normalizedCancelSessions = useMemo(() => (
     selectedClass?.scheduleStorageMode === "normalized"
       ? selectedClass.lessonSessions.filter((session) => session.date === input.cancelDate)
@@ -2057,6 +2082,7 @@ export function MakeupRequestWorkspace() {
     input.reason.trim() &&
     input.approverTeacherCatalogId &&
     (requestHasCancelDate || requestHasMakeupSlots) &&
+    (!requestHasCancelDate || selectedClassSchedulePlanReady) &&
     !hasIncompleteStartedMakeupSlot(input) &&
     (!requestHasMakeupSlots || materializedMakeupSlots.every((slot) => slot.classroom)) &&
     !selectedRoomHasCollision,
@@ -2121,13 +2147,14 @@ export function MakeupRequestWorkspace() {
 
   const handleClassChange = useCallback((classId: string) => {
     const classItem = data.classes.find((item) => item.id === classId) || null
-    const scheduleDateOptions = getMakeupClassScheduleDateOptions(classItem)
+    const schedulePlanReady = isMakeupClassSchedulePlanReady(classItem)
+    const scheduleDateOptions = schedulePlanReady ? getMakeupClassScheduleDateOptions(classItem) : []
     const allowedNames = classItem ? getAllowedApproverNames(classItem, approverEffectiveYear) : []
     const firstApprover = data.teachers.find((teacher) => allowedNames.includes(teacher.name))
     setInput((current) => ({
       ...current,
       classId,
-      cancelDate: scheduleDateOptions.length === 0 || scheduleDateOptions.some((item) => item.value === current.cancelDate) ? current.cancelDate : "",
+      cancelDate: !schedulePlanReady ? "" : scheduleDateOptions.length === 0 || scheduleDateOptions.some((item) => item.value === current.cancelDate) ? current.cancelDate : "",
       originalLessonSessionId: "",
       approverTeacherCatalogId: firstApprover?.id || "",
     }))
@@ -2135,6 +2162,7 @@ export function MakeupRequestWorkspace() {
       setSelectedSubject(classItem.subject)
       setSelectedTeacherKey(getClassTeacherSelectionKey(classItem, data.teachers))
     }
+    setError((current) => current === MAKEUP_CLASS_SCHEDULE_PLAN_LOAD_ERROR ? "" : current)
   }, [approverEffectiveYear, data.classes, data.teachers])
 
   const patchMakeupSlot = useCallback((slotId: string, patch: Partial<MakeupRequestInput["makeupSlots"][number]>) => {
@@ -2711,7 +2739,7 @@ export function MakeupRequestWorkspace() {
                   }}
 	                  placeholder={!selectedClass ? "수업을 먼저 선택" : selectedClassScheduleDateOptions.length > 0 ? "수업일정에서 휴강일 선택" : "휴강일 선택"}
 	                  ariaLabel="휴강일 선택"
-	                  disabled={!selectedClass}
+	                  disabled={!selectedClass || !selectedClassSchedulePlanReady}
 	                  linkedDates={selectedClassScheduleDateOptions}
 	                  linkedDatesLabel="수업일정"
 	                  restrictToLinkedDates={selectedClassScheduleDateOptions.length > 0}

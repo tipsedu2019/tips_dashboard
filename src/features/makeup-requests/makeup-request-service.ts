@@ -78,6 +78,7 @@ export type MakeupClassOption = {
   room: string
   schedule: string
   schedulePlan: Row
+  schedulePlanLoaded: boolean
   scheduleStorageMode: "legacy" | "shadow" | "normalized"
   lessonSessions: Array<{ id: string; date: string; state: string }>
   textbooks: Row[]
@@ -382,6 +383,7 @@ function parseStringArray(value: unknown) {
 
 function mapClass(row: Row): MakeupClassOption {
   const schedulePlan = parseObject(row.schedule_plan)
+  const scheduleStorageMode = text(row.schedule_storage_mode) === "normalized" ? "normalized" : text(row.schedule_storage_mode) === "shadow" ? "shadow" : "legacy"
   return {
     id: text(row.id),
     name: text(row.name || row.class_name),
@@ -393,7 +395,8 @@ function mapClass(row: Row): MakeupClassOption {
     room: text(row.room),
     schedule: text(row.schedule),
     schedulePlan,
-    scheduleStorageMode: text(row.schedule_storage_mode) === "normalized" ? "normalized" : text(row.schedule_storage_mode) === "shadow" ? "shadow" : "legacy",
+    schedulePlanLoaded: scheduleStorageMode === "normalized" || Object.prototype.hasOwnProperty.call(row, "schedule_plan"),
+    scheduleStorageMode,
     lessonSessions: Array.isArray(row.lessonSessions) ? row.lessonSessions as MakeupClassOption["lessonSessions"] : [],
     textbooks: Array.isArray(row.textbooks) ? (row.textbooks as Row[]) : [],
     textbookIds: parseTextbookIds(row),

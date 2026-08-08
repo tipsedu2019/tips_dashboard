@@ -244,7 +244,9 @@ function loadMakeupWorkspaceDataLoader(supabase) {
 }
 
 function loadMakeupClassSchedulePlanLoadCache() {
-  const startIndex = workspaceSource.indexOf("function createMakeupClassSchedulePlanLoadCache");
+  const readinessIndex = workspaceSource.indexOf("function isMakeupClassSchedulePlanReady");
+  const cacheIndex = workspaceSource.indexOf("function createMakeupClassSchedulePlanLoadCache");
+  const startIndex = readinessIndex === -1 ? cacheIndex : readinessIndex;
   if (startIndex === -1) return undefined;
   const endIndex = workspaceSource.indexOf("export function MakeupRequestWorkspace", startIndex);
   assert.notEqual(endIndex, -1, "missing makeup workspace component marker");
@@ -252,6 +254,33 @@ function loadMakeupClassSchedulePlanLoadCache() {
     workspaceSource.slice(startIndex, endIndex),
     ["createMakeupClassSchedulePlanLoadCache"],
   ).createMakeupClassSchedulePlanLoadCache;
+}
+
+function loadMakeupClassMapper() {
+  const source = sourceBetween(
+    serviceSource,
+    "function parseTextbookIds",
+    "function mapRequest",
+  );
+  return transpileAndLoad(
+    source,
+    ["mapClass"],
+    {
+      parseObject: (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {},
+      text: (value) => String(value ?? "").trim(),
+    },
+  ).mapClass;
+}
+
+function loadMakeupClassSchedulePlanReadiness() {
+  const startIndex = workspaceSource.indexOf("function isMakeupClassSchedulePlanReady");
+  if (startIndex === -1) return undefined;
+  const endIndex = workspaceSource.indexOf("function createMakeupClassSchedulePlanLoadCache", startIndex);
+  assert.notEqual(endIndex, -1, "missing makeup schedule plan cache marker");
+  return transpileAndLoad(
+    workspaceSource.slice(startIndex, endIndex),
+    ["isMakeupClassSchedulePlanReady"],
+  ).isMakeupClassSchedulePlanReady;
 }
 
 function createCompleteMakeupQueryBuilder(calls, response = { data: [], error: null }) {
@@ -444,7 +473,7 @@ test("선택 수업 일정 cache는 normalized를 건너뛰고 legacy 조회를 
   await refreshedLoad;
 });
 
-test("선택 수업 일정 cache는 실패 후 자동 반복하지 않고 명시적인 다음 호출만 허용한다", async () => {
+test("선택 수업 일정 cache는 실패도 refresh 전까지 settled로 유지한다", async () => {
   const createLoadCache = loadMakeupClassSchedulePlanLoadCache();
   assert.equal(typeof createLoadCache, "function");
 
@@ -458,6 +487,12 @@ test("선택 수업 일정 cache는 실패 후 자동 반복하지 않고 명시
   await assert.rejects(cache.load(legacyClass), /schedule plan unavailable/);
   await Promise.resolve();
   assert.equal(attempts, 1);
+  assert.equal(cache.hasFailed("class-legacy"), true);
+  assert.equal(cache.load(legacyClass), null);
+  assert.equal(attempts, 1);
+
+  cache.reset();
+  assert.equal(cache.hasFailed("class-legacy"), false);
   await assert.rejects(cache.load(legacyClass), /schedule plan unavailable/);
   assert.equal(attempts, 2);
 });
@@ -475,6 +510,53 @@ test("선택 수업 일정 cache는 refresh 이전 요청의 늦은 실패를 �
   cache.reset();
   rejectLoad(new Error("stale schedule plan failure"));
   assert.equal(await staleLoad, null);
+});
+
+test("휴보강 수업 일정 ready 상태는 normalized와 실제 lazy 완료를 구분한다", () => {
+  const mapClass = loadMakeupClassMapper();
+  const isSchedulePlanReady = loadMakeupClassSchedulePlanReadiness();
+  assert.equal(typeof isSchedulePlanReady, "function");
+
+  const legacyPending = mapClass({ id: "legacy", schedule_storage_mode: "legacy" });
+  const shadowPending = mapClass({ id: "shadow", schedule_storage_mode: "shadow" });
+  const normalized = mapClass({ id: "normalized", schedule_storage_mode: "normalized" });
+  const legacyLoadedEmpty = mapClass({ id: "legacy-empty", schedule_storage_mode: "legacy", schedule_plan: {} });
+
+  assert.equal(legacyPending.schedulePlanLoaded, false);
+  assert.equal(shadowPending.schedulePlanLoaded, false);
+  assert.equal(normalized.schedulePlanLoaded, true);
+  assert.equal(legacyLoadedEmpty.schedulePlanLoaded, true);
+  assert.equal(isSchedulePlanReady(legacyPending), false);
+  assert.equal(isSchedulePlanReady(shadowPending), false);
+  assert.equal(isSchedulePlanReady(normalized), true);
+  assert.equal(isSchedulePlanReady(legacyLoadedEmpty), true);
+});
+
+test("legacy 휴강일은 lazy plan ready 전 선택과 제출을 막고 stale 실패를 다른 수업에 표시하지 않는다", () => {
+  const classChangeSource = sourceBetween(
+    workspaceSource,
+    "const handleClassChange = useCallback",
+    "const patchMakeupSlot = useCallback",
+  );
+  const schedulePlanEffectSource = sourceBetween(
+    workspaceSource,
+    "useEffect(() => {\n    const schedulePlanLoadCache",
+    "useEffect(() => {\n    if (!authLoading)",
+  );
+
+  assert.match(workspaceSource, /const selectedClassSchedulePlanReady = isMakeupClassSchedulePlanReady\(selectedClass\)/);
+  assert.match(workspaceSource, /\(!requestHasCancelDate \|\| selectedClassSchedulePlanReady\)/);
+  assert.match(workspaceSource, /disabled=\{!selectedClass \|\| !selectedClassSchedulePlanReady\}/);
+  assert.match(classChangeSource, /const schedulePlanReady = isMakeupClassSchedulePlanReady\(classItem\)/);
+  assert.match(classChangeSource, /cancelDate: !schedulePlanReady \? "" :/);
+  assert.match(schedulePlanEffectSource, /schedulePlanLoaded: true/);
+  assert.match(schedulePlanEffectSource, /schedulePlanLoadCache\.hasFailed\(selectedClass\.id\)/);
+  assert.match(schedulePlanEffectSource, /selectedClassIdRef\.current !== selectedClass\.id/);
+  assert.ok(
+    schedulePlanEffectSource.indexOf("selectedClassIdRef.current !== selectedClass.id")
+      < schedulePlanEffectSource.lastIndexOf("setError(MAKEUP_CLASS_SCHEDULE_PLAN_LOAD_ERROR)"),
+    "a stale class failure must be rejected before showing the retry alert",
+  );
 });
 
 test("휴보강 오류 알림은 기존 refresh 경로를 실행하는 다시 불러오기 버튼을 제공한다", () => {
