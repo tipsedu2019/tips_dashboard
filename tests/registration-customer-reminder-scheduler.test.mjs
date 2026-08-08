@@ -144,3 +144,15 @@ test("Cron은 Vault·HTTPS 고정 host를 검증하고 함수로만 설치하며
   assert.ok(managerEnd < commitIndex)
   assert.doesNotMatch(sql.slice(managerEnd, commitIndex), /cron\.schedule\(/)
 })
+
+test("Vault 비밀키 회전은 service role 전용이며 값이나 URL을 클라이언트가 선택하지 못한다", async () => {
+  const sql = await migrationSource()
+
+  assert.match(sql, /create function public\.configure_registration_customer_reminder_worker_secret_v1\(\s*p_secret text\s*\)/)
+  assert.match(sql, /\(select auth\.role\(\)\) <> 'service_role'/)
+  assert.match(sql, /https:\/\/tipsdashboard\.vercel\.app\/api\/solapi\/registration\/reminders\/worker/)
+  assert.match(sql, /vault\.create_secret\(/)
+  assert.match(sql, /vault\.update_secret\(/)
+  assert.match(sql, /grant execute on function public\.configure_registration_customer_reminder_worker_secret_v1\(text\)\s+to service_role/)
+  assert.doesNotMatch(sql, /grant execute on function public\.configure_registration_customer_reminder_worker_secret_v1\(text\)\s+to (?:anon|authenticated)/)
+})
