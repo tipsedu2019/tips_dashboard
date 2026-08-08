@@ -42,28 +42,12 @@ function isMissingRelationError(error: unknown) {
   );
 }
 
-function withTableTimeout<T>(request: PromiseLike<T>, table: string, optional: boolean): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<T>((resolve, reject) => {
-    timer = setTimeout(() => {
-      if (optional) {
-        resolve([] as T);
-        return;
-      }
-
-      reject(new Error(`${table} 데이터를 불러오지 못했습니다.`));
-    }, ACADEMIC_TABLE_TIMEOUT_MS);
-  });
-
-  return Promise.race([Promise.resolve(request), timeout]).finally(() => {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  });
-}
-
 async function readTable(table: string, optional = false) {
-  const { data, error } = await withTableTimeout(supabase!.from(table).select("*"), table, optional);
+  const { data, error } = await supabase!
+    .from(table)
+    .select("*")
+    .abortSignal(AbortSignal.timeout(ACADEMIC_TABLE_TIMEOUT_MS))
+    .retry(false);
 
   if (error) {
     if (optional && isMissingRelationError(error)) {

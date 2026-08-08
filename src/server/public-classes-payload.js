@@ -14,6 +14,18 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "../..");
 
+export const PUBLIC_CLASSES_QUERY_TIMEOUT_MS = 8_000;
+
+export function applyPublicClassesQuerySafety(query) {
+  return query
+    .abortSignal(AbortSignal.timeout(PUBLIC_CLASSES_QUERY_TIMEOUT_MS))
+    .retry(false);
+}
+
+export function normalizePublicClassesFailure() {
+  return "Public class data is temporarily unavailable.";
+}
+
 export const publicClassesOutputPath = path.join(
   appRoot,
   "public",
@@ -206,11 +218,13 @@ export async function buildPublicClassesPayload({
 
   try {
     if (mode === "summary") {
-      const { data: classRows, error: classError } = await supabase
-        .from("classes")
-        .select(
-          "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date",
-        );
+      const { data: classRows, error: classError } = await applyPublicClassesQuerySafety(
+        supabase
+          .from("classes")
+          .select(
+            "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date",
+          ),
+      );
 
       if (classError) {
         throw classError;
@@ -232,9 +246,9 @@ export async function buildPublicClassesPayload({
       { data: textbookRows, error: textbookError },
       { data: progressRows, error: progressError },
     ] = await Promise.all([
-      supabase.from("classes").select("*"),
-      supabase.from("textbooks").select("*"),
-      supabase.from("progress_logs").select("*"),
+      applyPublicClassesQuerySafety(supabase.from("classes").select("*")),
+      applyPublicClassesQuerySafety(supabase.from("textbooks").select("*")),
+      applyPublicClassesQuerySafety(supabase.from("progress_logs").select("*")),
     ]);
 
     if (classError) {
@@ -281,7 +295,7 @@ export async function buildPublicClassesPayload({
     };
   } catch (error) {
     return buildFallbackPublicClassesPayload(
-      error?.message || "Unknown fetch error",
+      normalizePublicClassesFailure(error),
     );
   }
 }

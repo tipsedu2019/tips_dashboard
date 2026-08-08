@@ -49,6 +49,9 @@ const EMPTY_DATA: OperationsWorkspaceData = {
   teacherCatalogs: [],
   classroomCatalogs: [],
 };
+
+const OPERATIONS_TABLE_TIMEOUT_MS = 8_000;
+
 function isMissingRelationError(error: unknown) {
   const code = String((error as { code?: string })?.code || "").trim();
   const message = String((error as { message?: string })?.message || "").toLowerCase();
@@ -62,7 +65,11 @@ function isMissingRelationError(error: unknown) {
 }
 
 async function readTable(table: string, optional = false) {
-  const { data, error } = await supabase!.from(table).select("*");
+  const { data, error } = await supabase!
+    .from(table)
+    .select("*")
+    .abortSignal(AbortSignal.timeout(OPERATIONS_TABLE_TIMEOUT_MS))
+    .retry(false);
 
   if (error) {
     if (optional && isMissingRelationError(error)) {

@@ -1,7 +1,39 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildPublicClassesPayload } from "../src/server/public-classes-payload.js";
+import { createPublicClassesApiResponder } from "../src/server/public-classes-api.js";
+import {
+  buildPublicClassesPayload,
+  normalizePublicClassesFailure,
+} from "../src/server/public-classes-payload.js";
+
+test("public classes API defaults to the bounded summary payload", async () => {
+  const calls = [];
+  const respond = createPublicClassesApiResponder(async (options) => {
+    calls.push(options);
+    return {
+      generatedAt: "2026-08-09T00:00:00.000Z",
+      source: "supabase",
+      classes: [],
+      textbooks: [],
+      progressLogs: [],
+    };
+  });
+
+  const response = await respond();
+
+  assert.deepEqual(calls, [{ mode: "summary" }]);
+  assert.equal(response.status, 200);
+});
+
+test("public classes failures do not expose gateway HTML or request details", () => {
+  const reason = normalizePublicClassesFailure(
+    new Error("<html>cloudflare 522 https://example.invalid/?token=secret</html>"),
+  );
+
+  assert.equal(reason, "Public class data is temporarily unavailable.");
+  assert.doesNotMatch(reason, /html|cloudflare|522|token|https?:/i);
+});
 
 test("public classes summary mode reads and returns only fields required by the public list", async () => {
   const queries = [];
@@ -29,10 +61,21 @@ test("public classes summary mode reads and returns only fields required by the 
       return {
         select(columns) {
           queries.push({ table, columns });
-          return Promise.resolve({
+          const result = {
             data: table === "classes" ? [classRow] : [],
             error: null,
-          });
+          };
+          return {
+            abortSignal() {
+              return this;
+            },
+            retry() {
+              return this;
+            },
+            then(resolve, reject) {
+              return Promise.resolve(result).then(resolve, reject);
+            },
+          };
         },
       };
     },
