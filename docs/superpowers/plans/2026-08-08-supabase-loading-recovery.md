@@ -180,10 +180,56 @@ git add src/features/makeup-requests/makeup-request-loading.ts src/features/make
 git commit -m "fix: recover from stalled makeup loading"
 ```
 
-### Task 4: 통합 검증과 운영 배포
+### Task 4: 휴보강 초기 페이로드 축소와 수업 일정 지연 조회
+
+**Measured production evidence:**
+- The nine initial requests currently transfer about 6,498,383 bytes.
+- `classes=*` alone transfers 5,392,484 bytes because 71 legacy classes contain 4,893 `schedule_plan.sessions` entries.
+- `makeup_requests=*` transfers 1,016,217 bytes because list rows include unused before/after schedule snapshots.
+- Safe projections reduce the initial payload to about 117,634 bytes (98.19% smaller), while one selected legacy class can load its plan on demand.
 
 **Files:**
-- Verify only: all files changed by Tasks 1-3
+- Modify: `src/features/makeup-requests/makeup-request-service.ts`
+- Modify: `src/features/makeup-requests/makeup-request-workspace.tsx`
+- Modify: `tests/makeup-request-workspace.test.mjs`
+
+**Interfaces:**
+- Produces: explicit initial list projections and `loadMakeupClassSchedulePlan(classId)`
+- Consumes: the existing bounded PostgREST read contract and selected-class state
+
+- [ ] **Step 1: Write failing payload-contract tests**
+
+Add executable fake-builder tests proving that the initial `classes` read requests only `id,name,subject,grade,teacher,room,schedule,schedule_storage_mode,textbook_ids`, and that the initial `makeup_requests` read requests only mapper-used list fields without `schedule_plan_before` or `schedule_plan_after`. Add a test that a legacy class schedule-plan loader queries exactly one class with the same 12-second abort and `.retry(false)` boundary.
+
+- [ ] **Step 2: Run the 휴보강 test to verify RED**
+
+Run: `node --test --experimental-strip-types tests/makeup-request-workspace.test.mjs`
+
+Expected: FAIL because both initial reads still use `*` and there is no selected-class schedule-plan loader.
+
+- [ ] **Step 3: Narrow the initial projections**
+
+Replace the two broad reads with explicit constants. Preserve every field currently consumed by `mapClass` and `mapRequest`; omit only the heavy class `schedule_plan` and request `schedule_plan_before`/`schedule_plan_after` snapshots. Keep mutation and approval single-row reads unchanged.
+
+- [ ] **Step 4: Load legacy/shadow schedule plans on selection**
+
+Add a bounded one-row `id,schedule_plan` read for the selected class. In the workspace, call it only when a non-normalized class without a loaded plan becomes selected, merge the plan into that class, and avoid duplicate in-flight/settled reads. Reset the cache after a full workspace refresh. Normalized classes must continue using `class_lesson_sessions` without the extra request. A failed lazy read must show the stable retry guidance and must not loop automatically.
+
+- [ ] **Step 5: Run tests and verify the payload contract**
+
+Run the focused test and targeted lint/type checks. Confirm the initial browser/API request no longer includes either schedule snapshot and that the class list URL no longer selects `schedule_plan`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/features/makeup-requests/makeup-request-service.ts src/features/makeup-requests/makeup-request-workspace.tsx tests/makeup-request-workspace.test.mjs
+git commit -m "perf: shrink makeup startup payload"
+```
+
+### Task 5: 통합 검증과 운영 배포
+
+**Files:**
+- Verify only: all files changed by Tasks 1-4
 
 **Interfaces:**
 - Consumes: GitHub `main` integration and Vercel Git deployment
