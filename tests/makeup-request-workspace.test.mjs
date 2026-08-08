@@ -243,7 +243,7 @@ function loadMakeupWorkspaceDataLoader(supabase) {
   );
 }
 
-function loadMakeupClassSchedulePlanLoadCache() {
+function loadMakeupClassSchedulePlanRuntime() {
   const readinessIndex = workspaceSource.indexOf("function isMakeupClassSchedulePlanReady");
   const cacheIndex = workspaceSource.indexOf("function createMakeupClassSchedulePlanLoadCache");
   const startIndex = readinessIndex === -1 ? cacheIndex : readinessIndex;
@@ -252,8 +252,15 @@ function loadMakeupClassSchedulePlanLoadCache() {
   assert.notEqual(endIndex, -1, "missing makeup workspace component marker");
   return transpileAndLoad(
     workspaceSource.slice(startIndex, endIndex),
-    ["createMakeupClassSchedulePlanLoadCache"],
-  ).createMakeupClassSchedulePlanLoadCache;
+    [
+      "createMakeupClassSchedulePlanLoadCache",
+      "consumeMakeupClassSchedulePlanLoad: typeof consumeMakeupClassSchedulePlanLoad === 'function' ? consumeMakeupClassSchedulePlanLoad : undefined",
+    ],
+  );
+}
+
+function loadMakeupClassSchedulePlanLoadCache() {
+  return loadMakeupClassSchedulePlanRuntime()?.createMakeupClassSchedulePlanLoadCache;
 }
 
 function loadMakeupClassMapper() {
@@ -281,6 +288,18 @@ function loadMakeupClassSchedulePlanReadiness() {
     workspaceSource.slice(startIndex, endIndex),
     ["isMakeupClassSchedulePlanReady"],
   ).isMakeupClassSchedulePlanReady;
+}
+
+function loadMakeupClassSchedulePlanErrorClearer() {
+  const source = sourceBetween(
+    workspaceSource,
+    "const MAKEUP_CLASS_SCHEDULE_PLAN_LOAD_ERROR",
+    "const NOTIFICATION_DELIVERY_STATUS_LABELS",
+  );
+  return transpileAndLoad(
+    source,
+    ["clearMakeupClassSchedulePlanLoadError: typeof clearMakeupClassSchedulePlanLoadError === 'function' ? clearMakeupClassSchedulePlanLoadError : undefined"],
+  ).clearMakeupClassSchedulePlanLoadError;
 }
 
 function createCompleteMakeupQueryBuilder(calls, response = { data: [], error: null }) {
@@ -512,6 +531,83 @@ test("선택 수업 일정 cache는 refresh 이전 요청의 늦은 실패를 �
   assert.equal(await staleLoad, null);
 });
 
+test("선택 수업 일정 consumer는 내부 성공 뒤 refresh된 이전 generation 결과를 병합하지 않는다", async () => {
+  const { createMakeupClassSchedulePlanLoadCache, consumeMakeupClassSchedulePlanLoad } = loadMakeupClassSchedulePlanRuntime();
+  assert.equal(typeof consumeMakeupClassSchedulePlanLoad, "function");
+  const schedulePlanEffectSource = sourceBetween(
+    workspaceSource,
+    "useEffect(() => {\n    const schedulePlanLoadCache",
+    "useEffect(() => {\n    if (!authLoading)",
+  );
+  assert.match(schedulePlanEffectSource, /const loadGeneration = schedulePlanLoadCache\.captureGeneration\(\)/);
+  assert.match(schedulePlanEffectSource, /consumeMakeupClassSchedulePlanLoad\(schedulePlanRequest/);
+  assert.match(schedulePlanEffectSource, /schedulePlanLoadCache\.isCurrentGeneration\(loadGeneration\)/);
+
+  let resolveLoad;
+  const cache = createMakeupClassSchedulePlanLoadCache(() => new Promise((resolve) => {
+    resolveLoad = resolve;
+  }));
+  assert.equal(typeof cache.captureGeneration, "function");
+  assert.equal(typeof cache.isCurrentGeneration, "function");
+
+  const loadGeneration = cache.captureGeneration();
+  const legacyClass = { id: "class-legacy", scheduleStorageMode: "legacy", schedulePlan: {} };
+  const request = cache.load(legacyClass);
+  const mergedPlans = [];
+  const shownErrors = [];
+  let settledBeforeReset = false;
+  const consumption = consumeMakeupClassSchedulePlanLoad(request, {
+    isCurrentGeneration: () => cache.isCurrentGeneration(loadGeneration),
+    onSuccess: (result) => mergedPlans.push(result),
+    onFailure: () => shownErrors.push("error"),
+  });
+
+  resolveLoad({ sessions: [{ date: "2026-08-10" }] });
+  queueMicrotask(() => queueMicrotask(() => queueMicrotask(() => {
+    settledBeforeReset = cache.load(legacyClass) === null;
+    cache.reset();
+  })));
+  await consumption;
+
+  assert.equal(settledBeforeReset, true);
+  assert.equal(cache.isCurrentGeneration(loadGeneration), false);
+  assert.deepEqual(mergedPlans, []);
+  assert.deepEqual(shownErrors, []);
+});
+
+test("선택 수업 일정 consumer는 내부 실패 뒤 refresh된 이전 generation 오류를 표시하지 않는다", async () => {
+  const { createMakeupClassSchedulePlanLoadCache, consumeMakeupClassSchedulePlanLoad } = loadMakeupClassSchedulePlanRuntime();
+  assert.equal(typeof consumeMakeupClassSchedulePlanLoad, "function");
+
+  let rejectLoad;
+  const cache = createMakeupClassSchedulePlanLoadCache(() => new Promise((resolve, reject) => {
+    rejectLoad = reject;
+  }));
+  const loadGeneration = cache.captureGeneration();
+  const legacyClass = { id: "class-legacy", scheduleStorageMode: "legacy", schedulePlan: {} };
+  const request = cache.load(legacyClass);
+  const mergedPlans = [];
+  const shownErrors = [];
+  let failedBeforeReset = false;
+  const consumption = consumeMakeupClassSchedulePlanLoad(request, {
+    isCurrentGeneration: () => cache.isCurrentGeneration(loadGeneration),
+    onSuccess: (result) => mergedPlans.push(result),
+    onFailure: () => shownErrors.push("error"),
+  });
+
+  rejectLoad(new Error("stale schedule plan failure"));
+  queueMicrotask(() => queueMicrotask(() => queueMicrotask(() => {
+    failedBeforeReset = cache.hasFailed(legacyClass.id);
+    cache.reset();
+  })));
+  await consumption;
+
+  assert.equal(failedBeforeReset, true);
+  assert.equal(cache.isCurrentGeneration(loadGeneration), false);
+  assert.deepEqual(mergedPlans, []);
+  assert.deepEqual(shownErrors, []);
+});
+
 test("휴보강 수업 일정 ready 상태는 normalized와 실제 lazy 완료를 구분한다", () => {
   const mapClass = loadMakeupClassMapper();
   const isSchedulePlanReady = loadMakeupClassSchedulePlanReadiness();
@@ -557,6 +653,26 @@ test("legacy 휴강일은 lazy plan ready 전 선택과 제출을 막고 stale �
       < schedulePlanEffectSource.lastIndexOf("setError(MAKEUP_CLASS_SCHEDULE_PLAN_LOAD_ERROR)"),
     "a stale class failure must be rejected before showing the retry alert",
   );
+});
+
+test("보완 상신과 보강 일정 입력의 직접 수업 선택은 이전 일정 조회 오류만 지운다", () => {
+  const clearSchedulePlanLoadError = loadMakeupClassSchedulePlanErrorClearer();
+  assert.equal(typeof clearSchedulePlanLoadError, "function");
+  assert.equal(clearSchedulePlanLoadError("수업 일정을 불러오지 못했습니다. 다시 불러오기를 눌러 재시도해 주세요."), "");
+  assert.equal(clearSchedulePlanLoadError("휴보강 신청서 저장에 실패했습니다."), "휴보강 신청서 저장에 실패했습니다.");
+
+  const revisionSource = sourceBetween(
+    workspaceSource,
+    "const handleEditForRevision = useCallback",
+    "const handleSchedulePendingMakeup = useCallback",
+  );
+  const schedulePendingSource = sourceBetween(
+    workspaceSource,
+    "const handleSchedulePendingMakeup = useCallback",
+    "return (",
+  );
+  assert.match(revisionSource, /setError\(clearMakeupClassSchedulePlanLoadError\)/);
+  assert.match(schedulePendingSource, /setError\(clearMakeupClassSchedulePlanLoadError\)/);
 });
 
 test("휴보강 오류 알림은 기존 refresh 경로를 실행하는 다시 불러오기 버튼을 제공한다", () => {
