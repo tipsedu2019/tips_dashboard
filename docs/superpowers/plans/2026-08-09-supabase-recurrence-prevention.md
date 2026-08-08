@@ -23,7 +23,7 @@
 
 **Files:**
 - Create: `src/features/dashboard/session-dates.js`
-- Create: `supabase/migrations/20260809090000_dashboard_class_session_dates.sql`
+- Create: `supabase/migrations/20260808172543_dashboard_class_session_dates.sql`
 - Create: `tests/dashboard-resource-pressure.test.mjs`
 - Modify: `src/hooks/use-tips-dashboard-metrics.ts`
 - Test: `tests/dashboard-metrics.test.mjs`
@@ -184,7 +184,7 @@ Commit: `fix: bound Supabase read retries`
 ### Task 3: 리마인드 OFF 상태에서 cron과 heartbeat를 정지
 
 **Files:**
-- Create: `supabase/migrations/20260809091000_registration_customer_reminder_off_cron.sql`
+- Create: `supabase/migrations/20260808172642_registration_customer_reminder_off_cron.sql`
 - Modify: `tests/registration-customer-reminder-scheduler.test.mjs`
 
 **Interfaces:**
@@ -236,7 +236,7 @@ Commit: `fix: stop disabled reminder cron work`
 ### Task 4: 중복 profiles/classes/textbooks RLS와 ops_tasks initplan 정리
 
 **Files:**
-- Create: `supabase/migrations/20260809092000_rls_policy_initplan_consolidation.sql`
+- Create: `supabase/migrations/20260808172743_rls_policy_initplan_consolidation.sql`
 - Create: `tests/supabase-rls-resource-pressure.test.mjs`
 - Test: `tests/management-operational-rls.test.mjs`
 
@@ -294,7 +294,7 @@ Commit: `perf: consolidate high-frequency RLS policies`
 ### Task 5: 등록 하위 읽기 정책의 중첩 RLS 제거
 
 **Files:**
-- Create: `supabase/migrations/20260809093000_ops_registration_read_policy_optimization.sql`
+- Create: `supabase/migrations/20260808172835_ops_registration_read_policy_optimization.sql`
 - Modify: `tests/supabase-rls-resource-pressure.test.mjs`
 - Test: `tests/registration-track-schema.test.mjs`
 
@@ -371,7 +371,7 @@ Compare migration list with production, run security and performance advisors, r
 
 - [ ] **Step 4: Apply production migrations in order and verify each boundary**
 
-Apply `20260809090000`, verify RPC parity/payload; apply `20260809091000`, verify OFF cron inactive and no new heartbeat/net request; apply `20260809092000`, verify role counts/advisors; apply `20260809093000`, verify role counts and EXPLAIN. Do not combine migrations into one opaque operation.
+Apply `20260808172543`, verify RPC parity/payload; apply `20260808172642`, verify OFF cron inactive and no new heartbeat/net request; apply `20260808172743`, verify role counts/advisors; apply `20260808172835`, verify role counts and EXPLAIN. Do not combine migrations into one opaque operation.
 
 - [ ] **Step 5: Push verified commits to `main` and wait for Vercel Production**
 

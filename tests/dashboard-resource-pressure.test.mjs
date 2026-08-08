@@ -9,7 +9,7 @@ import {
 
 const hookUrl = new URL("../src/hooks/use-tips-dashboard-metrics.ts", import.meta.url)
 const migrationUrl = new URL(
-  "../supabase/migrations/20260809090000_dashboard_class_session_dates.sql",
+  "../supabase/migrations/20260808172543_dashboard_class_session_dates.sql",
   import.meta.url,
 )
 

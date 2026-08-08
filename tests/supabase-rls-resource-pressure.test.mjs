@@ -3,11 +3,11 @@ import { readFile } from "node:fs/promises"
 import test from "node:test"
 
 const consolidationUrl = new URL(
-  "../supabase/migrations/20260809092000_rls_policy_initplan_consolidation.sql",
+  "../supabase/migrations/20260808172743_rls_policy_initplan_consolidation.sql",
   import.meta.url,
 )
 const registrationReadUrl = new URL(
-  "../supabase/migrations/20260809093000_ops_registration_read_policy_optimization.sql",
+  "../supabase/migrations/20260808172835_ops_registration_read_policy_optimization.sql",
   import.meta.url,
 )
 
