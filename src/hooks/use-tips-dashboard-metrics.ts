@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import {
   buildDashboardMetrics,
@@ -10,7 +10,19 @@ import {
   attachDashboardClassSessionDates,
   buildDashboardSessionDateWindow,
 } from "@/features/dashboard/session-dates"
+import {
+  DASHBOARD_SNAPSHOT_VERSION,
+  dashboardSnapshotCache,
+} from "@/features/dashboard/snapshot-cache.js"
+import {
+  getDashboardSourceError,
+  normalizeDashboardConflictSources,
+  normalizeDashboardSummarySources,
+  type DashboardConflictSourcesSnapshot,
+  type DashboardSummarySources,
+} from "@/features/dashboard/snapshot-sources.js"
 import { supabase } from "@/lib/supabase"
+import { useAuth } from "@/providers/auth-provider"
 
 type DashboardMetricsData = Record<string, unknown> & {
   activeClassesCount: number
@@ -34,12 +46,13 @@ type DashboardMetricsState = DashboardMetricsData & {
 }
 
 type DashboardMetrics = DashboardMetricsState & {
+  retryCoreSources: () => void
+  retryConflictSources: () => void
   retryExamSources: () => void
 }
 
-type DashboardCoreData = {
-  classes: unknown[]
-  students: unknown[]
+type DashboardCoreData = DashboardSummarySources & {
+  scope: string
 }
 
 const buildMetrics = buildDashboardMetrics as unknown as (args: Record<string, unknown>) => DashboardMetricsData
@@ -56,323 +69,191 @@ const EMPTY_METRICS = {
   },
 } satisfies DashboardMetricsState
 
-const DASHBOARD_CORE_TABLE_TIMEOUT_MS = 15000
-const DASHBOARD_OPTIONAL_TABLE_TIMEOUT_MS = 5000
+const DASHBOARD_SNAPSHOT_TIMEOUT_MS = 8_000
 
-type DashboardTableReadOptions = {
-  optional?: boolean
-  columns?: string
-  timeoutMs?: number
-}
-
-type SupabaseTableResult = {
-  data?: unknown[] | null
-  error?: unknown | null
-}
-
-type DashboardTableReadResult = {
-  data: unknown[]
-  error: unknown | null
-}
-
-const DASHBOARD_TABLE_COLUMNS: Record<string, string> = {
-  classes: [
-    "id",
-    "name",
-    "subject",
-    "grade",
-    "teacher",
-    "room",
-    "schedule",
-    "status",
-    "start_date",
-    "end_date",
-    "student_ids",
-    "waitlist_ids",
-    "schedule_storage_mode",
-  ].join(","),
-  students: [
-    "id",
-    "name",
-    "school",
-    "grade",
-    "status",
-    "class_ids",
-    "waitlist_class_ids",
-  ].join(","),
-  class_terms: "id,academic_year,name,status,start_date,end_date,sort_order",
-  class_schedule_sync_groups: "id,term_id,name,subject,sort_order,is_default",
-  class_schedule_sync_group_members: "group_id,class_id,sort_order",
-  academic_schools: "id,name,category",
-  academic_exam_days: "id,school_id,grade,subject,exam_date",
-  academic_event_exam_details: "id,academic_event_id,school_id,grade,subject,exam_date",
-  academic_events: "*",
-  teacher_catalogs: "id,name,profile_id,subjects,is_visible",
-  classroom_catalogs: "id,name,subjects,is_visible",
-}
-
-function isMissingRelationError(error: unknown) {
-  const code = typeof error === "object" && error ? String((error as { code?: string }).code || "") : ""
-  const message = error instanceof Error ? error.message : String((error as { message?: string })?.message || "")
-
-  return (
-    code === "42P01" ||
-    code === "PGRST205" ||
-    message.includes("does not exist") ||
-    message.includes("Could not find the table")
-  )
-}
-
-function isMissingColumnError(error: unknown) {
-  const code = typeof error === "object" && error ? String((error as { code?: string }).code || "") : ""
-  const message = error instanceof Error ? error.message : String((error as { message?: string })?.message || "")
-
-  return code === "PGRST204" || message.includes("Could not find") || message.includes("column")
-}
-
-async function queryTable(tableName: string, columns: string, timeoutMs: number) {
-  return supabase!
-    .from(tableName)
-    .select(columns)
-    .abortSignal(AbortSignal.timeout(timeoutMs))
-    .retry(false) as unknown as PromiseLike<SupabaseTableResult>
-}
-
-async function readDashboardSessionDates() {
-  const { dateFrom, dateTo } = buildDashboardSessionDateWindow(new Date())
+async function readDashboardSummarySources(): Promise<DashboardSummarySources> {
   const { data, error } = await supabase!
-    .rpc("list_dashboard_class_session_dates_v1", {
-      p_date_from: dateFrom,
-      p_date_to: dateTo,
-    })
-    .abortSignal(AbortSignal.timeout(DASHBOARD_CORE_TABLE_TIMEOUT_MS))
+    .rpc("get_dashboard_summary_sources_v1")
+    .abortSignal(AbortSignal.timeout(DASHBOARD_SNAPSHOT_TIMEOUT_MS))
     .retry(false)
 
   if (error) throw error
-  return data || []
+  return normalizeDashboardSummarySources(data)
 }
 
-async function readTableResult(
-  tableName: string,
-  options: DashboardTableReadOptions = {},
-): Promise<DashboardTableReadResult> {
-  if (!supabase) {
-    return {
-      data: [],
-      error: new Error("Supabase 연결 설정을 확인해 주세요."),
-    }
-  }
+async function readDashboardConflictSources(): Promise<DashboardConflictSourcesSnapshot> {
+  const { dateFrom, dateTo } = buildDashboardSessionDateWindow(new Date())
+  const { data, error } = await supabase!
+    .rpc("get_dashboard_conflict_sources_v1", {
+      p_date_from: dateFrom,
+      p_date_to: dateTo,
+    })
+    .abortSignal(AbortSignal.timeout(DASHBOARD_SNAPSHOT_TIMEOUT_MS))
+    .retry(false)
 
-  const optional = options.optional ?? false
-  const columns = options.columns || DASHBOARD_TABLE_COLUMNS[tableName] || "*"
-  const timeoutMs = options.timeoutMs || (optional ? DASHBOARD_OPTIONAL_TABLE_TIMEOUT_MS : DASHBOARD_CORE_TABLE_TIMEOUT_MS)
-
-  try {
-    let result = await queryTable(tableName, columns, timeoutMs)
-
-    if (result.error && columns !== "*" && tableName !== "classes" && isMissingColumnError(result.error)) {
-      result = await queryTable(tableName, "*", timeoutMs)
-    }
-
-    return {
-      data: result.data || [],
-      error: result.error || null,
-    }
-  } catch (error) {
-    return { data: [], error }
-  }
+  if (error) throw error
+  return normalizeDashboardConflictSources(data)
 }
 
-async function readTable(tableName: string, options: DashboardTableReadOptions = {}): Promise<unknown[]> {
-  const result = await readTableResult(tableName, options)
-  if (!result.error) {
-    return result.data
+function disconnectedMetrics(message: string): DashboardMetricsState {
+  return {
+    ...EMPTY_METRICS,
+    isLoading: false,
+    error: message,
+    conflictSources: {
+      schedule: { status: "error", error: message },
+      exam: { status: "error", error: message },
+    },
   }
-  if (options.optional) {
-    return []
-  }
-  if (isMissingRelationError(result.error)) {
-    throw new Error(`${tableName} 데이터 원본을 찾지 못했습니다.`)
-  }
-  throw result.error
-}
-
-function getSourceError(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message) {
-    return error.message
-  }
-  if (typeof error === "object" && error && "message" in error) {
-    return String((error as { message?: unknown }).message || fallback)
-  }
-  return fallback
 }
 
 export function useTipsDashboardMetrics() {
+  const { user, role } = useAuth()
+  const userId = user?.id || ""
+  const cacheScope = userId && role
+    ? `${userId}:${role}:${DASHBOARD_SNAPSHOT_VERSION}`
+    : ""
+  const previousCacheScopeRef = useRef("")
   const [metrics, setMetrics] = useState<DashboardMetricsState>(EMPTY_METRICS)
   const [coreData, setCoreData] = useState<DashboardCoreData | null>(null)
-  const [examSourceRevision, setExamSourceRevision] = useState(0)
+  const [summarySourceRevision, setSummarySourceRevision] = useState(0)
+  const [conflictSourceRevision, setConflictSourceRevision] = useState(0)
 
-  const retryExamSources = useCallback(() => {
+  useEffect(() => {
+    const previousScope = previousCacheScopeRef.current
+    if (previousScope && previousScope !== cacheScope) {
+      dashboardSnapshotCache.invalidate(previousScope)
+    }
+    previousCacheScopeRef.current = cacheScope
+  }, [cacheScope])
+
+  const retryCoreSources = useCallback(() => {
+    if (!cacheScope) return
+    dashboardSnapshotCache.invalidate(cacheScope)
+    setCoreData(null)
+    setMetrics(EMPTY_METRICS)
+    setSummarySourceRevision((current) => current + 1)
+  }, [cacheScope])
+
+  const retryConflictSources = useCallback(() => {
+    if (!cacheScope || coreData?.scope !== cacheScope) return
+    dashboardSnapshotCache.invalidate(cacheScope, "conflict")
     setMetrics((current) => ({
       ...current,
       conflictSources: {
-        ...current.conflictSources,
+        schedule: { status: "loading", error: "" },
         exam: { status: "loading", error: "" },
       },
     }))
-    setExamSourceRevision((current) => current + 1)
-  }, [])
+    setConflictSourceRevision((current) => current + 1)
+  }, [cacheScope, coreData?.scope])
 
   useEffect(() => {
-    let isMounted = true
+    let isCurrent = true
 
-    async function loadCoreMetrics() {
+    async function loadSummary() {
+      await Promise.resolve()
+      if (!isCurrent) return
+
+      setCoreData(null)
+      if (!cacheScope) {
+        setMetrics(EMPTY_METRICS)
+        return
+      }
       if (!supabase) {
-        if (isMounted) {
-          const connectionError = "Supabase 연결 설정을 확인해 주세요."
-          setMetrics({
-            ...EMPTY_METRICS,
-            isLoading: false,
-            error: connectionError,
-            conflictSources: {
-              schedule: { status: "error", error: connectionError },
-              exam: { status: "error", error: connectionError },
-            },
-          })
-        }
+        setMetrics(disconnectedMetrics("Supabase 연결 설정을 확인해 주세요."))
         return
       }
 
+      setMetrics(EMPTY_METRICS)
       try {
-        const [classRows, students, sessionDates] = await Promise.all([
-          readTable("classes"),
-          readTable("students"),
-          readDashboardSessionDates(),
-        ])
-        const classes = attachDashboardClassSessionDates(classRows, sessionDates)
-
-        if (isMounted) {
-          setMetrics({
-            ...buildMetrics({ classes, students, }),
-            isLoading: false,
-            isConnected: true,
-            error: null,
-            conflictSources: {
-              schedule: { status: "ready", error: "" },
-              exam: { status: "loading", error: "" },
-            },
-          })
-          setCoreData({ classes, students })
-        }
+        const summary = await dashboardSnapshotCache.load(
+          cacheScope,
+          "summary",
+          readDashboardSummarySources,
+        )
+        if (!isCurrent) return
+        setMetrics({
+          ...buildMetrics({ classes: summary.classes, students: summary.students }),
+          isLoading: false,
+          isConnected: true,
+          error: null,
+          conflictSources: {
+            schedule: { status: "loading", error: "" },
+            exam: { status: "loading", error: "" },
+          },
+        })
+        setCoreData({ ...summary, scope: cacheScope })
       } catch (error) {
-        if (isMounted) {
-          const message = getSourceError(error, "알 수 없는 연결 오류가 발생했습니다.")
-          setMetrics({
-            ...EMPTY_METRICS,
-            isLoading: false,
-            error: message,
-            conflictSources: {
-              schedule: { status: "error", error: message },
-              exam: { status: "loading", error: "" },
-            },
-          })
-        }
+        if (!isCurrent) return
+        setMetrics(disconnectedMetrics(getDashboardSourceError(error)))
       }
     }
 
-    loadCoreMetrics()
+    void loadSummary()
 
     return () => {
-      isMounted = false
+      isCurrent = false
     }
-  }, [])
+  }, [cacheScope, summarySourceRevision])
 
   useEffect(() => {
-    if (!coreData) return
+    if (!cacheScope || !coreData || coreData.scope !== cacheScope || !supabase) return
     const sourceData = coreData
+    let isCurrent = true
 
-    let isMounted = true
-
-    async function loadEnrichment() {
-      setMetrics((current) => ({
-        ...current,
-        conflictSources: {
-          ...current.conflictSources,
-          exam: { status: "loading", error: "" },
-        },
-      }))
-
-      const [
-        classTerms,
-        classGroups,
-        classGroupMembers,
-        teacherCatalogs,
-        classroomCatalogs,
-        academicSchoolsResult,
-        academicExamDaysResult,
-        academicEventExamDetailsResult,
-        academicEventsResult,
-      ] = await Promise.all([
-        readTable("class_terms", { optional: true }),
-        readTable("class_schedule_sync_groups", { optional: true }),
-        readTable("class_schedule_sync_group_members", { optional: true }),
-        readTable("teacher_catalogs", { optional: true }),
-        readTable("classroom_catalogs", { optional: true }),
-        readTableResult("academic_schools", { optional: true }),
-        readTableResult("academic_exam_days", { optional: true }),
-        readTableResult("academic_event_exam_details", { optional: true }),
-        readTableResult("academic_events", { optional: true }),
-      ])
-
-      if (!isMounted) return
-
-      const examErrors = [
-        academicSchoolsResult.error,
-        academicExamDaysResult.error,
-        academicEventExamDetailsResult.error,
-        academicEventsResult.error,
-      ].filter(Boolean)
-      const examReady = examErrors.length === 0
-      const examError = examReady
-        ? ""
-        : getSourceError(examErrors[0], "시험 일정 데이터를 불러오지 못했습니다.")
-
-      setMetrics({
-        ...buildMetrics({
-          classes: sourceData.classes,
-          students: sourceData.students,
-          classTerms,
-          classGroups,
-          classGroupMembers,
-          teacherCatalogs,
-          classroomCatalogs,
-          academicSchools: examReady ? academicSchoolsResult.data : [],
-          academicExamDays: examReady ? academicExamDaysResult.data : [],
-          academicEventExamDetails: examReady ? academicEventExamDetailsResult.data : [],
-          academicEvents: examReady ? academicEventsResult.data : [],
-        }),
-        isLoading: false,
-        isConnected: true,
-        error: null,
-        conflictSources: {
-          schedule: { status: "ready", error: "" },
-          exam: {
-            status: examReady ? "ready" : "error",
-            error: examError,
+    dashboardSnapshotCache
+      .load(cacheScope, "conflict", readDashboardConflictSources)
+      .then((conflict) => {
+        if (!isCurrent) return
+        const classes = attachDashboardClassSessionDates(sourceData.classes, conflict.sessionDates)
+        setMetrics({
+          ...buildMetrics({
+            classes,
+            students: sourceData.students,
+            classTerms: conflict.classTerms,
+            classGroups: conflict.classGroups,
+            classGroupMembers: conflict.classGroupMembers,
+            teacherCatalogs: conflict.teacherCatalogs,
+            classroomCatalogs: conflict.classroomCatalogs,
+            academicSchools: conflict.academicSchools,
+            academicExamDays: conflict.academicExamDays,
+            academicEventExamDetails: conflict.academicEventExamDetails,
+            academicEvents: conflict.academicEvents,
+          }),
+          isLoading: false,
+          isConnected: true,
+          error: null,
+          conflictSources: {
+            schedule: { status: "ready", error: "" },
+            exam: { status: "ready", error: "" },
           },
-        },
+        })
       })
-    }
-
-    loadEnrichment()
+      .catch((error: unknown) => {
+        if (!isCurrent) return
+        const message = getDashboardSourceError(error)
+        setMetrics((current) => ({
+          ...current,
+          conflictSources: {
+            schedule: { status: "error", error: message },
+            exam: { status: "error", error: message },
+          },
+        }))
+      })
 
     return () => {
-      isMounted = false
+      isCurrent = false
     }
-  }, [coreData, examSourceRevision])
+  }, [cacheScope, conflictSourceRevision, coreData])
 
   return useMemo<DashboardMetrics>(
-    () => ({ ...metrics, retryExamSources }),
-    [metrics, retryExamSources],
+    () => ({
+      ...metrics,
+      retryCoreSources,
+      retryConflictSources,
+      retryExamSources: retryConflictSources,
+    }),
+    [metrics, retryConflictSources, retryCoreSources],
   )
 }

@@ -62,36 +62,19 @@ test("dashboard session dates preserve legacy and normalized metric shapes", () 
   assert.deepEqual(result[2].schedule_plan, { sessions: [] })
 })
 
-test("dashboard reads narrow class fields and a bounded no-retry session RPC", async () => {
+test("dashboard reads two bounded no-retry snapshot RPCs without direct table fan-out", async () => {
   const source = await readFile(hookUrl, "utf8")
-  const columnsMatch = source.match(
-    /const DASHBOARD_TABLE_COLUMNS:[\s\S]*?classes:\s*([\s\S]*?),\n\s*students:/,
+
+  assert.match(source, /rpc\("get_dashboard_summary_sources_v1"\)/)
+  assert.match(source, /rpc\("get_dashboard_conflict_sources_v1",/)
+  assert.equal(
+    (source.match(/\.abortSignal\(AbortSignal\.timeout\(DASHBOARD_SNAPSHOT_TIMEOUT_MS\)\)\s*\.retry\(false\)/gu) || []).length,
+    2,
   )
-
-  assert.ok(columnsMatch, "dashboard class projection must be explicit")
-  assert.doesNotMatch(columnsMatch[1], /schedule_plan|["']\*["']/)
-  for (const column of [
-    "id",
-    "name",
-    "subject",
-    "grade",
-    "teacher",
-    "room",
-    "schedule",
-    "status",
-    "start_date",
-    "end_date",
-    "student_ids",
-    "waitlist_ids",
-    "schedule_storage_mode",
-  ]) {
-    assert.match(columnsMatch[1], new RegExp(`\\b${column}\\b`))
-  }
-
-  assert.match(source, /rpc\("list_dashboard_class_session_dates_v1"/)
-  assert.match(source, /\.abortSignal\(AbortSignal\.timeout\([^)]*\)\)\s*\.retry\(false\)/)
-  assert.match(source, /\.select\(columns\)\s*\.abortSignal\(AbortSignal\.timeout\([^)]*\)\)\s*\.retry\(false\)/)
-  assert.doesNotMatch(source, /attachNormalizedLessonSessions/)
+  assert.match(source, /const DASHBOARD_SNAPSHOT_TIMEOUT_MS = 8_000/)
+  assert.match(source, /attachDashboardClassSessionDates\(/)
+  assert.doesNotMatch(source, /\.from\(/)
+  assert.doesNotMatch(source, /list_dashboard_class_session_dates_v1/)
 })
 
 test("dashboard session RPC returns only active dates inside a guarded range", async () => {

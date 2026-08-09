@@ -18,3 +18,4 @@ export type DashboardConflictSourcesSnapshot = {
 
 export function normalizeDashboardSummarySources(value: unknown): DashboardSummarySources
 export function normalizeDashboardConflictSources(value: unknown): DashboardConflictSourcesSnapshot
+export function getDashboardSourceError(error: unknown, fallback?: string): string

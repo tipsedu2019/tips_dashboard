@@ -5,6 +5,7 @@ import {
   createDashboardSnapshotCache,
 } from "../src/features/dashboard/snapshot-cache.js"
 import {
+  getDashboardSourceError,
   normalizeDashboardConflictSources,
   normalizeDashboardSummarySources,
 } from "../src/features/dashboard/snapshot-sources.js"
@@ -164,4 +165,17 @@ test("dashboard conflict source normalizer rejects any missing or non-array sour
     () => normalizeDashboardConflictSources(missingClassTerms),
     /대시보드 데이터 형식을 확인하지 못했습니다\./,
   )
+})
+
+test("dashboard source errors hide retryable transport internals", () => {
+  const retryMessage = "서버 응답이 지연되었습니다. 잠시 후 다시 시도해 주세요."
+
+  assert.equal(getDashboardSourceError(new DOMException("signal timed out", "AbortError")), retryMessage)
+  assert.equal(getDashboardSourceError({ code: "57014", message: "canceling statement" }), retryMessage)
+  assert.equal(getDashboardSourceError(new TypeError("Failed to fetch")), retryMessage)
+  assert.equal(
+    getDashboardSourceError(new Error("권한이 없습니다."), "연결 오류"),
+    "권한이 없습니다.",
+  )
+  assert.equal(getDashboardSourceError(null, "연결 오류"), "연결 오류")
 })

@@ -454,37 +454,28 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.doesNotMatch(source, /bucket\.classBreakdowns\?\.byGrade \|\| \[\]\)\.slice\(0, 5\)/);
 });
 
-test("dashboard metrics renders the core snapshot before optional enrichment", async () => {
+test("dashboard metrics renders a cached summary before independently loading conflicts", async () => {
   const source = await readSource("src/hooks/use-tips-dashboard-metrics.ts");
 
-  assert.match(source, /const DASHBOARD_CORE_TABLE_TIMEOUT_MS = 15000/);
-  assert.match(source, /const DASHBOARD_OPTIONAL_TABLE_TIMEOUT_MS = 5000/);
-  assert.match(source, /classes:\s*\[[\s\S]*"schedule_storage_mode"[\s\S]*\]\.join\(","\)/);
-  assert.doesNotMatch(
-    source.match(/classes:\s*([\s\S]*?),\n\s*students:/)?.[1] || "",
-    /schedule_plan|["']\*["']/,
-  );
-  assert.match(source, /students:\s*\[[\s\S]*"school"[\s\S]*"grade"[\s\S]*"class_ids"/);
-  assert.match(source, /academic_events: "\*"/);
-  assert.match(source, /teacher_catalogs: "id,name,profile_id,subjects,is_visible"/);
-  assert.match(source, /classroom_catalogs: "id,name,subjects,is_visible"/);
-  assert.match(source, /function isMissingColumnError/);
-  assert.match(source, /tableName !== "classes" && isMissingColumnError\(result\.error\)/);
-  assert.match(source, /result = await queryTable\(tableName, "\*", timeoutMs\)/);
-  assert.match(source, /rpc\("list_dashboard_class_session_dates_v1"/);
-  assert.match(source, /const \[classRows, students, sessionDates\] = await Promise\.all/);
-  assert.match(source, /const classes = attachDashboardClassSessionDates\(classRows, sessionDates\)/);
-  assert.match(source, /buildMetrics\(\{\s*classes,\s*students,\s*\}\)/);
-  assert.match(source, /readTable\("class_terms", \{ optional: true \}\)/);
+  assert.match(source, /const DASHBOARD_SNAPSHOT_TIMEOUT_MS = 8_000/);
+  assert.match(source, /rpc\("get_dashboard_summary_sources_v1"\)/);
+  assert.match(source, /rpc\("get_dashboard_conflict_sources_v1",/);
+  assert.equal((source.match(/\.retry\(false\)/g) || []).length, 2);
+  assert.match(source, /DASHBOARD_SNAPSHOT_VERSION/);
+  assert.match(source, /const cacheScope = userId && role/);
+  assert.match(source, /dashboardSnapshotCache\s*\.load\(\s*cacheScope,\s*"summary"/);
+  assert.match(source, /dashboardSnapshotCache\s*\.load\(\s*cacheScope,\s*"conflict"/);
+  assert.match(source, /buildMetrics\(\{ classes: summary\.classes, students: summary\.students \}\)/);
+  assert.match(source, /attachDashboardClassSessionDates\(sourceData\.classes, conflict\.sessionDates\)/);
   assert.match(source, /type ConflictSourceStatus = "loading" \| "ready" \| "error"/);
   assert.match(source, /schedule: \{ status: "loading", error: "" \}/);
   assert.match(source, /exam: \{ status: "loading", error: "" \}/);
-  assert.match(source, /setExamSourceRevision\(\(current\) => current \+ 1\)/);
-  assert.match(source, /retryExamSources/);
-  assert.match(source, /examSourceRevision/);
-  assert.match(source, /teacherCatalogs/);
-  assert.match(source, /classroomCatalogs/);
-  assert.doesNotMatch(source, /resolve\(\{ data: \[\], error: null \} as T\)/);
+  assert.match(source, /retryCoreSources/);
+  assert.match(source, /retryConflictSources/);
+  assert.match(source, /setSummarySourceRevision\(\(current\) => current \+ 1\)/);
+  assert.match(source, /setConflictSourceRevision\(\(current\) => current \+ 1\)/);
+  assert.match(source, /setMetrics\(\(current\) => \(\{[\s\S]*\.\.\.current,[\s\S]*schedule: \{ status: "error"/);
+  assert.doesNotMatch(source, /\.from\(|readTable\(|academic_events: "\*"/);
 });
 
 test("dashboard renders academy-wide actionable conflict state before filters and metrics", async () => {
