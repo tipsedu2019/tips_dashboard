@@ -1,5 +1,5 @@
 begin;
-select plan(107);
+select plan(112);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '120s';
@@ -452,8 +452,21 @@ values (
   '97000000-0000-4000-8000-000000000101', '청강 담당원장',
   '97000000-0000-4000-8000-000000000102', '청강 101호', 'manual', 7
 );
-insert into public.ops_tasks(id, title, type, status, priority, requested_by, student_name)
-values ('97000000-0000-4000-8000-000000000105', '청강 schema fixture', 'registration', 'requested', 'normal', '97000000-0000-4000-8000-000000000001', '합성 청강학생');
+insert into public.ops_tasks(
+  id, title, type, status, priority, requested_by,
+  assignee_id, secondary_assignee_id, student_name
+)
+values (
+  '97000000-0000-4000-8000-000000000105',
+  '청강 schema fixture',
+  'registration',
+  'requested',
+  'normal',
+  '97000000-0000-4000-8000-000000000001',
+  '97000000-0000-4000-8000-000000000004',
+  '97000000-0000-4000-8000-000000000003',
+  '합성 청강학생'
+);
 insert into public.ops_registration_subject_tracks(
   id, task_id, subject, pipeline_status, director_profile_id,
   director_assignment_source, director_assigned_at, migration_review_required,
@@ -661,6 +674,61 @@ exception
 end;
 $$;
 
+create or replace function pg_temp.registration_observation_function_body(
+  p_function regprocedure
+)
+returns text
+language sql
+stable
+security invoker
+as $$
+  select procedure.prosrc
+  from pg_catalog.pg_proc procedure
+  where procedure.oid = p_function;
+$$;
+
+create or replace function pg_temp.registration_observation_explain_security_definer_body_as_actor(
+  p_actor uuid,
+  p_function regprocedure,
+  p_argument_types text,
+  p_arguments text
+)
+returns jsonb
+language plpgsql
+security invoker
+as $$
+declare
+  v_query text;
+  v_result jsonb;
+begin
+  perform pg_temp.registration_observation_set_actor(p_actor);
+  v_query := pg_temp.registration_observation_function_body(p_function);
+  if v_query is null then
+    raise exception 'registration_observation_explain_target_missing';
+  end if;
+
+  execute pg_catalog.format(
+    'prepare registration_observation_shared_read_plan(%s) as %s',
+    p_argument_types,
+    v_query
+  );
+  execute pg_catalog.format(
+    'explain (analyze, buffers, format json) execute registration_observation_shared_read_plan(%s)',
+    p_arguments
+  ) into v_result;
+  execute 'deallocate registration_observation_shared_read_plan';
+  return v_result;
+exception
+  when others then
+    begin
+      execute 'deallocate registration_observation_shared_read_plan';
+    exception
+      when invalid_sql_statement_name then null;
+    end;
+    raise;
+end;
+$$;
+
 create or replace function pg_temp.registration_observation_plan_nodes(p_plan jsonb)
 returns table(node jsonb)
 language sql
@@ -711,6 +779,9 @@ select is(
       pg_catalog.to_regprocedure('dashboard_private.get_registration_observation_manager_detail_v1_impl(uuid,integer)'),
       pg_catalog.to_regprocedure('dashboard_private.get_registration_observation_manager_attempt_v1_impl(uuid,uuid)'),
       pg_catalog.to_regprocedure('dashboard_private.assert_registration_observation_manager_access_v1(uuid)'),
+      pg_catalog.to_regprocedure('dashboard_private.assert_registration_observation_attempt_limit_v1(integer)'),
+      pg_catalog.to_regprocedure('dashboard_private.registration_observation_manager_detail_rows_v1(uuid,integer)'),
+      pg_catalog.to_regprocedure('dashboard_private.registration_observation_manager_attempt_read_v1(uuid,uuid)'),
       pg_catalog.to_regprocedure('dashboard_private.resolve_registration_observation_session_v1(uuid,uuid,text,uuid,text)'),
       pg_catalog.to_regprocedure('dashboard_private.registration_observation_booking_fact_hash_v1(jsonb)'),
       pg_catalog.to_regprocedure('dashboard_private.registration_observation_legacy_session_content_hash_v1(jsonb,text)')
@@ -727,6 +798,7 @@ select is(
     )
     from (values
       ('assert_registration_observation_manager_access_v1(p_track_id uuid)', true),
+      ('assert_registration_observation_attempt_limit_v1(p_attempt_limit integer)', true),
       ('get_registration_observation_manager_attempt_v1(p_track_id uuid, p_observation_id uuid)', false),
       ('get_registration_observation_manager_attempt_v1_impl(p_track_id uuid, p_observation_id uuid)', true),
       ('get_registration_observation_manager_detail_v1(p_track_id uuid, p_attempt_limit integer)', false),
@@ -735,6 +807,8 @@ select is(
       ('list_registration_observation_sessions_v1_impl(p_track_id uuid, p_class_id uuid, p_date_from date, p_date_to date)', true),
       ('registration_observation_booking_fact_hash_v1(p_fact jsonb)', true),
       ('registration_observation_legacy_session_content_hash_v1(p_schedule_plan jsonb, p_session_key text)', true),
+      ('registration_observation_manager_attempt_read_v1(p_track_id uuid, p_observation_id uuid)', true),
+      ('registration_observation_manager_detail_rows_v1(p_track_id uuid, p_attempt_limit integer)', true),
       ('resolve_registration_observation_session_v1(p_track_id uuid, p_class_id uuid, p_session_authority text, p_class_lesson_session_id uuid, p_legacy_session_key text)', true)
     ) expected(signature, definer)
   ),
@@ -761,9 +835,12 @@ select is(
       and not has_function_privilege('service_role', 'public.get_registration_observation_manager_attempt_v1(uuid,uuid)', 'EXECUTE'),
     'pureHelpersDenied',
       not has_function_privilege('authenticated', 'dashboard_private.assert_registration_observation_manager_access_v1(uuid)', 'EXECUTE')
+      and not has_function_privilege('authenticated', 'dashboard_private.assert_registration_observation_attempt_limit_v1(integer)', 'EXECUTE')
       and not has_function_privilege('authenticated', 'dashboard_private.resolve_registration_observation_session_v1(uuid,uuid,text,uuid,text)', 'EXECUTE')
       and not has_function_privilege('authenticated', 'dashboard_private.registration_observation_booking_fact_hash_v1(jsonb)', 'EXECUTE')
       and not has_function_privilege('authenticated', 'dashboard_private.registration_observation_legacy_session_content_hash_v1(jsonb,text)', 'EXECUTE')
+      and not has_function_privilege('authenticated', 'dashboard_private.registration_observation_manager_detail_rows_v1(uuid,integer)', 'EXECUTE')
+      and not has_function_privilege('authenticated', 'dashboard_private.registration_observation_manager_attempt_read_v1(uuid,uuid)', 'EXECUTE')
   ),
   '{"anonDenied":true,"privateChainAuthenticated":true,"publicAuthenticated":true,"pureHelpersDenied":true,"serviceRoleDenied":true}'::jsonb,
   'read RPC grants are explicit and pure helpers remain outside the Data API chain'
@@ -973,6 +1050,31 @@ values
   ),
   '청강 담당원장',
   '청강 101호'
+),
+(
+  '97000000-0000-4000-8000-000000000140',
+  '청강 legacy 오늘 필터 반',
+  '영어',
+  '수업 진행 중',
+  'shadow',
+  pg_catalog.jsonb_build_object(
+    'sessions', pg_catalog.jsonb_build_array(
+      pg_catalog.jsonb_build_object(
+        'sessionKey', 'legacy-today-expired',
+        'date', pg_catalog.to_char(current_date, 'YYYY-MM-DD'),
+        'scheduleState', 'active',
+        'textbookEntries', '[]'::jsonb
+      ),
+      pg_catalog.jsonb_build_object(
+        'sessionKey', 'legacy-future-valid',
+        'date', pg_catalog.to_char(current_date + 1, 'YYYY-MM-DD'),
+        'scheduleState', 'active',
+        'textbookEntries', '[]'::jsonb
+      )
+    )
+  ),
+  '청강 담당원장',
+  '청강 101호'
 );
 
 do $$
@@ -1079,6 +1181,46 @@ from (values
   (12, '19:30'::time, '21:00'::time, 5)
 ) fixture(offset_value, start_time, end_time, sort_order);
 
+do $$
+begin
+  perform dashboard_private.with_continuous_class_schedule_audit_context_v1(
+    '97000000-0000-4000-8000-000000000140',
+    '97000000-0000-4000-8000-000000000111',
+    'registration_observation_reads_legacy_today_fixture'
+  );
+end;
+$$;
+
+insert into public.class_schedule_slots(
+  id, class_id, weekday, start_time, end_time,
+  teacher_catalog_id, teacher_name, classroom_catalog_id, classroom_name, sort_order
+)
+values
+(
+  '97000000-0000-4000-8000-000000000141',
+  '97000000-0000-4000-8000-000000000140',
+  extract(dow from current_date)::smallint,
+  '00:00',
+  '00:01',
+  null,
+  '청강 담당원장',
+  null,
+  '청강 101호',
+  0
+),
+(
+  '97000000-0000-4000-8000-000000000142',
+  '97000000-0000-4000-8000-000000000140',
+  extract(dow from current_date + 1)::smallint,
+  '17:00',
+  '19:00',
+  null,
+  '청강 담당원장',
+  null,
+  '청강 101호',
+  1
+);
+
 select pg_temp.registration_observation_set_actor('97000000-0000-4000-8000-000000000001');
 set local role authenticated;
 select throws_ok(
@@ -1170,6 +1312,33 @@ select is(
   '[{"legacySessionKey":"legacy-primary","scheduleState":"active","sessionKey":"legacy-primary","textbooks":[{"memo":"복습","planLabel":"2단원","textbookId":"97000000-0000-4000-8000-000000000120","title":"청강 교재"}]},{"legacySessionKey":"legacy-snake","scheduleState":"active","sessionKey":"legacy-snake","textbooks":[]},{"legacySessionKey":"legacy-id-only","scheduleState":"makeup","sessionKey":"legacy-id-only","textbooks":[]}]'::jsonb,
   'legacy resolver uses exact unique name fallback, honors key priority, maps normal to active, and keeps selected textbooks'
 );
+select lives_ok(
+  $statement$
+    do $body$
+    declare
+      v_result jsonb;
+      v_keys jsonb;
+    begin
+      v_result := public.list_registration_observation_sessions_v1(
+        '97000000-0000-4000-8000-000000000106',
+        '97000000-0000-4000-8000-000000000140',
+        current_date,
+        current_date + 1
+      );
+      select coalesce(
+        pg_catalog.jsonb_agg(item -> 'sessionKey' order by item ->> 'sessionKey'),
+        '[]'::jsonb
+      )
+      into v_keys
+      from pg_catalog.jsonb_array_elements(v_result) item;
+      if v_keys <> '["legacy-future-valid"]'::jsonb then
+        raise exception 'unexpected legacy session keys: %', v_keys;
+      end if;
+    end
+    $body$
+  $statement$,
+  'legacy list skips an active session earlier today and still returns the later valid session'
+);
 reset role;
 
 select throws_ok(
@@ -1189,6 +1358,12 @@ select throws_ok(
   '22023',
   'registration_observation_session_time_ambiguous',
   'legacy resolver rejects zero or multiple repeating slots for the exact date'
+);
+select throws_ok(
+  $$select dashboard_private.resolve_registration_observation_session_v1('97000000-0000-4000-8000-000000000106', '97000000-0000-4000-8000-000000000140', 'legacy', null, 'legacy-today-expired')$$,
+  '22023',
+  'registration_observation_session_invalid',
+  'direct legacy resolver remains fail closed for an expired session'
 );
 
 insert into public.ops_tasks(id, title, type, status, priority, requested_by, student_name)
@@ -1279,6 +1454,84 @@ select is(
   (select observation_attempt_count from public.ops_registration_subject_tracks where id = '97000000-0000-4000-8000-000000000106'),
   10001::bigint,
   '10k terminal history plus one open row uses the transactionally maintained scalar'
+);
+
+select is(
+  pg_temp.registration_observation_call_as_actor(
+    '97000000-0000-4000-8000-000000000004',
+    $$select pg_catalog.jsonb_build_object(
+      'baseTrackId', summary.id,
+      'baseSubject', summary.subject,
+      'observationAttemptCount', summary.observation_attempt_count,
+      'observationCurrentId', summary.observation_current_id,
+      'observationCurrentStatus', summary.observation_current_status,
+      'observationCurrentAppointmentId', summary.observation_current_appointment_id,
+      'observationNearestScheduledAt', summary.observation_nearest_scheduled_at,
+      'observationNearestPlace', summary.observation_nearest_place,
+      'observationNotificationRevision', summary.observation_notification_revision,
+      'observationRevision', summary.observation_revision,
+      'observationFeedbackRevision', summary.observation_feedback_revision
+    )
+    from public.ops_registration_subject_track_summaries summary
+    where summary.id = '97000000-0000-4000-8000-000000000106'$$
+  ),
+  '{"baseSubject":"영어","baseTrackId":"97000000-0000-4000-8000-000000000106","observationAttemptCount":null,"observationCurrentAppointmentId":null,"observationCurrentId":null,"observationCurrentStatus":null,"observationFeedbackRevision":null,"observationNearestPlace":null,"observationNearestScheduledAt":null,"observationNotificationRevision":null,"observationRevision":null}'::jsonb,
+  'track-visible nonmanager keeps the base summary row while every observation scalar is concealed'
+);
+
+select is(
+  pg_catalog.jsonb_build_object(
+    'admin', pg_temp.registration_observation_call_as_actor(
+      '97000000-0000-4000-8000-000000000001',
+      $$select pg_catalog.jsonb_build_object(
+        'attemptCount', summary.observation_attempt_count,
+        'currentId', summary.observation_current_id,
+        'currentStatus', summary.observation_current_status,
+        'currentAppointmentId', summary.observation_current_appointment_id,
+        'nearestScheduledAt', pg_catalog.to_char(summary.observation_nearest_scheduled_at at time zone 'Asia/Seoul', 'YYYY-MM-DD"T"HH24:MI:SS'),
+        'nearestPlace', summary.observation_nearest_place,
+        'notificationRevision', summary.observation_notification_revision,
+        'revision', summary.observation_revision,
+        'feedbackRevision', summary.observation_feedback_revision
+      )
+      from public.ops_registration_subject_track_summaries summary
+      where summary.id = '97000000-0000-4000-8000-000000000106'$$
+    ),
+    'staff', pg_temp.registration_observation_call_as_actor(
+      '97000000-0000-4000-8000-000000000002',
+      $$select pg_catalog.jsonb_build_object(
+        'attemptCount', summary.observation_attempt_count,
+        'currentId', summary.observation_current_id,
+        'currentStatus', summary.observation_current_status,
+        'currentAppointmentId', summary.observation_current_appointment_id,
+        'nearestScheduledAt', pg_catalog.to_char(summary.observation_nearest_scheduled_at at time zone 'Asia/Seoul', 'YYYY-MM-DD"T"HH24:MI:SS'),
+        'nearestPlace', summary.observation_nearest_place,
+        'notificationRevision', summary.observation_notification_revision,
+        'revision', summary.observation_revision,
+        'feedbackRevision', summary.observation_feedback_revision
+      )
+      from public.ops_registration_subject_track_summaries summary
+      where summary.id = '97000000-0000-4000-8000-000000000106'$$
+    ),
+    'director', pg_temp.registration_observation_call_as_actor(
+      '97000000-0000-4000-8000-000000000003',
+      $$select pg_catalog.jsonb_build_object(
+        'attemptCount', summary.observation_attempt_count,
+        'currentId', summary.observation_current_id,
+        'currentStatus', summary.observation_current_status,
+        'currentAppointmentId', summary.observation_current_appointment_id,
+        'nearestScheduledAt', pg_catalog.to_char(summary.observation_nearest_scheduled_at at time zone 'Asia/Seoul', 'YYYY-MM-DD"T"HH24:MI:SS'),
+        'nearestPlace', summary.observation_nearest_place,
+        'notificationRevision', summary.observation_notification_revision,
+        'revision', summary.observation_revision,
+        'feedbackRevision', summary.observation_feedback_revision
+      )
+      from public.ops_registration_subject_track_summaries summary
+      where summary.id = '97000000-0000-4000-8000-000000000106'$$
+    )
+  ),
+  '{"admin":{"attemptCount":10001,"currentAppointmentId":"97000000-0000-4000-8000-000000000107","currentId":"97000000-0000-4000-8000-000000000108","currentStatus":"scheduled","feedbackRevision":0,"nearestPlace":"본관","nearestScheduledAt":"2026-08-17T18:00:00","notificationRevision":1,"revision":1},"director":{"attemptCount":10001,"currentAppointmentId":"97000000-0000-4000-8000-000000000107","currentId":"97000000-0000-4000-8000-000000000108","currentStatus":"scheduled","feedbackRevision":0,"nearestPlace":"본관","nearestScheduledAt":"2026-08-17T18:00:00","notificationRevision":1,"revision":1},"staff":{"attemptCount":10001,"currentAppointmentId":"97000000-0000-4000-8000-000000000107","currentId":"97000000-0000-4000-8000-000000000108","currentStatus":"scheduled","feedbackRevision":0,"nearestPlace":"본관","nearestScheduledAt":"2026-08-17T18:00:00","notificationRevision":1,"revision":1}}'::jsonb,
+  'admin staff and exact director retain all correct observation summary scalars'
 );
 
 select pg_temp.registration_observation_set_actor('97000000-0000-4000-8000-000000000001');
@@ -1434,41 +1687,78 @@ reset role;
 
 create temporary table registration_observation_read_plans(
   name text primary key,
+  query_sql text not null,
   plan jsonb not null
 ) on commit drop;
 
-insert into registration_observation_read_plans(name, plan)
+insert into registration_observation_read_plans(name, query_sql, plan)
 values
 (
   'exact-10k',
-  pg_temp.registration_observation_explain_as_actor(
+  pg_temp.registration_observation_function_body(
+    'dashboard_private.registration_observation_manager_attempt_read_v1(uuid,uuid)'::regprocedure
+  ),
+  pg_temp.registration_observation_explain_security_definer_body_as_actor(
     '97000000-0000-4000-8000-000000000001',
-    $$select observation.id
-      from public.ops_registration_observations observation
-      where observation.id = '98100000-0000-4000-8000-000000000001'
-        and observation.track_id = '97000000-0000-4000-8000-000000000106'
-      limit 1$$
+    'dashboard_private.registration_observation_manager_attempt_read_v1(uuid,uuid)'::regprocedure,
+    'uuid, uuid',
+    $$'97000000-0000-4000-8000-000000000106'::uuid, '98100000-0000-4000-8000-000000000001'::uuid$$
   )
 ),
 (
   'detail-10k',
-  pg_temp.registration_observation_explain_as_actor(
+  pg_temp.registration_observation_function_body(
+    'dashboard_private.registration_observation_manager_detail_rows_v1(uuid,integer)'::regprocedure
+  ),
+  pg_temp.registration_observation_explain_security_definer_body_as_actor(
     '97000000-0000-4000-8000-000000000001',
-    $$select observation.id
-      from public.ops_registration_observations observation
-      where observation.track_id = '97000000-0000-4000-8000-000000000106'
-      order by observation.created_at desc, observation.id desc
-      limit 50$$
+    'dashboard_private.registration_observation_manager_detail_rows_v1(uuid,integer)'::regprocedure,
+    'uuid, integer',
+    $$'97000000-0000-4000-8000-000000000106'::uuid, 50$$
   )
 ),
 (
   'summary-10k',
+  $$select summary.*
+      from public.ops_registration_subject_track_summaries summary
+      where summary.id = '97000000-0000-4000-8000-000000000106'$$,
   pg_temp.registration_observation_explain_as_actor(
     '97000000-0000-4000-8000-000000000001',
     $$select summary.*
       from public.ops_registration_subject_track_summaries summary
       where summary.id = '97000000-0000-4000-8000-000000000106'$$
   )
+);
+
+select is(
+  (
+    select pg_catalog.jsonb_build_object(
+      'exactSharedBody', exact_plan.query_sql = pg_temp.registration_observation_function_body(
+        'dashboard_private.registration_observation_manager_attempt_read_v1(uuid,uuid)'::regprocedure
+      ),
+      'exactAccess', exact_plan.query_sql ~* 'assert_registration_observation_manager_access_v1',
+      'exactAppointmentJoin', exact_plan.query_sql ~* 'ops_registration_appointments',
+      'exactTaskJoin', exact_plan.query_sql ~* 'ops_tasks',
+      'exactLessonJoin', exact_plan.query_sql ~* 'class_lesson_sessions',
+      'exactPayload', exact_plan.query_sql ~* 'registration_observation_attempt_payload_v1',
+      'detailSharedBody', detail_plan.query_sql = pg_temp.registration_observation_function_body(
+        'dashboard_private.registration_observation_manager_detail_rows_v1(uuid,integer)'::regprocedure
+      ),
+      'detailAccess', detail_plan.query_sql ~* 'assert_registration_observation_manager_access_v1',
+      'detailAppointmentJoin', detail_plan.query_sql ~* 'ops_registration_appointments',
+      'detailLessonJoin', detail_plan.query_sql ~* 'class_lesson_sessions',
+      'detailPayload', detail_plan.query_sql ~* 'registration_observation_attempt_payload_v1',
+      'detailCurrent', detail_plan.query_sql ~* 'decision_kind[[:space:]]+is[[:space:]]+null',
+      'detailLatestEnrollment', detail_plan.query_sql ~* 'decision_kind[[:space:]]*=[[:space:]]*''enrollment''',
+      'detailClasses', detail_plan.query_sql ~* 'from[[:space:]]+public[.]classes'
+    )
+    from registration_observation_read_plans exact_plan
+    cross join registration_observation_read_plans detail_plan
+    where exact_plan.name = 'exact-10k'
+      and detail_plan.name = 'detail-10k'
+  ),
+  '{"detailAccess":true,"detailAppointmentJoin":true,"detailClasses":true,"detailCurrent":true,"detailLatestEnrollment":true,"detailLessonJoin":true,"detailPayload":true,"detailSharedBody":true,"exactAccess":true,"exactAppointmentJoin":true,"exactLessonJoin":true,"exactPayload":true,"exactSharedBody":true,"exactTaskJoin":true}'::jsonb,
+  'EXPLAIN targets are exact production-shared SQL bodies with access joins payload and all detail reads'
 );
 
 select is(
@@ -1620,10 +1910,29 @@ select is(
   '20k terminal history plus one open row keeps the exact track scalar'
 );
 
-insert into registration_observation_read_plans(name, plan)
+insert into registration_observation_read_plans(name, query_sql, plan)
 values
 (
   'latest-enrollment-20k',
+  $$select bounded.id
+      from (values
+        ('scheduled'::text),
+        ('attended_feedback_pending'),
+        ('completed'),
+        ('no_show'),
+        ('canceled')
+      ) status_candidate(status)
+      cross join lateral (
+        select observation.id, observation.created_at
+        from public.ops_registration_observations observation
+        where observation.track_id = '97000000-0000-4000-8000-000000000106'
+          and observation.decision_kind = 'enrollment'
+          and observation.status = status_candidate.status
+        order by observation.created_at desc, observation.id desc
+        limit 1
+      ) bounded
+      order by bounded.created_at desc, bounded.id desc
+      limit 1$$,
   pg_temp.registration_observation_explain_as_actor(
     '97000000-0000-4000-8000-000000000001',
     $$select bounded.id
@@ -1649,6 +1958,9 @@ values
 ),
 (
   'summary-20k',
+  $$select summary.*
+      from public.ops_registration_subject_track_summaries summary
+      where summary.id = '97000000-0000-4000-8000-000000000106'$$,
   pg_temp.registration_observation_explain_as_actor(
     '97000000-0000-4000-8000-000000000001',
     $$select summary.*

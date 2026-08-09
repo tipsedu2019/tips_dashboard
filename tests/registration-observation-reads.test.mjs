@@ -135,11 +135,13 @@ test("public reads are thin invoker wrappers over guarded bounded definer implem
     {
       publicName: "public.get_registration_observation_manager_detail_v1",
       privateName: "dashboard_private.get_registration_observation_manager_detail_v1_impl",
+      sharedName: "dashboard_private.registration_observation_manager_detail_rows_v1",
       argumentsPattern: /p_track_id\s+uuid[\s\S]*p_attempt_limit\s+integer\s+default\s+20/i,
     },
     {
       publicName: "public.get_registration_observation_manager_attempt_v1",
       privateName: "dashboard_private.get_registration_observation_manager_attempt_v1_impl",
+      sharedName: "dashboard_private.registration_observation_manager_attempt_read_v1",
       argumentsPattern: /p_track_id\s+uuid[\s\S]*p_observation_id\s+uuid/i,
     },
   ];
@@ -156,9 +158,15 @@ test("public reads are thin invoker wrappers over guarded bounded definer implem
     assert.match(implementation, /stable/i);
     assert.match(implementation, /security definer/i);
     assert.match(implementation, /set search_path = ''/i);
+    const guardedRead = contract.sharedName
+      ? functionDefinition(sql, contract.sharedName)
+      : implementation;
+    assert.match(guardedRead, /stable/i);
+    assert.match(guardedRead, /security definer/i);
+    assert.match(guardedRead, /set search_path = ''/i);
     assert.match(
-      implementation,
-      /assert_registration_observation_manager_access_v1\s*\(\s*p_track_id\s*\)/i,
+      guardedRead,
+      /assert_registration_observation_manager_access_v1\s*\(\s*(?:p_track_id|\$1)\s*\)/i,
     );
   }
 
@@ -169,13 +177,28 @@ test("public reads are thin invoker wrappers over guarded bounded definer implem
   assert.match(list, /p_date_from\s*<\s*current_date/i);
   assert.match(list, /p_date_to\s*-\s*p_date_from\s*>\s*120/i);
   assert.match(list, /limit\s+240/i);
+  assert.match(
+    list,
+    /cross\s+join\s+lateral\s*\([\s\S]*count\s*\(\s*\*\s*\)[\s\S]*slot_count[\s\S]*class_schedule_slots[\s\S]*slot_count\s*<>\s*1[\s\S]*session_date\s*\+\s*slot_fact\.start_time[\s\S]*at\s+time\s+zone\s+'Asia\/Seoul'[\s\S]*>\s*pg_catalog\.now\(\)[\s\S]*resolve_registration_observation_session_v1/i,
+  );
 
-  const detail = functionDefinition(
+  const detailImplementation = functionDefinition(
     sql,
     "dashboard_private.get_registration_observation_manager_detail_v1_impl",
   );
-  assert.match(detail, /p_attempt_limit\s+not between\s+1\s+and\s+50/i);
-  assert.match(detail, /limit\s+p_attempt_limit/i);
+  const detail = functionDefinition(
+    sql,
+    "dashboard_private.registration_observation_manager_detail_rows_v1",
+  );
+  const limitGuard = functionDefinition(
+    sql,
+    "dashboard_private.assert_registration_observation_attempt_limit_v1",
+  );
+  assert.match(detailImplementation, /registration_observation_manager_detail_rows_v1/i);
+  assert.doesNotMatch(detailImplementation, /from\s+public\.ops_registration_observations/i);
+  assert.match(limitGuard, /p_attempt_limit\s+not between\s+1\s+and\s+50/i);
+  assert.match(detail, /assert_registration_observation_attempt_limit_v1\s*\(\s*\$2\s*\)/i);
+  assert.match(detail, /limit\s+input\.attempt_limit/i);
   assert.match(detail, /limit\s+100/i);
   assert.match(detail, /decision_kind\s*=\s*'enrollment'/i);
   assert.match(detail, /limit\s+1/i);
@@ -189,16 +212,22 @@ test("public reads are thin invoker wrappers over guarded bounded definer implem
   );
   assert.doesNotMatch(detail, /feedback_reason|student_name|parent_contact|school|inquiry/i);
 
-  const attempt = functionDefinition(
+  const attemptImplementation = functionDefinition(
     sql,
     "dashboard_private.get_registration_observation_manager_attempt_v1_impl",
   );
+  const attempt = functionDefinition(
+    sql,
+    "dashboard_private.registration_observation_manager_attempt_read_v1",
+  );
+  assert.match(attemptImplementation, /registration_observation_manager_attempt_read_v1/i);
+  assert.doesNotMatch(attemptImplementation, /from\s+public\.ops_registration_observations/i);
   assert.match(
     attempt,
-    /observation\.id\s*=\s*p_observation_id[\s\S]*observation\.track_id\s*=\s*p_track_id/i,
+    /observation\.id\s*=\s*\$2[\s\S]*observation\.track_id\s*=\s*\(\s*input\.track\s*\)\.id/i,
   );
   assert.match(attempt, /limit\s+1/i);
-  assert.match(attempt, /registration_observation_not_found/i);
+  assert.match(attemptImplementation, /registration_observation_not_found/i);
   assert.doesNotMatch(attempt, /offset\b|count\s*\(|feedback_reason|parent_contact|school|inquiry/i);
 });
 
@@ -218,6 +247,22 @@ test("read ACLs are explicit and exclude public, anon, and service role executio
       new RegExp(`revoke all on function\\s+${escaped}\\s+from public, anon, authenticated, service_role`, "i"),
     );
     assert.match(
+      sql,
+      new RegExp(`grant execute on function\\s+${escaped}\\s+to authenticated`, "i"),
+    );
+  }
+
+  for (const signature of [
+    "dashboard_private.assert_registration_observation_attempt_limit_v1(integer)",
+    "dashboard_private.registration_observation_manager_detail_rows_v1(uuid, integer)",
+    "dashboard_private.registration_observation_manager_attempt_read_v1(uuid, uuid)",
+  ]) {
+    const escaped = escapeRegExp(signature).replaceAll(" ", "\\s*");
+    assert.match(
+      sql,
+      new RegExp(`revoke all on function\\s+${escaped}\\s+from public, anon, authenticated, service_role`, "i"),
+    );
+    assert.doesNotMatch(
       sql,
       new RegExp(`grant execute on function\\s+${escaped}\\s+to authenticated`, "i"),
     );
@@ -248,7 +293,18 @@ test("summary view appends only bounded observation scalars without a history ag
   ]) {
     assert.match(view, new RegExp(`\\b${column}\\b`, "i"));
   }
-  assert.match(view, /track\.observation_attempt_count\s+as\s+observation_attempt_count/i);
+  assert.match(
+    view,
+    /case\s+when\s+observation_manager\.allowed\s+is\s+true\s+then\s+track\.observation_attempt_count\s+else\s+null\s+end\s+as\s+observation_attempt_count/i,
+  );
+  assert.match(
+    view,
+    /left\s+join\s+lateral\s*\(\s*select\s+true\s+as\s+allowed[\s\S]*current_dashboard_role\(\)[\s\S]*registration_observation_track_director_profile_id_matches_v1\(\s*track\.id\s*\)[\s\S]*limit\s+1\s*\)\s+observation_manager\s+on\s+true/i,
+  );
+  assert.equal(
+    [...view.matchAll(/case\s+when\s+observation_manager\.allowed\s+is\s+true/gi)].length,
+    9,
+  );
   assert.match(view, /ops_registration_observations[\s\S]*limit\s+1/i);
   assert.doesNotMatch(view, /count\s*\([^)]*\)[\s\S]*ops_registration_observations/i);
   assert.doesNotMatch(view, /feedback_reason|textbook_snapshot|progress_snapshot/i);
@@ -265,6 +321,18 @@ test("schema pgTAP freezes canonical, authorization, exact lookup, and 20k index
   assert.match(sql, /generate_series\(1,\s*10000\)/i);
   assert.match(sql, /generate_series\(10001,\s*20000\)/i);
   assert.match(sql, /explain\s*\(analyze,\s*buffers,\s*format json\)/i);
+  assert.match(sql, /registration_observation_explain_security_definer_body_as_actor/i);
+  assert.match(sql, /EXPLAIN targets are exact production-shared SQL bodies/i);
+  assert.match(sql, /registration_observation_manager_attempt_read_v1\(uuid,uuid\)/i);
+  assert.match(sql, /registration_observation_manager_detail_rows_v1\(uuid,integer\)/i);
+  assert.doesNotMatch(
+    sql,
+    /'exact-10k'[\s\S]{0,500}select\s+observation\.id\s+from\s+public\.ops_registration_observations/i,
+  );
+  assert.doesNotMatch(
+    sql,
+    /'detail-10k'[\s\S]{0,500}select\s+observation\.id\s+from\s+public\.ops_registration_observations/i,
+  );
   assert.match(sql, /ops_registration_observations_open_track_key/i);
   assert.match(sql, /ops_registration_observations_pkey/i);
   assert.match(sql, /ops_registration_observations_track_decision_status_idx/i);

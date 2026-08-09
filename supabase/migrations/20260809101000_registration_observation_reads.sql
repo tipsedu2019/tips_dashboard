@@ -187,7 +187,20 @@ begin
     candidates as materialized (
       select dated.session_key, dated.session_date
       from dated
+      cross join lateral (
+        select
+          pg_catalog.count(*)::integer as slot_count,
+          pg_catalog.min(slot.start_time) as start_time
+        from public.class_schedule_slots slot
+        where slot.class_id = p_class_id
+          and slot.weekday = extract(dow from dated.session_date)::smallint
+      ) slot_fact
       where dated.session_date between p_date_from and p_date_to
+        and (
+          slot_fact.slot_count <> 1
+          or (dated.session_date + slot_fact.start_time) at time zone 'Asia/Seoul'
+            > pg_catalog.now()
+        )
       order by dated.session_date, dated.session_key
       limit 240
     ),
@@ -276,6 +289,248 @@ as $$
   );
 $$;
 
+create or replace function dashboard_private.assert_registration_observation_attempt_limit_v1(
+  p_attempt_limit integer
+)
+returns integer
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if p_attempt_limit is null or p_attempt_limit not between 1 and 50 then
+    raise exception 'registration_observation_attempt_limit_invalid'
+      using errcode = '22023';
+  end if;
+
+  return p_attempt_limit;
+end;
+$$;
+
+create or replace function dashboard_private.registration_observation_manager_detail_rows_v1(
+  p_track_id uuid,
+  p_attempt_limit integer
+)
+returns table(
+  row_kind text,
+  payload jsonb,
+  sort_created_at timestamptz,
+  sort_id uuid,
+  sort_name text
+)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  with authorized as materialized (
+    select dashboard_private.assert_registration_observation_manager_access_v1($1) as track
+  ),
+  validated as materialized (
+    select
+      authorized.track,
+      dashboard_private.assert_registration_observation_attempt_limit_v1($2) as attempt_limit
+    from authorized
+  ),
+  track_row(row_kind, payload, sort_created_at, sort_id, sort_name) as materialized (
+    select
+      'track'::text,
+      pg_catalog.jsonb_build_object(
+        'trackId', (input.track).id,
+        'taskId', (input.track).task_id,
+        'subject', (input.track).subject,
+        'workflowStatus', (input.track).workflow_status,
+        'workflowRevision', (input.track).workflow_revision,
+        'observationReturnWorkflowStatus', (input.track).observation_return_workflow_status,
+        'directorProfileId', (input.track).director_profile_id
+      ),
+      null::timestamptz,
+      (input.track).id,
+      null::text
+    from validated input
+  ),
+  attempt_rows(row_kind, payload, sort_created_at, sort_id, sort_name) as materialized (
+    select
+      'attempt'::text,
+      dashboard_private.registration_observation_attempt_payload_v1(
+        bounded.observation_row,
+        bounded.appointment_row,
+        bounded.session_key
+      ),
+      bounded.created_at,
+      bounded.id,
+      null::text
+    from validated input
+    cross join lateral (
+      select
+        observation as observation_row,
+        appointment as appointment_row,
+        coalesce(lesson.session_key, observation.legacy_session_key) as session_key,
+        observation.created_at,
+        observation.id
+      from public.ops_registration_observations observation
+      join public.ops_registration_appointments appointment
+        on appointment.id = observation.appointment_id
+       and appointment.task_id = observation.task_id
+      left join public.class_lesson_sessions lesson
+        on lesson.id = observation.class_lesson_session_id
+       and lesson.class_id = observation.class_id
+      where observation.track_id = (input.track).id
+        and observation.task_id = (input.track).task_id
+      order by observation.created_at desc, observation.id desc
+      limit input.attempt_limit
+    ) bounded
+  ),
+  current_row(row_kind, payload, sort_created_at, sort_id, sort_name) as materialized (
+    select
+      'current'::text,
+      dashboard_private.registration_observation_attempt_payload_v1(
+        bounded.observation_row,
+        bounded.appointment_row,
+        bounded.session_key
+      ),
+      bounded.created_at,
+      bounded.id,
+      null::text
+    from validated input
+    cross join lateral (
+      select
+        observation as observation_row,
+        appointment as appointment_row,
+        coalesce(lesson.session_key, observation.legacy_session_key) as session_key,
+        observation.created_at,
+        observation.id
+      from public.ops_registration_observations observation
+      join public.ops_registration_appointments appointment
+        on appointment.id = observation.appointment_id
+       and appointment.task_id = observation.task_id
+      left join public.class_lesson_sessions lesson
+        on lesson.id = observation.class_lesson_session_id
+       and lesson.class_id = observation.class_id
+      where observation.track_id = (input.track).id
+        and observation.task_id = (input.track).task_id
+        and observation.decision_kind is null
+        and observation.status in (
+          'scheduled',
+          'attended_feedback_pending',
+          'completed',
+          'no_show'
+        )
+      limit 1
+    ) bounded
+  ),
+  latest_enrollment_row(row_kind, payload, sort_created_at, sort_id, sort_name) as materialized (
+    select
+      'latest_enrollment'::text,
+      pg_catalog.to_jsonb(bounded.id),
+      bounded.created_at,
+      bounded.id,
+      null::text
+    from validated input
+    cross join lateral (
+      select recent.id, recent.created_at
+      from (values
+        ('scheduled'::text),
+        ('attended_feedback_pending'),
+        ('completed'),
+        ('no_show'),
+        ('canceled')
+      ) status_candidate(status)
+      cross join lateral (
+        select observation.id, observation.created_at
+        from public.ops_registration_observations observation
+        where observation.track_id = (input.track).id
+          and observation.decision_kind = 'enrollment'
+          and observation.status = status_candidate.status
+        order by observation.created_at desc, observation.id desc
+        limit 1
+      ) recent
+      order by recent.created_at desc, recent.id desc
+      limit 1
+    ) bounded
+  ),
+  class_rows(row_kind, payload, sort_created_at, sort_id, sort_name) as materialized (
+    select
+      'class'::text,
+      pg_catalog.jsonb_build_object(
+        'id', bounded.id,
+        'name', bounded.name,
+        'subject', bounded.subject
+      ),
+      null::timestamptz,
+      bounded.id,
+      bounded.name
+    from validated input
+    cross join lateral (
+      select class.id, class.name, class.subject
+      from public.classes class
+      where class.subject = (input.track).subject
+        and class.closed_at is null
+      order by class.name, class.id
+      limit 100
+    ) bounded
+  )
+  select * from track_row
+  union all
+  select * from attempt_rows
+  union all
+  select * from current_row
+  union all
+  select * from latest_enrollment_row
+  union all
+  select * from class_rows;
+$$;
+
+create or replace function dashboard_private.registration_observation_manager_attempt_read_v1(
+  p_track_id uuid,
+  p_observation_id uuid
+)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  with authorized as materialized (
+    select dashboard_private.assert_registration_observation_manager_access_v1($1) as track
+  )
+  select pg_catalog.jsonb_build_object(
+    'trackId', (input.track).id,
+    'taskId', (input.track).task_id,
+    'observation', dashboard_private.registration_observation_attempt_payload_v1(
+      bounded.observation_row,
+      bounded.appointment_row,
+      bounded.session_key
+    )
+  )
+  from authorized input
+  cross join lateral (
+    select
+      observation as observation_row,
+      appointment as appointment_row,
+      coalesce(lesson.session_key, observation.legacy_session_key) as session_key
+    from public.ops_registration_observations observation
+    join public.ops_registration_appointments appointment
+      on appointment.id = observation.appointment_id
+     and appointment.task_id = observation.task_id
+    join public.ops_tasks task
+      on task.id = observation.task_id
+     and task.id = (input.track).task_id
+     and task.type = 'registration'
+    left join public.class_lesson_sessions lesson
+      on lesson.id = observation.class_lesson_session_id
+     and lesson.class_id = observation.class_id
+    where observation.id = $2
+      and observation.track_id = (input.track).id
+      and observation.task_id = (input.track).task_id
+      and nullif(pg_catalog.btrim(
+        coalesce(lesson.session_key, observation.legacy_session_key)
+      ), '') is not null
+    limit 1
+  ) bounded;
+$$;
+
 create or replace function dashboard_private.get_registration_observation_manager_detail_v1_impl(
   p_track_id uuid,
   p_attempt_limit integer default 20
@@ -287,139 +542,54 @@ security definer
 set search_path = ''
 as $$
 declare
-  v_track public.ops_registration_subject_tracks%rowtype;
-  v_attempts jsonb;
-  v_current jsonb;
-  v_latest_enrollment_observation_id uuid;
-  v_classes jsonb;
+  v_result jsonb;
 begin
-  v_track := dashboard_private.assert_registration_observation_manager_access_v1(
-    p_track_id
-  );
-  if p_attempt_limit is null or p_attempt_limit not between 1 and 50 then
-    raise exception 'registration_observation_attempt_limit_invalid'
-      using errcode = '22023';
-  end if;
-
-  select coalesce(
-    pg_catalog.jsonb_agg(
-      dashboard_private.registration_observation_attempt_payload_v1(
-        bounded.observation_row,
-        bounded.appointment_row,
-        bounded.session_key
-      )
-      order by bounded.created_at desc, bounded.id desc
-    ),
-    '[]'::jsonb
+  with shared_rows as materialized (
+    select *
+    from dashboard_private.registration_observation_manager_detail_rows_v1(
+      p_track_id,
+      p_attempt_limit
+    )
   )
-  into v_attempts
-  from (
-    select
-      observation as observation_row,
-      appointment as appointment_row,
-      coalesce(lesson.session_key, observation.legacy_session_key) as session_key,
-      observation.created_at,
-      observation.id
-    from public.ops_registration_observations observation
-    join public.ops_registration_appointments appointment
-      on appointment.id = observation.appointment_id
-     and appointment.task_id = observation.task_id
-    left join public.class_lesson_sessions lesson
-      on lesson.id = observation.class_lesson_session_id
-     and lesson.class_id = observation.class_id
-    where observation.track_id = p_track_id
-      and observation.task_id = v_track.task_id
-    order by observation.created_at desc, observation.id desc
-    limit p_attempt_limit
-  ) bounded;
-
-  select dashboard_private.registration_observation_attempt_payload_v1(
-    current_row.observation_row,
-    current_row.appointment_row,
-    current_row.session_key
-  )
-  into v_current
-  from (
-    select
-      observation as observation_row,
-      appointment as appointment_row,
-      coalesce(lesson.session_key, observation.legacy_session_key) as session_key
-    from public.ops_registration_observations observation
-    join public.ops_registration_appointments appointment
-      on appointment.id = observation.appointment_id
-     and appointment.task_id = observation.task_id
-    left join public.class_lesson_sessions lesson
-      on lesson.id = observation.class_lesson_session_id
-     and lesson.class_id = observation.class_id
-    where observation.track_id = p_track_id
-      and observation.task_id = v_track.task_id
-      and observation.decision_kind is null
-      and observation.status in (
-        'scheduled',
-        'attended_feedback_pending',
-        'completed',
-        'no_show'
-      )
-    limit 1
-  ) current_row;
-
-  select bounded.id
-  into v_latest_enrollment_observation_id
-  from (values
-    ('scheduled'::text),
-    ('attended_feedback_pending'),
-    ('completed'),
-    ('no_show'),
-    ('canceled')
-  ) status_candidate(status)
-  cross join lateral (
-    select observation.id, observation.created_at
-    from public.ops_registration_observations observation
-    where observation.track_id = p_track_id
-      and observation.decision_kind = 'enrollment'
-      and observation.status = status_candidate.status
-    order by observation.created_at desc, observation.id desc
-    limit 1
-  ) bounded
-  order by bounded.created_at desc, bounded.id desc
-  limit 1;
-
-  select coalesce(
-    pg_catalog.jsonb_agg(
-      pg_catalog.jsonb_build_object(
-        'id', bounded.id,
-        'name', bounded.name,
-        'subject', bounded.subject
-      )
-      order by bounded.name, bounded.id
+  select pg_catalog.jsonb_build_object(
+    'track', (
+      select row.payload
+      from shared_rows row
+      where row.row_kind = 'track'
+      limit 1
     ),
-    '[]'::jsonb
-  )
-  into v_classes
-  from (
-    select class.id, class.name, class.subject
-    from public.classes class
-    where class.subject = v_track.subject
-      and class.closed_at is null
-    order by class.name, class.id
-    limit 100
-  ) bounded;
-
-  return pg_catalog.jsonb_build_object(
-    'track', pg_catalog.jsonb_build_object(
-      'trackId', v_track.id,
-      'taskId', v_track.task_id,
-      'subject', v_track.subject,
-      'workflowStatus', v_track.workflow_status,
-      'workflowRevision', v_track.workflow_revision,
-      'observationReturnWorkflowStatus', v_track.observation_return_workflow_status,
-      'directorProfileId', v_track.director_profile_id
+    'currentObservation', (
+      select row.payload
+      from shared_rows row
+      where row.row_kind = 'current'
+      limit 1
     ),
-    'currentObservation', v_current,
-    'latestEnrollmentDecisionObservationId', v_latest_enrollment_observation_id,
-    'attempts', v_attempts,
-    'classes', v_classes
-  );
+    'latestEnrollmentDecisionObservationId', (
+      select row.payload
+      from shared_rows row
+      where row.row_kind = 'latest_enrollment'
+      limit 1
+    ),
+    'attempts', coalesce((
+      select pg_catalog.jsonb_agg(
+        row.payload
+        order by row.sort_created_at desc, row.sort_id desc
+      )
+      from shared_rows row
+      where row.row_kind = 'attempt'
+    ), '[]'::jsonb),
+    'classes', coalesce((
+      select pg_catalog.jsonb_agg(
+        row.payload
+        order by row.sort_name, row.sort_id
+      )
+      from shared_rows row
+      where row.row_kind = 'class'
+    ), '[]'::jsonb)
+  )
+  into v_result;
+
+  return v_result;
 end;
 $$;
 
@@ -434,51 +604,19 @@ security definer
 set search_path = ''
 as $$
 declare
-  v_track public.ops_registration_subject_tracks%rowtype;
-  v_attempt record;
+  v_result jsonb;
 begin
-  v_track := dashboard_private.assert_registration_observation_manager_access_v1(
-    p_track_id
+  v_result := dashboard_private.registration_observation_manager_attempt_read_v1(
+    p_track_id,
+    p_observation_id
   );
 
-  select
-    observation,
-    appointment,
-    coalesce(lesson.session_key, observation.legacy_session_key) as session_key
-  into v_attempt
-  from public.ops_registration_observations observation
-  join public.ops_registration_appointments appointment
-    on appointment.id = observation.appointment_id
-   and appointment.task_id = observation.task_id
-  join public.ops_tasks task
-    on task.id = observation.task_id
-   and task.id = v_track.task_id
-   and task.type = 'registration'
-  left join public.class_lesson_sessions lesson
-    on lesson.id = observation.class_lesson_session_id
-   and lesson.class_id = observation.class_id
-  where observation.id = p_observation_id
-    and observation.track_id = p_track_id
-    and observation.task_id = v_track.task_id
-  limit 1;
-
-  if not found
-    or nullif(pg_catalog.btrim(v_attempt.session_key), '') is null
-  then
+  if v_result is null then
     raise exception 'registration_observation_not_found'
       using errcode = 'P0002';
   end if;
 
-  return pg_catalog.jsonb_build_object(
-    'trackId', v_track.id,
-    'taskId', v_track.task_id,
-    'observation',
-      dashboard_private.registration_observation_attempt_payload_v1(
-        v_attempt.observation,
-        v_attempt.appointment,
-        v_attempt.session_key
-      )
-  );
+  return v_result;
 end;
 $$;
 
@@ -563,16 +701,42 @@ select
   track.enrollment_detail_rows,
   active_level_test.scheduled_at as level_test_scheduled_at,
   active_level_test.place as level_test_place,
-  track.observation_attempt_count as observation_attempt_count,
-  current_observation.id as observation_current_id,
-  current_observation.status as observation_current_status,
-  current_observation.appointment_id as observation_current_appointment_id,
-  current_observation.scheduled_at as observation_nearest_scheduled_at,
-  current_observation.place as observation_nearest_place,
-  current_observation.notification_revision as observation_notification_revision,
-  current_observation.revision as observation_revision,
-  current_observation.feedback_revision as observation_feedback_revision
+  case when observation_manager.allowed is true
+    then track.observation_attempt_count else null
+  end as observation_attempt_count,
+  case when observation_manager.allowed is true
+    then current_observation.id else null
+  end as observation_current_id,
+  case when observation_manager.allowed is true
+    then current_observation.status else null
+  end as observation_current_status,
+  case when observation_manager.allowed is true
+    then current_observation.appointment_id else null
+  end as observation_current_appointment_id,
+  case when observation_manager.allowed is true
+    then current_observation.scheduled_at else null
+  end as observation_nearest_scheduled_at,
+  case when observation_manager.allowed is true
+    then current_observation.place else null
+  end as observation_nearest_place,
+  case when observation_manager.allowed is true
+    then current_observation.notification_revision else null
+  end as observation_notification_revision,
+  case when observation_manager.allowed is true
+    then current_observation.revision else null
+  end as observation_revision,
+  case when observation_manager.allowed is true
+    then current_observation.feedback_revision else null
+  end as observation_feedback_revision
 from public.ops_registration_subject_tracks track
+left join lateral (
+  select true as allowed
+  where (select public.current_dashboard_role()) in ('admin', 'staff')
+    or dashboard_private.registration_observation_track_director_profile_id_matches_v1(
+      track.id
+    )
+  limit 1
+) observation_manager on true
 left join lateral (
   select appointment.scheduled_at, appointment.place
   from public.ops_registration_consultations consultation
@@ -640,6 +804,12 @@ alter function dashboard_private.list_registration_observation_sessions_v1_impl(
   owner to postgres;
 alter function dashboard_private.registration_observation_attempt_payload_v1(public.ops_registration_observations, public.ops_registration_appointments, text)
   owner to postgres;
+alter function dashboard_private.assert_registration_observation_attempt_limit_v1(integer)
+  owner to postgres;
+alter function dashboard_private.registration_observation_manager_detail_rows_v1(uuid, integer)
+  owner to postgres;
+alter function dashboard_private.registration_observation_manager_attempt_read_v1(uuid, uuid)
+  owner to postgres;
 alter function dashboard_private.get_registration_observation_manager_detail_v1_impl(uuid, integer)
   owner to postgres;
 alter function dashboard_private.get_registration_observation_manager_attempt_v1_impl(uuid, uuid)
@@ -654,6 +824,12 @@ alter function public.get_registration_observation_manager_attempt_v1(uuid, uuid
 revoke all on function dashboard_private.assert_registration_observation_manager_access_v1(uuid)
   from public, anon, authenticated, service_role;
 revoke all on function dashboard_private.registration_observation_attempt_payload_v1(public.ops_registration_observations, public.ops_registration_appointments, text)
+  from public, anon, authenticated, service_role;
+revoke all on function dashboard_private.assert_registration_observation_attempt_limit_v1(integer)
+  from public, anon, authenticated, service_role;
+revoke all on function dashboard_private.registration_observation_manager_detail_rows_v1(uuid, integer)
+  from public, anon, authenticated, service_role;
+revoke all on function dashboard_private.registration_observation_manager_attempt_read_v1(uuid, uuid)
   from public, anon, authenticated, service_role;
 
 revoke all on function dashboard_private.list_registration_observation_sessions_v1_impl(uuid, uuid, date, date)
