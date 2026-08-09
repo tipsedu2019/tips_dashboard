@@ -13,6 +13,9 @@ const pgTapPath = path.join(
   "supabase/tests/registration_observation_schema_test.sql",
 );
 
+const READ_ASSERTION_PATTERN =
+  /^select\s+(?:ok|is|isnt|has_[a-z_]+|function_[a-z_]+|throws_ok|lives_ok|is_empty|isnt_empty)\s*\(/gim;
+
 async function migrationSql() {
   return readFile(migrationPath, "utf8");
 }
@@ -121,10 +124,13 @@ test("readiness enumerates exact signatures and bounded missing-object tokens", 
   assert.doesNotMatch(sql, /pg_catalog\.current_date/i);
 });
 
-test("schema pgTAP is an executable 61-assertion ACL and behavior gate", async () => {
+test("schema pgTAP has one exact literal plan matching every assertion", async () => {
   const sql = await readFile(pgTapPath, "utf8");
   assert.match(sql, /^begin;/i);
-  assert.match(sql, /select plan\(61\);/i);
+  const planMatches = [...sql.matchAll(/select\s+plan\((\d+)\);/gi)];
+  assert.equal(planMatches.length, 1);
+  const assertionCount = [...sql.matchAll(READ_ASSERTION_PATTERN)].length;
+  assert.equal(Number(planMatches[0][1]), assertionCount);
   assert.match(sql, /insert into auth\.users/i);
   assert.match(sql, /'admin'/i);
   assert.match(sql, /'staff'/i);
@@ -135,7 +141,9 @@ test("schema pgTAP is an executable 61-assertion ACL and behavior gate", async (
   assert.match(sql, /registration_observation_request_key_conflict/i);
   assert.match(sql, /has_table_privilege/i);
   assert.match(sql, /set local role authenticated/i);
-  assert.match(sql, /select \* from finish\(\);\s*rollback;\s*$/i);
+  assert.doesNotMatch(sql, /select\s+no_plan\s*\(/i);
+  assert.doesNotMatch(sql, /select\s+\*\s+from\s+finish\s*\(/i);
+  assert.match(sql, /rollback;\s*$/i);
 });
 
 test("package exposes only the approved local observation QA entrypoint", async () => {
