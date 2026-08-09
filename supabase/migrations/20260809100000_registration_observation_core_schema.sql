@@ -789,7 +789,7 @@ begin
     if v_existing.operation <> 'activate'
       or v_existing.request_fingerprint <> v_fingerprint
     then
-      raise exception 'registration_observation_request_conflict'
+      raise exception 'registration_observation_request_key_conflict'
         using errcode = '23505';
     end if;
     return v_existing.response_payload;

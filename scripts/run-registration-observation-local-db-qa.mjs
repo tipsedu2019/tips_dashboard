@@ -5,14 +5,18 @@ import {
 } from "node:fs";
 import {
   cp,
+  lstat,
   mkdtemp,
   mkdir,
+  open,
   readFile,
   readdir,
   rm,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
+import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -23,8 +27,17 @@ export const PINNED_SUPABASE_GO =
   "/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supabase/cli-darwin-arm64/bin/supabase-go";
 export const PINNED_SUPABASE_VERSION = "2.103.0";
 
-const DEFAULT_DB_URL =
-  "postgresql://postgres:postgres@127.0.0.1:56322/postgres";
+const LOOPBACK_HOST = "127.0.0.1";
+const MIN_DYNAMIC_PORT = 49152;
+const MAX_DYNAMIC_PORT = 65535;
+const PORT_ALLOCATION_ATTEMPTS = 32;
+const PORT_LEASE_ROOT = path.join(
+  os.tmpdir(),
+  "tips-registration-observation-port-leases-v1",
+);
+const PORT_LEASE_ROOT_PREFIX =
+  "tips-registration-observation-port-leases-";
+const RUNTIME_PORT_LEASES = new WeakMap();
 const PROJECT_ID_PREFIX = "tips_obs_qa_";
 const PROJECT_ID_PATTERN = /^tips_obs_qa_[a-f0-9]{12}$/u;
 const WORKDIR_PREFIX = "tips-registration-observation-qa-";
@@ -294,6 +307,429 @@ function fail(code, detail = "", exitCode = 1) {
   throw error;
 }
 
+function hasExactKeys(value, keys) {
+  return value !== null
+    && typeof value === "object"
+    && JSON.stringify(Object.keys(value).sort())
+      === JSON.stringify([...keys].sort());
+}
+
+function runtimePortManifestRefused() {
+  fail("registration_observation_local_db_runtime_port_manifest_refused", "", 2);
+}
+
+export function assertRegistrationObservationRuntimePortManifest(value) {
+  if (!hasExactKeys(value, [
+    "apiPort",
+    "dbPort",
+    "dbUrl",
+    "host",
+    "poolerPort",
+    "shadowPort",
+  ])) {
+    runtimePortManifestRefused();
+  }
+  const ports = [
+    value.apiPort,
+    value.dbPort,
+    value.shadowPort,
+    value.poolerPort,
+  ];
+  const expectedDbUrl =
+    `postgresql://postgres:postgres@${LOOPBACK_HOST}:${value.dbPort}/postgres`;
+  if (
+    value.host !== LOOPBACK_HOST
+    || ports.some((port) =>
+      !Number.isInteger(port)
+      || port < MIN_DYNAMIC_PORT
+      || port > MAX_DYNAMIC_PORT
+    )
+    || new Set(ports).size !== ports.length
+    || value.dbUrl !== expectedDbUrl
+  ) {
+    runtimePortManifestRefused();
+  }
+  return value;
+}
+
+async function allocateFreeLoopbackPort(host = LOOPBACK_HOST) {
+  if (host !== LOOPBACK_HOST) runtimePortManifestRefused();
+  return new Promise((resolvePromise, rejectPromise) => {
+    const server = createServer();
+    let settled = false;
+    const rejectAllocation = (cause) => {
+      if (settled) return;
+      settled = true;
+      rejectPromise(
+        new Error(
+          `registration_observation_local_db_port_allocation_failed:${
+            cause?.code ?? cause?.message ?? "socket_error"
+          }`,
+        ),
+      );
+    };
+    server.unref();
+    server.once("error", rejectAllocation);
+    server.listen({ host, port: 0, exclusive: true }, () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      server.close((error) => {
+        if (settled) return;
+        settled = true;
+        if (
+          error
+          || !Number.isInteger(port)
+          || port < MIN_DYNAMIC_PORT
+          || port > MAX_DYNAMIC_PORT
+        ) {
+          rejectPromise(
+            new Error(
+              `registration_observation_local_db_port_allocation_failed:${
+                error?.code ?? (Number.isInteger(port) ? port : "invalid_port")
+              }`,
+            ),
+          );
+          return;
+        }
+        resolvePromise(port);
+      });
+    });
+  });
+}
+
+function portLeaseFailure(code, detail = "") {
+  const error = new Error(`${code}${detail ? `:${detail}` : ""}`);
+  error.code = code;
+  return error;
+}
+
+function portLeaseRootIsOwned(leaseRoot) {
+  if (typeof leaseRoot !== "string") return false;
+  const resolved = path.resolve(leaseRoot);
+  return path.dirname(resolved) === path.resolve(os.tmpdir())
+    && path.basename(resolved).startsWith(PORT_LEASE_ROOT_PREFIX);
+}
+
+async function assertPortLeaseRoot(leaseRoot) {
+  if (!portLeaseRootIsOwned(leaseRoot)) {
+    throw portLeaseFailure(
+      "registration_observation_local_db_port_lease_root_refused",
+    );
+  }
+  await mkdir(leaseRoot, { recursive: true, mode: 0o700 });
+  const metadata = await lstat(leaseRoot);
+  if (
+    !metadata.isDirectory()
+    || metadata.isSymbolicLink()
+    || (metadata.mode & 0o077) !== 0
+  ) {
+    throw portLeaseFailure(
+      "registration_observation_local_db_port_lease_root_refused",
+    );
+  }
+}
+
+function portLeaseOwnerIsValid(owner, port) {
+  return hasExactKeys(owner, [
+    "createdAtMs",
+    "pid",
+    "port",
+    "projectId",
+    "version",
+  ])
+    && owner.version === 1
+    && PROJECT_ID_PATTERN.test(owner.projectId)
+    && Number.isInteger(owner.pid)
+    && owner.pid > 0
+    && owner.port === port
+    && Number.isFinite(owner.createdAtMs)
+    && owner.createdAtMs > 0;
+}
+
+async function acquirePortLeaseDefault({
+  port,
+  projectId,
+  leaseRoot,
+  now = Date.now,
+}) {
+  if (
+    !Number.isInteger(port)
+    || port < MIN_DYNAMIC_PORT
+    || port > MAX_DYNAMIC_PORT
+    || !PROJECT_ID_PATTERN.test(projectId)
+    || typeof now !== "function"
+  ) {
+    throw portLeaseFailure(
+      "registration_observation_local_db_port_lease_refused",
+    );
+  }
+  await assertPortLeaseRoot(leaseRoot);
+  const leasePath = path.join(leaseRoot, `${port}.lease`);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let handle;
+    try {
+      handle = await open(leasePath, "wx", 0o600);
+    } catch (error) {
+      if (error?.code === "EEXIST") {
+        throw portLeaseFailure(
+          "registration_observation_local_db_port_lease_unavailable",
+          String(port),
+        );
+      }
+      throw error;
+    }
+
+    try {
+      const owner = {
+        version: 1,
+        projectId,
+        pid: process.pid,
+        port,
+        createdAtMs: now(),
+      };
+      if (!portLeaseOwnerIsValid(owner, port)) {
+        throw portLeaseFailure(
+          "registration_observation_local_db_port_lease_refused",
+        );
+      }
+      await handle.writeFile(`${JSON.stringify(owner)}\n`, "utf8");
+      await handle.sync();
+      await handle.close();
+      return Object.freeze({
+        leasePath,
+        port,
+        projectId,
+        pid: process.pid,
+      });
+    } catch (error) {
+      try {
+        await handle.close();
+      } catch {
+        // The rollback below owns the observable cleanup result.
+      }
+      try {
+        await unlink(leasePath);
+      } catch (unlinkError) {
+        if (unlinkError?.code !== "ENOENT") {
+          error.cleanupError = unlinkError;
+          error.portLeaseCleanupClaim = Object.freeze({
+            leasePath,
+            partialOwner: true,
+            port,
+            projectId,
+            pid: process.pid,
+          });
+        }
+      }
+      throw error;
+    }
+  }
+  throw portLeaseFailure(
+    "registration_observation_local_db_port_lease_unavailable",
+    String(port),
+  );
+}
+
+async function releasePortLeaseDefault(claim) {
+  if (claim.partialOwner === true) {
+    try {
+      await unlink(claim.leasePath);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    return;
+  }
+  const ownerText = await readFile(claim.leasePath, "utf8").catch((error) => {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  });
+  if (ownerText === null) return;
+  let owner;
+  try {
+    owner = JSON.parse(ownerText);
+  } catch {
+    throw portLeaseFailure(
+      "registration_observation_local_db_port_lease_ownership_refused",
+    );
+  }
+  if (
+    !portLeaseOwnerIsValid(owner, claim.port)
+    || owner.projectId !== claim.projectId
+    || owner.pid !== claim.pid
+  ) {
+    throw portLeaseFailure(
+      "registration_observation_local_db_port_lease_ownership_refused",
+    );
+  }
+  try {
+    await unlink(claim.leasePath);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+}
+
+async function releasePortLeaseClaims(claims, releasePortLease) {
+  const failedClaims = [];
+  const errors = [];
+  for (const claim of [...claims].reverse()) {
+    try {
+      await releasePortLease(claim);
+    } catch (error) {
+      failedClaims.unshift(claim);
+      errors.push(error);
+    }
+  }
+  return { failedClaims, errors };
+}
+
+async function failRuntimePortManifestAfterRollback({
+  claims,
+  primaryError,
+  releasePortLease,
+}) {
+  const { failedClaims, errors } = await releasePortLeaseClaims(
+    claims,
+    releasePortLease,
+  );
+  const error = new Error(
+    `registration_observation_local_db_runtime_port_manifest_refused:${
+      primaryError?.message ?? "allocation_attempts_exhausted"
+    }`,
+    { cause: primaryError },
+  );
+  error.exitCode = 2;
+  if (failedClaims.length > 0) {
+    error.portLeaseCleanup = { failedClaims, releasePortLease };
+  }
+  if (errors.length > 0) error.portLeaseRollbackErrors = errors;
+  throw error;
+}
+
+export async function buildRegistrationObservationRuntimePortManifest({
+  allocateLoopbackPort = allocateFreeLoopbackPort,
+  acquirePortLease = acquirePortLeaseDefault,
+  host = LOOPBACK_HOST,
+  leaseRoot = PORT_LEASE_ROOT,
+  now = Date.now,
+  projectId,
+  releasePortLease = releasePortLeaseDefault,
+} = {}) {
+  if (
+    host !== LOOPBACK_HOST
+    || !PROJECT_ID_PATTERN.test(projectId)
+    || typeof allocateLoopbackPort !== "function"
+    || typeof acquirePortLease !== "function"
+    || typeof releasePortLease !== "function"
+    || !portLeaseRootIsOwned(leaseRoot)
+  ) {
+    runtimePortManifestRefused();
+  }
+  const ports = [];
+  const claims = [];
+  let attempts = 0;
+  let lastAllocationError;
+  while (ports.length < 4 && attempts < PORT_ALLOCATION_ATTEMPTS) {
+    attempts += 1;
+    let port;
+    try {
+      port = await allocateLoopbackPort(host);
+    } catch (error) {
+      lastAllocationError = error;
+      continue;
+    }
+    if (
+      !Number.isInteger(port)
+      || port < MIN_DYNAMIC_PORT
+      || port > MAX_DYNAMIC_PORT
+    ) {
+      await failRuntimePortManifestAfterRollback({
+        claims,
+        primaryError: portLeaseFailure(
+          "registration_observation_local_db_port_allocation_invalid",
+          String(port),
+        ),
+        releasePortLease,
+      });
+    }
+    if (ports.includes(port)) continue;
+    let claim;
+    try {
+      claim = await acquirePortLease({
+        port,
+        projectId,
+        leaseRoot,
+        now,
+      });
+    } catch (error) {
+      if (
+        error?.code
+        === "registration_observation_local_db_port_lease_unavailable"
+      ) {
+        continue;
+      }
+      if (error?.portLeaseCleanupClaim) {
+        claims.push(error.portLeaseCleanupClaim);
+      }
+      await failRuntimePortManifestAfterRollback({
+        claims,
+        primaryError: error,
+        releasePortLease,
+      });
+    }
+    ports.push(port);
+    claims.push(claim);
+  }
+  if (ports.length !== 4) {
+    await failRuntimePortManifestAfterRollback({
+      claims,
+      primaryError: lastAllocationError
+        ?? portLeaseFailure(
+          "registration_observation_local_db_port_allocation_attempts_exhausted",
+        ),
+      releasePortLease,
+    });
+  }
+  const [apiPort, dbPort, shadowPort, poolerPort] = ports;
+  const manifest = Object.freeze({
+    host,
+    apiPort,
+    dbPort,
+    shadowPort,
+    poolerPort,
+    dbUrl:
+      `postgresql://postgres:postgres@${host}:${dbPort}/postgres`,
+  });
+  assertRegistrationObservationRuntimePortManifest(manifest);
+  RUNTIME_PORT_LEASES.set(manifest, { claims, releasePortLease });
+  return manifest;
+}
+
+export async function releaseRegistrationObservationRuntimePortLeases(
+  runtimePortManifest,
+) {
+  assertRegistrationObservationRuntimePortManifest(runtimePortManifest);
+  const held = RUNTIME_PORT_LEASES.get(runtimePortManifest);
+  if (!held) return;
+  const { failedClaims, errors } = await releasePortLeaseClaims(
+    held.claims,
+    held.releasePortLease,
+  );
+  if (failedClaims.length === 0) {
+    RUNTIME_PORT_LEASES.delete(runtimePortManifest);
+  } else {
+    RUNTIME_PORT_LEASES.set(runtimePortManifest, {
+      ...held,
+      claims: failedClaims,
+    });
+  }
+  if (errors.length > 0) {
+    throw portLeaseFailure(
+      "registration_observation_local_db_port_lease_release_failed",
+      errors.map((error) => error?.message ?? String(error)).join("|"),
+    );
+  }
+}
+
 export function listRegistrationObservationFocusNames() {
   return [...FOCUS_REGISTRY.keys()];
 }
@@ -415,7 +851,6 @@ function parseArgs(argv) {
     execute: false,
     approvedLocalDb: false,
     focus: "schema",
-    dbUrl: DEFAULT_DB_URL,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -426,13 +861,18 @@ function parseArgs(argv) {
       options.execute = true;
     } else if (argument === "--approved-local-db") {
       options.approvedLocalDb = true;
-    } else if (argument === "--focus" || argument === "--db-url") {
+    } else if (argument === "--db-url") {
+      fail(
+        "registration_observation_local_db_custom_db_url_forbidden",
+        "",
+        2,
+      );
+    } else if (argument === "--focus") {
       const value = argv[index + 1];
       if (!value || value.startsWith("--")) {
         fail("registration_observation_local_db_invalid_option", argument, 2);
       }
-      if (argument === "--focus") options.focus = value;
-      else options.dbUrl = value;
+      options.focus = value;
       index += 1;
     } else {
       fail("registration_observation_local_db_forbidden_option", argument, 2);
@@ -442,24 +882,6 @@ function parseArgs(argv) {
     fail("registration_observation_local_db_unknown_focus", options.focus, 2);
   }
   return options;
-}
-
-function assertExactLoopbackDbUrl(value) {
-  let parsed;
-  try {
-    parsed = new URL(value);
-  } catch {
-    fail("registration_observation_local_db_loopback_required", "", 2);
-  }
-  if (
-    value !== DEFAULT_DB_URL
-    || parsed.protocol !== "postgresql:"
-    || parsed.hostname !== "127.0.0.1"
-    || parsed.port !== "56322"
-    || parsed.pathname !== "/postgres"
-  ) {
-    fail("registration_observation_local_db_loopback_required", "", 2);
-  }
 }
 
 export function assertRegistrationObservationSafeEnvironment(environment) {
@@ -760,12 +1182,17 @@ export function registrationObservationSchemaFreshAssertionSql(
 
 export function buildRegistrationObservationLocalDbQaPlan(options) {
   const containerName = `supabase_db_${options.projectId}`;
+  const runtimePortManifest =
+    assertRegistrationObservationRuntimePortManifest(
+      options.runtimePortManifest,
+    );
   return Object.freeze({
     repositoryRoot: options.repositoryRoot,
     runtimeRoot: options.runtimeRoot,
     projectId: options.projectId,
     focus: options.focus,
-    dbUrl: options.dbUrl,
+    dbUrl: runtimePortManifest.dbUrl,
+    runtimePortManifest,
     migrations: Object.freeze([...(options.migrationPaths ?? [])]),
     tests: Object.freeze([
       ...(FOCUS_REGISTRY.get(options.focus)?.tests ?? []),
@@ -808,7 +1235,7 @@ export function buildRegistrationObservationLocalDbQaPlan(options) {
           options.runtimeRoot,
           options.focusTestDirectoryPath,
           "--db-url",
-          options.dbUrl,
+          runtimePortManifest.dbUrl,
         ],
       },
       {
@@ -976,6 +1403,41 @@ function assertFocusAvailable(focus, repositoryRoot, migrationPaths) {
   }
 }
 
+export function registrationObservationLocalConfigToml(
+  projectId,
+  runtimePortManifest,
+) {
+  if (!PROJECT_ID_PATTERN.test(projectId)) {
+    fail("registration_observation_local_db_project_identity_rejected");
+  }
+  const manifest = assertRegistrationObservationRuntimePortManifest(
+    runtimePortManifest,
+  );
+  return [
+    `project_id = "${projectId}"`,
+    "",
+    "[api]",
+    "enabled = false",
+    `port = ${manifest.apiPort}`,
+    "",
+    "[db]",
+    `port = ${manifest.dbPort}`,
+    `shadow_port = ${manifest.shadowPort}`,
+    "major_version = 15",
+    "",
+    "[db.pooler]",
+    "enabled = false",
+    `port = ${manifest.poolerPort}`,
+    "",
+    "[db.migrations]",
+    "enabled = true",
+    "",
+    "[db.seed]",
+    "enabled = false",
+    "",
+  ].join("\n");
+}
+
 async function prepareRuntime(options, migrationPaths) {
   const terminal = focusTerminal(options.focus, migrationPaths);
   const supabaseRoot = path.join(options.runtimeRoot, "supabase");
@@ -1043,29 +1505,10 @@ async function prepareRuntime(options, migrationPaths) {
 
   await writeFile(
     path.join(supabaseRoot, "config.toml"),
-    [
-      `project_id = "${options.projectId}"`,
-      "",
-      "[api]",
-      "enabled = false",
-      "port = 56321",
-      "",
-      "[db]",
-      "port = 56322",
-      "shadow_port = 56320",
-      "major_version = 15",
-      "",
-      "[db.pooler]",
-      "enabled = false",
-      "port = 56329",
-      "",
-      "[db.migrations]",
-      "enabled = true",
-      "",
-      "[db.seed]",
-      "enabled = false",
-      "",
-    ].join("\n"),
+    registrationObservationLocalConfigToml(
+      options.projectId,
+      options.runtimePortManifest,
+    ),
     "utf8",
   );
 
@@ -1150,7 +1593,9 @@ function assertExecutionProvenance(options) {
   ) {
     fail("registration_observation_local_db_runtime_provenance_rejected");
   }
-  assertExactLoopbackDbUrl(options.dbUrl);
+  assertRegistrationObservationRuntimePortManifest(
+    options.runtimePortManifest,
+  );
 }
 
 function assertPinnedCliVersion() {
@@ -1166,56 +1611,98 @@ function assertPinnedCliVersion() {
   }
 }
 
-async function runExecuted(options) {
-  assertExecutionProvenance(options);
-  assertRegistrationObservationSafeEnvironment(process.env);
-  assertPinnedCliVersion();
-  const migrationPaths = await listRepositoryMigrationPaths(
-    options.repositoryRoot,
-  );
-  assertFocusAvailable(options.focus, options.repositoryRoot, migrationPaths);
+function errorDetail(error) {
+  return [
+    error?.message,
+    error?.stdout?.trim(),
+    error?.stderr?.trim(),
+  ].filter(Boolean).join("\n");
+}
 
-  const preflight = await inspectResourcesDefault(options.projectId);
-  if (preflight.length > 0) {
-    fail("registration_observation_local_db_preexisting_resources");
-  }
+function formatPlanFailure(report) {
+  const primary = report.primaryError
+    ? `${report.primaryError.step}:${errorDetail(report.primaryError.error)}`
+    : "none";
+  const cleanup = report.cleanupErrors
+    .map(({ step, error }) => `${step}:${errorDetail(error)}`)
+    .join("|");
+  return `registration_observation_local_db_qa_failed:primary=${primary}${
+    cleanup ? `|cleanup=${cleanup}` : ""
+  }`;
+}
 
-  let report;
+async function runExecutionStep(step, callback) {
   try {
-    const prepared = await prepareRuntime(options, migrationPaths);
-    const plan = buildRegistrationObservationLocalDbQaPlan({
-      ...options,
-      ...prepared,
-    });
-    report = await executeRegistrationObservationLocalDbQaPlan(plan);
-    if (report.status !== 0) {
-      const errorDetail = (error) => [
-        error?.message,
-        error?.stdout?.trim(),
-        error?.stderr?.trim(),
-      ].filter(Boolean).join("\n");
-      const primary = report.primaryError
-        ? `${report.primaryError.step}:${errorDetail(report.primaryError.error)}`
-        : "none";
-      const cleanup = report.cleanupErrors
-        .map(({ step, error }) => `${step}:${errorDetail(error)}`)
-        .join("|");
-      fail(
-        "registration_observation_local_db_qa_failed",
-        `primary=${primary}${cleanup ? `|cleanup=${cleanup}` : ""}`,
-      );
-    }
-  } finally {
-    let leftovers = [];
-    try {
-      leftovers = await inspectResourcesDefault(options.projectId);
-    } catch {
-      leftovers = [];
-    }
-    if (leftovers.length > 0) {
-      await removeExactResources(leftovers, options.projectId);
-    }
-    await rm(options.runtimeRoot, { recursive: true, force: true });
+    return await callback();
+  } catch (error) {
+    const stepError = error instanceof Error
+      ? error
+      : new Error(String(error));
+    if (!stepError.stepName) stepError.stepName = step;
+    throw stepError;
+  }
+}
+
+async function runExecuted(options, dependencies, lifecycleState) {
+  const inspectResources =
+    dependencies.inspectResources ?? inspectResourcesDefault;
+  const assertSafeEnvironment =
+    dependencies.assertSafeEnvironment
+    ?? assertRegistrationObservationSafeEnvironment;
+  const assertCliVersion =
+    dependencies.assertPinnedCliVersion ?? assertPinnedCliVersion;
+  const listMigrationPaths =
+    dependencies.listMigrationPaths ?? listRepositoryMigrationPaths;
+  const prepare = dependencies.prepareRuntime ?? prepareRuntime;
+  const executePlan =
+    dependencies.executePlan ?? executeRegistrationObservationLocalDbQaPlan;
+
+  await runExecutionStep("execution-provenance", () =>
+    assertExecutionProvenance(options)
+  );
+  await runExecutionStep("environment-preflight", () =>
+    assertSafeEnvironment(process.env)
+  );
+  await runExecutionStep("cli-version-preflight", () => assertCliVersion());
+  const migrationPaths = await runExecutionStep(
+    "migration-catalog-preflight",
+    () => listMigrationPaths(options.repositoryRoot),
+  );
+  await runExecutionStep("focus-availability-preflight", () =>
+    assertFocusAvailable(options.focus, options.repositoryRoot, migrationPaths)
+  );
+  const preflight = await runExecutionStep(
+    "resource-preflight",
+    () => inspectResources(options.projectId),
+  );
+  if (preflight.length > 0) {
+    const error = new Error(
+      "registration_observation_local_db_preexisting_resources",
+    );
+    error.stepName = "resource-preflight";
+    throw error;
+  }
+  lifecycleState.resourceCleanupAllowed = true;
+
+  const prepared = await runExecutionStep(
+    "runtime-prepare",
+    () => prepare(options, migrationPaths),
+  );
+  const plan = buildRegistrationObservationLocalDbQaPlan({
+    ...options,
+    ...prepared,
+  });
+  const report = await runExecutionStep(
+    "qa-plan",
+    () => executePlan(plan, { inspectResources }),
+  );
+  if (report.status !== 0) {
+    const error = new Error(formatPlanFailure(report));
+    error.stepName = report.primaryError?.step
+      ?? report.cleanupErrors[0]?.step
+      ?? "qa-plan";
+    error.qaReport = report;
+    throw error;
   }
   return {
     mode: "executed-local-db",
@@ -1227,13 +1714,252 @@ async function runExecuted(options) {
   };
 }
 
+function runtimeRootIsOwned(runtimeRoot) {
+  if (typeof runtimeRoot !== "string") return false;
+  const resolved = path.resolve(runtimeRoot);
+  return path.dirname(resolved) === path.resolve(os.tmpdir())
+    && path.basename(resolved).startsWith(WORKDIR_PREFIX);
+}
+
+async function removeRuntimeRootDefault(runtimeRoot) {
+  await rm(runtimeRoot, { recursive: true, force: true });
+}
+
+export async function executeRegistrationObservationLocalDbQaLifecycle(
+  options,
+  dependencies = {},
+) {
+  const state = {
+    status: 0,
+    primaryError: null,
+    cleanupErrors: [],
+    cleanupEvidence: [],
+    result: null,
+  };
+  const lifecycleState = { resourceCleanupAllowed: false };
+  const createRuntimeRoot = dependencies.createRuntimeRoot
+    ?? (() => mkdtemp(path.join(os.tmpdir(), WORKDIR_PREFIX)));
+  const randomSource = dependencies.randomBytes ?? randomBytes;
+  const inspectResources =
+    dependencies.inspectResources ?? inspectResourcesDefault;
+  const removeResources =
+    dependencies.removeResources ?? removeExactResources;
+  const removeRuntimeRoot =
+    dependencies.removeRuntimeRoot ?? removeRuntimeRootDefault;
+  const fallbackRemoveRuntimeRoot =
+    dependencies.fallbackRemoveRuntimeRoot ?? removeRuntimeRootDefault;
+  let runtimeRoot;
+  let projectId;
+  let runtimePortManifest;
+  let pendingPortLeaseCleanup;
+
+  const recordCleanup = (step, error) => {
+    state.cleanupErrors.push({ step, error });
+    state.cleanupEvidence.push({ step, status: "failed", error });
+  };
+  const recordCleanupSuccess = (step, detail = "passed") => {
+    state.cleanupEvidence.push({ step, status: detail });
+  };
+
+  try {
+    runtimeRoot = await runExecutionStep(
+      "runtime-root-creation",
+      createRuntimeRoot,
+    );
+    await runExecutionStep("runtime-root-provenance", () => {
+      if (!runtimeRootIsOwned(runtimeRoot)) {
+        fail("registration_observation_local_db_runtime_provenance_rejected");
+      }
+    });
+    const randomValue = await runExecutionStep(
+      "project-identity-allocation",
+      () => randomSource(6),
+    );
+    if (
+      !(randomValue instanceof Uint8Array)
+      || randomValue.byteLength !== 6
+    ) {
+      const error = new Error(
+        "registration_observation_local_db_project_identity_rejected",
+      );
+      error.stepName = "project-identity-allocation";
+      throw error;
+    }
+    projectId = `${PROJECT_ID_PREFIX}${Buffer.from(randomValue).toString("hex")}`;
+    runtimePortManifest = await runExecutionStep(
+      "runtime-port-allocation",
+      () => buildRegistrationObservationRuntimePortManifest({
+        allocateLoopbackPort:
+          dependencies.allocateLoopbackPort ?? allocateFreeLoopbackPort,
+        acquirePortLease:
+          dependencies.acquirePortLease ?? acquirePortLeaseDefault,
+        leaseRoot: dependencies.leaseRoot ?? PORT_LEASE_ROOT,
+        now: dependencies.now ?? Date.now,
+        projectId,
+        releasePortLease:
+          dependencies.releasePortLease ?? releasePortLeaseDefault,
+      }),
+    );
+    state.result = await runExecuted(
+      {
+        repositoryRoot: options.repositoryRoot,
+        runtimeRoot,
+        projectId,
+        focus: options.focus,
+        runtimePortManifest,
+      },
+      dependencies,
+      lifecycleState,
+    );
+  } catch (error) {
+    pendingPortLeaseCleanup = error?.portLeaseCleanup;
+    for (const rollbackError of error?.portLeaseRollbackErrors ?? []) {
+      recordCleanup("runtime-port-lease-rollback", rollbackError);
+    }
+    state.primaryError = {
+      step: error?.stepName ?? "execution",
+      error,
+    };
+  } finally {
+    if (runtimeRoot && projectId && PROJECT_ID_PATTERN.test(projectId)) {
+      let leftovers;
+      try {
+        leftovers = await inspectResources(projectId);
+        recordCleanupSuccess("emergency-resource-inspection");
+      } catch (error) {
+        recordCleanup("emergency-resource-inspection", error);
+      }
+
+      if (
+        Array.isArray(leftovers)
+        && leftovers.length > 0
+        && lifecycleState.resourceCleanupAllowed
+      ) {
+        try {
+          await removeResources(leftovers, projectId);
+          recordCleanupSuccess("emergency-resource-removal");
+        } catch (error) {
+          recordCleanup("emergency-resource-removal", error);
+        }
+        try {
+          const residue = await inspectResources(projectId);
+          if (residue.length > 0) {
+            throw new Error(
+              `registration_observation_local_db_cleanup_incomplete:${residue
+                .map(({ kind, name }) => `${kind}:${name}`)
+                .join(",")}`,
+            );
+          }
+          recordCleanupSuccess("emergency-resource-reinspection");
+        } catch (error) {
+          recordCleanup("emergency-resource-reinspection", error);
+        }
+      } else if (Array.isArray(leftovers) && leftovers.length > 0) {
+        recordCleanupSuccess(
+          "emergency-resource-removal",
+          "skipped-preflight-not-passed",
+        );
+      }
+    }
+
+    if (runtimeRoot) {
+      if (!runtimeRootIsOwned(runtimeRoot)) {
+        recordCleanup(
+          "runtime-root-removal",
+          new Error(
+            "registration_observation_local_db_runtime_provenance_rejected",
+          ),
+        );
+      } else {
+        try {
+          await removeRuntimeRoot(runtimeRoot);
+          recordCleanupSuccess("runtime-root-removal");
+        } catch (error) {
+          recordCleanup("runtime-root-removal", error);
+          try {
+            await fallbackRemoveRuntimeRoot(runtimeRoot);
+            recordCleanupSuccess("runtime-root-removal-fallback");
+          } catch (fallbackError) {
+            recordCleanup("runtime-root-removal-fallback", fallbackError);
+          }
+        }
+      }
+    }
+
+    if (runtimePortManifest) {
+      try {
+        await releaseRegistrationObservationRuntimePortLeases(
+          runtimePortManifest,
+        );
+        recordCleanupSuccess("runtime-port-lease-release");
+      } catch (error) {
+        recordCleanup("runtime-port-lease-release", error);
+        try {
+          await releaseRegistrationObservationRuntimePortLeases(
+            runtimePortManifest,
+          );
+          recordCleanupSuccess("runtime-port-lease-release-fallback");
+        } catch (fallbackError) {
+          recordCleanup(
+            "runtime-port-lease-release-fallback",
+            fallbackError,
+          );
+        }
+      }
+    } else if (pendingPortLeaseCleanup) {
+      const releasePendingClaims = async () => {
+        const { failedClaims, errors } = await releasePortLeaseClaims(
+          pendingPortLeaseCleanup.failedClaims,
+          pendingPortLeaseCleanup.releasePortLease,
+        );
+        pendingPortLeaseCleanup = {
+          ...pendingPortLeaseCleanup,
+          failedClaims,
+        };
+        if (errors.length > 0) {
+          throw portLeaseFailure(
+            "registration_observation_local_db_port_lease_release_failed",
+            errors.map((error) => error?.message ?? String(error)).join("|"),
+          );
+        }
+      };
+      try {
+        await releasePendingClaims();
+        recordCleanupSuccess("runtime-port-lease-release");
+      } catch (error) {
+        recordCleanup("runtime-port-lease-release", error);
+        try {
+          await releasePendingClaims();
+          recordCleanupSuccess("runtime-port-lease-release-fallback");
+        } catch (fallbackError) {
+          recordCleanup(
+            "runtime-port-lease-release-fallback",
+            fallbackError,
+          );
+        }
+      }
+    }
+  }
+  if (state.primaryError || state.cleanupErrors.length > 0) state.status = 1;
+  return state;
+}
+
+function formatLifecycleFailure(state) {
+  const primary = state.primaryError
+    ? `${state.primaryError.step}:${errorDetail(state.primaryError.error)}`
+    : "none";
+  const cleanup = state.cleanupErrors
+    .map(({ step, error }) => `${step}:${errorDetail(error)}`)
+    .join("|");
+  return `primary=${primary}${cleanup ? `|cleanup=${cleanup}` : ""}`;
+}
+
 async function main() {
   const repositoryRoot = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     "..",
   );
   const parsed = parseArgs(process.argv.slice(2));
-  assertExactLoopbackDbUrl(parsed.dbUrl);
   if (parsed.execute !== parsed.approvedLocalDb) {
     fail("registration_observation_local_db_approval_required", "", 2);
   }
@@ -1242,7 +1968,8 @@ async function main() {
     process.stdout.write(
       `DRY RUN — zero database changes\n${JSON.stringify({
         focus: parsed.focus,
-        dbUrl: parsed.dbUrl,
+        databaseHost: LOOPBACK_HOST,
+        ports: "allocated uniquely per execution",
         providerCalls: 0,
         lifecycle: [
           "db-start",
@@ -1260,17 +1987,19 @@ async function main() {
 
   const migrationPaths = await listRepositoryMigrationPaths(repositoryRoot);
   assertFocusAvailable(parsed.focus, repositoryRoot, migrationPaths);
-  const suffix = randomBytes(6).toString("hex");
-  const projectId = `${PROJECT_ID_PREFIX}${suffix}`;
-  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), WORKDIR_PREFIX));
-  const report = await runExecuted({
+  const lifecycle = await executeRegistrationObservationLocalDbQaLifecycle({
     repositoryRoot,
-    runtimeRoot,
-    projectId,
     focus: parsed.focus,
-    dbUrl: parsed.dbUrl,
   });
-  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  if (lifecycle.status !== 0) {
+    const exitCode = lifecycle.primaryError?.error?.exitCode ?? 1;
+    fail(
+      "registration_observation_local_db_qa_failed",
+      formatLifecycleFailure(lifecycle),
+      exitCode,
+    );
+  }
+  process.stdout.write(`${JSON.stringify(lifecycle.result, null, 2)}\n`);
 }
 
 const isMain = process.argv[1]

@@ -344,8 +344,42 @@ select pg_temp.registration_observation_set_actor('97000000-0000-4000-8000-00000
 set local role authenticated;
 select throws_ok($$select public.activate_registration_observation_runtime_v1(0, 'task1-premature')$$, '55000', 'registration_observation_schema_not_ready', 'admin cannot activate an incomplete schema');
 reset role;
-select is((select activation_version from dashboard_private.registration_observation_runtime_settings where singleton = true), 0, 'failed activation leaves runtime off');
-select is((select count(*) from dashboard_private.registration_observation_mutation_requests where operation = 'activate'), 0::bigint, 'failed activation writes no receipt');
+select is(
+  pg_catalog.jsonb_build_object(
+    'runtimeVersion', (select activation_version from dashboard_private.registration_observation_runtime_settings where singleton = true),
+    'receiptCount', (select count(*) from dashboard_private.registration_observation_mutation_requests where operation = 'activate')
+  ),
+  '{"receiptCount": 0, "runtimeVersion": 0}'::jsonb,
+  'failed activation leaves runtime off and writes no receipt'
+);
+
+insert into dashboard_private.registration_observation_mutation_requests(
+  actor_profile_id,
+  operation,
+  request_key,
+  track_id,
+  request_fingerprint,
+  response_payload
+)
+values (
+  '97000000-0000-4000-8000-000000000001',
+  'activate',
+  'task1-fingerprint-conflict',
+  null,
+  '{"expectedCurrentVersion":999}',
+  '{}'::jsonb
+);
+set local role authenticated;
+select throws_ok(
+  $$select public.activate_registration_observation_runtime_v1(0, 'task1-fingerprint-conflict')$$,
+  '23505',
+  'registration_observation_request_key_conflict',
+  'activation request-key fingerprint conflict is exact'
+);
+reset role;
+delete from dashboard_private.registration_observation_mutation_requests
+where actor_profile_id = '97000000-0000-4000-8000-000000000001'
+  and request_key = 'task1-fingerprint-conflict';
 
 select function_privs_are('public', 'registration_observation_schema_readiness_v1', array[]::text[], 'authenticated', array['EXECUTE']);
 select function_privs_are('public', 'registration_observation_runtime_version', array[]::text[], 'authenticated', array['EXECUTE']);

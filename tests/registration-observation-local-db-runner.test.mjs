@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const runnerPath = path.join(
@@ -12,7 +15,15 @@ const runnerPath = path.join(
 const pinnedSupabaseGo =
   "/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supabase/cli-darwin-arm64/bin/supabase-go";
 const loopbackDbUrl =
-  "postgresql://postgres:postgres@127.0.0.1:56322/postgres";
+  "postgresql://postgres:postgres@127.0.0.1:61002/postgres";
+const runtimePortManifest = Object.freeze({
+  host: "127.0.0.1",
+  apiPort: 61001,
+  dbPort: 61002,
+  shadowPort: 61003,
+  poolerPort: 61004,
+  dbUrl: loopbackDbUrl,
+});
 const projectId = "tips_obs_qa_0123456789ab";
 const temporaryProjectPath = path.join(
   os.tmpdir(),
@@ -59,13 +70,82 @@ async function loadRunner() {
   return import(`file://${runnerPath}?test=${Date.now()}-${Math.random()}`);
 }
 
+function spawnPortLeaseChild(leaseRoot, childProjectId) {
+  const childScript = `
+const subject = await import(process.argv[1]);
+const candidates = Array.from({ length: 16 }, (_, index) => 62001 + index);
+const manifest = await subject.buildRegistrationObservationRuntimePortManifest({
+  projectId: process.argv[3],
+  leaseRoot: process.argv[2],
+  allocateLoopbackPort: async () => candidates.shift(),
+});
+process.stdout.write(JSON.stringify(manifest) + "\\n");
+await new Promise((resolve) => process.stdin.once("data", resolve));
+await subject.releaseRegistrationObservationRuntimePortLeases(manifest);
+`;
+  const child = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      childScript,
+      pathToFileURL(runnerPath).href,
+      leaseRoot,
+      childProjectId,
+    ],
+    {
+      cwd: repositoryRoot,
+      env: runnerEnvironment(),
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const manifest = new Promise((resolve, reject) => {
+    let stdout = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      const newline = stdout.indexOf("\n");
+      if (newline === -1) return;
+      try {
+        resolve(JSON.parse(stdout.slice(0, newline)));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    child.once("error", reject);
+    child.once("exit", (status) => {
+      if (!stdout.includes("\n")) {
+        reject(new Error(`lease child exited ${status}: ${stderr}`));
+      }
+    });
+  });
+  const release = async () => {
+    if (child.exitCode !== null) return;
+    const completed = new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", (status) => {
+        if (status === 0) resolve();
+        else reject(new Error(`lease child exited ${status}: ${stderr}`));
+      });
+    });
+    child.stdin.end("release\n");
+    await completed;
+  };
+  return { child, manifest, release };
+}
+
 function planInput() {
   return {
     repositoryRoot,
     runtimeRoot: temporaryProjectPath,
     projectId,
     focus: "schema",
-    dbUrl: loopbackDbUrl,
+    runtimePortManifest,
     migrationPaths: [
       "supabase/migrations/20260809100000_registration_observation_core_schema.sql",
     ],
@@ -382,6 +462,253 @@ test("runner plans the exact start-reset-fixture-test-cleanup-assert-stop lifecy
   ]);
 });
 
+test("one validated loopback port manifest owns config and pgTAP DB routing", async () => {
+  const runner = await loadRunner();
+  const allocated = [61001, 61002, 61003, 61004];
+  const hosts = [];
+  const acquired = [];
+  const released = [];
+  const manifest = await runner.buildRegistrationObservationRuntimePortManifest({
+    projectId,
+    allocateLoopbackPort: async (host) => {
+      hosts.push(host);
+      return allocated.shift();
+    },
+    acquirePortLease: async (claim) => {
+      acquired.push(claim);
+      return claim;
+    },
+    releasePortLease: async (claim) => {
+      released.push(claim);
+    },
+  });
+
+  assert.deepEqual(manifest, runtimePortManifest);
+  assert.deepEqual(hosts, Array(4).fill("127.0.0.1"));
+  assert.deepEqual(acquired.map(({ port }) => port), [
+    61001,
+    61002,
+    61003,
+    61004,
+  ]);
+  assert.equal(Object.isFrozen(manifest), true);
+
+  const config = runner.registrationObservationLocalConfigToml(
+    projectId,
+    manifest,
+  );
+  assert.match(config, /\[api\][\s\S]*port = 61001/);
+  assert.match(config, /\[db\][\s\S]*port = 61002/);
+  assert.match(config, /shadow_port = 61003/);
+  assert.match(config, /\[db\.pooler\][\s\S]*port = 61004/);
+  assert.doesNotMatch(config, /56320|56321|56322|56329/);
+
+  const plan = runner.buildRegistrationObservationLocalDbQaPlan(planInput());
+  assert.equal(plan.dbUrl, manifest.dbUrl);
+  assert.equal(plan.runtimePortManifest, runtimePortManifest);
+  await runner.releaseRegistrationObservationRuntimePortLeases(manifest);
+  assert.deepEqual(released.map(({ port }) => port), [
+    61004,
+    61003,
+    61002,
+    61001,
+  ]);
+});
+
+test("concurrent runtime manifests hold disjoint atomic leases in one shared root", async () => {
+  const runner = await loadRunner();
+  const leaseRoot = await mkdtemp(
+    path.join(os.tmpdir(), "tips-registration-observation-port-leases-test-"),
+  );
+  let first;
+  let second;
+  let ports = [];
+  const children = [
+    spawnPortLeaseChild(leaseRoot, "tips_obs_qa_aaaaaaaaaaaa"),
+    spawnPortLeaseChild(leaseRoot, "tips_obs_qa_bbbbbbbbbbbb"),
+  ];
+  try {
+    [first, second] = await Promise.all(
+      children.map(({ manifest }) => manifest),
+    );
+    ports = [
+      first.apiPort,
+      first.dbPort,
+      first.shadowPort,
+      first.poolerPort,
+      second.apiPort,
+      second.dbPort,
+      second.shadowPort,
+      second.poolerPort,
+    ];
+    assert.equal(new Set(ports).size, 8);
+    assert.notEqual(first.dbUrl, second.dbUrl);
+    assert.equal(
+      ports.every((port) =>
+        existsSync(path.join(leaseRoot, `${port}.lease`))
+      ),
+      true,
+    );
+  } finally {
+    const releases = await Promise.allSettled(
+      children.map(({ release }) => release()),
+    );
+    for (const [index, release] of releases.entries()) {
+      if (release.status === "rejected") {
+        children[index].child.kill();
+      }
+    }
+    assert.equal(
+      releases.every(({ status }) => status === "fulfilled"),
+      true,
+      releases
+        .filter(({ status }) => status === "rejected")
+        .map(({ reason }) => reason?.message ?? String(reason))
+        .join("\n"),
+    );
+    assert.equal(
+      ports.every((port) =>
+        !existsSync(path.join(leaseRoot, `${port}.lease`))
+      ),
+      true,
+    );
+    await rm(leaseRoot, { recursive: true, force: true });
+  }
+
+  assert.throws(
+    () => runner.assertRegistrationObservationRuntimePortManifest({
+      ...first,
+      host: "db.example.com",
+      dbUrl: `postgresql://postgres:postgres@db.example.com:${first.dbPort}/postgres`,
+    }),
+    /registration_observation_local_db_runtime_port_manifest_refused/,
+  );
+  assert.throws(
+    () => runner.assertRegistrationObservationRuntimePortManifest({
+      ...first,
+      poolerPort: first.dbPort,
+    }),
+    /registration_observation_local_db_runtime_port_manifest_refused/,
+  );
+
+  let duplicateCalls = 0;
+  const duplicateClaims = [];
+  const duplicateReleases = [];
+  await assert.rejects(
+    runner.buildRegistrationObservationRuntimePortManifest({
+      projectId,
+      allocateLoopbackPort: async () => {
+        duplicateCalls += 1;
+        return 65000;
+      },
+      acquirePortLease: async (claim) => {
+        duplicateClaims.push(claim);
+        return claim;
+      },
+      releasePortLease: async (claim) => {
+        duplicateReleases.push(claim);
+      },
+    }),
+    /registration_observation_local_db_runtime_port_manifest_refused/,
+  );
+  assert.equal(duplicateCalls, 32);
+  assert.equal(duplicateClaims.length, 1);
+  assert.equal(duplicateReleases.length, 1);
+});
+
+test("dead owner stays fail-closed while partial acquisition rolls back", async () => {
+  const runner = await loadRunner();
+  const leaseRoot = await mkdtemp(
+    path.join(os.tmpdir(), "tips-registration-observation-port-leases-test-"),
+  );
+  const stalePort = 65100;
+  const stalePath = path.join(leaseRoot, `${stalePort}.lease`);
+  await writeFile(
+    stalePath,
+    JSON.stringify({
+      version: 1,
+      projectId: "tips_obs_qa_cccccccccccc",
+      pid: 999999,
+      port: stalePort,
+      createdAtMs: 1,
+    }),
+    { mode: 0o600 },
+  );
+  let manifest;
+  try {
+    const allocated = [stalePort, 65101, 65102, 65103, 65104];
+    manifest = await runner.buildRegistrationObservationRuntimePortManifest({
+      projectId,
+      leaseRoot,
+      allocateLoopbackPort: async () => allocated.shift(),
+      now: () => 100_000,
+    });
+    const owner = JSON.parse(await readFile(stalePath, "utf8"));
+    assert.equal(owner.projectId, "tips_obs_qa_cccccccccccc");
+    assert.equal(owner.pid, 999999);
+    assert.equal(
+      [
+        manifest.apiPort,
+        manifest.dbPort,
+        manifest.shadowPort,
+        manifest.poolerPort,
+      ].includes(stalePort),
+      false,
+    );
+  } finally {
+    if (manifest) {
+      await runner.releaseRegistrationObservationRuntimePortLeases(manifest);
+    }
+    await rm(leaseRoot, { recursive: true, force: true });
+  }
+
+  const acquired = [];
+  const released = [];
+  let nextPort = 65200;
+  await assert.rejects(
+    runner.buildRegistrationObservationRuntimePortManifest({
+      projectId,
+      allocateLoopbackPort: async () => ++nextPort,
+      acquirePortLease: async (claim) => {
+        acquired.push(claim);
+        if (acquired.length === 2) {
+          throw new Error("synthetic partial lease acquisition failure");
+        }
+        return claim;
+      },
+      releasePortLease: async (claim) => {
+        released.push(claim);
+      },
+    }),
+    /registration_observation_local_db_runtime_port_manifest_refused/,
+  );
+  assert.deepEqual(acquired.map(({ port }) => port), [65201, 65202]);
+  assert.deepEqual(released.map(({ port }) => port), [65201]);
+
+  const partialRoot = await mkdtemp(
+    path.join(os.tmpdir(), "tips-registration-observation-port-leases-test-"),
+  );
+  try {
+    await assert.rejects(
+      runner.buildRegistrationObservationRuntimePortManifest({
+        projectId,
+        leaseRoot: partialRoot,
+        allocateLoopbackPort: async () => 65250,
+        now: () => {
+          throw new Error("synthetic owner payload failure");
+        },
+      }),
+      /registration_observation_local_db_runtime_port_manifest_refused/,
+    );
+    assert.equal(
+      existsSync(path.join(partialRoot, "65250.lease")),
+      false,
+    );
+  } finally {
+    await rm(partialRoot, { recursive: true, force: true });
+  }
+});
+
 test("runner cleanup order is fail-safe and never retries pgTAP", async () => {
   const afterSetupFailure = await runWithFakeSpawn({
     failAt: "focus-fixture-setup",
@@ -471,7 +798,17 @@ test("execution rejects remote flags, provider state, and non-loopback URLs", as
   assert.equal(remote.status, 2);
   assert.match(
     remote.stderr,
-    /registration_observation_local_db_loopback_required/,
+    /registration_observation_local_db_custom_db_url_forbidden/,
+  );
+
+  const customLoopback = runRunner([
+    "--db-url",
+    "postgresql://postgres:postgres@127.0.0.1:65432/postgres",
+  ]);
+  assert.equal(customLoopback.status, 2);
+  assert.match(
+    customLoopback.stderr,
+    /registration_observation_local_db_custom_db_url_forbidden/,
   );
 
   const runner = await loadRunner();
@@ -481,4 +818,351 @@ test("execution rejects remote flags, provider state, and non-loopback URLs", as
     }),
     /registration_observation_local_db_forbidden_environment/,
   );
+});
+
+test("outer lifecycle preserves a runtime primary across ordered removal and rm failures", async () => {
+  const runner = await loadRunner();
+  let runtimeRoot;
+  let nextPort = 63000;
+  const events = [];
+  let inspectionCount = 0;
+  const result = await runner.executeRegistrationObservationLocalDbQaLifecycle(
+    { repositoryRoot, focus: "schema" },
+    {
+      createRuntimeRoot: async () => {
+        runtimeRoot = await mkdtemp(
+          path.join(os.tmpdir(), "tips-registration-observation-qa-"),
+        );
+        return runtimeRoot;
+      },
+      randomBytes: () => Buffer.from("0123456789ab", "hex"),
+      allocateLoopbackPort: async () => {
+        nextPort += 1;
+        return nextPort;
+      },
+      assertSafeEnvironment: () => {},
+      assertPinnedCliVersion: () => {},
+      inspectResources: async (actualProjectId) => {
+        inspectionCount += 1;
+        const step = [
+          "resource-preflight",
+          "emergency-resource-inspection",
+          "emergency-resource-reinspection",
+        ][inspectionCount - 1];
+        events.push(step);
+        if (inspectionCount === 1 || inspectionCount === 3) return [];
+        return [{
+          kind: "container",
+          name: `supabase_db_${actualProjectId}`,
+          projectId: actualProjectId,
+        }];
+      },
+      prepareRuntime: async () => {
+        events.push("runtime-prepare");
+        throw new Error("synthetic runtime prepare failure");
+      },
+      removeResources: async () => {
+        events.push("emergency-resource-removal");
+        throw new Error("synthetic emergency removal failure");
+      },
+      removeRuntimeRoot: async () => {
+        events.push("runtime-root-removal");
+        throw new Error("synthetic runtime rm failure");
+      },
+      fallbackRemoveRuntimeRoot: async (target) => {
+        events.push("runtime-root-removal-fallback");
+        await rm(target, { recursive: true, force: true });
+      },
+    },
+  );
+
+  assert.equal(result.status, 1);
+  assert.equal(result.primaryError.step, "runtime-prepare");
+  assert.equal(
+    result.primaryError.error.message,
+    "synthetic runtime prepare failure",
+  );
+  assert.deepEqual(
+    result.cleanupErrors.map(({ step }) => step),
+    ["emergency-resource-removal", "runtime-root-removal"],
+  );
+  assert.deepEqual(
+    result.cleanupEvidence
+      .filter(({ status }) => status === "failed")
+      .map(({ step }) => step),
+    ["emergency-resource-removal", "runtime-root-removal"],
+  );
+  assert.deepEqual(events, [
+    "resource-preflight",
+    "runtime-prepare",
+    "emergency-resource-inspection",
+    "emergency-resource-removal",
+    "emergency-resource-reinspection",
+    "runtime-root-removal",
+    "runtime-root-removal-fallback",
+  ]);
+  assert.equal(existsSync(runtimeRoot), false);
+});
+
+test("outer lifecycle records emergency inspection before rm without replacing preflight error", async () => {
+  const runner = await loadRunner();
+  let runtimeRoot;
+  let nextPort = 64000;
+  let inspectionCount = 0;
+  const events = [];
+  const result = await runner.executeRegistrationObservationLocalDbQaLifecycle(
+    { repositoryRoot, focus: "schema" },
+    {
+      createRuntimeRoot: async () => {
+        runtimeRoot = await mkdtemp(
+          path.join(os.tmpdir(), "tips-registration-observation-qa-"),
+        );
+        return runtimeRoot;
+      },
+      randomBytes: () => Buffer.from("0123456789ab", "hex"),
+      allocateLoopbackPort: async () => {
+        nextPort += 1;
+        return nextPort;
+      },
+      assertSafeEnvironment: () => {},
+      assertPinnedCliVersion: () => {},
+      inspectResources: async () => {
+        inspectionCount += 1;
+        events.push(
+          inspectionCount === 1
+            ? "resource-preflight"
+            : "emergency-resource-inspection",
+        );
+        throw new Error(
+          inspectionCount === 1
+            ? "synthetic preflight inspection failure"
+            : "synthetic emergency inspection failure",
+        );
+      },
+      removeResources: async () => {
+        throw new Error("preflight resources must never be removed");
+      },
+      removeRuntimeRoot: async () => {
+        events.push("runtime-root-removal");
+        throw new Error("synthetic runtime rm failure");
+      },
+      fallbackRemoveRuntimeRoot: async (target) => {
+        events.push("runtime-root-removal-fallback");
+        await rm(target, { recursive: true, force: true });
+      },
+    },
+  );
+
+  assert.equal(result.status, 1);
+  assert.equal(result.primaryError.step, "resource-preflight");
+  assert.equal(
+    result.primaryError.error.message,
+    "synthetic preflight inspection failure",
+  );
+  assert.deepEqual(
+    result.cleanupErrors.map(({ step }) => step),
+    ["emergency-resource-inspection", "runtime-root-removal"],
+  );
+  assert.deepEqual(
+    result.cleanupEvidence
+      .filter(({ status }) => status === "failed")
+      .map(({ step }) => step),
+    ["emergency-resource-inspection", "runtime-root-removal"],
+  );
+  assert.deepEqual(events, [
+    "resource-preflight",
+    "emergency-resource-inspection",
+    "runtime-root-removal",
+    "runtime-root-removal-fallback",
+  ]);
+  assert.equal(existsSync(runtimeRoot), false);
+});
+
+test("port allocation failure after root creation is fail-closed and removes the root", async () => {
+  const runner = await loadRunner();
+  let runtimeRoot;
+  const result = await runner.executeRegistrationObservationLocalDbQaLifecycle(
+    { repositoryRoot, focus: "schema" },
+    {
+      createRuntimeRoot: async () => {
+        runtimeRoot = await mkdtemp(
+          path.join(os.tmpdir(), "tips-registration-observation-qa-"),
+        );
+        return runtimeRoot;
+      },
+      randomBytes: () => Buffer.from("0123456789ab", "hex"),
+      allocateLoopbackPort: async () => {
+        throw new Error("synthetic port allocator failure");
+      },
+      inspectResources: async () => [],
+    },
+  );
+
+  assert.equal(result.status, 1);
+  assert.equal(result.primaryError.step, "runtime-port-allocation");
+  assert.match(
+    result.primaryError.error.message,
+    /registration_observation_local_db_runtime_port_manifest_refused/,
+  );
+  assert.deepEqual(result.cleanupErrors, []);
+  assert.equal(existsSync(runtimeRoot), false);
+});
+
+test("outer finalizer releases every held port lease after an execution failure", async () => {
+  const runner = await loadRunner();
+  let runtimeRoot;
+  let nextPort = 65300;
+  const acquired = [];
+  const released = [];
+  const result = await runner.executeRegistrationObservationLocalDbQaLifecycle(
+    { repositoryRoot, focus: "schema" },
+    {
+      createRuntimeRoot: async () => {
+        runtimeRoot = await mkdtemp(
+          path.join(os.tmpdir(), "tips-registration-observation-qa-"),
+        );
+        return runtimeRoot;
+      },
+      randomBytes: () => Buffer.from("0123456789ab", "hex"),
+      allocateLoopbackPort: async () => ++nextPort,
+      acquirePortLease: async (claim) => {
+        acquired.push(claim);
+        return claim;
+      },
+      releasePortLease: async (claim) => {
+        released.push(claim);
+      },
+      assertSafeEnvironment: () => {},
+      assertPinnedCliVersion: () => {},
+      inspectResources: async () => [],
+      prepareRuntime: async () => {
+        throw new Error("synthetic post-lease execution failure");
+      },
+    },
+  );
+
+  assert.equal(result.status, 1);
+  assert.equal(result.primaryError.step, "runtime-prepare");
+  assert.deepEqual(acquired.map(({ port }) => port), [
+    65301,
+    65302,
+    65303,
+    65304,
+  ]);
+  assert.deepEqual(released.map(({ port }) => port), [
+    65304,
+    65303,
+    65302,
+    65301,
+  ]);
+  assert.equal(
+    result.cleanupEvidence.some(({ step, status }) =>
+      step === "runtime-port-lease-release" && status === "passed"
+    ),
+    true,
+  );
+  assert.equal(existsSync(runtimeRoot), false);
+});
+
+test("outer finalizer retries a failed partial-acquire rollback without hiding primary", async () => {
+  const runner = await loadRunner();
+  let runtimeRoot;
+  let nextPort = 65400;
+  let acquireCalls = 0;
+  let releaseCalls = 0;
+  const result = await runner.executeRegistrationObservationLocalDbQaLifecycle(
+    { repositoryRoot, focus: "schema" },
+    {
+      createRuntimeRoot: async () => {
+        runtimeRoot = await mkdtemp(
+          path.join(os.tmpdir(), "tips-registration-observation-qa-"),
+        );
+        return runtimeRoot;
+      },
+      randomBytes: () => Buffer.from("0123456789ab", "hex"),
+      allocateLoopbackPort: async () => ++nextPort,
+      acquirePortLease: async (claim) => {
+        acquireCalls += 1;
+        if (acquireCalls === 2) {
+          throw new Error("synthetic partial acquisition failure");
+        }
+        return claim;
+      },
+      releasePortLease: async () => {
+        releaseCalls += 1;
+        if (releaseCalls === 1) {
+          throw new Error("synthetic initial rollback failure");
+        }
+      },
+      inspectResources: async () => [],
+    },
+  );
+
+  assert.equal(result.status, 1);
+  assert.equal(result.primaryError.step, "runtime-port-allocation");
+  assert.equal(releaseCalls, 2);
+  assert.deepEqual(
+    result.cleanupErrors.map(({ step }) => step),
+    ["runtime-port-lease-rollback"],
+  );
+  assert.equal(
+    result.cleanupEvidence.some(({ step, status }) =>
+      step === "runtime-port-lease-release" && status === "passed"
+    ),
+    true,
+  );
+  assert.equal(existsSync(runtimeRoot), false);
+});
+
+test("preexisting project resources fail closed without being removed", async () => {
+  const runner = await loadRunner();
+  let runtimeRoot;
+  let nextPort = 65000;
+  let removeCalls = 0;
+  let inspectCalls = 0;
+  const result = await runner.executeRegistrationObservationLocalDbQaLifecycle(
+    { repositoryRoot, focus: "schema" },
+    {
+      createRuntimeRoot: async () => {
+        runtimeRoot = await mkdtemp(
+          path.join(os.tmpdir(), "tips-registration-observation-qa-"),
+        );
+        return runtimeRoot;
+      },
+      randomBytes: () => Buffer.from("0123456789ab", "hex"),
+      allocateLoopbackPort: async () => ++nextPort,
+      assertSafeEnvironment: () => {},
+      assertPinnedCliVersion: () => {},
+      inspectResources: async (actualProjectId) => {
+        inspectCalls += 1;
+        return [{
+          kind: "container",
+          name: `supabase_db_${actualProjectId}`,
+          projectId: actualProjectId,
+        }];
+      },
+      removeResources: async () => {
+        removeCalls += 1;
+      },
+    },
+  );
+
+  assert.equal(result.status, 1);
+  assert.equal(result.primaryError.step, "resource-preflight");
+  assert.equal(inspectCalls, 2);
+  assert.equal(removeCalls, 0);
+  assert.deepEqual(result.cleanupErrors, []);
+  assert.deepEqual(
+    result.cleanupEvidence.map(({ step, status }) => ({ step, status })),
+    [
+      { step: "emergency-resource-inspection", status: "passed" },
+      {
+        step: "emergency-resource-removal",
+        status: "skipped-preflight-not-passed",
+      },
+      { step: "runtime-root-removal", status: "passed" },
+      { step: "runtime-port-lease-release", status: "passed" },
+    ],
+  );
+  assert.equal(existsSync(runtimeRoot), false);
 });

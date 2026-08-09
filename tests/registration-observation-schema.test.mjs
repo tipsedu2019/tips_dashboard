@@ -80,6 +80,14 @@ test("core migration defines the exact public and private readiness signatures",
   assert.match(sql, /security invoker/i);
   assert.match(sql, /security definer/i);
   assert.match(sql, /set search_path = ''/i);
+  assert.match(
+    sql,
+    /raise exception 'registration_observation_request_key_conflict'/i,
+  );
+  assert.doesNotMatch(
+    sql,
+    /raise exception 'registration_observation_request_conflict'/i,
+  );
 });
 
 test("source revision and workflow truth tables are guarded in the database", async () => {
@@ -124,6 +132,7 @@ test("schema pgTAP is an executable 61-assertion ACL and behavior gate", async (
   assert.match(sql, /registration_observation_schema_readiness_v1/i);
   assert.match(sql, /registration_observation_runtime_version/i);
   assert.match(sql, /activate_registration_observation_runtime_v1/i);
+  assert.match(sql, /registration_observation_request_key_conflict/i);
   assert.match(sql, /has_table_privilege/i);
   assert.match(sql, /set local role authenticated/i);
   assert.match(sql, /select \* from finish\(\);\s*rollback;\s*$/i);
