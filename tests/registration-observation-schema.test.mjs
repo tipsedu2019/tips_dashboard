@@ -12,6 +12,10 @@ const pgTapPath = path.join(
   repositoryRoot,
   "supabase/tests/registration_observation_schema_test.sql",
 );
+const bookingMigrationPath = path.join(
+  repositoryRoot,
+  "supabase/migrations/20260809102000_registration_observation_booking.sql",
+);
 
 const READ_ASSERTION_PATTERN =
   /^select\s+(?:ok|is|isnt|has_[a-z_]+|function_[a-z_]+|throws_ok|lives_ok|is_empty|isnt_empty)\s*\(/gim;
@@ -144,6 +148,10 @@ test("schema pgTAP has one exact literal plan matching every assertion", async (
   assert.doesNotMatch(sql, /select\s+no_plan\s*\(/i);
   assert.doesNotMatch(sql, /select\s+\*\s+from\s+finish\s*\(/i);
   assert.match(sql, /rollback;\s*$/i);
+  assert.doesNotMatch(
+    sql,
+    /update dashboard_private\.registration_observation_runtime_settings/i,
+  );
 });
 
 test("package exposes only the approved local observation QA entrypoint", async () => {
@@ -153,5 +161,32 @@ test("package exposes only the approved local observation QA entrypoint", async 
   assert.equal(
     packageJson.scripts["verify:registration-observation:local-db"],
     "node --experimental-strip-types scripts/run-registration-observation-local-db-qa.mjs",
+  );
+});
+
+test("booking migration supplies every lifecycle signature anticipated by core readiness", async () => {
+  const coreSql = await migrationSql();
+  const bookingSql = await readFile(bookingMigrationPath, "utf8");
+  const signatures = [
+    "public.enter_registration_observation_v1(uuid,integer,text)",
+    "public.save_registration_observation_booking_v1(uuid,uuid,uuid,text,uuid,text,integer,integer,bigint,text)",
+    "public.cancel_registration_observation_v1(uuid,integer,bigint,text)",
+    "public.withdraw_registration_observation_v1(uuid,text,text,uuid,integer,bigint,bigint,text,text)",
+  ];
+  for (const signature of signatures) {
+    assert.match(coreSql, new RegExp(signature.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    const functionName = signature.slice("public.".length, signature.indexOf("("));
+    assert.match(
+      bookingSql,
+      new RegExp(`create or replace function public\\.${functionName}\\s*\\(`, "i"),
+    );
+  }
+  assert.match(
+    bookingSql,
+    /create or replace function dashboard_private\.set_registration_workflow_status_v1_impl\s*\(/i,
+  );
+  assert.doesNotMatch(
+    bookingSql,
+    /update\s+dashboard_private\.registration_observation_runtime_settings\s+set\s+activation_version\s*=\s*1/i,
   );
 });

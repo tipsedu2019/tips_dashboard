@@ -237,6 +237,169 @@ test("runner keeps every independent database reviewer gate", async () => {
   });
 });
 
+test("booking focus owns a committed runtime-one concurrency fixture and exact reverse cleanup", async () => {
+  const runner = await loadRunner();
+  const setupSql = runner.registrationObservationFocusSetupSql("booking");
+  const cleanupSql = runner.registrationObservationFocusCleanupSql("booking");
+  const freshSql = runner.registrationObservationSchemaFreshAssertionSql(
+    "booking",
+  );
+
+  assert.match(setupSql, /^begin;/i);
+  assert.match(setupSql, /create extension if not exists dblink;/i);
+  assert.match(setupSql, /registration_observation_local_qa_provider_baselines/i);
+  assert.match(setupSql, /99000000-0000-4000-8000-000000000001/i);
+  assert.match(setupSql, /99000000-0000-4000-8000-000000000106/i);
+  assert.match(setupSql, /99000000-0000-4000-8000-000000000116/i);
+  assert.match(setupSql, /99000000-0000-4000-8000-000000000117/i);
+  assert.match(setupSql, /99000000-0000-4000-8000-000000000118/i);
+  assert.match(
+    setupSql,
+    /update dashboard_private\.registration_observation_runtime_settings[\s\S]*activation_version = 1/i,
+  );
+  assert.match(setupSql, /commit;$/i);
+
+  const eventDelete = cleanupSql.indexOf(
+    "delete from dashboard_private.registration_observation_domain_events",
+  );
+  const receiptDelete = cleanupSql.indexOf(
+    "delete from dashboard_private.registration_observation_mutation_requests",
+  );
+  const observationDelete = cleanupSql.indexOf(
+    "delete from public.ops_registration_observations",
+  );
+  const appointmentDelete = cleanupSql.indexOf(
+    "delete from public.ops_registration_appointments",
+  );
+  const trackDelete = cleanupSql.indexOf(
+    "delete from public.ops_registration_subject_tracks",
+  );
+  const taskDelete = cleanupSql.indexOf("delete from public.ops_tasks");
+  const scheduleAuditContext = cleanupSql.indexOf(
+    "with_continuous_class_schedule_audit_context_v1",
+  );
+  const sessionDelete = cleanupSql.indexOf(
+    "delete from public.class_lesson_sessions",
+  );
+  const auditDelete = cleanupSql.indexOf(
+    "delete from public.dashboard_audit_logs",
+  );
+  const classTriggerDisable = cleanupSql.indexOf(
+    "alter table public.classes disable trigger dashboard_audit_classes",
+  );
+  const classDelete = cleanupSql.indexOf("delete from public.classes");
+  const classTriggerEnable = cleanupSql.indexOf(
+    "alter table public.classes enable trigger dashboard_audit_classes",
+  );
+  const profileDelete = cleanupSql.indexOf("delete from public.profiles");
+  assert.ok(eventDelete >= 0 && eventDelete < receiptDelete);
+  assert.ok(receiptDelete < observationDelete);
+  assert.ok(observationDelete < appointmentDelete);
+  assert.ok(appointmentDelete < trackDelete);
+  assert.ok(trackDelete < taskDelete);
+  assert.ok(taskDelete < scheduleAuditContext);
+  assert.ok(scheduleAuditContext < sessionDelete);
+  assert.ok(sessionDelete < auditDelete);
+  assert.ok(auditDelete < classTriggerDisable);
+  assert.ok(classTriggerDisable < classDelete);
+  assert.ok(classDelete < classTriggerEnable);
+  assert.ok(classTriggerEnable < profileDelete);
+  assert.ok(taskDelete < profileDelete);
+  assert.match(
+    cleanupSql,
+    /activation_version = 0[\s\S]*updated_by = null/i,
+  );
+  assert.match(cleanupSql, /^begin;/i);
+  assert.match(cleanupSql, /commit;$/i);
+
+  assert.match(freshSql, /registration_observation_runtime_not_zero/i);
+  assert.match(freshSql, /registration_observation_runtime_actor_not_cleared/i);
+  assert.match(freshSql, /99000000-0000-4000-8000-000000000106/i);
+  assert.match(freshSql, /99000000-0000-4000-8000-000000000118/i);
+  assert.match(freshSql, /public\.dashboard_audit_logs/i);
+  assert.match(freshSql, /registration_observation_booking_fixture_remains/i);
+});
+
+test("booking committed fixture setup remains before pgTAP on success and every failure path", async () => {
+  const runner = await loadRunner();
+  const bookingInput = {
+    ...planInput(),
+    focus: "booking",
+    preFixtureTestDirectoryPath: path.join(
+      temporaryProjectPath,
+      "supabase/focus-tests/booking-schema",
+    ),
+    setupSql: runner.registrationObservationFocusSetupSql("booking"),
+    cleanupSql: runner.registrationObservationFocusCleanupSql("booking"),
+    freshAssertSql: runner.registrationObservationSchemaFreshAssertionSql(
+      "booking",
+    ),
+  };
+  const plan = runner.buildRegistrationObservationLocalDbQaPlan(bookingInput);
+  assert.deepEqual(plan.steps.map(({ name }) => name), [
+    "db-start",
+    "db-reset",
+    "schema-pgtap",
+    "focus-fixture-setup",
+    "pgtap",
+    "focus-fixture-cleanup",
+    "fresh-runtime0-assert",
+    "db-stop",
+  ]);
+
+  for (const failedStep of [
+    "schema-pgtap",
+    "focus-fixture-setup",
+    "pgtap",
+  ]) {
+    const calls = [];
+    const result = await runner.executeRegistrationObservationLocalDbQaPlan(
+      plan,
+      {
+        runStep: async (step) => {
+          calls.push(step.name);
+          if (step.name === failedStep) throw new Error(`synthetic ${failedStep}`);
+          return {
+            stdout: step.name === "fresh-runtime0-assert"
+              ? "registration_observation_provider_outbox_delta=0\n"
+              : "",
+          };
+        },
+        inspectResources: async () => [],
+      },
+    );
+    assert.equal(result.status, 1);
+    const expectedCalls = {
+      "schema-pgtap": [
+        "db-start",
+        "db-reset",
+        "schema-pgtap",
+        "db-stop",
+      ],
+      "focus-fixture-setup": [
+        "db-start",
+        "db-reset",
+        "schema-pgtap",
+        "focus-fixture-setup",
+        "focus-fixture-cleanup",
+        "fresh-runtime0-assert",
+        "db-stop",
+      ],
+      pgtap: [
+        "db-start",
+        "db-reset",
+        "schema-pgtap",
+        "focus-fixture-setup",
+        "pgtap",
+        "focus-fixture-cleanup",
+        "fresh-runtime0-assert",
+        "db-stop",
+      ],
+    };
+    assert.deepEqual(calls, expectedCalls[failedStep]);
+  }
+});
+
 test("isolated reset installs only the pre-history schema required by repository migrations", async () => {
   const runner = await loadRunner();
   const sql = runner.registrationObservationLocalQaPrerequisiteSql();
