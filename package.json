@@ -18,6 +18,7 @@
     "verify:notification-content:isolated-db": "node --experimental-strip-types scripts/run-notification-isolated-db-qa.mjs",
     "verify:notification-content:browser": "node scripts/verify-notification-content-browser.mjs",
     "verify:registration-customer-message:isolated-db": "node --experimental-strip-types scripts/run-registration-customer-solapi-local-db-qa.mjs",
+    "verify:registration-observation:local-db": "node --experimental-strip-types scripts/run-registration-observation-local-db-qa.mjs",
     "verify:registration-customer-message:browser": "node --experimental-strip-types scripts/verify-registration-customer-message-browser.mjs"
   },
   "dependencies": {
