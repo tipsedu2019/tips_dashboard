@@ -7,23 +7,44 @@ import {
   normalizePublicClassesFailure,
 } from "../src/server/public-classes-payload.js";
 
-test("public classes API defaults to the bounded summary payload", async () => {
-  const calls = [];
-  const respond = createPublicClassesApiResponder(async (options) => {
-    calls.push(options);
+test("public classes API preserves class plans and their supporting catalogs", async () => {
+  const respond = createPublicClassesApiResponder(async ({ mode }) => {
+    if (mode === "full") {
+      return {
+        generatedAt: "2026-08-09T00:00:00.000Z",
+        source: "supabase",
+        classes: [
+          {
+            id: "class-1",
+            schedulePlan: { sessions: [{ id: "session-1" }] },
+            schedule_plan: { sessions: [{ id: "session-1" }] },
+          },
+        ],
+        textbooks: [{ id: "textbook-1", title: "교재" }],
+        progressLogs: [{ id: "progress-1", classId: "class-1" }],
+      };
+    }
+
     return {
       generatedAt: "2026-08-09T00:00:00.000Z",
       source: "supabase",
-      classes: [],
+      classes: [{ id: "class-1" }],
       textbooks: [],
       progressLogs: [],
     };
   });
 
   const response = await respond();
+  const payload = JSON.parse(response.body);
 
-  assert.deepEqual(calls, [{ mode: "summary" }]);
   assert.equal(response.status, 200);
+  assert.deepEqual(payload.classes[0].schedulePlan, {
+    sessions: [{ id: "session-1" }],
+  });
+  assert.deepEqual(payload.textbooks, [{ id: "textbook-1", title: "교재" }]);
+  assert.deepEqual(payload.progressLogs, [
+    { id: "progress-1", classId: "class-1" },
+  ]);
 });
 
 test("public classes failures do not expose gateway HTML or request details", () => {

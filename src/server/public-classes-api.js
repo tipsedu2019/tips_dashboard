@@ -7,7 +7,7 @@ export function createPublicClassesApiResponder(
   buildPayload = buildPublicClassesPayload,
 ) {
   return async function respond() {
-    const payload = await buildPayload({ mode: "summary" });
+    const payload = await buildPayload({ mode: "full" });
     const isFallback = isFallbackPublicClassesPayload(payload);
 
     return {
