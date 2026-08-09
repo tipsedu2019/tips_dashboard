@@ -601,7 +601,15 @@ async function failRuntimePortManifestAfterRollback({
   if (failedClaims.length > 0) {
     error.portLeaseCleanup = { failedClaims, releasePortLease };
   }
-  if (errors.length > 0) error.portLeaseRollbackErrors = errors;
+  const rollbackErrors = [];
+  for (const rollbackError of [primaryError?.cleanupError, ...errors]) {
+    if (rollbackError && !rollbackErrors.includes(rollbackError)) {
+      rollbackErrors.push(rollbackError);
+    }
+  }
+  if (rollbackErrors.length > 0) {
+    error.portLeaseRollbackErrors = rollbackErrors;
+  }
   throw error;
 }
 

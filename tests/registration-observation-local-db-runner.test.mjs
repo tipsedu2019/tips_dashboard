@@ -1114,6 +1114,84 @@ test("outer finalizer retries a failed partial-acquire rollback without hiding p
   assert.equal(existsSync(runtimeRoot), false);
 });
 
+test("owner-write rollback preserves its first cleanup failure after claim release succeeds", async () => {
+  const runner = await loadRunner();
+  let runtimeRoot;
+  let nextPort = 65420;
+  let releaseCalls = 0;
+  const outstandingClaims = new Set();
+  const originalCleanupError = new Error(
+    "synthetic owner-write unlink failure",
+  );
+  const result = await runner.executeRegistrationObservationLocalDbQaLifecycle(
+    { repositoryRoot, focus: "schema" },
+    {
+      createRuntimeRoot: async () => {
+        runtimeRoot = await mkdtemp(
+          path.join(os.tmpdir(), "tips-registration-observation-qa-"),
+        );
+        return runtimeRoot;
+      },
+      randomBytes: () => Buffer.from("0123456789ab", "hex"),
+      allocateLoopbackPort: async () => ++nextPort,
+      acquirePortLease: async ({ port, projectId: actualProjectId }) => {
+        const claim = Object.freeze({
+          leasePath: path.join(os.tmpdir(), `${actualProjectId}-${port}.lease`),
+          partialOwner: true,
+          port,
+          projectId: actualProjectId,
+          pid: process.pid,
+        });
+        outstandingClaims.add(claim);
+        const error = new Error("synthetic owner-write failure");
+        error.cleanupError = originalCleanupError;
+        error.portLeaseCleanupClaim = claim;
+        throw error;
+      },
+      releasePortLease: async (claim) => {
+        releaseCalls += 1;
+        outstandingClaims.delete(claim);
+      },
+      inspectResources: async () => [],
+    },
+  );
+
+  assert.equal(result.status, 1);
+  assert.equal(result.primaryError.step, "runtime-port-allocation");
+  assert.equal(
+    result.primaryError.error.cause.message,
+    "synthetic owner-write failure",
+  );
+  assert.equal(releaseCalls, 1);
+  assert.equal(outstandingClaims.size, 0);
+  assert.deepEqual(
+    result.cleanupErrors.map(({ step, error }) => ({ step, error })),
+    [{ step: "runtime-port-lease-rollback", error: originalCleanupError }],
+  );
+  assert.deepEqual(
+    result.cleanupEvidence
+      .map(({ step, status, error }) => ({ step, status, error })),
+    [
+      {
+        step: "runtime-port-lease-rollback",
+        status: "failed",
+        error: originalCleanupError,
+      },
+      {
+        step: "emergency-resource-inspection",
+        status: "passed",
+        error: undefined,
+      },
+      {
+        step: "runtime-root-removal",
+        status: "passed",
+        error: undefined,
+      },
+    ],
+  );
+  assert.equal(existsSync(runtimeRoot), false);
+});
+
 test("preexisting project resources fail closed without being removed", async () => {
   const runner = await loadRunner();
   let runtimeRoot;
