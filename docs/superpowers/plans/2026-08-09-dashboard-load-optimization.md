@@ -147,7 +147,7 @@
 ### Task 2: 인증 범위를 보존하는 두 개의 읽기 전용 RPC
 
 **Files:**
-- Modify: `supabase/migrations/20260809015836_dashboard_snapshot_sources.sql`
+- Modify: `supabase/migrations/20260809021903_dashboard_snapshot_sources.sql`
 - Modify: `tests/dashboard-resource-pressure.test.mjs`
 
 **Interfaces:**
@@ -228,7 +228,7 @@
 
   Commit:
   ```bash
-  git add supabase/migrations/20260809015836_dashboard_snapshot_sources.sql tests/dashboard-resource-pressure.test.mjs
+  git add supabase/migrations/20260809021903_dashboard_snapshot_sources.sql tests/dashboard-resource-pressure.test.mjs
   git commit -m "feat: add dashboard snapshot RPCs"
   ```
 
@@ -372,7 +372,7 @@
 
 **Files:**
 - Verify: all changed files
-- Apply: `supabase/migrations/20260809015836_dashboard_snapshot_sources.sql`
+- Apply: `supabase/migrations/20260809021903_dashboard_snapshot_sources.sql`
 
 **Interfaces:**
 - Consumes: Tasks 1–4의 커밋과 운영 Supabase project `slnjqlzzhewblvttiidk`

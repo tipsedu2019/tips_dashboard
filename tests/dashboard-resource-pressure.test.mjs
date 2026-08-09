@@ -13,7 +13,7 @@ const migrationUrl = new URL(
   import.meta.url,
 )
 const snapshotMigrationUrl = new URL(
-  "../supabase/migrations/20260809015836_dashboard_snapshot_sources.sql",
+  "../supabase/migrations/20260809021903_dashboard_snapshot_sources.sql",
   import.meta.url,
 )
 
