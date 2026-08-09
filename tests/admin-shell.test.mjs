@@ -505,8 +505,9 @@ test("dashboard renders academy-wide actionable conflict state before filters an
   assert.deepEqual(sectionOrder, [...sectionOrder].sort((left, right) => left - right));
   assert.doesNotMatch(conflictWarningBlock, /activeSubject|activeDivision/);
   assert.match(conflictWarningBlock, /rows\.length === 0 && sourcesReady/);
-  assert.match(conflictWarningBlock, /시험 일정 충돌을 확인하지 못했습니다\./);
-  assert.match(conflictWarningBlock, /retryExamSources/);
+  assert.match(conflictWarningBlock, /일정 충돌을 확인하지 못했습니다\./);
+  assert.match(conflictWarningBlock, /retryConflictSources/);
+  assert.doesNotMatch(conflictWarningBlock, /retryExamSources/);
   assert.match(conflictWarningBlock, /rows\.slice\(0, 3\)/);
   assert.match(conflictWarningBlock, /aria-expanded=\{showAllConflicts\}/);
   assert.match(conflictWarningBlock, /CONFLICT_TYPE_ORDER/);
@@ -518,6 +519,8 @@ test("dashboard renders academy-wide actionable conflict state before filters an
   assert.match(conflictWarningBlock, /listDashboardConflictTaskLinks/);
   assert.match(conflictWarningBlock, /createDashboardConflictTask/);
   assert.match(conflictWarningBlock, /aria-live="polite"/);
+  assert.match(filterBlock, /retryCoreSources/);
+  assert.match(filterBlock, /다시 시도/);
   assert.doesNotMatch(filterBlock, /rounded-xl border bg-background/);
   assert.match(segmentedControlBlock, /rounded-md border bg-muted\/30/);
   assert.match(segmentedControlBlock, /focus-visible:ring-2 focus-visible:ring-ring/);

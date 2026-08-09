@@ -32,6 +32,7 @@ import {
   type DashboardConflictTaskLink,
   type DashboardConflictType,
 } from "@/features/dashboard/conflict-contract"
+import { getDashboardSourceError } from "@/features/dashboard/snapshot-sources.js"
 import {
   createDashboardConflictTask,
   listDashboardConflictTaskLinks,
@@ -121,7 +122,8 @@ type DashboardMetrics = {
     schedule: { status: "loading" | "ready" | "error"; error: string }
     exam: { status: "loading" | "ready" | "error"; error: string }
   }
-  retryExamSources: () => void
+  retryCoreSources: () => void
+  retryConflictSources: () => void
   studentBreakdowns?: DashboardBucket["studentBreakdowns"]
   classBreakdowns?: DashboardBucket["classBreakdowns"]
   analyticsBySubject?: Partial<Record<DashboardSubjectKey, DashboardBucket>>
@@ -512,6 +514,14 @@ function DashboardHeader({
         {statusBadge ? (
           <div aria-label="운영 상태" className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
             {statusBadge}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={metrics.retryCoreSources}
+            >
+              다시 시도
+            </Button>
           </div>
         ) : null}
       </div>
@@ -1079,8 +1089,7 @@ function getConflictActionState(link: DashboardConflictTaskLink | undefined): Co
 }
 
 function getConflictActionError(error: unknown) {
-  if (error instanceof Error && error.message) return error.message
-  return "할 일을 등록하지 못했습니다."
+  return getDashboardSourceError(error, "할 일을 등록하지 못했습니다.")
 }
 
 function ConflictWarning({ metrics }: { metrics: DashboardMetrics }) {
@@ -1104,6 +1113,12 @@ function ConflictWarning({ metrics }: { metrics: DashboardMetrics }) {
   const sourcesReady =
     metrics.conflictSources.schedule.status === "ready" &&
     metrics.conflictSources.exam.status === "ready"
+  const sourcesLoading =
+    metrics.conflictSources.schedule.status === "loading" ||
+    metrics.conflictSources.exam.status === "loading"
+  const sourcesError =
+    metrics.conflictSources.schedule.status === "error" ||
+    metrics.conflictSources.exam.status === "error"
   const visibleRows = showAllConflicts ? rows : rows.slice(0, 3)
 
   useEffect(() => {
@@ -1198,23 +1213,15 @@ function ConflictWarning({ metrics }: { metrics: DashboardMetrics }) {
         ) : null}
       </AlertTitle>
       <AlertDescription className="mt-2 w-full min-w-0 gap-3 text-amber-950 dark:text-amber-100">
-        {metrics.conflictSources.schedule.status === "loading" ? (
-          <p>시간표 일정 충돌을 확인하고 있습니다.</p>
-        ) : null}
-        {metrics.conflictSources.schedule.status === "error" ? (
-          <p>시간표 일정 충돌을 확인하지 못했습니다.</p>
-        ) : null}
-        {metrics.conflictSources.exam.status === "loading" ? (
-          <p>시험 일정 충돌을 확인하고 있습니다.</p>
-        ) : null}
-        {metrics.conflictSources.exam.status === "error" ? (
+        {sourcesLoading ? <p>일정 충돌을 확인하고 있습니다.</p> : null}
+        {sourcesError ? (
           <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <p>시험 일정 충돌을 확인하지 못했습니다.</p>
+            <p>일정 충돌을 확인하지 못했습니다.</p>
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={metrics.retryExamSources}
+              onClick={metrics.retryConflictSources}
               className="w-full border-amber-300 bg-background sm:w-auto"
             >
               다시 시도

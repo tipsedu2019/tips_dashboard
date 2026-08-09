@@ -2309,6 +2309,8 @@ function normalizeDashboardConflictTaskLink(
   }
 }
 
+const DASHBOARD_CONFLICT_TASK_LINK_TIMEOUT_MS = 8_000
+
 export async function listDashboardConflictTaskLinks(
   conflicts: DashboardConflictRpcInput[],
 ): Promise<DashboardConflictTaskLink[]> {
@@ -2318,9 +2320,12 @@ export async function listDashboardConflictTaskLinks(
   if (new Set(keys).size !== keys.length) {
     throw new Error("중복된 일정 충돌을 확인했습니다.")
   }
-  const { data, error } = await supabase.rpc("list_dashboard_conflict_task_links_v1", {
-    p_conflicts: normalized,
-  })
+  const { data, error } = await supabase
+    .rpc("list_dashboard_conflict_task_links_v1", {
+      p_conflicts: normalized,
+    })
+    .abortSignal(AbortSignal.timeout(DASHBOARD_CONFLICT_TASK_LINK_TIMEOUT_MS))
+    .retry(false)
   if (error) throw error
   if (!Array.isArray(data) || data.length !== keys.length) {
     throw new Error("일정 충돌 할 일 상태를 확인하지 못했습니다.")

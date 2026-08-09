@@ -48,7 +48,6 @@ type DashboardMetricsState = DashboardMetricsData & {
 type DashboardMetrics = DashboardMetricsState & {
   retryCoreSources: () => void
   retryConflictSources: () => void
-  retryExamSources: () => void
 }
 
 type DashboardCoreData = DashboardSummarySources & {
@@ -252,7 +251,6 @@ export function useTipsDashboardMetrics() {
       ...metrics,
       retryCoreSources,
       retryConflictSources,
-      retryExamSources: retryConflictSources,
     }),
     [metrics, retryConflictSources, retryCoreSources],
   )
