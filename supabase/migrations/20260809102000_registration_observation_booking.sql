@@ -894,6 +894,7 @@ declare
   v_response jsonb;
 begin
   if p_track_id is null
+    or v_exit_kind is null
     or v_exit_kind not in ('return_to_previous', 'director_decision')
     or v_target_status is null
     or p_expected_workflow_revision is null
