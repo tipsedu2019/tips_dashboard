@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -18,7 +19,11 @@ import {
   type AcademicSubjectValue,
 } from "@/lib/academic-subject-registry";
 import { supabase } from "@/lib/supabase";
-import { createId, managementService } from "./management-service.js";
+import {
+  createId,
+  filterClassroomCatalogRowsForSubject,
+  managementService,
+} from "./management-service.js";
 import {
   SettingsMasterHeader,
   SettingsTableFrame,
@@ -34,6 +39,7 @@ type ClassroomRecord = {
   id: string;
   name: string;
   subjects: AcademicSubjectValue[];
+  campus: "본관" | "별관" | "";
   hasInvalidSubjectMembership?: boolean;
   isVisible: boolean;
   sortOrder: string;
@@ -42,9 +48,10 @@ type ClassroomRecord = {
 
 const SUBJECT_OPTIONS = ACADEMIC_SUBJECT_VALUES;
 const SUBJECT_FILTERS = ["전체", ...SUBJECT_OPTIONS] as const;
+const CAMPUS_OPTIONS = ["본관", "별관"] as const;
 const CLASSROOM_TABLE_COLUMNS = [
   { id: "subjects", label: "과목" },
-  { id: "name", label: "이름" },
+  { id: "name", label: "이름", required: true },
   { id: "visible", label: "표시" },
   { id: "action", label: "작업", required: true },
 ] satisfies SettingsTableColumn[];
@@ -61,6 +68,7 @@ function toClassroomRecord(row: Record<string, unknown>, index: number): Classro
     id: String(row.id || createId()),
     name: typeof row.name === "string" ? row.name : "",
     subjects,
+    campus: row.campus === "본관" || row.campus === "별관" ? row.campus : "",
     hasInvalidSubjectMembership,
     isVisible: row.is_visible !== false,
     sortOrder: String(row.sort_order ?? index),
@@ -72,10 +80,49 @@ function createEmptyClassroom(nextSortOrder: number): ClassroomRecord {
     id: createId(),
     name: "",
     subjects: ["영어"],
+    campus: "",
     isVisible: true,
     sortOrder: String(nextSortOrder),
     isNew: true,
   };
+}
+
+function ClassroomCampusSelect({
+  campus,
+  disabled,
+  onChange,
+}: {
+  campus: ClassroomRecord["campus"];
+  disabled: boolean;
+  onChange: (campus: Exclude<ClassroomRecord["campus"], "">) => void;
+}) {
+  return (
+    <div className="grid w-28 shrink-0 gap-1">
+      <Select
+        value={campus}
+        disabled={disabled}
+        onValueChange={(value) => {
+          if (value === "본관" || value === "별관") {
+            onChange(value);
+          }
+        }}
+      >
+        <SelectTrigger className="h-9 w-full" aria-label="강의실 건물">
+          <SelectValue placeholder="건물 선택" />
+        </SelectTrigger>
+        <SelectContent>
+          {CAMPUS_OPTIONS.map((option) => (
+            <SelectItem key={option} value={option}>{option}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {!campus ? (
+        <Badge variant="outline" className="w-fit rounded px-1.5 text-[11px] text-destructive">
+          건물 미지정
+        </Badge>
+      ) : null}
+    </div>
+  );
 }
 
 function ClassroomSubjectToggles({
@@ -144,7 +191,7 @@ export function ClassroomMasterWorkspace() {
     try {
       const { data, error: queryError } = await supabase
         .from("classroom_catalogs")
-        .select("id, name, subjects, is_visible, sort_order")
+        .select("id, name, subjects, campus, is_visible, sort_order")
         .order("sort_order", { ascending: true })
         .order("name", { ascending: true });
 
@@ -175,7 +222,7 @@ export function ClassroomMasterWorkspace() {
   }, [rows]);
 
   const filteredRows = useMemo(
-    () => rows.filter((row) => subjectFilter === "전체" || row.subjects.includes(subjectFilter)),
+    () => filterClassroomCatalogRowsForSubject(rows, subjectFilter) as ClassroomRecord[],
     [rows, subjectFilter],
   );
 
@@ -231,6 +278,10 @@ export function ClassroomMasterWorkspace() {
       setError("강의실 과목을 하나 이상 선택해 주세요.");
       return;
     }
+    if (nextRows.some((row) => !row.campus)) {
+      setError("강의실 건물을 선택해 주세요.");
+      return;
+    }
 
     setSaving(true);
     setError(null);
@@ -245,6 +296,7 @@ export function ClassroomMasterWorkspace() {
             id: row.id,
             name: row.name,
             subjects: [...row.subjects],
+            campus: row.campus,
             isVisible: row.isVisible,
             sortOrder: index + 1,
           })),
@@ -373,14 +425,21 @@ export function ClassroomMasterWorkspace() {
                       disabled={saving}
                       onToggle={(subject) => handleSubjectToggle(row.id, subject)}
                     />
-                    <Input
-                      name="classroom-name"
-                      className="h-9"
-                      value={row.name}
-                      onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
-                      placeholder="강의실 이름"
-                      aria-label={`${row.name || "새 강의실"} 강의실 이름`}
-                    />
+                    <div className="grid grid-cols-[minmax(0,1fr)_7rem] items-start gap-2">
+                      <Input
+                        name="classroom-name"
+                        className="h-9"
+                        value={row.name}
+                        onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
+                        placeholder="강의실 이름"
+                        aria-label={`${row.name || "새 강의실"} 강의실 이름`}
+                      />
+                      <ClassroomCampusSelect
+                        campus={row.campus}
+                        disabled={saving}
+                        onChange={(campus) => handleFieldChange(row.id, "campus", campus)}
+                      />
+                    </div>
                     <label className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
                       <span>표시</span>
                       <Checkbox
@@ -438,14 +497,21 @@ export function ClassroomMasterWorkspace() {
                       />
                     </TableCell> : null}
                     {isColumnVisible("name") ? <TableCell className={settingsTableCellClass}>
-                      <Input
-                        name="classroom-name"
-                        className="h-9"
-                        value={row.name}
-                        onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
-                        placeholder="강의실 이름"
-                        aria-label={`${row.name || "새 강의실"} 강의실 이름`}
-                      />
+                      <div className="grid grid-cols-[minmax(0,1fr)_7rem] items-start gap-2">
+                        <Input
+                          name="classroom-name"
+                          className="h-9"
+                          value={row.name}
+                          onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
+                          placeholder="강의실 이름"
+                          aria-label={`${row.name || "새 강의실"} 강의실 이름`}
+                        />
+                        <ClassroomCampusSelect
+                          campus={row.campus}
+                          disabled={saving}
+                          onChange={(campus) => handleFieldChange(row.id, "campus", campus)}
+                        />
+                      </div>
                     </TableCell> : null}
                     {isColumnVisible("visible") ? <TableCell className={`${settingsTableCellClass} text-center`}>
                       <div className="flex justify-center">

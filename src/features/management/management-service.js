@@ -172,6 +172,24 @@ function normalizeClassroomSubjectList(subjects) {
   return sortAcademicSubjects(parsed);
 }
 
+function normalizeClassroomCampus(value) {
+  if (value !== "본관" && value !== "별관") {
+    throw new Error("강의실 건물을 선택해 주세요.");
+  }
+  return value;
+}
+
+export function filterClassroomCatalogRowsForSubject(rows = [], subject = "전체") {
+  const selectedSubject = trimText(subject);
+  return (rows || []).filter((row) => {
+    const hasValidCampus = row?.campus === "본관" || row?.campus === "별관";
+    return !hasValidCampus
+      || !selectedSubject
+      || selectedSubject === "전체"
+      || getCatalogSubjectMemberships(row).includes(selectedSubject);
+  });
+}
+
 function normalizeDashboardRole(value) {
   const role = trimText(value).toLowerCase();
   return DASHBOARD_ROLES.includes(role) ? role : "teacher";
@@ -304,6 +322,9 @@ export function buildResourceCatalogPayload(resources = [], options = {}) {
     subjects: kind === "classroom"
       ? normalizeClassroomSubjectList(resource?.subjects)
       : normalizeSubjectList(resource?.subjects),
+    ...(kind === "classroom"
+      ? { campus: normalizeClassroomCampus(resource?.campus) }
+      : {}),
     is_visible: resource?.isVisible !== false,
     sort_order: resource?.sortOrder ?? resource?.sort_order ?? index,
     ...(kind === "teacher"
