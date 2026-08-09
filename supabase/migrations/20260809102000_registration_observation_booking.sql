@@ -66,46 +66,28 @@ as $$
     'workflowRevision', p_track.workflow_revision,
     'observation', case
       when p_observation.id is null then null::jsonb
-      else pg_catalog.jsonb_build_object(
-        'id', p_observation.id,
-        'taskId', p_observation.task_id,
-        'trackId', p_observation.track_id,
-        'appointmentId', p_observation.appointment_id,
-        'classId', p_observation.class_id,
-        'sessionAuthority', p_observation.session_authority,
-        'classLessonSessionId', p_observation.class_lesson_session_id,
-        'legacySessionKey', p_observation.legacy_session_key,
-        'sessionDate', p_observation.session_date,
-        'startsAt', p_observation.starts_at,
-        'endsAt', p_observation.ends_at,
-        'scheduleState', p_observation.session_schedule_state,
-        'sourceRevision', p_observation.source_revision,
-        'bookingFactHash', p_observation.booking_fact_hash,
-        'teacherCatalogId', p_observation.teacher_catalog_id,
-        'teacherProfileId', p_observation.teacher_profile_id,
-        'classroomCatalogId', p_observation.classroom_catalog_id,
-        'subject', p_observation.subject,
-        'className', p_observation.class_name_snapshot,
-        'teacherName', p_observation.teacher_name_snapshot,
-        'classroomName', p_observation.classroom_name_snapshot,
-        'campus', p_observation.campus,
-        'textbooks', p_observation.textbook_snapshot,
-        'progress', p_observation.progress_snapshot,
-        'status', p_observation.status,
-        'decisionKind', p_observation.decision_kind,
-        'revision', p_observation.revision,
-        'feedbackRevision', p_observation.feedback_revision
+      else dashboard_private.registration_observation_attempt_payload_v1(
+        p_observation,
+        p_appointment,
+        case p_observation.session_authority
+          when 'normalized' then (
+            select lesson.session_key
+            from public.class_lesson_sessions lesson
+            where lesson.id = p_observation.class_lesson_session_id
+              and lesson.class_id = p_observation.class_id
+          )
+          when 'legacy' then p_observation.legacy_session_key
+          else null
+        end
       )
     end,
     'appointment', case
       when p_appointment.id is null then null::jsonb
       else pg_catalog.jsonb_build_object(
-        'id', p_appointment.id,
-        'taskId', p_appointment.task_id,
-        'kind', p_appointment.kind,
+        'appointmentId', p_appointment.id,
+        'status', p_appointment.status,
         'scheduledAt', p_appointment.scheduled_at,
         'place', p_appointment.place,
-        'status', p_appointment.status,
         'notificationRevision', p_appointment.notification_revision
       )
     end,

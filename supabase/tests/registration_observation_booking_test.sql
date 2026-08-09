@@ -1,5 +1,5 @@
 begin;
-select plan(67);
+select plan(69);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '120s';
@@ -60,10 +60,29 @@ values (
 insert into public.classes(
   id, name, subject, status, schedule_storage_mode, schedule_plan
 )
-values (
-  '99100000-0000-4000-8000-000000000103', '청강 예약 영어반',
-  '영어', '수업 진행 중', 'normalized', '{"sessions":[]}'::jsonb
-);
+values
+  (
+    '99100000-0000-4000-8000-000000000103', '청강 예약 영어반',
+    '영어', '수업 진행 중', 'normalized', '{"sessions":[]}'::jsonb
+  ),
+  (
+    '99100000-0000-4000-8000-000000000193', '청강 예약 legacy 영어반',
+    '영어', '수업 진행 중', 'legacy',
+    pg_catalog.jsonb_build_object(
+      'sessions', pg_catalog.jsonb_build_array(
+        pg_catalog.jsonb_build_object(
+          'sessionKey', 'booking-legacy-session-a',
+          'date', (current_date + 21)::text,
+          'scheduleState', 'active',
+          'teacherCatalogId', '99100000-0000-4000-8000-000000000101',
+          'teacherName', '청강 예약 원장',
+          'classroomCatalogId', '99100000-0000-4000-8000-000000000102',
+          'classroomName', '청강 예약 101호'
+        )
+      ),
+      'textbooks', '[]'::jsonb
+    )
+  );
 
 do $$
 begin
@@ -74,6 +93,20 @@ begin
   );
 end;
 $$;
+insert into public.class_schedule_slots(
+  id, class_id, weekday, start_time, end_time,
+  teacher_catalog_id, teacher_name, classroom_catalog_id, classroom_name,
+  sort_order
+)
+values (
+  '99100000-0000-4000-8000-000000000194',
+  '99100000-0000-4000-8000-000000000193',
+  extract(dow from current_date + 21)::smallint,
+  '16:00', '18:00',
+  '99100000-0000-4000-8000-000000000101', '청강 예약 원장',
+  '99100000-0000-4000-8000-000000000102', '청강 예약 101호',
+  0
+);
 insert into public.class_lesson_sessions(
   id, class_id, session_key, session_date, schedule_state, start_time, end_time,
   teacher_catalog_id, teacher_name_snapshot, classroom_catalog_id,
@@ -108,7 +141,8 @@ values
   ('99100000-0000-4000-8000-000000000145', '청강 correction fixture', 'registration', 'requested', 'normal', '99100000-0000-4000-8000-000000000001', '합성 재청강학생'),
   ('99100000-0000-4000-8000-000000000155', '청강 rollback fixture', 'registration', 'requested', 'normal', '99100000-0000-4000-8000-000000000001', '합성 롤백학생'),
   ('99100000-0000-4000-8000-000000000165', '청강 active guard fixture', 'registration', 'requested', 'normal', '99100000-0000-4000-8000-000000000001', '합성 활성청강학생'),
-  ('99100000-0000-4000-8000-000000000175', '청강 unfit general fixture', 'registration', 'requested', 'normal', '99100000-0000-4000-8000-000000000001', '합성 부적합일반학생');
+  ('99100000-0000-4000-8000-000000000175', '청강 unfit general fixture', 'registration', 'requested', 'normal', '99100000-0000-4000-8000-000000000001', '합성 부적합일반학생'),
+  ('99100000-0000-4000-8000-000000000195', '청강 legacy payload fixture', 'registration', 'requested', 'normal', '99100000-0000-4000-8000-000000000001', '합성 legacy학생');
 
 insert into public.ops_registration_details(task_id)
 values
@@ -119,7 +153,8 @@ values
   ('99100000-0000-4000-8000-000000000145'),
   ('99100000-0000-4000-8000-000000000155'),
   ('99100000-0000-4000-8000-000000000165'),
-  ('99100000-0000-4000-8000-000000000175');
+  ('99100000-0000-4000-8000-000000000175'),
+  ('99100000-0000-4000-8000-000000000195');
 
 insert into public.ops_registration_subject_tracks(
   id, task_id, subject, pipeline_status, director_profile_id,
@@ -135,7 +170,8 @@ values
   ('99100000-0000-4000-8000-000000000146', '99100000-0000-4000-8000-000000000145', '영어', 'consultation_waiting', '99100000-0000-4000-8000-000000000003', 'manual', now(), false, 'observation_requested', 4, now(), 'consultation_completed', 2),
   ('99100000-0000-4000-8000-000000000156', '99100000-0000-4000-8000-000000000155', '영어', 'consultation_waiting', '99100000-0000-4000-8000-000000000003', 'manual', now(), false, 'observation_requested', 1, now(), 'consultation_completed', 0),
   ('99100000-0000-4000-8000-000000000166', '99100000-0000-4000-8000-000000000165', '영어', 'consultation_waiting', '99100000-0000-4000-8000-000000000003', 'manual', now(), false, 'consultation_completed', 1, now(), null, 1),
-  ('99100000-0000-4000-8000-000000000176', '99100000-0000-4000-8000-000000000175', '영어', 'consultation_waiting', '99100000-0000-4000-8000-000000000003', 'manual', now(), false, 'observation_requested', 3, now(), 'consultation_completed', 2);
+  ('99100000-0000-4000-8000-000000000176', '99100000-0000-4000-8000-000000000175', '영어', 'consultation_waiting', '99100000-0000-4000-8000-000000000003', 'manual', now(), false, 'observation_requested', 3, now(), 'consultation_completed', 2),
+  ('99100000-0000-4000-8000-000000000196', '99100000-0000-4000-8000-000000000195', '영어', 'consultation_waiting', '99100000-0000-4000-8000-000000000003', 'manual', now(), false, 'observation_requested', 1, now(), 'consultation_completed', 0);
 
 insert into public.ops_registration_appointments(
   id, task_id, kind, scheduled_at, place, status, notification_revision,
@@ -656,7 +692,7 @@ select is(
     )
     from registration_observation_booking_results result
     join public.ops_registration_observations observation
-      on observation.id = (result.response -> 'observation' ->> 'id')::uuid
+      on observation.id = (result.response -> 'observation' ->> 'observationId')::uuid
     join public.ops_registration_appointments appointment
       on appointment.id = observation.appointment_id
     join public.ops_registration_subject_tracks track on track.id = observation.track_id
@@ -664,6 +700,34 @@ select is(
   ),
   '{"attempts":1,"workflowRevision":2,"observationRevision":1,"feedbackRevision":0,"notificationRevision":1,"sameTask":true,"sameSubject":true,"sameSchedule":true,"samePlace":true,"eventCount":1}'::jsonb,
   'new booking atomically creates exact revision-one rows event and one counter increment'
+);
+select is(
+  (
+    select pg_catalog.jsonb_build_object(
+      'observationMatchesCanonical',
+        result.response -> 'observation'
+          = dashboard_private.registration_observation_attempt_payload_v1(
+              observation, appointment, 'booking-session-a'
+            ),
+      'sessionKey', result.response -> 'observation' ->> 'sessionKey',
+      'appointmentMatchesExact',
+        result.response -> 'appointment' = pg_catalog.jsonb_build_object(
+          'appointmentId', appointment.id,
+          'status', appointment.status,
+          'scheduledAt', appointment.scheduled_at,
+          'place', appointment.place,
+          'notificationRevision', appointment.notification_revision
+        )
+    )
+    from registration_observation_booking_results result
+    join public.ops_registration_observations observation
+      on observation.id = (result.response -> 'observation' ->> 'observationId')::uuid
+    join public.ops_registration_appointments appointment
+      on appointment.id = observation.appointment_id
+    where result.result_key = 'book-1'
+  ),
+  '{"observationMatchesCanonical":true,"sessionKey":"booking-session-a","appointmentMatchesExact":true}'::jsonb,
+  'normalized booking mutation returns canonical attempt and exact appointment payloads'
 );
 select is(
   (
@@ -689,6 +753,44 @@ select results_eq(
 );
 
 insert into registration_observation_booking_results(result_key, response)
+select 'book-legacy', public.save_registration_observation_booking_v1(
+  '99100000-0000-4000-8000-000000000196', null,
+  '99100000-0000-4000-8000-000000000193', 'legacy',
+  null, 'booking-legacy-session-a',
+  1, null, null, 'book-legacy-payload'
+);
+select is(
+  (
+    select pg_catalog.jsonb_build_object(
+      'observationMatchesCanonical',
+        result.response -> 'observation'
+          = dashboard_private.registration_observation_attempt_payload_v1(
+              observation, appointment, 'booking-legacy-session-a'
+            ),
+      'sessionKey', result.response -> 'observation' ->> 'sessionKey',
+      'legacySessionKey', result.response -> 'observation' ->> 'legacySessionKey',
+      'classLessonSessionId', result.response -> 'observation' -> 'classLessonSessionId',
+      'appointmentMatchesExact',
+        result.response -> 'appointment' = pg_catalog.jsonb_build_object(
+          'appointmentId', appointment.id,
+          'status', appointment.status,
+          'scheduledAt', appointment.scheduled_at,
+          'place', appointment.place,
+          'notificationRevision', appointment.notification_revision
+        )
+    )
+    from registration_observation_booking_results result
+    join public.ops_registration_observations observation
+      on observation.id = (result.response -> 'observation' ->> 'observationId')::uuid
+    join public.ops_registration_appointments appointment
+      on appointment.id = observation.appointment_id
+    where result.result_key = 'book-legacy'
+  ),
+  '{"observationMatchesCanonical":true,"sessionKey":"booking-legacy-session-a","legacySessionKey":"booking-legacy-session-a","classLessonSessionId":null,"appointmentMatchesExact":true}'::jsonb,
+  'legacy booking mutation returns canonical attempt with exact legacy session and appointment payloads'
+);
+
+insert into registration_observation_booking_results(result_key, response)
 select 'book-replay', public.save_registration_observation_booking_v1(
   '99100000-0000-4000-8000-000000000116', null,
   '99100000-0000-4000-8000-000000000103', 'normalized',
@@ -702,7 +804,7 @@ select is(
       'attempts', track.observation_attempt_count,
       'events', (
         select count(*) from dashboard_private.registration_observation_domain_events event
-        where event.observation_id = (original.response -> 'observation' ->> 'id')::uuid
+        where event.observation_id = (original.response -> 'observation' ->> 'observationId')::uuid
       )
     )
     from registration_observation_booking_results original
@@ -716,7 +818,7 @@ select is(
 );
 select throws_ok(
   $$select public.cancel_registration_observation_v1(
-    (select (response -> 'observation' ->> 'id')::uuid from registration_observation_booking_results where result_key = 'book-1'),
+    (select (response -> 'observation' ->> 'observationId')::uuid from registration_observation_booking_results where result_key = 'book-1'),
     1, 1, 'book-once'
   )$$,
   '23505', 'registration_observation_request_key_conflict',
@@ -726,7 +828,7 @@ select throws_ok(
 insert into registration_observation_booking_results(result_key, response)
 select 'reschedule-noop', public.save_registration_observation_booking_v1(
   '99100000-0000-4000-8000-000000000116',
-  (select (response -> 'observation' ->> 'id')::uuid from registration_observation_booking_results where result_key = 'book-1'),
+  (select (response -> 'observation' ->> 'observationId')::uuid from registration_observation_booking_results where result_key = 'book-1'),
   '99100000-0000-4000-8000-000000000103', 'normalized',
   '99100000-0000-4000-8000-000000000104', null,
   null, 1, 1, 'reschedule-noop'
@@ -744,7 +846,7 @@ select is(
     )
     from registration_observation_booking_results result
     join public.ops_registration_observations observation
-      on observation.id = (result.response -> 'observation' ->> 'id')::uuid
+      on observation.id = (result.response -> 'observation' ->> 'observationId')::uuid
     join public.ops_registration_appointments appointment on appointment.id = observation.appointment_id
     where result.result_key = 'reschedule-noop'
   ),
@@ -755,7 +857,7 @@ select is(
 insert into registration_observation_booking_results(result_key, response)
 select 'reschedule-changed', public.save_registration_observation_booking_v1(
   '99100000-0000-4000-8000-000000000116',
-  (select (response -> 'observation' ->> 'id')::uuid from registration_observation_booking_results where result_key = 'book-1'),
+  (select (response -> 'observation' ->> 'observationId')::uuid from registration_observation_booking_results where result_key = 'book-1'),
   '99100000-0000-4000-8000-000000000103', 'normalized',
   '99100000-0000-4000-8000-000000000114', null,
   null, 1, 1, 'reschedule-changed'
@@ -777,7 +879,7 @@ select is(
     )
     from registration_observation_booking_results result
     join public.ops_registration_observations observation
-      on observation.id = (result.response -> 'observation' ->> 'id')::uuid
+      on observation.id = (result.response -> 'observation' ->> 'observationId')::uuid
     join public.ops_registration_appointments appointment on appointment.id = observation.appointment_id
     join public.ops_registration_subject_tracks track on track.id = observation.track_id
     where result.result_key = 'reschedule-changed'
@@ -788,7 +890,7 @@ select is(
 select throws_ok(
   $$select public.save_registration_observation_booking_v1(
     '99100000-0000-4000-8000-000000000116',
-    (select (response -> 'observation' ->> 'id')::uuid from registration_observation_booking_results where result_key = 'book-1'),
+    (select (response -> 'observation' ->> 'observationId')::uuid from registration_observation_booking_results where result_key = 'book-1'),
     '99100000-0000-4000-8000-000000000103', 'normalized',
     '99100000-0000-4000-8000-000000000104', null,
     null, 1, 1, 'reschedule-stale'
@@ -798,7 +900,7 @@ select throws_ok(
 );
 select throws_ok(
   $$select pg_temp.registration_observation_reschedule_stale_probe(
-    (select (response -> 'observation' ->> 'id')::uuid from registration_observation_booking_results where result_key = 'book-1'),
+    (select (response -> 'observation' ->> 'observationId')::uuid from registration_observation_booking_results where result_key = 'book-1'),
     2, 1, 'reschedule-observation-stale'
   )$$,
   '40001', null,
@@ -806,7 +908,7 @@ select throws_ok(
 );
 select throws_ok(
   $$select pg_temp.registration_observation_reschedule_stale_probe(
-    (select (response -> 'observation' ->> 'id')::uuid from registration_observation_booking_results where result_key = 'book-1'),
+    (select (response -> 'observation' ->> 'observationId')::uuid from registration_observation_booking_results where result_key = 'book-1'),
     1, 2, 'reschedule-notification-stale'
   )$$,
   '40001', null,
@@ -833,7 +935,7 @@ select is(
     )
     from registration_observation_booking_results result
     join public.ops_registration_observations observation
-      on observation.id = (result.response -> 'observation' ->> 'id')::uuid
+      on observation.id = (result.response -> 'observation' ->> 'observationId')::uuid
     join public.ops_registration_appointments appointment
       on appointment.id = observation.appointment_id
     where result.result_key = 'book-1'
@@ -844,7 +946,7 @@ select is(
 
 insert into registration_observation_booking_results(result_key, response)
 select 'cancel-1', public.cancel_registration_observation_v1(
-  (select (response -> 'observation' ->> 'id')::uuid from registration_observation_booking_results where result_key = 'book-1'),
+  (select (response -> 'observation' ->> 'observationId')::uuid from registration_observation_booking_results where result_key = 'book-1'),
   2, 2, 'cancel-once'
 );
 select is(
@@ -866,7 +968,7 @@ select is(
     )
     from registration_observation_booking_results result
     join public.ops_registration_observations observation
-      on observation.id = (result.response -> 'observation' ->> 'id')::uuid
+      on observation.id = (result.response -> 'observation' ->> 'observationId')::uuid
     join public.ops_registration_appointments appointment on appointment.id = observation.appointment_id
     join public.ops_registration_subject_tracks track on track.id = observation.track_id
     where result.result_key = 'cancel-1'
@@ -876,7 +978,7 @@ select is(
 );
 select is(
   public.cancel_registration_observation_v1(
-    (select (response -> 'observation' ->> 'id')::uuid from registration_observation_booking_results where result_key = 'book-1'),
+    (select (response -> 'observation' ->> 'observationId')::uuid from registration_observation_booking_results where result_key = 'book-1'),
     2, 2, 'cancel-once'
   ),
   (select response from registration_observation_booking_results where result_key = 'cancel-1'),
@@ -893,8 +995,8 @@ select 'book-2', public.save_registration_observation_booking_v1(
 select is(
   (
     select pg_catalog.jsonb_build_object(
-      'newId', first.response -> 'observation' ->> 'id'
-        <> second.response -> 'observation' ->> 'id',
+      'newId', first.response -> 'observation' ->> 'observationId'
+        <> second.response -> 'observation' ->> 'observationId',
       'attempts', track.observation_attempt_count,
       'scheduledEvents', (
         select count(*) from dashboard_private.registration_observation_domain_events event
@@ -913,7 +1015,7 @@ select is(
   'a canceled attempt is never revived and the next attempt increments once'
 );
 select public.cancel_registration_observation_v1(
-  (select (response -> 'observation' ->> 'id')::uuid from registration_observation_booking_results where result_key = 'book-2'),
+  (select (response -> 'observation' ->> 'observationId')::uuid from registration_observation_booking_results where result_key = 'book-2'),
   1, 1, 'cancel-second'
 );
 
