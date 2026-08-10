@@ -20,6 +20,12 @@ import {
   EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
   normalizeRegistrationObservationSummary,
 } from "../src/features/tasks/registration-observation-model.ts"
+import {
+  activateRegistrationObservationRuntime,
+} from "../src/features/tasks/registration-observation-service.ts"
+import {
+  probeRegistrationObservationRuntime as probeRegistrationObservationRuntimeClient,
+} from "../src/features/tasks/registration-observation-runtime-probe.ts"
 
 const academicSubjectRegistry = {
   ACADEMIC_SUBJECT_VALUES,
@@ -111,6 +117,7 @@ async function loadRegistrationHistoryModel() {
 
 async function loadServiceBoundary({
   fixtureVersion = null,
+  fixtureObservationClient = null,
   fixtureCalendarRows = null,
   executeFixtureAction = () => null,
   databaseIntakeState = { available: false, version: 0 },
@@ -134,6 +141,7 @@ async function loadServiceBoundary({
     loadRegistrationSubjectTrackFixtureAppointmentCalendarRows: () => fixtureCalendarRows,
     loadRegistrationSubjectTrackFixtureOptionData: () => null,
     loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion: () => fixtureVersion,
+    loadRegistrationSubjectTrackFixtureObservationClient: () => fixtureObservationClient,
   }
   const supabase = {
     from() {
@@ -186,10 +194,7 @@ async function loadServiceBoundary({
       }
       if (specifier === "./registration-observation-runtime-probe.ts") {
         return {
-          probeRegistrationObservationRuntime: async () => ({
-            available: true,
-            runtimeVersion: 1,
-          }),
+          probeRegistrationObservationRuntime: probeRegistrationObservationRuntimeClient,
         }
       }
       if (specifier === "./registration-notification-processing-readiness") {
@@ -245,6 +250,22 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value))
 }
 
+function fixtureObservationRpc(client, name, args) {
+  return client.rpc(name, args).abortSignal({ fixture: true }).retry(false)
+}
+
+function activateFixtureObservation(client, requestKey) {
+  return activateRegistrationObservationRuntime(client, {
+    expectedCurrentVersion: 0,
+    requestKey,
+  })
+}
+
+function ensureFixtureObservationReady(client, getState, requestKey) {
+  if (getState().observation.runtimeVersion === 1) return Promise.resolve(null)
+  return activateFixtureObservation(client, requestKey)
+}
+
 test("fixture gate is exact and production always ignores the query", async () => {
   const {
     REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_VALUE,
@@ -289,6 +310,55 @@ test("fixture track summaries expose the inert observation summary scalars", asy
   })
 })
 
+test("fixture observation runtime and readiness start at zero", async () => {
+  const fixture = await loadFixtureModule()
+  const state = fixture.createRegistrationSubjectTrackFixtureState()
+
+  assert.equal(state.observation.runtimeVersion, 0)
+  assert.equal(state.observation.schemaReadiness.runtimeVersion, 0)
+})
+
+test("fixture service probe reads the actual observation runtime through activation", async () => {
+  const fixture = await loadFixtureModule()
+  let state = fixture.createRegistrationSubjectTrackFixtureState()
+  state = {
+    ...state,
+    observation: {
+      ...state.observation,
+      runtimeVersion: 0,
+      schemaReadiness: { ...state.observation.schemaReadiness, runtimeVersion: 0 },
+    },
+  }
+  const adapter = fixture.createRegistrationSubjectTrackFixtureAdapter({
+    getState: () => state,
+    replaceState: (next) => { state = next },
+  })
+  const boundary = await loadServiceBoundary({
+    fixtureVersion: 1,
+    fixtureObservationClient: adapter.observationClient,
+  })
+
+  assert.deepEqual(
+    plain(await boundary.service.probeRegistrationObservationRuntime()),
+    { runtimeVersion: 0, available: false },
+  )
+  assert.deepEqual(boundary.calls.rpc, [])
+
+  const activated = await activateFixtureObservation(
+    adapter.observationClient,
+    "fixture-observation-activate-runtime",
+  )
+  assert.equal(activated.runtimeVersion, 1)
+  assert.equal(activated.readiness.runtimeVersion, 0)
+  assert.equal(state.observation.runtimeVersion, 1)
+  assert.equal(state.observation.schemaReadiness.runtimeVersion, 1)
+  assert.deepEqual(
+    plain(await boundary.service.probeRegistrationObservationRuntime()),
+    { runtimeVersion: 1, available: true },
+  )
+  assert.deepEqual(boundary.calls.rpc, [])
+})
+
 test("fixture observation client replays an exact request key without a second revision", async () => {
   const fixture = await loadFixtureModule()
   let state = fixture.createRegistrationSubjectTrackFixtureState()
@@ -298,6 +368,11 @@ test("fixture observation client replays an exact request key without a second r
   }
   const adapter = fixture.createRegistrationSubjectTrackFixtureAdapter(runtime)
   const client = adapter.observationClient
+  await ensureFixtureObservationReady(
+    client,
+    () => state,
+    "fixture-observation-activate-replay",
+  )
   const input = {
     p_track_id: "20000000-0000-4000-8000-000000000001",
     p_expected_workflow_revision: 7,
@@ -340,6 +415,11 @@ test("fixture observation withdrawal rejects stale decision revisions before cor
     replaceState: (next) => { state = next },
   }
   const client = fixture.createRegistrationSubjectTrackFixtureAdapter(runtime).observationClient
+  await ensureFixtureObservationReady(
+    client,
+    () => state,
+    "fixture-observation-activate-withdrawal",
+  )
   const trackId = "20000000-0000-4000-8000-000000000001"
 
   await client.rpc("enter_registration_observation_v1", {
@@ -405,6 +485,261 @@ test("fixture observation withdrawal rejects stale decision revisions before cor
   assert.equal(corrected.data.workflowRevision, 9)
   assert.equal(corrected.data.observation.revision, 3)
   assert.equal(corrected.data.observation.decisionKind, "enrollment")
+})
+
+async function createFixtureObservationBookingScenario(requestKeySuffix) {
+  const fixture = await loadFixtureModule()
+  let state = fixture.createRegistrationSubjectTrackFixtureState()
+  const trackId = "20000000-0000-4000-8000-000000000001"
+  const classId = "20000000-0000-4000-8000-000000000003"
+  const sessionsKey = `${trackId}:${classId}`
+  const originalSession = plain(state.observation.sessions[sessionsKey][0])
+  const changedSession = {
+    ...originalSession,
+    startsAt: "2026-08-15T03:00:00.000Z",
+    endsAt: "2026-08-15T04:00:00.000Z",
+    bookingFactHash: "fixture-observation-booking-fact-hash-changed",
+    classLessonSessionId: "20000000-0000-4000-8000-000000000009",
+    sessionKey: "2026-08-15:fixture-observation-2",
+    sourceRevision: {
+      authority: "normalized",
+      sessionId: "20000000-0000-4000-8000-000000000009",
+      revision: 1,
+    },
+  }
+  state = {
+    ...state,
+    observation: {
+      ...state.observation,
+      sessions: {
+        ...state.observation.sessions,
+        [sessionsKey]: [originalSession, changedSession],
+      },
+    },
+  }
+  const getState = () => state
+  const replaceState = (next) => { state = next }
+  const client = fixture.createRegistrationSubjectTrackFixtureAdapter({
+    getState,
+    replaceState,
+  }).observationClient
+  await ensureFixtureObservationReady(
+    client,
+    getState,
+    `fixture-observation-activate-${requestKeySuffix}`,
+  )
+  await fixtureObservationRpc(client, "enter_registration_observation_v1", {
+    p_track_id: trackId,
+    p_expected_workflow_revision: 7,
+    p_request_key: `fixture-observation-enter-${requestKeySuffix}`,
+  })
+  const booked = await fixtureObservationRpc(client, "save_registration_observation_booking_v1", {
+    p_track_id: trackId,
+    p_observation_id: null,
+    p_class_id: classId,
+    p_session_authority: "normalized",
+    p_class_lesson_session_id: originalSession.classLessonSessionId,
+    p_legacy_session_key: null,
+    p_expected_workflow_revision: 8,
+    p_expected_appointment_notification_revision: null,
+    p_expected_observation_revision: null,
+    p_request_key: `fixture-observation-book-${requestKeySuffix}`,
+  })
+  return {
+    booked,
+    changedSession,
+    classId,
+    client,
+    getState,
+    originalSession,
+    replaceState,
+    trackId,
+  }
+}
+
+test("fixture reschedule preserves same-hash snapshots and increments a changed hash once", async () => {
+  const {
+    booked,
+    changedSession,
+    classId,
+    client,
+    getState,
+    originalSession,
+    trackId,
+  } = await createFixtureObservationBookingScenario("reschedule")
+  const noOpArgs = {
+    p_track_id: trackId,
+    p_observation_id: booked.data.observation.observationId,
+    p_class_id: classId,
+    p_session_authority: "normalized",
+    p_class_lesson_session_id: originalSession.classLessonSessionId,
+    p_legacy_session_key: null,
+    p_expected_workflow_revision: null,
+    p_expected_appointment_notification_revision: 1,
+    p_expected_observation_revision: 1,
+    p_request_key: "fixture-observation-reschedule-no-op",
+  }
+  const noOp = await fixtureObservationRpc(
+    client,
+    "save_registration_observation_booking_v1",
+    noOpArgs,
+  )
+
+  assert.equal(noOp.data.changed, false)
+  assert.deepEqual(plain(noOp.data.observation), plain(booked.data.observation))
+  assert.deepEqual(plain(noOp.data.appointment), plain(booked.data.appointment))
+  assert.equal(getState().observation.managerDetails[trackId].attempts[0].revision, 1)
+  assert.equal(
+    getState().observation.managerDetails[trackId].attempts[0].appointmentNotificationRevision,
+    1,
+  )
+  const noOpReplay = await fixtureObservationRpc(
+    client,
+    "save_registration_observation_booking_v1",
+    noOpArgs,
+  )
+  assert.deepEqual(plain(noOpReplay), plain(noOp))
+
+  const changedArgs = {
+    ...noOpArgs,
+    p_class_lesson_session_id: changedSession.classLessonSessionId,
+    p_request_key: "fixture-observation-reschedule-changed",
+  }
+  const changed = await fixtureObservationRpc(
+    client,
+    "save_registration_observation_booking_v1",
+    changedArgs,
+  )
+  assert.equal(changed.data.changed, true)
+  assert.equal(changed.data.observation.revision, 2)
+  assert.equal(changed.data.observation.appointmentNotificationRevision, 2)
+  assert.equal(changed.data.observation.bookingFactHash, changedSession.bookingFactHash)
+  assert.equal(getState().observation.managerDetails[trackId].attempts[0].revision, 2)
+  const changedReplay = await fixtureObservationRpc(
+    client,
+    "save_registration_observation_booking_v1",
+    changedArgs,
+  )
+  assert.deepEqual(plain(changedReplay), plain(changed))
+  assert.equal(getState().observation.managerDetails[trackId].attempts[0].revision, 2)
+})
+
+test("fixture reschedule rejects non-scheduled decided and canceled-appointment attempts", async () => {
+  const invalidAttemptCases = [
+    ["non-scheduled", { status: "completed" }],
+    ["decided", { decisionKind: "enrollment" }],
+    ["canceled-appointment", { appointmentStatus: "canceled" }],
+  ]
+
+  for (const [label, overrides] of invalidAttemptCases) {
+    const {
+      booked,
+      classId,
+      client,
+      getState,
+      originalSession,
+      replaceState,
+      trackId,
+    } = await createFixtureObservationBookingScenario(`reschedule-${label}`)
+    const current = getState()
+    const detail = current.observation.managerDetails[trackId]
+    const invalidAttempt = { ...detail.attempts[0], ...overrides }
+    replaceState({
+      ...current,
+      observation: {
+        ...current.observation,
+        managerDetails: {
+          ...current.observation.managerDetails,
+          [trackId]: {
+            ...detail,
+            currentObservation: invalidAttempt,
+            attempts: [invalidAttempt],
+          },
+        },
+      },
+    })
+
+    await assert.rejects(
+      Promise.resolve(fixtureObservationRpc(
+        client,
+        "save_registration_observation_booking_v1",
+        {
+          p_track_id: trackId,
+          p_observation_id: booked.data.observation.observationId,
+          p_class_id: classId,
+          p_session_authority: "normalized",
+          p_class_lesson_session_id: originalSession.classLessonSessionId,
+          p_legacy_session_key: null,
+          p_expected_workflow_revision: null,
+          p_expected_appointment_notification_revision: 1,
+          p_expected_observation_revision: 1,
+          p_request_key: `fixture-observation-reschedule-reject-${label}`,
+        },
+      )),
+      /registration_observation_transition_rejected/,
+    )
+    assert.equal(getState().observation.managerDetails[trackId].attempts[0].revision, 1)
+  }
+})
+
+test("fixture request keys preserve raw identity and replay before the runtime guard", async () => {
+  const fixture = await loadFixtureModule()
+  let state = fixture.createRegistrationSubjectTrackFixtureState()
+  const trackId = "20000000-0000-4000-8000-000000000001"
+  const client = fixture.createRegistrationSubjectTrackFixtureAdapter({
+    getState: () => state,
+    replaceState: (next) => { state = next },
+  }).observationClient
+  await ensureFixtureObservationReady(
+    client,
+    () => state,
+    "fixture-observation-activate-request-key",
+  )
+  const rawRequestKey = " fixture-observation-raw-key "
+  const input = {
+    p_track_id: trackId,
+    p_expected_workflow_revision: 7,
+    p_request_key: rawRequestKey,
+  }
+  const first = await fixtureObservationRpc(
+    client,
+    "enter_registration_observation_v1",
+    input,
+  )
+  assert.equal(first.data.requestKey, rawRequestKey)
+  assert.equal(state.observation.receipts[rawRequestKey].requestKey, rawRequestKey)
+
+  state = {
+    ...state,
+    observation: { ...state.observation, runtimeVersion: 0 },
+  }
+  const replay = await fixtureObservationRpc(
+    client,
+    "enter_registration_observation_v1",
+    input,
+  )
+  assert.deepEqual(plain(replay), plain(first))
+  await assert.rejects(
+    Promise.resolve(fixtureObservationRpc(client, "enter_registration_observation_v1", {
+      ...input,
+      p_expected_workflow_revision: 8,
+    })),
+    /registration_observation_request_key_conflict/,
+  )
+  await assert.rejects(
+    Promise.resolve(fixtureObservationRpc(client, "enter_registration_observation_v1", {
+      ...input,
+      p_request_key: rawRequestKey.trim(),
+    })),
+    /registration_observation_runtime_inactive/,
+  )
+  await assert.rejects(
+    Promise.resolve(fixtureObservationRpc(client, "enter_registration_observation_v1", {
+      ...input,
+      p_request_key: "   ",
+    })),
+    /registration_observation_fixture_request_key_required/,
+  )
 })
 
 test("fixture runtime publishes only the installed observation client", async () => {

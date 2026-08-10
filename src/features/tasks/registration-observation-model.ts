@@ -407,6 +407,7 @@ function timestamp(input: unknown, scope: string): string {
     || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(input)
     || !Number.isFinite(Date.parse(input))
   ) invalid(scope)
+  dateValue(input.slice(0, 10), scope)
   return input
 }
 
@@ -740,6 +741,8 @@ export function normalizeRegistrationObservationMutationResult(
       observation.trackId !== trackId
       || observation.appointmentId !== appointment.appointmentId
       || observation.appointmentStatus !== appointment.status
+      || observation.startsAt !== appointment.scheduledAt
+      || observation.campus !== appointment.place
       || observation.appointmentNotificationRevision !== appointment.notificationRevision
     ) invalid("mutation_result")
   }

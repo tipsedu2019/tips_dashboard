@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  normalizeRegistrationObservationMutationResult,
+  normalizeRegistrationObservationSessionOption,
+} from "../src/features/tasks/registration-observation-model.ts";
+import {
   activateRegistrationObservationRuntime,
   cancelRegistrationObservation,
   enterRegistrationObservation,
@@ -293,6 +297,7 @@ test("strict session normalizer rejects extra keys and source-branch mismatches"
     [{ ...exactNormalizedSession, classId: "not-a-uuid" }],
     [{ ...exactNormalizedSession, sessionDate: "2026-02-30" }],
     [{ ...exactNormalizedSession, startsAt: "2026-08-12 09:00" }],
+    [{ ...exactNormalizedSession, startsAt: "2026-02-31T09:00:00.000Z" }],
     [{ ...exactNormalizedSession, sourceRevision: { ...exactNormalizedSession.sourceRevision, sessionId: IDS.class } }],
     [{ ...exactLegacySession, sessionKey: "different-key" }],
     [{ ...exactLegacySession, legacySessionSourceHash: "" }],
@@ -305,12 +310,22 @@ test("strict session normalizer rejects extra keys and source-branch mismatches"
       loadRegistrationObservationSessions(client, {
         trackId: IDS.track,
         classId: IDS.class,
-        dateFrom: `2026-09-${String(index + 1).padStart(2, "0")}`,
-        dateTo: `2026-09-${String(index + 1).padStart(2, "0")}`,
+        dateFrom: "2026-08-12",
+        dateTo: "2026-08-12",
       }),
       /registration_observation_.*_invalid/,
     );
   }
+});
+
+test("session normalizer rejects an impossible calendar timestamp", () => {
+  assert.throws(
+    () => normalizeRegistrationObservationSessionOption({
+      ...exactNormalizedSession,
+      startsAt: "2026-02-31T09:00:00.000Z",
+    }),
+    /registration_observation_session_option_invalid/,
+  );
 });
 
 test("manager detail requires current observation to equal its attempts payload", async () => {
@@ -550,17 +565,54 @@ test("booking source and revision unions fail closed before an RPC", async () =>
   assert.equal(client.calls.length, 0);
 });
 
-test("a malformed successful mutation does not advance the session generation", async () => {
+test("mutation normalizer rejects appointment time that contradicts the observation", () => {
+  assert.throws(
+    () => normalizeRegistrationObservationMutationResult({
+      ...exactMutation,
+      appointment: {
+        ...exactMutation.appointment,
+        scheduledAt: "2026-08-12T09:30:00.000Z",
+      },
+    }),
+    /registration_observation_mutation_result_invalid/,
+  );
+});
+
+test("mutation normalizer rejects appointment place that contradicts the observation", () => {
+  assert.throws(
+    () => normalizeRegistrationObservationMutationResult({
+      ...exactMutation,
+      appointment: { ...exactMutation.appointment, place: "별관" },
+    }),
+    /registration_observation_mutation_result_invalid/,
+  );
+});
+
+test("malformed mutation snapshots do not advance the session generation", async () => {
   const sessionPending = deferred();
   let sessionCalls = 0;
   let mutationCalls = 0;
+  const malformedMutations = [
+    { ...exactMutation, extra: true },
+    {
+      ...exactMutation,
+      appointment: {
+        ...exactMutation.appointment,
+        scheduledAt: "2026-08-12T09:30:00.000Z",
+      },
+    },
+    {
+      ...exactMutation,
+      appointment: { ...exactMutation.appointment, place: "별관" },
+    },
+  ];
   const client = captureRpcClient({ handler: ({ name }) => {
     if (name === "list_registration_observation_sessions_v1") {
       sessionCalls += 1;
       return sessionPending.promise;
     }
     mutationCalls += 1;
-    return ok(mutationCalls === 1 ? { ...exactMutation, extra: true } : exactMutation);
+    return ok(malformedMutations[mutationCalls - 1] ?? exactMutation);
   } });
   const input = {
     trackId: IDS.track,
@@ -570,12 +622,15 @@ test("a malformed successful mutation does not advance the session generation", 
   };
   const first = loadRegistrationObservationSessions(client, input);
 
-  await assert.rejects(
-    saveRegistrationObservationBooking(client, newBookingInput()),
-    /registration_observation_mutation_result_invalid/,
-  );
-  assert.strictEqual(loadRegistrationObservationSessions(client, input), first);
-  assert.equal(sessionCalls, 1);
+  for (let index = 0; index < malformedMutations.length; index += 1) {
+    await assert.rejects(
+      saveRegistrationObservationBooking(client, newBookingInput()),
+      /registration_observation_mutation_result_invalid/,
+    );
+    assert.strictEqual(loadRegistrationObservationSessions(client, input), first);
+    assert.equal(sessionCalls, 1);
+    assert.equal(mutationCalls, index + 1);
+  }
 
   await saveRegistrationObservationBooking(client, newBookingInput());
   const afterSuccess = loadRegistrationObservationSessions(client, input);

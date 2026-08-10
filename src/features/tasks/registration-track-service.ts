@@ -16,6 +16,7 @@ import {
   loadRegistrationSubjectTrackFixtureAppointmentCalendarRows,
   loadRegistrationSubjectTrackFixtureCase,
   loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion,
+  loadRegistrationSubjectTrackFixtureObservationClient,
   loadRegistrationSubjectTrackFixtureOptionData,
   loadRegistrationSubjectTrackFixtureScienceConsultationClassOptions,
 } from "./registration-track-fixture-runtime"
@@ -43,6 +44,7 @@ import {
   normalizeRegistrationObservationSummary,
   type RegistrationObservationRuntimeState,
   type RegistrationObservationSummary,
+  type RegistrationObservationTrackWorkflowStatus,
 } from "./registration-observation-model.ts"
 import {
   probeRegistrationObservationRuntime as probeRegistrationObservationRuntimeFromDatabase,
@@ -57,7 +59,6 @@ import {
   createRegistrationNotificationProcessingReadinessLoader,
 } from "./registration-notification-processing-readiness"
 import {
-  REGISTRATION_WORKFLOW_STATUSES,
   getRegistrationWorkflowStatusFromLegacyTrack,
 } from "./registration-workflow-status.js"
 
@@ -81,10 +82,9 @@ export {
   resetRegistrationIntakeWorkflowRuntimeProbe,
 }
 export type { RegistrationIntakeRuntimeState }
-function probeRegistrationObservationRuntime(): Promise<RegistrationObservationRuntimeState> {
-  if (loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion() !== null) {
-    return Promise.resolve({ available: true, runtimeVersion: 1 })
-  }
+export function probeRegistrationObservationRuntime(): Promise<RegistrationObservationRuntimeState> {
+  const fixtureClient = loadRegistrationSubjectTrackFixtureObservationClient()
+  if (fixtureClient) return probeRegistrationObservationRuntimeFromDatabase(fixtureClient)
   return probeRegistrationObservationRuntimeFromDatabase(
     supabase as unknown as Parameters<typeof probeRegistrationObservationRuntimeFromDatabase>[0],
   )
@@ -132,12 +132,65 @@ export type OpsRegistrationWorkflowStatus =
   | "not_registered"
   | "inquiry_only"
 
-export type OpsRegistrationTrackSummary = {
+const OPS_REGISTRATION_WORKFLOW_STATUSES: readonly OpsRegistrationWorkflowStatus[] = [
+  "inquiry",
+  "level_test_requested",
+  "consultation_requested",
+  "consultation_completed",
+  "waiting_current_class",
+  "waiting_new_class",
+  "waiting_next_opening",
+  "enrollment_requested",
+  "payment_in_progress",
+  "registered",
+  "not_registered",
+  "inquiry_only",
+]
+
+const REGISTRATION_OBSERVATION_TRACK_WORKFLOW_STATUSES:
+  readonly RegistrationObservationTrackWorkflowStatus[] = [
+    ...OPS_REGISTRATION_WORKFLOW_STATUSES,
+    "observation_requested",
+    "observation_feedback_pending",
+    "observation_completed",
+  ]
+
+const OPS_REGISTRATION_WORKFLOW_STATUS_SET = new Set<string>(OPS_REGISTRATION_WORKFLOW_STATUSES)
+const REGISTRATION_OBSERVATION_TRACK_WORKFLOW_STATUS_SET = new Set<string>(
+  REGISTRATION_OBSERVATION_TRACK_WORKFLOW_STATUSES,
+)
+
+function isOpsRegistrationWorkflowStatus(
+  input: string,
+): input is OpsRegistrationWorkflowStatus {
+  return OPS_REGISTRATION_WORKFLOW_STATUS_SET.has(input)
+}
+
+function isRegistrationObservationTrackWorkflowStatus(
+  input: string,
+): input is RegistrationObservationTrackWorkflowStatus {
+  return REGISTRATION_OBSERVATION_TRACK_WORKFLOW_STATUS_SET.has(input)
+}
+
+function opsRegistrationWorkflowStatusFromLegacy(input: {
+  status: string
+  waitingKind?: string
+}): OpsRegistrationWorkflowStatus {
+  const status = getRegistrationWorkflowStatusFromLegacyTrack(input)
+  if (!isOpsRegistrationWorkflowStatus(status)) {
+    throw new Error("registration_workflow_status_response_invalid")
+  }
+  return status
+}
+
+type OpsRegistrationTrackSummaryFields<
+  TWorkflowStatus extends RegistrationObservationTrackWorkflowStatus,
+> = {
   id: string
   taskId: string
   subject: RegistrationSubject
   status: OpsRegistrationTrackStatus
-  workflowStatus: OpsRegistrationWorkflowStatus
+  workflowStatus: TWorkflowStatus
   workflowRevision: number
   workflowStatusEnteredAt: string
   legacy: boolean
@@ -159,7 +212,15 @@ export type OpsRegistrationTrackSummary = {
   levelTestPlace?: string
   visitScheduledAt?: string
   visitPlace?: string
-} & Partial<RegistrationObservationSummary>
+}
+
+export type OpsRegistrationTrackSummary =
+  & OpsRegistrationTrackSummaryFields<OpsRegistrationWorkflowStatus>
+  & Partial<RegistrationObservationSummary>
+
+export type OpsRegistrationObservationTrackSummary =
+  & OpsRegistrationTrackSummaryFields<RegistrationObservationTrackWorkflowStatus>
+  & RegistrationObservationSummary
 
 export type OpsRegistrationEnrollment = {
   id: string
@@ -303,10 +364,18 @@ export type OpsRegistrationCaseDetail = {
   migrationLegacy: OpsRegistrationMigrationLegacySnapshot | null
 }
 
-export type RegistrationTrackSummaryLoadResult = {
+export type RegistrationTrackSummaryLoadResult<
+  TWorkflowStatus extends RegistrationObservationTrackWorkflowStatus = OpsRegistrationWorkflowStatus,
+> = {
   mode: "legacy" | "maintenance" | "ready"
-  tracks: OpsRegistrationTrackSummary[]
+  tracks: Array<
+    & OpsRegistrationTrackSummaryFields<TWorkflowStatus>
+    & RegistrationObservationSummary
+  >
 }
+
+export type RegistrationObservationTrackSummaryLoadResult =
+  RegistrationTrackSummaryLoadResult<RegistrationObservationTrackWorkflowStatus>
 
 export type OpsRegistrationWorkspaceOptionData = {
   profiles: OpsProfileOption[]
@@ -992,20 +1061,22 @@ function trackStatus(input: unknown): OpsRegistrationTrackStatus {
 
 function workflowStatus(row: Row): OpsRegistrationWorkflowStatus {
   const direct = text(value(row, "workflow_status", "workflowStatus"))
-  if (
-    (REGISTRATION_WORKFLOW_STATUSES as readonly string[]).includes(direct)
-    || [
-      "observation_requested",
-      "observation_feedback_pending",
-      "observation_completed",
-    ].includes(direct)
-  ) {
-    return direct as OpsRegistrationWorkflowStatus
+  if (isOpsRegistrationWorkflowStatus(direct)) return direct
+  if (isRegistrationObservationTrackWorkflowStatus(direct)) {
+    throw new Error("registration_observation_ui_not_ready")
   }
-  return getRegistrationWorkflowStatusFromLegacyTrack({
+  return opsRegistrationWorkflowStatusFromLegacy({
     status: text(value(row, "pipeline_status", "status")),
     waitingKind: text(value(row, "waiting_kind", "waitingKind")),
-  }) as OpsRegistrationWorkflowStatus
+  })
+}
+
+function registrationObservationTrackWorkflowStatus(
+  row: Row,
+): RegistrationObservationTrackWorkflowStatus {
+  const direct = text(value(row, "workflow_status", "workflowStatus"))
+  if (isRegistrationObservationTrackWorkflowStatus(direct)) return direct
+  return workflowStatus(row)
 }
 
 function waitingKind(input: unknown): RegistrationWaitingKind {
@@ -1074,12 +1145,14 @@ function mapRegistrationObservationSummary(
   })
 }
 
-function mapTrack(
+function mapTrackFields<
+  TWorkflowStatus extends RegistrationObservationTrackWorkflowStatus,
+>(
   row: Row,
+  resolvedWorkflowStatus: TWorkflowStatus,
   directorNames = new Map<string, string>(),
   legacy = false,
-  observationSummaryRequired = false,
-): OpsRegistrationTrackSummary {
+): OpsRegistrationTrackSummaryFields<TWorkflowStatus> {
   const directorProfileId = nullableText(value(row, "director_profile_id", "directorProfileId"))
   const director = embeddedDirector(row)
   const levelTestScheduledAt = text(value(row, "level_test_scheduled_at", "levelTestScheduledAt"))
@@ -1091,7 +1164,7 @@ function mapTrack(
     taskId: text(value(row, "task_id", "taskId")),
     subject: subject(value(row, "subject")),
     status: trackStatus(value(row, "pipeline_status", "status")),
-    workflowStatus: workflowStatus(row),
+    workflowStatus: resolvedWorkflowStatus,
     workflowRevision: numberValue(value(row, "workflow_revision", "workflowRevision")) || 1,
     workflowStatusEnteredAt: text(value(row, "workflow_status_entered_at", "workflowStatusEnteredAt")),
     legacy,
@@ -1122,9 +1195,49 @@ function mapTrack(
     stageEnteredAt: text(value(row, "stage_entered_at", "stageEnteredAt")),
     phoneReadyAt: nullableText(value(row, "phone_ready_at", "phoneReadyAt")),
     phoneReadySource: phoneReadySource(value(row, "phone_ready_source", "phoneReadySource")),
-    ...mapRegistrationObservationSummary(row, observationSummaryRequired),
     ...(levelTestScheduledAt ? { levelTestScheduledAt, levelTestPlace } : {}),
     ...(visitScheduledAt ? { visitScheduledAt, visitPlace } : {}),
+  }
+}
+
+function mapTrack(
+  row: Row,
+  directorNames = new Map<string, string>(),
+  legacy = false,
+  observationSummaryRequired = false,
+): OpsRegistrationTrackSummary {
+  return {
+    ...mapTrackFields(row, workflowStatus(row), directorNames, legacy),
+    ...mapRegistrationObservationSummary(row, observationSummaryRequired),
+  }
+}
+
+function mapRegistrationObservationTrackSummary(
+  row: Row,
+  observationSummaryRequired: boolean,
+): OpsRegistrationObservationTrackSummary {
+  return {
+    ...mapTrackFields(row, registrationObservationTrackWorkflowStatus(row)),
+    ...mapRegistrationObservationSummary(row, observationSummaryRequired),
+  }
+}
+
+function toLegacyCompatibleTrackSummary(
+  track: OpsRegistrationObservationTrackSummary,
+): RegistrationTrackSummaryLoadResult["tracks"][number] {
+  const status = track.workflowStatus
+  if (!isOpsRegistrationWorkflowStatus(status)) {
+    throw new Error("registration_observation_ui_not_ready")
+  }
+  return { ...track, workflowStatus: status }
+}
+
+function toLegacyCompatibleTrackSummaryLoadResult(
+  result: RegistrationObservationTrackSummaryLoadResult,
+): RegistrationTrackSummaryLoadResult {
+  return {
+    ...result,
+    tracks: result.tracks.map(toLegacyCompatibleTrackSummary),
   }
 }
 
@@ -1565,8 +1678,8 @@ export function createRegistrationTrackService(
   if (typeof options.probeIntakeRuntime !== "function") {
     throw new Error("probeIntakeRuntime is required.")
   }
-  const summaryCache = new Map<string, RegistrationTrackSummaryLoadResult>()
-  const summaryInFlight = new Map<string, Promise<RegistrationTrackSummaryLoadResult>>()
+  const summaryCache = new Map<string, RegistrationObservationTrackSummaryLoadResult>()
+  const summaryInFlight = new Map<string, Promise<RegistrationObservationTrackSummaryLoadResult>>()
   const summaryEpochs = new Map<string, number>()
   const detailCache = new Map<string, OpsRegistrationCaseDetail>()
   const detailInFlight = new Map<string, Promise<OpsRegistrationCaseDetail>>()
@@ -1725,7 +1838,7 @@ export function createRegistrationTrackService(
       taskId: input.taskId,
       subject: entry,
       status: input.status,
-      workflowStatus: getRegistrationWorkflowStatusFromLegacyTrack({ status: input.status }) as OpsRegistrationWorkflowStatus,
+      workflowStatus: opsRegistrationWorkflowStatusFromLegacy({ status: input.status }),
       workflowRevision: 1,
       workflowStatusEnteredAt: input.stageEnteredAt || "",
       legacy: true,
@@ -1750,7 +1863,7 @@ export function createRegistrationTrackService(
     taskIds: string[] | null,
     viewerId: string,
     loadOptions: { force?: boolean } = {},
-  ): Promise<RegistrationTrackSummaryLoadResult> {
+  ): Promise<RegistrationObservationTrackSummaryLoadResult> {
     const normalizedTaskIds = taskIds === null
       ? null
       : [...new Set(taskIds.map(text).filter(Boolean))].sort()
@@ -1770,7 +1883,7 @@ export function createRegistrationTrackService(
     const generation = cacheGeneration
     const requestEpoch = summaryEpochs.get(cacheKey) || 0
 
-    const request = measure<RegistrationTrackSummaryLoadResult>(measureName, false, async (metrics) => {
+    const request = measure<RegistrationObservationTrackSummaryLoadResult>(measureName, false, async (metrics) => {
       const registrationRuntimeRequest = probeRuntime()
       const observationRuntimeRequest = options.probeObservationRuntime
         ? options.probeObservationRuntime()
@@ -1814,7 +1927,7 @@ export function createRegistrationTrackService(
         : null
       const runtime = await registrationRuntimeRequest
       if (runtime.mode !== "ready" || runtime.version !== 1) {
-        return { mode: runtime.mode, tracks: [] } as RegistrationTrackSummaryLoadResult
+        return { mode: runtime.mode, tracks: [] }
       }
       if (normalizedTaskIds?.length === 0) return { mode: "ready", tracks: [] }
 
@@ -1830,10 +1943,8 @@ export function createRegistrationTrackService(
         const observationSummaryRequired = await observationAvailableRequest
         return {
           mode: "ready",
-          tracks: trackRows.map((row) => mapTrack(
+          tracks: trackRows.map((row) => mapRegistrationObservationTrackSummary(
             row,
-            new Map<string, string>(),
-            false,
             observationSummaryRequired,
           )),
         }
@@ -1864,11 +1975,30 @@ export function createRegistrationTrackService(
     return loadTrackSummarySelection(taskIds, viewerId, loadOptions)
   }
 
+  async function loadLegacyCompatibleTrackSummaries(
+    taskIds: string[],
+    viewerId: string,
+    loadOptions: { force?: boolean } = {},
+  ): Promise<RegistrationTrackSummaryLoadResult> {
+    return toLegacyCompatibleTrackSummaryLoadResult(
+      await loadTrackSummarySelection(taskIds, viewerId, loadOptions),
+    )
+  }
+
   function loadWorkspaceTrackSummaries(
     viewerId: string,
     loadOptions: { force?: boolean } = {},
   ) {
     return loadTrackSummarySelection(null, viewerId, loadOptions)
+  }
+
+  async function loadLegacyCompatibleWorkspaceTrackSummaries(
+    viewerId: string,
+    loadOptions: { force?: boolean } = {},
+  ): Promise<RegistrationTrackSummaryLoadResult> {
+    return toLegacyCompatibleTrackSummaryLoadResult(
+      await loadTrackSummarySelection(null, viewerId, loadOptions),
+    )
   }
 
   function loadCaseDetail(
@@ -2670,12 +2800,12 @@ export function createRegistrationTrackService(
       p_request_key: requireRequestKey(input.requestKey),
     })
     const status = text(value(result, "workflow_status", "workflowStatus"))
-    if (!(REGISTRATION_WORKFLOW_STATUSES as readonly string[]).includes(status)) {
+    if (!isOpsRegistrationWorkflowStatus(status)) {
       throw new Error("registration_workflow_status_response_invalid")
     }
     return {
       trackId: text(value(result, "track_id", "trackId")),
-      workflowStatus: status as OpsRegistrationWorkflowStatus,
+      workflowStatus: status,
       workflowRevision: numberValue(value(result, "workflow_revision", "workflowRevision")),
       workflowStatusEnteredAt: text(value(result, "workflow_status_entered_at", "workflowStatusEnteredAt")),
     }
@@ -3029,7 +3159,9 @@ export function createRegistrationTrackService(
     createLegacyTrackSummaries,
     loadRegistrationAppointmentCalendarRows,
     loadTrackSummaries,
+    loadLegacyCompatibleTrackSummaries,
     loadWorkspaceTrackSummaries,
+    loadLegacyCompatibleWorkspaceTrackSummaries,
     loadCaseDetail,
     loadWorkspaceOptionData,
     loadAssignedScienceConsultationClassOptions,
@@ -3147,16 +3279,47 @@ export function clearRegistrationTrackServiceCaches() {
 export function loadRegistrationTrackSummaries(
   taskIds: string[],
   viewerId: string,
-  options: { force?: boolean } = {},
-): Promise<RegistrationTrackSummaryLoadResult> {
-  return defaultRegistrationTrackService.loadTrackSummaries(taskIds, viewerId, options)
+  options: { force?: boolean; observationAware: true },
+): Promise<RegistrationObservationTrackSummaryLoadResult>
+export function loadRegistrationTrackSummaries(
+  taskIds: string[],
+  viewerId: string,
+  options?: { force?: boolean; observationAware?: false },
+): Promise<RegistrationTrackSummaryLoadResult>
+export function loadRegistrationTrackSummaries(
+  taskIds: string[],
+  viewerId: string,
+  options: { force?: boolean; observationAware?: boolean } = {},
+): Promise<RegistrationObservationTrackSummaryLoadResult | RegistrationTrackSummaryLoadResult> {
+  const loadOptions = { force: options.force }
+  return options.observationAware
+    ? defaultRegistrationTrackService.loadTrackSummaries(taskIds, viewerId, loadOptions)
+    : defaultRegistrationTrackService.loadLegacyCompatibleTrackSummaries(
+        taskIds,
+        viewerId,
+        loadOptions,
+      )
 }
 
 export function loadRegistrationWorkspaceTrackSummaries(
   viewerId: string,
-  options: { force?: boolean } = {},
-): Promise<RegistrationTrackSummaryLoadResult> {
-  return defaultRegistrationTrackService.loadWorkspaceTrackSummaries(viewerId, options)
+  options: { force?: boolean; observationAware: true },
+): Promise<RegistrationObservationTrackSummaryLoadResult>
+export function loadRegistrationWorkspaceTrackSummaries(
+  viewerId: string,
+  options?: { force?: boolean; observationAware?: false },
+): Promise<RegistrationTrackSummaryLoadResult>
+export function loadRegistrationWorkspaceTrackSummaries(
+  viewerId: string,
+  options: { force?: boolean; observationAware?: boolean } = {},
+): Promise<RegistrationObservationTrackSummaryLoadResult | RegistrationTrackSummaryLoadResult> {
+  const loadOptions = { force: options.force }
+  return options.observationAware
+    ? defaultRegistrationTrackService.loadWorkspaceTrackSummaries(viewerId, loadOptions)
+    : defaultRegistrationTrackService.loadLegacyCompatibleWorkspaceTrackSummaries(
+        viewerId,
+        loadOptions,
+      )
 }
 
 export function loadRegistrationCaseDetail(

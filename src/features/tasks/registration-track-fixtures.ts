@@ -552,8 +552,8 @@ function registrationObservationFixtureMutation(
     state: RegistrationSubjectTrackFixtureState,
   ) => RegistrationObservationMutationResult | Record<string, unknown>,
 ) {
-  const requestKey = String(args.p_request_key || "").trim()
-  if (!requestKey) throw new Error("registration_observation_fixture_request_key_required")
+  const requestKey = typeof args.p_request_key === "string" ? args.p_request_key : ""
+  if (!requestKey.trim()) throw new Error("registration_observation_fixture_request_key_required")
   const semanticArgs = Object.fromEntries(
     Object.entries(args).filter(([key]) => key !== "p_request_key"),
   )
@@ -565,6 +565,10 @@ function registrationObservationFixtureMutation(
     }
     return { state: current, result: clone(existing.result) }
   }
+  if (
+    rpcName !== "activate_registration_observation_runtime_v1"
+    && current.observation.runtimeVersion !== 1
+  ) throw new Error("registration_observation_runtime_inactive")
   const state = clone(current)
   const result = mutate(state)
   state.observation.receipts[requestKey] = {
@@ -593,10 +597,16 @@ function executeRegistrationObservationFixtureRpc(
       },
     }
   }
-  if (
-    rpcName !== "activate_registration_observation_runtime_v1"
-    && current.observation.runtimeVersion !== 1
-  ) throw new Error("registration_observation_runtime_inactive")
+  const mutationRpc = [
+    "activate_registration_observation_runtime_v1",
+    "enter_registration_observation_v1",
+    "save_registration_observation_booking_v1",
+    "cancel_registration_observation_v1",
+    "withdraw_registration_observation_v1",
+  ].includes(rpcName)
+  if (!mutationRpc && current.observation.runtimeVersion !== 1) {
+    throw new Error("registration_observation_runtime_inactive")
+  }
   if (rpcName === "get_registration_observation_manager_detail_v1") {
     const trackId = String(args.p_track_id || "")
     const detail = current.observation.managerDetails[trackId]
@@ -707,6 +717,7 @@ function executeRegistrationObservationFixtureRpc(
       const existingId = args.p_observation_id === null ? null : String(args.p_observation_id || "")
       let attempt: RegistrationObservationAttempt
       let operation: "book" | "reschedule"
+      let changed = true
       if (existingId === null) {
         if (detail.track.workflowRevision !== Number(args.p_expected_workflow_revision)) {
           throw new Error("registration_observation_stale_revision")
@@ -738,12 +749,22 @@ function executeRegistrationObservationFixtureRpc(
           || existing.appointmentNotificationRevision
             !== Number(args.p_expected_appointment_notification_revision)
         ) throw new Error("registration_observation_stale_revision")
-        attempt = {
-          ...existing,
-          ...session,
-          revision: existing.revision + 1,
-          appointmentNotificationRevision: existing.appointmentNotificationRevision + 1,
-          updatedAt: "2026-08-10T03:00:00.000Z",
+        if (
+          existing.status !== "scheduled"
+          || existing.decisionKind !== null
+          || existing.appointmentStatus !== "scheduled"
+        ) throw new Error("registration_observation_transition_rejected")
+        if (existing.bookingFactHash === session.bookingFactHash) {
+          attempt = existing
+          changed = false
+        } else {
+          attempt = {
+            ...existing,
+            ...session,
+            revision: existing.revision + 1,
+            appointmentNotificationRevision: existing.appointmentNotificationRevision + 1,
+            updatedAt: "2026-08-10T03:00:00.000Z",
+          }
         }
         operation = "reschedule"
       }
@@ -764,7 +785,7 @@ function executeRegistrationObservationFixtureRpc(
         workflowRevision: nextDetail.track.workflowRevision,
         observation: attempt,
         appointment: registrationObservationAppointmentSnapshot(attempt),
-        changed: true,
+        changed,
       }
     })
   }
@@ -1812,11 +1833,11 @@ function createRegistrationObservationFixtureState(): RegistrationObservationFix
     },
   }
   return {
-    runtimeVersion: 1,
+    runtimeVersion: 0,
     schemaReadiness: {
       schemaReady: true,
       missingObjects: [],
-      runtimeVersion: 1,
+      runtimeVersion: 0,
     },
     managerDetails: {
       [FIXTURE_OBSERVATION_IDS.track]: {

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
 import ts from "typescript";
@@ -23,6 +26,28 @@ const serviceUrl = new URL(
 
 async function readServiceSource() {
   return readFile(serviceUrl, "utf8");
+}
+
+async function compileRegistrationTrackTypeContract(source) {
+  const directory = await mkdtemp(join(tmpdir(), "registration-track-types-"));
+  const fixturePath = join(directory, "contract.ts");
+  const configPath = fileURLToPath(new URL("../tsconfig.json", import.meta.url));
+  const projectPath = fileURLToPath(new URL("..", import.meta.url));
+  try {
+    await writeFile(fixturePath, source);
+    const config = ts.readConfigFile(configPath, ts.sys.readFile);
+    assert.equal(config.error, undefined);
+    const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, projectPath);
+    const program = ts.createProgram({
+      rootNames: [fixturePath],
+      options: { ...parsed.options, incremental: false, noEmit: true },
+    });
+    return ts.getPreEmitDiagnostics(program).map((diagnostic) => (
+      ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")
+    ));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 async function loadFactory(extraGlobals = {}) {
@@ -73,6 +98,76 @@ test("track rows preserve science and fail closed for unsupported subjects", asy
     () => mapTrack({ id: "unsupported-track", subject: "unknown" }),
     /registration_subject_unsupported/,
   );
+});
+
+test("observation summary types are broad while generic mutations stay narrow", async () => {
+  const servicePath = fileURLToPath(serviceUrl);
+  const modelPath = fileURLToPath(new URL(
+    "../src/features/tasks/registration-observation-model.ts",
+    import.meta.url,
+  ));
+  const diagnostics = await compileRegistrationTrackTypeContract(`
+    import {
+      createRegistrationTrackService,
+      loadRegistrationTrackSummaries,
+      type OpsRegistrationObservationTrackSummary,
+      type OpsRegistrationTrackSummary,
+      type OpsRegistrationWorkflowStatus,
+      type RegistrationObservationTrackSummaryLoadResult,
+    } from ${JSON.stringify(servicePath)};
+    import type {
+      RegistrationObservationTrackWorkflowStatus,
+    } from ${JSON.stringify(modelPath)};
+
+    type Equal<Left, Right> =
+      (<Value>() => Value extends Left ? 1 : 2) extends
+      (<Value>() => Value extends Right ? 1 : 2) ? true : false;
+    type Assert<Value extends true> = Value;
+    type ObservationReadStatus =
+      RegistrationObservationTrackSummaryLoadResult["tracks"][number]["workflowStatus"];
+    type GenericMutationStatus = Parameters<
+      ReturnType<typeof createRegistrationTrackService>["setRegistrationWorkflowStatus"]
+    >[0]["workflowStatus"];
+    const observationRead = loadRegistrationTrackSummaries([], "viewer", {
+      observationAware: true,
+    });
+    const genericRead = loadRegistrationTrackSummaries([], "viewer");
+    type PublicObservationReadStatus =
+      Awaited<typeof observationRead>["tracks"][number]["workflowStatus"];
+    type PublicGenericReadStatus =
+      Awaited<typeof genericRead>["tracks"][number]["workflowStatus"];
+
+    type ObservationReadIsExact = Assert<Equal<
+      ObservationReadStatus,
+      RegistrationObservationTrackWorkflowStatus
+    >>;
+    type ObservationTrackIsExact = Assert<Equal<
+      OpsRegistrationObservationTrackSummary["workflowStatus"],
+      RegistrationObservationTrackWorkflowStatus
+    >>;
+    type PublicObservationReadIsExact = Assert<Equal<
+      PublicObservationReadStatus,
+      RegistrationObservationTrackWorkflowStatus
+    >>;
+    type PublicGenericReadIsNarrow = Assert<Equal<
+      PublicGenericReadStatus,
+      OpsRegistrationWorkflowStatus
+    >>;
+    type GenericTrackIsNarrow = Assert<Equal<
+      OpsRegistrationTrackSummary["workflowStatus"],
+      OpsRegistrationWorkflowStatus
+    >>;
+    type GenericMutationIsNarrow = Assert<Equal<
+      GenericMutationStatus,
+      OpsRegistrationWorkflowStatus
+    >>;
+    type ObservationStatusCannotUseGenericMutation = Assert<Equal<
+      Extract<"observation_requested", GenericMutationStatus>,
+      never
+    >>;
+  `);
+
+  assert.deepEqual(diagnostics, []);
 });
 
 test("track summaries prefer the manual workflow status and preserve its revision", async () => {
@@ -868,6 +963,26 @@ test("track summary loader uses the exact safe projection and skips profile look
   assert.deepEqual(harness.queries[0].filters, [["in", "task_id", ["task-1"]]]);
   assert.doesNotMatch(harness.queries[0].columns, /schedule_plan|textbook|student_ids|waitlist_ids/);
   assert.doesNotMatch(harness.queries[0].columns, /consultations|appointments|\*/);
+});
+
+test("generic summary reads fail closed before observation workflow states reach legacy UI", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    queryHandler: () => ({ data: [{
+      id: "track-1",
+      task_id: "task-1",
+      subject: "영어",
+      pipeline_status: "visit_consultation_scheduled",
+      workflow_status: "observation_requested",
+      ...inertObservationSummaryRow,
+    }], error: null }),
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  await assert.rejects(
+    service.loadLegacyCompatibleTrackSummaries(["task-1"], "viewer-1"),
+    /registration_observation_ui_not_ready/,
+  );
 });
 
 test("track summary loader falls back to the pre-intake projection when only phone readiness columns are missing", async () => {
