@@ -37,6 +37,64 @@ export type RegistrationObservationDecisionKind =
   | "not_registered"
   | "re_observation"
 
+export type RegistrationObservationFeedbackSessionSource =
+  | Readonly<{
+      sessionAuthority: "normalized"
+      sessionKey: string
+      classLessonSessionId: string
+      legacySessionKey: null
+      sourceRevision: Readonly<{
+        authority: "normalized"
+        sessionId: string
+        revision: number
+      }>
+    }>
+  | Readonly<{
+      sessionAuthority: "legacy"
+      sessionKey: string
+      classLessonSessionId: null
+      legacySessionKey: string
+      sourceRevision: Readonly<{
+        authority: "legacy"
+        sessionKey: string
+        contentHash: string
+      }>
+    }>
+
+export type RegistrationObservationFeedbackDetail = Readonly<{
+  observationId: string
+  taskId: string
+  trackId: string
+  appointmentId: string
+  studentName: string
+  studentGrade: string
+  subject: "영어" | "수학" | "과학"
+  classId: string
+  className: string
+  sessionDate: string
+  startsAt: string
+  endsAt: string
+  classroomName: string
+  teacherName: string
+  status: RegistrationObservationStatus
+  attendance: "attended" | "no_show" | null
+  suitabilityResult: "fit" | "unfit" | null
+  feedbackReason: string | null
+  proxySubmitted: boolean
+  feedbackSubmittedByName: string | null
+  feedbackSubmittedAt: string | null
+  revision: number
+  feedbackRevision: number
+  appointmentNotificationRevision: number
+  trackWorkflowRevision: number
+  decisionKind: RegistrationObservationDecisionKind | null
+}> & RegistrationObservationFeedbackSessionSource
+
+export type RegistrationObservationFeedbackErrorState = Readonly<{
+  message: string
+  reloadRequired: boolean
+}>
+
 export type RegistrationObservationSourceRevision =
   | { authority: "normalized"; sessionId: string; revision: number }
   | { authority: "legacy"; sessionKey: string; contentHash: string }
@@ -173,7 +231,16 @@ export type RegistrationObservationAppointmentSnapshot = Readonly<{
 }>
 
 export type RegistrationObservationMutationResult = Readonly<{
-  operation: "enter" | "book" | "reschedule" | "cancel" | "withdraw"
+  operation:
+    | "enter"
+    | "book"
+    | "reschedule"
+    | "cancel"
+    | "withdraw"
+    | "record_attendance"
+    | "submit_feedback"
+    | "correct_feedback"
+    | "decide"
   requestKey: string
   trackId: string
   workflowStatus: RegistrationObservationTrackWorkflowStatus
@@ -322,6 +389,39 @@ const SUMMARY_KEYS = [
   "observationRevision",
   "observationFeedbackRevision",
 ] as const
+const FEEDBACK_DETAIL_KEYS = [
+  "observationId",
+  "taskId",
+  "trackId",
+  "appointmentId",
+  "studentName",
+  "studentGrade",
+  "subject",
+  "classId",
+  "className",
+  "sessionAuthority",
+  "sessionDate",
+  "sessionKey",
+  "classLessonSessionId",
+  "legacySessionKey",
+  "sourceRevision",
+  "startsAt",
+  "endsAt",
+  "classroomName",
+  "teacherName",
+  "status",
+  "attendance",
+  "suitabilityResult",
+  "feedbackReason",
+  "proxySubmitted",
+  "feedbackSubmittedByName",
+  "feedbackSubmittedAt",
+  "revision",
+  "feedbackRevision",
+  "appointmentNotificationRevision",
+  "trackWorkflowRevision",
+  "decisionKind",
+] as const
 
 export const EMPTY_REGISTRATION_OBSERVATION_SUMMARY: RegistrationObservationSummary = Object.freeze({
   observationAttemptCount: 0,
@@ -419,6 +519,10 @@ function timestamp(input: unknown, scope: string): string {
 
 function nullableTimestamp(input: unknown, scope: string): string | null {
   return input === null ? null : timestamp(input, scope)
+}
+
+function nullableNonblank(input: unknown, scope: string): string | null {
+  return input === null ? null : nonblank(input, scope)
 }
 
 function nullableEnum<const T extends readonly string[]>(
@@ -552,6 +656,192 @@ export function normalizeRegistrationObservationSessionOptions(
 ): readonly RegistrationObservationSessionOption[] {
   if (!Array.isArray(input)) invalid("session_options")
   return input.map(normalizeRegistrationObservationSessionOption)
+}
+
+function normalizeFeedbackSessionSource(
+  row: JsonObject,
+  scope: string,
+): RegistrationObservationFeedbackSessionSource {
+  const authority = enumValue(row.sessionAuthority, ["normalized", "legacy"] as const, scope)
+  const sessionKey = nonblank(row.sessionKey, scope)
+
+  if (authority === "normalized") {
+    const classLessonSessionId = uuid(row.classLessonSessionId, scope)
+    const sourceRevision = exactObject(
+      row.sourceRevision,
+      ["authority", "sessionId", "revision"],
+      scope,
+    )
+    if (
+      row.legacySessionKey !== null
+      || sourceRevision.authority !== "normalized"
+      || uuid(sourceRevision.sessionId, scope) !== classLessonSessionId
+    ) invalid(scope)
+    return {
+      sessionAuthority: "normalized",
+      sessionKey,
+      classLessonSessionId,
+      legacySessionKey: null,
+      sourceRevision: {
+        authority: "normalized",
+        sessionId: classLessonSessionId,
+        revision: revision(sourceRevision.revision, scope),
+      },
+    }
+  }
+
+  const legacySessionKey = nonblank(row.legacySessionKey, scope)
+  const sourceRevision = exactObject(
+    row.sourceRevision,
+    ["authority", "sessionKey", "contentHash"],
+    scope,
+  )
+  if (
+    row.classLessonSessionId !== null
+    || sessionKey !== legacySessionKey
+    || sourceRevision.authority !== "legacy"
+    || nonblank(sourceRevision.sessionKey, scope) !== legacySessionKey
+  ) invalid(scope)
+  return {
+    sessionAuthority: "legacy",
+    sessionKey,
+    classLessonSessionId: null,
+    legacySessionKey,
+    sourceRevision: {
+      authority: "legacy",
+      sessionKey: legacySessionKey,
+      contentHash: nonblank(sourceRevision.contentHash, scope),
+    },
+  }
+}
+
+export function normalizeRegistrationObservationFeedbackDetail(
+  input: unknown,
+): RegistrationObservationFeedbackDetail {
+  const scope = "feedback_detail"
+  const row = exactObject(input, FEEDBACK_DETAIL_KEYS, scope)
+  const startsAt = timestamp(row.startsAt, scope)
+  const endsAt = timestamp(row.endsAt, scope)
+  if (Date.parse(startsAt) >= Date.parse(endsAt)) invalid(scope)
+
+  const status = enumValue(row.status, OBSERVATION_STATUSES, scope)
+  const attendance = nullableEnum(row.attendance, ATTENDANCE_VALUES, scope)
+  const suitabilityResult = nullableEnum(row.suitabilityResult, SUITABILITY_VALUES, scope)
+  const decisionKind = nullableEnum(row.decisionKind, DECISION_KINDS, scope)
+  const feedbackReason = nullableNonblank(row.feedbackReason, scope)
+  const feedbackSubmittedByName = nullableNonblank(row.feedbackSubmittedByName, scope)
+  const feedbackSubmittedAt = nullableTimestamp(row.feedbackSubmittedAt, scope)
+  if (typeof row.proxySubmitted !== "boolean") invalid(scope)
+
+  const hasSubmitterTuple = feedbackSubmittedByName !== null && feedbackSubmittedAt !== null
+  if (
+    (feedbackSubmittedByName === null) !== (feedbackSubmittedAt === null)
+    || (row.proxySubmitted && !hasSubmitterTuple)
+  ) invalid(scope)
+
+  const hasEmptyFeedback = suitabilityResult === null
+    && feedbackReason === null
+    && !hasSubmitterTuple
+    && row.proxySubmitted === false
+  const lifecycleValid = (
+    (status === "scheduled" && attendance === null && hasEmptyFeedback)
+    || (
+      status === "attended_feedback_pending"
+      && attendance === "attended"
+      && hasEmptyFeedback
+    )
+    || (
+      status === "completed"
+      && attendance === "attended"
+      && suitabilityResult !== null
+      && feedbackReason !== null
+      && hasSubmitterTuple
+    )
+    || (
+      status === "no_show"
+      && attendance === "no_show"
+      && hasEmptyFeedback
+    )
+    || (status === "canceled" && attendance === null && hasEmptyFeedback)
+  )
+  if (
+    !lifecycleValid
+    || (decisionKind !== null && status !== "completed" && status !== "no_show")
+  ) invalid(scope)
+
+  const observationRevision = revision(row.revision, scope)
+  const appointmentNotificationRevision = revision(row.appointmentNotificationRevision, scope)
+  const trackWorkflowRevision = revision(row.trackWorkflowRevision, scope)
+  if (
+    observationRevision < 1
+    || appointmentNotificationRevision < 1
+    || trackWorkflowRevision < 1
+  ) invalid(scope)
+
+  return {
+    observationId: uuid(row.observationId, scope),
+    taskId: uuid(row.taskId, scope),
+    trackId: uuid(row.trackId, scope),
+    appointmentId: uuid(row.appointmentId, scope),
+    studentName: nonblank(row.studentName, scope),
+    studentGrade: nonblank(row.studentGrade, scope),
+    subject: enumValue(row.subject, SUBJECTS, scope),
+    classId: uuid(row.classId, scope),
+    className: nonblank(row.className, scope),
+    ...normalizeFeedbackSessionSource(row, scope),
+    sessionDate: dateValue(row.sessionDate, scope),
+    startsAt,
+    endsAt,
+    classroomName: nonblank(row.classroomName, scope),
+    teacherName: nonblank(row.teacherName, scope),
+    status,
+    attendance,
+    suitabilityResult,
+    feedbackReason,
+    proxySubmitted: row.proxySubmitted,
+    feedbackSubmittedByName,
+    feedbackSubmittedAt,
+    revision: observationRevision,
+    feedbackRevision: revision(row.feedbackRevision, scope),
+    appointmentNotificationRevision,
+    trackWorkflowRevision,
+    decisionKind,
+  }
+}
+
+export function getRegistrationObservationFeedbackErrorState(
+  error: unknown,
+): RegistrationObservationFeedbackErrorState {
+  const row = error && typeof error === "object"
+    ? error as Record<string, unknown>
+    : {}
+  const name = typeof row.name === "string" ? row.name : ""
+  const code = typeof row.code === "string" ? row.code : ""
+  const message = typeof row.message === "string" ? row.message : ""
+  const details = typeof row.details === "string" ? row.details : ""
+  const hint = typeof row.hint === "string" ? row.hint : ""
+  const diagnostic = [message, details, hint].filter(Boolean).join(" ")
+  if (
+    name === "AbortError"
+    || name === "TimeoutError"
+    || code === "57014"
+    || /failed to fetch|network(?: request)? (?:failed|error)|networkerror|load failed/i.test(diagnostic)
+  ) {
+    return {
+      message: "서버 응답이 지연되었습니다. 잠시 후 다시 시도해 주세요.",
+      reloadRequired: false,
+    }
+  }
+  if (code === "40001" || /registration_observation_stale_revision/.test(message)) {
+    return {
+      message: "청강 정보가 변경되었습니다. 다시 확인해 주세요.",
+      reloadRequired: true,
+    }
+  }
+  return {
+    message: "청강 피드백을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    reloadRequired: false,
+  }
 }
 
 export function normalizeRegistrationObservationAttempt(
@@ -755,7 +1045,17 @@ export function normalizeRegistrationObservationMutationResult(
   ], "mutation_result")
   const operation = enumValue(
     row.operation,
-    ["enter", "book", "reschedule", "cancel", "withdraw"] as const,
+    [
+      "enter",
+      "book",
+      "reschedule",
+      "cancel",
+      "withdraw",
+      "record_attendance",
+      "submit_feedback",
+      "correct_feedback",
+      "decide",
+    ] as const,
     "mutation_result",
   )
   const trackId = uuid(row.trackId, "mutation_result")
@@ -777,7 +1077,18 @@ export function normalizeRegistrationObservationMutationResult(
     ) invalid("mutation_result")
   }
   if (operation === "enter" && (observation !== null || appointment !== null)) invalid("mutation_result")
-  if (["book", "reschedule", "cancel"].includes(operation) && !observation) invalid("mutation_result")
+  if (
+    [
+      "book",
+      "reschedule",
+      "cancel",
+      "record_attendance",
+      "submit_feedback",
+      "correct_feedback",
+      "decide",
+    ].includes(operation)
+    && !observation
+  ) invalid("mutation_result")
   if (typeof row.changed !== "boolean") invalid("mutation_result")
   return {
     operation,

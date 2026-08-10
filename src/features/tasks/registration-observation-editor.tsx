@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -443,6 +443,7 @@ export type RegistrationObservationEditorProps = {
   detail: RegistrationObservationManagerDetail
   actions: RegistrationObservationActions
   onSaved: (result: RegistrationObservationMutationResult) => void | Promise<void>
+  feedbackPanel?: ReactNode
 }
 
 function dateKey(date: Date) {
@@ -504,6 +505,7 @@ export function RegistrationObservationEditor({
   detail,
   actions,
   onSaved,
+  feedbackPanel,
 }: RegistrationObservationEditorProps) {
   const current = detail.currentObservation
   const workflowStatus = detail.track.workflowStatus
@@ -917,6 +919,7 @@ export function RegistrationObservationEditor({
       ) : null}
 
       {readOnly ? <p className="text-sm text-muted-foreground">현재 상태는 이 화면에서 변경할 수 없습니다.</p> : null}
+      {feedbackPanel}
       {receipt === "예약 저장됨" ? (
         <div role="status" className="grid gap-1 text-sm">
           <p className="font-medium text-primary">예약 저장됨</p>

@@ -22,6 +22,10 @@ import {
 } from "../src/features/tasks/registration-observation-model.ts"
 import {
   activateRegistrationObservationRuntime,
+  correctRegistrationObservationFeedback,
+  decideRegistrationObservation,
+  loadRegistrationObservationFeedback,
+  submitRegistrationObservationFeedback,
 } from "../src/features/tasks/registration-observation-service.ts"
 import {
   probeRegistrationObservationRuntime as probeRegistrationObservationRuntimeClient,
@@ -770,6 +774,86 @@ test("fixture runtime publishes only the installed observation client", async ()
   assert.strictEqual(runtimeModule.loadRegistrationSubjectTrackFixtureObservationClient(), adapter.observationClient)
   uninstall()
   assert.equal(runtimeModule.loadRegistrationSubjectTrackFixtureObservationClient(), null)
+})
+
+test("fixture feedback read submit and non-registration decision preserve exact DTO revisions without enrollment effects", async () => {
+  const {
+    booked,
+    client,
+    getState,
+  } = await createFixtureObservationBookingScenario("feedback-decision")
+  const observationId = booked.data.observation.observationId
+  const beforeExternalCalls = getState().externalCallLedger.length
+
+  const initial = await loadRegistrationObservationFeedback(client, observationId, { force: true })
+  assert.equal(initial.status, "scheduled")
+  assert.equal(initial.feedbackSubmittedByName, null)
+  assert.equal(initial.feedbackSubmittedAt, null)
+  assert.equal(initial.proxySubmitted, false)
+
+  const submitted = await submitRegistrationObservationFeedback(client, {
+    observationId,
+    attendance: "attended",
+    suitabilityResult: "fit",
+    feedbackReason: "fixture 청강 적합",
+    expectedObservationRevision: initial.revision,
+    expectedFeedbackRevision: initial.feedbackRevision,
+    expectedAppointmentNotificationRevision: initial.appointmentNotificationRevision,
+    requestKey: "fixture-observation-feedback-submit",
+  })
+  assert.equal(submitted.status, "completed")
+  assert.equal(submitted.revision, initial.revision + 1)
+  assert.equal(submitted.feedbackRevision, initial.feedbackRevision + 1)
+  assert.equal(submitted.proxySubmitted, true)
+  assert.equal(submitted.feedbackSubmittedByName, "운영 담당자")
+  assert.equal(submitted.feedbackSubmittedAt, "2026-08-10T06:00:00.000Z")
+
+  const decisionInput = {
+    observationId,
+    decisionKind: "not_registered",
+    waitingClassId: null,
+    expectedObservationRevision: submitted.revision,
+    expectedFeedbackRevision: submitted.feedbackRevision,
+    expectedTrackWorkflowRevision: submitted.trackWorkflowRevision,
+    requestKey: "fixture-observation-feedback-decision",
+  }
+  const decided = await decideRegistrationObservation(client, decisionInput)
+  const replay = await decideRegistrationObservation(client, decisionInput)
+  assert.deepEqual(plain(replay), plain(decided))
+  assert.equal(decided.decisionKind, "not_registered")
+  assert.equal(decided.revision, submitted.revision + 1)
+  assert.equal(decided.feedbackRevision, submitted.feedbackRevision)
+  assert.equal(decided.trackWorkflowRevision, submitted.trackWorkflowRevision + 1)
+  await assert.rejects(
+    correctRegistrationObservationFeedback(client, {
+      observationId,
+      suitabilityResult: "unfit",
+      feedbackReason: "결정 뒤 사유만 정정해야 합니다.",
+      correctionReason: "fixture 결정 후 계약 검증",
+      expectedObservationRevision: decided.revision,
+      expectedFeedbackRevision: decided.feedbackRevision,
+      expectedDecisionKind: decided.decisionKind,
+      requestKey: "fixture-observation-post-decision-invalid-correction",
+    }),
+    /registration_observation_transition_rejected/,
+  )
+  const corrected = await correctRegistrationObservationFeedback(client, {
+    observationId,
+    suitabilityResult: "fit",
+    feedbackReason: "결정 뒤에는 적합 여부를 유지하고 사유만 정정합니다.",
+    correctionReason: "fixture 결정 후 사유 정정",
+    expectedObservationRevision: decided.revision,
+    expectedFeedbackRevision: decided.feedbackRevision,
+    expectedDecisionKind: decided.decisionKind,
+    requestKey: "fixture-observation-post-decision-correction",
+  })
+  assert.equal(corrected.suitabilityResult, decided.suitabilityResult)
+  assert.equal(corrected.feedbackRevision, decided.feedbackRevision + 1)
+  assert.equal(corrected.revision, decided.revision)
+  assert.equal(corrected.decisionKind, decided.decisionKind)
+  assert.equal(getState().observation.receipts[decisionInput.requestKey].requestKey, decisionInput.requestKey)
+  assert.equal(getState().externalCallLedger.length, beforeExternalCalls)
+  assert.equal(getState().caseDetails[decided.taskId], undefined)
 })
 
 test("fixture customer message client keeps all five preview/send states in memory without provider ledger entries", async () => {

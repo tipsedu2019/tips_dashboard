@@ -11,6 +11,8 @@ import type { RegistrationObservationClient } from "./registration-observation-s
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_VALUE = "registration-subject-tracks"
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL = "__TIPS_REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG__"
 
+export type RegistrationSubjectTrackFixtureObservationClient = RegistrationObservationClient
+
 export type RegistrationSubjectTrackFixtureDebugCounts = {
   tasks: number
   cases: number
@@ -69,7 +71,7 @@ export type RegistrationSubjectTrackFixtureDebugFault =
 
 export type RegistrationSubjectTrackFixtureAdapter = {
   readonly intakeWorkflowRuntimeVersion: number
-  readonly observationClient: RegistrationObservationClient
+  readonly observationClient: RegistrationSubjectTrackFixtureObservationClient
   executeAction: <T = unknown>(type: string, payload: Record<string, unknown>) => Promise<T>
   loadAppointmentCalendarRows: (
     input: RegistrationAppointmentCalendarLoadInput,
@@ -213,7 +215,7 @@ export function loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion(): numbe
   return getActiveFixtureAdapter()?.intakeWorkflowRuntimeVersion ?? null
 }
 
-export function loadRegistrationSubjectTrackFixtureObservationClient(): RegistrationObservationClient | null {
+export function loadRegistrationSubjectTrackFixtureObservationClient(): RegistrationSubjectTrackFixtureObservationClient | null {
   return getActiveFixtureAdapter()?.observationClient ?? null
 }
 

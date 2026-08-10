@@ -39,6 +39,7 @@ import type {
 import type {
   RegistrationObservationAppointmentSnapshot,
   RegistrationObservationAttempt,
+  RegistrationObservationFeedbackDetail,
   RegistrationObservationManagerDetail,
   RegistrationObservationMutationResult,
   RegistrationObservationSchemaReadiness,
@@ -222,6 +223,7 @@ export type RegistrationObservationFixtureState = {
   runtimeVersion: 0 | 1
   schemaReadiness: RegistrationObservationSchemaReadiness
   managerDetails: Record<string, RegistrationObservationManagerDetail>
+  feedbackDetails: Record<string, RegistrationObservationFeedbackDetail>
   sessions: Record<string, readonly RegistrationObservationSessionOption[]>
   receipts: Record<string, RegistrationObservationFixtureReceipt>
   sequence: number
@@ -531,6 +533,65 @@ function registrationObservationAppointmentSnapshot(
   }
 }
 
+function registrationObservationFeedbackDetail(
+  attempt: RegistrationObservationAttempt,
+  trackWorkflowRevision: number,
+  feedback: Pick<
+    RegistrationObservationFeedbackDetail,
+    "feedbackReason" | "proxySubmitted" | "feedbackSubmittedByName" | "feedbackSubmittedAt"
+  > = {
+    feedbackReason: null,
+    proxySubmitted: false,
+    feedbackSubmittedByName: null,
+    feedbackSubmittedAt: null,
+  },
+): RegistrationObservationFeedbackDetail {
+  const source = attempt.sessionAuthority === "normalized"
+    ? {
+        sessionAuthority: "normalized" as const,
+        sessionKey: attempt.sessionKey,
+        classLessonSessionId: attempt.classLessonSessionId,
+        legacySessionKey: null,
+        sourceRevision: attempt.sourceRevision,
+      }
+    : {
+        sessionAuthority: "legacy" as const,
+        sessionKey: attempt.sessionKey,
+        classLessonSessionId: null,
+        legacySessionKey: attempt.legacySessionKey,
+        sourceRevision: attempt.sourceRevision,
+      }
+  return {
+    observationId: attempt.observationId,
+    taskId: attempt.taskId,
+    trackId: attempt.trackId,
+    appointmentId: attempt.appointmentId,
+    studentName: "Fixture 청강 학생",
+    studentGrade: "고1",
+    subject: attempt.subject,
+    classId: attempt.classId,
+    className: attempt.className,
+    ...source,
+    sessionDate: attempt.sessionDate,
+    startsAt: attempt.startsAt,
+    endsAt: attempt.endsAt,
+    classroomName: attempt.classroomName,
+    teacherName: attempt.teacherName,
+    status: attempt.status,
+    attendance: attempt.attendance,
+    suitabilityResult: attempt.suitabilityResult,
+    feedbackReason: feedback.feedbackReason,
+    proxySubmitted: feedback.proxySubmitted,
+    feedbackSubmittedByName: feedback.feedbackSubmittedByName,
+    feedbackSubmittedAt: feedback.feedbackSubmittedAt,
+    revision: attempt.revision,
+    feedbackRevision: attempt.feedbackRevision,
+    appointmentNotificationRevision: attempt.appointmentNotificationRevision,
+    trackWorkflowRevision,
+    decisionKind: attempt.decisionKind,
+  }
+}
+
 function registrationObservationFixtureUuid(sequence: number, offset: number) {
   return `20000000-0000-4000-8000-${String(sequence + offset).padStart(12, "0")}`
 }
@@ -603,6 +664,10 @@ function executeRegistrationObservationFixtureRpc(
     "save_registration_observation_booking_v1",
     "cancel_registration_observation_v1",
     "withdraw_registration_observation_v1",
+    "record_registration_observation_attendance_v1",
+    "submit_registration_observation_feedback_v1",
+    "correct_registration_observation_feedback_v1",
+    "decide_registration_observation_v1",
   ].includes(rpcName)
   if (!mutationRpc && current.observation.runtimeVersion !== 1) {
     throw new Error("registration_observation_runtime_inactive")
@@ -629,6 +694,12 @@ function executeRegistrationObservationFixtureRpc(
       state: current,
       result: { trackId, taskId: detail.track.taskId, observation: clone(observation) },
     }
+  }
+  if (rpcName === "get_registration_observation_feedback_v1") {
+    const observationId = String(args.p_observation_id || "")
+    const detail = current.observation.feedbackDetails[observationId]
+    if (!detail) throw new Error("registration_observation_not_found")
+    return { state: current, result: clone(detail) }
   }
   if (rpcName === "list_registration_observation_sessions_v1") {
     const trackId = String(args.p_track_id || "")
@@ -777,6 +848,11 @@ function executeRegistrationObservationFixtureRpc(
         attempts,
       }
       state.observation.managerDetails[trackId] = nextDetail
+      state.observation.feedbackDetails[attempt.observationId] = registrationObservationFeedbackDetail(
+        attempt,
+        nextDetail.track.workflowRevision,
+        state.observation.feedbackDetails[attempt.observationId],
+      )
       return {
         operation,
         requestKey: String(args.p_request_key),
@@ -817,12 +893,307 @@ function executeRegistrationObservationFixtureRpc(
         ))],
       }
       state.observation.managerDetails[detail.track.trackId] = nextDetail
+      state.observation.feedbackDetails[observationId] = registrationObservationFeedbackDetail(
+        attempt,
+        nextDetail.track.workflowRevision,
+        state.observation.feedbackDetails[observationId],
+      )
       return {
         operation: "cancel",
         requestKey: String(args.p_request_key),
         trackId: detail.track.trackId,
         workflowStatus: detail.track.workflowStatus,
         workflowRevision: detail.track.workflowRevision,
+        observation: attempt,
+        appointment: registrationObservationAppointmentSnapshot(attempt),
+        changed: true,
+      }
+    })
+  }
+
+  if (rpcName === "record_registration_observation_attendance_v1") {
+    return registrationObservationFixtureMutation(current, rpcName, args, (state) => {
+      const observationId = String(args.p_observation_id || "")
+      const detail = registrationObservationFixtureDetailByAttempt(state.observation, observationId)
+      const existing = detail?.attempts.find((attempt) => attempt.observationId === observationId)
+      if (!detail || !existing) throw new Error("registration_observation_not_found")
+      if (
+        existing.revision !== Number(args.p_expected_observation_revision)
+        || existing.appointmentNotificationRevision
+          !== Number(args.p_expected_appointment_notification_revision)
+      ) throw new Error("registration_observation_stale_revision")
+      if (
+        existing.status !== "scheduled"
+        || existing.appointmentStatus !== "scheduled"
+        || existing.decisionKind !== null
+      ) throw new Error("registration_observation_transition_rejected")
+      const attempt: RegistrationObservationAttempt = {
+        ...existing,
+        appointmentStatus: "completed",
+        status: "attended_feedback_pending",
+        attendance: "attended",
+        revision: existing.revision + 1,
+        updatedAt: "2026-08-10T06:00:00.000Z",
+      }
+      const nextDetail: RegistrationObservationManagerDetail = {
+        ...detail,
+        track: {
+          ...detail.track,
+          workflowStatus: "observation_feedback_pending",
+          workflowRevision: detail.track.workflowRevision + 1,
+        },
+        currentObservation: attempt,
+        attempts: [attempt, ...detail.attempts.filter((candidate) => (
+          candidate.observationId !== observationId
+        ))],
+      }
+      state.observation.managerDetails[detail.track.trackId] = nextDetail
+      state.observation.feedbackDetails[observationId] = registrationObservationFeedbackDetail(
+        attempt,
+        nextDetail.track.workflowRevision,
+      )
+      return {
+        operation: "record_attendance",
+        requestKey: String(args.p_request_key),
+        trackId: detail.track.trackId,
+        workflowStatus: nextDetail.track.workflowStatus,
+        workflowRevision: nextDetail.track.workflowRevision,
+        observation: attempt,
+        appointment: registrationObservationAppointmentSnapshot(attempt),
+        changed: true,
+      }
+    })
+  }
+
+  if (rpcName === "submit_registration_observation_feedback_v1") {
+    return registrationObservationFixtureMutation(current, rpcName, args, (state) => {
+      const observationId = String(args.p_observation_id || "")
+      const detail = registrationObservationFixtureDetailByAttempt(state.observation, observationId)
+      const existing = detail?.attempts.find((attempt) => attempt.observationId === observationId)
+      if (!detail || !existing) throw new Error("registration_observation_not_found")
+      if (
+        existing.revision !== Number(args.p_expected_observation_revision)
+        || existing.feedbackRevision !== Number(args.p_expected_feedback_revision)
+        || existing.appointmentNotificationRevision
+          !== Number(args.p_expected_appointment_notification_revision)
+      ) throw new Error("registration_observation_stale_revision")
+      const attendance = String(args.p_attendance || "")
+      const suitabilityResult = args.p_suitability_result === null
+        ? null
+        : String(args.p_suitability_result || "")
+      const feedbackReason = args.p_feedback_reason === null
+        ? null
+        : String(args.p_feedback_reason || "").trim()
+      const attendedFeedback = attendance === "attended"
+        && (suitabilityResult === "fit" || suitabilityResult === "unfit")
+        && Boolean(feedbackReason)
+      const noShowFeedback = attendance === "no_show"
+        && suitabilityResult === null
+        && feedbackReason === null
+      if (
+        existing.decisionKind !== null
+        || !["scheduled", "attended_feedback_pending"].includes(existing.status)
+        || (!attendedFeedback && !noShowFeedback)
+        || (existing.status === "attended_feedback_pending" && !attendedFeedback)
+      ) throw new Error("registration_observation_transition_rejected")
+      const attempt: RegistrationObservationAttempt = {
+        ...existing,
+        appointmentStatus: "completed",
+        status: attendedFeedback ? "completed" : "no_show",
+        attendance: attendedFeedback ? "attended" : "no_show",
+        suitabilityResult: attendedFeedback
+          ? suitabilityResult as "fit" | "unfit"
+          : null,
+        revision: existing.revision + 1,
+        feedbackRevision: attendedFeedback
+          ? existing.feedbackRevision + 1
+          : existing.feedbackRevision,
+        updatedAt: "2026-08-10T06:00:00.000Z",
+      }
+      const nextDetail: RegistrationObservationManagerDetail = {
+        ...detail,
+        track: {
+          ...detail.track,
+          workflowStatus: "observation_completed",
+          workflowRevision: detail.track.workflowRevision + 1,
+        },
+        currentObservation: attempt,
+        attempts: [attempt, ...detail.attempts.filter((candidate) => (
+          candidate.observationId !== observationId
+        ))],
+      }
+      state.observation.managerDetails[detail.track.trackId] = nextDetail
+      state.observation.feedbackDetails[observationId] = registrationObservationFeedbackDetail(
+        attempt,
+        nextDetail.track.workflowRevision,
+        attendedFeedback
+          ? {
+              feedbackReason,
+              proxySubmitted: true,
+              feedbackSubmittedByName: "운영 담당자",
+              feedbackSubmittedAt: "2026-08-10T06:00:00.000Z",
+            }
+          : undefined,
+      )
+      return {
+        operation: "submit_feedback",
+        requestKey: String(args.p_request_key),
+        trackId: detail.track.trackId,
+        workflowStatus: nextDetail.track.workflowStatus,
+        workflowRevision: nextDetail.track.workflowRevision,
+        observation: attempt,
+        appointment: registrationObservationAppointmentSnapshot(attempt),
+        changed: true,
+      }
+    })
+  }
+
+  if (rpcName === "correct_registration_observation_feedback_v1") {
+    return registrationObservationFixtureMutation(current, rpcName, args, (state) => {
+      const observationId = String(args.p_observation_id || "")
+      const detail = registrationObservationFixtureDetailByAttempt(state.observation, observationId)
+      const existing = detail?.attempts.find((attempt) => attempt.observationId === observationId)
+      const currentFeedback = state.observation.feedbackDetails[observationId]
+      if (!detail || !existing || !currentFeedback) {
+        throw new Error("registration_observation_not_found")
+      }
+      if (
+        existing.revision !== Number(args.p_expected_observation_revision)
+        || existing.feedbackRevision !== Number(args.p_expected_feedback_revision)
+        || existing.decisionKind !== args.p_expected_decision_kind
+      ) throw new Error("registration_observation_stale_revision")
+      const suitabilityResult = String(args.p_suitability_result || "")
+      const feedbackReason = String(args.p_feedback_reason || "").trim()
+      const correctionReason = String(args.p_correction_reason || "").trim()
+      if (
+        existing.status !== "completed"
+        || (suitabilityResult !== "fit" && suitabilityResult !== "unfit")
+        || (
+          existing.decisionKind !== null
+          && suitabilityResult !== existing.suitabilityResult
+        )
+        || !feedbackReason
+        || !correctionReason
+      ) throw new Error("registration_observation_transition_rejected")
+      const attempt: RegistrationObservationAttempt = {
+        ...existing,
+        suitabilityResult,
+        feedbackRevision: existing.feedbackRevision + 1,
+        updatedAt: "2026-08-10T07:00:00.000Z",
+      }
+      const nextDetail: RegistrationObservationManagerDetail = {
+        ...detail,
+        currentObservation: detail.currentObservation?.observationId === observationId
+          ? attempt
+          : detail.currentObservation,
+        attempts: [attempt, ...detail.attempts.filter((candidate) => (
+          candidate.observationId !== observationId
+        ))],
+        latestDecisionObservation: detail.latestDecisionObservation?.observationId === observationId
+          ? {
+              ...detail.latestDecisionObservation,
+              feedbackRevision: attempt.feedbackRevision,
+            }
+          : detail.latestDecisionObservation,
+      }
+      state.observation.managerDetails[detail.track.trackId] = nextDetail
+      state.observation.feedbackDetails[observationId] = registrationObservationFeedbackDetail(
+        attempt,
+        nextDetail.track.workflowRevision,
+        { ...currentFeedback, feedbackReason },
+      )
+      return {
+        operation: "correct_feedback",
+        requestKey: String(args.p_request_key),
+        trackId: detail.track.trackId,
+        workflowStatus: nextDetail.track.workflowStatus,
+        workflowRevision: nextDetail.track.workflowRevision,
+        observation: attempt,
+        appointment: registrationObservationAppointmentSnapshot(attempt),
+        changed: true,
+      }
+    })
+  }
+
+  if (rpcName === "decide_registration_observation_v1") {
+    return registrationObservationFixtureMutation(current, rpcName, args, (state) => {
+      const observationId = String(args.p_observation_id || "")
+      const detail = registrationObservationFixtureDetailByAttempt(state.observation, observationId)
+      const existing = detail?.attempts.find((attempt) => attempt.observationId === observationId)
+      const currentFeedback = state.observation.feedbackDetails[observationId]
+      if (!detail || !existing || !currentFeedback) {
+        throw new Error("registration_observation_not_found")
+      }
+      if (
+        existing.revision !== Number(args.p_expected_observation_revision)
+        || existing.feedbackRevision !== Number(args.p_expected_feedback_revision)
+        || detail.track.workflowRevision !== Number(args.p_expected_track_workflow_revision)
+      ) throw new Error("registration_observation_stale_revision")
+      const decisionKind = String(args.p_decision_kind || "") as NonNullable<RegistrationObservationAttempt["decisionKind"]>
+      if (
+        existing.decisionKind !== null
+        || !["completed", "no_show"].includes(existing.status)
+        || ![
+          "enrollment",
+          "waiting_current_class",
+          "waiting_new_class",
+          "waiting_next_opening",
+          "not_registered",
+          "re_observation",
+        ].includes(decisionKind)
+        || (
+          decisionKind === "waiting_current_class"
+            ? args.p_waiting_class_id !== existing.classId
+            : args.p_waiting_class_id !== null
+        )
+      ) throw new Error("registration_observation_transition_rejected")
+      const workflowStatus = decisionKind === "enrollment"
+        ? "enrollment_requested"
+        : decisionKind === "re_observation"
+          ? "observation_requested"
+          : decisionKind
+      const attempt: RegistrationObservationAttempt = {
+        ...existing,
+        decisionKind,
+        revision: existing.revision + 1,
+        updatedAt: "2026-08-10T08:00:00.000Z",
+      }
+      const nextDetail: RegistrationObservationManagerDetail = {
+        ...detail,
+        track: {
+          ...detail.track,
+          workflowStatus,
+          workflowRevision: detail.track.workflowRevision + 1,
+          observationReturnWorkflowStatus: decisionKind === "re_observation"
+            ? detail.track.observationReturnWorkflowStatus
+            : null,
+        },
+        currentObservation: null,
+        latestEnrollmentDecisionObservationId: decisionKind === "enrollment"
+          ? observationId
+          : detail.latestEnrollmentDecisionObservationId,
+        latestDecisionObservation: {
+          observationId,
+          decisionKind,
+          observationRevision: attempt.revision,
+          feedbackRevision: attempt.feedbackRevision,
+        },
+        attempts: [attempt, ...detail.attempts.filter((candidate) => (
+          candidate.observationId !== observationId
+        ))],
+      }
+      state.observation.managerDetails[detail.track.trackId] = nextDetail
+      state.observation.feedbackDetails[observationId] = registrationObservationFeedbackDetail(
+        attempt,
+        nextDetail.track.workflowRevision,
+        currentFeedback,
+      )
+      return {
+        operation: "decide",
+        requestKey: String(args.p_request_key),
+        trackId: detail.track.trackId,
+        workflowStatus: nextDetail.track.workflowStatus,
+        workflowRevision: nextDetail.track.workflowRevision,
         observation: attempt,
         appointment: registrationObservationAppointmentSnapshot(attempt),
         changed: true,
@@ -931,6 +1302,13 @@ function executeRegistrationObservationFixtureRpc(
         attempts,
       }
       state.observation.managerDetails[trackId] = nextDetail
+      if (decision && state.observation.feedbackDetails[decision.observationId]) {
+        state.observation.feedbackDetails[decision.observationId] = registrationObservationFeedbackDetail(
+          decision,
+          nextDetail.track.workflowRevision,
+          state.observation.feedbackDetails[decision.observationId],
+        )
+      }
       return {
         operation: "withdraw",
         requestKey: String(args.p_request_key),
@@ -1876,6 +2254,7 @@ function createRegistrationObservationFixtureState(): RegistrationObservationFix
         }],
       },
     },
+    feedbackDetails: {},
     sessions: {
       [`${FIXTURE_OBSERVATION_IDS.track}:${FIXTURE_OBSERVATION_IDS.class}`]: [session],
     },

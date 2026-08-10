@@ -44,6 +44,13 @@ import {
   type RegistrationObservationActions,
 } from "./registration-observation-editor"
 import {
+  RegistrationObservationFeedbackPanel,
+  canEditRegistrationObservationFeedback,
+  getRegistrationObservationFeedbackRefreshPlan,
+  loadRegistrationObservationFeedbackForOwnedPanel,
+  type RegistrationObservationFeedbackActions,
+} from "./registration-observation-feedback-panel"
+import {
   REGISTRATION_DIRECTOR_VISIBLE_STATUSES,
   REGISTRATION_TRACK_STATUS_LABELS,
   RegistrationConsultationOutcomeEditor,
@@ -78,16 +85,23 @@ import type {
 } from "./ops-task-service"
 import { type RegistrationDirectorCatalogStatus } from "./registration-director-default.js"
 import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
-import type {
-  RegistrationObservationManagerDetail,
-  RegistrationObservationRuntimeState,
+import {
+  getRegistrationObservationFeedbackErrorState,
+  type RegistrationObservationFeedbackDetail,
+  type RegistrationObservationManagerDetail,
+  type RegistrationObservationRuntimeState,
 } from "./registration-observation-model"
 import {
   cancelRegistrationObservation,
+  correctRegistrationObservationFeedback,
+  decideRegistrationObservation,
   enterRegistrationObservation,
+  loadRegistrationObservationFeedback,
   loadRegistrationObservationManagerDetail,
   loadRegistrationObservationSessions,
+  recordRegistrationObservationAttendance,
   saveRegistrationObservationBooking,
+  submitRegistrationObservationFeedback,
   withdrawRegistrationObservation,
   type RegistrationObservationClient,
 } from "./registration-observation-service"
@@ -133,6 +147,20 @@ const registrationObservationActions: RegistrationObservationActions = {
   saveRegistrationObservationBooking: (input) => saveRegistrationObservationBooking(registrationObservationClient, input),
   cancelRegistrationObservation: (input) => cancelRegistrationObservation(registrationObservationClient, input),
   withdrawRegistrationObservation: (input) => withdrawRegistrationObservation(registrationObservationClient, input),
+}
+const registrationObservationFeedbackActions: RegistrationObservationFeedbackActions = {
+  recordRegistrationObservationAttendance: (input) => (
+    recordRegistrationObservationAttendance(registrationObservationClient, input)
+  ),
+  submitRegistrationObservationFeedback: (input) => (
+    submitRegistrationObservationFeedback(registrationObservationClient, input)
+  ),
+  correctRegistrationObservationFeedback: (input) => (
+    correctRegistrationObservationFeedback(registrationObservationClient, input)
+  ),
+  decideRegistrationObservation: (input) => (
+    decideRegistrationObservation(registrationObservationClient, input)
+  ),
 }
 
 export type RegistrationTrackViewerRole = "admin" | "staff" | "assistant" | "teacher" | null
@@ -316,6 +344,11 @@ export function RegistrationApplication({
   const [observationDetail, setObservationDetail] = useState<RegistrationObservationManagerDetail | null>(null)
   const [observationDetailLoading, setObservationDetailLoading] = useState(false)
   const [observationDetailError, setObservationDetailError] = useState("")
+  const [observationFeedbackDetail, setObservationFeedbackDetail] = useState<RegistrationObservationFeedbackDetail | null>(null)
+  const [observationFeedbackLoading, setObservationFeedbackLoading] = useState(false)
+  const [observationFeedbackError, setObservationFeedbackError] = useState("")
+  const feedbackLoadGenerationRef = useRef(0)
+  const activeObservationFeedbackKeyRef = useRef("")
   const [consultationModeDrafts, setConsultationModeDrafts] = useState<Record<string, RegistrationConsultationMode>>({})
   const [consultationDirectorDirtyByTrackId, setConsultationDirectorDirtyByTrackId] = useState<Record<string, boolean>>({})
   const [consultationSharedSaving, setConsultationSharedSaving] = useState(false)
@@ -637,6 +670,125 @@ export function RegistrationApplication({
         directorProfileId: activeTrack.directorProfileId,
       })
     : false
+  const activeFeedbackObservationId = activeObservationDetail?.currentObservation?.observationId || null
+  const activeFeedbackOwnershipKey = canManageActiveObservation
+    && activeTrack
+    && activeFeedbackObservationId
+    ? `${detail.task.id}:${activeTrack.id}:${activeFeedbackObservationId}`
+    : ""
+  activeObservationFeedbackKeyRef.current = activeFeedbackOwnershipKey
+
+  useEffect(() => {
+    const observationId = activeObservationDetail?.currentObservation?.observationId || null
+    const ownershipKey = canManageActiveObservation
+      && activeTrack
+      && observationId
+      ? `${detail.task.id}:${activeTrack.id}:${observationId}`
+      : ""
+    const generation = ++feedbackLoadGenerationRef.current
+    setObservationFeedbackDetail(null)
+    setObservationFeedbackError("")
+    if (!ownershipKey || !observationId) {
+      setObservationFeedbackLoading(false)
+      return
+    }
+    setObservationFeedbackLoading(true)
+    void loadRegistrationObservationFeedback(
+      registrationObservationClient,
+      observationId,
+    ).then((nextDetail) => {
+      if (
+        generation === feedbackLoadGenerationRef.current
+        && ownershipKey === activeObservationFeedbackKeyRef.current
+      ) setObservationFeedbackDetail(nextDetail)
+    }).catch((error) => {
+      if (
+        generation !== feedbackLoadGenerationRef.current
+        || ownershipKey !== activeObservationFeedbackKeyRef.current
+      ) return
+      setObservationFeedbackError(getRegistrationObservationFeedbackErrorState(error).message)
+    }).finally(() => {
+      if (
+        generation === feedbackLoadGenerationRef.current
+        && ownershipKey === activeObservationFeedbackKeyRef.current
+      ) setObservationFeedbackLoading(false)
+    })
+    return () => {
+      if (generation === feedbackLoadGenerationRef.current) {
+        feedbackLoadGenerationRef.current += 1
+      }
+    }
+  }, [
+    activeObservationDetail?.currentObservation?.observationId,
+    activeTrack,
+    canManageActiveObservation,
+    detail.task.id,
+  ])
+
+  const refreshActiveObservationFeedback = useCallback(async (
+    observationId: string = activeFeedbackObservationId || "",
+  ) => {
+    if (!canManageActiveObservation || !activeTrack || !observationId) return null
+    const ownershipKey = `${detail.task.id}:${activeTrack.id}:${observationId}`
+    const currentOwnershipKey = activeObservationFeedbackKeyRef.current
+    const refreshPlan = getRegistrationObservationFeedbackRefreshPlan({
+      requestedOwnershipKey: ownershipKey,
+      currentOwnershipKey,
+    })
+    const refreshedDetail = loadRegistrationObservationFeedbackForOwnedPanel({
+      requestedOwnershipKey: ownershipKey,
+      currentOwnershipKey,
+      load: () => loadRegistrationObservationFeedback(
+        registrationObservationClient,
+        observationId,
+        { force: true },
+      ),
+    })
+    if (!refreshPlan.mutatePanelState) {
+      return refreshedDetail
+    }
+    const generation = ++feedbackLoadGenerationRef.current
+    setObservationFeedbackLoading(true)
+    setObservationFeedbackError("")
+    try {
+      const nextDetail = await refreshedDetail
+      if (!nextDetail) return null
+      if (
+        generation === feedbackLoadGenerationRef.current
+        && ownershipKey === activeObservationFeedbackKeyRef.current
+      ) setObservationFeedbackDetail(nextDetail)
+      return nextDetail
+    } catch (error) {
+      if (
+        generation === feedbackLoadGenerationRef.current
+        && ownershipKey === activeObservationFeedbackKeyRef.current
+      ) setObservationFeedbackError(getRegistrationObservationFeedbackErrorState(error).message)
+      throw error
+    } finally {
+      if (
+        generation === feedbackLoadGenerationRef.current
+        && ownershipKey === activeObservationFeedbackKeyRef.current
+      ) setObservationFeedbackLoading(false)
+    }
+  }, [
+    activeFeedbackObservationId,
+    activeTrack,
+    canManageActiveObservation,
+    detail.task.id,
+  ])
+
+  const handleObservationFeedbackSaved = useCallback(async (
+    saved: RegistrationObservationFeedbackDetail,
+  ) => {
+    await handleObservationSaved()
+    await refreshActiveObservationFeedback(saved.observationId)
+  }, [handleObservationSaved, refreshActiveObservationFeedback])
+
+  const reloadObservationFeedback = useCallback(async () => {
+    if (!activeFeedbackObservationId) return
+    await handleObservationSaved()
+    await refreshActiveObservationFeedback(activeFeedbackObservationId)
+  }, [activeFeedbackObservationId, handleObservationSaved, refreshActiveObservationFeedback])
   const openSectionStates = Object.fromEntries(
     Object.entries(sectionStates).map(([section, state]) => [section, {
       ...state,
@@ -1221,6 +1373,33 @@ export function RegistrationApplication({
             detail={activeObservationDetail}
             actions={registrationObservationActions}
             onSaved={handleObservationSaved}
+            feedbackPanel={
+              observationFeedbackDetail?.observationId === activeFeedbackObservationId ? (
+                <RegistrationObservationFeedbackPanel
+                  detail={observationFeedbackDetail}
+                  canRecordAttendance={canManageCase}
+                  canEditFeedback={canEditRegistrationObservationFeedback({
+                    canManageCase,
+                    isAssignedTeacher: Boolean(
+                      viewerId
+                      && viewerId === activeObservationDetail.currentObservation?.teacherProfileId
+                    ),
+                    decisionKind: observationFeedbackDetail.decisionKind,
+                  })}
+                  canDecide={canManageCase || Boolean(
+                    viewerId
+                    && viewerId === activeTrack.directorProfileId
+                  )}
+                  actions={registrationObservationFeedbackActions}
+                  onSaved={handleObservationFeedbackSaved}
+                  onReload={reloadObservationFeedback}
+                />
+              ) : observationFeedbackError ? (
+                <p role="alert" className="text-sm text-destructive">{observationFeedbackError}</p>
+              ) : observationFeedbackLoading ? (
+                <p className="text-sm text-muted-foreground">청강 피드백을 불러오는 중입니다.</p>
+              ) : null
+            }
           />
         ) : observationDetailError ? (
           <p role="alert" className="text-sm text-destructive">{observationDetailError}</p>

@@ -2,18 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  normalizeRegistrationObservationFeedbackDetail,
   normalizeRegistrationObservationMutationResult,
   normalizeRegistrationObservationSessionOption,
 } from "../src/features/tasks/registration-observation-model.ts";
 import {
   activateRegistrationObservationRuntime,
   cancelRegistrationObservation,
+  correctRegistrationObservationFeedback,
+  decideRegistrationObservation,
   enterRegistrationObservation,
+  loadRegistrationObservationFeedback,
   loadRegistrationObservationManagerAttempt,
   loadRegistrationObservationManagerDetail,
   loadRegistrationObservationSchemaReadiness,
   loadRegistrationObservationSessions,
+  recordRegistrationObservationAttendance,
   saveRegistrationObservationBooking,
+  submitRegistrationObservationFeedback,
   withdrawRegistrationObservation,
 } from "../src/features/tasks/registration-observation-service.ts";
 
@@ -137,6 +143,93 @@ const exactMutation = Object.freeze({
   },
   changed: true,
 });
+
+const exactFeedback = Object.freeze({
+  observationId: IDS.observation,
+  taskId: IDS.task,
+  trackId: IDS.track,
+  appointmentId: IDS.appointment,
+  studentName: "김다미",
+  studentGrade: "고1",
+  subject: "영어",
+  classId: IDS.class,
+  className: "고1 영어 A",
+  sessionAuthority: "normalized",
+  sessionDate: "2026-08-12",
+  sessionKey: "2026-08-12:lesson-1",
+  classLessonSessionId: IDS.lesson,
+  legacySessionKey: null,
+  sourceRevision: {
+    authority: "normalized",
+    sessionId: IDS.lesson,
+    revision: 3,
+  },
+  startsAt: "2026-08-12T09:00:00.000Z",
+  endsAt: "2026-08-12T10:00:00.000Z",
+  classroomName: "본관 301호",
+  teacherName: "강부희",
+  status: "completed",
+  attendance: "attended",
+  suitabilityResult: "fit",
+  feedbackReason: "수업 참여와 이해도가 좋습니다.",
+  proxySubmitted: true,
+  feedbackSubmittedByName: "운영 담당자",
+  feedbackSubmittedAt: "2026-08-12T10:05:00.000Z",
+  revision: 2,
+  feedbackRevision: 1,
+  appointmentNotificationRevision: 1,
+  trackWorkflowRevision: 9,
+  decisionKind: null,
+});
+
+const exactLegacyFeedback = Object.freeze({
+  ...exactFeedback,
+  sessionAuthority: "legacy",
+  sessionKey: "2026-08-12:legacy-1",
+  classLessonSessionId: null,
+  legacySessionKey: "2026-08-12:legacy-1",
+  sourceRevision: {
+    authority: "legacy",
+    sessionKey: "2026-08-12:legacy-1",
+    contentHash: "legacy-content-hash-1",
+  },
+});
+
+function feedbackMutationEnvelope(operation, requestKey, feedback) {
+  const appointmentStatus = feedback.status === "scheduled" ? "scheduled" : "completed";
+  const observation = {
+    ...exactAttempt,
+    appointmentStatus,
+    status: feedback.status,
+    attendance: feedback.attendance,
+    suitabilityResult: feedback.suitabilityResult,
+    decisionKind: feedback.decisionKind,
+    revision: feedback.revision,
+    feedbackRevision: feedback.feedbackRevision,
+    appointmentNotificationRevision: feedback.appointmentNotificationRevision,
+    updatedAt: feedback.feedbackSubmittedAt ?? exactAttempt.updatedAt,
+  };
+  return {
+    operation,
+    requestKey,
+    trackId: feedback.trackId,
+    workflowStatus: feedback.decisionKind === "not_registered"
+      ? "not_registered"
+      : feedback.status === "attended_feedback_pending"
+        ? "observation_feedback_pending"
+        : feedback.status === "scheduled"
+          ? "observation_requested"
+          : "observation_completed",
+    workflowRevision: feedback.trackWorkflowRevision,
+    observation,
+    appointment: {
+      ...exactMutation.appointment,
+      status: appointmentStatus,
+      notificationRevision: feedback.appointmentNotificationRevision,
+    },
+    changed: true,
+  };
+}
 
 function deferred() {
   let resolve;
@@ -701,4 +794,324 @@ test("RPC errors propagate unchanged and never become successful payloads", asyn
     }),
     (error) => error === databaseError,
   );
+});
+
+test("feedback detail normalizer rejects exact-key, lifecycle, source, revision, and proxy tuple mutations", () => {
+  assert.deepEqual(normalizeRegistrationObservationFeedbackDetail(exactFeedback), exactFeedback);
+  assert.deepEqual(normalizeRegistrationObservationFeedbackDetail(exactLegacyFeedback), exactLegacyFeedback);
+
+  const invalidPayloads = [
+    { ...exactFeedback, unexpected: true },
+    Object.fromEntries(Object.entries(exactFeedback).filter(([key]) => key !== "sessionKey")),
+    { ...exactFeedback, status: "feedback_saved" },
+    { ...exactFeedback, revision: 0 },
+    { ...exactFeedback, feedbackRevision: -1 },
+    { ...exactFeedback, trackWorkflowRevision: 1.5 },
+    { ...exactFeedback, classLessonSessionId: IDS.class },
+    { ...exactLegacyFeedback, sessionKey: "different-legacy-key" },
+    { ...exactFeedback, feedbackSubmittedAt: "2026-08-12 10:05" },
+    { ...exactFeedback, feedbackSubmittedByName: null },
+    { ...exactFeedback, proxySubmitted: false, feedbackSubmittedAt: null },
+    {
+      ...exactFeedback,
+      status: "scheduled",
+      attendance: "attended",
+      suitabilityResult: null,
+      feedbackReason: null,
+      proxySubmitted: false,
+      feedbackSubmittedByName: null,
+      feedbackSubmittedAt: null,
+    },
+    {
+      ...exactFeedback,
+      status: "no_show",
+      attendance: "no_show",
+      suitabilityResult: "fit",
+      feedbackReason: null,
+    },
+    {
+      ...exactFeedback,
+      status: "scheduled",
+      attendance: null,
+      suitabilityResult: null,
+      feedbackReason: null,
+      proxySubmitted: false,
+      feedbackSubmittedByName: null,
+      feedbackSubmittedAt: null,
+      decisionKind: "not_registered",
+    },
+  ];
+
+  for (const payload of invalidPayloads) {
+    assert.throws(
+      () => normalizeRegistrationObservationFeedbackDetail(payload),
+      /registration_observation_feedback_detail_invalid/,
+    );
+  }
+});
+
+test("feedback read caches one in-flight and settled generation until an explicit force refresh", async () => {
+  const firstResponse = deferred();
+  let rpcCalls = 0;
+  const refreshed = { ...exactFeedback, feedbackRevision: 2 };
+  const client = captureRpcClient({ handler: () => {
+    rpcCalls += 1;
+    return rpcCalls === 1 ? firstResponse.promise : ok(refreshed);
+  } });
+
+  const { result: pending, timeoutCalls } = await captureTimeout(async () => {
+    const first = loadRegistrationObservationFeedback(client, IDS.observation);
+    const duplicate = loadRegistrationObservationFeedback(client, IDS.observation);
+    assert.strictEqual(duplicate, first);
+    assert.equal(client.calls.length, 1);
+    firstResponse.resolve(ok(exactFeedback));
+    assert.deepEqual(await first, exactFeedback);
+    const settled = loadRegistrationObservationFeedback(client, IDS.observation);
+    assert.strictEqual(settled, first);
+    assert.deepEqual(await settled, exactFeedback);
+    return loadRegistrationObservationFeedback(client, IDS.observation, { force: true });
+  });
+
+  assert.deepEqual(await pending, refreshed);
+  assert.equal(rpcCalls, 2);
+  assert.deepEqual(client.calls, [
+    {
+      name: "get_registration_observation_feedback_v1",
+      args: { p_observation_id: IDS.observation },
+    },
+    {
+      name: "get_registration_observation_feedback_v1",
+      args: { p_observation_id: IDS.observation },
+    },
+  ]);
+  assert.deepEqual(timeoutCalls, [12_000, 12_000]);
+  assert.deepEqual(client.retryArguments, [false, false]);
+});
+
+test("feedback settled cache is actor-session scoped so an account switch must recheck the read RPC", async () => {
+  let actorId = "10000000-0000-4000-8000-000000000020";
+  const denied = { code: "P0002", message: "registration_observation_not_found" };
+  const client = captureRpcClient({ handler: () => (
+    actorId.endsWith("20") ? ok(exactFeedback) : { data: null, error: denied }
+  ) });
+  client.auth = {
+    async getSession() {
+      return {
+        data: {
+          session: {
+            access_token: `session-${actorId}`,
+            user: { id: actorId },
+          },
+        },
+        error: null,
+      };
+    },
+  };
+
+  assert.deepEqual(
+    await loadRegistrationObservationFeedback(client, IDS.observation),
+    exactFeedback,
+  );
+  actorId = "10000000-0000-4000-8000-000000000021";
+  await assert.rejects(
+    loadRegistrationObservationFeedback(client, IDS.observation),
+    (error) => error === denied,
+  );
+  assert.equal(client.calls.length, 2);
+});
+
+test("force refresh invalidates a settled feedback failure without sharing the rejected generation", async () => {
+  const databaseError = { code: "57014", message: "statement timeout" };
+  let rpcCalls = 0;
+  const client = captureRpcClient({ handler: () => {
+    rpcCalls += 1;
+    return rpcCalls === 1 ? { data: null, error: databaseError } : ok(exactFeedback);
+  } });
+
+  const failed = loadRegistrationObservationFeedback(client, IDS.observation);
+  await assert.rejects(failed, (error) => error === databaseError);
+  const sameFailure = loadRegistrationObservationFeedback(client, IDS.observation);
+  assert.strictEqual(sameFailure, failed);
+  await assert.rejects(sameFailure, (error) => error === databaseError);
+  assert.deepEqual(
+    await loadRegistrationObservationFeedback(client, IDS.observation, { force: true }),
+    exactFeedback,
+  );
+  assert.equal(rpcCalls, 2);
+});
+
+test("feedback mutation clients map every conditional revision and disable automatic retry", async () => {
+  const attendanceDetail = {
+    ...exactFeedback,
+    status: "attended_feedback_pending",
+    attendance: "attended",
+    suitabilityResult: null,
+    feedbackReason: null,
+    proxySubmitted: false,
+    feedbackSubmittedByName: null,
+    feedbackSubmittedAt: null,
+    feedbackRevision: 0,
+  };
+  const correctedDetail = { ...exactFeedback, feedbackRevision: 2 };
+  const decidedDetail = {
+    ...correctedDetail,
+    decisionKind: "not_registered",
+    revision: 3,
+    trackWorkflowRevision: 10,
+  };
+  const feedbackReads = [attendanceDetail, exactFeedback, correctedDetail, decidedDetail];
+  let feedbackReadIndex = 0;
+  const mutationResponses = {
+    record_registration_observation_attendance_v1: feedbackMutationEnvelope(
+      "record_attendance",
+      "attendance-request-1",
+      attendanceDetail,
+    ),
+    submit_registration_observation_feedback_v1: feedbackMutationEnvelope(
+      "submit_feedback",
+      "feedback-request-1",
+      exactFeedback,
+    ),
+    correct_registration_observation_feedback_v1: feedbackMutationEnvelope(
+      "correct_feedback",
+      "correction-request-1",
+      correctedDetail,
+    ),
+    decide_registration_observation_v1: feedbackMutationEnvelope(
+      "decide",
+      "decision-request-1",
+      decidedDetail,
+    ),
+  };
+  const client = captureRpcClient({ handler: ({ name }) => {
+    if (name === "get_registration_observation_feedback_v1") {
+      return ok(feedbackReads[feedbackReadIndex++]);
+    }
+    return ok(mutationResponses[name]);
+  } });
+
+  assert.deepEqual(await recordRegistrationObservationAttendance(client, {
+    observationId: IDS.observation,
+    expectedObservationRevision: 1,
+    expectedAppointmentNotificationRevision: 1,
+    requestKey: "attendance-request-1",
+  }), attendanceDetail);
+  assert.deepEqual(await submitRegistrationObservationFeedback(client, {
+    observationId: IDS.observation,
+    attendance: "attended",
+    suitabilityResult: "fit",
+    feedbackReason: "수업 참여와 이해도가 좋습니다.",
+    expectedObservationRevision: 2,
+    expectedFeedbackRevision: 0,
+    expectedAppointmentNotificationRevision: 1,
+    requestKey: "feedback-request-1",
+  }), exactFeedback);
+  assert.deepEqual(await correctRegistrationObservationFeedback(client, {
+    observationId: IDS.observation,
+    suitabilityResult: "fit",
+    feedbackReason: "수업 참여와 이해도가 매우 좋습니다.",
+    correctionReason: "표현 보완",
+    expectedObservationRevision: 2,
+    expectedFeedbackRevision: 1,
+    expectedDecisionKind: "",
+    requestKey: "correction-request-1",
+  }), correctedDetail);
+  assert.deepEqual(await decideRegistrationObservation(client, {
+    observationId: IDS.observation,
+    decisionKind: "not_registered",
+    waitingClassId: null,
+    expectedObservationRevision: 2,
+    expectedFeedbackRevision: 2,
+    expectedTrackWorkflowRevision: 9,
+    requestKey: "decision-request-1",
+  }), decidedDetail);
+
+  assert.deepEqual(client.calls.filter(
+    ({ name }) => name !== "get_registration_observation_feedback_v1",
+  ), [
+    {
+      name: "record_registration_observation_attendance_v1",
+      args: {
+        p_observation_id: IDS.observation,
+        p_expected_observation_revision: 1,
+        p_expected_appointment_notification_revision: 1,
+        p_request_key: "attendance-request-1",
+      },
+    },
+    {
+      name: "submit_registration_observation_feedback_v1",
+      args: {
+        p_observation_id: IDS.observation,
+        p_attendance: "attended",
+        p_suitability_result: "fit",
+        p_feedback_reason: "수업 참여와 이해도가 좋습니다.",
+        p_expected_observation_revision: 2,
+        p_expected_feedback_revision: 0,
+        p_expected_appointment_notification_revision: 1,
+        p_request_key: "feedback-request-1",
+      },
+    },
+    {
+      name: "correct_registration_observation_feedback_v1",
+      args: {
+        p_observation_id: IDS.observation,
+        p_suitability_result: "fit",
+        p_feedback_reason: "수업 참여와 이해도가 매우 좋습니다.",
+        p_correction_reason: "표현 보완",
+        p_expected_observation_revision: 2,
+        p_expected_feedback_revision: 1,
+        p_expected_decision_kind: null,
+        p_request_key: "correction-request-1",
+      },
+    },
+    {
+      name: "decide_registration_observation_v1",
+      args: {
+        p_observation_id: IDS.observation,
+        p_decision_kind: "not_registered",
+        p_waiting_class_id: null,
+        p_expected_observation_revision: 2,
+        p_expected_feedback_revision: 2,
+        p_expected_track_workflow_revision: 9,
+        p_request_key: "decision-request-1",
+      },
+    },
+  ]);
+  assert.equal(
+    client.calls.filter(({ name }) => name === "get_registration_observation_feedback_v1").length,
+    4,
+  );
+  assert.deepEqual(client.retryArguments, Array(8).fill(false));
+});
+
+test("malformed feedback mutation responses do not replace a settled detail generation", async () => {
+  let readResponse = exactFeedback;
+  const client = captureRpcClient({ handler: ({ name }) => {
+    if (name === "correct_registration_observation_feedback_v1") {
+      return ok(feedbackMutationEnvelope(
+        "correct_feedback",
+        "malformed-correction-request",
+        { ...exactFeedback, feedbackRevision: 2 },
+      ));
+    }
+    return ok(readResponse);
+  } });
+  const settled = loadRegistrationObservationFeedback(client, IDS.observation);
+  assert.deepEqual(await settled, exactFeedback);
+
+  readResponse = { ...exactFeedback, feedbackRevision: -1 };
+  await assert.rejects(
+    correctRegistrationObservationFeedback(client, {
+      observationId: IDS.observation,
+      suitabilityResult: "fit",
+      feedbackReason: "수업 참여와 이해도가 좋습니다.",
+      correctionReason: "표현 보완",
+      expectedObservationRevision: 2,
+      expectedFeedbackRevision: 1,
+      expectedDecisionKind: null,
+      requestKey: "malformed-correction-request",
+    }),
+    /registration_observation_feedback_detail_invalid/,
+  );
+  assert.strictEqual(loadRegistrationObservationFeedback(client, IDS.observation), settled);
 });

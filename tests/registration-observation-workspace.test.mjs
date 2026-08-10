@@ -776,7 +776,7 @@ test("track detail loading imports and uses the centralized observation UI norma
   )
 })
 
-test("booking-only editor excludes teacher decision and provider actions", async () => {
+test("booking editor delegates feedback decisions to one dedicated slot and excludes provider actions", async () => {
   const [source, caseListSource] = await Promise.all([
     readSource("src/features/tasks/registration-observation-editor.tsx"),
     readSource("src/features/tasks/registration-case-list.tsx"),
@@ -787,16 +787,12 @@ test("booking-only editor excludes teacher decision and provider actions", async
   assert.match(source, /withdrawRegistrationObservation/)
   assert.doesNotMatch(source, /setRegistrationWorkflowStatus|set_registration_workflow_status_v1/)
   assert.doesNotMatch(source, /target as /)
-  for (const forbidden of [
-    "recordRegistrationObservationAttendance",
-    "record_registration_observation_attendance_v1",
-    "submitRegistrationObservationFeedback",
-    "submit_registration_observation_feedback_v1",
-    "correctRegistrationObservationFeedback",
-    "correct_registration_observation_feedback_v1",
-    "decideRegistrationObservation",
-    "decide_registration_observation_v1",
-  ]) assert.equal(source.includes(forbidden), false, forbidden)
+  assert.match(source, /feedbackPanel/)
+  assert.equal((source.match(/\{feedbackPanel\}/g) || []).length, 1)
+  assert.doesNotMatch(source, /record_registration_observation_attendance_v1/)
+  assert.doesNotMatch(source, /submit_registration_observation_feedback_v1/)
+  assert.doesNotMatch(source, /correct_registration_observation_feedback_v1/)
+  assert.doesNotMatch(source, /decide_registration_observation_v1/)
   assert.doesNotMatch(source, /google.chat|webhook|solapi|send.*customer/i)
   assert.match(source, /예약 저장됨/)
   assert.match(source, /고객 안내: 미발송/)
@@ -841,4 +837,19 @@ test("track editor mounts observation once before registration and only behind r
   assert.match(refresh, /if \(completionPlan\.loadManagerDetail\) setObservationDetail\(nextDetail\)/)
   assert.match(source, /resolveRegistrationApplicationFocusPanelId\(\{[\s\S]*?observationFocusAvailable:[\s\S]*?isRegistrationObservationWorkflowStatus/)
   assert.match(shell, /activeTrack && activeObservationDetail[\s\S]*?detail=\{activeObservationDetail\}/)
+})
+
+test("track editor loads one bounded feedback DTO only for an owned visible panel", async () => {
+  const source = await readSource("src/features/tasks/registration-track-editor.tsx")
+  const loadEffectStart = source.indexOf("loadRegistrationObservationFeedback(")
+  assert.ok(loadEffectStart >= 0, "the manager workspace must use the dedicated feedback read")
+  const loadEffect = source.slice(Math.max(0, loadEffectStart - 1_200), loadEffectStart + 2_400)
+  assert.match(loadEffect, /canManageActiveObservation/)
+  assert.match(loadEffect, /activeObservationDetail\?\.currentObservation\?\.observationId/)
+  assert.match(loadEffect, /feedbackLoadGenerationRef/)
+  assert.match(loadEffect, /activeObservationFeedbackKeyRef/)
+  assert.match(source, /force: true/)
+  assert.match(source, /<RegistrationObservationFeedbackPanel/)
+  assert.match(source, /feedbackPanel=\{/)
+  assert.doesNotMatch(loadEffect, /parentPhone|studentPhone|schoolName|inquiry|registrationTracks/)
 })

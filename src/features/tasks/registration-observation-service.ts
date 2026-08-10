@@ -1,11 +1,14 @@
 import {
   normalizeRegistrationObservationActivationResult,
+  normalizeRegistrationObservationFeedbackDetail,
   normalizeRegistrationObservationManagerAttemptDetail,
   normalizeRegistrationObservationManagerDetail,
   normalizeRegistrationObservationMutationResult,
   normalizeRegistrationObservationSchemaReadiness,
   normalizeRegistrationObservationSessionOptions,
   type RegistrationObservationActivationResult,
+  type RegistrationObservationDecisionKind,
+  type RegistrationObservationFeedbackDetail,
   type RegistrationObservationManagerAttemptDetail,
   type RegistrationObservationManagerDetail,
   type RegistrationObservationMutationResult,
@@ -28,6 +31,17 @@ export type RegistrationObservationClient = {
     name: string,
     args?: Record<string, unknown>,
   ) => RegistrationObservationRpcRequest
+  auth?: {
+    getSession: () => PromiseLike<{
+      data: {
+        session: {
+          access_token?: unknown
+          user?: { id?: unknown }
+        } | null
+      }
+      error: unknown
+    }>
+  }
 }
 
 export type LoadRegistrationObservationManagerDetailInput = Readonly<{
@@ -100,6 +114,50 @@ export type CancelRegistrationObservationInput = Readonly<{
   requestKey: string
 }>
 
+export type LoadRegistrationObservationFeedbackOptions = Readonly<{
+  timeoutMs?: number
+  force?: boolean
+}>
+
+export type RecordRegistrationObservationAttendanceInput = Readonly<{
+  observationId: string
+  expectedObservationRevision: number
+  expectedAppointmentNotificationRevision: number
+  requestKey: string
+}>
+
+export type SubmitRegistrationObservationFeedbackInput = Readonly<{
+  observationId: string
+  attendance: "attended" | "no_show"
+  suitabilityResult: "fit" | "unfit" | null
+  feedbackReason: string | null
+  expectedObservationRevision: number
+  expectedFeedbackRevision: number
+  expectedAppointmentNotificationRevision: number
+  requestKey: string
+}>
+
+export type CorrectRegistrationObservationFeedbackInput = Readonly<{
+  observationId: string
+  suitabilityResult: "fit" | "unfit"
+  feedbackReason: string
+  correctionReason: string
+  expectedObservationRevision: number
+  expectedFeedbackRevision: number
+  expectedDecisionKind: RegistrationObservationDecisionKind | null | ""
+  requestKey: string
+}>
+
+export type DecideRegistrationObservationInput = Readonly<{
+  observationId: string
+  decisionKind: RegistrationObservationDecisionKind
+  waitingClassId: string | null
+  expectedObservationRevision: number
+  expectedFeedbackRevision: number
+  expectedTrackWorkflowRevision: number
+  requestKey: string
+}>
+
 type RegistrationObservationReturnInput = Readonly<{
   exitKind: "return_to_previous"
   targetWorkflowStatus:
@@ -155,9 +213,15 @@ const WORKFLOW_STATUSES: readonly RegistrationObservationTrackWorkflowStatus[] =
 ]
 
 const sessionInFlight = new Map<string, Promise<readonly RegistrationObservationSessionOption[]>>()
+type FeedbackCacheEntry = Readonly<{
+  generation: number
+  promise: Promise<RegistrationObservationFeedbackDetail>
+}>
+const feedbackCache = new Map<string, FeedbackCacheEntry>()
 const clientIds = new WeakMap<object, number>()
 let nextClientId = 1
 let cacheGeneration = 0
+let feedbackCacheGeneration = 0
 
 function inputInvalid(scope: string): never {
   throw new Error(`registration_observation_${scope}_input_invalid`)
@@ -202,6 +266,26 @@ function nonnegativeRevision(input: unknown, scope: string) {
   return Number(input)
 }
 
+function nullableEnumValue<const T extends readonly string[]>(
+  input: unknown,
+  values: T,
+  scope: string,
+): T[number] | null {
+  if (input === null) return null
+  if (typeof input !== "string" || !values.includes(input as T[number])) inputInvalid(scope)
+  return input as T[number]
+}
+
+function enumValue<const T extends readonly string[]>(
+  input: unknown,
+  values: T,
+  scope: string,
+): T[number] {
+  const value = nullableEnumValue(input, values, scope)
+  if (value === null) inputInvalid(scope)
+  return value
+}
+
 function dateValue(input: unknown, scope: string) {
   if (typeof input !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(input)) inputInvalid(scope)
   const [year, month, day] = input.split("-").map(Number)
@@ -227,10 +311,137 @@ function clientId(client: RegistrationObservationClient) {
   return next
 }
 
-function executeRequest(request: RegistrationObservationRpcRequest) {
+function executeRequest(
+  request: RegistrationObservationRpcRequest,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+) {
   return request
-    .abortSignal(AbortSignal.timeout(REQUEST_TIMEOUT_MS))
+    .abortSignal(AbortSignal.timeout(timeoutMs))
     .retry(false)
+}
+
+function feedbackSessionScope(
+  client: RegistrationObservationClient,
+): string | Promise<string> {
+  if (!client.auth) return "fixture-or-test-client"
+  return Promise.resolve(client.auth.getSession()).then(({ data, error }) => {
+    if (error) throw error
+    if (data.session === null) return "signed-out"
+    const userId = data.session?.user?.id
+    const accessToken = data.session?.access_token
+    if (
+      typeof userId !== "string"
+      || userId.trim().length === 0
+      || typeof accessToken !== "string"
+      || accessToken.length === 0
+    ) throw new Error("registration_observation_feedback_session_invalid")
+    return `${userId}:${accessToken}`
+  })
+}
+
+function feedbackCacheKey(
+  client: RegistrationObservationClient,
+  sessionScope: string,
+  observationId: string,
+) {
+  return JSON.stringify([clientId(client), sessionScope, observationId])
+}
+
+function loadRegistrationObservationFeedbackForSession(
+  resolvedClient: RegistrationObservationClient,
+  sessionScope: string,
+  observationId: string,
+  timeoutMs: number,
+  force: boolean,
+) {
+  const key = feedbackCacheKey(resolvedClient, sessionScope, observationId)
+  const cached = feedbackCache.get(key)
+  if (!force && cached) return cached.promise
+
+  const generation = ++feedbackCacheGeneration
+  const promise = (async () => {
+    const { data, error } = await executeRequest(
+      resolvedClient.rpc(
+        "get_registration_observation_feedback_v1",
+        { p_observation_id: observationId },
+      ),
+      timeoutMs,
+    )
+    if (error) throw error
+    const detail = normalizeRegistrationObservationFeedbackDetail(data)
+    if (detail.observationId !== observationId) {
+      throw new Error("registration_observation_feedback_detail_invalid")
+    }
+    return detail
+  })().catch((error: unknown) => {
+    if (
+      cached
+      && error instanceof Error
+      && error.message === "registration_observation_feedback_detail_invalid"
+      && feedbackCache.get(key)?.generation === generation
+    ) feedbackCache.set(key, cached)
+    throw error
+  })
+  feedbackCache.set(key, { generation, promise })
+  return promise
+}
+
+export function loadRegistrationObservationFeedback(
+  client: RegistrationObservationClient,
+  observationIdInput: string,
+  optionsInput: LoadRegistrationObservationFeedbackOptions = {},
+): Promise<RegistrationObservationFeedbackDetail> {
+  let observationId: string
+  let timeoutMs: number
+  let force: boolean
+  try {
+    observationId = uuid(observationIdInput, "feedback")
+    const options = exactInput(optionsInput, [], ["timeoutMs", "force"], "feedback")
+    timeoutMs = options.timeoutMs === undefined
+      ? REQUEST_TIMEOUT_MS
+      : positiveRevision(options.timeoutMs, "feedback")
+    if (options.force !== undefined && typeof options.force !== "boolean") inputInvalid("feedback")
+    force = options.force === true
+  } catch (error) {
+    return Promise.reject(error)
+  }
+
+  const resolvedClient = activeClient(client)
+  const sessionScope = feedbackSessionScope(resolvedClient)
+  if (typeof sessionScope === "string") {
+    return loadRegistrationObservationFeedbackForSession(
+      resolvedClient,
+      sessionScope,
+      observationId,
+      timeoutMs,
+      force,
+    )
+  }
+  return sessionScope.then((scope) => loadRegistrationObservationFeedbackForSession(
+    resolvedClient,
+    scope,
+    observationId,
+    timeoutMs,
+    force,
+  ))
+}
+
+async function feedbackMutationRpc(
+  client: RegistrationObservationClient,
+  name: string,
+  args: Record<string, unknown>,
+  expected: Readonly<{
+    operation: "record_attendance" | "submit_feedback" | "correct_feedback" | "decide"
+    requestKey: string
+    observationId: string
+  }>,
+) {
+  const resolvedClient = activeClient(client)
+  const { data, error } = await executeRequest(resolvedClient.rpc(name, args))
+  if (error) throw error
+  mutationIdentity(normalizeRegistrationObservationMutationResult(data), expected)
+  cacheGeneration += 1
+  return loadRegistrationObservationFeedback(resolvedClient, expected.observationId, { force: true })
 }
 
 async function rpcResult(
@@ -527,6 +738,205 @@ export async function cancelRegistrationObservation(
     p_expected_observation_revision: expectedObservationRevision,
     p_request_key: requestKey,
   }, { operation: "cancel", requestKey, observationId })
+}
+
+export async function recordRegistrationObservationAttendance(
+  client: RegistrationObservationClient,
+  input: RecordRegistrationObservationAttendanceInput,
+) {
+  const row = exactInput(input, [
+    "observationId",
+    "expectedObservationRevision",
+    "expectedAppointmentNotificationRevision",
+    "requestKey",
+  ], [], "attendance")
+  const observationId = uuid(row.observationId, "attendance")
+  const expectedObservationRevision = positiveRevision(
+    row.expectedObservationRevision,
+    "attendance",
+  )
+  const expectedAppointmentNotificationRevision = positiveRevision(
+    row.expectedAppointmentNotificationRevision,
+    "attendance",
+  )
+  const requestKey = nonblank(row.requestKey, "attendance")
+  return feedbackMutationRpc(client, "record_registration_observation_attendance_v1", {
+    p_observation_id: observationId,
+    p_expected_observation_revision: expectedObservationRevision,
+    p_expected_appointment_notification_revision: expectedAppointmentNotificationRevision,
+    p_request_key: requestKey,
+  }, { operation: "record_attendance", requestKey, observationId })
+}
+
+export async function submitRegistrationObservationFeedback(
+  client: RegistrationObservationClient,
+  input: SubmitRegistrationObservationFeedbackInput,
+) {
+  const row = exactInput(input, [
+    "observationId",
+    "attendance",
+    "suitabilityResult",
+    "feedbackReason",
+    "expectedObservationRevision",
+    "expectedFeedbackRevision",
+    "expectedAppointmentNotificationRevision",
+    "requestKey",
+  ], [], "feedback_submission")
+  const observationId = uuid(row.observationId, "feedback_submission")
+  const attendance = enumValue(
+    row.attendance,
+    ["attended", "no_show"] as const,
+    "feedback_submission",
+  )
+  const suitabilityResult = nullableEnumValue(
+    row.suitabilityResult,
+    ["fit", "unfit"] as const,
+    "feedback_submission",
+  )
+  const feedbackReason = row.feedbackReason === null
+    ? null
+    : nonblank(row.feedbackReason, "feedback_submission")
+  if (
+    (attendance === "attended" && (suitabilityResult === null || feedbackReason === null))
+    || (attendance === "no_show" && (suitabilityResult !== null || feedbackReason !== null))
+  ) inputInvalid("feedback_submission")
+  const expectedObservationRevision = positiveRevision(
+    row.expectedObservationRevision,
+    "feedback_submission",
+  )
+  const expectedFeedbackRevision = nonnegativeRevision(
+    row.expectedFeedbackRevision,
+    "feedback_submission",
+  )
+  const expectedAppointmentNotificationRevision = positiveRevision(
+    row.expectedAppointmentNotificationRevision,
+    "feedback_submission",
+  )
+  const requestKey = nonblank(row.requestKey, "feedback_submission")
+  return feedbackMutationRpc(client, "submit_registration_observation_feedback_v1", {
+    p_observation_id: observationId,
+    p_attendance: attendance,
+    p_suitability_result: suitabilityResult,
+    p_feedback_reason: feedbackReason,
+    p_expected_observation_revision: expectedObservationRevision,
+    p_expected_feedback_revision: expectedFeedbackRevision,
+    p_expected_appointment_notification_revision: expectedAppointmentNotificationRevision,
+    p_request_key: requestKey,
+  }, { operation: "submit_feedback", requestKey, observationId })
+}
+
+export async function correctRegistrationObservationFeedback(
+  client: RegistrationObservationClient,
+  input: CorrectRegistrationObservationFeedbackInput,
+) {
+  const row = exactInput(input, [
+    "observationId",
+    "suitabilityResult",
+    "feedbackReason",
+    "correctionReason",
+    "expectedObservationRevision",
+    "expectedFeedbackRevision",
+    "expectedDecisionKind",
+    "requestKey",
+  ], [], "feedback_correction")
+  const observationId = uuid(row.observationId, "feedback_correction")
+  const suitabilityResult = enumValue(
+    row.suitabilityResult,
+    ["fit", "unfit"] as const,
+    "feedback_correction",
+  )
+  const feedbackReason = nonblank(row.feedbackReason, "feedback_correction")
+  const correctionReason = nonblank(row.correctionReason, "feedback_correction")
+  const expectedObservationRevision = positiveRevision(
+    row.expectedObservationRevision,
+    "feedback_correction",
+  )
+  const expectedFeedbackRevision = nonnegativeRevision(
+    row.expectedFeedbackRevision,
+    "feedback_correction",
+  )
+  const expectedDecisionKind = row.expectedDecisionKind === ""
+    ? null
+    : nullableEnumValue(
+        row.expectedDecisionKind,
+        [
+          "enrollment",
+          "waiting_current_class",
+          "waiting_new_class",
+          "waiting_next_opening",
+          "not_registered",
+          "re_observation",
+        ] as const,
+        "feedback_correction",
+      )
+  const requestKey = nonblank(row.requestKey, "feedback_correction")
+  return feedbackMutationRpc(client, "correct_registration_observation_feedback_v1", {
+    p_observation_id: observationId,
+    p_suitability_result: suitabilityResult,
+    p_feedback_reason: feedbackReason,
+    p_correction_reason: correctionReason,
+    p_expected_observation_revision: expectedObservationRevision,
+    p_expected_feedback_revision: expectedFeedbackRevision,
+    p_expected_decision_kind: expectedDecisionKind,
+    p_request_key: requestKey,
+  }, { operation: "correct_feedback", requestKey, observationId })
+}
+
+export async function decideRegistrationObservation(
+  client: RegistrationObservationClient,
+  input: DecideRegistrationObservationInput,
+) {
+  const row = exactInput(input, [
+    "observationId",
+    "decisionKind",
+    "waitingClassId",
+    "expectedObservationRevision",
+    "expectedFeedbackRevision",
+    "expectedTrackWorkflowRevision",
+    "requestKey",
+  ], [], "decision")
+  const observationId = uuid(row.observationId, "decision")
+  const decisionKind = enumValue(
+    row.decisionKind,
+    [
+      "enrollment",
+      "waiting_current_class",
+      "waiting_new_class",
+      "waiting_next_opening",
+      "not_registered",
+      "re_observation",
+    ] as const,
+    "decision",
+  )
+  const waitingClassId = row.waitingClassId === null
+    ? null
+    : uuid(row.waitingClassId, "decision")
+  if (
+    (decisionKind === "waiting_current_class" && waitingClassId === null)
+    || (decisionKind !== "waiting_current_class" && waitingClassId !== null)
+  ) inputInvalid("decision")
+  const expectedObservationRevision = positiveRevision(
+    row.expectedObservationRevision,
+    "decision",
+  )
+  const expectedFeedbackRevision = nonnegativeRevision(
+    row.expectedFeedbackRevision,
+    "decision",
+  )
+  const expectedTrackWorkflowRevision = positiveRevision(
+    row.expectedTrackWorkflowRevision,
+    "decision",
+  )
+  const requestKey = nonblank(row.requestKey, "decision")
+  return feedbackMutationRpc(client, "decide_registration_observation_v1", {
+    p_observation_id: observationId,
+    p_decision_kind: decisionKind,
+    p_waiting_class_id: waitingClassId,
+    p_expected_observation_revision: expectedObservationRevision,
+    p_expected_feedback_revision: expectedFeedbackRevision,
+    p_expected_track_workflow_revision: expectedTrackWorkflowRevision,
+    p_request_key: requestKey,
+  }, { operation: "decide", requestKey, observationId })
 }
 
 export async function withdrawRegistrationObservation(
