@@ -1,5 +1,5 @@
 begin;
-select plan(41);
+select plan(49);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '120s';
@@ -82,10 +82,29 @@ values (
 insert into public.classes(
   id, name, subject, status, schedule_storage_mode, schedule_plan
 )
-values (
-  '99300000-0000-4000-8000-000000000103', '청강 피드백 영어반',
-  '영어', '수업 진행 중', 'normalized', '{"sessions":[]}'::jsonb
-);
+values
+  (
+    '99300000-0000-4000-8000-000000000103', '청강 피드백 영어반',
+    '영어', '수업 진행 중', 'normalized', '{"sessions":[]}'::jsonb
+  ),
+  (
+    '99300000-0000-4000-8000-000000000193', '청강 피드백 legacy 영어반',
+    '영어', '수업 진행 중', 'legacy',
+    pg_catalog.jsonb_build_object(
+      'sessions', pg_catalog.jsonb_build_array(
+        pg_catalog.jsonb_build_object(
+          'sessionKey', 'feedback-legacy-session',
+          'date', (current_date - 1)::text,
+          'scheduleState', 'active',
+          'teacherCatalogId', '99300000-0000-4000-8000-000000000101',
+          'teacherName', '청강 피드백 담당교사',
+          'classroomCatalogId', '99300000-0000-4000-8000-000000000102',
+          'classroomName', '청강 피드백 101호'
+        )
+      ),
+      'textbooks', '[]'::jsonb
+    )
+  );
 
 do $$
 begin
@@ -128,6 +147,30 @@ values
     'manual', 9
   );
 
+do $$
+begin
+  perform dashboard_private.with_continuous_class_schedule_audit_context_v1(
+    '99300000-0000-4000-8000-000000000193',
+    '99300000-0000-4000-8000-000000000194',
+    'registration_observation_feedback_submit_test'
+  );
+end;
+$$;
+insert into public.class_schedule_slots(
+  id, class_id, weekday, start_time, end_time,
+  teacher_catalog_id, teacher_name, classroom_catalog_id, classroom_name,
+  sort_order
+)
+values (
+  '99300000-0000-4000-8000-000000000194',
+  '99300000-0000-4000-8000-000000000193',
+  extract(dow from current_date - 1)::smallint,
+  '18:00', '20:00',
+  '99300000-0000-4000-8000-000000000101', '청강 피드백 담당교사',
+  '99300000-0000-4000-8000-000000000102', '청강 피드백 101호',
+  0
+);
+
 insert into public.ops_tasks(
   id, title, type, status, priority, requested_by, student_name
 )
@@ -140,7 +183,8 @@ values
   ('99300000-0000-4000-8000-000000000155', '청강 stale auth', 'registration', 'requested', 'normal', '99300000-0000-4000-8000-000000000001', '합성 stale학생'),
   ('99300000-0000-4000-8000-000000000165', '청강 proxy', 'registration', 'requested', 'normal', '99300000-0000-4000-8000-000000000001', '합성 대리학생'),
   ('99300000-0000-4000-8000-000000000175', '청강 event rollback', 'registration', 'requested', 'normal', '99300000-0000-4000-8000-000000000001', '합성 롤백학생'),
-  ('99300000-0000-4000-8000-000000000185', '청강 runtime guard', 'registration', 'requested', 'normal', '99300000-0000-4000-8000-000000000001', '합성 runtime학생');
+  ('99300000-0000-4000-8000-000000000185', '청강 runtime guard', 'registration', 'requested', 'normal', '99300000-0000-4000-8000-000000000001', '합성 runtime학생'),
+  ('99300000-0000-4000-8000-000000000195', '청강 legacy source guard', 'registration', 'requested', 'normal', '99300000-0000-4000-8000-000000000001', '합성 legacy학생');
 
 insert into public.ops_registration_details(task_id)
 values
@@ -152,7 +196,8 @@ values
   ('99300000-0000-4000-8000-000000000155'),
   ('99300000-0000-4000-8000-000000000165'),
   ('99300000-0000-4000-8000-000000000175'),
-  ('99300000-0000-4000-8000-000000000185');
+  ('99300000-0000-4000-8000-000000000185'),
+  ('99300000-0000-4000-8000-000000000195');
 
 insert into public.ops_registration_subject_tracks(
   id, task_id, subject, pipeline_status, director_profile_id,
@@ -169,7 +214,96 @@ values
   ('99300000-0000-4000-8000-000000000156', '99300000-0000-4000-8000-000000000155', '영어', 'consultation_waiting', '99300000-0000-4000-8000-000000000005', 'manual', now(), false, 'observation_requested', 4, now(), 'consultation_completed', 1),
   ('99300000-0000-4000-8000-000000000166', '99300000-0000-4000-8000-000000000165', '영어', 'consultation_waiting', '99300000-0000-4000-8000-000000000005', 'manual', now(), false, 'observation_requested', 9, now(), 'consultation_completed', 1),
   ('99300000-0000-4000-8000-000000000176', '99300000-0000-4000-8000-000000000175', '영어', 'consultation_waiting', '99300000-0000-4000-8000-000000000005', 'manual', now(), false, 'observation_requested', 4, now(), 'consultation_completed', 1),
-  ('99300000-0000-4000-8000-000000000186', '99300000-0000-4000-8000-000000000185', '영어', 'consultation_waiting', '99300000-0000-4000-8000-000000000005', 'manual', now(), false, 'observation_requested', 1, now(), 'consultation_completed', 1);
+  ('99300000-0000-4000-8000-000000000186', '99300000-0000-4000-8000-000000000185', '영어', 'consultation_waiting', '99300000-0000-4000-8000-000000000005', 'manual', now(), false, 'observation_requested', 1, now(), 'consultation_completed', 1),
+  ('99300000-0000-4000-8000-000000000196', '99300000-0000-4000-8000-000000000195', '영어', 'consultation_waiting', '99300000-0000-4000-8000-000000000005', 'manual', now(), false, 'observation_requested', 1, now(), 'consultation_completed', 1);
+
+insert into public.ops_registration_admission_batches(
+  id, task_id, revision_number, status, invoice_sent_at,
+  payment_confirmed_at, created_at, updated_at
+)
+values (
+  '99300000-0000-4000-8000-000000000191',
+  '99300000-0000-4000-8000-000000000125',
+  91, 'paid', '2026-08-01 09:00:00+09', '2026-08-01 10:00:00+09',
+  '2026-08-01 08:00:00+09', '2026-08-01 10:00:00+09'
+);
+insert into public.ops_registration_enrollments(
+  id, track_id, class_id, status, makeedu_registered, roster_active,
+  sort_order, created_at, updated_at
+)
+values (
+  '99300000-0000-4000-8000-000000000192',
+  '99300000-0000-4000-8000-000000000126',
+  '99300000-0000-4000-8000-000000000103',
+  'planned', false, false, 91,
+  '2026-08-01 08:00:00+09', '2026-08-01 08:00:00+09'
+);
+create temporary table registration_observation_financial_state_before
+on commit drop
+as
+select pg_catalog.jsonb_build_object(
+  'enrollmentCount', (
+    select count(*)
+    from public.ops_registration_enrollments enrollment
+    where enrollment.track_id in (
+      '99300000-0000-4000-8000-000000000126',
+      '99300000-0000-4000-8000-000000000136',
+      '99300000-0000-4000-8000-000000000146',
+      '99300000-0000-4000-8000-000000000166'
+    )
+  ),
+  'enrollments', (
+    select coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.to_jsonb(enrollment) order by enrollment.id
+      ),
+      '[]'::jsonb
+    )
+    from public.ops_registration_enrollments enrollment
+    where enrollment.track_id in (
+      '99300000-0000-4000-8000-000000000126',
+      '99300000-0000-4000-8000-000000000136',
+      '99300000-0000-4000-8000-000000000146',
+      '99300000-0000-4000-8000-000000000166'
+    )
+  ),
+  'admissionCount', (
+    select count(*)
+    from public.ops_registration_admission_batches admission
+    where admission.task_id in (
+      '99300000-0000-4000-8000-000000000125',
+      '99300000-0000-4000-8000-000000000135',
+      '99300000-0000-4000-8000-000000000145',
+      '99300000-0000-4000-8000-000000000165'
+    )
+  ),
+  'admissions', (
+    select coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.to_jsonb(admission) order by admission.id
+      ),
+      '[]'::jsonb
+    )
+    from public.ops_registration_admission_batches admission
+    where admission.task_id in (
+      '99300000-0000-4000-8000-000000000125',
+      '99300000-0000-4000-8000-000000000135',
+      '99300000-0000-4000-8000-000000000145',
+      '99300000-0000-4000-8000-000000000165'
+    )
+  ),
+  'paymentCount', (
+    select count(*)
+    from public.ops_registration_admission_batches payment
+    where payment.task_id in (
+      '99300000-0000-4000-8000-000000000125',
+      '99300000-0000-4000-8000-000000000135',
+      '99300000-0000-4000-8000-000000000145',
+      '99300000-0000-4000-8000-000000000165'
+    )
+      and payment.payment_confirmed_at is not null
+  )
+) as state;
 
 insert into public.ops_registration_appointments(
   id, task_id, kind, scheduled_at, place, status,
@@ -184,7 +318,8 @@ values
   ('99300000-0000-4000-8000-000000000157', '99300000-0000-4000-8000-000000000155', 'observation_class', ((current_date - 1 + time '18:00') at time zone 'Asia/Seoul'), '본관', 'scheduled', 6, '99300000-0000-4000-8000-000000000001'),
   ('99300000-0000-4000-8000-000000000167', '99300000-0000-4000-8000-000000000165', 'observation_class', ((current_date - 1 + time '18:00') at time zone 'Asia/Seoul'), '본관', 'scheduled', 2, '99300000-0000-4000-8000-000000000001'),
   ('99300000-0000-4000-8000-000000000177', '99300000-0000-4000-8000-000000000175', 'observation_class', ((current_date - 1 + time '18:00') at time zone 'Asia/Seoul'), '본관', 'scheduled', 1, '99300000-0000-4000-8000-000000000001'),
-  ('99300000-0000-4000-8000-000000000187', '99300000-0000-4000-8000-000000000185', 'observation_class', ((current_date - 1 + time '18:00') at time zone 'Asia/Seoul'), '본관', 'scheduled', 7, '99300000-0000-4000-8000-000000000001');
+  ('99300000-0000-4000-8000-000000000187', '99300000-0000-4000-8000-000000000185', 'observation_class', ((current_date - 1 + time '18:00') at time zone 'Asia/Seoul'), '본관', 'scheduled', 7, '99300000-0000-4000-8000-000000000001'),
+  ('99300000-0000-4000-8000-000000000197', '99300000-0000-4000-8000-000000000195', 'observation_class', ((current_date - 1 + time '18:00') at time zone 'Asia/Seoul'), '본관', 'scheduled', 2, '99300000-0000-4000-8000-000000000001');
 
 insert into public.ops_registration_observations(
   id, task_id, track_id, appointment_id, class_id,
@@ -198,14 +333,54 @@ insert into public.ops_registration_observations(
 )
 values
   ('99300000-0000-4000-8000-000000000108', '99300000-0000-4000-8000-000000000105', '99300000-0000-4000-8000-000000000106', '99300000-0000-4000-8000-000000000107', '99300000-0000-4000-8000-000000000103', 'normalized', '99300000-0000-4000-8000-000000000114', null, current_date + 1, ((current_date + 1 + time '18:00') at time zone 'Asia/Seoul'), ((current_date + 1 + time '20:00') at time zone 'Asia/Seoul'), 'active', 8, null, '{"authority":"normalized","sessionId":"99300000-0000-4000-8000-000000000114","revision":8}'::jsonb, repeat('a', 64), '99300000-0000-4000-8000-000000000101', '99300000-0000-4000-8000-000000000003', '99300000-0000-4000-8000-000000000102', '영어', '청강 피드백 영어반', '청강 피드백 담당교사', '청강 피드백 101호', '본관', 'scheduled', 0, 1, '99300000-0000-4000-8000-000000000001', '99300000-0000-4000-8000-000000000001'),
-  ('99300000-0000-4000-8000-000000000118', '99300000-0000-4000-8000-000000000115', '99300000-0000-4000-8000-000000000116', '99300000-0000-4000-8000-000000000117', '99300000-0000-4000-8000-000000000103', 'normalized', '99300000-0000-4000-8000-000000000124', null, current_date, now() - interval '1 hour', now() + interval '1 hour', 'active', 9, null, '{"authority":"normalized","sessionId":"99300000-0000-4000-8000-000000000124","revision":9}'::jsonb, repeat('b', 64), '99300000-0000-4000-8000-000000000101', '99300000-0000-4000-8000-000000000003', '99300000-0000-4000-8000-000000000102', '영어', '청강 피드백 영어반', '청강 피드백 담당교사', '청강 피드백 101호', '본관', 'scheduled', 0, 1, '99300000-0000-4000-8000-000000000001', '99300000-0000-4000-8000-000000000001'),
+  ('99300000-0000-4000-8000-000000000118', '99300000-0000-4000-8000-000000000115', '99300000-0000-4000-8000-000000000116', '99300000-0000-4000-8000-000000000117', '99300000-0000-4000-8000-000000000103', 'normalized', '99300000-0000-4000-8000-000000000124', null, current_date, ((current_date + time '00:00') at time zone 'Asia/Seoul'), ((current_date + time '23:59') at time zone 'Asia/Seoul'), 'active', 9, null, '{"authority":"normalized","sessionId":"99300000-0000-4000-8000-000000000124","revision":9}'::jsonb, repeat('b', 64), '99300000-0000-4000-8000-000000000101', '99300000-0000-4000-8000-000000000003', '99300000-0000-4000-8000-000000000102', '영어', '청강 피드백 영어반', '청강 피드백 담당교사', '청강 피드백 101호', '본관', 'scheduled', 0, 1, '99300000-0000-4000-8000-000000000001', '99300000-0000-4000-8000-000000000001'),
   ('99300000-0000-4000-8000-000000000128', '99300000-0000-4000-8000-000000000125', '99300000-0000-4000-8000-000000000126', '99300000-0000-4000-8000-000000000127', '99300000-0000-4000-8000-000000000103', 'normalized', '99300000-0000-4000-8000-000000000104', null, current_date - 1, ((current_date - 1 + time '18:00') at time zone 'Asia/Seoul'), ((current_date - 1 + time '20:00') at time zone 'Asia/Seoul'), 'active', 7, null, '{"authority":"normalized","sessionId":"99300000-0000-4000-8000-000000000104","revision":7}'::jsonb, repeat('c', 64), '99300000-0000-4000-8000-000000000101', '99300000-0000-4000-8000-000000000003', '99300000-0000-4000-8000-000000000102', '영어', '청강 피드백 영어반', '청강 피드백 담당교사', '청강 피드백 101호', '본관', 'scheduled', 0, 4, '99300000-0000-4000-8000-000000000001', '99300000-0000-4000-8000-000000000001'),
   ('99300000-0000-4000-8000-000000000138', '99300000-0000-4000-8000-000000000135', '99300000-0000-4000-8000-000000000136', '99300000-0000-4000-8000-000000000137', '99300000-0000-4000-8000-000000000103', 'normalized', '99300000-0000-4000-8000-000000000104', null, current_date - 1, ((current_date - 1 + time '18:00') at time zone 'Asia/Seoul'), ((current_date - 1 + time '20:00') at time zone 'Asia/Seoul'), 'active', 7, null, '{"authority":"normalized","sessionId":"99300000-0000-4000-8000-000000000104","revision":7}'::jsonb, repeat('d', 64), '99300000-0000-4000-8000-000000000101', '99300000-0000-4000-8000-000000000003', '99300000-0000-4000-8000-000000000102', '영어', '청강 피드백 영어반', '청강 피드백 담당교사', '청강 피드백 101호', '본관', 'scheduled', 0, 7, '99300000-0000-4000-8000-000000000001', '99300000-0000-4000-8000-000000000001'),
   ('99300000-0000-4000-8000-000000000148', '99300000-0000-4000-8000-000000000145', '99300000-0000-4000-8000-000000000146', '99300000-0000-4000-8000-000000000147', '99300000-0000-4000-8000-000000000103', 'normalized', '99300000-0000-4000-8000-000000000104', null, current_date - 1, ((current_date - 1 + time '18:00') at time zone 'Asia/Seoul'), ((current_date - 1 + time '20:00') at time zone 'Asia/Seoul'), 'active', 7, null, '{"authority":"normalized","sessionId":"99300000-0000-4000-8000-000000000104","revision":7}'::jsonb, repeat('e', 64), '99300000-0000-4000-8000-000000000101', '99300000-0000-4000-8000-000000000003', '99300000-0000-4000-8000-000000000102', '영어', '청강 피드백 영어반', '청강 피드백 담당교사', '청강 피드백 101호', '본관', 'scheduled', 0, 3, '99300000-0000-4000-8000-000000000001', '99300000-0000-4000-8000-000000000001'),
   ('99300000-0000-4000-8000-000000000158', '99300000-0000-4000-8000-000000000155', '99300000-0000-4000-8000-000000000156', '99300000-0000-4000-8000-000000000157', '99300000-0000-4000-8000-000000000103', 'normalized', '99300000-0000-4000-8000-000000000104', null, current_date - 1, ((current_date - 1 + time '18:00') at time zone 'Asia/Seoul'), ((current_date - 1 + time '20:00') at time zone 'Asia/Seoul'), 'active', 7, null, '{"authority":"normalized","sessionId":"99300000-0000-4000-8000-000000000104","revision":7}'::jsonb, repeat('f', 64), '99300000-0000-4000-8000-000000000101', '99300000-0000-4000-8000-000000000003', '99300000-0000-4000-8000-000000000102', '영어', '청강 피드백 영어반', '청강 피드백 담당교사', '청강 피드백 101호', '본관', 'scheduled', 0, 9, '99300000-0000-4000-8000-000000000001', '99300000-0000-4000-8000-000000000001'),
   ('99300000-0000-4000-8000-000000000168', '99300000-0000-4000-8000-000000000165', '99300000-0000-4000-8000-000000000166', '99300000-0000-4000-8000-000000000167', '99300000-0000-4000-8000-000000000103', 'normalized', '99300000-0000-4000-8000-000000000104', null, current_date - 1, ((current_date - 1 + time '18:00') at time zone 'Asia/Seoul'), ((current_date - 1 + time '20:00') at time zone 'Asia/Seoul'), 'active', 7, null, '{"authority":"normalized","sessionId":"99300000-0000-4000-8000-000000000104","revision":7}'::jsonb, repeat('1', 64), '99300000-0000-4000-8000-000000000101', '99300000-0000-4000-8000-000000000003', '99300000-0000-4000-8000-000000000102', '영어', '청강 피드백 영어반', '청강 피드백 담당교사', '청강 피드백 101호', '본관', 'scheduled', 0, 2, '99300000-0000-4000-8000-000000000001', '99300000-0000-4000-8000-000000000001'),
   ('99300000-0000-4000-8000-000000000178', '99300000-0000-4000-8000-000000000175', '99300000-0000-4000-8000-000000000176', '99300000-0000-4000-8000-000000000177', '99300000-0000-4000-8000-000000000103', 'normalized', '99300000-0000-4000-8000-000000000104', null, current_date - 1, ((current_date - 1 + time '18:00') at time zone 'Asia/Seoul'), ((current_date - 1 + time '20:00') at time zone 'Asia/Seoul'), 'active', 7, null, '{"authority":"normalized","sessionId":"99300000-0000-4000-8000-000000000104","revision":7}'::jsonb, repeat('2', 64), '99300000-0000-4000-8000-000000000101', '99300000-0000-4000-8000-000000000003', '99300000-0000-4000-8000-000000000102', '영어', '청강 피드백 영어반', '청강 피드백 담당교사', '청강 피드백 101호', '본관', 'scheduled', 0, 6, '99300000-0000-4000-8000-000000000001', '99300000-0000-4000-8000-000000000001'),
-  ('99300000-0000-4000-8000-000000000188', '99300000-0000-4000-8000-000000000185', '99300000-0000-4000-8000-000000000186', '99300000-0000-4000-8000-000000000187', '99300000-0000-4000-8000-000000000103', 'normalized', '99300000-0000-4000-8000-000000000104', null, current_date - 1, ((current_date - 1 + time '18:00') at time zone 'Asia/Seoul'), ((current_date - 1 + time '20:00') at time zone 'Asia/Seoul'), 'active', 7, null, '{"authority":"normalized","sessionId":"99300000-0000-4000-8000-000000000104","revision":7}'::jsonb, repeat('3', 64), '99300000-0000-4000-8000-000000000101', '99300000-0000-4000-8000-000000000003', '99300000-0000-4000-8000-000000000102', '영어', '청강 피드백 영어반', '청강 피드백 담당교사', '청강 피드백 101호', '본관', 'scheduled', 0, 1, '99300000-0000-4000-8000-000000000001', '99300000-0000-4000-8000-000000000001');
+  ('99300000-0000-4000-8000-000000000188', '99300000-0000-4000-8000-000000000185', '99300000-0000-4000-8000-000000000186', '99300000-0000-4000-8000-000000000187', '99300000-0000-4000-8000-000000000103', 'normalized', '99300000-0000-4000-8000-000000000104', null, current_date - 1, ((current_date - 1 + time '18:00') at time zone 'Asia/Seoul'), ((current_date - 1 + time '20:00') at time zone 'Asia/Seoul'), 'active', 7, null, '{"authority":"normalized","sessionId":"99300000-0000-4000-8000-000000000104","revision":7}'::jsonb, repeat('3', 64), '99300000-0000-4000-8000-000000000101', '99300000-0000-4000-8000-000000000003', '99300000-0000-4000-8000-000000000102', '영어', '청강 피드백 영어반', '청강 피드백 담당교사', '청강 피드백 101호', '본관', 'scheduled', 0, 1, '99300000-0000-4000-8000-000000000001', '99300000-0000-4000-8000-000000000001'),
+  (
+    '99300000-0000-4000-8000-000000000198',
+    '99300000-0000-4000-8000-000000000195',
+    '99300000-0000-4000-8000-000000000196',
+    '99300000-0000-4000-8000-000000000197',
+    '99300000-0000-4000-8000-000000000193',
+    'legacy', null, 'feedback-legacy-session', current_date - 1,
+    ((current_date - 1 + time '18:00') at time zone 'Asia/Seoul'),
+    ((current_date - 1 + time '20:00') at time zone 'Asia/Seoul'),
+    'active', null,
+    dashboard_private.registration_observation_legacy_session_content_hash_v1(
+      (
+        select class.schedule_plan
+        from public.classes class
+        where class.id = '99300000-0000-4000-8000-000000000193'
+      ),
+      'feedback-legacy-session'
+    ),
+    pg_catalog.jsonb_build_object(
+      'authority', 'legacy',
+      'sessionKey', 'feedback-legacy-session',
+      'contentHash',
+        dashboard_private.registration_observation_legacy_session_content_hash_v1(
+          (
+            select class.schedule_plan
+            from public.classes class
+            where class.id = '99300000-0000-4000-8000-000000000193'
+          ),
+          'feedback-legacy-session'
+        )
+    ),
+    repeat('4', 64),
+    '99300000-0000-4000-8000-000000000101',
+    '99300000-0000-4000-8000-000000000003',
+    '99300000-0000-4000-8000-000000000102',
+    '영어', '청강 피드백 legacy 영어반', '청강 피드백 담당교사',
+    '청강 피드백 101호', '본관', 'scheduled', 0, 1,
+    '99300000-0000-4000-8000-000000000001',
+    '99300000-0000-4000-8000-000000000001'
+  );
 
 create or replace function pg_temp.registration_observation_feedback_set_actor(
   p_actor uuid
@@ -270,6 +445,11 @@ select ok(
     'service_role',
     'public.record_registration_observation_attendance_v1(uuid,bigint,integer,text)',
     'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'dashboard_private.assert_registration_observation_current_session_v1(uuid,text)',
+    'EXECUTE'
   ),
   'only authenticated owns the public feedback mutation surface'
 );
@@ -301,6 +481,7 @@ select is(
     join pg_catalog.pg_roles owner on owner.oid = procedure.proowner
     where namespace.nspname in ('public', 'dashboard_private')
       and procedure.proname in (
+        'assert_registration_observation_current_session_v1',
         'record_registration_observation_attendance_v1',
         'record_registration_observation_attendance_v1_impl',
         'submit_registration_observation_feedback_v1',
@@ -315,8 +496,8 @@ select is(
         where config.setting in ('search_path=', 'search_path=""')
       )
   ),
-  4::bigint,
-  'all four feedback functions are postgres owned with an empty search path'
+  5::bigint,
+  'all five feedback functions are postgres owned with an empty search path'
 );
 
 select pg_temp.registration_observation_feedback_set_actor(
@@ -332,6 +513,222 @@ select throws_ok(
   'attendance before start is rejected by canonical server time'
 );
 reset role;
+
+do $$
+begin
+  perform dashboard_private.with_continuous_class_schedule_audit_context_v1(
+    '99300000-0000-4000-8000-000000000103',
+    '99300000-0000-4000-8000-000000000201',
+    'registration_observation_feedback_submit_test'
+  );
+end;
+$$;
+update public.class_lesson_sessions lesson
+set session_date = current_date + 1,
+    revision = 8
+where lesson.id = '99300000-0000-4000-8000-000000000104';
+select pg_temp.registration_observation_feedback_set_actor(
+  '99300000-0000-4000-8000-000000000003'
+);
+set local role authenticated;
+select throws_ok(
+  $test$
+  do $mutation$
+  begin
+    perform public.submit_registration_observation_feedback_v1(
+      '99300000-0000-4000-8000-000000000148',
+      'no_show', null, null, 3, 0, 5,
+      'feedback-normalized-source-moved'
+    );
+    raise exception 'registration_observation_current_source_guard_missing'
+      using errcode = 'P0001';
+  end;
+  $mutation$;
+  $test$,
+  '55000', 'registration_observation_session_source_dirty',
+  'normalized moved session rejects no show against the stale snapshot'
+);
+reset role;
+update public.class_lesson_sessions lesson
+set session_date = current_date - 1,
+    revision = 7
+where lesson.id = '99300000-0000-4000-8000-000000000104';
+
+update public.class_lesson_sessions lesson
+set schedule_state = 'exception',
+    revision = 8
+where lesson.id = '99300000-0000-4000-8000-000000000104';
+select pg_temp.registration_observation_feedback_set_actor(
+  '99300000-0000-4000-8000-000000000002'
+);
+set local role authenticated;
+select throws_ok(
+  $test$
+  do $mutation$
+  begin
+    perform public.record_registration_observation_attendance_v1(
+      '99300000-0000-4000-8000-000000000128', 4, 3,
+      'feedback-normalized-source-canceled'
+    );
+    raise exception 'registration_observation_current_source_guard_missing'
+      using errcode = 'P0001';
+  end;
+  $mutation$;
+  $test$,
+  '55000', 'registration_observation_session_source_dirty',
+  'normalized canceled session rejects attendance against the stale snapshot'
+);
+reset role;
+update public.class_lesson_sessions lesson
+set schedule_state = 'active',
+    revision = 7
+where lesson.id = '99300000-0000-4000-8000-000000000104';
+
+update public.classes class
+set schedule_plan = pg_catalog.jsonb_set(
+  class.schedule_plan,
+  '{sessions,0,date}',
+  pg_catalog.to_jsonb((current_date + 1)::text),
+  false
+)
+where class.id = '99300000-0000-4000-8000-000000000193';
+select pg_temp.registration_observation_feedback_set_actor(
+  '99300000-0000-4000-8000-000000000003'
+);
+set local role authenticated;
+select throws_ok(
+  $test$
+  do $mutation$
+  begin
+    perform public.submit_registration_observation_feedback_v1(
+      '99300000-0000-4000-8000-000000000198',
+      'no_show', null, null, 1, 0, 2,
+      'feedback-legacy-source-moved'
+    );
+    raise exception 'registration_observation_current_source_guard_missing'
+      using errcode = 'P0001';
+  end;
+  $mutation$;
+  $test$,
+  '55000', 'registration_observation_session_source_dirty',
+  'legacy moved session rejects no show against the stale snapshot'
+);
+reset role;
+update public.classes class
+set schedule_plan = pg_catalog.jsonb_set(
+  class.schedule_plan,
+  '{sessions,0,date}',
+  pg_catalog.to_jsonb((current_date - 1)::text),
+  false
+)
+where class.id = '99300000-0000-4000-8000-000000000193';
+
+update public.classes class
+set schedule_plan = pg_catalog.jsonb_set(
+  class.schedule_plan,
+  '{sessions,0,scheduleState}',
+  '"skipped"'::jsonb,
+  false
+)
+where class.id = '99300000-0000-4000-8000-000000000193';
+select pg_temp.registration_observation_feedback_set_actor(
+  '99300000-0000-4000-8000-000000000003'
+);
+set local role authenticated;
+select throws_ok(
+  $test$
+  do $mutation$
+  begin
+    perform public.submit_registration_observation_feedback_v1(
+      '99300000-0000-4000-8000-000000000198',
+      'no_show', null, null, 1, 0, 2,
+      'feedback-legacy-source-canceled'
+    );
+    raise exception 'registration_observation_current_source_guard_missing'
+      using errcode = 'P0001';
+  end;
+  $mutation$;
+  $test$,
+  '55000', 'registration_observation_session_source_dirty',
+  'legacy canceled session rejects no show against the stale snapshot'
+);
+reset role;
+update public.classes class
+set schedule_plan = pg_catalog.jsonb_set(
+  class.schedule_plan,
+  '{sessions,0,scheduleState}',
+  '"active"'::jsonb,
+  false
+)
+where class.id = '99300000-0000-4000-8000-000000000193';
+
+select is(
+  (
+    select pg_catalog.jsonb_build_object(
+      'normalizedAttendance', (
+        select pg_catalog.jsonb_build_object(
+          'trackStatus', track.workflow_status,
+          'trackRevision', track.workflow_revision,
+          'observationStatus', observation.status,
+          'observationRevision', observation.revision,
+          'appointmentStatus', appointment.status
+        )
+        from public.ops_registration_observations observation
+        join public.ops_registration_subject_tracks track
+          on track.id = observation.track_id
+        join public.ops_registration_appointments appointment
+          on appointment.id = observation.appointment_id
+        where observation.id = '99300000-0000-4000-8000-000000000128'
+      ),
+      'normalizedNoShow', (
+        select pg_catalog.jsonb_build_object(
+          'trackStatus', track.workflow_status,
+          'trackRevision', track.workflow_revision,
+          'observationStatus', observation.status,
+          'observationRevision', observation.revision,
+          'appointmentStatus', appointment.status
+        )
+        from public.ops_registration_observations observation
+        join public.ops_registration_subject_tracks track
+          on track.id = observation.track_id
+        join public.ops_registration_appointments appointment
+          on appointment.id = observation.appointment_id
+        where observation.id = '99300000-0000-4000-8000-000000000148'
+      ),
+      'legacy', (
+        select pg_catalog.jsonb_build_object(
+          'trackStatus', track.workflow_status,
+          'trackRevision', track.workflow_revision,
+          'observationStatus', observation.status,
+          'observationRevision', observation.revision,
+          'appointmentStatus', appointment.status
+        )
+        from public.ops_registration_observations observation
+        join public.ops_registration_subject_tracks track
+          on track.id = observation.track_id
+        join public.ops_registration_appointments appointment
+          on appointment.id = observation.appointment_id
+        where observation.id = '99300000-0000-4000-8000-000000000198'
+      ),
+      'events', (
+        select count(*)
+        from dashboard_private.registration_observation_domain_events event
+        where event.observation_id in (
+          '99300000-0000-4000-8000-000000000128',
+          '99300000-0000-4000-8000-000000000148',
+          '99300000-0000-4000-8000-000000000198'
+        )
+      ),
+      'receipts', (
+        select count(*)
+        from dashboard_private.registration_observation_mutation_requests request
+        where request.request_key like 'feedback-%-source-%'
+      )
+    )
+  ),
+  '{"normalizedAttendance":{"trackStatus":"observation_requested","trackRevision":5,"observationStatus":"scheduled","observationRevision":4,"appointmentStatus":"scheduled"},"normalizedNoShow":{"trackStatus":"observation_requested","trackRevision":3,"observationStatus":"scheduled","observationRevision":3,"appointmentStatus":"scheduled"},"legacy":{"trackStatus":"observation_requested","trackRevision":1,"observationStatus":"scheduled","observationRevision":1,"appointmentStatus":"scheduled"},"events":0,"receipts":0}'::jsonb,
+  'current-source rejection performs zero lifecycle event and receipt DML'
+);
 
 select pg_temp.registration_observation_feedback_set_actor(
   '99300000-0000-4000-8000-000000000003'
@@ -700,6 +1097,82 @@ select throws_ok(
   'feedback request key conflict rejects a different fingerprint'
 );
 reset role;
+
+create temp table registration_observation_feedback_replay_state_before
+on commit drop
+as
+select pg_catalog.jsonb_build_object(
+  'appointment', pg_catalog.to_jsonb(appointment),
+  'observation', pg_catalog.to_jsonb(observation),
+  'track', pg_catalog.to_jsonb(track),
+  'eventCount', (
+    select count(*)
+    from dashboard_private.registration_observation_domain_events event
+    where event.observation_id = observation.id
+  ),
+  'receiptCount', (
+    select count(*)
+    from dashboard_private.registration_observation_mutation_requests request
+    where request.track_id = track.id
+  )
+) as state
+from public.ops_registration_observations observation
+join public.ops_registration_appointments appointment
+  on appointment.id = observation.appointment_id
+join public.ops_registration_subject_tracks track
+  on track.id = observation.track_id
+where observation.id = '99300000-0000-4000-8000-000000000138';
+
+update public.profiles
+set role = 'viewer',
+    updated_at = now()
+where id = '99300000-0000-4000-8000-000000000003';
+select pg_temp.registration_observation_feedback_set_actor(
+  '99300000-0000-4000-8000-000000000003'
+);
+set local role authenticated;
+select throws_ok(
+  $$select public.submit_registration_observation_feedback_v1(
+    '99300000-0000-4000-8000-000000000138',
+    'attended', 'unfit', '  진도 적응이 어려움  ', 7, 0, 4,
+    'feedback-atomic-success'
+  )$$,
+  'P0002', 'registration_observation_not_found',
+  'feedback replay rechecks the current role before returning a stored response'
+);
+reset role;
+select is(
+  (
+    select pg_catalog.jsonb_build_object(
+      'appointment', pg_catalog.to_jsonb(appointment),
+      'observation', pg_catalog.to_jsonb(observation),
+      'track', pg_catalog.to_jsonb(track),
+      'eventCount', (
+        select count(*)
+        from dashboard_private.registration_observation_domain_events event
+        where event.observation_id = observation.id
+      ),
+      'receiptCount', (
+        select count(*)
+        from dashboard_private.registration_observation_mutation_requests request
+        where request.track_id = track.id
+      )
+    )
+    from public.ops_registration_observations observation
+    join public.ops_registration_appointments appointment
+      on appointment.id = observation.appointment_id
+    join public.ops_registration_subject_tracks track
+      on track.id = observation.track_id
+    where observation.id = '99300000-0000-4000-8000-000000000138'
+  ),
+  (select state from registration_observation_feedback_replay_state_before),
+  'unauthorized feedback replay performs zero lifecycle event and receipt DML'
+);
+update public.profiles
+set role = 'teacher',
+    updated_at = now()
+where id = '99300000-0000-4000-8000-000000000003';
+
 select is(
   (
     select pg_catalog.jsonb_build_object(
@@ -890,28 +1363,72 @@ update dashboard_private.registration_observation_runtime_settings
 set activation_version = 1
 where singleton = true;
 
-select ok(
-  not exists (
-    select 1
-    from public.ops_registration_enrollments enrollment
-    where enrollment.track_id in (
-      '99300000-0000-4000-8000-000000000126',
-      '99300000-0000-4000-8000-000000000136',
-      '99300000-0000-4000-8000-000000000146',
-      '99300000-0000-4000-8000-000000000166'
-    )
-  )
-  and not exists (
-    select 1
-    from public.ops_registration_admission_batches admission
-    where admission.task_id in (
-      '99300000-0000-4000-8000-000000000125',
-      '99300000-0000-4000-8000-000000000135',
-      '99300000-0000-4000-8000-000000000145',
-      '99300000-0000-4000-8000-000000000165'
+select is(
+  pg_catalog.jsonb_build_object(
+    'enrollmentCount', (
+      select count(*)
+      from public.ops_registration_enrollments enrollment
+      where enrollment.track_id in (
+        '99300000-0000-4000-8000-000000000126',
+        '99300000-0000-4000-8000-000000000136',
+        '99300000-0000-4000-8000-000000000146',
+        '99300000-0000-4000-8000-000000000166'
+      )
+    ),
+    'enrollments', (
+      select coalesce(
+        pg_catalog.jsonb_agg(
+          pg_catalog.to_jsonb(enrollment) order by enrollment.id
+        ),
+        '[]'::jsonb
+      )
+      from public.ops_registration_enrollments enrollment
+      where enrollment.track_id in (
+        '99300000-0000-4000-8000-000000000126',
+        '99300000-0000-4000-8000-000000000136',
+        '99300000-0000-4000-8000-000000000146',
+        '99300000-0000-4000-8000-000000000166'
+      )
+    ),
+    'admissionCount', (
+      select count(*)
+      from public.ops_registration_admission_batches admission
+      where admission.task_id in (
+        '99300000-0000-4000-8000-000000000125',
+        '99300000-0000-4000-8000-000000000135',
+        '99300000-0000-4000-8000-000000000145',
+        '99300000-0000-4000-8000-000000000165'
+      )
+    ),
+    'admissions', (
+      select coalesce(
+        pg_catalog.jsonb_agg(
+          pg_catalog.to_jsonb(admission) order by admission.id
+        ),
+        '[]'::jsonb
+      )
+      from public.ops_registration_admission_batches admission
+      where admission.task_id in (
+        '99300000-0000-4000-8000-000000000125',
+        '99300000-0000-4000-8000-000000000135',
+        '99300000-0000-4000-8000-000000000145',
+        '99300000-0000-4000-8000-000000000165'
+      )
+    ),
+    'paymentCount', (
+      select count(*)
+      from public.ops_registration_admission_batches payment
+      where payment.task_id in (
+        '99300000-0000-4000-8000-000000000125',
+        '99300000-0000-4000-8000-000000000135',
+        '99300000-0000-4000-8000-000000000145',
+        '99300000-0000-4000-8000-000000000165'
+      )
+        and payment.payment_confirmed_at is not null
     )
   ),
-  'attendance feedback and no show create no enrollment admission or payment facts'
+  (select state from registration_observation_financial_state_before),
+  'attendance feedback and no show preserve exact enrollment admission and payment facts'
 );
 
 create temporary table registration_observation_feedback_concurrency_results(
@@ -921,18 +1438,73 @@ create temporary table registration_observation_feedback_concurrency_results(
   message text
 ) on commit drop;
 
+create function pg_temp.registration_observation_feedback_waiting_workers()
+returns bigint
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_waiting bigint := 0;
+  v_deadline timestamptz := pg_catalog.clock_timestamp() + interval '5 seconds';
+begin
+  loop
+    select count(*)
+    into v_waiting
+    from pg_catalog.pg_stat_activity activity
+    where activity.application_name in (
+      'feedback_submit_a',
+      'feedback_submit_b'
+    )
+      and activity.wait_event_type = 'Lock'
+      and pg_catalog.cardinality(
+        pg_catalog.pg_blocking_pids(activity.pid)
+      ) > 0;
+
+    exit when v_waiting = 2
+      or pg_catalog.clock_timestamp() >= v_deadline;
+    perform pg_catalog.pg_sleep(0.02);
+  end loop;
+
+  return v_waiting;
+end;
+$$;
+
+select dblink_connect(
+  'feedback_submit_blocker',
+  'hostaddr=' || pg_catalog.host(pg_catalog.inet_server_addr())
+    || ' port=5432 dbname=' || current_database()
+    || ' user=postgres password=postgres'
+    || ' application_name=feedback_submit_blocker'
+);
+
 select dblink_connect(
   'feedback_submit_a',
   'hostaddr=' || pg_catalog.host(pg_catalog.inet_server_addr())
     || ' port=5432 dbname=' || current_database()
     || ' user=postgres password=postgres'
+    || ' application_name=feedback_submit_a'
 );
 select dblink_connect(
   'feedback_submit_b',
   'hostaddr=' || pg_catalog.host(pg_catalog.inet_server_addr())
     || ' port=5432 dbname=' || current_database()
     || ' user=postgres password=postgres'
+    || ' application_name=feedback_submit_b'
 );
+select dblink_exec('feedback_submit_blocker', 'begin');
+select dblink_exec('feedback_submit_blocker', $remote$
+  do $blocker$
+  begin
+    perform track.id
+    from public.ops_registration_subject_tracks track
+    where track.id = '99200000-0000-4000-8000-000000000106'
+    for update;
+    if not found then
+      raise exception 'feedback_submit_blocker_target_missing';
+    end if;
+  end;
+  $blocker$;
+$remote$);
 select dblink_exec(connection_name, $remote$
   create or replace function pg_temp.registration_observation_feedback_capture(
     p_sql text
@@ -993,6 +1565,12 @@ select dblink_send_query(
     )$statement$
   )$query$
 );
+select is(
+  pg_temp.registration_observation_feedback_waiting_workers(),
+  2::bigint,
+  'both feedback workers overlap while waiting for the contested track lock'
+);
+select dblink_exec('feedback_submit_blocker', 'rollback');
 insert into registration_observation_feedback_concurrency_results
 select 'a', result.*
 from dblink_get_result('feedback_submit_a')
@@ -1064,6 +1642,7 @@ select is(
 
 select dblink_disconnect('feedback_submit_a');
 select dblink_disconnect('feedback_submit_b');
+select dblink_disconnect('feedback_submit_blocker');
 
 create or replace function pg_temp.registration_observation_fail_feedback_event()
 returns trigger

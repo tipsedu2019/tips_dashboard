@@ -48,7 +48,7 @@ test("attendance and feedback require every approved revision", async () => {
   assert.match(sql, /observation_no_show|observation_feedback_submitted/);
   assert.doesNotMatch(
     sql,
-    /insert into public\.ops_registration_enrollments|payment/,
+    /(?:insert into|update|delete from) public\.(?:ops_registration_enrollments|ops_registration_admission_batches)|payment/,
   );
 });
 
@@ -98,6 +98,58 @@ test("feedback mutations keep actor request locks before track observation appoi
     sql,
     /grant\s+(?:insert|update|delete|all)\s+on\s+(?:table\s+)?(?:public\.ops_registration_observations|public\.ops_registration_appointments|public\.ops_registration_subject_tracks)/i,
   );
+});
+
+test("feedback time boundaries lock and compare the current normalized or legacy source", async () => {
+  // Production break caught: attendance/no-show/feedback trusts the booking
+  // snapshot after the source lesson moved, was canceled, or changed authority.
+  const sql = await readFile(migrationPath, "utf8");
+  const sourceDefinition = functionDefinition(
+    sql,
+    "dashboard_private.assert_registration_observation_current_session_v1",
+  );
+  assert.match(sourceDefinition, /security\s+definer/i);
+  assert.match(sourceDefinition, /set\s+search_path\s*=\s*''/i);
+  assert.match(
+    sourceDefinition,
+    /registration_observation_active_actor_v1\s*\(/i,
+  );
+  for (const token of [
+    "public.classes",
+    "public.class_lesson_sessions",
+    "public.class_schedule_slots",
+    "registration_observation_legacy_session_content_hash_v1",
+    "session_source_revision",
+    "legacy_session_source_hash",
+    "source_revision",
+    "for share",
+  ]) assert.match(sourceDefinition, new RegExp(token, "i"));
+  assert.match(
+    sourceDefinition,
+    /registration_observation_session_source_dirty/i,
+  );
+  assert.doesNotMatch(
+    sql,
+    /grant\s+execute\s+on\s+function\s+dashboard_private\.assert_registration_observation_current_session_v1/i,
+  );
+
+  for (const name of [
+    "dashboard_private.record_registration_observation_attendance_v1_impl",
+    "dashboard_private.submit_registration_observation_feedback_v1_impl",
+  ]) {
+    const definition = functionDefinition(sql, name);
+    const sourceCheck = definition.indexOf(
+      "assert_registration_observation_current_session_v1",
+    );
+    const boundaryError = definition.indexOf(
+      "registration_observation_time_boundary_rejected",
+    );
+    assert.ok(sourceCheck >= 0 && sourceCheck < boundaryError);
+    assert.doesNotMatch(
+      definition,
+      /pg_catalog\.now\(\)\s*<\s*v_observation\.(?:starts_at|ends_at)/i,
+    );
+  }
 });
 
 test("feedback submit pgTAP owns lifecycle boundaries replay revisions proxy and race assertions", async () => {
