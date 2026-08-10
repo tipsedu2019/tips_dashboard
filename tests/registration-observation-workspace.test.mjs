@@ -473,7 +473,7 @@ test("saving blocks every dialog close path", async () => {
   assert.equal(completed.shouldRestoreTriggerFocus, true)
 })
 
-test("a completed dialog close restores explicit trigger focus after the dialog unmounts", async () => {
+test("a connected enabled dialog trigger wins over the stable fallback target", async () => {
   const { restoreRegistrationObservationDialogTriggerFocus } = await loadEditorModel()
   assert.equal(
     typeof restoreRegistrationObservationDialogTriggerFocus,
@@ -483,14 +483,99 @@ test("a completed dialog close restores explicit trigger focus after the dialog 
 
   const scheduled = []
   const focusCalls = []
-  restoreRegistrationObservationDialogTriggerFocus(
-    { focus: (options) => focusCalls.push(options) },
+  const handled = restoreRegistrationObservationDialogTriggerFocus(
+    {
+      isConnected: true,
+      disabled: false,
+      focus: (options) => focusCalls.push({ target: "trigger", options }),
+    },
     (callback) => scheduled.push(callback),
+    {
+      isConnected: true,
+      disabled: false,
+      focus: (options) => focusCalls.push({ target: "fallback", options }),
+    },
   )
+  assert.equal(handled, true)
   assert.deepEqual(focusCalls, [], "focus restoration must wait until the dialog has closed")
   assert.equal(scheduled.length, 1)
   scheduled[0]()
-  assert.deepEqual({ ...focusCalls[0] }, { preventScroll: true })
+  assert.equal(focusCalls[0].target, "trigger")
+  assert.deepEqual({ ...focusCalls[0].options }, { preventScroll: true })
+})
+
+test("a detached or disabled dialog trigger falls back to the connected subject tab", async () => {
+  const { restoreRegistrationObservationDialogTriggerFocus } = await loadEditorModel()
+  assert.equal(typeof restoreRegistrationObservationDialogTriggerFocus, "function")
+
+  for (const trigger of [
+    { isConnected: false, disabled: false },
+    { isConnected: true, disabled: true },
+  ]) {
+    const scheduled = []
+    const focusCalls = []
+    const handled = restoreRegistrationObservationDialogTriggerFocus(
+      { ...trigger, focus: () => focusCalls.push("trigger") },
+      (callback) => scheduled.push(callback),
+      {
+        isConnected: true,
+        disabled: false,
+        focus: () => focusCalls.push("fallback"),
+      },
+    )
+    assert.equal(handled, true)
+    assert.equal(scheduled.length, 1)
+    scheduled[0]()
+    assert.deepEqual(focusCalls, ["fallback"])
+  }
+})
+
+test("focus restoration rechecks a trigger that detaches before the scheduled frame", async () => {
+  const { restoreRegistrationObservationDialogTriggerFocus } = await loadEditorModel()
+  const scheduled = []
+  const focusCalls = []
+  const trigger = {
+    isConnected: true,
+    disabled: false,
+    focus: () => focusCalls.push("trigger"),
+  }
+  const fallback = {
+    isConnected: true,
+    disabled: false,
+    focus: () => focusCalls.push("fallback"),
+  }
+
+  const handled = restoreRegistrationObservationDialogTriggerFocus(
+    trigger,
+    (callback) => scheduled.push(callback),
+    fallback,
+  )
+  assert.equal(handled, true, "a live candidate should suppress Radix default focus")
+  trigger.isConnected = false
+  scheduled[0]()
+  assert.deepEqual(focusCalls, ["fallback"])
+})
+
+test("no valid dialog focus target leaves Radix default focus restoration untouched", async () => {
+  const { restoreRegistrationObservationDialogTriggerFocus } = await loadEditorModel()
+  assert.equal(typeof restoreRegistrationObservationDialogTriggerFocus, "function")
+
+  for (const [trigger, fallback] of [
+    [null, null],
+    [
+      { isConnected: false, disabled: false, focus: () => assert.fail("detached trigger focused") },
+      { isConnected: true, disabled: true, focus: () => assert.fail("disabled fallback focused") },
+    ],
+  ]) {
+    const scheduled = []
+    const handled = restoreRegistrationObservationDialogTriggerFocus(
+      trigger,
+      (callback) => scheduled.push(callback),
+      fallback,
+    )
+    assert.equal(handled, false)
+    assert.deepEqual(scheduled, [])
+  }
 })
 
 test("withdrawal dialog wires correction validation to the field, disabled submit, and RPC guard", async () => {
@@ -546,6 +631,44 @@ test("save and withdrawal dialogs wire guarded close and explicit focus return o
     2,
     "footer close controls must not close during a mutation",
   )
+})
+
+test("dialog close focus falls back to the active subject tab before suppressing Radix default", async () => {
+  const source = await readSource("src/features/tasks/registration-observation-editor.tsx")
+  const fallbackLookup = /document\.getElementById\(`registration-subject-tab-\$\{trackId\}`\)/g
+  assert.equal(
+    (source.match(fallbackLookup) || []).length,
+    2,
+    "save and withdrawal dialogs must both resolve the persistent active-subject tab",
+  )
+
+  for (const [handlerName, startMarker, endMarker] of [
+    [
+      "handleSaveDialogCloseAutoFocus",
+      "function handleSaveDialogCloseAutoFocus",
+      "function handleWithdrawDialogCloseAutoFocus",
+    ],
+    [
+      "handleWithdrawDialogCloseAutoFocus",
+      "function handleWithdrawDialogCloseAutoFocus",
+      "\n  useEffect(() => {",
+    ],
+  ]) {
+    const start = source.indexOf(startMarker)
+    const end = source.indexOf(endMarker, start + 1)
+    assert.ok(start >= 0 && end > start, `${handlerName} must remain explicit`)
+    const handler = source.slice(start, end)
+    assert.match(
+      handler,
+      /const focusRestored = restoreRegistrationObservationDialogTriggerFocus\(/,
+    )
+    assert.match(handler, /if \(focusRestored\) event\.preventDefault\(\)/)
+    assert.ok(
+      handler.indexOf("restoreRegistrationObservationDialogTriggerFocus(")
+        < handler.indexOf("event.preventDefault()"),
+      `${handlerName} must leave Radix default focus available when no target is valid`,
+    )
+  }
 })
 
 test("observation UI errors normalize domain, timeout, network, and prerequisite failures", async () => {

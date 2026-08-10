@@ -140,10 +140,26 @@ export function getRegistrationObservationDialogClosePlan(input: {
 }
 
 export function restoreRegistrationObservationDialogTriggerFocus(
-  trigger: { focus: (options?: FocusOptions) => void } | null,
+  trigger: {
+    focus: (options?: FocusOptions) => void
+    isConnected: boolean
+    disabled?: boolean
+  } | null,
   schedule: (callback: () => void) => void,
+  fallback: {
+    focus: (options?: FocusOptions) => void
+    isConnected: boolean
+    disabled?: boolean
+  } | null = null,
 ) {
-  schedule(() => trigger?.focus({ preventScroll: true }))
+  const focusTarget = () => trigger?.isConnected && !trigger.disabled
+    ? trigger
+    : fallback?.isConnected && !fallback.disabled
+      ? fallback
+      : null
+  if (!focusTarget()) return false
+  schedule(() => focusTarget()?.focus({ preventScroll: true }))
+  return true
 }
 
 type RegistrationObservationBookingDraftInput = Readonly<{
@@ -590,19 +606,21 @@ export function RegistrationObservationEditor({
   }
 
   function handleSaveDialogCloseAutoFocus(event: Event) {
-    event.preventDefault()
-    restoreRegistrationObservationDialogTriggerFocus(
+    const focusRestored = restoreRegistrationObservationDialogTriggerFocus(
       saveDialogTriggerRef.current,
       (callback) => window.requestAnimationFrame(callback),
+      document.getElementById(`registration-subject-tab-${trackId}`),
     )
+    if (focusRestored) event.preventDefault()
   }
 
   function handleWithdrawDialogCloseAutoFocus(event: Event) {
-    event.preventDefault()
-    restoreRegistrationObservationDialogTriggerFocus(
+    const focusRestored = restoreRegistrationObservationDialogTriggerFocus(
       withdrawDialogTriggerRef.current,
       (callback) => window.requestAnimationFrame(callback),
+      document.getElementById(`registration-subject-tab-${trackId}`),
     )
+    if (focusRestored) event.preventDefault()
   }
 
   useEffect(() => {

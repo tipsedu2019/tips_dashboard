@@ -459,6 +459,10 @@ function createClient({ queryHandler, rpcHandler } = {}) {
         query.filters.push(["not", column, operator, value]);
         return fluent;
       },
+      or(filters) {
+        query.filters.push(["or", filters]);
+        return fluent;
+      },
       gte(column, value) {
         query.filters.push(["gte", column, value]);
         return fluent;
@@ -934,6 +938,17 @@ const caseDetailObservationSecrets = {
   afterValue: "private-observation-audit-after-value",
 };
 
+const caseDetailObservationEventServerOrFilter = [
+  "event_type.neq.registration_track_event",
+  "after_value.is.null",
+  'after_value.not.match.".*\\"event_type\\": \\"registration_observation_.*"',
+  'after_value.not.match.".*\\"version\\": 2.*"',
+].join(",");
+
+function toPostgresJsonbText(value) {
+  return JSON.stringify(value).replaceAll('\":', '\": ');
+}
+
 function detailRowsWithObservationSecrets(query) {
   const result = detailRows(query.table);
   const hasExactFilter = (expected) => query.filters.some((filter) => (
@@ -943,8 +958,11 @@ function detailRowsWithObservationSecrets(query) {
   const hidesObservationAppointments = hasExactFilter([
     "neq", "kind", "observation_class",
   ]);
-  const hidesObservationEvents = hasExactFilter([
+  const hidesOuterObservationEvents = hasExactFilter([
     "not", "event_type", "like", "registration_observation_%",
+  ]);
+  const hidesCanonicalObservationEvents = hasExactFilter([
+    "or", caseDetailObservationEventServerOrFilter,
   ]);
   if (query.table === "ops_registration_subject_tracks") {
     return {
@@ -996,8 +1014,44 @@ function detailRowsWithObservationSecrets(query) {
           id: "event-observation-reason-private",
           task_id: "task-1",
           actor_id: "profile-1",
-          event_type: "registration_observation_withdrawn",
+          event_type: "registration_track_event",
           field_name: "registration_observation:track-1",
+          before_value: null,
+          after_value: toPostgresJsonbText({
+            version: 2,
+            event_type: "registration_observation_withdrawn",
+            actor_profile_id: "profile-1",
+            actor_kind: "user",
+            system_source: null,
+            track_id: "track-1",
+            subject: "영어",
+            source: "observation_feedback_pending",
+            destination: "consultation_completed",
+            reason_code: "director_correction",
+            metadata: {
+              reason: caseDetailObservationSecrets.reason,
+              afterValue: caseDetailObservationSecrets.afterValue,
+            },
+            occurred_at: "2026-08-14T10:00:00+09:00",
+          }),
+          created_at: "2026-08-14T01:00:00Z",
+        },
+        {
+          id: "event-observation-legacy-private",
+          task_id: "task-1",
+          actor_id: "profile-1",
+          event_type: "registration_observation_audit_payload",
+          field_name: "registration_observation:track-1",
+          before_value: null,
+          after_value: caseDetailObservationSecrets.afterValue,
+          created_at: "2026-08-14T01:01:00Z",
+        },
+        {
+          id: "event-observation-v1-private",
+          task_id: "task-1",
+          actor_id: "profile-1",
+          event_type: "registration_track_event",
+          field_name: "registration_track:track-1",
           before_value: null,
           after_value: JSON.stringify({
             version: 1,
@@ -1008,24 +1062,85 @@ function detailRowsWithObservationSecrets(query) {
             source: "observation_feedback_pending",
             destination: "consultation_completed",
             reason: caseDetailObservationSecrets.reason,
-            metadata: {},
-            occurredAt: "2026-08-14T10:00:00+09:00",
+            metadata: { afterValue: caseDetailObservationSecrets.afterValue },
+            occurredAt: "2026-08-14T10:01:00+09:00",
           }),
-          created_at: "2026-08-14T01:00:00Z",
+          created_at: "2026-08-14T01:01:30Z",
         },
         {
-          id: "event-observation-audit-private",
+          id: "event-public-v2",
           task_id: "task-1",
           actor_id: "profile-1",
-          event_type: "registration_observation_audit_payload",
-          field_name: "registration_observation:track-1",
+          event_type: "registration_track_event",
+          field_name: "registration_track:track-1",
           before_value: null,
-          after_value: caseDetailObservationSecrets.afterValue,
-          created_at: "2026-08-14T01:01:00Z",
+          after_value: toPostgresJsonbText({
+            version: 2,
+            event_type: "registration_consultation_completed",
+            actor_profile_id: "profile-1",
+            actor_kind: "user",
+            system_source: null,
+            track_id: "track-1",
+            subject: "영어",
+            source: "consultation_requested",
+            destination: "consultation_completed",
+            reason_code: null,
+            metadata: {
+              consultationId: "consultation-public",
+              note: "registration_observation_reference_only",
+            },
+            occurred_at: "2026-08-14T10:02:00+09:00",
+          }),
+          created_at: "2026-08-14T01:02:00Z",
         },
-      ].filter((row) => (
-        !hidesObservationEvents || !row.event_type.startsWith("registration_observation_")
-      )),
+        {
+          id: "event-legacy-null",
+          task_id: "task-1",
+          actor_id: null,
+          event_type: "legacy_history_marker",
+          field_name: "legacy",
+          before_value: null,
+          after_value: null,
+          created_at: "2026-08-14T01:03:00Z",
+        },
+        {
+          id: "event-malformed-non-v2",
+          task_id: "task-1",
+          actor_id: null,
+          event_type: "registration_track_event",
+          field_name: "registration_track:track-1",
+          before_value: null,
+          after_value: "{malformed non-v2 history",
+          created_at: "2026-08-14T01:04:00Z",
+        },
+        {
+          id: "event-json-non-v2",
+          task_id: "task-1",
+          actor_id: null,
+          event_type: "registration_track_event",
+          field_name: "registration_track:track-1",
+          before_value: null,
+          after_value: toPostgresJsonbText({
+            version: 3,
+            event_type: "registration_observation_future_shape",
+            metadata: { note: "unknown payload version stays legacy" },
+          }),
+          created_at: "2026-08-14T01:05:00Z",
+        },
+      ].filter((row) => {
+        if (
+          hidesOuterObservationEvents
+          && row.event_type.startsWith("registration_observation_")
+        ) return false;
+        if (
+          hidesCanonicalObservationEvents
+          && row.event_type === "registration_track_event"
+          && row.after_value !== null
+          && String(row.after_value).includes('\"version\": 2')
+          && String(row.after_value).includes('\"event_type\": \"registration_observation_')
+        ) return false;
+        return true;
+      }),
     };
   }
   return result;
@@ -1033,6 +1148,10 @@ function detailRowsWithObservationSecrets(query) {
 
 function assertCaseDetailOmitsObservationSecrets(detail) {
   const payload = JSON.stringify(detail);
+  const publicV2 = detail.events.find((event) => event.id === "event-public-v2");
+  const legacyNull = detail.events.find((event) => event.id === "event-legacy-null");
+  const malformed = detail.events.find((event) => event.id === "event-malformed-non-v2");
+  const jsonNonV2 = detail.events.find((event) => event.id === "event-json-non-v2");
   assert.deepEqual({
     appointmentIds: Array.from(detail.appointments, (appointment) => appointment.id),
     eventIds: Array.from(detail.events, (event) => event.id),
@@ -1044,6 +1163,24 @@ function assertCaseDetailOmitsObservationSecrets(detail) {
       detail.events.filter((event) => event.eventType.startsWith("registration_observation_")),
       (event) => event.eventType,
     ),
+    preservedEventShapes: {
+      publicV2: publicV2 ? {
+        eventType: publicV2.eventType,
+        metadata: { ...publicV2.metadata },
+      } : null,
+      legacyNull: legacyNull ? {
+        eventType: legacyNull.eventType,
+        legacyText: legacyNull.legacyText,
+      } : null,
+      malformed: malformed ? {
+        eventType: malformed.eventType,
+        legacyText: malformed.legacyText,
+      } : null,
+      jsonNonV2: jsonNonV2 ? {
+        eventType: jsonNonV2.eventType,
+        legacyText: jsonNonV2.legacyText,
+      } : null,
+    },
     exposedSecrets: {
       scheduledAt: payload.includes(caseDetailObservationSecrets.scheduledAt),
       place: payload.includes(caseDetailObservationSecrets.place),
@@ -1052,9 +1189,41 @@ function assertCaseDetailOmitsObservationSecrets(detail) {
     },
   }, {
     appointmentIds: ["appointment-1"],
-    eventIds: ["event-canonical", "event-legacy"],
+    eventIds: [
+      "event-canonical",
+      "event-legacy",
+      "event-public-v2",
+      "event-legacy-null",
+      "event-malformed-non-v2",
+      "event-json-non-v2",
+    ],
     observationAppointmentKinds: [],
     observationEventTypes: [],
+    preservedEventShapes: {
+      publicV2: {
+        eventType: "registration_consultation_completed",
+        metadata: {
+          consultationId: "consultation-public",
+          note: "registration_observation_reference_only",
+        },
+      },
+      legacyNull: {
+        eventType: "legacy_history_marker",
+        legacyText: null,
+      },
+      malformed: {
+        eventType: "registration_track_event",
+        legacyText: "{malformed non-v2 history",
+      },
+      jsonNonV2: {
+        eventType: "registration_track_event",
+        legacyText: toPostgresJsonbText({
+          version: 3,
+          event_type: "registration_observation_future_shape",
+          metadata: { note: "unknown payload version stays legacy" },
+        }),
+      },
+    },
     exposedSecrets: {
       scheduledAt: false,
       place: false,
@@ -1080,6 +1249,7 @@ function assertCaseDetailUsesServerPrivacyFilters(harness) {
     eventFilters: [
       ["eq", "task_id", "task-1"],
       ["not", "event_type", "like", "registration_observation_%"],
+      ["or", caseDetailObservationEventServerOrFilter],
     ],
   });
 }
@@ -1855,6 +2025,7 @@ test("detail loader embeds track children in six scoped reads, maps rows, and sh
   assert.deepEqual(events.filters, [
     ["eq", "task_id", "task-1"],
     ["not", "event_type", "like", "registration_observation_%"],
+    ["or", caseDetailObservationEventServerOrFilter],
   ]);
   assert.ok(!events.filters.some((filter) => filter[0] === "in" && filter[1] === "event_type"));
   const messages = harness.queries.find((query) => query.table === "ops_registration_messages");
