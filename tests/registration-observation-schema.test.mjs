@@ -16,6 +16,10 @@ const bookingMigrationPath = path.join(
   repositoryRoot,
   "supabase/migrations/20260809102000_registration_observation_booking.sql",
 );
+const feedbackAccessMigrationPath = path.join(
+  repositoryRoot,
+  "supabase/migrations/20260809102500_registration_observation_feedback_access.sql",
+);
 
 const READ_ASSERTION_PATTERN =
   /^select\s+(?:ok|is|isnt|has_[a-z_]+|function_[a-z_]+|throws_ok|lives_ok|is_empty|isnt_empty)\s*\(/gim;
@@ -188,5 +192,23 @@ test("booking migration supplies every lifecycle signature anticipated by core r
   assert.doesNotMatch(
     bookingSql,
     /update\s+dashboard_private\.registration_observation_runtime_settings\s+set\s+activation_version\s*=\s*1/i,
+  );
+});
+
+test("feedback access migration supplies the exact read signature anticipated by core readiness", async () => {
+  const coreSql = await migrationSql();
+  const accessSql = await readFile(feedbackAccessMigrationPath, "utf8");
+  const signature = "public.get_registration_observation_feedback_v1(uuid)";
+  assert.match(
+    coreSql,
+    new RegExp(signature.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+  );
+  assert.match(
+    accessSql,
+    /create\s+(?:or\s+replace\s+)?function\s+public\.get_registration_observation_feedback_v1\s*\(/i,
+  );
+  assert.match(
+    accessSql,
+    /alter\s+function\s+public\.get_registration_observation_feedback_v1\(uuid\)\s+owner\s+to\s+postgres/i,
   );
 });
