@@ -16,6 +16,10 @@ import {
 import {
   createRegistrationNotificationProcessingReadinessLoader,
 } from "../src/features/tasks/registration-notification-processing-readiness.ts"
+import {
+  EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
+  normalizeRegistrationObservationSummary,
+} from "../src/features/tasks/registration-observation-model.ts"
 
 const academicSubjectRegistry = {
   ACADEMIC_SUBJECT_VALUES,
@@ -174,6 +178,20 @@ async function loadServiceBoundary({
           invalidateRegistrationSubjectTrackRuntimeAfterReadyFailure(error) { throw error },
         }
       }
+      if (specifier === "./registration-observation-model.ts") {
+        return {
+          EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
+          normalizeRegistrationObservationSummary,
+        }
+      }
+      if (specifier === "./registration-observation-runtime-probe.ts") {
+        return {
+          probeRegistrationObservationRuntime: async () => ({
+            available: true,
+            runtimeVersion: 1,
+          }),
+        }
+      }
       if (specifier === "./registration-notification-processing-readiness") {
         return { createRegistrationNotificationProcessingReadinessLoader }
       }
@@ -241,6 +259,172 @@ test("fixture gate is exact and production always ignores the query", async () =
   assert.equal(shouldEnableRegistrationSubjectTrackFixture("staging", "registration-subject-tracks"), false)
   assert.equal(shouldEnableRegistrationSubjectTrackFixture("development", "registration-subject-tracks-extra"), false)
   assert.equal(shouldEnableRegistrationSubjectTrackFixture("development", ""), false)
+})
+
+test("fixture track summaries expose the inert observation summary scalars", async () => {
+  const fixture = await loadFixtureModule()
+  const state = fixture.createRegistrationSubjectTrackFixtureState()
+  const firstTrack = Object.values(state.caseDetails)[0].tracks[0]
+
+  assert.deepEqual(plain({
+    observationAttemptCount: firstTrack.observationAttemptCount,
+    observationCurrentId: firstTrack.observationCurrentId,
+    observationCurrentStatus: firstTrack.observationCurrentStatus,
+    observationCurrentAppointmentId: firstTrack.observationCurrentAppointmentId,
+    observationNearestScheduledAt: firstTrack.observationNearestScheduledAt,
+    observationNearestPlace: firstTrack.observationNearestPlace,
+    observationNotificationRevision: firstTrack.observationNotificationRevision,
+    observationRevision: firstTrack.observationRevision,
+    observationFeedbackRevision: firstTrack.observationFeedbackRevision,
+  }), {
+    observationAttemptCount: 0,
+    observationCurrentId: null,
+    observationCurrentStatus: null,
+    observationCurrentAppointmentId: null,
+    observationNearestScheduledAt: null,
+    observationNearestPlace: null,
+    observationNotificationRevision: null,
+    observationRevision: null,
+    observationFeedbackRevision: null,
+  })
+})
+
+test("fixture observation client replays an exact request key without a second revision", async () => {
+  const fixture = await loadFixtureModule()
+  let state = fixture.createRegistrationSubjectTrackFixtureState()
+  const runtime = {
+    getState: () => state,
+    replaceState: (next) => { state = next },
+  }
+  const adapter = fixture.createRegistrationSubjectTrackFixtureAdapter(runtime)
+  const client = adapter.observationClient
+  const input = {
+    p_track_id: "20000000-0000-4000-8000-000000000001",
+    p_expected_workflow_revision: 7,
+    p_request_key: "fixture-observation-enter-1",
+  }
+
+  const first = await client
+    .rpc("enter_registration_observation_v1", input)
+    .abortSignal({ fixture: true })
+    .retry(false)
+  const afterFirst = plain(first)
+  const revisionAfterFirst = state.observation.managerDetails[input.p_track_id].track.workflowRevision
+  const replay = await client
+    .rpc("enter_registration_observation_v1", input)
+    .abortSignal({ fixture: true })
+    .retry(false)
+
+  assert.deepEqual(plain(replay), afterFirst)
+  assert.equal(revisionAfterFirst, 8)
+  assert.equal(state.observation.managerDetails[input.p_track_id].track.workflowRevision, 8)
+  assert.equal(state.observation.receipts[input.p_request_key].requestKey, input.p_request_key)
+
+  await assert.rejects(
+    Promise.resolve(client
+      .rpc("enter_registration_observation_v1", {
+        ...input,
+        p_expected_workflow_revision: 8,
+      })
+      .abortSignal({ fixture: true })
+      .retry(false)),
+    /registration_observation_request_key_conflict/,
+  )
+})
+
+test("fixture observation withdrawal rejects stale decision revisions before correction", async () => {
+  const fixture = await loadFixtureModule()
+  let state = fixture.createRegistrationSubjectTrackFixtureState()
+  const runtime = {
+    getState: () => state,
+    replaceState: (next) => { state = next },
+  }
+  const client = fixture.createRegistrationSubjectTrackFixtureAdapter(runtime).observationClient
+  const trackId = "20000000-0000-4000-8000-000000000001"
+
+  await client.rpc("enter_registration_observation_v1", {
+    p_track_id: trackId,
+    p_expected_workflow_revision: 7,
+    p_request_key: "fixture-observation-enter-correction",
+  }).abortSignal({ fixture: true }).retry(false)
+  const booking = await client.rpc("save_registration_observation_booking_v1", {
+    p_track_id: trackId,
+    p_observation_id: null,
+    p_class_id: "20000000-0000-4000-8000-000000000003",
+    p_session_authority: "normalized",
+    p_class_lesson_session_id: "20000000-0000-4000-8000-000000000004",
+    p_legacy_session_key: null,
+    p_expected_workflow_revision: 8,
+    p_expected_appointment_notification_revision: null,
+    p_expected_observation_revision: null,
+    p_request_key: "fixture-observation-book-correction",
+  }).abortSignal({ fixture: true }).retry(false)
+  const attempt = {
+    ...plain(booking.data.observation),
+    appointmentStatus: "completed",
+    status: "completed",
+    decisionKind: "re_observation",
+    revision: 2,
+    feedbackRevision: 1,
+  }
+  const detail = state.observation.managerDetails[trackId]
+  state = {
+    ...state,
+    observation: {
+      ...state.observation,
+      managerDetails: {
+        ...state.observation.managerDetails,
+        [trackId]: { ...detail, currentObservation: null, attempts: [attempt] },
+      },
+    },
+  }
+
+  const correction = {
+    p_track_id: trackId,
+    p_exit_kind: "director_decision",
+    p_target_workflow_status: "enrollment_requested",
+    p_decision_observation_id: attempt.observationId,
+    p_expected_workflow_revision: 8,
+    p_expected_decision_observation_revision: 1,
+    p_expected_decision_feedback_revision: 1,
+    p_reason: "director correction",
+    p_request_key: "fixture-observation-withdraw-stale",
+  }
+  await assert.rejects(
+    Promise.resolve(client.rpc("withdraw_registration_observation_v1", correction)
+      .abortSignal({ fixture: true }).retry(false)),
+    /registration_observation_stale_revision/,
+  )
+  assert.equal(state.observation.managerDetails[trackId].track.workflowRevision, 8)
+
+  const corrected = await client.rpc("withdraw_registration_observation_v1", {
+    ...correction,
+    p_expected_decision_observation_revision: 2,
+    p_request_key: "fixture-observation-withdraw-corrected",
+  }).abortSignal({ fixture: true }).retry(false)
+  assert.equal(corrected.data.workflowRevision, 9)
+  assert.equal(corrected.data.observation.revision, 3)
+  assert.equal(corrected.data.observation.decisionKind, "enrollment")
+})
+
+test("fixture runtime publishes only the installed observation client", async () => {
+  const fixture = await loadFixtureModule()
+  const runtimeModule = await loadFixtureRuntimeModule()
+  let state = fixture.createRegistrationSubjectTrackFixtureState()
+  const adapter = fixture.createRegistrationSubjectTrackFixtureAdapter({
+    getState: () => state,
+    replaceState: (next) => { state = next },
+  })
+
+  assert.equal(runtimeModule.loadRegistrationSubjectTrackFixtureObservationClient(), null)
+  const uninstall = runtimeModule.installRegistrationSubjectTrackFixtureRuntime(
+    "test",
+    "registration-subject-tracks",
+    adapter,
+  )
+  assert.strictEqual(runtimeModule.loadRegistrationSubjectTrackFixtureObservationClient(), adapter.observationClient)
+  uninstall()
+  assert.equal(runtimeModule.loadRegistrationSubjectTrackFixtureObservationClient(), null)
 })
 
 test("fixture customer message client keeps all five preview/send states in memory without provider ledger entries", async () => {

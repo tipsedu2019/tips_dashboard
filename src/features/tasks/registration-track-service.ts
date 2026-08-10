@@ -39,6 +39,15 @@ import {
 } from "./registration-intake-runtime-probe"
 import type { RegistrationIntakeRuntimeState } from "./registration-intake-runtime-probe"
 import {
+  EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
+  normalizeRegistrationObservationSummary,
+  type RegistrationObservationRuntimeState,
+  type RegistrationObservationSummary,
+} from "./registration-observation-model.ts"
+import {
+  probeRegistrationObservationRuntime as probeRegistrationObservationRuntimeFromDatabase,
+} from "./registration-observation-runtime-probe.ts"
+import {
   invalidateRegistrationSubjectTrackRuntimeAfterReadyFailure,
   probeRegistrationSubjectTrackRuntime as probeRegistrationSubjectTrackRuntimeFromDatabase,
 } from "./registration-runtime-probe"
@@ -72,6 +81,14 @@ export {
   resetRegistrationIntakeWorkflowRuntimeProbe,
 }
 export type { RegistrationIntakeRuntimeState }
+function probeRegistrationObservationRuntime(): Promise<RegistrationObservationRuntimeState> {
+  if (loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion() !== null) {
+    return Promise.resolve({ available: true, runtimeVersion: 1 })
+  }
+  return probeRegistrationObservationRuntimeFromDatabase(
+    supabase as unknown as Parameters<typeof probeRegistrationObservationRuntimeFromDatabase>[0],
+  )
+}
 
 // registration-track-service-factory:start
 type Row = Record<string, unknown>
@@ -142,7 +159,7 @@ export type OpsRegistrationTrackSummary = {
   levelTestPlace?: string
   visitScheduledAt?: string
   visitPlace?: string
-}
+} & Partial<RegistrationObservationSummary>
 
 export type OpsRegistrationEnrollment = {
   id: string
@@ -697,6 +714,7 @@ export type RegistrationTrackClient = {
 export type RegistrationTrackServiceOptions = {
   probeRuntime: () => Promise<RegistrationRuntimeState>
   probeIntakeRuntime: () => Promise<RegistrationIntakeRuntimeState>
+  probeObservationRuntime?: () => Promise<RegistrationObservationRuntimeState>
   invalidateRuntimeAfterReadyFailure?: (error: unknown) => never
   performance?: RegistrationPerformanceSink
   recordMeasure?: (measure: RegistrationMeasure) => void
@@ -706,7 +724,7 @@ export type RegistrationTrackServiceOptions = {
   requestTimeoutMs?: number
 }
 
-const TRACK_SUMMARY_COLUMNS = [
+const PRE_OBSERVATION_TRACK_SUMMARY_COLUMNS = [
   "id",
   "task_id",
   "subject",
@@ -733,6 +751,19 @@ const TRACK_SUMMARY_COLUMNS = [
   "visit_place",
   "enrollment_detail_rows",
   "director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)",
+].join(",")
+
+const TRACK_SUMMARY_COLUMNS = [
+  PRE_OBSERVATION_TRACK_SUMMARY_COLUMNS,
+  "observation_attempt_count",
+  "observation_current_id",
+  "observation_current_status",
+  "observation_current_appointment_id",
+  "observation_nearest_scheduled_at",
+  "observation_nearest_place",
+  "observation_notification_revision",
+  "observation_revision",
+  "observation_feedback_revision",
 ].join(",")
 
 const PRE_INTAKE_TRACK_SUMMARY_COLUMNS = [
@@ -961,7 +992,14 @@ function trackStatus(input: unknown): OpsRegistrationTrackStatus {
 
 function workflowStatus(row: Row): OpsRegistrationWorkflowStatus {
   const direct = text(value(row, "workflow_status", "workflowStatus"))
-  if ((REGISTRATION_WORKFLOW_STATUSES as readonly string[]).includes(direct)) {
+  if (
+    (REGISTRATION_WORKFLOW_STATUSES as readonly string[]).includes(direct)
+    || [
+      "observation_requested",
+      "observation_feedback_pending",
+      "observation_completed",
+    ].includes(direct)
+  ) {
     return direct as OpsRegistrationWorkflowStatus
   }
   return getRegistrationWorkflowStatusFromLegacyTrack({
@@ -1005,7 +1043,43 @@ function embeddedDirector(row: Row) {
   return firstRow(raw)
 }
 
-function mapTrack(row: Row, directorNames = new Map<string, string>(), legacy = false): OpsRegistrationTrackSummary {
+function mapRegistrationObservationSummary(
+  row: Row,
+  required = false,
+): RegistrationObservationSummary {
+  const rawValues = [
+    value(row, "observation_attempt_count", "observationAttemptCount"),
+    value(row, "observation_current_id", "observationCurrentId"),
+    value(row, "observation_current_status", "observationCurrentStatus"),
+    value(row, "observation_current_appointment_id", "observationCurrentAppointmentId"),
+    value(row, "observation_nearest_scheduled_at", "observationNearestScheduledAt"),
+    value(row, "observation_nearest_place", "observationNearestPlace"),
+    value(row, "observation_notification_revision", "observationNotificationRevision"),
+    value(row, "observation_revision", "observationRevision"),
+    value(row, "observation_feedback_revision", "observationFeedbackRevision"),
+  ]
+  if (!required && rawValues.every((item) => item === undefined)) {
+    return { ...EMPTY_REGISTRATION_OBSERVATION_SUMMARY }
+  }
+  return normalizeRegistrationObservationSummary({
+    observationAttemptCount: rawValues[0],
+    observationCurrentId: rawValues[1],
+    observationCurrentStatus: rawValues[2],
+    observationCurrentAppointmentId: rawValues[3],
+    observationNearestScheduledAt: rawValues[4],
+    observationNearestPlace: rawValues[5],
+    observationNotificationRevision: rawValues[6],
+    observationRevision: rawValues[7],
+    observationFeedbackRevision: rawValues[8],
+  })
+}
+
+function mapTrack(
+  row: Row,
+  directorNames = new Map<string, string>(),
+  legacy = false,
+  observationSummaryRequired = false,
+): OpsRegistrationTrackSummary {
   const directorProfileId = nullableText(value(row, "director_profile_id", "directorProfileId"))
   const director = embeddedDirector(row)
   const levelTestScheduledAt = text(value(row, "level_test_scheduled_at", "levelTestScheduledAt"))
@@ -1048,6 +1122,7 @@ function mapTrack(row: Row, directorNames = new Map<string, string>(), legacy = 
     stageEnteredAt: text(value(row, "stage_entered_at", "stageEnteredAt")),
     phoneReadyAt: nullableText(value(row, "phone_ready_at", "phoneReadyAt")),
     phoneReadySource: phoneReadySource(value(row, "phone_ready_source", "phoneReadySource")),
+    ...mapRegistrationObservationSummary(row, observationSummaryRequired),
     ...(levelTestScheduledAt ? { levelTestScheduledAt, levelTestPlace } : {}),
     ...(visitScheduledAt ? { visitScheduledAt, visitPlace } : {}),
   }
@@ -1490,7 +1565,6 @@ export function createRegistrationTrackService(
   if (typeof options.probeIntakeRuntime !== "function") {
     throw new Error("probeIntakeRuntime is required.")
   }
-
   const summaryCache = new Map<string, RegistrationTrackSummaryLoadResult>()
   const summaryInFlight = new Map<string, Promise<RegistrationTrackSummaryLoadResult>>()
   const summaryEpochs = new Map<string, number>()
@@ -1668,6 +1742,7 @@ export function createRegistrationTrackService(
       stageEnteredAt: input.stageEnteredAt || "",
       phoneReadyAt: null,
       phoneReadySource: null,
+      ...EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
     } satisfies OpsRegistrationTrackSummary)))
   }
 
@@ -1696,10 +1771,23 @@ export function createRegistrationTrackService(
     const requestEpoch = summaryEpochs.get(cacheKey) || 0
 
     const request = measure<RegistrationTrackSummaryLoadResult>(measureName, false, async (metrics) => {
+      const registrationRuntimeRequest = probeRuntime()
+      const observationRuntimeRequest = options.probeObservationRuntime
+        ? options.probeObservationRuntime()
+        : Promise.resolve<RegistrationObservationRuntimeState>({
+            available: false,
+            runtimeVersion: 0,
+          })
+      const observationAvailableRequest = observationRuntimeRequest.then((runtime) => (
+        runtime.available && runtime.runtimeVersion === 1
+      ))
       const loadTrackRows = async () => {
+        const observationAvailable = await observationAvailableRequest
         try {
           const summaryQuery = client.from("ops_registration_subject_track_summaries")
-            .select(TRACK_SUMMARY_COLUMNS)
+            .select(observationAvailable
+              ? TRACK_SUMMARY_COLUMNS
+              : PRE_OBSERVATION_TRACK_SUMMARY_COLUMNS)
           return await queryRows(
             normalizedTaskIds === null
               ? summaryQuery
@@ -1707,7 +1795,7 @@ export function createRegistrationTrackService(
             metrics,
           )
         } catch (error) {
-          if (!missingTrackSummaryOptionalColumnError(error)) throw error
+          if (observationAvailable || !missingTrackSummaryOptionalColumnError(error)) throw error
           const fallbackQuery = client.from("ops_registration_subject_track_summaries")
             .select(PRE_INTAKE_TRACK_SUMMARY_COLUMNS)
           return queryRows(
@@ -1724,7 +1812,7 @@ export function createRegistrationTrackService(
             (error) => ({ ok: false as const, error }),
           )
         : null
-      const runtime = await probeRuntime()
+      const runtime = await registrationRuntimeRequest
       if (runtime.mode !== "ready" || runtime.version !== 1) {
         return { mode: runtime.mode, tracks: [] } as RegistrationTrackSummaryLoadResult
       }
@@ -1739,9 +1827,15 @@ export function createRegistrationTrackService(
         } else {
           trackRows = await loadTrackRows()
         }
+        const observationSummaryRequired = await observationAvailableRequest
         return {
           mode: "ready",
-          tracks: trackRows.map((row) => mapTrack(row)),
+          tracks: trackRows.map((row) => mapTrack(
+            row,
+            new Map<string, string>(),
+            false,
+            observationSummaryRequired,
+          )),
         }
       } catch (error) {
         if (missingSchemaError(error)) return invalidateReadyRuntime(error)
@@ -3034,6 +3128,7 @@ const defaultRegistrationTrackService = createRegistrationTrackService(
   {
     probeRuntime: probeRegistrationSubjectTrackRuntime,
     probeIntakeRuntime: probeRegistrationIntakeWorkflowRuntime,
+    probeObservationRuntime: probeRegistrationObservationRuntime,
     invalidateRuntimeAfterReadyFailure: invalidateRegistrationSubjectTrackRuntimeAfterReadyFailure,
     onMutationSuccess: () => registrationTrackMutationCacheInvalidator?.(),
     performance: typeof performance === "undefined"

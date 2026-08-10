@@ -6,6 +6,7 @@ import type {
 import type { OpsRegistrationCaseDetail, OpsRegistrationWorkspaceOptionData } from "./registration-track-service"
 import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
 import type { RegistrationCustomerMessageClient } from "./registration-customer-message-contract"
+import type { RegistrationObservationClient } from "./registration-observation-service"
 
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_VALUE = "registration-subject-tracks"
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL = "__TIPS_REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG__"
@@ -68,6 +69,7 @@ export type RegistrationSubjectTrackFixtureDebugFault =
 
 export type RegistrationSubjectTrackFixtureAdapter = {
   readonly intakeWorkflowRuntimeVersion: number
+  readonly observationClient: RegistrationObservationClient
   executeAction: <T = unknown>(type: string, payload: Record<string, unknown>) => Promise<T>
   loadAppointmentCalendarRows: (
     input: RegistrationAppointmentCalendarLoadInput,
@@ -209,6 +211,10 @@ export function executeRegistrationSubjectTrackFixtureAction<T = unknown>(
 
 export function loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion(): number | null {
   return getActiveFixtureAdapter()?.intakeWorkflowRuntimeVersion ?? null
+}
+
+export function loadRegistrationSubjectTrackFixtureObservationClient(): RegistrationObservationClient | null {
+  return getActiveFixtureAdapter()?.observationClient ?? null
 }
 
 export function loadRegistrationSubjectTrackFixtureCase(taskId: string): Promise<OpsRegistrationCaseDetail> | null {

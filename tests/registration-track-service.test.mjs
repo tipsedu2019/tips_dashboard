@@ -8,6 +8,10 @@ import ts from "typescript";
 import { parseAcademicSubject } from "../src/lib/academic-subject-registry.ts";
 import { normalizeRegistrationLevelTestPlace } from "../src/features/tasks/registration-level-test-place.ts";
 import {
+  EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
+  normalizeRegistrationObservationSummary,
+} from "../src/features/tasks/registration-observation-model.ts";
+import {
   REGISTRATION_WORKFLOW_STATUSES,
   getRegistrationWorkflowStatusFromLegacyTrack,
 } from "../src/features/tasks/registration-workflow-status.js";
@@ -50,6 +54,8 @@ async function loadFactory(extraGlobals = {}) {
     clearTimeout,
     crypto: { randomUUID: () => "uuid-from-crypto" },
     normalizeRegistrationLevelTestPlace,
+    EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
+    normalizeRegistrationObservationSummary,
     parseAcademicSubject,
     REGISTRATION_WORKFLOW_STATUSES,
     getRegistrationWorkflowStatusFromLegacyTrack,
@@ -375,6 +381,7 @@ function readyOptions(overrides = {}) {
   return {
     probeRuntime: async () => ({ mode: "ready", version: 1 }),
     probeIntakeRuntime: async () => ({ available: true, version: 1 }),
+    probeObservationRuntime: async () => ({ available: true, runtimeVersion: 1 }),
     invalidateRuntimeAfterReadyFailure(error) {
       const integrityError = new Error("runtime integrity failure");
       integrityError.code = "REGISTRATION_RUNTIME_INTEGRITY_ERROR";
@@ -386,6 +393,18 @@ function readyOptions(overrides = {}) {
     ...overrides,
   };
 }
+
+const inertObservationSummaryRow = {
+  observation_attempt_count: 0,
+  observation_current_id: null,
+  observation_current_status: null,
+  observation_current_appointment_id: null,
+  observation_nearest_scheduled_at: null,
+  observation_nearest_place: null,
+  observation_notification_revision: null,
+  observation_revision: null,
+  observation_feedback_revision: null,
+};
 
 function initialWorkflowCreateInput() {
   return {
@@ -787,6 +806,7 @@ test("track summary loader uses the exact safe projection and skips profile look
       return { data: [{
         id: "track-1", task_id: "task-1", subject: "영어",
         pipeline_status: "visit_consultation_scheduled", director_profile_id: null,
+        workflow_status: "observation_feedback_pending",
         director_assignment_source: "", director_assignment_rule_key: "",
         waiting_kind: null, level_test_retake_decision: null,
         migration_review_required: false, stage_entered_at: "2026-07-12T01:00:00Z",
@@ -798,6 +818,15 @@ test("track summary loader uses the exact safe projection and skips profile look
           classStartSessionKey: null, classStartLessonSessionId: null,
           classStartSession: "1회차", sortOrder: 0,
         }],
+        observation_attempt_count: 2,
+        observation_current_id: "10000000-0000-4000-8000-000000000003",
+        observation_current_status: "scheduled",
+        observation_current_appointment_id: "10000000-0000-4000-8000-000000000004",
+        observation_nearest_scheduled_at: "2026-08-12T09:00:00.000Z",
+        observation_nearest_place: "본관",
+        observation_notification_revision: 3,
+        observation_revision: 4,
+        observation_feedback_revision: 1,
         updated_at: "2026-07-12T02:00:00Z",
       }], error: null };
     },
@@ -810,7 +839,7 @@ test("track summary loader uses the exact safe projection and skips profile look
   const { enrollmentDetailRows, ...track } = result.tracks[0];
   assert.deepEqual({ ...track }, {
     id: "track-1", taskId: "task-1", subject: "영어",
-    status: "visit_consultation_scheduled", workflowStatus: "consultation_requested",
+    status: "visit_consultation_scheduled", workflowStatus: "observation_feedback_pending",
     workflowRevision: 1, workflowStatusEnteredAt: "", legacy: false, directorProfileId: null,
     directorName: "", directorAssignmentSource: "", directorAssignmentRuleKey: "",
     waitingKind: "", waitingDetailKind: "", waitingDetailClassId: null, waitingDetailRetakeDecision: "", levelTestRetakeDecision: "", migrationReviewRequired: false,
@@ -818,6 +847,15 @@ test("track summary loader uses the exact safe projection and skips profile look
     phoneReadyAt: null, phoneReadySource: null,
     levelTestScheduledAt: "2026-07-12T05:00:00Z", levelTestPlace: "본관",
     visitScheduledAt: "2026-07-13T01:00:00Z", visitPlace: "상담실",
+    observationAttemptCount: 2,
+    observationCurrentId: "10000000-0000-4000-8000-000000000003",
+    observationCurrentStatus: "scheduled",
+    observationCurrentAppointmentId: "10000000-0000-4000-8000-000000000004",
+    observationNearestScheduledAt: "2026-08-12T09:00:00.000Z",
+    observationNearestPlace: "본관",
+    observationNotificationRevision: 3,
+    observationRevision: 4,
+    observationFeedbackRevision: 1,
   });
   assert.deepEqual(JSON.parse(JSON.stringify(enrollmentDetailRows)), [{
       classId: "class-1", textbookId: null, classStartDate: "2026-08-10",
@@ -826,7 +864,7 @@ test("track summary loader uses the exact safe projection and skips profile look
   }]);
   assert.equal(harness.queries.length, 1);
   assert.equal(harness.queries[0].columns,
-    "id,task_id,subject,pipeline_status,workflow_status,workflow_revision,workflow_status_entered_at,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,waiting_detail_kind,waiting_detail_class_id,waiting_detail_retake_decision,level_test_retake_decision,migration_review_required,stage_entered_at,phone_ready_at,phone_ready_source,updated_at,level_test_scheduled_at,level_test_place,visit_scheduled_at,visit_place,enrollment_detail_rows,director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)");
+    "id,task_id,subject,pipeline_status,workflow_status,workflow_revision,workflow_status_entered_at,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,waiting_detail_kind,waiting_detail_class_id,waiting_detail_retake_decision,level_test_retake_decision,migration_review_required,stage_entered_at,phone_ready_at,phone_ready_source,updated_at,level_test_scheduled_at,level_test_place,visit_scheduled_at,visit_place,enrollment_detail_rows,director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name),observation_attempt_count,observation_current_id,observation_current_status,observation_current_appointment_id,observation_nearest_scheduled_at,observation_nearest_place,observation_notification_revision,observation_revision,observation_feedback_revision");
   assert.deepEqual(harness.queries[0].filters, [["in", "task_id", ["task-1"]]]);
   assert.doesNotMatch(harness.queries[0].columns, /schedule_plan|textbook|student_ids|waitlist_ids/);
   assert.doesNotMatch(harness.queries[0].columns, /consultations|appointments|\*/);
@@ -857,6 +895,7 @@ test("track summary loader falls back to the pre-intake projection when only pho
     },
   });
   const service = createRegistrationTrackService(harness.client, readyOptions({
+    probeObservationRuntime: async () => ({ available: false, runtimeVersion: 0 }),
     invalidateRuntimeAfterReadyFailure(error) {
       invalidations += 1;
       const integrity = new Error("integrity");
@@ -878,6 +917,57 @@ test("track summary loader falls back to the pre-intake projection when only pho
   assert.match(harness.queries[0].columns, /phone_ready_at,phone_ready_source/);
   assert.doesNotMatch(harness.queries[1].columns, /phone_ready_at|phone_ready_source/);
   assert.deepEqual(harness.queries[1].filters, [["in", "task_id", ["task-1"]]]);
+});
+
+test("runtime-ready observation columns fail visibly instead of using an old projection", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const missingObservationColumn = {
+    code: "42703",
+    message: "column ops_registration_subject_track_summaries.observation_attempt_count does not exist",
+  };
+  let invalidations = 0;
+  const harness = createClient({
+    queryHandler: () => ({ data: null, error: missingObservationColumn }),
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    invalidateRuntimeAfterReadyFailure(error) {
+      invalidations += 1;
+      const integrity = new Error("integrity");
+      integrity.code = "REGISTRATION_RUNTIME_INTEGRITY_ERROR";
+      integrity.cause = error;
+      throw integrity;
+    },
+  }));
+
+  await assert.rejects(
+    service.loadTrackSummaries(["task-1"], "viewer-1"),
+    (error) => error.code === "REGISTRATION_RUNTIME_INTEGRITY_ERROR"
+      && error.cause === missingObservationColumn,
+  );
+  assert.equal(invalidations, 1);
+  assert.equal(harness.queries.length, 1);
+  assert.match(harness.queries[0].columns, /observation_attempt_count/);
+});
+
+test("runtime-ready summary rows cannot omit the observation scalar payload", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    queryHandler: () => ({ data: [{
+      id: "track-1",
+      task_id: "task-1",
+      subject: "영어",
+      pipeline_status: "inquiry",
+      workflow_status: "observation_requested",
+    }], error: null }),
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  await assert.rejects(
+    service.loadTrackSummaries(["task-1"], "viewer-1"),
+    /registration_observation_summary_invalid/,
+  );
+  assert.equal(harness.queries.length, 1);
+  assert.match(harness.queries[0].columns, /observation_attempt_count/);
 });
 
 test("track summary loader does not fall back for an unrelated missing summary column", async () => {
@@ -925,6 +1015,7 @@ test("track summary loader embeds director names without a profile lookup waterf
         director_assignment_source: "default", director_assignment_rule_key: "rule",
         waiting_kind: null, level_test_retake_decision: null,
         migration_review_required: false, stage_entered_at: "2026-07-12T01:00:00Z",
+        ...inertObservationSummaryRow,
       })), error: null };
     },
   });
@@ -954,6 +1045,7 @@ test("workspace track summary loader reads all visible tracks without waiting fo
         phone_ready_at: null, phone_ready_source: null,
         updated_at: "2026-07-12T01:00:00Z",
         visit_scheduled_at: null, visit_place: null,
+        ...inertObservationSummaryRow,
       }], error: null };
     },
   });
@@ -982,6 +1074,7 @@ test("workspace track summary read overlaps a delayed runtime readiness check", 
         phone_ready_at: null, phone_ready_source: null,
         updated_at: "2026-07-12T01:00:00Z",
         visit_scheduled_at: null, visit_place: null,
+        ...inertObservationSummaryRow,
       }], error: null };
     },
   });
@@ -990,7 +1083,7 @@ test("workspace track summary read overlaps a delayed runtime readiness check", 
   }));
 
   const pending = service.loadWorkspaceTrackSummaries("viewer-1", { force: true });
-  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(harness.queries.length, 1);
   assert.deepEqual(harness.queries[0].filters, []);
@@ -1763,6 +1856,7 @@ test("initial workflow create uses the exact atomic payload and maps the complet
       stageEnteredAt: "2026-07-12T01:00:00Z",
       phoneReadyAt: "2026-07-12T01:00:00Z",
       phoneReadySource: "inquiry",
+      ...EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
     },
     {
       id: "track-math",
@@ -1786,6 +1880,7 @@ test("initial workflow create uses the exact atomic payload and maps the complet
       stageEnteredAt: "2026-07-12T02:00:00Z",
       phoneReadyAt: null,
       phoneReadySource: null,
+      ...EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
     },
   ]);
   assert.deepEqual(Array.from(result.appointments, (appointment) => ({ ...appointment })), [
