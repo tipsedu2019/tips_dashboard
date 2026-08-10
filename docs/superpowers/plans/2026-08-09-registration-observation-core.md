@@ -1593,7 +1593,7 @@ Round 2의 raw `after_value` text predicate는 JSON member 위치·공백에 의
 - [x] **Step 4:** manager detail에 bounded attempts와 독립적인 `latestDecisionObservation`을 추가하고 20개 초과 canceled attempt 뒤 `re_observation` 정정을 RED→GREEN으로 닫는다.
 - [x] **Step 5:** legacy/shadow schedule JSON을 한 번만 set-wise parse하고 10,000-session structural/behavior/performance RED→GREEN을 닫는다.
 - [x] **Step 6:** schema/booking/workspace/core-review local DB, full core Node, ESLint, TypeScript, webpack build, diff/scope/status를 검증하고 커밋한다. runtime/provider/remote는 0을 유지한다.
-- [ ] **Step 7:** 네 original findings만 대상으로 한 독립 scoped re-review를 한 번 실행하고, 남은 load-bearing finding이 있으면 추가 수정 없이 controller/user에게 보고한다.
+- [x] **Step 7:** 네 original findings만 대상으로 한 독립 scoped re-review를 한 번 실행하고, 남은 load-bearing finding이 있으면 추가 수정 없이 controller/user에게 보고한다.
 
 ### Task 9: 사용자 승인으로 최종 재검토 잔여 두 건을 전진 교정한다
 
@@ -1620,7 +1620,7 @@ Round 2의 raw `after_value` text predicate는 JSON member 위치·공백에 의
   - isolated schema/booking/workspace/core-review 네 focus는 runtime `0`, provider/outbox delta `0`, cleanup passed를 유지한다.
   - production/remote DB, runtime activation, provider send/call, push, deploy, browser mutation, backfill은 하지 않는다. 구현/검증 report와 exact commit SHA를 기록한다.
 
-- [ ] **Step 5: Task 9 범위만 단일 독립 재검토한다**
+- [x] **Step 5: Task 9 범위만 단일 독립 재검토한다**
   - Task 9 base..HEAD review package로 위 F2/F4 원문과 새 migration/TS 계약만 검토한다. 잔여 Critical/Important가 있으면 추가 수정 없이 controller/user에게 보고한다.
 
 ## Final verification matrix
