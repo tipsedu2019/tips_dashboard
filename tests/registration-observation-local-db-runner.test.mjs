@@ -244,6 +244,7 @@ test("runner keeps every independent database reviewer gate", async () => {
     runner.getRegistrationObservationFocusContract("feedback-submit"),
     {
       ceiling: "20260809103000",
+      fixture: { kind: "committed" },
       tests: [
         "supabase/tests/registration_observation_feedback_access_test.sql",
         "supabase/tests/registration_observation_feedback_submit_test.sql",
@@ -258,6 +259,137 @@ test("runner keeps every independent database reviewer gate", async () => {
       "supabase/tests/registration_observation_feedback_decisions_test.sql",
     ],
   });
+});
+
+test("feedback submit owns a committed runtime-one fixture and exact fresh cleanup", async () => {
+  // Production break caught: feedback-submit remains a downstream placeholder,
+  // so cross-session race workers cannot see committed rows or prove cleanup.
+  const runner = await loadRunner();
+  const contract = runner.getRegistrationObservationFocusContract(
+    "feedback-submit",
+  );
+  const setupSql = runner.registrationObservationFocusSetupSql(
+    "feedback-submit",
+  );
+  const cleanupSql = runner.registrationObservationFocusCleanupSql(
+    "feedback-submit",
+  );
+  const freshSql = runner.registrationObservationSchemaFreshAssertionSql(
+    "feedback-submit",
+  );
+
+  assert.equal(contract.fixture.kind, "committed");
+  assert.match(setupSql, /^begin;/i);
+  assert.match(setupSql, /create extension if not exists dblink;/i);
+  assert.match(setupSql, /99200000-0000-4000-8000-000000000001/i);
+  assert.match(setupSql, /99200000-0000-4000-8000-000000000108/i);
+  assert.match(
+    setupSql,
+    /update dashboard_private\.registration_observation_runtime_settings[\s\S]*activation_version = 1/i,
+  );
+  assert.match(setupSql, /commit;$/i);
+
+  const eventDelete = cleanupSql.indexOf(
+    "delete from dashboard_private.registration_observation_domain_events",
+  );
+  const receiptDelete = cleanupSql.indexOf(
+    "delete from dashboard_private.registration_observation_mutation_requests",
+  );
+  const observationDelete = cleanupSql.indexOf(
+    "delete from public.ops_registration_observations",
+  );
+  const appointmentDelete = cleanupSql.indexOf(
+    "delete from public.ops_registration_appointments",
+  );
+  const trackDelete = cleanupSql.indexOf(
+    "delete from public.ops_registration_subject_tracks",
+  );
+  const taskDelete = cleanupSql.indexOf("delete from public.ops_tasks");
+  const profileDelete = cleanupSql.indexOf("delete from public.profiles");
+  assert.ok(eventDelete >= 0 && eventDelete < receiptDelete);
+  assert.ok(receiptDelete < observationDelete);
+  assert.ok(observationDelete < appointmentDelete);
+  assert.ok(appointmentDelete < trackDelete);
+  assert.ok(trackDelete < taskDelete);
+  assert.ok(taskDelete < profileDelete);
+  assert.match(
+    cleanupSql,
+    /activation_version = 0[\s\S]*updated_by = null/i,
+  );
+  assert.match(cleanupSql, /^begin;/i);
+  assert.match(cleanupSql, /commit;$/i);
+
+  assert.match(freshSql, /registration_observation_runtime_not_zero/i);
+  assert.match(freshSql, /registration_observation_runtime_actor_not_cleared/i);
+  assert.match(freshSql, /99200000-0000-4000-8000-000000000001/i);
+  assert.match(freshSql, /99200000-0000-4000-8000-000000000108/i);
+  assert.match(freshSql, /registration_observation_feedback_fixture_remains/i);
+  assert.match(freshSql, /registration_observation_provider_outbox_delta=0/i);
+});
+
+test("feedback committed fixture cleans up after setup pgTAP and cleanup failures", async () => {
+  // Production break caught: an error path leaves runtime=1 or committed
+  // feedback rows behind instead of continuing cleanup/fresh/stop in order.
+  const runner = await loadRunner();
+  const feedbackInput = {
+    ...planInput(),
+    focus: "feedback-submit",
+    setupSql: runner.registrationObservationFocusSetupSql("feedback-submit"),
+    cleanupSql: runner.registrationObservationFocusCleanupSql(
+      "feedback-submit",
+    ),
+    freshAssertSql: runner.registrationObservationSchemaFreshAssertionSql(
+      "feedback-submit",
+    ),
+  };
+  const plan = runner.buildRegistrationObservationLocalDbQaPlan(feedbackInput);
+  const expectedSuccess = [
+    "db-start",
+    "db-reset",
+    "focus-fixture-setup",
+    "pgtap",
+    "focus-fixture-cleanup",
+    "fresh-runtime0-assert",
+    "db-stop",
+  ];
+  assert.deepEqual(plan.steps.map(({ name }) => name), expectedSuccess);
+
+  for (const failedStep of [
+    "focus-fixture-setup",
+    "pgtap",
+    "focus-fixture-cleanup",
+  ]) {
+    const calls = [];
+    const result = await runner.executeRegistrationObservationLocalDbQaPlan(
+      plan,
+      {
+        runStep: async (step) => {
+          calls.push(step.name);
+          if (step.name === failedStep) {
+            throw new Error(`synthetic ${failedStep} failure`);
+          }
+          return {
+            stdout: step.name === "fresh-runtime0-assert"
+              ? "registration_observation_provider_outbox_delta=0\n"
+              : "",
+          };
+        },
+        inspectResources: async () => [],
+      },
+    );
+    assert.equal(result.status, 1);
+    const expectedCalls = failedStep === "focus-fixture-setup"
+      ? [
+          "db-start",
+          "db-reset",
+          "focus-fixture-setup",
+          "focus-fixture-cleanup",
+          "fresh-runtime0-assert",
+          "db-stop",
+        ]
+      : expectedSuccess;
+    assert.deepEqual(calls, expectedCalls);
+  }
 });
 
 test("booking focus owns a committed runtime-one concurrency fixture and exact reverse cleanup", async () => {

@@ -160,7 +160,7 @@ const FOCUS_REGISTRY = new Map([
         "supabase/tests/registration_observation_feedback_access_test.sql",
         "supabase/tests/registration_observation_feedback_submit_test.sql",
       ],
-      fixture: "downstream-committed",
+      fixture: Object.freeze({ kind: "committed" }),
       providerOutboxStage: "core",
     },
   ],
@@ -913,23 +913,113 @@ function registrationObservationBookingFixtureSetupLines() {
   ];
 }
 
+function registrationObservationFeedbackFixtureSetupLines() {
+  return [
+    "insert into auth.users(id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)",
+    "values",
+    "  ('99200000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'feedback-runner-admin@example.invalid', crypt('feedback-runner-only', gen_salt('bf')), now(), '{\"provider\":\"email\",\"providers\":[\"email\"]}'::jsonb, '{}'::jsonb, now(), now()),",
+    "  ('99200000-0000-4000-8000-000000000003', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'feedback-runner-teacher@example.invalid', crypt('feedback-runner-only', gen_salt('bf')), now(), '{\"provider\":\"email\",\"providers\":[\"email\"]}'::jsonb, '{}'::jsonb, now(), now());",
+    "insert into public.profiles(id, role, name, email, created_at, updated_at)",
+    "values",
+    "  ('99200000-0000-4000-8000-000000000001', 'admin', '청강 피드백 runner 관리자', 'feedback-runner-admin@example.invalid', now(), now()),",
+    "  ('99200000-0000-4000-8000-000000000003', 'teacher', '청강 피드백 runner 담당', 'feedback-runner-teacher@example.invalid', now(), now())",
+    "on conflict (id) do update set role = excluded.role, name = excluded.name, email = excluded.email, updated_at = excluded.updated_at;",
+    "delete from public.teacher_catalogs where profile_id = '99200000-0000-4000-8000-000000000003';",
+    "insert into public.teacher_catalogs(id, name, subjects, is_visible, sort_order, profile_id, account_email, dashboard_role)",
+    "values ('99200000-0000-4000-8000-000000000101', '청강 피드백 runner 담당', array['영어']::text[], true, 9993, '99200000-0000-4000-8000-000000000003', 'feedback-runner-teacher@example.invalid', 'teacher');",
+    "update public.profiles set teacher_catalog_id = '99200000-0000-4000-8000-000000000101' where id = '99200000-0000-4000-8000-000000000003';",
+    "insert into public.classroom_catalogs(id, name, subjects, is_visible, sort_order, campus)",
+    "values ('99200000-0000-4000-8000-000000000102', '청강 피드백 runner 101호', array['영어']::text[], true, 9994, '본관');",
+    "insert into public.classes(id, name, subject, status, schedule_storage_mode, schedule_plan)",
+    "values ('99200000-0000-4000-8000-000000000103', '청강 피드백 runner 영어반', '영어', '수업 진행 중', 'normalized', '{\"sessions\":[]}'::jsonb);",
+    "do $$",
+    "begin",
+    "  perform dashboard_private.with_continuous_class_schedule_audit_context_v1(",
+    "    '99200000-0000-4000-8000-000000000103',",
+    "    '99200000-0000-4000-8000-000000000111',",
+    "    'registration_observation_feedback_runner'",
+    "  );",
+    "end",
+    "$$;",
+    "insert into public.class_lesson_sessions(id, class_id, session_key, session_date, schedule_state, start_time, end_time, teacher_catalog_id, teacher_name_snapshot, classroom_catalog_id, classroom_name_snapshot, origin, revision)",
+    "values ('99200000-0000-4000-8000-000000000104', '99200000-0000-4000-8000-000000000103', 'runner-feedback-session-a', current_date - 1, 'active', '18:00', '20:00', '99200000-0000-4000-8000-000000000101', '청강 피드백 runner 담당', '99200000-0000-4000-8000-000000000102', '청강 피드백 runner 101호', 'manual', 7);",
+    "insert into public.ops_tasks(id, title, type, status, priority, requested_by, student_name)",
+    "values ('99200000-0000-4000-8000-000000000105', '청강 피드백 runner concurrency', 'registration', 'requested', 'normal', '99200000-0000-4000-8000-000000000001', '합성 피드백 동시학생');",
+    "insert into public.ops_registration_details(task_id)",
+    "values ('99200000-0000-4000-8000-000000000105');",
+    "insert into public.ops_registration_subject_tracks(id, task_id, subject, pipeline_status, director_profile_id, director_assignment_source, director_assigned_at, migration_review_required, workflow_status, workflow_revision, workflow_status_entered_at, observation_return_workflow_status, observation_attempt_count)",
+    "values ('99200000-0000-4000-8000-000000000106', '99200000-0000-4000-8000-000000000105', '영어', 'consultation_waiting', '99200000-0000-4000-8000-000000000001', 'manual', now(), false, 'observation_requested', 1, now(), 'consultation_completed', 1);",
+    "insert into public.ops_registration_appointments(id, task_id, kind, scheduled_at, place, status, notification_revision, created_by)",
+    "values ('99200000-0000-4000-8000-000000000107', '99200000-0000-4000-8000-000000000105', 'observation_class', ((current_date - 1 + time '18:00') at time zone 'Asia/Seoul'), '본관', 'scheduled', 3, '99200000-0000-4000-8000-000000000001');",
+    "insert into public.ops_registration_observations(id, task_id, track_id, appointment_id, class_id, session_authority, class_lesson_session_id, legacy_session_key, session_date, starts_at, ends_at, session_schedule_state, session_source_revision, legacy_session_source_hash, source_revision, booking_fact_hash, teacher_catalog_id, teacher_profile_id, classroom_catalog_id, subject, class_name_snapshot, teacher_name_snapshot, classroom_name_snapshot, campus, status, feedback_revision, revision, created_by, updated_by)",
+    "values ('99200000-0000-4000-8000-000000000108', '99200000-0000-4000-8000-000000000105', '99200000-0000-4000-8000-000000000106', '99200000-0000-4000-8000-000000000107', '99200000-0000-4000-8000-000000000103', 'normalized', '99200000-0000-4000-8000-000000000104', null, current_date - 1, ((current_date - 1 + time '18:00') at time zone 'Asia/Seoul'), ((current_date - 1 + time '20:00') at time zone 'Asia/Seoul'), 'active', 7, null, '{\"authority\":\"normalized\",\"sessionId\":\"99200000-0000-4000-8000-000000000104\",\"revision\":7}'::jsonb, repeat('f', 64), '99200000-0000-4000-8000-000000000101', '99200000-0000-4000-8000-000000000003', '99200000-0000-4000-8000-000000000102', '영어', '청강 피드백 runner 영어반', '청강 피드백 runner 담당', '청강 피드백 runner 101호', '본관', 'scheduled', 0, 1, '99200000-0000-4000-8000-000000000001', '99200000-0000-4000-8000-000000000001');",
+    "update dashboard_private.registration_observation_runtime_settings",
+    "set activation_version = 1, updated_at = now(), updated_by = '99200000-0000-4000-8000-000000000001'",
+    "where singleton = true;",
+  ];
+}
+
 export function registrationObservationFocusSetupSql(focus) {
   const baseline = registrationObservationProviderOutboxBaselineSetupSql(focus);
-  if (focus !== "booking") return baseline;
+  if (![
+    "booking",
+    "feedback-submit",
+  ].includes(focus)) return baseline;
   const lines = baseline.split("\n");
   if (lines.at(-1) !== "commit;") {
     throw new Error("registration_observation_local_db_setup_manifest_invalid");
   }
+  const fixtureLines = focus === "booking"
+    ? registrationObservationBookingFixtureSetupLines()
+    : registrationObservationFeedbackFixtureSetupLines();
   return [
     ...lines.slice(0, 1),
     "create extension if not exists dblink;",
     ...lines.slice(1, -1),
-    ...registrationObservationBookingFixtureSetupLines(),
+    ...fixtureLines,
     "commit;",
   ].join("\n");
 }
 
 export function registrationObservationFocusCleanupSql(focus) {
+  if (focus === "feedback-submit") {
+    return [
+      "begin;",
+      "delete from dashboard_private.registration_observation_domain_events where observation_id = '99200000-0000-4000-8000-000000000108';",
+      "delete from dashboard_private.registration_observation_mutation_requests where track_id = '99200000-0000-4000-8000-000000000106';",
+      "delete from public.ops_registration_observations where id = '99200000-0000-4000-8000-000000000108';",
+      "delete from public.ops_registration_appointments where id = '99200000-0000-4000-8000-000000000107';",
+      "delete from public.ops_registration_subject_tracks where id = '99200000-0000-4000-8000-000000000106';",
+      "delete from public.ops_tasks where id = '99200000-0000-4000-8000-000000000105';",
+      "do $$",
+      "begin",
+      "  perform dashboard_private.with_continuous_class_schedule_audit_context_v1(",
+      "    '99200000-0000-4000-8000-000000000103',",
+      "    '99200000-0000-4000-8000-000000000111',",
+      "    'registration_observation_feedback_runner_cleanup'",
+      "  );",
+      "end",
+      "$$;",
+      "delete from public.class_lesson_sessions where id = '99200000-0000-4000-8000-000000000104';",
+      "delete from public.dashboard_audit_logs where class_id = '99200000-0000-4000-8000-000000000103' or entity_id = any(array['99200000-0000-4000-8000-000000000001', '99200000-0000-4000-8000-000000000003', '99200000-0000-4000-8000-000000000101', '99200000-0000-4000-8000-000000000102', '99200000-0000-4000-8000-000000000103', '99200000-0000-4000-8000-000000000104']);",
+      "alter table public.classes disable trigger dashboard_audit_classes;",
+      "delete from public.classes where id = '99200000-0000-4000-8000-000000000103';",
+      "alter table public.classes enable trigger dashboard_audit_classes;",
+      "select pg_catalog.set_config('app.class_schedule_mutation', '', true);",
+      "select pg_catalog.set_config('app.class_schedule_class_id', '', true);",
+      "select pg_catalog.set_config('app.class_schedule_request_key', '', true);",
+      "select pg_catalog.set_config('app.class_schedule_request_operation', '', true);",
+      "select pg_catalog.set_config('app.class_schedule_change_reason', '', true);",
+      "update public.profiles set teacher_catalog_id = null where id = '99200000-0000-4000-8000-000000000003';",
+      "delete from public.teacher_catalogs where id = '99200000-0000-4000-8000-000000000101';",
+      "delete from public.classroom_catalogs where id = '99200000-0000-4000-8000-000000000102';",
+      "delete from public.profiles where id = any(array['99200000-0000-4000-8000-000000000001'::uuid, '99200000-0000-4000-8000-000000000003'::uuid]);",
+      "delete from auth.users where id = any(array['99200000-0000-4000-8000-000000000001'::uuid, '99200000-0000-4000-8000-000000000003'::uuid]);",
+      "delete from public.dashboard_audit_logs where entity_id = any(array['99200000-0000-4000-8000-000000000001', '99200000-0000-4000-8000-000000000003', '99200000-0000-4000-8000-000000000101', '99200000-0000-4000-8000-000000000102', '99200000-0000-4000-8000-000000000103', '99200000-0000-4000-8000-000000000104']);",
+      "update dashboard_private.registration_observation_runtime_settings set activation_version = 0, updated_at = now(), updated_by = null where singleton = true;",
+      "commit;",
+    ].join("\n");
+  }
   if (focus !== "booking") return "begin; commit;";
   return [
     "begin;",
@@ -976,6 +1066,9 @@ export function getRegistrationObservationFocusContract(focus) {
   }
   return Object.freeze({
     ceiling: contract.ceiling,
+    ...(typeof contract.fixture === "object"
+      ? { fixture: Object.freeze({ ...contract.fixture }) }
+      : {}),
     tests: Object.freeze([...contract.tests]),
   });
 }
@@ -1311,6 +1404,51 @@ function registrationObservationBookingFreshAssertionLines(focus) {
   ];
 }
 
+function registrationObservationFeedbackFreshAssertionLines(focus) {
+  if (focus !== "feedback-submit") return [];
+  return [
+    "  if exists (select 1 from auth.users where id = any(array['99200000-0000-4000-8000-000000000001'::uuid, '99200000-0000-4000-8000-000000000003'::uuid])) then",
+    "    raise exception 'registration_observation_feedback_fixture_remains';",
+    "  end if;",
+    "  if exists (select 1 from public.profiles where id = any(array['99200000-0000-4000-8000-000000000001'::uuid, '99200000-0000-4000-8000-000000000003'::uuid])) then",
+    "    raise exception 'registration_observation_feedback_fixture_remains';",
+    "  end if;",
+    "  if exists (select 1 from public.teacher_catalogs where id = '99200000-0000-4000-8000-000000000101'::uuid) then",
+    "    raise exception 'registration_observation_feedback_fixture_remains';",
+    "  end if;",
+    "  if exists (select 1 from public.classroom_catalogs where id = '99200000-0000-4000-8000-000000000102'::uuid) then",
+    "    raise exception 'registration_observation_feedback_fixture_remains';",
+    "  end if;",
+    "  if exists (select 1 from public.classes where id = '99200000-0000-4000-8000-000000000103'::uuid) then",
+    "    raise exception 'registration_observation_feedback_fixture_remains';",
+    "  end if;",
+    "  if exists (select 1 from public.class_lesson_sessions where id = '99200000-0000-4000-8000-000000000104'::uuid) then",
+    "    raise exception 'registration_observation_feedback_fixture_remains';",
+    "  end if;",
+    "  if exists (select 1 from public.ops_tasks where id = '99200000-0000-4000-8000-000000000105'::uuid) then",
+    "    raise exception 'registration_observation_feedback_fixture_remains';",
+    "  end if;",
+    "  if exists (select 1 from public.ops_registration_subject_tracks where id = '99200000-0000-4000-8000-000000000106'::uuid) then",
+    "    raise exception 'registration_observation_feedback_fixture_remains';",
+    "  end if;",
+    "  if exists (select 1 from public.ops_registration_appointments where id = '99200000-0000-4000-8000-000000000107'::uuid) then",
+    "    raise exception 'registration_observation_feedback_fixture_remains';",
+    "  end if;",
+    "  if exists (select 1 from public.ops_registration_observations where id = '99200000-0000-4000-8000-000000000108'::uuid) then",
+    "    raise exception 'registration_observation_feedback_fixture_remains';",
+    "  end if;",
+    "  if exists (select 1 from dashboard_private.registration_observation_mutation_requests where track_id = '99200000-0000-4000-8000-000000000106'::uuid) then",
+    "    raise exception 'registration_observation_feedback_fixture_remains';",
+    "  end if;",
+    "  if exists (select 1 from dashboard_private.registration_observation_domain_events where observation_id = '99200000-0000-4000-8000-000000000108'::uuid) then",
+    "    raise exception 'registration_observation_feedback_fixture_remains';",
+    "  end if;",
+    "  if exists (select 1 from public.dashboard_audit_logs where class_id = '99200000-0000-4000-8000-000000000103'::uuid or entity_id = any(array['99200000-0000-4000-8000-000000000001', '99200000-0000-4000-8000-000000000003', '99200000-0000-4000-8000-000000000101', '99200000-0000-4000-8000-000000000102', '99200000-0000-4000-8000-000000000103', '99200000-0000-4000-8000-000000000104'])) then",
+    "    raise exception 'registration_observation_feedback_fixture_remains';",
+    "  end if;",
+  ];
+}
+
 export function registrationObservationSchemaFreshAssertionSql(
   focus = "schema",
 ) {
@@ -1318,6 +1456,8 @@ export function registrationObservationSchemaFreshAssertionSql(
     registrationObservationProviderOutboxFreshAssertionLines(focus);
   const bookingAssertions =
     registrationObservationBookingFreshAssertionLines(focus);
+  const feedbackAssertions =
+    registrationObservationFeedbackFreshAssertionLines(focus);
   return [
     "begin;",
     "do $$",
@@ -1368,6 +1508,7 @@ export function registrationObservationSchemaFreshAssertionSql(
     "    raise exception 'registration_observation_fixture_events_remain';",
     "  end if;",
     ...bookingAssertions,
+    ...feedbackAssertions,
     ...providerAssertions,
     "end",
     "$$;",
