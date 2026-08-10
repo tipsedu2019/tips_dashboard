@@ -1592,7 +1592,7 @@ Round 2의 raw `after_value` text predicate는 JSON member 위치·공백에 의
 - [x] **Step 3:** generic/observation summary의 projection, runtime probe, cache/in-flight/epoch identity를 분리하고 양방향 호출 순서 및 runtime `0→1`을 RED→GREEN으로 닫는다.
 - [x] **Step 4:** manager detail에 bounded attempts와 독립적인 `latestDecisionObservation`을 추가하고 20개 초과 canceled attempt 뒤 `re_observation` 정정을 RED→GREEN으로 닫는다.
 - [x] **Step 5:** legacy/shadow schedule JSON을 한 번만 set-wise parse하고 10,000-session structural/behavior/performance RED→GREEN을 닫는다.
-- [ ] **Step 6:** schema/booking/workspace/core-review local DB, full core Node, ESLint, TypeScript, webpack build, diff/scope/status를 검증하고 커밋한다. runtime/provider/remote는 0을 유지한다.
+- [x] **Step 6:** schema/booking/workspace/core-review local DB, full core Node, ESLint, TypeScript, webpack build, diff/scope/status를 검증하고 커밋한다. runtime/provider/remote는 0을 유지한다.
 - [ ] **Step 7:** 네 original findings만 대상으로 한 독립 scoped re-review를 한 번 실행하고, 남은 load-bearing finding이 있으면 추가 수정 없이 controller/user에게 보고한다.
 
 ## Final verification matrix
