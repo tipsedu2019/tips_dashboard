@@ -43,6 +43,91 @@ function functionDefinition(sql, qualifiedName) {
   return match[0];
 }
 
+function assertFeedbackMutationLockOrder(definition) {
+  const normalized = normalizeSql(definition);
+  const statements = normalized
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+  const advisoryLocks = [
+    ...normalized.matchAll(/\bpg_advisory_xact_lock\s*\(/gi),
+  ];
+  assert.equal(
+    advisoryLocks.length,
+    1,
+    "feedback mutation must acquire exactly one actor/request advisory lock",
+  );
+
+  const lockedStatement = (prefix, requiredTokens, label) => {
+    const matches = statements.filter((statement) =>
+      statement.toLowerCase().startsWith(prefix.toLowerCase()),
+    );
+    assert.equal(matches.length, 1, `expected one exact ${label} SELECT`);
+    const [statement] = matches;
+    assert.match(statement, /for update$/i, `${label} SELECT must own FOR UPDATE`);
+    for (const token of requiredTokens) {
+      assert.match(
+        statement,
+        new RegExp(escapeRegExp(token), "i"),
+        `${label} SELECT must bind ${token}`,
+      );
+    }
+    return normalized.indexOf(statement);
+  };
+
+  const replayLookup = normalized.indexOf(
+    "from dashboard_private.registration_observation_mutation_requests request",
+  );
+  const trackLock = lockedStatement(
+    "select track.* into v_track from public.ops_registration_subject_tracks track",
+    [
+      "where track.id = ( select observation.track_id",
+      "from public.ops_registration_observations observation",
+      "where observation.id = p_observation_id )",
+    ],
+    "track",
+  );
+  const observationLock = lockedStatement(
+    "select observation.* into v_observation from public.ops_registration_observations observation",
+    [
+      "where observation.id = p_observation_id",
+      "observation.track_id = v_track.id",
+      "observation.task_id = v_track.task_id",
+    ],
+    "observation",
+  );
+  const appointmentLock = lockedStatement(
+    "select appointment.* into v_appointment from public.ops_registration_appointments appointment",
+    [
+      "where appointment.id = v_observation.appointment_id",
+      "appointment.task_id = v_track.task_id",
+    ],
+    "appointment",
+  );
+  const eventLock = lockedStatement(
+    "perform event.observation_id from dashboard_private.registration_observation_domain_events event",
+    [
+      "event.observation_id = v_observation.id",
+      "event.appointment_id = v_appointment.id",
+      "event.notification_revision = v_appointment.notification_revision",
+      "event.event_kind =",
+      "event.booking_fact_hash = v_observation.booking_fact_hash",
+      "event.source_revision = v_observation.source_revision",
+    ],
+    "domain-event",
+  );
+  const receiptWrite = normalized.lastIndexOf(
+    "insert into dashboard_private.registration_observation_mutation_requests(",
+  );
+
+  assert.ok(advisoryLocks[0].index < replayLookup);
+  assert.ok(replayLookup < trackLock);
+  assert.ok(trackLock < observationLock);
+  assert.ok(observationLock < appointmentLock);
+  assert.ok(appointmentLock < eventLock);
+  assert.ok(eventLock < receiptWrite);
+}
+
 test("attendance and feedback require every approved revision", async () => {
   // Production break caught: either RPC drops an optimistic revision or writes
   // enrollment/payment facts while recording attendance or first feedback.
@@ -221,6 +306,7 @@ test("correction keeps decision access and feedback revision isolated", async ()
     definition,
     /(?:set|,)\s*(?:notification_revision|workflow_revision)\s*=|(?:set|,)\s*revision\s*=\s*observation\.revision\s*\+/i,
   );
+  assertFeedbackMutationLockOrder(definition);
 
   const wrapper = functionDefinition(
     sql,
@@ -264,35 +350,7 @@ test("director decision checks domain feedback and track revisions", async () =>
     /(?:insert\s+into|update|delete\s+from)\s+public\.(?:ops_registration_enrollments|ops_registration_admission_batches|ops_registration_customer_messages)|payment/i,
   );
 
-  const advisoryLock = definition.indexOf("pg_advisory_xact_lock");
-  const replayLookup = definition.indexOf(
-    "registration_observation_mutation_requests",
-  );
-  const trackLock = definition.indexOf(
-    "from public.ops_registration_subject_tracks",
-    replayLookup + 1,
-  );
-  const observationLock = definition.indexOf(
-    "from public.ops_registration_observations",
-    trackLock + 1,
-  );
-  const appointmentLock = definition.indexOf(
-    "from public.ops_registration_appointments",
-    observationLock + 1,
-  );
-  const eventLock = definition.indexOf(
-    "from dashboard_private.registration_observation_domain_events",
-    appointmentLock + 1,
-  );
-  const receiptWrite = definition.lastIndexOf(
-    "insert into dashboard_private.registration_observation_mutation_requests",
-  );
-  assert.ok(advisoryLock >= 0 && advisoryLock < replayLookup);
-  assert.ok(replayLookup < trackLock);
-  assert.ok(trackLock < observationLock);
-  assert.ok(observationLock < appointmentLock);
-  assert.ok(appointmentLock < eventLock);
-  assert.ok(eventLock < receiptWrite);
+  assertFeedbackMutationLockOrder(definition);
 
   const wrapper = functionDefinition(
     sql,
@@ -318,7 +376,11 @@ test("correction and director pgTAP own replay roles revisions mapping race and 
     "teacher correction before decision",
     "teacher correction after decision",
     "admin same-result reason correction",
+    "stale observation revision rejects correction",
     "stale feedback revision",
+    "stale expected decision kind rejects correction",
+    "director decision rejects a stale observation revision",
+    "director decision rejects a stale feedback revision",
     "duplicate correction replay",
     "duplicate decision replay",
     "request key conflict",
@@ -326,6 +388,11 @@ test("correction and director pgTAP own replay roles revisions mapping race and 
     "re-observation active attempt",
     "notification revision unchanged",
     "financial state before",
+    "waiting_current_class decision preserves its exact per-track financial state",
+    "waiting_new_class decision preserves its exact per-track financial state",
+    "waiting_next_opening decision preserves its exact per-track financial state",
+    "not_registered decision preserves its exact per-track financial state",
+    "re_observation decision preserves its exact per-track financial state",
     "dblink_send_query",
     "both decision workers overlap",
     "one concurrent decision succeeds",

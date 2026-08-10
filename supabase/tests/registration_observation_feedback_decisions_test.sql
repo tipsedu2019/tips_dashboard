@@ -1,5 +1,5 @@
 begin;
-select plan(40);
+select plan(49);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '120s';
@@ -13,8 +13,8 @@ create extension if not exists dblink;
 -- decision replay, request key conflict, waiting class subject mismatch,
 -- re-observation active attempt, notification revision unchanged, exact
 -- decision mapping, committed dblink_send_query overlap, and the seeded
--- financial state before/after fingerprint. The shared runner additionally
--- requires the registration_observation_provider_outbox_delta=0 receipt.
+-- per-decision financial state before/after fingerprints. The shared runner
+-- additionally requires the registration_observation_provider_outbox_delta=0 receipt.
 
 insert into auth.users(
   id, instance_id, aud, role, email, encrypted_password,
@@ -225,34 +225,77 @@ values (
   '2026-08-01 08:00:00+09', '2026-08-01 08:00:00+09'
 );
 
+create function pg_temp.registration_observation_decision_financial_state(
+  p_task_id uuid,
+  p_track_id uuid
+)
+returns jsonb
+language sql
+stable
+set search_path = ''
+as $$
+  select pg_catalog.jsonb_build_object(
+    'enrollmentCount', (
+      select count(*)
+      from public.ops_registration_enrollments enrollment
+      where enrollment.track_id = p_track_id
+    ),
+    'enrollments', coalesce((
+      select pg_catalog.jsonb_agg(
+        pg_catalog.to_jsonb(enrollment) order by enrollment.id
+      )
+      from public.ops_registration_enrollments enrollment
+      where enrollment.track_id = p_track_id
+    ), '[]'::jsonb),
+    'admissionCount', (
+      select count(*)
+      from public.ops_registration_admission_batches admission
+      where admission.task_id = p_task_id
+    ),
+    'admissions', coalesce((
+      select pg_catalog.jsonb_agg(
+        pg_catalog.to_jsonb(admission) order by admission.id
+      )
+      from public.ops_registration_admission_batches admission
+      where admission.task_id = p_task_id
+    ), '[]'::jsonb),
+    'paymentCount', (
+      select count(*)
+      from public.ops_registration_admission_batches payment
+      where payment.task_id = p_task_id
+        and payment.payment_confirmed_at is not null
+    ),
+    'payments', coalesce((
+      select pg_catalog.jsonb_agg(
+        pg_catalog.to_jsonb(payment) order by payment.id
+      )
+      from public.ops_registration_admission_batches payment
+      where payment.task_id = p_task_id
+        and payment.payment_confirmed_at is not null
+    ), '[]'::jsonb)
+  );
+$$;
+
 create temporary table registration_observation_decision_financial_state_before
 on commit drop
 as
-select pg_catalog.jsonb_build_object(
-  'enrollmentCount', (
-    select count(*) from public.ops_registration_enrollments enrollment
-    where enrollment.track_id = '99400000-0000-4000-8000-000000000106'
-  ),
-  'enrollments', (
-    select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(enrollment) order by enrollment.id)
-    from public.ops_registration_enrollments enrollment
-    where enrollment.track_id = '99400000-0000-4000-8000-000000000106'
-  ),
-  'admissionCount', (
-    select count(*) from public.ops_registration_admission_batches admission
-    where admission.task_id = '99400000-0000-4000-8000-000000000105'
-  ),
-  'admissions', (
-    select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(admission) order by admission.id)
-    from public.ops_registration_admission_batches admission
-    where admission.task_id = '99400000-0000-4000-8000-000000000105'
-  ),
-  'paymentCount', (
-    select count(*) from public.ops_registration_admission_batches payment
-    where payment.task_id = '99400000-0000-4000-8000-000000000105'
-      and payment.payment_confirmed_at is not null
-  )
-) as state;
+select
+  target.decision_kind,
+  target.task_id,
+  target.track_id,
+  pg_temp.registration_observation_decision_financial_state(
+    target.task_id,
+    target.track_id
+  ) as state
+from (
+  values
+    ('enrollment', '99400000-0000-4000-8000-000000000105'::uuid, '99400000-0000-4000-8000-000000000106'::uuid),
+    ('waiting_current_class', '99400000-0000-4000-8000-000000000115'::uuid, '99400000-0000-4000-8000-000000000116'::uuid),
+    ('waiting_new_class', '99400000-0000-4000-8000-000000000125'::uuid, '99400000-0000-4000-8000-000000000126'::uuid),
+    ('waiting_next_opening', '99400000-0000-4000-8000-000000000135'::uuid, '99400000-0000-4000-8000-000000000136'::uuid),
+    ('not_registered', '99400000-0000-4000-8000-000000000145'::uuid, '99400000-0000-4000-8000-000000000146'::uuid),
+    ('re_observation', '99400000-0000-4000-8000-000000000155'::uuid, '99400000-0000-4000-8000-000000000156'::uuid)
+) as target(decision_kind, task_id, track_id);
 
 create temporary table registration_observation_decision_results(
   result_key text primary key,
@@ -457,6 +500,24 @@ select throws_ok(
   )$$,
   '40001', 'registration_observation_stale_revision',
   'stale feedback revision rejects correction'
+);
+select throws_ok(
+  $$select public.correct_registration_observation_feedback_v1(
+    '99400000-0000-4000-8000-000000000108',
+    'unfit', 'stale observation revision', '오래된 관찰 화면',
+    4, 3, null, 'decision-correction-stale-observation'
+  )$$,
+  '40001', 'registration_observation_stale_revision',
+  'stale observation revision rejects correction'
+);
+select throws_ok(
+  $$select public.correct_registration_observation_feedback_v1(
+    '99400000-0000-4000-8000-000000000108',
+    'unfit', 'stale decision token', '오래된 결정 화면',
+    5, 3, 'enrollment', 'decision-correction-stale-decision'
+  )$$,
+  '40001', 'registration_observation_stale_revision',
+  'stale expected decision kind rejects correction'
 );
 reset role;
 
@@ -668,6 +729,24 @@ select pg_temp.registration_observation_decision_set_actor(
   '99400000-0000-4000-8000-000000000005'
 );
 set local role authenticated;
+select throws_ok(
+  $$select public.decide_registration_observation_v1(
+    '99400000-0000-4000-8000-000000000118', 'waiting_current_class',
+    '99400000-0000-4000-8000-000000000103', 1, 1, 8,
+    'decision-stale-observation-revision'
+  )$$,
+  '40001', 'registration_observation_stale_revision',
+  'director decision rejects a stale observation revision'
+);
+select throws_ok(
+  $$select public.decide_registration_observation_v1(
+    '99400000-0000-4000-8000-000000000118', 'waiting_current_class',
+    '99400000-0000-4000-8000-000000000103', 2, 0, 8,
+    'decision-stale-feedback-revision'
+  )$$,
+  '40001', 'registration_observation_stale_revision',
+  'director decision rejects a stale feedback revision'
+);
 select throws_ok(
   $$select public.decide_registration_observation_v1(
     '99400000-0000-4000-8000-000000000118', 'waiting_current_class',
@@ -955,33 +1034,58 @@ select throws_ok(
 reset role;
 
 select is(
-  pg_catalog.jsonb_build_object(
-    'enrollmentCount', (
-      select count(*) from public.ops_registration_enrollments enrollment
-      where enrollment.track_id = '99400000-0000-4000-8000-000000000106'
-    ),
-    'enrollments', (
-      select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(enrollment) order by enrollment.id)
-      from public.ops_registration_enrollments enrollment
-      where enrollment.track_id = '99400000-0000-4000-8000-000000000106'
-    ),
-    'admissionCount', (
-      select count(*) from public.ops_registration_admission_batches admission
-      where admission.task_id = '99400000-0000-4000-8000-000000000105'
-    ),
-    'admissions', (
-      select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(admission) order by admission.id)
-      from public.ops_registration_admission_batches admission
-      where admission.task_id = '99400000-0000-4000-8000-000000000105'
-    ),
-    'paymentCount', (
-      select count(*) from public.ops_registration_admission_batches payment
-      where payment.task_id = '99400000-0000-4000-8000-000000000105'
-        and payment.payment_confirmed_at is not null
-    )
+  pg_temp.registration_observation_decision_financial_state(
+    '99400000-0000-4000-8000-000000000105',
+    '99400000-0000-4000-8000-000000000106'
   ),
-  (select state from registration_observation_decision_financial_state_before),
-  'seeded financial state before remains byte-exact after correction and every decision'
+  (select state from registration_observation_decision_financial_state_before
+   where decision_kind = 'enrollment'),
+  'seeded financial state before remains byte-exact after the enrollment decision'
+);
+select is(
+  pg_temp.registration_observation_decision_financial_state(
+    '99400000-0000-4000-8000-000000000115',
+    '99400000-0000-4000-8000-000000000116'
+  ),
+  (select state from registration_observation_decision_financial_state_before
+   where decision_kind = 'waiting_current_class'),
+  'waiting_current_class decision preserves its exact per-track financial state'
+);
+select is(
+  pg_temp.registration_observation_decision_financial_state(
+    '99400000-0000-4000-8000-000000000125',
+    '99400000-0000-4000-8000-000000000126'
+  ),
+  (select state from registration_observation_decision_financial_state_before
+   where decision_kind = 'waiting_new_class'),
+  'waiting_new_class decision preserves its exact per-track financial state'
+);
+select is(
+  pg_temp.registration_observation_decision_financial_state(
+    '99400000-0000-4000-8000-000000000135',
+    '99400000-0000-4000-8000-000000000136'
+  ),
+  (select state from registration_observation_decision_financial_state_before
+   where decision_kind = 'waiting_next_opening'),
+  'waiting_next_opening decision preserves its exact per-track financial state'
+);
+select is(
+  pg_temp.registration_observation_decision_financial_state(
+    '99400000-0000-4000-8000-000000000145',
+    '99400000-0000-4000-8000-000000000146'
+  ),
+  (select state from registration_observation_decision_financial_state_before
+   where decision_kind = 'not_registered'),
+  'not_registered decision preserves its exact per-track financial state'
+);
+select is(
+  pg_temp.registration_observation_decision_financial_state(
+    '99400000-0000-4000-8000-000000000155',
+    '99400000-0000-4000-8000-000000000156'
+  ),
+  (select state from registration_observation_decision_financial_state_before
+   where decision_kind = 're_observation'),
+  're_observation decision preserves its exact per-track financial state'
 );
 select is(
   (
