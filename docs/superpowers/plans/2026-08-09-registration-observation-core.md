@@ -14,6 +14,7 @@
 - 이 계획에서 외부 Google Chat/SOLAPI 호출, due-job materialization/worker, 교사 feedback route, attendance/feedback/decision mutation, enrollment source link를 구현하지 않는다. 아래의 frozen interface만 downstream에 제공한다.
 - 어떤 downstream migration도 `enter_registration_observation_v1`, `list_registration_observation_sessions_v1`, `save_registration_observation_booking_v1`, `cancel_registration_observation_v1`, `withdraw_registration_observation_v1` 또는 그 private impl을 `CREATE OR REPLACE`하지 않는다. core mutation은 provider 대신 `dashboard_private.registration_observation_domain_events`만 transaction 안에서 INSERT한다.
 - 도메인 변경 audit은 기존 exact helper `dashboard_private.write_registration_track_event_v2(uuid,uuid,text,text,text,text,jsonb,text,text)`로 `ops_task_events`에 남긴다. 이 audit과 stable domain event를 제외한 provider/due/delivery row는 core transaction에서 만들지 않는다.
+- shared 등록 case detail은 observation audit을 client-side text 정규식으로 판별하지 않는다. 새 forward-only computed field `public.registration_task_event_shared_visible(public.ops_task_events)`가 exact outer legacy prefix 또는 outer type이 `registration_track_event`일 때만 parse 가능한 v1/v2 payload의 canonical top-level inner event type을 판정하고, PostgREST query가 `registration_task_event_shared_visible = true`인 row만 전송한다. 기존 migration/table/RLS/audit writer는 수정하지 않고 malformed/null/unknown-version, key/prefix near-miss, non-track outer 및 일반 event history는 보존한다.
 - runtime 설정의 초기값은 `0`이다. `public.registration_observation_schema_readiness_v1()`은 runtime 값과 무관하게 설치 상태를 보고하고, `public.registration_observation_runtime_version()`만 활성 값을 보고한다. 예약·lifecycle domain mutation private impl은 receipt replay를 제외한 새 쓰기 전에 runtime `1`을 강제하며, admin activation RPC만 이 guard의 예외다.
 - 공개 RPC는 SECURITY INVOKER wrapper, private impl/helper는 SECURITY DEFINER와 `SET search_path = ''`를 사용한다. 모든 함수에 `REVOKE ALL ... FROM PUBLIC, anon, authenticated, service_role` 뒤 필요한 private impl과 public wrapper에만 `GRANT EXECUTE ... TO authenticated`를 명시한다. private table은 네 role 모두 ALL revoke한다.
 - observation 직접 INSERT/UPDATE/DELETE grant나 write policy를 만들지 않는다. 직접 SELECT는 manager summary view를 위해 authenticated에만 grant하고, admin/staff 또는 해당 track director만 보이는 RLS policy를 적용한다. 교사 상세는 downstream 전용 RPC 외에는 열지 않는다.
@@ -70,6 +71,21 @@ git mv -- "$registration_observation_booking_generated" supabase/migrations/2026
 test "$(rg --files supabase/migrations | rg '/[0-9]{14}_registration_observation_booking\.sql$')" = "supabase/migrations/20260809102000_registration_observation_booking.sql"
 test "$(git diff --cached --name-only --diff-filter=ACMR | rg '^supabase/migrations/[0-9]{14}_registration_observation_booking\.sql$')" = "supabase/migrations/20260809102000_registration_observation_booking.sql"
 test -z "$(git diff --cached --name-only --diff-filter=D | rg 'registration_observation_booking\.sql$')"
+```
+
+Task 6 shared-event privacy correction:
+
+```bash
+test ! -e supabase/migrations/20260809102200_registration_observation_shared_event_filter.sql
+test "$(/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supabase/cli-darwin-arm64/bin/supabase-go --version)" = "2.103.0"
+/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supabase/cli-darwin-arm64/bin/supabase-go migration new registration_observation_shared_event_filter
+registration_observation_shared_event_filter_generated="$(rg --files supabase/migrations | rg '/[0-9]{14}_registration_observation_shared_event_filter\.sql$')"
+test "$(printf '%s\n' "$registration_observation_shared_event_filter_generated" | sed '/^$/d' | wc -l | tr -d ' ')" = "1"
+git add -- "$registration_observation_shared_event_filter_generated"
+git mv -- "$registration_observation_shared_event_filter_generated" supabase/migrations/20260809102200_registration_observation_shared_event_filter.sql
+test "$(rg --files supabase/migrations | rg '/[0-9]{14}_registration_observation_shared_event_filter\.sql$')" = "supabase/migrations/20260809102200_registration_observation_shared_event_filter.sql"
+test "$(git diff --cached --name-only --diff-filter=ACMR | rg '^supabase/migrations/[0-9]{14}_registration_observation_shared_event_filter\.sql$')" = "supabase/migrations/20260809102200_registration_observation_shared_event_filter.sql"
+test -z "$(git diff --cached --name-only --diff-filter=D | rg 'registration_observation_shared_event_filter\.sql$')"
 ```
 
 worker는 CLI 생성·staged rename까지 마친 뒤 `apply_patch`로 SQL을 작성한다. 작성 뒤 exact target에 `git add --`, `test -s`, 위 staged `ACMR` exact-one/D-zero gate, `git diff --cached --check`를 다시 실행한다. 같은 `rg` equality까지 모두 PASS한 다음에만 해당 migration RED/GREEN 단계로 진행한다. `git status --short` 또는 staged diff에 frozen target 외 같은 slug generated/orphan path가 보이면 task는 GREEN이 아니다.
@@ -196,14 +212,16 @@ export type RegistrationObservationHistoricalEnrollmentOption =
 ```bash
 /Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --experimental-strip-types scripts/run-registration-observation-local-db-qa.mjs
 /Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --experimental-strip-types scripts/run-registration-observation-local-db-qa.mjs --execute --approved-local-db --focus schema
+/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --experimental-strip-types scripts/run-registration-observation-local-db-qa.mjs --execute --approved-local-db --focus workspace
 ```
 
-`--focus`의 닫힌 값은 `schema | booking | feedback-access | feedback-submit | feedback | enrollment | google-chat | solapi-contract | solapi-queue | solapi`다. 각 focus는 고정 migration ceiling, pgTAP 파일, committed-fixture setup/cleanup/fresh-assert hook을 선택한다. hook은 runner가 만든 loopback DB와 exact synthetic fixture ID manifest만 받을 수 있고 provider credential이나 linked project ref를 입력으로 받지 않는다. 아직 committed fixture가 필요 없는 focus는 Task 1 registry에 setup/cleanup 각각 `begin; commit;`인 concrete no-op hook을 등록해 별도 connection에서 실행한다. 반대로 downstream 계획이 committed fixture를 요구한다고 선언한 focus는 그 계획의 concrete setup/cleanup/fresh hook이 추가되기 전까지 unavailable이다. 따라서 모든 available focus가 동일한 실행 순서와 오류 정리 계약을 갖고, generic no-op이 committed-fixture 요구를 우회하지 못한다.
+`--focus`의 닫힌 값은 `schema | booking | workspace | feedback-access | feedback-submit | feedback | enrollment | google-chat | solapi-contract | solapi-queue | solapi`다. 각 focus는 고정 migration ceiling, pgTAP 파일, committed-fixture setup/cleanup/fresh-assert hook을 선택한다. hook은 runner가 만든 loopback DB와 exact synthetic fixture ID manifest만 받을 수 있고 provider credential이나 linked project ref를 입력으로 받지 않는다. 아직 committed fixture가 필요 없는 focus는 Task 1 registry에 setup/cleanup 각각 `begin; commit;`인 concrete no-op hook을 등록해 별도 connection에서 실행한다. `workspace`도 registry의 exact fixture 값 `noop`을 사용하며, 기존 provider-baseline setup/cleanup/fresh assertion lifecycle은 그대로 실행한다. 반대로 downstream 계획이 committed fixture를 요구한다고 선언한 focus는 그 계획의 concrete setup/cleanup/fresh hook이 추가되기 전까지 unavailable이다. 따라서 모든 available focus가 동일한 실행 순서와 오류 정리 계약을 갖고, generic no-op이 committed-fixture 요구를 우회하지 못한다.
 
 | focus | migration ceiling | pgTAP file |
 |---|---|---|
 | schema | `20260809101000` | `supabase/tests/registration_observation_schema_test.sql` |
 | booking | `20260809102000` | schema test + `supabase/tests/registration_observation_booking_test.sql` |
+| workspace | `20260809102200` | `supabase/tests/registration_observation_shared_event_filter_test.sql` only |
 | feedback-access | `20260809102500` | `supabase/tests/registration_observation_feedback_access_test.sql` |
 | feedback-submit | `20260809103000` | feedback access test + `supabase/tests/registration_observation_feedback_submit_test.sql` |
 | feedback | `20260809103500` | feedback access test + feedback submit test + `supabase/tests/registration_observation_feedback_decisions_test.sql` |
@@ -214,6 +232,8 @@ export type RegistrationObservationHistoricalEnrollmentOption =
 | solapi | `20260809106200` | `supabase/tests/registration_observation_solapi_contract_test.sql` + `supabase/tests/registration_observation_solapi_queue_test.sql` + `supabase/tests/registration_observation_solapi_dispatch_test.sql` |
 
 아직 존재하지 않는 downstream migration/test 또는 focus-owned fixture hook을 선택하면 `registration_observation_local_db_focus_unavailable:<focus>`로 종료한다. 단, `schema` focus는 core의 단계별 TDD를 위해 다음 exact two-phase 규칙을 갖는다. `20260809101000_registration_observation_reads.sql`이 아직 없으면 Task 1 phase로 판정해 required ceiling `20260809100000`까지 apply하고 schema pgTAP을 실행한다. 파일이 생긴 순간부터 Task 3 phase로 판정해 required ceiling `20260809101000`까지 apply하며 101000 apply 누락을 허용하지 않는다. 파일명의 존재 외 환경변수나 수동 phase flag로 이 분기를 바꾸지 않는다. runner Node test는 두 synthetic file manifests에서 각각 100000/101000 ceiling과 동일 schema pgTAP mapping을 assert한다. runner는 linked/remote/production flag, provider credential, 비-loopback DB URL을 거부하고 임시 Supabase project/고유 loopback ports만 사용하며 자신이 만든 Docker resource만 정리한다.
+
+`workspace` focus는 `20260809102200_registration_observation_shared_event_filter.sql`과 `supabase/tests/registration_observation_shared_event_filter_test.sql`이 모두 존재할 때만 available이다. clean reset은 repository migration을 `20260809102200`까지 순서대로 적용하지만 pgTAP 선택은 신규 shared-event test 한 파일만 사용한다. schema/booking pgTAP을 같은 focus에 다시 끼워 넣지 않으며, 그 둘은 각자의 독립 focus reviewer gate로 남긴다.
 
 Downstream feedback 계획의 migration 이름은 `supabase/migrations/20260809102500_registration_observation_feedback_access.sql`, `supabase/migrations/20260809103000_registration_observation_feedback_mutations.sql`, `supabase/migrations/20260809103500_registration_observation_feedback_decisions.sql`로 고정한다. pgTAP은 `registration_observation_feedback_access_test.sql`, `registration_observation_feedback_submit_test.sql`, `registration_observation_feedback_decisions_test.sql` 세 파일로 분리한다. `feedback-access`는 access만, `feedback-submit`은 access + submit, `feedback`은 access + submit + decisions를 실행해 최종 HEAD에서도 낮은 ceiling focus가 독립 GREEN이어야 한다.
 
@@ -236,8 +256,8 @@ Downstream SOLAPI의 각 focus는 자기 ceiling까지 clean apply한다. `solap
 
 | File | Responsibility | Owner task |
 |---|---|---|
-| `scripts/run-registration-observation-local-db-qa.mjs` | isolated clean apply, focus routing, destructive-scope guard | Task 1 |
-| `tests/registration-observation-local-db-runner.test.mjs` | runner argv/focus/safety contract | Task 1 |
+| `scripts/run-registration-observation-local-db-qa.mjs` | isolated clean apply, focus routing, destructive-scope guard; Task 6 adds the exact workspace focus | Task 1/6 |
+| `tests/registration-observation-local-db-runner.test.mjs` | runner argv/focus/safety contract, including workspace ceiling/test/noop fixture | Task 1/6 |
 | `supabase/migrations/20260809100000_registration_observation_core_schema.sql` | statuses, columns, observation/receipt/event/runtime tables, checks/indexes/RLS/ACL/readiness | Task 1 |
 | `supabase/tests/registration_observation_schema_test.sql` | schema, ACL, RLS, readiness, runtime-default pgTAP | Task 1–3 |
 | `tests/registration-observation-schema.test.mjs` | migration source contract and exact signature guard | Task 1–4 |
@@ -249,10 +269,13 @@ Downstream SOLAPI의 각 focus는 자기 ceiling까지 clean apply한다. `solap
 | `supabase/migrations/20260809102000_registration_observation_booking.sql` | generic guard, entry/book/reschedule/cancel/withdraw mutations | Task 4 |
 | `supabase/tests/registration_observation_booking_test.sql` | revision, receipt, lock-visible behavior, lifecycle pgTAP | Task 4 |
 | `tests/registration-observation-booking.test.mjs` | mutation signature/event/lock-order source contract | Task 4 |
+| `supabase/migrations/20260809102200_registration_observation_shared_event_filter.sql` | forward-only shared-event computed field only; no table/RLS/backfill/audit-writer change | Task 6 |
+| `supabase/tests/registration_observation_shared_event_filter_test.sql` | real-row shared visibility matrix and ACL/computed-field pgTAP | Task 6 |
+| `tests/registration-observation-shared-event-filter.test.mjs` | frozen migration/function/source boundary contract | Task 6 |
 | `src/features/tasks/registration-observation-model.ts` | strict domain and RPC JSON types/normalizers | Task 5 |
 | `src/features/tasks/registration-observation-runtime-probe.ts` | readiness + runtime probe and schema-cache miss handling | Task 5 |
 | `src/features/tasks/registration-observation-service.ts` | bounded detail/session reads, exact single-attempt read, non-retrying mutations, request mapping | Task 5 |
-| `src/features/tasks/registration-track-service.ts` | fixed summary projection and selected case integration | Task 5 |
+| `src/features/tasks/registration-track-service.ts` | fixed summary projection and selected case integration; shared detail uses the DB computed field | Task 5/6 |
 | `src/features/tasks/registration-track-fixtures.ts` | browser fixture observation shape | Task 5 |
 | `src/features/tasks/registration-track-fixture-runtime.ts` | fixture read/mutation parity | Task 5 |
 | `tests/registration-observation-service.test.mjs` | normalizer/deadline/request mapping | Task 5 |
@@ -269,6 +292,7 @@ Downstream SOLAPI의 각 focus는 자기 ceiling까지 clean apply한다. `solap
 | `src/features/tasks/registration-case-list.tsx` | observation list tab/row | Task 6 |
 | `src/features/tasks/ops-task-workspace.tsx` | runtime probe injection and refresh | Task 6 |
 | `tests/registration-observation-workspace.test.mjs` | booking UI state machine/source contract | Task 6 |
+| `tests/registration-track-service.test.mjs` | shared detail server-boundary filter and preservation matrix | Task 5/6 |
 | existing registration model/workspace/list tests | shell/order/status regressions | Task 6 |
 | `package.json` | `verify:registration-observation:local-db` script only | Task 1 |
 
@@ -1445,6 +1469,69 @@ Downstream SOLAPI의 각 focus는 자기 ceiling까지 clean apply한다. `solap
   git commit -m "feat: add observation booking workspace"
   ```
 
+#### Fix round 3 adjudication: shared case-detail event privacy
+
+Round 2의 raw `after_value` text predicate는 JSON member 위치·공백에 의존하고 nested metadata와 future payload를 구분하는 DB 권위가 아니므로 최종 server privacy boundary로 채택하지 않는다. Task 6은 historical migration을 수정하지 않고 frozen `20260809102200_registration_observation_shared_event_filter.sql` 하나를 추가한다. 이 migration은 PostgREST computed field `public.registration_task_event_shared_visible(public.ops_task_events)`와 필요한 execute ACL만 소유한다. column/index/backfill/RLS/policy/audit writer/RPC/provider/runtime 값을 추가하거나 바꾸지 않는다.
+
+추가 허용 파일은 정확히 다음뿐이다.
+
+- `supabase/migrations/20260809102200_registration_observation_shared_event_filter.sql`
+- `supabase/tests/registration_observation_shared_event_filter_test.sql`
+- `tests/registration-observation-shared-event-filter.test.mjs`
+- `scripts/run-registration-observation-local-db-qa.mjs`
+- `tests/registration-observation-local-db-runner.test.mjs`
+- `src/features/tasks/registration-track-service.ts`
+- `tests/registration-track-service.test.mjs`
+- `docs/superpowers/plans/2026-08-09-registration-observation-core.md`
+- `.superpowers/sdd/2026-08-09-registration-observation-core/task-6-brief.md`
+- `.superpowers/sdd/2026-08-09-registration-observation-core/task-6-report.md`
+
+`progress.md`, 기존 `20260809100000`/`101000`/`102000` migration, 기존 schema/booking pgTAP, provider/feedback/enrollment/runtime/deploy 파일은 허용하지 않는다.
+
+- [ ] **Step 8: shared-event와 workspace focus RED를 tests-only로 고정한다**
+
+  신규 pgTAP과 Node source-contract는 실제 `ops_task_events` row matrix를 고정한다. exact outer `registration_observation_%`, outer `registration_track_event` + numeric/string v1 `eventType`, numeric/string v2 `event_type` observation row는 `false`다. 일반 v2 row의 nested metadata에 observation-like 문자열만 있는 경우, null, malformed JSON, unknown version, non-track outer, underscore/prefix near-miss, v1 snake-case 및 v2 camel-case key는 `true`다. `registration-track-service` query는 `.eq("registration_task_event_shared_visible", true)`를 요구하고 dedicated manager detail RPC는 바꾸지 않는다. Runner test는 `workspace`가 ceiling `20260809102200`, pgTAP exact one file, fixture `noop`인지 검사한다.
+
+  Run:
+  ```bash
+  /Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --experimental-strip-types --test --test-reporter=tap tests/registration-observation-shared-event-filter.test.mjs tests/registration-observation-local-db-runner.test.mjs tests/registration-track-service.test.mjs
+  ```
+  Expected: computed field migration/function, workspace registry, exact server query가 아직 없어서 FAIL한다. 이 RED 전에 migration target은 creation gate를 통과한 빈 frozen file이고 production SQL/service 구현은 없어야 한다.
+
+- [ ] **Step 9: workspace registry를 연결하고 DB RED를 재현한다**
+
+  Runner registry에 `workspace`를 ceiling `20260809102200`, tests `['supabase/tests/registration_observation_shared_event_filter_test.sql']`, fixture `noop`으로 추가한다. 이 focus는 clean reset에서 ceiling까지 모든 migration을 적용하지만 선택 pgTAP은 신규 파일 하나만 실행한다. 기존 provider-baseline setup/cleanup/fresh assertion과 `start→reset→setup→pgTAP→cleanup→fresh→stop` lifecycle은 그대로 재사용한다.
+
+  Run:
+  ```bash
+  /Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --experimental-strip-types scripts/run-registration-observation-local-db-qa.mjs --execute --approved-local-db --focus workspace
+  ```
+  Expected: clean apply는 ceiling까지 도달하고 신규 pgTAP이 computed field 부재를 구체적으로 FAIL한다. unknown-focus, missing-file 또는 schema/booking pgTAP의 우연한 재실행을 DB RED로 인정하지 않는다.
+
+- [ ] **Step 10: forward-only computed field와 exact client filter를 구현한다**
+
+  Migration은 한 explicit transaction 안에서 unnamed row-composite argument 하나를 받는 `STABLE`, `SECURITY INVOKER`, empty-`search_path` computed field를 만들고 owner를 `postgres`로 고정한다. `PUBLIC`, `anon`, `authenticated`, `service_role`의 implicit privilege를 먼저 모두 revoke한 뒤 `authenticated`, `service_role`에만 `EXECUTE`를 부여한다. 판정은 outer가 exact `registration_track_event`인 JSON parse 성공 row의 exact v1/v2 top-level key만 사용하며 exception이나 substring match로 일반 history를 삭제하지 않는다.
+
+  `registration-track-service.ts`는 generic 및 observation-aware shared detail의 `ops_task_events` query를 다음 server predicate 하나로 제한한다.
+
+  ```ts
+  query.eq("registration_task_event_shared_visible", true)
+  ```
+
+  기존 response parser의 v1/v2 방어 필터와 dedicated `get_registration_observation_manager_detail_v1` 경계는 유지한다.
+
+- [ ] **Step 11: Task 6 DB/UI GREEN과 scope를 확인한다**
+
+  Run:
+  ```bash
+  /Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --experimental-strip-types --test --test-reporter=tap tests/registration-observation-shared-event-filter.test.mjs tests/registration-observation-local-db-runner.test.mjs tests/registration-track-service.test.mjs
+  /Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --experimental-strip-types scripts/run-registration-observation-local-db-qa.mjs --execute --approved-local-db --focus workspace
+  /Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node node_modules/eslint/bin/eslint.js scripts/run-registration-observation-local-db-qa.mjs src/features/tasks/registration-track-service.ts tests/registration-observation-local-db-runner.test.mjs tests/registration-observation-shared-event-filter.test.mjs tests/registration-track-service.test.mjs
+  /Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node node_modules/typescript/bin/tsc --noEmit --pretty false
+  git diff --check
+  ```
+  Expected: focused Node tests와 isolated workspace pgTAP이 PASS하고 runtime은 `0`, provider call/delivery row delta와 fixture 잔여는 `0`이다. staged/unstaged scope는 위 additional permitted files뿐이며 기존 migrations/tests는 byte-identical이어야 한다.
+
 ---
 
 ### Task 7: Core 경계와 최종 회귀를 고정한다
@@ -1456,7 +1543,7 @@ Downstream SOLAPI의 각 focus는 자기 ceiling까지 clean apply한다. `solap
 - [ ] **Step 1: spec/interface coverage test를 실행한다**
 
   ```bash
-  rg -n "reminder_due|feedback_due|google_chat|solapi|submit_registration_observation_feedback|decide_registration_observation" supabase/migrations/20260809100000_registration_observation_core_schema.sql supabase/migrations/20260809101000_registration_observation_reads.sql supabase/migrations/20260809102000_registration_observation_booking.sql src/features/tasks/registration-observation-editor.tsx
+  rg -n "reminder_due|feedback_due|google_chat|solapi|submit_registration_observation_feedback|decide_registration_observation" supabase/migrations/20260809100000_registration_observation_core_schema.sql supabase/migrations/20260809101000_registration_observation_reads.sql supabase/migrations/20260809102000_registration_observation_booking.sql supabase/migrations/20260809102200_registration_observation_shared_event_filter.sql src/features/tasks/registration-observation-editor.tsx
   rg -n "create or replace function (public|dashboard_private)\.(enter|save|cancel|withdraw)_registration_observation" supabase/migrations
   ```
 
@@ -1467,8 +1554,9 @@ Downstream SOLAPI의 각 focus는 자기 ceiling까지 clean apply한다. `solap
   ```bash
   /Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --experimental-strip-types scripts/run-registration-observation-local-db-qa.mjs --execute --approved-local-db --focus schema
   /Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --experimental-strip-types scripts/run-registration-observation-local-db-qa.mjs --execute --approved-local-db --focus booking
+  /Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --experimental-strip-types scripts/run-registration-observation-local-db-qa.mjs --execute --approved-local-db --focus workspace
   ```
-  Expected: 두 isolated run 모두 exact `start→reset→committed setup→pgTAP→cleanup/fresh runtime0→stop` lifecycle로 PASS하고 runtime default 0, fixture 잔여 0, provider 호출 0, schema focus ceiling 101000/read-only와 booking ceiling 102000/mutations가 독립적으로 재현된다.
+  Expected: 세 isolated run 모두 exact `start→reset→committed setup→pgTAP→cleanup/fresh runtime0→stop` lifecycle로 PASS하고 runtime default 0, fixture 잔여 0, provider 호출 0을 유지한다. schema focus ceiling 101000/read-only, booking ceiling 102000/mutations, workspace ceiling 102200/shared-event computed field가 각자의 exact pgTAP selection으로 독립 재현된다.
 
 - [ ] **Step 3: core 전체 회귀를 실행한다**
 
@@ -1507,6 +1595,7 @@ Downstream SOLAPI의 각 focus는 자기 ceiling까지 clean apply한다. `solap
 | first-screen O(1) plan: no history aggregate/scan, actual rows/loops/buffers ceilings | Task 3 10k/20k fixture EXPLAIN JSON assertions |
 | request ledger, exact signatures/revision combinations, global lock order | Task 4 pgTAP + source contract |
 | booking/reschedule/cancel/withdraw and generic transition guard | Task 4 pgTAP |
+| shared case detail excludes outer/v1/v2 observation audit at the server boundary without dropping malformed, nested-metadata, null, or unknown-version history | Task 6 shared-event pgTAP + source contract + track-service test + Task 7 workspace focus |
 | stable domain event seam; no provider/due implementation | Task 1 schema + Task 4 events + Task 7 boundary scan |
 | strict TS model, 12s abort, no retry, runtime probe | Task 5 Node tests |
 | list/detail booking UI and explicit application shell order | Task 6 UI/model tests |

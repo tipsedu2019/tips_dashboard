@@ -105,6 +105,20 @@ const FOCUS_REGISTRY = new Map([
     },
   ],
   [
+    "workspace",
+    {
+      ceiling: "20260809102200",
+      migrations: [
+        "20260809102200_registration_observation_shared_event_filter.sql",
+      ],
+      tests: [
+        "supabase/tests/registration_observation_shared_event_filter_test.sql",
+      ],
+      fixture: "noop",
+      providerOutboxStage: "core",
+    },
+  ],
+  [
     "feedback-access",
     {
       ceiling: "20260809102500",

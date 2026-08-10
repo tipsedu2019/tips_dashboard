@@ -779,8 +779,6 @@ type QueryBuilder = PromiseLike<QueryResult> & {
   select: (columns: string, options?: Record<string, unknown>) => QueryBuilder
   eq: (column: string, value: unknown) => QueryBuilder
   neq: (column: string, value: unknown) => QueryBuilder
-  not: (column: string, operator: string, value: unknown) => QueryBuilder
-  or: (filters: string) => QueryBuilder
   gte: (column: string, value: unknown) => QueryBuilder
   lt: (column: string, value: unknown) => QueryBuilder
   in: (column: string, values: unknown[]) => QueryBuilder
@@ -1397,12 +1395,24 @@ function parseJsonRecord(input: unknown): Record<string, unknown> | null {
   }
 }
 
+function registrationTrackEventPayloadVersion(payload: Record<string, unknown> | null) {
+  if (payload?.version === 1 || payload?.version === "1") return 1
+  if (payload?.version === 2 || payload?.version === "2") return 2
+  return null
+}
+
+function exactRegistrationTrackEventType(input: unknown) {
+  return typeof input === "string" ? input : ""
+}
+
 function mapTrackEvent(row: Row): OpsRegistrationTrackEvent {
-  const payload = parseJsonRecord(value(row, "after_value", "afterValue"))
-  const rawPayloadVersion = payload ? numberValue(payload.version) : 0
-  const payloadVersion = rawPayloadVersion === 1 || rawPayloadVersion === 2
-    ? rawPayloadVersion
+  const outerEventType = exactRegistrationTrackEventType(
+    value(row, "event_type", "eventType"),
+  )
+  const payload = outerEventType === "registration_track_event"
+    ? parseJsonRecord(value(row, "after_value", "afterValue"))
     : null
+  const payloadVersion = registrationTrackEventPayloadVersion(payload)
   const versionOne = payloadVersion === 1 ? payload : null
   const versionTwo = payloadVersion === 2 ? payload : null
   const canonical = versionTwo || versionOne
@@ -1427,10 +1437,10 @@ function mapTrackEvent(row: Row): OpsRegistrationTrackEvent {
         ? nullableText(versionOne.trackId)
         : null,
     eventType: versionTwo
-      ? text(versionTwo.event_type) || text(value(row, "event_type", "eventType"))
+      ? exactRegistrationTrackEventType(versionTwo.event_type) || outerEventType
       : versionOne
-        ? text(versionOne.eventType) || text(value(row, "event_type", "eventType"))
-        : text(value(row, "event_type", "eventType")),
+        ? exactRegistrationTrackEventType(versionOne.eventType) || outerEventType
+        : outerEventType,
     subject: parseAcademicSubject(rawSubject),
     source: canonical ? nullableText(canonical.source) : null,
     destination: canonical ? nullableText(canonical.destination) : null,
@@ -1461,27 +1471,24 @@ function mapTrackEvent(row: Row): OpsRegistrationTrackEvent {
 }
 
 const REGISTRATION_OBSERVATION_EVENT_PREFIX = "registration_observation_"
-const REGISTRATION_OBSERVATION_EVENT_SERVER_FILTER = [
-  "event_type.neq.registration_track_event",
-  "after_value.is.null",
-  'after_value.not.match.".*\\"event_type\\": \\"registration_observation_.*"',
-  'after_value.not.match.".*\\"version\\": 2.*"',
-].join(",")
 
 function isBookingOnlyRegistrationAppointmentRow(row: Row) {
   return text(value(row, "kind")) === "observation_class"
 }
 
 function isBookingOnlyRegistrationEventRow(row: Row) {
-  const outerEventType = text(value(row, "event_type", "eventType"))
+  const outerEventType = exactRegistrationTrackEventType(
+    value(row, "event_type", "eventType"),
+  )
   if (outerEventType.startsWith(REGISTRATION_OBSERVATION_EVENT_PREFIX)) return true
+  if (outerEventType !== "registration_track_event") return false
 
   const payload = parseJsonRecord(value(row, "after_value", "afterValue"))
-  const payloadVersion = payload ? numberValue(payload.version) : 0
+  const payloadVersion = registrationTrackEventPayloadVersion(payload)
   const innerEventType = payloadVersion === 2
-    ? text(payload?.event_type)
+    ? exactRegistrationTrackEventType(payload?.event_type)
     : payloadVersion === 1
-      ? text(payload?.eventType)
+      ? exactRegistrationTrackEventType(payload?.eventType)
       : ""
   return innerEventType.startsWith(REGISTRATION_OBSERVATION_EVENT_PREFIX)
 }
@@ -2163,8 +2170,7 @@ export function createRegistrationTrackService(
           client.from("ops_task_events")
             .select(EVENT_COLUMNS)
             .eq("task_id", safeTaskId)
-            .not("event_type", "like", "registration_observation_%")
-            .or(REGISTRATION_OBSERVATION_EVENT_SERVER_FILTER),
+            .eq("registration_task_event_shared_visible", true),
           metrics,
           signal,
         ),

@@ -208,6 +208,7 @@ test("runner keeps every independent database reviewer gate", async () => {
   assert.deepEqual(runner.listRegistrationObservationFocusNames(), [
     "schema",
     "booking",
+    "workspace",
     "feedback-access",
     "feedback-submit",
     "feedback",
@@ -217,6 +218,16 @@ test("runner keeps every independent database reviewer gate", async () => {
     "solapi-queue",
     "solapi",
   ]);
+  assert.deepEqual(runner.getRegistrationObservationFocusContract("workspace"), {
+    ceiling: "20260809102200",
+    tests: [
+      "supabase/tests/registration_observation_shared_event_filter_test.sql",
+    ],
+  });
+  assert.equal(
+    runner.registrationObservationFocusCleanupSql("workspace"),
+    "begin; commit;",
+  );
   assert.deepEqual(
     runner.getRegistrationObservationFocusContract("feedback-submit"),
     {

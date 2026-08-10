@@ -938,13 +938,6 @@ const caseDetailObservationSecrets = {
   afterValue: "private-observation-audit-after-value",
 };
 
-const caseDetailObservationEventServerOrFilter = [
-  "event_type.neq.registration_track_event",
-  "after_value.is.null",
-  'after_value.not.match.".*\\"event_type\\": \\"registration_observation_.*"',
-  'after_value.not.match.".*\\"version\\": 2.*"',
-].join(",");
-
 function toPostgresJsonbText(value) {
   return JSON.stringify(value).replaceAll('\":', '\": ');
 }
@@ -958,12 +951,10 @@ function detailRowsWithObservationSecrets(query) {
   const hidesObservationAppointments = hasExactFilter([
     "neq", "kind", "observation_class",
   ]);
-  const hidesOuterObservationEvents = hasExactFilter([
-    "not", "event_type", "like", "registration_observation_%",
+  const usesSharedVisibilityComputedField = hasExactFilter([
+    "eq", "registration_task_event_shared_visible", true,
   ]);
-  const hidesCanonicalObservationEvents = hasExactFilter([
-    "or", caseDetailObservationEventServerOrFilter,
-  ]);
+  const usesLegacyTextRegex = query.filters.some((filter) => filter[0] === "or");
   if (query.table === "ops_registration_subject_tracks") {
     return {
       ...result,
@@ -1087,7 +1078,10 @@ function detailRowsWithObservationSecrets(query) {
             reason_code: null,
             metadata: {
               consultationId: "consultation-public",
-              note: "registration_observation_reference_only",
+              nestedAudit: {
+                version: 2,
+                event_type: "registration_observation_reference_only",
+              },
             },
             occurred_at: "2026-08-14T10:02:00+09:00",
           }),
@@ -1104,13 +1098,62 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:03:00Z",
         },
         {
+          id: "event-non-track-observation-shaped",
+          task_id: "task-1",
+          actor_id: null,
+          event_type: "customer_message_sent",
+          field_name: "customer_message",
+          before_value: null,
+          after_value: toPostgresJsonbText({
+            version: 2,
+            event_type: "registration_observation_reference_only",
+          }),
+          created_at: "2026-08-14T01:03:30Z",
+        },
+        {
+          id: "event-outer-whitespace-observation-shaped",
+          task_id: "task-1",
+          actor_id: null,
+          event_type: " registration_observation_reference_only",
+          field_name: "legacy_whitespace",
+          before_value: null,
+          after_value: null,
+          created_at: "2026-08-14T01:03:40Z",
+        },
+        {
+          id: "event-inner-whitespace-observation-shaped",
+          task_id: "task-1",
+          actor_id: null,
+          event_type: "registration_track_event",
+          field_name: "registration_track:track-1",
+          before_value: null,
+          after_value: toPostgresJsonbText({
+            version: 2,
+            event_type: " registration_observation_reference_only",
+          }),
+          created_at: "2026-08-14T01:03:50Z",
+        },
+        {
+          id: "event-inner-array-observation-shaped",
+          task_id: "task-1",
+          actor_id: null,
+          event_type: "registration_track_event",
+          field_name: "registration_track:track-1",
+          before_value: null,
+          after_value: toPostgresJsonbText({
+            version: 2,
+            event_type: ["registration_observation_reference_only"],
+          }),
+          created_at: "2026-08-14T01:03:55Z",
+        },
+        {
           id: "event-malformed-non-v2",
           task_id: "task-1",
           actor_id: null,
           event_type: "registration_track_event",
           field_name: "registration_track:track-1",
           before_value: null,
-          after_value: "{malformed non-v2 history",
+          after_value: '{malformed "version": 2 "event_type": "registration_observation_nested"',
           created_at: "2026-08-14T01:04:00Z",
         },
         {
@@ -1121,24 +1164,42 @@ function detailRowsWithObservationSecrets(query) {
           field_name: "registration_track:track-1",
           before_value: null,
           after_value: toPostgresJsonbText({
-            version: 3,
+            version: 20,
             event_type: "registration_observation_future_shape",
             metadata: { note: "unknown payload version stays legacy" },
           }),
           created_at: "2026-08-14T01:05:00Z",
         },
+        {
+          id: "event-json-string-version-near-miss",
+          task_id: "task-1",
+          actor_id: null,
+          event_type: "registration_track_event",
+          field_name: "registration_track:track-1",
+          before_value: null,
+          after_value: toPostgresJsonbText({
+            version: "2.0",
+            event_type: "registration_observation_future_shape",
+          }),
+          created_at: "2026-08-14T01:06:00Z",
+        },
       ].filter((row) => {
-        if (
-          hidesOuterObservationEvents
-          && row.event_type.startsWith("registration_observation_")
-        ) return false;
-        if (
-          hidesCanonicalObservationEvents
-          && row.event_type === "registration_track_event"
-          && row.after_value !== null
-          && String(row.after_value).includes('\"version\": 2')
-          && String(row.after_value).includes('\"event_type\": \"registration_observation_')
-        ) return false;
+        if (usesSharedVisibilityComputedField) {
+          return ![
+            "event-observation-reason-private",
+            "event-observation-legacy-private",
+            "event-observation-v1-private",
+          ].includes(row.id);
+        }
+        if (usesLegacyTextRegex) {
+          if (row.event_type.startsWith("registration_observation_")) return false;
+          const legacyText = String(row.after_value || "");
+          if (
+            row.event_type === "registration_track_event"
+            && legacyText.includes('\"version\": 2')
+            && legacyText.includes('\"event_type\": \"registration_observation_')
+          ) return false;
+        }
         return true;
       }),
     };
@@ -1150,8 +1211,14 @@ function assertCaseDetailOmitsObservationSecrets(detail) {
   const payload = JSON.stringify(detail);
   const publicV2 = detail.events.find((event) => event.id === "event-public-v2");
   const legacyNull = detail.events.find((event) => event.id === "event-legacy-null");
+  const nonTrack = detail.events.find(
+    (event) => event.id === "event-non-track-observation-shaped",
+  );
   const malformed = detail.events.find((event) => event.id === "event-malformed-non-v2");
   const jsonNonV2 = detail.events.find((event) => event.id === "event-json-non-v2");
+  const stringVersionNearMiss = detail.events.find(
+    (event) => event.id === "event-json-string-version-near-miss",
+  );
   assert.deepEqual({
     appointmentIds: Array.from(detail.appointments, (appointment) => appointment.id),
     eventIds: Array.from(detail.events, (event) => event.id),
@@ -1166,11 +1233,15 @@ function assertCaseDetailOmitsObservationSecrets(detail) {
     preservedEventShapes: {
       publicV2: publicV2 ? {
         eventType: publicV2.eventType,
-        metadata: { ...publicV2.metadata },
+        metadata: JSON.parse(JSON.stringify(publicV2.metadata)),
       } : null,
       legacyNull: legacyNull ? {
         eventType: legacyNull.eventType,
         legacyText: legacyNull.legacyText,
+      } : null,
+      nonTrack: nonTrack ? {
+        eventType: nonTrack.eventType,
+        legacyText: nonTrack.legacyText,
       } : null,
       malformed: malformed ? {
         eventType: malformed.eventType,
@@ -1179,6 +1250,10 @@ function assertCaseDetailOmitsObservationSecrets(detail) {
       jsonNonV2: jsonNonV2 ? {
         eventType: jsonNonV2.eventType,
         legacyText: jsonNonV2.legacyText,
+      } : null,
+      stringVersionNearMiss: stringVersionNearMiss ? {
+        eventType: stringVersionNearMiss.eventType,
+        legacyText: stringVersionNearMiss.legacyText,
       } : null,
     },
     exposedSecrets: {
@@ -1194,8 +1269,13 @@ function assertCaseDetailOmitsObservationSecrets(detail) {
       "event-legacy",
       "event-public-v2",
       "event-legacy-null",
+      "event-non-track-observation-shaped",
+      "event-outer-whitespace-observation-shaped",
+      "event-inner-whitespace-observation-shaped",
+      "event-inner-array-observation-shaped",
       "event-malformed-non-v2",
       "event-json-non-v2",
+      "event-json-string-version-near-miss",
     ],
     observationAppointmentKinds: [],
     observationEventTypes: [],
@@ -1204,23 +1284,40 @@ function assertCaseDetailOmitsObservationSecrets(detail) {
         eventType: "registration_consultation_completed",
         metadata: {
           consultationId: "consultation-public",
-          note: "registration_observation_reference_only",
+          nestedAudit: {
+            version: 2,
+            event_type: "registration_observation_reference_only",
+          },
         },
       },
       legacyNull: {
         eventType: "legacy_history_marker",
         legacyText: null,
       },
+      nonTrack: {
+        eventType: "customer_message_sent",
+        legacyText: toPostgresJsonbText({
+          version: 2,
+          event_type: "registration_observation_reference_only",
+        }),
+      },
       malformed: {
         eventType: "registration_track_event",
-        legacyText: "{malformed non-v2 history",
+        legacyText: '{malformed "version": 2 "event_type": "registration_observation_nested"',
       },
       jsonNonV2: {
         eventType: "registration_track_event",
         legacyText: toPostgresJsonbText({
-          version: 3,
+          version: 20,
           event_type: "registration_observation_future_shape",
           metadata: { note: "unknown payload version stays legacy" },
+        }),
+      },
+      stringVersionNearMiss: {
+        eventType: "registration_track_event",
+        legacyText: toPostgresJsonbText({
+          version: "2.0",
+          event_type: "registration_observation_future_shape",
         }),
       },
     },
@@ -1248,8 +1345,7 @@ function assertCaseDetailUsesServerPrivacyFilters(harness) {
     ],
     eventFilters: [
       ["eq", "task_id", "task-1"],
-      ["not", "event_type", "like", "registration_observation_%"],
-      ["or", caseDetailObservationEventServerOrFilter],
+      ["eq", "registration_task_event_shared_visible", true],
     ],
   });
 }
@@ -1702,7 +1798,7 @@ test("case detail excludes observation rows at the server query boundary", async
   assertCaseDetailUsesServerPrivacyFilters(harness);
 });
 
-test("generic case detail does not leak booking-only observation appointments or audit secrets", async () => {
+test("generic case detail preserves nested observation-like and version20 history without booking secrets", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient({
     queryHandler(query) {
@@ -1717,7 +1813,7 @@ test("generic case detail does not leak booking-only observation appointments or
   assertCaseDetailUsesServerPrivacyFilters(harness);
 });
 
-test("observation-aware case detail keeps booking-only secrets behind manager detail", async () => {
+test("observation-aware case detail preserves shared nested and malformed history behind manager detail", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient({
     queryHandler(query) {
@@ -2024,8 +2120,7 @@ test("detail loader embeds track children in six scoped reads, maps rows, and sh
   const events = harness.queries.find((query) => query.table === "ops_task_events");
   assert.deepEqual(events.filters, [
     ["eq", "task_id", "task-1"],
-    ["not", "event_type", "like", "registration_observation_%"],
-    ["or", caseDetailObservationEventServerOrFilter],
+    ["eq", "registration_task_event_shared_visible", true],
   ]);
   assert.ok(!events.filters.some((filter) => filter[0] === "in" && filter[1] === "event_type"));
   const messages = harness.queries.find((query) => query.table === "ops_registration_messages");
