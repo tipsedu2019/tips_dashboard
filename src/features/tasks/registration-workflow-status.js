@@ -13,12 +13,25 @@ export const REGISTRATION_WORKFLOW_STATUSES = Object.freeze([
   "inquiry_only",
 ])
 
+export const REGISTRATION_OBSERVATION_WORKFLOW_STATUSES = Object.freeze([
+  "observation_requested",
+  "observation_feedback_pending",
+  "observation_completed",
+])
+
+export const REGISTRATION_OBSERVATION_TRACK_WORKFLOW_STATUSES = Object.freeze([
+  ...REGISTRATION_WORKFLOW_STATUSES.slice(0, 7),
+  ...REGISTRATION_OBSERVATION_WORKFLOW_STATUSES,
+  ...REGISTRATION_WORKFLOW_STATUSES.slice(7),
+])
+
 export const REGISTRATION_WORKFLOW_VIEWS = Object.freeze([
   ["inquiry", "문의"],
   ["level_test", "레벨테스트 신청"],
   ["consultation_requested", "상담 신청"],
   ["consultation_completed", "상담 완료"],
   ["waiting", "대기 신청"],
+  ["observation", "청강 신청"],
   ["enrollment", "등록 신청"],
   ["payment", "입학 진행"],
   ["completed", "완료"],
@@ -32,6 +45,9 @@ export const REGISTRATION_WORKFLOW_STATUS_LABELS = Object.freeze({
   waiting_current_class: "현재반 대기 신청",
   waiting_new_class: "신규반 대기 신청",
   waiting_next_opening: "다음 개강 알림 요청",
+  observation_requested: "청강 예약 필요",
+  observation_feedback_pending: "교사 피드백 대기",
+  observation_completed: "청강 완료",
   enrollment_requested: "등록 신청",
   payment_in_progress: "입학 진행 중",
   registered: "등록 완료",
@@ -47,6 +63,9 @@ const VIEW_BY_STATUS = Object.freeze({
   waiting_current_class: "waiting",
   waiting_new_class: "waiting",
   waiting_next_opening: "waiting",
+  observation_requested: "observation",
+  observation_feedback_pending: "observation",
+  observation_completed: "observation",
   enrollment_requested: "enrollment",
   payment_in_progress: "payment",
   registered: "completed",
@@ -98,6 +117,10 @@ export function getRegistrationWorkflowViewKey(status) {
   return VIEW_BY_STATUS[text(status)] || "inquiry"
 }
 
+export function isRegistrationObservationWorkflowStatus(status) {
+  return REGISTRATION_OBSERVATION_WORKFLOW_STATUSES.includes(text(status))
+}
+
 export function getRegistrationWorkflowStatusFromLegacyTrack(track = {}) {
   const status = text(track.status || track.pipelineStatus)
   if (status === "waiting") {
@@ -130,6 +153,7 @@ export function getRegistrationWorkflowStatusOptions(input = {}) {
 
 export function getRegistrationInlineWorkflowStatusOptions(input = {}) {
   const currentStatus = text(input.currentStatus)
+  if (isRegistrationObservationWorkflowStatus(currentStatus)) return []
   const allowed = getRegistrationWorkflowStatusOptions(input)
   const current = REGISTRATION_WORKFLOW_STATUSES.includes(currentStatus)
     ? [workflowStatusOption(currentStatus)]

@@ -2,21 +2,58 @@ import {
   getAllowedRegistrationTrackActions,
   type RegistrationTrackAction,
 } from "./registration-track-model.js"
+import { getRegistrationWorkflowStatusFromLegacyTrack } from "./registration-workflow-status.js"
 import type { RegistrationInitialWorkflowDraft } from "./registration-intake-workflow"
 import type {
   OpsRegistrationAdmissionBatch,
   OpsRegistrationAppointment,
   OpsRegistrationConsultation,
   OpsRegistrationLevelTest,
-  OpsRegistrationTrackSummary,
+  OpsRegistrationObservationTrackSummary,
   RegistrationSubject,
 } from "./registration-track-service"
+
+export function canManageRegistrationObservationTrack(input: {
+  viewerId: string | null
+  viewerRole: string | null
+  directorProfileId: string | null
+}) {
+  return input.viewerRole === "admin"
+    || input.viewerRole === "staff"
+    || Boolean(input.viewerId && input.viewerId === input.directorProfileId)
+}
+
+export function resolveRegistrationApplicationFocusPanelId(input: {
+  focusTrackId: string | null
+  activeTrackId: string | null
+  observationFocusAvailable: boolean
+  genericFocusPanelId: string | null
+}) {
+  if (!input.focusTrackId || input.focusTrackId !== input.activeTrackId) return null
+  if (input.observationFocusAvailable) return "registration-application-observation"
+  return input.genericFocusPanelId
+}
+
+export function getRegistrationObservationRefreshPlan(input: {
+  savedTaskId: string
+  savedTrackId: string
+  activeTaskId: string | null
+  activeTrackId: string | null
+}): { loadManagerDetail: boolean; preferredTrackId: string | undefined } {
+  const ownsSelection = input.savedTaskId === input.activeTaskId
+    && input.savedTrackId === input.activeTrackId
+  return {
+    loadManagerDetail: ownsSelection,
+    preferredTrackId: ownsSelection ? input.savedTrackId : undefined,
+  }
+}
 
 export const REGISTRATION_APPLICATION_SECTION_ORDER = [
   "inquiry",
   "level_test",
   "consultation",
   "placement",
+  "observation",
   "admission",
   "history",
 ] as const
@@ -29,6 +66,7 @@ export const REGISTRATION_APPLICATION_BODY_SECTION_ORDER = [
   "level_test",
   "consultation",
   "placement",
+  "observation",
   "admission",
 ] as const satisfies readonly RegistrationApplicationSectionKey[]
 
@@ -61,7 +99,7 @@ export type RegistrationConsultationMode = "phone" | "visit"
 
 export function isRegistrationWaitingMessageSourceComplete(
   track: Pick<
-    OpsRegistrationTrackSummary,
+    OpsRegistrationObservationTrackSummary,
     "workflowStatus" | "waitingDetailKind" | "waitingDetailClassId"
   >,
 ) {
@@ -117,7 +155,7 @@ export function getRegistrationSaveActionPresentation(input: {
 }
 
 export function resolveRegistrationActiveTrackId(
-  tracks: readonly Pick<OpsRegistrationTrackSummary, "id">[],
+  tracks: readonly Pick<OpsRegistrationObservationTrackSummary, "id">[],
   requestedTrackId: string | null,
 ): string | null {
   return tracks.some((track) => track.id === requestedTrackId)
@@ -216,7 +254,7 @@ export const REGISTRATION_ACTION_SECTION = {
 >
 
 const CURRENT_SECTION_BY_STATUS: Record<
-  OpsRegistrationTrackSummary["status"],
+  OpsRegistrationObservationTrackSummary["status"],
   RegistrationApplicationBodySectionKey
 > = {
   inquiry: "inquiry",
@@ -246,6 +284,7 @@ export type RegistrationApplicationProgressKey =
   | "level_test"
   | "consultation"
   | "waiting"
+  | "observation"
   | "registration"
   | "admission"
 
@@ -254,6 +293,7 @@ const REGISTRATION_APPLICATION_PROGRESS_ORDER: RegistrationApplicationProgressKe
   "level_test",
   "consultation",
   "waiting",
+  "observation",
   "registration",
   "admission",
 ]
@@ -272,23 +312,27 @@ const REGISTRATION_APPLICATION_PROGRESS_LABELS: Record<
   level_test: "레벨테스트",
   consultation: "상담",
   waiting: "대기",
+  observation: "청강 신청",
   registration: "등록 신청",
   admission: "입학",
 }
 
 export function getRegistrationApplicationProgress(
-  status: OpsRegistrationTrackSummary["status"],
-  waitingKind: OpsRegistrationTrackSummary["waitingKind"] = "",
+  status: OpsRegistrationObservationTrackSummary["status"],
+  waitingKind: OpsRegistrationObservationTrackSummary["waitingKind"] = "",
+  workflowStatus?: OpsRegistrationObservationTrackSummary["workflowStatus"],
 ): RegistrationApplicationProgressStep[] {
   if (status === "registered") {
     return REGISTRATION_APPLICATION_PROGRESS_ORDER.map((key) => ({
       key,
       label: REGISTRATION_APPLICATION_PROGRESS_LABELS[key],
-      state: key === "waiting" && !waitingKind ? "skipped" : "complete",
+      state: (key === "waiting" && !waitingKind) || key === "observation" ? "skipped" : "complete",
     }))
   }
 
-  const currentSection: RegistrationApplicationProgressKey = status === "waiting"
+  const currentSection: RegistrationApplicationProgressKey = workflowStatus?.startsWith("observation_")
+    ? "observation"
+    : status === "waiting"
     ? "waiting"
     : ["enrollment_decided", "not_registered"].includes(status)
       ? "registration"
@@ -301,7 +345,8 @@ export function getRegistrationApplicationProgress(
   return REGISTRATION_APPLICATION_PROGRESS_ORDER.map((key, index) => ({
     key,
     label: REGISTRATION_APPLICATION_PROGRESS_LABELS[key],
-    state: key === "waiting" && index < currentIndex && !waitingKind
+    state: (key === "waiting" && index < currentIndex && !waitingKind)
+      || (key === "observation" && index < currentIndex && !workflowStatus?.startsWith("observation_"))
       ? "skipped"
       : index === currentIndex
       ? terminal ? "terminal" : "current"
@@ -310,7 +355,7 @@ export function getRegistrationApplicationProgress(
 }
 
 function getActionSection(
-  status: OpsRegistrationTrackSummary["status"],
+  status: OpsRegistrationObservationTrackSummary["status"],
   action: RegistrationTrackAction,
 ): RegistrationApplicationSectionKey {
   if (action === "reopen_track" && status === "not_registered") return "placement"
@@ -331,7 +376,7 @@ function getTrackLockReason(input: {
 }
 
 export function getRegistrationApplicationTrackState(input: {
-  track: OpsRegistrationTrackSummary
+  track: OpsRegistrationObservationTrackSummary
   canManage: boolean
   canCompleteConsultation: boolean
 }): {
@@ -343,7 +388,11 @@ export function getRegistrationApplicationTrackState(input: {
     RegistrationApplicationTrackSectionState
   >
 } {
-  const currentSection = CURRENT_SECTION_BY_STATUS[input.track.status]
+  const workflowStatus = input.track.workflowStatus
+    || getRegistrationWorkflowStatusFromLegacyTrack(input.track)
+  const currentSection = workflowStatus.startsWith("observation_")
+    ? "observation"
+    : CURRENT_SECTION_BY_STATUS[input.track.status]
   const actionsBySection: Record<
     RegistrationApplicationSectionKey,
     RegistrationTrackAction[]
@@ -352,6 +401,7 @@ export function getRegistrationApplicationTrackState(input: {
     level_test: [],
     consultation: [],
     placement: [],
+    observation: [],
     admission: [],
     history: [],
   }
@@ -402,7 +452,7 @@ export type RegistrationApplicationAppointmentActionPlan = {
 }
 
 export function getRegistrationApplicationAppointmentActionPlans(input: {
-  tracks: readonly Pick<OpsRegistrationTrackSummary, "id" | "subject">[]
+  tracks: readonly Pick<OpsRegistrationObservationTrackSummary, "id" | "subject">[]
   appointments: readonly Pick<OpsRegistrationAppointment, "id" | "kind" | "status">[]
   levelTests: readonly Pick<OpsRegistrationLevelTest, "appointmentId" | "trackId" | "status">[]
   consultations: readonly Pick<OpsRegistrationConsultation, "appointmentId" | "trackId" | "mode" | "status">[]
@@ -495,6 +545,7 @@ export function getRegistrationCreateSectionStates(input: {
     level_test: { current: false, editable: false, lockReason: futureLockReason, upcoming: true },
     consultation: { current: false, editable: false, lockReason: futureLockReason, upcoming: true },
     placement: { current: false, editable: false, lockReason: futureLockReason, upcoming: true },
+    observation: { current: false, editable: false, lockReason: futureLockReason, upcoming: true },
     admission: { current: false, editable: false, lockReason: futureLockReason, upcoming: true },
     history: {
       current: false,

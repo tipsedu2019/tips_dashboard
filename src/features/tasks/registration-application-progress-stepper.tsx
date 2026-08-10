@@ -55,7 +55,7 @@ export function RegistrationApplicationProgressStepper({
   }
 
   return (
-    <ol aria-label="과목별 등록 진행 상황" className="grid gap-2 sm:grid-cols-6">
+    <ol aria-label="과목별 등록 진행 상황" className="grid gap-2 sm:grid-cols-7">
       {steps.map((step) => {
         const presentation = PROGRESS_STATE_PRESENTATION[step.state]
         const Icon = presentation.Icon

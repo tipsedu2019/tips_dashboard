@@ -109,7 +109,9 @@ test("observation summary types are broad while generic mutations stay narrow", 
   const diagnostics = await compileRegistrationTrackTypeContract(`
     import {
       createRegistrationTrackService,
+      loadRegistrationCaseDetail,
       loadRegistrationTrackSummaries,
+      type OpsRegistrationObservationCaseDetail,
       type OpsRegistrationObservationTrackSummary,
       type OpsRegistrationTrackSummary,
       type OpsRegistrationWorkflowStatus,
@@ -132,10 +134,18 @@ test("observation summary types are broad while generic mutations stay narrow", 
       observationAware: true,
     });
     const genericRead = loadRegistrationTrackSummaries([], "viewer");
+    const observationDetail = loadRegistrationCaseDetail("task", "viewer", {
+      observationAware: true,
+    });
+    const genericDetail = loadRegistrationCaseDetail("task", "viewer");
     type PublicObservationReadStatus =
       Awaited<typeof observationRead>["tracks"][number]["workflowStatus"];
     type PublicGenericReadStatus =
       Awaited<typeof genericRead>["tracks"][number]["workflowStatus"];
+    type PublicObservationDetailStatus =
+      Awaited<typeof observationDetail>["tracks"][number]["workflowStatus"];
+    type PublicGenericDetailStatus =
+      Awaited<typeof genericDetail>["tracks"][number]["workflowStatus"];
 
     type ObservationReadIsExact = Assert<Equal<
       ObservationReadStatus,
@@ -159,6 +169,18 @@ test("observation summary types are broad while generic mutations stay narrow", 
     >>;
     type GenericMutationIsNarrow = Assert<Equal<
       GenericMutationStatus,
+      OpsRegistrationWorkflowStatus
+    >>;
+    type PublicObservationDetailIsExact = Assert<Equal<
+      PublicObservationDetailStatus,
+      RegistrationObservationTrackWorkflowStatus
+    >>;
+    type ObservationDetailAliasIsExact = Assert<Equal<
+      OpsRegistrationObservationCaseDetail["tracks"][number]["workflowStatus"],
+      RegistrationObservationTrackWorkflowStatus
+    >>;
+    type PublicGenericDetailIsNarrow = Assert<Equal<
+      PublicGenericDetailStatus,
       OpsRegistrationWorkflowStatus
     >>;
     type ObservationStatusCannotUseGenericMutation = Assert<Equal<
@@ -781,6 +803,7 @@ function detailRows(table) {
         task_id: "task-1",
         subject: "영어",
         pipeline_status: "consultation_waiting",
+        observation_attempt_count: 0,
         director_profile_id: "director-1",
         director_assignment_source: "default",
         director_assignment_rule_key: "english:2026:high1",
@@ -951,6 +974,7 @@ test("track summary loader uses the exact safe projection and skips profile look
     observationNotificationRevision: 3,
     observationRevision: 4,
     observationFeedbackRevision: 1,
+    observationSummaryVisible: true,
   });
   assert.deepEqual(JSON.parse(JSON.stringify(enrollmentDetailRows)), [{
       classId: "class-1", textbookId: null, classStartDate: "2026-08-10",
@@ -963,6 +987,41 @@ test("track summary loader uses the exact safe projection and skips profile look
   assert.deepEqual(harness.queries[0].filters, [["in", "task_id", ["task-1"]]]);
   assert.doesNotMatch(harness.queries[0].columns, /schedule_plan|textbook|student_ids|waitlist_ids/);
   assert.doesNotMatch(harness.queries[0].columns, /consultations|appointments|\*/);
+});
+
+test("an exact all-null observation summary is concealed while partial null remains fail-closed", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  let partial = false;
+  const harness = createClient({
+    queryHandler: () => ({ data: [{
+      id: "track-1", task_id: "task-1", subject: "영어",
+      pipeline_status: "consultation_waiting",
+      workflow_status: "observation_requested",
+      observation_attempt_count: null,
+      observation_current_id: partial ? "observation-without-count" : null,
+      observation_current_status: null,
+      observation_current_appointment_id: null,
+      observation_nearest_scheduled_at: null,
+      observation_nearest_place: null,
+      observation_notification_revision: null,
+      observation_revision: null,
+      observation_feedback_revision: null,
+    }], error: null }),
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const concealed = await service.loadTrackSummaries(["task-1"], "viewer-1", { force: true });
+  assert.equal(concealed.tracks[0].observationSummaryVisible, false);
+  assert.deepEqual(
+    Object.fromEntries(Object.keys(EMPTY_REGISTRATION_OBSERVATION_SUMMARY).map((key) => [key, concealed.tracks[0][key]])),
+    EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
+  );
+
+  partial = true;
+  await assert.rejects(
+    service.loadTrackSummaries(["task-1"], "viewer-1", { force: true }),
+    /registration_observation_summary_invalid/,
+  );
 });
 
 test("generic summary reads fail closed before observation workflow states reach legacy UI", async () => {
@@ -1289,6 +1348,81 @@ test("case detail reads overlap a delayed runtime readiness check", async () => 
   const detail = await pending;
   assert.equal(detail.task.id, "task-1");
   assert.deepEqual(detail.tracks.map((track) => track.id), ["track-1"]);
+});
+
+test("observation-aware detail is broad while default detail fails closed and cannot share its cache", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    queryHandler(query) {
+      if (query.table === "ops_registration_subject_track_summaries") {
+        const track = detailRows("ops_registration_subject_tracks").data[0];
+        return { data: [{
+          ...track,
+          workflow_status: "observation_requested",
+          workflow_revision: 5,
+          ...inertObservationSummaryRow,
+        }], error: null };
+      }
+      const result = detailRows(query.table);
+      if (query.table === "ops_registration_subject_tracks") {
+        return {
+          ...result,
+          data: result.data.map((row) => ({
+            ...row,
+            workflow_status: "observation_requested",
+            workflow_revision: 5,
+            observation_attempt_count: 0,
+          })),
+        };
+      }
+      return result;
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const broad = await service.loadCaseDetail("task-1", "viewer-1", {
+    observationAware: true,
+  });
+  assert.equal(broad.tracks[0].workflowStatus, "observation_requested");
+  assert.equal(broad.tracks[0].workflowRevision, 5);
+  assert.equal(broad.tracks[0].observationSummaryVisible, true);
+  assert.equal(
+    harness.queries.filter((query) => query.table === "ops_registration_subject_track_summaries").length,
+    1,
+    "the one persisted counter cannot stand in for the complete summary-view tuple",
+  );
+
+  await assert.rejects(
+    service.loadCaseDetail("task-1", "viewer-1"),
+    /registration_observation_ui_not_ready/,
+  );
+  assert.equal(
+    harness.queries.filter((query) => query.table === "ops_registration_subject_tracks").length,
+    2,
+    "narrow and broad detail reads must have separate cache identities",
+  );
+});
+
+test("observation-aware detail fails closed when its required summary row is missing", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    queryHandler(query) {
+      if (query.table === "ops_registration_subject_track_summaries") {
+        return { data: [], error: null };
+      }
+      return detailRows(query.table);
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  await assert.rejects(
+    service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }),
+    /registration_observation_summary_invalid/,
+  );
+  assert.equal(
+    harness.queries.filter((query) => query.table === "ops_registration_subject_track_summaries").length,
+    1,
+  );
 });
 
 test("a stalled case-detail read times out and a forced retry can start fresh", async () => {

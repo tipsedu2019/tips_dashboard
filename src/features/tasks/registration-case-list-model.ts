@@ -5,8 +5,8 @@ import {
 } from "./registration-workflow-status.js"
 import type {
   OpsRegistrationTrackStatus,
+  OpsRegistrationObservationTrackSummary,
   OpsRegistrationTrackSummary,
-  OpsRegistrationWorkflowStatus,
   RegistrationSubject,
 } from "./registration-track-service"
 
@@ -16,6 +16,7 @@ export type RegistrationWorkflowViewKey =
   | "consultation_requested"
   | "consultation_completed"
   | "waiting"
+  | "observation"
   | "enrollment"
   | "payment"
   | "completed"
@@ -25,16 +26,16 @@ export type RegistrationCaseListTrackItem = {
   trackId: string
   subject: RegistrationSubject
   status: OpsRegistrationTrackStatus
-  workflowStatus: OpsRegistrationWorkflowStatus
+  workflowStatus: OpsRegistrationObservationTrackSummary["workflowStatus"]
   workflowRevision: number
   workflowStatusEnteredAt: string
   viewKey: RegistrationWorkflowViewKey
   directorProfileId: string | null
   directorName: string
-  waitingKind: OpsRegistrationTrackSummary["waitingKind"]
-  waitingDetailKind: OpsRegistrationTrackSummary["waitingDetailKind"]
+  waitingKind: OpsRegistrationObservationTrackSummary["waitingKind"]
+  waitingDetailKind: OpsRegistrationObservationTrackSummary["waitingDetailKind"]
   waitingDetailClassId: string | null
-  enrollmentDetailRows?: OpsRegistrationTrackSummary["enrollmentDetailRows"]
+  enrollmentDetailRows?: OpsRegistrationObservationTrackSummary["enrollmentDetailRows"]
   stageEnteredAt: string
   phoneReadyAt: string | null
   levelTestScheduledAt: string
@@ -42,8 +43,12 @@ export type RegistrationCaseListTrackItem = {
   migrationReviewRequired: boolean
   visitScheduledAt: string
   visitPlace: string
+  observationSummaryVisible: boolean
+  observationCurrentStatus: OpsRegistrationObservationTrackSummary["observationCurrentStatus"]
+  observationNearestScheduledAt: string | null
+  observationNearestPlace: OpsRegistrationObservationTrackSummary["observationNearestPlace"]
   sourceIndex: number
-  track: OpsRegistrationTrackSummary
+  track: OpsRegistrationTrackSummary | OpsRegistrationObservationTrackSummary
 }
 
 export type RegistrationCaseListItem = {
@@ -72,12 +77,13 @@ const REGISTRATION_TRACK_VIEW_KEYS: RegistrationWorkflowViewKey[] = [
   "consultation_requested",
   "consultation_completed",
   "waiting",
+  "observation",
   "enrollment",
   "payment",
   "completed",
 ]
 
-const DELETABLE_WORKFLOW_STATUSES = new Set<OpsRegistrationWorkflowStatus>(["inquiry"])
+const DELETABLE_WORKFLOW_STATUSES = new Set<string>(["inquiry"])
 const DELETABLE_PIPELINE_STATUSES = new Set<OpsRegistrationTrackStatus>([
   "inquiry",
   "migration_review",
@@ -132,10 +138,47 @@ export function buildRegistrationCaseListItems(
       migrationReviewRequired: track.migrationReviewRequired,
       visitScheduledAt: track.visitScheduledAt || "",
       visitPlace: track.visitPlace || "",
+      observationSummaryVisible: track.observationSummaryVisible === true,
+      observationCurrentStatus: track.observationCurrentStatus ?? null,
+      observationNearestScheduledAt: track.observationNearestScheduledAt ?? null,
+      observationNearestPlace: track.observationNearestPlace ?? null,
       sourceIndex: trackSourceIndex,
       track,
     })),
   }))
+}
+
+export function getRegistrationObservationListSummary(
+  track: Pick<
+    RegistrationCaseListTrackItem,
+    | "workflowStatus"
+    | "observationCurrentStatus"
+    | "observationNearestScheduledAt"
+    | "observationNearestPlace"
+  >,
+): { label: string; scheduledAt: string | null; place: string | null } {
+  const label = track.workflowStatus === "observation_completed"
+    || track.observationCurrentStatus === "completed"
+    ? "청강 완료"
+    : track.workflowStatus === "observation_feedback_pending"
+      || track.observationCurrentStatus === "attended_feedback_pending"
+      ? "교사 피드백 대기"
+      : track.observationCurrentStatus === "scheduled"
+        ? "청강 예약"
+        : "예약 필요"
+  return {
+    label,
+    scheduledAt: track.observationNearestScheduledAt,
+    place: track.observationNearestPlace,
+  }
+}
+
+export function canOpenRegistrationCaseListItem(input: Pick<
+  RegistrationCaseListViewItem,
+  "viewKey" | "matchingTracks"
+>) {
+  return input.viewKey !== "observation"
+    || input.matchingTracks.some((track) => track.observationSummaryVisible)
 }
 
 export function getRegistrationCaseLevelTestAppointments(

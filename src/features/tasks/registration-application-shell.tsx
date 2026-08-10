@@ -24,6 +24,7 @@ export type RegistrationApplicationShellProps = {
   levelTest?: ReactNode
   consultation?: ReactNode
   waiting?: ReactNode
+  observation?: ReactNode
   registration?: ReactNode
   waitingState?: RegistrationApplicationSectionState
   registrationState?: RegistrationApplicationSectionState
@@ -35,11 +36,17 @@ const SECTION_CONTENT_KEY = {
   level_test: "levelTest",
   consultation: "consultation",
   waiting: "waiting",
+  observation: "observation",
   registration: "registration",
   admission: "admission",
 } as const
 
-const APPLICATION_UI_SECTION_ORDER = ["inquiry", "level_test", "consultation", "waiting", "registration", "admission"] as const
+const SECTION_ORDER = [
+  "inquiry", "levelTest", "consultation", "waiting", "observation", "registration", "admission",
+] as const
+const APPLICATION_UI_SECTION_ORDER = SECTION_ORDER.map((section) => (
+  section === "levelTest" ? "level_test" : section
+)) as readonly (keyof typeof SECTION_CONTENT_KEY)[]
 const CREATE_UI_SECTION_ORDER = ["inquiry"] as const
 type RegistrationApplicationUiSectionKey = typeof APPLICATION_UI_SECTION_ORDER[number]
 
@@ -48,6 +55,7 @@ const SECTION_TITLES: Record<RegistrationApplicationUiSectionKey, string> = {
   level_test: "레벨테스트",
   consultation: "상담",
   waiting: "대기",
+  observation: "청강 신청",
   registration: "등록",
   admission: "입학",
 }
@@ -116,7 +124,7 @@ function RegistrationApplicationSection({
 export function RegistrationApplicationShell(props: RegistrationApplicationShellProps) {
   const sections = props.mode === "create"
     ? CREATE_UI_SECTION_ORDER
-    : APPLICATION_UI_SECTION_ORDER
+    : APPLICATION_UI_SECTION_ORDER.filter((section) => section !== "observation" || props.observation !== undefined)
 
   return (
     <div data-registration-application-mode={props.mode} className="min-w-0 [&_select:disabled]:border-muted-foreground/20 [&_select:disabled]:bg-muted [&_select:disabled]:text-muted-foreground [&_select:disabled]:opacity-100">

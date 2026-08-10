@@ -4,6 +4,7 @@ import { Children, useCallback, useEffect, useMemo, useRef, useState, type React
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { supabase } from "@/lib/supabase"
 
 import { RegistrationApplicationAdmissionSection } from "./registration-application-admission-section"
 import { RegistrationAlimtalkPreviewDialog } from "./registration-alimtalk-preview-dialog"
@@ -15,12 +16,15 @@ import {
 } from "./registration-application-inquiry-section"
 import { RegistrationApplicationLevelTestSection } from "./registration-application-level-test-section"
 import {
+  canManageRegistrationObservationTrack,
   getRegistrationApplicationAppointmentActionPlans,
   getRegistrationApplicationCaseEditableSections,
   getRegistrationEnrollmentDirtyKey,
   getRegistrationApplicationSectionStates,
   getRegistrationApplicationTrackState,
   getRegistrationConsultationModeDraft,
+  getRegistrationObservationRefreshPlan,
+  resolveRegistrationApplicationFocusPanelId,
   resolveRegistrationActiveTrackId,
   settleRegistrationConflictComparison,
   updateRegistrationApplicationDirtyKeys,
@@ -33,6 +37,12 @@ import { RegistrationApplicationHistoryAction } from "./registration-application
 import { RegistrationApplicationShell } from "./registration-application-shell"
 import { RegistrationApplicationSubjectTabs } from "./registration-application-subject-tabs"
 import {
+  RegistrationObservationEditor,
+  canLoadRegistrationObservationWorkspace,
+  canUseRegistrationObservationDetail,
+  type RegistrationObservationActions,
+} from "./registration-observation-editor"
+import {
   REGISTRATION_DIRECTOR_VISIBLE_STATUSES,
   REGISTRATION_TRACK_STATUS_LABELS,
   RegistrationConsultationOutcomeEditor,
@@ -41,6 +51,7 @@ import {
   RegistrationMigrationReviewEditor,
   RegistrationTrackDirectorSection,
   RegistrationWaitingDetailsEditor,
+  canStartRegistrationObservation,
   getRegistrationIdentityEditLock,
   type RegistrationMigrationConflictState,
   type RegistrationMigrationDirtyScope,
@@ -66,6 +77,19 @@ import type {
 } from "./ops-task-service"
 import { type RegistrationDirectorCatalogStatus } from "./registration-director-default.js"
 import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
+import type {
+  RegistrationObservationManagerDetail,
+  RegistrationObservationRuntimeState,
+} from "./registration-observation-model"
+import {
+  cancelRegistrationObservation,
+  enterRegistrationObservation,
+  loadRegistrationObservationManagerDetail,
+  loadRegistrationObservationSessions,
+  saveRegistrationObservationBooking,
+  withdrawRegistrationObservation,
+  type RegistrationObservationClient,
+} from "./registration-observation-service"
 import { ACADEMIC_SUBJECT_VALUES } from "../../lib/academic-subject-registry.ts"
 import {
   getRegistrationActionPermissions,
@@ -78,10 +102,11 @@ import {
   saveRegistrationCaseInquiry,
   saveRegistrationPhoneConsultation,
   setRegistrationWorkflowStatus,
+  isOpsRegistrationWorkflowStatus,
   type OpsRegistrationAppointment,
   type OpsRegistrationCaseDetail,
+  type OpsRegistrationObservationCaseDetail,
   type OpsRegistrationConsultation,
-  type OpsRegistrationTrackSummary,
   type RegistrationAppointmentMutationResponse,
 } from "./registration-track-service"
 import {
@@ -90,14 +115,30 @@ import {
 } from "./registration-consultation-notification.js"
 import {
   REGISTRATION_WORKFLOW_STATUS_LABELS,
+  getRegistrationWorkflowViewKey,
   getRegistrationWorkflowStatusOptions,
+  isRegistrationObservationWorkflowStatus,
 } from "./registration-workflow-status.js"
+
+const UNAVAILABLE_REGISTRATION_OBSERVATION_RUNTIME: RegistrationObservationRuntimeState = {
+  available: false,
+  runtimeVersion: 0,
+}
+
+const registrationObservationClient = supabase as unknown as RegistrationObservationClient
+const registrationObservationActions: RegistrationObservationActions = {
+  enterRegistrationObservation: (input) => enterRegistrationObservation(registrationObservationClient, input),
+  loadRegistrationObservationSessions: (input) => loadRegistrationObservationSessions(registrationObservationClient, input),
+  saveRegistrationObservationBooking: (input) => saveRegistrationObservationBooking(registrationObservationClient, input),
+  cancelRegistrationObservation: (input) => cancelRegistrationObservation(registrationObservationClient, input),
+  withdrawRegistrationObservation: (input) => withdrawRegistrationObservation(registrationObservationClient, input),
+}
 
 export type RegistrationTrackViewerRole = "admin" | "staff" | "assistant" | "teacher" | null
 
 export type RegistrationApplicationProps = {
   task: OpsTask
-  detail: OpsRegistrationCaseDetail
+  detail: OpsRegistrationObservationCaseDetail
   focusTrackId: string | null
   viewerId: string | null
   viewerRole: RegistrationTrackViewerRole
@@ -124,11 +165,12 @@ export type RegistrationApplicationProps = {
   onAppointmentOpenChange?: (appointmentId: string | null) => void
   onDirtyChange?: (dirty: boolean) => void
   notificationToken?: string
+  observationRuntime?: RegistrationObservationRuntimeState
   closeAction: ReactNode
 }
 
 type TrackContext = {
-  track: OpsRegistrationTrackSummary
+  track: OpsRegistrationCaseDetail["tracks"][number]
   permissions: RegistrationTrackActionPermissions
   state: ReturnType<typeof getRegistrationApplicationTrackState>
   activeConsultation: OpsRegistrationConsultation | null
@@ -159,6 +201,7 @@ function hasRegistrationTrackFrameContent({
   reviewTrackId: string | null
 }) {
   const { track } = context
+  if (isRegistrationObservationWorkflowStatus(track.workflowStatus)) return false
   if (section === "admission") return false
   if (section === "inquiry") return track.migrationReviewRequired && reviewTrackId === track.id
   if (track.migrationReviewRequired) return section === "placement" && placementMode === "waiting"
@@ -257,6 +300,7 @@ export function RegistrationApplication({
   initialAppointmentId = null,
   onDirtyChange,
   notificationToken = "",
+  observationRuntime = UNAVAILABLE_REGISTRATION_OBSERVATION_RUNTIME,
   closeAction,
 }: RegistrationApplicationProps) {
   const [customerMessageTarget, setCustomerMessageTarget] = useState<RegistrationCustomerMessageTarget | null>(null)
@@ -268,6 +312,9 @@ export function RegistrationApplication({
   const [migrationDirectorResetVersion, setMigrationDirectorResetVersion] = useState(0)
   const [migrationReviewResetVersion, setMigrationReviewResetVersion] = useState(0)
   const [workflowStatusSaving, setWorkflowStatusSaving] = useState(false)
+  const [observationDetail, setObservationDetail] = useState<RegistrationObservationManagerDetail | null>(null)
+  const [observationDetailLoading, setObservationDetailLoading] = useState(false)
+  const [observationDetailError, setObservationDetailError] = useState("")
   const [consultationModeDrafts, setConsultationModeDrafts] = useState<Record<string, RegistrationConsultationMode>>({})
   const [consultationDirectorDirtyByTrackId, setConsultationDirectorDirtyByTrackId] = useState<Record<string, boolean>>({})
   const [consultationSharedSaving, setConsultationSharedSaving] = useState(false)
@@ -306,12 +353,100 @@ export function RegistrationApplication({
     ACADEMIC_SUBJECT_VALUES.indexOf(left.subject) - ACADEMIC_SUBJECT_VALUES.indexOf(right.subject)
     || left.id.localeCompare(right.id)
   )), [detail.tracks])
+  const genericTracks = useMemo(
+    () => orderedTracks.flatMap((track) => {
+      if (!isOpsRegistrationWorkflowStatus(track.workflowStatus)) return []
+      return [{ ...track, workflowStatus: track.workflowStatus }]
+    }),
+    [orderedTracks],
+  )
+  const genericDetail = useMemo<OpsRegistrationCaseDetail>(() => ({
+    ...detail,
+    tracks: genericTracks,
+  }), [detail, genericTracks])
   const activeTrackId = resolveRegistrationActiveTrackId(orderedTracks, focusTrackId)
   const activeTrack = orderedTracks.find((track) => track.id === activeTrackId) || null
-  const reviewTrack = orderedTracks.find((track) => track.migrationReviewRequired) || null
+  const activeGenericTrack = genericTracks.find((track) => track.id === activeTrackId) || null
+  const activeObservationTrackIdRef = useRef(activeTrack?.id || null)
+  const activeObservationTaskIdRef = useRef<string | null>(detail.task.id)
+  activeObservationTrackIdRef.current = activeTrack?.id || null
+  activeObservationTaskIdRef.current = detail.task.id
+  const activeObservationDetail = canUseRegistrationObservationDetail({
+    activeTrackId: activeTrack?.id || null,
+    detailTrackId: observationDetail?.track.trackId || null,
+  }) ? observationDetail : null
+  const observationTrackEligible = Boolean(activeTrack && (
+    canStartRegistrationObservation(activeTrack)
+    || isRegistrationObservationWorkflowStatus(activeTrack.workflowStatus)
+  ))
+  const observationWorkspaceAvailable = Boolean(activeTrack && canLoadRegistrationObservationWorkspace({
+    runtimeAvailable: observationRuntime.available && observationTrackEligible,
+    observationSummaryVisible: activeTrack.observationSummaryVisible,
+  }))
+  const reviewTrack = genericTracks.find((track) => track.migrationReviewRequired) || null
   const activeMigrationConflictState = migrationConflictState?.taskId === detail.task.id
     ? migrationConflictState
     : null
+
+  useEffect(() => {
+    setObservationDetail(null)
+    setObservationDetailError("")
+    if (!activeTrack || !observationWorkspaceAvailable) {
+      setObservationDetailLoading(false)
+      return
+    }
+    let active = true
+    setObservationDetailLoading(true)
+    void loadRegistrationObservationManagerDetail(registrationObservationClient, {
+      trackId: activeTrack.id,
+    }).then((nextDetail) => {
+      if (active) setObservationDetail(nextDetail)
+    }).catch((error) => {
+      if (active) setObservationDetailError(errorMessage(error, "청강 정보를 불러오지 못했습니다."))
+    }).finally(() => {
+      if (active) setObservationDetailLoading(false)
+    })
+    return () => {
+      active = false
+    }
+  }, [activeTrack, observationWorkspaceAvailable])
+
+  useEffect(() => {
+    const taskId = detail.task.id
+    return () => {
+      if (activeObservationTaskIdRef.current === taskId) {
+        activeObservationTaskIdRef.current = null
+        activeObservationTrackIdRef.current = null
+      }
+    }
+  }, [detail.task.id])
+
+  const handleObservationSaved = useCallback(async () => {
+    if (!activeTrack || !observationWorkspaceAvailable) return
+    const trackId = activeTrack.id
+    const taskId = detail.task.id
+    const refreshPlan = getRegistrationObservationRefreshPlan({
+      savedTaskId: taskId,
+      savedTrackId: trackId,
+      activeTaskId: activeObservationTaskIdRef.current,
+      activeTrackId: activeObservationTrackIdRef.current,
+    })
+    if (!refreshPlan.loadManagerDetail) {
+      await onReload()
+      return
+    }
+    const [nextDetail] = await Promise.all([
+      loadRegistrationObservationManagerDetail(registrationObservationClient, { trackId }),
+      onReload(refreshPlan.preferredTrackId),
+    ])
+    const completionPlan = getRegistrationObservationRefreshPlan({
+      savedTaskId: taskId,
+      savedTrackId: trackId,
+      activeTaskId: activeObservationTaskIdRef.current,
+      activeTrackId: activeObservationTrackIdRef.current,
+    })
+    if (completionPlan.loadManagerDetail) setObservationDetail(nextDetail)
+  }, [activeTrack, detail.task.id, observationWorkspaceAvailable, onReload])
 
   useEffect(() => {
     onDirtyChangeRef.current = onDirtyChange
@@ -401,18 +536,30 @@ export function RegistrationApplication({
   }
 
   const permissionsByTrackId = useMemo(() => new Map(orderedTracks.map((track) => {
+    if (!isOpsRegistrationWorkflowStatus(track.workflowStatus)) {
+      const canManageObservation = canManageRegistrationObservationTrack({
+        viewerId,
+        viewerRole,
+        directorProfileId: track.directorProfileId,
+      })
+      return [track.id, {
+        canManage: canManageObservation,
+        canCompleteConsultation: false,
+        readOnly: !canManageObservation,
+      } satisfies RegistrationTrackActionPermissions] as const
+    }
     const activeConsultation = getRegistrationActiveConsultation({
       trackId: track.id,
       consultations: detail.consultations,
     })
     return [track.id, getRegistrationActionPermissions({ viewerId, viewerRole, track, activeConsultation }) as RegistrationTrackActionPermissions]
-  })), [detail.consultations, orderedTracks, viewerId, viewerRole])
+  })), [canManageCase, detail.consultations, orderedTracks, viewerId, viewerRole])
   const trackStates = orderedTracks.map((track) => getRegistrationApplicationTrackState({
     track,
     canManage: permissionsByTrackId.get(track.id)?.canManage || false,
     canCompleteConsultation: permissionsByTrackId.get(track.id)?.canCompleteConsultation || false,
   }))
-  const trackContexts: TrackContext[] = orderedTracks.map((track) => {
+  const trackContexts: TrackContext[] = genericTracks.map((track) => {
     const activeConsultation = getRegistrationActiveConsultation({
       trackId: track.id,
       consultations: detail.consultations,
@@ -441,14 +588,14 @@ export function RegistrationApplication({
         : detail.appointments.some((appointment) => appointment.id === customerMessageTarget.sourceId)
   ) ? customerMessageTarget : null
   const admissionApplicationState = getRegistrationAdmissionApplicationState({
-    tracks: orderedTracks,
+    tracks: genericTracks,
     enrollments: detail.enrollments,
     admissionNoticeSent: Boolean(detail.task.registration?.admissionNoticeSent),
     admissionApplicationMessageStatus: detail.admissionApplicationMessageStatus,
     admissionApplicationMessageClaimActive: detail.admissionApplicationMessageClaimActive,
   })
   const admissionTargetTracks = admissionApplicationState.targetTrackIds.flatMap((trackId) => {
-    const track = detail.tracks.find((item) => item.id === trackId)
+    const track = genericTracks.find((item) => item.id === trackId)
     return track ? [track] : []
   })
   const admissionMessageRecoveryAvailable = Boolean(
@@ -461,11 +608,11 @@ export function RegistrationApplication({
     || admissionMessageRecoveryAvailable
   )
   const appointmentActionPlans = getRegistrationApplicationAppointmentActionPlans({
-    tracks: orderedTracks,
+    tracks: genericTracks,
     appointments: detail.appointments,
     levelTests: detail.levelTests,
     consultations: detail.consultations,
-    actionableTrackIds: orderedTracks
+    actionableTrackIds: genericTracks
       .filter((track) => permissionsByTrackId.get(track.id)?.canManage)
       .map((track) => track.id),
   })
@@ -482,15 +629,28 @@ export function RegistrationApplication({
       appointmentActionSections: activeAppointmentActionPlans.map((plan) => plan.kind === "level_test" ? "level_test" : "consultation"),
     }),
   })
+  const canManageActiveObservation = activeTrack
+    ? canManageRegistrationObservationTrack({
+        viewerId,
+        viewerRole,
+        directorProfileId: activeTrack.directorProfileId,
+      })
+    : false
   const openSectionStates = Object.fromEntries(
     Object.entries(sectionStates).map(([section, state]) => [section, {
       ...state,
       current: section !== "history",
       upcoming: false,
-      editable: section === "history" ? false : section === "admission" ? admissionEditable : canManageCase,
+      editable: section === "history"
+        ? false
+        : section === "admission"
+          ? admissionEditable
+          : section === "observation" ? canManageActiveObservation : canManageCase,
       lockReason: section === "history"
         ? "저장 시 자동 기록됩니다"
-        : canManageCase ? "" : "등록 정보를 수정할 권한이 없습니다",
+        : section === "observation"
+          ? canManageActiveObservation ? "" : "청강 예약을 처리할 권한이 없습니다"
+          : canManageCase ? "" : "등록 정보를 수정할 권한이 없습니다",
     }]),
   ) as typeof sectionStates
   const splitPlacementState = () => {
@@ -504,25 +664,31 @@ export function RegistrationApplication({
   const waitingState = splitPlacementState()
   const registrationState = splitPlacementState()
   const focusedContext = trackContexts.find((context) => context.track.id === activeTrackId) || null
-  const workflowStatusOptions = activeTrack
+  const workflowStatusOptions = activeGenericTrack
     ? getRegistrationWorkflowStatusOptions({
       viewerId,
       viewerRole,
-      directorProfileId: activeTrack.directorProfileId,
+      directorProfileId: activeGenericTrack.directorProfileId,
     })
     : []
   async function changeWorkflowStatus(nextStatus: string) {
-    if (!activeTrack || nextStatus === activeTrack.workflowStatus || workflowStatusSaving) return
+    if (!activeGenericTrack || nextStatus === activeGenericTrack.workflowStatus || workflowStatusSaving) return
+    if (
+      isRegistrationObservationWorkflowStatus(activeGenericTrack.workflowStatus)
+      || isRegistrationObservationWorkflowStatus(nextStatus)
+    ) return
+    const nextOption = workflowStatusOptions.find((option) => option.value === nextStatus)
+    if (!nextOption) return
     setWorkflowStatusSaving(true)
     try {
       const savedStatus = await setRegistrationWorkflowStatus({
-        trackId: activeTrack.id,
-        workflowStatus: nextStatus as typeof activeTrack.workflowStatus,
-        expectedWorkflowRevision: activeTrack.workflowRevision,
-        requestKey: `registration-workflow-status:${activeTrack.id}:${crypto.randomUUID()}`,
+        trackId: activeGenericTrack.id,
+        workflowStatus: nextOption.value,
+        expectedWorkflowRevision: activeGenericTrack.workflowRevision,
+        requestKey: `registration-workflow-status:${activeGenericTrack.id}:${crypto.randomUUID()}`,
       })
       let managementNotificationFailed = false
-      if (notificationToken && isRegistrationManagementNotificationWorkflowStatus(nextStatus)) {
+      if (notificationToken && isRegistrationManagementNotificationWorkflowStatus(nextOption.value)) {
         try {
           const sourceEventIds = await ensureRegistrationWorkflowNotificationSourceIds({
             trackId: savedStatus.trackId,
@@ -538,7 +704,7 @@ export function RegistrationApplication({
           managementNotificationFailed = true
         }
       }
-      await onReload(activeTrack.id)
+      await onReload(activeGenericTrack.id)
       if (managementNotificationFailed) {
         onWarning("진행상태는 저장됐지만 관리팀 구글챗 알림은 전송하지 못했습니다.")
       }
@@ -549,9 +715,11 @@ export function RegistrationApplication({
     }
   }
   const migrationReviewPanelId = reviewTrack ? `registration-inquiry-${reviewTrack.id}` : null
-  const subjectPanelIdsByTrackId = Object.fromEntries(trackContexts.map((context) => [
-    context.track.id,
-    context.track.migrationReviewRequired
+  const subjectPanelIdsByTrackId = Object.fromEntries(orderedTracks.map((track) => {
+    const context = trackContexts.find((candidate) => candidate.track.id === track.id)
+    if (!context) return [track.id, ["registration-application-observation"]] as const
+    return [context.track.id,
+      context.track.migrationReviewRequired
       ? migrationReviewPanelId ? [migrationReviewPanelId] : []
       : [
       { section: "inquiry" as const, panel: "inquiry" as const, placementMode: undefined },
@@ -564,8 +732,9 @@ export function RegistrationApplication({
       context,
       placementMode: candidate.placementMode,
       reviewTrackId: reviewTrack?.id || null,
-    })).map((candidate) => `registration-${candidate.panel}-${context.track.id}`),
-  ]))
+      })).map((candidate) => `registration-${candidate.panel}-${context.track.id}`),
+    ] as const
+  }))
 
   useEffect(() => {
     if (!activeTrackId || focusTrackId === activeTrackId) return
@@ -574,10 +743,21 @@ export function RegistrationApplication({
 
   useEffect(() => {
     const initialFocusRequest = initialFocusRequestRef.current
-    if (!focusTrackId || !focusedContext || focusTrackId !== activeTrackId) return
+    if (!focusTrackId || focusTrackId !== activeTrackId) return
     if (initialFocusRequest.taskId !== detail.task.id || initialFocusRequest.trackId !== focusTrackId) return
     if (initialFocusAppliedRef.current === detail.task.id) return
-    const focusPanelId = getRegistrationTrackFocusPanelId(focusedContext, reviewTrack?.id || null)
+    const focusPanelId = resolveRegistrationApplicationFocusPanelId({
+      focusTrackId,
+      activeTrackId,
+      observationFocusAvailable: Boolean(
+        observationWorkspaceAvailable
+        && activeTrack
+        && isRegistrationObservationWorkflowStatus(activeTrack.workflowStatus)
+      ),
+      genericFocusPanelId: focusedContext
+        ? getRegistrationTrackFocusPanelId(focusedContext, reviewTrack?.id || null)
+        : null,
+    })
     if (!focusPanelId) return
     const frame = window.requestAnimationFrame(() => {
       initialFocusAppliedRef.current = detail.task.id
@@ -585,7 +765,7 @@ export function RegistrationApplication({
         ?.scrollIntoView({ block: "nearest", behavior: "smooth" })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [activeTrackId, detail.task.id, focusTrackId, focusedContext, reviewTrack?.id])
+  }, [activeTrack, activeTrackId, detail.task.id, focusTrackId, focusedContext, observationWorkspaceAvailable, reviewTrack?.id])
 
   async function saveInquiry(draft: RegistrationInquiryDraft, requestKey: string) {
     try {
@@ -647,7 +827,7 @@ export function RegistrationApplication({
     if (section === "placement" && placementMode === "registration") {
       return (
         <RegistrationEnrollmentTrackEditor
-          detail={detail}
+          detail={genericDetail}
           track={track}
           viewerId={viewerId || ""}
           permissions={permissions}
@@ -695,7 +875,7 @@ export function RegistrationApplication({
             {activeMigrationConflictState ? (
               <RegistrationMigrationConflictNotice
                 conflict={activeMigrationConflictState}
-                detail={detail}
+                detail={genericDetail}
                 retrying={migrationConflictRetrying}
                 canReapply={Boolean(reviewTrack)}
                 onRetry={() => void retryMigrationConflictRefresh()}
@@ -706,7 +886,7 @@ export function RegistrationApplication({
             <RegistrationMigrationReviewEditor
               key={detail.task.id}
               task={task}
-              detail={detail}
+              detail={genericDetail}
               track={reviewTrack}
               permissions={permissionsByTrackId.get(reviewTrack.id) || { canManage: false, canCompleteConsultation: false, readOnly: true }}
               directorOptions={directorOptions}
@@ -731,7 +911,7 @@ export function RegistrationApplication({
           <RegistrationTrackDirectorSection
             ref={activeTrackId === context.track.id ? activeConsultationDirectorRef : undefined}
             task={task}
-            detail={detail}
+            detail={genericDetail}
             track={context.track}
             permissions={context.permissions}
             directorOptions={directorOptions}
@@ -777,50 +957,50 @@ export function RegistrationApplication({
   const activeVisitAppointment = activeVisitPlan
     ? detail.appointments.find((item) => item.id === activeVisitPlan.appointmentId) || null
     : null
-  const phoneConsultation = activeTrack
+  const phoneConsultation = activeGenericTrack
     ? detail.consultations.find((item) => (
-      item.trackId === activeTrack.id && item.mode === "phone" && item.status !== "canceled"
+      item.trackId === activeGenericTrack.id && item.mode === "phone" && item.status !== "canceled"
     )) || null
     : null
-  const activeConsultationMode = activeTrack ? getRegistrationConsultationModeDraft({
-    draftMode: consultationModeDrafts[activeTrack.id] || null,
+  const activeConsultationMode = activeGenericTrack ? getRegistrationConsultationModeDraft({
+    draftMode: consultationModeDrafts[activeGenericTrack.id] || null,
     hasVisitAppointment: Boolean(activeVisitAppointment),
   }) : null
-  const activeConsultationDirectorDirty = activeTrack
-    ? Boolean(consultationDirectorDirtyByTrackId[activeTrack.id])
+  const activeConsultationDirectorDirty = activeGenericTrack
+    ? Boolean(consultationDirectorDirtyByTrackId[activeGenericTrack.id])
     : false
 
   function selectConsultationMode(mode: RegistrationConsultationMode) {
-    if (!activeTrack || !activeConsultationMode || (mode === "phone" && activeConsultationMode.phoneDisabled)) return
+    if (!activeGenericTrack || !activeConsultationMode || (mode === "phone" && activeConsultationMode.phoneDisabled)) return
     const next = getRegistrationConsultationModeDraft({
       draftMode: mode,
       hasVisitAppointment: Boolean(activeVisitAppointment),
     })
-    setConsultationModeDrafts((current) => ({ ...current, [activeTrack.id]: next.mode }))
-    setDirty(`consultation:mode-${activeTrack.id}`, next.dirty)
+    setConsultationModeDrafts((current) => ({ ...current, [activeGenericTrack.id]: next.mode }))
+    setDirty(`consultation:mode-${activeGenericTrack.id}`, next.dirty)
   }
 
   async function saveActiveConsultationDirector() {
     if (activeConsultationDirectorRef.current) {
       return activeConsultationDirectorRef.current.savePending()
     }
-    if (activeTrack?.directorProfileId) return true
+    if (activeGenericTrack?.directorProfileId) return true
     onWarning("상담 책임자를 선택하세요.")
     return false
   }
 
   async function savePhoneConsultation() {
-    if (!activeTrack || consultationSharedSaving) return
+    if (!activeGenericTrack || consultationSharedSaving) return
     setConsultationSharedSaving(true)
     try {
       const saved = await saveActiveConsultationDirector()
       if (!saved) return
       await saveRegistrationPhoneConsultation({
-        trackId: activeTrack.id,
-        requestKey: `registration-phone-consultation:${activeTrack.id}:${crypto.randomUUID()}`,
+        trackId: activeGenericTrack.id,
+        requestKey: `registration-phone-consultation:${activeGenericTrack.id}:${crypto.randomUUID()}`,
       })
-      setDirty(`consultation:mode-${activeTrack.id}`, false)
-      await onReload(activeTrack.id)
+      setDirty(`consultation:mode-${activeGenericTrack.id}`, false)
+      await onReload(activeGenericTrack.id)
     } catch (error) {
       onWarning(errorMessage(error, "상담 정보를 저장하지 못했습니다."))
     } finally {
@@ -828,13 +1008,24 @@ export function RegistrationApplication({
     }
   }
 
+  const registrationSection = (
+    <RegistrationApplicationPlacementSection
+      editable={registrationState.editable}
+      fields={(
+        <div className="grid gap-3">
+          {renderTrackFrames("placement", "registration")}
+        </div>
+      )}
+    />
+  )
+
   return (
     <>
     <RegistrationApplicationShell
       mode="detail"
       studentName={detail.task.studentName || detail.task.title}
       closeAction={closeAction}
-      historyAction={<RegistrationApplicationHistoryAction detail={detail} profiles={profiles} />}
+      historyAction={<RegistrationApplicationHistoryAction detail={genericDetail} profiles={profiles} />}
       subjectNavigation={(
         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_18rem] md:items-end">
           <RegistrationApplicationSubjectTabs
@@ -842,27 +1033,33 @@ export function RegistrationApplication({
               id: track.id,
               subject: track.subject,
               statusLabel: REGISTRATION_WORKFLOW_STATUS_LABELS[track.workflowStatus] || REGISTRATION_TRACK_STATUS_LABELS[track.status],
+              viewKey: getRegistrationWorkflowViewKey(track.workflowStatus),
             }))}
             value={activeTrackId}
             panelIdsByTrackId={subjectPanelIdsByTrackId}
             onValueChange={handleSubjectTabChange}
           />
-          {activeTrack ? (
+          {activeGenericTrack ? (
             <label data-registration-workflow-status="" className="grid min-w-0 gap-1.5">
               <span className="text-xs font-medium text-muted-foreground">진행상태</span>
               <select
-                aria-label={`${activeTrack.subject} 진행상태`}
-                value={activeTrack.workflowStatus}
+                aria-label={`${activeGenericTrack.subject} 진행상태`}
+                value={activeGenericTrack.workflowStatus}
                 disabled={workflowStatusSaving || workflowStatusOptions.length === 0}
                 onChange={(event) => void changeWorkflowStatus(event.target.value)}
                 className="h-10 min-w-0 rounded-md border border-primary/30 bg-primary/5 px-3 text-sm font-semibold text-primary outline-none focus:ring-2 focus:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <option value={activeTrack.workflowStatus}>{REGISTRATION_WORKFLOW_STATUS_LABELS[activeTrack.workflowStatus]}</option>
-                {workflowStatusOptions.filter((option) => option.value !== activeTrack.workflowStatus).map((option) => (
+                <option value={activeGenericTrack.workflowStatus}>{REGISTRATION_WORKFLOW_STATUS_LABELS[activeGenericTrack.workflowStatus]}</option>
+                {workflowStatusOptions.filter((option) => option.value !== activeGenericTrack.workflowStatus).map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
             </label>
+          ) : activeTrack ? (
+            <div data-registration-workflow-status="observation" className="grid min-w-0 gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">진행상태</span>
+              <Badge variant="outline">{REGISTRATION_WORKFLOW_STATUS_LABELS[activeTrack.workflowStatus]}</Badge>
+            </div>
           ) : null}
         </div>
       )}
@@ -876,8 +1073,8 @@ export function RegistrationApplication({
           editorContent={(
             <RegistrationInquiryEditor
               key={detail.task.id}
-              detail={detail}
-              identityLocked={getRegistrationIdentityEditLock(detail)}
+              detail={genericDetail}
+              identityLocked={getRegistrationIdentityEditLock(genericDetail)}
               canEdit={canManageCase}
               subjectCapabilities={subjectCapabilities}
               schools={schools}
@@ -899,23 +1096,23 @@ export function RegistrationApplication({
       )}
       levelTest={(
         <RegistrationApplicationLevelTestSection editable={openSectionStates.level_test.editable}>
-          {activeTrack ? (
+          {activeGenericTrack ? (
             <RegistrationAppointmentEditor
-              key={`level_test:${activeTrack.id}:${activeLevelTestAppointment?.id || "new"}:${activeLevelTestAppointment?.notificationRevision ?? "new"}`}
+              key={`level_test:${activeGenericTrack.id}:${activeLevelTestAppointment?.id || "new"}:${activeLevelTestAppointment?.notificationRevision ?? "new"}`}
               kind="level_test"
               taskId={detail.task.id}
-              eligibleTracks={orderedTracks}
-              initialTrackId={activeTrack.id}
+              eligibleTracks={genericTracks}
+              initialTrackId={activeGenericTrack.id}
               appointment={activeLevelTestAppointment}
               activities={detail.levelTests}
               embedded
               subjectScoped
-              visibleTrackId={activeTrack.id}
+              visibleTrackId={activeGenericTrack.id}
               onSaved={handleAppointmentSaved}
               onWarning={onWarning}
               onReload={onReload}
               notificationToken={notificationToken}
-              onDirtyChange={(dirty) => setDirty(`level_test:appointment-${activeLevelTestAppointment?.id || activeTrack.id}`, dirty)}
+              onDirtyChange={(dirty) => setDirty(`level_test:appointment-${activeLevelTestAppointment?.id || activeGenericTrack.id}`, dirty)}
               onTrackDirtyChange={(trackId, dirty) => setDirty(`level_test:track-${trackId}`, dirty)}
               canOpenCustomerMessage={canManageCase}
               onOpenCustomerMessage={openCustomerMessage}
@@ -925,11 +1122,11 @@ export function RegistrationApplication({
       )}
       consultation={(
         <RegistrationApplicationConsultationSection editable={openSectionStates.consultation.editable}>
-          {activeTrack && activeConsultationMode ? (
+          {activeGenericTrack && activeConsultationMode ? (
             <div className="grid gap-4">
               <fieldset className="m-0 grid min-w-0 gap-1.5 border-0 p-0">
                 <legend className="text-sm font-medium">상담 방식</legend>
-                <div role="group" aria-label={`${activeTrack.subject} 상담 방식`} className="grid grid-cols-2 gap-2">
+                <div role="group" aria-label={`${activeGenericTrack.subject} 상담 방식`} className="grid grid-cols-2 gap-2">
                   <Button
                     type="button"
                     aria-pressed={activeConsultationMode.mode === "phone"}
@@ -953,28 +1150,28 @@ export function RegistrationApplication({
 
               {activeConsultationMode.mode === "visit" ? (
                 <RegistrationAppointmentEditor
-                  key={`visit_consultation:${activeTrack.id}:${activeVisitAppointment?.id || "new"}:${activeVisitAppointment?.notificationRevision ?? "new"}`}
+                  key={`visit_consultation:${activeGenericTrack.id}:${activeVisitAppointment?.id || "new"}:${activeVisitAppointment?.notificationRevision ?? "new"}`}
                   kind="visit_consultation"
                   taskId={detail.task.id}
-                  eligibleTracks={orderedTracks}
-                  initialTrackId={activeTrack.id}
+                  eligibleTracks={genericTracks}
+                  initialTrackId={activeGenericTrack.id}
                   appointment={activeVisitAppointment}
                   activities={detail.consultations.filter((item) => item.mode === "visit")}
                   embedded
                   subjectScoped
-                  visibleTrackId={activeTrack.id}
+                  visibleTrackId={activeGenericTrack.id}
                   onSaved={async (saved) => {
-                    setDirty(`consultation:mode-${activeTrack.id}`, false)
+                    setDirty(`consultation:mode-${activeGenericTrack.id}`, false)
                     await handleAppointmentSaved(saved)
                   }}
                   onBeforeSave={saveActiveConsultationDirector}
                   externalDirty={activeConsultationDirectorDirty || activeConsultationMode.dirty}
                   actionLabel="상담 정보 저장"
-                  saveAriaLabel={`${activeTrack.subject} 상담 정보 저장`}
+                  saveAriaLabel={`${activeGenericTrack.subject} 상담 정보 저장`}
                   onWarning={onWarning}
                   onReload={onReload}
                   notificationToken={notificationToken}
-                  onDirtyChange={(dirty) => setDirty(`consultation:appointment-${activeVisitAppointment?.id || activeTrack.id}`, dirty)}
+                  onDirtyChange={(dirty) => setDirty(`consultation:appointment-${activeVisitAppointment?.id || activeGenericTrack.id}`, dirty)}
                   canOpenCustomerMessage={canManageCase}
                   onOpenCustomerMessage={openCustomerMessage}
                 />
@@ -985,8 +1182,8 @@ export function RegistrationApplication({
                     dirty={activeConsultationDirectorDirty || !phoneConsultation}
                     saving={consultationSharedSaving}
                     actionLabel="상담 정보 저장"
-                    cleanLabel={phoneConsultation ? "저장됨" : activeTrack.directorProfileId ? "상담 정보 저장" : "상담 책임자를 선택하세요"}
-                    aria-label={`${activeTrack.subject} 상담 정보 저장`}
+                    cleanLabel={phoneConsultation ? "저장됨" : activeGenericTrack.directorProfileId ? "상담 정보 저장" : "상담 책임자를 선택하세요"}
+                    aria-label={`${activeGenericTrack.subject} 상담 정보 저장`}
                     onClick={() => void savePhoneConsultation()}
                   />
                 </div>
@@ -1009,16 +1206,28 @@ export function RegistrationApplication({
           )}
         />
       )}
-      registration={(
-        <RegistrationApplicationPlacementSection
-          editable={registrationState.editable}
-          fields={(
-            <div className="grid gap-3">
-              {renderTrackFrames("placement", "registration")}
-            </div>
-          )}
-        />
-      )}
+      observation={canLoadRegistrationObservationWorkspace({
+        runtimeAvailable: observationRuntime.available && observationTrackEligible,
+        observationSummaryVisible: activeTrack?.observationSummaryVisible === true,
+      }) ? (
+        activeTrack && activeObservationDetail ? (
+          <RegistrationObservationEditor
+            key={activeTrack.id}
+            trackId={activeTrack.id}
+            workflowRevision={activeTrack.workflowRevision}
+            observationRevision={activeObservationDetail.currentObservation?.revision ?? null}
+            appointmentNotificationRevision={activeObservationDetail.currentObservation?.appointmentNotificationRevision ?? null}
+            detail={activeObservationDetail}
+            actions={registrationObservationActions}
+            onSaved={handleObservationSaved}
+          />
+        ) : observationDetailError ? (
+          <p role="alert" className="text-sm text-destructive">{observationDetailError}</p>
+        ) : observationDetailLoading ? (
+          <p className="text-sm text-muted-foreground">청강 정보를 불러오는 중입니다.</p>
+        ) : null
+      ) : undefined}
+      registration={registrationSection}
       admission={(
         <RegistrationApplicationAdmissionSection
           editable={openSectionStates.admission.editable}
@@ -1033,7 +1242,7 @@ export function RegistrationApplication({
               ) : null}
               <RegistrationAdmissionPanel
                 taskId={detail.task.id}
-                tracks={orderedTracks}
+                tracks={genericTracks}
                 enrollments={detail.enrollments}
                 batches={detail.admissionBatches}
                 classes={classOptions}

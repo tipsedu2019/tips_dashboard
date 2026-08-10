@@ -50,6 +50,7 @@ import {
   type OpsRegistrationAppointment,
   type OpsRegistrationConsultation,
   type OpsRegistrationMigrationLegacySnapshot,
+  type OpsRegistrationObservationTrackSummary,
   type OpsRegistrationTrackStatus,
   type OpsRegistrationTrackSummary,
   type RegistrationSubject,
@@ -60,6 +61,15 @@ import { getRegistrationPersistenceErrorMessage } from "./registration-workflow.
 import { RegistrationSelect } from "./registration-select"
 import { RegistrationSaveButton } from "./registration-save-button"
 import type { RegistrationCustomerMessageTarget } from "./registration-customer-message-contract"
+
+export function canStartRegistrationObservation(
+  track: Pick<OpsRegistrationObservationTrackSummary, "workflowStatus">,
+) {
+  return track.workflowStatus === "consultation_completed"
+    || track.workflowStatus === "waiting_current_class"
+    || track.workflowStatus === "waiting_new_class"
+    || track.workflowStatus === "waiting_next_opening"
+}
 
 export function isRegistrationDirectorCatalogRefreshError(message: string) {
   return message.includes("registration_director_refresh_required")

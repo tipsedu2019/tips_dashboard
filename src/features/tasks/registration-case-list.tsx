@@ -6,13 +6,20 @@ import { Button } from "@/components/ui/button"
 
 import { RegistrationSelect } from "./registration-select"
 import {
+  canOpenRegistrationCaseListItem,
   getRegistrationCaseLevelTestAppointments,
+  getRegistrationObservationListSummary,
   type RegistrationCaseListViewItem,
 } from "./registration-case-list-model"
 import { getRegistrationSummaryActionPermissions } from "./registration-track-model.js"
 import type { OpsClassOption, OpsTextbookOption } from "./ops-task-service"
 import type { OpsRegistrationWorkflowStatus } from "./registration-track-service"
-import { getRegistrationInlineWorkflowStatusOptions } from "./registration-workflow-status.js"
+import type { RegistrationObservationTrackWorkflowStatus } from "./registration-observation-model"
+import {
+  REGISTRATION_WORKFLOW_STATUS_LABELS,
+  getRegistrationInlineWorkflowStatusOptions,
+  isRegistrationObservationWorkflowStatus,
+} from "./registration-workflow-status.js"
 
 export type RegistrationCaseListProps = {
   items: RegistrationCaseListViewItem[]
@@ -33,27 +40,13 @@ export type RegistrationCaseListProps = {
   onDelete: (item: RegistrationCaseListViewItem) => void
 }
 
-const TRACK_STATUS_LABELS: Record<OpsRegistrationWorkflowStatus, string> = {
-  inquiry: "등록 문의",
-  level_test_requested: "레벨테스트 신청",
-  consultation_requested: "상담 신청",
-  consultation_completed: "상담 완료",
-  waiting_current_class: "현재반 대기 신청",
-  waiting_new_class: "신규반 대기 신청",
-  waiting_next_opening: "다음 개강 알림 요청",
-  enrollment_requested: "등록 신청",
-  payment_in_progress: "입학 진행 중",
-  registered: "등록 완료",
-  not_registered: "미등록",
-  inquiry_only: "문의만",
-}
-
 const REGISTRATION_CASE_VIEW_COLUMNS = {
   inquiry: ["학생", "빠른 처리", "연락처", "문의 일시", "요청 사항"],
   level_test: ["학생", "빠른 처리", "예약 일시", "장소", "레벨테스트 결과"],
   consultation_requested: ["학생", "빠른 처리", "상담 방식", "책임자", "예약 일시 · 장소"],
   consultation_completed: ["학생", "빠른 처리", "책임자", "완료 일시"],
   waiting: ["학생", "빠른 처리", "책임자", "대기 유형 · 수업", "진입 일시"],
+  observation: ["학생", "상태", "예약 일시", "장소"],
   enrollment: ["학생", "빠른 처리", "수강 수업", "교재", "수업 시작"],
   payment: ["학생", "빠른 처리", "입학신청서", "메이크에듀", "청구서", "수납"],
   completed: ["학생", "빠른 처리", "책임자", "등록 수업", "완료 일시"],
@@ -148,13 +141,13 @@ function RegistrationCaseCompletionPill({
   return <RegistrationCasePill tone={complete ? "success" : "neutral"}>{complete ? completeLabel : pendingLabel}</RegistrationCasePill>
 }
 
-function RegistrationTrackStatusBadge({ status }: { status: OpsRegistrationWorkflowStatus }) {
+function RegistrationTrackStatusBadge({ status }: { status: RegistrationObservationTrackWorkflowStatus }) {
   const completed = status === "registered" || status === "not_registered" || status === "inquiry_only"
   const attention = status === "waiting_current_class" || status === "waiting_new_class" || status === "waiting_next_opening"
 
   return (
     <RegistrationCasePill tone={completed ? "neutral" : attention ? "warning" : "primary"}>
-      {TRACK_STATUS_LABELS[status]}
+      {REGISTRATION_WORKFLOW_STATUS_LABELS[status]}
     </RegistrationCasePill>
   )
 }
@@ -174,6 +167,9 @@ function RegistrationTrackStatusControl({
   disabled: boolean
   onStatusChange: RegistrationCaseListProps["onStatusChange"]
 }) {
+  if (isRegistrationObservationWorkflowStatus(track.workflowStatus)) {
+    return <RegistrationTrackStatusBadge status={track.workflowStatus} />
+  }
   const options = getRegistrationInlineWorkflowStatusOptions({
     currentStatus: track.workflowStatus,
     viewerId,
@@ -192,11 +188,14 @@ function RegistrationTrackStatusControl({
       <RegistrationSelect
         aria-label={`${track.subject} ${studentName} 진행상태`}
         value={track.workflowStatus}
-        placeholder={TRACK_STATUS_LABELS[track.workflowStatus]}
+        placeholder={REGISTRATION_WORKFLOW_STATUS_LABELS[track.workflowStatus]}
         options={options}
         disabled={disabled}
         size="sm"
-        onValueChange={(value) => onStatusChange(track, value as OpsRegistrationWorkflowStatus)}
+        onValueChange={(value) => {
+          const nextStatus = options.find((option) => option.value === value)?.value
+          if (nextStatus) onStatusChange(track, nextStatus)
+        }}
         className="h-8 w-full min-w-0 border-transparent bg-transparent px-2 text-xs font-medium text-primary shadow-none hover:border-border hover:bg-muted/40 focus-visible:ring-2 disabled:cursor-wait disabled:opacity-60"
       />
     </div>
@@ -337,6 +336,22 @@ function RegistrationCaseProcessCells({
     <RegistrationCaseCell label="진입 일시" cellRole={cellRole}>{trackLines((track) => <RegistrationCaseTrackValue track={track}>{formatRegistrationCaseTime(track.workflowStatusEnteredAt)}</RegistrationCaseTrackValue>)}</RegistrationCaseCell>
   </>
 
+  if (item.viewKey === "observation") return <>
+    <RegistrationCaseCell label="학생" cellRole={cellRole}>{student}</RegistrationCaseCell>
+    <RegistrationCaseCell label="상태" cellRole={cellRole}>{trackLines((track) => {
+      const summary = getRegistrationObservationListSummary(track)
+      return <RegistrationCaseTrackValue track={track}><RegistrationCasePill tone={summary.label === "교사 피드백 대기" ? "warning" : "primary"}>{summary.label}</RegistrationCasePill></RegistrationCaseTrackValue>
+    })}</RegistrationCaseCell>
+    <RegistrationCaseCell label="예약 일시" cellRole={cellRole}>{trackLines((track) => {
+      const summary = getRegistrationObservationListSummary(track)
+      return <RegistrationCaseTrackValue track={track}>{summary.scheduledAt ? formatRegistrationCaseTime(summary.scheduledAt) : "미정"}</RegistrationCaseTrackValue>
+    })}</RegistrationCaseCell>
+    <RegistrationCaseCell label="장소" cellRole={cellRole}>{trackLines((track) => {
+      const summary = getRegistrationObservationListSummary(track)
+      return <RegistrationCaseTrackValue track={track}><RegistrationCasePill>{summary.place || "미정"}</RegistrationCasePill></RegistrationCaseTrackValue>
+    })}</RegistrationCaseCell>
+  </>
+
   if (item.viewKey === "enrollment") return <>
     <RegistrationCaseCell label="학생" cellRole={cellRole}>{student}</RegistrationCaseCell>
     {status}
@@ -445,14 +460,18 @@ export function RegistrationCaseList({
   const showActionColumn = items.some(canDelete)
   const gridTemplateColumns = `repeat(${columns.length}, minmax(0, 1fr))${showActionColumn ? " minmax(5rem, auto)" : ""}`
   const openRegistrationCase = (item: RegistrationCaseListViewItem) => {
-    if (disabled) return
+    if (disabled || !canOpenRegistrationCaseListItem(item)) return
+    const targetTrack = item.viewKey === "observation"
+      ? item.matchingTracks.find((track) => track.observationSummaryVisible)
+      : item.representativeTrack
+    if (!targetTrack) return
     const permissions = getRegistrationSummaryActionPermissions({
       viewerId,
       viewerRole,
-      track: item.representativeTrack.track,
+      track: targetTrack.track,
     })
-    if (permissions.canManage) onEdit(item.taskId, item.representativeTrack.trackId)
-    else onOpen(item.taskId, item.representativeTrack.trackId)
+    if (permissions.canManage) onEdit(item.taskId, targetTrack.trackId)
+    else onOpen(item.taskId, targetTrack.trackId)
   }
   const handleRegistrationCaseKeyDown = (
     event: KeyboardEvent<HTMLElement>,
@@ -472,41 +491,43 @@ export function RegistrationCaseList({
       ) : (
         <>
           <div data-testid="registration-case-mobile-list" className="grid min-w-0 gap-2 p-2 lg:hidden" role="list" aria-label="등록 신청 모바일 목록">
-            {visibleItems.map((item) => (
-              <article
+            {visibleItems.map((item) => {
+              const entryAvailable = !disabled && canOpenRegistrationCaseListItem(item)
+              return <article
                 key={item.taskId}
                 data-registration-case-row=""
-                tabIndex={0}
-                className="grid min-w-0 cursor-pointer gap-3 overflow-hidden rounded-md border bg-background p-3 shadow-xs outline-none transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring/50"
+                tabIndex={entryAvailable ? 0 : undefined}
+                className={`grid min-w-0 gap-3 overflow-hidden rounded-md border bg-background p-3 shadow-xs outline-none transition-colors ${entryAvailable ? "cursor-pointer hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring/50" : ""}`}
                 role="listitem"
-                aria-label={`${item.studentName} 등록 신청 열기`}
-                onClick={() => openRegistrationCase(item)}
-                onKeyDown={(event) => handleRegistrationCaseKeyDown(event, item)}
+                aria-label={`${item.studentName} 등록 신청${entryAvailable ? " 열기" : ""}`}
+                onClick={entryAvailable ? () => openRegistrationCase(item) : undefined}
+                onKeyDown={entryAvailable ? (event) => handleRegistrationCaseKeyDown(event, item) : undefined}
               >
                 <RegistrationCaseListRow item={item} viewerId={viewerId} viewerRole={viewerRole} disabled={disabled} classes={classes} textbooks={textbooks} onOpen={onOpen} onEdit={onEdit} onStatusChange={onStatusChange} canDelete={canDelete} onDelete={onDelete} showActionColumn={showActionColumn} />
               </article>
-            ))}
+            })}
           </div>
           <div data-testid="registration-case-desktop-list" className="hidden w-full min-w-0 overflow-hidden lg:block" role="table" aria-label="등록 신청 데이터테이블">
             <div className="grid min-w-0 border-b bg-muted/45 text-xs text-muted-foreground" style={{ gridTemplateColumns }} role="row">
               {columns.map((column) => <div key={column} className="px-3 py-2" role="columnheader">{column}</div>)}
               {showActionColumn ? <div className="px-3 py-2 text-right" role="columnheader">관리</div> : null}
             </div>
-            {visibleItems.map((item) => (
-              <div
+            {visibleItems.map((item) => {
+              const entryAvailable = !disabled && canOpenRegistrationCaseListItem(item)
+              return <div
                 key={item.taskId}
                 data-registration-case-row=""
-                tabIndex={0}
-                className="grid min-w-0 cursor-pointer items-center gap-3 border-b p-3 text-sm outline-none transition-colors last:border-b-0 hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
+                tabIndex={entryAvailable ? 0 : undefined}
+                className={`grid min-w-0 items-center gap-3 border-b p-3 text-sm outline-none transition-colors last:border-b-0 ${entryAvailable ? "cursor-pointer hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50" : ""}`}
                 style={{ gridTemplateColumns }}
                 role="row"
-                aria-label={`${item.studentName} 등록 신청 열기`}
-                onClick={() => openRegistrationCase(item)}
-                onKeyDown={(event) => handleRegistrationCaseKeyDown(event, item)}
+                aria-label={`${item.studentName} 등록 신청${entryAvailable ? " 열기" : ""}`}
+                onClick={entryAvailable ? () => openRegistrationCase(item) : undefined}
+                onKeyDown={entryAvailable ? (event) => handleRegistrationCaseKeyDown(event, item) : undefined}
               >
                 <RegistrationCaseListRow item={item} viewerId={viewerId} viewerRole={viewerRole} disabled={disabled} classes={classes} textbooks={textbooks} onOpen={onOpen} onEdit={onEdit} onStatusChange={onStatusChange} canDelete={canDelete} onDelete={onDelete} cellRole="cell" showActionColumn={showActionColumn} />
               </div>
-            ))}
+            })}
           </div>
           {hasMore ? (
             <div className="flex justify-center border-t p-2">

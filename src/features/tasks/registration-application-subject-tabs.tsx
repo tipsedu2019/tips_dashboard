@@ -3,11 +3,13 @@
 import type { KeyboardEvent } from "react"
 
 import { Button } from "@/components/ui/button"
+import type { RegistrationWorkflowViewKey } from "./registration-workflow-status.js"
 
 type RegistrationApplicationSubjectTabTrack = {
   id: string
   subject: string
   statusLabel: string
+  viewKey: RegistrationWorkflowViewKey
 }
 
 export function RegistrationApplicationSubjectTabs({
@@ -59,6 +61,7 @@ export function RegistrationApplicationSubjectTabs({
             aria-label={`${track.subject} ${track.statusLabel}`}
             aria-selected={selected}
             aria-controls={panelIdsByTrackId[track.id]?.join(" ")}
+            data-registration-view-key={track.viewKey}
             tabIndex={selected ? 0 : -1}
             className={`h-auto min-w-0 justify-center gap-2 rounded-none border-b-2 px-2 py-2.5 shadow-none sm:min-w-fit sm:flex-none sm:justify-start sm:px-1 ${selected
               ? "border-primary text-foreground hover:bg-transparent"

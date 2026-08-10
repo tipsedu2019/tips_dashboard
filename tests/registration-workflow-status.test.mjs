@@ -10,9 +10,10 @@ async function loadWorkflowStatus() {
   return import(workflowStatusUrl)
 }
 
-test("registration workflow exposes the Notion status order and eight list views", async () => {
+test("registration workflow exposes observation statuses and the nine-view order", async () => {
   const {
     REGISTRATION_WORKFLOW_STATUSES,
+    REGISTRATION_OBSERVATION_TRACK_WORKFLOW_STATUSES,
     REGISTRATION_WORKFLOW_STATUS_LABELS,
     REGISTRATION_WORKFLOW_VIEWS,
     getRegistrationWorkflowViewKey,
@@ -32,6 +33,13 @@ test("registration workflow exposes the Notion status order and eight list views
     "not_registered",
     "inquiry_only",
   ])
+  assert.deepEqual(REGISTRATION_OBSERVATION_TRACK_WORKFLOW_STATUSES, [
+    ...REGISTRATION_WORKFLOW_STATUSES.slice(0, 7),
+    "observation_requested",
+    "observation_feedback_pending",
+    "observation_completed",
+    ...REGISTRATION_WORKFLOW_STATUSES.slice(7),
+  ])
   assert.equal(REGISTRATION_WORKFLOW_STATUS_LABELS.inquiry, "등록 문의")
   assert.equal(REGISTRATION_WORKFLOW_STATUS_LABELS.payment_in_progress, "입학 진행 중")
   assert.equal(REGISTRATION_WORKFLOW_STATUS_LABELS.waiting_next_opening, "다음 개강 알림 요청")
@@ -41,11 +49,15 @@ test("registration workflow exposes the Notion status order and eight list views
     ["consultation_requested", "상담 신청"],
     ["consultation_completed", "상담 완료"],
     ["waiting", "대기 신청"],
+    ["observation", "청강 신청"],
     ["enrollment", "등록 신청"],
     ["payment", "입학 진행"],
     ["completed", "완료"],
   ])
   assert.equal(getRegistrationWorkflowViewKey("waiting_next_opening"), "waiting")
+  assert.equal(getRegistrationWorkflowViewKey("observation_requested"), "observation")
+  assert.equal(getRegistrationWorkflowViewKey("observation_feedback_pending"), "observation")
+  assert.equal(getRegistrationWorkflowViewKey("observation_completed"), "observation")
   assert.equal(getRegistrationWorkflowViewKey("not_registered"), "completed")
   assert.equal(getRegistrationWorkflowViewKey("unexpected"), "inquiry")
 })
@@ -121,6 +133,28 @@ test("workflow status choices follow operations and assigned-director ownership"
       "inquiry_only",
     ],
   )
+})
+
+test("generic workflow choices never accept observation source or target states", async () => {
+  const {
+    getRegistrationInlineWorkflowStatusOptions,
+    getRegistrationWorkflowStatusOptions,
+    isRegistrationObservationWorkflowStatus,
+  } = await loadWorkflowStatus()
+
+  for (const viewerRole of ["admin", "staff"]) {
+    assert.equal(
+      getRegistrationWorkflowStatusOptions({ viewerRole })
+        .some(({ value }) => value.startsWith("observation_")),
+      false,
+    )
+  }
+  assert.deepEqual(getRegistrationInlineWorkflowStatusOptions({
+    currentStatus: "observation_requested",
+    viewerRole: "admin",
+  }), [])
+  assert.equal(isRegistrationObservationWorkflowStatus("observation_completed"), true)
+  assert.equal(isRegistrationObservationWorkflowStatus("enrollment_requested"), false)
 })
 
 test("inline status choices always retain the current value and expose only the viewer's allowed changes", async () => {

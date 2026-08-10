@@ -3,10 +3,12 @@ import test from "node:test"
 
 import {
   buildRegistrationCaseListItems,
+  canOpenRegistrationCaseListItem,
   filterRegistrationCaseListItems,
   getRegistrationCaseMatchedTracks,
   getRegistrationCaseTabCounts,
   getRegistrationCaseTrackTimeValue,
+  getRegistrationObservationListSummary,
 } from "../src/features/tasks/registration-case-list-model.ts"
 
 function track({
@@ -22,6 +24,10 @@ function track({
   levelTestPlace = "",
   visitScheduledAt = "",
   visitPlace = "",
+  observationSummaryVisible = true,
+  observationCurrentStatus = null,
+  observationNearestScheduledAt = null,
+  observationNearestPlace = null,
 } = {}) {
   return {
     id,
@@ -37,6 +43,10 @@ function track({
     levelTestPlace,
     visitScheduledAt,
     visitPlace,
+    observationSummaryVisible,
+    observationCurrentStatus,
+    observationNearestScheduledAt,
+    observationNearestPlace,
     migrationReviewRequired: false,
   }
 }
@@ -98,6 +108,49 @@ test("one open case appears once in each of its non-completed views", () => {
   assert.equal(filterRegistrationCaseListItems(items, "inquiry").length, 1)
   assert.equal(filterRegistrationCaseListItems(items, "waiting").length, 1)
   assert.equal(filterRegistrationCaseListItems(items, "closed").length, 0)
+})
+
+test("observation list groups all three states and derives four labels from scalar summary only", () => {
+  const cases = [
+    ["observation_requested", null, "예약 필요"],
+    ["observation_requested", "scheduled", "청강 예약"],
+    ["observation_feedback_pending", "attended_feedback_pending", "교사 피드백 대기"],
+    ["observation_completed", "completed", "청강 완료"],
+  ]
+  for (const [workflowStatus, observationCurrentStatus, label] of cases) {
+    const items = buildRegistrationCaseListItems([
+      registrationCase({
+        id: `case-${label}`,
+        registrationTracks: [track({
+          id: `track-${label}`,
+          workflowStatus,
+          observationCurrentStatus,
+          observationNearestScheduledAt: "2026-08-20T09:00:00Z",
+          observationNearestPlace: "본관",
+        })],
+      }),
+    ])
+    const [item] = filterRegistrationCaseListItems(items, "observation")
+    assert.equal(item.matchingTracks[0].viewKey, "observation")
+    assert.deepEqual(getRegistrationObservationListSummary(item.matchingTracks[0]), {
+      label,
+      scheduledAt: "2026-08-20T09:00:00Z",
+      place: "본관",
+    })
+    assert.equal(getRegistrationCaseTabCounts(items).observation, 1)
+  }
+  assert.equal(canOpenRegistrationCaseListItem({
+    viewKey: "observation",
+    matchingTracks: [{ observationSummaryVisible: false }],
+  }), false)
+  assert.equal(canOpenRegistrationCaseListItem({
+    viewKey: "observation",
+    matchingTracks: [{ observationSummaryVisible: false }, { observationSummaryVisible: true }],
+  }), true)
+  assert.equal(canOpenRegistrationCaseListItem({
+    viewKey: "waiting",
+    matchingTracks: [{ observationSummaryVisible: false }],
+  }), true)
 })
 
 test("level-test rows use active canonical appointments and collapse a shared reservation", async () => {
@@ -179,6 +232,7 @@ test("same-view subject tracks remain in one case row and counts increment once"
     consultation_requested: 2,
     consultation_completed: 0,
     waiting: 0,
+    observation: 0,
     enrollment: 0,
     payment: 0,
     completed: 0,

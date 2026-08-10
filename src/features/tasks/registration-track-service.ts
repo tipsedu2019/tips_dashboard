@@ -160,7 +160,7 @@ const REGISTRATION_OBSERVATION_TRACK_WORKFLOW_STATUS_SET = new Set<string>(
   REGISTRATION_OBSERVATION_TRACK_WORKFLOW_STATUSES,
 )
 
-function isOpsRegistrationWorkflowStatus(
+export function isOpsRegistrationWorkflowStatus(
   input: string,
 ): input is OpsRegistrationWorkflowStatus {
   return OPS_REGISTRATION_WORKFLOW_STATUS_SET.has(input)
@@ -214,13 +214,18 @@ type OpsRegistrationTrackSummaryFields<
   visitPlace?: string
 }
 
+type RegistrationObservationSummaryAccess = RegistrationObservationSummary & {
+  /** False only when the server deliberately conceals the complete scalar tuple. */
+  observationSummaryVisible: boolean
+}
+
 export type OpsRegistrationTrackSummary =
   & OpsRegistrationTrackSummaryFields<OpsRegistrationWorkflowStatus>
-  & Partial<RegistrationObservationSummary>
+  & Partial<RegistrationObservationSummaryAccess>
 
 export type OpsRegistrationObservationTrackSummary =
   & OpsRegistrationTrackSummaryFields<RegistrationObservationTrackWorkflowStatus>
-  & RegistrationObservationSummary
+  & RegistrationObservationSummaryAccess
 
 export type OpsRegistrationEnrollment = {
   id: string
@@ -344,7 +349,9 @@ export type OpsRegistrationMigrationLegacySnapshot = {
   }
 }
 
-export type OpsRegistrationCaseDetail = {
+type OpsRegistrationCaseDetailFields<
+  TTrack extends OpsRegistrationTrackSummary | OpsRegistrationObservationTrackSummary,
+> = {
   task: OpsTask
   commonRevision: number
   admissionApplicationMessageId: string | null
@@ -354,7 +361,7 @@ export type OpsRegistrationCaseDetail = {
   admissionApplicationAccepted: boolean
   comments: OpsTaskComment[]
   attachments: OpsTaskAttachment[]
-  tracks: OpsRegistrationTrackSummary[]
+  tracks: TTrack[]
   appointments: OpsRegistrationAppointment[]
   levelTests: OpsRegistrationLevelTest[]
   consultations: OpsRegistrationConsultation[]
@@ -364,13 +371,19 @@ export type OpsRegistrationCaseDetail = {
   migrationLegacy: OpsRegistrationMigrationLegacySnapshot | null
 }
 
+export type OpsRegistrationCaseDetail =
+  OpsRegistrationCaseDetailFields<OpsRegistrationTrackSummary>
+
+export type OpsRegistrationObservationCaseDetail =
+  OpsRegistrationCaseDetailFields<OpsRegistrationObservationTrackSummary>
+
 export type RegistrationTrackSummaryLoadResult<
   TWorkflowStatus extends RegistrationObservationTrackWorkflowStatus = OpsRegistrationWorkflowStatus,
 > = {
   mode: "legacy" | "maintenance" | "ready"
   tracks: Array<
     & OpsRegistrationTrackSummaryFields<TWorkflowStatus>
-    & RegistrationObservationSummary
+    & RegistrationObservationSummaryAccess
   >
 }
 
@@ -1117,7 +1130,7 @@ function embeddedDirector(row: Row) {
 function mapRegistrationObservationSummary(
   row: Row,
   required = false,
-): RegistrationObservationSummary {
+): RegistrationObservationSummaryAccess {
   const rawValues = [
     value(row, "observation_attempt_count", "observationAttemptCount"),
     value(row, "observation_current_id", "observationCurrentId"),
@@ -1130,19 +1143,43 @@ function mapRegistrationObservationSummary(
     value(row, "observation_feedback_revision", "observationFeedbackRevision"),
   ]
   if (!required && rawValues.every((item) => item === undefined)) {
-    return { ...EMPTY_REGISTRATION_OBSERVATION_SUMMARY }
+    return {
+      ...EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
+      observationSummaryVisible: false,
+    }
   }
-  return normalizeRegistrationObservationSummary({
-    observationAttemptCount: rawValues[0],
-    observationCurrentId: rawValues[1],
-    observationCurrentStatus: rawValues[2],
-    observationCurrentAppointmentId: rawValues[3],
-    observationNearestScheduledAt: rawValues[4],
-    observationNearestPlace: rawValues[5],
-    observationNotificationRevision: rawValues[6],
-    observationRevision: rawValues[7],
-    observationFeedbackRevision: rawValues[8],
-  })
+  if (rawValues.every((item) => item === null)) {
+    return {
+      ...EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
+      observationSummaryVisible: false,
+    }
+  }
+  return {
+    ...normalizeRegistrationObservationSummary({
+      observationAttemptCount: rawValues[0],
+      observationCurrentId: rawValues[1],
+      observationCurrentStatus: rawValues[2],
+      observationCurrentAppointmentId: rawValues[3],
+      observationNearestScheduledAt: rawValues[4],
+      observationNearestPlace: rawValues[5],
+      observationNotificationRevision: rawValues[6],
+      observationRevision: rawValues[7],
+      observationFeedbackRevision: rawValues[8],
+    }),
+    observationSummaryVisible: true,
+  }
+}
+
+function rowNeedsRegistrationObservationSummary(row: Row): boolean {
+  return value(row, "observation_attempt_count", "observationAttemptCount") === undefined
+    || value(row, "observation_current_id", "observationCurrentId") === undefined
+    || value(row, "observation_current_status", "observationCurrentStatus") === undefined
+    || value(row, "observation_current_appointment_id", "observationCurrentAppointmentId") === undefined
+    || value(row, "observation_nearest_scheduled_at", "observationNearestScheduledAt") === undefined
+    || value(row, "observation_nearest_place", "observationNearestPlace") === undefined
+    || value(row, "observation_notification_revision", "observationNotificationRevision") === undefined
+    || value(row, "observation_revision", "observationRevision") === undefined
+    || value(row, "observation_feedback_revision", "observationFeedbackRevision") === undefined
 }
 
 function mapTrackFields<
@@ -1206,9 +1243,28 @@ function mapTrack(
   legacy = false,
   observationSummaryRequired = false,
 ): OpsRegistrationTrackSummary {
+  const trackFields = mapTrackFields(row, workflowStatus(row), directorNames, legacy)
+  const mappedObservationSummary = !observationSummaryRequired
+    && rowNeedsRegistrationObservationSummary(row)
+    ? {
+        ...EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
+        observationSummaryVisible: false,
+      }
+    : mapRegistrationObservationSummary(row, observationSummaryRequired)
+  const observationSummary: RegistrationObservationSummary = {
+    observationAttemptCount: mappedObservationSummary.observationAttemptCount,
+    observationCurrentId: mappedObservationSummary.observationCurrentId,
+    observationCurrentStatus: mappedObservationSummary.observationCurrentStatus,
+    observationCurrentAppointmentId: mappedObservationSummary.observationCurrentAppointmentId,
+    observationNearestScheduledAt: mappedObservationSummary.observationNearestScheduledAt,
+    observationNearestPlace: mappedObservationSummary.observationNearestPlace,
+    observationNotificationRevision: mappedObservationSummary.observationNotificationRevision,
+    observationRevision: mappedObservationSummary.observationRevision,
+    observationFeedbackRevision: mappedObservationSummary.observationFeedbackRevision,
+  }
   return {
-    ...mapTrackFields(row, workflowStatus(row), directorNames, legacy),
-    ...mapRegistrationObservationSummary(row, observationSummaryRequired),
+    ...trackFields,
+    ...observationSummary,
   }
 }
 
@@ -1681,8 +1737,14 @@ export function createRegistrationTrackService(
   const summaryCache = new Map<string, RegistrationObservationTrackSummaryLoadResult>()
   const summaryInFlight = new Map<string, Promise<RegistrationObservationTrackSummaryLoadResult>>()
   const summaryEpochs = new Map<string, number>()
-  const detailCache = new Map<string, OpsRegistrationCaseDetail>()
-  const detailInFlight = new Map<string, Promise<OpsRegistrationCaseDetail>>()
+  const detailCache = new Map<
+    string,
+    OpsRegistrationCaseDetail | OpsRegistrationObservationCaseDetail
+  >()
+  const detailInFlight = new Map<
+    string,
+    Promise<OpsRegistrationCaseDetail | OpsRegistrationObservationCaseDetail>
+  >()
   const detailEpochs = new Map<string, number>()
   const optionCache = new Map<string, OpsRegistrationWorkspaceOptionData>()
   const optionInFlight = new Map<string, Promise<OpsRegistrationWorkspaceOptionData>>()
@@ -2004,10 +2066,22 @@ export function createRegistrationTrackService(
   function loadCaseDetail(
     taskId: string,
     viewerId: string,
-    loadOptions: { force?: boolean } = {},
-  ): Promise<OpsRegistrationCaseDetail> {
+    loadOptions: { force?: boolean; observationAware: true },
+  ): Promise<OpsRegistrationObservationCaseDetail>
+  function loadCaseDetail(
+    taskId: string,
+    viewerId: string,
+    loadOptions?: { force?: boolean; observationAware?: false },
+  ): Promise<OpsRegistrationCaseDetail>
+  function loadCaseDetail(
+    taskId: string,
+    viewerId: string,
+    loadOptions: { force?: boolean; observationAware?: boolean } = {},
+  ): Promise<OpsRegistrationCaseDetail | OpsRegistrationObservationCaseDetail> {
     const safeTaskId = text(taskId)
-    const cacheKey = `${requireViewerId(viewerId)}:${safeTaskId}`
+    const safeViewerId = requireViewerId(viewerId)
+    const observationAware = loadOptions.observationAware === true
+    const cacheKey = `${observationAware ? "observation" : "generic"}:${safeViewerId}:${safeTaskId}`
     if (loadOptions.force) {
       advanceEpoch(detailEpochs, cacheKey)
       detailCache.delete(cacheKey)
@@ -2069,34 +2143,56 @@ export function createRegistrationTrackService(
         const detailRow = firstRow(value(parentRow, "ops_registration_details")) || {}
         const comments = rows(value(parentRow, "ops_task_comments")).map(mapComment)
         const attachments = rows(value(parentRow, "ops_task_attachments")).map(mapAttachment)
-        const tracks = trackRows.map((row) => mapTrack(row))
         const activeMessage = messageRows[0] || null
         const activeStatus = text(value(activeMessage, "status"))
         const messageStatus = activeStatus === "failed"
           ? "failed_hold"
           : (["pending", "accepted", "unknown"].includes(activeStatus) ? activeStatus : "")
 
-        return {
-          task: mapTask(parentRow, detailRow, comments, attachments),
-          commonRevision: numberValue(value(detailRow, "common_revision", "commonRevision")),
-          admissionApplicationMessageId: nullableText(value(activeMessage, "id")),
-          admissionApplicationMessageStatus: messageStatus as OpsRegistrationCaseDetail["admissionApplicationMessageStatus"],
-          admissionApplicationMessageClaimActive: bool(value(activeMessage, "claim_active", "claimActive")),
-          admissionApplicationMessageUpdatedAt: nullableText(value(activeMessage, "updated_at", "updatedAt")),
-          admissionApplicationAccepted: activeStatus === "accepted",
-          comments,
-          attachments,
-          tracks,
-          appointments: appointmentRows.map(mapAppointment),
-          levelTests: levelTestRows.map(mapLevelTest),
-          consultations: consultationRows.map(mapConsultation),
-          admissionBatches: batchRows.map(mapBatch),
-          enrollments: enrollmentRows.map(mapEnrollment),
-          events: eventRows.map(mapTrackEvent),
-          migrationLegacy: tracks.some((track) => track.migrationReviewRequired)
-            ? buildRegistrationMigrationLegacySnapshot(parentRow, detailRow, eventRows)
-            : null,
+        function buildDetail<
+          TTrack extends OpsRegistrationTrackSummary | OpsRegistrationObservationTrackSummary,
+        >(tracks: TTrack[]): OpsRegistrationCaseDetailFields<TTrack> {
+          return {
+            task: mapTask(parentRow, detailRow, comments, attachments),
+            commonRevision: numberValue(value(detailRow, "common_revision", "commonRevision")),
+            admissionApplicationMessageId: nullableText(value(activeMessage, "id")),
+            admissionApplicationMessageStatus: messageStatus as OpsRegistrationCaseDetail["admissionApplicationMessageStatus"],
+            admissionApplicationMessageClaimActive: bool(value(activeMessage, "claim_active", "claimActive")),
+            admissionApplicationMessageUpdatedAt: nullableText(value(activeMessage, "updated_at", "updatedAt")),
+            admissionApplicationAccepted: activeStatus === "accepted",
+            comments,
+            attachments,
+            tracks,
+            appointments: appointmentRows.map(mapAppointment),
+            levelTests: levelTestRows.map(mapLevelTest),
+            consultations: consultationRows.map(mapConsultation),
+            admissionBatches: batchRows.map(mapBatch),
+            enrollments: enrollmentRows.map(mapEnrollment),
+            events: eventRows.map(mapTrackEvent),
+            migrationLegacy: tracks.some((track) => track.migrationReviewRequired)
+              ? buildRegistrationMigrationLegacySnapshot(parentRow, detailRow, eventRows)
+              : null,
+          }
         }
+
+        if (!observationAware) return buildDetail(trackRows.map((row) => mapTrack(row)))
+
+        const rowsMissingObservationSummary = trackRows.some(rowNeedsRegistrationObservationSummary)
+        const summaryResult = rowsMissingObservationSummary
+          ? await loadTrackSummarySelection([safeTaskId], safeViewerId, { force: loadOptions.force })
+          : null
+        const summaryByTrackId = new Map(
+          (summaryResult?.tracks || []).map((track) => [track.id, track]),
+        )
+        const tracks = trackRows.map((row) => {
+          const summary = summaryByTrackId.get(text(value(row, "id")))
+          if (summary) return summary
+          if (rowNeedsRegistrationObservationSummary(row)) {
+            throw new Error("registration_observation_summary_invalid")
+          }
+          return mapRegistrationObservationTrackSummary(row, true)
+        })
+        return buildDetail(tracks)
       } catch (error) {
         if (missingSchemaError(error)) return invalidateReadyRuntime(error)
         throw error
@@ -3322,14 +3418,61 @@ export function loadRegistrationWorkspaceTrackSummaries(
       )
 }
 
+function toObservationAwareTrackSummary(
+  track: OpsRegistrationTrackSummary,
+): OpsRegistrationObservationTrackSummary {
+  return {
+    ...track,
+    observationAttemptCount: track.observationAttemptCount ?? 0,
+    observationCurrentId: track.observationCurrentId ?? null,
+    observationCurrentStatus: track.observationCurrentStatus ?? null,
+    observationCurrentAppointmentId: track.observationCurrentAppointmentId ?? null,
+    observationNearestScheduledAt: track.observationNearestScheduledAt ?? null,
+    observationNearestPlace: track.observationNearestPlace ?? null,
+    observationNotificationRevision: track.observationNotificationRevision ?? null,
+    observationRevision: track.observationRevision ?? null,
+    observationFeedbackRevision: track.observationFeedbackRevision ?? null,
+    observationSummaryVisible: track.observationSummaryVisible === true,
+  }
+}
+
+export function toObservationAwareCaseDetail(
+  detail: OpsRegistrationCaseDetail,
+): OpsRegistrationObservationCaseDetail {
+  return {
+    ...detail,
+    tracks: detail.tracks.map(toObservationAwareTrackSummary),
+  }
+}
+
 export function loadRegistrationCaseDetail(
   taskId: string,
   viewerId: string,
-  options: { force?: boolean } = {},
-): Promise<OpsRegistrationCaseDetail> {
+  options: { force?: boolean; observationAware: true },
+): Promise<OpsRegistrationObservationCaseDetail>
+export function loadRegistrationCaseDetail(
+  taskId: string,
+  viewerId: string,
+  options?: { force?: boolean; observationAware?: false },
+): Promise<OpsRegistrationCaseDetail>
+export function loadRegistrationCaseDetail(
+  taskId: string,
+  viewerId: string,
+  options: { force?: boolean; observationAware?: boolean } = {},
+): Promise<OpsRegistrationCaseDetail | OpsRegistrationObservationCaseDetail> {
   const fixture = loadRegistrationSubjectTrackFixtureCase(taskId)
-  if (fixture) return fixture
-  return defaultRegistrationTrackService.loadCaseDetail(taskId, viewerId, options)
+  if (fixture) {
+    return options.observationAware
+      ? fixture.then(toObservationAwareCaseDetail)
+      : fixture
+  }
+  const loadOptions = { force: options.force }
+  return options.observationAware
+    ? defaultRegistrationTrackService.loadCaseDetail(taskId, viewerId, {
+        ...loadOptions,
+        observationAware: true,
+      })
+    : defaultRegistrationTrackService.loadCaseDetail(taskId, viewerId, loadOptions)
 }
 
 export async function loadRegistrationAppointmentCalendar(

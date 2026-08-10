@@ -21,12 +21,78 @@ const {
   getRegistrationEnrollmentDirtyKey,
   getRegistrationSaveActionPresentation,
   beginRegistrationConflictComparison,
+  canManageRegistrationObservationTrack,
+  getRegistrationObservationRefreshPlan,
   isRegistrationApplicationSectionContentDisabled,
   reconcileRegistrationEnrollmentDraft,
   reconcileRegistrationEditorDraft,
+  resolveRegistrationApplicationFocusPanelId,
   settleRegistrationConflictComparison,
   updateRegistrationApplicationDirtyKeys,
 } = application
+
+test("observation focus and refresh ownership fail closed across runtime, track switches, and close", () => {
+  assert.equal(resolveRegistrationApplicationFocusPanelId({
+    focusTrackId: "track-a",
+    activeTrackId: "track-a",
+    observationFocusAvailable: true,
+    genericFocusPanelId: null,
+  }), "registration-application-observation")
+  assert.equal(resolveRegistrationApplicationFocusPanelId({
+    focusTrackId: "track-a",
+    activeTrackId: "track-a",
+    observationFocusAvailable: false,
+    genericFocusPanelId: null,
+  }), null, "runtime0 observation deep links must not focus a hidden section")
+  assert.equal(resolveRegistrationApplicationFocusPanelId({
+    focusTrackId: "track-a",
+    activeTrackId: "track-b",
+    observationFocusAvailable: true,
+    genericFocusPanelId: null,
+  }), null, "a stale deep link must not focus the newly selected track")
+
+  assert.deepEqual(getRegistrationObservationRefreshPlan({
+    savedTaskId: "task-1",
+    savedTrackId: "track-a",
+    activeTaskId: "task-1",
+    activeTrackId: "track-a",
+  }), { loadManagerDetail: true, preferredTrackId: "track-a" })
+  assert.deepEqual(getRegistrationObservationRefreshPlan({
+    savedTaskId: "task-1",
+    savedTrackId: "track-a",
+    activeTaskId: "task-1",
+    activeTrackId: "track-b",
+  }), { loadManagerDetail: false, preferredTrackId: undefined })
+  assert.deepEqual(getRegistrationObservationRefreshPlan({
+    savedTaskId: "task-1",
+    savedTrackId: "track-a",
+    activeTaskId: null,
+    activeTrackId: null,
+  }), { loadManagerDetail: false, preferredTrackId: undefined })
+})
+
+test("observation booking authority includes only staff management and the exact track director", () => {
+  assert.equal(canManageRegistrationObservationTrack({
+    viewerId: "staff-1",
+    viewerRole: "staff",
+    directorProfileId: null,
+  }), true)
+  assert.equal(canManageRegistrationObservationTrack({
+    viewerId: "director-1",
+    viewerRole: "teacher",
+    directorProfileId: "director-1",
+  }), true)
+  assert.equal(canManageRegistrationObservationTrack({
+    viewerId: "director-2",
+    viewerRole: "teacher",
+    directorProfileId: "director-1",
+  }), false)
+  assert.equal(canManageRegistrationObservationTrack({
+    viewerId: null,
+    viewerRole: "admin",
+    directorProfileId: null,
+  }), true)
+})
 
 test("consultation mode stays simple before a visit is saved and locks to the saved visit", () => {
   assert.deepEqual(getRegistrationConsultationModeDraft({
@@ -101,9 +167,38 @@ test("visible application body excludes history while internal state retains it"
     "level_test",
     "consultation",
     "placement",
+    "observation",
     "admission",
   ])
   assert.ok(REGISTRATION_APPLICATION_SECTION_ORDER.includes("history"))
+})
+
+test("observation is an independent application and progress section", () => {
+  assert.deepEqual(REGISTRATION_APPLICATION_SECTION_ORDER, [
+    "inquiry",
+    "level_test",
+    "consultation",
+    "placement",
+    "observation",
+    "admission",
+    "history",
+  ])
+  assert.deepEqual(
+    getRegistrationApplicationProgress(
+      "waiting",
+      "",
+      "observation_requested",
+    ).map(({ key, state }) => [key, state]),
+    [
+      ["inquiry", "reached"],
+      ["level_test", "reached"],
+      ["consultation", "reached"],
+      ["waiting", "skipped"],
+      ["observation", "current"],
+      ["registration", "upcoming"],
+      ["admission", "upcoming"],
+    ],
+  )
 })
 
 function makeTrack(status, subject = "영어") {
@@ -141,15 +236,15 @@ const cases = [
   ["inquiry_closed", "inquiry"],
 ]
 
-const progressKeys = ["inquiry", "level_test", "consultation", "waiting", "registration", "admission"]
+const progressKeys = ["inquiry", "level_test", "consultation", "waiting", "observation", "registration", "admission"]
 
-test("registration progress derives six ordered steps from the active track status", () => {
+test("registration progress derives seven ordered steps from the active track status", () => {
   const expectedStatesByStatus = {
-    inquiry: ["current", "upcoming", "upcoming", "upcoming", "upcoming", "upcoming"],
-    level_test_scheduled: ["reached", "current", "upcoming", "upcoming", "upcoming", "upcoming"],
-    consultation_waiting: ["reached", "reached", "current", "upcoming", "upcoming", "upcoming"],
-    waiting: ["reached", "reached", "reached", "current", "upcoming", "upcoming"],
-    enrollment_processing: ["reached", "reached", "reached", "skipped", "reached", "current"],
+    inquiry: ["current", "upcoming", "upcoming", "upcoming", "upcoming", "upcoming", "upcoming"],
+    level_test_scheduled: ["reached", "current", "upcoming", "upcoming", "upcoming", "upcoming", "upcoming"],
+    consultation_waiting: ["reached", "reached", "current", "upcoming", "upcoming", "upcoming", "upcoming"],
+    waiting: ["reached", "reached", "reached", "current", "upcoming", "upcoming", "upcoming"],
+    enrollment_processing: ["reached", "reached", "reached", "skipped", "skipped", "reached", "current"],
   }
 
   for (const [status, expectedStates] of Object.entries(expectedStatesByStatus)) {
@@ -162,15 +257,15 @@ test("registration progress derives six ordered steps from the active track stat
 test("registered completes all progress while closed outcomes terminate only their outcome step", () => {
   assert.deepEqual(
     getRegistrationApplicationProgress("registered").map((step) => step.state),
-    ["complete", "complete", "complete", "skipped", "complete", "complete"],
+    ["complete", "complete", "complete", "skipped", "skipped", "complete", "complete"],
   )
   assert.deepEqual(
     getRegistrationApplicationProgress("not_registered").map((step) => step.state),
-    ["reached", "reached", "reached", "skipped", "terminal", "upcoming"],
+    ["reached", "reached", "reached", "skipped", "skipped", "terminal", "upcoming"],
   )
   assert.deepEqual(
     getRegistrationApplicationProgress("inquiry_closed").map((step) => step.state),
-    ["terminal", "upcoming", "upcoming", "upcoming", "upcoming", "upcoming"],
+    ["terminal", "upcoming", "upcoming", "upcoming", "upcoming", "upcoming", "upcoming"],
   )
 })
 

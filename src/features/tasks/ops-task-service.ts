@@ -28,12 +28,13 @@ import {
   clearRegistrationTrackServiceCaches,
   loadOpsRegistrationWorkspaceOptionData as loadRegistrationWorkspaceOptionData,
   loadRegistrationCaseDetail,
-  loadRegistrationTrackSummaries,
   loadRegistrationWorkspaceTrackSummaries,
   setRegistrationTrackMutationCacheInvalidator,
-  type OpsRegistrationCaseDetail,
-  type OpsRegistrationTrackStatus,
+  type OpsRegistrationObservationCaseDetail,
+  type OpsRegistrationObservationTrackSummary,
   type OpsRegistrationTrackSummary,
+  type OpsRegistrationTrackStatus,
+  type RegistrationObservationTrackSummaryLoadResult,
   type OpsRegistrationWorkspaceOptionData,
 } from "./registration-track-service"
 import {
@@ -280,7 +281,7 @@ export type OpsTask = {
   createdAt: string
   updatedAt: string
   registration?: OpsRegistrationDetail
-  registrationTracks?: OpsRegistrationTrackSummary[]
+  registrationTracks?: OpsRegistrationTrackSummary[] | OpsRegistrationObservationTrackSummary[]
   withdrawal?: OpsWithdrawalDetail
   transfer?: OpsTransferDetail
   wordRetest?: OpsWordRetestDetail
@@ -1497,7 +1498,7 @@ function getLegacyRegistrationTrackStatus(task: OpsTask): OpsRegistrationTrackSt
   return "inquiry"
 }
 
-function createLegacyRegistrationTrackSummaries(tasks: OpsTask[]): OpsRegistrationTrackSummary[] {
+function createLegacyRegistrationTrackSummaries(tasks: OpsTask[]): OpsRegistrationObservationTrackSummary[] {
   return tasks.flatMap((task) => {
     const subjects = parseRegistrationSubjects(task.subject)
       .filter((subject): subject is "영어" | "수학" => subject === "영어" || subject === "수학")
@@ -1533,17 +1534,27 @@ function createLegacyRegistrationTrackSummaries(tasks: OpsTask[]): OpsRegistrati
       stageEnteredAt: task.registration?.inquiryAt || task.createdAt,
       phoneReadyAt: null,
       phoneReadySource: null,
+      observationAttemptCount: 0,
+      observationCurrentId: null,
+      observationCurrentStatus: null,
+      observationCurrentAppointmentId: null,
+      observationNearestScheduledAt: null,
+      observationNearestPlace: null,
+      observationNotificationRevision: null,
+      observationRevision: null,
+      observationFeedbackRevision: null,
+      observationSummaryVisible: false,
     }))
   })
 }
 
 function resolveRegistrationTrackSummariesForParents(
   parentTasks: OpsTask[],
-  summary: Awaited<ReturnType<typeof loadRegistrationTrackSummaries>>,
-): OpsRegistrationTrackSummary[] {
+  summary: RegistrationObservationTrackSummaryLoadResult,
+): OpsRegistrationObservationTrackSummary[] {
   if (summary.mode === "legacy") return createLegacyRegistrationTrackSummaries(parentTasks)
 
-  const childTracksByTaskId = new Map<string, OpsRegistrationTrackSummary[]>()
+  const childTracksByTaskId = new Map<string, OpsRegistrationObservationTrackSummary[]>()
   summary.tracks.forEach((track) => {
     const current = childTracksByTaskId.get(track.taskId) || []
     current.push(track)
@@ -1581,7 +1592,7 @@ async function readOpsRegistrationParentWorkspaceData(
     const runtimeProbePromise = probeRegistrationSubjectTrackRuntime()
     const summaryReadPromise = loadRegistrationWorkspaceTrackSummaries(
       safeViewerId,
-      { force: options.force },
+      { force: options.force, observationAware: true },
     )
     metrics.queryCount += 1
     const taskReadPromise = supabase
@@ -1847,12 +1858,15 @@ export function loadOpsRegistrationCaseDetail(
   taskId: string,
   viewerId: string,
   options: { force?: boolean } = {},
-): Promise<OpsRegistrationCaseDetail> {
+): Promise<OpsRegistrationObservationCaseDetail> {
   const safeTaskId = text(taskId)
   const safeViewerId = text(viewerId)
   if (!safeTaskId) throw new Error("등록 업무를 선택하세요.")
   if (!safeViewerId) throw new Error("인증된 사용자 정보를 확인할 수 없습니다.")
-  return loadRegistrationCaseDetail(safeTaskId, safeViewerId, options)
+  return loadRegistrationCaseDetail(safeTaskId, safeViewerId, {
+    force: options.force,
+    observationAware: true,
+  })
 }
 
 async function assertOpsTaskExists(taskId: string) {

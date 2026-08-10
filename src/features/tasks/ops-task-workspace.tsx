@@ -197,13 +197,18 @@ import {
   ensureRegistrationWorkflowNotificationSourceIds,
   loadRegistrationLegacyNotificationSourceIds,
   probeRegistrationIntakeWorkflowRuntime,
+  probeRegistrationObservationRuntime,
   probeRegistrationSubjectTrackRuntime,
   setRegistrationWorkflowStatus,
+  toObservationAwareCaseDetail,
   updateRegistrationCaseCommon,
   type OpsRegistrationCaseDetail,
+  type OpsRegistrationObservationCaseDetail,
   type OpsRegistrationWorkflowStatus,
   type RegistrationSubject,
 } from "./registration-track-service"
+import type { RegistrationObservationRuntimeState } from "./registration-observation-model"
+import { isRegistrationObservationWorkflowStatus } from "./registration-workflow-status.js"
 import { RegistrationApplicationCreate } from "./registration-application-create"
 import { resolveRegistrationCreateCatalogStatus } from "./registration-application-model"
 import {
@@ -283,6 +288,7 @@ type TodoDueFilterKey = "all" | "overdue" | "today" | "upcoming" | "unscheduled"
 type TodoSelectFilterKey = "all" | string
 type WithdrawalViewKey = "applicant" | "operations" | "closed"
 type RegistrationViewKey = "inquiry" | "level_test" | "consultation_requested" | "consultation_completed" | "waiting" | "enrollment" | "payment" | "completed"
+type RegistrationWorkspaceViewKey = RegistrationViewKey | "observation"
 type RegistrationWorkspaceMode = "list" | "calendar"
 type WithdrawalPeriodFilter = "all" | "today" | "week" | "month" | "custom"
 type WithdrawalNotificationChannelKey = "applicant" | "operations" | "google_chat_admin"
@@ -700,18 +706,19 @@ const WITHDRAWAL_VIEW_TABS: Array<{ key: WithdrawalViewKey; label: string }> = [
   { key: "closed", label: "완료" },
 ]
 
-const REGISTRATION_VIEW_TABS: Array<{ key: RegistrationViewKey; label: string }> = [
+const REGISTRATION_VIEW_TABS: Array<{ key: RegistrationWorkspaceViewKey; label: string }> = [
   { key: "inquiry", label: "문의" },
   { key: "level_test", label: "레벨테스트 신청" },
   { key: "consultation_requested", label: "상담 신청" },
   { key: "consultation_completed", label: "상담 완료" },
   { key: "waiting", label: "대기 신청" },
+  { key: "observation", label: "청강 신청" },
   { key: "enrollment", label: "등록 신청" },
   { key: "payment", label: "입학 진행" },
   { key: "completed", label: "완료" },
 ]
 
-const REGISTRATION_VIEWS_REQUIRING_LINKED_LABELS = new Set<RegistrationViewKey>([
+const REGISTRATION_VIEWS_REQUIRING_LINKED_LABELS = new Set<RegistrationWorkspaceViewKey>([
   "waiting",
   "enrollment",
   "completed",
@@ -726,7 +733,7 @@ const REGISTRATION_CALENDAR_KIND_TABS = [
 const REGISTRATION_GRADE_OPTIONS = getRegistrationGradeOptions()
 
 function getRegistrationAppointmentParticipantTrackIds(
-  detail: OpsRegistrationCaseDetail,
+  detail: OpsRegistrationObservationCaseDetail,
   appointmentId: string,
 ) {
   const appointment = detail.appointments.find((item) => item.id === appointmentId) || null
@@ -744,7 +751,7 @@ function getRegistrationAppointmentParticipantTrackIds(
 }
 
 function resolveRegistrationAppointmentFocus(
-  detail: OpsRegistrationCaseDetail,
+  detail: OpsRegistrationObservationCaseDetail,
   appointmentId: string,
   preferredTrackId: string | null,
 ) {
@@ -3020,11 +3027,11 @@ function getWithdrawalViewTasks(tasks: OpsTask[], view: WithdrawalViewKey) {
   return tasks.filter((task) => isClosedOpsTask(task))
 }
 
-function isRegistrationViewKey(value: string): value is RegistrationViewKey {
+function isRegistrationViewKey(value: string): value is RegistrationWorkspaceViewKey {
   return REGISTRATION_VIEW_TABS.some((tab) => tab.key === value)
 }
 
-function normalizeRegistrationViewKey(value: string): RegistrationViewKey | null {
+function normalizeRegistrationViewKey(value: string): RegistrationWorkspaceViewKey | null {
   if (isRegistrationViewKey(value)) return value
   if (value === "consulting") return "consultation_requested"
   if (value === "closed") return "completed"
@@ -8246,7 +8253,19 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [view, setView] = useState<ViewKey>("all")
   const [todoView, setTodoView] = useState<TodoViewKey>("inbox")
   const [withdrawalView, setWithdrawalView] = useState<WithdrawalViewKey>("applicant")
-  const [registrationView, setRegistrationView] = useState<RegistrationViewKey>("inquiry")
+  const [registrationView, setRegistrationView] = useState<RegistrationWorkspaceViewKey>("inquiry")
+  const [registrationObservationRuntime, setRegistrationObservationRuntime] = useState<RegistrationObservationRuntimeState>({
+    runtimeVersion: 0,
+    available: false,
+  })
+  const [registrationObservationRuntimeProbed, setRegistrationObservationRuntimeProbed] = useState(false)
+  const [registrationObservationRuntimeError, setRegistrationObservationRuntimeError] = useState("")
+  const registrationViewTabs = useMemo(
+    () => REGISTRATION_VIEW_TABS.filter((tab) => (
+      tab.key !== "observation" || registrationObservationRuntime.available
+    )),
+    [registrationObservationRuntime.available],
+  )
   const [registrationMode, setRegistrationMode] = useState<RegistrationWorkspaceMode>("list")
   const [registrationConsultationOwnerScope, setRegistrationConsultationOwnerScope] = useState<RegistrationConsultationOwnerScope>("mine")
   const [registrationCalendarKind, setRegistrationCalendarKind] = useState<RegistrationAppointmentCalendarKindFilter>("all")
@@ -8297,7 +8316,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [registrationApplicationDirty, setRegistrationApplicationDirty] = useState(false)
   const selectedRegistrationTrackIdRef = useRef<string | null>(selectedRegistrationTrackId)
   selectedRegistrationTrackIdRef.current = selectedRegistrationTrackId
-  const [registrationCaseDetail, setRegistrationCaseDetail] = useState<OpsRegistrationCaseDetail | null>(null)
+  const [registrationCaseDetail, setRegistrationCaseDetail] = useState<OpsRegistrationObservationCaseDetail | null>(null)
   const [registrationDetailLoadError, setRegistrationDetailLoadError] = useState("")
   const [form, setForm] = useState<OpsTaskInput>(() => cloneForm())
   const [registrationInitialWorkflowDraft, setRegistrationInitialWorkflowDraft] = useState<RegistrationInitialWorkflowDraft>(() => (
@@ -8813,7 +8832,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
-  const syncRegistrationView = (nextView: RegistrationViewKey) => {
+  const syncRegistrationView = (nextView: RegistrationWorkspaceViewKey) => {
     const nextOwnerScope = isRegistrationConsultationViewKey(nextView) && isRegistrationConsultationViewKey(registrationView)
       ? registrationConsultationOwnerScope
       : "mine"
@@ -8824,6 +8843,37 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     clearRegistrationWorkspaceSelection()
     replaceRegistrationWorkspaceSearch({ mode: "list", view: nextView, ownerScope: nextOwnerScope })
   }
+
+  useEffect(() => {
+    if (
+      !isRegistrationWorkspace
+      || !registrationObservationRuntimeProbed
+      || registrationObservationRuntime.available
+      || registrationView !== "observation"
+    ) return
+
+    setRegistrationMode("list")
+    setRegistrationView("waiting")
+    setRegistrationConsultationOwnerScope("mine")
+    setTaskFocus("none")
+    setDetailOpen(false)
+    setRegistrationApplicationHost({ kind: "closed" })
+    setSelectedRegistrationTrackId(null)
+    setSelectedRegistrationAppointmentId(null)
+    setRegistrationCaseDetail(null)
+    registrationTrackSelectionRef.current = ""
+    const nextSearchParams = buildRegistrationWorkspaceSearchParams(
+      new URLSearchParams(window.location.search),
+      { mode: "list", view: "waiting", ownerScope: "mine" },
+    )
+    const queryString = nextSearchParams.toString()
+    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+  }, [
+    isRegistrationWorkspace,
+    registrationObservationRuntime.available,
+    registrationObservationRuntimeProbed,
+    registrationView,
+  ])
 
   const syncRegistrationConsultationOwnerScope = (ownerScope: RegistrationConsultationOwnerScope) => {
     setRegistrationConsultationOwnerScope(ownerScope)
@@ -8850,16 +8900,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     replaceRegistrationWorkspaceSearch({ mode: "list", view: registrationView, ownerScope })
   }
 
-  function handleRegistrationViewTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, currentView: RegistrationViewKey) {
+  function handleRegistrationViewTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, currentView: RegistrationWorkspaceViewKey) {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
     event.preventDefault()
-    const currentIndex = REGISTRATION_VIEW_TABS.findIndex((tab) => tab.key === currentView)
+    const currentIndex = registrationViewTabs.findIndex((tab) => tab.key === currentView)
     const nextIndex = event.key === "Home"
       ? 0
       : event.key === "End"
-        ? REGISTRATION_VIEW_TABS.length - 1
-        : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + REGISTRATION_VIEW_TABS.length) % REGISTRATION_VIEW_TABS.length
-    const nextView = REGISTRATION_VIEW_TABS[nextIndex]?.key
+        ? registrationViewTabs.length - 1
+        : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + registrationViewTabs.length) % registrationViewTabs.length
+    const nextView = registrationViewTabs[nextIndex]?.key
     if (!nextView) return
     syncRegistrationView(nextView)
     window.requestAnimationFrame(() => {
@@ -9113,6 +9163,38 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       active = false
     }
   }, [currentUserId, isRegistrationWorkspace, registrationFixtureEnabled, registrationFixtureRequested, registrationFixtureRevision])
+
+  useEffect(() => {
+    if (
+      !isRegistrationWorkspace
+      || !registrationViewerId
+      || (registrationFixtureRequested && !registrationFixtureEnabled)
+    ) {
+      setRegistrationObservationRuntime({ runtimeVersion: 0, available: false })
+      setRegistrationObservationRuntimeProbed(false)
+      setRegistrationObservationRuntimeError("")
+      return
+    }
+
+    let active = true
+    setRegistrationObservationRuntime({ runtimeVersion: 0, available: false })
+    setRegistrationObservationRuntimeProbed(false)
+    setRegistrationObservationRuntimeError("")
+    void probeRegistrationObservationRuntime().then((runtime) => {
+      if (!active) return
+      setRegistrationObservationRuntime(runtime)
+      setRegistrationObservationRuntimeProbed(true)
+    }).catch(() => {
+      if (!active) return
+      setRegistrationObservationRuntime({ runtimeVersion: 0, available: false })
+      setRegistrationObservationRuntimeProbed(true)
+      setRegistrationObservationRuntimeError("청강 신청 기능 상태를 확인하지 못했습니다. 다른 등록 업무는 계속 처리할 수 있습니다.")
+    })
+
+    return () => {
+      active = false
+    }
+  }, [isRegistrationWorkspace, registrationFixtureEnabled, registrationFixtureRequested, registrationViewerId])
 
   useEffect(() => {
     if (form.type !== "registration") return
@@ -9738,7 +9820,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     if (registrationFixtureEnabled && registrationFixtureModule && registrationFixtureStateRef.current) {
       const detail = registrationFixtureModule.getRegistrationSubjectTrackFixtureCase(registrationFixtureStateRef.current, taskId)
       if (!detail) return Promise.reject(new Error("registration_subject_track_fixture_case_not_found"))
-      return Promise.resolve(detail)
+      return Promise.resolve(toObservationAwareCaseDetail(detail))
     }
     return loadOpsRegistrationCaseDetail(taskId, registrationViewerId, { force })
   }, [registrationFixtureEnabled, registrationFixtureModule, registrationViewerId])
@@ -10252,7 +10334,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     track: RegistrationCaseListViewItem["matchingTracks"][number],
     workflowStatus: OpsRegistrationWorkflowStatus,
   ) => {
-    if (saving || track.workflowStatus === workflowStatus) return
+    if (
+      saving
+      || track.workflowStatus === workflowStatus
+      || isRegistrationObservationWorkflowStatus(track.workflowStatus)
+      || isRegistrationObservationWorkflowStatus(workflowStatus)
+    ) return
     setSaving(true)
     setMessage("")
     try {
@@ -12164,7 +12251,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                      </button>
 	                    )
 	                  })
-	                  : REGISTRATION_VIEW_TABS.map((tab) => {
+	                  : registrationViewTabs.map((tab) => {
 	                    const registrationCount = registrationCounts[tab.key]
 
 	                    return (
@@ -12574,6 +12661,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           </div>
         )}
         {message && !formOpen && !detailOpen && registrationApplicationHost.kind === "closed" && <div role="alert" className="rounded-md border border-destructive/30 px-3 py-2 text-sm whitespace-pre-line text-destructive">{message}</div>}
+        {isRegistrationWorkspace && registrationObservationRuntimeError ? (
+          <div role="alert" className="rounded-md border border-destructive/30 px-3 py-2 text-sm whitespace-pre-line text-destructive">
+            {registrationObservationRuntimeError}
+          </div>
+        ) : null}
 
 	        {loading ? (
           isRegistrationWorkspace ? (
@@ -13307,6 +13399,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       initialAppointmentId={selectedRegistrationAppointmentId}
                       viewerId={registrationViewerId}
                       viewerRole={registrationViewerRole}
+                      observationRuntime={registrationObservationRuntime}
                       onFocusTrack={handleSelectRegistrationTrack}
                       onAppointmentOpenChange={handleRegistrationAppointmentOpenChange}
                       onAppointmentSaved={() => setRegistrationCalendarRefreshToken((current) => current + 1)}
@@ -13736,6 +13829,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 initialAppointmentId={registrationApplicationHost.appointmentId}
                 viewerId={registrationViewerId}
                 viewerRole={registrationViewerRole}
+                observationRuntime={registrationObservationRuntime}
                 onFocusTrack={handleSelectRegistrationTrack}
                 onAppointmentOpenChange={handleRegistrationAppointmentOpenChange}
                 onAppointmentSaved={() => setRegistrationCalendarRefreshToken((current) => current + 1)}

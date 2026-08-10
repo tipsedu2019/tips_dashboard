@@ -998,7 +998,7 @@ test("leaving a registration fixture clears provider retry targets before produc
   ]);
 });
 
-test("registration exposes eight ordered work tabs with case rows retaining subject-specific states", async () => {
+test("registration keeps eight ordered legacy tabs and inserts observation only for runtime one", async () => {
   const [workspaceSource, caseListSource, trackModelSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/registration-case-list.tsx"),
@@ -1009,7 +1009,7 @@ test("registration exposes eight ordered work tabs with case rows retaining subj
     workspaceSource.indexOf("const REGISTRATION_GRADE_OPTIONS"),
   );
 
-  const orderedTabs = [
+  const runtimeZeroTabs = [
     '{ key: "inquiry", label: "문의" }',
     '{ key: "level_test", label: "레벨테스트 신청" }',
     '{ key: "consultation_requested", label: "상담 신청" }',
@@ -1019,12 +1019,28 @@ test("registration exposes eight ordered work tabs with case rows retaining subj
     '{ key: "payment", label: "입학 진행" }',
     '{ key: "completed", label: "완료" }',
   ];
-  for (let index = 1; index < orderedTabs.length; index += 1) {
-    assert.ok(
-      tabsSource.indexOf(orderedTabs[index - 1]) < tabsSource.indexOf(orderedTabs[index]),
-      `${orderedTabs[index - 1]} should appear before ${orderedTabs[index]}`,
-    );
-  }
+  const runtimeOneTabs = [
+    ...runtimeZeroTabs.slice(0, 5),
+    '{ key: "observation", label: "청강 신청" }',
+    ...runtimeZeroTabs.slice(5),
+  ];
+  const declaredTabs = tabsSource
+    .slice(tabsSource.indexOf("[", tabsSource.indexOf("REGISTRATION_VIEW_TABS")) + 1, tabsSource.indexOf("\n]"))
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      return trimmed.endsWith(",") ? trimmed.slice(0, -1) : trimmed;
+    })
+    .filter((line) => line.startsWith("{ key:"));
+
+  assert.deepEqual(declaredTabs, runtimeOneTabs, "runtime1 must expose exactly nine tabs in the approved order");
+  assert.deepEqual(
+    declaredTabs.filter((tab) => !tab.includes('key: "observation"')),
+    runtimeZeroTabs,
+    "runtime0 must retain exactly the original eight-tab path",
+  );
+  assert.ok(workspaceSource.includes('tab.key !== "observation" || registrationObservationRuntime.available'));
+  assert.ok(workspaceSource.includes(": registrationViewTabs.map((tab) => {"));
   assertIncludesAll(trackModelSource, [
     'level_test_scheduled: "level_test"',
     'level_test_in_progress: "level_test"',
@@ -1033,13 +1049,14 @@ test("registration exposes eight ordered work tabs with case rows retaining subj
   ]);
 
   assertIncludesAll(caseListSource, [
-    'level_test_requested: "레벨테스트 신청"',
-    'consultation_requested: "상담 신청"',
-    'consultation_completed: "상담 완료"',
     "RegistrationTrackStatusControl",
+    "REGISTRATION_WORKFLOW_STATUS_LABELS",
     "getRegistrationInlineWorkflowStatusOptions",
-    "onStatusChange(track, value as OpsRegistrationWorkflowStatus)",
+    "if (isRegistrationObservationWorkflowStatus(track.workflowStatus))",
+    "const nextStatus = options.find((option) => option.value === value)?.value",
+    "if (nextStatus) onStatusChange(track, nextStatus)",
   ]);
+  assert.ok(!caseListSource.includes("value as OpsRegistrationWorkflowStatus"));
 });
 
 test("registration toolbar keeps search without a manual or refresh button", async () => {
@@ -1627,6 +1644,16 @@ test("registration workspace supplies one stable real-or-fixture customer messag
   assert.doesNotMatch(source, /메이크에듀용 내용 복사|입학신청서 다시 발송/);
 })
 
+test("registration workspace probes observation runtime and hides its tab when unavailable", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx")
+
+  assert.match(source, /probeRegistrationObservationRuntime\(\)/)
+  assert.match(source, /registrationObservationRuntime\.available/)
+  assert.match(source, /tab\.key !== "observation" \|\| registrationObservationRuntime\.available/)
+  assert.match(source, /registrationObservationRuntimeError/)
+  assert.match(source, /observationRuntime=\{registrationObservationRuntime\}/)
+})
+
 test("registration create uses the canonical initial plan, exact runtime matrix, and frozen retry envelope", async () => {
   const [source, createSource, inquiryFieldsSource, subjectPickerSource, initialPlanSource, intakeWorkflowSource, registrationWorkflowSource, sampleWorkflowSource, browserWorkflowSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
@@ -1849,7 +1876,22 @@ test("canonical registration application opens one honest read-only timeline fro
   );
 
   assert.match(editorSource, /import \{ RegistrationApplicationHistoryAction \} from "\.\/registration-application-history-action"/);
-  assert.match(editorSource, /historyAction=\{<RegistrationApplicationHistoryAction[\s\S]*?detail=\{detail\}[\s\S]*?profiles=/);
+  assertIncludesAll(editorSource, [
+    "const genericTracks = useMemo(",
+    "if (!isOpsRegistrationWorkflowStatus(track.workflowStatus)) return []",
+    "const genericDetail = useMemo<OpsRegistrationCaseDetail>(() => ({",
+    "tracks: genericTracks,",
+    "trackContexts: TrackContext[] = genericTracks.map",
+    "historyAction={<RegistrationApplicationHistoryAction detail={genericDetail} profiles={profiles} />}",
+  ]);
+  assert.equal(
+    editorSource.split("detail={genericDetail}").length - 1,
+    6,
+    "every generic detail consumer must receive the narrow projection",
+  );
+  assert.equal(editorSource.split("detail={detail}").length - 1, 0);
+  assert.equal(editorSource.split("eligibleTracks={genericTracks}").length - 1, 2);
+  assert.equal(editorSource.split("tracks={genericTracks}").length - 1, 1);
   assert.doesNotMatch(editorSource, /history=\{<RegistrationHistoryTimeline/);
   assert.match(actionSource, /aria-label="자동 이력 보기"/);
   assert.match(actionSource, /<Popover>/);
@@ -2223,10 +2265,20 @@ test("registration application rows retain every subject during class sync", asy
   ]);
   assertIncludesAll(caseListSource, [
     "item.matchingTracks.map",
-    "item.representativeTrack.trackId",
+    'const targetTrack = item.viewKey === "observation"',
+    "? item.matchingTracks.find((track) => track.observationSummaryVisible)",
+    ": item.representativeTrack",
+    "if (!targetTrack) return",
+    "onEdit(item.taskId, targetTrack.trackId)",
+    "onOpen(item.taskId, targetTrack.trackId)",
     "track.trackId",
     "track.subject",
   ]);
+  assert.equal(
+    caseListSource.split("item.matchingTracks.map").length - 1,
+    2,
+    "both status and value columns must render every matching subject track",
+  );
   assert.doesNotMatch(caseListSource, /item\.tracks\.map/);
   assertIncludesAll(serviceSource, [
     "assertRegistrationInquiryBaseReady",

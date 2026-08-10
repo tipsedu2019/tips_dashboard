@@ -457,7 +457,11 @@ function createWorkspaceLoaderHarness({
         };
       },
       async loadRegistrationWorkspaceTrackSummaries(viewerId, options = {}) {
-        counts.workspaceTrackSummaryCalls.push({ viewerId, force: options.force });
+        counts.workspaceTrackSummaryCalls.push({
+          viewerId,
+          force: options.force,
+          observationAware: options.observationAware,
+        });
         return registrationWorkspaceTrackSummaryLoader(viewerId, options);
       },
       async probeRegistrationSubjectTrackRuntime() {
@@ -887,7 +891,7 @@ test("same-key concurrent workspace loads share one in-flight query wave", async
   assert.strictEqual(firstData, secondData);
 });
 
-test("registration cold load uses the narrow parent projection and workspace track summaries", async () => {
+test("registration cold load opts its workspace summaries into observation-aware reads", async () => {
   const harness = createWorkspaceLoaderHarness();
   const load = harness.loadOpsTaskWorkspaceData({
     taskType: "registration",
@@ -918,6 +922,7 @@ test("registration cold load uses the narrow parent projection and workspace tra
   assert.deepEqual(harness.counts.workspaceTrackSummaryCalls, [{
     viewerId: "viewer-a",
     force: true,
+    observationAware: true,
   }]);
 });
 
@@ -1052,11 +1057,13 @@ test("ready registration summaries use child rows per parent and fall back only 
   assert.equal(resolved.some((track) => track.id === "legacy:child-backed:수학"), false);
 });
 
-test("registration task shape, selected detail, and cache invalidation delegate to the focused service", () => {
-  assert.match(serviceSource, /registrationTracks\?: OpsRegistrationTrackSummary\[\]/);
+test("registration task shape and selected detail use explicit observation-aware read boundaries", () => {
+  assert.match(serviceSource, /type OpsRegistrationTrackSummary,/);
+  assert.match(serviceSource, /type OpsRegistrationObservationTrackSummary,/);
+  assert.match(serviceSource, /registrationTracks\?: OpsRegistrationTrackSummary\[\] \| OpsRegistrationObservationTrackSummary\[\]/);
   assert.match(serviceSource, /directorCatalogStatus\?: "authoritative" \| "partial" \| "error"/);
   assert.match(serviceSource, /export function loadOpsRegistrationCaseDetail/);
-  assert.match(serviceSource, /return loadRegistrationCaseDetail\(safeTaskId, safeViewerId/);
+  assert.match(serviceSource, /return loadRegistrationCaseDetail\(safeTaskId, safeViewerId, \{[\s\S]*observationAware: true/);
   assert.match(serviceSource, /function clearOpsTaskWorkspaceDataCache\(\)[\s\S]*clearRegistrationTrackServiceCaches\(\)/);
   assert.match(serviceSource, /setRegistrationTrackMutationCacheInvalidator\(clearOpsTaskWorkspaceDataCache\)/);
   const parentSource = sourceBetween(

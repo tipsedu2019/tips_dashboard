@@ -121,9 +121,11 @@ test("registration application shell separates waiting and registration in fixed
 
 test("registration progress supports consultation to waiting to registration and direct registration", async () => {
   const model = await readFile(new URL("../src/features/tasks/registration-application-model.ts", import.meta.url), "utf8")
-  assert.match(model, /"consultation",\s*"waiting",\s*"registration",\s*"admission"/)
+  assert.match(model, /"consultation",\s*"waiting",\s*"observation",\s*"registration",\s*"admission"/)
   assert.match(model, /waitingKind[\s\S]*?"skipped"/)
   assert.match(model, /waiting: "대기"/)
+  assert.match(model, /observation: "청강 신청"/)
+  assert.match(model, /workflowStatus\?\.startsWith\("observation_"\)[\s\S]*?"observation"/)
   assert.match(model, /registration: "등록 신청"/)
 })
 
@@ -146,7 +148,8 @@ test("waiting and registration summaries omit unexplained duplicate fields", asy
 test("saved registration uses the subject status selector instead of a separate progress stepper", async () => {
   const detail = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
 
-  assert.match(detail, /aria-label=\{`\$\{activeTrack\.subject\} 진행상태`\}/)
+  assert.match(detail, /aria-label=\{`\$\{activeGenericTrack\.subject\} 진행상태`\}/)
+  assert.match(detail, /activeGenericTrack \? \([\s\S]*?<select[\s\S]*?: activeTrack \? \([\s\S]*?data-registration-workflow-status="observation"/)
   assert.match(detail, /await setRegistrationWorkflowStatus\(/)
   assert.match(detail, /progress=\{null\}/)
   assert.doesNotMatch(detail, /progress=\{<RegistrationApplicationProgressStepper/)
@@ -245,7 +248,8 @@ test("saved detail exposes automatic history from a header clock popover only", 
   )
   assert.match(action, /<RegistrationHistoryTimeline[\s\S]*?embedded/)
   assert.doesNotMatch(action, /<Sheet|<Dialog/)
-  assert.match(detail, /historyAction=\{<RegistrationApplicationHistoryAction detail=\{detail\} profiles=\{profiles\} \/>\}/)
+  assert.match(detail, /const genericDetail = useMemo<OpsRegistrationCaseDetail>/)
+  assert.match(detail, /historyAction=\{<RegistrationApplicationHistoryAction detail=\{genericDetail\} profiles=\{profiles\} \/>\}/)
   assert.doesNotMatch(detail, /history=\{|<RegistrationHistoryTimeline/)
   assert.doesNotMatch(create, /historyAction=|history=\{/)
   assert.match(timeline, /embedded\?: boolean/)
@@ -399,6 +403,20 @@ test("registration detail keeps every workflow section visible in one continuous
   assert.match(shell, /sticky -top-6/)
   assert.doesNotMatch(shell, /SECTION_INDEX|01|02|03|04|05|06/)
   assert.doesNotMatch(shell, /Collapsible|ChevronDown|data-\[state=closed\]:hidden|<details\b|<summary\b/)
+})
+
+test("registration detail owns a booking-only observation slot and guards generic workflow changes", async () => {
+  const [editor, shell] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-shell.tsx", import.meta.url), "utf8"),
+  ])
+
+  assert.match(editor, /isRegistrationObservationWorkflowStatus\(activeTrack\.workflowStatus\)/)
+  assert.match(editor, /<RegistrationObservationEditor/)
+  assert.match(editor, /observationRuntime\.available/)
+  assert.match(editor, /observationSummaryVisible/)
+  assert.match(shell, /observation\?: ReactNode/)
+  assert.match(shell, /observation: "observation"/)
 })
 
 test("registration detail uses a wide document surface with a compact subject and status header", async () => {
@@ -571,9 +589,21 @@ test("case list renders one keyed application row in each responsive surface", a
 test("case list makes the whole visible row a keyboard-accessible entry point", async () => {
   const source = await readListSource()
 
-  assert.match(source, /data-registration-case-row=""/)
-  assert.match(source, /tabIndex=\{0\}/)
-  assert.match(source, /onClick=\{\(\) => openRegistrationCase\(item\)\}/)
+  assert.equal((source.match(/data-registration-case-row=""/g) || []).length, 2)
+  assert.equal(
+    (source.match(/const entryAvailable = !disabled && canOpenRegistrationCaseListItem\(item\)/g) || []).length,
+    2,
+    "both responsive rows must retain legacy interaction while removing concealed observation entry",
+  )
+  assert.equal((source.match(/tabIndex=\{entryAvailable \? 0 : undefined\}/g) || []).length, 2)
+  assert.equal(
+    (source.match(/onClick=\{entryAvailable \? \(\) => openRegistrationCase\(item\) : undefined\}/g) || []).length,
+    2,
+  )
+  assert.equal(
+    (source.match(/aria-label=\{`\$\{item\.studentName\} 등록 신청\$\{entryAvailable \? " 열기" : ""\}`\}/g) || []).length,
+    2,
+  )
   assert.match(source, /event\.key !== "Enter" && event\.key !== " "/)
   assert.doesNotMatch(source, /ArrowUpRight|TRACK_MANAGEMENT_LABELS/)
   assert.match(source, /const showActionColumn = items\.some\(canDelete\)/)
@@ -785,7 +815,9 @@ test("case list renders application-scoped desktop and mobile rows", async () =>
   assert.match(source, /className="hidden w-full min-w-0 overflow-hidden lg:block"/);
   assert.match(source, /className="min-w-0 overflow-hidden bg-background lg:rounded-lg lg:border"/);
   assert.doesNotMatch(source, /md:hidden|md:block/);
-  assert.match(source, /item\.representativeTrack\.trackId/);
+  assert.match(source, /const targetTrack = item\.viewKey === "observation"[\s\S]*?item\.matchingTracks\.find\(\(track\) => track\.observationSummaryVisible\)[\s\S]*?: item\.representativeTrack/);
+  assert.match(source, /if \(!targetTrack\) return/);
+  assert.match(source, /onEdit\(item\.taskId, targetTrack\.trackId\)[\s\S]*?onOpen\(item\.taskId, targetTrack\.trackId\)/);
   assert.match(source, /break-words \[overflow-wrap:anywhere\]/);
   assert.match(source, /"빠른 처리"/);
   assert.match(source, /"요청 사항"/);
@@ -903,16 +935,18 @@ test("case list keeps the Notion-like workflow status editable in place without 
   assert.match(source, /getRegistrationInlineWorkflowStatusOptions/);
   assert.match(source, /<RegistrationSelect/);
   assert.match(source, /aria-label=\{`\$\{track\.subject\} \$\{studentName\} 진행상태`\}/);
-  assert.match(source, /onValueChange=\{\(value\) => onStatusChange\(track, value as OpsRegistrationWorkflowStatus\)\}/);
+  assert.match(source, /if \(isRegistrationObservationWorkflowStatus\(track\.workflowStatus\)\) \{[\s\S]*?return <RegistrationTrackStatusBadge/);
+  assert.match(source, /onValueChange=\{\(value\) => \{[\s\S]*?const nextStatus = options\.find\(\(option\) => option\.value === value\)\?\.value[\s\S]*?if \(nextStatus\) onStatusChange\(track, nextStatus\)/);
+  assert.doesNotMatch(source, /value as OpsRegistrationWorkflowStatus/);
   assert.match(source, /event\.stopPropagation\(\)/);
-  assert.match(source, /onOpen\(item\.taskId, item\.representativeTrack\.trackId\)/);
-  assert.match(source, /onEdit\(item\.taskId, item\.representativeTrack\.trackId\)/);
+  assert.match(source, /onOpen\(item\.taskId, targetTrack\.trackId\)/);
+  assert.match(source, /onEdit\(item\.taskId, targetTrack\.trackId\)/);
   assert.doesNotMatch(source, /onAction|complete_consultation|전화상담 완료/);
   assert.doesNotMatch(source, /getRegistrationActionPermissions/);
   assert.doesNotMatch(source, /\.consultations/);
   assert.match(
     source,
-    /permissions\.canManage[\s\S]*?onEdit\(item\.taskId, item\.representativeTrack\.trackId\)[\s\S]*?else onOpen\(item\.taskId, item\.representativeTrack\.trackId\)/,
+    /permissions\.canManage[\s\S]*?onEdit\(item\.taskId, targetTrack\.trackId\)[\s\S]*?else onOpen\(item\.taskId, targetTrack\.trackId\)/,
     "one contextual open action should replace duplicate detail and management buttons",
   );
   assert.match(workspace, /await setRegistrationWorkflowStatus\(\{/);
@@ -1013,7 +1047,8 @@ test("track editor shows common information once and subject-scoped navigation",
   assert.match(application, /saveRegistrationCaseInquiry/)
   assert.match(application, /expectedCommonRevision:\s*detail\.commonRevision/)
   assert.match(application, /expectedSubjects:\s*orderedTracks\.map/)
-  assert.match(application, /getRegistrationIdentityEditLock\(detail\)/)
+  assert.match(application, /const genericDetail = useMemo<OpsRegistrationCaseDetail>/)
+  assert.match(application, /getRegistrationIdentityEditLock\(genericDetail\)/)
   assert.match(application, /activeTrackId/)
   assert.match(application, /track\.subject/)
   assert.match(application, /track\.status/)
@@ -1109,7 +1144,8 @@ test("two tracks at different statuses expose both current sections and actions 
   assert.deepEqual(states[0].sections.level_test.actions, ["start_level_test", "record_level_test_result", "cancel_level_test"])
   assert.ok(states[1].sections.consultation.actions.includes("complete_phone_consultation"))
   assert.match(source, /orderedTracks\.map\(\(track\) => getRegistrationApplicationTrackState/)
-  assert.match(source, /trackContexts\.map/)
+  assert.match(source, /const trackContexts: TrackContext\[\] = genericTracks\.map/)
+  assert.match(source, /return trackContexts[\s\S]*?\.filter\([\s\S]*?\.map\(\(context\) =>/)
   assert.match(source, /<RegistrationApplicationShell/)
   assert.doesNotMatch(source, /focusTrackId === context\.track\.id\) \? \(\s*<RegistrationConsultationOutcomeEditor/)
   assert.match(actions, /export function RegistrationTrackStageEditor/)
@@ -1148,7 +1184,8 @@ test("two decided subjects share one admission preview action and expose two bad
   assert.deepEqual(badges, ["영어", "수학"])
   assert.equal((application.match(/<RegistrationAdmissionPanel/g) || []).length, 1)
   assert.match(application, /getRegistrationApplicationCaseEditableSections\(\{[\s\S]*?admissionBatches: detail\.admissionBatches/)
-  assert.match(application, /getRegistrationAdmissionApplicationState\(\{[\s\S]*?tracks: orderedTracks,[\s\S]*?enrollments: detail\.enrollments/)
+  assert.match(application, /getRegistrationAdmissionApplicationState\(\{[\s\S]*?tracks: genericTracks,[\s\S]*?enrollments: detail\.enrollments/)
+  assert.match(application, /const genericTracks = useMemo[\s\S]*?isOpsRegistrationWorkflowStatus/)
   assert.match(application, /admissionApplicationState\.canSend/)
   assert.match(application, /admissionApplicationState\.targetTrackIds/)
   assert.match(application, /admissionTargetTracks\.map/)
@@ -1196,14 +1233,17 @@ test("saved and create applications share the intake shell while saved detail ow
 test("saved application keeps exception actions in their owning sections", async () => {
   const source = await readRegistrationApplicationSource()
   const inquiry = sourceBetween(source, "inquiry={(\n", "levelTest={(\n")
-  const waiting = sourceBetween(source, "waiting={(\n", "registration={(\n")
-  const registration = sourceBetween(source, "registration={(\n", "admission={(\n")
+  const waiting = sourceBetween(source, "waiting={(\n", "observation={canLoadRegistrationObservationWorkspace")
+  const observation = sourceBetween(source, "observation={canLoadRegistrationObservationWorkspace", "registration={registrationSection}")
+  const registration = sourceBetween(source, "const registrationSection = (", "\n\n  return (")
   const admission = sourceBetween(source, "admission={(\n", "<RegistrationAlimtalkPreviewDialog")
 
   assert.match(source, /RegistrationMigrationReviewEditor/)
   assert.match(inquiry, /renderTrackFrames\("inquiry"\)/)
   assert.match(waiting, /renderTrackFrames\("placement", "waiting"\)/)
   assert.match(registration, /renderTrackFrames\("placement", "registration"\)/)
+  assert.match(observation, /<RegistrationObservationEditor/)
+  assert.doesNotMatch(observation, /RegistrationEnrollmentTrackEditor|RegistrationAdmissionPanel/)
   assert.match(source, /section === "placement"[\s\S]*?<RegistrationEnrollmentTrackEditor/)
   assert.match(admission, /RegistrationAdmissionPanel/)
   assert.match(admission, /cancelRegistrationAdmissionBatch|onOpenCustomerMessage/)
@@ -1307,12 +1347,12 @@ test("consultation editor restores phone and visit choice with one shared save a
   const source = await readRegistrationApplicationSource()
 
   assert.match(source, /getRegistrationConsultationModeDraft/)
-  assert.match(source, /aria-label=\{`\$\{activeTrack\.subject\} 상담 방식`\}/)
+  assert.match(source, /aria-label=\{`\$\{activeGenericTrack\.subject\} 상담 방식`\}/)
   assert.match(source, />전화상담</)
   assert.match(source, />방문상담</)
   assert.match(source, /onBeforeSave=\{saveActiveConsultationDirector\}/)
   assert.match(source, /actionLabel="상담 정보 저장"/)
-  assert.match(source, /aria-label=\{`\$\{activeTrack\.subject\} 상담 정보 저장`\}/)
+  assert.match(source, /aria-label=\{`\$\{activeGenericTrack\.subject\} 상담 정보 저장`\}/)
   assert.match(source, /saveRegistrationPhoneConsultation\(\{/)
   assert.match(source, /phoneConsultation/)
   assert.match(source, /dirty=\{activeConsultationDirectorDirty \|\| !phoneConsultation\}/)
@@ -1425,7 +1465,8 @@ test("new appointments start with the active subject selected", async () => {
   assert.match(editor, /initialTrackId\?: string/)
   assert.match(editor, /selectableTracks\.some\(\(track\) => track\.id === initialTrackId\)/)
   assert.doesNotMatch(editor, /:\s*selectableTracks\.map\(\(track\) => track\.id\)/)
-  assert.match(workspace, /initialTrackId=\{activeTrack\.id\}/)
+  assert.match(workspace, /initialTrackId=\{activeGenericTrack\.id\}/)
+  assert.match(workspace, /eligibleTracks=\{genericTracks\}/)
 })
 
 test("subject removal renders the deployed history-block error inline", async () => {
@@ -1571,7 +1612,8 @@ test("track editor keeps level-test and visit editors open for the active subjec
   assert.match(source, /getRegistrationApplicationAppointmentActionPlans\(\{/)
   assert.match(source, /const activeLevelTestPlan/)
   assert.match(source, /const activeVisitPlan/)
-  assert.match(source, /initialTrackId=\{activeTrack\.id\}/)
+  assert.match(source, /initialTrackId=\{activeGenericTrack\.id\}/)
+  assert.equal((source.match(/eligibleTracks=\{genericTracks\}/g) || []).length, 2)
   assert.match(source, /subjectScoped/)
   assert.equal((source.match(/<RegistrationAppointmentEditor/g) || []).length, 2)
   assert.doesNotMatch(source, /data-registration-appointment-plan-action/)
