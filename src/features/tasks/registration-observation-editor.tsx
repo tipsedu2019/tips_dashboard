@@ -55,6 +55,97 @@ export function canWithdrawRegistrationObservation(input: {
     && input.currentObservation === null
 }
 
+function registrationObservationErrorRecord(error: unknown) {
+  if (typeof error === "string") {
+    return { name: "", code: "", message: error.trim(), details: "", hint: "" }
+  }
+  if (!error || typeof error !== "object") {
+    return { name: "", code: "", message: "", details: "", hint: "" }
+  }
+  return {
+    name: "name" in error ? String(error.name || "").trim() : "",
+    code: "code" in error ? String(error.code || "").trim() : "",
+    message: "message" in error ? String(error.message || "").trim() : "",
+    details: "details" in error ? String(error.details || "").trim() : "",
+    hint: "hint" in error ? String(error.hint || "").trim() : "",
+  }
+}
+
+export function getRegistrationObservationUiErrorMessage(
+  error: unknown,
+  fallback: string,
+) {
+  const { name, code, message, details, hint } = registrationObservationErrorRecord(error)
+  const diagnostic = [message, details, hint].filter(Boolean).join(" ")
+
+  if (
+    name === "AbortError"
+    || name === "TimeoutError"
+    || name === "RegistrationRequestTimeoutError"
+    || code === "REGISTRATION_REQUEST_TIMEOUT"
+    || code === "57014"
+    || /\b(?:timed out|timeout|statement timeout|aborted)\b/i.test(diagnostic)
+  ) {
+    return "요청 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요."
+  }
+  if (/failed to fetch|network(?: request)? (?:failed|error)|networkerror|load failed/i.test(diagnostic)) {
+    return "네트워크 연결을 확인한 뒤 다시 시도해 주세요."
+  }
+  if (diagnostic.includes("registration_observation_session_time_ambiguous")) {
+    return "같은 시간의 청강 회차가 둘 이상입니다. 다른 회차를 선택해 주세요."
+  }
+  if (
+    diagnostic.includes("registration_observation_session_invalid")
+    || diagnostic.includes("registration_observation_legacy_session_invalid")
+    || diagnostic.includes("registration_observation_session_identity_required")
+    || diagnostic.includes("registration_observation_booking_revision_required")
+    || diagnostic.includes("registration_observation_revision_combination_invalid")
+  ) {
+    return "청강 예약에 필요한 정보를 확인할 수 없습니다. 반과 회차를 다시 선택해 주세요."
+  }
+  if (diagnostic.includes("registration_observation_correction_reason_required")) {
+    return "재청강 결정 정정 사유를 입력하세요."
+  }
+  if (code === "P0002" || diagnostic.includes("registration_observation_not_found")) {
+    return "청강 정보를 찾을 수 없습니다. 화면을 새로고침해 주세요."
+  }
+  if (
+    code === "40001"
+    || diagnostic.includes("registration_observation_stale_revision")
+    || diagnostic.includes("registration_observation_request_key_conflict")
+    || diagnostic.includes("registration_observation_request_conflict")
+    || diagnostic.includes("registration_observation_transition_rejected")
+  ) {
+    return "최신 청강 정보가 변경되었습니다. 화면을 새로고침한 뒤 다시 시도해 주세요."
+  }
+  return fallback
+}
+
+type RegistrationObservationDialogCloseSource =
+  | "on_open_change"
+  | "close_button"
+  | "escape"
+  | "dialog_close"
+
+export function getRegistrationObservationDialogClosePlan(input: {
+  saving: boolean
+  source: RegistrationObservationDialogCloseSource
+}) {
+  const shouldClose = !input.saving
+  return {
+    shouldClose,
+    shouldPreventDefault: input.saving && input.source !== "on_open_change",
+    shouldRestoreTriggerFocus: shouldClose,
+  }
+}
+
+export function restoreRegistrationObservationDialogTriggerFocus(
+  trigger: { focus: (options?: FocusOptions) => void } | null,
+  schedule: (callback: () => void) => void,
+) {
+  schedule(() => trigger?.focus({ preventScroll: true }))
+}
+
 type RegistrationObservationBookingDraftInput = Readonly<{
   trackId: string
   workflowRevision: number
@@ -144,17 +235,19 @@ export function buildRegistrationObservationCancelInput(input: {
   }
 }
 
+type RegistrationObservationWithdrawalCorrection = Readonly<{
+  decisionKind: string | null
+  observationId: string
+  observationRevision: number
+  feedbackRevision: number
+}>
+
 type RegistrationObservationWithdrawalDraftInput = Readonly<{
   trackId: string
   workflowRevision: number
   reason: string
   requestKey: string
-  correction: Readonly<{
-    decisionKind: string | null
-    observationId: string
-    observationRevision: number
-    feedbackRevision: number
-  }> | null
+  correction: RegistrationObservationWithdrawalCorrection | null
 } & (
   | {
       exitKind: "return_to_previous"
@@ -218,6 +311,37 @@ export function getRegistrationObservationWithdrawalCorrection(
     observationRevision: latestDecision.revision,
     feedbackRevision: latestDecision.feedbackRevision,
   }
+}
+
+export type RegistrationObservationWithdrawalSubmitState = Readonly<{
+  normalizedReason: string
+  fieldError: string
+  submitDisabled: boolean
+}>
+
+export function getRegistrationObservationWithdrawalSubmitState(input: {
+  correction: RegistrationObservationWithdrawalCorrection | null
+  reason: string
+  saving: boolean
+  mutationCommitted: boolean
+}): RegistrationObservationWithdrawalSubmitState {
+  const normalizedReason = input.reason.trim()
+  const fieldError = input.correction?.decisionKind === "re_observation" && !normalizedReason
+    ? "재청강 결정 정정 사유를 입력하세요."
+    : ""
+  return {
+    normalizedReason,
+    fieldError,
+    submitDisabled: input.saving || input.mutationCommitted || Boolean(fieldError),
+  }
+}
+
+export async function executeRegistrationObservationWithdrawal<T>(
+  submitState: RegistrationObservationWithdrawalSubmitState,
+  operation: (normalizedReason: string) => Promise<T>,
+): Promise<T | null> {
+  if (submitState.submitDisabled) return null
+  return operation(submitState.normalizedReason)
 }
 
 export function getRegistrationObservationRequestKey(
@@ -356,10 +480,6 @@ function isObservationDirectorTarget(target: string): target is
     || target === "not_registered"
 }
 
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error && error.message ? error.message : fallback
-}
-
 export function RegistrationObservationEditor({
   trackId,
   workflowRevision,
@@ -389,6 +509,8 @@ export function RegistrationObservationEditor({
   const [committedCanonicalKey, setCommittedCanonicalKey] = useState("")
   const committedCanonicalKeyRef = useRef("")
   const requestKeysRef = useRef(new Map<string, string>())
+  const saveDialogTriggerRef = useRef<HTMLButtonElement>(null)
+  const withdrawDialogTriggerRef = useRef<HTMLButtonElement>(null)
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false)
   const [withdrawOpen, setWithdrawOpen] = useState(false)
   const [withdrawValue, setWithdrawValue] = useState(() => (
@@ -415,6 +537,16 @@ export function RegistrationObservationEditor({
     workflowStatus,
     currentObservation: current,
   })
+  const withdrawalCorrection = withdrawValue.startsWith("director:")
+    ? getRegistrationObservationWithdrawalCorrection(detail)
+    : null
+  const withdrawSubmitState = getRegistrationObservationWithdrawalSubmitState({
+    correction: withdrawalCorrection,
+    reason: withdrawReason,
+    saving,
+    mutationCommitted,
+  })
+  const withdrawReasonErrorId = `registration-observation-withdraw-reason-error-${trackId}`
 
   function stableRequestKey(scope: string, fingerprint: string) {
     return getRegistrationObservationRequestKey(
@@ -422,6 +554,54 @@ export function RegistrationObservationEditor({
       scope,
       fingerprint,
       () => `${scope}:${crypto.randomUUID()}`,
+    )
+  }
+
+  function handleSaveConfirmOpenChange(open: boolean) {
+    if (open) {
+      setSaveConfirmOpen(true)
+      return
+    }
+    const plan = getRegistrationObservationDialogClosePlan({
+      saving,
+      source: "on_open_change",
+    })
+    if (plan.shouldClose) setSaveConfirmOpen(false)
+  }
+
+  function handleWithdrawOpenChange(open: boolean) {
+    if (open) {
+      setWithdrawOpen(true)
+      return
+    }
+    const plan = getRegistrationObservationDialogClosePlan({
+      saving,
+      source: "on_open_change",
+    })
+    if (plan.shouldClose) setWithdrawOpen(false)
+  }
+
+  function handleDialogEscape(event: Event) {
+    const plan = getRegistrationObservationDialogClosePlan({
+      saving,
+      source: "escape",
+    })
+    if (plan.shouldPreventDefault) event.preventDefault()
+  }
+
+  function handleSaveDialogCloseAutoFocus(event: Event) {
+    event.preventDefault()
+    restoreRegistrationObservationDialogTriggerFocus(
+      saveDialogTriggerRef.current,
+      (callback) => window.requestAnimationFrame(callback),
+    )
+  }
+
+  function handleWithdrawDialogCloseAutoFocus(event: Event) {
+    event.preventDefault()
+    restoreRegistrationObservationDialogTriggerFocus(
+      withdrawDialogTriggerRef.current,
+      (callback) => window.requestAnimationFrame(callback),
     )
   }
 
@@ -461,7 +641,7 @@ export function RegistrationObservationEditor({
     }).catch((error) => {
       if (!active) return
       setSessions([])
-      setSessionError(errorMessage(error, "청강 회차를 불러오지 못했습니다."))
+      setSessionError(getRegistrationObservationUiErrorMessage(error, "청강 회차를 불러오지 못했습니다."))
     }).finally(() => {
       if (active) setSessionsLoading(false)
     })
@@ -514,7 +694,7 @@ export function RegistrationObservationEditor({
       }
       return committed.result
     } catch (error) {
-      setMutationError(errorMessage(error, "청강 정보를 저장하지 못했습니다."))
+      setMutationError(getRegistrationObservationUiErrorMessage(error, "청강 정보를 저장하지 못했습니다."))
       return null
     } finally {
       setSaving(false)
@@ -589,46 +769,51 @@ export function RegistrationObservationEditor({
   }
 
   async function withdraw() {
-    const [kind, target] = withdrawValue.split(":")
-    const correction = getRegistrationObservationWithdrawalCorrection(detail)
-    const fingerprint = JSON.stringify({
-      trackId,
-      workflowRevision,
-      kind,
-      target,
-      reason: withdrawReason,
-      correction,
-    })
-    const scope = "registration-observation-withdraw"
-    const withdrawRequestKey = stableRequestKey(scope, fingerprint)
-    let input: WithdrawRegistrationObservationInput
-    if (kind === "return" && isObservationReturnTarget(target)) {
-      input = buildRegistrationObservationWithdrawalInput({
-        trackId,
-        workflowRevision,
-        exitKind: "return_to_previous",
-        targetWorkflowStatus: target,
-        reason: withdrawReason,
-        requestKey: withdrawRequestKey,
-        correction: null,
-      })
-    } else if (kind === "director" && isObservationDirectorTarget(target)) {
-      input = buildRegistrationObservationWithdrawalInput({
-        trackId,
-        workflowRevision,
-        exitKind: "director_decision",
-        targetWorkflowStatus: target,
-        reason: withdrawReason,
-        requestKey: withdrawRequestKey,
-        correction,
-      })
-    } else {
-      setMutationError("청강 철회 다음 단계를 다시 선택하세요.")
-      return
-    }
-    const result = await commit(
-      () => actions.withdrawRegistrationObservation(input),
-      { scope, fingerprint, requestKey: withdrawRequestKey },
+    const result = await executeRegistrationObservationWithdrawal(
+      withdrawSubmitState,
+      async (normalizedReason) => {
+        const [kind, target] = withdrawValue.split(":")
+        const correction = kind === "director" ? withdrawalCorrection : null
+        const fingerprint = JSON.stringify({
+          trackId,
+          workflowRevision,
+          kind,
+          target,
+          reason: normalizedReason,
+          correction,
+        })
+        const scope = "registration-observation-withdraw"
+        const withdrawRequestKey = stableRequestKey(scope, fingerprint)
+        let input: WithdrawRegistrationObservationInput
+        if (kind === "return" && isObservationReturnTarget(target)) {
+          input = buildRegistrationObservationWithdrawalInput({
+            trackId,
+            workflowRevision,
+            exitKind: "return_to_previous",
+            targetWorkflowStatus: target,
+            reason: normalizedReason,
+            requestKey: withdrawRequestKey,
+            correction: null,
+          })
+        } else if (kind === "director" && isObservationDirectorTarget(target)) {
+          input = buildRegistrationObservationWithdrawalInput({
+            trackId,
+            workflowRevision,
+            exitKind: "director_decision",
+            targetWorkflowStatus: target,
+            reason: normalizedReason,
+            requestKey: withdrawRequestKey,
+            correction,
+          })
+        } else {
+          setMutationError("청강 철회 다음 단계를 다시 선택하세요.")
+          return null
+        }
+        return commit(
+          () => actions.withdrawRegistrationObservation(input),
+          { scope, fingerprint, requestKey: withdrawRequestKey },
+        )
+      },
     )
     if (result) setWithdrawOpen(false)
   }
@@ -705,9 +890,9 @@ export function RegistrationObservationEditor({
           ) : null}
 
           <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={() => setSaveConfirmOpen(true)} disabled={saving || mutationCommitted || Boolean(prerequisiteError)}>저장</Button>
+            <Button ref={saveDialogTriggerRef} type="button" onClick={() => setSaveConfirmOpen(true)} disabled={saving || mutationCommitted || Boolean(prerequisiteError)}>저장</Button>
             {current?.appointmentStatus === "scheduled" ? <Button type="button" variant="outline" onClick={() => void cancelBooking()} disabled={saving || mutationCommitted}>예약 취소</Button> : null}
-            {withdrawAvailable ? <Button type="button" variant="ghost" onClick={() => setWithdrawOpen(true)} disabled={saving || mutationCommitted}>청강 철회</Button> : null}
+            {withdrawAvailable ? <Button ref={withdrawDialogTriggerRef} type="button" variant="ghost" onClick={() => setWithdrawOpen(true)} disabled={saving || mutationCommitted}>청강 철회</Button> : null}
           </div>
           {current?.appointmentStatus === "scheduled" ? <p className="text-xs text-muted-foreground">예약을 취소한 뒤 청강을 철회할 수 있습니다.</p> : null}
         </div>
@@ -723,21 +908,29 @@ export function RegistrationObservationEditor({
       {mutationError ? <p role="alert" className="text-sm text-destructive">{mutationError}</p> : null}
       {refreshError ? <p role="alert" className="text-sm text-destructive">{refreshError}</p> : null}
 
-      <Dialog open={saveConfirmOpen} onOpenChange={setSaveConfirmOpen}>
-        <DialogContent>
+      <Dialog open={saveConfirmOpen} onOpenChange={handleSaveConfirmOpenChange}>
+        <DialogContent
+          showCloseButton={!saving}
+          onEscapeKeyDown={handleDialogEscape}
+          onCloseAutoFocus={handleSaveDialogCloseAutoFocus}
+        >
           <DialogHeader>
             <DialogTitle>청강 예약을 저장할까요?</DialogTitle>
             <DialogDescription>선택한 반과 회차로 청강 예약을 저장합니다.</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <DialogClose asChild><Button type="button" variant="outline">돌아가기</Button></DialogClose>
+            <DialogClose asChild><Button type="button" variant="outline" disabled={saving || mutationCommitted}>돌아가기</Button></DialogClose>
             <Button type="button" onClick={() => void saveBooking()} disabled={saving || mutationCommitted}>{saving ? "저장 중" : "저장"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={withdrawOpen} onOpenChange={setWithdrawOpen}>
-        <DialogContent>
+      <Dialog open={withdrawOpen} onOpenChange={handleWithdrawOpenChange}>
+        <DialogContent
+          showCloseButton={!saving}
+          onEscapeKeyDown={handleDialogEscape}
+          onCloseAutoFocus={handleWithdrawDialogCloseAutoFocus}
+        >
           <DialogHeader>
             <DialogTitle>청강 진행을 철회할까요?</DialogTitle>
             <DialogDescription>이전 단계로 돌아가거나 원장 판단에 따른 다음 단계를 선택합니다.</DialogDescription>
@@ -770,12 +963,20 @@ export function RegistrationObservationEditor({
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor={`registration-observation-withdraw-reason-${trackId}`}>사유</Label>
-              <Input id={`registration-observation-withdraw-reason-${trackId}`} value={withdrawReason} onChange={(event) => setWithdrawReason(event.target.value)} disabled={saving || mutationCommitted} />
+              <Input
+                id={`registration-observation-withdraw-reason-${trackId}`}
+                value={withdrawReason}
+                onChange={(event) => setWithdrawReason(event.target.value)}
+                disabled={saving || mutationCommitted}
+                aria-invalid={Boolean(withdrawSubmitState.fieldError)}
+                aria-describedby={withdrawSubmitState.fieldError ? withdrawReasonErrorId : undefined}
+              />
+              {withdrawSubmitState.fieldError ? <p id={withdrawReasonErrorId} role="alert" className="text-xs text-destructive">{withdrawSubmitState.fieldError}</p> : null}
             </div>
           </div>
           <DialogFooter>
-            <DialogClose asChild><Button type="button" variant="outline">취소</Button></DialogClose>
-            <Button type="button" onClick={() => void withdraw()} disabled={saving || mutationCommitted}>{saving ? "처리 중" : "철회"}</Button>
+            <DialogClose asChild><Button type="button" variant="outline" disabled={saving || mutationCommitted}>취소</Button></DialogClose>
+            <Button type="button" onClick={() => void withdraw()} disabled={withdrawSubmitState.submitDisabled}>{saving ? "처리 중" : "철회"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -462,7 +462,7 @@ export function RegistrationCaseList({
   const openRegistrationCase = (item: RegistrationCaseListViewItem) => {
     if (disabled || !canOpenRegistrationCaseListItem(item)) return
     const targetTrack = item.viewKey === "observation"
-      ? item.matchingTracks.find((track) => track.observationSummaryVisible)
+      ? item.matchingTracks.find((track) => track.observationSummaryVisible) || item.representativeTrack
       : item.representativeTrack
     if (!targetTrack) return
     const permissions = getRegistrationSummaryActionPermissions({

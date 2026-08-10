@@ -20,7 +20,41 @@ async function loadEditorModel() {
   assert.notEqual(start, -1)
   assert.ok(end > start)
   const compiled = ts.transpileModule(
-    `${source.slice(start + startMarker.length, end)}\nmodule.exports = { buildRegistrationObservationBookingInput, buildRegistrationObservationCancelInput, buildRegistrationObservationWithdrawalInput, canLoadRegistrationObservationWorkspace, canUseRegistrationObservationDetail, canWithdrawRegistrationObservation, completeRegistrationObservationRequestKey, executeRegistrationObservationBooking, executeRegistrationObservationCommit, getRegistrationObservationRequestKey, getRegistrationObservationWithdrawalCorrection, reconcileRegistrationObservationWithdrawalValue, shouldLockRegistrationObservationMutation };`,
+    `${source.slice(start + startMarker.length, end)}\nmodule.exports = {
+      buildRegistrationObservationBookingInput,
+      buildRegistrationObservationCancelInput,
+      buildRegistrationObservationWithdrawalInput,
+      canLoadRegistrationObservationWorkspace,
+      canUseRegistrationObservationDetail,
+      canWithdrawRegistrationObservation,
+      completeRegistrationObservationRequestKey,
+      executeRegistrationObservationBooking,
+      executeRegistrationObservationCommit,
+      getRegistrationObservationRequestKey,
+      getRegistrationObservationWithdrawalCorrection,
+      reconcileRegistrationObservationWithdrawalValue,
+      shouldLockRegistrationObservationMutation,
+      executeRegistrationObservationWithdrawal:
+        typeof executeRegistrationObservationWithdrawal === "function"
+          ? executeRegistrationObservationWithdrawal
+          : undefined,
+      getRegistrationObservationDialogClosePlan:
+        typeof getRegistrationObservationDialogClosePlan === "function"
+          ? getRegistrationObservationDialogClosePlan
+          : undefined,
+      getRegistrationObservationUiErrorMessage:
+        typeof getRegistrationObservationUiErrorMessage === "function"
+          ? getRegistrationObservationUiErrorMessage
+          : undefined,
+      getRegistrationObservationWithdrawalSubmitState:
+        typeof getRegistrationObservationWithdrawalSubmitState === "function"
+          ? getRegistrationObservationWithdrawalSubmitState
+          : undefined,
+      restoreRegistrationObservationDialogTriggerFocus:
+        typeof restoreRegistrationObservationDialogTriggerFocus === "function"
+          ? restoreRegistrationObservationDialogTriggerFocus
+          : undefined,
+    };`,
     { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } },
   ).outputText
   const sandboxModule = { exports: {} }
@@ -310,6 +344,308 @@ test("runtime or concealed summary gates observation detail, session, and editor
     runtimeAvailable: true,
     observationSummaryVisible: true,
   }), true)
+})
+
+test("latest re-observation correction rejects a blank reason before any withdrawal RPC", async () => {
+  const {
+    executeRegistrationObservationWithdrawal,
+    getRegistrationObservationWithdrawalSubmitState,
+  } = await loadEditorModel()
+  assert.equal(
+    typeof getRegistrationObservationWithdrawalSubmitState,
+    "function",
+    "the editor model must own correction-reason validation",
+  )
+  assert.equal(
+    typeof executeRegistrationObservationWithdrawal,
+    "function",
+    "the editor model must block invalid withdrawal operations before the service boundary",
+  )
+
+  const submitState = getRegistrationObservationWithdrawalSubmitState({
+    correction: {
+      decisionKind: "re_observation",
+      observationId: "observation-2",
+      observationRevision: 6,
+      feedbackRevision: 2,
+    },
+    reason: "   \t ",
+    saving: false,
+    mutationCommitted: false,
+  })
+  assert.deepEqual({ ...submitState }, {
+    normalizedReason: "",
+    fieldError: "재청강 결정 정정 사유를 입력하세요.",
+    submitDisabled: true,
+  })
+
+  let rpcCalls = 0
+  const result = await executeRegistrationObservationWithdrawal(
+    submitState,
+    async () => {
+      rpcCalls += 1
+      return { changed: true }
+    },
+  )
+  assert.equal(result, null)
+  assert.equal(rpcCalls, 0)
+})
+
+test("ordinary withdrawal permits a blank reason", async () => {
+  const {
+    executeRegistrationObservationWithdrawal,
+    getRegistrationObservationWithdrawalSubmitState,
+  } = await loadEditorModel()
+  assert.equal(typeof getRegistrationObservationWithdrawalSubmitState, "function")
+  assert.equal(typeof executeRegistrationObservationWithdrawal, "function")
+
+  const ordinary = getRegistrationObservationWithdrawalSubmitState({
+    correction: null,
+    reason: "   ",
+    saving: false,
+    mutationCommitted: false,
+  })
+  assert.deepEqual({ ...ordinary }, {
+    normalizedReason: "",
+    fieldError: "",
+    submitDisabled: false,
+  })
+
+  let rpcCalls = 0
+  const ordinaryResult = await executeRegistrationObservationWithdrawal(
+    ordinary,
+    async (normalizedReason) => {
+      rpcCalls += 1
+      assert.equal(normalizedReason, "")
+      return { changed: true }
+    },
+  )
+  assert.deepEqual({ ...ordinaryResult }, { changed: true })
+  assert.equal(rpcCalls, 1)
+
+})
+
+test("re-observation correction sends only a trimmed reason", async () => {
+  const { getRegistrationObservationWithdrawalSubmitState } = await loadEditorModel()
+  assert.equal(typeof getRegistrationObservationWithdrawalSubmitState, "function")
+
+  const correction = getRegistrationObservationWithdrawalSubmitState({
+    correction: {
+      decisionKind: "re_observation",
+      observationId: "observation-2",
+      observationRevision: 6,
+      feedbackRevision: 2,
+    },
+    reason: "  일정 변경으로 다시 청강  ",
+    saving: false,
+    mutationCommitted: false,
+  })
+  assert.deepEqual({ ...correction }, {
+    normalizedReason: "일정 변경으로 다시 청강",
+    fieldError: "",
+    submitDisabled: false,
+  })
+})
+
+test("saving blocks every dialog close path", async () => {
+  const {
+    getRegistrationObservationDialogClosePlan,
+  } = await loadEditorModel()
+  assert.equal(
+    typeof getRegistrationObservationDialogClosePlan,
+    "function",
+    "both dialogs need one close policy for controlled state, X, Escape, and DialogClose",
+  )
+  for (const source of ["on_open_change", "close_button", "escape", "dialog_close"]) {
+    const plan = getRegistrationObservationDialogClosePlan({ saving: true, source })
+    assert.equal(plan.shouldClose, false, source)
+    assert.equal(plan.shouldRestoreTriggerFocus, false, source)
+  }
+  assert.equal(
+    getRegistrationObservationDialogClosePlan({ saving: true, source: "escape" }).shouldPreventDefault,
+    true,
+  )
+  const completed = getRegistrationObservationDialogClosePlan({
+    saving: false,
+    source: "dialog_close",
+  })
+  assert.equal(completed.shouldClose, true)
+  assert.equal(completed.shouldRestoreTriggerFocus, true)
+})
+
+test("a completed dialog close restores explicit trigger focus after the dialog unmounts", async () => {
+  const { restoreRegistrationObservationDialogTriggerFocus } = await loadEditorModel()
+  assert.equal(
+    typeof restoreRegistrationObservationDialogTriggerFocus,
+    "function",
+    "controlled dialogs need an explicit trigger-focus return",
+  )
+
+  const scheduled = []
+  const focusCalls = []
+  restoreRegistrationObservationDialogTriggerFocus(
+    { focus: (options) => focusCalls.push(options) },
+    (callback) => scheduled.push(callback),
+  )
+  assert.deepEqual(focusCalls, [], "focus restoration must wait until the dialog has closed")
+  assert.equal(scheduled.length, 1)
+  scheduled[0]()
+  assert.deepEqual({ ...focusCalls[0] }, { preventScroll: true })
+})
+
+test("withdrawal dialog wires correction validation to the field, disabled submit, and RPC guard", async () => {
+  const source = await readSource("src/features/tasks/registration-observation-editor.tsx")
+
+  assert.match(
+    source,
+    /const withdrawSubmitState = getRegistrationObservationWithdrawalSubmitState\(/,
+  )
+  assert.match(source, /executeRegistrationObservationWithdrawal\(\s*withdrawSubmitState,/)
+  assert.match(source, /aria-invalid=\{Boolean\(withdrawSubmitState\.fieldError\)\}/)
+  assert.match(source, /aria-describedby=\{withdrawSubmitState\.fieldError/)
+  assert.match(
+    source,
+    /withdrawSubmitState\.fieldError \? <p[^>]*role="alert"[^>]*>\{withdrawSubmitState\.fieldError\}<\/p>/,
+  )
+  assert.match(source, /disabled=\{withdrawSubmitState\.submitDisabled\}/)
+})
+
+test("save and withdrawal dialogs wire guarded close and explicit focus return on every exit", async () => {
+  const source = await readSource("src/features/tasks/registration-observation-editor.tsx")
+
+  assert.match(source, /const saveDialogTriggerRef = useRef<HTMLButtonElement>\(null\)/)
+  assert.match(source, /const withdrawDialogTriggerRef = useRef<HTMLButtonElement>\(null\)/)
+  assert.match(source, /ref=\{saveDialogTriggerRef\}/)
+  assert.match(source, /ref=\{withdrawDialogTriggerRef\}/)
+  assert.match(source, /getRegistrationObservationDialogClosePlan\(\{\s*saving,/)
+  assert.equal(
+    (source.match(/onOpenChange=\{handle(?:SaveConfirm|Withdraw)OpenChange\}/g) || []).length,
+    2,
+    "both controlled Dialog roots must reject close requests while saving",
+  )
+  assert.equal((source.match(/onEscapeKeyDown=/g) || []).length, 2)
+  assert.equal((source.match(/onCloseAutoFocus=/g) || []).length, 2)
+  const hidesDefaultCloseWhileSaving = (
+    source.match(/showCloseButton=\{!saving\}/g) || []
+  ).length === 2
+  const handlesDefaultCloseExplicitly = (
+    source.match(/onCloseButtonClick=\{handle(?:SaveConfirm|Withdraw)CloseButton\}/g) || []
+  ).length === 2
+  assert.equal(
+    hidesDefaultCloseWhileSaving || handlesDefaultCloseExplicitly,
+    true,
+    "both default X controls must be unavailable or explicitly guarded during saving",
+  )
+  assert.equal(
+    (source.match(/restoreRegistrationObservationDialogTriggerFocus\(/g) || []).length >= 3,
+    true,
+    "the helper definition and both dialog close paths must restore their own trigger",
+  )
+  assert.equal(
+    (source.match(/<DialogClose asChild>[\s\S]{0,180}<Button[^>]*disabled=\{saving \|\| mutationCommitted\}/g) || []).length,
+    2,
+    "footer close controls must not close during a mutation",
+  )
+})
+
+test("observation UI errors normalize domain, timeout, network, and prerequisite failures", async () => {
+  const { getRegistrationObservationUiErrorMessage } = await loadEditorModel()
+  assert.equal(
+    typeof getRegistrationObservationUiErrorMessage,
+    "function",
+    "one UI boundary must normalize every observation error",
+  )
+
+  const latestChanged = "최신 청강 정보가 변경되었습니다. 화면을 새로고침한 뒤 다시 시도해 주세요."
+  const cases = [
+    {
+      error: { code: "40001", message: "registration_observation_stale_revision" },
+      want: latestChanged,
+    },
+    {
+      error: { code: "P0002", message: "registration_observation_not_found" },
+      want: "청강 정보를 찾을 수 없습니다. 화면을 새로고침해 주세요.",
+    },
+    {
+      error: { code: "40001", message: "registration_observation_request_key_conflict" },
+      want: latestChanged,
+    },
+    {
+      error: { name: "RegistrationRequestTimeoutError", code: "REGISTRATION_REQUEST_TIMEOUT", message: "request_timeout" },
+      want: "요청 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.",
+    },
+    {
+      error: { name: "AbortError", message: "The operation was aborted" },
+      want: "요청 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.",
+    },
+    {
+      error: { code: "57014", message: "canceling statement due to statement timeout" },
+      want: "요청 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.",
+    },
+    {
+      error: new TypeError("Failed to fetch"),
+      want: "네트워크 연결을 확인한 뒤 다시 시도해 주세요.",
+    },
+    {
+      error: { message: "registration_observation_session_invalid" },
+      want: "청강 예약에 필요한 정보를 확인할 수 없습니다. 반과 회차를 다시 선택해 주세요.",
+    },
+    {
+      error: { message: "registration_observation_session_time_ambiguous" },
+      want: "같은 시간의 청강 회차가 둘 이상입니다. 다른 회차를 선택해 주세요.",
+    },
+  ]
+  for (const { error, want } of cases) {
+    const actual = getRegistrationObservationUiErrorMessage(error, "청강 정보를 처리하지 못했습니다.")
+    assert.equal(actual, want)
+    assert.doesNotMatch(
+      actual,
+      /registration_observation_|PGRST|SQLSTATE|dashboard_private|duplicate key|violates|57014|40001|P0002|Failed to fetch/i,
+    )
+  }
+
+  for (const error of [
+    {
+      code: "23505",
+      message: "duplicate key value violates unique constraint registration_observation_private_key",
+      details: "Key (track_id) already exists",
+      hint: "inspect dashboard_private.registration_observation_mutation_requests",
+    },
+    { code: "PGRST116", message: "JSON object requested, multiple rows returned" },
+    new Error("registration_observation_unexpected_internal_marker"),
+  ]) {
+    assert.equal(
+      getRegistrationObservationUiErrorMessage(error, "청강 정보를 처리하지 못했습니다."),
+      "청강 정보를 처리하지 못했습니다.",
+    )
+  }
+})
+
+test("session and mutation errors use only the centralized observation UI normalizer", async () => {
+  const source = await readSource("src/features/tasks/registration-observation-editor.tsx")
+
+  assert.doesNotMatch(source, /function errorMessage\(/)
+  assert.match(
+    source,
+    /getRegistrationObservationUiErrorMessage\(error, "청강 회차를 불러오지 못했습니다\."\)/,
+  )
+  assert.match(
+    source,
+    /getRegistrationObservationUiErrorMessage\(error, "청강 정보를 저장하지 못했습니다\."\)/,
+  )
+})
+
+test("track detail loading imports and uses the centralized observation UI normalizer", async () => {
+  const trackEditorSource = await readSource("src/features/tasks/registration-track-editor.tsx")
+  const observationEditorImport = trackEditorSource.match(
+    /import \{([\s\S]*?)\} from "\.\/registration-observation-editor"/,
+  )
+  assert.ok(observationEditorImport, "track editor must import the observation editor boundary")
+  assert.match(observationEditorImport[1], /\bgetRegistrationObservationUiErrorMessage\b/)
+  assert.match(
+    trackEditorSource,
+    /setObservationDetailError\(getRegistrationObservationUiErrorMessage\(error, "청강 정보를 불러오지 못했습니다\."\)\)/,
+  )
 })
 
 test("booking-only editor excludes teacher decision and provider actions", async () => {

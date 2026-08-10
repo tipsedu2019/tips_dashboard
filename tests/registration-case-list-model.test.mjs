@@ -142,7 +142,7 @@ test("observation list groups all three states and derives four labels from scal
   assert.equal(canOpenRegistrationCaseListItem({
     viewKey: "observation",
     matchingTracks: [{ observationSummaryVisible: false }],
-  }), false)
+  }), true, "concealed observation rows must still open the base registration case detail")
   assert.equal(canOpenRegistrationCaseListItem({
     viewKey: "observation",
     matchingTracks: [{ observationSummaryVisible: false }, { observationSummaryVisible: true }],

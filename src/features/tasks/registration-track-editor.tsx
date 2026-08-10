@@ -40,6 +40,7 @@ import {
   RegistrationObservationEditor,
   canLoadRegistrationObservationWorkspace,
   canUseRegistrationObservationDetail,
+  getRegistrationObservationUiErrorMessage,
   type RegistrationObservationActions,
 } from "./registration-observation-editor"
 import {
@@ -402,7 +403,7 @@ export function RegistrationApplication({
     }).then((nextDetail) => {
       if (active) setObservationDetail(nextDetail)
     }).catch((error) => {
-      if (active) setObservationDetailError(errorMessage(error, "청강 정보를 불러오지 못했습니다."))
+      if (active) setObservationDetailError(getRegistrationObservationUiErrorMessage(error, "청강 정보를 불러오지 못했습니다."))
     }).finally(() => {
       if (active) setObservationDetailLoading(false)
     })

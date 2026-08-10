@@ -778,6 +778,8 @@ type QueryBuilder = PromiseLike<QueryResult> & {
   retry?: (enabled: boolean) => QueryBuilder
   select: (columns: string, options?: Record<string, unknown>) => QueryBuilder
   eq: (column: string, value: unknown) => QueryBuilder
+  neq: (column: string, value: unknown) => QueryBuilder
+  not: (column: string, operator: string, value: unknown) => QueryBuilder
   gte: (column: string, value: unknown) => QueryBuilder
   lt: (column: string, value: unknown) => QueryBuilder
   in: (column: string, values: unknown[]) => QueryBuilder
@@ -1457,6 +1459,33 @@ function mapTrackEvent(row: Row): OpsRegistrationTrackEvent {
   }
 }
 
+const REGISTRATION_OBSERVATION_EVENT_PREFIX = "registration_observation_"
+
+function isBookingOnlyRegistrationAppointmentRow(row: Row) {
+  return text(value(row, "kind")) === "observation_class"
+}
+
+function isBookingOnlyRegistrationEventRow(row: Row) {
+  return text(value(row, "event_type", "eventType"))
+    .startsWith(REGISTRATION_OBSERVATION_EVENT_PREFIX)
+}
+
+function withoutBookingOnlyRegistrationObservationDetail<
+  TTrack extends OpsRegistrationTrackSummary | OpsRegistrationObservationTrackSummary,
+>(
+  detail: OpsRegistrationCaseDetailFields<TTrack>,
+): OpsRegistrationCaseDetailFields<TTrack> {
+  return {
+    ...detail,
+    appointments: detail.appointments.filter(
+      (appointment) => String(appointment.kind) !== "observation_class",
+    ),
+    events: detail.events.filter(
+      (event) => !event.eventType.startsWith(REGISTRATION_OBSERVATION_EVENT_PREFIX),
+    ),
+  }
+}
+
 function buildRegistrationMigrationLegacySnapshot(
   parentRow: Row,
   detailRow: Row,
@@ -2104,13 +2133,21 @@ export function createRegistrationTrackService(
           metrics,
           signal,
         ),
-        ...TASK_SCOPED_CASE_READS.map(([table, columns]) => queryRows(
-          client.from(table).select(columns).eq("task_id", safeTaskId),
-          metrics,
-          signal,
-        )),
+        ...TASK_SCOPED_CASE_READS.map(([table, columns]) => {
+          const taskQuery = client.from(table).select(columns).eq("task_id", safeTaskId)
+          return queryRows(
+            table === "ops_registration_appointments"
+              ? taskQuery.neq("kind", "observation_class")
+              : taskQuery,
+            metrics,
+            signal,
+          )
+        }),
         queryRows(
-          client.from("ops_task_events").select(EVENT_COLUMNS).eq("task_id", safeTaskId),
+          client.from("ops_task_events")
+            .select(EVENT_COLUMNS)
+            .eq("task_id", safeTaskId)
+            .not("event_type", "like", "registration_observation_%"),
           metrics,
           signal,
         ),
@@ -2137,6 +2174,12 @@ export function createRegistrationTrackService(
         const [parentRow, trackRows, appointmentRows, batchRows, eventRows, messageRows] = phaseOne as [
           Row, Row[], Row[], Row[], Row[], Row[],
         ]
+        const sharedAppointmentRows = appointmentRows.filter(
+          (row) => !isBookingOnlyRegistrationAppointmentRow(row),
+        )
+        const sharedEventRows = eventRows.filter(
+          (row) => !isBookingOnlyRegistrationEventRow(row),
+        )
         const levelTestRows = trackRows.flatMap((row) => rows(value(row, "level_tests")))
         const consultationRows = trackRows.flatMap((row) => rows(value(row, "consultations")))
         const enrollmentRows = trackRows.flatMap((row) => rows(value(row, "enrollments")))
@@ -2163,14 +2206,14 @@ export function createRegistrationTrackService(
             comments,
             attachments,
             tracks,
-            appointments: appointmentRows.map(mapAppointment),
+            appointments: sharedAppointmentRows.map(mapAppointment),
             levelTests: levelTestRows.map(mapLevelTest),
             consultations: consultationRows.map(mapConsultation),
             admissionBatches: batchRows.map(mapBatch),
             enrollments: enrollmentRows.map(mapEnrollment),
-            events: eventRows.map(mapTrackEvent),
+            events: sharedEventRows.map(mapTrackEvent),
             migrationLegacy: tracks.some((track) => track.migrationReviewRequired)
-              ? buildRegistrationMigrationLegacySnapshot(parentRow, detailRow, eventRows)
+              ? buildRegistrationMigrationLegacySnapshot(parentRow, detailRow, sharedEventRows)
               : null,
           }
         }
@@ -3439,9 +3482,10 @@ function toObservationAwareTrackSummary(
 export function toObservationAwareCaseDetail(
   detail: OpsRegistrationCaseDetail,
 ): OpsRegistrationObservationCaseDetail {
+  const sharedDetail = withoutBookingOnlyRegistrationObservationDetail(detail)
   return {
-    ...detail,
-    tracks: detail.tracks.map(toObservationAwareTrackSummary),
+    ...sharedDetail,
+    tracks: sharedDetail.tracks.map(toObservationAwareTrackSummary),
   }
 }
 
@@ -3462,9 +3506,11 @@ export function loadRegistrationCaseDetail(
 ): Promise<OpsRegistrationCaseDetail | OpsRegistrationObservationCaseDetail> {
   const fixture = loadRegistrationSubjectTrackFixtureCase(taskId)
   if (fixture) {
-    return options.observationAware
-      ? fixture.then(toObservationAwareCaseDetail)
-      : fixture
+    return fixture.then((detail) => (
+      options.observationAware
+        ? toObservationAwareCaseDetail(detail)
+        : withoutBookingOnlyRegistrationObservationDetail(detail)
+    ))
   }
   const loadOptions = { force: options.force }
   return options.observationAware

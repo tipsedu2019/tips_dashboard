@@ -593,7 +593,7 @@ test("case list makes the whole visible row a keyboard-accessible entry point", 
   assert.equal(
     (source.match(/const entryAvailable = !disabled && canOpenRegistrationCaseListItem\(item\)/g) || []).length,
     2,
-    "both responsive rows must retain legacy interaction while removing concealed observation entry",
+    "both responsive rows must retain base-detail interaction for concealed observation rows",
   )
   assert.equal((source.match(/tabIndex=\{entryAvailable \? 0 : undefined\}/g) || []).length, 2)
   assert.equal(
@@ -605,6 +605,11 @@ test("case list makes the whole visible row a keyboard-accessible entry point", 
     2,
   )
   assert.match(source, /event\.key !== "Enter" && event\.key !== " "/)
+  assert.match(
+    source,
+    /item\.matchingTracks\.find\(\(track\) => track\.observationSummaryVisible\)\s*\|\| item\.representativeTrack/,
+    "a concealed observation row must fall back to the general case-detail track",
+  )
   assert.doesNotMatch(source, /ArrowUpRight|TRACK_MANAGEMENT_LABELS/)
   assert.match(source, /const showActionColumn = items\.some\(canDelete\)/)
 })

@@ -177,8 +177,7 @@ export function canOpenRegistrationCaseListItem(input: Pick<
   RegistrationCaseListViewItem,
   "viewKey" | "matchingTracks"
 >) {
-  return input.viewKey !== "observation"
-    || input.matchingTracks.some((track) => track.observationSummaryVisible)
+  return input.matchingTracks.length > 0
 }
 
 export function getRegistrationCaseLevelTestAppointments(

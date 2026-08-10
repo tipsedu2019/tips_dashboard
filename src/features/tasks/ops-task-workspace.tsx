@@ -9188,7 +9188,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       if (!active) return
       setRegistrationObservationRuntime({ runtimeVersion: 0, available: false })
       setRegistrationObservationRuntimeProbed(true)
-      setRegistrationObservationRuntimeError("청강 신청 기능 상태를 확인하지 못했습니다. 다른 등록 업무는 계속 처리할 수 있습니다.")
+      setRegistrationObservationRuntimeError("청강 신청 기능 상태를 확인하지 못했습니다. 등록 정보를 다시 불러와 주세요.")
     })
 
     return () => {

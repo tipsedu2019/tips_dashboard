@@ -1652,6 +1652,8 @@ test("registration workspace probes observation runtime and hides its tab when u
   assert.match(source, /tab\.key !== "observation" \|\| registrationObservationRuntime\.available/)
   assert.match(source, /registrationObservationRuntimeError/)
   assert.match(source, /observationRuntime=\{registrationObservationRuntime\}/)
+  assert.match(source, /청강 신청 기능 상태를 확인하지 못했습니다\. 등록 정보를 다시 불러와 주세요\./)
+  assert.doesNotMatch(source, /다른 등록 업무는 계속 처리할 수 있습니다/)
 })
 
 test("registration create uses the canonical initial plan, exact runtime matrix, and frozen retry envelope", async () => {

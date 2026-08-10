@@ -15,6 +15,9 @@ import {
   normalizeRegistrationObservationSummary,
 } from "../src/features/tasks/registration-observation-model.ts";
 import {
+  loadRegistrationObservationManagerDetail,
+} from "../src/features/tasks/registration-observation-service.ts";
+import {
   REGISTRATION_WORKFLOW_STATUSES,
   getRegistrationWorkflowStatusFromLegacyTrack,
 } from "../src/features/tasks/registration-workflow-status.js";
@@ -446,6 +449,14 @@ function createClient({ queryHandler, rpcHandler } = {}) {
       },
       eq(column, value) {
         query.filters.push(["eq", column, value]);
+        return fluent;
+      },
+      neq(column, value) {
+        query.filters.push(["neq", column, value]);
+        return fluent;
+      },
+      not(column, operator, value) {
+        query.filters.push(["not", column, operator, value]);
         return fluent;
       },
       gte(column, value) {
@@ -916,6 +927,163 @@ function detailRows(table) {
   throw new Error(`unexpected detail table: ${table}`);
 }
 
+const caseDetailObservationSecrets = {
+  scheduledAt: "2026-08-14T09:37:00+09:00",
+  place: "비공개 청강 교실 907호",
+  reason: "보호자 요청: 다른 학생에게 알리지 말 것",
+  afterValue: "private-observation-audit-after-value",
+};
+
+function detailRowsWithObservationSecrets(query) {
+  const result = detailRows(query.table);
+  const hasExactFilter = (expected) => query.filters.some((filter) => (
+    filter.length === expected.length
+    && filter.every((value, index) => value === expected[index])
+  ));
+  const hidesObservationAppointments = hasExactFilter([
+    "neq", "kind", "observation_class",
+  ]);
+  const hidesObservationEvents = hasExactFilter([
+    "not", "event_type", "like", "registration_observation_%",
+  ]);
+  if (query.table === "ops_registration_subject_tracks") {
+    return {
+      ...result,
+      data: result.data.map((row) => ({
+        ...row,
+        workflow_status: "consultation_requested",
+        workflow_revision: 4,
+        ...inertObservationSummaryRow,
+      })),
+    };
+  }
+  if (query.table === "ops_registration_appointments") {
+    return {
+      ...result,
+      data: [
+        ...result.data,
+        {
+          id: "appointment-observation-private",
+          task_id: "task-1",
+          kind: "observation_class",
+          scheduled_at: caseDetailObservationSecrets.scheduledAt,
+          place: caseDetailObservationSecrets.place,
+          status: "scheduled",
+          notification_revision: 7,
+          created_at: "2026-08-10T01:00:00Z",
+          updated_at: "2026-08-10T02:00:00Z",
+        },
+        {
+          id: "appointment-observation-canceled",
+          task_id: "task-1",
+          kind: "observation_class",
+          scheduled_at: "2026-08-13T08:00:00+09:00",
+          place: "취소된 청강 교실",
+          status: "canceled",
+          notification_revision: 4,
+          created_at: "2026-08-09T01:00:00Z",
+          updated_at: "2026-08-09T02:00:00Z",
+        },
+      ].filter((row) => !hidesObservationAppointments || row.kind !== "observation_class"),
+    };
+  }
+  if (query.table === "ops_task_events") {
+    return {
+      ...result,
+      data: [
+        ...result.data,
+        {
+          id: "event-observation-reason-private",
+          task_id: "task-1",
+          actor_id: "profile-1",
+          event_type: "registration_observation_withdrawn",
+          field_name: "registration_observation:track-1",
+          before_value: null,
+          after_value: JSON.stringify({
+            version: 1,
+            eventType: "registration_observation_withdrawn",
+            actorId: "profile-1",
+            trackId: "track-1",
+            subject: "영어",
+            source: "observation_feedback_pending",
+            destination: "consultation_completed",
+            reason: caseDetailObservationSecrets.reason,
+            metadata: {},
+            occurredAt: "2026-08-14T10:00:00+09:00",
+          }),
+          created_at: "2026-08-14T01:00:00Z",
+        },
+        {
+          id: "event-observation-audit-private",
+          task_id: "task-1",
+          actor_id: "profile-1",
+          event_type: "registration_observation_audit_payload",
+          field_name: "registration_observation:track-1",
+          before_value: null,
+          after_value: caseDetailObservationSecrets.afterValue,
+          created_at: "2026-08-14T01:01:00Z",
+        },
+      ].filter((row) => (
+        !hidesObservationEvents || !row.event_type.startsWith("registration_observation_")
+      )),
+    };
+  }
+  return result;
+}
+
+function assertCaseDetailOmitsObservationSecrets(detail) {
+  const payload = JSON.stringify(detail);
+  assert.deepEqual({
+    appointmentIds: Array.from(detail.appointments, (appointment) => appointment.id),
+    eventIds: Array.from(detail.events, (event) => event.id),
+    observationAppointmentKinds: Array.from(
+      detail.appointments.filter((appointment) => appointment.kind === "observation_class"),
+      (appointment) => appointment.kind,
+    ),
+    observationEventTypes: Array.from(
+      detail.events.filter((event) => event.eventType.startsWith("registration_observation_")),
+      (event) => event.eventType,
+    ),
+    exposedSecrets: {
+      scheduledAt: payload.includes(caseDetailObservationSecrets.scheduledAt),
+      place: payload.includes(caseDetailObservationSecrets.place),
+      reason: payload.includes(caseDetailObservationSecrets.reason),
+      afterValue: payload.includes(caseDetailObservationSecrets.afterValue),
+    },
+  }, {
+    appointmentIds: ["appointment-1"],
+    eventIds: ["event-canonical", "event-legacy"],
+    observationAppointmentKinds: [],
+    observationEventTypes: [],
+    exposedSecrets: {
+      scheduledAt: false,
+      place: false,
+      reason: false,
+      afterValue: false,
+    },
+  });
+}
+
+function assertCaseDetailUsesServerPrivacyFilters(harness) {
+  const appointmentQuery = harness.queries.find(
+    (query) => query.table === "ops_registration_appointments",
+  );
+  const eventQuery = harness.queries.find((query) => query.table === "ops_task_events");
+  assert.deepEqual({
+    appointmentFilters: appointmentQuery.filters,
+    eventFilters: eventQuery.filters,
+  }, {
+    appointmentFilters: [
+      ["eq", "task_id", "task-1"],
+      ["neq", "kind", "observation_class"],
+    ],
+    eventFilters: [
+      ["eq", "task_id", "task-1"],
+      ["not", "event_type", "like", "registration_observation_%"],
+    ],
+  });
+}
+
 test("track summary loader uses the exact safe projection and skips profile lookup without directors", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient({
@@ -1350,6 +1518,156 @@ test("case detail reads overlap a delayed runtime readiness check", async () => 
   assert.deepEqual(detail.tracks.map((track) => track.id), ["track-1"]);
 });
 
+test("case detail excludes observation rows at the server query boundary", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    queryHandler(query) {
+      return detailRowsWithObservationSecrets(query);
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  await service.loadCaseDetail("task-1", "viewer-1");
+
+  assertCaseDetailUsesServerPrivacyFilters(harness);
+});
+
+test("generic case detail does not leak booking-only observation appointments or audit secrets", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    queryHandler(query) {
+      return detailRowsWithObservationSecrets(query);
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+
+  assertCaseDetailOmitsObservationSecrets(detail);
+  assertCaseDetailUsesServerPrivacyFilters(harness);
+});
+
+test("observation-aware case detail keeps booking-only secrets behind manager detail", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    queryHandler(query) {
+      return detailRowsWithObservationSecrets(query);
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const detail = await service.loadCaseDetail("task-1", "viewer-1", {
+    observationAware: true,
+  });
+
+  assert.equal(
+    detail.tracks[0].observationSummaryVisible,
+    true,
+    "a visible manager summary remains available without embedding booking-only detail",
+  );
+  assertCaseDetailOmitsObservationSecrets(detail);
+  assertCaseDetailUsesServerPrivacyFilters(harness);
+});
+
+test("dedicated manager detail preserves the observation schedule and place hidden from shared detail", async () => {
+  const ids = {
+    track: "71000000-0000-4000-8000-000000000001",
+    task: "71000000-0000-4000-8000-000000000002",
+    observation: "71000000-0000-4000-8000-000000000003",
+    appointment: "71000000-0000-4000-8000-000000000004",
+    class: "71000000-0000-4000-8000-000000000005",
+    lesson: "71000000-0000-4000-8000-000000000006",
+    teacherCatalog: "71000000-0000-4000-8000-000000000007",
+    teacherProfile: "71000000-0000-4000-8000-000000000008",
+    classroom: "71000000-0000-4000-8000-000000000009",
+    director: "71000000-0000-4000-8000-000000000010",
+  };
+  const attempt = {
+    observationId: ids.observation,
+    taskId: ids.task,
+    trackId: ids.track,
+    appointmentId: ids.appointment,
+    appointmentStatus: "scheduled",
+    classId: ids.class,
+    subject: "영어",
+    className: "고1 영어 청강반",
+    scheduleState: "active",
+    sessionDate: "2026-08-14",
+    startsAt: caseDetailObservationSecrets.scheduledAt,
+    endsAt: "2026-08-14T10:37:00+09:00",
+    teacherCatalogId: ids.teacherCatalog,
+    teacherProfileId: ids.teacherProfile,
+    teacherName: "강부희",
+    classroomCatalogId: ids.classroom,
+    classroomName: caseDetailObservationSecrets.place,
+    campus: "본관",
+    textbooks: [{ textbookId: null, title: "수업 자료", planLabel: "1과", memo: "" }],
+    progress: "진도: 1과",
+    bookingFactHash: "manager-detail-booking-fact",
+    status: "scheduled",
+    attendance: null,
+    suitabilityResult: null,
+    decisionKind: null,
+    revision: 1,
+    feedbackRevision: 0,
+    appointmentNotificationRevision: 1,
+    createdAt: "2026-08-10T02:00:00.000Z",
+    updatedAt: "2026-08-10T02:00:00.000Z",
+    sessionAuthority: "normalized",
+    classLessonSessionId: ids.lesson,
+    legacySessionKey: null,
+    sessionKey: "2026-08-14:lesson-private",
+    sessionSourceRevision: 3,
+    legacySessionSourceHash: null,
+    sourceRevision: {
+      authority: "normalized",
+      sessionId: ids.lesson,
+      revision: 3,
+    },
+  };
+  const payload = {
+    track: {
+      trackId: ids.track,
+      taskId: ids.task,
+      subject: "영어",
+      workflowStatus: "observation_requested",
+      workflowRevision: 4,
+      observationReturnWorkflowStatus: "consultation_completed",
+      directorProfileId: ids.director,
+    },
+    currentObservation: attempt,
+    latestEnrollmentDecisionObservationId: null,
+    attempts: [attempt],
+    classes: [{ id: ids.class, name: "고1 영어 청강반", subject: "영어" }],
+  };
+  const calls = [];
+  const client = {
+    rpc(name, args) {
+      calls.push({ name, args });
+      const response = Promise.resolve({ data: payload, error: null });
+      const request = {
+        abortSignal() { return request; },
+        retry() { return request; },
+        then(resolve, reject) { return response.then(resolve, reject); },
+      };
+      return request;
+    },
+  };
+
+  const detail = await loadRegistrationObservationManagerDetail(client, {
+    trackId: ids.track,
+  });
+
+  assert.deepEqual(calls, [{
+    name: "get_registration_observation_manager_detail_v1",
+    args: { p_track_id: ids.track, p_attempt_limit: 20 },
+  }]);
+  assert.equal(detail.currentObservation.startsAt, caseDetailObservationSecrets.scheduledAt);
+  assert.equal(detail.currentObservation.classroomName, caseDetailObservationSecrets.place);
+  assert.equal(detail.attempts[0].startsAt, caseDetailObservationSecrets.scheduledAt);
+  assert.equal(detail.attempts[0].classroomName, caseDetailObservationSecrets.place);
+});
+
 test("observation-aware detail is broad while default detail fails closed and cannot share its cache", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient({
@@ -1534,7 +1852,10 @@ test("detail loader embeds track children in six scoped reads, maps rows, and sh
   assert.equal(detail.events[1].legacyText, "plain future history");
 
   const events = harness.queries.find((query) => query.table === "ops_task_events");
-  assert.deepEqual(events.filters, [["eq", "task_id", "task-1"]]);
+  assert.deepEqual(events.filters, [
+    ["eq", "task_id", "task-1"],
+    ["not", "event_type", "like", "registration_observation_%"],
+  ]);
   assert.ok(!events.filters.some((filter) => filter[0] === "in" && filter[1] === "event_type"));
   const messages = harness.queries.find((query) => query.table === "ops_registration_messages");
   assert.deepEqual(messages.filters, [
