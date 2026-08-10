@@ -1595,6 +1595,34 @@ Round 2의 raw `after_value` text predicate는 JSON member 위치·공백에 의
 - [x] **Step 6:** schema/booking/workspace/core-review local DB, full core Node, ESLint, TypeScript, webpack build, diff/scope/status를 검증하고 커밋한다. runtime/provider/remote는 0을 유지한다.
 - [ ] **Step 7:** 네 original findings만 대상으로 한 독립 scoped re-review를 한 번 실행하고, 남은 load-bearing finding이 있으면 추가 수정 없이 controller/user에게 보고한다.
 
+### Task 9: 사용자 승인으로 최종 재검토 잔여 두 건을 전진 교정한다
+
+**Files:** Create `supabase/migrations/20260809102450_registration_observation_core_review_followup.sql`, `supabase/tests/registration_observation_core_review_followup_test.sql`; modify `scripts/run-registration-observation-local-db-qa.mjs`, its runner/source tests, `src/features/tasks/registration-track-service.ts`, and the minimal track-service tests and plan/ledger/report artifacts required below. Existing migrations through `20260809102400` remain byte-identical.
+
+**Reviewer gate:** F2 runtime-version cache identity/generic object separation and F4 legacy catalog-ID alias precedence each have a direct executable RED before production edits. One forward migration replaces only the private legacy session list implementation without changing public signatures, security mode, owner, ACL, normalized behavior, parse-once structure, or existing hash/output contracts. A single scoped independent review must return Critical/Important 0.
+
+- [x] **Step 1: frozen follow-up migration과 local focus를 RED로 고정한다**
+  - pinned Supabase CLI `2.103.0`의 `migration new registration_observation_core_review_followup`으로 생성하고 generated path를 먼저 stage한 뒤 exact `20260809102450`으로 `git mv`한다.
+  - `core-review` focus ceiling을 `20260809102450`으로 올리고 기존 `10/10` pgTAP 뒤 follow-up pgTAP을 추가한다. migration gate는 follow-up A1/D0, 기존 migrations byte-identical이다.
+
+- [x] **Step 2: observation runtime cache identity와 generic object를 RED→GREEN으로 분리한다**
+  - generic mode는 observation runtime probe를 호출하지 않고 pre-observation projection과 generic-only object shape를 반환한다. 반환 객체에는 `observationAttemptCount`, `observationCurrentId`, `observationCurrentStatus`, `observationCurrentAppointmentId`, `observationNearestScheduledAt`, `observationNearestPlace`, `observationNotificationRevision`, `observationRevision`, `observationFeedbackRevision`, `observationSummaryVisible` own key가 없어야 한다.
+  - observation mode는 observation runtime을 cache/in-flight 조회 전에 resolve하고 resolved runtime version/availability를 cache, in-flight, epoch identity에 포함한다. 같은 viewer/task에서 runtime `0` 결과를 캐시한 뒤 runtime `1`로 바뀌는 두 번째 호출은 `force` 없이 expanded projection을 다시 조회해야 한다.
+  - generic↔observation 양방향, rejected observation probe 격리, same-mode runtime `0→1`, force/epoch, measurement identity를 행동 테스트로 고정한다.
+
+- [x] **Step 3: legacy catalog alias precedence를 RED→GREEN으로 복원한다**
+  - `teacherCatalogId`/`classroomCatalogId`는 각각 camelCase 값을 `btrim/nullif`한 뒤 snake_case 값을 `btrim/nullif`하고 그 다음 slot fallback을 사용한다. blank camelCase는 valid snake_case UUID를 가리면 안 된다.
+  - blank camelCase + distinct valid snake_case teacher/classroom fixture에서 list 결과의 catalog IDs, names, booking/content hashes가 authoritative frozen resolver와 일치함을 실제 pgTAP으로 증명한다.
+  - 10k→240, parse-once materialized source, duplicate/null reject, normalized authority와 기존 representative legacy parity가 그대로 통과해야 한다.
+
+- [x] **Step 4: 전체 검증과 commit을 완료한다**
+  - focused RED/GREEN, full core Node, targeted ESLint, full TypeScript, `next build --webpack`, `git diff --check`를 fresh 실행한다.
+  - isolated schema/booking/workspace/core-review 네 focus는 runtime `0`, provider/outbox delta `0`, cleanup passed를 유지한다.
+  - production/remote DB, runtime activation, provider send/call, push, deploy, browser mutation, backfill은 하지 않는다. 구현/검증 report와 exact commit SHA를 기록한다.
+
+- [ ] **Step 5: Task 9 범위만 단일 독립 재검토한다**
+  - Task 9 base..HEAD review package로 위 F2/F4 원문과 새 migration/TS 계약만 검토한다. 잔여 Critical/Important가 있으면 추가 수정 없이 controller/user에게 보고한다.
+
 ## Final verification matrix
 
 | Requirement | Owning evidence |
@@ -1618,3 +1646,5 @@ Round 2의 raw `after_value` text predicate는 JSON member 위치·공백에 의
 | generic summary remains pre-observation and observation-aware summary owns probe/projection/cache identity | Task 8 service tests |
 | latest decision correction remains independent of bounded attempts | Task 8 detail pgTAP/model/editor tests |
 | legacy/shadow list parses large schedule JSON set-wise once | Task 8 10k structural/behavior/performance pgTAP |
+| observation runtime version participates in cache identity and generic objects contain no observation keys | Task 9 track-service behavior tests |
+| blank camelCase catalog aliases fall through to valid snake_case aliases without changing set-wise performance | Task 9 follow-up pgTAP |

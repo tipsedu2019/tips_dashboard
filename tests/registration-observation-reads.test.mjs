@@ -12,6 +12,10 @@ const reviewFixMigrationPath = path.join(
   repositoryRoot,
   "supabase/migrations/20260809102400_registration_observation_core_review_fixes.sql",
 );
+const reviewFollowupMigrationPath = path.join(
+  repositoryRoot,
+  "supabase/migrations/20260809102450_registration_observation_core_review_followup.sql",
+);
 const pgTapPath = path.join(
   repositoryRoot,
   "supabase/tests/registration_observation_schema_test.sql",
@@ -23,6 +27,10 @@ async function readMigration() {
 
 async function readReviewFixMigration() {
   return readFile(reviewFixMigrationPath, "utf8");
+}
+
+async function readReviewFollowupMigration() {
+  return readFile(reviewFollowupMigrationPath, "utf8");
 }
 
 function escapeRegExp(value) {
@@ -54,6 +62,59 @@ test("read migration is transactional, forward-only, and provider inert", async 
     sql,
     /\b(?:insert\s+into|update|delete\s+from)\s+dashboard_private\.registration_observation_runtime_settings\b/i,
   );
+});
+
+test("review follow-up replaces only the set-wise private list and preserves blank-alias precedence and ACLs", async () => {
+  const sql = await readReviewFollowupMigration();
+  assert.match(sql, /^begin;\s+set local lock_timeout = '5s';/i);
+  assert.match(sql, /set local statement_timeout = '120s';/i);
+  assert.match(sql, /commit;\s*$/i);
+  assert.doesNotMatch(
+    sql,
+    /\b(?:solapi|google_chat|provider|notification_deliver(?:y|ies)|reminder_jobs|due_jobs|outbox)\b/i,
+  );
+  assert.doesNotMatch(
+    sql,
+    /\b(?:insert\s+into|update|delete\s+from)\s+dashboard_private\.registration_observation_runtime_settings\b/i,
+  );
+
+  const definitions = sql.match(/create\s+or\s+replace\s+function\b/gi) ?? [];
+  assert.equal(definitions.length, 1);
+  const implementation = functionDefinition(
+    sql,
+    "dashboard_private.list_registration_observation_sessions_v1_impl",
+  );
+  assert.match(implementation, /language\s+plpgsql/i);
+  assert.match(implementation, /stable/i);
+  assert.match(implementation, /security definer/i);
+  assert.match(implementation, /set search_path = ''/i);
+  assert.match(implementation, /source_sessions\s+as\s+materialized/i);
+  assert.equal(
+    (implementation.match(/jsonb_array_elements\(v_sessions\)/gi) ?? []).length,
+    1,
+  );
+  assert.match(implementation, /limit\s+240/i);
+  assert.match(
+    implementation,
+    /coalesce\(\s*nullif\(pg_catalog\.btrim\(candidate\.value\s*->>\s*'teacherCatalogId'\),\s*''\),\s*nullif\(pg_catalog\.btrim\(candidate\.value\s*->>\s*'teacher_catalog_id'\),\s*''\)\s*\)\s+as teacher_catalog_text/i,
+  );
+  assert.match(
+    implementation,
+    /coalesce\(\s*nullif\(pg_catalog\.btrim\(candidate\.value\s*->>\s*'classroomCatalogId'\),\s*''\),\s*nullif\(pg_catalog\.btrim\(candidate\.value\s*->>\s*'classroom_catalog_id'\),\s*''\)\s*\)\s+as classroom_catalog_text/i,
+  );
+  assert.match(
+    sql,
+    /alter function dashboard_private\.list_registration_observation_sessions_v1_impl\(uuid, uuid, date, date\)\s+owner to postgres/i,
+  );
+  assert.match(
+    sql,
+    /revoke all on function dashboard_private\.list_registration_observation_sessions_v1_impl\(uuid, uuid, date, date\)\s+from public, anon, authenticated, service_role/i,
+  );
+  assert.match(
+    sql,
+    /grant execute on function dashboard_private\.list_registration_observation_sessions_v1_impl\(uuid, uuid, date, date\)\s+to authenticated/i,
+  );
+  assert.doesNotMatch(sql, /create\s+or\s+replace\s+function\s+public\./i);
 });
 
 test("canonical resolver helpers expose the frozen signatures and selected-session contract", async () => {

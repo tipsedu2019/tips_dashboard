@@ -121,12 +121,14 @@ const FOCUS_REGISTRY = new Map([
   [
     "core-review",
     {
-      ceiling: "20260809102400",
+      ceiling: "20260809102450",
       migrations: [
         "20260809102400_registration_observation_core_review_fixes.sql",
+        "20260809102450_registration_observation_core_review_followup.sql",
       ],
       tests: [
         "supabase/tests/registration_observation_core_review_fixes_test.sql",
+        "supabase/tests/registration_observation_core_review_followup_test.sql",
       ],
       fixture: "noop",
       providerOutboxStage: "core",

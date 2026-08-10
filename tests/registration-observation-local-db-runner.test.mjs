@@ -226,9 +226,10 @@ test("runner keeps every independent database reviewer gate", async () => {
     ],
   });
   assert.deepEqual(runner.getRegistrationObservationFocusContract("core-review"), {
-    ceiling: "20260809102400",
+    ceiling: "20260809102450",
     tests: [
       "supabase/tests/registration_observation_core_review_fixes_test.sql",
+      "supabase/tests/registration_observation_core_review_followup_test.sql",
     ],
   });
   assert.equal(

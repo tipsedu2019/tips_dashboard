@@ -149,6 +149,21 @@ test("observation summary types are broad while generic mutations stay narrow", 
       Awaited<typeof observationDetail>["tracks"][number]["workflowStatus"];
     type PublicGenericDetailStatus =
       Awaited<typeof genericDetail>["tracks"][number]["workflowStatus"];
+    type ObservationSummaryKey =
+      | "observationAttemptCount"
+      | "observationCurrentId"
+      | "observationCurrentStatus"
+      | "observationCurrentAppointmentId"
+      | "observationNearestScheduledAt"
+      | "observationNearestPlace"
+      | "observationNotificationRevision"
+      | "observationRevision"
+      | "observationFeedbackRevision"
+      | "observationSummaryVisible";
+    type PublicGenericReadObservationKeys = Extract<
+      ObservationSummaryKey,
+      keyof Awaited<typeof genericRead>["tracks"][number]
+    >;
 
     type ObservationReadIsExact = Assert<Equal<
       ObservationReadStatus,
@@ -165,6 +180,10 @@ test("observation summary types are broad while generic mutations stay narrow", 
     type PublicGenericReadIsNarrow = Assert<Equal<
       PublicGenericReadStatus,
       OpsRegistrationWorkflowStatus
+    >>;
+    type PublicGenericReadHasNoObservationKeys = Assert<Equal<
+      PublicGenericReadObservationKeys,
+      never
     >>;
     type GenericTrackIsNarrow = Assert<Equal<
       OpsRegistrationTrackSummary["workflowStatus"],
@@ -538,6 +557,19 @@ const inertObservationSummaryRow = {
   observation_feedback_revision: null,
 };
 
+const observationSummaryObjectKeys = [
+  "observationAttemptCount",
+  "observationCurrentId",
+  "observationCurrentStatus",
+  "observationCurrentAppointmentId",
+  "observationNearestScheduledAt",
+  "observationNearestPlace",
+  "observationNotificationRevision",
+  "observationRevision",
+  "observationFeedbackRevision",
+  "observationSummaryVisible",
+];
+
 function summaryRowForProjection(columns) {
   return {
     id: "track-1",
@@ -575,6 +607,129 @@ test("generic summary never probes observation runtime and survives a rejected p
   assert.equal(result.tracks[0].id, "track-1");
   assert.equal(observationProbeCalls, 0);
   assert.doesNotMatch(harness.queries[0].columns, /observation_attempt_count/);
+  for (const key of observationSummaryObjectKeys) {
+    assert.equal(
+      Object.hasOwn(result.tracks[0], key),
+      false,
+      `generic summary must not own ${key}`,
+    );
+  }
+});
+
+test("a rejected observation probe cannot poison a later generic or observation summary read", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  let rejectObservationProbe = true;
+  let observationProbeCalls = 0;
+  const harness = createClient({
+    queryHandler: (query) => ({ data: [summaryRowForProjection(query.columns)], error: null }),
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    probeObservationRuntime: async () => {
+      observationProbeCalls += 1;
+      if (rejectObservationProbe) throw new Error("observation probe rejected");
+      return { available: true, runtimeVersion: 1 };
+    },
+  }));
+
+  await assert.rejects(
+    service.loadTrackSummaries(["task-1"], "same-viewer"),
+    /observation probe rejected/,
+  );
+  const generic = await service.loadLegacyCompatibleTrackSummaries(
+    ["task-1"],
+    "same-viewer",
+  );
+  rejectObservationProbe = false;
+  const observation = await service.loadTrackSummaries(["task-1"], "same-viewer");
+
+  assert.equal(observationProbeCalls, 2);
+  assert.equal(harness.queries.length, 2);
+  assert.doesNotMatch(harness.queries[0].columns, /observation_attempt_count/);
+  assert.match(harness.queries[1].columns, /observation_attempt_count/);
+  for (const key of observationSummaryObjectKeys) {
+    assert.equal(Object.hasOwn(generic.tracks[0], key), false);
+  }
+  assert.equal(observation.tracks[0].observationSummaryVisible, true);
+});
+
+test("observation summary refreshes an unforced same-viewer cache when runtime changes from 0 to 1", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  let observationRuntimeVersion = 0;
+  let observationProbeCalls = 0;
+  const measures = [];
+  const harness = createClient({
+    queryHandler: (query) => ({ data: [summaryRowForProjection(query.columns)], error: null }),
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    probeObservationRuntime: async () => {
+      observationProbeCalls += 1;
+      return {
+        available: observationRuntimeVersion === 1,
+        runtimeVersion: observationRuntimeVersion,
+      };
+    },
+    recordMeasure: (measure) => measures.push({ ...measure }),
+  }));
+
+  const unavailable = await service.loadTrackSummaries(["task-1"], "same-viewer");
+  observationRuntimeVersion = 1;
+  const available = await service.loadTrackSummaries(["task-1"], "same-viewer");
+
+  assert.equal(unavailable.tracks[0].observationSummaryVisible, false);
+  assert.equal(available.tracks[0].observationSummaryVisible, true);
+  assert.equal(observationProbeCalls, 2);
+  assert.equal(harness.queries.length, 2);
+  assert.doesNotMatch(harness.queries[0].columns, /observation_attempt_count/);
+  assert.match(harness.queries[1].columns, /observation_attempt_count/);
+  assert.deepEqual(
+    measures.map(({ name, cacheHit, queryCount }) => ({ name, cacheHit, queryCount })),
+    [
+      { name: "registration:track-summary:observation", cacheHit: false, queryCount: 1 },
+      { name: "registration:track-summary:observation", cacheHit: false, queryCount: 1 },
+    ],
+  );
+});
+
+test("observation runtime identity separates an unavailable in-flight read from a newly available read", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const unavailableQueryStarted = deferred();
+  const unavailableQueryGate = deferred();
+  let observationRuntimeVersion = 0;
+  let observationProbeCalls = 0;
+  const harness = createClient({
+    queryHandler(query) {
+      const result = { data: [summaryRowForProjection(query.columns)], error: null };
+      if (!query.columns.includes("observation_attempt_count")) {
+        unavailableQueryStarted.resolve();
+        return unavailableQueryGate.promise.then(() => result);
+      }
+      return result;
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    probeObservationRuntime: async () => {
+      observationProbeCalls += 1;
+      return {
+        available: observationRuntimeVersion === 1,
+        runtimeVersion: observationRuntimeVersion,
+      };
+    },
+  }));
+
+  const unavailable = service.loadTrackSummaries(["task-1"], "same-viewer");
+  await unavailableQueryStarted.promise;
+  observationRuntimeVersion = 1;
+  const available = service.loadTrackSummaries(["task-1"], "same-viewer");
+  const probeCallsBeforeRelease = observationProbeCalls;
+  unavailableQueryGate.resolve();
+  const [unavailableResult, availableResult] = await Promise.all([unavailable, available]);
+
+  assert.equal(probeCallsBeforeRelease, 2);
+  assert.equal(harness.queries.length, 2);
+  assert.equal(unavailableResult.tracks[0].observationSummaryVisible, false);
+  assert.equal(availableResult.tracks[0].observationSummaryVisible, true);
+  assert.doesNotMatch(harness.queries[0].columns, /observation_attempt_count/);
+  assert.match(harness.queries[1].columns, /observation_attempt_count/);
 });
 
 test("generic and observation summary modes isolate projection cache inflight epoch and measurement identity", async () => {
