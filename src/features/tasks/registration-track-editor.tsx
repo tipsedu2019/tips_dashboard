@@ -46,8 +46,11 @@ import {
 import {
   RegistrationObservationFeedbackPanel,
   canEditRegistrationObservationFeedback,
+  canKeepRegistrationObservationFeedbackHistoryMounted,
+  getRegistrationObservationFeedbackMountPlan,
   getRegistrationObservationFeedbackRefreshPlan,
   loadRegistrationObservationFeedbackForOwnedPanel,
+  shouldMountRegistrationObservationFeedbackOnly,
   type RegistrationObservationFeedbackActions,
 } from "./registration-observation-feedback-panel"
 import {
@@ -409,9 +412,16 @@ export function RegistrationApplication({
     activeTrackId: activeTrack?.id || null,
     detailTrackId: observationDetail?.track.trackId || null,
   }) ? observationDetail : null
-  const observationTrackEligible = Boolean(activeTrack && (
+  const observationWorkflowActionable = Boolean(activeTrack && (
     canStartRegistrationObservation(activeTrack)
     || isRegistrationObservationWorkflowStatus(activeTrack.workflowStatus)
+  ))
+  const observationTrackEligible = Boolean(activeTrack && (
+    observationWorkflowActionable
+    || canKeepRegistrationObservationFeedbackHistoryMounted({
+      canManageCase,
+      observationAttemptCount: activeTrack.observationAttemptCount,
+    })
   ))
   const observationWorkspaceAvailable = Boolean(activeTrack && canLoadRegistrationObservationWorkspace({
     runtimeAvailable: observationRuntime.available && observationTrackEligible,
@@ -587,7 +597,7 @@ export function RegistrationApplication({
       consultations: detail.consultations,
     })
     return [track.id, getRegistrationActionPermissions({ viewerId, viewerRole, track, activeConsultation }) as RegistrationTrackActionPermissions]
-  })), [canManageCase, detail.consultations, orderedTracks, viewerId, viewerRole])
+  })), [detail.consultations, orderedTracks, viewerId, viewerRole])
   const trackStates = orderedTracks.map((track) => getRegistrationApplicationTrackState({
     track,
     canManage: permissionsByTrackId.get(track.id)?.canManage || false,
@@ -670,18 +680,26 @@ export function RegistrationApplication({
         directorProfileId: activeTrack.directorProfileId,
       })
     : false
-  const activeFeedbackObservationId = activeObservationDetail?.currentObservation?.observationId || null
-  const activeFeedbackOwnershipKey = canManageActiveObservation
-    && activeTrack
+  const activeFeedbackMountPlan = getRegistrationObservationFeedbackMountPlan({
+    managerDetail: activeObservationDetail,
+    canManageObservation: canManageActiveObservation,
+    canManageCase,
+  })
+  const activeFeedbackObservationId = activeFeedbackMountPlan?.observationId || null
+  const activeFeedbackCorrectionOnly = activeFeedbackMountPlan?.correctionOnly === true
+  const activeFeedbackHistoryOnly = shouldMountRegistrationObservationFeedbackOnly({
+    correctionOnly: activeFeedbackCorrectionOnly,
+    workflowActionable: observationWorkflowActionable,
+  })
+  const activeFeedbackOwnershipKey = activeTrack
     && activeFeedbackObservationId
     ? `${detail.task.id}:${activeTrack.id}:${activeFeedbackObservationId}`
     : ""
   activeObservationFeedbackKeyRef.current = activeFeedbackOwnershipKey
 
   useEffect(() => {
-    const observationId = activeObservationDetail?.currentObservation?.observationId || null
-    const ownershipKey = canManageActiveObservation
-      && activeTrack
+    const observationId = activeFeedbackObservationId
+    const ownershipKey = activeTrack
       && observationId
       ? `${detail.task.id}:${activeTrack.id}:${observationId}`
       : ""
@@ -719,9 +737,8 @@ export function RegistrationApplication({
       }
     }
   }, [
-    activeObservationDetail?.currentObservation?.observationId,
+    activeFeedbackObservationId,
     activeTrack,
-    canManageActiveObservation,
     detail.task.id,
   ])
 
@@ -1161,6 +1178,37 @@ export function RegistrationApplication({
     }
   }
 
+  const activeObservationFeedbackPanel = observationFeedbackDetail?.observationId
+    === activeFeedbackObservationId ? (
+      <RegistrationObservationFeedbackPanel
+        detail={observationFeedbackDetail}
+        canRecordAttendance={canManageCase && !activeFeedbackCorrectionOnly}
+        canEditFeedback={activeFeedbackCorrectionOnly
+          ? canManageCase
+          : canEditRegistrationObservationFeedback({
+              canManageCase,
+              isAssignedTeacher: Boolean(
+                viewerId
+                && viewerId === activeObservationDetail?.currentObservation?.teacherProfileId
+              ),
+              decisionKind: observationFeedbackDetail.decisionKind,
+            })}
+        canDecide={!activeFeedbackCorrectionOnly && (
+          canManageCase || Boolean(
+            viewerId
+            && viewerId === activeTrack?.directorProfileId
+          )
+        )}
+        actions={registrationObservationFeedbackActions}
+        onSaved={handleObservationFeedbackSaved}
+        onReload={reloadObservationFeedback}
+      />
+    ) : observationFeedbackError ? (
+      <p role="alert" className="text-sm text-destructive">{observationFeedbackError}</p>
+    ) : observationFeedbackLoading ? (
+      <p className="text-sm text-muted-foreground">청강 피드백을 불러오는 중입니다.</p>
+    ) : null
+
   const registrationSection = (
     <RegistrationApplicationPlacementSection
       editable={registrationState.editable}
@@ -1364,43 +1412,19 @@ export function RegistrationApplication({
         observationSummaryVisible: activeTrack?.observationSummaryVisible === true,
       }) ? (
         activeTrack && activeObservationDetail ? (
-          <RegistrationObservationEditor
-            key={activeTrack.id}
-            trackId={activeTrack.id}
-            workflowRevision={activeTrack.workflowRevision}
-            observationRevision={activeObservationDetail.currentObservation?.revision ?? null}
-            appointmentNotificationRevision={activeObservationDetail.currentObservation?.appointmentNotificationRevision ?? null}
-            detail={activeObservationDetail}
-            actions={registrationObservationActions}
-            onSaved={handleObservationSaved}
-            feedbackPanel={
-              observationFeedbackDetail?.observationId === activeFeedbackObservationId ? (
-                <RegistrationObservationFeedbackPanel
-                  detail={observationFeedbackDetail}
-                  canRecordAttendance={canManageCase}
-                  canEditFeedback={canEditRegistrationObservationFeedback({
-                    canManageCase,
-                    isAssignedTeacher: Boolean(
-                      viewerId
-                      && viewerId === activeObservationDetail.currentObservation?.teacherProfileId
-                    ),
-                    decisionKind: observationFeedbackDetail.decisionKind,
-                  })}
-                  canDecide={canManageCase || Boolean(
-                    viewerId
-                    && viewerId === activeTrack.directorProfileId
-                  )}
-                  actions={registrationObservationFeedbackActions}
-                  onSaved={handleObservationFeedbackSaved}
-                  onReload={reloadObservationFeedback}
-                />
-              ) : observationFeedbackError ? (
-                <p role="alert" className="text-sm text-destructive">{observationFeedbackError}</p>
-              ) : observationFeedbackLoading ? (
-                <p className="text-sm text-muted-foreground">청강 피드백을 불러오는 중입니다.</p>
-              ) : null
-            }
-          />
+          activeFeedbackHistoryOnly ? activeObservationFeedbackPanel : (
+            <RegistrationObservationEditor
+              key={activeTrack.id}
+              trackId={activeTrack.id}
+              workflowRevision={activeTrack.workflowRevision}
+              observationRevision={activeObservationDetail.currentObservation?.revision ?? null}
+              appointmentNotificationRevision={activeObservationDetail.currentObservation?.appointmentNotificationRevision ?? null}
+              detail={activeObservationDetail}
+              actions={registrationObservationActions}
+              onSaved={handleObservationSaved}
+              feedbackPanel={activeObservationFeedbackPanel}
+            />
+          )
         ) : observationDetailError ? (
           <p role="alert" className="text-sm text-destructive">{observationDetailError}</p>
         ) : observationDetailLoading ? (

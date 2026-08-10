@@ -770,10 +770,12 @@ export function normalizeRegistrationObservationFeedbackDetail(
   ) invalid(scope)
 
   const observationRevision = revision(row.revision, scope)
+  const feedbackRevision = revision(row.feedbackRevision, scope)
   const appointmentNotificationRevision = revision(row.appointmentNotificationRevision, scope)
   const trackWorkflowRevision = revision(row.trackWorkflowRevision, scope)
   if (
     observationRevision < 1
+    || (status === "completed" ? feedbackRevision < 1 : feedbackRevision !== 0)
     || appointmentNotificationRevision < 1
     || trackWorkflowRevision < 1
   ) invalid(scope)
@@ -802,7 +804,7 @@ export function normalizeRegistrationObservationFeedbackDetail(
     feedbackSubmittedByName,
     feedbackSubmittedAt,
     revision: observationRevision,
-    feedbackRevision: revision(row.feedbackRevision, scope),
+    feedbackRevision,
     appointmentNotificationRevision,
     trackWorkflowRevision,
     decisionKind,

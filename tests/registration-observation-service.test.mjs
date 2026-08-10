@@ -850,6 +850,65 @@ test("feedback detail normalizer rejects exact-key, lifecycle, source, revision,
   }
 });
 
+test("feedback detail feedbackRevision matches every canonical feedback lifecycle", () => {
+  const emptyFeedback = {
+    suitabilityResult: null,
+    feedbackReason: null,
+    proxySubmitted: false,
+    feedbackSubmittedByName: null,
+    feedbackSubmittedAt: null,
+    decisionKind: null,
+  };
+  const canonicalEmptyStates = [
+    { status: "scheduled", attendance: null },
+    { status: "attended_feedback_pending", attendance: "attended" },
+    { status: "no_show", attendance: "no_show" },
+    { status: "canceled", attendance: null },
+  ];
+
+  assert.throws(
+    () => normalizeRegistrationObservationFeedbackDetail({
+      ...exactFeedback,
+      feedbackRevision: 0,
+    }),
+    /registration_observation_feedback_detail_invalid/,
+    "completed feedback must have a submitted revision",
+  );
+  for (const state of canonicalEmptyStates) {
+    const canonical = {
+      ...exactFeedback,
+      ...emptyFeedback,
+      ...state,
+      feedbackRevision: 0,
+    };
+    assert.deepEqual(
+      normalizeRegistrationObservationFeedbackDetail(canonical),
+      canonical,
+    );
+    assert.throws(
+      () => normalizeRegistrationObservationFeedbackDetail({
+        ...canonical,
+        feedbackRevision: 1,
+      }),
+      /registration_observation_feedback_detail_invalid/,
+      `${state.status} cannot carry a submitted feedback revision`,
+    );
+  }
+  assert.equal(normalizeRegistrationObservationFeedbackDetail({
+    ...exactFeedback,
+    ...emptyFeedback,
+    status: "no_show",
+    attendance: "no_show",
+    feedbackRevision: 0,
+    decisionKind: "not_registered",
+  }).decisionKind, "not_registered");
+  assert.equal(normalizeRegistrationObservationFeedbackDetail({
+    ...exactFeedback,
+    feedbackRevision: 2,
+    decisionKind: "not_registered",
+  }).feedbackRevision, 2);
+});
+
 test("feedback read caches one in-flight and settled generation until an explicit force refresh", async () => {
   const firstResponse = deferred();
   let rpcCalls = 0;
@@ -920,6 +979,67 @@ test("feedback settled cache is actor-session scoped so an account switch must r
   assert.equal(client.calls.length, 2);
 });
 
+test("feedback read fails closed when the active session changes between scope capture and RPC resolution", async () => {
+  const actorA = "10000000-0000-4000-8000-000000000020";
+  const actorB = "10000000-0000-4000-8000-000000000021";
+  let actorId = actorA;
+  let authCallback = null;
+  let rpcCalls = 0;
+  const requestStarted = deferred();
+  const authorizationGate = deferred();
+  const requestAuthorized = deferred();
+  const responseGate = deferred();
+  const requestActors = [];
+  const client = captureRpcClient({ handler: async () => {
+    rpcCalls += 1;
+    if (rpcCalls === 1) {
+      requestStarted.resolve();
+      await authorizationGate.promise;
+      requestActors.push(actorId);
+      requestAuthorized.resolve();
+      await responseGate.promise;
+    }
+    return ok(exactFeedback);
+  } });
+  const currentSession = () => ({
+    access_token: `session-${actorId}`,
+    user: { id: actorId },
+  });
+  client.auth = {
+    async getSession() {
+      return {
+        data: { session: currentSession() },
+        error: null,
+      };
+    },
+    onAuthStateChange(callback) {
+      authCallback = callback;
+      return { data: { subscription: { unsubscribe() {} } } };
+    },
+  };
+
+  const crossed = loadRegistrationObservationFeedback(client, IDS.observation);
+  await requestStarted.promise;
+  actorId = actorB;
+  authCallback?.("SIGNED_IN", currentSession());
+  authorizationGate.resolve();
+  await requestAuthorized.promise;
+  assert.deepEqual(requestActors, [actorB]);
+  actorId = actorA;
+  authCallback?.("SIGNED_IN", currentSession());
+  responseGate.resolve();
+  await assert.rejects(
+    crossed,
+    /registration_observation_feedback_session_changed/,
+  );
+
+  assert.deepEqual(
+    await loadRegistrationObservationFeedback(client, IDS.observation),
+    exactFeedback,
+  );
+  assert.equal(rpcCalls, 2, "the B-authorized response must not populate A's settled cache");
+});
+
 test("force refresh invalidates a settled feedback failure without sharing the rejected generation", async () => {
   const databaseError = { code: "57014", message: "statement timeout" };
   let rpcCalls = 0;
@@ -938,6 +1058,42 @@ test("force refresh invalidates a settled feedback failure without sharing the r
     exactFeedback,
   );
   assert.equal(rpcCalls, 2);
+});
+
+test("overlapping malformed force reads restore only the last valid settled feedback generation", async () => {
+  const firstForceResponse = deferred();
+  const secondForceResponse = deferred();
+  let rpcCalls = 0;
+  const client = captureRpcClient({ handler: () => {
+    rpcCalls += 1;
+    if (rpcCalls === 1) return ok(exactFeedback);
+    if (rpcCalls === 2) return firstForceResponse.promise;
+    return secondForceResponse.promise;
+  } });
+
+  const settled = loadRegistrationObservationFeedback(client, IDS.observation);
+  assert.deepEqual(await settled, exactFeedback);
+  const firstForce = loadRegistrationObservationFeedback(
+    client,
+    IDS.observation,
+    { force: true },
+  );
+  const secondForce = loadRegistrationObservationFeedback(
+    client,
+    IDS.observation,
+    { force: true },
+  );
+
+  firstForceResponse.resolve(ok({ ...exactFeedback, feedbackRevision: -1 }));
+  await assert.rejects(firstForce, /registration_observation_feedback_detail_invalid/);
+  secondForceResponse.resolve(ok({ ...exactFeedback, revision: -1 }));
+  await assert.rejects(secondForce, /registration_observation_feedback_detail_invalid/);
+
+  assert.deepEqual(
+    await loadRegistrationObservationFeedback(client, IDS.observation),
+    exactFeedback,
+  );
+  assert.equal(rpcCalls, 3, "recovery must publish S without a fourth RPC");
 });
 
 test("feedback mutation clients map every conditional revision and disable automatic retry", async () => {
@@ -1082,6 +1238,295 @@ test("feedback mutation clients map every conditional revision and disable autom
     4,
   );
   assert.deepEqual(client.retryArguments, Array(8).fill(false));
+});
+
+test("every feedback mutation correlates its envelope identity lifecycle and revision floor with the refreshed DTO", async () => {
+  const scheduledDetail = {
+    ...exactFeedback,
+    status: "scheduled",
+    attendance: null,
+    suitabilityResult: null,
+    feedbackReason: null,
+    proxySubmitted: false,
+    feedbackSubmittedByName: null,
+    feedbackSubmittedAt: null,
+    decisionKind: null,
+    revision: 4,
+    feedbackRevision: 0,
+    appointmentNotificationRevision: 2,
+    trackWorkflowRevision: 12,
+  };
+  const attendanceDetail = {
+    ...scheduledDetail,
+    status: "attended_feedback_pending",
+    attendance: "attended",
+  };
+  const completedDetail = {
+    ...exactFeedback,
+    revision: 4,
+    feedbackRevision: 2,
+    appointmentNotificationRevision: 2,
+    trackWorkflowRevision: 12,
+  };
+  const correctedDetail = { ...completedDetail, feedbackRevision: 3 };
+  const noShowDetail = {
+    ...scheduledDetail,
+    status: "no_show",
+    attendance: "no_show",
+  };
+  const decidedDetail = {
+    ...correctedDetail,
+    decisionKind: "not_registered",
+    revision: 5,
+    trackWorkflowRevision: 13,
+  };
+  const cases = [
+    {
+      operation: "record_attendance",
+      rpcName: "record_registration_observation_attendance_v1",
+      requestKey: "correlation-attendance",
+      envelopeDetail: attendanceDetail,
+      wrongOperationDetail: scheduledDetail,
+      invoke: (client) => recordRegistrationObservationAttendance(client, {
+        observationId: IDS.observation,
+        expectedObservationRevision: 3,
+        expectedAppointmentNotificationRevision: 2,
+        requestKey: "correlation-attendance",
+      }),
+    },
+    {
+      operation: "submit_feedback",
+      rpcName: "submit_registration_observation_feedback_v1",
+      requestKey: "correlation-submit",
+      envelopeDetail: completedDetail,
+      wrongOperationDetail: attendanceDetail,
+      invoke: (client) => submitRegistrationObservationFeedback(client, {
+        observationId: IDS.observation,
+        attendance: "attended",
+        suitabilityResult: "fit",
+        feedbackReason: "수업 참여와 이해도가 좋습니다.",
+        expectedObservationRevision: 3,
+        expectedFeedbackRevision: 0,
+        expectedAppointmentNotificationRevision: 2,
+        requestKey: "correlation-submit",
+      }),
+    },
+    {
+      operation: "correct_feedback",
+      rpcName: "correct_registration_observation_feedback_v1",
+      requestKey: "correlation-correct",
+      envelopeDetail: correctedDetail,
+      wrongOperationDetail: noShowDetail,
+      invoke: (client) => correctRegistrationObservationFeedback(client, {
+        observationId: IDS.observation,
+        suitabilityResult: "fit",
+        feedbackReason: "정정한 피드백 사유입니다.",
+        correctionReason: "표현 정정",
+        expectedObservationRevision: 4,
+        expectedFeedbackRevision: 2,
+        expectedDecisionKind: null,
+        requestKey: "correlation-correct",
+      }),
+    },
+    {
+      operation: "decide",
+      rpcName: "decide_registration_observation_v1",
+      requestKey: "correlation-decide",
+      envelopeDetail: decidedDetail,
+      wrongOperationDetail: correctedDetail,
+      invoke: (client) => decideRegistrationObservation(client, {
+        observationId: IDS.observation,
+        decisionKind: "not_registered",
+        waitingClassId: null,
+        expectedObservationRevision: 4,
+        expectedFeedbackRevision: 3,
+        expectedTrackWorkflowRevision: 12,
+        requestKey: "correlation-decide",
+      }),
+    },
+  ];
+
+  for (const mutationCase of cases) {
+    const envelope = feedbackMutationEnvelope(
+      mutationCase.operation,
+      mutationCase.requestKey,
+      mutationCase.envelopeDetail,
+    );
+    const invalidDetails = [
+      ["operation lifecycle", mutationCase.wrongOperationDetail],
+      ["task", { ...mutationCase.envelopeDetail, taskId: IDS.class }],
+      ["track", { ...mutationCase.envelopeDetail, trackId: IDS.class }],
+      ["appointment", { ...mutationCase.envelopeDetail, appointmentId: IDS.class }],
+      ["observation revision", {
+        ...mutationCase.envelopeDetail,
+        revision: mutationCase.envelopeDetail.revision - 1,
+      }],
+      ["appointment revision", {
+        ...mutationCase.envelopeDetail,
+        appointmentNotificationRevision:
+          mutationCase.envelopeDetail.appointmentNotificationRevision - 1,
+      }],
+      ["track revision", {
+        ...mutationCase.envelopeDetail,
+        trackWorkflowRevision: mutationCase.envelopeDetail.trackWorkflowRevision - 1,
+      }],
+      ...(mutationCase.envelopeDetail.feedbackRevision > 0
+        ? [["feedback revision", {
+            ...mutationCase.envelopeDetail,
+            feedbackRevision: mutationCase.envelopeDetail.feedbackRevision - 1,
+          }]]
+        : []),
+    ];
+    for (const [label, invalidDetail] of invalidDetails) {
+      const client = captureRpcClient({ handler: ({ name }) => (
+        name === mutationCase.rpcName ? ok(envelope) : ok(invalidDetail)
+      ) });
+      await assert.rejects(
+        mutationCase.invoke(client),
+        /registration_observation_feedback_mutation_detail_invalid/,
+        `${mutationCase.operation} must reject a mismatched ${label}`,
+      );
+    }
+
+    const wrongOperationEnvelope = feedbackMutationEnvelope(
+      mutationCase.operation,
+      mutationCase.requestKey,
+      mutationCase.wrongOperationDetail,
+    );
+    const wrongOperationClient = captureRpcClient({ handler: ({ name }) => (
+      name === mutationCase.rpcName
+        ? ok(wrongOperationEnvelope)
+        : ok(mutationCase.wrongOperationDetail)
+    ) });
+    await assert.rejects(
+      mutationCase.invoke(wrongOperationClient),
+      /registration_observation_feedback_mutation_detail_invalid/,
+      `${mutationCase.operation} must reject an impossible operation lifecycle`,
+    );
+  }
+});
+
+test("post-decision mutation correlation preserves immutable decision and suitability facts", async () => {
+  const decided = {
+    ...exactFeedback,
+    decisionKind: "not_registered",
+    revision: 5,
+    feedbackRevision: 3,
+    appointmentNotificationRevision: 2,
+    trackWorkflowRevision: 13,
+  };
+  const cases = [
+    {
+      operation: "correct_feedback",
+      rpcName: "correct_registration_observation_feedback_v1",
+      requestKey: "correlation-post-decision-correct",
+      invoke: (client) => correctRegistrationObservationFeedback(client, {
+        observationId: IDS.observation,
+        suitabilityResult: "fit",
+        feedbackReason: "결정 후 사유 정정",
+        correctionReason: "표현 정정",
+        expectedObservationRevision: 5,
+        expectedFeedbackRevision: 2,
+        expectedDecisionKind: "not_registered",
+        requestKey: "correlation-post-decision-correct",
+      }),
+    },
+    {
+      operation: "decide",
+      rpcName: "decide_registration_observation_v1",
+      requestKey: "correlation-post-decision-decide",
+      invoke: (client) => decideRegistrationObservation(client, {
+        observationId: IDS.observation,
+        decisionKind: "not_registered",
+        waitingClassId: null,
+        expectedObservationRevision: 4,
+        expectedFeedbackRevision: 3,
+        expectedTrackWorkflowRevision: 12,
+        requestKey: "correlation-post-decision-decide",
+      }),
+    },
+  ];
+
+  for (const mutationCase of cases) {
+    const envelope = feedbackMutationEnvelope(
+      mutationCase.operation,
+      mutationCase.requestKey,
+      decided,
+    );
+    for (const [label, invalidDetail] of [
+      ["decision", {
+        ...decided,
+        decisionKind: "enrollment",
+        revision: decided.revision + 1,
+        trackWorkflowRevision: decided.trackWorkflowRevision + 1,
+      }],
+      ["suitability", {
+        ...decided,
+        suitabilityResult: "unfit",
+        feedbackRevision: decided.feedbackRevision + 1,
+      }],
+    ]) {
+      const client = captureRpcClient({ handler: ({ name }) => (
+        name === mutationCase.rpcName ? ok(envelope) : ok(invalidDetail)
+      ) });
+      await assert.rejects(
+        mutationCase.invoke(client),
+        /registration_observation_feedback_mutation_detail_invalid/,
+        `${mutationCase.operation} must preserve the decided ${label}`,
+      );
+    }
+
+    const concurrentlyCorrected = {
+      ...decided,
+      feedbackReason: "결정 후 더 최신 사유 정정",
+      feedbackRevision: decided.feedbackRevision + 1,
+    };
+    const validClient = captureRpcClient({ handler: ({ name }) => (
+      name === mutationCase.rpcName ? ok(envelope) : ok(concurrentlyCorrected)
+    ) });
+    assert.deepEqual(await mutationCase.invoke(validClient), concurrentlyCorrected);
+  }
+});
+
+test("attendance correlation accepts a concurrently newer completed and decided canonical DTO", async () => {
+  const attendanceDetail = {
+    ...exactFeedback,
+    status: "attended_feedback_pending",
+    attendance: "attended",
+    suitabilityResult: null,
+    feedbackReason: null,
+    proxySubmitted: false,
+    feedbackSubmittedByName: null,
+    feedbackSubmittedAt: null,
+    revision: 2,
+    feedbackRevision: 0,
+    appointmentNotificationRevision: 1,
+    trackWorkflowRevision: 9,
+  };
+  const concurrentlyDecided = {
+    ...exactFeedback,
+    decisionKind: "not_registered",
+    revision: 4,
+    feedbackRevision: 2,
+    appointmentNotificationRevision: 1,
+    trackWorkflowRevision: 11,
+  };
+  const client = captureRpcClient({ handler: ({ name }) => (
+    name === "record_registration_observation_attendance_v1"
+      ? ok(feedbackMutationEnvelope(
+          "record_attendance",
+          "correlation-concurrent-newer",
+          attendanceDetail,
+        ))
+      : ok(concurrentlyDecided)
+  ) });
+
+  assert.deepEqual(await recordRegistrationObservationAttendance(client, {
+    observationId: IDS.observation,
+    expectedObservationRevision: 1,
+    expectedAppointmentNotificationRevision: 1,
+    requestKey: "correlation-concurrent-newer",
+  }), concurrentlyDecided);
 });
 
 test("malformed feedback mutation responses do not replace a settled detail generation", async () => {

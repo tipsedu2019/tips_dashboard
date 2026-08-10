@@ -845,11 +845,24 @@ test("track editor loads one bounded feedback DTO only for an owned visible pane
   assert.ok(loadEffectStart >= 0, "the manager workspace must use the dedicated feedback read")
   const loadEffect = source.slice(Math.max(0, loadEffectStart - 1_200), loadEffectStart + 2_400)
   assert.match(loadEffect, /canManageActiveObservation/)
-  assert.match(loadEffect, /activeObservationDetail\?\.currentObservation\?\.observationId/)
+  assert.match(source, /getRegistrationObservationFeedbackMountPlan\(\{/)
+  assert.match(source, /managerDetail: activeObservationDetail/)
+  assert.match(source, /canManageCase/)
+  assert.match(loadEffect, /activeFeedbackObservationId/)
   assert.match(loadEffect, /feedbackLoadGenerationRef/)
   assert.match(loadEffect, /activeObservationFeedbackKeyRef/)
   assert.match(source, /force: true/)
   assert.match(source, /<RegistrationObservationFeedbackPanel/)
   assert.match(source, /feedbackPanel=\{/)
+  assert.match(source, /canKeepRegistrationObservationFeedbackHistoryMounted\(\{/)
+  assert.match(source, /observationAttemptCount: activeTrack\.observationAttemptCount/)
+  assert.match(source, /canRecordAttendance=\{canManageCase && !activeFeedbackCorrectionOnly\}/)
+  assert.match(source, /canEditFeedback=\{activeFeedbackCorrectionOnly\s*\? canManageCase/)
+  assert.match(source, /canDecide=\{!activeFeedbackCorrectionOnly && \(/)
+  assert.match(
+    source,
+    /activeFeedbackHistoryOnly\s*\? activeObservationFeedbackPanel\s*:\s*\(/,
+    "terminal decisions must mount the correction panel without reopening the booking editor",
+  )
   assert.doesNotMatch(loadEffect, /parentPhone|studentPhone|schoolName|inquiry|registrationTracks/)
 })

@@ -41,6 +41,9 @@ export type RegistrationObservationClient = {
       }
       error: unknown
     }>
+    onAuthStateChange?: (
+      callback: (event: string, session: unknown) => void,
+    ) => unknown
   }
 }
 
@@ -217,7 +220,25 @@ type FeedbackCacheEntry = Readonly<{
   generation: number
   promise: Promise<RegistrationObservationFeedbackDetail>
 }>
+type FeedbackMutationOperation =
+  | "record_attendance"
+  | "submit_feedback"
+  | "correct_feedback"
+  | "decide"
+type FeedbackDetailValidator = (
+  detail: RegistrationObservationFeedbackDetail,
+) => void
+type FeedbackSessionScope = Readonly<{
+  identity: string
+  epoch: number
+}>
+type FeedbackAuthState = {
+  epoch: number
+}
 const feedbackCache = new Map<string, FeedbackCacheEntry>()
+const feedbackLastValidCache = new Map<string, FeedbackCacheEntry>()
+const feedbackCacheKeysByClient = new WeakMap<object, Set<string>>()
+const feedbackAuthStates = new WeakMap<object, FeedbackAuthState>()
 const clientIds = new WeakMap<object, number>()
 let nextClientId = 1
 let cacheGeneration = 0
@@ -320,13 +341,70 @@ function executeRequest(
     .retry(false)
 }
 
+function deleteFeedbackCacheKey(client: RegistrationObservationClient, key: string) {
+  feedbackCache.delete(key)
+  feedbackLastValidCache.delete(key)
+  feedbackCacheKeysByClient.get(client)?.delete(key)
+}
+
+function clearFeedbackCacheForClient(client: RegistrationObservationClient) {
+  const keys = feedbackCacheKeysByClient.get(client)
+  if (!keys) return
+  for (const key of keys) {
+    feedbackCache.delete(key)
+    feedbackLastValidCache.delete(key)
+  }
+  keys.clear()
+}
+
+function setFeedbackCacheEntry(
+  client: RegistrationObservationClient,
+  key: string,
+  entry: FeedbackCacheEntry,
+) {
+  feedbackCache.set(key, entry)
+  const keys = feedbackCacheKeysByClient.get(client) || new Set<string>()
+  keys.add(key)
+  feedbackCacheKeysByClient.set(client, keys)
+}
+
+function feedbackAuthState(client: RegistrationObservationClient) {
+  const existing = feedbackAuthStates.get(client)
+  if (existing) return existing
+  const state: FeedbackAuthState = { epoch: 0 }
+  feedbackAuthStates.set(client, state)
+  client.auth?.onAuthStateChange?.((event) => {
+    if (event === "INITIAL_SESSION") return
+    state.epoch += 1
+    clearFeedbackCacheForClient(client)
+  })
+  return state
+}
+
+async function opaqueFeedbackSessionIdentity(userId: string, accessToken: string) {
+  const subtle = globalThis.crypto?.subtle
+  if (!subtle) throw new Error("registration_observation_feedback_session_invalid")
+  const digest = await subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${userId}\u0000${accessToken}`),
+  )
+  return Array.from(new Uint8Array(digest), (byte) => (
+    byte.toString(16).padStart(2, "0")
+  )).join("")
+}
+
 function feedbackSessionScope(
   client: RegistrationObservationClient,
-): string | Promise<string> {
-  if (!client.auth) return "fixture-or-test-client"
-  return Promise.resolve(client.auth.getSession()).then(({ data, error }) => {
+): FeedbackSessionScope | Promise<FeedbackSessionScope> {
+  if (!client.auth) return { identity: "fixture-or-test-client", epoch: 0 }
+  const state = feedbackAuthState(client)
+  const epoch = state.epoch
+  return Promise.resolve(client.auth.getSession()).then(async ({ data, error }) => {
+    if (state.epoch !== epoch) {
+      throw new Error("registration_observation_feedback_session_changed")
+    }
     if (error) throw error
-    if (data.session === null) return "signed-out"
+    if (data.session === null) return { identity: "signed-out", epoch }
     const userId = data.session?.user?.id
     const accessToken = data.session?.access_token
     if (
@@ -335,31 +413,135 @@ function feedbackSessionScope(
       || typeof accessToken !== "string"
       || accessToken.length === 0
     ) throw new Error("registration_observation_feedback_session_invalid")
-    return `${userId}:${accessToken}`
+    const identity = await opaqueFeedbackSessionIdentity(userId, accessToken)
+    if (state.epoch !== epoch) {
+      throw new Error("registration_observation_feedback_session_changed")
+    }
+    return { identity, epoch }
   })
 }
 
 function feedbackCacheKey(
   client: RegistrationObservationClient,
-  sessionScope: string,
+  sessionScope: FeedbackSessionScope,
   observationId: string,
 ) {
-  return JSON.stringify([clientId(client), sessionScope, observationId])
+  return JSON.stringify([
+    clientId(client),
+    sessionScope.identity,
+    sessionScope.epoch,
+    observationId,
+  ])
+}
+
+function feedbackMutationDetailInvalid(): never {
+  throw new Error("registration_observation_feedback_mutation_detail_invalid")
+}
+
+function feedbackMutationSnapshotIsCanonical(
+  operation: FeedbackMutationOperation,
+  mutation: RegistrationObservationMutationResult,
+) {
+  const observation = mutation.observation
+  const appointment = mutation.appointment
+  if (!observation || !appointment || appointment.status !== "completed") {
+    feedbackMutationDetailInvalid()
+  }
+
+  const completedFeedback = observation.status === "completed"
+    && observation.attendance === "attended"
+    && observation.suitabilityResult !== null
+    && observation.feedbackRevision >= 1
+  const noShow = observation.status === "no_show"
+    && observation.attendance === "no_show"
+    && observation.suitabilityResult === null
+    && observation.feedbackRevision === 0
+  const decisionWorkflowStatus = observation.decisionKind === "enrollment"
+    ? "enrollment_requested"
+    : observation.decisionKind === "waiting_current_class"
+      ? "waiting_current_class"
+      : observation.decisionKind === "waiting_new_class"
+        ? "waiting_new_class"
+        : observation.decisionKind === "waiting_next_opening"
+          ? "waiting_next_opening"
+          : observation.decisionKind === "not_registered"
+            ? "not_registered"
+            : observation.decisionKind === "re_observation"
+              ? "observation_requested"
+              : null
+
+  const canonical = operation === "record_attendance"
+    ? observation.status === "attended_feedback_pending"
+      && observation.attendance === "attended"
+      && observation.suitabilityResult === null
+      && observation.feedbackRevision === 0
+      && observation.decisionKind === null
+      && mutation.workflowStatus === "observation_feedback_pending"
+    : operation === "submit_feedback"
+      ? (completedFeedback || noShow)
+        && observation.decisionKind === null
+        && mutation.workflowStatus === "observation_completed"
+      : operation === "correct_feedback"
+        ? completedFeedback
+          && (
+            observation.decisionKind !== null
+            || mutation.workflowStatus === "observation_completed"
+          )
+        : (completedFeedback || noShow)
+          && observation.decisionKind !== null
+          && mutation.workflowStatus === decisionWorkflowStatus
+  if (!canonical) feedbackMutationDetailInvalid()
+}
+
+function assertFeedbackMutationDetailCorrelation(
+  operation: FeedbackMutationOperation,
+  mutation: RegistrationObservationMutationResult,
+  detail: RegistrationObservationFeedbackDetail,
+) {
+  const observation = mutation.observation
+  const appointment = mutation.appointment
+  if (!observation || !appointment) feedbackMutationDetailInvalid()
+
+  const lifecycleCorrelated = operation === "record_attendance"
+    ? detail.status === "attended_feedback_pending" || detail.status === "completed"
+    : operation === "submit_feedback"
+      ? detail.status === observation.status
+      : operation === "correct_feedback"
+        ? detail.status === "completed"
+        : detail.status === observation.status
+          && detail.decisionKind === observation.decisionKind
+  const decidedFactsCorrelated = observation.decisionKind === null || (
+    detail.decisionKind === observation.decisionKind
+    && detail.suitabilityResult === observation.suitabilityResult
+  )
+  if (
+    detail.observationId !== observation.observationId
+    || detail.taskId !== observation.taskId
+    || detail.trackId !== mutation.trackId
+    || detail.appointmentId !== appointment.appointmentId
+    || detail.revision < observation.revision
+    || detail.feedbackRevision < observation.feedbackRevision
+    || detail.appointmentNotificationRevision < appointment.notificationRevision
+    || detail.trackWorkflowRevision < mutation.workflowRevision
+    || !lifecycleCorrelated
+    || !decidedFactsCorrelated
+  ) feedbackMutationDetailInvalid()
 }
 
 function loadRegistrationObservationFeedbackForSession(
   resolvedClient: RegistrationObservationClient,
-  sessionScope: string,
+  sessionScope: FeedbackSessionScope,
   observationId: string,
   timeoutMs: number,
   force: boolean,
+  validateDetail?: FeedbackDetailValidator,
 ) {
   const key = feedbackCacheKey(resolvedClient, sessionScope, observationId)
   const cached = feedbackCache.get(key)
   if (!force && cached) return cached.promise
 
   const generation = ++feedbackCacheGeneration
-  const promise = (async () => {
+  const promise: Promise<RegistrationObservationFeedbackDetail> = (async () => {
     const { data, error } = await executeRequest(
       resolvedClient.rpc(
         "get_registration_observation_feedback_v1",
@@ -367,29 +549,49 @@ function loadRegistrationObservationFeedbackForSession(
       ),
       timeoutMs,
     )
+    const currentSessionScope = await feedbackSessionScope(resolvedClient)
+    if (
+      currentSessionScope.identity !== sessionScope.identity
+      || currentSessionScope.epoch !== sessionScope.epoch
+    ) throw new Error("registration_observation_feedback_session_changed")
     if (error) throw error
     const detail = normalizeRegistrationObservationFeedbackDetail(data)
     if (detail.observationId !== observationId) {
       throw new Error("registration_observation_feedback_detail_invalid")
     }
+    validateDetail?.(detail)
     return detail
-  })().catch((error: unknown) => {
+  })().then((detail) => {
+    if (feedbackCache.get(key)?.generation === generation) {
+      feedbackLastValidCache.set(key, { generation, promise })
+    }
+    return detail
+  }).catch((error: unknown) => {
     if (
-      cached
-      && error instanceof Error
-      && error.message === "registration_observation_feedback_detail_invalid"
+      error instanceof Error
+      && error.message === "registration_observation_feedback_session_changed"
       && feedbackCache.get(key)?.generation === generation
-    ) feedbackCache.set(key, cached)
+    ) deleteFeedbackCacheKey(resolvedClient, key)
+    const invalidDetail = error instanceof Error && (
+      error.message === "registration_observation_feedback_detail_invalid"
+      || error.message === "registration_observation_feedback_mutation_detail_invalid"
+    )
+    if (invalidDetail && feedbackCache.get(key)?.generation === generation) {
+      const lastValid = feedbackLastValidCache.get(key)
+      if (lastValid) setFeedbackCacheEntry(resolvedClient, key, lastValid)
+      else deleteFeedbackCacheKey(resolvedClient, key)
+    }
     throw error
   })
-  feedbackCache.set(key, { generation, promise })
+  setFeedbackCacheEntry(resolvedClient, key, { generation, promise })
   return promise
 }
 
-export function loadRegistrationObservationFeedback(
+function loadRegistrationObservationFeedbackValidated(
   client: RegistrationObservationClient,
   observationIdInput: string,
   optionsInput: LoadRegistrationObservationFeedbackOptions = {},
+  validateDetail?: FeedbackDetailValidator,
 ): Promise<RegistrationObservationFeedbackDetail> {
   let observationId: string
   let timeoutMs: number
@@ -408,13 +610,14 @@ export function loadRegistrationObservationFeedback(
 
   const resolvedClient = activeClient(client)
   const sessionScope = feedbackSessionScope(resolvedClient)
-  if (typeof sessionScope === "string") {
+  if (!(sessionScope instanceof Promise)) {
     return loadRegistrationObservationFeedbackForSession(
       resolvedClient,
       sessionScope,
       observationId,
       timeoutMs,
       force,
+      validateDetail,
     )
   }
   return sessionScope.then((scope) => loadRegistrationObservationFeedbackForSession(
@@ -423,7 +626,20 @@ export function loadRegistrationObservationFeedback(
     observationId,
     timeoutMs,
     force,
+    validateDetail,
   ))
+}
+
+export function loadRegistrationObservationFeedback(
+  client: RegistrationObservationClient,
+  observationIdInput: string,
+  optionsInput: LoadRegistrationObservationFeedbackOptions = {},
+): Promise<RegistrationObservationFeedbackDetail> {
+  return loadRegistrationObservationFeedbackValidated(
+    client,
+    observationIdInput,
+    optionsInput,
+  )
 }
 
 async function feedbackMutationRpc(
@@ -431,7 +647,7 @@ async function feedbackMutationRpc(
   name: string,
   args: Record<string, unknown>,
   expected: Readonly<{
-    operation: "record_attendance" | "submit_feedback" | "correct_feedback" | "decide"
+    operation: FeedbackMutationOperation
     requestKey: string
     observationId: string
   }>,
@@ -439,9 +655,22 @@ async function feedbackMutationRpc(
   const resolvedClient = activeClient(client)
   const { data, error } = await executeRequest(resolvedClient.rpc(name, args))
   if (error) throw error
-  mutationIdentity(normalizeRegistrationObservationMutationResult(data), expected)
+  const mutation = mutationIdentity(
+    normalizeRegistrationObservationMutationResult(data),
+    expected,
+  )
+  feedbackMutationSnapshotIsCanonical(expected.operation, mutation)
   cacheGeneration += 1
-  return loadRegistrationObservationFeedback(resolvedClient, expected.observationId, { force: true })
+  return loadRegistrationObservationFeedbackValidated(
+    resolvedClient,
+    expected.observationId,
+    { force: true },
+    (detail) => assertFeedbackMutationDetailCorrelation(
+      expected.operation,
+      mutation,
+      detail,
+    ),
+  )
 }
 
 async function rpcResult(

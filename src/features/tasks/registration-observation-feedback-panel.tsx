@@ -14,6 +14,7 @@ import {
   getRegistrationObservationFeedbackErrorState,
   type RegistrationObservationDecisionKind,
   type RegistrationObservationFeedbackDetail,
+  type RegistrationObservationManagerDetail,
 } from "./registration-observation-model"
 import { RegistrationSelect } from "./registration-select"
 import type {
@@ -91,6 +92,44 @@ export function canEditRegistrationObservationFeedback(input: {
 }) {
   return input.canManageCase
     || (input.decisionKind === null && input.isAssignedTeacher)
+}
+
+export function canKeepRegistrationObservationFeedbackHistoryMounted(input: {
+  canManageCase: boolean
+  observationAttemptCount: number
+}) {
+  return input.canManageCase && input.observationAttemptCount > 0
+}
+
+export function shouldMountRegistrationObservationFeedbackOnly(input: {
+  correctionOnly: boolean
+  workflowActionable: boolean
+}) {
+  return input.correctionOnly && !input.workflowActionable
+}
+
+export function getRegistrationObservationFeedbackMountPlan(input: {
+  managerDetail: Pick<
+    RegistrationObservationManagerDetail,
+    "currentObservation" | "latestDecisionObservation"
+  > | null
+  canManageObservation: boolean
+  canManageCase: boolean
+}) {
+  if (!input.canManageObservation || !input.managerDetail) return null
+  if (input.managerDetail.currentObservation) {
+    return {
+      observationId: input.managerDetail.currentObservation.observationId,
+      correctionOnly: false,
+    } as const
+  }
+  if (input.canManageCase && input.managerDetail.latestDecisionObservation) {
+    return {
+      observationId: input.managerDetail.latestDecisionObservation.observationId,
+      correctionOnly: true,
+    } as const
+  }
+  return null
 }
 
 export function updateRegistrationObservationFeedbackPanelDraft<

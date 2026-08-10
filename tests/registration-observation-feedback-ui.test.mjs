@@ -101,6 +101,18 @@ async function loadPanelModel() {
         typeof getRegistrationObservationFeedbackRefreshPlan === "function"
           ? getRegistrationObservationFeedbackRefreshPlan
           : undefined,
+      getRegistrationObservationFeedbackMountPlan:
+        typeof getRegistrationObservationFeedbackMountPlan === "function"
+          ? getRegistrationObservationFeedbackMountPlan
+          : undefined,
+      canKeepRegistrationObservationFeedbackHistoryMounted:
+        typeof canKeepRegistrationObservationFeedbackHistoryMounted === "function"
+          ? canKeepRegistrationObservationFeedbackHistoryMounted
+          : undefined,
+      shouldMountRegistrationObservationFeedbackOnly:
+        typeof shouldMountRegistrationObservationFeedbackOnly === "function"
+          ? shouldMountRegistrationObservationFeedbackOnly
+          : undefined,
       loadRegistrationObservationFeedbackForOwnedPanel:
         typeof loadRegistrationObservationFeedbackForOwnedPanel === "function"
           ? loadRegistrationObservationFeedbackForOwnedPanel
@@ -286,6 +298,73 @@ test("post-decision correction locks suitability and serializes only the origina
   )
   assert.equal(plan.ok, true)
   assert.equal(plan.input.suitabilityResult, "fit")
+})
+
+test("manager mount plan keeps the latest decided feedback correction-only for admin and staff", async () => {
+  const {
+    canKeepRegistrationObservationFeedbackHistoryMounted,
+    getRegistrationObservationFeedbackMountPlan,
+    shouldMountRegistrationObservationFeedbackOnly,
+  } = await loadPanelModel()
+  assert.equal(typeof getRegistrationObservationFeedbackMountPlan, "function")
+  assert.equal(typeof canKeepRegistrationObservationFeedbackHistoryMounted, "function")
+  assert.equal(canKeepRegistrationObservationFeedbackHistoryMounted({
+    canManageCase: true,
+    observationAttemptCount: 1,
+  }), true, "admin/staff must retain the mounted path after terminal decisions")
+  assert.equal(canKeepRegistrationObservationFeedbackHistoryMounted({
+    canManageCase: false,
+    observationAttemptCount: 1,
+  }), false, "a director or teacher must not reopen terminal history correction")
+  assert.equal(canKeepRegistrationObservationFeedbackHistoryMounted({
+    canManageCase: true,
+    observationAttemptCount: 0,
+  }), false, "a track without observation history must keep load zero")
+  assert.equal(typeof shouldMountRegistrationObservationFeedbackOnly, "function")
+  assert.equal(shouldMountRegistrationObservationFeedbackOnly({
+    correctionOnly: true,
+    workflowActionable: false,
+  }), true, "terminal history mounts only the locked correction panel")
+  assert.equal(shouldMountRegistrationObservationFeedbackOnly({
+    correctionOnly: true,
+    workflowActionable: true,
+  }), false, "waiting and re-observation keep their next observation actions mounted")
+  const decidedManagerDetail = {
+    currentObservation: null,
+    latestDecisionObservation: {
+      observationId: IDS.observation,
+    },
+  }
+
+  assert.deepEqual({ ...getRegistrationObservationFeedbackMountPlan({
+    managerDetail: decidedManagerDetail,
+    canManageObservation: true,
+    canManageCase: true,
+  }) }, {
+    observationId: IDS.observation,
+    correctionOnly: true,
+  })
+  assert.equal(getRegistrationObservationFeedbackMountPlan({
+    managerDetail: decidedManagerDetail,
+    canManageObservation: true,
+    canManageCase: false,
+  }), null, "a director must not reopen post-decision correction")
+  assert.deepEqual({ ...getRegistrationObservationFeedbackMountPlan({
+    managerDetail: {
+      currentObservation: { observationId: IDS.appointment },
+      latestDecisionObservation: decidedManagerDetail.latestDecisionObservation,
+    },
+    canManageObservation: true,
+    canManageCase: false,
+  }) }, {
+    observationId: IDS.appointment,
+    correctionOnly: false,
+  })
+  assert.equal(getRegistrationObservationFeedbackMountPlan({
+    managerDetail: null,
+    canManageObservation: true,
+    canManageCase: true,
+  }), null, "a concealed or wrong-owner manager detail must load zero feedback rows")
 })
 
 test("decision duplicate clicks call one dedicated RPC and never call an enrollment mutation", async () => {
