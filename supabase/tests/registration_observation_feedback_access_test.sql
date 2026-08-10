@@ -1,5 +1,5 @@
 begin;
-select plan(21);
+select plan(26);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '120s';
@@ -16,7 +16,9 @@ values
   ('99250000-0000-4000-8000-000000000003', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'feedback-staff@example.invalid', crypt('feedback-only', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}', null, null, now(), now()),
   ('99250000-0000-4000-8000-000000000004', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'feedback-director@example.invalid', crypt('feedback-only', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}', null, null, now(), now()),
   ('99250000-0000-4000-8000-000000000005', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'feedback-unrelated@example.invalid', crypt('feedback-only', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}', null, null, now(), now()),
-  ('99250000-0000-4000-8000-000000000006', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'feedback-banned-admin@example.invalid', crypt('feedback-only', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}', null, now() + interval '1 day', now(), now());
+  ('99250000-0000-4000-8000-000000000006', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'feedback-banned-admin@example.invalid', crypt('feedback-only', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}', null, now() + interval '1 day', now(), now()),
+  ('99250000-0000-4000-8000-000000000007', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'feedback-math-teacher@example.invalid', crypt('feedback-only', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}', null, null, now(), now()),
+  ('99250000-0000-4000-8000-000000000008', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'feedback-math-director@example.invalid', crypt('feedback-only', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}', null, null, now(), now());
 
 insert into public.profiles(id, role, name, email, created_at, updated_at)
 values
@@ -25,7 +27,9 @@ values
   ('99250000-0000-4000-8000-000000000003', 'staff', '운영 스태프', 'feedback-staff@example.invalid', now(), now()),
   ('99250000-0000-4000-8000-000000000004', 'teacher', '담당 원장', 'feedback-director@example.invalid', now(), now()),
   ('99250000-0000-4000-8000-000000000005', 'teacher', '무관 교사', 'feedback-unrelated@example.invalid', now(), now()),
-  ('99250000-0000-4000-8000-000000000006', 'admin', '차단 관리자', 'feedback-banned-admin@example.invalid', now(), now())
+  ('99250000-0000-4000-8000-000000000006', 'admin', '차단 관리자', 'feedback-banned-admin@example.invalid', now(), now()),
+  ('99250000-0000-4000-8000-000000000007', 'teacher', '수학 담당 교사', 'feedback-math-teacher@example.invalid', now(), now()),
+  ('99250000-0000-4000-8000-000000000008', 'teacher', '수학 담당 원장', 'feedback-math-director@example.invalid', now(), now())
 on conflict (id) do update
 set role = excluded.role,
     name = excluded.name,
@@ -39,30 +43,47 @@ where profile_id in (
   '99250000-0000-4000-8000-000000000003',
   '99250000-0000-4000-8000-000000000004',
   '99250000-0000-4000-8000-000000000005',
-  '99250000-0000-4000-8000-000000000006'
+  '99250000-0000-4000-8000-000000000006',
+  '99250000-0000-4000-8000-000000000007',
+  '99250000-0000-4000-8000-000000000008'
 );
 
 insert into public.teacher_catalogs(
   id, name, subjects, is_visible, sort_order, profile_id, account_email,
   dashboard_role
 )
-values (
-  '99250000-0000-4000-8000-000000000110', '피드백 담당 교사',
-  array['영어']::text[], true, 9925,
-  '99250000-0000-4000-8000-000000000001',
-  'feedback-assigned@example.invalid', 'teacher'
-);
+values
+  (
+    '99250000-0000-4000-8000-000000000110', '피드백 담당 교사',
+    array['영어']::text[], true, 9925,
+    '99250000-0000-4000-8000-000000000001',
+    'feedback-assigned@example.invalid', 'teacher'
+  ),
+  (
+    '99250000-0000-4000-8000-000000000113', '피드백 수학 교사',
+    array['수학']::text[], true, 9926,
+    '99250000-0000-4000-8000-000000000007',
+    'feedback-math-teacher@example.invalid', 'teacher'
+  );
 update public.profiles
 set teacher_catalog_id = '99250000-0000-4000-8000-000000000110'
 where id = '99250000-0000-4000-8000-000000000001';
+update public.profiles
+set teacher_catalog_id = '99250000-0000-4000-8000-000000000113'
+where id = '99250000-0000-4000-8000-000000000007';
 
 insert into public.classroom_catalogs(
   id, name, subjects, is_visible, sort_order, campus
 )
-values (
-  '99250000-0000-4000-8000-000000000111', '피드백 101호',
-  array['영어']::text[], true, 9925, '본관'
-);
+values
+  (
+    '99250000-0000-4000-8000-000000000111', '피드백 101호',
+    array['영어']::text[], true, 9925, '본관'
+  ),
+  (
+    '99250000-0000-4000-8000-000000000114', '피드백 102호',
+    array['수학']::text[], true, 9926, '본관'
+  );
 
 insert into public.classes(
   id, name, subject, status, schedule_storage_mode, schedule_plan
@@ -75,6 +96,10 @@ values
   (
     '99250000-0000-4000-8000-000000000102', '피드백 legacy반',
     '영어', '수업 진행 중', 'legacy', '{"sessions":[]}'::jsonb
+  ),
+  (
+    '99250000-0000-4000-8000-000000000103', '피드백 수학반',
+    '수학', '수업 진행 중', 'legacy', '{"sessions":[]}'::jsonb
   );
 
 do $$
@@ -126,7 +151,8 @@ insert into public.ops_registration_subject_tracks(
 values
   ('99250000-0000-4000-8000-000000000301', '99250000-0000-4000-8000-000000000201', '영어', 'consultation_waiting', '99250000-0000-4000-8000-000000000004', 'manual', now(), false, 'observation_requested', 6, now(), 'consultation_completed', 1),
   ('99250000-0000-4000-8000-000000000302', '99250000-0000-4000-8000-000000000202', '영어', 'consultation_waiting', '99250000-0000-4000-8000-000000000004', 'manual', now(), false, 'observation_completed', 9, now(), 'consultation_completed', 1),
-  ('99250000-0000-4000-8000-000000000303', '99250000-0000-4000-8000-000000000203', '영어', 'consultation_waiting', '99250000-0000-4000-8000-000000000004', 'manual', now(), false, 'observation_completed', 4, now(), 'consultation_completed', 1);
+  ('99250000-0000-4000-8000-000000000303', '99250000-0000-4000-8000-000000000203', '영어', 'consultation_waiting', '99250000-0000-4000-8000-000000000004', 'manual', now(), false, 'observation_completed', 4, now(), 'consultation_completed', 1),
+  ('99250000-0000-4000-8000-000000000304', '99250000-0000-4000-8000-000000000201', '수학', 'consultation_waiting', '99250000-0000-4000-8000-000000000008', 'manual', now(), false, 'observation_requested', 12, now(), 'consultation_completed', 1);
 
 insert into public.ops_registration_appointments(
   id, task_id, kind, scheduled_at, place, status, notification_revision,
@@ -135,7 +161,8 @@ insert into public.ops_registration_appointments(
 values
   ('99250000-0000-4000-8000-000000000401', '99250000-0000-4000-8000-000000000201', 'observation_class', ((current_date + 7 + time '18:00') at time zone 'Asia/Seoul'), '본관', 'scheduled', 2, '99250000-0000-4000-8000-000000000002'),
   ('99250000-0000-4000-8000-000000000402', '99250000-0000-4000-8000-000000000202', 'observation_class', ((current_date - 7 + time '17:00') at time zone 'Asia/Seoul'), '본관', 'completed', 3, '99250000-0000-4000-8000-000000000002'),
-  ('99250000-0000-4000-8000-000000000403', '99250000-0000-4000-8000-000000000203', 'observation_class', ((current_date - 14 + time '16:00') at time zone 'Asia/Seoul'), '본관', 'completed', 4, '99250000-0000-4000-8000-000000000002');
+  ('99250000-0000-4000-8000-000000000403', '99250000-0000-4000-8000-000000000203', 'observation_class', ((current_date - 14 + time '16:00') at time zone 'Asia/Seoul'), '본관', 'completed', 4, '99250000-0000-4000-8000-000000000002'),
+  ('99250000-0000-4000-8000-000000000404', '99250000-0000-4000-8000-000000000201', 'observation_class', ((current_date + 8 + time '19:00') at time zone 'Asia/Seoul'), '본관', 'scheduled', 5, '99250000-0000-4000-8000-000000000002');
 
 insert into public.ops_registration_observations(
   id, task_id, track_id, appointment_id, class_id,
@@ -147,7 +174,8 @@ insert into public.ops_registration_observations(
   classroom_name_snapshot, campus, status, attendance,
   attendance_recorded_by, attendance_recorded_at, suitability_result,
   feedback_reason, feedback_submitted_by, feedback_submitted_at,
-  feedback_revision, revision, created_by, updated_by
+  feedback_revision, decision_kind, decided_by, decided_at,
+  revision, created_by, updated_by
 )
 values
   (
@@ -166,7 +194,7 @@ values
     '99250000-0000-4000-8000-000000000001',
     '99250000-0000-4000-8000-000000000111', '영어', '피드백 정규반',
     '담당 교사', '피드백 101호', '본관', 'scheduled', null,
-    null, null, null, null, null, null, 0, 4,
+    null, null, null, null, null, null, 0, null, null, null, 4,
     '99250000-0000-4000-8000-000000000002',
     '99250000-0000-4000-8000-000000000002'
   ),
@@ -190,7 +218,8 @@ values
     '담당 교사', '피드백 101호', '본관', 'completed', 'attended',
     '99250000-0000-4000-8000-000000000002', '2026-08-09 03:00:00+00',
     'fit', '대리 입력 피드백', '99250000-0000-4000-8000-000000000002',
-    '2026-08-09 03:04:05+00', 2, 8,
+    '2026-08-09 03:04:05+00', 2, 'not_registered',
+    '99250000-0000-4000-8000-000000000004', '2026-08-09 03:10:00+00', 8,
     '99250000-0000-4000-8000-000000000002',
     '99250000-0000-4000-8000-000000000002'
   ),
@@ -214,7 +243,29 @@ values
     '담당 교사', '피드백 101호', '본관', 'completed', 'attended',
     '99250000-0000-4000-8000-000000000001', '2026-08-02 04:00:00+00',
     'unfit', '담당 교사 피드백', '99250000-0000-4000-8000-000000000001',
-    '2026-08-02 04:05:00+00', 1, 5,
+    '2026-08-02 04:05:00+00', 1, null, null, null, 5,
+    '99250000-0000-4000-8000-000000000002',
+    '99250000-0000-4000-8000-000000000002'
+  ),
+  (
+    '99250000-0000-4000-8000-000000000504',
+    '99250000-0000-4000-8000-000000000201',
+    '99250000-0000-4000-8000-000000000304',
+    '99250000-0000-4000-8000-000000000404',
+    '99250000-0000-4000-8000-000000000103',
+    'legacy', null, 'feedback-math-sibling', current_date + 8,
+    ((current_date + 8 + time '19:00') at time zone 'Asia/Seoul'),
+    ((current_date + 8 + time '21:00') at time zone 'Asia/Seoul'),
+    'active', null, repeat('f', 64),
+    pg_catalog.jsonb_build_object(
+      'authority', 'legacy', 'sessionKey', 'feedback-math-sibling',
+      'contentHash', repeat('f', 64)
+    ),
+    repeat('9', 64), '99250000-0000-4000-8000-000000000113',
+    '99250000-0000-4000-8000-000000000007',
+    '99250000-0000-4000-8000-000000000114', '수학', '피드백 수학반',
+    '수학 담당 교사', '피드백 102호', '본관', 'scheduled', null,
+    null, null, null, null, null, null, 0, null, null, null, 3,
     '99250000-0000-4000-8000-000000000002',
     '99250000-0000-4000-8000-000000000002'
   );
@@ -438,6 +489,40 @@ select is(
   '99250000-0000-4000-8000-000000000501',
   'track director reads the exact owned observation'
 );
+select is(
+  pg_temp.feedback_access_read(
+    '99250000-0000-4000-8000-000000000007',
+    '99250000-0000-4000-8000-000000000504'
+  ) ->> 'observationId',
+  '99250000-0000-4000-8000-000000000504',
+  'math assigned teacher retains access to only the exact sibling-subject observation they own'
+);
+select throws_ok(
+  $$select pg_temp.feedback_access_error_probe(
+    '99250000-0000-4000-8000-000000000007',
+    '99250000-0000-4000-8000-000000000501'
+  )$$,
+  'P0002',
+  'registration_observation_not_found',
+  'assigned teacher owning one sibling-subject row still receives exact P0002 for another teacher row'
+);
+select is(
+  pg_temp.feedback_access_read(
+    '99250000-0000-4000-8000-000000000008',
+    '99250000-0000-4000-8000-000000000504'
+  ) ->> 'observationId',
+  '99250000-0000-4000-8000-000000000504',
+  'math track director retains access to only the exact sibling subject and track they own'
+);
+select throws_ok(
+  $$select pg_temp.feedback_access_error_probe(
+    '99250000-0000-4000-8000-000000000008',
+    '99250000-0000-4000-8000-000000000501'
+  )$$,
+  'P0002',
+  'registration_observation_not_found',
+  'director owning one sibling subject track still receives exact P0002 for another director track'
+);
 
 select throws_ok(
   $$select pg_temp.feedback_access_error_probe(
@@ -552,6 +637,50 @@ select is(
     ]::text[]) key_name
   ),
   'legacy feedback read returns only the exact approved key set'
+);
+select is(
+  pg_temp.feedback_access_read(
+    '99250000-0000-4000-8000-000000000004',
+    '99250000-0000-4000-8000-000000000502'
+  ),
+  pg_catalog.jsonb_build_object(
+    'observationId', '99250000-0000-4000-8000-000000000502'::uuid,
+    'taskId', '99250000-0000-4000-8000-000000000202'::uuid,
+    'trackId', '99250000-0000-4000-8000-000000000302'::uuid,
+    'appointmentId', '99250000-0000-4000-8000-000000000402'::uuid,
+    'studentName', '대리 학생',
+    'studentGrade', '중3',
+    'subject', '영어',
+    'classId', '99250000-0000-4000-8000-000000000102'::uuid,
+    'className', '피드백 legacy반',
+    'sessionAuthority', 'legacy',
+    'sessionDate', current_date - 7,
+    'sessionKey', 'feedback-legacy-proxy',
+    'classLessonSessionId', null::uuid,
+    'legacySessionKey', 'feedback-legacy-proxy',
+    'sourceRevision', pg_catalog.jsonb_build_object(
+      'authority', 'legacy',
+      'sessionKey', 'feedback-legacy-proxy',
+      'contentHash', repeat('b', 64)
+    ),
+    'startsAt', ((current_date - 7 + time '17:00') at time zone 'Asia/Seoul'),
+    'endsAt', ((current_date - 7 + time '19:00') at time zone 'Asia/Seoul'),
+    'classroomName', '피드백 101호',
+    'teacherName', '담당 교사',
+    'status', 'completed',
+    'attendance', 'attended',
+    'suitabilityResult', 'fit',
+    'feedbackReason', '대리 입력 피드백',
+    'proxySubmitted', true,
+    'feedbackSubmittedByName', '대리 관리자',
+    'feedbackSubmittedAt', '2026-08-09 03:04:05+00'::timestamptz,
+    'revision', 8,
+    'feedbackRevision', 2,
+    'appointmentNotificationRevision', 3,
+    'trackWorkflowRevision', 9,
+    'decisionKind', 'not_registered'
+  ),
+  'populated feedback DTO rejects swapped or misrouted IDs names schedule session status feedback revisions and decision values'
 );
 select is(
   (
