@@ -12,6 +12,7 @@
 
 - 제품 계약의 권위는 `docs/superpowers/specs/2026-08-09-registration-observation-workflow-design.md`다.
 - 이 계획은 `2026-08-09-registration-observation-core.md`가 제공하는 schema, booking RPC, runtime/readiness, 공통 client model, `dashboard_private.registration_observation_domain_events`를 선행 조건으로 한다.
+- 이 계획의 completion gate가 공용 멘션 계획 `docs/superpowers/plans/2026-08-10-dashboard-google-chat-profile-mentions.md`보다 먼저 통과해야 한다. 담당 교사·원장 profile ID는 기존 canonical observation/track 사실로만 제공하며 이 계획은 Chat identity, mention setting, provider 또는 Directory를 호출하지 않는다.
 - 원장 결정은 교사 피드백만으로 자동 실행하지 않는다. 담당 교사·admin/staff가 피드백을 저장한 뒤 원장 또는 admin/staff가 별도 동작으로 결정한다.
 - assigned teacher에게 `ops_tasks` 또는 sibling subject track 전체 SELECT 권한을 추가하지 않는다.
 - teacher 전용 read RPC에는 학생명·학년·과목·수업·일시·강의실·담당 교사·현재 피드백·revision만 포함한다. 전화번호, 학교, 문의 메모, 다른 과목과 다른 observation은 반환하지 않는다.
@@ -1460,3 +1461,4 @@ git commit -m "feat: show observations on registration calendar"
 - [ ] 104000 calendar view/helper forward replacement과 Task 8 exact service DTO/select가 일치하며, 달력은 appointment 단위 한 건이고 runtime0에서 observation filter/row/deep-link/detail을 모두 숨긴다. Runtime1에서는 calendar builder와 Google Chat/in-app provider consumer가 `taskId,trackId,appointmentId,observationId,view=calendar` golden을 공유하고, extra/duplicate/missing/malformed tuple은 fallback 없이 닫히며, 최근 manager detail 50개 밖의 observation도 exact single-attempt RPC로 열리고 네 URL 관계가 모두 재검증된다.
 - [ ] enrollment focus는 roadmap의 exact rollback SQL을 migration artifact 없이 rehearsal해 1→0/0→0와 open observation/data preservation을 증명한다.
 - [ ] focused test, clean DB/pgTAP, ESLint, tsc, `next build --webpack`, `git diff --check`가 모두 PASS한다.
+- [ ] downstream profile-mention/Google Chat 계획이 소비할 feedback/domain event와 current teacher/director facts는 저장됐지만, 이 계획 자체의 Directory/webhook/provider call은 0이다.

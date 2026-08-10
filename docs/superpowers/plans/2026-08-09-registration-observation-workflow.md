@@ -1,8 +1,8 @@
 # Registration Observation Workflow Delivery Roadmap
 
-> **For agentic workers:** 이 문서는 실행 순서와 공통 계약을 고정하는 상위 로드맵이다. 직접 구현하지 말고 아래 네 실행 계획을 순서대로 진행한다. 각 실행 계획은 superpowers:subagent-driven-development(권장) 또는 superpowers:executing-plans를 사용한다.
+> **For agentic workers:** 이 문서는 실행 순서와 공통 계약을 고정하는 상위 로드맵이다. 직접 구현하지 말고 아래 다섯 실행 계획을 순서대로 진행한다. 각 실행 계획은 superpowers:subagent-driven-development(권장) 또는 superpowers:executing-plans를 사용한다.
 
-**Goal:** 등록 신청 직전의 과목별 청강 예약, 교사 피드백, 원장 결정, Google Chat 운영 알림, SOLAPI 고객 안내를 독립적으로 검증·배포·활성화한다.
+**Goal:** 등록 신청 직전의 과목별 청강 예약, 교사 피드백, 원장 결정, 프로필 기반 Google Chat 담당자 멘션, Google Chat 운영 알림, SOLAPI 고객 안내를 독립적으로 검증·배포·활성화한다.
 
 **Architecture:** 예약·피드백 같은 핵심 도메인 저장과 외부 전송을 분리한다. 핵심 mutation은 canonical 사실과 revision을 검증한 뒤 공통 domain outbox까지만 원자 저장하고, Google Chat과 SOLAPI는 각자 별도 materializer·queue·worker·activation을 소유한다. 스키마 준비 여부와 사용자 노출 runtime을 분리해 활성화 전에도 안전하게 readiness를 확인한다.
 
@@ -11,6 +11,7 @@
 ## Product Authority
 
 - 승인된 제품 계약: `docs/superpowers/specs/2026-08-09-registration-observation-workflow-design.md`
+- 승인된 공용 멘션 계약: `docs/superpowers/specs/2026-08-10-dashboard-google-chat-profile-mentions-design.md`
 - 이 로드맵은 구현 경계를 나눌 뿐 제품 계약을 변경하지 않는다.
 - 계약 변경이 필요하면 구현을 중단하고 설계 문서를 먼저 수정·승인받는다.
 
@@ -20,8 +21,9 @@
 |---:|---|---|
 | 1 | `docs/superpowers/plans/2026-08-09-registration-observation-core.md` | default-OFF schema/readiness, 예약 원장·RPC·목록/상세 UI, 공통 outbox |
 | 2 | `docs/superpowers/plans/2026-08-09-registration-observation-feedback-enrollment.md` | 교사 피드백·원장 결정·등록 첫 수업일·달력 |
-| 3 | `docs/superpowers/plans/2026-08-09-registration-observation-google-chat.md` | Google Chat immediate/due worker와 종류별 default-OFF 활성화 |
-| 4 | `docs/superpowers/plans/2026-08-09-registration-observation-solapi.md` | 고객 예약 안내·3시간 리마인드, 템플릿 verification/live 활성화 |
+| 3 | `docs/superpowers/plans/2026-08-10-dashboard-google-chat-profile-mentions.md` | 프로필 identity·규칙별 토글·공용 resolver/snapshot·provider text, adopted rule 0/provider 0 |
+| 4 | `docs/superpowers/plans/2026-08-09-registration-observation-google-chat.md` | 과목방 교사·관리팀방 원장 멘션, immediate/due worker와 종류별 default-OFF 활성화 |
+| 5 | `docs/superpowers/plans/2026-08-09-registration-observation-solapi.md` | 고객 예약 안내·3시간 리마인드, 템플릿 verification/live 활성화 |
 
 뒤 계획은 앞 계획이 정의한 public/private interface만 소비한다. 앞 계획의 migration이나 RPC를 다시 정의해 부수효과를 붙이는 방식은 금지한다.
 
@@ -43,6 +45,8 @@
 - 모든 신규 migration은 저장소가 고정한 Supabase CLI `/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supabase/cli-darwin-arm64/bin/supabase-go` `2.103.0`의 `migration new`와 아래 표의 exact slug로 먼저 생성한다. 실행 전 reviewed frozen target 부재를 확인하고 생성된 동일 slug 파일이 정확히 한 개인지 검증한다. 생성 파일은 untracked이므로 exact generated path에 `git add -- "$generated"`를 먼저 실행한 뒤에만 각 task block의 literal frozen path로 `git mv --`한다. move 직후와 SQL 작성 뒤 target을 다시 stage하고, `git diff --cached --name-only --diff-filter=ACMR`에서 같은 slug가 frozen target 정확히 한 개, `--diff-filter=D`에서 staged source/orphan이 0개인지 검증한다. target 충돌, CLI version drift, 생성 파일 0개/2개 이상, staged orphan, empty target, `git diff --cached --check` 실패면 그 task를 중단한다. 직접 `touch`, redirection, `apply_patch`로 migration 파일을 처음 만드는 것은 금지한다.
 - `SECURITY DEFINER` mutation/read surface는 `SET search_path = ''`, schema-qualified relation/function, 함수 내부 explicit actor·role/access 검증을 갖는다. pure private ID/hash/trigger helper는 모든 API role에서 exact EXECUTE를 revoke하고 actor-guarded definer caller/trigger chain에서만 도달하는 경우에만 직접 actor 인자를 생략할 수 있으며 그 call graph를 pgTAP으로 고정한다. 필요하지 않은 `authenticated`, `service_role`도 revoke하고 실제 호출 역할에만 최소 grant한다. public enrollment wrapper처럼 기존 definer 경계를 유지하는 함수도 같은 ACL을 pgTAP으로 고정한다.
 - 새 runtime, Google Chat rule, SOLAPI message kind는 모두 default OFF다. code push나 migration만으로 provider가 활성화되면 안 된다.
+- 공용 Google Chat 멘션 foundation은 기존 workflow 설정을 채택하거나 활성화하지 않는다. action-required 기본 ON/informational 기본 OFF는 각 workflow 채택 migration이 별도 mention-setting row를 seed할 때만 적용한다.
+- Directory 조회는 선생님 설정의 명시적 동기화에서만 허용한다. worker/provider hot path는 DB에 미리 검증된 identity snapshot만 사용하고 Directory 호출 0을 유지한다.
 - 테스트/DB 적용/Git push/Vercel READY/Google Chat receipt/SOLAPI approval·receipt는 서로 다른 증거로 보고한다.
 
 ## Cross-Plan Database Contract
@@ -135,11 +139,11 @@ Plan 1 creates one reusable runner:
   --focus schema
 ```
 
-`--focus` accepts exactly one of `schema | booking | feedback-access | feedback-submit | feedback | enrollment | google-chat | solapi-contract | solapi-queue | solapi`. The runner must create a clean isolated database, apply repository migrations in order only through the selected focus ceiling, run the requested pgTAP files, report the exact failed assertion, and tear down the temporary database on success or failure. `feedback-submit` runs access + submit pgTAP, while `feedback` runs access + submit + decision pgTAP from separate files. A DB task cannot defer this check to the final rollout plan.
+`--focus` accepts exactly one of `schema | booking | workspace | core-review | feedback-access | feedback-submit | feedback | enrollment | chat-mentions | google-chat | solapi-contract | solapi-queue | solapi`. The runner must create a clean isolated database, apply repository migrations in order only through the selected focus ceiling, run the requested pgTAP files, report the exact failed assertion, and tear down the temporary database on success or failure. `feedback-submit` runs access + submit pgTAP, while `feedback` runs access + submit + decision pgTAP from separate files. `chat-mentions` ends at `20260809104500`, seeds no adopted workflow row and has provider/outbox stage `core`. A DB task cannot defer this check to the final rollout plan.
 
 Single-session mutation pgTAP may set runtime `1` only inside its rollback transaction. A `dblink`/multi-session concurrency test must not rely on that uncommitted value: the isolated runner creates uniquely named fixture rows and sets runtime `1` through a separate superuser connection, commits them before opening worker connections, then disconnects workers, restores runtime `0`, deletes only those exact fixture IDs in reverse FK order, commits cleanup, and verifies runtime `0` from a fresh connection. Enrollment activation concurrency starts from committed runtime `0`, performs the real admin RPC in worker connections, and restores `1→0` with the exact Gate B-R rehearsed SQL body before deleting only exact fixture IDs; an outer transaction rollback is never claimed to undo a remote commit. No test helper, bypass GUC, deactivation RPC, direct-write grant, or fixture row is installed by a production migration.
 
-Reviewed frozen migration identities are closed across the four normal plans. A worker must use the slug in the right column with the pinned CLI, stage the exact generated path, then move it to the exact target in the left column; it must not select a fresh timestamp instead. The sole exception is Gate B-R: no artifact exists in the healthy tree, and an incident-generated timestamp is accepted only through its separate failure declaration, staged-orphan gate, two reviews, and two approvals.
+Reviewed frozen migration identities are closed across the five normal plans. A worker must use the slug in the right column with the pinned CLI, stage the exact generated path, then move it to the exact target in the left column; it must not select a fresh timestamp instead. The sole exception is Gate B-R: no artifact exists in the healthy tree, and an incident-generated timestamp is accepted only through its separate failure declaration, staged-orphan gate, two reviews, and two approvals.
 
 | Frozen target | `migration new` slug |
 |---|---|
@@ -150,6 +154,7 @@ Reviewed frozen migration identities are closed across the four normal plans. A 
 | `20260809103000_registration_observation_feedback_mutations.sql` | `registration_observation_feedback_mutations` |
 | `20260809103500_registration_observation_feedback_decisions.sql` | `registration_observation_feedback_decisions` |
 | `20260809104000_registration_observation_enrollment_source.sql` | `registration_observation_enrollment_source` |
+| `20260809104500_dashboard_google_chat_profile_mentions.sql` | `dashboard_google_chat_profile_mentions` |
 | `20260809105000_registration_observation_google_chat.sql` | `registration_observation_google_chat` |
 | `20260809106000_registration_observation_solapi_contract.sql` | `registration_observation_solapi_contract` |
 | `20260809106100_registration_observation_solapi_queue.sql` | `registration_observation_solapi_queue` |
@@ -182,20 +187,20 @@ All RPC response normalizers use exact-key validation. Unknown enums, malformed 
 
 ## Delivery Sequence and Approval Gates
 
-### Gate A: Plans 1–4 default-OFF artifacts implemented
+### Gate A: Plans 1–5 default-OFF artifacts implemented
 
-- clean DB apply through `20260809106200` and all observation schema/booking/feedback/enrollment/Google Chat/SOLAPI pgTAP pass
+- clean DB apply through `20260809106200` and all observation schema/booking/feedback/enrollment/profile-mention/Google Chat/SOLAPI pgTAP pass
 - focused Node tests, ESLint, tsc, `next build --webpack`, `git diff --check` pass
 - independent spec and code-quality review pass per task
 - runtime, every Google Chat observation rule and every SOLAPI observation message kind remain OFF; provider attempts are zero
 
 ### Gate B: Core production release
 
-1. Rebase the reviewed feature branch on current `origin/main` in the isolated worktree, keep it free of unrelated changes, finish every Plan 1–4 commit/review, and record `release_sha="$(git rev-parse HEAD)"`. Push that exact commit to its `origin/codex/...` feature ref; do not update `main` yet.
+1. Rebase the reviewed feature branch on current `origin/main` in the isolated worktree, keep it free of unrelated changes, finish every Plan 1–5 commit/review, and record `release_sha="$(git rev-parse HEAD)"`. Push that exact commit to its `origin/codex/...` feature ref; do not update `main` yet.
 2. Freeze a trusted read-only pre-dispatch receipt and classify it as exactly one of these two states; every other or partially installed state is `drifted` and blocks dispatch.
-   - First installation, exact token `not_installed`: `dashboard_private.registration_observation_runtime_settings`, `dashboard_private.registration_observation_domain_events`, `dashboard_private.registration_observation_chat_jobs`, and `dashboard_private.registration_observation_solapi_event_consumptions` are all absent; observation provider attempts are zero; and the complete local-only pending set is exactly `20260809100000`, `20260809101000`, `20260809102000`, `20260809102500`, `20260809103000`, `20260809103500`, `20260809104000`, `20260809105000`, `20260809106000`, `20260809106100`, `20260809106200` in that order, with unreviewed pending count `0`. Do not require a runtime probe before its relation/function exists. The feature-ref workflow must transition this state to exact token `installed_inert`: all eleven reviewed versions are installed, runtime is `0`, all seven Google Chat observation rules and both SOLAPI observation kinds are OFF, and observation outbox/consumer/job/template-receipt/provider-attempt counts remain zero.
+   - First installation, exact token `not_installed`: `dashboard_private.registration_observation_runtime_settings`, `dashboard_private.registration_observation_domain_events`, `dashboard_private.google_chat_profile_identities`, `dashboard_private.registration_observation_chat_jobs`, and `dashboard_private.registration_observation_solapi_event_consumptions` are all absent; observation provider attempts are zero; and the complete local-only pending set is exactly `20260809100000`, `20260809101000`, `20260809102000`, `20260809102500`, `20260809103000`, `20260809103500`, `20260809104000`, `20260809104500`, `20260809105000`, `20260809106000`, `20260809106100`, `20260809106200` in that order, with unreviewed pending count `0`. Do not require a runtime probe before its relation/function exists. The feature-ref workflow must transition this state to exact token `installed_inert`: all twelve reviewed versions are installed, runtime is `0`, exactly seven adopted Google Chat mention-setting rows have the approved six ON/one informational OFF values, all eight Google Chat observation destination rules and both SOLAPI observation kinds are OFF, and observation outbox/consumer/job/template-receipt/provider-attempt counts remain zero.
    - Subsequent rollout, exact token `installed_runtime0`: the observation schema and runtime probe already exist, `public.registration_observation_runtime_version()=0`, all observation provider families are OFF, observation outbox/provider attempts are zero, and the complete pending set equals that rollout's frozen reviewed ordered set with unreviewed pending count `0`. The feature-ref workflow must preserve `installed_runtime0` and produce no outbox/provider delta until the later activation step.
-   In either branch, dispatch the existing GitHub Actions workflow `.github/workflows/supabase-db-push.yml` / `Push Supabase Migrations` with the exact feature ref before any application-code update to `main`. The workflow's event/head branch/checkout `headSha` must match the dispatch and `release_sha`; its layout test/verifier and `Push migrations` job must succeed. Freeze the full linked ledger immediately afterward and compare it with the pre-dispatch receipt: it may add only the exact frozen reviewed pending set, may remove no version, and may contain no unreviewed version. For this first installation that delta is the eleven-version set above, including Google Chat `20260809105000`; its dependency gate must pass before observation mutations can create an event. Operator shell must not run `supabase link`, `migration repair`, or any `db push --linked`.
+   In either branch, dispatch the existing GitHub Actions workflow `.github/workflows/supabase-db-push.yml` / `Push Supabase Migrations` with the exact feature ref before any application-code update to `main`. The workflow's event/head branch/checkout `headSha` must match the dispatch and `release_sha`; its layout test/verifier and `Push migrations` job must succeed. Freeze the full linked ledger immediately afterward and compare it with the pre-dispatch receipt: it may add only the exact frozen reviewed pending set, may remove no version, and may contain no unreviewed version. For this first installation that delta is the twelve-version set above, including profile mention foundation `20260809104500` before Google Chat `20260809105000`; its dependency gate must pass before observation mutations can create an event. Operator shell must not run `supabase link`, `migration repair`, or any `db push --linked`.
 3. Only after the feature-ref DB run has `conclusion=success`, exact `headSha=release_sha`, and frozen ledger evidence, fast-forward `main` to that identical `release_sha`—no merge commit, rebuild commit, or cherry-pick SHA. Wait for the `push: main` `Push Supabase Migrations` run before accepting application deployment evidence. That second DB run must have exact `headSha=release_sha`, report pending migration count 0 / remote database already up to date, and leave a second read-only ledger byte-for-byte equal to the feature-ref receipt. A non-no-op or unequal-ledger main-trigger run blocks Vercel acceptance and activation.
 4. Verify Vercel Production `READY`, aliases and runtime logs for the identical `release_sha`; a Production receipt for another SHA is invalid.
 5. In the deployed classroom management UI, explicitly select `본관 | 별관` for every in-use classroom left null; do not infer from names.
@@ -365,17 +370,19 @@ cmp -s "$rollback_ledger_after_dispatch" "$rollback_ledger_after_main"
 
 The dispatch log and before/after ledger diff must show exactly the named incident version applied once and no other change. The automatic main run must be pending 0 / database already up to date, and `cmp` must prove its ledger equals the feature-ref receipt. Any pre-dispatch ledger mismatch blocks the run. These `migration list --linked` calls are read-only; operators never run `supabase link`, `db push --linked`, `migration repair`, or `db reset --linked` directly. Post-apply, verify runtime `0` from a fresh connection and browser probe, new non-replay observation mutations rejected, provider attempts unchanged, all four hashes/counts preserved, and re-run the open-observation report. Existing open observations remain stored and must be individually listed for an explicit product-approved wind-down/resume decision; this task neither cancels them nor changes attendance, feedback, decision, enrollment, admission, payment, outbox, due, or provider data.
 
-### Gate C: Google Chat release
+### Gate C: Google Chat profile identity and observation release
 
-- use the Plan 3 code/migration already deployed at Gate B; do not apply a new Google migration after runtime activation
+- use the Plan 3 foundation and Plan 4 observation code/migrations already deployed at Gate B; do not apply a new Google migration after runtime activation
+- provision the three Directory credentials in Vercel Production only through the approved secret workflow, redeploy the identical release SHA, and require the new Production deployment `READY`; Preview/local remain absent
+- verify actual teacher/director profile identities in teacher settings before any mention-enabled rule; identity readiness is not provider-send proof
 - prove provider-zero, destination routing, URL allowlist and privacy in isolated DB and browser
-- enable one event family at a time: scheduled → rescheduled → canceled → 3h preparation → feedback due → feedback submitted
+- enable one event family at a time: scheduled → rescheduled → canceled → 3h preparation → feedback due → feedback submitted → director reassigned
 - verify exactly one expected channel receipt for each family before enabling the next
 - rollback only observation rule families; existing registration/level-test/consultation notifications stay enabled
 
 ### Gate D: SOLAPI release
 
-- use the Plan 4 code/migrations already deployed default-OFF at Gate B
+- use the Plan 5 code/migrations already deployed default-OFF at Gate B
 - create provider templates and wait for approval without blocking domain/Google Chat operation
 - add new template IDs to Vercel Preview/Production environment, redeploy exact code SHA and verify `READY`
 - for each kind independently: `off → verification → one approved-number accepted receipt → live`
@@ -407,8 +414,9 @@ The report records both SHAs and states that the second deployment is docs-only.
 
 - [ ] Plan 1 completion gate passes.
 - [ ] Plan 2 completion gate passes.
-- [ ] Plan 3 completion gate passes, including real Google Chat receipts.
-- [ ] Plan 4 code/DB completion gate passes independently of provider approval.
+- [ ] Plan 3 shared profile-mention completion gate passes with adopted-rule count 0 and provider 0.
+- [ ] Plan 4 completion gate passes, including actual subject-room teacher and management-room director mention receipts.
+- [ ] Plan 5 code/DB completion gate passes independently of provider approval.
 - [ ] SOLAPI booking and reminder each pass verification receipt, recipient receipt and live activation.
 - [ ] Gate B 전에 enrollment-focus pgTAP으로 exact `1 → 0` SQL body와 data/open-observation 보존을 rehearsal했으며, healthy release tree에는 rollback migration artifact가 없다. 실제 실패 때만 Gate B-R exact CLI/staged orphan/hash/two-review/two-approval gate로 named forward-only migration을 생성·적용한다. Google Chat rules와 SOLAPI kinds는 데이터를 삭제하지 않고 독립 비활성화할 수 있다.
 - [ ] No duplicate provider attempts exist for the same observation + notification revision + message/event kind.

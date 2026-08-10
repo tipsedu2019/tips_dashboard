@@ -2,31 +2,32 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 청강 예약·변경·취소, 시작 3시간 전 준비, 종료 30분 후 피드백 요청, 피드백 제출을 정확한 과목방·원장방·원장 inbox에 한 번씩 전달하되 예약 저장과 provider를 분리하고 source drift·중복·개인정보·과거 backlog를 fail closed한다.
+**Goal:** 청강 예약·변경·취소, 시작 3시간 전 준비, 종료 30분 후 피드백 요청, 피드백 제출, 담당 원장 변경을 정확한 과목방·관리팀방·원장 inbox에 한 번씩 전달하고, 검증된 현재/변경 담당자만 멘션하되 예약 저장과 provider를 분리하고 source drift·중복·개인정보·과거 backlog를 fail closed한다.
 
-**Architecture:** core 청강 도메인이 같은 transaction에서 INSERT하는 `dashboard_private.registration_observation_domain_events`만 stable producer seam으로 소비한다. Google Chat migration은 core booking/lifecycle RPC를 재정의하지 않고 outbox의 `AFTER INSERT` trigger로 provider-neutral Chat job만 원자 생성·취소한다. 기존 notification worker가 due job을 claim하고 canonical source를 두 번 재검증한 뒤 기존 notification control plane event/fanout/delivery에 넘긴다. observation delivery는 layout verifier가 보호하는 generic claim/prepare/revalidate RPC를 byte-identical로 보존하고, claim-token으로 잠그는 observation 전용 frozen-state read RPC와 channel-aware final-prepare RPC만 사용한다. final-prepare는 공통 source/rule/frozen-render를 재검증한 뒤 Google Chat은 canonical connection만 검증해 기존 `begin_notification_delivery_send_v1`로 provider ownership을 얻고, in-app만 current director eligibility를 검증해 기존 `commit_notification_in_app_delivery_v1`로 원자 완료한다. Google Chat rule은 전부 OFF로 Gate B의 runtime-0 migration/code bundle에 포함하고, 기존 customer/SOLAPI queue·worker·template·cron과 별도로 한 family씩 실제 receipt를 확인한다.
+**Architecture:** core 청강 도메인이 같은 transaction에서 INSERT하는 `dashboard_private.registration_observation_domain_events`와 공용 멘션 기반이 캡처한 provider-neutral `notification_assignment_change_facts`만 stable producer seam으로 소비한다. Google Chat migration은 core booking/lifecycle/assignment RPC를 재정의하지 않고 각 seam의 trigger로 Chat job만 원자 생성·취소한다. 기존 notification worker가 due job을 claim하고 canonical source를 두 번 재검증한 뒤 기존 notification control plane event/fanout/delivery에 넘긴다. observation delivery는 layout verifier가 보호하는 generic claim/prepare/revalidate RPC를 byte-identical로 보존하고, claim-token으로 잠그는 observation 전용 frozen-state read RPC와 channel-aware final-prepare RPC만 사용한다. final-prepare는 source/rule/frozen-render와 공용 mention setting/identity를 재검증하고 delivery mention snapshot을 결속한 뒤, Google Chat은 canonical connection만 검증해 기존 `begin_notification_delivery_send_v1`로 provider ownership을 얻고, in-app만 current director eligibility를 검증해 기존 `commit_notification_in_app_delivery_v1`로 원자 완료한다. Google Chat rule은 전부 OFF로 Gate B의 runtime-0 migration/code bundle에 포함하고, 기존 customer/SOLAPI queue·worker·template·cron과 별도로 한 family씩 실제 receipt를 확인한다.
 
 **Tech Stack:** Next.js 16 App Router, React 19, TypeScript 5.9, Supabase Postgres/PostgREST/RLS/pgTAP, existing notification control plane worker, Google Chat cards/webhooks, Node test runner, ESLint, Vercel
 
 ## Global Constraints
 
-- 제품 계약의 권위는 `docs/superpowers/specs/2026-08-09-registration-observation-workflow-design.md`다. 이 계획이 설계를 바꾸지 않는다.
-- 선행 구현은 `docs/superpowers/plans/2026-08-09-registration-observation-core.md`와 `docs/superpowers/plans/2026-08-09-registration-observation-feedback-enrollment.md`다. 특히 core outbox, observation/appointment 상태 매핑, 담당 교사 feedback route가 먼저 존재해야 한다.
+- 제품 계약의 권위는 `docs/superpowers/specs/2026-08-09-registration-observation-workflow-design.md`와 `docs/superpowers/specs/2026-08-10-dashboard-google-chat-profile-mentions-design.md`다. 이 계획이 설계를 바꾸지 않는다.
+- 선행 구현은 `docs/superpowers/plans/2026-08-09-registration-observation-core.md`, `docs/superpowers/plans/2026-08-09-registration-observation-feedback-enrollment.md`, `docs/superpowers/plans/2026-08-10-dashboard-google-chat-profile-mentions.md`다. 특히 core outbox, observation/appointment 상태 매핑, 담당 교사 feedback route, profile identity/rule mention setting/assignment fact/delivery snapshot/provider text 경계가 먼저 존재해야 한다.
 - 이 계획은 `enter_registration_observation_v1`, `list_registration_observation_sessions_v1`, `save_registration_observation_booking_v1`, `cancel_registration_observation_v1`, `withdraw_registration_observation_v1`, 참석·피드백·결정 RPC 또는 그 private impl을 `CREATE OR REPLACE`하지 않는다. 신규와 기존 예약 변경은 모두 core `save_registration_observation_booking_v1`가 소유한다.
 - core mutation은 domain event INSERT까지만 소유한다. Google Chat trigger는 같은 transaction에서 내부 job intent만 만들며 webhook, `net.http`, `fetch`, provider attempt를 실행하지 않는다.
 - 고객/SOLAPI 경계는 완전히 별도다. `registration_customer_reminder_jobs`, `ops_registration_customer_messages`, customer-message template/receipt/activation, SOLAPI worker/API/cron과 관련 source를 이 계획에서 수정하거나 호출하지 않는다.
-- output event key는 정확히 여섯 개다: `registration.observation_scheduled`, `registration.observation_rescheduled`, `registration.observation_canceled`, `registration.observation_reminder_due`, `registration.observation_feedback_due`, `registration.observation_feedback_submitted`.
+- output event key는 정확히 일곱 개다: `registration.observation_scheduled`, `registration.observation_rescheduled`, `registration.observation_canceled`, `registration.observation_reminder_due`, `registration.observation_feedback_due`, `registration.observation_feedback_submitted`, `registration.observation_director_reassigned`. 앞 여섯 개는 observation domain seam, 마지막 하나는 canonical `track_director` assignment fact seam만 소비한다.
 - `observation_attendance_recorded`는 고객 reminder와 내부 `observation_reminder_due`를 취소하고 `observation_feedback_due`는 유지한다. `observation_no_show`와 `observation_feedback_submitted`는 남은 내부 due를 모두 취소한다.
-- 예약·변경·취소·due identity는 `observation_id + appointment.notification_revision + output event key`다. observation `revision`과 `feedback_revision`은 notification identity가 아니다.
+- 예약·변경·취소·due identity는 `observation_id + appointment.notification_revision + output event key`다. 담당 원장 변경 identity는 `assignment_fact_id + registration.observation_director_reassigned`다. observation `revision`과 `feedback_revision`은 notification identity가 아니다.
 - 시작 3시간 전과 종료 30분 후는 고정 운영값이다. settings UI, browser payload, environment variable로 변경하지 않는다. 시작까지 3시간 미만이면 reminder job을 만들지 않고 즉시 대체 발송도 하지 않는다.
 - 예약 핵심 drift는 class, subject, session authority/ID/key, session `schedule_state`, date/start/end, teacher, classroom, campus의 `booking_fact_hash`로 판단한다. 교재·진도·메모·workflow 상태는 hash에 넣지 않는다.
 - claim, materialization, provider 직전은 각각 현재 appointment `notification_revision`, observation/appointment lifecycle, tagged `source_revision`, `booking_fact_hash`를 다시 읽는다. 승인 설계 §6.1의 저장/현재 분리(`docs/superpowers/specs/2026-08-09-registration-observation-workflow-design.md:282`)대로 source revision만 바뀌고 booking hash가 같을 때 scheduled/rescheduled는 job에 저장된 immutable `preparation_snapshot`을 유지하고, reminder_due만 동일 회차의 최신 교재·진도를 다시 resolve한다. booking hash가 다르면 `source_dirty`, provider attempt 0이다.
 - `source_dirty`, `canceled`, `suppressed`, `failed`, `materialized`는 terminal이다. 자동으로 pending으로 되돌리지 않는다. observation Production Google Chat은 기존 production classifier를 그대로 쓴다. HTTP 429는 `retry_wait/provider_rate_limited`, HTTP 425는 `retry_wait/transient_pre_dispatch_failure`로 provider 미수락이 확정된 경우에만 자동 retry한다. Production worker는 항상 `http408Disposition:'delivery_unknown'`을 명시하므로 HTTP 408은 `delivery_unknown/provider_ambiguous_response`, timeout/reset/5xx도 `delivery_unknown` terminal이며 두 번째 provider call이 없다. option 없는 legacy 408 retry 기본값은 보존하지만 observation Production 계약으로 사용하지 않는다. retry부터는 첫 attempt 전에 저장한 render fingerprint/title/body/href를 동결하고 현재 eligibility만 read-only로 다시 확인한다.
-- 신규 rule 7개는 모두 `enabled=false`, `delivery_mode='immediate'`, `rule_variant_key='immediate'`로 seed한다. due 시각은 rule scheduler가 아니라 전용 job이 소유한다. 기존 runtime flag, 기존 rule enabled 값, 기존 schedule을 변경하지 않는다.
-- scheduled/rescheduled/canceled/reminder_due/feedback_due Google Chat은 canonical track subject에서 `google_chat.english | google_chat.math | google_chat.science`를 결정한다. feedback_submitted Google Chat은 `google_chat.executive`, paired in-app은 current track director 한 명이다.
+- 신규 destination rule 8개는 모두 `enabled=false`, `delivery_mode='immediate'`, `rule_variant_key='immediate'`로 seed한다. due 시각은 rule scheduler가 아니라 전용 job이 소유한다. 기존 runtime flag, 기존 rule enabled 값, 기존 schedule을 변경하지 않는다.
+- 신규 Google Chat mention-setting row는 정확히 7개다. scheduled/rescheduled/reminder_due/feedback_due/feedback_submitted/director_reassigned는 `mention_enabled=true`, informational canceled는 `false`, paired in-app은 Chat mention row가 없다. Mention setting은 rule enabled/runtime을 바꾸지 않는다.
+- scheduled/rescheduled/canceled/reminder_due/feedback_due Google Chat은 canonical track subject에서 `google_chat.english | google_chat.math | google_chat.science`를 결정하고 current teacher profile을 의미 대상으로 사용한다. rescheduled의 같은 revision에 `subject_teacher` change fact가 있으면 이전+신규를 사용한다. feedback_submitted와 director_reassigned Google Chat은 `google_chat.management`이고 current 또는 이전+신규 track director를 사용한다. paired in-app은 current track director 한 명이다. `google_chat.executive`는 모든 observation branch에서 금지한다.
 - feedback 결과(`fit|unfit`)와 사유, 전화번호, 학교, 문의 메모, sibling track, 내부 UUID는 카드 본문에 넣지 않는다. 인증된 Dashboard button target의 observation UUID만 예외다.
 - 모든 DB assertion은 새 migration까지 clean apply한 뒤 `scripts/run-registration-observation-local-db-qa.mjs --execute --approved-local-db --focus google-chat` focused pgTAP으로 검증한다.
-- 기존 migration은 수정하지 않는다. Google Chat DB 변경은 core plan이 예약한 단일 forward migration `20260809105000_registration_observation_google_chat.sql` 안에서 완결하며, `105000`은 frozen common runner의 hard ceiling이다. 이 계획은 두 번째 migration이나 `105000`보다 늦은 파일을 만들지 않는다. 파일은 pinned supabase-go CLI `2.103.0`의 `supabase migration new registration_observation_google_chat`로 먼저 만든 뒤 생성 파일이 정확히 하나이고 frozen target이 비어 있음을 확인해 reviewed `git mv`한다. target collision, 둘 이상의 generated file, 최종 빈 파일, generated orphan은 즉시 중단한다.
+- 기존 migration은 수정하지 않는다. Google Chat DB 변경은 core plan이 예약한 단일 forward migration `20260809105000_registration_observation_google_chat.sql` 안에서 완결하며, `105000`은 frozen common runner의 hard ceiling이다. 이 migration은 선행 `20260809104500_dashboard_google_chat_profile_mentions.sql`의 exact tables/functions/ACL을 transaction 시작에서 검증하고 없으면 전체 rollback한다. 이 계획은 두 번째 migration이나 `105000`보다 늦은 파일을 만들지 않는다. 파일은 pinned supabase-go CLI `2.103.0`의 `supabase migration new registration_observation_google_chat`로 먼저 만든 뒤 생성 파일이 정확히 하나이고 frozen target이 비어 있음을 확인해 reviewed `git mv`한다. target collision, 둘 이상의 generated file, 최종 빈 파일, generated orphan은 즉시 중단한다.
 - `scripts/verify-supabase-migration-layout.mjs`가 보호하는 `claim_notification_deliveries_v1`, `prepare_notification_immediate_delivery_v1`, `revalidate_immediate_notification_delivery_v1`는 migration에서 호출·교체·주석 참조하지 않는다. observation 전용 claim-token frozen-state read/final-prepare만 추가하고 기존 generic behavior/hash를 보존한다. worker는 generic claim DTO에 없는 expiry/frozen render 값을 추측하거나 delivery table에서 직접 읽지 않는다.
 - 신규 private job table은 RLS를 켜고 `PUBLIC, anon, authenticated, service_role`의 직접 table privilege를 모두 revoke한다. 신규 `SECURITY DEFINER` public RPC는 `set search_path=''`, 함수 내부 exact caller-role check, exact-signature PUBLIC/role revoke, 필요한 역할에만 최소 grant를 갖는다. private helper와 outbox trigger는 가능한 한 `SECURITY INVOKER`로 두며 모든 relation을 schema-qualified한다.
 - provider-zero, Git SHA, Supabase migration, Vercel Production `READY`, rule activation, Google Chat provider receipt, 실제 채팅방 수신은 서로 다른 증거로 기록한다.
@@ -52,6 +53,27 @@ dashboard_private.registration_observation_domain_events(
   occurred_at timestamptz not null,
   unique (observation_id, notification_revision, event_kind)
 )
+
+dashboard_private.notification_assignment_change_facts(
+  fact_id uuid primary key,
+  workflow_key text not null,
+  source_type text not null,
+  source_id text not null,
+  source_revision bigint,
+  context_entity_id uuid not null,
+  role_key text not null,
+  previous_profile_ids uuid[] not null,
+  current_profile_ids uuid[] not null,
+  occurred_at timestamptz not null
+)
+
+dashboard_private.prepare_google_chat_delivery_mention_snapshot_v1(
+  p_delivery_id uuid,
+  p_claim_token uuid,
+  p_rule_id uuid,
+  p_profile_ids uuid[],
+  p_retry_frozen boolean
+) returns jsonb
 ```
 
 `source_revision`은 다음 exact tagged union이다.
@@ -158,6 +180,7 @@ export type RegistrationObservationNotificationSource = Readonly<{
   startsAt: string
   endsAt: string
   teacherCatalogId: string
+  teacherProfileId: string | null
   teacherName: string
   classroomCatalogId: string
   classroomName: string
@@ -168,7 +191,7 @@ export type RegistrationObservationNotificationSource = Readonly<{
 }>
 ```
 
-`hasFeedback`는 발송 eligibility용 boolean일 뿐 결과·사유를 반환하지 않는다. RPC와 TypeScript source reader는 parent/student phone, school, inquiry, suitability, feedback reason, sibling track, 전체 `schedule_plan`을 반환하지 않는다.
+`hasFeedback`는 발송 eligibility용 boolean일 뿐 결과·사유를 반환하지 않는다. `teacherProfileId`와 `directorProfileId`는 의미 대상 profile이 연결되지 않았을 때 null이며, 그 자체가 Chat delivery 실패 사유가 아니다. RPC와 TypeScript source reader는 parent/student phone, school, inquiry, suitability, feedback reason, sibling track, 전체 `schedule_plan`을 반환하지 않는다.
 
 payload schema version은 `3`이며 event별 exact union을 사용한다.
 
@@ -199,6 +222,8 @@ type ObservationChatPayloadBase = Readonly<{
   booking_fact_hash: string
   occurred_at: string
   delivery_expires_at: string
+  mention_role: "subject_teacher" | "track_director"
+  mention_profile_ids: ReadonlyArray<string>
 }>
 
 export type RegistrationObservationChatPayloadV3 =
@@ -235,6 +260,13 @@ export type RegistrationObservationChatPayloadV3 =
       submitted_by_name: string
       submitted_at: string
     }>)
+  | (ObservationChatPayloadBase & Readonly<{
+      event_kind: "registration.observation_director_reassigned"
+      assignment_fact_id: string
+      booking: ObservationBookingPresentationFact
+      previous_director_profile_ids: ReadonlyArray<string>
+      director_profile_ids: ReadonlyArray<string>
+    }>)
 ```
 
 Job/NCP identity는 다음 문자열을 정확히 사용한다.
@@ -251,6 +283,18 @@ occurrence_key := 'registration:observation:' || observation_id::text
 
 `event key suffix`는 `scheduled | rescheduled | canceled | reminder_due | feedback_due | feedback_submitted` 중 하나다. `dashboard_private.notification_events`의 기존 unique `(scope_key, workflow_key, source_type, source_id, event_key, occurrence_key)`와 Chat job의 unique `(observation_id, notification_revision, event_key)`가 중복을 이중 차단한다.
 
+Director reassignment uses this separate exact identity:
+
+```sql
+source_type := 'registration_observation_assignment_change';
+source_id := assignment_fact_id::text;
+notification_events.source_revision := null;
+occurrence_key := 'registration:observation:' || observation_id::text
+  || ':director_assignment:' || assignment_fact_id::text;
+```
+
+`registration_observation_chat_jobs` has `assignment_fact_id uuid null`; a partial unique `(assignment_fact_id,event_key) where assignment_fact_id is not null` owns reassignment, while the existing observation/revision unique applies only where `assignment_fact_id is null`. Repeated director changes therefore cannot collide or backfill a stale occurrence.
+
 ## Timing, Cutoff, and Backlog Contract
 
 | Family | `due_at` | `delivery_expires_at` | Late behavior |
@@ -259,6 +303,7 @@ occurrence_key := 'registration:observation:' || observation_id::text
 | reminder_due | `starts_at - interval '3 hours'` | `starts_at` | 시작 후 provider 0 |
 | feedback_due | `ends_at + interval '30 minutes'` | `ends_at + interval '24 hours'` | expired terminal `canceled/notification_window_closed` |
 | feedback_submitted | domain `occurred_at` | `occurred_at + 24 hours` | expired terminal `canceled/notification_window_closed` |
+| director_reassigned | assignment fact `occurred_at` | `occurred_at + 24 hours` | expired terminal `canceled/notification_window_closed` |
 
 - rule disabled 시 job identity와 rule snapshot은 `suppressed/rule_disabled_at_source`로 보존하지만 claim 대상이 아니다.
 - rule을 나중에 ON으로 바꿔도 기존 `suppressed`, `canceled`, `source_dirty`, `failed`, `materialized` job은 재개방하지 않는다.
@@ -278,17 +323,17 @@ occurrence_key := 'registration:observation:' || observation_id::text
 | `tests/registration-observation-local-db-runner.test.mjs` | google-chat focus ceiling and exact pgTAP routing |
 | `src/features/notifications/server/adapters/registration-observation-notification-source.ts` | strict source RPC parser, bounded selected-session content reads, exact progress priority, no sibling fallback |
 | `src/features/notifications/server/adapters/registration-notification-adapter.ts` | observation target resolution, payload parsing, pre-send revalidation/refresh, exact deep links |
-| `src/features/notifications/server/presentation/registration-notification-presentation.ts` | six event copy, destination matrix, privacy and exact schema validation |
+| `src/features/notifications/server/presentation/registration-notification-presentation.ts` | seven event copy, destination matrix, privacy and exact schema validation |
 | `src/features/notifications/server/notification-workflow-adapter.ts` | optional refreshed payload result for pre-send render refresh |
 | `src/features/notifications/server/notification-worker.ts` | Chat job claim/materialization stage, observation frozen-state read on first/retry, first-attempt refresh, retry frozen-payload/render preflight, channel-aware observation final-prepare seam, provider workflow key, heartbeat count |
 | `src/app/api/notifications/worker/route.ts` | additive worker count response; same authenticated route and schedule contract |
 | `src/features/notifications/server/notification-app-deep-link.ts` | shared exact static/dynamic route/query allowlist and button label policy |
-| `src/features/notifications/server/providers/google-chat-provider.ts` | shared app-link validator, observation button labels, unchanged webhook transport safety |
-| `src/features/notifications/notification-control-plane-types.ts` | six registration event literals and destination types |
+| `src/features/notifications/server/providers/google-chat-provider.ts` | consume shared validated mention context, app-link validator, observation button labels, unchanged webhook transport safety |
+| `src/features/notifications/notification-control-plane-types.ts` | seven registration event literals and destination types |
 | `src/features/notifications/server/notification-workflow-registry.ts` | observation event adapter registration and no-backfill reconciliation boundary |
-| `src/features/notifications/notification-google-chat-catalog.ts` | canonical subject/executive connection contract |
+| `src/features/notifications/notification-google-chat-catalog.ts` | canonical subject/management connection contract |
 | `src/features/notifications/notification-content-contract-registry.ts` | payload v3 content contracts and privacy classes |
-| `src/features/notifications/notification-content-manifest.ts` | seven rule identities and content coverage |
+| `src/features/notifications/notification-content-manifest.ts` | eight rule identities and content coverage |
 | `tests/notification-registration-observation.test.mjs` | exact source/payload/dedupe/routing/content/privacy tests |
 | `tests/registration-notification-adapter.test.mjs` | source drift, target resolution, stored immediate/latest reminder preparation split, no backfill |
 | `tests/notification-registration-presentation.test.mjs` | Korean copy and destination/privacy fail-closed tests |
@@ -298,7 +343,7 @@ occurrence_key := 'registration:observation:' || observation_id::text
 | `tests/notification-operations.test.mjs` | unchanged one-minute existing schedule and no second cron |
 | `tests/notification-content-contract.test.mjs` | content key/token/privacy contract |
 | `tests/notification-content-manifest.test.mjs` | DB/TS/fixture identity parity |
-| `tests/fixtures/notification-content-contracts.json` | seven exact rule contracts |
+| `tests/fixtures/notification-content-contracts.json` | eight exact rule contracts |
 | `tests/fixtures/notification-content-coverage-manifest.json` | observation destination/renderer/fixture coverage |
 | `tests/fixtures/notification-content-golden.json` | deterministic Korean output and link metadata |
 | `tests/registration-observation-google-chat-provider-zero.test.mjs` | full lifecycle with fetch/provider/external-attempt count zero |
@@ -322,7 +367,7 @@ occurrence_key := 'registration:observation:' || observation_id::text
 
 **Interfaces:**
 - Consumes: core `registration_observation_domain_events`, observation/appointment/track/task/class/session/profile/catalog facts, notification control plane rule/event/job/delivery tables
-- Produces: one internal Chat job ledger; atomic `AFTER INSERT` materializer; service-only source, claim, finish, reap, materialize, claim-token frozen-state read, first-attempt delivery-refresh, channel-aware observation final-prepare and readiness RPCs; seven disabled UI-registry/rule/template/content-contract identities
+- Produces: one internal Chat job ledger; atomic domain-event and assignment-fact materializers; service-only source, claim, finish, reap, materialize, claim-token frozen-state read, first-attempt delivery-refresh, channel-aware observation final-prepare and readiness RPCs; eight disabled UI-registry/rule/template/content-contract identities and seven mention-setting rows
 - Does not produce: webhook call, external attempt, customer message, SOLAPI job, cron job
 
 - [ ] **Step 1: Write the Node migration-contract RED test**
@@ -342,7 +387,9 @@ const migrationUrl = new URL(
 test("observation Chat consumes the stable domain outbox without replacing core mutations", async () => {
   const sql = await readFile(migrationUrl, "utf8")
   assert.match(sql, /after insert on dashboard_private\.registration_observation_domain_events/i)
-  assert.match(sql, /unique\s*\(observation_id,\s*notification_revision,\s*event_key\)/i)
+  assert.match(sql, /after insert on dashboard_private\.notification_assignment_change_facts/i)
+  assert.match(sql, /create unique index registration_observation_chat_jobs_domain_identity_idx[\s\S]*observation_id,\s*notification_revision,\s*event_key[\s\S]*domain_event_id is not null/i)
+  assert.match(sql, /create unique index registration_observation_chat_jobs_assignment_identity_idx[\s\S]*assignment_fact_id,\s*event_key[\s\S]*assignment_fact_id is not null/i)
   assert.match(sql, /registration\.observation_reminder_due/i)
   assert.match(sql, /registration\.observation_feedback_due/i)
   assert.doesNotMatch(sql, /create or replace function public\.(?:enter|save|reschedule|cancel|withdraw)_registration_observation_v1/i)
@@ -351,15 +398,17 @@ test("observation Chat consumes the stable domain outbox without replacing core 
   assert.match(sql, /notification_dispatch_ownership_claims/i)
 })
 
-test("all observation rules are immediate and default OFF", async () => {
+test("all eight observation destination rules are immediate and default OFF", async () => {
   const sql = await readFile(migrationUrl, "utf8")
-  const seededEvents = [...sql.matchAll(/registration\.observation_(scheduled|rescheduled|canceled|reminder_due|feedback_due|feedback_submitted)/g)]
-  assert.equal(new Set(seededEvents.map((match) => match[0])).size, 6)
+  const seededEvents = [...sql.matchAll(/registration\.observation_(scheduled|rescheduled|canceled|reminder_due|feedback_due|feedback_submitted|director_reassigned)/g)]
+  assert.equal(new Set(seededEvents.map((match) => match[0])).size, 7)
   assert.match(sql, /delivery_mode[\s\S]*'immediate'/i)
   assert.match(sql, /rule_variant_key[\s\S]*'immediate'/i)
   assert.match(sql, /enabled[\s\S]*false/i)
   assert.match(sql, /notification_settings_ui_registry/i)
   assert.match(sql, /notification_rule_content_contracts/i)
+  assert.match(sql, /notification_rule_mention_settings/i)
+  assert.doesNotMatch(sql, /google_chat\.executive/i)
 })
 
 test("observation Chat leaves protected generic functions byte-identical", async () => {
@@ -476,7 +525,7 @@ test("service worker uses RPCs and legacy QA performs no shared delivery or owne
   }
 })
 
-test("observation final prepare keeps executive connection and director eligibility channel-local", async () => {
+test("observation final prepare keeps management delivery independent while resolving safe mentions", async () => {
   const sql = await readFile(migrationUrl, "utf8")
   const segment = (startMarker, endMarker) => {
     const start = sql.indexOf(startMarker)
@@ -495,13 +544,14 @@ test("observation final prepare keeps executive connection and director eligibil
   )
 
   assert.match(google, /begin_notification_delivery_send_v1/i)
-  assert.match(google, /google_chat\.executive/i)
-  assert.match(google, /connection:google_chat\.executive/i)
-  assert.doesNotMatch(google, /public\.google_chat_webhook_settings|public\.profiles|auth\.users|notification_profile_is_active_v1|is_active_subject_director|director_profile_id/i)
+  assert.match(google, /prepare_google_chat_delivery_mention_snapshot_v1/i)
+  assert.match(google, /google_chat\.management/i)
+  assert.match(google, /connection:google_chat\.management/i)
+  assert.doesNotMatch(google, /public\.google_chat_webhook_settings|notification_profile_is_active_v1|is_active_subject_director|recipient_revoked/i)
   assert.match(inApp, /public\.profiles[\s\S]*auth\.users/i)
   assert.match(inApp, /is_active_subject_director[\s\S]*notification_profile_is_active_v1/i)
   assert.match(inApp, /recipient_revoked/i)
-  assert.doesNotMatch(inApp, /google_chat_webhook_settings|google_chat\.management/i)
+  assert.doesNotMatch(inApp, /google_chat_webhook_settings|google_chat\.management|prepare_google_chat_delivery_mention_snapshot_v1/i)
 })
 ```
 
@@ -651,18 +701,19 @@ grant execute on function public.get_registration_observation_notification_sourc
 4. return `hasFeedback` boolean only, never suitability/result/reason;
 5. raise `registration_observation_notification_source_missing` for missing/inconsistent links and `registration_observation_notification_source_dirty` when stored/current booking hash differs.
 
-`directorProfileId` is deliberately nullable channel-routing metadata, not part of `sourceRevision` or `bookingFactHash`. The source RPC/reader must not turn a null director, missing profile, deleted account, or banned account into `registration_observation_notification_source_missing`; it returns the nullable current track value and leaves profile/account eligibility exclusively to the final-prepare in-app branch. This is what allows the same valid feedback-submitted source to retain its executive Google Chat delivery when its director inbox is unavailable.
+`directorProfileId` is deliberately nullable semantic-target metadata, not part of `sourceRevision` or `bookingFactHash`. The source RPC/reader must not turn a null director, missing profile, deleted account, banned account, or missing Chat identity into `registration_observation_notification_source_missing`; it returns the nullable current track value. Final-prepare applies strict recipient eligibility only to the in-app branch, while the Google Chat branch snapshots verified mention identities on a best-effort basis. Thus the same valid feedback-submitted source retains its management Chat delivery without a mention when the director inbox/identity is unavailable.
 
 The function performs no `classes.select('*')`, full observation scan, sibling track read or unbounded `schedule_plan` projection. Add an observation PK lookup, appointment PK lookup and exact class/session lookup to the pgTAP `EXPLAIN` assertions.
 
 - [ ] **Step 6: Create the closed Chat job ledger**
 
-First create immutable, security-invoker private validators `dashboard_private.registration_observation_chat_source_revision_valid_v1(jsonb) returns boolean`, `dashboard_private.registration_observation_chat_job_snapshots_valid_v1(text,jsonb,jsonb,jsonb,jsonb) returns boolean`, and `dashboard_private.registration_observation_chat_reservation_snapshot_hash_v1(text,jsonb,jsonb) returns text`. The first accepts only the frozen normalized/legacy tagged union, with no extra/null keys; the second enforces exact event-specific object/null shapes. The hash helper returns `notification_sha256_hex_v1(notification_canonical_json_v1(jsonb_build_object('eventKey',...,'currentBooking',...,'previousBooking',...)))`, preserving explicit JSON nulls. Do not invent a second serializer. Cross-language tests compare this output with the worker's existing sorted-key `canonicalJson` SHA-256 for reordered object keys and nested arrays. Create this exact relation in `dashboard_private`:
+First create immutable, security-invoker private validators `dashboard_private.registration_observation_chat_source_revision_valid_v1(jsonb) returns boolean`, `dashboard_private.registration_observation_chat_job_snapshots_valid_v1(text,jsonb,jsonb,jsonb,jsonb,text,uuid[]) returns boolean`, and `dashboard_private.registration_observation_chat_reservation_snapshot_hash_v1(text,jsonb,jsonb) returns text`. The first accepts only the frozen normalized/legacy tagged union, with no extra/null keys; the second enforces exact event-specific object/null shapes plus semantic mention role/profile arrays. The hash helper returns `notification_sha256_hex_v1(notification_canonical_json_v1(jsonb_build_object('eventKey',...,'currentBooking',...,'previousBooking',...)))`, preserving explicit JSON nulls. Do not invent a second serializer. Cross-language tests compare this output with the worker's existing sorted-key `canonicalJson` SHA-256 for reordered object keys and nested arrays. Create this exact relation in `dashboard_private`:
 
 ```sql
 create table dashboard_private.registration_observation_chat_jobs (
   job_id uuid primary key default gen_random_uuid(),
-  domain_event_id uuid not null references dashboard_private.registration_observation_domain_events(event_id) on delete restrict,
+  domain_event_id uuid references dashboard_private.registration_observation_domain_events(event_id) on delete restrict,
+  assignment_fact_id uuid references dashboard_private.notification_assignment_change_facts(fact_id) on delete restrict,
   observation_id uuid not null references public.ops_registration_observations(id) on delete restrict,
   appointment_id uuid not null references public.ops_registration_appointments(id) on delete restrict,
   notification_revision integer not null check (notification_revision > 0),
@@ -672,7 +723,8 @@ create table dashboard_private.registration_observation_chat_jobs (
     'registration.observation_canceled',
     'registration.observation_reminder_due',
     'registration.observation_feedback_due',
-    'registration.observation_feedback_submitted'
+    'registration.observation_feedback_submitted',
+    'registration.observation_director_reassigned'
   )),
   source_revision jsonb not null,
   booking_fact_hash text not null check (booking_fact_hash ~ '^[a-f0-9]{64}$'),
@@ -681,6 +733,8 @@ create table dashboard_private.registration_observation_chat_jobs (
   previous_booking_snapshot jsonb,
   preparation_snapshot jsonb,
   submission_snapshot jsonb,
+  mention_role text not null check (mention_role in ('subject_teacher','track_director')),
+  mention_profile_ids uuid[] not null default '{}'::uuid[],
   rule_snapshot jsonb not null check (jsonb_typeof(rule_snapshot) = 'array'),
   due_at timestamptz not null,
   expires_at timestamptz not null check (expires_at > due_at),
@@ -697,7 +751,7 @@ create table dashboard_private.registration_observation_chat_jobs (
   completed_at timestamptz,
   created_at timestamptz not null default clock_timestamp(),
   updated_at timestamptz not null default clock_timestamp(),
-  unique (observation_id, notification_revision, event_key),
+  check ((domain_event_id is null) <> (assignment_fact_id is null)),
   check (
     source_revision = jsonb_strip_nulls(source_revision)
     and dashboard_private.registration_observation_chat_source_revision_valid_v1(source_revision)
@@ -711,7 +765,9 @@ create table dashboard_private.registration_observation_chat_jobs (
     current_booking_snapshot,
     previous_booking_snapshot,
     preparation_snapshot,
-    submission_snapshot
+    submission_snapshot,
+    mention_role,
+    mention_profile_ids
   )),
   check (
     reservation_snapshot_hash = dashboard_private.registration_observation_chat_reservation_snapshot_hash_v1(
@@ -753,12 +809,21 @@ The snapshot validator admits exactly these combinations and exact key sets:
 | reminder_due | required | null | required | null |
 | feedback_due | required | null | null | null |
 | feedback_submitted | required | null | null | required `{submittedByName,submittedAt}` |
+| director_reassigned | required | null | null | null |
 
-Booking snapshots contain only the frozen booking presentation keys; preparation contains exactly `{textbookNames,progressSummary}`. No validator accepts phone, school, feedback result/reason, sibling content or an extra key. pgTAP exercises every accepted row and one rejection for each wrong/mixed/extra-key shape, then proves that changing one current/previous booking byte without recomputing `reservation_snapshot_hash` fails `23514` and that deterministic replay produces the same hash.
+Booking snapshots contain only the frozen booking presentation keys; preparation contains exactly `{textbookNames,progressSummary}`. The first six event kinds require `domain_event_id`; director reassigned requires `assignment_fact_id`. Subject events require `mention_role='subject_teacher'`; feedback-submitted/director-reassigned Chat and the paired inbox semantic source use `track_director`. Mention profile arrays are canonical distinct UUID arrays and may be empty only when the canonical profile link is absent. No validator accepts Chat IDs, markup, phone, school, feedback result/reason, sibling content or an extra key. pgTAP exercises every accepted row and one rejection for each wrong/mixed/extra-key shape, then proves that changing one current/previous booking byte without recomputing `reservation_snapshot_hash` fails `23514` and that deterministic replay produces the same hash.
 
 Add exact indexes:
 
 ```sql
+create unique index registration_observation_chat_jobs_domain_identity_idx
+  on dashboard_private.registration_observation_chat_jobs(
+    observation_id, notification_revision, event_key
+  )
+  where domain_event_id is not null;
+create unique index registration_observation_chat_jobs_assignment_identity_idx
+  on dashboard_private.registration_observation_chat_jobs(assignment_fact_id, event_key)
+  where assignment_fact_id is not null;
 create index registration_observation_chat_jobs_due_claim_idx
   on dashboard_private.registration_observation_chat_jobs(status, next_attempt_at, due_at, job_id)
   where status = 'pending';
@@ -784,7 +849,7 @@ No policy grants direct Data API access and the worker receives no direct table 
 
 - [ ] **Step 7: Seed exact default-OFF UI registry, rules, templates, and DB content contracts**
 
-Replace `notification_rules_workflow_audience_check` forward-only so registration also allows `executive_team`; preserve every existing workflow/audience pair byte-for-byte otherwise. Seed seven deterministic system rules:
+Do not replace `notification_rules_workflow_audience_check` merely to add this feature: the existing registration contract already admits `management_team`. Assert that existing workflow/audience CHECK is unchanged, that `google_chat.executive` is absent from every observation rule/fixture, and seed eight deterministic system rules:
 
 | Event | Channel | Audience | Destination |
 |---|---|---|---|
@@ -793,10 +858,11 @@ Replace `notification_rules_workflow_audience_check` forward-only so registratio
 | canceled | google_chat | subject_team | canonical subject connection |
 | reminder_due | google_chat | subject_team | canonical subject connection |
 | feedback_due | google_chat | subject_team | canonical subject connection |
-| feedback_submitted | google_chat | executive_team | `google_chat.executive` |
+| feedback_submitted | google_chat | management_team | `google_chat.management` |
 | feedback_submitted | in_app | track_director | current director profile |
+| director_reassigned | google_chat | management_team | `google_chat.management` |
 
-All seven rows use `enabled=false`, `delivery_mode='immediate'`, `rule_variant_key='immediate'`, `schedule_key=null`, `schedule_config=null`, revision `1`, system actor. Each has one immutable version-1 template, payload schema version `3`, SHA-256 checksum and exact allowed-variable list. Use these deterministic UUID literals in both migration and content fixtures so repeated clean apply is identical:
+All eight rows use `enabled=false`, `delivery_mode='immediate'`, `rule_variant_key='immediate'`, `schedule_key=null`, `schedule_config=null`, revision `1`, system actor. Each has one immutable version-1 template, payload schema version `3`, SHA-256 checksum and exact allowed-variable list. Use these deterministic UUID literals in both migration and content fixtures so repeated clean apply is identical:
 
 | Identity | Rule UUID | Template UUID |
 |---|---|---|
@@ -805,10 +871,11 @@ All seven rows use `enabled=false`, `delivery_mode='immediate'`, `rule_variant_k
 | canceled subject Chat | `81000000-0000-4000-8000-000000000003` | `82000000-0000-4000-8000-000000000003` |
 | reminder_due subject Chat | `81000000-0000-4000-8000-000000000004` | `82000000-0000-4000-8000-000000000004` |
 | feedback_due subject Chat | `81000000-0000-4000-8000-000000000005` | `82000000-0000-4000-8000-000000000005` |
-| feedback_submitted executive Chat | `81000000-0000-4000-8000-000000000006` | `82000000-0000-4000-8000-000000000006` |
+| feedback_submitted management Chat | `81000000-0000-4000-8000-000000000006` | `82000000-0000-4000-8000-000000000006` |
 | feedback_submitted director inbox | `81000000-0000-4000-8000-000000000007` | `82000000-0000-4000-8000-000000000007` |
+| director_reassigned management Chat | `81000000-0000-4000-8000-000000000008` | `82000000-0000-4000-8000-000000000008` |
 
-Before inserting a rule, insert its matching `dashboard_private.notification_settings_ui_registry` row with the same identity/UUID. Use `workflow_label='등록'`, `workflow_sort=3`, `group_label='청강'`, stable event sort `201..206`, descriptive Korean event/audience/channel labels, `cell_sort=1`, `initial_enabled=false`, `source_trigger_kind='registration_observation_domain_event'`, `configuration_kind='editable_rule'`, and `activation_locked=false`. The in-app/Chat rows for feedback submitted use distinct cell sort `1/2` so UI order is deterministic. The migration asserts seven registry rows, seven rules, seven active templates, and zero enabled rows before continuing.
+Before inserting a rule, insert its matching `dashboard_private.notification_settings_ui_registry` row with the same identity/UUID. Use `workflow_label='등록'`, `workflow_sort=3`, `group_label='청강'`, stable event sort `201..207`, descriptive Korean event/audience/channel labels, `cell_sort=1`, `initial_enabled=false`, `configuration_kind='editable_rule'`, and `activation_locked=false`. The first seven rows use `source_trigger_kind='registration_observation_domain_event'`; director reassigned uses `source_trigger_kind='notification_assignment_change_fact'`. The in-app/Chat rows for feedback submitted use distinct cell sort `1/2` so UI order is deterministic. The migration asserts eight registry rows, eight rules, eight active templates, seven adopted Chat mention-setting rows with the exact six-ON/one-OFF defaults, and zero enabled rules before continuing.
 
 Each template sets `content_contract_version='1'`. Insert a matching `dashboard_private.notification_rule_content_contracts` row with the current repository shape and no invented keys:
 
@@ -830,7 +897,7 @@ type ObservationContentContractV1 = Readonly<{
   destinationPolicy: Readonly<{
     allowedConnectionKeys: ReadonlyArray<
       "google_chat.english" | "google_chat.math" |
-      "google_chat.science" | "google_chat.executive"
+      "google_chat.science" | "google_chat.management"
     >
     subjectScoped: boolean
   }>
@@ -845,9 +912,9 @@ type ObservationContentContractV1 = Readonly<{
 }>
 ```
 
-The five subject Chat contracts use all three subject connection keys and `subjectScoped=true`; executive Chat uses only `google_chat.executive`; the director in-app contract uses an empty connection list. Both non-subject contracts use `subjectScoped=false`. `availableVariables` and `fieldPresence` cover exactly the template variables. Because none of the observation templates exposes an approved free-text field, `freeTextVisibility={}` and `freeTextPriority=[]`; phone, school, inquiry, suitability, result, feedback reason, URL and UUID never appear. Seed `contract_version='1'`, update only the same deterministic identity on conflict, and assert the registry/rule/contract foreign-key identity is exact.
+The five subject Chat contracts use all three subject connection keys and `subjectScoped=true`; both management Chat contracts use only `google_chat.management`; the director in-app contract uses an empty connection list. All three non-subject contracts use `subjectScoped=false`. `availableVariables` and `fieldPresence` cover exactly the template variables. Because none of the observation templates exposes an approved free-text field, `freeTextVisibility={}` and `freeTextPriority=[]`; phone, school, inquiry, suitability, result, feedback reason, URL and UUID never appear. Seed `contract_version='1'`, update only the same deterministic identity on conflict, and assert the registry/rule/contract foreign-key identity is exact.
 
-The event-spec arrays are deterministic; `optionalLineTokens=[]` for all seven identities:
+The event-spec arrays are deterministic; `optionalLineTokens=[]` for all eight identities:
 
 | Event | `requiredTokens` | `mustHaveFacts` |
 |---|---|---|
@@ -856,8 +923,9 @@ The event-spec arrays are deterministic; `optionalLineTokens=[]` for all seven i
 | canceled | 학생, 과목, 수업, 일정 | target, event, current_state, schedule |
 | reminder_due | 학생, 과목, 수업, 일정, 담당선생님, 강의실, 교재, 진도 | target, event, schedule, location |
 | feedback_due | 학생, 과목, 수업, 일정, 담당선생님, 강의실 | target, event, schedule, location |
-| feedback_submitted executive Chat | 학생, 과목, 수업, 제출자, 제출시각 | target, event, progress_actor, schedule |
+| feedback_submitted management Chat | 학생, 과목, 수업, 제출자, 제출시각 | target, event, progress_actor, schedule |
 | feedback_submitted director inbox | 학생, 과목, 수업, 제출자, 제출시각 | target, event, progress_actor, schedule |
+| director_reassigned management Chat | 학생, 과목, 수업 | target, event, current_state |
 
 The canonical Korean templates use the same intuitive Korean tokens exposed by notification settings. Add only the missing entries to `VARIABLE_BY_TOKEN`; reuse existing entries byte-for-byte:
 
@@ -942,7 +1010,16 @@ The canonical Korean templates are:
 제출시각: {제출시각}
 ```
 
-The executive Google Chat and director inbox share the last body. Neither template has a result/reason token.
+The management Google Chat and director inbox share the last body. Neither template has a result/reason token.
+
+```text
+[청강 담당 원장 변경] {학생}
+학생: {학생}
+과목/수업: [{과목}] {수업}
+담당 원장이 변경되었습니다.
+```
+
+The reassignment body never prints previous/current director names or IDs. Those profiles exist only in the semantic mention input and immutable delivery mention snapshot.
 
 - [ ] **Step 8: Materialize domain events into jobs atomically**
 
@@ -960,12 +1037,19 @@ dashboard_private.registration_observation_chat_booking_snapshot_v1(
 dashboard_private.materialize_registration_observation_chat_from_domain_event_v1()
 returns trigger
 
+dashboard_private.materialize_registration_observation_chat_from_assignment_fact_v1()
+returns trigger
+
 create trigger registration_observation_google_chat_materializer
 after insert on dashboard_private.registration_observation_domain_events
 for each row execute function dashboard_private.materialize_registration_observation_chat_from_domain_event_v1();
+
+create trigger registration_observation_google_chat_assignment_materializer
+after insert on dashboard_private.notification_assignment_change_facts
+for each row execute function dashboard_private.materialize_registration_observation_chat_from_assignment_fact_v1();
 ```
 
-The two read helpers and trigger function are `security invoker set search_path=''`; revoke their exact signatures from `PUBLIC, anon, authenticated, service_role`. The trigger gains privileges only through the already-authorized core SECURITY DEFINER mutation that inserts the domain event, and it validates `TG_OP='INSERT'`, `TG_TABLE_SCHEMA='dashboard_private'`, `TG_TABLE_NAME='registration_observation_domain_events'` before touching a job.
+The read helpers and both trigger functions are `security invoker set search_path=''`; revoke their exact signatures from `PUBLIC, anon, authenticated, service_role`. Each trigger gains privileges only through the already-authorized SECURITY DEFINER mutation that inserts its source row and validates its exact `TG_OP`, table schema, and table name before touching a job.
 
 The trigger locks the observation's Chat jobs by `(observation_id, notification_revision, event_key)` order, then selects every matching notification rule in ascending `rule_id` order `FOR SHARE` and holds those locks through the job inserts. It validates `NEW.appointment_id`, `NEW.notification_revision`, `NEW.source_revision` and `NEW.booking_fact_hash` against the current canonical source, then applies the frozen mapping. The saved `rule_snapshot` is built only from the locked rows, so concurrent `save_notification_control_plane_v2` either finishes before the snapshot or waits until every job identity is committed. The trigger must not accept a destination from the domain row or browser.
 
@@ -975,6 +1059,7 @@ The trigger locks the observation's Chat jobs by `(observation_id, notification_
 - attendance_recorded: terminalize the current revision reminder only; leave feedback due unchanged; insert no Chat event.
 - no_show: terminalize current revision reminder and feedback due; insert no Chat event.
 - feedback_submitted: terminalize current revision reminder and feedback due; insert one feedback-submitted immediate job. Store `submission_snapshot` with exact keys `submittedByName,submittedAt` from the current observation/profile; never result or reason.
+- director_reassigned: accept only `workflow_key='registration'`, `source_type='registration_track'`, `role_key='track_director'` and the current track as `context_entity_id`; under the current track→observation→appointment locks require an undecided current observation and current scheduled/completed appointment, then insert one management Chat job keyed by `fact_id`. Store exact previous+current semantic profile arrays but no name/email/Chat ID. Facts created before the director rule activation remain suppressed and never backfill.
 
 For every output event, capture the exact current rule IDs/revisions/template IDs/enabled values. If every matching rule is disabled, create the identity as terminal `suppressed/rule_disabled_at_source`. If at least one is enabled, create `pending` with `next_attempt_at=due_at`. A later rule update never mutates this snapshot or reopens a terminal row.
 
@@ -1052,11 +1137,12 @@ grant execute on function public.materialize_registration_observation_chat_job_v
 Claim JSON exact keys are:
 
 ```text
-job_id, claim_token, observation_id, appointment_id, notification_revision,
+job_id, claim_token, observation_id, appointment_id, assignment_fact_id, notification_revision,
 event_key, due_at, expires_at, attempt_count, source_revision,
 booking_fact_hash, reservation_snapshot_hash,
 current_booking_snapshot, previous_booking_snapshot,
-preparation_snapshot, submission_snapshot, rule_snapshot
+preparation_snapshot, submission_snapshot, mention_role,
+mention_profile_ids, rule_snapshot
 ```
 
 `finish` only accepts `retry | failed | canceled | source_dirty | suppressed`. Retry requires a future `p_next_attempt_at < expires_at`, a transient allowlisted code and `attempt_count < 5`; it clears claim fields and does not persist the transient error as `last_error_code`. Every other disposition is terminal, stores its allowlisted non-null terminal error code and clears claim/lease/next-attempt fields. Reap returns expired claimed rows to the exact pending shape only while the same retry bounds hold; otherwise it closes them in the exact failed shape. Its response is exact `{reaped_count, failed_count}`.
@@ -1082,6 +1168,8 @@ dashboard_private.record_notification_event_v1(
   null
 )
 ```
+
+For `registration.observation_director_reassigned`, use `source_type='registration_observation_assignment_change'`, `source_id=assignment_fact_id::text`, nullable NCP `source_revision`, and the separate assignment occurrence key frozen above. All other events keep the observation/revision identity shown in the call. The payload builder exact-validates `mention_role` and canonical profile arrays but never carries Chat user IDs or markup.
 
 Before calling it, reacquire the exact rule IDs in ascending order `FOR SHARE`, compare those locked rows with `rule_snapshot`, and hold the locks through `record_notification_event_v1`. Read the inserted/existing `dashboard_private.notification_events.rule_snapshot` and compare it byte-for-byte with the job snapshot before marking the job materialized. A pre-call mismatch suppresses the job with no NCP event; a post-insert mismatch raises and rolls the transaction back, so neither the NCP event nor the job transition can commit. This closes the concurrent rule-save window without changing the existing recorder. On success set `materialized_event_id`, `status='materialized'`, `completed_at`, clear `next_attempt_at/claimed_by/claim_token/lease_expires_at`, and keep `last_error_code=null`; exact replay returns the same event ID.
 
@@ -1259,7 +1347,7 @@ candidate in_app
   → matching auth.users FOR SHARE
 
 candidate google_chat
-  → no director/profile/account/connection pre-lock
+  → no recipient-eligibility or connection pre-lock
 
 then, for either candidate
 → dashboard_private.notification_deliveries FOR UPDATE
@@ -1268,17 +1356,23 @@ then, for either candidate
 → dashboard_private.notification_dispatch_ownership_claims FOR UPDATE
 
 locked google_chat branch only
+→ dashboard_private.notification_rule_mention_settings FOR SHARE
+→ public.profiles then dashboard_private.google_chat_profile_identities
+  FOR SHARE in canonical profile UUID order through
+  prepare_google_chat_delivery_mention_snapshot_v1
+
+locked google_chat branch only
 → existing begin_notification_delivery_send_v1 owns the canonical
   public.google_chat_webhook_settings FOR SHARE lock/validation
 ```
 
-If the locked track director is null, the in-app candidate acquires no director dependency row and later closes fail-closed; the Google Chat candidate never reads or locks `public.profiles`, `auth.users`, director-candidate catalogs, or subject-director settings. If the candidate channel differs from the later locked delivery/event/rule identity, raise `registration_observation_notification_target_lock_mismatch` with SQLSTATE `40001` and do not acquire a second branch lock out of order. The class lock intentionally precedes the normalized session lock: the real `save_class_lesson_session_v1` path first acquires its class mutation lock and only then locks `class_lesson_sessions`, so reversing that pair would introduce a deadlock. Legacy authority has no separate session row; its selected exact session is re-derived from the already locked `classes.schedule_plan`. Missing class/session/catalog facts fail the common source contract, but missing/inactive director is only an in-app target failure. This order preserves the master `track → observation → appointment` mutation order and the existing generic `delivery → event → rule → ownership → Google connection` order. In particular, final-prepare must not pre-lock `google_chat_webhook_settings`: the unchanged real begin locks delivery and ownership before that connection, so connection-first would invert the production order. No branch may lock delivery first relative to the common source rows or call a helper that silently acquires an earlier row out of order.
+If the locked track director is null, the in-app candidate acquires no director dependency row and later closes fail-closed. The Google Chat candidate may read only the semantic profile IDs already frozen in its payload, the adopted mention setting, profile activity, and verified identity rows through the shared snapshot helper; missing/inactive/unverified identity produces an omission audit and an empty mention list, never `recipient_revoked` or a canceled Chat delivery. It never treats director eligibility as a Chat delivery-recipient gate and never reads subject-director eligibility settings. If the candidate channel differs from the later locked delivery/event/rule identity, raise `registration_observation_notification_target_lock_mismatch` with SQLSTATE `40001` and do not acquire a second branch lock out of order. The class lock intentionally precedes the normalized session lock: the real `save_class_lesson_session_v1` path first acquires its class mutation lock and only then locks `class_lesson_sessions`, so reversing that pair would introduce a deadlock. Legacy authority has no separate session row; its selected exact session is re-derived from the already locked `classes.schedule_plan`. Missing class/session/catalog facts fail the common source contract, but missing/inactive director eligibility is only an in-app target failure. This order preserves the master `track → observation → appointment` mutation order and the existing generic `delivery → event → rule → ownership → Google connection` order. In particular, final-prepare must not pre-lock `google_chat_webhook_settings`: the unchanged real begin locks delivery and ownership before that connection, so connection-first would invert the production order. No branch may lock delivery first relative to the common source rows or call a helper that silently acquires an earlier row out of order.
 
 Under those locks, ignore every pre-read value and rebuild the current tagged `sourceRevision`, `bookingFactHash`, lifecycle/status/notification revision, selected normalized session or exact priority-normalized legacy session key, class/date/time, teacher/classroom/campus catalog facts, and nullable current track `director_profile_id`. The common source result remains valid when that director is null, missing, deleted, or banned; common validation must not call `notification_profile_is_active_v1`. Require the exact claim token and live lease; workflow `registration`; source type `registration_observation`; expected event/rule/revision; `pg_catalog.clock_timestamp()` strictly before the exact payload `delivery_expires_at`; a current enabled matching rule; current source status/revision/booking hash eligibility; a stored schema-3 observation payload whose server-recomputed canonical hash equals both stored/expected payload fingerprints; and stored title/body/href whose server-recomputed canonical render hash equals both stored/expected render fingerprints. An expiry reached under this lock closes terminal `canceled/notification_window_closed` before either channel primitive. For a first attempt it additionally requires `attempt_count=0`, `last_attempt_started_at is null`, payload snapshot plus both fingerprints present, and no ownership-scoped external-attempt audit. For a retry it requires `attempt_count>0`, non-null `last_attempt_started_at`, the same frozen payload/render fingerprints, and at least one ownership-scoped registered-attempt audit; it performs only locked read-only current eligibility checks and never refreshes payload or render content.
 
 After the common source and dispatch locks/checks, apply target eligibility only inside the verified locked delivery channel:
 
-- `google_chat`: before begin, require the locked rule/event/delivery tuple to have `target_kind='connection'`, `target_profile_id is null`, and exact `target_key='connection:' || connection_key`. Subject events require the canonical subject mapping. `registration.observation_feedback_submitted` requires the complete exact tuple `audience_key='executive_team'`, `channel_key='google_chat'`, `target_kind='connection'`, `target_key='connection:google_chat.executive'`, `target_profile_id is null`, `connection_key='google_chat.executive'`, and `target_snapshot={'connection_key':'google_chat.executive'}` with no extra key. `destinationTeam='executive'` is presentation metadata derived separately from `notification-google-chat-catalog.ts`, never a target-snapshot field. Do **not** evaluate or dereference the common nullable director ID, profile, account, or active predicate in this branch. Call unchanged `public.begin_notification_delivery_send_v1(p_delivery_id,p_claim_token)` while the common source and dispatch locks remain held; that primitive alone acquires and validates `public.google_chat_webhook_settings(channel='executive') FOR SHARE` in its existing delivery→ownership→connection order, including active connection state and exact webhook form. Exact-key/type validate the same delivery/claim identity and return its result with `prepared=true`. Only `status='sending'`, `channel_key='google_chat'`, and a valid dispatch token may cross to external-attempt registration. Existing `failed/connection_missing` and every `failed|canceled|skipped` result are normalized to exact `{prepared:false,delivery_id,status,status_reason}` and return terminal/provider-zero.
+- `google_chat`: before begin, require the locked rule/event/delivery tuple to have `target_kind='connection'`, `target_profile_id is null`, and exact `target_key='connection:' || connection_key`. Subject events require the canonical subject mapping. `registration.observation_feedback_submitted` and `registration.observation_director_reassigned` each require the complete exact tuple `audience_key='management_team'`, `channel_key='google_chat'`, `target_kind='connection'`, `target_key='connection:google_chat.management'`, `target_profile_id is null`, `connection_key='google_chat.management'`, and `target_snapshot={'connection_key':'google_chat.management'}` with no extra key. `destinationTeam='management'` is presentation metadata derived separately from `notification-google-chat-catalog.ts`, never a target-snapshot field. Exact-validate the payload's semantic `mention_role`/`mention_profile_ids`, then call `dashboard_private.prepare_google_chat_delivery_mention_snapshot_v1` while the delivery/claim/rule facts remain locked. Scheduled/canceled/reminder/feedback-due use current subject teacher; rescheduled uses previous+current teacher when its matching change fact exists; feedback-submitted uses current director; director-reassigned uses previous+current director. The helper's exact `user_names` are returned as `mention_user_names`; an OFF setting or omitted identity returns `[]` and does not cancel. Do **not** evaluate `notification_profile_is_active_v1` or `is_active_subject_director` as recipient eligibility in this branch. Then call unchanged `public.begin_notification_delivery_send_v1(p_delivery_id,p_claim_token)` while the common source and dispatch locks remain held; that primitive alone acquires and validates the canonical `public.google_chat_webhook_settings` row in its existing delivery→ownership→connection order, including active connection state and exact webhook form. Exact-key/type validate the same delivery/claim identity and return its result with `prepared=true`. Only `status='sending'`, `channel_key='google_chat'`, a canonical `mention_user_names` array, and a valid dispatch token may cross to external-attempt registration. Existing `failed/connection_missing` and every `failed|canceled|skipped` result are normalized to exact `{prepared:false,delivery_id,status,status_reason}` and return terminal/provider-zero.
 - `in_app`: require `target_kind='profile'`, `connection_key is null`, exact `target_snapshot={'profile_id':<locked director UUID>}` with no extra key, a non-null locked current director, and the exact current-subject predicates `dashboard_private.is_active_subject_director(<locked director>,<locked track subject>)=true` plus `dashboard_private.notification_profile_is_active_v1(<locked director>)=true` over the locked director-candidate catalog/settings, `public.profiles`, and `auth.users` facts. Target identity must equal `target_profile_id=<locked director>` plus `target_key='profile:<locked director UUID>'`. Missing/null/inactive/non-candidate/current-director mismatch closes delivery and reserved ownership atomically as exact `{prepared:false,delivery_id,status:'canceled',status_reason:'recipient_revoked'}`; never retarget in place. Additionally require first-attempt state (`attempt_count=0`, null `last_attempt_started_at`, no ownership-scoped external-attempt audit); a retry-shaped in-app claim fails closed. While the same source/rule/ownership and director eligibility facts remain locked, call existing `public.commit_notification_in_app_delivery_v1(p_delivery_id,p_claim_token)`. Exact-validate its four-key result `{delivery_id,notification_id,push_children_created,status}` and return it plus `{prepared:true,channel_key:'in_app'}` only for `status='sent'`; normalize `canceled|skipped` to the same terminal envelope. This branch returns to the worker immediately and must never call `begin_notification_delivery_send_v1`, register an external attempt, resolve a provider, or invoke transport. The existing commit primitive remains unchanged; the zero-provider fixture uses a director with no push subscriptions and requires `push_children_created=0`.
 - reject every other channel for an observation source before either primitive.
 
@@ -1354,7 +1448,7 @@ Keep `PUBLIC`, `anon`, and `authenticated` at zero table privileges. Preserve th
 The Task 1 `no_plan()` assertion set must prove at least:
 
 1. exact table/function/trigger/check/index/ACL shape;
-2. all seven rules disabled and no existing rule changed;
+2. all eight destination rules disabled, all seven mention settings at their approved defaults, and no existing rule changed;
 3. scheduled at `starts_at - 3h` creates reminder, scheduled at `starts_at - 2h59m59s` creates no reminder;
 4. feedback due is exactly `ends_at + 30m`;
 5. duplicate domain event replay yields one job identity;
@@ -1369,7 +1463,7 @@ The Task 1 `no_plan()` assertion set must prove at least:
 14. stale claim token and payload key injection are rejected;
 15. the frozen-state read rejects stale/expired claim or non-canonical ownership, returns only the nine exact camelCase keys, exposes event payload plus null fingerprints only on a valid first claim, and exposes the persisted frozen snapshot/fingerprints on a post-refresh first claim and retry;
 16. delivery refresh is impossible after ownership-scoped external-attempt audit registration, while retry final-prepare preserves the frozen fingerprints;
-17. the Google Chat final-prepare locks and validates only its exact canonical subject/executive connection target, reaches the real begin primitive and returns only a matching `sending` provider-ready result; one-at-a-time wrong `audience_key`, `connection_key`, `target_key`, non-null `target_profile_id`, wrong snapshot value, and snapshot extra-key fixtures each fail before begin with zero external-attempt audit, while the valid executive branch performs no director profile/account read;
+17. the Google Chat final-prepare locks and validates only its exact canonical subject/management connection target, snapshots the exact adopted mention setting and active verified identities before the first marker, reaches the real begin primitive and returns only a matching `sending` provider-ready result; one-at-a-time wrong `audience_key`, `connection_key`, `target_key`, non-null `target_profile_id`, wrong snapshot value, snapshot extra-key, raw Chat ID, and forged markup fixtures each fail before begin with zero external-attempt audit, while missing/unverified identities produce a valid empty mention array without canceling the management delivery;
 18. the in-app final-prepare alone locks the current director profile/account, revalidates the active/current target plus the same common source/rule/ownership contract, reaches the real atomic commit primitive only when valid, creates exactly one dashboard notification, returns parent `sent` with zero push children in the no-subscription fixture, and creates no begin/external-attempt/provider evidence;
 19. all source/result/reason/phone fields are absent from public source JSON;
 20. customer/SOLAPI queue row counts remain exactly unchanged;
@@ -1381,7 +1475,9 @@ The Task 1 `no_plan()` assertion set must prove at least:
 26. `service_role` has SELECT but no INSERT/UPDATE/DELETE privilege on each shared delivery/ownership table, and attempted direct INSERT, UPDATE, and DELETE against both tables each fail as SQLSTATE `42501`; `PUBLIC`, `anon`, and `authenticated` retain no direct privilege;
 27. after that revoke/regrant, exact fixtures for `claim_notification_deliveries_v1(text,integer,integer)`, `begin_notification_delivery_send_v1(uuid,uuid)`, `commit_notification_in_app_delivery_v1(uuid,uuid)`, `finalize_notification_delivery_v1(uuid,uuid,text,text,text,text,text,text,timestamptz)`, and `register_notification_external_attempt_v1(uuid,uuid,bigint,uuid,uuid,uuid)` plus every new observation wrapper still execute successfully as `service_role` without any direct table DML;
 28. dblink/two-session director and selected-session races obey the ordered lock contract and produce no deadlock, mixed source, stale target, duplicate notification, or provider attempt;
-29. paired deliveries from the same `registration.observation_feedback_submitted` event prove both missing and inactive-current-director cases: in-app is absent before fanout or closes exact `canceled/recipient_revoked` at final-prepare, while the healthy locked `google_chat.executive` delivery independently reaches `sending` through the real begin primitive with external-attempt/provider count zero.
+29. paired deliveries from the same `registration.observation_feedback_submitted` event prove both missing and inactive-current-director cases: in-app is absent before fanout or closes exact `canceled/recipient_revoked` at final-prepare, while the healthy locked `google_chat.management` delivery independently reaches `sending` through the real begin primitive with an empty mention list and external-attempt/provider count zero;
+30. scheduled/reminder/feedback-due/canceled use current subject teacher, matching-revision rescheduled uses canonical previous+current teacher, feedback-submitted uses current director, and director-reassigned uses previous+current director; profile UUID order/dedupe and omission reasons match the shared resolver, while mention OFF always returns `[]` without changing rule/job status;
+31. a canonical `track_director` assignment fact under an undecided current observation creates exactly one director-reassigned job/event, replay creates zero duplicates, unrelated/malformed/stale/decided facts create zero, and `google_chat.executive` appears in no rule, target, fixture, snapshot, or provider payload.
 
 The readiness pgTAP fixture deletes only its transaction-local synthetic heartbeat rows, then covers no row, a succeeded row at `clock_timestamp()-interval '5 minutes 1 second'`, a succeeded row at `clock_timestamp()-interval '4 minutes 59 seconds'`, and finally a newer failed row over that current success. Each call exact-compares all top-level keys, `latestObservationHeartbeatAt` to the latest inserted `created_at`, and `recentObservationHeartbeat` to `false,false,true,false`; `ROLLBACK` removes the fixture.
 
@@ -1434,13 +1530,13 @@ Add two named `dblink` final-prepare race matrices using bounded `lock_timeout`/
 
 Each schedule records which transaction acquired each barrier, asserts the waiter truly waited, joins both sessions, and proves zero `40P01`/timeout, no mixed A/B payload or target, one allowed terminal-or-commit outcome, and no duplicate notification. ACL tests execute every public wrapper as `anon` and `authenticated` (both `42501`), prove `service_role` execute succeeds, assert `has_table_privilege` SELECT true and INSERT/UPDATE/DELETE false for the two shared tables, and execute all six negative direct-DML cases in transaction-local exception subblocks. New job/audit tables retain their stricter no-direct-access policy; shared delivery/ownership direct SELECT is the only exception explicitly granted above.
 
-Add a real channel-independence pgTAP matrix, not a mocked wrapper test. With one healthy locked `public.google_chat_webhook_settings(channel='executive')` row, create each fixture from one exact feedback-submitted domain event and assert the executive/in-app rows share `event_id`, source observation, occurrence, notification revision, and payload fingerprint:
+Add a real channel-independence pgTAP matrix, not a mocked wrapper test. With one healthy locked `public.google_chat_webhook_settings(channel='management')` row, create each fixture from one exact feedback-submitted domain event and assert the management/in-app rows share `event_id`, source observation, occurrence, notification revision, and payload fingerprint:
 
-1. Director null before target resolution: materialization produces the executive connection delivery only; the in-app target is unavailable rather than replaced by an arbitrary profile. Real executive final-prepare returns `prepared=true`, `channel_key='google_chat'`, `connection_key='google_chat.executive'`, `status='sending'`, the exact locked webhook, and ownership `dispatch_started`.
-2. Director present/active during paired fanout, then current track director becomes null before final-prepare: in-app returns exact `{prepared:false,delivery_id,status:'canceled',status_reason:'recipient_revoked'}`, clears claim/lease, closes reserved ownership, and creates zero dashboard notification. Its paired executive delivery still returns the successful real-begin receipt above.
-3. Director present/active during paired fanout, then the matching synthetic `auth.users` row becomes inactive through future `banned_until` before final-prepare: the same in-app close/executive proceed split is required. Repeat with `deleted_at` in a savepoint if the fixture factory supports it; either active predicate component must never affect executive Chat.
+1. Director null before target resolution: materialization produces the management connection delivery only; the in-app target is unavailable rather than replaced by an arbitrary profile. Real management final-prepare returns `prepared=true`, `channel_key='google_chat'`, `connection_key='google_chat.management'`, `status='sending'`, the exact locked webhook, and ownership `dispatch_started`.
+2. Director present/active during paired fanout, then current track director becomes null before final-prepare: in-app returns exact `{prepared:false,delivery_id,status:'canceled',status_reason:'recipient_revoked'}`, clears claim/lease, closes reserved ownership, and creates zero dashboard notification. Its paired management delivery still returns the successful real-begin receipt above.
+3. Director present/active during paired fanout, then the matching synthetic `auth.users` row becomes inactive through future `banned_until` before final-prepare: the same in-app close/management proceed split is required. Repeat with `deleted_at` in a savepoint if the fixture factory supports it; either active predicate component must never affect management Chat.
 
-For every row, assert the final-prepare lock trace is common source rows → optional in-app director dependencies → delivery/event/rule/ownership → existing begin-owned Google connection lock. Put stable SQL comments `registration_observation_final_prepare_google_chat_target_begin/end` and `registration_observation_final_prepare_in_app_target_begin/end` around the two target-validation blocks; the Node migration-contract test extracts those exact segments and proves the Google block contains the exact executive tuple plus `begin_notification_delivery_send_v1` but no direct `google_chat_webhook_settings`, `public.profiles`, `auth.users`, director helper, or `director_profile_id` reference. The in-app block contains `is_active_subject_director`, `notification_profile_is_active_v1`, exact profile snapshot/current-director predicates, and no connection fallback. In-app pgTAP asserts the locked eligibility IDs equal the current track director. Across the matrix, `register_notification_external_attempt_v1`, provider/fetch, and customer/SOLAPI deltas remain zero. Roll back all synthetic account/track changes.
+For every row, assert the final-prepare lock trace is common source rows → optional in-app director dependencies → delivery/event/rule/ownership → existing begin-owned Google connection lock. Put stable SQL comments `registration_observation_final_prepare_google_chat_target_begin/end` and `registration_observation_final_prepare_in_app_target_begin/end` around the two target-validation blocks; the Node migration-contract test extracts those exact segments and proves the Google block contains the exact management tuple plus `begin_notification_delivery_send_v1` but no direct `google_chat_webhook_settings`, `public.profiles`, `auth.users`, director helper, or `director_profile_id` reference. The in-app block contains `is_active_subject_director`, `notification_profile_is_active_v1`, exact profile snapshot/current-director predicates, and no connection fallback. In-app pgTAP asserts the locked eligibility IDs equal the current track director. Across the matrix, `register_notification_external_attempt_v1`, provider/fetch, and customer/SOLAPI deltas remain zero. Roll back all synthetic account/track changes.
 
 - [ ] **Step 12: Run clean-apply GREEN and review the isolated boundary**
 
@@ -1559,6 +1655,8 @@ const validScheduledPayload = Object.freeze({
   booking_fact_hash: "a".repeat(64),
   occurred_at: "2026-08-17T08:00:00.000Z",
   delivery_expires_at: "2026-08-18T08:00:00.000Z",
+  mention_role: "subject_teacher",
+  mention_profile_ids: Object.freeze(["10000000-0000-4000-8000-000000000007"]),
   event_kind: "registration.observation_scheduled",
   booking: Object.freeze({
     class_id: "10000000-0000-4000-8000-000000000006",
@@ -1633,12 +1731,12 @@ for (const [subject, connectionKey, destinationTeam] of subjectCases) {
   assert.equal(renderObservationDestinationTeam(connectionKey), destinationTeam)
 }
 
-const executive = await adapter.resolveTargets(observationInput({
+const management = await adapter.resolveTargets(observationInput({
   eventKey: "registration.observation_feedback_submitted",
   subject: "영어",
-  audienceKey: "executive_team",
+  audienceKey: "management_team",
 }))
-assert.deepEqual(executive.targets.map((target) => ({
+assert.deepEqual(management.targets.map((target) => ({
   targetKind: target.targetKind,
   targetKey: target.targetKey,
   targetProfileId: target.targetProfileId,
@@ -1646,12 +1744,12 @@ assert.deepEqual(executive.targets.map((target) => ({
   targetSnapshot: target.targetSnapshot,
 })), [{
   targetKind: "connection",
-  targetKey: "connection:google_chat.executive",
+  targetKey: "connection:google_chat.management",
   targetProfileId: null,
-  connectionKey: "google_chat.executive",
-  targetSnapshot: { connection_key: "google_chat.executive" },
+  connectionKey: "google_chat.management",
+  targetSnapshot: { connection_key: "google_chat.management" },
 }])
-assert.equal(renderObservationDestinationTeam("google_chat.executive"), "executive")
+assert.equal(renderObservationDestinationTeam("google_chat.management"), "management")
 ```
 
 `renderObservationDestinationTeam` is a test-only read of the checked-in Google Chat catalog/presentation mapping. `destinationTeam` is never written into `target_snapshot` and never participates in target identity or its hash.
@@ -1720,7 +1818,7 @@ The stored `preparation_snapshot` is the immutable presentation authority for sc
 
 - [ ] **Step 5: Extend registration adapter with exact payload-v3 handling**
 
-Add the six event keys to closed sets and route `sourceType === 'registration_observation'` through a separate branch. Export one pure builder for worker tests:
+Add the seven event keys to closed sets and route `sourceType === 'registration_observation' | 'registration_observation_assignment_change'` through separate closed branches. Export one pure builder for worker tests:
 
 ```ts
 export function buildRegistrationObservationChatPayloadV3(input: Readonly<{
@@ -1738,16 +1836,19 @@ Builder rules:
 - canceled requires canceled snapshot and lifecycle `canceled`;
 - feedback_due requires `scheduled | attended_feedback_pending` and `hasFeedback=false`;
 - feedback_submitted requires completed lifecycle plus exact `submission_snapshot`; never copy suitability/reason;
+- director_reassigned requires the exact locked assignment fact plus an undecided current observation, management destination, `mention_role='track_director'`, and canonical previous+current director profiles; it never copies either director name/email/Chat ID into presentation;
 - every timestamp is valid ISO with `starts_at < ends_at`; hashes are lowercase SHA-256; every UUID is v1-v5 canonical.
 
 `resolveTargets` ignores browser payload destination. Subject events map canonical payload subject to one connection target and stable target-set hash. feedback_submitted accepts only:
 
 ```text
-google_chat + executive_team -> connection:google_chat.executive
+google_chat + management_team -> connection:google_chat.management
 in_app + track_director -> `profile:${currentDirectorProfileId}`
 ```
 
-Missing/inactive director makes only the in-app target unavailable; it must not reroute the executive Chat or pick an arbitrary manager.
+Missing/inactive director makes only the in-app target unavailable; it must not reroute the management Chat or pick an arbitrary manager.
+
+`director_reassigned` accepts only `google_chat + management_team -> connection:google_chat.management`; it has no subject-room or in-app target.
 
 - [ ] **Step 6: Implement pre-send source revalidation and refresh result**
 
@@ -1776,7 +1877,7 @@ export type NotificationRevalidationInput = Readonly<{
 }>
 ```
 
-For an observation first attempt, the worker supplies `eventSnapshot` only after it has called `read_registration_observation_notification_delivery_frozen_state_v1`, exact-validated that RPC's nine-key DTO, and matched its `snapshot` to the event payload from the existing `get_notification_render_snapshot_v1` response. The generic render snapshot is used only for immutable template/rule metadata; expiry, attempt state, payload/render fingerprints and stored title/body/href come exclusively from the locked observation read. `sourceType === "registration_observation"` requires schema version `3` and an exact payload union; every existing adapter may continue receiving/ignoring `undefined`.
+For an observation first attempt, the worker supplies `eventSnapshot` only after it has called `read_registration_observation_notification_delivery_frozen_state_v1`, exact-validated that RPC's nine-key DTO, and matched its `snapshot` to the event payload from the existing `get_notification_render_snapshot_v1` response. The generic render snapshot is used only for immutable template/rule metadata; expiry, attempt state, payload/render fingerprints and stored title/body/href come exclusively from the locked observation read. `sourceType === "registration_observation" | "registration_observation_assignment_change"` requires schema version `3` and an exact payload union; every existing adapter may continue receiving/ignoring `undefined`.
 
 Extend `NotificationRevalidationResult` additively:
 
@@ -1797,10 +1898,11 @@ Existing adapters continue returning `{ok:true}`. The worker supplies the exact 
 | canceled | observation `canceled`, appointment `canceled` |
 | feedback_due | observation `scheduled|attended_feedback_pending`, appointment `scheduled|completed`, `hasFeedback=false` |
 | feedback_submitted | observation `completed`, appointment `completed`, `hasFeedback=true` |
+| director_reassigned | current observation undecided, current appointment present, exact assignment fact still bound to the track |
 
-Notification revision mismatch returns `canceled/source_revision_changed`; lifecycle mismatch returns `canceled/source_status_changed`; booking hash mismatch returns `canceled/source_schedule_changed`; rule revision/target mismatch uses existing reasons. Revalidation compares both `input.sourceRevision` (appointment notification revision) and the event payload's tagged `source_revision`/`booking_fact_hash`; it never confuses the bigint and JSON revisions. A tagged source revision change with equal booking hash is allowed. Target revalidation is channel-local: executive `connection:google_chat.executive` never tests `directorProfileId` or profile/account activity, while in-app requires the current non-null active director and returns `canceled/recipient_revoked` otherwise. Processing one paired target must not mutate or short-circuit the other.
+Notification revision mismatch returns `canceled/source_revision_changed`; lifecycle mismatch returns `canceled/source_status_changed`; booking hash mismatch returns `canceled/source_schedule_changed`; rule revision/target mismatch uses existing reasons. Revalidation compares both `input.sourceRevision` (appointment notification revision, or null only for assignment change) and the event payload's tagged `source_revision`/`booking_fact_hash`; it never confuses the bigint and JSON revisions. A tagged source revision change with equal booking hash is allowed. Target revalidation is channel-local: management `connection:google_chat.management` validates its semantic current/previous director profile IDs for mention snapshotting but never treats missing/inactive/unverified identity as delivery ineligibility, while in-app requires the current non-null active director and returns `canceled/recipient_revoked` otherwise. Processing one paired target must not mutate or short-circuit the other.
 
-For `attemptCount === 0`, scheduled/rescheduled rebuild with their immutable stored preparation, reminder_due resolves current exact-session preparation, and the other three events do not read preparation. All six rebuild the exact schema-3 payload with the current tagged source revision and **always** return `refreshedPayload`, `payloadSchemaVersion:3`, and the deterministic canonical payload fingerprint even if the JSON bytes did not change. This mandatory first-attempt result lets the worker persist both payload/render fingerprints before the final prepare boundary.
+For `attemptCount === 0`, scheduled/rescheduled rebuild with their immutable stored preparation, reminder_due resolves current exact-session preparation, and the other four events do not read preparation. All seven rebuild the exact schema-3 payload with the current tagged source revision and **always** return `refreshedPayload`, `payloadSchemaVersion:3`, and the deterministic canonical payload fingerprint even if the JSON bytes did not change. This mandatory first-attempt result lets the worker persist both payload/render fingerprints before the final prepare boundary.
 
 For `attemptCount > 0`, revalidation reads only current lifecycle/revision/hash/rule/target eligibility and returns plain `{ok:true}`. It must not call `readCurrentPreparation`, rebuild payload, return `refreshedPayload`, or change title/body/href. The worker reuses the stored schema-3 payload, title/body/href, and fingerprints from the first attempt. RED tests prove that a progress edit between a retryable 429 or 425 and the retry changes neither body nor fingerprint, while cancellation still prevents the retry. Production 408 is never a retry fixture.
 
@@ -1808,7 +1910,7 @@ Set reminder retry window to the exact `booking.starts_at`; no provider retry ca
 
 - [ ] **Step 7: Implement strict presentation and destination validation**
 
-Payload schema version `3` is accepted only for the six observation keys. Each union member gets exact key validation before rendering. Add presentation context keys; these are the payload-to-template boundary, so `subjects` intentionally contains the one canonical observation subject:
+Payload schema version `3` is accepted only for the seven observation keys. Each union member gets exact key validation before rendering. Add presentation context keys; these are the payload-to-template boundary, so `subjects` intentionally contains the one canonical observation subject:
 
 ```text
 student_name, subjects, class_name, scheduled_at, before_schedule,
@@ -1826,12 +1928,16 @@ scheduled/rescheduled/canceled/reminder_due/feedback_due:
   connection=subject-derived, destinationTeam=english|math|science
 
 feedback_submitted Chat:
-  audience=executive_team, channel=google_chat,
-  connection=google_chat.executive, destinationTeam=executive
+  audience=management_team, channel=google_chat,
+  connection=google_chat.management, destinationTeam=management
 
 feedback_submitted inbox:
   audience=track_director, channel=in_app,
   connection=null, destinationTeam=null
+
+director_reassigned Chat:
+  audience=management_team, channel=google_chat,
+  connection=google_chat.management, destinationTeam=management
 ```
 
 Any cross-room combination throws `notification_registration_destination_unsupported`; it does not fall back to management.
@@ -1993,7 +2099,7 @@ The provider imports this module; it no longer maintains a second allowlist. Ext
 
 - [ ] **Step 4: Build exact observation links in the adapter**
 
-For scheduled/rescheduled/canceled/reminder_due and both feedback_submitted targets:
+For scheduled/rescheduled/canceled/reminder_due, both feedback_submitted targets, and director_reassigned:
 
 ```ts
 `/admin/registration?taskId=${taskId}&trackId=${trackId}&appointmentId=${appointmentId}&observationId=${observationId}&view=calendar`
@@ -2026,7 +2132,7 @@ git commit -m "feat: secure observation chat links"
 
 ---
 
-### Task 4: Register Seven Content Identities and Golden Cards
+### Task 4: Register Eight Content Identities and Golden Cards
 
 **Files:**
 - Modify: `src/features/notifications/notification-content-contract-registry.ts`
@@ -2040,7 +2146,7 @@ git commit -m "feat: secure observation chat links"
 - Modify: `supabase/tests/registration_observation_google_chat_test.sql`
 
 **Interfaces:**
-- Consumes: seven migration-seeded rule/template identities and payload schema version 3
+- Consumes: eight migration-seeded rule/template identities and payload schema version 3
 - Produces: TS/DB/fixture parity against the current `NotificationContentContract`, deterministic Korean golden output, and separate executable PII/link assertions
 
 - [ ] **Step 1: Add manifest parity RED assertions**
@@ -2052,8 +2158,9 @@ const expected = [
   "registration.observation_canceled|subject_team|google_chat",
   "registration.observation_reminder_due|subject_team|google_chat",
   "registration.observation_feedback_due|subject_team|google_chat",
-  "registration.observation_feedback_submitted|executive_team|google_chat",
+  "registration.observation_feedback_submitted|management_team|google_chat",
   "registration.observation_feedback_submitted|track_director|in_app",
+  "registration.observation_director_reassigned|management_team|google_chat",
 ]
 
 for (const identity of expected) {
@@ -2063,7 +2170,7 @@ for (const identity of expected) {
 }
 ```
 
-For all seven contracts assert only fields that exist in the current repository `NotificationContentContract`:
+For all eight contracts assert only fields that exist in the current repository `NotificationContentContract`:
 
 ```js
 assert.equal(contract.contractVersion, "1")
@@ -2099,7 +2206,7 @@ Each entry declares:
 
 - workflow `registration`, contract version `1`, `supportedPayloadVersions:[3]`, renderer `registration` in the surrounding registry/manifest identity;
 - exact event/audience/channel/rule variant identity;
-- allowed destination: subject connection set for five subject events, executive only for feedback Chat, profile target only for director inbox;
+- allowed destination: subject connection set for five subject events, management only for feedback-submitted/director-reassigned Chat, profile target only for director inbox;
 - required/optional presentation-variable key set matching the Korean token mapping and event union;
 - button policy: `청강 상세 보기` only for the exact `taskId,trackId,appointmentId,observationId,view=calendar` tuple, except feedback_due `피드백 입력`; in-app uses the same validated detail href without a Google Chat button;
 - forbidden body classes: phone, school, inquiry, suitability, feedback reason, UUID, URL, mention, HTML/control/bidi;
@@ -2128,7 +2235,7 @@ Expected KST display is `2026년 8월 17일 월요일 오후 6:00–8:00`. Fixtu
 
 - [ ] **Step 4: Add DB/TS exact parity pgTAP**
 
-Keep the focused pgTAP on `select no_plan()` and add the executable DB-side parity assertions comparing seven `(event_key,audience_key,channel_key,rule_variant_key,payload_schema_version,checksum)` rows with fixture identities and validating the Korean token map. At minimum include these representative assertions in addition to one exact row assertion for each of the seven identities:
+Keep the focused pgTAP on `select no_plan()` and add the executable DB-side parity assertions comparing eight `(event_key,audience_key,channel_key,rule_variant_key,payload_schema_version,checksum)` rows with fixture identities and validating the Korean token map. At minimum include these representative assertions in addition to one exact row assertion for each of the eight identities:
 
 ```sql
 select is(
@@ -2138,8 +2245,8 @@ select is(
     where rule_row.workflow_key = 'registration'
       and rule_row.event_key like 'registration.observation_%'
   ),
-  7::bigint,
-  'exactly seven observation destination rules are installed'
+  8::bigint,
+  'exactly eight observation destination rules are installed'
 );
 
 select is_empty(
@@ -2183,7 +2290,7 @@ Run:
 git diff --check
 ```
 
-Expected: seven-way TS/DB/manifest/golden parity passes; focused pgTAP has zero failed assertions; provider attempts remain 0.
+Expected: eight-way TS/DB/manifest/golden parity passes; focused pgTAP has zero failed assertions; provider attempts remain 0.
 
 ```bash
 git add src/features/notifications/notification-content-contract-registry.ts src/features/notifications/notification-content-manifest.ts tests/notification-content-contract.test.mjs tests/notification-content-contract-db.test.mjs tests/notification-content-manifest.test.mjs tests/fixtures/notification-content-contracts.json tests/fixtures/notification-content-coverage-manifest.json tests/fixtures/notification-content-golden.json supabase/tests/registration_observation_google_chat_test.sql
@@ -2316,7 +2423,7 @@ Run the 429 and 425 cases with a progress edit between attempts and assert the e
 
 Add a paired `registration.observation_feedback_submitted` in-app fixture whose final-prepare mock returns exact `{prepared:true,channel_key:'in_app',delivery_id,notification_id,push_children_created:0,status:'sent'}`. It must call the frozen-state read twice around first-attempt refresh and final-prepare once, then return immediately with `register_notification_external_attempt_v1` calls `0`, provider resolution calls `0`, and provider sends `0`. A separate Google Chat fixture still proves the provider-ready branch alone registers one attempt and calls the injected fake provider once. Task 1 pgTAP—not a worker mock—proves that these final-prepare branches reach the real begin/commit primitives.
 
-Add a second paired worker fixture whose two claims share the exact feedback-submitted event/source/revision/fingerprint and whose source reader returns the same nullable director fact for both. Run it once with `directorProfileId:null` and once with the former director marked inactive after fanout. The in-app final-prepare result is exact `{prepared:false,delivery_id,status:'canceled',status_reason:'recipient_revoked'}` and that lane performs zero commit, provider resolution, attempt registration, or send. The executive claim must still pass common source revalidation, final-prepare as exact `connection:google_chat.executive`, and become provider-ready; only that executive lane may register one attempt and invoke the injected fake provider once. Assert the in-app outcome cannot short-circuit, cancel, or mutate the executive claim, and assert no fallback profile/management connection is resolved. The provider-zero integration below repeats this split against the real DB boundary while stopping the executive lane before attempt registration.
+Add a second paired worker fixture whose two claims share the exact feedback-submitted event/source/revision/fingerprint and whose source reader returns the same nullable director fact for both. Run it once with `directorProfileId:null` and once with the former director marked inactive after fanout. The in-app final-prepare result is exact `{prepared:false,delivery_id,status:'canceled',status_reason:'recipient_revoked'}` and that lane performs zero commit, provider resolution, attempt registration, or send. The management claim must still pass common source revalidation, snapshot an empty mention list, final-prepare as exact `connection:google_chat.management`, and become provider-ready; only that management lane may register one attempt and invoke the injected fake provider once. Assert the in-app outcome cannot short-circuit, cancel, or mutate the management claim, and assert no fallback profile, `@all`, executive room, or alternate management connection is resolved. The provider-zero integration below repeats this split against the real DB boundary while stopping the management lane before attempt registration.
 
 - [ ] **Step 3: Run Task 5 RED**
 
@@ -2486,6 +2593,7 @@ const http = require("node:http")
 const https = require("node:https")
 let fetchCalls = 0
 let providerCalls = 0
+let directoryCalls = 0
 const externalRequests = []
 const originalFetch = globalThis.fetch
 const originalHttpRequest = http.request
@@ -2510,11 +2618,17 @@ const provider = {
     throw new Error("provider_zero_send_forbidden")
   },
 }
+const directory = {
+  async getUser() {
+    directoryCalls += 1
+    throw new Error("provider_zero_directory_call_forbidden")
+  },
+}
 ```
 
 The `finally` block restores all five functions, calls `syncBuiltinESMExports()` again, and then destroys the disposable project's manifest-owned database/container/network/temp-root resources. The runner test dynamically imports `node:http`/`node:https` after trap installation to prove the ESM bindings are trapped too, and proves every manifest entry is absent after cleanup.
 
-The focused pgTAP run immediately before the Node integration owns the seven-rules-OFF scheduled/rescheduled/canceled, attendance, no-show, feedback-submitted suppression/cancellation matrix in rollback. The committed Node database is therefore still clean, runtime `0`, both shared flags false, all seven rules false, and has no observation/domain/delivery row when its bootstrap starts. Seed only the synthetic Auth/profile/catalog/class/session/connection prerequisites (including explicit valid campus) before readiness; no observation booking or lifecycle mutation is permitted yet.
+The focused pgTAP run immediately before the Node integration owns the eight-rules-OFF scheduled/rescheduled/canceled, attendance, no-show, feedback-submitted/director-reassigned suppression/cancellation matrix in rollback. The committed Node database is therefore still clean, runtime `0`, both shared flags false, all eight rules false, all seven mention settings at six ON/one OFF, and has no observation/domain/delivery row when its bootstrap starts. Seed only the synthetic Auth/profile/identity/catalog/class/session/connection prerequisites (including explicit valid campus) before readiness; no observation booking or lifecycle mutation is permitted yet.
 
 Against that committed clean database, execute this exact bootstrap and require every receipt before continuing. No `enter/save/cancel/attendance/feedback/decision` observation RPC, Chat job materialization, v2 rule save, generic claim, begin, or in-app commit may run before its numbered predecessor:
 
@@ -2522,15 +2636,16 @@ Against that committed clean database, execute this exact bootstrap and require 
 2. Through the production `activateRegistrationObservationRuntime` seam call `public.activate_registration_observation_runtime_v1(integer,text)` with `{p_expected_current_version:0,p_request_key:'provider-zero-google-chat-activate-v1'}`. Exact-compare `{operation:'activate',requestKey:'provider-zero-google-chat-activate-v1',previousVersion:0,runtimeVersion:1,readiness:{schemaReady:true,missingObjects:[],runtimeVersion:0}}`; replay the same request once and require byte/deep equality, then require `public.registration_observation_runtime_version() = 1`.
 3. Through the service-role client call `public.record_notification_worker_heartbeat_v1(text,uuid,text,jsonb,text)` first with `phase='started'` and then the same `worker_id='notification-worker-route-v1'`, `run_id`, counts and `phase='succeeded'`. Both void RPC responses must be SQL `null`; counts must have exactly the six nonnegative-integer keys `{observation_due:0,fanout:0,rule_reconciliation:0,target_reconciliation:0,deliveries:0,reaped:0}` and `p_error_code=null`. Read back the latest `(created_at desc,id desc)` row and exact-compare worker/run/phase/counts/error, then require it is current under the setter's three-minute dependency gate and the observation readiness five-minute gate.
 4. Read only the two current private flag rows through service role and require both are `{enabled:false,revision:'1'}`. Call `public.set_notification_runtime_flag_v1(text,boolean,bigint,uuid)` with fresh request IDs in the fixed order `notification_control_plane_settings_ui_enabled` then `notification_control_plane_dispatch_registration_enabled`, always passing that row's current decimal revision as `p_expected_revision`. Exact-compare each response key set and value: `{flag_key:<exact key>,enabled:true,revision:'2',canceled_count:0,claim_cancel_requested_count:0,reserved_ownership_claims:[]}`; same-request replay must be deep-equal. Finally exact-compare `public.get_notification_runtime_flags_v1().flags` for those two keys as `{enabled:true,revision:'2'}` through the authenticated admin client. Direct `UPDATE notification_runtime_flags` is forbidden.
-5. Fetch one fresh authenticated `get_notification_control_plane_v1('registration')` snapshot. Call the production `saveNotificationControlPlaneViaRpc` path, hence exact SQL signature `public.save_notification_control_plane_v2(text,jsonb,jsonb,jsonb,uuid)`, to enable the scheduled Google Chat rule plus both feedback-submitted rules (executive Google Chat and current-director in-app) in one committed patch. `expected_rule_revisions`, `expected_contract_versions`, and `patch.rules` must have exactly the same three rule UUID keys—no whole-workflow map—and carry the snapshot's current decimal revision/contract values. Exact-parse the DB wire response with top-level keys only `{scope_key,workflow_key,rules,connections,delivery_summary,loaded_at,reconciliation_job}` and reconciliation value `{job_kind:'rule_reconciliation',job_id:<uuid>,status:'pending',attempt_count:0}`; require all three target rows enabled with their revisions advanced exactly once and unchanged content-contract versions, save audit/request-ledger rows for the fresh request ID, and a same-request replay that is deep-equal. Drain that exact reconciliation job before the first domain action.
-6. Only now create and commit one fresh scheduled action, materialize/fan out a real Google Chat NCP delivery, and claim it through the byte-identical real generic claim RPC. Invoke exported production `prepareRegistrationObservationDeliveryForDispatch`, assert its first read has null fingerprints, refresh returns exact `{outcome:'refreshed',delivery_id,payload_fingerprint,render_fingerprint}`, its second read returns those exact committed values, and final-prepare returns the exact key set `{prepared:true,delivery_id,claim_token,dispatch_token,status:'sending',channel_key:'google_chat',connection_key,webhook_url,rendered_title,rendered_body,href}` produced around the unchanged successful `begin_notification_delivery_send_v1(uuid,uuid)`. Stop before `register_notification_external_attempt_v1`, never call the injected provider, and exact-compare the deterministic title/body/target and five-key link.
-7. Create a separate fresh observation lifecycle through feedback submission while its director is active, materialize/fan out and real-claim both deliveries from that same event. Exact-compare their event/source/occurrence/revision/fingerprint identity. Invoke the same production seam for executive Chat and stop its exact successful `{prepared:true,...,status:'sending',channel_key:'google_chat',connection_key:'google_chat.executive'}` receipt before attempt registration/provider; invoke it for in-app and require exact `{prepared:true,channel_key:'in_app',delivery_id,notification_id,push_children_created:0,status:'sent'}` from real `commit_notification_in_app_delivery_v1(uuid,uuid)`, exactly one dashboard notification, parent delivery `sent`, ownership `closed`, and no begin/attempt/provider path for that in-app delivery.
-8. Repeat two fresh paired feedback-submitted lifecycles. In each, materialize/fanout/claim both deliveries while director A is active, then—after the pairs exist but before either final-prepare—use test-only privileged fixture mutation to (a) set the locked track's `director_profile_id` null and (b) in a separate lifecycle set A's synthetic `auth.users.banned_until` to `clock_timestamp()+interval '1 day'`. For each same-event pair, real in-app final-prepare must return exact `{prepared:false,delivery_id,status:'canceled',status_reason:'recipient_revoked'}`, close ownership, clear claim/lease, and create zero dashboard notification/commit/begin. Real executive final-prepare must ignore the director defect, validate the exact `google_chat.executive` target tuple after the shared dispatch suffix, delegate the sole `channel='executive'` row lock/readiness check to unchanged begin, and reach exact `sending/google_chat/google_chat.executive`. Stop both executive results before attempt registration, restore nothing outside the owned disposable database, and require fetch/provider/external-attempt totals remain zero. A third target-resolution-only subcase makes the director null before fanout and proves executive delivery `1`, in-app delivery `0`, with no fallback target.
-9. After the boundary receipts, run fresh scheduled → attendance, scheduled → no-show, and scheduled → feedback-submitted lifecycles; assert reminder/feedback due cancellation/retention semantics without allowing a second begin/commit for the already-proven identities.
-10. Source revision changes with equal booking hash: scheduled/rescheduled payloads retain their stored snapshot while reminder payload refreshes latest same-session progress before its first attempt. Booking-hash drift produces `source_dirty` with delivery/provider/external-attempt audit 0.
-11. For old-suppressed immutability, use a still-disabled rule to commit the old event, exact-compare its terminal suppression, then perform a separate correctly keyed v2 enable receipt before a fresh matching lifecycle; the old job remains terminal and only the fresh event becomes pending.
+5. Fetch one fresh authenticated `get_notification_control_plane_v1('registration')` snapshot. Call the production `saveNotificationControlPlaneViaRpc` path, hence exact SQL signature `public.save_notification_control_plane_v2(text,jsonb,jsonb,jsonb,uuid)`, to enable the scheduled Google Chat rule, both feedback-submitted rules (management Google Chat and current-director in-app), and director-reassigned management rule in one committed patch. `expected_rule_revisions`, `expected_contract_versions`, and `patch.rules` must have exactly the same four rule UUID keys—no whole-workflow map—and carry the snapshot's current decimal revision/contract values. Exact-parse the DB wire response with top-level keys only `{scope_key,workflow_key,rules,connections,delivery_summary,loaded_at,reconciliation_job}` and reconciliation value `{job_kind:'rule_reconciliation',job_id:<uuid>,status:'pending',attempt_count:0}`; require all four target rows enabled with their revisions advanced exactly once and unchanged content-contract versions, save audit/request-ledger rows for the fresh request ID, and a same-request replay that is deep-equal. Drain that exact reconciliation job before the first domain action.
+6. Only now create and commit one fresh scheduled action, materialize/fan out a real Google Chat NCP delivery, and claim it through the byte-identical real generic claim RPC. Invoke exported production `prepareRegistrationObservationDeliveryForDispatch`, assert its first read has null fingerprints, refresh returns exact `{outcome:'refreshed',delivery_id,payload_fingerprint,render_fingerprint}`, its second read returns those exact committed values, and final-prepare returns the exact key set `{prepared:true,delivery_id,claim_token,dispatch_token,status:'sending',channel_key:'google_chat',connection_key,webhook_url,rendered_title,rendered_body,href,mention_user_names}` produced around the unchanged successful `begin_notification_delivery_send_v1(uuid,uuid)`. Exact-compare the verified current teacher's one canonical `users/...` name; mutate the identity after the simulated marker and prove the retry read returns the same frozen name. Stop before `register_notification_external_attempt_v1`, never call the injected provider/Directory, and exact-compare the deterministic title/body/target and five-key link.
+7. Create a separate fresh observation lifecycle through feedback submission while its director is active, materialize/fan out and real-claim both deliveries from that same event. Exact-compare their event/source/occurrence/revision/fingerprint identity. Invoke the same production seam for management Chat and stop its exact successful `{prepared:true,...,status:'sending',channel_key:'google_chat',connection_key:'google_chat.management',mention_user_names:['users/123456789']}` receipt before attempt registration/provider; invoke it for in-app and require exact `{prepared:true,channel_key:'in_app',delivery_id,notification_id,push_children_created:0,status:'sent'}` from real `commit_notification_in_app_delivery_v1(uuid,uuid)`, exactly one dashboard notification, parent delivery `sent`, ownership `closed`, and no begin/attempt/provider path for that in-app delivery.
+8. Repeat two fresh paired feedback-submitted lifecycles. In each, materialize/fanout/claim both deliveries while director A is active, then—after the pairs exist but before either final-prepare—use test-only privileged fixture mutation to (a) set the locked track's `director_profile_id` null and (b) in a separate lifecycle set A's synthetic `auth.users.banned_until` to `clock_timestamp()+interval '1 day'`. For each same-event pair, real in-app final-prepare must return exact `{prepared:false,delivery_id,status:'canceled',status_reason:'recipient_revoked'}`, close ownership, clear claim/lease, and create zero dashboard notification/commit/begin. Real management final-prepare must ignore the director defect, validate the exact `google_chat.management` target tuple after the shared dispatch suffix, delegate the sole `channel='management'` row lock/readiness check to unchanged begin, and reach exact `sending/google_chat/google_chat.management`. Stop both management results before attempt registration, restore nothing outside the owned disposable database, and require fetch/provider/external-attempt totals remain zero. A third target-resolution-only subcase makes the director null before fanout and proves management delivery `1`, in-app delivery `0`, with no fallback target.
+9. Commit one canonical director A→B assignment change while its observation is undecided. Require one director-reassigned management delivery, semantic profile IDs exactly A+B, mention names exactly the two verified resource names, body contains neither name/ID, replay produces no duplicate, and Directory/provider/external-attempt totals remain zero.
+10. After the boundary receipts, run fresh scheduled → attendance, scheduled → no-show, and scheduled → feedback-submitted lifecycles; assert reminder/feedback due cancellation/retention semantics without allowing a second begin/commit for the already-proven identities.
+11. Source revision changes with equal booking hash: scheduled/rescheduled payloads retain their stored snapshot while reminder payload refreshes latest same-session progress before its first attempt. Booking-hash drift produces `source_dirty` with delivery/provider/external-attempt audit 0.
+12. For old-suppressed immutability, use a still-disabled rule to commit the old event, exact-compare its terminal suppression, then perform a separate correctly keyed v2 enable receipt before a fresh matching lifecycle; the old job remains terminal and only the fresh event becomes pending.
 
-This ordering is executable, not documentary: the integration records an ordered call trace and asserts exactly `readiness → activate → heartbeat.started → heartbeat.succeeded → flag.settings-ui → flag.registration-dispatch → v2-save → lifecycle → claim/read/refresh/read/final-prepare → begin|commit`. The invalid-director subtrace is exact `paired lifecycle → paired fanout/claim → null|ban fixture mutation → in-app final-prepare/recipient_revoked → executive final-prepare/begin`, with the reverse final-prepare call order repeated once to prove channel independence. Any rejection, missing/extra call, executive cancellation caused by director state, or begin/commit before its v2 save fails the provider-zero run.
+This ordering is executable, not documentary: the integration records an ordered call trace and asserts exactly `readiness → activate → heartbeat.started → heartbeat.succeeded → flag.settings-ui → flag.registration-dispatch → v2-save → lifecycle → claim/read/refresh/read/final-prepare → begin|commit`. The invalid-director subtrace is exact `paired lifecycle → paired fanout/claim → null|ban fixture mutation → in-app final-prepare/recipient_revoked → management final-prepare/begin`, with the reverse final-prepare call order repeated once to prove channel independence. Any rejection, missing/extra call, management cancellation caused by director state, or begin/commit before its v2 save fails the provider-zero run.
 
 The v2 save is committed—not wrapped in a transaction-local rollback—because `record_notification_event_v1` must observe the enabled rule and content contract through its real registry joins. The database is disposable, so cleanup destroys the whole owned project after assertions.
 
@@ -2579,6 +2694,7 @@ assert.deepEqual(callTrace.slice(0, 8), [
 ])
 assert.equal(fetchCalls, 0)
 assert.equal(providerCalls, 0)
+assert.equal(directoryCalls, 0)
 assert.deepEqual(externalRequests, [])
 assert.equal(await countRowsWhere("dashboard_private.notification_audit_logs", {
   entity_kind: "notification_external_attempt",
@@ -2591,20 +2707,20 @@ assert.equal(await ownershipState(committedInAppDeliveryId), "closed")
 assert.equal(await dashboardNotificationCountForDelivery(committedInAppDeliveryId), 1)
 assert.equal(await pushChildCount(committedInAppDeliveryId), 0)
 for (const pair of [missingDirectorPair, inactiveDirectorPair]) {
-  assert.equal(pair.executive.eventId, pair.inApp.eventId)
-  assert.equal(pair.executive.sourceId, pair.inApp.sourceId)
-  assert.equal(pair.executive.occurrenceKey, pair.inApp.occurrenceKey)
-  assert.equal(pair.executive.notificationRevision, pair.inApp.notificationRevision)
-  assert.equal(pair.executive.payloadFingerprint, pair.inApp.payloadFingerprint)
-  assert.equal(await deliveryStatus(pair.executive.deliveryId), "sending")
-  assert.equal(await ownershipState(pair.executive.deliveryId), "dispatch_started")
-  assert.equal(await deliveryConnectionKey(pair.executive.deliveryId), "google_chat.executive")
+  assert.equal(pair.management.eventId, pair.inApp.eventId)
+  assert.equal(pair.management.sourceId, pair.inApp.sourceId)
+  assert.equal(pair.management.occurrenceKey, pair.inApp.occurrenceKey)
+  assert.equal(pair.management.notificationRevision, pair.inApp.notificationRevision)
+  assert.equal(pair.management.payloadFingerprint, pair.inApp.payloadFingerprint)
+  assert.equal(await deliveryStatus(pair.management.deliveryId), "sending")
+  assert.equal(await ownershipState(pair.management.deliveryId), "dispatch_started")
+  assert.equal(await deliveryConnectionKey(pair.management.deliveryId), "google_chat.management")
   assert.equal(await deliveryStatus(pair.inApp.deliveryId), "canceled")
   assert.equal(await deliveryStatusReason(pair.inApp.deliveryId), "recipient_revoked")
   assert.equal(await ownershipState(pair.inApp.deliveryId), "closed")
   assert.equal(await dashboardNotificationCountForDelivery(pair.inApp.deliveryId), 0)
 }
-assert.equal(missingBeforeFanout.executiveDeliveryCount, 1)
+assert.equal(missingBeforeFanout.managementDeliveryCount, 1)
 assert.equal(missingBeforeFanout.inAppDeliveryCount, 0)
 assert.equal((await storedObservationPayload(preparedDeliveryId)).event_kind, "registration.observation_scheduled")
 assert.match(await storedPayloadFingerprint(preparedDeliveryId), /^[0-9a-f]{64}$/)
@@ -2682,28 +2798,33 @@ The four private helpers above are local to this script. `parseProviderZeroArgum
   fetch: 0,
   http: 0,
   https: 0,
+  directory: 0,
   provider: 0,
   externalAttemptAudit: 0,
   googleChatPrepareBoundaryReached: true,
   googleChatDeliveryStatus: "sending",
+  scheduledMentionUserNames: ["users/123456788"],
+  feedbackMentionUserNames: ["users/123456789"],
+  directorReassignedMentionUserNames: ["users/123456789", "users/987654321"],
+  missingIdentityMentionUserNames: [],
   inAppCommitBoundaryReached: true,
   inAppDeliveryStatus: "sent",
   inAppDashboardNotificationCount: 1,
   inAppPushChildrenCreated: 0,
   missingDirectorPair: {
-    executiveStatus: "sending",
-    executiveConnectionKey: "google_chat.executive",
+    managementStatus: "sending",
+    managementConnectionKey: "google_chat.management",
     inAppStatus: "canceled",
     inAppStatusReason: "recipient_revoked",
   },
   inactiveDirectorPair: {
-    executiveStatus: "sending",
-    executiveConnectionKey: "google_chat.executive",
+    managementStatus: "sending",
+    managementConnectionKey: "google_chat.management",
     inAppStatus: "canceled",
     inAppStatusReason: "recipient_revoked",
   },
   missingDirectorBeforeFanout: {
-    executiveDeliveryCount: 1,
+    managementDeliveryCount: 1,
     inAppDeliveryCount: 0,
   },
   customerQueueUnchanged: true,
@@ -2712,7 +2833,7 @@ The four private helpers above are local to this script. `parseProviderZeroArgum
 }
 ```
 
-The CLI passes `process.argv.slice(2)`, a copied/filtered `process.env`, `spawnSync`, and `mkdtempSync`. It uses the pinned supabase-go binary at `/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supabase/cli-darwin-arm64/bin/supabase-go`, asserts `--version` is exactly `2.103.0`, independently creates one temporary local Supabase project, copies repository migrations only through `20260809105000`, runs the focused pgTAP plus `tests/registration-observation-google-chat-provider-zero.test.mjs` against that loopback database, and removes only the project/container/network/temp IDs recorded in its own manifest in `finally`. It seeds a synthetic local Auth user/admin profile used by the production readiness/activation and v2 save helpers, synthetic UUIDs/names, all seven initially disabled rules and their content contracts, normalized and legacy exact sessions, assigned teacher/director with zero push subscriptions, existing customer queue sentinel rows, and a syntactically valid deterministic **fake** Chat webhook row used only so the begin primitive can reach `sending`; it never supplies a real webhook/provider credential and the transport traps make the fake URL unreachable. It never imports, patches or writes `scripts/run-registration-observation-local-db-qa.mjs` or `tests/registration-observation-local-db-runner.test.mjs`.
+The CLI passes `process.argv.slice(2)`, a copied/filtered `process.env`, `spawnSync`, and `mkdtempSync`. It uses the pinned supabase-go binary at `/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supabase/cli-darwin-arm64/bin/supabase-go`, asserts `--version` is exactly `2.103.0`, independently creates one temporary local Supabase project, copies repository migrations only through `20260809105000`, runs the focused pgTAP plus `tests/registration-observation-google-chat-provider-zero.test.mjs` against that loopback database, and removes only the project/container/network/temp IDs recorded in its own manifest in `finally`. It seeds a synthetic local Auth user/admin profile used by the production readiness/activation and v2 save helpers, synthetic UUIDs/names, all eight initially disabled rules and their content contracts, the seven approved mention-setting rows, verified/missing identity variants, normalized and legacy exact sessions, assigned teacher/director with zero push subscriptions, existing customer queue sentinel rows, and a syntactically valid deterministic **fake** Chat webhook row used only so the begin primitive can reach `sending`; it never supplies a real webhook/provider credential and the transport traps make the fake URL unreachable. It never imports, patches or writes `scripts/run-registration-observation-local-db-qa.mjs` or `tests/registration-observation-local-db-runner.test.mjs`.
 
 The separate runner test injects `spawnImpl`/`makeTempRoot` fakes and has these executable guard assertions:
 
@@ -2824,7 +2945,8 @@ current remote migration ledger includes the complete reviewed prefix through 20
 registration_observation_runtime_version() = 1
 current origin/main SHA and Vercel Production READY SHA
 existing notification worker schedule/heartbeat state
-seven observation rule count = 7 and every row enabled = false
+eight observation destination rule count = 8 and every row enabled = false
+seven mention-setting rows = approved six ON and canceled OFF
 observation ownership-scoped external-attempt audit count = 0
 customer/SOLAPI queue fingerprints
 ```
@@ -2875,7 +2997,7 @@ where workflow_key = 'registration'
 order by event_key, channel_key, audience_key;
 ```
 
-Expected: readiness schema/trigger/rule count correct; seven rows, all `enabled=false`; pending/claimed/sourceDirty/failed counts zero; no existing rule revision changed.
+Expected: readiness schema/trigger/rule count correct; eight rule rows all `enabled=false`; seven mention-setting rows at approved defaults; pending/claimed/sourceDirty/failed counts zero; no existing rule revision changed.
 
 - [ ] **Step 5: Require Vercel Production READY on the same SHA**
 
@@ -2888,6 +3010,12 @@ node --experimental-strip-types scripts/record-notification-deployment-receipt.m
 ```
 
 Expected: receipt records contract version 2, Production `READY` inventory and build revision hash without printing tokens/URLs.
+
+- [ ] **Step 5A: Provision Production-only Directory readiness and verify identities**
+
+Use the approved Vercel secret workflow to add exactly `GOOGLE_WORKSPACE_DIRECTORY_CLIENT_EMAIL`, `GOOGLE_WORKSPACE_DIRECTORY_PRIVATE_KEY`, and `GOOGLE_WORKSPACE_DIRECTORY_SUBJECT` to **Production only**. Never echo, download, diff, or write the values to a report; Preview/local must remain absent. Trigger a new Production deployment of the identical `TIPS_OBSERVATION_CHAT_RELEASE_SHA`, wait for `READY`, re-run the deployment receipt collector, and record the first and second deployment IDs separately while proving their Git SHA is equal.
+
+In deployed `대시보드 > 환경 설정 > 선생님 설정`, require secret-free Directory readiness `ready`. As active admin/staff, explicitly sync every teacher/director profile used by the observation verification fixtures, confirm current account email and `확인됨`, and retain only profile ID, identity revision, status, timestamp and a hash of the Chat resource name in the rollout report. Test one manual numeric-ID verification path as the fallback. A missing credential, suspended/mismatched account, raw provider error, or inability to prove the same-SHA deployment stops activation; it does not change the saved profile/observation state or fall back to a wider mention.
 
 - [ ] **Step 6: Verify the existing scheduler and additive heartbeat**
 
@@ -2907,7 +3035,7 @@ Require exactly one active `tips-notification-worker-v1` at `* * * * *`, one act
 
 - [ ] **Step 7: Perform one production provider-zero lifecycle**
 
-In the Dashboard create a clearly labeled synthetic task/student `청강 CHAT 검증`, one subject track and a future exact class session. Save one observation booking while all seven rules are OFF. Do not enable a rule and do not call a webhook manually.
+In the Dashboard create a clearly labeled synthetic task/student `청강 CHAT 검증`, one subject track and a future exact class session. Save one observation booking while all eight rules are OFF. Do not enable a rule and do not call a webhook manually.
 
 Read-only evidence after two worker intervals:
 
@@ -2958,7 +3086,7 @@ Vercel Production SHA/READY/aliases/routes/logs
 existing schedule/heartbeat
 production default-OFF provider-zero
 customer/SOLAPI unchanged evidence
-not activated: seven observation rules
+not activated: eight observation destination rules
 ```
 
 Do not include student phone, webhook URL, provider secret, rendered target snapshot or provider response body.
@@ -2985,7 +3113,7 @@ The feature worktree hands the reviewed report diff to the already-existing main
 - No source/migration changes unless a defect is reproduced and fixed through a new reviewed commit/forward migration followed by Phase 6A–6B verification again
 
 **Interfaces:**
-- Consumes: Phase 6B healthy default-OFF deployment, current subject/executive connections, fresh synthetic observation actions
+- Consumes: Phase 6B healthy default-OFF deployment, current subject/management connections, fresh synthetic observation actions
 - Produces: staged rule activation, one real delivery receipt per required event, exact room/privacy/duplicate evidence, tested per-rule rollback
 
 - [ ] **Step 1: Reconfirm activation gates and cutoff behavior**
@@ -3000,8 +3128,9 @@ registration_observation_runtime_version() = 1
 notification_control_plane_settings_ui_enabled = true with a current decimal revision
 notification_control_plane_dispatch_registration_enabled = true with a current decimal revision
 one active minute worker and latest succeeded heartbeat has exactly observation_due, fanout, rule_reconciliation, target_reconciliation, deliveries, reaped
-google_chat.english/math/science/executive connection readiness true
-seven observation rules OFF
+google_chat.english/math/science/management connection readiness true
+eight observation destination rules OFF
+seven mention settings at approved defaults
 old provider-zero jobs terminal suppressed
 observation provider attempts 0 before activation
 ```
@@ -3053,6 +3182,8 @@ phone/result/reason/UUID absent from body
 one external attempt, one sent delivery, duplicate count 0
 ```
 
+Mention receipt is event-specific: scheduled mentions the current teacher; rescheduled mentions previous+current teacher after an actual A→B change; canceled has no mention because its adopted setting defaults OFF. Capture provider response and actual room observation separately, and record only hashed provider message identity plus semantic profile IDs—never a webhook or credential. A separate missing-identity fixture must still deliver the same card with no `<users/...>` text.
+
 If one fails, turn only that event rule OFF through a fresh v2 snapshot/two-map request; leave previously proven families and all existing notification rules unchanged. Do not proceed to the next family.
 
 - [ ] **Step 3: Activate and prove the fixed 3-hour reminder**
@@ -3086,16 +3217,18 @@ result/reason/phone/raw URL absent
 duplicate count 0
 ```
 
+The feedback-due room receipt must mention the current assigned teacher when verified; the missing-identity control still sends the same card without a mention.
+
 Run three negative fresh fixtures: submitted before due, no-show, canceled. Each must produce provider attempt 0 for feedback_due. Attendance-only must retain one feedback_due job.
 
-- [ ] **Step 5: Activate feedback-submitted executive Chat and director inbox together**
+- [ ] **Step 5: Activate feedback-submitted management Chat and director inbox together**
 
-After feedback-due passes, fetch a fresh snapshot and exact two-key revision/contract maps, then enable both `registration.observation_feedback_submitted` rules in one audited v2 control-plane save: executive Google Chat and track-director in-app. Verify the exact save/reconciliation receipt, the two returned rule revisions advanced once, and both content-contract versions unchanged before submitting one fresh synthetic feedback after the canonical end time.
+After feedback-due passes, fetch a fresh snapshot and exact two-key revision/contract maps, then enable both `registration.observation_feedback_submitted` rules in one audited v2 control-plane save: management Google Chat and track-director in-app. Verify the exact save/reconciliation receipt, the two returned rule revisions advanced once, and both content-contract versions unchanged before submitting one fresh synthetic feedback after the canonical end time.
 
 Require:
 
 ```text
-executive room: one sent delivery
+management room: one sent delivery
 current track director: one in-app delivery
 student, subject/class, submitter, submitted time present
 fit/unfit result and reason absent from Chat
@@ -3104,7 +3237,9 @@ no subject-room feedback-submitted delivery
 duplicate count 0 on worker replay
 ```
 
-If the director is missing/inactive, in-app must fail closed without rerouting; executive Chat behavior remains independently auditable.
+If the director is missing/inactive, in-app must fail closed without rerouting; management Chat still sends without a mention and remains independently auditable.
+
+For the healthy fixture, management Chat must mention exactly the current director. Then fetch a fresh snapshot and enable only `registration.observation_director_reassigned` with its exact one-key revision/contract maps. Perform one real canonical director A→B reassignment while the current observation remains undecided. Require one management-room delivery that mentions exactly A+B in stable semantic order, contains no previous/current director name or ID in the card body, creates no subject-room/in-app duplicate, and replays with provider delta 0. A missing/unverified A or B is omitted individually; the message still sends and `@all`, management-wide fallback, and `google_chat.executive` remain impossible.
 
 - [ ] **Step 6: Confirm unknown/no-retry and targeted rollback**
 
@@ -3135,9 +3270,12 @@ Append one row per family/subject destination with event key, source revision, r
 Final report must state separately:
 
 ```text
-seven rule enabled states
+eight rule enabled states and seven mention-setting states
 Google Chat real receipt totals by event and destination
 director inbox receipt
+subject-teacher and management-director mention receipts by event
+director-reassigned previous+current mention receipt
+missing/unverified identity no-mention delivery receipt
 duplicate total = 0
 wrong-destination total = 0
 PII finding total = 0
@@ -3169,27 +3307,28 @@ Record those final SHA-256 values beside the exact Git feature/release/report SH
 - [ ] Protected generic claim/prepare/revalidate definitions remain byte-identical and `verify-supabase-migration-layout.mjs` is GREEN; first/retry source expiry/frozen state comes only from the claim-token locked observation read RPC, and observation uses only its channel-aware final-prepare before existing begin/commit primitives.
 - [ ] The pinned supabase-go 2.103.0 `migration new` produced exactly one empty generated file, reviewed `git mv` froze it at `20260809105000`, and final gates prove one non-empty target with no collision/orphan.
 - [ ] New tables/helpers/RPCs have RLS/minimal exact grants, revoked direct DML, fixed empty search paths, exact service-role actor checks, and negative anon/authenticated ACL tests.
-- [ ] Six output event keys and seven destination rules have exact DB/TS/fixture parity.
-- [ ] Seven settings UI registry rows and DB content-contract rows exist before the v2-only save path; every activation/rollback uses identical exact target UUID key sets across patch, current rule-revision map, and current content-contract-version map, then verifies the exact save/reconciliation receipt before lifecycle creation.
+- [ ] Seven output event keys, eight destination rules, and seven adopted mention-setting rows have exact DB/TS/fixture parity.
+- [ ] Eight settings UI registry rows and DB content-contract rows exist before the v2-only save path; every activation/rollback uses identical exact target UUID key sets across patch, current rule-revision map, and current content-contract-version map, then verifies the exact save/reconciliation receipt before lifecycle creation.
 - [ ] Internal due values are fixed at 3 hours before and 30 minutes after; no settings/browser override exists.
 - [ ] attendance/no-show/feedback lifecycle cancellation matches the frozen mapping under race and replay.
 - [ ] Reservation snapshot SHA-256 is deterministic over the exact canonical tuple, rejects tampering, and stable rule locks plus post-insert event snapshot comparison close concurrent saves.
 - [ ] The `105000` migration gates and forward-replaces both named delivery reason CHECKs exactly once, preserves the complete old registry/mapping, adds `notification_window_closed` only to global+canceled, and real expired Google/in-app final-prepare persists exact `canceled/notification_window_closed` with cleared claim state and zero begin/commit/external-attempt side effects.
-- [ ] claim, materialize and observation final-prepare each revalidate current lifecycle/revision/hash/target; final-prepare locks exact common track→observation→appointment→class→normalized-session→catalog facts, locks the in-app-only current-director catalog/profile/account dependencies when that is the candidate, and then locks delivery→event→rule→ownership. The Google branch validates the exact canonical connection tuple only after that suffix and delegates the sole webhook connection lock/readiness check to unchanged begin in its production delivery→ownership→connection order. It passes both A→B director/session races, closes only in-app for null/inactive/stale director, lets the same-source healthy executive Chat reach begin without any director predicate, and changes no protected generic RPC.
+- [ ] claim, materialize and observation final-prepare each revalidate current lifecycle/revision/hash/target; final-prepare locks exact common track→observation→appointment→class→normalized-session→catalog facts, locks the in-app-only current-director recipient dependencies when that is the candidate, and then locks delivery→event→rule→ownership. The Google branch validates the exact canonical connection tuple, mention setting, semantic profile/identity snapshot after that suffix and delegates the sole webhook connection lock/readiness check to unchanged begin in its production delivery→ownership→connection order. It passes teacher/director/session races, closes only in-app for null/inactive/stale director, lets the same-source management Chat reach begin with an exact current/changed-director mention or empty omission snapshot, and changes no protected generic RPC.
 - [ ] Before the first external attempt, source revision-only drift preserves scheduled/rescheduled stored preparation and refreshes only reminder_due current exact-session preparation per approved design §6.1 line 282; retry freezes payload/render fingerprints and performs eligibility-only reads; booking drift is source_dirty/provider-zero.
 - [ ] Missing progress renders the value `미입력` exactly; the template alone supplies the `진도:` label.
 - [ ] External attempts are measured only by `notification_audit_logs` (`notification_external_attempt`/`external_attempt_registered`) joined through delivery ownership; no nonexistent attempt table is referenced.
-- [ ] Disposable provider-zero exact-orders readiness `0` → production core activation `0→1` → current six-key started/succeeded heartbeat → service-role settings-UI then registration-dispatch setters → exact target-keyed v2 save → lifecycle; it real-claims paired feedback-submitted deliveries and proves both null-director and inactive-account variants close in-app `recipient_revoked` while the same event's locked executive connection still reaches Google begin. Normal Google/in-app receipts, locked read→refresh→locked read→final-prepare, fetch/http/https/ESM traps, zero external attempts/provider calls, and destruction of every manifest-owned resource remain required.
+- [ ] Disposable provider-zero exact-orders readiness `0` → production core activation `0→1` → current six-key started/succeeded heartbeat → service-role settings-UI then registration-dispatch setters → exact target-keyed v2 save → lifecycle; it real-claims paired feedback-submitted deliveries and proves both null-director and inactive-account variants close in-app `recipient_revoked` while the same event's locked management connection still reaches Google begin. Normal Google/in-app receipts, locked read→refresh→locked read→final-prepare, fetch/http/https/ESM traps, zero external attempts/provider calls, and destruction of every manifest-owned resource remain required.
 - [ ] Worker synthesizes validated `workflow_key` into Google Chat provider context; DB begin response is unchanged and the shared link policy receives the correct workflow.
 - [ ] Observation Production always constructs Google Chat with `http408Disposition:'delivery_unknown'`; 429 and 425 alone retry with an identical frozen second send, while canonical 408, timeout, reset, and 5xx stay terminal unknown with total provider calls `1` across two worker runs.
 - [ ] old default-OFF jobs never backfill after activation; only fresh actions send.
-- [ ] subject/executive/director destinations are canonical and wrong-room fallback is impossible.
+- [ ] subject/management/director destinations are canonical and wrong-room fallback is impossible.
 - [ ] Static `청강 상세 보기` links use exactly `taskId,trackId,appointmentId,observationId,view=calendar`; shared validator/adapter/worker/provider tests reject every incomplete, malformed, duplicate, extra or non-calendar observation tuple without breaking legacy appointment links, while the dynamic teacher feedback route remains query/hash-free.
 - [ ] card bodies contain no phone, result, reason, raw URL or UUID.
 - [ ] existing worker route/schedule is reused; no second cron, provider worker or secret was added.
 - [ ] Repo-wide service-role usage audit found no production direct shared-table DML; legacy word-retest QA no longer deletes shared deliveries; `service_role` has SELECT-only on delivery/ownership, direct I/U/D negative pgTAP passes, and generic SECURITY DEFINER worker RPC compatibility remains GREEN.
 - [ ] Readiness returns exact `latestObservationHeartbeatAt:string|null` and `recentObservationHeartbeat:boolean`; missing/stale/current/latest-failed fixtures enforce latest-row `succeeded` plus `clock_timestamp()-5m` semantics.
 - [ ] Phase 6C exact-parses both shared runtime flags as enabled with decimal revisions and audited settings-UI-before-registration-dispatch receipts, plus the latest current six-key succeeded heartbeat, before every family save; missing shared readiness stops activation rather than changing flags in this plan.
+- [ ] Directory credentials exist only in Vercel Production, the post-secret deployment is `READY` on the identical release SHA, Preview/local remain absent, teacher/director identities are explicitly verified in teacher settings, and reports contain only secret-free/hash evidence.
 - [ ] customer/SOLAPI queue, templates, activation, cron and receipts are unchanged.
 - [ ] clean DB/pgTAP, focused Node, typecheck, lint, webpack build and provider-zero all pass.
 - [ ] This plan only consumes the master Gate B receipt: runtime-0/empty-outbox → exact feature-ref push → `Push Supabase Migrations` workflow_dispatch with matching `headSha` and frozen ledger through `20260809106200` → identical SHA main push → main-trigger pending-0/equal-ledger no-op → same-SHA Vercel READY → campus → readiness → runtime-0 provider-zero smoke → atomic activation → post-activation smoke; no direct linked push occurs, subordinate steps never redefine/reorder it, and every family follows enable → fresh action → real receipt → next.
