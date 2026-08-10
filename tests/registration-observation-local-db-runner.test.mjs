@@ -253,12 +253,174 @@ test("runner keeps every independent database reviewer gate", async () => {
   );
   assert.deepEqual(runner.getRegistrationObservationFocusContract("feedback"), {
     ceiling: "20260809103500",
+    fixture: { kind: "committed" },
     tests: [
       "supabase/tests/registration_observation_feedback_access_test.sql",
       "supabase/tests/registration_observation_feedback_submit_test.sql",
       "supabase/tests/registration_observation_feedback_decisions_test.sql",
     ],
   });
+});
+
+test("feedback owns the Task 2 committed manifest plus a director decision worker", async () => {
+  // Production break caught: feedback aliases feedback-submit/noop and never
+  // supplies the committed director identity used by the decision race.
+  const runner = await loadRunner();
+  const contract = runner.getRegistrationObservationFocusContract("feedback");
+  const setupSql = runner.registrationObservationFocusSetupSql("feedback");
+  const cleanupSql = runner.registrationObservationFocusCleanupSql("feedback");
+  const freshSql = runner.registrationObservationSchemaFreshAssertionSql(
+    "feedback",
+  );
+
+  assert.equal(contract.fixture.kind, "committed");
+  assert.deepEqual(
+    contract.tests.map((testPath, index) =>
+      runner.registrationObservationFocusTestStagedName(index, testPath)
+    ),
+    [
+      "001_registration_observation_feedback_access_test.sql",
+      "002_registration_observation_feedback_submit_test.sql",
+      "003_registration_observation_feedback_decisions_test.sql",
+    ],
+  );
+  assert.match(setupSql, /^begin;/i);
+  assert.match(setupSql, /create extension if not exists dblink;/i);
+  for (const id of [
+    "99200000-0000-4000-8000-000000000001",
+    "99200000-0000-4000-8000-000000000003",
+    "99200000-0000-4000-8000-000000000004",
+    "99200000-0000-4000-8000-000000000108",
+  ]) assert.match(setupSql, new RegExp(id, "i"));
+  assert.match(
+    setupSql,
+    /director_profile_id[\s\S]*99200000-0000-4000-8000-000000000004/i,
+  );
+  assert.match(
+    setupSql,
+    /update dashboard_private\.registration_observation_runtime_settings[\s\S]*activation_version = 1/i,
+  );
+  assert.match(setupSql, /commit;$/i);
+
+  const eventDelete = cleanupSql.indexOf(
+    "delete from dashboard_private.registration_observation_domain_events",
+  );
+  const receiptDelete = cleanupSql.indexOf(
+    "delete from dashboard_private.registration_observation_mutation_requests",
+  );
+  const observationDelete = cleanupSql.indexOf(
+    "delete from public.ops_registration_observations",
+  );
+  const appointmentDelete = cleanupSql.indexOf(
+    "delete from public.ops_registration_appointments",
+  );
+  const trackDelete = cleanupSql.indexOf(
+    "delete from public.ops_registration_subject_tracks",
+  );
+  assert.ok(eventDelete >= 0 && eventDelete < receiptDelete);
+  assert.ok(receiptDelete < observationDelete);
+  assert.ok(observationDelete < appointmentDelete);
+  assert.ok(appointmentDelete < trackDelete);
+  assert.match(cleanupSql, /99200000-0000-4000-8000-000000000004/i);
+  assert.match(
+    cleanupSql,
+    /activation_version = 0[\s\S]*updated_by = null/i,
+  );
+
+  assert.match(freshSql, /registration_observation_runtime_not_zero/i);
+  assert.match(freshSql, /99200000-0000-4000-8000-000000000004/i);
+  assert.match(freshSql, /registration_observation_feedback_fixture_remains/i);
+  assert.match(freshSql, /registration_observation_provider_outbox_delta=0/i);
+});
+
+test("feedback committed plan keeps exact argv and failure cleanup order", async () => {
+  // Production break caught: feedback runs the wrong pgTAP directory or skips
+  // reverse cleanup/fresh runtime-zero after setup, test, or cleanup failure.
+  const runner = await loadRunner();
+  const setupSql = runner.registrationObservationFocusSetupSql("feedback");
+  const cleanupSql = runner.registrationObservationFocusCleanupSql("feedback");
+  const freshSql = runner.registrationObservationSchemaFreshAssertionSql(
+    "feedback",
+  );
+  const feedbackDirectory = path.join(
+    temporaryProjectPath,
+    "supabase/focus-tests/feedback",
+  );
+  const input = {
+    ...planInput(),
+    focus: "feedback",
+    focusTestDirectoryPath: feedbackDirectory,
+    setupSql,
+    cleanupSql,
+    freshAssertSql: freshSql,
+  };
+  const plan = runner.buildRegistrationObservationLocalDbQaPlan(input);
+  const psqlArgv = (sql) => [
+    "docker", "exec", "-i", containerName, "psql", "-X", "-qAt",
+    "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres",
+    "-c", sql,
+  ];
+  assert.deepEqual(plan.steps[2].argv, psqlArgv(setupSql));
+  assert.deepEqual(plan.steps[3].argv, [
+    pinnedSupabaseGo,
+    "test",
+    "db",
+    "--workdir",
+    temporaryProjectPath,
+    feedbackDirectory,
+    "--db-url",
+    loopbackDbUrl,
+  ]);
+  assert.deepEqual(plan.steps[4].argv, psqlArgv(cleanupSql));
+  assert.deepEqual(plan.steps[5].argv, psqlArgv(freshSql));
+
+  const expectedSuccess = [
+    "db-start",
+    "db-reset",
+    "focus-fixture-setup",
+    "pgtap",
+    "focus-fixture-cleanup",
+    "fresh-runtime0-assert",
+    "db-stop",
+  ];
+  for (const failedStep of [
+    "focus-fixture-setup",
+    "pgtap",
+    "focus-fixture-cleanup",
+  ]) {
+    const calls = [];
+    const result = await runner.executeRegistrationObservationLocalDbQaPlan(
+      plan,
+      {
+        runStep: async (step) => {
+          calls.push(step.name);
+          if (step.name === failedStep) {
+            throw new Error(`synthetic ${failedStep} failure`);
+          }
+          return {
+            stdout: step.name === "fresh-runtime0-assert"
+              ? "registration_observation_provider_outbox_delta=0\n"
+              : "",
+          };
+        },
+        inspectResources: async () => [],
+      },
+    );
+    assert.equal(result.status, 1);
+    assert.deepEqual(
+      calls,
+      failedStep === "focus-fixture-setup"
+        ? [
+            "db-start",
+            "db-reset",
+            "focus-fixture-setup",
+            "focus-fixture-cleanup",
+            "fresh-runtime0-assert",
+            "db-stop",
+          ]
+        : expectedSuccess,
+    );
+  }
 });
 
 test("feedback submit owns a committed runtime-one fixture and exact fresh cleanup", async () => {
@@ -677,12 +839,12 @@ test("downstream focus fails explicitly until its files exist", () => {
     "--execute",
     "--approved-local-db",
     "--focus",
-    "feedback",
+    "enrollment",
   ]);
   assert.equal(result.status, 2);
   assert.match(
     result.stderr,
-    /registration_observation_local_db_focus_unavailable:feedback/,
+    /registration_observation_local_db_focus_unavailable:enrollment/,
   );
 });
 
