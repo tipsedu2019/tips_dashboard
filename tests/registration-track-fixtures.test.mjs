@@ -454,7 +454,17 @@ test("fixture observation withdrawal rejects stale decision revisions before cor
       ...state.observation,
       managerDetails: {
         ...state.observation.managerDetails,
-        [trackId]: { ...detail, currentObservation: null, attempts: [attempt] },
+        [trackId]: {
+          ...detail,
+          currentObservation: null,
+          latestDecisionObservation: {
+            observationId: attempt.observationId,
+            decisionKind: "re_observation",
+            observationRevision: 2,
+            feedbackRevision: 1,
+          },
+          attempts: [attempt],
+        },
       },
     },
   }

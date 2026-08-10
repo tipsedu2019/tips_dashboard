@@ -1581,6 +1581,20 @@ Round 2의 raw `after_value` text predicate는 JSON member 위치·공백에 의
   git diff --check
   ```
 
+### Task 8: Whole-core review findings를 한 번의 전진 수정으로 닫는다
+
+**Files:** Create `supabase/migrations/20260809102400_registration_observation_core_review_fixes.sql`, `supabase/tests/registration_observation_core_review_fixes_test.sql`; modify the local DB runner/contracts, exact observation model/service/editor/track-service tests and implementation, and this plan only as enumerated in `.superpowers/sdd/2026-08-09-registration-observation-core/final-fix-brief.md`.
+
+**Reviewer gate:** 기존 동결 migration은 byte-identical이다. 네 finding 각각 production 변경 전 행동 RED가 있고, 한 forward migration으로 active-manager RLS/summary, attempt-limit-independent latest decision, set-wise legacy list를 교정한다. generic summary는 observation-aware summary와 projection/cache/probe identity를 분리한다. 단일 scoped re-review에서 Critical/Important 0이어야 한다.
+
+- [x] **Step 1:** pinned CLI `2.103.0`으로 migration을 생성하고 `20260809102400`으로 동결한다. 새 `core-review` focus와 exact pgTAP을 RED로 고정한다.
+- [x] **Step 2:** deleted/banned admin/staff table/view concealment과 active manager/director 허용을 행동 RED→GREEN으로 닫는다.
+- [x] **Step 3:** generic/observation summary의 projection, runtime probe, cache/in-flight/epoch identity를 분리하고 양방향 호출 순서 및 runtime `0→1`을 RED→GREEN으로 닫는다.
+- [x] **Step 4:** manager detail에 bounded attempts와 독립적인 `latestDecisionObservation`을 추가하고 20개 초과 canceled attempt 뒤 `re_observation` 정정을 RED→GREEN으로 닫는다.
+- [x] **Step 5:** legacy/shadow schedule JSON을 한 번만 set-wise parse하고 10,000-session structural/behavior/performance RED→GREEN을 닫는다.
+- [ ] **Step 6:** schema/booking/workspace/core-review local DB, full core Node, ESLint, TypeScript, webpack build, diff/scope/status를 검증하고 커밋한다. runtime/provider/remote는 0을 유지한다.
+- [ ] **Step 7:** 네 original findings만 대상으로 한 독립 scoped re-review를 한 번 실행하고, 남은 load-bearing finding이 있으면 추가 수정 없이 controller/user에게 보고한다.
+
 ## Final verification matrix
 
 | Requirement | Owning evidence |
@@ -1600,3 +1614,7 @@ Round 2의 raw `after_value` text predicate는 JSON member 위치·공백에 의
 | strict TS model, 12s abort, no retry, runtime probe | Task 5 Node tests |
 | list/detail booking UI and explicit application shell order | Task 6 UI/model tests |
 | teacher feedback/decision/enrollment/Google Chat/SOLAPI remain downstream | frozen interfaces + Task 7 boundary scan |
+| active admin/staff account requirement for observation table and summary visibility | Task 8 active-manager pgTAP |
+| generic summary remains pre-observation and observation-aware summary owns probe/projection/cache identity | Task 8 service tests |
+| latest decision correction remains independent of bounded attempts | Task 8 detail pgTAP/model/editor tests |
+| legacy/shadow list parses large schedule JSON set-wise once | Task 8 10k structural/behavior/performance pgTAP |

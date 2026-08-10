@@ -317,14 +317,14 @@ export function buildRegistrationObservationWithdrawalInput(
 }
 
 export function getRegistrationObservationWithdrawalCorrection(
-  detail: Pick<RegistrationObservationManagerDetail, "attempts">,
+  detail: Pick<RegistrationObservationManagerDetail, "latestDecisionObservation">,
 ) {
-  const latestDecision = detail.attempts.find((attempt) => attempt.decisionKind !== null)
+  const latestDecision = detail.latestDecisionObservation
   if (latestDecision?.decisionKind !== "re_observation") return null
   return {
     decisionKind: latestDecision.decisionKind,
     observationId: latestDecision.observationId,
-    observationRevision: latestDecision.revision,
+    observationRevision: latestDecision.observationRevision,
     feedbackRevision: latestDecision.feedbackRevision,
   }
 }

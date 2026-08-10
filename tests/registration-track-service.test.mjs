@@ -538,6 +538,112 @@ const inertObservationSummaryRow = {
   observation_feedback_revision: null,
 };
 
+function summaryRowForProjection(columns) {
+  return {
+    id: "track-1",
+    task_id: "task-1",
+    subject: "영어",
+    pipeline_status: "consultation_waiting",
+    workflow_status: "consultation_completed",
+    workflow_revision: 3,
+    director_profile_id: null,
+    ...(columns.includes("observation_attempt_count")
+      ? inertObservationSummaryRow
+      : {}),
+  };
+}
+
+test("generic summary never probes observation runtime and survives a rejected probe", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  let observationProbeCalls = 0;
+  const harness = createClient({
+    queryHandler: (query) => ({ data: [summaryRowForProjection(query.columns)], error: null }),
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    probeObservationRuntime: async () => {
+      observationProbeCalls += 1;
+      throw new Error("observation probe rejected");
+    },
+  }));
+
+  const result = await service.loadLegacyCompatibleTrackSummaries(
+    ["task-1"],
+    "shared-viewer",
+  );
+
+  assert.equal(result.mode, "ready");
+  assert.equal(result.tracks[0].id, "track-1");
+  assert.equal(observationProbeCalls, 0);
+  assert.doesNotMatch(harness.queries[0].columns, /observation_attempt_count/);
+});
+
+test("generic and observation summary modes isolate projection cache inflight epoch and measurement identity", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  for (const order of [["generic", "observation"], ["observation", "generic"]]) {
+    let observationRuntimeVersion = 0;
+    let observationProbeCalls = 0;
+    const measures = [];
+    const harness = createClient({
+      queryHandler: (query) => ({ data: [summaryRowForProjection(query.columns)], error: null }),
+    });
+    const service = createRegistrationTrackService(harness.client, readyOptions({
+      probeObservationRuntime: async () => {
+        observationProbeCalls += 1;
+        return {
+          available: observationRuntimeVersion === 1,
+          runtimeVersion: observationRuntimeVersion,
+        };
+      },
+      recordMeasure: (measure) => measures.push({ ...measure }),
+    }));
+    const invoke = (mode, force = false) => mode === "generic"
+      ? service.loadLegacyCompatibleTrackSummaries(["task-1"], "shared-viewer", { force })
+      : service.loadTrackSummaries(["task-1"], "shared-viewer", { force });
+
+    await invoke(order[0]);
+    if (order[0] === "generic") observationRuntimeVersion = 1;
+    await invoke(order[1]);
+    if (order[0] === "observation") {
+      observationRuntimeVersion = 1;
+      await invoke("observation", true);
+    }
+
+    const queryCountBeforeGenericForce = order[0] === "observation" ? 3 : 2;
+    assert.equal(
+      harness.queries.length,
+      queryCountBeforeGenericForce,
+      `separate queries and runtime 0 -> 1 refresh for ${order.join(" -> ")}`,
+    );
+    const genericQuery = harness.queries.find(
+      (query) => !query.columns.includes("observation_attempt_count"),
+    );
+    const observationQuery = harness.queries.find(
+      (query) => query.columns.includes("observation_attempt_count"),
+    );
+    assert.ok(genericQuery, `generic projection for ${order.join(" -> ")}`);
+    assert.ok(observationQuery, `observation projection for ${order.join(" -> ")}`);
+    const observationProbeCallsBeforeGenericForce = order[0] === "observation" ? 2 : 1;
+    assert.equal(observationProbeCalls, observationProbeCallsBeforeGenericForce);
+    assert.deepEqual(new Set(measures.map((measure) => measure.name)), new Set([
+      "registration:track-summary:generic",
+      "registration:track-summary:observation",
+    ]));
+
+    await invoke("generic", true);
+    assert.equal(
+      observationProbeCalls,
+      observationProbeCallsBeforeGenericForce,
+      "generic force advances only the generic epoch",
+    );
+    await invoke("observation");
+    assert.equal(
+      harness.queries.length,
+      queryCountBeforeGenericForce + 1,
+      "observation cache survives a generic force refresh",
+    );
+  }
+});
+
 function initialWorkflowCreateInput() {
   return {
     studentName: "김다미",
@@ -1903,6 +2009,7 @@ test("dedicated manager detail preserves the observation schedule and place hidd
     },
     currentObservation: attempt,
     latestEnrollmentDecisionObservationId: null,
+    latestDecisionObservation: null,
     attempts: [attempt],
     classes: [{ id: ids.class, name: "고1 영어 청강반", subject: "영어" }],
   };

@@ -148,6 +148,12 @@ export type RegistrationObservationManagerDetail = Readonly<{
   }>
   currentObservation: RegistrationObservationAttempt | null
   latestEnrollmentDecisionObservationId: string | null
+  latestDecisionObservation: null | Readonly<{
+    observationId: string
+    decisionKind: RegistrationObservationDecisionKind
+    observationRevision: number
+    feedbackRevision: number
+  }>
   attempts: readonly RegistrationObservationAttempt[]
   classes: readonly Readonly<{ id: string; name: string; subject: "영어" | "수학" | "과학" }>[]
 }>
@@ -580,7 +586,14 @@ export function normalizeRegistrationObservationManagerDetail(
 ): RegistrationObservationManagerDetail {
   const row = exactObject(
     input,
-    ["track", "currentObservation", "latestEnrollmentDecisionObservationId", "attempts", "classes"],
+    [
+      "track",
+      "currentObservation",
+      "latestEnrollmentDecisionObservationId",
+      "latestDecisionObservation",
+      "attempts",
+      "classes",
+    ],
     "manager_detail",
   )
   const trackRow = exactObject(row.track, [
@@ -629,6 +642,22 @@ export function normalizeRegistrationObservationManagerDetail(
     row.latestEnrollmentDecisionObservationId,
     "manager_detail",
   )
+  const latestDecisionObservation = row.latestDecisionObservation === null
+    ? null
+    : (() => {
+        const decision = exactObject(row.latestDecisionObservation, [
+          "observationId",
+          "decisionKind",
+          "observationRevision",
+          "feedbackRevision",
+        ], "manager_detail")
+        return {
+          observationId: uuid(decision.observationId, "manager_detail"),
+          decisionKind: enumValue(decision.decisionKind, DECISION_KINDS, "manager_detail"),
+          observationRevision: revision(decision.observationRevision, "manager_detail"),
+          feedbackRevision: revision(decision.feedbackRevision, "manager_detail"),
+        } as const
+      })()
   if (!Array.isArray(row.classes)) invalid("manager_detail")
   const classes = row.classes.map((item) => {
     const classRow = exactObject(item, ["id", "name", "subject"], "manager_detail")
@@ -644,6 +673,7 @@ export function normalizeRegistrationObservationManagerDetail(
     track,
     currentObservation,
     latestEnrollmentDecisionObservationId,
+    latestDecisionObservation,
     attempts,
     classes,
   }

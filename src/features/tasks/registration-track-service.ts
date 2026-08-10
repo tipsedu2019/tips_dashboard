@@ -1279,22 +1279,13 @@ function mapRegistrationObservationTrackSummary(
   }
 }
 
-function toLegacyCompatibleTrackSummary(
-  track: OpsRegistrationObservationTrackSummary,
+function mapGenericTrackSummary(
+  row: Row,
 ): RegistrationTrackSummaryLoadResult["tracks"][number] {
-  const status = track.workflowStatus
-  if (!isOpsRegistrationWorkflowStatus(status)) {
-    throw new Error("registration_observation_ui_not_ready")
-  }
-  return { ...track, workflowStatus: status }
-}
-
-function toLegacyCompatibleTrackSummaryLoadResult(
-  result: RegistrationObservationTrackSummaryLoadResult,
-): RegistrationTrackSummaryLoadResult {
   return {
-    ...result,
-    tracks: result.tracks.map(toLegacyCompatibleTrackSummary),
+    ...mapTrack(row),
+    ...EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
+    observationSummaryVisible: false,
   }
 }
 
@@ -1786,8 +1777,12 @@ export function createRegistrationTrackService(
   if (typeof options.probeIntakeRuntime !== "function") {
     throw new Error("probeIntakeRuntime is required.")
   }
-  const summaryCache = new Map<string, RegistrationObservationTrackSummaryLoadResult>()
-  const summaryInFlight = new Map<string, Promise<RegistrationObservationTrackSummaryLoadResult>>()
+  type TrackSummaryMode = "generic" | "observation"
+  type TrackSummarySelectionResult =
+    | RegistrationTrackSummaryLoadResult
+    | RegistrationObservationTrackSummaryLoadResult
+  const summaryCache = new Map<string, TrackSummarySelectionResult>()
+  const summaryInFlight = new Map<string, Promise<TrackSummarySelectionResult>>()
   const summaryEpochs = new Map<string, number>()
   const detailCache = new Map<
     string,
@@ -1976,12 +1971,25 @@ export function createRegistrationTrackService(
   function loadTrackSummarySelection(
     taskIds: string[] | null,
     viewerId: string,
+    mode: "generic",
+    loadOptions?: { force?: boolean },
+  ): Promise<RegistrationTrackSummaryLoadResult>
+  function loadTrackSummarySelection(
+    taskIds: string[] | null,
+    viewerId: string,
+    mode: "observation",
+    loadOptions?: { force?: boolean },
+  ): Promise<RegistrationObservationTrackSummaryLoadResult>
+  function loadTrackSummarySelection(
+    taskIds: string[] | null,
+    viewerId: string,
+    mode: TrackSummaryMode,
     loadOptions: { force?: boolean } = {},
-  ): Promise<RegistrationObservationTrackSummaryLoadResult> {
+  ): Promise<TrackSummarySelectionResult> {
     const normalizedTaskIds = taskIds === null
       ? null
       : [...new Set(taskIds.map(text).filter(Boolean))].sort()
-    const cacheKey = `${requireViewerId(viewerId)}:${normalizedTaskIds === null ? "workspace" : normalizedTaskIds.join(",")}`
+    const cacheKey = `${mode}:${requireViewerId(viewerId)}:${normalizedTaskIds === null ? "workspace" : normalizedTaskIds.join(",")}`
     if (loadOptions.force) {
       advanceEpoch(summaryEpochs, cacheKey)
       summaryCache.delete(cacheKey)
@@ -1989,27 +1997,30 @@ export function createRegistrationTrackService(
     }
     const cached = summaryCache.get(cacheKey)
     const measureName = normalizedTaskIds === null
-      ? "registration:track-summary:workspace"
-      : "registration:track-summary"
+      ? `registration:track-summary:workspace:${mode}`
+      : `registration:track-summary:${mode}`
     if (cached) return measure(measureName, true, async () => cached)
     const pending = summaryInFlight.get(cacheKey)
     if (pending) return pending
     const generation = cacheGeneration
     const requestEpoch = summaryEpochs.get(cacheKey) || 0
 
-    const request = measure<RegistrationObservationTrackSummaryLoadResult>(measureName, false, async (metrics) => {
+    const request = measure<TrackSummarySelectionResult>(measureName, false, async (metrics) => {
       const registrationRuntimeRequest = probeRuntime()
-      const observationRuntimeRequest = options.probeObservationRuntime
-        ? options.probeObservationRuntime()
-        : Promise.resolve<RegistrationObservationRuntimeState>({
-            available: false,
-            runtimeVersion: 0,
-          })
-      const observationAvailableRequest = observationRuntimeRequest.then((runtime) => (
-        runtime.available && runtime.runtimeVersion === 1
-      ))
+      const observationAvailableRequest = mode === "observation"
+        ? (
+            options.probeObservationRuntime
+              ? options.probeObservationRuntime()
+              : Promise.resolve<RegistrationObservationRuntimeState>({
+                  available: false,
+                  runtimeVersion: 0,
+                })
+          ).then((runtime) => runtime.available && runtime.runtimeVersion === 1)
+        : null
       const loadTrackRows = async () => {
-        const observationAvailable = await observationAvailableRequest
+        const observationAvailable = observationAvailableRequest
+          ? await observationAvailableRequest
+          : false
         try {
           const summaryQuery = client.from("ops_registration_subject_track_summaries")
             .select(observationAvailable
@@ -2054,13 +2065,21 @@ export function createRegistrationTrackService(
         } else {
           trackRows = await loadTrackRows()
         }
-        const observationSummaryRequired = await observationAvailableRequest
+        const observationSummaryRequired = observationAvailableRequest
+          ? await observationAvailableRequest
+          : false
+        if (mode === "observation") {
+          return {
+            mode: "ready",
+            tracks: trackRows.map((row) => mapRegistrationObservationTrackSummary(
+              row,
+              observationSummaryRequired,
+            )),
+          }
+        }
         return {
           mode: "ready",
-          tracks: trackRows.map((row) => mapRegistrationObservationTrackSummary(
-            row,
-            observationSummaryRequired,
-          )),
+          tracks: trackRows.map(mapGenericTrackSummary),
         }
       } catch (error) {
         if (missingSchemaError(error)) return invalidateReadyRuntime(error)
@@ -2086,33 +2105,29 @@ export function createRegistrationTrackService(
     viewerId: string,
     loadOptions: { force?: boolean } = {},
   ) {
-    return loadTrackSummarySelection(taskIds, viewerId, loadOptions)
+    return loadTrackSummarySelection(taskIds, viewerId, "observation", loadOptions)
   }
 
-  async function loadLegacyCompatibleTrackSummaries(
+  function loadLegacyCompatibleTrackSummaries(
     taskIds: string[],
     viewerId: string,
     loadOptions: { force?: boolean } = {},
   ): Promise<RegistrationTrackSummaryLoadResult> {
-    return toLegacyCompatibleTrackSummaryLoadResult(
-      await loadTrackSummarySelection(taskIds, viewerId, loadOptions),
-    )
+    return loadTrackSummarySelection(taskIds, viewerId, "generic", loadOptions)
   }
 
   function loadWorkspaceTrackSummaries(
     viewerId: string,
     loadOptions: { force?: boolean } = {},
   ) {
-    return loadTrackSummarySelection(null, viewerId, loadOptions)
+    return loadTrackSummarySelection(null, viewerId, "observation", loadOptions)
   }
 
-  async function loadLegacyCompatibleWorkspaceTrackSummaries(
+  function loadLegacyCompatibleWorkspaceTrackSummaries(
     viewerId: string,
     loadOptions: { force?: boolean } = {},
   ): Promise<RegistrationTrackSummaryLoadResult> {
-    return toLegacyCompatibleTrackSummaryLoadResult(
-      await loadTrackSummarySelection(null, viewerId, loadOptions),
-    )
+    return loadTrackSummarySelection(null, viewerId, "generic", loadOptions)
   }
 
   function loadCaseDetail(
@@ -2245,7 +2260,12 @@ export function createRegistrationTrackService(
 
         const rowsMissingObservationSummary = trackRows.some(rowNeedsRegistrationObservationSummary)
         const summaryResult = rowsMissingObservationSummary
-          ? await loadTrackSummarySelection([safeTaskId], safeViewerId, { force: loadOptions.force })
+          ? await loadTrackSummarySelection(
+              [safeTaskId],
+              safeViewerId,
+              "observation",
+              { force: loadOptions.force },
+            )
           : null
         const summaryByTrackId = new Map(
           (summaryResult?.tracks || []).map((track) => [track.id, track]),

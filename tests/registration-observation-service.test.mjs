@@ -111,6 +111,12 @@ const exactManagerDetail = Object.freeze({
   },
   currentObservation: exactAttempt,
   latestEnrollmentDecisionObservationId: "10000000-0000-4000-8000-000000000099",
+  latestDecisionObservation: {
+    observationId: "10000000-0000-4000-8000-000000000098",
+    decisionKind: "re_observation",
+    observationRevision: 6,
+    feedbackRevision: 2,
+  },
   attempts: [exactAttempt],
   classes: [{ id: IDS.class, name: "고1 영어 A", subject: "영어" }],
 });
@@ -339,6 +345,46 @@ test("manager detail requires current observation to equal its attempts payload"
     loadRegistrationObservationManagerDetail(client, { trackId: IDS.track }),
     /registration_observation_manager_detail_invalid/,
   );
+});
+
+test("manager detail normalizes the latest decision independently of bounded attempts", async () => {
+  const client = captureRpcClient({ result: ok(exactManagerDetail) });
+  const detail = await loadRegistrationObservationManagerDetail(client, {
+    trackId: IDS.track,
+    attemptLimit: 1,
+  });
+
+  assert.deepEqual(detail.latestDecisionObservation, {
+    observationId: "10000000-0000-4000-8000-000000000098",
+    decisionKind: "re_observation",
+    observationRevision: 6,
+    feedbackRevision: 2,
+  });
+  assert.equal(
+    detail.attempts.some((attempt) => (
+      attempt.observationId === detail.latestDecisionObservation.observationId
+    )),
+    false,
+  );
+
+  for (const payload of [
+    { ...exactManagerDetail, latestDecisionObservation: undefined },
+    {
+      ...exactManagerDetail,
+      latestDecisionObservation: {
+        ...exactManagerDetail.latestDecisionObservation,
+        unexpected: true,
+      },
+    },
+  ]) {
+    await assert.rejects(
+      loadRegistrationObservationManagerDetail(
+        captureRpcClient({ result: ok(payload) }),
+        { trackId: IDS.track },
+      ),
+      /registration_observation_manager_detail_invalid/,
+    );
+  }
 });
 
 test("single-attempt detail rejects extra keys and cross-track identity", async () => {

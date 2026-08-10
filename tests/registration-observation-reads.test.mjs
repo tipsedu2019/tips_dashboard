@@ -8,6 +8,10 @@ const migrationPath = path.join(
   repositoryRoot,
   "supabase/migrations/20260809101000_registration_observation_reads.sql",
 );
+const reviewFixMigrationPath = path.join(
+  repositoryRoot,
+  "supabase/migrations/20260809102400_registration_observation_core_review_fixes.sql",
+);
 const pgTapPath = path.join(
   repositoryRoot,
   "supabase/tests/registration_observation_schema_test.sql",
@@ -15,6 +19,10 @@ const pgTapPath = path.join(
 
 async function readMigration() {
   return readFile(migrationPath, "utf8");
+}
+
+async function readReviewFixMigration() {
+  return readFile(reviewFixMigrationPath, "utf8");
 }
 
 function escapeRegExp(value) {
@@ -338,4 +346,60 @@ test("schema pgTAP freezes canonical, authorization, exact lookup, and 20k index
   assert.match(sql, /ops_registration_observations_track_decision_status_idx/i);
   assert.match(sql, /20k latest enrollment scalar uses at most five one-row decision-status index probes/i);
   assert.doesNotMatch(sql, /select\s+no_plan\s*\(/i);
+});
+
+test("core review forward fix keeps active-manager, decision-scalar, and set-wise list boundaries", async () => {
+  const sql = await readReviewFixMigration();
+  assert.match(sql, /^begin;\s+set local lock_timeout = '5s';/i);
+  assert.match(sql, /set local statement_timeout = '120s';/i);
+  assert.match(sql, /commit;\s*$/i);
+
+  const activeManager = functionDefinition(
+    sql,
+    "dashboard_private.registration_observation_current_actor_is_active_manager_v1",
+  );
+  assert.match(activeManager, /security definer/i);
+  assert.match(activeManager, /set search_path = ''/i);
+  assert.match(activeManager, /auth\.uid\(\)/i);
+  assert.match(activeManager, /actor\.role\s+in\s*\(\s*'admin'\s*,\s*'staff'\s*\)/i);
+  assert.match(activeManager, /account\.deleted_at\s+is\s+null/i);
+  assert.match(activeManager, /account\.banned_until\s+is\s+null[\s\S]*account\.banned_until\s*<=\s*pg_catalog\.now\(\)/i);
+
+  const list = functionDefinition(
+    sql,
+    "dashboard_private.list_registration_observation_sessions_v1_impl",
+  );
+  const legacyBranch = list.match(
+    /elsif\s+v_class\.schedule_storage_mode\s+in\s*\(\s*'legacy'\s*,\s*'shadow'\s*\)\s+then([\s\S]*?)else\s+raise exception 'registration_observation_session_invalid'/i,
+  )?.[1];
+  assert.ok(legacyBranch, "missing forward set-wise legacy branch");
+  assert.equal(
+    [...legacyBranch.matchAll(/jsonb_array_elements\(\s*v_class\.schedule_plan\s*->\s*'(?:sessions|session_list)'/gi)].length,
+    0,
+    "the selected source array is bound once before set-wise expansion",
+  );
+  assert.equal(
+    [...legacyBranch.matchAll(/jsonb_array_elements\(\s*v_sessions\s*\)/gi)].length,
+    1,
+    "legacy sessions are expanded once",
+  );
+  assert.doesNotMatch(
+    legacyBranch,
+    /resolve_registration_observation_session_v1|registration_observation_legacy_session_content_hash_v1/i,
+  );
+  assert.match(legacyBranch, /with\s+source_sessions\s+as\s+materialized/i);
+  assert.match(legacyBranch, /group\s+by\s+canonical\.session_key\s+having\s+count\(\*\)\s*>\s*1/i);
+  assert.match(legacyBranch, /limit\s+240/i);
+  assert.match(legacyBranch, /continuous_class_schedule_content_hash_v1/i);
+  assert.match(legacyBranch, /registration_observation_booking_fact_hash_v1/i);
+
+  const detail = functionDefinition(
+    sql,
+    "dashboard_private.get_registration_observation_manager_detail_v1_impl",
+  );
+  assert.match(detail, /'latestDecisionObservation'/i);
+  assert.match(detail, /row_kind\s*=\s*'latest_decision'/i);
+  assert.match(sql, /drop policy if exists ops_registration_observations_select/i);
+  assert.match(sql, /registration_observation_current_actor_is_active_manager_v1\(\)/i);
+  assert.doesNotMatch(sql, /create\s+(?:or\s+replace\s+)?function\s+public\.list_registration_observation_sessions_v1/i);
 });

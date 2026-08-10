@@ -865,13 +865,20 @@ function executeRegistrationObservationFixtureRpc(
         ].includes(targetWorkflowStatus)) {
           throw new Error("registration_observation_transition_rejected")
         }
-        const latestDecision = detail.attempts.find((attempt) => attempt.decisionKind !== null) || null
+        const latestDecision = detail.latestDecisionObservation
         if (latestDecision?.decisionKind === "re_observation") {
+          const latestDecisionAttempt = detail.attempts.find((attempt) => (
+            attempt.observationId === latestDecision.observationId
+          )) || null
+          if (!latestDecisionAttempt) {
+            throw new Error("registration_observation_fixture_detail_incomplete")
+          }
           if (String(args.p_decision_observation_id || "") !== latestDecision.observationId) {
             throw new Error("registration_observation_transition_rejected")
           }
           if (
-            latestDecision.revision !== Number(args.p_expected_decision_observation_revision)
+            latestDecision.observationRevision
+              !== Number(args.p_expected_decision_observation_revision)
             || latestDecision.feedbackRevision
               !== Number(args.p_expected_decision_feedback_revision)
           ) throw new Error("registration_observation_stale_revision")
@@ -879,11 +886,11 @@ function executeRegistrationObservationFixtureRpc(
             throw new Error("registration_observation_correction_reason_required")
           }
           decision = {
-            ...latestDecision,
+            ...latestDecisionAttempt,
             decisionKind: targetWorkflowStatus === "enrollment_requested"
               ? "enrollment"
               : targetWorkflowStatus as NonNullable<RegistrationObservationAttempt["decisionKind"]>,
-            revision: latestDecision.revision + 1,
+            revision: latestDecision.observationRevision + 1,
             updatedAt: "2026-08-10T05:00:00.000Z",
           }
         } else if (
@@ -913,6 +920,14 @@ function executeRegistrationObservationFixtureRpc(
         latestEnrollmentDecisionObservationId: attempts.find((attempt) => (
           attempt.decisionKind === "enrollment"
         ))?.observationId || null,
+        latestDecisionObservation: decision
+          ? {
+              observationId: decision.observationId,
+              decisionKind: decision.decisionKind as NonNullable<typeof decision.decisionKind>,
+              observationRevision: decision.revision,
+              feedbackRevision: decision.feedbackRevision,
+            }
+          : detail.latestDecisionObservation,
         attempts,
       }
       state.observation.managerDetails[trackId] = nextDetail
@@ -1852,6 +1867,7 @@ function createRegistrationObservationFixtureState(): RegistrationObservationFix
         },
         currentObservation: null,
         latestEnrollmentDecisionObservationId: null,
+        latestDecisionObservation: null,
         attempts: [],
         classes: [{
           id: FIXTURE_OBSERVATION_IDS.class,

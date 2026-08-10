@@ -275,31 +275,36 @@ test("observation booking plans use dedicated RPCs and exact revision ownership"
   assert.match(committed.refreshError.message, /refresh_failed/)
 
   const reObservation = {
-    observationId: "observation-1",
+    observationId: "10000000-0000-4000-8000-000000000001",
     decisionKind: "re_observation",
-    revision: 6,
+    observationRevision: 6,
     feedbackRevision: 2,
   }
-  const enrollment = {
-    observationId: "observation-2",
-    decisionKind: "enrollment",
-    revision: 3,
-    feedbackRevision: 1,
-  }
   assert.deepEqual({ ...getRegistrationObservationWithdrawalCorrection({
-    attempts: [
-      { observationId: "observation-3", decisionKind: null, revision: 1, feedbackRevision: 0 },
-      reObservation,
-      enrollment,
-    ],
+    latestDecisionObservation: reObservation,
+    attempts: Array.from({ length: 21 }, (_, index) => ({
+      observationId: `canceled-${index + 1}`,
+      decisionKind: null,
+      revision: 1,
+      feedbackRevision: 0,
+    })),
   }) }, {
     decisionKind: "re_observation",
-    observationId: "observation-1",
+    observationId: "10000000-0000-4000-8000-000000000001",
     observationRevision: 6,
     feedbackRevision: 2,
   })
   assert.equal(getRegistrationObservationWithdrawalCorrection({
-    attempts: [enrollment, reObservation],
+    latestDecisionObservation: {
+      ...reObservation,
+      decisionKind: "enrollment",
+    },
+    attempts: [{
+      observationId: "old-re-observation-inside-attempts",
+      decisionKind: "re_observation",
+      revision: 99,
+      feedbackRevision: 99,
+    }],
   }), null)
 
   assert.equal(reconcileRegistrationObservationWithdrawalValue({
