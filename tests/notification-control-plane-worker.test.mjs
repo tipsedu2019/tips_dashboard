@@ -2404,6 +2404,204 @@ test("Google Chat provider는 주입 fetch만 쓰고 확정 성공·429·영구 
   assert.equal(ledger.length, callsBeforeMissing, "연결이 없으면 fixture transport도 호출하면 안 된다")
 })
 
+test("Google Chat provider는 mention_user_names의 property presence로 legacy bytes와 adopted text를 구분한다", async () => {
+  const { createGoogleChatProvider } = await import(googleChatProviderModuleUrl)
+  const bodies = []
+  const provider = createGoogleChatProvider({
+    fetch: async (_input, init) => {
+      bodies.push(init.body)
+      return new Response(JSON.stringify({ name: "spaces/fixture/messages/mentions" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    },
+  })
+
+  assertProviderResult(await provider.send(createBegunGoogleChatContext()), "sent", null)
+  assert.equal(
+    bodies[0],
+    '{"cardsV2":[{"cardId":"tips-dashboard-notification","card":{"header":{"title":"새 할 일"},"sections":[{"widgets":[{"textParagraph":{"text":"확인할 할 일이 있습니다."}},{"buttonList":{"buttons":[{"text":"대시보드에서 보기","onClick":{"openLink":{"url":"https://tipsedu.co.kr/admin/tasks"}}}]}}]}]}}]}',
+    "mention_user_names가 없으면 기존 cardsV2 JSON bytes를 유지해야 한다",
+  )
+
+  assertProviderResult(
+    await provider.send(createBegunGoogleChatContext({ mention_user_names: [] })),
+    "sent",
+    null,
+  )
+  assert.equal(
+    bodies[1],
+    '{"text":"새 할 일 — 확인할 할 일이 있습니다.","cardsV2":[{"cardId":"tips-dashboard-notification","card":{"header":{"title":"새 할 일"},"sections":[{"widgets":[{"textParagraph":{"text":"확인할 할 일이 있습니다."}},{"buttonList":{"buttons":[{"text":"대시보드에서 보기","onClick":{"openLink":{"url":"https://tipsedu.co.kr/admin/tasks"}}}]}}]}]}}]}',
+    "빈 배열도 adopted no-mention text를 보내야 한다",
+  )
+})
+
+test("Google Chat provider는 verified resource names를 canonical text로 dedupe·최대 20개까지만 렌더한다", async () => {
+  const { createGoogleChatProvider } = await import(googleChatProviderModuleUrl)
+  const payloads = []
+  const provider = createGoogleChatProvider({
+    fetch: async (_input, init) => {
+      payloads.push(JSON.parse(init.body))
+      return new Response(JSON.stringify({ name: "spaces/fixture/messages/mentions" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    },
+  })
+
+  assertProviderResult(
+    await provider.send(createBegunGoogleChatContext({
+      mention_user_names: ["users/123456789", "users/987654321", "users/123456789"],
+    })),
+    "sent",
+    null,
+  )
+  assert.equal(
+    payloads[0].text,
+    "<users/123456789> <users/987654321> 새 할 일 — 확인할 할 일이 있습니다.",
+  )
+
+  const twentyNames = Array.from({ length: 20 }, (_, index) => `users/${index + 1}`)
+  assertProviderResult(
+    await provider.send(createBegunGoogleChatContext({ mention_user_names: twentyNames })),
+    "sent",
+    null,
+  )
+  assert.equal(
+    payloads[1].text,
+    "<users/1> <users/2> <users/3> <users/4> <users/5> <users/6> <users/7> <users/8> <users/9> <users/10> <users/11> <users/12> <users/13> <users/14> <users/15> <users/16> <users/17> <users/18> <users/19> <users/20> 새 할 일 — 확인할 할 일이 있습니다.",
+  )
+
+  const callsBeforeRejections = payloads.length
+  for (const mention_user_names of [
+    ["users/0"],
+    ["users/123456789/extra"],
+    ["users/123456789", 7],
+    "users/123456789",
+    Array.from({ length: 21 }, (_, index) => `users/${index + 1}`),
+  ]) {
+    assertProviderResult(
+      await provider.send(createBegunGoogleChatContext({ mention_user_names })),
+      "failed",
+      "render_validation_failed",
+    )
+  }
+  assert.equal(payloads.length, callsBeforeRejections, "malformed 또는 21개 mention은 fetch 전에 막아야 한다")
+})
+
+test("Google Chat provider는 adopted text를 Unicode whitespace로 평탄화하고 markup·@all·control·bidi·외부 URL·32KB 초과를 fetch 전에 막는다", async () => {
+  const { createGoogleChatProvider } = await import(googleChatProviderModuleUrl)
+  const payloads = []
+  const provider = createGoogleChatProvider({
+    fetch: async (_input, init) => {
+      payloads.push(JSON.parse(init.body))
+      return new Response(JSON.stringify({ name: "spaces/fixture/messages/mentions" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    },
+  })
+
+  assertProviderResult(
+    await provider.send(createBegunGoogleChatContext({
+      rendered_title: "  새\t할\n일  ",
+      rendered_body: " 확인할\u00a0할 일이 있습니다. ",
+      mention_user_names: ["users/123456789"],
+    })),
+    "sent",
+    null,
+  )
+  assert.equal(payloads[0].text, "<users/123456789> 새 할 일 — 확인할 할 일이 있습니다.")
+
+  const callsBeforeRejections = payloads.length
+  for (const overrides of [
+    { rendered_title: "<users/123456789> 새 할 일" },
+    { rendered_body: "@all 확인" },
+    { rendered_body: "제어\u0007문자" },
+    { rendered_body: "bidi\u202e문자" },
+    { rendered_body: "https://evil.invalid" },
+    { rendered_body: "a".repeat(31_600) },
+  ]) {
+    assertProviderResult(
+      await provider.send(createBegunGoogleChatContext({
+        mention_user_names: [],
+        ...overrides,
+      })),
+      "failed",
+      "render_validation_failed",
+    )
+  }
+  assert.equal(payloads.length, callsBeforeRejections, "unsafe adopted content는 transport 전에 거절해야 한다")
+})
+
+test("Google Chat worker는 sending/google_chat begun context의 mention_user_names만 canonical array로 검증하고 property presence를 보존한다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  async function sendBegunContext(begunContext, claim = createDeliveryClaim()) {
+    let providerInput = null
+    const harness = createRpcHarness({
+      claim_notification_deliveries_v1: [claim],
+      prepare_notification_immediate_delivery_v1: begunContext,
+    })
+    const worker = createNotificationWorkerRuntime({
+      getAdapter: () => createAdapter(),
+      rpc: harness.rpc,
+      getProvider: () => ({
+        async send(input) {
+          providerInput = input
+          return {
+            status: "sent",
+            statusReason: null,
+            providerMessageId: null,
+            providerResponseCode: "200",
+            errorCode: null,
+            errorSummary: null,
+            nextAttemptAt: null,
+          }
+        },
+      }),
+      createRunId: () => RUN_ID,
+    })
+    await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+    return providerInput
+  }
+
+  const absent = await sendBegunContext(createBegunGoogleChatContext())
+  assert.equal(Object.hasOwn(absent, "mention_user_names"), false)
+  const presentEmpty = await sendBegunContext(createBegunGoogleChatContext({ mention_user_names: [] }))
+  assert.equal(Object.hasOwn(presentEmpty, "mention_user_names"), true)
+  assert.deepEqual(presentEmpty.mention_user_names, [])
+  const unrelatedWebPush = await sendBegunContext(
+    createBegunWebPushContext({ mention_user_names: "not-a-google-chat-resource-name" }),
+    createDeliveryClaim({ channel_key: "web_push" }),
+  )
+  assert.equal(unrelatedWebPush.mention_user_names, "not-a-google-chat-resource-name")
+
+  const invalidHarness = createRpcHarness({
+    claim_notification_deliveries_v1: [createDeliveryClaim()],
+    prepare_notification_immediate_delivery_v1: createBegunGoogleChatContext({
+      mention_user_names: ["users/invalid"],
+    }),
+  })
+  const invalidWorker = createNotificationWorkerRuntime({
+    getAdapter: () => createAdapter(),
+    rpc: invalidHarness.rpc,
+    getProvider: () => ({
+      async send() {
+        throw new Error("malformed mention context는 provider에 도달하면 안 됩니다.")
+      },
+    }),
+    createRunId: () => RUN_ID,
+  })
+  await assert.rejects(
+    invalidWorker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 }),
+    (error) => error?.code === "worker_envelope_invalid",
+  )
+  assert.equal(
+    invalidHarness.calls.some((call) => call.name === "register_notification_external_attempt_v1"),
+    false,
+  )
+})
+
 test("Google Chat provider는 안전한 상대 링크만 고정 origin의 전체 URL로 보내고 잘못된 링크는 전송 전에 닫는다", async () => {
   const { createGoogleChatProvider } = await import(googleChatProviderModuleUrl)
   const fetchCalls = []

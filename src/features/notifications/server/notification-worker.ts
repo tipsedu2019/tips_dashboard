@@ -106,6 +106,7 @@ const TOKEN_PATTERN = /\{([^{}]+)\}/g
 const HTML_PATTERN = /<\/?[A-Za-z][^>]*>|[<>]/
 const MENTION_PATTERN = /(^|[^A-Za-z0-9_])@(all|everyone|here|channel)(?=$|[^A-Za-z0-9_])/iu
 const URL_PATTERN = /(?:https?:\/\/|\/\/)[^\s]+/iu
+const GOOGLE_CHAT_USER_NAME_PATTERN = /^users\/[1-9]\d{0,31}$/u
 const MAX_TITLE_LENGTH = 200
 const MAX_BODY_LENGTH = 4_000
 const RETRY_MIN_SECONDS = 30
@@ -1173,6 +1174,18 @@ async function finalizeDelivery(
   })
 }
 
+function validateGoogleChatMentionUserNames(context: JsonRecord) {
+  const mentionUserNames = context.mention_user_names
+  if (mentionUserNames === undefined) return
+  if (
+    !Array.isArray(mentionUserNames) ||
+    mentionUserNames.length > 20 ||
+    mentionUserNames.some((value) => (
+      typeof value !== "string" || !GOOGLE_CHAT_USER_NAME_PATTERN.test(value)
+    ))
+  ) workerEnvelopeError()
+}
+
 async function processDelivery(
   claim: JsonRecord,
   input: NotificationWorkerRuntimeInput,
@@ -1251,6 +1264,7 @@ async function processDelivery(
   }
 
   const begunChannel = asString(begun.channel_key)
+  if (begunChannel === "google_chat") validateGoogleChatMentionUserNames(begun)
   const provider = input.getProvider(begunChannel)
   if (!provider) {
     await finalizeDelivery(claim, "failed", "connection_missing", input.rpc, {

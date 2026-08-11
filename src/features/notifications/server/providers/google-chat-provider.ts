@@ -23,6 +23,7 @@ export type GoogleChatBegunDeliveryContext = Readonly<{
   rendered_title: string
   rendered_body: string
   href: string | null
+  mention_user_names?: ReadonlyArray<string>
 }>
 
 type FetchTransport = (
@@ -38,6 +39,8 @@ const RAW_PATH_SEPARATOR_OR_TRAVERSAL = /(?:\\|(?:^|\/)\.{1,2}(?:\/|$))/u
 const MAX_GOOGLE_CHAT_MESSAGE_BYTES = 32_000
 const GOOGLE_CHAT_CARD_ID = "tips-dashboard-notification"
 const GOOGLE_CHAT_BUTTON_TEXT = "대시보드에서 보기"
+const GOOGLE_CHAT_USER_NAME_PATTERN = /^users\/[1-9]\d{0,31}$/u
+const GOOGLE_CHAT_UNSAFE_TEXT_PATTERN = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]|<|>|(?:^|[^A-Za-z0-9_])@(all|everyone|here|channel)(?=$|[^A-Za-z0-9_])/iu
 const GOOGLE_CHAT_LINK_QUERY_KEYS: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
   "/admin/tasks": new Set(["taskId", "focus"]),
   "/admin/word-retests": new Set(["taskId"]),
@@ -70,6 +73,11 @@ export type GoogleChatCardPayload = Readonly<{
       }>>
     }>
   }>>
+}>
+
+type GoogleChatMessagePayload = GoogleChatCardPayload | Readonly<{
+  text: string
+  cardsV2: GoogleChatCardPayload["cardsV2"]
 }>
 
 export type GoogleChatCardPayloadResult =
@@ -168,18 +176,27 @@ function escapeGoogleChatCardText(value: string) {
     .replace(/\n/gu, "<br>")
 }
 
+function flattenGoogleChatText(value: unknown) {
+  if (
+    typeof value !== "string" ||
+    !value ||
+    EXTERNAL_URL_PATTERN.test(value) ||
+    GOOGLE_CHAT_UNSAFE_TEXT_PATTERN.test(value)
+  ) return undefined
+  const flattened = value.replace(/\s+/gu, " ").trim()
+  return flattened || undefined
+}
+
 export function buildGoogleChatCardPayload(input: Pick<
   GoogleChatBegunDeliveryContext,
   "rendered_title" | "rendered_body" | "href"
 >): GoogleChatCardPayloadResult {
+  const title = flattenGoogleChatText(input?.rendered_title)
+  const body = flattenGoogleChatText(input?.rendered_body)
   if (
     !input ||
-    typeof input.rendered_title !== "string" ||
-    !input.rendered_title ||
-    typeof input.rendered_body !== "string" ||
-    !input.rendered_body ||
-    EXTERNAL_URL_PATTERN.test(input.rendered_title) ||
-    EXTERNAL_URL_PATTERN.test(input.rendered_body)
+    !title ||
+    !body
   ) return { ok: false, errorCode: "render_validation_failed" }
 
   const absoluteUrl = absoluteGoogleChatAppHref(input.href)
@@ -216,6 +233,39 @@ export function buildGoogleChatCardPayload(input: Pick<
     return { ok: false, errorCode: "render_validation_failed" }
   }
   return { ok: true, payload, absoluteUrl, byteLength }
+}
+
+function buildGoogleChatMessagePayload(context: GoogleChatBegunDeliveryContext):
+  | Readonly<{ ok: true; payload: GoogleChatMessagePayload }>
+  | Readonly<{ ok: false }> {
+  const builtCard = buildGoogleChatCardPayload(context)
+  if (!builtCard.ok) return { ok: false }
+  if (!Object.prototype.hasOwnProperty.call(context, "mention_user_names")) {
+    return { ok: true, payload: builtCard.payload }
+  }
+
+  const mentionUserNames = context.mention_user_names
+  if (
+    !Array.isArray(mentionUserNames) ||
+    mentionUserNames.length > 20 ||
+    mentionUserNames.some((value) => (
+      typeof value !== "string" || !GOOGLE_CHAT_USER_NAME_PATTERN.test(value)
+    ))
+  ) return { ok: false }
+
+  const title = flattenGoogleChatText(context.rendered_title)
+  const body = flattenGoogleChatText(context.rendered_body)
+  if (!title || !body) return { ok: false }
+  const uniqueUserNames = [...new Set(mentionUserNames)]
+  const mentionText = uniqueUserNames.map((userName) => `<${userName}>`).join(" ")
+  const payload: GoogleChatMessagePayload = Object.freeze({
+    text: `${mentionText ? `${mentionText} ` : ""}${title} — ${body}`,
+    cardsV2: builtCard.payload.cardsV2,
+  })
+  if (Buffer.byteLength(JSON.stringify(payload), "utf8") > MAX_GOOGLE_CHAT_MESSAGE_BYTES) {
+    return { ok: false }
+  }
+  return { ok: true, payload }
 }
 
 function nextRetryAt() {
@@ -276,7 +326,7 @@ export function createGoogleChatProvider(input: {
           errorSummary: "provider connection unavailable",
         })
       }
-      const built = buildGoogleChatCardPayload(context)
+      const built = buildGoogleChatMessagePayload(context)
       if (!built.ok) {
         return result("failed", "render_validation_failed", {
           errorCode: "render_validation_failed",
