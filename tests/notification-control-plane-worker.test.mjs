@@ -2458,6 +2458,7 @@ test("nullable/inactive feedback director의 in-app cancel은 management Chat을
       workflow_key: "registration", event_key: "registration.observation_feedback_submitted", source_type: "registration_observation",
       source_id: "70000000-0000-4000-8000-000000000023", source_revision: "7", rule_revision: "1", target_generation: "1", attempt_count: 1,
     }
+    const verifiedDirectorProfileId = directorState === "null" ? null : PROFILE_ID
     const claims = [
       createDeliveryClaim({ ...base, delivery_id: inAppDeliveryId, channel_key: "in_app", target: { target_kind: "profile", target_key: `profile:${PROFILE_ID}`, target_profile_id: PROFILE_ID, connection_key: null, target_snapshot: { profile_id: PROFILE_ID } } }),
       createDeliveryClaim({ ...base, delivery_id: managementDeliveryId, channel_key: "google_chat", target: { target_kind: "connection", target_key: "connection:google_chat.management", target_profile_id: null, connection_key: "google_chat.management", target_snapshot: { connection_key: "google_chat.management" } } }),
@@ -2465,7 +2466,10 @@ test("nullable/inactive feedback director의 in-app cancel은 management Chat을
     const harness = createRpcHarness({
       claim_notification_deliveries_v1: claims,
       read_registration_observation_notification_delivery_frozen_state_v1: (parameters) => ({
-        attemptCount: 1, expiresAt: "2026-08-17T10:00:00.000Z", snapshot: { director_state: directorState, delivery: parameters.p_delivery_id },
+        attemptCount: 1, expiresAt: "2026-08-17T10:00:00.000Z", snapshot: {
+          event_kind: "registration.observation_feedback_submitted", director_state: directorState,
+          verified_director_profile_id: verifiedDirectorProfileId, delivery: parameters.p_delivery_id,
+        },
         payloadFingerprint: "a".repeat(64), renderFingerprint: "b".repeat(64), title: "제출", body: "피드백", href: "/admin/registration", lastAttemptStartedAt: "2026-08-17T07:00:00.000Z",
       }),
       prepare_registration_observation_notification_delivery_v1: (parameters) => parameters.p_delivery_id === inAppDeliveryId
@@ -2474,8 +2478,18 @@ test("nullable/inactive feedback director의 in-app cancel은 management Chat을
     })
     let lookups = 0
     let sends = 0
+    const revalidations = []
     const worker = createNotificationWorkerRuntime({
-      rpc: harness.rpc, getAdapter: () => createAdapter(), createRunId: () => RUN_ID,
+      rpc: harness.rpc,
+      getAdapter: () => createAdapter({
+        async revalidateBeforeSend(input) {
+          revalidations.push(input)
+          assert.equal(input.eventSnapshot.payload.director_state, directorState)
+          assert.equal(input.eventSnapshot.payload.verified_director_profile_id, verifiedDirectorProfileId)
+          return { ok: true }
+        },
+      }),
+      createRunId: () => RUN_ID,
       getProvider: (channel) => {
         lookups += 1
         assert.equal(channel, "google_chat")
@@ -2485,6 +2499,10 @@ test("nullable/inactive feedback director의 in-app cancel은 management Chat을
     await worker.runBatch({ workerId: "worker-fixture", batchSize: 2, leaseSeconds: 30 })
     assert.equal(lookups, 1, directorState)
     assert.equal(sends, 1, directorState)
+    assert.equal(revalidations.length, 2, directorState)
+    assert.equal(revalidations.filter((entry) => entry.target.connectionKey === "google_chat.management").length, 1, directorState)
+    assert.equal(revalidations.filter((entry) => entry.target.connectionKey === null).length, 1, directorState)
+    assert.equal(harness.calls.filter((call) => call.name === "prepare_registration_observation_notification_delivery_v1").length, 2, directorState)
     assert.equal(harness.calls.filter((call) => call.name === "register_notification_external_attempt_v1").length, 1, directorState)
     assert.equal(harness.calls.some((call) => JSON.stringify(call.parameters).includes("google_chat.executive")), false, directorState)
     assert.equal(harness.calls.some((call) => JSON.stringify(call.parameters).includes("@all")), false, directorState)
