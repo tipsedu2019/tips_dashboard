@@ -5,7 +5,9 @@ import test from "node:test";
 import vm from "node:vm";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { reconcileRegistrationEnrollmentDraft } from "../src/features/tasks/registration-application-model.ts";
 import * as registrationTrackModel from "../src/features/tasks/registration-track-model.js";
+import { getSelectableRegistrationScheduleSessions } from "../src/features/tasks/registration-workflow.js";
 
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
@@ -62,6 +64,306 @@ async function loadAdmissionProgressRuntime() {
   })
   factory(require, runtimeModule, runtimeModule.exports)
   return runtimeModule.exports
+}
+
+function createControlledPromise() {
+  let resolve
+  let reject
+  const promise = new Promise((onResolve, onReject) => {
+    resolve = onResolve
+    reject = onReject
+  })
+  return { promise, resolve, reject }
+}
+
+function createRegistrationEditorHookHarness() {
+  const slots = []
+  let cursor = 0
+  let pendingEffects = []
+
+  function sameDependencies(left, right) {
+    return Boolean(
+      left
+      && right
+      && left.length === right.length
+      && left.every((value, index) => Object.is(value, right[index])),
+    )
+  }
+
+  function useState(initialValue) {
+    const index = cursor++
+    if (!slots[index]) {
+      slots[index] = {
+        kind: "state",
+        value: typeof initialValue === "function" ? initialValue() : initialValue,
+      }
+    }
+    const slot = slots[index]
+    return [
+      slot.value,
+      (nextValue) => {
+        slot.value = typeof nextValue === "function" ? nextValue(slot.value) : nextValue
+      },
+    ]
+  }
+
+  function useRef(initialValue) {
+    const index = cursor++
+    if (!slots[index]) slots[index] = { kind: "ref", value: { current: initialValue } }
+    return slots[index].value
+  }
+
+  function memoHook(factory, dependencies) {
+    const index = cursor++
+    const slot = slots[index]
+    if (!slot || !sameDependencies(slot.dependencies, dependencies)) {
+      slots[index] = { kind: "memo", value: factory(), dependencies }
+    }
+    return slots[index].value
+  }
+
+  function useEffect(effect, dependencies) {
+    const index = cursor++
+    const slot = slots[index]
+    if (!slot || !sameDependencies(slot.dependencies, dependencies)) {
+      pendingEffects.push({ effect, index })
+      slots[index] = { kind: "effect", cleanup: slot?.cleanup, dependencies }
+    }
+  }
+
+  return {
+    react: {
+      useCallback: (callback, dependencies) => memoHook(() => callback, dependencies),
+      useEffect,
+      useMemo: memoHook,
+      useRef,
+      useState,
+    },
+    render(component, props) {
+      assert.equal(pendingEffects.length, 0, "flush editor effects before rendering again")
+      cursor = 0
+      return component(props)
+    },
+    flushEffects() {
+      const effects = pendingEffects
+      pendingEffects = []
+      for (const { effect, index } of effects) {
+        slots[index].cleanup?.()
+        slots[index].cleanup = effect()
+      }
+    },
+    cleanup() {
+      for (const slot of slots) slot?.cleanup?.()
+      pendingEffects = []
+    },
+  }
+}
+
+function findMountedRegistrationElements(node, predicate, matches = []) {
+  if (Array.isArray(node)) {
+    for (const child of node) findMountedRegistrationElements(child, predicate, matches)
+    return matches
+  }
+  if (!node || typeof node !== "object" || !("props" in node)) return matches
+  if (predicate(node)) matches.push(node)
+  findMountedRegistrationElements(node.props.children, predicate, matches)
+  return matches
+}
+
+function findMountedRegistrationElement(node, predicate, description) {
+  const matches = findMountedRegistrationElements(node, predicate)
+  assert.equal(matches.length, 1, `expected one ${description}, received ${matches.length}`)
+  return matches[0]
+}
+
+function collectMountedRegistrationText(node, output = []) {
+  if (Array.isArray(node)) {
+    for (const child of node) collectMountedRegistrationText(child, output)
+  } else if (typeof node === "string" || typeof node === "number") {
+    output.push(String(node))
+  } else if (node && typeof node === "object" && "props" in node) {
+    collectMountedRegistrationText(node.props.children, output)
+  }
+  return output
+}
+
+async function flushMountedRegistrationWork() {
+  await new Promise((resolve) => setImmediate(resolve))
+}
+
+function registrationEditorPassthrough(tag = "div") {
+  return function RegistrationEditorPassthrough({ children, className }) {
+    return createElement(tag, { className }, children)
+  }
+}
+
+async function loadMountedRegistrationEnrollmentEditor({
+  hookHarness,
+  loadObservation,
+  loadClassDetails,
+  saveEnrollmentDetails = async () => undefined,
+}) {
+  const fileName = new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url)
+  const source = await readFile(fileName, "utf8")
+  const output = ts.transpileModule(source, {
+    compilerOptions: {
+      esModuleInterop: true,
+      jsx: ts.JsxEmit.ReactJSX,
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: fileName.pathname,
+  }).outputText
+
+  const Wrapper = registrationEditorPassthrough()
+  const Label = registrationEditorPassthrough("label")
+  const Badge = registrationEditorPassthrough("span")
+  const Icon = () => createElement("span", { "aria-hidden": "true" })
+  const Button = registrationEditorPassthrough("button")
+  const Textarea = registrationEditorPassthrough("textarea")
+  const RegistrationSelect = registrationEditorPassthrough("select")
+  const RegistrationSaveButton = registrationEditorPassthrough("button")
+  const Calendar = Wrapper
+  const runtimeModule = { exports: {} }
+  let requestKeySequence = 0
+  const registrationService = {
+    advanceRegistrationAdmissionBatch: async () => undefined,
+    cancelRegistrationAdmissionBatch: async () => undefined,
+    cancelRegistrationEnrollment: async () => undefined,
+    completeRegistrationAdmissionBatch: async () => undefined,
+    createRegistrationMutationRequestKey(kind, entityId) {
+      requestKeySequence += 1
+      return `${kind}:${entityId}:mounted-${requestKeySequence}`
+    },
+    loadRegistrationEnrollmentStartObservation: loadObservation,
+    saveRegistrationEnrollmentDetails: saveEnrollmentDetails,
+    setRegistrationEnrollmentMakeedu: async () => undefined,
+    startRegistrationAdmissionBatch: async () => undefined,
+  }
+  const localModules = new Map([
+    ["lucide-react", { CalendarDays: Icon, ChevronDown: Icon, Plus: Icon, RefreshCw: Icon, Trash2: Icon }],
+    ["@/components/ui/alert", { Alert: Wrapper, AlertDescription: Wrapper, AlertTitle: Wrapper }],
+    ["@/components/ui/badge", { Badge }],
+    ["@/components/ui/button", { Button }],
+    ["@/components/ui/calendar", { Calendar }],
+    ["@/components/ui/collapsible", { Collapsible: Wrapper, CollapsibleContent: Wrapper, CollapsibleTrigger: Wrapper }],
+    ["@/components/ui/label", { Label }],
+    ["@/components/ui/popover", { Popover: Wrapper, PopoverContent: Wrapper, PopoverTrigger: Wrapper }],
+    ["@/components/ui/textarea", { Textarea }],
+    ["./registration-admission-progress", { RegistrationAdmissionProgress: Wrapper }],
+    ["./registration-select", { RegistrationSelect }],
+    ["./registration-save-button", { RegistrationSaveButton }],
+    ["./ops-task-service", { loadOpsRegistrationClassDetails: loadClassDetails }],
+    ["./registration-track-model.js", registrationTrackModel],
+    ["./registration-workflow", { getSelectableRegistrationScheduleSessions }],
+    ["./registration-application-model", { reconcileRegistrationEnrollmentDraft }],
+    ["./registration-track-service", registrationService],
+  ])
+  const runtimeRequire = (specifier) => {
+    if (specifier === "react") return hookHarness.react
+    if (specifier === "react/jsx-runtime") return require(specifier)
+    const local = localModules.get(specifier)
+    if (local) return local
+    throw new Error(`unhandled registration editor runtime import: ${specifier}`)
+  }
+  const factory = vm.runInThisContext(`(function(require, module, exports) {${output}\n})`, {
+    filename: fileName.pathname,
+  })
+  factory(runtimeRequire, runtimeModule, runtimeModule.exports)
+  return runtimeModule.exports.RegistrationEnrollmentEditor
+}
+
+const MOUNTED_REGISTRATION_TRACK_ID = "76000000-0000-4000-8000-000000000001"
+const MOUNTED_REGISTRATION_TASK_ID = "76000000-0000-4000-8000-000000000002"
+const MOUNTED_REGISTRATION_CLASS_ID = "76000000-0000-4000-8000-000000000003"
+const MOUNTED_REGISTRATION_OBSERVATION_ID = "76000000-0000-4000-8000-000000000004"
+const MOUNTED_REGISTRATION_OBSERVATION_LESSON_ID = "76000000-0000-4000-8000-000000000005"
+const MOUNTED_REGISTRATION_FUTURE_LESSON_ID = "76000000-0000-4000-8000-000000000006"
+const MOUNTED_REGISTRATION_FUTURE_SESSION_KEY = "normalized:2026-08-24:2"
+
+const mountedRegistrationObservation = Object.freeze({
+  observationId: MOUNTED_REGISTRATION_OBSERVATION_ID,
+  taskId: MOUNTED_REGISTRATION_TASK_ID,
+  trackId: MOUNTED_REGISTRATION_TRACK_ID,
+  appointmentId: "76000000-0000-4000-8000-000000000007",
+  studentName: "김학생",
+  studentGrade: "중2",
+  subject: "영어",
+  classId: MOUNTED_REGISTRATION_CLASS_ID,
+  className: "중2 영어 A반",
+  sessionDate: "2026-08-17",
+  startsAt: "2026-08-17T10:00:00.000Z",
+  endsAt: "2026-08-17T11:30:00.000Z",
+  classroomName: "101호",
+  teacherName: "박선생",
+  status: "completed",
+  attendance: "attended",
+  suitabilityResult: "fit",
+  feedbackReason: "수업 참여가 안정적입니다.",
+  proxySubmitted: false,
+  feedbackSubmittedByName: "박선생",
+  feedbackSubmittedAt: "2026-08-17T12:00:00.000Z",
+  revision: 3,
+  feedbackRevision: 2,
+  appointmentNotificationRevision: 1,
+  trackWorkflowRevision: 4,
+  decisionKind: "enrollment",
+  sessionAuthority: "normalized",
+  sessionKey: "normalized:2026-08-17:1",
+  classLessonSessionId: MOUNTED_REGISTRATION_OBSERVATION_LESSON_ID,
+  legacySessionKey: null,
+  sourceRevision: Object.freeze({
+    authority: "normalized",
+    sessionId: MOUNTED_REGISTRATION_OBSERVATION_LESSON_ID,
+    revision: 7,
+  }),
+})
+
+function mountedRegistrationEditorProps(overrides = {}) {
+  return {
+    taskId: MOUNTED_REGISTRATION_TASK_ID,
+    viewerId: "76000000-0000-4000-8000-000000000008",
+    track: {
+      id: MOUNTED_REGISTRATION_TRACK_ID,
+      taskId: MOUNTED_REGISTRATION_TASK_ID,
+      subject: "영어",
+      status: "enrollment_decided",
+      stageEnteredAt: "2026-08-18T00:00:00.000Z",
+      observationFeedbackRevision: 2,
+      enrollmentDetailRows: [],
+    },
+    enrollments: [],
+    admissionBatches: [],
+    classes: [{
+      id: MOUNTED_REGISTRATION_CLASS_ID,
+      label: "중2 영어 A반",
+      subject: "영어",
+      textbookIds: [],
+    }],
+    textbooks: [],
+    permissions: { canManage: true },
+    onReload: async () => undefined,
+    onWarning: () => undefined,
+    ...overrides,
+  }
+}
+
+function mountedRegistrationClassDetails() {
+  return {
+    [MOUNTED_REGISTRATION_CLASS_ID]: {
+      id: MOUNTED_REGISTRATION_CLASS_ID,
+      textbookIds: [],
+      schedulePlan: {
+        sessions: [{
+          id: MOUNTED_REGISTRATION_FUTURE_LESSON_ID,
+          sessionKey: MOUNTED_REGISTRATION_FUTURE_SESSION_KEY,
+          date: "2026-08-24",
+          sessionNumber: 2,
+          scheduleState: "active",
+        }],
+      },
+    },
+  }
 }
 
 const ADMISSION_PROGRESS_LABELS = [
@@ -1760,8 +2062,307 @@ test("observation first lesson UI renders the approved compact copy before the p
   assert.doesNotMatch(editor, /latestDecisionObservation|\.attempts\b/)
   assert.match(calendar, /selectedSession\?\.sessionDate \|\| valueDate/)
   assert.match(calendar, /selectedSession\?\.label \|\| valueLabel/)
-  assert.match(editor, /const currentMatchingObservation = matchingObservation\?\.trackId === track\.id[\s\S]*?\? matchingObservation[\s\S]*?: null/)
+  assert.match(editor, /const currentMatchingObservation = permissions\.canManage && matchingObservation\?\.trackId === track\.id[\s\S]*?\? matchingObservation[\s\S]*?: null/)
   assert.equal((editor.match(/matchingObservation: currentMatchingObservation/g) || []).length, 3)
+})
+
+test("mounted observation first lesson suggestion fails closed in the permission downgrade commit", async () => {
+  const hookHarness = createRegistrationEditorHookHarness()
+  const observation = createControlledPromise()
+  const RegistrationEnrollmentEditor = await loadMountedRegistrationEnrollmentEditor({
+    hookHarness,
+    loadObservation: () => observation.promise,
+    loadClassDetails: async () => mountedRegistrationClassDetails(),
+  })
+
+  try {
+    const managedProps = mountedRegistrationEditorProps()
+    let view = hookHarness.render(RegistrationEnrollmentEditor, managedProps)
+    hookHarness.flushEffects()
+    findMountedRegistrationElement(
+      view,
+      (element) => element.props["aria-label"] === "영어 수업 1 선택",
+      "first class selection",
+    ).props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
+    view = hookHarness.render(RegistrationEnrollmentEditor, managedProps)
+    hookHarness.flushEffects()
+    observation.resolve(mountedRegistrationObservation)
+    await flushMountedRegistrationWork()
+    view = hookHarness.render(RegistrationEnrollmentEditor, managedProps)
+    const managedText = collectMountedRegistrationText(view).join(" ")
+    assert.match(managedText, /최근 적합 청강/)
+    const managedCalendar = findMountedRegistrationElement(
+      view,
+      (element) => element.props.subject === "영어" && element.props.rowIndex === 1 && Array.isArray(element.props.sessions),
+      "first lesson calendar",
+    )
+    assert.equal(managedCalendar.props.valueDate, "2026-08-17")
+    assert.equal(managedCalendar.props.sourceObservationId, MOUNTED_REGISTRATION_OBSERVATION_ID)
+    hookHarness.flushEffects()
+
+    const downgradedView = hookHarness.render(RegistrationEnrollmentEditor, mountedRegistrationEditorProps({
+      permissions: { canManage: false },
+    }))
+    const synchronousPermissionCommit = collectMountedRegistrationText(downgradedView).join(" ")
+    const downgradedCalendar = findMountedRegistrationElement(
+      downgradedView,
+      (element) => element.props.subject === "영어" && element.props.rowIndex === 1 && Array.isArray(element.props.sessions),
+      "downgraded first lesson calendar",
+    )
+    assert.doesNotMatch(synchronousPermissionCommit, /최근 적합 청강|중2 영어 A반/)
+    assert.equal(downgradedCalendar.props.sessions.some((option) => option.source === "observation"), false)
+    assert.equal(downgradedCalendar.props.sourceObservationId, MOUNTED_REGISTRATION_OBSERVATION_ID, "the stored draft stays intact")
+    hookHarness.flushEffects()
+  } finally {
+    hookHarness.cleanup()
+  }
+})
+
+test("mounted observation first lesson defaults only the newly added initiating row", async () => {
+  const hookHarness = createRegistrationEditorHookHarness()
+  const RegistrationEnrollmentEditor = await loadMountedRegistrationEnrollmentEditor({
+    hookHarness,
+    loadObservation: async () => mountedRegistrationObservation,
+    loadClassDetails: async () => mountedRegistrationClassDetails(),
+  })
+  const persistedProps = mountedRegistrationEditorProps({
+    track: {
+      ...mountedRegistrationEditorProps().track,
+      enrollmentDetailRows: [{
+        id: "persisted-row",
+        classId: MOUNTED_REGISTRATION_CLASS_ID,
+        textbookId: null,
+        classStartDate: null,
+        classStartSessionKey: null,
+        classStartLessonSessionId: null,
+        classStartSession: null,
+        classStartSourceObservationId: null,
+        sortOrder: 0,
+      }],
+    },
+  })
+
+  try {
+    let view = hookHarness.render(RegistrationEnrollmentEditor, persistedProps)
+    hookHarness.flushEffects()
+    await flushMountedRegistrationWork()
+    view = hookHarness.render(RegistrationEnrollmentEditor, persistedProps)
+    let calendars = findMountedRegistrationElements(
+      view,
+      (element) => element.props.subject === "영어" && Array.isArray(element.props.sessions),
+    )
+    assert.equal(calendars.length, 1)
+    assert.equal(calendars[0].props.sourceObservationId, "", "persisted blank ownership is never defaulted")
+    hookHarness.flushEffects()
+
+    findMountedRegistrationElement(
+      view,
+      (element) => element.props["aria-label"] === "영어 수업 추가",
+      "add enrollment row action",
+    ).props.onClick()
+    view = hookHarness.render(RegistrationEnrollmentEditor, persistedProps)
+    hookHarness.flushEffects()
+    const classSelections = findMountedRegistrationElements(
+      view,
+      (element) => String(element.props["aria-label"] || "").match(/^영어 수업 \d+ 선택$/),
+    )
+    assert.equal(classSelections.length, 2)
+    classSelections[1].props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
+    view = hookHarness.render(RegistrationEnrollmentEditor, persistedProps)
+    calendars = findMountedRegistrationElements(
+      view,
+      (element) => element.props.subject === "영어" && Array.isArray(element.props.sessions),
+    )
+    assert.equal(calendars.length, 2)
+    assert.equal(calendars[0].props.sourceObservationId, "")
+    assert.equal(calendars[1].props.sourceObservationId, MOUNTED_REGISTRATION_OBSERVATION_ID)
+    assert.equal(collectMountedRegistrationText(view).filter((value) => value === "최근 적합 청강").length, 1)
+    hookHarness.flushEffects()
+  } finally {
+    hookHarness.cleanup()
+  }
+})
+
+test("mounted observation first lesson keeps a regular override through refresh and saves DB null", async () => {
+  const hookHarness = createRegistrationEditorHookHarness()
+  const saveCalls = []
+  let observationLoads = 0
+  const RegistrationEnrollmentEditor = await loadMountedRegistrationEnrollmentEditor({
+    hookHarness,
+    loadObservation: async () => {
+      observationLoads += 1
+      return mountedRegistrationObservation
+    },
+    loadClassDetails: async () => mountedRegistrationClassDetails(),
+    saveEnrollmentDetails: async (input) => {
+      saveCalls.push(input)
+      return { trackId: input.trackId, rows: input.rows }
+    },
+  })
+  const initialProps = mountedRegistrationEditorProps()
+
+  try {
+    let view = hookHarness.render(RegistrationEnrollmentEditor, initialProps)
+    hookHarness.flushEffects()
+    await flushMountedRegistrationWork()
+    view = hookHarness.render(RegistrationEnrollmentEditor, initialProps)
+    hookHarness.flushEffects()
+    findMountedRegistrationElement(
+      view,
+      (element) => element.props["aria-label"] === "영어 수업 1 선택",
+      "first class selection",
+    ).props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
+    view = hookHarness.render(RegistrationEnrollmentEditor, initialProps)
+    hookHarness.flushEffects()
+    await flushMountedRegistrationWork()
+    view = hookHarness.render(RegistrationEnrollmentEditor, initialProps)
+    let mountedText = collectMountedRegistrationText(view).join(" ")
+    assert.match(mountedText, /8월 17일\s*·\s*중2 영어 A반\s*· 참석 · 적합/)
+    let calendar = findMountedRegistrationElement(
+      view,
+      (element) => element.props.subject === "영어" && element.props.rowIndex === 1 && Array.isArray(element.props.sessions),
+      "defaulted first lesson calendar",
+    )
+    assert.equal(calendar.props.valueDate, "2026-08-17")
+    assert.equal(calendar.props.sourceObservationId, MOUNTED_REGISTRATION_OBSERVATION_ID)
+    const regularOption = calendar.props.sessions.find((option) => option.source === "regular")
+    assert.deepEqual({
+      source: regularOption?.source,
+      sessionDate: regularOption?.sessionDate,
+      key: regularOption?.classStartSessionKey,
+    }, {
+      source: "regular",
+      sessionDate: "2026-08-24",
+      key: MOUNTED_REGISTRATION_FUTURE_SESSION_KEY,
+    })
+    hookHarness.flushEffects()
+
+    calendar.props.onSelect(regularOption)
+    view = hookHarness.render(RegistrationEnrollmentEditor, initialProps)
+    mountedText = collectMountedRegistrationText(view).join(" ")
+    assert.doesNotMatch(mountedText, /최근 적합 청강/)
+    calendar = findMountedRegistrationElement(
+      view,
+      (element) => element.props.subject === "영어" && element.props.rowIndex === 1 && Array.isArray(element.props.sessions),
+      "regular first lesson calendar",
+    )
+    assert.equal(calendar.props.valueDate, "2026-08-24")
+    assert.equal(calendar.props.sourceObservationId, "")
+    hookHarness.flushEffects()
+
+    const refreshedProps = mountedRegistrationEditorProps({
+      track: {
+        ...initialProps.track,
+        observationFeedbackRevision: 3,
+        enrollmentDetailRows: [],
+      },
+    })
+    view = hookHarness.render(RegistrationEnrollmentEditor, refreshedProps)
+    hookHarness.flushEffects()
+    await flushMountedRegistrationWork()
+    view = hookHarness.render(RegistrationEnrollmentEditor, refreshedProps)
+    mountedText = collectMountedRegistrationText(view).join(" ")
+    assert.doesNotMatch(mountedText, /최근 적합 청강/)
+    calendar = findMountedRegistrationElement(
+      view,
+      (element) => element.props.subject === "영어" && element.props.rowIndex === 1 && Array.isArray(element.props.sessions),
+      "refreshed regular first lesson calendar",
+    )
+    assert.equal(calendar.props.valueDate, "2026-08-24")
+    assert.equal(calendar.props.sourceObservationId, "")
+    assert.equal(observationLoads, 2)
+    hookHarness.flushEffects()
+
+    findMountedRegistrationElement(
+      view,
+      (element) => element.props["aria-label"] === "영어 등록 정보 저장",
+      "enrollment save action",
+    ).props.onClick()
+    await flushMountedRegistrationWork()
+    assert.equal(saveCalls.length, 1)
+    assert.equal(saveCalls[0].trackId, MOUNTED_REGISTRATION_TRACK_ID)
+    assert.deepEqual(saveCalls[0].rows, [{
+      classId: MOUNTED_REGISTRATION_CLASS_ID,
+      textbookId: null,
+      classStartDate: "2026-08-24",
+      classStartSessionKey: MOUNTED_REGISTRATION_FUTURE_SESSION_KEY,
+      classStartLessonSessionId: MOUNTED_REGISTRATION_FUTURE_LESSON_ID,
+      classStartSession: "2회차",
+      classStartSourceObservationId: null,
+      sortOrder: 0,
+    }])
+  } finally {
+    hookHarness.cleanup()
+  }
+})
+
+test("mounted observation first lesson ignores an old-track delayed completion", async () => {
+  const hookHarness = createRegistrationEditorHookHarness()
+  const staleTrackLoad = createControlledPromise()
+  const currentTrackLoad = createControlledPromise()
+  let loadCount = 0
+  const RegistrationEnrollmentEditor = await loadMountedRegistrationEnrollmentEditor({
+    hookHarness,
+    loadObservation: () => {
+      loadCount += 1
+      return loadCount === 1 ? staleTrackLoad.promise : currentTrackLoad.promise
+    },
+    loadClassDetails: async () => mountedRegistrationClassDetails(),
+  })
+  const firstTrackProps = mountedRegistrationEditorProps()
+  const secondTrackId = "76000000-0000-4000-8000-000000000099"
+  const secondTrackProps = mountedRegistrationEditorProps({
+    taskId: "76000000-0000-4000-8000-000000000098",
+    track: {
+      ...firstTrackProps.track,
+      id: secondTrackId,
+      taskId: "76000000-0000-4000-8000-000000000098",
+      enrollmentDetailRows: [],
+    },
+  })
+
+  try {
+    hookHarness.render(RegistrationEnrollmentEditor, firstTrackProps)
+    hookHarness.flushEffects()
+    let view = hookHarness.render(RegistrationEnrollmentEditor, secondTrackProps)
+    hookHarness.flushEffects()
+    view = hookHarness.render(RegistrationEnrollmentEditor, secondTrackProps)
+    hookHarness.flushEffects()
+    findMountedRegistrationElement(
+      view,
+      (element) => element.props["aria-label"] === "영어 수업 1 선택",
+      "current-track class selection",
+    ).props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
+    view = hookHarness.render(RegistrationEnrollmentEditor, secondTrackProps)
+    hookHarness.flushEffects()
+
+    staleTrackLoad.resolve(mountedRegistrationObservation)
+    await flushMountedRegistrationWork()
+    view = hookHarness.render(RegistrationEnrollmentEditor, secondTrackProps)
+    let calendar = findMountedRegistrationElement(
+      view,
+      (element) => element.props.subject === "영어" && element.props.rowIndex === 1 && Array.isArray(element.props.sessions),
+      "current-track calendar after stale completion",
+    )
+    assert.equal(calendar.props.sourceObservationId, "")
+    assert.equal(calendar.props.sessions.some((option) => option.source === "observation"), false)
+    assert.doesNotMatch(collectMountedRegistrationText(view).join(" "), /최근 적합 청강/)
+    hookHarness.flushEffects()
+
+    const returnToFirstTrack = hookHarness.render(RegistrationEnrollmentEditor, firstTrackProps)
+    calendar = findMountedRegistrationElement(
+      returnToFirstTrack,
+      (element) => element.props.subject === "영어" && element.props.rowIndex === 1 && Array.isArray(element.props.sessions),
+      "returned first-track calendar before effects",
+    )
+    assert.equal(calendar.props.sourceObservationId, "")
+    assert.equal(calendar.props.sessions.some((option) => option.source === "observation"), false)
+    assert.doesNotMatch(collectMountedRegistrationText(returnToFirstTrack).join(" "), /최근 적합 청강/)
+    hookHarness.flushEffects()
+  } finally {
+    hookHarness.cleanup()
+    currentTrackLoad.resolve(null)
+  }
 })
 
 test("observation first lesson editor keeps async ownership wiring and React state updaters pure", async () => {

@@ -141,7 +141,7 @@ function registrationCalendarDate(dateKey: string) {
 }
 
 function registrationKoreanMonthDay(dateKey: string) {
-  const [, month, day] = dateKey.match(/^(\d{4})-(\d{2})-(\d{2})$/) || []
+  const [, , month, day] = dateKey.match(/^(\d{4})-(\d{2})-(\d{2})$/) || []
   if (!month || !day) return dateKey
   return `${Number(month)}월 ${Number(day)}일`
 }
@@ -385,7 +385,7 @@ export function RegistrationEnrollmentEditor({
   const [cancellationValidationError, setCancellationValidationError] = useState("")
   const [enrollmentHistoryOpen, setEnrollmentHistoryOpen] = useState(false)
   const [matchingObservation, setMatchingObservation] = useState<RegistrationObservationFeedbackDetail | null>(null)
-  const currentMatchingObservation = matchingObservation?.trackId === track.id
+  const currentMatchingObservation = permissions.canManage && matchingObservation?.trackId === track.id
     ? matchingObservation
     : null
   const sectionRef = useRef<HTMLElement | null>(null)
