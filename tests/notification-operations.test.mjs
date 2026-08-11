@@ -7,6 +7,7 @@ const scheduleScriptUrl = new URL("../scripts/manage-notification-worker-schedul
 const drainScriptUrl = new URL("../scripts/verify-notification-contract-drain.mjs", import.meta.url)
 const scheduleMigrationUrl = new URL("../supabase/pending-migrations/notification-cutover/20260716195500_notification_worker_schedule.sql", import.meta.url)
 const forwardMigrationUrl = new URL("../supabase/pending-migrations/notification-cutover/20260716195900_notification_control_plane_forward_compat.sql", import.meta.url)
+const vercelJsonUrl = new URL("../vercel.json", import.meta.url)
 
 function healthyMetrics() {
   return {
@@ -226,7 +227,10 @@ test("24시간/full operating day drain verifier는 stale bundle·old server가 
 })
 
 test("schedule migration은 Vault fail-closed, 두 schedule, atomic watchdog와 마지막 marker를 가진다", async () => {
-  const source = await readFile(scheduleMigrationUrl, "utf8")
+  const [source, vercelJson] = await Promise.all([
+    readFile(scheduleMigrationUrl, "utf8"),
+    readFile(vercelJsonUrl, "utf8").then(JSON.parse),
+  ])
   assert.match(source, /create extension if not exists pg_cron;/)
   assert.doesNotMatch(source, /create extension if not exists pg_cron with schema/)
   for (const functionName of [
@@ -253,6 +257,9 @@ test("schedule migration은 Vault fail-closed, 두 schedule, atomic watchdog와 
   assert.match(source, /octet_length\(p_secret\) < 32/)
   assert.match(source, /tips-notification-worker-v1/)
   assert.match(source, /tips-notification-cutover-watchdog-v1/)
+  assert.match(source, /tips-notification-worker-v1[\s\S]*?\* \* \* \* \*/)
+  assert.equal(source.includes("tips-registration-observation-worker"), false)
+  assert.equal(vercelJson.crons?.length || 0, 0)
   assert.match(source, /interval '3 minutes'/)
   assert.match(source, /interval '5 minutes'/)
   assert.doesNotMatch(source, /extensions\.digest/)

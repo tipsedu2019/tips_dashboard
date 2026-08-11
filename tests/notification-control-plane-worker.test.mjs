@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { createHash } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
 import vm from "node:vm"
@@ -378,6 +379,44 @@ function createDeliveryClaim(overrides = {}) {
       connection_key: "google_chat.management",
       target_snapshot: { role: "staff", active: true },
     },
+    ...overrides,
+  }
+}
+
+function createObservationChatJobClaim(overrides = {}) {
+  const booking = {
+    classId: "70000000-0000-4000-8000-000000000026", className: "관찰반",
+    sessionAuthority: "normalized", classLessonSessionId: "70000000-0000-4000-8000-000000000025",
+    legacySessionKey: null, scheduleState: "active", startsAt: "2026-08-18T01:00:00.000Z",
+    endsAt: "2026-08-18T02:00:00.000Z", teacherCatalogId: "70000000-0000-4000-8000-000000000027",
+    teacherProfileId: null, teacherName: "선생님", classroomCatalogId: "70000000-0000-4000-8000-000000000028",
+    classroomName: "101", campus: "본관",
+  }
+  return {
+    job_id: "70000000-0000-4000-8000-000000000021",
+    claim_token: "70000000-0000-4000-8000-000000000022",
+    observation_id: "70000000-0000-4000-8000-000000000023",
+    appointment_id: "70000000-0000-4000-8000-000000000024",
+    assignment_fact_id: null,
+    notification_revision: 1,
+    event_key: "registration.observation_reminder_due",
+    due_at: "2026-08-17T07:00:00.000Z",
+    expires_at: "2026-08-17T10:00:00.000Z",
+    attempt_count: 1,
+    source_revision: {
+      authority: "normalized",
+      sessionId: "70000000-0000-4000-8000-000000000025",
+      revision: 7,
+    },
+    booking_fact_hash: "a".repeat(64),
+    reservation_snapshot_hash: "b".repeat(64),
+    current_booking_snapshot: booking,
+    previous_booking_snapshot: null,
+    preparation_snapshot: { textbookNames: ["교재"], progressSummary: "진도" },
+    submission_snapshot: null,
+    mention_role: "subject_teacher",
+    mention_profile_ids: [],
+    rule_snapshot: [],
     ...overrides,
   }
 }
@@ -1187,6 +1226,45 @@ test("worker는 시작 heartbeat 뒤 정해진 순서로 bounded batch를 처리
       p_batch_size: 7,
       p_lease_seconds: 45,
     })
+  }
+})
+
+test("관찰 Chat job의 잘못된 event와 일반 source timeout은 batch 중단 대신 failed/retry receipt로 닫는다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  for (const fixture of [
+    {
+      name: "invalid event",
+      job: createObservationChatJobClaim({ event_key: "registration.observation_invalid" }),
+      sourceReader: { async readSource() { throw new Error("must not read invalid event") }, async readCurrentPreparation() { throw new Error("unexpected") } },
+      disposition: "failed",
+      errorCode: "payload_schema_unsupported",
+    },
+    {
+      name: "plain transient source timeout",
+      job: createObservationChatJobClaim(),
+      sourceReader: { async readSource() { throw new Error("registration_observation_source_timeout") }, async readCurrentPreparation() { throw new Error("unexpected") } },
+      disposition: "retry",
+      errorCode: "transient_pre_dispatch_failure",
+    },
+  ]) {
+    const harness = createRpcHarness({
+      claim_registration_observation_chat_jobs_v1: [fixture.job],
+      finish_registration_observation_chat_job_v1: { ok: true },
+    })
+    const worker = createNotificationWorkerRuntime({
+      getAdapter: () => null,
+      rpc: harness.rpc,
+      getProvider: () => null,
+      createRunId: () => RUN_ID,
+      now: () => new Date("2026-08-17T08:00:00.000Z"),
+      observationSourceReader: fixture.sourceReader,
+    })
+    const counts = await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+    assert.equal(counts.observationDue, 1, fixture.name)
+    const finish = harness.calls.find((call) => call.name === "finish_registration_observation_chat_job_v1")
+    assert.equal(finish.parameters.p_disposition, fixture.disposition, fixture.name)
+    assert.equal(finish.parameters.p_error_code, fixture.errorCode, fixture.name)
+    assert.equal(harness.calls.some((call) => call.name === "materialize_registration_observation_chat_job_v1"), false, fixture.name)
   }
 })
 
@@ -2045,6 +2123,148 @@ test("관찰 delivery는 generic prepare 전에 잠긴 frozen state를 읽고 �
     "read_registration_observation_notification_delivery_frozen_state_v1",
     "finalize_notification_delivery_v1",
   ])
+})
+
+test("관찰 첫 시도는 locked snapshot만 adapter에 전달하고 두 번째 locked read의 expiry를 다시 검증한다", async () => {
+  const { prepareRegistrationObservationDeliveryForDispatch } = await import(workerModuleUrl)
+  const claim = createDeliveryClaim({
+    workflow_key: "registration", event_key: "registration.observation_reminder_due",
+    source_type: "registration_observation", source_id: "70000000-0000-4000-8000-000000000012",
+    source_revision: "1", rule_revision: "1", target_generation: "1",
+  })
+  const frozenPayload = { frozen: "yes" }
+  const payloadFingerprint = createHash("sha256").update(JSON.stringify(frozenPayload)).digest("hex")
+  const calls = []
+  const adapter = createAdapter({
+    async revalidateBeforeSend(input) {
+      assert.deepEqual(input.eventSnapshot, { payloadSchemaVersion: 3, payload: frozenPayload })
+      assert.equal(input.eventSnapshot.payload, frozenPayload)
+      return { ok: true, refreshedPayload: frozenPayload, payloadSchemaVersion: 3, payloadFingerprint }
+    },
+    async buildRenderContext() { return {} },
+    async buildDeepLink() { return null },
+  })
+  let readCount = 0
+  await assert.rejects(prepareRegistrationObservationDeliveryForDispatch({
+    claim,
+    adapter,
+    now: () => new Date("2026-08-17T08:00:00.000Z"),
+    async rpc(name, parameters) {
+      calls.push({ name, parameters })
+      if (name === "read_registration_observation_notification_delivery_frozen_state_v1") {
+        readCount += 1
+        return readCount === 1 ? {
+          expiresAt: "2026-08-17T10:00:00.000Z", snapshot: frozenPayload,
+          payloadFingerprint: null, renderFingerprint: null, title: null, body: null, href: null,
+          lastAttemptStartedAt: null, attemptCount: 0,
+        } : {
+          expiresAt: "2026-08-17T07:59:59.000Z", snapshot: frozenPayload,
+          payloadFingerprint: parameters.p_unused ?? payloadFingerprint,
+          renderFingerprint: createHash("sha256").update(JSON.stringify({ title: "T", body: "B", href: null })).digest("hex"),
+          title: "T", body: "B", href: null, lastAttemptStartedAt: null, attemptCount: 0,
+        }
+      }
+      if (name === "get_notification_render_snapshot_v1") return {
+        event_id: EVENT_ID, workflow_key: "registration", event_key: claim.event_key,
+        source_type: claim.source_type, source_id: claim.source_id, source_revision: "1",
+        occurrence_key: "observation-fixture", occurred_at: claim.scheduled_for,
+        payload_schema_version: 3, payload: frozenPayload,
+        rule_id: RULE_ID, rule_revision: "1", template_id: TEMPLATE_ID, channel_key: "google_chat",
+        audience_key: "subject_team", rule_variant_key: "immediate", title_template: "T", body_template: "B",
+        allowed_variables: [], template_payload_schema_version: 3,
+      }
+      if (name === "refresh_registration_observation_notification_delivery_v1") return { outcome: "refreshed" }
+      if (name === "prepare_registration_observation_notification_delivery_v1") return {
+        prepared: false, delivery_id: DELIVERY_ID, status: "canceled", status_reason: "recipient_revoked",
+      }
+      throw new Error(`unexpected rpc ${name}`)
+    },
+  }), /worker DB 응답 형식/)
+  assert.deepEqual(calls.map((call) => call.name), [
+    "read_registration_observation_notification_delivery_frozen_state_v1",
+    "get_notification_render_snapshot_v1",
+    "refresh_registration_observation_notification_delivery_v1",
+    "read_registration_observation_notification_delivery_frozen_state_v1",
+  ])
+})
+
+test("관찰 frozen retry는 fingerprint가 있으면 title/body/href도 모두 보존해야 한다", async () => {
+  const { prepareRegistrationObservationDeliveryForDispatch } = await import(workerModuleUrl)
+  const claim = createDeliveryClaim({
+    workflow_key: "registration", event_key: "registration.observation_reminder_due",
+    source_type: "registration_observation", source_id: "70000000-0000-4000-8000-000000000012",
+    source_revision: "1", rule_revision: "1", target_generation: "1", attempt_count: 1,
+  })
+  await assert.rejects(prepareRegistrationObservationDeliveryForDispatch({
+    claim,
+    adapter: createAdapter(),
+    async rpc(name) {
+      if (name !== "read_registration_observation_notification_delivery_frozen_state_v1") throw new Error(`unexpected ${name}`)
+      return {
+        expiresAt: "2026-08-17T10:00:00.000Z", snapshot: { frozen: "yes" },
+        payloadFingerprint: "a".repeat(64), renderFingerprint: "b".repeat(64),
+        title: null, body: "frozen", href: "/admin/registration", lastAttemptStartedAt: "2026-08-17T07:00:00.000Z", attemptCount: 1,
+      }
+    },
+  }), /worker DB 응답 형식/)
+})
+
+test("관찰 first-attempt generic payload는 locked frozen snapshot과 byte-identical 해야 하며 adapter 전에 거절한다", async () => {
+  const { prepareRegistrationObservationDeliveryForDispatch } = await import(workerModuleUrl)
+  const claim = createDeliveryClaim({
+    workflow_key: "registration", event_key: "registration.observation_reminder_due",
+    source_type: "registration_observation", source_id: "70000000-0000-4000-8000-000000000012",
+    source_revision: "1", rule_revision: "1", target_generation: "1",
+  })
+  let revalidationCalls = 0
+  await assert.rejects(prepareRegistrationObservationDeliveryForDispatch({
+    claim,
+    adapter: createAdapter({ async revalidateBeforeSend() { revalidationCalls += 1; return { ok: true } } }),
+    async rpc(name) {
+      if (name === "read_registration_observation_notification_delivery_frozen_state_v1") return {
+        expiresAt: "2026-08-17T10:00:00.000Z", snapshot: { locked: true }, payloadFingerprint: null,
+        renderFingerprint: null, title: null, body: null, href: null, lastAttemptStartedAt: null, attemptCount: 0,
+      }
+      if (name === "get_notification_render_snapshot_v1") return {
+        event_id: EVENT_ID, workflow_key: "registration", event_key: claim.event_key,
+        source_type: claim.source_type, source_id: claim.source_id, source_revision: "1", occurrence_key: "fixture",
+        occurred_at: claim.scheduled_for, payload_schema_version: 3, payload: { generic: true }, rule_id: RULE_ID,
+        rule_revision: "1", template_id: TEMPLATE_ID, channel_key: "google_chat", audience_key: "subject_team",
+        rule_variant_key: "immediate", title_template: "T", body_template: "B", allowed_variables: [], template_payload_schema_version: 3,
+      }
+      throw new Error(`unexpected rpc ${name}`)
+    },
+  }), /worker DB 응답 형식/)
+  assert.equal(revalidationCalls, 0)
+})
+
+test("관찰 final-prepare 결과는 닫힌 union·동일 delivery·in-app provider-zero receipt만 받는다", async () => {
+  const { prepareRegistrationObservationDeliveryForDispatch } = await import(workerModuleUrl)
+  const claim = createDeliveryClaim({
+    workflow_key: "registration", event_key: "registration.observation_feedback_submitted",
+    source_type: "registration_observation", source_id: "70000000-0000-4000-8000-000000000012",
+    source_revision: "1", rule_revision: "1", target_generation: "1", attempt_count: 1, channel_key: "in_app",
+  })
+  const frozen = {
+    expiresAt: "2026-08-17T10:00:00.000Z", snapshot: { frozen: true }, payloadFingerprint: "a".repeat(64),
+    renderFingerprint: "b".repeat(64), title: "frozen", body: "frozen", href: "/admin/registration",
+    lastAttemptStartedAt: "2026-08-17T07:00:00.000Z", attemptCount: 1,
+  }
+  const notificationId = "70000000-0000-4000-8000-000000000030"
+  for (const malformed of [
+    { prepared: false, delivery_id: "70000000-0000-4000-8000-000000000029", status: "canceled", status_reason: "recipient_revoked" },
+    { prepared: true, channel_key: "in_app", delivery_id: DELIVERY_ID, notification_id: notificationId, push_children_created: 1, status: "sent" },
+    { prepared: true, channel_key: "in_app", delivery_id: DELIVERY_ID, notification_id: notificationId, push_children_created: 0, status: "sent", dispatch_token: DISPATCH_TOKEN },
+  ]) {
+    await assert.rejects(prepareRegistrationObservationDeliveryForDispatch({
+      claim, adapter: createAdapter(),
+      async rpc(name) {
+        if (name === "read_registration_observation_notification_delivery_frozen_state_v1") return frozen
+        if (name === "prepare_registration_observation_notification_delivery_v1") return malformed
+        throw new Error(`unexpected rpc ${name}`)
+      },
+    }), /worker DB 응답 형식/)
+  }
 })
 
 test("worker는 외부 시도 등록 거부 또는 응답 불명확 시 provider를 0회 호출하고 unknown으로 닫는다", async () => {

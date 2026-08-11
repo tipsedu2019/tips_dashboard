@@ -20,6 +20,14 @@ import {
 import { createWebPushProvider } from "./providers/web-push-provider.ts"
 import { validateNotificationAppDeepLink } from "./notification-app-deep-link.ts"
 import { normalizeRenderedNotificationBody } from "./presentation/notification-presentation-formatters.ts"
+import type {
+  RegistrationObservationChatJobClaim,
+} from "./adapters/registration-notification-adapter.ts"
+import type {
+  RegistrationObservationNotificationSource,
+  RegistrationObservationPreparation,
+  RegistrationObservationSessionSourceRevision,
+} from "./adapters/registration-observation-notification-source.ts"
 
 type JsonRecord = Record<string, unknown>
 type NotificationRpc = (name: string, parameters: JsonRecord) => Promise<unknown>
@@ -64,8 +72,8 @@ type NotificationWorkerRuntimeInput = Readonly<{
   createRunId: () => string
   now?: () => Date
   observationSourceReader?: Readonly<{
-    readSource(observationId: string): Promise<unknown>
-    readCurrentPreparation(source: unknown): Promise<unknown>
+    readSource(observationId: string): Promise<RegistrationObservationNotificationSource>
+    readCurrentPreparation(source: RegistrationObservationNotificationSource): Promise<RegistrationObservationPreparation>
   }>
 }>
 
@@ -175,6 +183,13 @@ function requiredHash(value: unknown) {
 
 function requiredPositiveInteger(value: unknown) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    workerEnvelopeError()
+  }
+  return value
+}
+
+function requiredNonNegativeInteger(value: unknown) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     workerEnvelopeError()
   }
   return value
@@ -652,35 +667,142 @@ function observationJobRetryAt(now: Date, attemptCount: number, expiresAt: strin
   return next.getTime() < Date.parse(expiresAt) ? next.toISOString() : null
 }
 
-function observationJobClaim(job: JsonRecord) {
-  requiredUuid(job.job_id)
-  requiredUuid(job.claim_token)
-  requiredUuid(job.observation_id)
-  requiredUuid(job.appointment_id)
-  if (job.assignment_fact_id !== null && job.assignment_fact_id !== undefined) requiredUuid(job.assignment_fact_id)
-  requiredPositiveInteger(job.notification_revision)
-  const eventKey = requiredString(job.event_key)
+function transientObservationJobError(error: unknown) {
+  const code = normalizeWorkerErrorCode(error)
+  if (code === "notification_registration_observation_source_unavailable" || code === "notification_rpc_unavailable") {
+    return true
+  }
+  const message = error instanceof Error ? error.message : ""
+  return /registration_observation_source_(?:timeout|unavailable)|(?:rpc|database|connection).*(?:timeout|unavailable)/iu.test(message)
+}
+
+function observationSourceRevision(value: unknown): RegistrationObservationSessionSourceRevision {
+  if (!isPlainRecord(value)) workerEnvelopeError()
+  if (value.authority === "normalized") {
+    const revision = requireExactRecord(value, ["authority", "sessionId", "revision"])
+    if (!Number.isSafeInteger(revision.revision) || Number(revision.revision) < 0) workerEnvelopeError()
+    return Object.freeze({
+      authority: "normalized",
+      sessionId: requiredUuid(revision.sessionId),
+      revision: Number(revision.revision),
+    })
+  }
+  const legacy = requireExactRecord(value, ["authority", "contentHash", "sessionKey"])
+  if (legacy.authority !== "legacy") workerEnvelopeError()
+  return Object.freeze({
+    authority: "legacy",
+    sessionKey: requiredString(legacy.sessionKey),
+    contentHash: requiredHash(legacy.contentHash),
+  })
+}
+
+const OBSERVATION_BOOKING_SNAPSHOT_KEYS = [
+  "campus", "classId", "classLessonSessionId", "className", "classroomCatalogId", "classroomName", "endsAt",
+  "legacySessionKey", "scheduleState", "sessionAuthority", "startsAt", "teacherCatalogId", "teacherName", "teacherProfileId",
+]
+
+function observationBookingSnapshot(value: unknown) {
+  const booking = requireExactRecord(value, OBSERVATION_BOOKING_SNAPSHOT_KEYS)
+  requiredUuid(booking.classId)
+  requiredString(booking.className)
+  if (booking.sessionAuthority !== "normalized" && booking.sessionAuthority !== "legacy") workerEnvelopeError()
+  if (booking.classLessonSessionId !== null) requiredUuid(booking.classLessonSessionId)
+  if (booking.legacySessionKey !== null) requiredString(booking.legacySessionKey)
+  if (booking.scheduleState !== "active" && booking.scheduleState !== "makeup") workerEnvelopeError()
+  for (const key of ["startsAt", "endsAt"]) {
+    if (typeof booking[key] !== "string" || !Number.isFinite(Date.parse(booking[key]))) workerEnvelopeError()
+  }
+  requiredUuid(booking.teacherCatalogId)
+  if (booking.teacherProfileId !== null) requiredUuid(booking.teacherProfileId)
+  requiredString(booking.teacherName)
+  requiredUuid(booking.classroomCatalogId)
+  requiredString(booking.classroomName)
+  if (booking.campus !== "본관" && booking.campus !== "별관") workerEnvelopeError()
+  return Object.freeze({ ...booking })
+}
+
+function observationSubmission(value: unknown) {
+  if (value === null) return null
+  const submission = requireExactRecord(value, ["submittedAt", "submittedByName"])
+  requiredString(submission.submittedByName)
+  if (typeof submission.submittedAt !== "string" || !Number.isFinite(Date.parse(submission.submittedAt))) workerEnvelopeError()
+  return Object.freeze({ ...submission })
+}
+
+function observationRuleSnapshot(value: unknown) {
+  if (!Array.isArray(value)) workerEnvelopeError()
+  return Object.freeze(value.map((rule) => {
+    const parsed = requireExactRecord(rule, ["audience_key", "channel_key", "enabled", "rule_id", "rule_revision", "rule_variant_key", "template_id"])
+    requiredUuid(parsed.rule_id)
+    decimalString(parsed.rule_revision)
+    requiredUuid(parsed.template_id)
+    requiredString(parsed.channel_key)
+    requiredString(parsed.audience_key)
+    requiredString(parsed.rule_variant_key)
+    if (typeof parsed.enabled !== "boolean") workerEnvelopeError()
+    return Object.freeze({ ...parsed })
+  }))
+}
+
+function observationPreparation(value: unknown): RegistrationObservationPreparation | null {
+  if (value === null) return null
+  const preparation = requireExactRecord(value, ["progressSummary", "textbookNames"])
+  if (!Array.isArray(preparation.textbookNames) || preparation.textbookNames.length < 1) workerEnvelopeError()
+  const textbookNames = preparation.textbookNames.map((name) => requiredString(name))
+  return Object.freeze({ textbookNames: Object.freeze(textbookNames), progressSummary: requiredString(preparation.progressSummary) })
+}
+
+function observationJobClaim(job: JsonRecord): RegistrationObservationChatJobClaim {
+  const claimed = requireExactRecord(job, [
+    "appointment_id", "assignment_fact_id", "attempt_count", "booking_fact_hash", "claim_token",
+    "current_booking_snapshot", "due_at", "event_key", "expires_at", "job_id", "mention_profile_ids",
+    "mention_role", "notification_revision", "observation_id", "preparation_snapshot", "previous_booking_snapshot",
+    "reservation_snapshot_hash", "rule_snapshot", "source_revision", "submission_snapshot",
+  ])
+  const eventKey = requiredString(claimed.event_key)
   if (!OBSERVATION_CHAT_EVENT_KEYS.has(eventKey)) workerEnvelopeError()
-  const dueAt = requiredString(job.due_at)
-  const expiresAt = requiredString(job.expires_at)
+  const dueAt = requiredString(claimed.due_at)
+  const expiresAt = requiredString(claimed.expires_at)
   if (!Number.isFinite(Date.parse(dueAt)) || !Number.isFinite(Date.parse(expiresAt))) workerEnvelopeError()
-  const attemptCount = requiredPositiveInteger(job.attempt_count)
-  requiredHash(job.booking_fact_hash)
-  if (!isPlainRecord(job.current_booking_snapshot)) workerEnvelopeError()
-  if (job.previous_booking_snapshot !== null && job.previous_booking_snapshot !== undefined && !isPlainRecord(job.previous_booking_snapshot)) {
-    workerEnvelopeError()
-  }
-  if (job.preparation_snapshot !== null && job.preparation_snapshot !== undefined && !isPlainRecord(job.preparation_snapshot)) {
-    workerEnvelopeError()
-  }
-  if (job.submission_snapshot !== null && job.submission_snapshot !== undefined && !isPlainRecord(job.submission_snapshot)) {
-    workerEnvelopeError()
-  }
-  if (job.mention_role !== "subject_teacher" && job.mention_role !== "track_director") workerEnvelopeError()
-  if (!Array.isArray(job.mention_profile_ids) || job.mention_profile_ids.some((value) => typeof value !== "string" || !UUID_PATTERN.test(value))) {
-    workerEnvelopeError()
-  }
-  return { eventKey, expiresAt, attemptCount }
+  const currentBookingSnapshot = observationBookingSnapshot(claimed.current_booking_snapshot)
+  const previousBookingSnapshot = claimed.previous_booking_snapshot === null
+    ? null : observationBookingSnapshot(claimed.previous_booking_snapshot)
+  const preparationSnapshot = observationPreparation(claimed.preparation_snapshot)
+  const submissionSnapshot = observationSubmission(claimed.submission_snapshot)
+  if (!Array.isArray(claimed.mention_profile_ids)) workerEnvelopeError()
+  const mentionProfileIds = claimed.mention_profile_ids.map((value) => requiredUuid(value))
+  if (claimed.mention_role !== "subject_teacher" && claimed.mention_role !== "track_director") workerEnvelopeError()
+  observationRuleSnapshot(claimed.rule_snapshot)
+  const validSnapshots = eventKey === "registration.observation_rescheduled"
+    ? previousBookingSnapshot !== null && preparationSnapshot !== null && submissionSnapshot === null && claimed.mention_role === "subject_teacher"
+    : eventKey === "registration.observation_scheduled" || eventKey === "registration.observation_reminder_due"
+      ? previousBookingSnapshot === null && preparationSnapshot !== null && submissionSnapshot === null && claimed.mention_role === "subject_teacher"
+      : eventKey === "registration.observation_canceled" || eventKey === "registration.observation_feedback_due"
+        ? previousBookingSnapshot === null && preparationSnapshot === null && submissionSnapshot === null && claimed.mention_role === "subject_teacher"
+        : eventKey === "registration.observation_feedback_submitted"
+          ? previousBookingSnapshot === null && preparationSnapshot === null && submissionSnapshot !== null && claimed.mention_role === "track_director"
+          : previousBookingSnapshot === null && preparationSnapshot === null && submissionSnapshot === null && claimed.mention_role === "track_director"
+  if (!validSnapshots) workerEnvelopeError()
+  return Object.freeze({
+    jobId: requiredUuid(claimed.job_id),
+    claimToken: requiredUuid(claimed.claim_token),
+    observationId: requiredUuid(claimed.observation_id),
+    appointmentId: requiredUuid(claimed.appointment_id),
+    assignmentFactId: claimed.assignment_fact_id === null ? null : requiredUuid(claimed.assignment_fact_id),
+    notificationRevision: requiredPositiveInteger(claimed.notification_revision),
+    eventKey: eventKey as RegistrationObservationChatJobClaim["eventKey"],
+    dueAt,
+    expiresAt,
+    attemptCount: requiredNonNegativeInteger(claimed.attempt_count),
+    sourceRevision: observationSourceRevision(claimed.source_revision),
+    bookingFactHash: requiredHash(claimed.booking_fact_hash),
+    currentBookingSnapshot,
+    previousBookingSnapshot,
+    preparationSnapshot,
+    submissionSnapshot,
+    mentionRole: claimed.mention_role,
+    mentionProfileIds: Object.freeze(mentionProfileIds),
+  })
 }
 
 async function finishObservationChatJob(
@@ -703,7 +825,14 @@ async function processRegistrationObservationChatJob(
   job: JsonRecord,
   input: NotificationWorkerRuntimeInput,
 ) {
-  const { eventKey, expiresAt, attemptCount } = observationJobClaim(job)
+  let claim: RegistrationObservationChatJobClaim
+  try {
+    claim = observationJobClaim(job)
+  } catch {
+    await finishObservationChatJob(job, "failed", "payload_schema_unsupported", null, input.rpc)
+    return
+  }
+  const { eventKey, expiresAt, attemptCount } = claim
   const now = (input.now || (() => new Date()))()
   if (Date.parse(expiresAt) <= now.getTime()) {
     await finishObservationChatJob(job, "canceled", "notification_window_closed", null, input.rpc)
@@ -715,39 +844,19 @@ async function processRegistrationObservationChatJob(
     return
   }
   try {
-    const source = await sourceReader.readSource(requiredUuid(job.observation_id))
+    const source = await sourceReader.readSource(claim.observationId)
     const preparation = eventKey === "registration.observation_reminder_due"
       ? await sourceReader.readCurrentPreparation(source)
       : eventKey === "registration.observation_scheduled" || eventKey === "registration.observation_rescheduled"
-        ? job.preparation_snapshot
+        ? claim.preparationSnapshot
         : null
     const { buildRegistrationObservationChatPayloadV3 } = await import(
       "./adapters/registration-notification-adapter.ts"
     )
     const payload = buildRegistrationObservationChatPayloadV3({
-      job: {
-        jobId: requiredUuid(job.job_id),
-        claimToken: requiredUuid(job.claim_token),
-        observationId: requiredUuid(job.observation_id),
-        appointmentId: requiredUuid(job.appointment_id),
-        assignmentFactId: job.assignment_fact_id === null || job.assignment_fact_id === undefined
-          ? null : requiredUuid(job.assignment_fact_id),
-        notificationRevision: requiredPositiveInteger(job.notification_revision),
-        eventKey: eventKey as never,
-        dueAt: requiredString(job.due_at),
-        expiresAt,
-        attemptCount,
-        sourceRevision: job.source_revision as never,
-        bookingFactHash: requiredHash(job.booking_fact_hash),
-        currentBookingSnapshot: job.current_booking_snapshot as JsonRecord,
-        previousBookingSnapshot: (job.previous_booking_snapshot ?? null) as JsonRecord | null,
-        preparationSnapshot: (job.preparation_snapshot ?? null) as never,
-        submissionSnapshot: (job.submission_snapshot ?? null) as JsonRecord | null,
-        mentionRole: job.mention_role as never,
-        mentionProfileIds: job.mention_profile_ids as string[],
-      },
-      source: source as never,
-      preparation: preparation as never,
+      job: claim,
+      source,
+      preparation,
     })
     const receipt = asRecord(await input.rpc("materialize_registration_observation_chat_job_v1", {
       p_job_id: asString(job.job_id),
@@ -762,8 +871,7 @@ async function processRegistrationObservationChatJob(
       "suppressed",
     ].includes(requiredString(receipt.outcome))) workerEnvelopeError()
   } catch (error) {
-    const code = normalizeWorkerErrorCode(error)
-    if (code === "notification_registration_observation_source_unavailable" || code === "notification_rpc_unavailable") {
+    if (transientObservationJobError(error)) {
       const nextAttemptAt = observationJobRetryAt(now, attemptCount, expiresAt)
       if (nextAttemptAt) {
         await finishObservationChatJob(job, "retry", "transient_pre_dispatch_failure", nextAttemptAt, input.rpc)
@@ -1387,6 +1495,10 @@ function observationFrozenState(value: unknown) {
     typeof frozen.lastAttemptStartedAt !== "string" || !Number.isFinite(Date.parse(frozen.lastAttemptStartedAt))
   )) workerEnvelopeError()
   if ((attemptCount === 0) !== (frozen.lastAttemptStartedAt === null)) workerEnvelopeError()
+  if (attemptCount > 0 && (
+    frozen.payloadFingerprint === null || frozen.renderFingerprint === null
+    || frozen.title === null || frozen.body === null || frozen.href === null
+  )) workerEnvelopeError()
   return Object.freeze({
     attemptCount,
     expiresAt: frozen.expiresAt,
@@ -1422,26 +1534,45 @@ async function observationTerminal(
   return { kind: "terminal", status, reason }
 }
 
-function observationPrepareResult(value: unknown): RegistrationObservationDeliveryPrepareResult | null {
+function observationPrepareResult(value: unknown, claim: JsonRecord): RegistrationObservationDeliveryPrepareResult | null {
   const prepared = asRecord(value)
   if (prepared.prepared === false) {
+    requireExactRecord(prepared, ["delivery_id", "prepared", "status", "status_reason"])
+    if (requiredUuid(prepared.delivery_id) !== asString(claim.delivery_id)) workerEnvelopeError()
     const status = requiredString(prepared.status)
     if (!(["canceled", "failed", "skipped"] as string[]).includes(status)) workerEnvelopeError()
-    return { kind: "terminal", status: status as "canceled" | "failed" | "skipped", reason: nullableString(prepared.status_reason) }
+    const reason = nullableString(prepared.status_reason)
+    if (!reason) workerEnvelopeError()
+    return { kind: "terminal", status: status as "canceled" | "failed" | "skipped", reason }
   }
   if (prepared.prepared !== true) workerEnvelopeError()
   const channelKey = requiredString(prepared.channel_key)
   if (channelKey === "in_app") {
-    requiredUuid(prepared.delivery_id)
+    requireExactRecord(prepared, ["channel_key", "delivery_id", "notification_id", "prepared", "push_children_created", "status"])
+    if (requiredUuid(prepared.delivery_id) !== asString(claim.delivery_id)) workerEnvelopeError()
     requiredUuid(prepared.notification_id)
     if (
       prepared.status !== "sent"
       || !Number.isInteger(Number(prepared.push_children_created))
-      || "dispatch_token" in prepared
+      || Number(prepared.push_children_created) !== 0
     ) workerEnvelopeError()
     return { kind: "in_app_committed", notificationId: asString(prepared.notification_id) }
   }
   if (channelKey !== "google_chat" || prepared.status !== "sending") workerEnvelopeError()
+  const expectedKeys = prepared.href === undefined
+    ? ["channel_key", "claim_token", "connection_key", "delivery_id", "dispatch_token", "mention_user_names", "prepared", "rendered_body", "rendered_title", "status", "webhook_url"]
+    : ["channel_key", "claim_token", "connection_key", "delivery_id", "dispatch_token", "href", "mention_user_names", "prepared", "rendered_body", "rendered_title", "status", "webhook_url"]
+  requireExactRecord(prepared, expectedKeys)
+  if (
+    requiredUuid(prepared.delivery_id) !== asString(claim.delivery_id)
+    || requiredUuid(prepared.claim_token) !== asString(claim.claim_token)
+    || !requiredUuid(prepared.dispatch_token)
+    || typeof prepared.connection_key !== "string" || !prepared.connection_key
+    || typeof prepared.rendered_title !== "string" || typeof prepared.rendered_body !== "string"
+    || typeof prepared.webhook_url !== "string" || !prepared.webhook_url
+    || ("href" in prepared && prepared.href !== null && typeof prepared.href !== "string")
+  ) workerEnvelopeError()
+  validateGoogleChatMentionUserNames(prepared)
   return { kind: "provider_ready", begun: prepared }
 }
 
@@ -1478,7 +1609,7 @@ export async function prepareRegistrationObservationDeliveryForDispatch(
     return observationPrepareResult(await rpc(
       "prepare_registration_observation_notification_delivery_v1",
       observationPrepareParameters(claim, frozen.payloadFingerprint, frozen.renderFingerprint),
-    )) || workerEnvelopeError()
+    ), claim) || workerEnvelopeError()
   }
 
   if (
@@ -1498,12 +1629,13 @@ export async function prepareRegistrationObservationDeliveryForDispatch(
     || event.sourceRevision !== nullableString(claim.source_revision)
     || event.payloadSchemaVersion !== 3 || rule.ruleId !== claim.rule_id || rule.ruleRevision !== decimalString(claim.rule_revision)
   ) workerEnvelopeError()
+  if (canonicalJson(event.payload) !== canonicalJson(frozen.snapshot)) workerEnvelopeError()
   const revalidation = await adapter.revalidateBeforeSend({
     eventId: event.eventId, deliveryId: asString(claim.delivery_id), eventKey: event.eventKey,
     sourceType: event.sourceType, sourceId: event.sourceId, sourceRevision: event.sourceRevision,
     ruleId: rule.ruleId, ruleRevision: rule.ruleRevision, targetGeneration: decimalString(claim.target_generation),
     scheduledFor: asString(claim.scheduled_for), attemptCount: 0, target: targetFromClaim(claim.target),
-    eventSnapshot: { payloadSchemaVersion: 3, payload: event.payload },
+    eventSnapshot: { payloadSchemaVersion: 3, payload: frozen.snapshot },
   })
   if (!revalidation.ok) return observationTerminal(claim, revalidation.status, revalidation.reason, rpc)
   if (!("refreshedPayload" in revalidation) || revalidation.payloadSchemaVersion !== 3 || !HASH_PATTERN.test(revalidation.payloadFingerprint)) {
@@ -1541,7 +1673,9 @@ export async function prepareRegistrationObservationDeliveryForDispatch(
     { p_delivery_id: asString(claim.delivery_id), p_claim_token: asString(claim.claim_token) },
   ))
   if (
-    confirmed.attemptCount !== 0 || confirmed.lastAttemptStartedAt !== null || confirmed.payloadFingerprint !== payloadFingerprint
+    confirmed.attemptCount !== 0 || confirmed.expiresAt !== frozen.expiresAt
+    || Date.parse(confirmed.expiresAt) <= (input.now || (() => new Date()))().getTime()
+    || confirmed.lastAttemptStartedAt !== null || confirmed.payloadFingerprint !== payloadFingerprint
     || confirmed.renderFingerprint !== renderFingerprint || confirmed.title !== rendered.renderedTitle
     || confirmed.body !== rendered.renderedBody || confirmed.href !== rendered.href
     || canonicalJson(confirmed.snapshot) !== canonicalJson(revalidation.refreshedPayload)
@@ -1549,7 +1683,7 @@ export async function prepareRegistrationObservationDeliveryForDispatch(
   return observationPrepareResult(await rpc(
     "prepare_registration_observation_notification_delivery_v1",
     observationPrepareParameters(claim, payloadFingerprint, renderFingerprint),
-  )) || workerEnvelopeError()
+  ), claim) || workerEnvelopeError()
 }
 
 async function processDelivery(
