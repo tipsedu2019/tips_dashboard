@@ -2630,6 +2630,14 @@ test("관찰 first-attempt refresh가 durable frozen retry를 만들고 canonica
     const initialPayload = { progress: "42~49쪽" }
     const currentSource = { progress: "50~57쪽", revision: "7", reads: 0, retryReadForbidden: false }
     const refreshedPayload = { progress: currentSource.progress, source_revision: currentSource.revision }
+    const sourceAccessor = {
+      async readCurrentPreparationAndTaggedRevision() {
+        currentSource.reads += 1
+        if (currentSource.retryReadForbidden) throw new Error("retry consulted current preparation source")
+        return { progress: currentSource.progress, revision: currentSource.revision }
+      },
+    }
+    let forceRetrySourceRead = false
     const payloadFingerprint = createHash("sha256").update(JSON.stringify(refreshedPayload)).digest("hex")
     const renderFingerprint = createHash("sha256").update(JSON.stringify({ body: "B", href: "/admin/registration", title: "T" })).digest("hex")
     const state = { status: "pending", attempt: 0, frozen: null, sends: 0, claims: 0 }
@@ -2694,11 +2702,12 @@ test("관찰 first-attempt refresh가 durable frozen retry를 만들고 canonica
         async revalidateBeforeSend(input) {
           if (input.attemptCount === 0) {
             currentPreparationReads += 1
-            currentSource.reads += 1
-            if (currentSource.retryReadForbidden) throw new Error("retry must not read current preparation")
+            const current = await sourceAccessor.readCurrentPreparationAndTaggedRevision()
+            assert.deepEqual(current, { progress: "50~57쪽", revision: "7" })
             return { ok: true, refreshedPayload, payloadSchemaVersion: 3, payloadFingerprint }
           }
-          if (currentSource.retryReadForbidden && currentSource.reads !== 1) throw new Error("retry read current preparation")
+          if (forceRetrySourceRead) await sourceAccessor.readCurrentPreparationAndTaggedRevision()
+          if (currentSource.reads !== 1) throw new Error("retry read current preparation")
           assert.deepEqual(input.eventSnapshot, { payloadSchemaVersion: 3, payload: refreshedPayload })
           return { ok: true }
         },
@@ -2710,6 +2719,15 @@ test("관찰 first-attempt refresh가 durable frozen retry를 만들고 canonica
     currentSource.progress = "B revision의 완전히 다른 진도"
     currentSource.revision = "8"
     currentSource.retryReadForbidden = true
+    if (fixture.name === "429") {
+      forceRetrySourceRead = true
+      await assert.rejects(
+        worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 }),
+        /retry consulted current preparation source/,
+      )
+      forceRetrySourceRead = false
+      currentSource.reads = 1
+    }
     await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
     assert.equal(currentPreparationReads, 1, fixture.name)
     assert.equal(currentSource.reads, 1, fixture.name)
