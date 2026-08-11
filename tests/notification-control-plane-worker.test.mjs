@@ -1332,6 +1332,61 @@ test("관찰 worker materialize는 source_dirty/suppressed를 terminal receipt�
   }
 })
 
+test("반복 observation materialize는 하나의 durable event를 fanout/apply/prepare/provider로 한 번만 전달한다", async () => {
+  const { createNotificationWorkerRuntime, hashNotificationTargets } = await import(workerModuleUrl)
+  const job = createObservationChatJobClaim({ expires_at: "2026-08-18T01:00:00.000Z" })
+  const fanoutJob = {
+    job_id: "80000000-0000-4000-8000-000000000011", claim_token: "80000000-0000-4000-8000-000000000012",
+    workflow_key: "registration", event_id: EVENT_ID, event_key: job.event_key, source_type: "registration_observation", source_id: job.observation_id,
+    source_revision: "7", occurrence_key: "observation:replay", occurred_at: job.due_at, scheduled_for: job.due_at,
+    payload_schema_version: 3, payload: { replay: "frozen" }, rule_id: RULE_ID, rule_revision: "1", template_id: TEMPLATE_ID,
+    channel_key: "google_chat", audience_key: "subject_team", rule_variant_key: "immediate", title_template: "T", body_template: "B", allowed_variables: [], template_payload_schema_version: 3,
+    cursor: null, next_cursor: null, last_rule: true,
+  }
+  const target = { targetKind: "connection", targetKey: "connection:google_chat.management", targetProfileId: null, connectionKey: "google_chat.management", targetSnapshot: { connection_key: "google_chat.management" } }
+  const targetSetHash = hashNotificationTargets([target])
+  const state = { eventCount: 0, fanned: false, deliveryPending: false, sent: false }
+  const calls = []
+  const rpc = async (name, parameters) => {
+    calls.push({ name, parameters: clone(parameters) })
+    if (name === "record_notification_worker_heartbeat_v1") return null
+    if (name === "reap_registration_observation_chat_job_leases_v1") return { reaped_count: 0, failed_count: 0 }
+    if (name === "claim_registration_observation_chat_jobs_v1") return [job]
+    if (name === "materialize_registration_observation_chat_job_v1") { state.eventCount = 1; return { outcome: "materialized", event_id: EVENT_ID } }
+    if (name === "claim_notification_fanout_jobs_v1") return state.eventCount && !state.fanned ? [fanoutJob] : []
+    if (name === "apply_notification_fanout_batch_v1") { state.fanned = true; state.deliveryPending = true; return { outcome: "applied", delivery_count: 1 } }
+    if (name === "finish_notification_orchestration_job_v1") return { ok: true }
+    if (["claim_notification_rule_reconciliation_jobs_v1", "claim_notification_target_reconciliation_jobs_v1"].includes(name)) return []
+    if (name === "reap_notification_leases_v1") return { reaped_count: 0 }
+    if (name === "claim_notification_deliveries_v1") return state.deliveryPending && !state.sent ? [createDeliveryClaim({ workflow_key: "registration", event_key: job.event_key, source_type: "ops_task", source_id: "replay", source_revision: "1" })] : []
+    if (name === "prepare_notification_immediate_delivery_v1") return createBegunGoogleChatContext({ workflow_key: "registration" })
+    if (name === "register_notification_external_attempt_v1") return { allowed: true, attempt_id: "80000000-0000-4000-8000-000000000013" }
+    if (name === "finalize_notification_delivery_v1") { state.sent = true; return { ok: true } }
+    throw new Error(`unexpected rpc ${name}`)
+  }
+  let sends = 0
+  const worker = createNotificationWorkerRuntime({
+    rpc, createRunId: () => RUN_ID,
+    observationSourceReader: {
+      async readSource() { return createObservationSourceForJob(job) },
+      async readCurrentPreparation() { return { textbookNames: ["교재"], progressSummary: "50~57쪽" } },
+    },
+    getAdapter: () => createAdapter({
+      workflowKey: "registration",
+      async resolveTargets() { return { targetGeneration: TARGET_GENERATION, targetSetHash, targets: [target] } },
+      async buildRenderContext() { return {} }, async buildDeepLink() { return "/admin/registration" },
+    }),
+    getProvider: () => ({ async send() { sends += 1; return { status: "sent", providerMessageId: "replay", providerResponseCode: "200" } } }),
+  })
+  await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+  await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+  assert.equal(state.eventCount, 1)
+  assert.equal(calls.filter((call) => call.name === "apply_notification_fanout_batch_v1").length, 1)
+  assert.equal(calls.filter((call) => call.name === "prepare_notification_immediate_delivery_v1").length, 1)
+  assert.equal(calls.filter((call) => call.name === "register_notification_external_attempt_v1").length, 1)
+  assert.equal(sends, 1)
+})
+
 test("관찰 worker는 scheduled 저장 preparation을 유지하고 reminder에는 현재 preparation만 materialize한다", async () => {
   const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
   for (const fixture of [
@@ -2557,6 +2612,107 @@ test("관찰 frozen retry의 429/425만 두 번째 send를 허용하고 408·tim
     const finalizations = harness.calls.filter((call) => call.name === "finalize_notification_delivery_v1")
     assert.equal(finalizations[0].parameters.p_status, fixture.first.status, fixture.name)
     assert.equal(finalizations[0].parameters.p_next_attempt_at === null, fixture.sends === 1, fixture.name)
+  }
+})
+
+test("관찰 first-attempt refresh가 durable frozen retry를 만들고 canonical Google Chat 결과가 다음 claim을 결정한다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  const { createGoogleChatProvider } = await import(googleChatProviderModuleUrl)
+  for (const fixture of [
+    { name: "429", response: () => new Response("rate", { status: 429 }), retry: true },
+    { name: "425", response: () => new Response("early", { status: 425 }), retry: true },
+    { name: "408", response: () => new Response("ambiguous", { status: 408 }), retry: false },
+    { name: "timeout", response: () => { throw Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }) }, retry: false },
+    { name: "reset", response: () => { throw Object.assign(new Error("reset"), { code: "ECONNRESET" }) }, retry: false },
+    { name: "5xx", response: () => new Response("upstream", { status: 500 }), retry: false },
+  ]) {
+    const deliveryId = "80000000-0000-4000-8000-000000000009"
+    const initialPayload = { progress: "42~49쪽" }
+    const refreshedPayload = { progress: "50~57쪽" }
+    const payloadFingerprint = createHash("sha256").update(JSON.stringify(refreshedPayload)).digest("hex")
+    const renderFingerprint = createHash("sha256").update(JSON.stringify({ body: "B", href: "/admin/registration", title: "T" })).digest("hex")
+    const state = { status: "pending", attempt: 0, frozen: null, sends: 0, claims: 0 }
+    const calls = []
+    const claimBase = createDeliveryClaim({
+      delivery_id: deliveryId, workflow_key: "registration", event_key: "registration.observation_reminder_due",
+      source_type: "registration_observation", source_id: "70000000-0000-4000-8000-000000000023", source_revision: "7",
+      rule_revision: "1", target_generation: "1", channel_key: "google_chat",
+      target: { target_kind: "connection", target_key: "connection:google_chat.management", target_profile_id: null, connection_key: "google_chat.management", target_snapshot: { connection_key: "google_chat.management" } },
+    })
+    const rpc = async (name, parameters) => {
+      calls.push({ name, parameters: clone(parameters) })
+      if (name === "record_notification_worker_heartbeat_v1") return null
+      if (name === "reap_registration_observation_chat_job_leases_v1") return { reaped_count: 0, failed_count: 0 }
+      if (["claim_registration_observation_chat_jobs_v1", "claim_notification_fanout_jobs_v1", "claim_notification_rule_reconciliation_jobs_v1", "claim_notification_target_reconciliation_jobs_v1"].includes(name)) return []
+      if (name === "reap_notification_leases_v1") return { reaped_count: 0 }
+      if (name === "claim_notification_deliveries_v1") {
+        state.claims += 1
+        return state.status === "pending" ? [{ ...claimBase, attempt_count: state.attempt }] : []
+      }
+      if (name === "read_registration_observation_notification_delivery_frozen_state_v1") {
+        return state.frozen || { attemptCount: 0, expiresAt: "2026-08-17T10:00:00.000Z", snapshot: initialPayload, payloadFingerprint: null, renderFingerprint: null, title: null, body: null, href: null, lastAttemptStartedAt: null }
+      }
+      if (name === "get_notification_render_snapshot_v1") return {
+        event_id: EVENT_ID, workflow_key: "registration", event_key: claimBase.event_key, source_type: claimBase.source_type,
+        source_id: claimBase.source_id, source_revision: "7", occurrence_key: "durable-first-attempt", occurred_at: claimBase.scheduled_for,
+        payload_schema_version: 3, payload: initialPayload, rule_id: RULE_ID, rule_revision: "1", template_id: TEMPLATE_ID,
+        channel_key: "google_chat", audience_key: "subject_team", rule_variant_key: "immediate", title_template: "T", body_template: "B", allowed_variables: [], template_payload_schema_version: 3,
+      }
+      if (name === "refresh_registration_observation_notification_delivery_v1") {
+        state.frozen = { attemptCount: 0, expiresAt: "2026-08-17T10:00:00.000Z", snapshot: parameters.p_payload, payloadFingerprint: parameters.p_payload_fingerprint, renderFingerprint: parameters.p_render_fingerprint, title: parameters.p_rendered_title, body: parameters.p_rendered_body, href: parameters.p_href, lastAttemptStartedAt: null }
+        return { outcome: "refreshed" }
+      }
+      if (name === "prepare_registration_observation_notification_delivery_v1") return {
+        prepared: true, delivery_id: deliveryId, claim_token: CLAIM_TOKEN, dispatch_token: DISPATCH_TOKEN, status: "sending", channel_key: "google_chat", connection_key: "google_chat.management", webhook_url: GOOGLE_CHAT_URL, rendered_title: state.frozen.title, rendered_body: state.frozen.body, href: state.frozen.href, mention_user_names: [],
+      }
+      if (name === "register_notification_external_attempt_v1") return { allowed: true, attempt_id: "80000000-0000-4000-8000-000000000010" }
+      if (name === "finalize_notification_delivery_v1") {
+        if (parameters.p_status === "retry_wait") {
+          state.status = "pending"
+          state.attempt = 1
+          state.frozen = { ...state.frozen, attemptCount: 1, lastAttemptStartedAt: "2026-08-17T08:00:00.000Z" }
+        } else state.status = "terminal"
+        return { ok: true }
+      }
+      throw new Error(`unexpected rpc ${name}`)
+    }
+    const fetchCalls = []
+    const provider = createGoogleChatProvider({
+      http408Disposition: "delivery_unknown",
+      fetch: async (_input, init) => {
+        fetchCalls.push(clone(init))
+        state.sends += 1
+        if (state.sends === 1) return fixture.response()
+        return new Response(JSON.stringify({ name: "spaces/fixture/messages/frozen-retry" }), { status: 200, headers: { "Content-Type": "application/json" } })
+      },
+    })
+    let currentPreparationReads = 0
+    const worker = createNotificationWorkerRuntime({
+      rpc, createRunId: () => RUN_ID, now: () => new Date("2026-08-17T08:00:00.000Z"), getProvider: () => provider,
+      getAdapter: () => createAdapter({
+        async revalidateBeforeSend(input) {
+          if (input.attemptCount === 0) {
+            currentPreparationReads += 1
+            return { ok: true, refreshedPayload, payloadSchemaVersion: 3, payloadFingerprint }
+          }
+          assert.deepEqual(input.eventSnapshot, { payloadSchemaVersion: 3, payload: refreshedPayload })
+          return { ok: true }
+        },
+        async buildRenderContext() { return {} },
+        async buildDeepLink() { return "/admin/registration" },
+      }),
+    })
+    await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+    await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+    assert.equal(currentPreparationReads, 1, fixture.name)
+    assert.equal(state.sends, fixture.retry ? 2 : 1, fixture.name)
+    assert.equal(fetchCalls.length, fixture.retry ? 2 : 1, fixture.name)
+    assert.equal(calls.filter((call) => call.name === "get_notification_render_snapshot_v1").length, 1, fixture.name)
+    assert.equal(calls.filter((call) => call.name === "refresh_registration_observation_notification_delivery_v1").length, 1, fixture.name)
+    assert.equal(calls.filter((call) => call.name === "register_notification_external_attempt_v1").length, fixture.retry ? 2 : 1, fixture.name)
+    assert.equal(state.frozen.payloadFingerprint, payloadFingerprint, fixture.name)
+    assert.equal(state.frozen.renderFingerprint, renderFingerprint, fixture.name)
+    assert.deepEqual(fetchCalls.at(-1), fetchCalls[0], `${fixture.name} frozen transport bytes`)
   }
 })
 
