@@ -28,11 +28,16 @@ import {
 
 type SyncMode = "auto" | "manual";
 
-function getIdentityStatus(identity: GoogleChatProfileIdentity, lookupFailed = false) {
-  if (lookupFailed || identity.lastSyncStatus === "provider_error") return "조회 실패";
+function getIdentityStatus(identity: GoogleChatProfileIdentity) {
+  if (identity.lastSyncStatus === "provider_error") return "조회 실패";
   if (identity.verificationStatus === "verified") return "확인됨";
   if (identity.verificationStatus === "unverified") return "재확인 필요";
   return "미설정";
+}
+
+function isManualFallbackOutcome(identity: GoogleChatProfileIdentity) {
+  return identity.lastSyncStatus === "not_found"
+    && identity.verificationStatus === "not_found";
 }
 
 function formatSyncTime(value: string | null) {
@@ -122,10 +127,8 @@ function IdentityControls({
 
 function IdentitySummary({
   identity,
-  lookupFailed,
 }: {
   identity: GoogleChatProfileIdentity;
-  lookupFailed: boolean;
 }) {
   return (
     <>
@@ -140,7 +143,7 @@ function IdentitySummary({
         </div>
         <div>
           <dt className="text-muted-foreground">상태</dt>
-          <dd className="mt-0.5"><Badge variant="outline" className="rounded-md">{getIdentityStatus(identity, lookupFailed)}</Badge></dd>
+          <dd className="mt-0.5"><Badge variant="outline" className="rounded-md">{getIdentityStatus(identity)}</Badge></dd>
         </div>
         <div>
           <dt className="text-muted-foreground">마지막 동기화</dt>
@@ -221,17 +224,17 @@ export function TeacherGoogleChatIdentityPanel({
         : current,
       );
       setManualChatUserIds((current) => ({ ...current, [identity.profileId]: "" }));
-      setManualFallbackProfileIds((current) => current.filter((id) => id !== identity.profileId));
+      setManualFallbackProfileIds((current) => {
+        const withoutCurrent = current.filter((id) => id !== identity.profileId);
+        return mode === "auto" && isManualFallbackOutcome(nextIdentity)
+          ? [...withoutCurrent, identity.profileId]
+          : withoutCurrent;
+      });
     } catch (error) {
       setProfileErrors((current) => ({
         ...current,
         [identity.profileId]: getSafeErrorMessage(error),
       }));
-      if (mode === "auto") {
-        setManualFallbackProfileIds((current) => current.includes(identity.profileId)
-          ? current
-          : [...current, identity.profileId]);
-      }
     } finally {
       setPendingProfileIds((current) => current.filter((id) => id !== identity.profileId));
     }
@@ -262,7 +265,7 @@ export function TeacherGoogleChatIdentityPanel({
               data-testid="teacher-google-chat-identity-mobile-card"
               className="grid gap-3 rounded-lg border border-border/70 bg-background px-3 py-3"
             >
-              <IdentitySummary identity={identity} lookupFailed={manualAvailable} />
+              <IdentitySummary identity={identity} />
               <IdentityControls
                 identity={identity}
                 snapshot={snapshot}
@@ -308,7 +311,7 @@ export function TeacherGoogleChatIdentityPanel({
                       </div>
                     </TableCell>
                     <TableCell className={settingsTableCellClass}>{identity.chatUserId ?? "미설정"}</TableCell>
-                    <TableCell className={settingsTableCellClass}>{getIdentityStatus(identity, manualAvailable)}</TableCell>
+                    <TableCell className={settingsTableCellClass}>{getIdentityStatus(identity)}</TableCell>
                     <TableCell className={settingsTableCellClass}>{formatSyncTime(identity.lastSyncAt)}</TableCell>
                     <TableCell className={settingsTableCellClass}>
                       <IdentityControls

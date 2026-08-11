@@ -217,18 +217,66 @@ test("removing editable or Directory checks would enable identity actions in a c
   }
 });
 
-test("handling an automatic lookup failure unsafely would leak details or skip the manual fallback", async () => {
+test("treating an initial revision conflict as a lookup failure would unlock unsafe manual verification", async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const verifiedKim = identity({
+    profileId: profileOne,
+    profileName: "김선생",
+    accountEmail: "kim@example.com",
+    chatUserId: "123456789",
+    verificationStatus: "verified",
+    lastSyncStatus: "ok",
+    identityRevision: "4",
+  });
+  try {
+    await openPanel(page, {
+      ...defaultSnapshot,
+      identities: [verifiedKim, defaultSnapshot.identities[1]],
+    }, [{ kind: "http", status: 409, body: { code: "google_chat_profile_identity_revision_conflict" } }]);
+    const desktop = page.getByTestId("teacher-google-chat-identity-desktop-list");
+    await desktop.getByRole("button", { name: "김선생 자동 조회" }).click();
+    await desktop.getByText("다른 관리자가 먼저 변경했습니다. 새로고침 후 다시 시도해 주세요.", { exact: true }).waitFor();
+    assert.equal(await desktop.getByLabel("김선생 Google Chat ID").count(), 0);
+    assert.equal(await desktop.getByRole("button", { name: "김선생 확인" }).count(), 0);
+    assert.equal(await desktop.getByText("조회 실패", { exact: true }).count(), 0);
+    await desktop.getByText("확인됨", { exact: true }).waitFor();
+  } finally {
+    await page.close();
+  }
+});
+
+test("handling a generic automatic request failure unsafely would leak details or open manual fallback", async () => {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   try {
     await openPanel(page, defaultSnapshot, [{ kind: "reject", error: "aliases=private@example.com directory-ready=secret" }]);
     const desktop = page.getByTestId("teacher-google-chat-identity-desktop-list");
     await desktop.getByRole("button", { name: "김선생 자동 조회" }).click();
     await desktop.getByText("Google Chat 계정 정보를 저장하지 못했습니다.", { exact: true }).waitFor();
-    await desktop.getByLabel("김선생 Google Chat ID").waitFor();
-    await desktop.getByRole("button", { name: "김선생 확인" }).waitFor();
-    await desktop.getByText("조회 실패", { exact: true }).waitFor();
+    assert.equal(await desktop.getByLabel("김선생 Google Chat ID").count(), 0);
+    assert.equal(await desktop.getByRole("button", { name: "김선생 확인" }).count(), 0);
+    assert.equal(await desktop.getByText("조회 실패", { exact: true }).count(), 0);
     assert.equal(await page.getByText("private@example.com", { exact: true }).count(), 0);
     assert.equal(await page.getByText("directory-ready=secret", { exact: true }).count(), 0);
+  } finally {
+    await page.close();
+  }
+});
+
+test("opening manual fallback without a strict not-found identity would bypass lookup verification", async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const notFoundKim = identity({
+    profileId: profileOne,
+    profileName: "김선생",
+    accountEmail: "kim@example.com",
+    identityRevision: "2",
+  });
+  try {
+    await openPanel(page, defaultSnapshot, [{ kind: "resolve", identity: notFoundKim }]);
+    const desktop = page.getByTestId("teacher-google-chat-identity-desktop-list");
+    await desktop.getByRole("button", { name: "김선생 자동 조회" }).click();
+    await desktop.getByLabel("김선생 Google Chat ID").waitFor();
+    await desktop.getByRole("button", { name: "김선생 확인" }).waitFor();
+    assert.ok(await desktop.getByText("미설정", { exact: true }).count() > 0);
   } finally {
     await page.close();
   }
@@ -245,10 +293,16 @@ test("sharing pending or failure state across profiles would block the other ide
     lastSyncStatus: "ok",
     identityRevision: "2",
   });
+  const notFoundLee = identity({
+    profileId: profileTwo,
+    profileName: "이선생",
+    accountEmail: "lee@example.com",
+    identityRevision: "2",
+  });
   try {
     await openPanel(page, defaultSnapshot, [
       { kind: "delay", identity: resolvedKim },
-      { kind: "reject", error: "private-directory-reason" },
+      { kind: "resolve", identity: notFoundLee },
     ]);
     const desktop = page.getByTestId("teacher-google-chat-identity-desktop-list");
     const kimAuto = desktop.getByRole("button", { name: "김선생 자동 조회" });
@@ -278,10 +332,16 @@ test("sending a stale revision, reusing a request ID, or replacing every row wou
     lastSyncStatus: "ok",
     identityRevision: "2",
   });
+  const notFoundKim = identity({
+    profileId: profileOne,
+    profileName: "김선생",
+    accountEmail: "kim@example.com",
+    identityRevision: "3",
+  });
   try {
     await openPanel(page, defaultSnapshot, [
       { kind: "resolve", identity: resolvedKim },
-      { kind: "reject", error: "lookup failed" },
+      { kind: "resolve", identity: notFoundKim },
       { kind: "http", status: 409, body: { code: "google_chat_profile_identity_revision_conflict" } },
     ]);
     const desktop = page.getByTestId("teacher-google-chat-identity-desktop-list");
@@ -297,7 +357,7 @@ test("sending a stale revision, reusing a request ID, or replacing every row wou
     await desktop.getByRole("button", { name: "김선생 확인" }).click();
     await desktop.getByText("다른 관리자가 먼저 변경했습니다. 새로고침 후 다시 시도해 주세요.", { exact: true }).waitFor();
     const requests = await page.evaluate(() => window.__identityPanelFixture.requests);
-    assert.deepEqual(requests.map((request) => request.expected_identity_revision), ["1", "2", "2"]);
+    assert.deepEqual(requests.map((request) => request.expected_identity_revision), ["1", "2", "3"]);
     assert.deepEqual(requests.map((request) => request.profile_id), [profileOne, profileOne, profileOne]);
     assert.deepEqual(requests.map((request) => request.url), [
       "/api/admin/google-chat-identities",
