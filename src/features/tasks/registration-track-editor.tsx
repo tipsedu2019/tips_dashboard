@@ -431,6 +431,7 @@ export function RegistrationApplication({
     activeDeepLinkedAttempt
     && ["completed", "no_show", "canceled"].includes(activeDeepLinkedAttempt.status),
   )
+  const activeDeepLinkedAttemptCanceled = activeDeepLinkedAttempt?.status === "canceled"
   const deepLinkedObservationHistoryEligible = activeDeepLinkedAttemptTerminal
     && canManageActiveObservation
   const activeObservationTrackIdRef = useRef(activeTrack?.id || null)
@@ -1373,7 +1374,7 @@ export function RegistrationApplication({
       <RegistrationObservationFeedbackPanel
         detail={observationFeedbackDetail}
         canRecordAttendance={!activeDeepLinkedAttemptTerminal && canManageCase && !activeFeedbackCorrectionOnly}
-        canEditFeedback={!activeDeepLinkedAttemptTerminal && (activeFeedbackCorrectionOnly
+        canEditFeedback={!activeDeepLinkedAttemptCanceled && (activeFeedbackCorrectionOnly
           ? canManageCase
           : canEditRegistrationObservationFeedback({
               canManageCase,
@@ -1383,7 +1384,7 @@ export function RegistrationApplication({
               ),
               decisionKind: observationFeedbackDetail.decisionKind,
             }))}
-        canDecide={!activeDeepLinkedAttemptTerminal && !activeFeedbackCorrectionOnly && (
+        canDecide={!activeDeepLinkedAttemptCanceled && !activeFeedbackCorrectionOnly && (
           canManageCase || Boolean(
             viewerId
             && viewerId === activeTrack?.directorProfileId

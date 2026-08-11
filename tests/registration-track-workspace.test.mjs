@@ -378,11 +378,22 @@ async function loadMountedRegistrationApplication({
     }],
     ["./registration-observation-feedback-panel", {
       RegistrationObservationFeedbackPanel,
-      canEditRegistrationObservationFeedback: () => true,
+      canEditRegistrationObservationFeedback: ({ canManageCase, isAssignedTeacher, decisionKind }) => (
+        canManageCase || (decisionKind === null && isAssignedTeacher)
+      ),
       canKeepRegistrationObservationFeedbackHistoryMounted: ({ canManageCase, observationAttemptCount }) => (
         canManageCase && observationAttemptCount > 0
       ),
-      getRegistrationObservationFeedbackMountPlan: () => null,
+      getRegistrationObservationFeedbackMountPlan: ({ managerDetail, canManageObservation, canManageCase }) => {
+        if (!canManageObservation || !managerDetail) return null
+        if (managerDetail.currentObservation) {
+          return { observationId: managerDetail.currentObservation.observationId, correctionOnly: false }
+        }
+        if (canManageCase && managerDetail.latestDecisionObservation) {
+          return { observationId: managerDetail.latestDecisionObservation.observationId, correctionOnly: true }
+        }
+        return null
+      },
       getRegistrationObservationFeedbackRefreshPlan: ({ requestedOwnershipKey, currentOwnershipKey }) => ({
         mutatePanelState: requestedOwnershipKey === currentOwnershipKey,
       }),
@@ -1764,10 +1775,11 @@ test("registration application threads the exact deep-linked attempt into the re
   assert.match(detail, /viewerId === activeFeedbackTeacherProfileId/)
 })
 
-test("mounted terminal deep links stay focused for their exact managers with every history action closed", async () => {
+test("mounted terminal deep links preserve exact feedback role and status rules", async (t) => {
   const taskId = "77000000-0000-4000-8000-000000000001"
   const trackId = "77000000-0000-4000-8000-000000000002"
   const directorId = "77000000-0000-4000-8000-000000000003"
+  const teacherId = "77000000-0000-4000-8000-000000000013"
   const baseAttempt = {
     observationId: "77000000-0000-4000-8000-000000000004",
     taskId,
@@ -1782,7 +1794,7 @@ test("mounted terminal deep links stay focused for their exact managers with eve
     startsAt: "2026-08-10T10:00:00.000Z",
     endsAt: "2026-08-10T11:30:00.000Z",
     teacherCatalogId: "77000000-0000-4000-8000-000000000007",
-    teacherProfileId: directorId,
+    teacherProfileId: teacherId,
     teacherName: "김선생",
     classroomCatalogId: "77000000-0000-4000-8000-000000000008",
     classroomName: "301호",
@@ -1811,198 +1823,401 @@ test("mounted terminal deep links stay focused for their exact managers with eve
     },
   }
   const roleCases = [
-    { viewerRole: "admin", viewerId: "77000000-0000-4000-8000-000000000010" },
-    { viewerRole: "staff", viewerId: "77000000-0000-4000-8000-000000000011" },
-    { viewerRole: "teacher", viewerId: directorId },
+    { label: "admin", viewerRole: "admin", viewerId: "77000000-0000-4000-8000-000000000010", canManageCase: true },
+    { label: "staff", viewerRole: "staff", viewerId: "77000000-0000-4000-8000-000000000011", canManageCase: true },
+    { label: "director", viewerRole: "teacher", viewerId: directorId, canManageCase: false },
   ]
   const originalWindow = globalThis.window
   const originalDocument = globalThis.document
-  try {
-    for (const status of ["completed", "canceled"]) {
-      for (const roleCase of roleCases) {
-        const deepLinkedAttempt = {
-          ...baseAttempt,
+  const scrolledPanelIds = []
+  globalThis.window = {
+    requestAnimationFrame(callback) {
+      callback()
+      return 1
+    },
+    cancelAnimationFrame() {},
+  }
+  globalThis.document = {
+    getElementById(id) {
+      return { scrollIntoView: () => scrolledPanelIds.push(id) }
+    },
+  }
+
+  async function mountTerminalHistory({ status, decisionKind, roleCase }) {
+    const deepLinkedAttempt = {
+      ...baseAttempt,
+      status,
+      appointmentStatus: status === "canceled" ? "canceled" : "completed",
+      attendance: status === "canceled" ? null : status === "no_show" ? "no_show" : "attended",
+      suitabilityResult: status === "canceled" || status === "no_show" ? null : "fit",
+      decisionKind,
+    }
+    const managerDetail = {
+      track: {
+        trackId,
+        taskId,
+        subject: "영어",
+        workflowStatus: "enrollment_requested",
+        workflowRevision: 12,
+        observationReturnWorkflowStatus: null,
+        directorProfileId: directorId,
+      },
+      currentObservation: null,
+      latestEnrollmentDecisionObservationId: null,
+      latestDecisionObservation: null,
+      attempts: [],
+      classes: [],
+    }
+    let managerLoads = 0
+    let feedbackLoads = 0
+    const hookHarness = createRegistrationEditorHookHarness()
+    const mounted = await loadMountedRegistrationApplication({
+      hookHarness,
+      loadManagerDetail: async () => {
+        managerLoads += 1
+        return managerDetail
+      },
+      loadFeedback: async () => {
+        feedbackLoads += 1
+        return {
+          observationId: deepLinkedAttempt.observationId,
           status,
-          appointmentStatus: status === "canceled" ? "canceled" : "completed",
-          attendance: status === "canceled" ? null : "attended",
-          suitabilityResult: status === "canceled" ? null : "fit",
-          decisionKind: status === "canceled" ? null : "enrollment",
+          decisionKind,
         }
-        const managerDetail = {
-          track: {
-            trackId,
-            taskId,
-            subject: "영어",
-            workflowStatus: "enrollment_requested",
-            workflowRevision: 12,
-            observationReturnWorkflowStatus: null,
-            directorProfileId: directorId,
-          },
-          currentObservation: null,
-          latestEnrollmentDecisionObservationId: null,
-          latestDecisionObservation: null,
-          attempts: [],
-          classes: [],
-        }
-        let managerLoads = 0
-        let feedbackLoads = 0
-        const hookHarness = createRegistrationEditorHookHarness()
-        const mounted = await loadMountedRegistrationApplication({
-          hookHarness,
-          loadManagerDetail: async () => {
-            managerLoads += 1
-            return managerDetail
-          },
-          loadFeedback: async () => {
-            feedbackLoads += 1
-            return {
-              observationId: deepLinkedAttempt.observationId,
-              status,
-              decisionKind: deepLinkedAttempt.decisionKind,
-            }
-          },
-        })
-        const scrolledPanelIds = []
-        globalThis.window = {
-          requestAnimationFrame(callback) {
-            callback()
-            return 1
-          },
-          cancelAnimationFrame() {},
-        }
-        globalThis.document = {
-          getElementById(id) {
-            return { scrollIntoView: () => scrolledPanelIds.push(id) }
-          },
-        }
-        const props = {
-          task: { id: taskId, title: "김학생 등록", studentName: "김학생", type: "registration" },
-          detail: {
-            task: { id: taskId, title: "김학생 등록", studentName: "김학생", registration: null },
-            commonRevision: 1,
-            tracks: [{
-              id: trackId,
-              taskId,
-              subject: "영어",
-              status: "enrollment_requested",
-              workflowStatus: "enrollment_requested",
-              workflowRevision: 12,
-              directorProfileId: directorId,
-              observationAttemptCount: 0,
-              observationSummaryVisible: false,
-              migrationReviewRequired: false,
-              legacy: false,
-              waitingKind: null,
-            }],
-            appointments: [],
-            levelTests: [],
-            consultations: [],
-            enrollments: [],
-            admissionBatches: [],
-            admissionApplicationMessageStatus: "not_sent",
-            admissionApplicationMessageClaimActive: false,
-            admissionApplicationMessageId: null,
-          },
-          focusTrackId: trackId,
-          viewerId: roleCase.viewerId,
-          viewerRole: roleCase.viewerRole,
-          onFocusTrack: () => undefined,
-          onReload: async () => undefined,
-          onWarning: () => undefined,
-          subjectCapabilities: [],
-          customerMessageClient: {},
-          observationRuntime: { available: true, runtimeVersion: 1 },
-          deepLinkedAttempt,
-          closeAction: null,
-        }
-        try {
-          let view = hookHarness.render(mounted.RegistrationApplication, props)
-          hookHarness.flushEffects()
-          await flushMountedRegistrationWork()
-          view = hookHarness.render(mounted.RegistrationApplication, props)
-          const shell = findMountedRegistrationElement(
-            view,
-            (node) => node.type === mounted.RegistrationApplicationShell,
-            "registration application shell",
-          )
-          assert.ok(shell.props.observation, `${roleCase.viewerRole}:${status} keeps the history workspace mounted`)
-          const editor = findMountedRegistrationElement(
-            shell.props.observation,
-            (node) => node.type === mounted.RegistrationObservationEditor,
-            "historical observation editor",
-          )
-          assert.equal(editor.props.deepLinkedAttempt, deepLinkedAttempt)
-          const feedbackPanel = findMountedRegistrationElement(
-            editor.props.feedbackPanel,
-            (node) => node.type === mounted.RegistrationObservationFeedbackPanel,
-            "historical feedback panel",
-          )
-          assert.equal(feedbackPanel.props.canRecordAttendance, false)
-          assert.equal(feedbackPanel.props.canEditFeedback, false)
-          assert.equal(feedbackPanel.props.canDecide, false)
-          assert.equal(managerLoads, 1)
-          assert.equal(feedbackLoads, 1)
-          assert.deepEqual(scrolledPanelIds, ["registration-application-observation"])
-        } finally {
-          hookHarness.cleanup()
+      },
+    })
+    const props = {
+      task: { id: taskId, title: "김학생 등록", studentName: "김학생", type: "registration" },
+      detail: {
+        task: { id: taskId, title: "김학생 등록", studentName: "김학생", registration: null },
+        commonRevision: 1,
+        tracks: [{
+          id: trackId,
+          taskId,
+          subject: "영어",
+          status: "enrollment_requested",
+          workflowStatus: "enrollment_requested",
+          workflowRevision: 12,
+          directorProfileId: directorId,
+          observationAttemptCount: 0,
+          observationSummaryVisible: false,
+          migrationReviewRequired: false,
+          legacy: false,
+          waitingKind: null,
+        }],
+        appointments: [],
+        levelTests: [],
+        consultations: [],
+        enrollments: [],
+        admissionBatches: [],
+        admissionApplicationMessageStatus: "not_sent",
+        admissionApplicationMessageClaimActive: false,
+        admissionApplicationMessageId: null,
+      },
+      focusTrackId: trackId,
+      viewerId: roleCase.viewerId,
+      viewerRole: roleCase.viewerRole,
+      onFocusTrack: () => undefined,
+      onReload: async () => undefined,
+      onWarning: () => undefined,
+      subjectCapabilities: [],
+      customerMessageClient: {},
+      observationRuntime: { available: true, runtimeVersion: 1 },
+      deepLinkedAttempt,
+      closeAction: null,
+    }
+    try {
+      let view = hookHarness.render(mounted.RegistrationApplication, props)
+      hookHarness.flushEffects()
+      await flushMountedRegistrationWork()
+      view = hookHarness.render(mounted.RegistrationApplication, props)
+      const shell = findMountedRegistrationElement(
+        view,
+        (node) => node.type === mounted.RegistrationApplicationShell,
+        "registration application shell",
+      )
+      assert.ok(shell.props.observation, `${roleCase.label}:${status} keeps history mounted`)
+      const editor = findMountedRegistrationElement(
+        shell.props.observation,
+        (node) => node.type === mounted.RegistrationObservationEditor,
+        "historical observation editor",
+      )
+      assert.equal(editor.props.deepLinkedAttempt, deepLinkedAttempt)
+      const feedbackPanel = findMountedRegistrationElement(
+        editor.props.feedbackPanel,
+        (node) => node.type === mounted.RegistrationObservationFeedbackPanel,
+        "historical feedback panel",
+      )
+      assert.equal(managerLoads, 1)
+      assert.equal(feedbackLoads, 1)
+      return feedbackPanel.props
+    } finally {
+      hookHarness.cleanup()
+    }
+  }
+
+  try {
+    await t.test("completed decisions keep correction for management only", async () => {
+      for (const roleCase of roleCases) {
+        const feedback = await mountTerminalHistory({ status: "completed", decisionKind: "enrollment", roleCase })
+        assert.equal(feedback.canRecordAttendance, false)
+        assert.equal(feedback.canEditFeedback, roleCase.canManageCase, roleCase.label)
+        assert.equal(feedback.canDecide, false, roleCase.label)
+      }
+    })
+
+    await t.test("undecided completed and no-show attempts keep manager decisions", async () => {
+      for (const status of ["completed", "no_show"]) {
+        for (const roleCase of roleCases) {
+          const feedback = await mountTerminalHistory({ status, decisionKind: null, roleCase })
+          assert.equal(feedback.canRecordAttendance, false)
+          assert.equal(feedback.canEditFeedback, roleCase.canManageCase, `${roleCase.label}:${status}`)
+          assert.equal(feedback.canDecide, true, `${roleCase.label}:${status}`)
         }
       }
-    }
+    })
+
+    await t.test("canceled attempts keep every feedback action closed", async () => {
+      for (const roleCase of roleCases) {
+        const feedback = await mountTerminalHistory({ status: "canceled", decisionKind: null, roleCase })
+        assert.equal(feedback.canRecordAttendance, false)
+        assert.equal(feedback.canEditFeedback, false, roleCase.label)
+        assert.equal(feedback.canDecide, false, roleCase.label)
+      }
+    })
+    assert.equal(scrolledPanelIds.length, 12)
+    assert.ok(scrolledPanelIds.every((id) => id === "registration-application-observation"))
   } finally {
     globalThis.window = originalWindow
     globalThis.document = originalDocument
   }
 })
 
-test("observation child loads share monotonic ownership across passive and forced refreshes", async () => {
-  // The shared owner is behavior-tested for A-B-A, close/reopen, runtime, viewer,
-  // failure release, and mutation ordering in registration-workspace-route.test.mjs.
-  // This integration guard makes both child panels use that owner instead of
-  // recyclable strings or an effect-local boolean.
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
-  assert.match(source, /createRegistrationObservationAsyncOwnership/)
-  assert.match(source, /observationManagerLoadOwnershipRef/)
-  assert.match(source, /observationFeedbackLoadOwnershipRef/)
-  assert.match(source, /activeObservationViewerIdRef\.current = viewerId/)
-  assert.match(source, /activeObservationRuntimeVersionRef\.current = observationRuntime\.runtimeVersion/)
+test("mounted observation child loads reject A-B-A and passive overwrites", async (t) => {
+  const taskId = "78000000-0000-4000-8000-000000000001"
+  const trackA = "78000000-0000-4000-8000-000000000002"
+  const trackB = "78000000-0000-4000-8000-000000000003"
+  const observationId = "78000000-0000-4000-8000-000000000004"
+  const directorId = "78000000-0000-4000-8000-000000000005"
+  const originalWindow = globalThis.window
+  const originalDocument = globalThis.document
+  globalThis.window = {
+    requestAnimationFrame(callback) {
+      callback()
+      return 1
+    },
+    cancelAnimationFrame() {},
+  }
+  globalThis.document = {
+    getElementById() {
+      return { scrollIntoView() {} }
+    },
+  }
 
-  const managerEffect = sourceBetween(
-    source,
-    "  useEffect(() => {\n    setObservationDetail(null)",
-    "\n\n  useEffect(() => {\n    const taskId = detail.task.id",
+  const track = (id, subject) => ({
+    id,
+    taskId,
+    subject,
+    status: "observation_completed",
+    workflowStatus: "observation_completed",
+    workflowRevision: 12,
+    directorProfileId: directorId,
+    observationAttemptCount: 1,
+    observationSummaryVisible: true,
+    migrationReviewRequired: false,
+    legacy: false,
+    waitingKind: null,
+  })
+  const tracks = [track(trackA, "영어"), track(trackB, "수학")]
+  const applicationProps = (focusTrackId, observationRuntime = { available: true, runtimeVersion: 1 }) => ({
+    task: { id: taskId, title: "김학생 등록", studentName: "김학생", type: "registration" },
+    detail: {
+      task: { id: taskId, title: "김학생 등록", studentName: "김학생", registration: null },
+      commonRevision: 1,
+      tracks,
+      appointments: [],
+      levelTests: [],
+      consultations: [],
+      enrollments: [],
+      admissionBatches: [],
+      admissionApplicationMessageStatus: "not_sent",
+      admissionApplicationMessageClaimActive: false,
+      admissionApplicationMessageId: null,
+    },
+    focusTrackId,
+    viewerId: "78000000-0000-4000-8000-000000000006",
+    viewerRole: "admin",
+    onFocusTrack: () => undefined,
+    onReload: async () => undefined,
+    onWarning: () => undefined,
+    subjectCapabilities: [],
+    customerMessageClient: {},
+    observationRuntime,
+    deepLinkedAttempt: null,
+    closeAction: null,
+  })
+  const managerDetail = (trackId, marker, currentObservation = null) => ({
+    marker,
+    track: {
+      trackId,
+      taskId,
+      subject: trackId === trackA ? "영어" : "수학",
+      workflowStatus: "observation_completed",
+      workflowRevision: 12,
+      observationReturnWorkflowStatus: null,
+      directorProfileId: directorId,
+    },
+    currentObservation,
+    latestEnrollmentDecisionObservationId: null,
+    latestDecisionObservation: null,
+    attempts: currentObservation ? [currentObservation] : [],
+    classes: [],
+  })
+  const currentObservation = {
+    observationId,
+    taskId,
+    trackId: trackA,
+    teacherProfileId: "78000000-0000-4000-8000-000000000007",
+    status: "completed",
+    decisionKind: null,
+  }
+  const findEditor = (view, mounted) => {
+    const shell = findMountedRegistrationElement(
+      view,
+      (node) => node.type === mounted.RegistrationApplicationShell,
+      "registration application shell",
+    )
+    return findMountedRegistrationElement(
+      shell.props.observation,
+      (node) => node.type === mounted.RegistrationObservationEditor,
+      "observation editor",
+    )
+  }
+  const findFeedback = (view, mounted) => findMountedRegistrationElement(
+    findEditor(view, mounted).props.feedbackPanel,
+    (node) => node.type === mounted.RegistrationObservationFeedbackPanel,
+    "observation feedback panel",
   )
-  assert.match(managerEffect, /const managerRequestToken = managerOwnership\.begin\(managerRequestContext\)/)
-  assert.match(managerEffect, /observationManagerLoadOwnershipRef\.current\.owns\(/)
-  assert.match(managerEffect, /observationManagerLoadOwnershipRef\.current\.invalidate\(managerRequestToken\)/)
-  assert.match(managerEffect, /viewerId/)
-  assert.match(managerEffect, /observationRuntime\.runtimeVersion/)
 
-  const savedRefresh = sourceBetween(
-    source,
-    "const handleObservationSaved = useCallback",
-    "\n\n  useEffect(() => {\n    onDirtyChangeRef.current",
-  )
-  assert.match(savedRefresh, /const managerRequestToken = observationManagerLoadOwnershipRef\.current\.begin\(managerRequestContext\)/)
-  assert.match(savedRefresh, /observationManagerLoadOwnershipRef\.current\.owns\(/)
+  try {
+    await t.test("manager detail commits only the newest A-B-A request", async () => {
+      const managerRequests = []
+      const hookHarness = createRegistrationEditorHookHarness()
+      const mounted = await loadMountedRegistrationApplication({
+        hookHarness,
+        loadManagerDetail: (_client, { trackId }) => {
+          const deferred = createControlledPromise()
+          managerRequests.push({ trackId, deferred })
+          return deferred.promise
+        },
+        loadFeedback: async () => {
+          throw new Error("feedback should stay unmounted without an observation")
+        },
+      })
+      try {
+        for (const focusTrackId of [trackA, trackB, trackA]) {
+          hookHarness.render(mounted.RegistrationApplication, applicationProps(focusTrackId))
+          hookHarness.flushEffects()
+        }
+        assert.deepEqual(managerRequests.map((request) => request.trackId), [trackA, trackB, trackA])
+        managerRequests[2].deferred.resolve(managerDetail(trackA, "A-newest"))
+        await flushMountedRegistrationWork()
+        let view = hookHarness.render(mounted.RegistrationApplication, applicationProps(trackA))
+        hookHarness.flushEffects()
+        assert.equal(findEditor(view, mounted).props.detail.marker, "A-newest")
 
-  const feedbackEffect = sourceBetween(
-    source,
-    "  useEffect(() => {\n    const observationId = activeFeedbackObservationId",
-    "\n\n  const refreshActiveObservationFeedback",
-  )
-  assert.match(feedbackEffect, /const feedbackRequestToken = feedbackOwnership\.begin\(feedbackRequestContext\)/)
-  assert.match(feedbackEffect, /observationFeedbackLoadOwnershipRef\.current\.owns\(/)
-  assert.match(feedbackEffect, /observationFeedbackLoadOwnershipRef\.current\.invalidate\(feedbackRequestToken\)/)
+        managerRequests[0].deferred.resolve(managerDetail(trackA, "A-stale"))
+        managerRequests[1].deferred.resolve(managerDetail(trackB, "B-stale"))
+        await flushMountedRegistrationWork()
+        view = hookHarness.render(mounted.RegistrationApplication, applicationProps(trackA))
+        hookHarness.flushEffects()
+        assert.equal(findEditor(view, mounted).props.detail.marker, "A-newest")
+      } finally {
+        hookHarness.cleanup()
+      }
+    })
 
-  const forcedRefresh = sourceBetween(
-    source,
-    "const refreshActiveObservationFeedback = useCallback",
-    "\n\n  const handleObservationFeedbackSaved",
-  )
-  const beginIndex = forcedRefresh.indexOf("observationFeedbackLoadOwnershipRef.current.begin")
-  const loadIndex = forcedRefresh.indexOf("loadRegistrationObservationFeedbackForOwnedPanel", beginIndex)
-  assert.ok(beginIndex >= 0 && beginIndex < loadIndex, "forced refresh owns the panel before starting its request")
-  assert.match(forcedRefresh, /observationFeedbackLoadOwnershipRef\.current\.owns\(/)
+    await t.test("forced post-save feedback outranks an older passive refresh", async () => {
+      const managerRequests = []
+      const feedbackRequests = []
+      const hookHarness = createRegistrationEditorHookHarness()
+      const mounted = await loadMountedRegistrationApplication({
+        hookHarness,
+        loadManagerDetail: (_client, { trackId }) => {
+          const deferred = createControlledPromise()
+          managerRequests.push({ trackId, deferred })
+          return deferred.promise
+        },
+        loadFeedback: (_client, requestedObservationId, options) => {
+          const deferred = createControlledPromise()
+          feedbackRequests.push({ observationId: requestedObservationId, options, deferred })
+          return deferred.promise
+        },
+      })
+      const props = applicationProps(trackA)
+      try {
+        hookHarness.render(mounted.RegistrationApplication, props)
+        hookHarness.flushEffects()
+        managerRequests[0].deferred.resolve(managerDetail(trackA, "initial-manager", currentObservation))
+        await flushMountedRegistrationWork()
+        let view = hookHarness.render(mounted.RegistrationApplication, props)
+        hookHarness.flushEffects()
+        assert.equal(feedbackRequests.length, 1)
+        feedbackRequests[0].deferred.resolve({
+          observationId,
+          status: "completed",
+          decisionKind: null,
+          marker: "initial-feedback",
+        })
+        await flushMountedRegistrationWork()
+        view = hookHarness.render(mounted.RegistrationApplication, props)
+        hookHarness.flushEffects()
+        const initialPanel = findFeedback(view, mounted)
+        assert.equal(initialPanel.props.detail.marker, "initial-feedback")
+
+        hookHarness.render(mounted.RegistrationApplication, applicationProps(trackA, { available: false, runtimeVersion: 1 }))
+        hookHarness.flushEffects()
+        hookHarness.render(mounted.RegistrationApplication, props)
+        hookHarness.flushEffects()
+        assert.equal(managerRequests.length, 2)
+        managerRequests[1].deferred.resolve(managerDetail(trackA, "passive-manager", currentObservation))
+        await flushMountedRegistrationWork()
+        view = hookHarness.render(mounted.RegistrationApplication, props)
+        hookHarness.flushEffects()
+        assert.equal(feedbackRequests.length, 2)
+        assert.equal(feedbackRequests[1].options, undefined)
+
+        const saved = {
+          observationId,
+          status: "completed",
+          decisionKind: null,
+          marker: "saved-feedback",
+        }
+        const savedRefresh = initialPanel.props.onSaved(saved)
+        assert.equal(managerRequests.length, 3)
+        managerRequests[2].deferred.resolve(managerDetail(trackA, "forced-manager", currentObservation))
+        await flushMountedRegistrationWork()
+        assert.equal(feedbackRequests.length, 3)
+        assert.deepEqual(feedbackRequests[2].options, { force: true })
+        feedbackRequests[2].deferred.resolve({ ...saved, marker: "forced-feedback" })
+        await savedRefresh
+        view = hookHarness.render(mounted.RegistrationApplication, props)
+        hookHarness.flushEffects()
+        assert.equal(findFeedback(view, mounted).props.detail.marker, "forced-feedback")
+
+        feedbackRequests[1].deferred.resolve({ ...saved, marker: "passive-stale" })
+        await flushMountedRegistrationWork()
+        view = hookHarness.render(mounted.RegistrationApplication, props)
+        hookHarness.flushEffects()
+        assert.equal(findFeedback(view, mounted).props.detail.marker, "forced-feedback")
+      } finally {
+        hookHarness.cleanup()
+      }
+    })
+  } finally {
+    globalThis.window = originalWindow
+    globalThis.document = originalDocument
+  }
 })
 
 test("canonical track detail resolves and persists director defaults only for management roles", async () => {

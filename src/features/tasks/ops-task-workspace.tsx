@@ -184,6 +184,7 @@ import {
   normalizeRegistrationConsultationOwnerScope,
   normalizeRegistrationWorkspaceCalendarKind,
   shouldDeferRegistrationWorkspaceLoad,
+  useRegistrationObservationAsyncOwnershipLifecycle,
   useRegistrationObservationRouteAdjudication,
   type RegistrationConsultationOwnerScope,
   type RegistrationDirectDeepLinkTarget,
@@ -8373,13 +8374,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const registrationObservationLoadOwnershipRef = useRef(createRegistrationObservationAsyncOwnership())
   const registrationObservationRuntimeVersionRef = useRef(registrationObservationRuntime.runtimeVersion)
   registrationObservationRuntimeVersionRef.current = registrationObservationRuntime.runtimeVersion
-  useEffect(() => {
-    const ownership = registrationObservationLoadOwnershipRef.current
-    ownership.invalidate()
-    return () => {
-      ownership.invalidate()
-    }
-  }, [currentUserId, registrationObservationRuntime.runtimeVersion])
+  useRegistrationObservationAsyncOwnershipLifecycle({
+    ownership: registrationObservationLoadOwnershipRef.current,
+    viewerId: currentUserId,
+    runtimeVersion: registrationObservationRuntime.runtimeVersion,
+  })
   const registrationCreateAttemptRef = useRef<RegistrationCreateAttempt | null>(null)
   const registrationCommittedReceiptRef = useRef<RegistrationCommittedReceipt | null>(null)
   const registrationCloseDeepLinkRestoreRef = useRef<{

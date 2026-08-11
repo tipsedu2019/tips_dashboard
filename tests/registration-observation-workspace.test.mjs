@@ -1098,9 +1098,6 @@ test("track editor loads one bounded feedback DTO only for an owned visible pane
   assert.match(source, /feedbackPanel=\{/)
   assert.match(source, /canKeepRegistrationObservationFeedbackHistoryMounted\(\{/)
   assert.match(source, /observationAttemptCount: activeTrack\.observationAttemptCount/)
-  assert.match(source, /canRecordAttendance=\{!activeDeepLinkedAttemptTerminal && canManageCase && !activeFeedbackCorrectionOnly\}/)
-  assert.match(source, /canEditFeedback=\{!activeDeepLinkedAttemptTerminal && \(activeFeedbackCorrectionOnly\s*\? canManageCase/)
-  assert.match(source, /canDecide=\{!activeDeepLinkedAttemptTerminal && !activeFeedbackCorrectionOnly && \(/)
   assert.match(
     source,
     /activeFeedbackHistoryOnly\s*\? activeObservationFeedbackPanel\s*:\s*\(/,

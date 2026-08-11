@@ -4,6 +4,8 @@ import { createRequire } from "node:module"
 import test from "node:test"
 import vm from "node:vm"
 
+import { StrictMode, act, createElement, useState } from "react"
+import { createRoot } from "react-dom/client"
 import ts from "typescript"
 
 import * as registrationWorkspaceRoute from "../src/features/tasks/registration-workspace-route.ts"
@@ -17,6 +19,7 @@ import {
 } from "../src/features/tasks/registration-workspace-route.ts"
 
 const require = createRequire(import.meta.url)
+const { JSDOM } = require("jsdom")
 
 function createRouteHookHarness() {
   const slots = []
@@ -43,7 +46,7 @@ function createRouteHookHarness() {
     const slot = slots[index]
     if (!slot || !sameDependencies(slot.dependencies, dependencies)) {
       pendingEffects.push({ effect, index })
-      slots[index] = { kind: "effect", cleanup: slot?.cleanup, dependencies }
+      slots[index] = { kind: "effect", cleanup: slot?.cleanup, dependencies, effect }
     }
   }
 
@@ -60,6 +63,13 @@ function createRouteHookHarness() {
       for (const { effect, index } of effects) {
         slots[index].cleanup?.()
         slots[index].cleanup = effect()
+      }
+    },
+    replayEffects() {
+      for (const slot of slots) {
+        if (slot?.kind !== "effect") continue
+        slot.cleanup?.()
+        slot.cleanup = slot.effect()
       }
     },
     cleanup() {
@@ -183,6 +193,7 @@ test("mounted observation route gate defers cold URLs and adjudicates each raw q
     assert.deepEqual(rejected, [])
 
     render({ runtimeProbed: true, searchParams: exactQuery })
+    hookHarness.replayEffects()
     render({ runtimeProbed: true, searchParams: exactQuery })
     render({ runtimeProbed: true, searchParams: exactQuery })
     assert.equal(opened.length, 1)
@@ -199,6 +210,154 @@ test("mounted observation route gate defers cold URLs and adjudicates each raw q
     assert.equal(opened.length, 1)
   } finally {
     hookHarness.cleanup()
+  }
+})
+
+test("real StrictMode owns one exact observation adjudication and read", async () => {
+  // Production break caught: retaining only the render-captured empty selection
+  // key dispatches a second exact read during StrictMode effect setup replay;
+  // treating replay cleanup as an unmount then invalidates the only retained read.
+  const taskId = "12000000-0000-4000-8000-000000000001"
+  const trackId = "12000000-0000-4000-8000-000000000002"
+  const appointmentId = "12000000-0000-4000-8000-000000000003"
+  const observationId = "12000000-0000-4000-8000-000000000004"
+  const exactQuery = new URLSearchParams([
+    ["taskId", taskId],
+    ["trackId", trackId],
+    ["appointmentId", appointmentId],
+    ["observationId", observationId],
+    ["view", "calendar"],
+  ])
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>")
+  const originalWindow = globalThis.window
+  const originalDocument = globalThis.document
+  const originalNavigator = globalThis.navigator
+  const originalActEnvironment = globalThis.IS_REACT_ACT_ENVIRONMENT
+  const opened = []
+  const exactReads = []
+  const committed = []
+  const rejected = []
+  let root
+
+  globalThis.window = dom.window
+  globalThis.document = dom.window.document
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: dom.window.navigator,
+  })
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+
+  function StrictObservationRoute({
+    query = exactQuery,
+    runtimeProbed = true,
+    runtimeVersion = 1,
+    viewerId = "viewer-1",
+  }) {
+    const [ownership] = useState(() => registrationWorkspaceRoute.createRegistrationObservationAsyncOwnership())
+    registrationWorkspaceRoute.useRegistrationObservationAsyncOwnershipLifecycle({
+      ownership,
+      viewerId,
+      runtimeVersion,
+    })
+    registrationWorkspaceRoute.useRegistrationObservationRouteAdjudication({
+      enabled: true,
+      viewerId,
+      searchParams: query,
+      observationRuntimeVersion: runtimeVersion,
+      runtimeProbed,
+      workspaceReady: false,
+      currentSelectionKey: "",
+      async onOpen(target) {
+        opened.push(`${viewerId}:${runtimeVersion}:${target.observationId}`)
+        const context = {
+          targetKey: `observation:${target.taskId}:${target.trackId}:${target.appointmentId}:${target.observationId}`,
+          viewerId,
+          runtimeVersion,
+        }
+        const token = ownership.begin(context)
+        const attempt = await registrationWorkspaceRoute.loadRegistrationObservationDeepLinkedAttempt(
+          target,
+          async (input) => {
+            exactReads.push(input)
+            return {
+              taskId: target.taskId,
+              trackId: target.trackId,
+              observation: {
+                taskId: target.taskId,
+                trackId: target.trackId,
+                appointmentId: target.appointmentId,
+                observationId: target.observationId,
+              },
+            }
+          },
+        )
+        if (attempt && ownership.owns(token, context)) {
+          committed.push(`${viewerId}:${runtimeVersion}:${attempt.observationId}`)
+        }
+      },
+      onReject(searchParams) {
+        rejected.push(searchParams.toString())
+      },
+    })
+    return null
+  }
+
+  async function renderStrict(props) {
+    await act(async () => {
+      root.render(createElement(StrictMode, null, createElement(StrictObservationRoute, props)))
+      await new Promise((resolve) => setImmediate(resolve))
+    })
+  }
+
+  try {
+    root = createRoot(dom.window.document.getElementById("root"))
+    await renderStrict({})
+    assert.equal(opened.length, 1)
+    assert.equal(exactReads.length, 1)
+    assert.equal(committed.length, 1)
+    assert.deepEqual(exactReads, [{ trackId, observationId }])
+    assert.deepEqual(rejected, [])
+
+    const nextTrackId = "12000000-0000-4000-8000-000000000012"
+    const nextAppointmentId = "12000000-0000-4000-8000-000000000013"
+    const nextObservationId = "12000000-0000-4000-8000-000000000014"
+    const nextQuery = new URLSearchParams([
+      ["taskId", taskId],
+      ["trackId", nextTrackId],
+      ["appointmentId", nextAppointmentId],
+      ["observationId", nextObservationId],
+      ["view", "calendar"],
+    ])
+    await renderStrict({ query: nextQuery })
+    assert.equal(opened.length, 2, "a new exact target owns a new read")
+    assert.equal(exactReads.length, 2)
+    assert.equal(committed.length, 2)
+
+    await renderStrict({ query: nextQuery, viewerId: "viewer-2" })
+    assert.equal(opened.length, 3, "a new viewer owns a new adjudication")
+    assert.equal(exactReads.length, 3)
+    assert.equal(committed.length, 3)
+
+    await renderStrict({ query: nextQuery, viewerId: "viewer-2", runtimeVersion: 0 })
+    assert.equal(opened.length, 3)
+    assert.equal(exactReads.length, 3)
+    assert.equal(rejected.length, 1)
+    await renderStrict({ query: nextQuery, viewerId: "viewer-2", runtimeVersion: 1 })
+    assert.equal(opened.length, 4, "runtime restoration owns a fresh exact read")
+    assert.equal(exactReads.length, 4)
+    assert.equal(committed.length, 4)
+  } finally {
+    if (root) {
+      await act(async () => root.unmount())
+    }
+    dom.window.close()
+    globalThis.window = originalWindow
+    globalThis.document = originalDocument
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: originalNavigator,
+    })
+    globalThis.IS_REACT_ACT_ENVIRONMENT = originalActEnvironment
   }
 })
 

@@ -66,8 +66,12 @@ export type RegistrationObservationAsyncOwnershipToken = Readonly<
 export function createRegistrationObservationAsyncOwnership() {
   let generation = 0
   let activeToken: RegistrationObservationAsyncOwnershipToken | null = null
+  let lifecycleActive = true
 
   return {
+    activate() {
+      lifecycleActive = true
+    },
     begin(context: RegistrationObservationAsyncOwnershipContext) {
       generation += 1
       const token: RegistrationObservationAsyncOwnershipToken = Object.freeze({
@@ -83,11 +87,15 @@ export function createRegistrationObservationAsyncOwnership() {
       activeToken = null
       return true
     },
+    deactivate() {
+      lifecycleActive = false
+    },
     owns(
       token: RegistrationObservationAsyncOwnershipToken,
       context: RegistrationObservationAsyncOwnershipContext,
     ) {
-      return activeToken === token
+      return lifecycleActive
+        && activeToken === token
         && token.generation === generation
         && token.targetKey === context.targetKey
         && token.viewerId === context.viewerId
@@ -95,6 +103,38 @@ export function createRegistrationObservationAsyncOwnership() {
         && context.runtimeVersion === 1
     },
   }
+}
+
+export function useRegistrationObservationAsyncOwnershipLifecycle(input: {
+  ownership: ReturnType<typeof createRegistrationObservationAsyncOwnership>
+  viewerId: string
+  runtimeVersion: 0 | 1
+}) {
+  const lifecycleRef = useRef({
+    contextKey: "",
+    setupGeneration: 0,
+  })
+  const contextKey = `${input.viewerId}\u0000${input.runtimeVersion}`
+
+  useEffect(() => {
+    const lifecycle = lifecycleRef.current
+    lifecycle.setupGeneration += 1
+    input.ownership.activate()
+    if (lifecycle.contextKey !== contextKey) {
+      input.ownership.invalidate()
+      lifecycle.contextKey = contextKey
+    }
+
+    return () => {
+      input.ownership.deactivate()
+      const cleanupGeneration = ++lifecycle.setupGeneration
+      queueMicrotask(() => {
+        if (lifecycle.setupGeneration !== cleanupGeneration) return
+        input.ownership.invalidate()
+        lifecycle.contextKey = ""
+      })
+    }
+  }, [contextKey, input.ownership])
 }
 
 export function isRegistrationConsultationViewKey(
@@ -232,12 +272,14 @@ export function useRegistrationObservationRouteAdjudication(input: {
     workspaceReady,
   } = input
   const rejectedQueryRef = useRef("")
+  const adjudicatedQueryRef = useRef("")
   const querySignature = currentSearchParams.toString()
 
   useEffect(() => {
     const searchParams = new URLSearchParams(querySignature)
     if (!enabled || !searchParams.has("observationId")) {
       rejectedQueryRef.current = ""
+      adjudicatedQueryRef.current = ""
       return
     }
     if (!runtimeProbed) return
@@ -249,9 +291,11 @@ export function useRegistrationObservationRouteAdjudication(input: {
       workspaceReady,
       currentSelectionKey: "",
     })
+    const adjudicationKey = `${viewerId}\u0000${observationRuntimeVersion}\u0000${querySignature}`
     if (exactTarget?.kind !== "observation") {
-      if (rejectedQueryRef.current === querySignature) return
-      rejectedQueryRef.current = querySignature
+      adjudicatedQueryRef.current = ""
+      if (rejectedQueryRef.current === adjudicationKey) return
+      rejectedQueryRef.current = adjudicationKey
       onReject(searchParams)
       return
     }
@@ -264,7 +308,13 @@ export function useRegistrationObservationRouteAdjudication(input: {
       workspaceReady,
       currentSelectionKey,
     })
-    if (target?.kind === "observation") void onOpen(target)
+    if (target?.kind !== "observation") {
+      adjudicatedQueryRef.current = adjudicationKey
+      return
+    }
+    if (adjudicatedQueryRef.current === adjudicationKey) return
+    adjudicatedQueryRef.current = adjudicationKey
+    void onOpen(target)
   }, [
     currentSelectionKey,
     enabled,
