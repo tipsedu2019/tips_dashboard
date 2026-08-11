@@ -28,6 +28,10 @@ const adapterModuleUrl = new URL(
   "../src/features/notifications/server/notification-workflow-adapter.ts",
   import.meta.url,
 )
+const registrationAdapterModuleUrl = new URL(
+  "../src/features/notifications/server/adapters/registration-notification-adapter.ts",
+  import.meta.url,
+)
 const approvalAdapterModuleUrl = new URL(
   "../src/features/notifications/server/adapters/approvals-notification-adapter.ts",
   import.meta.url,
@@ -2615,132 +2619,83 @@ test("관찰 frozen retry의 429/425만 두 번째 send를 허용하고 408·tim
   }
 })
 
-test("관찰 first-attempt refresh가 durable frozen retry를 만들고 canonical Google Chat 결과가 다음 claim을 결정한다", async () => {
+test("실제 registration adapter retry는 mutable observation source reader를 재호출하지 않고 frozen A를 보낸다", async () => {
   const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
-  const { createGoogleChatProvider } = await import(googleChatProviderModuleUrl)
-  for (const fixture of [
-    { name: "429", response: () => new Response("rate", { status: 429 }), retry: true },
-    { name: "425", response: () => new Response("early", { status: 425 }), retry: true },
-    { name: "408", response: () => new Response("ambiguous", { status: 408 }), retry: false },
-    { name: "timeout", response: () => { throw Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }) }, retry: false },
-    { name: "reset", response: () => { throw Object.assign(new Error("reset"), { code: "ECONNRESET" }) }, retry: false },
-    { name: "5xx", response: () => new Response("upstream", { status: 500 }), retry: false },
-  ]) {
-    const deliveryId = "80000000-0000-4000-8000-000000000009"
-    const initialPayload = { progress: "42~49쪽" }
-    const currentSource = { progress: "50~57쪽", revision: "7", reads: 0, retryReadForbidden: false }
-    const refreshedPayload = { progress: currentSource.progress, source_revision: currentSource.revision }
-    const sourceAccessor = {
-      async readCurrentPreparationAndTaggedRevision() {
-        currentSource.reads += 1
-        if (currentSource.retryReadForbidden) throw new Error("retry consulted current preparation source")
-        return { progress: currentSource.progress, revision: currentSource.revision }
+  const { createRegistrationNotificationAdapter } = await import(registrationAdapterModuleUrl)
+  for (const statusReason of ["provider_rate_limited", "transient_pre_dispatch_failure"]) {
+    const job = createObservationChatJobClaim({ expires_at: "2026-08-18T01:00:00.000Z" })
+    const sourceA = createObservationSourceForJob(job)
+    const booking = {
+      class_id: sourceA.classId, class_name: sourceA.className, session_authority: sourceA.sessionAuthority,
+      class_lesson_session_id: sourceA.classLessonSessionId, legacy_session_key: sourceA.legacySessionKey,
+      schedule_state: sourceA.scheduleState, starts_at: sourceA.startsAt, ends_at: sourceA.endsAt,
+      teacher_name: sourceA.teacherName, classroom_name: sourceA.classroomName, campus: sourceA.campus,
+    }
+    const payloadA = {
+      task_id: sourceA.taskId, track_id: sourceA.trackId, observation_id: sourceA.observationId, appointment_id: sourceA.appointmentId,
+      appointment_notification_revision: 1, student_name: sourceA.studentName, subject: sourceA.subject, source_revision: sourceA.sourceRevision,
+      booking_fact_hash: sourceA.bookingFactHash, occurred_at: job.due_at, delivery_expires_at: job.expires_at,
+      mention_role: "subject_teacher", mention_profile_ids: [], event_kind: "registration.observation_reminder_due", booking,
+      textbook_names: ["교재 A"], progress_summary: "진도 A",
+    }
+    const sourceB = { ...sourceA, sourceRevision: { ...sourceA.sourceRevision, revision: 8 }, notificationRevision: 8 }
+    const preparationB = { textbookNames: ["교재 B"], progressSummary: "진도 B" }
+    assert.equal(sourceA.sourceRevision.revision, 7, statusReason)
+    const mutableSource = { source: sourceA, preparation: { textbookNames: ["교재 A"], progressSummary: "진도 A" }, throwOnRead: false }
+    const state = { attempt: 0, pending: true, frozen: null, sends: 0, sourceReads: 0, preparationReads: 0, contexts: [] }
+    const sourceReader = {
+      async readSource() {
+        state.sourceReads += 1
+        if (mutableSource.throwOnRead) throw new Error(`retry consulted mutable observation source revision ${mutableSource.source.sourceRevision}`)
+        return mutableSource.source
+      },
+      async readCurrentPreparation() {
+        state.preparationReads += 1
+        if (mutableSource.throwOnRead) throw new Error(`retry consulted mutable preparation ${mutableSource.preparation.progressSummary}`)
+        return mutableSource.preparation
       },
     }
-    let forceRetrySourceRead = false
-    const payloadFingerprint = createHash("sha256").update(JSON.stringify(refreshedPayload)).digest("hex")
-    const renderFingerprint = createHash("sha256").update(JSON.stringify({ body: "B", href: "/admin/registration", title: "T" })).digest("hex")
-    const state = { status: "pending", attempt: 0, frozen: null, sends: 0, claims: 0 }
-    const calls = []
-    const claimBase = createDeliveryClaim({
-      delivery_id: deliveryId, workflow_key: "registration", event_key: "registration.observation_reminder_due",
-      source_type: "registration_observation", source_id: "70000000-0000-4000-8000-000000000023", source_revision: "7",
-      rule_revision: "1", target_generation: "1", channel_key: "google_chat",
-      target: { target_kind: "connection", target_key: "connection:google_chat.management", target_profile_id: null, connection_key: "google_chat.management", target_snapshot: { connection_key: "google_chat.management" } },
+    const adapter = createRegistrationNotificationAdapter({
+      now: () => new Date("2026-08-17T08:00:00.000Z"), observationSourceReader: sourceReader,
+      async getSourceSnapshot() { return null }, async listScheduledSources() { return { items: [], nextCursor: null, done: true } }, async listTargetItems() { return { items: [], nextCursor: null, done: true } },
+    })
+    const claim = createDeliveryClaim({
+      workflow_key: "registration", event_key: job.event_key, source_type: "registration_observation", source_id: job.observation_id,
+      source_revision: "1", rule_revision: "1", target_generation: "1", scheduled_for: job.due_at, channel_key: "google_chat",
+      target: { target_kind: "connection", target_key: "connection:google_chat.english", target_profile_id: null, connection_key: "google_chat.english", target_snapshot: { connection_key: "google_chat.english" } },
     })
     const rpc = async (name, parameters) => {
-      calls.push({ name, parameters: clone(parameters) })
       if (name === "record_notification_worker_heartbeat_v1") return null
       if (name === "reap_registration_observation_chat_job_leases_v1") return { reaped_count: 0, failed_count: 0 }
       if (["claim_registration_observation_chat_jobs_v1", "claim_notification_fanout_jobs_v1", "claim_notification_rule_reconciliation_jobs_v1", "claim_notification_target_reconciliation_jobs_v1"].includes(name)) return []
       if (name === "reap_notification_leases_v1") return { reaped_count: 0 }
-      if (name === "claim_notification_deliveries_v1") {
-        state.claims += 1
-        return state.status === "pending" ? [{ ...claimBase, attempt_count: state.attempt }] : []
-      }
-      if (name === "read_registration_observation_notification_delivery_frozen_state_v1") {
-        return state.frozen || { attemptCount: 0, expiresAt: "2026-08-17T10:00:00.000Z", snapshot: initialPayload, payloadFingerprint: null, renderFingerprint: null, title: null, body: null, href: null, lastAttemptStartedAt: null }
-      }
-      if (name === "get_notification_render_snapshot_v1") return {
-        event_id: EVENT_ID, workflow_key: "registration", event_key: claimBase.event_key, source_type: claimBase.source_type,
-        source_id: claimBase.source_id, source_revision: "7", occurrence_key: "durable-first-attempt", occurred_at: claimBase.scheduled_for,
-        payload_schema_version: 3, payload: initialPayload, rule_id: RULE_ID, rule_revision: "1", template_id: TEMPLATE_ID,
-        channel_key: "google_chat", audience_key: "subject_team", rule_variant_key: "immediate", title_template: "T", body_template: "B", allowed_variables: [], template_payload_schema_version: 3,
-      }
-      if (name === "refresh_registration_observation_notification_delivery_v1") {
-        state.frozen = { attemptCount: 0, expiresAt: "2026-08-17T10:00:00.000Z", snapshot: parameters.p_payload, payloadFingerprint: parameters.p_payload_fingerprint, renderFingerprint: parameters.p_render_fingerprint, title: parameters.p_rendered_title, body: parameters.p_rendered_body, href: parameters.p_href, lastAttemptStartedAt: null }
-        return { outcome: "refreshed" }
-      }
-      if (name === "prepare_registration_observation_notification_delivery_v1") return {
-        prepared: true, delivery_id: deliveryId, claim_token: CLAIM_TOKEN, dispatch_token: DISPATCH_TOKEN, status: "sending", channel_key: "google_chat", connection_key: "google_chat.management", webhook_url: GOOGLE_CHAT_URL, rendered_title: state.frozen.title, rendered_body: state.frozen.body, href: state.frozen.href, mention_user_names: [],
-      }
-      if (name === "register_notification_external_attempt_v1") return { allowed: true, attempt_id: "80000000-0000-4000-8000-000000000010" }
-      if (name === "finalize_notification_delivery_v1") {
-        if (parameters.p_status === "retry_wait") {
-          state.status = "pending"
-          state.attempt = 1
-          state.frozen = { ...state.frozen, attemptCount: 1, lastAttemptStartedAt: "2026-08-17T08:00:00.000Z" }
-        } else state.status = "terminal"
-        return { ok: true }
-      }
+      if (name === "claim_notification_deliveries_v1") return state.pending ? [{ ...claim, attempt_count: state.attempt }] : []
+      if (name === "read_registration_observation_notification_delivery_frozen_state_v1") return state.frozen || { attemptCount: 0, expiresAt: job.expires_at, snapshot: payloadA, payloadFingerprint: null, renderFingerprint: null, title: null, body: null, href: null, lastAttemptStartedAt: null }
+      if (name === "get_notification_render_snapshot_v1") return { event_id: EVENT_ID, workflow_key: "registration", event_key: job.event_key, source_type: "registration_observation", source_id: job.observation_id, source_revision: "1", occurrence_key: "real-adapter", occurred_at: job.due_at, payload_schema_version: 3, payload: payloadA, rule_id: RULE_ID, rule_revision: "1", template_id: TEMPLATE_ID, channel_key: "google_chat", audience_key: "subject_team", rule_variant_key: "immediate", title_template: "T", body_template: "B", allowed_variables: [], template_payload_schema_version: 3 }
+      if (name === "refresh_registration_observation_notification_delivery_v1") { state.frozen = { attemptCount: 0, expiresAt: job.expires_at, snapshot: parameters.p_payload, payloadFingerprint: parameters.p_payload_fingerprint, renderFingerprint: parameters.p_render_fingerprint, title: parameters.p_rendered_title, body: parameters.p_rendered_body, href: parameters.p_href, lastAttemptStartedAt: null }; return { outcome: "refreshed" } }
+      if (name === "prepare_registration_observation_notification_delivery_v1") return { prepared: true, delivery_id: DELIVERY_ID, claim_token: CLAIM_TOKEN, dispatch_token: DISPATCH_TOKEN, status: "sending", channel_key: "google_chat", connection_key: "google_chat.english", webhook_url: GOOGLE_CHAT_URL, rendered_title: state.frozen.title, rendered_body: state.frozen.body, href: state.frozen.href, mention_user_names: [] }
+      if (name === "register_notification_external_attempt_v1") return { allowed: true, attempt_id: "80000000-0000-4000-8000-000000000014" }
+      if (name === "finalize_notification_delivery_v1") { if (parameters.p_status === "retry_wait") { state.attempt = 1; state.frozen = { ...state.frozen, attemptCount: 1, lastAttemptStartedAt: "2026-08-17T08:00:00.000Z" } } else state.pending = false; return { ok: true } }
       throw new Error(`unexpected rpc ${name}`)
     }
-    const fetchCalls = []
-    const provider = createGoogleChatProvider({
-      http408Disposition: "delivery_unknown",
-      fetch: async (_input, init) => {
-        fetchCalls.push(clone(init))
-        state.sends += 1
-        if (state.sends === 1) return fixture.response()
-        return new Response(JSON.stringify({ name: "spaces/fixture/messages/frozen-retry" }), { status: 200, headers: { "Content-Type": "application/json" } })
-      },
-    })
-    let currentPreparationReads = 0
-    const worker = createNotificationWorkerRuntime({
-      rpc, createRunId: () => RUN_ID, now: () => new Date("2026-08-17T08:00:00.000Z"), getProvider: () => provider,
-      getAdapter: () => createAdapter({
-        async revalidateBeforeSend(input) {
-          if (input.attemptCount === 0) {
-            currentPreparationReads += 1
-            const current = await sourceAccessor.readCurrentPreparationAndTaggedRevision()
-            assert.deepEqual(current, { progress: "50~57쪽", revision: "7" })
-            return { ok: true, refreshedPayload, payloadSchemaVersion: 3, payloadFingerprint }
-          }
-          if (forceRetrySourceRead) await sourceAccessor.readCurrentPreparationAndTaggedRevision()
-          if (currentSource.reads !== 1) throw new Error("retry read current preparation")
-          assert.deepEqual(input.eventSnapshot, { payloadSchemaVersion: 3, payload: refreshedPayload })
-          return { ok: true }
-        },
-        async buildRenderContext() { return {} },
-        async buildDeepLink() { return "/admin/registration" },
-      }),
-    })
+    const worker = createNotificationWorkerRuntime({ rpc, createRunId: () => RUN_ID, now: () => new Date("2026-08-17T08:00:00.000Z"), getAdapter: () => adapter, getProvider: () => ({ async send(context) { state.contexts.push(structuredClone(context)); state.sends += 1; return state.sends === 1 ? { status: "retry_wait", statusReason, providerResponseCode: statusReason === "provider_rate_limited" ? "429" : "425" } : { status: "sent", providerMessageId: "real-adapter", providerResponseCode: "200" } } }) })
     await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
-    currentSource.progress = "B revision의 완전히 다른 진도"
-    currentSource.revision = "8"
-    currentSource.retryReadForbidden = true
-    if (fixture.name === "429") {
-      forceRetrySourceRead = true
-      await assert.rejects(
-        worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 }),
-        /retry consulted current preparation source/,
-      )
-      forceRetrySourceRead = false
-      currentSource.reads = 1
-    }
+    mutableSource.source = sourceB
+    mutableSource.preparation = preparationB
+    mutableSource.throwOnRead = true
+    assert.equal(mutableSource.source.sourceRevision.revision, 8, statusReason)
+    assert.equal(mutableSource.preparation.progressSummary, "진도 B", statusReason)
     await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
-    assert.equal(currentPreparationReads, 1, fixture.name)
-    assert.equal(currentSource.reads, 1, fixture.name)
-    assert.equal(state.sends, fixture.retry ? 2 : 1, fixture.name)
-    assert.equal(fetchCalls.length, fixture.retry ? 2 : 1, fixture.name)
-    assert.equal(calls.filter((call) => call.name === "get_notification_render_snapshot_v1").length, 1, fixture.name)
-    assert.equal(calls.filter((call) => call.name === "refresh_registration_observation_notification_delivery_v1").length, 1, fixture.name)
-    assert.equal(calls.filter((call) => call.name === "register_notification_external_attempt_v1").length, fixture.retry ? 2 : 1, fixture.name)
-    assert.equal(state.frozen.payloadFingerprint, payloadFingerprint, fixture.name)
-    assert.equal(state.frozen.renderFingerprint, renderFingerprint, fixture.name)
-    assert.deepEqual(state.frozen.snapshot, refreshedPayload, fixture.name)
-    assert.doesNotMatch(JSON.stringify(state.frozen.snapshot), /B revision/, fixture.name)
-    assert.deepEqual(fetchCalls.at(-1), fetchCalls[0], `${fixture.name} frozen transport bytes`)
+    assert.equal(state.sends, 2, statusReason)
+    assert.equal(state.sourceReads, 1, statusReason)
+    assert.equal(state.preparationReads, 1, statusReason)
+    assert.deepEqual(state.contexts[1], state.contexts[0], `${statusReason} frozen A transport bytes`)
+    assert.equal(state.contexts[0].rendered_title, state.frozen.title, statusReason)
+    assert.equal(state.contexts[0].rendered_body, state.frozen.body, statusReason)
+    assert.equal(state.contexts[0].href, state.frozen.href, statusReason)
+    assert.deepEqual(state.contexts[0].mention_user_names, [], statusReason)
+    assert.deepEqual(state.frozen.snapshot.source_revision, sourceA.sourceRevision, statusReason)
+    assert.equal(state.frozen.snapshot.progress_summary, "진도 A", statusReason)
   }
 })
 

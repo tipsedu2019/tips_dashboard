@@ -1361,6 +1361,7 @@ async function revalidateObservationBeforeSend(
     || input.sourceType !== (assignmentChange ? OBSERVATION_ASSIGNMENT_SOURCE_TYPE : OBSERVATION_SOURCE_TYPE)
     || sourceIdentityInvalid
   ) return { ok: false, status: "failed", reason: "payload_schema_unsupported" }
+  if ((input.attemptCount as number) > 0) return { ok: true }
   const sourceReader = dependencies.observationSourceReader
   if (!sourceReader) return { ok: false, status: "failed", reason: "payload_schema_unsupported" }
   let source: RegistrationObservationNotificationSource
@@ -1399,8 +1400,6 @@ async function revalidateObservationBeforeSend(
     payload.event_kind === "registration.observation_reminder_due"
     && dependencies.now().getTime() >= Date.parse(booking.starts_at)
   ) return { ok: false, status: "failed", reason: "retry_window_closed" }
-  if ((input.attemptCount as number) > 0) return { ok: true }
-
   let refreshed: RegistrationObservationChatPayloadV3
   try {
     let candidate: Readonly<Record<string, unknown>> = {
