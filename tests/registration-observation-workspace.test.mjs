@@ -1,11 +1,15 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
+import { createRequire } from "node:module"
 import test from "node:test"
 import vm from "node:vm"
 
+import { createElement, forwardRef } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 import ts from "typescript"
 
 const root = new URL("../", import.meta.url)
+const require = createRequire(import.meta.url)
 
 async function readSource(pathname) {
   return readFile(new URL(pathname, root), "utf8")
@@ -36,6 +40,10 @@ async function loadEditorModel() {
         typeof getRegistrationObservationEditorAttemptPlan === "function"
           ? getRegistrationObservationEditorAttemptPlan
           : undefined,
+      getRegistrationObservationDisplayStatusLabel:
+        typeof getRegistrationObservationDisplayStatusLabel === "function"
+          ? getRegistrationObservationDisplayStatusLabel
+          : undefined,
       reconcileRegistrationObservationWithdrawalValue,
       shouldLockRegistrationObservationMutation,
       executeRegistrationObservationWithdrawal:
@@ -64,6 +72,60 @@ async function loadEditorModel() {
   const sandboxModule = { exports: {} }
   vm.runInNewContext(compiled, { module: sandboxModule, exports: sandboxModule.exports })
   return sandboxModule.exports
+}
+
+async function loadMountedObservationEditor() {
+  const fileName = new URL("src/features/tasks/registration-observation-editor.tsx", root)
+  const source = await readFile(fileName, "utf8")
+  const output = ts.transpileModule(source, {
+    compilerOptions: {
+      esModuleInterop: true,
+      jsx: ts.JsxEmit.ReactJSX,
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: fileName.pathname,
+  }).outputText
+  const Button = forwardRef(function MountedObservationButton({ children, ...props }, ref) {
+    return createElement("button", { ...props, ref }, children)
+  })
+  const Dialog = ({ open, children }) => open ? createElement("div", null, children) : null
+  const Wrapper = ({ children, ...props }) => createElement("div", props, children)
+  const DialogClose = ({ children }) => children
+  const Input = (props) => createElement("input", props)
+  const Label = ({ children, ...props }) => createElement("label", props, children)
+  const RegistrationSelect = ({ options = [], ...props }) => createElement(
+    "select",
+    props,
+    options.map((option) => createElement("option", { key: option.value, value: option.value }, option.label)),
+  )
+  const runtimeModule = { exports: {} }
+  const localModules = new Map([
+    ["@/components/ui/button", { Button }],
+    ["@/components/ui/dialog", {
+      Dialog,
+      DialogClose,
+      DialogContent: Wrapper,
+      DialogDescription: Wrapper,
+      DialogFooter: Wrapper,
+      DialogHeader: Wrapper,
+      DialogTitle: Wrapper,
+    }],
+    ["@/components/ui/input", { Input }],
+    ["@/components/ui/label", { Label }],
+    ["./registration-select", { RegistrationSelect }],
+  ])
+  const runtimeRequire = (specifier) => {
+    if (specifier === "react" || specifier === "react/jsx-runtime") return require(specifier)
+    const local = localModules.get(specifier)
+    if (local) return local
+    throw new Error(`unhandled observation editor runtime import: ${specifier}`)
+  }
+  const factory = vm.runInThisContext(`(function(require, module, exports) {${output}\n})`, {
+    filename: fileName.pathname,
+  })
+  factory(runtimeRequire, runtimeModule, runtimeModule.exports)
+  return runtimeModule.exports.RegistrationObservationEditor
 }
 
 function observationAttempt(observationId, overrides = {}) {
@@ -156,6 +218,87 @@ test("calendar deep-linked attempt prepends beyond the recent limit and deduplic
     deepLinkedAttempt: { ...duplicate, teacherName: "다른 선생님" },
     selectedObservationId: duplicate.observationId,
   }), null)
+})
+
+test("mounted historical observation uses its exact attempt status and exposes no workflow actions", async () => {
+  const RegistrationObservationEditor = await loadMountedObservationEditor()
+  const currentAttempt = observationAttempt(
+    "31000000-0000-4000-8000-000000000001",
+    { status: "scheduled", appointmentStatus: "scheduled", decisionKind: null },
+  )
+  const expectedLabels = new Map([
+    ["scheduled", "청강 예정"],
+    ["attended_feedback_pending", "교사 피드백 대기"],
+    ["completed", "청강 완료"],
+    ["no_show", "불참"],
+    ["canceled", "취소"],
+  ])
+
+  for (const [status, expectedLabel] of expectedLabels) {
+    const deepLinkedAttempt = observationAttempt(
+      `32000000-0000-4000-8000-${String([...expectedLabels.keys()].indexOf(status) + 1).padStart(12, "0")}`,
+      {
+        status,
+        appointmentStatus: status === "scheduled" ? "scheduled" : status === "canceled" ? "canceled" : "completed",
+        attendance: status === "no_show" ? "no_show" : status === "scheduled" ? null : "attended",
+        decisionKind: status === "completed" ? "enrollment" : null,
+      },
+    )
+    const markup = renderToStaticMarkup(createElement(RegistrationObservationEditor, {
+      trackId: deepLinkedAttempt.trackId,
+      workflowRevision: 12,
+      observationRevision: deepLinkedAttempt.revision,
+      appointmentNotificationRevision: deepLinkedAttempt.appointmentNotificationRevision,
+      detail: {
+        track: {
+          trackId: deepLinkedAttempt.trackId,
+          taskId: deepLinkedAttempt.taskId,
+          subject: "영어",
+          workflowStatus: "observation_requested",
+          workflowRevision: 12,
+          observationReturnWorkflowStatus: "consultation_completed",
+          directorProfileId: deepLinkedAttempt.teacherProfileId,
+        },
+        currentObservation: currentAttempt,
+        latestEnrollmentDecisionObservationId: null,
+        latestDecisionObservation: null,
+        attempts: [currentAttempt, deepLinkedAttempt],
+        classes: [],
+      },
+      deepLinkedAttempt,
+      actions: {
+        enterRegistrationObservation: async () => ({ changed: false }),
+        loadRegistrationObservationSessions: async () => [],
+        saveRegistrationObservationBooking: async () => ({ changed: false }),
+        cancelRegistrationObservation: async () => ({ changed: false }),
+        withdrawRegistrationObservation: async () => ({ changed: false }),
+      },
+      onSaved: async () => undefined,
+    }))
+    assert.match(markup, new RegExp(`role="status"[^>]*>${expectedLabel}<`), status)
+    assert.doesNotMatch(markup, />청강 진행<|>저장<|>예약 취소<|>청강 철회</, status)
+  }
+})
+
+test("historical attempt status outranks a receipt retained by the same track editor", async () => {
+  const { getRegistrationObservationDisplayStatusLabel } = await loadEditorModel()
+  assert.equal(typeof getRegistrationObservationDisplayStatusLabel, "function")
+  const deepLinkedAttempt = observationAttempt(
+    "33000000-0000-4000-8000-000000000001",
+    { status: "completed", appointmentStatus: "completed" },
+  )
+  assert.equal(getRegistrationObservationDisplayStatusLabel({
+    receipt: "예약 필요",
+    workflowStatus: "observation_requested",
+    current: deepLinkedAttempt,
+    deepLinkedAttempt,
+  }), "청강 완료")
+  assert.equal(getRegistrationObservationDisplayStatusLabel({
+    receipt: "예약 필요",
+    workflowStatus: "observation_requested",
+    current: null,
+    deepLinkedAttempt: null,
+  }), "예약 필요")
 })
 
 test("application shell places observation between waiting and registration", async () => {
@@ -918,7 +1061,8 @@ test("track editor mounts observation once before registration and only behind r
 
   assert.equal((shell.match(/\bobservation=/g) || []).length, 1)
   assert.ok(shell.indexOf("observation=") < shell.indexOf("registration={registrationSection}"))
-  assert.match(shell, /observation=\{canLoadRegistrationObservationWorkspace\(\{[\s\S]*?\}\) \? \(/)
+  assert.match(source, /const observationWorkspaceAvailable = Boolean\(activeTrack && canLoadRegistrationObservationWorkspace\(\{/)
+  assert.match(shell, /observation=\{observationWorkspaceAvailable \? \(/)
   assert.match(shell, /<RegistrationObservationEditor\s+key=\{activeTrack\.id\}/)
   assert.match(source, /const canManageActiveObservation = activeTrack[\s\S]*?canManageRegistrationObservationTrack/)
   assert.match(source, /section === "observation" \? canManageActiveObservation/)
@@ -945,16 +1089,18 @@ test("track editor loads one bounded feedback DTO only for an owned visible pane
   assert.match(source, /managerDetail: activeObservationDetail/)
   assert.match(source, /canManageCase/)
   assert.match(loadEffect, /activeFeedbackObservationId/)
-  assert.match(loadEffect, /feedbackLoadGenerationRef/)
+  assert.match(loadEffect, /observationFeedbackLoadOwnershipRef/)
   assert.match(loadEffect, /activeObservationFeedbackKeyRef/)
+  assert.match(loadEffect, /activeObservationViewerIdRef/)
+  assert.match(loadEffect, /activeObservationRuntimeVersionRef/)
   assert.match(source, /force: true/)
   assert.match(source, /<RegistrationObservationFeedbackPanel/)
   assert.match(source, /feedbackPanel=\{/)
   assert.match(source, /canKeepRegistrationObservationFeedbackHistoryMounted\(\{/)
   assert.match(source, /observationAttemptCount: activeTrack\.observationAttemptCount/)
-  assert.match(source, /canRecordAttendance=\{canManageCase && !activeFeedbackCorrectionOnly\}/)
-  assert.match(source, /canEditFeedback=\{activeFeedbackCorrectionOnly\s*\? canManageCase/)
-  assert.match(source, /canDecide=\{!activeFeedbackCorrectionOnly && \(/)
+  assert.match(source, /canRecordAttendance=\{!activeDeepLinkedAttemptTerminal && canManageCase && !activeFeedbackCorrectionOnly\}/)
+  assert.match(source, /canEditFeedback=\{!activeDeepLinkedAttemptTerminal && \(activeFeedbackCorrectionOnly\s*\? canManageCase/)
+  assert.match(source, /canDecide=\{!activeDeepLinkedAttemptTerminal && !activeFeedbackCorrectionOnly && \(/)
   assert.match(
     source,
     /activeFeedbackHistoryOnly\s*\? activeObservationFeedbackPanel\s*:\s*\(/,

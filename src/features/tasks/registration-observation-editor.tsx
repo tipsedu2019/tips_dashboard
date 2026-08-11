@@ -110,6 +110,31 @@ export function canWithdrawRegistrationObservation(input: {
     && input.currentObservation === null
 }
 
+export function getRegistrationObservationAttemptStatusLabel(
+  attempt: Pick<RegistrationObservationAttempt, "appointmentStatus" | "status">,
+) {
+  if (attempt.appointmentStatus === "canceled" || attempt.status === "canceled") return "취소"
+  if (attempt.status === "no_show") return "불참"
+  if (attempt.status === "completed") return "청강 완료"
+  if (attempt.status === "attended_feedback_pending") return "교사 피드백 대기"
+  return "청강 예정"
+}
+
+export function getRegistrationObservationDisplayStatusLabel(input: {
+  receipt: string
+  workflowStatus: RegistrationObservationManagerDetail["track"]["workflowStatus"]
+  current: Pick<RegistrationObservationAttempt, "appointmentStatus" | "status"> | null
+  deepLinkedAttempt: RegistrationObservationAttempt | null
+}) {
+  if (input.deepLinkedAttempt && input.current) {
+    return getRegistrationObservationAttemptStatusLabel(input.current)
+  }
+  if (input.receipt === "예약 필요") return "예약 필요"
+  if (input.workflowStatus === "observation_feedback_pending") return "교사 피드백 대기"
+  if (input.workflowStatus === "observation_completed") return "청강 완료"
+  return input.current?.status === "scheduled" ? "청강 예약" : "예약 필요"
+}
+
 function registrationObservationErrorRecord(error: unknown) {
   if (typeof error === "string") {
     return { name: "", code: "", message: error.trim(), details: "", hint: "" }
@@ -931,15 +956,12 @@ export function RegistrationObservationEditor({
     )
   }
 
-  const statusLabel = receipt === "예약 필요"
-    ? "예약 필요"
-    : workflowStatus === "observation_feedback_pending"
-      ? "교사 피드백 대기"
-      : workflowStatus === "observation_completed"
-        ? "청강 완료"
-        : current?.status === "scheduled"
-          ? "청강 예약"
-          : "예약 필요"
+  const statusLabel = getRegistrationObservationDisplayStatusLabel({
+    receipt,
+    workflowStatus,
+    current,
+    deepLinkedAttempt,
+  })
 
   return (
     <div className="grid gap-4">

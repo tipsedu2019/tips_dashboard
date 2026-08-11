@@ -163,13 +163,19 @@ export function RegistrationAppointmentCalendar({
   const range = useMemo(() => getRegistrationAppointmentCalendarRange(view, anchorDateKey), [anchorDateKey, view])
   const days = useMemo(() => calendarDays(range, view), [range, view])
   const todayDateKey = getSeoulRegistrationDateKey()
+  const runtimeSafeItems = useMemo(
+    () => observationRuntimeVersion === 0
+      ? items.filter((item) => item.kind !== "observation")
+      : items,
+    [items, observationRuntimeVersion],
+  )
   const visibleItems = useMemo(
-    () => filterRegistrationAppointmentCalendarItems(items, kindFilter),
-    [items, kindFilter],
+    () => filterRegistrationAppointmentCalendarItems(runtimeSafeItems, kindFilter),
+    [kindFilter, runtimeSafeItems],
   )
   const kindCounts = useMemo(
-    () => getRegistrationAppointmentCalendarKindCounts(items),
-    [items],
+    () => getRegistrationAppointmentCalendarKindCounts(runtimeSafeItems),
+    [runtimeSafeItems],
   )
 
   const itemsByDate = useMemo(() => {

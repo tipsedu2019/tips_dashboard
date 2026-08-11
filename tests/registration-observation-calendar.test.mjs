@@ -157,6 +157,123 @@ test("runtime one rejects every observation cross-shape even outside the selecte
   );
 });
 
+test("calendar row guards reject one field mutation at a time for nullability UUIDs participants and timestamps", () => {
+  const snapshotValues = {
+    observation_id: observationCalendarIds.observationId,
+    observation_track_id: observationCalendarIds.trackId,
+    observation_class_id: observationCalendarIds.classId,
+    observation_class_name: "영어 심화반",
+    observation_ends_at: "2026-08-12T17:30:00+09:00",
+    observation_teacher_name: "김선생",
+    observation_classroom_name: "본관 301호",
+  };
+  for (const field of Object.keys(snapshotValues)) {
+    assert.throws(
+      () => buildRegistrationAppointmentCalendarItems(
+        [observationCalendarRow({ [field]: null })],
+        { observationRuntimeVersion: 1 },
+      ),
+      new RegExp(`registration_appointment_calendar_row_invalid:${field}`),
+      `observation ${field} is required`,
+    );
+  }
+
+  const legacyBase = observationCalendarRow({
+    kind: "level_test",
+    observation_id: null,
+    observation_track_id: null,
+    observation_class_id: null,
+    observation_class_name: null,
+    observation_ends_at: null,
+    observation_teacher_name: null,
+    observation_classroom_name: null,
+  });
+  for (const [field, value] of Object.entries(snapshotValues)) {
+    assert.throws(
+      () => buildRegistrationAppointmentCalendarItems(
+        [{ ...legacyBase, [field]: value }],
+        { observationRuntimeVersion: 1 },
+      ),
+      new RegExp(`registration_appointment_calendar_row_invalid:${field}`),
+      `legacy ${field} must remain null`,
+    );
+  }
+
+  for (const [field, value] of [
+    ["task_id", "not-a-task-uuid"],
+    ["appointment_id", "not-an-appointment-uuid"],
+    ["observation_id", "not-an-observation-uuid"],
+    ["observation_track_id", "not-a-track-uuid"],
+    ["observation_class_id", "not-a-class-uuid"],
+  ]) {
+    assert.throws(
+      () => buildRegistrationAppointmentCalendarItems(
+        [observationCalendarRow({ [field]: value })],
+        { observationRuntimeVersion: 1 },
+      ),
+      new RegExp(`registration_appointment_calendar_row_invalid:${field}`),
+      `${field} must be a UUID`,
+    );
+  }
+
+  const otherTrackId = "40000000-0000-4000-8000-000000000002";
+  const participantMutations = [
+    { overrides: { track_ids: null }, field: "participants" },
+    { overrides: { subjects: null }, field: "participants" },
+    { overrides: { track_ids: [], subjects: [] }, field: "participants" },
+    { overrides: { track_ids: [observationCalendarIds.trackId], subjects: [] }, field: "participants" },
+    {
+      overrides: {
+        track_ids: [observationCalendarIds.trackId, observationCalendarIds.trackId],
+        subjects: ["영어", "수학"],
+      },
+      field: "participants",
+    },
+    {
+      overrides: {
+        track_ids: [observationCalendarIds.trackId, otherTrackId],
+        subjects: ["영어", "영어"],
+      },
+      field: "participants",
+    },
+    { overrides: { subjects: ["국어"] }, field: "subjects" },
+    { overrides: { track_ids: [otherTrackId] }, field: "observation_participants" },
+    {
+      overrides: {
+        track_ids: [observationCalendarIds.trackId, otherTrackId],
+        subjects: ["영어", "수학"],
+      },
+      field: "observation_participants",
+    },
+  ];
+  for (const { overrides, field } of participantMutations) {
+    assert.throws(
+      () => buildRegistrationAppointmentCalendarItems(
+        [observationCalendarRow(overrides)],
+        { observationRuntimeVersion: 1 },
+      ),
+      new RegExp(`registration_appointment_calendar_row_invalid:${field}`),
+    );
+  }
+
+  for (const [field, value] of [
+    ["scheduled_at", "2026-08-12T25:00:00+09:00"],
+    ["scheduled_at", "2026-08-12T16:00:00"],
+    ["observation_ends_at", "2026-08-12T17:30:00"],
+    ["observation_ends_at", "2026-02-30T17:30:00+09:00"],
+    ["observation_ends_at", "2026-08-12T15:59:59+09:00"],
+    ["observation_ends_at", "2026-08-12T16:00:00+09:00"],
+  ]) {
+    assert.throws(
+      () => buildRegistrationAppointmentCalendarItems(
+        [observationCalendarRow({ [field]: value })],
+        { observationRuntimeVersion: 1 },
+      ),
+      new RegExp(`registration_appointment_calendar_row_invalid:${field}`),
+    );
+  }
+});
+
 test("calendar forward replacement preserves ten columns and appends seven bounded observation snapshots", async () => {
   // Production break caught: direct-view consumers see reordered legacy fields,
   // sensitive feedback facts, or a renamed observation kind.

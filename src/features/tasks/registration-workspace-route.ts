@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react"
+
 import type { RegistrationAppointmentCalendarKind } from "./registration-appointment-calendar-model"
 import type { RegistrationWorkflowViewKey } from "./registration-case-list-model"
 import type {
@@ -51,6 +53,50 @@ export const REGISTRATION_WORKSPACE_DETAIL_KEYS = [
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
+export type RegistrationObservationAsyncOwnershipContext = Readonly<{
+  targetKey: string
+  viewerId: string
+  runtimeVersion: 0 | 1
+}>
+
+export type RegistrationObservationAsyncOwnershipToken = Readonly<
+  RegistrationObservationAsyncOwnershipContext & { generation: number }
+>
+
+export function createRegistrationObservationAsyncOwnership() {
+  let generation = 0
+  let activeToken: RegistrationObservationAsyncOwnershipToken | null = null
+
+  return {
+    begin(context: RegistrationObservationAsyncOwnershipContext) {
+      generation += 1
+      const token: RegistrationObservationAsyncOwnershipToken = Object.freeze({
+        ...context,
+        generation,
+      })
+      activeToken = token
+      return token
+    },
+    invalidate(token?: RegistrationObservationAsyncOwnershipToken) {
+      if (token && token !== activeToken) return false
+      generation += 1
+      activeToken = null
+      return true
+    },
+    owns(
+      token: RegistrationObservationAsyncOwnershipToken,
+      context: RegistrationObservationAsyncOwnershipContext,
+    ) {
+      return activeToken === token
+        && token.generation === generation
+        && token.targetKey === context.targetKey
+        && token.viewerId === context.viewerId
+        && token.runtimeVersion === 1
+        && context.runtimeVersion === 1
+    },
+  }
+}
+
 export function isRegistrationConsultationViewKey(
   value: string,
 ): value is "consultation_requested" | "consultation_completed" {
@@ -78,7 +124,6 @@ export function getRegistrationDirectDeepLinkTarget(input: {
   workspaceReady: boolean
   currentSelectionKey: string
   currentAppointmentId?: string
-  currentObservationId?: string
 }): RegistrationDirectDeepLinkTarget | null {
   const viewerId = input.viewerId.trim()
   if (!viewerId) return null
@@ -107,10 +152,9 @@ export function getRegistrationDirectDeepLinkTarget(input: {
       || view !== "calendar"
     ) return null
 
-    if (
-      input.currentSelectionKey === `observation:${taskId}:${trackId}:${appointmentId}:${observationId}`
-      || input.currentObservationId?.trim() === observationId
-    ) return null
+    if (input.currentSelectionKey === `observation:${taskId}:${trackId}:${appointmentId}:${observationId}`) {
+      return null
+    }
 
     return {
       kind: "observation",
@@ -161,6 +205,77 @@ export function getRegistrationDirectDeepLinkTarget(input: {
   ) return null
 
   return { kind: "track", taskId, trackId }
+}
+
+export function useRegistrationObservationRouteAdjudication(input: {
+  enabled: boolean
+  viewerId: string
+  searchParams: URLSearchParams
+  observationRuntimeVersion: 0 | 1
+  runtimeProbed: boolean
+  workspaceReady: boolean
+  currentSelectionKey: string
+  onOpen: (
+    target: Extract<RegistrationDirectDeepLinkTarget, { kind: "observation" }>,
+  ) => void | Promise<unknown>
+  onReject: (searchParams: URLSearchParams) => void
+}) {
+  const {
+    currentSelectionKey,
+    enabled,
+    observationRuntimeVersion,
+    onOpen,
+    onReject,
+    runtimeProbed,
+    searchParams: currentSearchParams,
+    viewerId,
+    workspaceReady,
+  } = input
+  const rejectedQueryRef = useRef("")
+  const querySignature = currentSearchParams.toString()
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(querySignature)
+    if (!enabled || !searchParams.has("observationId")) {
+      rejectedQueryRef.current = ""
+      return
+    }
+    if (!runtimeProbed) return
+
+    const exactTarget = getRegistrationDirectDeepLinkTarget({
+      viewerId,
+      searchParams,
+      observationRuntimeVersion,
+      workspaceReady,
+      currentSelectionKey: "",
+    })
+    if (exactTarget?.kind !== "observation") {
+      if (rejectedQueryRef.current === querySignature) return
+      rejectedQueryRef.current = querySignature
+      onReject(searchParams)
+      return
+    }
+
+    rejectedQueryRef.current = ""
+    const target = getRegistrationDirectDeepLinkTarget({
+      viewerId,
+      searchParams,
+      observationRuntimeVersion,
+      workspaceReady,
+      currentSelectionKey,
+    })
+    if (target?.kind === "observation") void onOpen(target)
+  }, [
+    currentSelectionKey,
+    enabled,
+    observationRuntimeVersion,
+    onOpen,
+    onReject,
+    querySignature,
+    runtimeProbed,
+    viewerId,
+    workspaceReady,
+  ])
 }
 
 export async function loadRegistrationObservationDeepLinkedAttempt(

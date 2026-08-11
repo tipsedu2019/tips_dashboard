@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import test from "node:test";
+import vm from "node:vm";
+import { createElement } from "react";
+import ts from "typescript";
+
+const require = createRequire(import.meta.url);
 
 const modelUrl = new URL(
   "../src/features/tasks/registration-appointment-calendar-model.ts",
@@ -25,6 +31,148 @@ const caseListModelUrl = new URL(
 
 async function loadModel() {
   return import(modelUrl.href);
+}
+
+function createCalendarHookHarness() {
+  const slots = [];
+  let cursor = 0;
+  let pendingEffects = [];
+  function sameDependencies(left, right) {
+    return Boolean(
+      left
+      && right
+      && left.length === right.length
+      && left.every((value, index) => Object.is(value, right[index])),
+    );
+  }
+  function useState(initialValue) {
+    const index = cursor++;
+    if (!slots[index]) {
+      slots[index] = { value: typeof initialValue === "function" ? initialValue() : initialValue };
+    }
+    const slot = slots[index];
+    return [slot.value, (nextValue) => {
+      slot.value = typeof nextValue === "function" ? nextValue(slot.value) : nextValue;
+    }];
+  }
+  function useRef(initialValue) {
+    const index = cursor++;
+    if (!slots[index]) slots[index] = { value: { current: initialValue } };
+    return slots[index].value;
+  }
+  function memoHook(factory, dependencies) {
+    const index = cursor++;
+    const slot = slots[index];
+    if (!slot || !sameDependencies(slot.dependencies, dependencies)) {
+      slots[index] = { value: factory(), dependencies };
+    }
+    return slots[index].value;
+  }
+  function useEffect(effect, dependencies) {
+    const index = cursor++;
+    const slot = slots[index];
+    if (!slot || !sameDependencies(slot.dependencies, dependencies)) {
+      pendingEffects.push({ effect, index });
+      slots[index] = { cleanup: slot?.cleanup, dependencies };
+    }
+  }
+  return {
+    react: {
+      useCallback: (callback, dependencies) => memoHook(() => callback, dependencies),
+      useEffect,
+      useMemo: memoHook,
+      useRef,
+      useState,
+    },
+    render(component, props) {
+      assert.equal(pendingEffects.length, 0, "flush calendar effects before rendering again");
+      cursor = 0;
+      return component(props);
+    },
+    flushEffects() {
+      const effects = pendingEffects;
+      pendingEffects = [];
+      for (const { effect, index } of effects) {
+        if (typeof slots[index].cleanup === "function") slots[index].cleanup();
+        slots[index].cleanup = effect();
+      }
+    },
+    cleanup() {
+      for (const slot of slots) {
+        if (typeof slot?.cleanup === "function") slot.cleanup();
+      }
+      pendingEffects = [];
+    },
+  };
+}
+
+function controlledCalendarPromise() {
+  let resolve;
+  let reject;
+  const promise = new Promise((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, resolve, reject };
+}
+
+function findCalendarElements(node, predicate, matches = []) {
+  if (Array.isArray(node)) {
+    for (const child of node) findCalendarElements(child, predicate, matches);
+    return matches;
+  }
+  if (!node || typeof node !== "object" || !("props" in node)) return matches;
+  if (predicate(node)) matches.push(node);
+  findCalendarElements(node.props.children, predicate, matches);
+  return matches;
+}
+
+async function flushCalendarWork() {
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
+async function loadMountedCalendar({ hookHarness, loadCalendar }) {
+  const fileName = new URL("../src/features/tasks/registration-appointment-calendar.tsx", import.meta.url);
+  const source = await readFile(fileName, "utf8");
+  const output = ts.transpileModule(source, {
+    compilerOptions: {
+      esModuleInterop: true,
+      jsx: ts.JsxEmit.ReactJSX,
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: fileName.pathname,
+  }).outputText;
+  const Icon = () => createElement("span", { "aria-hidden": "true" });
+  const Badge = ({ children, ...props }) => createElement("span", props, children);
+  const Button = ({ children, ...props }) => createElement("button", props, children);
+  const model = await loadModel();
+  const localModules = new Map([
+    ["lucide-react", {
+      CalendarDays: Icon,
+      ChevronLeft: Icon,
+      ChevronRight: Icon,
+      List: Icon,
+      RefreshCw: Icon,
+    }],
+    ["@/components/ui/badge", { Badge }],
+    ["@/components/ui/button", { Button }],
+    ["./registration-appointment-calendar-model", model],
+    ["./registration-track-service", { loadRegistrationAppointmentCalendar: loadCalendar }],
+  ]);
+  const runtimeModule = { exports: {} };
+  const runtimeRequire = (specifier) => {
+    if (specifier === "react") return hookHarness.react;
+    if (specifier === "react/jsx-runtime") return require(specifier);
+    const local = localModules.get(specifier);
+    if (local) return local;
+    throw new Error(`unhandled calendar runtime import: ${specifier}`);
+  };
+  const factory = vm.runInThisContext(`(function(require, module, exports) {${output}\n})`, {
+    filename: fileName.pathname,
+  });
+  factory(runtimeRequire, runtimeModule, runtimeModule.exports);
+  return runtimeModule.exports.RegistrationAppointmentCalendar;
 }
 
 function calendarRow(overrides = {}) {
@@ -170,6 +318,110 @@ test("일정 유형 필터와 건수는 공유 예약을 과목별로 나누지 
   );
   assert.deepEqual(filterRegistrationAppointmentCalendarItems(items, "all").map((item) => item.id), originalIds);
   assert.deepEqual(items.map((item) => item.id), originalIds);
+});
+
+test("mounted runtime downgrade hides stale observation cards and counts before its reload settles", async () => {
+  const { getSeoulRegistrationDateKey } = await loadModel();
+  const dateKey = getSeoulRegistrationDateKey();
+  const levelTest = {
+    id: "registration-appointment:runtime-level",
+    appointmentId: "runtime-level",
+    taskId: "runtime-task-level",
+    studentName: "레벨학생",
+    kind: "level_test",
+    scheduledAt: `${dateKey}T10:00:00+09:00`,
+    place: "본관",
+    status: "scheduled",
+    notificationRevision: 1,
+    trackIds: ["runtime-track-level"],
+    subjects: ["영어"],
+    observationId: null,
+    observationTrackId: null,
+    observationClassId: null,
+    observationClassName: null,
+    observationEndsAt: null,
+    observationTeacherName: null,
+    observationClassroomName: null,
+    href: "/admin/registration?taskId=runtime-task-level&appointmentId=runtime-level&view=calendar",
+  };
+  const observation = {
+    id: "registration-observation:runtime-observation",
+    appointmentId: "runtime-observation-appointment",
+    taskId: "runtime-task-observation",
+    studentName: "청강학생",
+    kind: "observation",
+    scheduledAt: `${dateKey}T13:00:00+09:00`,
+    place: "301호",
+    status: "scheduled",
+    notificationRevision: 1,
+    trackIds: ["runtime-track-observation"],
+    subjects: ["수학"],
+    observationId: "runtime-observation",
+    observationTrackId: "runtime-track-observation",
+    observationClassId: "runtime-class-observation",
+    observationClassName: "수학 심화반",
+    observationEndsAt: `${dateKey}T14:30:00+09:00`,
+    observationTeacherName: "김선생",
+    observationClassroomName: "301호",
+    href: "/admin/registration?taskId=runtime-task-observation&trackId=runtime-track-observation&appointmentId=runtime-observation-appointment&observationId=runtime-observation&view=calendar",
+  };
+  const runtimeOneLoad = controlledCalendarPromise();
+  const runtimeZeroLoad = controlledCalendarPromise();
+  const loadCalls = [];
+  const hookHarness = createCalendarHookHarness();
+  const Calendar = await loadMountedCalendar({
+    hookHarness,
+    loadCalendar: (input) => {
+      loadCalls.push(input.observationRuntimeVersion);
+      return input.observationRuntimeVersion === 1 ? runtimeOneLoad.promise : runtimeZeroLoad.promise;
+    },
+  });
+  const opened = [];
+  const counts = [];
+  const onOpenAppointment = (item) => opened.push(item.kind);
+  const onKindCountsChange = (nextCounts) => counts.push(nextCounts);
+
+  try {
+    const runtimeOneProps = {
+      onOpenAppointment,
+      onKindCountsChange,
+      observationRuntimeVersion: 1,
+      kindFilter: "all",
+    };
+    hookHarness.render(Calendar, runtimeOneProps);
+    hookHarness.flushEffects();
+    runtimeOneLoad.resolve([levelTest, observation]);
+    await flushCalendarWork();
+    let view = hookHarness.render(Calendar, runtimeOneProps);
+    hookHarness.flushEffects();
+    let cards = findCalendarElements(view, (node) => node.props["data-registration-calendar-item"] === "");
+    assert.equal(cards.filter((node) => node.props["data-registration-calendar-kind"] === "observation").length, 2);
+
+    const runtimeZeroProps = { ...runtimeOneProps, observationRuntimeVersion: 0 };
+    view = hookHarness.render(Calendar, runtimeZeroProps);
+    cards = findCalendarElements(view, (node) => node.props["data-registration-calendar-item"] === "");
+    assert.equal(
+      cards.some((node) => node.props["data-registration-calendar-kind"] === "observation"),
+      false,
+      "runtime0 render must not expose a stale observation click target",
+    );
+    assert.equal(cards.filter((node) => node.props["data-registration-calendar-kind"] === "level_test").length, 2);
+
+    hookHarness.flushEffects();
+    assert.deepEqual(loadCalls, [1, 0]);
+    assert.deepEqual(counts.at(-1), {
+      all: 1,
+      level_test: 1,
+      visit_consultation: 0,
+      observation: 0,
+    });
+    cards.find((node) => node.props["data-registration-calendar-kind"] === "level_test").props.onClick();
+    assert.deepEqual(opened, ["level_test"]);
+    runtimeZeroLoad.resolve([levelTest]);
+    await flushCalendarWork();
+  } finally {
+    hookHarness.cleanup();
+  }
 });
 
 test("과목과 트랙을 영어, 수학, 과학 레지스트리 순서로 함께 정렬한다", async () => {

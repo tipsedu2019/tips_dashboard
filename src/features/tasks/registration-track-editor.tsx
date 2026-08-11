@@ -128,6 +128,7 @@ import {
   type OpsRegistrationConsultation,
   type RegistrationAppointmentMutationResponse,
 } from "./registration-track-service"
+import { createRegistrationObservationAsyncOwnership } from "./registration-workspace-route"
 import {
   dispatchRegistrationManagementNotificationSources,
   isRegistrationManagementNotificationWorkflowStatus,
@@ -353,8 +354,14 @@ export function RegistrationApplication({
   const [observationFeedbackDetail, setObservationFeedbackDetail] = useState<RegistrationObservationFeedbackDetail | null>(null)
   const [observationFeedbackLoading, setObservationFeedbackLoading] = useState(false)
   const [observationFeedbackError, setObservationFeedbackError] = useState("")
-  const feedbackLoadGenerationRef = useRef(0)
+  const observationManagerLoadOwnershipRef = useRef(createRegistrationObservationAsyncOwnership())
+  const observationFeedbackLoadOwnershipRef = useRef(createRegistrationObservationAsyncOwnership())
   const activeObservationFeedbackKeyRef = useRef("")
+  const activeObservationManagerKeyRef = useRef("")
+  const activeObservationViewerIdRef = useRef(viewerId || "")
+  const activeObservationRuntimeVersionRef = useRef(observationRuntime.runtimeVersion)
+  activeObservationViewerIdRef.current = viewerId || ""
+  activeObservationRuntimeVersionRef.current = observationRuntime.runtimeVersion
   const [consultationModeDrafts, setConsultationModeDrafts] = useState<Record<string, RegistrationConsultationMode>>({})
   const [consultationDirectorDirtyByTrackId, setConsultationDirectorDirtyByTrackId] = useState<Record<string, boolean>>({})
   const [consultationSharedSaving, setConsultationSharedSaving] = useState(false)
@@ -413,6 +420,19 @@ export function RegistrationApplication({
     && deepLinkedAttempt.trackId === activeTrack?.id
     ? deepLinkedAttempt
     : null
+  const canManageActiveObservation = activeTrack
+    ? canManageRegistrationObservationTrack({
+        viewerId,
+        viewerRole,
+        directorProfileId: activeTrack.directorProfileId,
+      })
+    : false
+  const activeDeepLinkedAttemptTerminal = Boolean(
+    activeDeepLinkedAttempt
+    && ["completed", "no_show", "canceled"].includes(activeDeepLinkedAttempt.status),
+  )
+  const deepLinkedObservationHistoryEligible = activeDeepLinkedAttemptTerminal
+    && canManageActiveObservation
   const activeObservationTrackIdRef = useRef(activeTrack?.id || null)
   const activeObservationTaskIdRef = useRef<string | null>(detail.task.id)
   activeObservationTrackIdRef.current = activeTrack?.id || null
@@ -427,6 +447,7 @@ export function RegistrationApplication({
   ))
   const observationTrackEligible = Boolean(activeTrack && (
     observationWorkflowActionable
+    || deepLinkedObservationHistoryEligible
     || canKeepRegistrationObservationFeedbackHistoryMounted({
       canManageCase,
       observationAttemptCount: activeTrack.observationAttemptCount,
@@ -434,8 +455,12 @@ export function RegistrationApplication({
   ))
   const observationWorkspaceAvailable = Boolean(activeTrack && canLoadRegistrationObservationWorkspace({
     runtimeAvailable: observationRuntime.available && observationTrackEligible,
-    observationSummaryVisible: activeTrack.observationSummaryVisible,
+    observationSummaryVisible: activeTrack.observationSummaryVisible || deepLinkedObservationHistoryEligible,
   }))
+  const activeObservationManagerKey = activeTrack && observationWorkspaceAvailable
+    ? `${detail.task.id}:${activeTrack.id}:manager`
+    : ""
+  activeObservationManagerKeyRef.current = activeObservationManagerKey
   const reviewTrack = genericTracks.find((track) => track.migrationReviewRequired) || null
   const activeMigrationConflictState = migrationConflictState?.taskId === detail.task.id
     ? migrationConflictState
@@ -444,25 +469,63 @@ export function RegistrationApplication({
   useEffect(() => {
     setObservationDetail(null)
     setObservationDetailError("")
-    if (!activeObservationTrackId || !observationWorkspaceAvailable) {
+    if (
+      !activeObservationTrackId
+      || !activeObservationManagerKey
+      || !observationWorkspaceAvailable
+      || !viewerId
+      || observationRuntime.runtimeVersion !== 1
+    ) {
+      observationManagerLoadOwnershipRef.current.invalidate()
       setObservationDetailLoading(false)
       return
     }
-    let active = true
+    const managerRequestContext = {
+      targetKey: activeObservationManagerKey,
+      viewerId,
+      runtimeVersion: observationRuntime.runtimeVersion,
+    } as const
+    const managerOwnership = observationManagerLoadOwnershipRef.current
+    const managerRequestToken = managerOwnership.begin(managerRequestContext)
     setObservationDetailLoading(true)
     void loadRegistrationObservationManagerDetail(registrationObservationClient, {
       trackId: activeObservationTrackId,
     }).then((nextDetail) => {
-      if (active) setObservationDetail(nextDetail)
+      const currentManagerRequestContext = {
+        targetKey: activeObservationManagerKeyRef.current,
+        viewerId: activeObservationViewerIdRef.current,
+        runtimeVersion: activeObservationRuntimeVersionRef.current,
+      } as const
+      if (!observationManagerLoadOwnershipRef.current.owns(
+        managerRequestToken,
+        currentManagerRequestContext,
+      )) return
+      setObservationDetail(nextDetail)
+      setObservationDetailLoading(false)
     }).catch((error) => {
-      if (active) setObservationDetailError(getRegistrationObservationUiErrorMessage(error, "청강 정보를 불러오지 못했습니다."))
-    }).finally(() => {
-      if (active) setObservationDetailLoading(false)
+      const currentManagerRequestContext = {
+        targetKey: activeObservationManagerKeyRef.current,
+        viewerId: activeObservationViewerIdRef.current,
+        runtimeVersion: activeObservationRuntimeVersionRef.current,
+      } as const
+      if (!observationManagerLoadOwnershipRef.current.owns(
+        managerRequestToken,
+        currentManagerRequestContext,
+      )) return
+      setObservationDetailError(getRegistrationObservationUiErrorMessage(error, "청강 정보를 불러오지 못했습니다."))
+      setObservationDetailLoading(false)
+      observationManagerLoadOwnershipRef.current.invalidate(managerRequestToken)
     })
     return () => {
-      active = false
+      managerOwnership.invalidate(managerRequestToken)
     }
-  }, [activeObservationTrackId, observationWorkspaceAvailable])
+  }, [
+    activeObservationManagerKey,
+    activeObservationTrackId,
+    observationRuntime.runtimeVersion,
+    observationWorkspaceAvailable,
+    viewerId,
+  ])
 
   useEffect(() => {
     const taskId = detail.task.id
@@ -475,7 +538,13 @@ export function RegistrationApplication({
   }, [detail.task.id])
 
   const handleObservationSaved = useCallback(async () => {
-    if (!activeTrack || !observationWorkspaceAvailable) return
+    if (
+      !activeTrack
+      || !activeObservationManagerKey
+      || !observationWorkspaceAvailable
+      || !viewerId
+      || observationRuntime.runtimeVersion !== 1
+    ) return
     const trackId = activeTrack.id
     const taskId = detail.task.id
     const refreshPlan = getRegistrationObservationRefreshPlan({
@@ -488,18 +557,61 @@ export function RegistrationApplication({
       await onReload()
       return
     }
-    const [nextDetail] = await Promise.all([
-      loadRegistrationObservationManagerDetail(registrationObservationClient, { trackId }),
-      onReload(refreshPlan.preferredTrackId),
-    ])
-    const completionPlan = getRegistrationObservationRefreshPlan({
-      savedTaskId: taskId,
-      savedTrackId: trackId,
-      activeTaskId: activeObservationTaskIdRef.current,
-      activeTrackId: activeObservationTrackIdRef.current,
-    })
-    if (completionPlan.loadManagerDetail) setObservationDetail(nextDetail)
-  }, [activeTrack, detail.task.id, observationWorkspaceAvailable, onReload])
+    const managerRequestContext = {
+      targetKey: activeObservationManagerKey,
+      viewerId,
+      runtimeVersion: observationRuntime.runtimeVersion,
+    } as const
+    const managerRequestToken = observationManagerLoadOwnershipRef.current.begin(managerRequestContext)
+    setObservationDetailLoading(true)
+    setObservationDetailError("")
+    try {
+      const [nextDetail] = await Promise.all([
+        loadRegistrationObservationManagerDetail(registrationObservationClient, { trackId }),
+        onReload(refreshPlan.preferredTrackId),
+      ])
+      const currentManagerRequestContext = {
+        targetKey: activeObservationManagerKeyRef.current,
+        viewerId: activeObservationViewerIdRef.current,
+        runtimeVersion: activeObservationRuntimeVersionRef.current,
+      } as const
+      if (!observationManagerLoadOwnershipRef.current.owns(
+        managerRequestToken,
+        currentManagerRequestContext,
+      )) return
+      const completionPlan = getRegistrationObservationRefreshPlan({
+        savedTaskId: taskId,
+        savedTrackId: trackId,
+        activeTaskId: activeObservationTaskIdRef.current,
+        activeTrackId: activeObservationTrackIdRef.current,
+      })
+      if (completionPlan.loadManagerDetail) setObservationDetail(nextDetail)
+      setObservationDetailLoading(false)
+    } catch (error) {
+      const currentManagerRequestContext = {
+        targetKey: activeObservationManagerKeyRef.current,
+        viewerId: activeObservationViewerIdRef.current,
+        runtimeVersion: activeObservationRuntimeVersionRef.current,
+      } as const
+      if (observationManagerLoadOwnershipRef.current.owns(
+        managerRequestToken,
+        currentManagerRequestContext,
+      )) {
+        setObservationDetailError(getRegistrationObservationUiErrorMessage(error, "청강 정보를 불러오지 못했습니다."))
+        setObservationDetailLoading(false)
+        observationManagerLoadOwnershipRef.current.invalidate(managerRequestToken)
+      }
+      throw error
+    }
+  }, [
+    activeObservationManagerKey,
+    activeTrack,
+    detail.task.id,
+    observationRuntime.runtimeVersion,
+    observationWorkspaceAvailable,
+    onReload,
+    viewerId,
+  ])
 
   useEffect(() => {
     onDirtyChangeRef.current = onDirtyChange
@@ -682,13 +794,6 @@ export function RegistrationApplication({
       appointmentActionSections: activeAppointmentActionPlans.map((plan) => plan.kind === "level_test" ? "level_test" : "consultation"),
     }),
   })
-  const canManageActiveObservation = activeTrack
-    ? canManageRegistrationObservationTrack({
-        viewerId,
-        viewerRole,
-        directorProfileId: activeTrack.directorProfileId,
-      })
-    : false
   const activeFeedbackMountPlan = getRegistrationObservationFeedbackMountPlan({
     managerDetail: activeObservationDetail,
     canManageObservation: canManageActiveObservation,
@@ -716,59 +821,109 @@ export function RegistrationApplication({
 
   useEffect(() => {
     const observationId = activeFeedbackObservationId
-    const ownershipKey = activeTrack
+    const ownershipKey = activeObservationTrackId
       && observationId
-      ? `${detail.task.id}:${activeTrack.id}:${observationId}`
+      ? `${detail.task.id}:${activeObservationTrackId}:${observationId}`
       : ""
-    const generation = ++feedbackLoadGenerationRef.current
     setObservationFeedbackDetail(null)
     setObservationFeedbackError("")
-    if (!ownershipKey || !observationId) {
+    if (
+      !ownershipKey
+      || !observationId
+      || !canManageActiveObservation
+      || !observationWorkspaceAvailable
+      || !viewerId
+      || observationRuntime.runtimeVersion !== 1
+    ) {
+      observationFeedbackLoadOwnershipRef.current.invalidate()
       setObservationFeedbackLoading(false)
       return
     }
+    const feedbackRequestContext = {
+      targetKey: ownershipKey,
+      viewerId,
+      runtimeVersion: observationRuntime.runtimeVersion,
+    } as const
+    const feedbackOwnership = observationFeedbackLoadOwnershipRef.current
+    const feedbackRequestToken = feedbackOwnership.begin(feedbackRequestContext)
     setObservationFeedbackLoading(true)
     void loadRegistrationObservationFeedback(
       registrationObservationClient,
       observationId,
     ).then((nextDetail) => {
-      if (
-        generation === feedbackLoadGenerationRef.current
-        && ownershipKey === activeObservationFeedbackKeyRef.current
-      ) setObservationFeedbackDetail(nextDetail)
+      const currentFeedbackRequestContext = {
+        targetKey: activeObservationFeedbackKeyRef.current,
+        viewerId: activeObservationViewerIdRef.current,
+        runtimeVersion: activeObservationRuntimeVersionRef.current,
+      } as const
+      if (!observationFeedbackLoadOwnershipRef.current.owns(
+        feedbackRequestToken,
+        currentFeedbackRequestContext,
+      )) return
+      setObservationFeedbackDetail(nextDetail)
+      setObservationFeedbackLoading(false)
     }).catch((error) => {
-      if (
-        generation !== feedbackLoadGenerationRef.current
-        || ownershipKey !== activeObservationFeedbackKeyRef.current
-      ) return
+      const currentFeedbackRequestContext = {
+        targetKey: activeObservationFeedbackKeyRef.current,
+        viewerId: activeObservationViewerIdRef.current,
+        runtimeVersion: activeObservationRuntimeVersionRef.current,
+      } as const
+      if (!observationFeedbackLoadOwnershipRef.current.owns(
+        feedbackRequestToken,
+        currentFeedbackRequestContext,
+      )) return
       setObservationFeedbackError(getRegistrationObservationFeedbackErrorState(error).message)
-    }).finally(() => {
-      if (
-        generation === feedbackLoadGenerationRef.current
-        && ownershipKey === activeObservationFeedbackKeyRef.current
-      ) setObservationFeedbackLoading(false)
+      setObservationFeedbackLoading(false)
+      observationFeedbackLoadOwnershipRef.current.invalidate(feedbackRequestToken)
     })
     return () => {
-      if (generation === feedbackLoadGenerationRef.current) {
-        feedbackLoadGenerationRef.current += 1
-      }
+      feedbackOwnership.invalidate(feedbackRequestToken)
     }
   }, [
     activeFeedbackObservationId,
-    activeTrack,
+    activeObservationTrackId,
+    canManageActiveObservation,
     detail.task.id,
+    observationRuntime.runtimeVersion,
+    observationWorkspaceAvailable,
+    viewerId,
   ])
 
   const refreshActiveObservationFeedback = useCallback(async (
     observationId: string = activeFeedbackObservationId || "",
   ) => {
-    if (!canManageActiveObservation || !activeTrack || !observationId) return null
+    if (
+      !canManageActiveObservation
+      || !activeTrack
+      || !observationId
+      || !viewerId
+      || observationRuntime.runtimeVersion !== 1
+    ) return null
     const ownershipKey = `${detail.task.id}:${activeTrack.id}:${observationId}`
     const currentOwnershipKey = activeObservationFeedbackKeyRef.current
     const refreshPlan = getRegistrationObservationFeedbackRefreshPlan({
       requestedOwnershipKey: ownershipKey,
       currentOwnershipKey,
     })
+    if (!refreshPlan.mutatePanelState) {
+      return loadRegistrationObservationFeedbackForOwnedPanel({
+        requestedOwnershipKey: ownershipKey,
+        currentOwnershipKey,
+        load: () => loadRegistrationObservationFeedback(
+          registrationObservationClient,
+          observationId,
+          { force: true },
+        ),
+      })
+    }
+    const feedbackRequestContext = {
+      targetKey: ownershipKey,
+      viewerId,
+      runtimeVersion: observationRuntime.runtimeVersion,
+    } as const
+    const feedbackRequestToken = observationFeedbackLoadOwnershipRef.current.begin(feedbackRequestContext)
+    setObservationFeedbackLoading(true)
+    setObservationFeedbackError("")
     const refreshedDetail = loadRegistrationObservationFeedbackForOwnedPanel({
       requestedOwnershipKey: ownershipKey,
       currentOwnershipKey,
@@ -778,37 +933,52 @@ export function RegistrationApplication({
         { force: true },
       ),
     })
-    if (!refreshPlan.mutatePanelState) {
-      return refreshedDetail
-    }
-    const generation = ++feedbackLoadGenerationRef.current
-    setObservationFeedbackLoading(true)
-    setObservationFeedbackError("")
     try {
       const nextDetail = await refreshedDetail
       if (!nextDetail) return null
-      if (
-        generation === feedbackLoadGenerationRef.current
-        && ownershipKey === activeObservationFeedbackKeyRef.current
-      ) setObservationFeedbackDetail(nextDetail)
+      const currentFeedbackRequestContext = {
+        targetKey: activeObservationFeedbackKeyRef.current,
+        viewerId: activeObservationViewerIdRef.current,
+        runtimeVersion: activeObservationRuntimeVersionRef.current,
+      } as const
+      if (observationFeedbackLoadOwnershipRef.current.owns(
+        feedbackRequestToken,
+        currentFeedbackRequestContext,
+      )) setObservationFeedbackDetail(nextDetail)
       return nextDetail
     } catch (error) {
-      if (
-        generation === feedbackLoadGenerationRef.current
-        && ownershipKey === activeObservationFeedbackKeyRef.current
-      ) setObservationFeedbackError(getRegistrationObservationFeedbackErrorState(error).message)
+      const currentFeedbackRequestContext = {
+        targetKey: activeObservationFeedbackKeyRef.current,
+        viewerId: activeObservationViewerIdRef.current,
+        runtimeVersion: activeObservationRuntimeVersionRef.current,
+      } as const
+      if (observationFeedbackLoadOwnershipRef.current.owns(
+        feedbackRequestToken,
+        currentFeedbackRequestContext,
+      )) {
+        setObservationFeedbackError(getRegistrationObservationFeedbackErrorState(error).message)
+        setObservationFeedbackLoading(false)
+        observationFeedbackLoadOwnershipRef.current.invalidate(feedbackRequestToken)
+      }
       throw error
     } finally {
-      if (
-        generation === feedbackLoadGenerationRef.current
-        && ownershipKey === activeObservationFeedbackKeyRef.current
-      ) setObservationFeedbackLoading(false)
+      const currentFeedbackRequestContext = {
+        targetKey: activeObservationFeedbackKeyRef.current,
+        viewerId: activeObservationViewerIdRef.current,
+        runtimeVersion: activeObservationRuntimeVersionRef.current,
+      } as const
+      if (observationFeedbackLoadOwnershipRef.current.owns(
+        feedbackRequestToken,
+        currentFeedbackRequestContext,
+      )) setObservationFeedbackLoading(false)
     }
   }, [
     activeFeedbackObservationId,
     activeTrack,
     canManageActiveObservation,
     detail.task.id,
+    observationRuntime.runtimeVersion,
+    viewerId,
   ])
 
   const handleObservationFeedbackSaved = useCallback(async (
@@ -939,7 +1109,10 @@ export function RegistrationApplication({
       observationFocusAvailable: Boolean(
         observationWorkspaceAvailable
         && activeTrack
-        && isRegistrationObservationWorkflowStatus(activeTrack.workflowStatus)
+        && (
+          isRegistrationObservationWorkflowStatus(activeTrack.workflowStatus)
+          || deepLinkedObservationHistoryEligible
+        )
       ),
       genericFocusPanelId: focusedContext
         ? getRegistrationTrackFocusPanelId(focusedContext, reviewTrack?.id || null)
@@ -952,7 +1125,7 @@ export function RegistrationApplication({
         ?.scrollIntoView({ block: "nearest", behavior: "smooth" })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [activeTrack, activeTrackId, detail.task.id, focusTrackId, focusedContext, observationWorkspaceAvailable, reviewTrack?.id])
+  }, [activeTrack, activeTrackId, deepLinkedObservationHistoryEligible, detail.task.id, focusTrackId, focusedContext, observationWorkspaceAvailable, reviewTrack?.id])
 
   async function saveInquiry(draft: RegistrationInquiryDraft, requestKey: string) {
     try {
@@ -1199,8 +1372,8 @@ export function RegistrationApplication({
     === activeFeedbackObservationId ? (
       <RegistrationObservationFeedbackPanel
         detail={observationFeedbackDetail}
-        canRecordAttendance={canManageCase && !activeFeedbackCorrectionOnly}
-        canEditFeedback={activeFeedbackCorrectionOnly
+        canRecordAttendance={!activeDeepLinkedAttemptTerminal && canManageCase && !activeFeedbackCorrectionOnly}
+        canEditFeedback={!activeDeepLinkedAttemptTerminal && (activeFeedbackCorrectionOnly
           ? canManageCase
           : canEditRegistrationObservationFeedback({
               canManageCase,
@@ -1209,8 +1382,8 @@ export function RegistrationApplication({
                 && viewerId === activeFeedbackTeacherProfileId
               ),
               decisionKind: observationFeedbackDetail.decisionKind,
-            })}
-        canDecide={!activeFeedbackCorrectionOnly && (
+            }))}
+        canDecide={!activeDeepLinkedAttemptTerminal && !activeFeedbackCorrectionOnly && (
           canManageCase || Boolean(
             viewerId
             && viewerId === activeTrack?.directorProfileId
@@ -1424,10 +1597,7 @@ export function RegistrationApplication({
           )}
         />
       )}
-      observation={canLoadRegistrationObservationWorkspace({
-        runtimeAvailable: observationRuntime.available && observationTrackEligible,
-        observationSummaryVisible: activeTrack?.observationSummaryVisible === true,
-      }) ? (
+      observation={observationWorkspaceAvailable ? (
         activeTrack && activeObservationDetail ? (
           activeFeedbackHistoryOnly ? activeObservationFeedbackPanel : (
             <RegistrationObservationEditor

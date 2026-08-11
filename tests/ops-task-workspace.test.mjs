@@ -1246,9 +1246,10 @@ test("observation calendar deep links use one exact attempt read without appoint
     "loadRegistrationObservationManagerAttempt",
     "loadRegistrationObservationDeepLinkedAttempt",
     "const openRegistrationObservation = useCallback",
-    "searchParams: currentSearchParams",
+    "useRegistrationObservationRouteAdjudication",
+    "onOpen: openRegistrationObservation",
+    "onReject: rejectRegistrationObservationRoute",
     "observationRuntimeVersion: registrationObservationRuntime.runtimeVersion",
-    'directRegistrationTarget.kind === "observation"',
     "setRegistrationDeepLinkedAttempt",
     "deepLinkedAttempt={registrationDeepLinkedAttempt}",
     "observationRuntimeVersion={registrationObservationRuntime.runtimeVersion}",
@@ -1266,9 +1267,95 @@ test("observation calendar deep links use one exact attempt read without appoint
     source.lastIndexOf("useEffect(() => {", source.indexOf("const currentSearchParams = new URLSearchParams(window.location.search)")),
     source.indexOf("function handleDetailOpenChange", source.indexOf("const currentSearchParams = new URLSearchParams(window.location.search)")),
   );
-  assert.match(deepLinkEffect, /if \(currentSearchParams\.has\("observationId"\)\) \{/);
+  assert.match(deepLinkEffect, /if \(currentSearchParams\.has\("observationId"\)\) return/);
   assert.doesNotMatch(deepLinkEffect, /taskId:\s*deepLinkedTaskId[\s\S]*?trackId:\s*deepLinkedTrackId[\s\S]*?appointmentId:\s*deepLinkedAppointmentId/);
   assert.match(source, /setRegistrationDeepLinkedAttempt\(null\)/);
+});
+
+test("observation detail requests use monotonic ownership across every lifecycle boundary", async () => {
+  // Production break caught: recyclable selection strings allow stale A-B-A,
+  // close/reopen, runtime, viewer, or mutation refresh completions to commit.
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  assertIncludesAll(source, [
+    "createRegistrationObservationAsyncOwnership",
+    "registrationObservationLoadOwnershipRef",
+    "registrationObservationRuntimeVersionRef",
+    "const requestToken = registrationObservationLoadOwnershipRef.current.begin(requestContext)",
+    "registrationObservationLoadOwnershipRef.current.owns(requestToken, currentRequestContext)",
+    "registrationObservationLoadOwnershipRef.current.invalidate(requestToken)",
+    "registrationObservationLoadOwnershipRef.current.invalidate()",
+  ]);
+  const openObservation = source.slice(
+    source.indexOf("const openRegistrationObservation = useCallback"),
+    source.indexOf("const rejectRegistrationObservationRoute", source.indexOf("const openRegistrationObservation = useCallback")),
+  );
+  assert.match(openObservation, /targetKey:\s*selectionKey/);
+  assert.match(openObservation, /viewerId:\s*currentUserId/);
+  assert.match(openObservation, /runtimeVersion:\s*registrationObservationRuntime\.runtimeVersion/);
+  assert.match(
+    openObservation,
+    /if \(\s*!registrationObservationLoadOwnershipRef\.current\.owns\(requestToken, currentRequestContext\)[\s\S]*?\) return null/,
+  );
+  assert.match(openObservation, /registrationTrackSelectionRef\.current = ""/);
+  assert.match(openObservation, /syncTaskDeepLink\(null\)/);
+
+  const clearSelection = source.slice(
+    source.indexOf("const clearRegistrationWorkspaceSelection"),
+    source.indexOf("const replaceRegistrationWorkspaceSearch"),
+  );
+  const rejectRoute = source.slice(
+    source.indexOf("const rejectRegistrationObservationRoute"),
+    source.indexOf("useRegistrationObservationRouteAdjudication", source.indexOf("const rejectRegistrationObservationRoute")),
+  );
+  const focusTrack = source.slice(
+    source.indexOf("const handleSelectRegistrationTrack"),
+    source.indexOf("const handleRegistrationAppointmentOpenChange"),
+  );
+  const focusAppointment = source.slice(
+    source.indexOf("const handleRegistrationAppointmentOpenChange"),
+    source.indexOf("const reloadRegistrationCaseDetail"),
+  );
+  const reloadDetail = source.slice(
+    source.indexOf("const reloadRegistrationCaseDetail"),
+    source.indexOf("async function retryCommittedRegistrationCaseRefresh"),
+  );
+  const closeHost = source.slice(
+    source.indexOf("const closeRegistrationApplicationHost"),
+    source.indexOf("const requestRegistrationApplicationClose"),
+  );
+  const openTrack = source.slice(
+    source.indexOf("const openRegistrationTrack"),
+    source.indexOf("const openRegistrationCase"),
+  );
+  const openCase = source.slice(
+    source.indexOf("const openRegistrationCase"),
+    source.indexOf("const openRegistrationEdit"),
+  );
+  const openAppointment = source.slice(
+    source.indexOf("const openRegistrationAppointment"),
+    source.indexOf("const openRegistrationObservation"),
+  );
+  for (const lifecycleBranch of [
+    clearSelection,
+    rejectRoute,
+    focusTrack,
+    focusAppointment,
+    closeHost,
+    openTrack,
+    openCase,
+    openAppointment,
+  ]) {
+    assert.match(lifecycleBranch, /registrationObservationLoadOwnershipRef\.current\.invalidate\(\)/);
+  }
+  assert.match(
+    reloadDetail,
+    /const observationRequestToken = registrationObservationLoadOwnershipRef\.current\.begin\(observationRequestContext\)/,
+  );
+  assert.match(
+    reloadDetail,
+    /registrationObservationLoadOwnershipRef\.current\.owns\(\s*observationRequestToken,\s*currentObservationRequestContext,?\s*\)/,
+  );
+  assert.match(reloadDetail, /registrationObservationLoadOwnershipRef\.current\.invalidate\(observationRequestToken\)/);
 });
 
 test("malformed observation coordinates discard an already open DTO without legacy fallback", async () => {
@@ -1276,24 +1363,22 @@ test("malformed observation coordinates discard an already open DTO without lega
   // rejected by the route parser but leaves the previously authorized detail
   // visible behind the malformed URL.
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const deepLinkEffect = source.slice(
-    source.lastIndexOf("useEffect(() => {", source.indexOf("const currentSearchParams = new URLSearchParams(window.location.search)")),
-    source.indexOf("function handleDetailOpenChange", source.indexOf("const currentSearchParams = new URLSearchParams(window.location.search)")),
+  const rejectedRoute = source.slice(
+    source.indexOf("const rejectRegistrationObservationRoute = useCallback"),
+    source.indexOf("useRegistrationObservationRouteAdjudication", source.indexOf("const rejectRegistrationObservationRoute = useCallback")),
   );
-  const malformedBranch = deepLinkEffect.match(
-    /if \(currentSearchParams\.has\("observationId"\)\) \{([\s\S]*?)\n\s*\}/,
-  )?.[1] || "";
-  assertIncludesAll(malformedBranch, [
-    "setRegistrationDeepLinkedAttempt(null)",
-    "setRegistrationCaseDetail(null)",
-    "setSelectedRegistrationTrackId(null)",
-    "setSelectedRegistrationAppointmentId(null)",
-    'setRegistrationApplicationHost({ kind: "closed" })',
+  assertIncludesAll(rejectedRoute, [
+    "setRegistrationDeepLinkedAttempt((current) => current === null ? current : null)",
+    "setRegistrationCaseDetail((current) => current === null ? current : null)",
+    "setSelectedRegistrationTrackId((current) => current === null ? current : null)",
+    "setSelectedRegistrationAppointmentId((current) => current === null ? current : null)",
+    'current.kind === "closed"',
     'registrationTrackSelectionRef.current = ""',
     "registrationObservationDeepLinkTargetRef.current = null",
-    "return",
+    "buildRegistrationWorkspaceSearchParams(currentSearchParams, target)",
+    "currentQuery === nextQuery",
   ]);
-  assert.doesNotMatch(malformedBranch, /openRegistrationAppointment\(|setMessage\(|setNotice\(/);
+  assert.doesNotMatch(rejectedRoute, /openRegistrationAppointment\(|setMessage\(|setNotice\(/);
 
   const runtimeZeroCleanup = source.slice(
     source.indexOf("const hasObservationDetail = currentSearchParams.has"),

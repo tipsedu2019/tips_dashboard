@@ -6,6 +6,7 @@ import vm from "node:vm";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { reconcileRegistrationEnrollmentDraft } from "../src/features/tasks/registration-application-model.ts";
+import { createRegistrationObservationAsyncOwnership } from "../src/features/tasks/registration-workspace-route.ts";
 import * as registrationTrackModel from "../src/features/tasks/registration-track-model.js";
 import { getSelectableRegistrationScheduleSessions } from "../src/features/tasks/registration-workflow.js";
 
@@ -271,6 +272,195 @@ async function loadMountedRegistrationEnrollmentEditor({
   })
   factory(runtimeRequire, runtimeModule, runtimeModule.exports)
   return runtimeModule.exports.RegistrationEnrollmentEditor
+}
+
+async function loadMountedRegistrationApplication({
+  hookHarness,
+  loadManagerDetail,
+  loadFeedback,
+}) {
+  const fileName = new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url)
+  const source = await readFile(fileName, "utf8")
+  const output = ts.transpileModule(source, {
+    compilerOptions: {
+      esModuleInterop: true,
+      jsx: ts.JsxEmit.ReactJSX,
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: fileName.pathname,
+  }).outputText
+  const Passthrough = registrationEditorPassthrough()
+  const Button = registrationEditorPassthrough("button")
+  const Badge = registrationEditorPassthrough("span")
+  const RegistrationApplicationShell = function MountedRegistrationApplicationShell(props) {
+    return createElement("section", { "data-mounted-registration-shell": "" }, props.children)
+  }
+  const RegistrationObservationEditor = function MountedRegistrationObservationEditor(props) {
+    return createElement("div", { "data-mounted-observation-editor": props.deepLinkedAttempt?.observationId || "" })
+  }
+  const RegistrationObservationFeedbackPanel = function MountedRegistrationObservationFeedbackPanel() {
+    return createElement("div", { "data-mounted-observation-feedback": "" })
+  }
+  const sectionStates = Object.fromEntries([
+    "inquiry",
+    "level_test",
+    "consultation",
+    "waiting",
+    "observation",
+    "registration",
+    "admission",
+    "history",
+  ].map((key) => [key, { current: true, editable: false, upcoming: false, lockReason: "" }]))
+  const observationActions = {
+    cancelRegistrationObservation: async () => ({ changed: false }),
+    correctRegistrationObservationFeedback: async () => ({ changed: false }),
+    decideRegistrationObservation: async () => ({ changed: false }),
+    enterRegistrationObservation: async () => ({ changed: false }),
+    loadRegistrationObservationFeedback: loadFeedback,
+    loadRegistrationObservationManagerDetail: loadManagerDetail,
+    loadRegistrationObservationSessions: async () => [],
+    recordRegistrationObservationAttendance: async () => ({ changed: false }),
+    saveRegistrationObservationBooking: async () => ({ changed: false }),
+    submitRegistrationObservationFeedback: async () => ({ changed: false }),
+    withdrawRegistrationObservation: async () => ({ changed: false }),
+  }
+  const localModules = new Map([
+    ["@/components/ui/badge", { Badge }],
+    ["@/components/ui/button", { Button }],
+    ["@/lib/supabase", { supabase: {} }],
+    ["./registration-application-admission-section", { RegistrationApplicationAdmissionSection: Passthrough }],
+    ["./registration-alimtalk-preview-dialog", { RegistrationAlimtalkPreviewDialog: Passthrough }],
+    ["./registration-application-consultation-section", { RegistrationApplicationConsultationSection: Passthrough }],
+    ["./registration-application-inquiry-section", {
+      RegistrationApplicationInquirySection: Passthrough,
+      RegistrationInquiryEditor: Passthrough,
+    }],
+    ["./registration-application-level-test-section", { RegistrationApplicationLevelTestSection: Passthrough }],
+    ["./registration-application-model", {
+      canManageRegistrationObservationTrack: ({ viewerId, viewerRole, directorProfileId }) => (
+        viewerRole === "admin" || viewerRole === "staff" || Boolean(viewerId && viewerId === directorProfileId)
+      ),
+      getRegistrationApplicationAppointmentActionPlans: () => [],
+      getRegistrationApplicationCaseEditableSections: () => [],
+      getRegistrationEnrollmentDirtyKey: (trackId, scope) => `enrollment:${trackId}:${scope}`,
+      getRegistrationApplicationSectionStates: () => sectionStates,
+      getRegistrationApplicationTrackState: ({ track }) => ({ trackId: track.id }),
+      getRegistrationConsultationModeDraft: () => ({ mode: "phone", dirty: false, phoneDisabled: false }),
+      getRegistrationObservationRefreshPlan: ({ savedTaskId, savedTrackId, activeTaskId, activeTrackId }) => ({
+        loadManagerDetail: savedTaskId === activeTaskId && savedTrackId === activeTrackId,
+        preferredTrackId: savedTaskId === activeTaskId && savedTrackId === activeTrackId ? savedTrackId : undefined,
+      }),
+      resolveRegistrationApplicationFocusPanelId: ({ focusTrackId, activeTrackId, observationFocusAvailable, genericFocusPanelId }) => (
+        focusTrackId && focusTrackId === activeTrackId
+          ? observationFocusAvailable ? "registration-application-observation" : genericFocusPanelId
+          : null
+      ),
+      resolveRegistrationActiveTrackId: (tracks, focusTrackId) => (
+        tracks.some((track) => track.id === focusTrackId) ? focusTrackId : tracks[0]?.id || null
+      ),
+      settleRegistrationConflictComparison: () => null,
+      updateRegistrationApplicationDirtyKeys: (current) => current,
+    }],
+    ["./registration-application-placement-section", { RegistrationApplicationPlacementSection: Passthrough }],
+    ["./registration-application-history-action", { RegistrationApplicationHistoryAction: Passthrough }],
+    ["./registration-application-shell", { RegistrationApplicationShell }],
+    ["./registration-application-subject-tabs", { RegistrationApplicationSubjectTabs: Passthrough }],
+    ["./registration-observation-editor", {
+      RegistrationObservationEditor,
+      canLoadRegistrationObservationWorkspace: ({ runtimeAvailable, observationSummaryVisible }) => (
+        runtimeAvailable && observationSummaryVisible
+      ),
+      canUseRegistrationObservationDetail: ({ activeTrackId, detailTrackId }) => Boolean(
+        activeTrackId && activeTrackId === detailTrackId
+      ),
+      getRegistrationObservationUiErrorMessage: (_error, fallback) => fallback,
+    }],
+    ["./registration-observation-feedback-panel", {
+      RegistrationObservationFeedbackPanel,
+      canEditRegistrationObservationFeedback: () => true,
+      canKeepRegistrationObservationFeedbackHistoryMounted: ({ canManageCase, observationAttemptCount }) => (
+        canManageCase && observationAttemptCount > 0
+      ),
+      getRegistrationObservationFeedbackMountPlan: () => null,
+      getRegistrationObservationFeedbackRefreshPlan: ({ requestedOwnershipKey, currentOwnershipKey }) => ({
+        mutatePanelState: requestedOwnershipKey === currentOwnershipKey,
+      }),
+      loadRegistrationObservationFeedbackForOwnedPanel: ({ requestedOwnershipKey, currentOwnershipKey, load }) => (
+        requestedOwnershipKey === currentOwnershipKey ? load() : Promise.resolve(null)
+      ),
+      shouldMountRegistrationObservationFeedbackOnly: () => false,
+    }],
+    ["./registration-application-track-actions", {
+      REGISTRATION_DIRECTOR_VISIBLE_STATUSES: new Set(),
+      REGISTRATION_TRACK_STATUS_LABELS: new Proxy({}, { get: () => "등록" }),
+      RegistrationConsultationOutcomeEditor: Passthrough,
+      RegistrationEnrollmentTrackEditor: Passthrough,
+      RegistrationMigrationConflictNotice: Passthrough,
+      RegistrationMigrationReviewEditor: Passthrough,
+      RegistrationTrackDirectorSection: Passthrough,
+      RegistrationWaitingDetailsEditor: Passthrough,
+      canStartRegistrationObservation: () => false,
+      getRegistrationIdentityEditLock: () => false,
+    }],
+    ["./registration-appointment-editor", { RegistrationAppointmentEditor: Passthrough }],
+    ["./registration-save-button", { RegistrationSaveButton: Button }],
+    ["./registration-enrollment-editor", {
+      clearRegistrationEnrollmentDrafts: () => undefined,
+      RegistrationAdmissionPanel: Passthrough,
+    }],
+    ["./registration-observation-model", {
+      getRegistrationObservationFeedbackErrorState: () => ({ message: "load failed", reloadRequired: true }),
+    }],
+    ["./registration-observation-service", observationActions],
+    ["../../lib/academic-subject-registry.ts", { ACADEMIC_SUBJECT_VALUES: ["영어", "수학", "과학"] }],
+    ["./registration-track-model.js", {
+      getRegistrationActionPermissions: () => ({ canManage: false, canCompleteConsultation: false, readOnly: true }),
+      getRegistrationActiveConsultation: () => null,
+      getRegistrationAdmissionApplicationState: () => ({
+        targetTrackIds: [],
+        canSend: false,
+        syncNeeded: false,
+      }),
+      getRegistrationCurrentClassWaitClassId: () => null,
+    }],
+    ["./registration-track-service", {
+      ensureRegistrationWorkflowNotificationSourceIds: async () => [],
+      saveRegistrationCaseInquiry: async () => undefined,
+      saveRegistrationPhoneConsultation: async () => undefined,
+      setRegistrationWorkflowStatus: async () => undefined,
+      isOpsRegistrationWorkflowStatus: () => true,
+    }],
+    ["./registration-workspace-route", { createRegistrationObservationAsyncOwnership }],
+    ["./registration-consultation-notification.js", {
+      dispatchRegistrationManagementNotificationSources: async () => ({ failedSourceEventIds: [] }),
+      isRegistrationManagementNotificationWorkflowStatus: () => false,
+    }],
+    ["./registration-workflow-status.js", {
+      REGISTRATION_WORKFLOW_STATUS_LABELS: new Proxy({}, { get: () => "등록 신청" }),
+      getRegistrationWorkflowViewKey: () => "registration",
+      getRegistrationWorkflowStatusOptions: () => [],
+      isRegistrationObservationWorkflowStatus: (status) => String(status).startsWith("observation_"),
+    }],
+  ])
+  const runtimeModule = { exports: {} }
+  const runtimeRequire = (specifier) => {
+    if (specifier === "react") return { ...hookHarness.react, Children: require("react").Children }
+    if (specifier === "react/jsx-runtime") return require(specifier)
+    const local = localModules.get(specifier)
+    if (local) return local
+    throw new Error(`unhandled registration application runtime import: ${specifier}`)
+  }
+  const factory = vm.runInThisContext(`(function(require, module, exports) {${output}\n})`, {
+    filename: fileName.pathname,
+  })
+  factory(runtimeRequire, runtimeModule, runtimeModule.exports)
+  return {
+    RegistrationApplication: runtimeModule.exports.RegistrationApplication,
+    RegistrationApplicationShell,
+    RegistrationObservationEditor,
+    RegistrationObservationFeedbackPanel,
+  }
 }
 
 const MOUNTED_REGISTRATION_TRACK_ID = "76000000-0000-4000-8000-000000000001"
@@ -1541,8 +1731,8 @@ test("saved and create applications share the intake shell while saved detail ow
 test("saved application keeps exception actions in their owning sections", async () => {
   const source = await readRegistrationApplicationSource()
   const inquiry = sourceBetween(source, "inquiry={(\n", "levelTest={(\n")
-  const waiting = sourceBetween(source, "waiting={(\n", "observation={canLoadRegistrationObservationWorkspace")
-  const observation = sourceBetween(source, "observation={canLoadRegistrationObservationWorkspace", "registration={registrationSection}")
+  const waiting = sourceBetween(source, "waiting={(\n", "observation={observationWorkspaceAvailable")
+  const observation = sourceBetween(source, "observation={observationWorkspaceAvailable", "registration={registrationSection}")
   const registration = sourceBetween(source, "const registrationSection = (", "\n\n  return (")
   const admission = sourceBetween(source, "admission={(\n", "<RegistrationAlimtalkPreviewDialog")
 
@@ -1572,6 +1762,247 @@ test("registration application threads the exact deep-linked attempt into the re
     /const activeFeedbackTeacherProfileId = activeDeepLinkedAttempt\?\.teacherProfileId[\s\S]*?activeObservationDetail\?\.currentObservation\?\.teacherProfileId/,
   )
   assert.match(detail, /viewerId === activeFeedbackTeacherProfileId/)
+})
+
+test("mounted terminal deep links stay focused for their exact managers with every history action closed", async () => {
+  const taskId = "77000000-0000-4000-8000-000000000001"
+  const trackId = "77000000-0000-4000-8000-000000000002"
+  const directorId = "77000000-0000-4000-8000-000000000003"
+  const baseAttempt = {
+    observationId: "77000000-0000-4000-8000-000000000004",
+    taskId,
+    trackId,
+    appointmentId: "77000000-0000-4000-8000-000000000005",
+    appointmentStatus: "completed",
+    classId: "77000000-0000-4000-8000-000000000006",
+    subject: "영어",
+    className: "영어 심화반",
+    scheduleState: "active",
+    sessionDate: "2026-08-10",
+    startsAt: "2026-08-10T10:00:00.000Z",
+    endsAt: "2026-08-10T11:30:00.000Z",
+    teacherCatalogId: "77000000-0000-4000-8000-000000000007",
+    teacherProfileId: directorId,
+    teacherName: "김선생",
+    classroomCatalogId: "77000000-0000-4000-8000-000000000008",
+    classroomName: "301호",
+    campus: "본관",
+    textbooks: [],
+    progress: "",
+    bookingFactHash: "b".repeat(64),
+    attendance: "attended",
+    suitabilityResult: "fit",
+    decisionKind: "enrollment",
+    revision: 3,
+    feedbackRevision: 2,
+    appointmentNotificationRevision: 4,
+    createdAt: "2026-08-10T00:00:00.000Z",
+    updatedAt: "2026-08-10T12:00:00.000Z",
+    sessionAuthority: "normalized",
+    classLessonSessionId: "77000000-0000-4000-8000-000000000009",
+    legacySessionKey: null,
+    sessionKey: "normalized:history",
+    sessionSourceRevision: 1,
+    legacySessionSourceHash: null,
+    sourceRevision: {
+      authority: "normalized",
+      sessionId: "77000000-0000-4000-8000-000000000009",
+      revision: 1,
+    },
+  }
+  const roleCases = [
+    { viewerRole: "admin", viewerId: "77000000-0000-4000-8000-000000000010" },
+    { viewerRole: "staff", viewerId: "77000000-0000-4000-8000-000000000011" },
+    { viewerRole: "teacher", viewerId: directorId },
+  ]
+  const originalWindow = globalThis.window
+  const originalDocument = globalThis.document
+  try {
+    for (const status of ["completed", "canceled"]) {
+      for (const roleCase of roleCases) {
+        const deepLinkedAttempt = {
+          ...baseAttempt,
+          status,
+          appointmentStatus: status === "canceled" ? "canceled" : "completed",
+          attendance: status === "canceled" ? null : "attended",
+          suitabilityResult: status === "canceled" ? null : "fit",
+          decisionKind: status === "canceled" ? null : "enrollment",
+        }
+        const managerDetail = {
+          track: {
+            trackId,
+            taskId,
+            subject: "영어",
+            workflowStatus: "enrollment_requested",
+            workflowRevision: 12,
+            observationReturnWorkflowStatus: null,
+            directorProfileId: directorId,
+          },
+          currentObservation: null,
+          latestEnrollmentDecisionObservationId: null,
+          latestDecisionObservation: null,
+          attempts: [],
+          classes: [],
+        }
+        let managerLoads = 0
+        let feedbackLoads = 0
+        const hookHarness = createRegistrationEditorHookHarness()
+        const mounted = await loadMountedRegistrationApplication({
+          hookHarness,
+          loadManagerDetail: async () => {
+            managerLoads += 1
+            return managerDetail
+          },
+          loadFeedback: async () => {
+            feedbackLoads += 1
+            return {
+              observationId: deepLinkedAttempt.observationId,
+              status,
+              decisionKind: deepLinkedAttempt.decisionKind,
+            }
+          },
+        })
+        const scrolledPanelIds = []
+        globalThis.window = {
+          requestAnimationFrame(callback) {
+            callback()
+            return 1
+          },
+          cancelAnimationFrame() {},
+        }
+        globalThis.document = {
+          getElementById(id) {
+            return { scrollIntoView: () => scrolledPanelIds.push(id) }
+          },
+        }
+        const props = {
+          task: { id: taskId, title: "김학생 등록", studentName: "김학생", type: "registration" },
+          detail: {
+            task: { id: taskId, title: "김학생 등록", studentName: "김학생", registration: null },
+            commonRevision: 1,
+            tracks: [{
+              id: trackId,
+              taskId,
+              subject: "영어",
+              status: "enrollment_requested",
+              workflowStatus: "enrollment_requested",
+              workflowRevision: 12,
+              directorProfileId: directorId,
+              observationAttemptCount: 0,
+              observationSummaryVisible: false,
+              migrationReviewRequired: false,
+              legacy: false,
+              waitingKind: null,
+            }],
+            appointments: [],
+            levelTests: [],
+            consultations: [],
+            enrollments: [],
+            admissionBatches: [],
+            admissionApplicationMessageStatus: "not_sent",
+            admissionApplicationMessageClaimActive: false,
+            admissionApplicationMessageId: null,
+          },
+          focusTrackId: trackId,
+          viewerId: roleCase.viewerId,
+          viewerRole: roleCase.viewerRole,
+          onFocusTrack: () => undefined,
+          onReload: async () => undefined,
+          onWarning: () => undefined,
+          subjectCapabilities: [],
+          customerMessageClient: {},
+          observationRuntime: { available: true, runtimeVersion: 1 },
+          deepLinkedAttempt,
+          closeAction: null,
+        }
+        try {
+          let view = hookHarness.render(mounted.RegistrationApplication, props)
+          hookHarness.flushEffects()
+          await flushMountedRegistrationWork()
+          view = hookHarness.render(mounted.RegistrationApplication, props)
+          const shell = findMountedRegistrationElement(
+            view,
+            (node) => node.type === mounted.RegistrationApplicationShell,
+            "registration application shell",
+          )
+          assert.ok(shell.props.observation, `${roleCase.viewerRole}:${status} keeps the history workspace mounted`)
+          const editor = findMountedRegistrationElement(
+            shell.props.observation,
+            (node) => node.type === mounted.RegistrationObservationEditor,
+            "historical observation editor",
+          )
+          assert.equal(editor.props.deepLinkedAttempt, deepLinkedAttempt)
+          const feedbackPanel = findMountedRegistrationElement(
+            editor.props.feedbackPanel,
+            (node) => node.type === mounted.RegistrationObservationFeedbackPanel,
+            "historical feedback panel",
+          )
+          assert.equal(feedbackPanel.props.canRecordAttendance, false)
+          assert.equal(feedbackPanel.props.canEditFeedback, false)
+          assert.equal(feedbackPanel.props.canDecide, false)
+          assert.equal(managerLoads, 1)
+          assert.equal(feedbackLoads, 1)
+          assert.deepEqual(scrolledPanelIds, ["registration-application-observation"])
+        } finally {
+          hookHarness.cleanup()
+        }
+      }
+    }
+  } finally {
+    globalThis.window = originalWindow
+    globalThis.document = originalDocument
+  }
+})
+
+test("observation child loads share monotonic ownership across passive and forced refreshes", async () => {
+  // The shared owner is behavior-tested for A-B-A, close/reopen, runtime, viewer,
+  // failure release, and mutation ordering in registration-workspace-route.test.mjs.
+  // This integration guard makes both child panels use that owner instead of
+  // recyclable strings or an effect-local boolean.
+  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  assert.match(source, /createRegistrationObservationAsyncOwnership/)
+  assert.match(source, /observationManagerLoadOwnershipRef/)
+  assert.match(source, /observationFeedbackLoadOwnershipRef/)
+  assert.match(source, /activeObservationViewerIdRef\.current = viewerId/)
+  assert.match(source, /activeObservationRuntimeVersionRef\.current = observationRuntime\.runtimeVersion/)
+
+  const managerEffect = sourceBetween(
+    source,
+    "  useEffect(() => {\n    setObservationDetail(null)",
+    "\n\n  useEffect(() => {\n    const taskId = detail.task.id",
+  )
+  assert.match(managerEffect, /const managerRequestToken = managerOwnership\.begin\(managerRequestContext\)/)
+  assert.match(managerEffect, /observationManagerLoadOwnershipRef\.current\.owns\(/)
+  assert.match(managerEffect, /observationManagerLoadOwnershipRef\.current\.invalidate\(managerRequestToken\)/)
+  assert.match(managerEffect, /viewerId/)
+  assert.match(managerEffect, /observationRuntime\.runtimeVersion/)
+
+  const savedRefresh = sourceBetween(
+    source,
+    "const handleObservationSaved = useCallback",
+    "\n\n  useEffect(() => {\n    onDirtyChangeRef.current",
+  )
+  assert.match(savedRefresh, /const managerRequestToken = observationManagerLoadOwnershipRef\.current\.begin\(managerRequestContext\)/)
+  assert.match(savedRefresh, /observationManagerLoadOwnershipRef\.current\.owns\(/)
+
+  const feedbackEffect = sourceBetween(
+    source,
+    "  useEffect(() => {\n    const observationId = activeFeedbackObservationId",
+    "\n\n  const refreshActiveObservationFeedback",
+  )
+  assert.match(feedbackEffect, /const feedbackRequestToken = feedbackOwnership\.begin\(feedbackRequestContext\)/)
+  assert.match(feedbackEffect, /observationFeedbackLoadOwnershipRef\.current\.owns\(/)
+  assert.match(feedbackEffect, /observationFeedbackLoadOwnershipRef\.current\.invalidate\(feedbackRequestToken\)/)
+
+  const forcedRefresh = sourceBetween(
+    source,
+    "const refreshActiveObservationFeedback = useCallback",
+    "\n\n  const handleObservationFeedbackSaved",
+  )
+  const beginIndex = forcedRefresh.indexOf("observationFeedbackLoadOwnershipRef.current.begin")
+  const loadIndex = forcedRefresh.indexOf("loadRegistrationObservationFeedbackForOwnedPanel", beginIndex)
+  assert.ok(beginIndex >= 0 && beginIndex < loadIndex, "forced refresh owns the panel before starting its request")
+  assert.match(forcedRefresh, /observationFeedbackLoadOwnershipRef\.current\.owns\(/)
 })
 
 test("canonical track detail resolves and persists director defaults only for management roles", async () => {
