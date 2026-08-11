@@ -113,6 +113,12 @@ type ConflictOverrideState = {
   conflictingFields: string[]
 }
 
+type MentionMutationAttempt = {
+  signature: string
+  requestId: string
+  scopeGeneration: number
+}
+
 type EventRuleGroup = {
   eventKey: string
   eventLabel: string
@@ -196,6 +202,10 @@ function errorMessage(error: unknown) {
     }
   }
   return "알림 설정을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
+}
+
+function isDefinitiveMentionMutationError(error: unknown) {
+  return error instanceof NotificationMentionSettingsHttpError && error.status < 500
 }
 
 function revisionsForPatch(
@@ -1014,6 +1024,7 @@ export function NotificationControlPanel({
   const saveRequestRef = React.useRef<{ signature: string; requestId: string } | null>(null)
   const mentionLoadGenerationRef = React.useRef(0)
   const mentionMutationGenerationRef = React.useRef(new Map<string, number>())
+  const mentionMutationRequestRef = React.useRef(new Map<string, MentionMutationAttempt>())
 
   React.useEffect(() => {
     if (!visible) return
@@ -1029,6 +1040,8 @@ export function NotificationControlPanel({
     const mentionController = new AbortController()
     const mentionLoadGeneration = mentionLoadGenerationRef.current + 1
     mentionLoadGenerationRef.current = mentionLoadGeneration
+    mentionMutationGenerationRef.current.clear()
+    mentionMutationRequestRef.current.clear()
     setMentionSettings(new Map())
     setMentionSavingRuleIds(new Set())
     setMentionErrors({})
@@ -1105,8 +1118,20 @@ export function NotificationControlPanel({
     setting: NotificationMentionSettingDto,
     mentionEnabled: boolean,
   ) => {
+    const scopeGeneration = mentionLoadGenerationRef.current
     const generation = (mentionMutationGenerationRef.current.get(setting.ruleId) ?? 0) + 1
     mentionMutationGenerationRef.current.set(setting.ruleId, generation)
+    const signature = `${setting.revision}:${mentionEnabled}`
+    const previousAttempt = mentionMutationRequestRef.current.get(setting.ruleId)
+    const requestId = previousAttempt?.scopeGeneration === scopeGeneration
+      && previousAttempt.signature === signature
+      ? previousAttempt.requestId
+      : crypto.randomUUID()
+    mentionMutationRequestRef.current.set(setting.ruleId, {
+      signature,
+      requestId,
+      scopeGeneration,
+    })
     setMentionSavingRuleIds((current) => new Set(current).add(setting.ruleId))
     setMentionErrors((current) => {
       const next = { ...current }
@@ -1118,16 +1143,26 @@ export function NotificationControlPanel({
         ruleId: setting.ruleId,
         mentionEnabled,
         expectedRevision: setting.revision,
-        requestId: crypto.randomUUID(),
+        requestId,
       })
-      if (mentionMutationGenerationRef.current.get(setting.ruleId) !== generation) return
+      if (
+        mentionLoadGenerationRef.current !== scopeGeneration ||
+        mentionMutationGenerationRef.current.get(setting.ruleId) !== generation
+      ) return
       setMentionSettings((current) => {
         const next = new Map(current)
         next.set(saved.ruleId, saved)
         return next
       })
+      mentionMutationRequestRef.current.delete(setting.ruleId)
     } catch (error) {
-      if (mentionMutationGenerationRef.current.get(setting.ruleId) !== generation) return
+      if (
+        mentionLoadGenerationRef.current !== scopeGeneration ||
+        mentionMutationGenerationRef.current.get(setting.ruleId) !== generation
+      ) return
+      if (isDefinitiveMentionMutationError(error)) {
+        mentionMutationRequestRef.current.delete(setting.ruleId)
+      }
       setMentionErrors((current) => ({
         ...current,
         [setting.ruleId]: error instanceof NotificationMentionSettingsHttpError
@@ -1136,7 +1171,10 @@ export function NotificationControlPanel({
           : "담당자 멘션을 저장하지 못했습니다.",
       }))
     } finally {
-      if (mentionMutationGenerationRef.current.get(setting.ruleId) === generation) {
+      if (
+        mentionLoadGenerationRef.current === scopeGeneration &&
+        mentionMutationGenerationRef.current.get(setting.ruleId) === generation
+      ) {
         setMentionSavingRuleIds((current) => {
           const next = new Set(current)
           next.delete(setting.ruleId)
