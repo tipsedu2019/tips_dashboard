@@ -15,7 +15,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useAuth } from "@/providers/auth-provider";
 import { createGoogleChatProfileIdentityService } from "./google-chat-profile-identity-service";
 import type {
   GoogleChatProfileIdentity,
@@ -29,8 +28,8 @@ import {
 
 type SyncMode = "auto" | "manual";
 
-function getIdentityStatus(identity: GoogleChatProfileIdentity) {
-  if (identity.lastSyncStatus === "provider_error") return "조회 실패";
+function getIdentityStatus(identity: GoogleChatProfileIdentity, lookupFailed = false) {
+  if (lookupFailed || identity.lastSyncStatus === "provider_error") return "조회 실패";
   if (identity.verificationStatus === "verified") return "확인됨";
   if (identity.verificationStatus === "unverified") return "재확인 필요";
   return "미설정";
@@ -65,6 +64,7 @@ function getSafeLoadMessage() {
 function IdentityControls({
   identity,
   snapshot,
+  manualAvailable,
   manualChatUserId,
   pending,
   onManualChatUserIdChange,
@@ -72,6 +72,7 @@ function IdentityControls({
 }: {
   identity: GoogleChatProfileIdentity;
   snapshot: Pick<GoogleChatProfileIdentitySnapshot, "editable" | "directory">;
+  manualAvailable: boolean;
   manualChatUserId: string;
   pending: boolean;
   onManualChatUserIdChange: (value: string) => void;
@@ -81,15 +82,6 @@ function IdentityControls({
 
   return (
     <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
-      <Input
-        className="h-8"
-        value={manualChatUserId}
-        onChange={(event) => onManualChatUserIdChange(event.target.value)}
-        placeholder="숫자 Chat ID"
-        inputMode="numeric"
-        aria-label={`${identity.profileName} Google Chat ID`}
-        disabled={!snapshot.editable || !snapshot.directory.configured || pending}
-      />
       <Button
         type="button"
         variant="outline"
@@ -101,21 +93,40 @@ function IdentityControls({
       >
         자동 조회
       </Button>
-      <Button
-        type="button"
-        size="sm"
-        className="h-8"
-        onClick={() => onSync("manual")}
-        disabled={disabled}
-        aria-label={`${identity.profileName} 확인`}
-      >
-        {pending ? "확인 중" : "확인"}
-      </Button>
+      {manualAvailable ? (
+        <>
+          <Input
+            className="h-8"
+            value={manualChatUserId}
+            onChange={(event) => onManualChatUserIdChange(event.target.value)}
+            placeholder="숫자 Chat ID"
+            inputMode="numeric"
+            aria-label={`${identity.profileName} Google Chat ID`}
+            disabled={!snapshot.editable || !snapshot.directory.configured || pending}
+          />
+          <Button
+            type="button"
+            size="sm"
+            className="h-8"
+            onClick={() => onSync("manual")}
+            disabled={disabled}
+            aria-label={`${identity.profileName} 확인`}
+          >
+            {pending ? "확인 중" : "확인"}
+          </Button>
+        </>
+      ) : null}
     </div>
   );
 }
 
-function IdentitySummary({ identity }: { identity: GoogleChatProfileIdentity }) {
+function IdentitySummary({
+  identity,
+  lookupFailed,
+}: {
+  identity: GoogleChatProfileIdentity;
+  lookupFailed: boolean;
+}) {
   return (
     <>
       <div className="min-w-0">
@@ -129,7 +140,7 @@ function IdentitySummary({ identity }: { identity: GoogleChatProfileIdentity }) 
         </div>
         <div>
           <dt className="text-muted-foreground">상태</dt>
-          <dd className="mt-0.5"><Badge variant="outline" className="rounded-md">{getIdentityStatus(identity)}</Badge></dd>
+          <dd className="mt-0.5"><Badge variant="outline" className="rounded-md">{getIdentityStatus(identity, lookupFailed)}</Badge></dd>
         </div>
         <div>
           <dt className="text-muted-foreground">마지막 동기화</dt>
@@ -140,22 +151,25 @@ function IdentitySummary({ identity }: { identity: GoogleChatProfileIdentity }) 
   );
 }
 
-export function TeacherGoogleChatIdentityPanel() {
-  const { session } = useAuth();
+export function TeacherGoogleChatIdentityPanel({
+  getAccessToken,
+}: {
+  getAccessToken: () => Promise<string | null>;
+}) {
   const [snapshot, setSnapshot] = useState<GoogleChatProfileIdentitySnapshot | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [pendingProfileIds, setPendingProfileIds] = useState<string[]>([]);
   const [profileErrors, setProfileErrors] = useState<Record<string, string>>({});
   const [manualChatUserIds, setManualChatUserIds] = useState<Record<string, string>>({});
+  const [manualFallbackProfileIds, setManualFallbackProfileIds] = useState<string[]>([]);
 
-  const accessToken = session?.access_token ?? null;
   const service = useMemo(
     () =>
       createGoogleChatProfileIdentityService({
-        getAccessToken: async () => accessToken,
+        getAccessToken,
       }),
-    [accessToken],
+    [getAccessToken],
   );
 
   useEffect(() => {
@@ -207,11 +221,17 @@ export function TeacherGoogleChatIdentityPanel() {
         : current,
       );
       setManualChatUserIds((current) => ({ ...current, [identity.profileId]: "" }));
+      setManualFallbackProfileIds((current) => current.filter((id) => id !== identity.profileId));
     } catch (error) {
       setProfileErrors((current) => ({
         ...current,
         [identity.profileId]: getSafeErrorMessage(error),
       }));
+      if (mode === "auto") {
+        setManualFallbackProfileIds((current) => current.includes(identity.profileId)
+          ? current
+          : [...current, identity.profileId]);
+      }
     } finally {
       setPendingProfileIds((current) => current.filter((id) => id !== identity.profileId));
     }
@@ -235,16 +255,18 @@ export function TeacherGoogleChatIdentityPanel() {
       <div data-testid="teacher-google-chat-identity-mobile-list" className="grid gap-2 md:hidden">
         {isLoading ? <Skeleton className="h-40 w-full" /> : snapshot?.identities.map((identity) => {
           const pending = pendingProfileIds.includes(identity.profileId);
+          const manualAvailable = manualFallbackProfileIds.includes(identity.profileId);
           return (
             <section
               key={identity.profileId}
               data-testid="teacher-google-chat-identity-mobile-card"
               className="grid gap-3 rounded-lg border border-border/70 bg-background px-3 py-3"
             >
-              <IdentitySummary identity={identity} />
+              <IdentitySummary identity={identity} lookupFailed={manualAvailable} />
               <IdentityControls
                 identity={identity}
                 snapshot={snapshot}
+                manualAvailable={manualAvailable}
                 manualChatUserId={manualChatUserIds[identity.profileId] ?? ""}
                 pending={pending}
                 onManualChatUserIdChange={(value) => updateManualChatUserId(identity.profileId, value)}
@@ -276,6 +298,7 @@ export function TeacherGoogleChatIdentityPanel() {
                 <TableRow><TableCell colSpan={5} className="px-3 py-6"><Skeleton className="h-8 w-full" /></TableCell></TableRow>
               ) : snapshot?.identities.map((identity) => {
                 const pending = pendingProfileIds.includes(identity.profileId);
+                const manualAvailable = manualFallbackProfileIds.includes(identity.profileId);
                 return (
                   <TableRow key={identity.profileId}>
                     <TableCell className={settingsTableCellClass}>
@@ -285,12 +308,13 @@ export function TeacherGoogleChatIdentityPanel() {
                       </div>
                     </TableCell>
                     <TableCell className={settingsTableCellClass}>{identity.chatUserId ?? "미설정"}</TableCell>
-                    <TableCell className={settingsTableCellClass}>{getIdentityStatus(identity)}</TableCell>
+                    <TableCell className={settingsTableCellClass}>{getIdentityStatus(identity, manualAvailable)}</TableCell>
                     <TableCell className={settingsTableCellClass}>{formatSyncTime(identity.lastSyncAt)}</TableCell>
                     <TableCell className={settingsTableCellClass}>
                       <IdentityControls
                         identity={identity}
                         snapshot={snapshot}
+                        manualAvailable={manualAvailable}
                         manualChatUserId={manualChatUserIds[identity.profileId] ?? ""}
                         pending={pending}
                         onManualChatUserIdChange={(value) => updateManualChatUserId(identity.profileId, value)}

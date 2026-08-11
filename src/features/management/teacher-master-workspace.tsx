@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAuth } from "@/providers/auth-provider";
 import {
   Table,
   TableBody,
@@ -446,6 +447,7 @@ function formatAuditTime(value: string) {
 }
 
 export function TeacherMasterWorkspace() {
+  const { session } = useAuth();
   const [rows, setRows] = useState<TeacherRecord[]>([]);
   const [profiles, setProfiles] = useState<AccountProfile[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -458,6 +460,10 @@ export function TeacherMasterWorkspace() {
   const [isDirty, setIsDirty] = useState(false);
   const [teamFilter, setTeamFilter] =
     useState<(typeof TEAM_FILTERS)[number]>("전체");
+  const getGoogleChatAccessToken = useCallback(
+    async () => session?.access_token ?? null,
+    [session?.access_token],
+  );
 
   const loadTeachers = useCallback(async () => {
     setLoading(true);
@@ -1117,7 +1123,7 @@ export function TeacherMasterWorkspace() {
         })}
       </div>
 
-      <TeacherGoogleChatIdentityPanel />
+      <TeacherGoogleChatIdentityPanel getAccessToken={getGoogleChatAccessToken} />
 
       <div data-testid="teacher-audit-mobile-list" className="grid gap-2 md:hidden">
         <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
