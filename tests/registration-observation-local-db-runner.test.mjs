@@ -577,6 +577,8 @@ test("enrollment owns a committed runtime-zero activation fixture and marked dea
     "99300000-0000-4000-8000-000000000001",
     "99300000-0000-4000-8000-000000000106",
     "99300000-0000-4000-8000-000000000108",
+    "99300000-0000-4000-8000-000000000280",
+    "99300000-0000-4000-8000-000000000281",
   ]) assert.match(setupSql, new RegExp(id, "i"));
   assert.match(
     setupSql,
@@ -618,10 +620,12 @@ test("enrollment owns a committed runtime-zero activation fixture and marked dea
   );
   assert.match(cleanupSql, /^begin;/i);
   assert.match(cleanupSql, /commit;$/i);
+  assert.match(cleanupSql, /99300000-0000-4000-8000-000000000281/i);
 
   assert.match(freshSql, /registration_observation_runtime_not_zero/i);
   assert.match(freshSql, /registration_observation_runtime_actor_not_cleared/i);
   assert.match(freshSql, /99300000-0000-4000-8000-000000000108/i);
+  assert.match(freshSql, /99300000-0000-4000-8000-000000000281/i);
   assert.match(freshSql, /registration_observation_enrollment_fixture_remains/i);
   assert.match(freshSql, /registration_observation_provider_outbox_delta=0/i);
 });

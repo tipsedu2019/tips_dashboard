@@ -1,5 +1,5 @@
 begin;
-select plan(107);
+select plan(152);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '120s';
@@ -29,8 +29,10 @@ select pg_catalog.set_config(
 create extension if not exists dblink;
 
 -- Mutation-sensitive coverage map. The executable cases below bind the
--- completed attended fit enrollment historical source, unfit, no-show,
--- canceled, wrong task, missing decision, id-less draft, ambiguous draft,
+-- completed attended fit enrollment historical source, independent wrong task,
+-- wrong track, class, status, attendance, suitability, and decision predicates,
+-- normalized and legacy source-component mismatches, no-show, canceled,
+-- id-less draft, every editable-row exclusion, ambiguous draft,
 -- runtime 0, same-fingerprint replay, consultation_completed details bypass,
 -- literal canonical-rows key, row audit failure, recompute failure,
 -- details audit failure, outer receipt failure, concurrent activation,
@@ -287,6 +289,11 @@ select throws_ok(
   $$select dashboard_private.normalize_registration_enrollment_rows_request_v1('[{"classId":"bad","sortOrder":0}]'::jsonb)$$,
   '22023', 'registration_enrollment_rows_invalid',
   'normalizer rejects malformed UUID values'
+);
+select throws_ok(
+  $$select dashboard_private.normalize_registration_enrollment_rows_request_v1('[{"classId":"99300000-0000-4000-8000-000000000103","classStartDate":"2026-02-30","sortOrder":0}]'::jsonb)$$,
+  '22023', 'registration_enrollment_rows_invalid',
+  'normalizer rejects a shape-valid but impossible calendar date'
 );
 select throws_ok(
   $$select dashboard_private.normalize_registration_enrollment_rows_request_v1('[{"classId":"99300000-0000-4000-8000-000000000103","sortOrder":0.5}]'::jsonb)$$,
@@ -550,6 +557,213 @@ select is(
 select dblink_disconnect('enrollment_activation_a');
 select dblink_disconnect('enrollment_activation_b');
 select dblink_disconnect('enrollment_activation_blocker');
+
+-- A details worker reads the track before entering the receipt-free helper.
+-- Hold the canonical track lock, let that early read complete, update the
+-- committed status in the blocker, then release it. Both audits must use the
+-- status at the canonical locked-save boundary, never the stale early read.
+create function pg_temp.registration_observation_stale_audit_worker_waiting()
+returns bigint
+language plpgsql
+as $$
+declare
+  v_waiting bigint := 0;
+  v_deadline timestamptz := pg_catalog.clock_timestamp() + interval '5 seconds';
+begin
+  loop
+    perform pg_catalog.pg_stat_clear_snapshot();
+    select pg_catalog.count(*)
+    into v_waiting
+    from pg_catalog.pg_stat_activity activity
+    cross join pg_temp.registration_observation_stale_audit_pids pids
+    where activity.pid = pids.worker_pid
+      and activity.wait_event_type = 'Lock'
+      and pids.blocker_pid = any(
+        pg_catalog.pg_blocking_pids(activity.pid)
+      )
+      and dblink_is_busy('enrollment_stale_audit_worker') = 1;
+    exit when v_waiting = 1
+      or pg_catalog.clock_timestamp() >= v_deadline;
+    perform pg_catalog.pg_sleep(0.02);
+  end loop;
+  return v_waiting;
+end;
+$$;
+
+select dblink_connect(
+  'enrollment_stale_audit_blocker',
+  'hostaddr=' || pg_catalog.host(pg_catalog.inet_server_addr())
+    || ' port=5432 dbname=' || current_database()
+    || ' user=postgres password=postgres'
+    || ' application_name=enrollment_stale_audit_blocker'
+);
+select dblink_connect(
+  'enrollment_stale_audit_worker',
+  'hostaddr=' || pg_catalog.host(pg_catalog.inet_server_addr())
+    || ' port=5432 dbname=' || current_database()
+    || ' user=postgres password=postgres'
+    || ' application_name=enrollment_stale_audit_worker'
+);
+create temporary table registration_observation_stale_audit_pids
+on commit drop
+as
+select worker.pid as worker_pid, blocker.pid as blocker_pid
+from dblink(
+  'enrollment_stale_audit_worker',
+  'select pg_catalog.pg_backend_pid()'
+) as worker(pid integer)
+cross join dblink(
+  'enrollment_stale_audit_blocker',
+  'select pg_catalog.pg_backend_pid()'
+) as blocker(pid integer);
+select dblink_exec('enrollment_stale_audit_blocker', 'begin');
+select dblink_exec('enrollment_stale_audit_blocker', $remote$
+  do $blocker$
+  begin
+    perform track.id
+    from public.ops_registration_subject_tracks track
+    where track.id = '99300000-0000-4000-8000-000000000281'
+    for update;
+    if not found then
+      raise exception 'enrollment_stale_audit_blocker_target_missing';
+    end if;
+  end;
+  $blocker$;
+$remote$);
+select dblink_exec('enrollment_stale_audit_worker', $remote$
+  create or replace function pg_temp.registration_observation_stale_audit_capture()
+  returns table(result_sqlstate text, response jsonb, message text)
+  language plpgsql
+  as $capture$
+  begin
+    begin
+      response := public.save_registration_enrollment_details_v1(
+        '99300000-0000-4000-8000-000000000281',
+        pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+          'classId', '99300000-0000-4000-8000-000000000113',
+          'classStartDate', pg_catalog.to_char(
+            current_date + 7,
+            'YYYY-MM-DD'
+          ),
+          'classStartSessionKey', pg_catalog.to_char(
+            current_date + 7,
+            'YYYY-MM-DD'
+          ) || ':1',
+          'classStartLessonSessionId',
+            '99300000-0000-4000-8000-000000000114',
+          'classStartSession', 'stale-audit browser label',
+          'sortOrder', 0
+        )),
+        'enrollment-stale-audit-details'
+      );
+      result_sqlstate := '00000';
+      message := null;
+      return next;
+    exception
+      when others then
+        get stacked diagnostics
+          result_sqlstate = returned_sqlstate,
+          message = message_text;
+        response := null;
+        return next;
+    end;
+  end;
+  $capture$;
+  do $actor$
+  begin
+    perform pg_catalog.set_config(
+      'request.jwt.claim.sub',
+      '99300000-0000-4000-8000-000000000001',
+      false
+    );
+    perform pg_catalog.set_config(
+      'request.jwt.claim.role', 'authenticated', false
+    );
+  end;
+  $actor$;
+  set role authenticated;
+$remote$);
+select dblink_send_query(
+  'enrollment_stale_audit_worker',
+  'select * from pg_temp.registration_observation_stale_audit_capture()'
+);
+select is(
+  pg_temp.registration_observation_stale_audit_worker_waiting(),
+  1::bigint,
+  'details worker completes its early read and waits at the canonical track lock'
+);
+select dblink_exec('enrollment_stale_audit_blocker', $remote$
+  update public.ops_registration_subject_tracks
+  set pipeline_status = 'enrollment_decided',
+      updated_at = pg_catalog.now()
+  where id = '99300000-0000-4000-8000-000000000281';
+$remote$);
+select dblink_exec('enrollment_stale_audit_blocker', 'commit');
+
+create temporary table registration_observation_stale_audit_result
+on commit drop
+as
+select result.*
+from dblink_get_result('enrollment_stale_audit_worker')
+  as result(result_sqlstate text, response jsonb, message text);
+select is(
+  (
+    select pg_catalog.jsonb_build_object(
+      'sqlstate', result_sqlstate,
+      'message', message,
+      'trackId', response ->> 'trackId',
+      'rowCount', pg_catalog.jsonb_array_length(response -> 'rows')
+    )
+    from registration_observation_stale_audit_result
+  ),
+  '{"sqlstate":"00000","message":null,"trackId":"99300000-0000-4000-8000-000000000281","rowCount":1}'::jsonb,
+  'details worker commits one canonical row after the blocker advances status'
+);
+select is(
+  (
+    select pg_catalog.jsonb_build_object(
+      'rowCount', pg_catalog.count(*) filter (
+        where event.after_value::jsonb ->> 'event_type' =
+          'enrollment_rows_saved'
+      ),
+      'rowSource', pg_catalog.max(
+        event.after_value::jsonb ->> 'source'
+      ) filter (
+        where event.after_value::jsonb ->> 'event_type' =
+          'enrollment_rows_saved'
+      ),
+      'rowDestination', pg_catalog.max(
+        event.after_value::jsonb ->> 'destination'
+      ) filter (
+        where event.after_value::jsonb ->> 'event_type' =
+          'enrollment_rows_saved'
+      ),
+      'detailCount', pg_catalog.count(*) filter (
+        where event.after_value::jsonb ->> 'event_type' =
+          'registration_enrollment_details_saved'
+      ),
+      'detailSource', pg_catalog.max(
+        event.after_value::jsonb ->> 'source'
+      ) filter (
+        where event.after_value::jsonb ->> 'event_type' =
+          'registration_enrollment_details_saved'
+      ),
+      'detailDestination', pg_catalog.max(
+        event.after_value::jsonb ->> 'destination'
+      ) filter (
+        where event.after_value::jsonb ->> 'event_type' =
+          'registration_enrollment_details_saved'
+      )
+    )
+    from public.ops_task_events event
+    where event.task_id = '99300000-0000-4000-8000-000000000280'
+      and event.event_type = 'registration_track_event'
+  ),
+  '{"rowCount":1,"rowSource":"enrollment_decided","rowDestination":"enrollment_decided","detailCount":1,"detailSource":"enrollment_decided","detailDestination":"enrollment_decided"}'::jsonb,
+  'row and details audits both record the status at the canonical locked-save boundary'
+);
+select dblink_disconnect('enrollment_stale_audit_worker');
+select dblink_disconnect('enrollment_stale_audit_blocker');
 
 -- A paid admission row makes the finance fingerprint non-empty. Enrollment
 -- source and calendar workflow operations must never change it or create a
@@ -895,6 +1109,762 @@ set pipeline_status = 'enrollment_decided'
 where id = '99300000-0000-4000-8000-000000000106';
 update registration_observation_task_update_counter set update_count = 0;
 
+-- A signed JWT outlives an Auth-side delete or ban. Every public operation
+-- must re-check the current account before replay, while the validator,
+-- receipt-free canonical helper, and table trigger must defend themselves.
+insert into public.ops_tasks(
+  id, title, type, status, priority, requested_by, student_name
+) values (
+  '99300000-0000-4000-8000-000000000260',
+  '청강 등록 active-actor guard fixture',
+  'registration',
+  'requested',
+  'normal',
+  '99300000-0000-4000-8000-000000000001',
+  '합성 active-actor 학생'
+);
+insert into public.ops_registration_details(task_id)
+values ('99300000-0000-4000-8000-000000000260');
+insert into public.ops_registration_subject_tracks(
+  id,
+  task_id,
+  subject,
+  pipeline_status,
+  director_profile_id,
+  director_assignment_source,
+  director_assigned_at,
+  migration_review_required,
+  workflow_status,
+  workflow_revision,
+  workflow_status_entered_at,
+  observation_attempt_count
+) values (
+  '99300000-0000-4000-8000-000000000261',
+  '99300000-0000-4000-8000-000000000260',
+  '영어',
+  'enrollment_decided',
+  '99300000-0000-4000-8000-000000000005',
+  'manual',
+  pg_catalog.now(),
+  false,
+  'enrollment_requested',
+  1,
+  pg_catalog.now(),
+  0
+);
+insert into public.ops_registration_enrollments(
+  id, track_id, class_id, status, makeedu_registered, roster_active, sort_order
+) values (
+  '99300000-0000-4000-8000-000000000262',
+  '99300000-0000-4000-8000-000000000261',
+  '99300000-0000-4000-8000-000000000113',
+  'planned', false, false, 0
+);
+
+select public.save_registration_enrollment_rows(
+  '99300000-0000-4000-8000-000000000261',
+  '[{"id":"99300000-0000-4000-8000-000000000262","classId":"99300000-0000-4000-8000-000000000113","sortOrder":0}]'::jsonb,
+  'actor-guard-admin-rows-replay'
+);
+select public.save_registration_enrollment_details_v1(
+  '99300000-0000-4000-8000-000000000261',
+  '[{"id":"99300000-0000-4000-8000-000000000262","classId":"99300000-0000-4000-8000-000000000113","sortOrder":0}]'::jsonb,
+  'actor-guard-admin-details-replay'
+);
+select pg_catalog.set_config(
+  'request.jwt.claim.sub',
+  '99300000-0000-4000-8000-000000000002',
+  true
+);
+select public.save_registration_enrollment_rows(
+  '99300000-0000-4000-8000-000000000261',
+  '[{"id":"99300000-0000-4000-8000-000000000262","classId":"99300000-0000-4000-8000-000000000113","sortOrder":0}]'::jsonb,
+  'actor-guard-staff-rows-replay'
+);
+select public.save_registration_enrollment_details_v1(
+  '99300000-0000-4000-8000-000000000261',
+  '[{"id":"99300000-0000-4000-8000-000000000262","classId":"99300000-0000-4000-8000-000000000113","sortOrder":0}]'::jsonb,
+  'actor-guard-staff-details-replay'
+);
+select pg_catalog.set_config(
+  'request.jwt.claim.sub',
+  '99300000-0000-4000-8000-000000000001',
+  true
+);
+
+create temporary table registration_observation_actor_guard_task_updates(
+  update_count integer not null
+) on commit drop;
+insert into registration_observation_actor_guard_task_updates values (0);
+create function pg_temp.registration_observation_count_actor_guard_task_update()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  update pg_temp.registration_observation_actor_guard_task_updates
+  set update_count = update_count + 1;
+  return new;
+end;
+$$;
+create trigger registration_observation_count_actor_guard_task_update
+after update on public.ops_tasks
+for each row
+when (new.id = '99300000-0000-4000-8000-000000000260'::uuid)
+execute function pg_temp.registration_observation_count_actor_guard_task_update();
+
+create function pg_temp.registration_observation_actor_guard_state(
+  p_actor_id uuid,
+  p_request_key text
+)
+returns jsonb
+language sql
+stable
+set search_path = ''
+as $$
+  select pg_catalog.jsonb_build_object(
+    'enrollmentHash', (
+      select pg_catalog.md5(coalesce(
+        pg_catalog.jsonb_agg(
+          pg_catalog.to_jsonb(enrollment) - 'updated_at'
+          order by enrollment.id
+        )::text,
+        '[]'
+      ))
+      from public.ops_registration_enrollments enrollment
+      where enrollment.track_id =
+        '99300000-0000-4000-8000-000000000261'
+    ),
+    'detailRows', (
+      select track.enrollment_detail_rows
+      from public.ops_registration_subject_tracks track
+      where track.id = '99300000-0000-4000-8000-000000000261'
+    ),
+    'rowAudits', (
+      select pg_catalog.count(*)
+      from public.ops_task_events event
+      where event.task_id = '99300000-0000-4000-8000-000000000260'
+        and event.event_type = 'registration_track_event'
+        and event.after_value::jsonb ->> 'event_type' =
+          'enrollment_rows_saved'
+    ),
+    'detailAudits', (
+      select pg_catalog.count(*)
+      from public.ops_task_events event
+      where event.task_id = '99300000-0000-4000-8000-000000000260'
+        and event.event_type = 'registration_track_event'
+        and event.after_value::jsonb ->> 'event_type' =
+          'registration_enrollment_details_saved'
+    ),
+    'receipts', (
+      select pg_catalog.count(*)
+      from dashboard_private.ops_registration_mutations mutation
+      where mutation.actor_id = p_actor_id
+        and mutation.request_key = p_request_key
+    )
+  );
+$$;
+
+create function pg_temp.registration_observation_capture_actor_guard(
+  p_actor_id uuid,
+  p_account_state text,
+  p_operation text,
+  p_request_key text
+)
+returns jsonb
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_before jsonb;
+  v_after jsonb;
+  v_sqlstate text;
+  v_message text;
+begin
+  update auth.users account
+  set deleted_at = case
+        when p_account_state = 'deleted' then pg_catalog.now()
+        else null
+      end,
+      banned_until = case
+        when p_account_state = 'banned'
+          then pg_catalog.now() + interval '1 day'
+        else null
+      end
+  where account.id = p_actor_id;
+  perform pg_catalog.set_config(
+    'request.jwt.claim.sub', p_actor_id::text, true
+  );
+  update pg_temp.registration_observation_actor_guard_task_updates
+  set update_count = 0;
+  v_before := pg_temp.registration_observation_actor_guard_state(
+    p_actor_id,
+    p_request_key
+  );
+
+  begin
+    if p_operation = 'rows' then
+      perform public.save_registration_enrollment_rows(
+        '99300000-0000-4000-8000-000000000261',
+        '[{"id":"99300000-0000-4000-8000-000000000262","classId":"99300000-0000-4000-8000-000000000113","sortOrder":0}]'::jsonb,
+        p_request_key
+      );
+    elsif p_operation = 'details' then
+      perform public.save_registration_enrollment_details_v1(
+        '99300000-0000-4000-8000-000000000261',
+        '[{"id":"99300000-0000-4000-8000-000000000262","classId":"99300000-0000-4000-8000-000000000113","sortOrder":0}]'::jsonb,
+        p_request_key
+      );
+    elsif p_operation = 'validator' then
+      perform dashboard_private.validate_registration_observation_class_start_source_v1(
+        '99300000-0000-4000-8000-000000000106',
+        '99300000-0000-4000-8000-000000000108',
+        '99300000-0000-4000-8000-000000000103',
+        current_date - 2,
+        pg_catalog.current_setting('test.registration_enrollment_key_a'),
+        '99300000-0000-4000-8000-000000000104'
+      );
+    elsif p_operation = 'canonical' then
+      perform dashboard_private.save_registration_enrollment_rows_canonical_v1(
+        '99300000-0000-4000-8000-000000000261',
+        dashboard_private.normalize_registration_enrollment_rows_request_v1(
+          '[{"id":"99300000-0000-4000-8000-000000000262","classId":"99300000-0000-4000-8000-000000000113","sortOrder":0}]'::jsonb
+        ),
+        p_actor_id
+      );
+    elsif p_operation = 'trigger' then
+      insert into public.ops_registration_enrollments(
+        track_id, class_id, status, makeedu_registered, roster_active, sort_order
+      ) values (
+        '99300000-0000-4000-8000-000000000261',
+        '99300000-0000-4000-8000-000000000103',
+        'planned', false, false, 1
+      );
+    else
+      raise exception 'registration_actor_guard_test_operation_invalid';
+    end if;
+    raise exception 'registration_actor_guard_unexpected_success'
+      using errcode = 'P0001';
+  exception
+    when others then
+      get stacked diagnostics
+        v_sqlstate = returned_sqlstate,
+        v_message = message_text;
+  end;
+
+  v_after := pg_temp.registration_observation_actor_guard_state(
+    p_actor_id,
+    p_request_key
+  );
+  update auth.users account
+  set deleted_at = null,
+      banned_until = null
+  where account.id = p_actor_id;
+
+  return pg_catalog.jsonb_build_object(
+    'sqlstate', v_sqlstate,
+    'message', v_message,
+    'enrollmentDmlDelta', case
+      when v_before ->> 'enrollmentHash' = v_after ->> 'enrollmentHash'
+        then 0 else 1
+      end,
+    'detailDelta', case
+      when v_before -> 'detailRows' = v_after -> 'detailRows'
+        then 0 else 1
+      end,
+    'rowAuditDelta',
+      (v_after ->> 'rowAudits')::bigint
+        - (v_before ->> 'rowAudits')::bigint,
+    'detailAuditDelta',
+      (v_after ->> 'detailAudits')::bigint
+        - (v_before ->> 'detailAudits')::bigint,
+    'recomputeDelta', (
+      select update_count
+      from pg_temp.registration_observation_actor_guard_task_updates
+    ),
+    'receiptDelta',
+      (v_after ->> 'receipts')::bigint
+        - (v_before ->> 'receipts')::bigint
+  );
+end;
+$$;
+
+create function pg_temp.registration_observation_actor_guard_expected()
+returns jsonb
+language sql
+immutable
+set search_path = ''
+as $$
+  select '{"sqlstate":"42501","message":"registration_access_denied","enrollmentDmlDelta":0,"detailDelta":0,"rowAuditDelta":0,"detailAuditDelta":0,"recomputeDelta":0,"receiptDelta":0}'::jsonb;
+$$;
+
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000001', 'deleted', 'rows',
+    'actor-guard-admin-deleted-rows-new'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'deleted admin cannot make a new rows request and changes no state'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000001', 'deleted', 'rows',
+    'actor-guard-admin-rows-replay'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'deleted admin cannot replay rows and changes no state'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000001', 'deleted', 'details',
+    'actor-guard-admin-deleted-details-new'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'deleted admin cannot make a new details request and changes no state'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000001', 'deleted', 'details',
+    'actor-guard-admin-details-replay'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'deleted admin cannot replay details and changes no state'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000001', 'banned', 'rows',
+    'actor-guard-admin-banned-rows-new'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'banned admin cannot make a new rows request and changes no state'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000001', 'banned', 'rows',
+    'actor-guard-admin-rows-replay'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'banned admin cannot replay rows and changes no state'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000001', 'banned', 'details',
+    'actor-guard-admin-banned-details-new'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'banned admin cannot make a new details request and changes no state'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000001', 'banned', 'details',
+    'actor-guard-admin-details-replay'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'banned admin cannot replay details and changes no state'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000002', 'deleted', 'rows',
+    'actor-guard-staff-deleted-rows-new'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'deleted staff cannot make a new rows request and changes no state'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000002', 'deleted', 'rows',
+    'actor-guard-staff-rows-replay'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'deleted staff cannot replay rows and changes no state'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000002', 'deleted', 'details',
+    'actor-guard-staff-deleted-details-new'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'deleted staff cannot make a new details request and changes no state'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000002', 'deleted', 'details',
+    'actor-guard-staff-details-replay'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'deleted staff cannot replay details and changes no state'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000002', 'banned', 'rows',
+    'actor-guard-staff-banned-rows-new'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'banned staff cannot make a new rows request and changes no state'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000002', 'banned', 'rows',
+    'actor-guard-staff-rows-replay'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'banned staff cannot replay rows and changes no state'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000002', 'banned', 'details',
+    'actor-guard-staff-banned-details-new'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'banned staff cannot make a new details request and changes no state'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000002', 'banned', 'details',
+    'actor-guard-staff-details-replay'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'banned staff cannot replay details and changes no state'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000001', 'deleted', 'validator',
+    'actor-guard-inner-validator'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'deleted admin is rejected by the receipt-free validator inner defense'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000001', 'banned', 'canonical',
+    'actor-guard-inner-canonical'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'banned admin is rejected by the receipt-free canonical inner defense'
+);
+select is(
+  pg_temp.registration_observation_capture_actor_guard(
+    '99300000-0000-4000-8000-000000000002', 'deleted', 'trigger',
+    'actor-guard-inner-trigger'
+  ), pg_temp.registration_observation_actor_guard_expected(),
+  'deleted staff is rejected by the receipt-free trigger inner defense'
+);
+
+select pg_catalog.set_config(
+  'request.jwt.claim.sub',
+  '99300000-0000-4000-8000-000000000001',
+  true
+);
+
+-- The real legacy consultation completion path lets a non-manager exact
+-- science director materialize one current-class waitlist enrollment. The
+-- trigger must recognize only that legacy final shape; it must not grant the
+-- director planned-row editing rights.
+update public.teacher_catalogs teacher
+set name = '청강 등록 runner 과학 원장',
+    subjects = array['과학팀']::text[],
+    is_visible = true,
+    sort_order = 9998,
+    account_email = 'enrollment-runner-director@example.invalid',
+    dashboard_role = 'teacher'
+where teacher.profile_id = '99300000-0000-4000-8000-000000000005';
+update public.profiles profile
+set teacher_catalog_id = (
+      select teacher.id
+      from public.teacher_catalogs teacher
+      where teacher.profile_id = profile.id
+    ),
+    updated_at = pg_catalog.now()
+where profile.id = '99300000-0000-4000-8000-000000000005';
+update public.academic_subject_settings setting
+set is_active = true,
+    registration_create_enabled = true,
+    grade_levels = array['고1', '고2', '고3']::text[],
+    default_director_profile_id =
+      '99300000-0000-4000-8000-000000000005',
+    updated_at = pg_catalog.now()
+where setting.subject = '과학';
+
+insert into public.classes(
+  id, name, subject, grade, subject_area_key,
+  status, schedule_storage_mode, schedule_plan
+) values (
+  '99300000-0000-4000-8000-000000000271',
+  '청강 등록 current-class 과학반',
+  '과학',
+  '고1',
+  'integrated_science',
+  '수업 진행 중',
+  'normalized',
+  '{"sessions":[]}'::jsonb
+);
+insert into public.ops_tasks(
+  id, title, type, status, priority, requested_by, student_name
+) values (
+  '99300000-0000-4000-8000-000000000272',
+  '청강 등록 exact-director current-class fixture',
+  'registration',
+  'requested',
+  'normal',
+  '99300000-0000-4000-8000-000000000001',
+  '합성 과학 원장 학생'
+);
+insert into public.ops_registration_details(
+  task_id,
+  inquiry_at,
+  school_grade,
+  school_name,
+  parent_phone,
+  student_phone
+) values (
+  '99300000-0000-4000-8000-000000000272',
+  pg_catalog.now() - interval '1 day',
+  '고1',
+  '합성 과학고',
+  '010-9930-0272',
+  '010-9930-1272'
+);
+insert into public.ops_registration_subject_tracks(
+  id,
+  task_id,
+  subject,
+  pipeline_status,
+  director_profile_id,
+  director_assignment_source,
+  director_assigned_at,
+  migration_review_required,
+  workflow_status,
+  workflow_revision,
+  workflow_status_entered_at,
+  observation_attempt_count
+) values (
+  '99300000-0000-4000-8000-000000000273',
+  '99300000-0000-4000-8000-000000000272',
+  '과학',
+  'consultation_waiting',
+  '99300000-0000-4000-8000-000000000005',
+  'manual',
+  pg_catalog.now(),
+  false,
+  'consultation_completed',
+  1,
+  pg_catalog.now(),
+  0
+);
+insert into public.ops_registration_consultations(
+  id, track_id, appointment_id, mode, status, director_profile_id,
+  ready_at, ready_source
+) values (
+  '99300000-0000-4000-8000-000000000274',
+  '99300000-0000-4000-8000-000000000273',
+  null,
+  'phone',
+  'waiting',
+  '99300000-0000-4000-8000-000000000005',
+  pg_catalog.now(),
+  'director_resolved'
+);
+
+create function pg_temp.registration_observation_director_fixture_state()
+returns jsonb
+language sql
+stable
+set search_path = ''
+as $$
+  select pg_catalog.jsonb_build_object(
+    'consultation', (
+      select pg_catalog.to_jsonb(consultation) - 'updated_at'
+      from public.ops_registration_consultations consultation
+      where consultation.id = '99300000-0000-4000-8000-000000000274'
+    ),
+    'track', (
+      select pg_catalog.to_jsonb(track) - 'updated_at'
+      from public.ops_registration_subject_tracks track
+      where track.id = '99300000-0000-4000-8000-000000000273'
+    ),
+    'task', (
+      select pg_catalog.to_jsonb(task) - 'updated_at'
+      from public.ops_tasks task
+      where task.id = '99300000-0000-4000-8000-000000000272'
+    ),
+    'students', (
+      select pg_catalog.count(*)
+      from public.students student
+      where student.name = '합성 과학 원장 학생'
+        and pg_catalog.regexp_replace(student.parent_contact, '\\D+', '', 'g') =
+          '01099300272'
+    ),
+    'enrollments', (
+      select pg_catalog.count(*)
+      from public.ops_registration_enrollments enrollment
+      where enrollment.track_id = '99300000-0000-4000-8000-000000000273'
+    ),
+    'receipts', (
+      select pg_catalog.count(*)
+      from dashboard_private.ops_registration_mutations mutation
+      where mutation.task_id = '99300000-0000-4000-8000-000000000272'
+    )
+  );
+$$;
+create temporary table registration_observation_director_baseline
+on commit drop
+as
+select pg_temp.registration_observation_director_fixture_state() as state;
+
+select pg_catalog.set_config(
+  'request.jwt.claim.sub',
+  '99300000-0000-4000-8000-000000000004',
+  true
+);
+select throws_ok(
+  $$select public.complete_registration_consultation(
+    '99300000-0000-4000-8000-000000000274',
+    'waiting',
+    'current_class',
+    '99300000-0000-4000-8000-000000000271',
+    'director-current-class-unrelated'
+  )$$,
+  '42501',
+  'registration_access_denied',
+  'unrelated director cannot complete the real current-class consultation path'
+);
+
+update auth.users account
+set banned_until = pg_catalog.now() + interval '1 day'
+where account.id = '99300000-0000-4000-8000-000000000005';
+select pg_catalog.set_config(
+  'request.jwt.claim.sub',
+  '99300000-0000-4000-8000-000000000005',
+  true
+);
+select throws_ok(
+  $$select public.complete_registration_consultation(
+    '99300000-0000-4000-8000-000000000274',
+    'waiting',
+    'current_class',
+    '99300000-0000-4000-8000-000000000271',
+    'director-current-class-banned'
+  )$$,
+  '42501',
+  'registration_access_denied',
+  'banned exact director cannot complete the real current-class consultation path'
+);
+update auth.users account
+set banned_until = null
+where account.id = '99300000-0000-4000-8000-000000000005';
+
+select throws_ok(
+  $$select public.save_registration_enrollment_rows(
+    '99300000-0000-4000-8000-000000000273',
+    '[{"classId":"99300000-0000-4000-8000-000000000271","sortOrder":0}]'::jsonb,
+    'director-planned-row-denied'
+  )$$,
+  '42501',
+  'registration_access_denied',
+  'exact director keeps no direct planned enrollment-row editor right'
+);
+select is(
+  pg_temp.registration_observation_director_fixture_state(),
+  (select state from registration_observation_director_baseline),
+  'unrelated, banned, and direct-row director denials leave all fixture state unchanged'
+);
+
+create function pg_temp.registration_observation_capture_director_completion()
+returns jsonb
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_sqlstate text := '00000';
+  v_message text;
+begin
+  begin
+    perform public.complete_registration_consultation(
+      '99300000-0000-4000-8000-000000000274',
+      'waiting',
+      'current_class',
+      '99300000-0000-4000-8000-000000000271',
+      'director-current-class-active'
+    );
+  exception
+    when others then
+      get stacked diagnostics
+        v_sqlstate = returned_sqlstate,
+        v_message = message_text;
+  end;
+
+  return pg_catalog.jsonb_build_object(
+    'sqlstate', v_sqlstate,
+    'message', v_message,
+    'consultationStatus', (
+      select consultation.status
+      from public.ops_registration_consultations consultation
+      where consultation.id = '99300000-0000-4000-8000-000000000274'
+    ),
+    'consultationOutcome', (
+      select consultation.outcome
+      from public.ops_registration_consultations consultation
+      where consultation.id = '99300000-0000-4000-8000-000000000274'
+    ),
+    'trackStatus', (
+      select track.pipeline_status
+      from public.ops_registration_subject_tracks track
+      where track.id = '99300000-0000-4000-8000-000000000273'
+    ),
+    'waitingKind', (
+      select track.waiting_kind
+      from public.ops_registration_subject_tracks track
+      where track.id = '99300000-0000-4000-8000-000000000273'
+    ),
+    'enrollmentCount', (
+      select pg_catalog.count(*)
+      from public.ops_registration_enrollments enrollment
+      where enrollment.track_id = '99300000-0000-4000-8000-000000000273'
+    ),
+    'waitlistShape', coalesce((
+      select pg_catalog.bool_and(
+        enrollment.student_id is not null
+        and enrollment.student_id is not distinct from task.student_id
+        and enrollment.class_id = '99300000-0000-4000-8000-000000000271'
+        and enrollment.status = 'waitlisted'
+        and enrollment.roster_active
+        and enrollment.admission_batch_id is null
+        and enrollment.class_start_date is null
+        and enrollment.class_start_session_key is null
+        and enrollment.class_start_session is null
+        and enrollment.class_start_lesson_session_id is null
+        and enrollment.class_start_source_observation_id is null
+        and enrollment.roster_released_at is null
+        and enrollment.roster_release_reason is null
+        and enrollment.roster_release_source_task_id is null
+        and enrollment.roster_release_kind is null
+      )
+      from public.ops_registration_enrollments enrollment
+      join public.ops_registration_subject_tracks track
+        on track.id = enrollment.track_id
+      join public.ops_tasks task on task.id = track.task_id
+      where enrollment.track_id = '99300000-0000-4000-8000-000000000273'
+    ), false),
+    'studentProjection', coalesce((
+      select student.waitlist_class_ids ?
+        '99300000-0000-4000-8000-000000000271'
+      from public.ops_tasks task
+      join public.students student on student.id = task.student_id
+      where task.id = '99300000-0000-4000-8000-000000000272'
+    ), false),
+    'classProjection', coalesce((
+      select class.waitlist_ids ? task.student_id::text
+      from public.ops_tasks task
+      cross join public.classes class
+      where task.id = '99300000-0000-4000-8000-000000000272'
+        and class.id = '99300000-0000-4000-8000-000000000271'
+    ), false),
+    'receiptCount', (
+      select pg_catalog.count(*)
+      from dashboard_private.ops_registration_mutations mutation
+      where mutation.actor_id = '99300000-0000-4000-8000-000000000005'
+        and mutation.request_key = 'director-current-class-active'
+        and mutation.task_id = '99300000-0000-4000-8000-000000000272'
+        and mutation.mutation_type = 'complete_consultation'
+    )
+  );
+end;
+$$;
+
+select is(
+  pg_temp.registration_observation_capture_director_completion(),
+  '{"sqlstate":"00000","message":null,"consultationStatus":"completed","consultationOutcome":"waiting","trackStatus":"waiting","waitingKind":"current_class","enrollmentCount":1,"waitlistShape":true,"studentProjection":true,"classProjection":true,"receiptCount":1}'::jsonb,
+  'active exact director completes the real public consultation path and materializes one canonical current-class wait'
+);
+
+select pg_catalog.set_config(
+  'request.jwt.claim.sub',
+  '99300000-0000-4000-8000-000000000001',
+  true
+);
+
 -- Validator branch matrix. These direct calls exercise the exact task/track/
 -- class and completed/attended/fit/enrollment facts before any enrollment DML.
 insert into public.ops_tasks(
@@ -925,8 +1895,8 @@ insert into public.ops_registration_subject_tracks(
   observation_attempt_count
 ) values (
   '99300000-0000-4000-8000-000000000196',
-  '99300000-0000-4000-8000-000000000195',
-  '영어',
+  '99300000-0000-4000-8000-000000000105',
+  '수학',
   'enrollment_decided',
   '99300000-0000-4000-8000-000000000005',
   'manual',
@@ -949,8 +1919,31 @@ select throws_ok(
   )$$,
   '23514',
   'registration_observation_class_start_source_invalid',
-  'wrong task and track source is rejected with zero writes'
+  'same-task wrong-track source is rejected independently with zero writes'
 );
+update public.ops_registration_observations
+set task_id = '99300000-0000-4000-8000-000000000195'
+where id = '99300000-0000-4000-8000-000000000108';
+select throws_ok(
+  $$select dashboard_private.validate_registration_observation_class_start_source_v1(
+    '99300000-0000-4000-8000-000000000106',
+    '99300000-0000-4000-8000-000000000108',
+    '99300000-0000-4000-8000-000000000103',
+    current_date - 2,
+    pg_catalog.current_setting('test.registration_enrollment_key_a'),
+    '99300000-0000-4000-8000-000000000104'
+  )$$,
+  '23514',
+  'registration_observation_class_start_source_invalid',
+  'same-track wrong-task source is rejected independently with zero writes'
+);
+update public.ops_registration_observations
+set task_id = '99300000-0000-4000-8000-000000000105'
+where id = '99300000-0000-4000-8000-000000000108';
+delete from public.ops_registration_subject_tracks
+where id = '99300000-0000-4000-8000-000000000196';
+delete from public.ops_tasks
+where id = '99300000-0000-4000-8000-000000000195';
 select throws_ok(
   $$select dashboard_private.validate_registration_observation_class_start_source_v1(
     '99300000-0000-4000-8000-000000000106',
@@ -978,6 +1971,131 @@ select ok(
   'completed attended fit enrollment historical source succeeds despite exception schedule state and uses server KST label'
 );
 
+select throws_ok(
+  $$select dashboard_private.validate_registration_observation_class_start_source_v1(
+    '99300000-0000-4000-8000-000000000106',
+    '99300000-0000-4000-8000-000000000108',
+    '99300000-0000-4000-8000-000000000103',
+    current_date - 3,
+    pg_catalog.current_setting('test.registration_enrollment_key_a'),
+    '99300000-0000-4000-8000-000000000104'
+  )$$,
+  '23514',
+  'registration_observation_class_start_source_invalid',
+  'normalized historical source rejects an independently mismatched date'
+);
+select throws_ok(
+  $$select dashboard_private.validate_registration_observation_class_start_source_v1(
+    '99300000-0000-4000-8000-000000000106',
+    '99300000-0000-4000-8000-000000000108',
+    '99300000-0000-4000-8000-000000000103',
+    current_date - 2,
+    pg_catalog.current_setting('test.registration_enrollment_key_b'),
+    '99300000-0000-4000-8000-000000000104'
+  )$$,
+  '23514',
+  'registration_observation_class_start_source_invalid',
+  'normalized historical source rejects an independently mismatched key'
+);
+select throws_ok(
+  $$select dashboard_private.validate_registration_observation_class_start_source_v1(
+    '99300000-0000-4000-8000-000000000106',
+    '99300000-0000-4000-8000-000000000108',
+    '99300000-0000-4000-8000-000000000103',
+    current_date - 2,
+    pg_catalog.current_setting('test.registration_enrollment_key_a'),
+    '99300000-0000-4000-8000-000000000124'
+  )$$,
+  '23514',
+  'registration_observation_class_start_source_invalid',
+  'normalized historical source rejects an independently mismatched lesson'
+);
+
+-- The table-level fact-shape constraint normally prevents one-column corrupt
+-- rows. Drop and restore it inside this rollback-only transaction so status
+-- and attendance each prove their own validator predicate mutation-sensitively.
+alter table public.ops_registration_observations
+  drop constraint ops_registration_observations_status_facts_check;
+update public.ops_registration_observations
+set status = 'attended_feedback_pending'
+where id = '99300000-0000-4000-8000-000000000118';
+select throws_ok(
+  $$select dashboard_private.validate_registration_observation_class_start_source_v1(
+    '99300000-0000-4000-8000-000000000106',
+    '99300000-0000-4000-8000-000000000118',
+    '99300000-0000-4000-8000-000000000103',
+    current_date - 3,
+    pg_catalog.current_setting('test.registration_enrollment_key_b'),
+    '99300000-0000-4000-8000-000000000124'
+  )$$,
+  '23514',
+  'registration_observation_class_start_source_invalid',
+  'non-completed status is rejected when attendance fit and decision remain eligible'
+);
+update public.ops_registration_observations
+set status = 'completed', attendance = 'no_show'
+where id = '99300000-0000-4000-8000-000000000118';
+select throws_ok(
+  $$select dashboard_private.validate_registration_observation_class_start_source_v1(
+    '99300000-0000-4000-8000-000000000106',
+    '99300000-0000-4000-8000-000000000118',
+    '99300000-0000-4000-8000-000000000103',
+    current_date - 3,
+    pg_catalog.current_setting('test.registration_enrollment_key_b'),
+    '99300000-0000-4000-8000-000000000124'
+  )$$,
+  '23514',
+  'registration_observation_class_start_source_invalid',
+  'non-attended attendance is rejected when status fit and decision remain eligible'
+);
+update public.ops_registration_observations
+set attendance = 'attended'
+where id = '99300000-0000-4000-8000-000000000118';
+alter table public.ops_registration_observations
+  add constraint ops_registration_observations_status_facts_check
+  check (
+    (
+      status = 'scheduled'
+      and attendance is null
+      and suitability_result is null
+      and feedback_reason is null
+      and feedback_submitted_by is null
+      and feedback_submitted_at is null
+    )
+    or (
+      status = 'attended_feedback_pending'
+      and attendance = 'attended'
+      and suitability_result is null
+      and feedback_reason is null
+      and feedback_submitted_by is null
+      and feedback_submitted_at is null
+    )
+    or (
+      status = 'completed'
+      and attendance = 'attended'
+      and suitability_result in ('fit', 'unfit')
+      and nullif(pg_catalog.btrim(feedback_reason), '') is not null
+      and feedback_submitted_by is not null
+      and feedback_submitted_at is not null
+    )
+    or (
+      status = 'no_show'
+      and attendance = 'no_show'
+      and suitability_result is null
+      and feedback_reason is null
+      and feedback_submitted_by is null
+      and feedback_submitted_at is null
+    )
+    or (
+      status = 'canceled'
+      and attendance is null
+      and suitability_result is null
+      and feedback_reason is null
+      and feedback_submitted_by is null
+      and feedback_submitted_at is null
+    )
+  );
+
 update public.ops_registration_observations
 set suitability_result = 'unfit'
 where id = '99300000-0000-4000-8000-000000000118';
@@ -992,7 +2110,7 @@ select throws_ok(
   )$$,
   '23514',
   'registration_observation_class_start_source_invalid',
-  'unfit observation source is rejected with zero writes'
+  'unfit suitability is rejected when status attendance and decision remain eligible'
 );
 update public.ops_registration_observations
 set suitability_result = 'fit'
@@ -1063,6 +2181,22 @@ set status = 'completed',
 where id = '99300000-0000-4000-8000-000000000118';
 
 update public.ops_registration_observations
+set decision_kind = 'not_registered'
+where id = '99300000-0000-4000-8000-000000000118';
+select throws_ok(
+  $$select dashboard_private.validate_registration_observation_class_start_source_v1(
+    '99300000-0000-4000-8000-000000000106',
+    '99300000-0000-4000-8000-000000000118',
+    '99300000-0000-4000-8000-000000000103',
+    current_date - 3,
+    pg_catalog.current_setting('test.registration_enrollment_key_b'),
+    '99300000-0000-4000-8000-000000000124'
+  )$$,
+  '23514',
+  'registration_observation_class_start_source_invalid',
+  'non-enrollment decision is rejected when status attendance and fit remain eligible'
+);
+update public.ops_registration_observations
 set decision_kind = null,
     decided_by = null,
     decided_at = null
@@ -1078,7 +2212,7 @@ select throws_ok(
   )$$,
   '23514',
   'registration_observation_class_start_source_invalid',
-  'missing decision observation source is rejected with zero writes'
+  'missing decision is rejected when status attendance and fit remain eligible'
 );
 update public.ops_registration_observations
 set decision_kind = 'enrollment',
@@ -1397,6 +2531,45 @@ set session_authority = 'legacy',
       'contentHash', repeat('l', 64)
     )
 where id = '99300000-0000-4000-8000-000000000118';
+select throws_ok(
+  $$select dashboard_private.validate_registration_observation_class_start_source_v1(
+    '99300000-0000-4000-8000-000000000106',
+    '99300000-0000-4000-8000-000000000118',
+    '99300000-0000-4000-8000-000000000103',
+    current_date - 2,
+    pg_catalog.current_setting('test.registration_enrollment_key_legacy_b'),
+    null
+  )$$,
+  '23514',
+  'registration_observation_class_start_source_invalid',
+  'legacy historical source rejects an independently mismatched date'
+);
+select throws_ok(
+  $$select dashboard_private.validate_registration_observation_class_start_source_v1(
+    '99300000-0000-4000-8000-000000000106',
+    '99300000-0000-4000-8000-000000000118',
+    '99300000-0000-4000-8000-000000000103',
+    current_date - 3,
+    pg_catalog.current_setting('test.registration_enrollment_key_b'),
+    null
+  )$$,
+  '23514',
+  'registration_observation_class_start_source_invalid',
+  'legacy historical source rejects an independently mismatched key'
+);
+select throws_ok(
+  $$select dashboard_private.validate_registration_observation_class_start_source_v1(
+    '99300000-0000-4000-8000-000000000106',
+    '99300000-0000-4000-8000-000000000118',
+    '99300000-0000-4000-8000-000000000103',
+    current_date - 3,
+    pg_catalog.current_setting('test.registration_enrollment_key_legacy_b'),
+    '99300000-0000-4000-8000-000000000124'
+  )$$,
+  '23514',
+  'registration_observation_class_start_source_invalid',
+  'legacy historical source rejects a non-null normalized lesson id'
+);
 create temporary table registration_observation_legacy_source_response on commit drop as
 select public.save_registration_enrollment_rows(
   '99300000-0000-4000-8000-000000000106',
@@ -1570,8 +2743,87 @@ select is(
 delete from public.ops_registration_enrollments
 where class_id = '99300000-0000-4000-8000-000000000123';
 
--- Rollback-only active/rostered/admission fixture uses an exact synthetic
--- student, so all foreign keys and production triggers remain enabled.
+-- A registered track remains a valid normal-save source state. This exercises
+-- the positive branch separately from the enrollment_decided historical flow.
+update public.ops_registration_subject_tracks
+set pipeline_status = 'registered',
+    workflow_status = 'registered',
+    workflow_revision = workflow_revision + 1,
+    workflow_status_entered_at = pg_catalog.now()
+where id = '99300000-0000-4000-8000-000000000106';
+insert into public.ops_registration_enrollments(
+  id, track_id, class_id, status, makeedu_registered, roster_active, sort_order
+) values (
+  '99300000-0000-4000-8000-000000000155',
+  '99300000-0000-4000-8000-000000000106',
+  '99300000-0000-4000-8000-000000000113',
+  'planned', false, false, 0
+);
+create temporary table registration_observation_registered_response
+on commit drop
+as
+select public.save_registration_enrollment_rows(
+  '99300000-0000-4000-8000-000000000106',
+  pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+    'id', '99300000-0000-4000-8000-000000000155',
+    'classId', '99300000-0000-4000-8000-000000000113',
+    'classStartDate', pg_catalog.to_char(current_date + 7, 'YYYY-MM-DD'),
+    'classStartSessionKey',
+      pg_catalog.current_setting('test.registration_enrollment_key_regular'),
+    'classStartLessonSessionId',
+      '99300000-0000-4000-8000-000000000114',
+    'classStartSession', 'registered browser label',
+    'classStartSourceObservationId', null,
+    'sortOrder', 0
+  )),
+  'enrollment-registered-normal-save'
+) as response;
+select is(
+  (
+    select pg_catalog.jsonb_build_object(
+      'pipeline', track.pipeline_status,
+      'id', response.response #>> '{rows,0,id}',
+      'source', response.response #> '{rows,0,classStartSourceObservationId}',
+      'date', response.response #>> '{rows,0,classStartDate}',
+      'key', response.response #>> '{rows,0,classStartSessionKey}',
+      'lesson', response.response #>> '{rows,0,classStartLessonSessionId}',
+      'receiptCount', (
+        select pg_catalog.count(*)
+        from dashboard_private.ops_registration_mutations mutation
+        where mutation.request_key = 'enrollment-registered-normal-save'
+      )
+    )
+    from registration_observation_registered_response response
+    join public.ops_registration_subject_tracks track
+      on track.id = '99300000-0000-4000-8000-000000000106'
+  ),
+  pg_catalog.jsonb_build_object(
+    'pipeline', 'registered',
+    'id', '99300000-0000-4000-8000-000000000155',
+    'source', null,
+    'date', pg_catalog.to_char(current_date + 7, 'YYYY-MM-DD'),
+    'key', pg_catalog.current_setting('test.registration_enrollment_key_regular'),
+    'lesson', '99300000-0000-4000-8000-000000000114',
+    'receiptCount', 1
+  ),
+  'registered track accepts one ordinary normalized save and one receipt'
+);
+delete from public.ops_registration_enrollments
+where id = '99300000-0000-4000-8000-000000000155';
+update public.ops_registration_subject_tracks
+set pipeline_status = 'enrollment_decided',
+    workflow_status = 'enrollment_requested',
+    workflow_revision = workflow_revision + 1,
+    workflow_status_entered_at = pg_catalog.now()
+where id = '99300000-0000-4000-8000-000000000106';
+select dashboard_private.recompute_registration_parent(
+  '99300000-0000-4000-8000-000000000105'
+);
+
+-- Rollback-only editable-predicate fixtures use an exact synthetic student.
+-- The production state-shape check normally prevents one-field corruption,
+-- so it is dropped and restored in this transaction exactly as the unique
+-- candidate index is for the 2+ ambiguity branch above.
 insert into public.students(
   id, name, uid, class_ids, waitlist_class_ids
 ) values (
@@ -1582,41 +2834,224 @@ insert into public.students(
   '[]'::jsonb
 );
 insert into public.ops_registration_enrollments(
-  id, track_id, student_id, admission_batch_id, class_id,
-  status, makeedu_registered, roster_active, sort_order
+  id, track_id, class_id, status, makeedu_registered, roster_active, sort_order
 ) values (
   '99300000-0000-4000-8000-000000000154',
   '99300000-0000-4000-8000-000000000106',
-  '99300000-0000-4000-8000-000000000194',
-  '99300000-0000-4000-8000-000000000190',
   '99300000-0000-4000-8000-000000000123',
-  'planned', false, true, 9
+  'planned', false, false, 9
 );
-select throws_ok(
-  $$select public.save_registration_enrollment_rows(
-    '99300000-0000-4000-8000-000000000106',
-    '[{"id":"99300000-0000-4000-8000-000000000154","classId":"99300000-0000-4000-8000-000000000123","sortOrder":9}]'::jsonb,
-    'enrollment-rostered-admission-linked'
-  )$$,
-  '40001', 'registration_enrollment_draft_not_editable',
-  'active rostered admission-linked supplied enrollment fails closed'
+do $$
+declare
+  v_constraint_name text;
+begin
+  select constraint_row.conname
+  into strict v_constraint_name
+  from pg_catalog.pg_constraint constraint_row
+  where constraint_row.conrelid =
+      'public.ops_registration_enrollments'::pg_catalog.regclass
+    and constraint_row.contype = 'c'
+    and pg_catalog.pg_get_constraintdef(constraint_row.oid)
+      like '%status = ''waitlisted''%'
+    and pg_catalog.pg_get_constraintdef(constraint_row.oid)
+      like '%roster_release_source_task_id%';
+  execute pg_catalog.format(
+    'alter table public.ops_registration_enrollments drop constraint %I',
+    v_constraint_name
+  );
+end;
+$$;
+create function pg_temp.registration_observation_editable_predicate_result(
+  p_request_key text
+)
+returns jsonb
+language plpgsql
+as $$
+declare
+  v_sqlstate text;
+  v_message text;
+begin
+  begin
+    perform public.save_registration_enrollment_rows(
+      '99300000-0000-4000-8000-000000000106',
+      '[{"id":"99300000-0000-4000-8000-000000000154","classId":"99300000-0000-4000-8000-000000000123","sortOrder":9}]'::jsonb,
+      p_request_key
+    );
+    raise exception 'registration_editable_predicate_unexpected_success';
+  exception
+    when others then
+      get stacked diagnostics
+        v_sqlstate = returned_sqlstate,
+        v_message = message_text;
+  end;
+  return pg_catalog.jsonb_build_object(
+    'sqlstate', v_sqlstate,
+    'message', v_message
+  );
+end;
+$$;
+
+update public.ops_registration_enrollments
+set student_id = '99300000-0000-4000-8000-000000000194'
+where id = '99300000-0000-4000-8000-000000000154';
+select is(
+  pg_temp.registration_observation_editable_predicate_result(
+    'enrollment-editable-student'
+  ),
+  '{"sqlstate":"40001","message":"registration_enrollment_draft_not_editable"}'::jsonb,
+  'student-linked supplied draft is independently non-editable'
 );
+update public.ops_registration_enrollments
+set student_id = null,
+    admission_batch_id = '99300000-0000-4000-8000-000000000190'
+where id = '99300000-0000-4000-8000-000000000154';
+select is(
+  pg_temp.registration_observation_editable_predicate_result(
+    'enrollment-editable-admission'
+  ),
+  '{"sqlstate":"40001","message":"registration_enrollment_draft_not_editable"}'::jsonb,
+  'admission-linked supplied draft is independently non-editable'
+);
+update public.ops_registration_enrollments
+set admission_batch_id = null, roster_active = true
+where id = '99300000-0000-4000-8000-000000000154';
+select is(
+  pg_temp.registration_observation_editable_predicate_result(
+    'enrollment-editable-roster'
+  ),
+  '{"sqlstate":"40001","message":"registration_enrollment_draft_not_editable"}'::jsonb,
+  'roster-active supplied draft is independently non-editable'
+);
+update public.ops_registration_enrollments
+set roster_active = false, roster_released_at = pg_catalog.now()
+where id = '99300000-0000-4000-8000-000000000154';
+select is(
+  pg_temp.registration_observation_editable_predicate_result(
+    'enrollment-editable-release-at'
+  ),
+  '{"sqlstate":"40001","message":"registration_enrollment_draft_not_editable"}'::jsonb,
+  'roster release timestamp independently makes a supplied draft non-editable'
+);
+update public.ops_registration_enrollments
+set roster_released_at = null, roster_release_reason = 'withdrawal_completed'
+where id = '99300000-0000-4000-8000-000000000154';
+select is(
+  pg_temp.registration_observation_editable_predicate_result(
+    'enrollment-editable-release-reason'
+  ),
+  '{"sqlstate":"40001","message":"registration_enrollment_draft_not_editable"}'::jsonb,
+  'roster release reason independently makes a supplied draft non-editable'
+);
+update public.ops_registration_enrollments
+set roster_release_reason = null,
+    roster_release_source_task_id = '99300000-0000-4000-8000-000000000105'
+where id = '99300000-0000-4000-8000-000000000154';
+select is(
+  pg_temp.registration_observation_editable_predicate_result(
+    'enrollment-editable-release-source'
+  ),
+  '{"sqlstate":"40001","message":"registration_enrollment_draft_not_editable"}'::jsonb,
+  'roster release source task independently makes a supplied draft non-editable'
+);
+update public.ops_registration_enrollments
+set roster_release_source_task_id = null, roster_release_kind = 'withdrawal'
+where id = '99300000-0000-4000-8000-000000000154';
+select is(
+  pg_temp.registration_observation_editable_predicate_result(
+    'enrollment-editable-release-kind'
+  ),
+  '{"sqlstate":"40001","message":"registration_enrollment_draft_not_editable"}'::jsonb,
+  'roster release kind independently makes a supplied draft non-editable'
+);
+update public.ops_registration_enrollments
+set roster_release_kind = null
+where id = '99300000-0000-4000-8000-000000000154';
 select is(
   (
     select pg_catalog.jsonb_build_object(
-      'rowCount', pg_catalog.count(*),
+      'editableShape', pg_catalog.bool_and(
+        enrollment.status = 'planned'
+        and enrollment.student_id is null
+        and enrollment.admission_batch_id is null
+        and not enrollment.roster_active
+        and enrollment.roster_released_at is null
+        and enrollment.roster_release_reason is null
+        and enrollment.roster_release_source_task_id is null
+        and enrollment.roster_release_kind is null
+      ),
       'receiptCount', (select pg_catalog.count(*)
         from dashboard_private.ops_registration_mutations mutation
-        where mutation.request_key = 'enrollment-rostered-admission-linked')
+        where mutation.request_key like 'enrollment-editable-%')
     )
     from public.ops_registration_enrollments enrollment
     where enrollment.id = '99300000-0000-4000-8000-000000000154'
-      and enrollment.roster_active
-      and enrollment.admission_batch_id = '99300000-0000-4000-8000-000000000190'
   ),
-  '{"rowCount":1,"receiptCount":0}'::jsonb,
-  'rostered admission-linked rejection has zero DML and receipt delta'
+  '{"editableShape":true,"receiptCount":0}'::jsonb,
+  'every independent editable-predicate rejection rolls back DML and receipt effects'
 );
+alter table public.ops_registration_enrollments
+  add constraint registration_observation_test_enrollment_state_shape_check
+  check (
+    (
+      status = 'planned'
+      and admission_batch_id is null
+      and student_id is null
+      and not roster_active
+      and roster_released_at is null
+      and roster_release_reason is null
+      and roster_release_source_task_id is null
+      and roster_release_kind is null
+    )
+    or (
+      status = 'planned'
+      and admission_batch_id is not null
+      and student_id is not null
+      and roster_active
+      and roster_released_at is null
+      and roster_release_reason is null
+      and roster_release_source_task_id is null
+      and roster_release_kind is null
+    )
+    or (
+      status = 'waitlisted'
+      and admission_batch_id is null
+      and student_id is not null
+      and roster_active
+      and roster_released_at is null
+      and roster_release_reason is null
+      and roster_release_source_task_id is null
+      and roster_release_kind is null
+    )
+    or (
+      status = 'enrolled'
+      and admission_batch_id is not null
+      and student_id is not null
+      and (
+        (
+          roster_active
+          and roster_released_at is null
+          and roster_release_reason is null
+          and roster_release_source_task_id is null
+          and roster_release_kind is null
+        )
+        or (
+          not roster_active
+          and roster_released_at is not null
+          and nullif(pg_catalog.btrim(roster_release_reason), '') is not null
+          and roster_release_source_task_id is not null
+          and roster_release_kind is not null
+        )
+      )
+    )
+    or (
+      status = 'canceled'
+      and not roster_active
+      and roster_released_at is null
+      and roster_release_reason is null
+      and roster_release_source_task_id is null
+      and roster_release_kind is null
+    )
+  );
 delete from public.ops_registration_enrollments
 where id = '99300000-0000-4000-8000-000000000154';
 delete from public.students

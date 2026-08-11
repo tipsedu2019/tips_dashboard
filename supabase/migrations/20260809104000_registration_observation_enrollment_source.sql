@@ -30,7 +30,12 @@ declare
   v_session_label text;
 begin
   if (select auth.uid()) is null
-    or p_track_id is null
+    or not dashboard_private.registration_observation_current_actor_is_active_manager_v1()
+  then
+    raise exception 'registration_access_denied' using errcode = '42501';
+  end if;
+
+  if p_track_id is null
     or p_observation_id is null
     or p_class_id is null
     or p_class_start_date is null
@@ -492,6 +497,7 @@ declare
 begin
   if p_actor_id is null
     or p_actor_id is distinct from (select auth.uid())
+    or not dashboard_private.registration_observation_current_actor_is_active_manager_v1()
     or p_track_id is null
     or p_canonical_rows is null
     or pg_catalog.jsonb_typeof(p_canonical_rows) <> 'array'
@@ -982,7 +988,11 @@ declare
   v_response jsonb;
   v_receipt_matches boolean;
 begin
-  if v_actor_id is null or v_request_key is null or p_track_id is null then
+  if v_actor_id is null
+    or not dashboard_private.registration_observation_current_actor_is_active_manager_v1()
+    or v_request_key is null
+    or p_track_id is null
+  then
     raise exception 'registration_access_denied' using errcode = '42501';
   end if;
 
@@ -1081,8 +1091,20 @@ declare
   v_mode text;
   v_session jsonb;
   v_session_id uuid;
+  v_is_legacy_current_class_wait boolean;
 begin
-  if v_actor_id is null then
+  if v_actor_id is null
+    or not exists (
+      select 1
+      from auth.users account
+      where account.id = v_actor_id
+        and account.deleted_at is null
+        and (
+          account.banned_until is null
+          or account.banned_until <= pg_catalog.now()
+        )
+    )
+  then
     raise exception 'registration_access_denied' using errcode = '42501';
   end if;
 
@@ -1093,11 +1115,41 @@ begin
   if v_task_id is null then
     raise exception 'registration_access_denied' using errcode = '42501';
   end if;
-  perform dashboard_private.assert_registration_mutation_access(
-    v_task_id,
-    new.track_id,
-    'save_enrollment_rows'
-  );
+
+  v_is_legacy_current_class_wait :=
+    tg_op = 'INSERT'
+    and new.status = 'waitlisted'
+    and new.roster_active
+    and not new.makeedu_registered
+    and new.student_id is not null
+    and new.admission_batch_id is null
+    and new.textbook_id is null
+    and new.class_start_date is null
+    and nullif(pg_catalog.btrim(new.class_start_session_key), '') is null
+    and nullif(pg_catalog.btrim(new.class_start_session), '') is null
+    and new.class_start_lesson_session_id is null
+    and new.class_start_source_observation_id is null
+    and new.roster_released_at is null
+    and new.roster_release_reason is null
+    and new.roster_release_source_task_id is null
+    and new.roster_release_kind is null
+    and new.sort_order = 0;
+
+  if v_is_legacy_current_class_wait
+    and not dashboard_private.registration_observation_current_actor_is_active_manager_v1()
+  then
+    perform dashboard_private.assert_registration_mutation_access(
+      v_task_id,
+      new.track_id,
+      'complete_consultation'
+    );
+  else
+    perform dashboard_private.assert_registration_mutation_access(
+      v_task_id,
+      new.track_id,
+      'save_enrollment_rows'
+    );
+  end if;
 
   if new.class_start_source_observation_id is null then
     if new.class_start_date is null
@@ -1233,7 +1285,12 @@ declare
   v_response jsonb;
 begin
   if v_actor_id is null
-    or v_request_key is null
+    or not dashboard_private.registration_observation_current_actor_is_active_manager_v1()
+  then
+    raise exception 'registration_access_denied' using errcode = '42501';
+  end if;
+
+  if v_request_key is null
     or p_track_id is null
     or p_rows is null
     or pg_catalog.jsonb_typeof(p_rows) <> 'array'
@@ -1315,6 +1372,16 @@ begin
       v_canonical_rows,
       v_actor_id
     );
+
+  select track.*
+  into v_track
+  from public.ops_registration_subject_tracks track
+  where track.id = p_track_id
+    and track.task_id = v_task_id
+  for update;
+  if not found then
+    raise exception 'registration_access_denied' using errcode = '42501';
+  end if;
 
   update public.ops_registration_subject_tracks
   set enrollment_detail_rows = v_response -> 'rows',
