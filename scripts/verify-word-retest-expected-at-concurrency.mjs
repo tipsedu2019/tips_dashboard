@@ -195,21 +195,32 @@ async function cleanupFixture(context) {
   )
   const eventIds = canonicalRows.map((row) => row.id)
   if (eventIds.length) {
-    await attempt("delivery reverse cleanup", () => context.serviceClient
-      .schema("dashboard_private")
-      .from("notification_deliveries")
-      .delete()
-      .in("event_id", eventIds))
-    await attempt("fanout reverse cleanup", () => context.serviceClient
-      .schema("dashboard_private")
-      .from("notification_event_fanout_jobs")
-      .delete()
-      .in("event_id", eventIds))
-    await attempt("canonical reverse cleanup", () => context.serviceClient
-      .schema("dashboard_private")
-      .from("notification_events")
-      .delete()
-      .in("id", eventIds))
+    const deliveryRows = await privateRows(
+      context.serviceClient,
+      "notification_deliveries",
+      (query) => query.in("event_id", eventIds),
+    )
+    const ownershipRows = await privateRows(
+      context.serviceClient,
+      "notification_dispatch_ownership_claims",
+      (query) => query.in("occurrence_key", canonicalRows.map((row) => row.occurrence_key)),
+    )
+    if (deliveryRows.length || ownershipRows.length) {
+      cleanupErrors.push(new Error(
+        `unexpected shared notification artifacts require isolated database disposal: events=${eventIds.join(",")} deliveries=${deliveryRows.map((row) => row.id).join(",")} ownership=${ownershipRows.map((row) => row.id).join(",")}`,
+      ))
+    } else {
+      await attempt("fanout reverse cleanup", () => context.serviceClient
+        .schema("dashboard_private")
+        .from("notification_event_fanout_jobs")
+        .delete()
+        .in("event_id", eventIds))
+      await attempt("canonical reverse cleanup", () => context.serviceClient
+        .schema("dashboard_private")
+        .from("notification_events")
+        .delete()
+        .in("id", eventIds))
+    }
   }
   await attempt("source reverse cleanup", () => context.serviceClient
     .from("ops_task_events")

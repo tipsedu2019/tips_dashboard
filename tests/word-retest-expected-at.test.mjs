@@ -372,7 +372,12 @@ test("동시성 verifier는 승인 target, 동일 actor 두 client, local barrie
     "notification_events",
     "notification_event_fanout_jobs",
     "notification_deliveries",
+    "notification_dispatch_ownership_claims",
   ]) assert.match(script, new RegExp(table))
+  assert.doesNotMatch(
+    script,
+    /\.from\(["']notification_(?:deliveries|dispatch_ownership_claims)["']\)[\s\S]{0,160}\.(?:insert|update|delete)\s*\(/,
+  )
   assert.match(script, /detail reverse cleanup[\s\S]*parent reverse cleanup[\s\S]*request-ledger reverse cleanup/)
   assert.match(script, /Word-retest expected-time concurrency proof \(not executed\)/)
 })

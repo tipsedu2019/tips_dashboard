@@ -1030,12 +1030,12 @@ test("next downstream focus fails explicitly until its files exist", () => {
     "--execute",
     "--approved-local-db",
     "--focus",
-    "google-chat",
+    "solapi-contract",
   ]);
   assert.equal(result.status, 2);
   assert.match(
     result.stderr,
-    /registration_observation_local_db_focus_unavailable:google-chat/,
+    /registration_observation_local_db_focus_unavailable:solapi-contract/,
   );
 });
 
