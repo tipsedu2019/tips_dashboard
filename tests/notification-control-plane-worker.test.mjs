@@ -2699,6 +2699,112 @@ test("실제 registration adapter retry는 mutable observation source reader를 
   }
 })
 
+test("관찰 first-attempt refresh는 canonical Google Chat provider 결과로 durable retry claim을 결정한다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  const { createGoogleChatProvider } = await import(googleChatProviderModuleUrl)
+  for (const fixture of [
+    { name: "429", response: () => new Response("rate", { status: 429 }), retry: true, firstStatus: "retry_wait" },
+    { name: "425", response: () => new Response("early", { status: 425 }), retry: true, firstStatus: "retry_wait" },
+    { name: "408", response: () => new Response("ambiguous", { status: 408 }), retry: false, firstStatus: "delivery_unknown" },
+    { name: "timeout", response: () => { throw Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }) }, retry: false, firstStatus: "delivery_unknown" },
+    { name: "reset", response: () => { throw Object.assign(new Error("reset"), { code: "ECONNRESET" }) }, retry: false, firstStatus: "delivery_unknown" },
+    { name: "5xx", response: () => new Response("upstream", { status: 500 }), retry: false, firstStatus: "delivery_unknown" },
+  ]) {
+    const deliveryId = "80000000-0000-4000-8000-000000000009"
+    const initialPayload = { progress: "42~49쪽" }
+    const refreshedPayload = { progress: "50~57쪽" }
+    const payloadFingerprint = createHash("sha256").update(JSON.stringify(refreshedPayload)).digest("hex")
+    const renderFingerprint = createHash("sha256").update(JSON.stringify({ body: "B", href: "/admin/registration", title: "T" })).digest("hex")
+    const state = { status: "pending", attempt: 0, frozen: null, sends: 0, claims: 0 }
+    const calls = []
+    const claimBase = createDeliveryClaim({
+      delivery_id: deliveryId, workflow_key: "registration", event_key: "registration.observation_reminder_due",
+      source_type: "registration_observation", source_id: "70000000-0000-4000-8000-000000000023", source_revision: "7",
+      rule_revision: "1", target_generation: "1", channel_key: "google_chat",
+      target: { target_kind: "connection", target_key: "connection:google_chat.management", target_profile_id: null, connection_key: "google_chat.management", target_snapshot: { connection_key: "google_chat.management" } },
+    })
+    const rpc = async (name, parameters) => {
+      calls.push({ name, parameters: clone(parameters) })
+      if (name === "record_notification_worker_heartbeat_v1") return null
+      if (name === "reap_registration_observation_chat_job_leases_v1") return { reaped_count: 0, failed_count: 0 }
+      if (["claim_registration_observation_chat_jobs_v1", "claim_notification_fanout_jobs_v1", "claim_notification_rule_reconciliation_jobs_v1", "claim_notification_target_reconciliation_jobs_v1"].includes(name)) return []
+      if (name === "reap_notification_leases_v1") return { reaped_count: 0 }
+      if (name === "claim_notification_deliveries_v1") {
+        state.claims += 1
+        return state.status === "pending" ? [{ ...claimBase, attempt_count: state.attempt }] : []
+      }
+      if (name === "read_registration_observation_notification_delivery_frozen_state_v1") {
+        return state.frozen || { attemptCount: 0, expiresAt: "2026-08-17T10:00:00.000Z", snapshot: initialPayload, payloadFingerprint: null, renderFingerprint: null, title: null, body: null, href: null, lastAttemptStartedAt: null }
+      }
+      if (name === "get_notification_render_snapshot_v1") return {
+        event_id: EVENT_ID, workflow_key: "registration", event_key: claimBase.event_key, source_type: claimBase.source_type,
+        source_id: claimBase.source_id, source_revision: "7", occurrence_key: "durable-first-attempt", occurred_at: claimBase.scheduled_for,
+        payload_schema_version: 3, payload: initialPayload, rule_id: RULE_ID, rule_revision: "1", template_id: TEMPLATE_ID,
+        channel_key: "google_chat", audience_key: "subject_team", rule_variant_key: "immediate", title_template: "T", body_template: "B", allowed_variables: [], template_payload_schema_version: 3,
+      }
+      if (name === "refresh_registration_observation_notification_delivery_v1") {
+        state.frozen = { attemptCount: 0, expiresAt: "2026-08-17T10:00:00.000Z", snapshot: parameters.p_payload, payloadFingerprint: parameters.p_payload_fingerprint, renderFingerprint: parameters.p_render_fingerprint, title: parameters.p_rendered_title, body: parameters.p_rendered_body, href: parameters.p_href, lastAttemptStartedAt: null }
+        return { outcome: "refreshed" }
+      }
+      if (name === "prepare_registration_observation_notification_delivery_v1") return {
+        prepared: true, delivery_id: deliveryId, claim_token: CLAIM_TOKEN, dispatch_token: DISPATCH_TOKEN, status: "sending", channel_key: "google_chat", connection_key: "google_chat.management", webhook_url: GOOGLE_CHAT_URL, rendered_title: state.frozen.title, rendered_body: state.frozen.body, href: state.frozen.href, mention_user_names: [],
+      }
+      if (name === "register_notification_external_attempt_v1") return { allowed: true, attempt_id: "80000000-0000-4000-8000-000000000010" }
+      if (name === "finalize_notification_delivery_v1") {
+        if (parameters.p_status === "retry_wait") {
+          state.status = "pending"
+          state.attempt = 1
+          state.frozen = { ...state.frozen, attemptCount: 1, lastAttemptStartedAt: "2026-08-17T08:00:00.000Z" }
+        } else state.status = "terminal"
+        return { ok: true }
+      }
+      throw new Error(`unexpected rpc ${name}`)
+    }
+    const fetchCalls = []
+    const provider = createGoogleChatProvider({
+      http408Disposition: "delivery_unknown",
+      fetch: async (_input, init) => {
+        fetchCalls.push(clone(init))
+        state.sends += 1
+        if (state.sends === 1) return fixture.response()
+        return new Response(JSON.stringify({ name: "spaces/fixture/messages/frozen-retry" }), { status: 200, headers: { "Content-Type": "application/json" } })
+      },
+    })
+    let currentPreparationReads = 0
+    const worker = createNotificationWorkerRuntime({
+      rpc, createRunId: () => RUN_ID, now: () => new Date("2026-08-17T08:00:00.000Z"), getProvider: () => provider,
+      getAdapter: () => createAdapter({
+        async revalidateBeforeSend(input) {
+          if (input.attemptCount === 0) {
+            currentPreparationReads += 1
+            return { ok: true, refreshedPayload, payloadSchemaVersion: 3, payloadFingerprint }
+          }
+          assert.deepEqual(input.eventSnapshot, { payloadSchemaVersion: 3, payload: refreshedPayload })
+          return { ok: true }
+        },
+        async buildRenderContext() { return {} },
+        async buildDeepLink() { return "/admin/registration" },
+      }),
+    })
+    await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+    await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+    const expectedSends = fixture.retry ? 2 : 1
+    assert.equal(currentPreparationReads, 1, fixture.name)
+    assert.equal(state.claims, 2, fixture.name)
+    assert.equal(state.sends, expectedSends, fixture.name)
+    assert.equal(fetchCalls.length, expectedSends, fixture.name)
+    assert.equal(calls.filter((call) => call.name === "get_notification_render_snapshot_v1").length, 1, fixture.name)
+    assert.equal(calls.filter((call) => call.name === "refresh_registration_observation_notification_delivery_v1").length, 1, fixture.name)
+    assert.equal(calls.filter((call) => call.name === "register_notification_external_attempt_v1").length, expectedSends, fixture.name)
+    assert.equal(state.frozen.payloadFingerprint, payloadFingerprint, fixture.name)
+    assert.equal(state.frozen.renderFingerprint, renderFingerprint, fixture.name)
+    const finalizations = calls.filter((call) => call.name === "finalize_notification_delivery_v1")
+    assert.equal(finalizations[0].parameters.p_status, fixture.firstStatus, fixture.name)
+    assert.equal(finalizations.length, expectedSends, fixture.name)
+    if (fixture.retry) assert.deepEqual(fetchCalls[1], fetchCalls[0], `${fixture.name} frozen transport bytes`)
+  }
+})
+
 test("worker는 외부 시도 등록 거부 또는 응답 불명확 시 provider를 0회 호출하고 unknown으로 닫는다", async () => {
   const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
   for (const fixture of [
