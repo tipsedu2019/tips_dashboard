@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto"
 
-import type {
-  NotificationChannelKey,
-  NotificationWorkflowKey,
+import {
+  NOTIFICATION_WORKFLOW_OPTIONS,
+  type NotificationChannelKey,
+  type NotificationWorkflowKey,
 } from "../notification-control-plane-types.ts"
 import type {
   NotificationRenderContext,
@@ -17,6 +18,7 @@ import {
   type NotificationProviderResult,
 } from "./providers/google-chat-provider.ts"
 import { createWebPushProvider } from "./providers/web-push-provider.ts"
+import { validateNotificationAppDeepLink } from "./notification-app-deep-link.ts"
 import { normalizeRenderedNotificationBody } from "./presentation/notification-presentation-formatters.ts"
 
 type JsonRecord = Record<string, unknown>
@@ -86,16 +88,9 @@ type RenderedNotificationSnapshot = Readonly<{
   href: string | null
 }>
 
-const WORKFLOW_LINK_ROOTS: Readonly<Record<string, string>> = Object.freeze({
-  tasks: "/admin/tasks",
-  word_retests: "/admin/word-retests",
-  registration: "/admin/registration",
-  transfer: "/admin/transfer",
-  withdrawal: "/admin/withdrawal",
-  makeup_requests: "/admin/makeup-requests",
-  approvals: "/admin/approvals",
-})
-const WORKFLOW_KEY_SET = new Set(Object.keys(WORKFLOW_LINK_ROOTS))
+const WORKFLOW_KEY_SET = new Set<string>(
+  NOTIFICATION_WORKFLOW_OPTIONS.map((workflow) => workflow.key),
+)
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const DECIMAL_PATTERN = /^(?:0|[1-9]\d*)$/
@@ -307,24 +302,11 @@ export function filterNotificationRenderContext(
 
 function validateDeepLink(workflowKey: string, href: string | null) {
   if (href === null) return null
-  if (typeof href !== "string" || !href.startsWith("/") || href.startsWith("//")) {
-    renderValidationError()
-  }
-  const expectedRoot = WORKFLOW_LINK_ROOTS[workflowKey]
-  if (!expectedRoot) renderValidationError()
-  let parsed: URL
   try {
-    parsed = new URL(href, "https://notification.invalid")
+    return validateNotificationAppDeepLink(href, requiredWorkflowKey(workflowKey))
   } catch {
     renderValidationError()
   }
-  if (
-    parsed.origin !== "https://notification.invalid" ||
-    (parsed.pathname !== expectedRoot && !parsed.pathname.startsWith(`${expectedRoot}/`))
-  ) {
-    renderValidationError()
-  }
-  return `${parsed.pathname}${parsed.search}${parsed.hash}`
 }
 
 export function renderNotificationSnapshot(input: RenderSnapshotInput): RenderedNotificationSnapshot {
@@ -1197,6 +1179,16 @@ function validateGoogleChatMentionUserNames(context: JsonRecord) {
   }
 }
 
+function googleChatProviderContext(
+  begun: JsonRecord,
+  workflowKey: unknown,
+): NotificationBegunDeliveryContext {
+  return Object.freeze({
+    ...begun,
+    workflow_key: requiredWorkflowKey(workflowKey),
+  }) as unknown as NotificationBegunDeliveryContext
+}
+
 async function processDelivery(
   claim: JsonRecord,
   input: NotificationWorkerRuntimeInput,
@@ -1276,6 +1268,9 @@ async function processDelivery(
 
   const begunChannel = asString(begun.channel_key)
   if (begunChannel === "google_chat") validateGoogleChatMentionUserNames(begun)
+  const providerContext = begunChannel === "google_chat"
+    ? googleChatProviderContext(begun, claim.workflow_key)
+    : begun as NotificationBegunDeliveryContext
   const provider = input.getProvider(begunChannel)
   if (!provider) {
     await finalizeDelivery(claim, "failed", "connection_missing", input.rpc, {
@@ -1319,7 +1314,7 @@ async function processDelivery(
 
   let rawResult: NotificationProviderResult
   try {
-    rawResult = await provider.send(begun as NotificationBegunDeliveryContext)
+    rawResult = await provider.send(providerContext)
   } catch {
     rawResult = {
       status: "delivery_unknown",

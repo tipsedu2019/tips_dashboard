@@ -1,4 +1,6 @@
 import { validateGoogleChatWebhookUrl } from "../notification-connection-crypto.ts"
+import type { NotificationWorkflowKey } from "../../notification-control-plane-types.ts"
+import { buildNotificationAppLink } from "../notification-app-deep-link.ts"
 
 export type NotificationProviderResult = Readonly<{
   status: "sent" | "retry_wait" | "failed" | "delivery_unknown"
@@ -12,7 +14,7 @@ export type NotificationProviderResult = Readonly<{
 
 export type Http408Disposition = "retry_wait" | "delivery_unknown"
 
-export type GoogleChatBegunDeliveryContext = Readonly<{
+type GoogleChatProviderInput = Readonly<{
   delivery_id: string
   claim_token: string
   dispatch_token: string
@@ -23,8 +25,19 @@ export type GoogleChatBegunDeliveryContext = Readonly<{
   rendered_title: string
   rendered_body: string
   href: string | null
+  workflow_key?: NotificationWorkflowKey
   mention_user_names?: ReadonlyArray<string>
 }>
+
+export type GoogleChatBegunDeliveryContext = GoogleChatProviderInput & Readonly<{
+  workflow_key: NotificationWorkflowKey
+}>
+
+function hasGoogleChatWorkflowKey(
+  value: GoogleChatProviderInput,
+): value is GoogleChatBegunDeliveryContext {
+  return typeof value.workflow_key === "string"
+}
 
 type FetchTransport = (
   input: RequestInfo | URL,
@@ -32,24 +45,11 @@ type FetchTransport = (
 ) => Promise<Response>
 
 const SAFE_PROVIDER_ID = /^[A-Za-z0-9._/-]{1,256}$/
-const GOOGLE_CHAT_APP_ORIGIN = "https://tipsedu.co.kr"
 const EXTERNAL_URL_PATTERN = /(?:https?:\/\/|\/\/)/iu
-const ENCODED_PATH_SEPARATOR_OR_TRAVERSAL = /%(?:2e|2f|5c)/iu
-const RAW_PATH_SEPARATOR_OR_TRAVERSAL = /(?:\\|(?:^|\/)\.{1,2}(?:\/|$))/u
 const MAX_GOOGLE_CHAT_MESSAGE_BYTES = 32_000
 const GOOGLE_CHAT_CARD_ID = "tips-dashboard-notification"
-const GOOGLE_CHAT_BUTTON_TEXT = "대시보드에서 보기"
 const GOOGLE_CHAT_USER_NAME_PATTERN = /^users\/[1-9]\d{0,31}$/u
 const GOOGLE_CHAT_UNSAFE_TEXT_PATTERN = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]|<|>|(?:^|[^A-Za-z0-9_])@(all|everyone|here|channel)(?=$|[^A-Za-z0-9_])/iu
-const GOOGLE_CHAT_LINK_QUERY_KEYS: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
-  "/admin/tasks": new Set(["taskId", "focus"]),
-  "/admin/word-retests": new Set(["taskId"]),
-  "/admin/registration": new Set(["taskId", "trackId", "appointmentId", "view"]),
-  "/admin/transfer": new Set(["flow", "taskId"]),
-  "/admin/withdrawal": new Set(["flow", "taskId"]),
-  "/admin/makeup-requests": new Set(["request"]),
-  "/admin/approvals": new Set(["approvalId"]),
-})
 
 export type GoogleChatCardPayload = Readonly<{
   cardsV2: ReadonlyArray<Readonly<{
@@ -116,55 +116,6 @@ function safeWebhookUrl(value: unknown) {
   }
 }
 
-function absoluteGoogleChatAppHref(value: unknown) {
-  const rawPath = typeof value === "string" ? value.split("?", 1)[0] : ""
-  if (
-    typeof value !== "string" ||
-    !value.startsWith("/admin/") ||
-    value.includes("#") ||
-    EXTERNAL_URL_PATTERN.test(value) ||
-    ENCODED_PATH_SEPARATOR_OR_TRAVERSAL.test(rawPath) ||
-    RAW_PATH_SEPARATOR_OR_TRAVERSAL.test(rawPath)
-  ) {
-    return undefined
-  }
-
-  try {
-    const parsed = new URL(value, GOOGLE_CHAT_APP_ORIGIN)
-    const allowedQueryKeys = GOOGLE_CHAT_LINK_QUERY_KEYS[parsed.pathname]
-    if (
-      parsed.origin !== GOOGLE_CHAT_APP_ORIGIN ||
-      !allowedQueryKeys ||
-      parsed.hash ||
-      parsed.username ||
-      parsed.password
-    ) {
-      return undefined
-    }
-
-    const seenQueryKeys = new Set<string>()
-    for (const [key, queryValue] of parsed.searchParams) {
-      if (
-        !allowedQueryKeys.has(key) ||
-        seenQueryKeys.has(key) ||
-        !queryValue ||
-        /[\u0000-\u001f\u007f]/u.test(queryValue)
-      ) return undefined
-      seenQueryKeys.add(key)
-    }
-    if (parsed.searchParams.has("view") && parsed.searchParams.get("view") !== "calendar") {
-      return undefined
-    }
-    if (
-      parsed.searchParams.has("flow") &&
-      !["applicant", "operations", "closed"].includes(parsed.searchParams.get("flow") || "")
-    ) return undefined
-    return parsed.toString()
-  } catch {
-    return undefined
-  }
-}
-
 function escapeGoogleChatCardText(value: string) {
   return value
     .replace(/&/gu, "&amp;")
@@ -220,7 +171,7 @@ function canonicalGoogleChatMentionUserNames(value: unknown) {
 
 export function buildGoogleChatCardPayload(input: Pick<
   GoogleChatBegunDeliveryContext,
-  "rendered_title" | "rendered_body" | "href"
+  "rendered_title" | "rendered_body" | "href" | "workflow_key"
 >): GoogleChatCardPayloadResult {
   const title = flattenGoogleChatText(input?.rendered_title)
   const body = flattenGoogleChatText(input?.rendered_body)
@@ -230,8 +181,12 @@ export function buildGoogleChatCardPayload(input: Pick<
     !body
   ) return { ok: false, errorCode: "render_validation_failed" }
 
-  const absoluteUrl = absoluteGoogleChatAppHref(input.href)
-  if (!absoluteUrl) return { ok: false, errorCode: "render_validation_failed" }
+  let appLink
+  try {
+    appLink = buildNotificationAppLink(input.href, input.workflow_key)
+  } catch {
+    return { ok: false, errorCode: "render_validation_failed" }
+  }
   const payload: GoogleChatCardPayload = Object.freeze({
     cardsV2: Object.freeze([Object.freeze({
       cardId: GOOGLE_CHAT_CARD_ID,
@@ -247,9 +202,9 @@ export function buildGoogleChatCardPayload(input: Pick<
             Object.freeze({
               buttonList: Object.freeze({
                 buttons: Object.freeze([Object.freeze({
-                  text: GOOGLE_CHAT_BUTTON_TEXT,
+                  text: appLink.buttonText,
                   onClick: Object.freeze({
-                    openLink: Object.freeze({ url: absoluteUrl }),
+                    openLink: Object.freeze({ url: appLink.absoluteUrl }),
                   }),
                 })]),
               }),
@@ -263,12 +218,13 @@ export function buildGoogleChatCardPayload(input: Pick<
   if (byteLength > MAX_GOOGLE_CHAT_MESSAGE_BYTES) {
     return { ok: false, errorCode: "render_validation_failed" }
   }
-  return { ok: true, payload, absoluteUrl, byteLength }
+  return { ok: true, payload, absoluteUrl: appLink.absoluteUrl, byteLength }
 }
 
-function buildGoogleChatMessagePayload(context: GoogleChatBegunDeliveryContext):
+function buildGoogleChatMessagePayload(context: GoogleChatProviderInput):
   | Readonly<{ ok: true; payload: GoogleChatMessagePayload }>
   | Readonly<{ ok: false }> {
+  if (!hasGoogleChatWorkflowKey(context)) return { ok: false }
   const builtCard = buildGoogleChatCardPayload(context)
   if (!builtCard.ok) return { ok: false }
   if (!Object.prototype.hasOwnProperty.call(context, "mention_user_names")) {
@@ -345,7 +301,7 @@ export function createGoogleChatProvider(input: {
   const http408Disposition = normalizeHttp408Disposition(input.http408Disposition)
 
   return {
-    async send(context: GoogleChatBegunDeliveryContext): Promise<NotificationProviderResult> {
+    async send(context: GoogleChatProviderInput): Promise<NotificationProviderResult> {
       const webhookUrl = safeWebhookUrl(context?.webhook_url)
       if (!webhookUrl || context?.status !== "sending" || context?.channel_key !== "google_chat") {
         return result("failed", "connection_missing", {

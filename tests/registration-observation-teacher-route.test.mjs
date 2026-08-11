@@ -15,6 +15,10 @@ const pageUrl = new URL(
   "src/app/admin/registration/observations/[observationId]/feedback/page.tsx",
   root,
 )
+const notificationDeepLinkUrl = new URL(
+  "src/features/notifications/server/notification-app-deep-link.ts",
+  root,
+)
 const panelUrl = new URL(
   "src/features/tasks/registration-observation-teacher-feedback.tsx",
   root,
@@ -412,6 +416,21 @@ test("teacher feedback route validates the UUID segment and stays under the admi
 
   const adminLayoutSource = await readSource(adminLayoutUrl)
   assert.match(adminLayoutSource, /<AuthGuard>[\s\S]*\{children\}[\s\S]*<\/AuthGuard>/)
+})
+
+test("teacher feedback route is the sole dynamic registration notification link", async () => {
+  const { validateNotificationAppDeepLink } = await import(notificationDeepLinkUrl.href)
+  const href = `/admin/registration/observations/${IDS.observation}/feedback`
+
+  assert.equal(validateNotificationAppDeepLink(href, "registration"), href)
+  for (const malformed of [
+    `/admin/registration/observations/${IDS.observation}/feedback?taskId=${IDS.task}`,
+    `${href}#result`,
+    `/admin/registration/observations/${IDS.observation}/feedback/extra`,
+    "/admin/registration/observations/not-a-uuid/feedback",
+  ]) {
+    assert.throws(() => validateNotificationAppDeepLink(malformed, "registration"))
+  }
 })
 
 test("teacher feedback route uses only the dedicated feedback client and never reaches registration, decision, enrollment, or providers", async () => {

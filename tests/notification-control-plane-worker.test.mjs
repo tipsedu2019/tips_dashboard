@@ -411,6 +411,7 @@ function createBegunGoogleChatContext(overrides = {}) {
     rendered_title: "새 할 일",
     rendered_body: "확인할 할 일이 있습니다.",
     href: "/admin/tasks",
+    workflow_key: "tasks",
     ...overrides,
   }
 }
@@ -1846,9 +1847,9 @@ test("전자결재의 비활성 수신자 재검증은 실제 승인 adapter 경
   assertNoSensitiveValue(finalize.parameters)
 })
 
-test("worker는 begin-send가 돌려준 canonical context 하나만 provider에 넘기고 unknown을 자동 재시도하지 않는다", async () => {
+test("worker는 begun payload의 위조 workflow를 덮고 claim workflow context 하나만 provider에 넘긴다", async () => {
   const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
-  const begunContext = createBegunGoogleChatContext()
+  const begunContext = createBegunGoogleChatContext({ workflow_key: "registration" })
   const timeline = []
   let providerInput = null
   const harness = createRpcHarness({
@@ -1894,7 +1895,10 @@ test("worker는 begin-send가 돌려준 canonical context 하나만 provider에 
 
   assert.equal(result.deliveries, 1)
   assert.deepEqual(timeline, ["prepare", "register", "provider", "finalize"])
-  assert.deepEqual(providerInput, begunContext)
+  assert.deepEqual(providerInput, {
+    ...begunContext,
+    workflow_key: "tasks",
+  })
   const prepare = harness.calls.find((call) => (
     call.name === "prepare_notification_immediate_delivery_v1"
   ))
@@ -2694,6 +2698,7 @@ test("Google Chat provider는 안전한 상대 링크만 고정 origin의 전체
 
   assertProviderResult(
     await provider.send(createBegunGoogleChatContext({
+      workflow_key: "withdrawal",
       href: "/admin/withdrawal?flow=operations&taskId=ea3cd6e1-e2da-4f9d-833e-c7349c09ee31",
     })),
     "sent",

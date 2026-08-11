@@ -1504,10 +1504,15 @@ export function createRegistrationNotificationAdapter(
       if (isObservationEvent(input.eventKey)) {
         const payload = observationPayload(input)
         observationPresentationInput(input, payload)
+        if (payload.event_kind === "registration.observation_feedback_due") {
+          return `/admin/registration/observations/${payload.observation_id}/feedback`
+        }
         const query = new URLSearchParams()
         query.set("taskId", payload.task_id)
         query.set("trackId", payload.track_id)
+        query.set("appointmentId", payload.appointment_id)
         query.set("observationId", payload.observation_id)
+        query.set("view", "calendar")
         return `/admin/registration?${query.toString()}`
       }
       if (isImmediateEvent(input.eventKey)) return immediateDeepLink(input)
