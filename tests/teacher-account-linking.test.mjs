@@ -43,6 +43,7 @@ test("teacher settings links teachers to login accounts and editable roles", asy
   assert.match(workspaceSource, /계정/);
   assert.match(workspaceSource, /권한/);
   assert.match(workspaceSource, /최근 변경 이력/);
+  assert.match(workspaceSource, /TeacherGoogleChatIdentityPanel/);
   assert.match(workspaceSource, /연결된 계정/);
   assert.match(workspaceSource, /function formatAccountIdentifier/);
   assert.match(workspaceSource, /아이디 \$\{trimmed\}/);

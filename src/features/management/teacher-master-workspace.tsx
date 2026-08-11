@@ -32,6 +32,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { createId, managementService } from "./management-service.js";
+import { TeacherGoogleChatIdentityPanel } from "./teacher-google-chat-identity-panel";
 import {
   SettingsMasterHeader,
   SettingsTableFrame,
@@ -1115,6 +1116,8 @@ export function TeacherMasterWorkspace() {
           );
         })}
       </div>
+
+      <TeacherGoogleChatIdentityPanel />
 
       <div data-testid="teacher-audit-mobile-list" className="grid gap-2 md:hidden">
         <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
