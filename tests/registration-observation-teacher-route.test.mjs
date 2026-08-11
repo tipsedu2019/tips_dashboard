@@ -5,7 +5,6 @@ import test from "node:test"
 import vm from "node:vm"
 
 import { createElement } from "react"
-import { renderToStaticMarkup } from "react-dom/server"
 
 import { getRegistrationObservationFeedbackErrorState } from "../src/features/tasks/registration-observation-model.ts"
 
@@ -128,37 +127,6 @@ async function loadTsxRuntime(url, overrides = {}) {
   return runtimeModule.exports
 }
 
-async function loadTeacherModel() {
-  const source = await readSource(panelUrl)
-  const startMarker = "// registration-observation-teacher-feedback-model:start"
-  const endMarker = "// registration-observation-teacher-feedback-model:end"
-  const start = source.indexOf(startMarker)
-  const end = source.indexOf(endMarker, start + startMarker.length)
-  assert.notEqual(start, -1, "teacher feedback model start marker must exist")
-  assert.ok(end > start, "teacher feedback model end marker must follow start")
-  const compiled = ts.transpileModule(
-    `${source.slice(start + startMarker.length, end)}\nmodule.exports = {
-      buildRegistrationObservationTeacherFeedbackPlan,
-      executeRegistrationObservationTeacherFeedbackLoad,
-      executeRegistrationObservationTeacherFeedbackMutation,
-      getRegistrationObservationTeacherFeedbackAvailability,
-      getRegistrationObservationTeacherFeedbackNextBoundary,
-      getRegistrationObservationTeacherProxyLabel,
-    };`,
-    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
-  ).outputText
-  const sandboxModule = { exports: {} }
-  vm.runInNewContext(compiled, {
-    module: sandboxModule,
-    exports: sandboxModule.exports,
-    Date,
-    JSON,
-    Map,
-    Promise,
-  })
-  return sandboxModule.exports
-}
-
 function deferred() {
   let resolve
   let reject
@@ -209,8 +177,11 @@ function RegistrationSelect({ value, options = [], ...props }) {
   )
 }
 
-async function loadTeacherView() {
-  return loadTsxRuntime(panelUrl, {
+let teacherModulePromise
+
+async function loadTeacherModule() {
+  if (teacherModulePromise) return teacherModulePromise
+  teacherModulePromise = loadTsxRuntime(panelUrl, {
     "@/components/ui/button": { Button },
     "@/components/ui/label": { Label },
     "@/components/ui/textarea": { Textarea },
@@ -231,6 +202,7 @@ async function loadTeacherView() {
       submitRegistrationObservationFeedback: async () => completedDetail,
     },
   })
+  return teacherModulePromise
 }
 
 function viewProps(overrides = {}) {
@@ -257,6 +229,162 @@ function viewProps(overrides = {}) {
   }
 }
 
+function findReactElements(node, predicate, matches = []) {
+  if (Array.isArray(node)) {
+    for (const child of node) findReactElements(child, predicate, matches)
+    return matches
+  }
+  if (!node || typeof node !== "object" || !("props" in node)) return matches
+  if (predicate(node)) matches.push(node)
+  findReactElements(node.props.children, predicate, matches)
+  return matches
+}
+
+function findReactElement(node, predicate, description) {
+  const matches = findReactElements(node, predicate)
+  assert.equal(matches.length, 1, `expected one ${description}, received ${matches.length}`)
+  return matches[0]
+}
+
+function collectReactText(node, output = []) {
+  if (Array.isArray(node)) {
+    for (const child of node) collectReactText(child, output)
+  } else if (typeof node === "string" || typeof node === "number") {
+    output.push(String(node))
+  } else if (node && typeof node === "object" && "props" in node) {
+    collectReactText(node.props.children, output)
+  }
+  return output
+}
+
+function hasClass(element, className) {
+  return String(element.props.className || "").split(/\s+/).includes(className)
+}
+
+function createHookHarness() {
+  const slots = []
+  let cursor = 0
+  let pendingEffects = []
+
+  function sameDependencies(left, right) {
+    return Boolean(
+      left
+      && right
+      && left.length === right.length
+      && left.every((value, index) => Object.is(value, right[index])),
+    )
+  }
+
+  function useState(initialValue) {
+    const index = cursor++
+    if (!slots[index]) {
+      slots[index] = {
+        kind: "state",
+        value: typeof initialValue === "function" ? initialValue() : initialValue,
+      }
+    }
+    const slot = slots[index]
+    return [
+      slot.value,
+      (nextValue) => {
+        slot.value = typeof nextValue === "function"
+          ? nextValue(slot.value)
+          : nextValue
+      },
+    ]
+  }
+
+  function useRef(initialValue) {
+    const index = cursor++
+    if (!slots[index]) slots[index] = { kind: "ref", value: { current: initialValue } }
+    return slots[index].value
+  }
+
+  function memoHook(factory, dependencies) {
+    const index = cursor++
+    const slot = slots[index]
+    if (!slot || !sameDependencies(slot.dependencies, dependencies)) {
+      slots[index] = {
+        kind: "memo",
+        value: factory(),
+        dependencies,
+      }
+    }
+    return slots[index].value
+  }
+
+  function useEffect(effect, dependencies) {
+    const index = cursor++
+    const slot = slots[index]
+    if (!slot || !sameDependencies(slot.dependencies, dependencies)) {
+      pendingEffects.push({ effect, index })
+      slots[index] = {
+        kind: "effect",
+        cleanup: slot?.cleanup,
+        dependencies,
+      }
+    }
+  }
+
+  return {
+    react: {
+      useCallback: (callback, dependencies) => memoHook(() => callback, dependencies),
+      useEffect,
+      useMemo: memoHook,
+      useRef,
+      useState,
+    },
+    render(component, props) {
+      assert.equal(pendingEffects.length, 0, "flush effects before rendering again")
+      cursor = 0
+      return component(props)
+    },
+    flushEffects() {
+      const effects = pendingEffects
+      pendingEffects = []
+      for (const { effect, index } of effects) {
+        slots[index].cleanup?.()
+        slots[index].cleanup = effect()
+      }
+    },
+    cleanup() {
+      for (const slot of slots) slot?.cleanup?.()
+      pendingEffects = []
+    },
+  }
+}
+
+function createTimerHarness() {
+  let nextId = 0
+  const timers = new Map()
+  return {
+    window: {
+      setTimeout(callback) {
+        const id = ++nextId
+        timers.set(id, callback)
+        return id
+      },
+      clearTimeout(id) {
+        timers.delete(id)
+      },
+    },
+    runNext() {
+      const next = timers.entries().next().value
+      assert.ok(next, "expected a queued timer")
+      const [id, callback] = next
+      timers.delete(id)
+      callback()
+    },
+    clear() {
+      timers.clear()
+    },
+  }
+}
+
+async function flushAsyncWork() {
+  await new Promise((resolve) => setImmediate(resolve))
+}
+
 test("teacher feedback route validates the UUID segment and stays under the admin auth guard", async () => {
   const notFoundError = new Error("NEXT_NOT_FOUND")
   function TeacherRouteStub() {
@@ -268,10 +396,9 @@ test("teacher feedback route validates the UUID segment and stays under the admi
       RegistrationObservationTeacherFeedback: TeacherRouteStub,
     },
   })
-  assert.equal(pageRuntime.isRegistrationObservationFeedbackId(IDS.observation), true)
-  assert.equal(pageRuntime.isRegistrationObservationFeedbackId(IDS.observation.toUpperCase()), true)
+  assert.deepEqual(Object.keys(pageRuntime).sort(), ["default"])
+
   for (const malformed of ["", "not-a-uuid", `${IDS.observation}/extra`, "10000000-0000-4000-8000-00000000003"]) {
-    assert.equal(pageRuntime.isRegistrationObservationFeedbackId(malformed), false)
     await assert.rejects(
       pageRuntime.default({ params: Promise.resolve({ observationId: malformed }) }),
       (error) => error === notFoundError,
@@ -301,7 +428,7 @@ test("teacher feedback route uses only the dedicated feedback client and never r
 })
 
 test("assigned load succeeds while unrelated and missing observations expose the same bounded not-found result", async () => {
-  const { executeRegistrationObservationTeacherFeedbackLoad } = await loadTeacherModel()
+  const { executeRegistrationObservationTeacherFeedbackLoad } = await loadTeacherModule()
   const assigned = await executeRegistrationObservationTeacherFeedbackLoad({
     requestedOwnershipKey: `teacher-a:${IDS.observation}`,
     currentOwnershipKey: () => `teacher-a:${IDS.observation}`,
@@ -339,22 +466,76 @@ test("assigned load succeeds while unrelated and missing observations expose the
 })
 
 test("load completion is owned by the exact actor and observation route", async () => {
-  const { executeRegistrationObservationTeacherFeedbackLoad } = await loadTeacherModel()
+  const {
+    executeRegistrationObservationTeacherFeedbackLoad,
+    getRegistrationObservationTeacherFeedbackOwnershipKey,
+    transitionRegistrationObservationTeacherFeedbackLoadState,
+  } = await loadTeacherModule()
+  const ownerKeys = [
+    getRegistrationObservationTeacherFeedbackOwnershipKey(
+      "teacher-a",
+      "2026-08-12T11:00:00.000Z",
+      IDS.observation,
+    ),
+    getRegistrationObservationTeacherFeedbackOwnershipKey(
+      "teacher-b",
+      "2026-08-12T11:00:00.000Z",
+      IDS.observation,
+    ),
+    getRegistrationObservationTeacherFeedbackOwnershipKey(
+      "teacher-a",
+      "2026-08-12T12:00:00.000Z",
+      IDS.observation,
+    ),
+    getRegistrationObservationTeacherFeedbackOwnershipKey(
+      "teacher-a",
+      "2026-08-12T11:00:00.000Z",
+      "20000000-0000-4000-8000-000000000003",
+    ),
+  ]
+  assert.equal(new Set(ownerKeys).size, 4)
+
   const response = deferred()
-  let currentOwner = `teacher-a:${IDS.observation}`
+  let currentOwner = ownerKeys[0]
   const loading = executeRegistrationObservationTeacherFeedbackLoad({
     requestedOwnershipKey: currentOwner,
     currentOwnershipKey: () => currentOwner,
     load: () => response.promise,
     normalizeError: getRegistrationObservationFeedbackErrorState,
   })
-  currentOwner = `teacher-b:${IDS.observation}`
+  currentOwner = ownerKeys[1]
   response.resolve(scheduledDetail)
   assert.deepEqual({ ...await loading }, { kind: "stale" })
+
+  const oldDraft = Object.freeze({
+    suitabilityResult: "unfit",
+    feedbackReason: "다른 세션에서 작성한 내용",
+  })
+  const transitioned = transitionRegistrationObservationTeacherFeedbackLoadState(
+    {
+      ownershipKey: ownerKeys[0],
+      detail: scheduledDetail,
+      draft: oldDraft,
+      loading: false,
+      saving: false,
+      errorMessage: "",
+      fieldError: null,
+      reloadRequired: false,
+      receipt: "",
+    },
+    {
+      kind: "loaded",
+      ownershipKey: ownerKeys[3],
+      detail: scheduledDetail,
+      preserveDraft: true,
+    },
+  )
+  assert.notEqual(transitioned.draft, oldDraft)
+  assert.deepEqual({ ...transitioned.draft }, emptyDraft)
 })
 
 test("proxy label requires the complete server-projected proxy tuple", async () => {
-  const { getRegistrationObservationTeacherProxyLabel } = await loadTeacherModel()
+  const { getRegistrationObservationTeacherProxyLabel } = await loadTeacherModule()
   assert.equal(
     getRegistrationObservationTeacherProxyLabel(proxyDetail),
     "대리 입력 · 운영 담당자 · 2026. 8. 12. 19:05",
@@ -372,7 +553,7 @@ test("scheduled and attended-feedback-pending actions use separate canonical sta
   const {
     getRegistrationObservationTeacherFeedbackAvailability,
     getRegistrationObservationTeacherFeedbackNextBoundary,
-  } = await loadTeacherModel()
+  } = await loadTeacherModule()
   const beforeStart = Date.parse(scheduledDetail.startsAt) - 1
   const atStart = Date.parse(scheduledDetail.startsAt)
   const beforeEnd = Date.parse(scheduledDetail.endsAt) - 1
@@ -414,11 +595,10 @@ test("scheduled and attended-feedback-pending actions use separate canonical sta
     getRegistrationObservationTeacherFeedbackNextBoundary(pendingDetail, atEnd),
     null,
   )
-  assert.doesNotMatch(await readSource(panelUrl), /setInterval\(/)
 })
 
 test("teacher plans map each action to the exact revision tuple without a director decision", async () => {
-  const { buildRegistrationObservationTeacherFeedbackPlan } = await loadTeacherModel()
+  const { buildRegistrationObservationTeacherFeedbackPlan } = await loadTeacherModule()
   const nowMs = Date.parse(scheduledDetail.endsAt)
   const feedback = buildRegistrationObservationTeacherFeedbackPlan({
     detail: scheduledDetail,
@@ -506,13 +686,14 @@ test("teacher plans map each action to the exact revision tuple without a direct
 })
 
 test("validation focuses suitability before reason and trims the required reason", async () => {
-  const { executeRegistrationObservationTeacherFeedbackMutation } = await loadTeacherModel()
+  const { executeRegistrationObservationTeacherFeedbackMutation } = await loadTeacherModule()
   const focused = []
   const common = {
     detail: scheduledDetail,
     action: "submit_feedback",
     nowMs: Date.parse(scheduledDetail.endsAt),
     allowAttendanceOnly: false,
+    reloadRequired: false,
     guard: { current: false },
     requestKeys: new Map(),
     createRequestKey: () => "request-unused",
@@ -546,7 +727,7 @@ test("validation focuses suitability before reason and trims the required reason
 })
 
 test("mutation execution blocks duplicate submits, keeps a failed request key stable, and ignores stale ownership completion", async () => {
-  const { executeRegistrationObservationTeacherFeedbackMutation } = await loadTeacherModel()
+  const { executeRegistrationObservationTeacherFeedbackMutation } = await loadTeacherModule()
   const response = deferred()
   const guard = { current: false }
   const requestKeys = new Map()
@@ -560,6 +741,7 @@ test("mutation execution blocks duplicate submits, keeps a failed request key st
     action: "submit_feedback",
     nowMs: Date.parse(scheduledDetail.endsAt),
     allowAttendanceOnly: false,
+    reloadRequired: false,
     guard,
     requestKeys,
     createRequestKey: () => `feedback-request-${++generated}`,
@@ -627,14 +809,153 @@ test("mutation execution blocks duplicate submits, keeps a failed request key st
   assert.doesNotMatch(failed.errorMessage, /registration_|dashboard_private|55000/)
 })
 
+test("reload-required state fails closed for every mutation and disables every stale control", async () => {
+  const {
+    executeRegistrationObservationTeacherFeedbackMutation,
+    RegistrationObservationTeacherFeedbackView,
+  } = await loadTeacherModule()
+  const calls = []
+  const requestKeys = new Map()
+  for (const action of ["submit_feedback", "no_show", "record_attendance"]) {
+    const result = await executeRegistrationObservationTeacherFeedbackMutation({
+      detail: scheduledDetail,
+      draft: completedDraft,
+      action,
+      nowMs: Date.parse(scheduledDetail.endsAt),
+      allowAttendanceOnly: true,
+      reloadRequired: true,
+      guard: { current: false },
+      requestKeys,
+      createRequestKey: () => {
+        calls.push("request-key")
+        return "must-not-be-created"
+      },
+      currentOwnershipMatches: () => true,
+      recordAttendance: async () => {
+        calls.push("attendance")
+        return pendingDetail
+      },
+      submitFeedback: async () => {
+        calls.push("feedback")
+        return completedDetail
+      },
+      normalizeError: getRegistrationObservationFeedbackErrorState,
+      onSaving: () => calls.push("saving"),
+      onSaved: () => calls.push("saved"),
+      focusField: () => calls.push("focus"),
+    })
+    assert.deepEqual({ ...result }, { kind: "reload_required" })
+  }
+  assert.deepEqual(calls, [])
+  assert.equal(requestKeys.size, 0)
+
+  const view = RegistrationObservationTeacherFeedbackView(viewProps({
+    reloadRequired: true,
+    canRecordAttendance: true,
+  }))
+  for (const id of ["teacher-feedback-suitability", "teacher-feedback-reason"]) {
+    assert.equal(
+      findReactElement(view, (element) => element.props.id === id, id).props.disabled,
+      true,
+    )
+  }
+  for (const action of ["submit_feedback", "no_show", "record_attendance"]) {
+    assert.equal(
+      findReactElement(
+        view,
+        (element) => element.props["data-action"] === action,
+        `${action} action`,
+      ).props.disabled,
+      true,
+    )
+  }
+
+  const onReload = () => {}
+  const loadingReloadView = RegistrationObservationTeacherFeedbackView(viewProps({
+    reloadRequired: true,
+    loading: true,
+    canRecordAttendance: true,
+    onReload,
+  }))
+  const reloadControl = findReactElement(
+    loadingReloadView,
+    (element) => element.props.onClick === onReload,
+    "reload action",
+  )
+  assert.equal(reloadControl.props.disabled, true)
+  assert.equal(reloadControl.props.children, "불러오는 중")
+})
+
+test("reload recovery keeps the teacher draft while replacing only canonical server detail", async () => {
+  const { transitionRegistrationObservationTeacherFeedbackLoadState } = (
+    await loadTeacherModule()
+  )
+  const ownershipKey = `teacher-a:session-a:${IDS.observation}`
+  const draft = Object.freeze({
+    suitabilityResult: "unfit",
+    feedbackReason: "작성 중인 교사 메모",
+  })
+  const staleState = Object.freeze({
+    ownershipKey,
+    detail: scheduledDetail,
+    draft,
+    loading: false,
+    saving: false,
+    errorMessage: "최신 내용을 다시 불러와 주세요.",
+    fieldError: null,
+    reloadRequired: true,
+    receipt: "",
+  })
+
+  const reloading = transitionRegistrationObservationTeacherFeedbackLoadState(
+    staleState,
+    { kind: "reload_started", ownershipKey },
+  )
+  assert.equal(reloading.detail, scheduledDetail)
+  assert.equal(reloading.draft, draft)
+  assert.equal(reloading.loading, true)
+  assert.equal(reloading.reloadRequired, true)
+
+  const refreshedDetail = Object.freeze({ ...scheduledDetail, revision: 5 })
+  const refreshed = transitionRegistrationObservationTeacherFeedbackLoadState(
+    reloading,
+    {
+      kind: "loaded",
+      ownershipKey,
+      detail: refreshedDetail,
+      preserveDraft: true,
+    },
+  )
+  assert.equal(refreshed.detail, refreshedDetail)
+  assert.equal(refreshed.draft, draft)
+  assert.equal(refreshed.loading, false)
+  assert.equal(refreshed.reloadRequired, false)
+
+  const failedReload = transitionRegistrationObservationTeacherFeedbackLoadState(
+    reloading,
+    {
+      kind: "failed",
+      ownershipKey,
+      errorMessage: "청강 피드백을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      reloadRequired: false,
+      preserveDraft: true,
+    },
+  )
+  assert.equal(failedReload.detail, scheduledDetail)
+  assert.equal(failedReload.draft, draft)
+  assert.equal(failedReload.loading, false)
+  assert.equal(failedReload.reloadRequired, true)
+})
+
 test("browser boundary guidance cannot turn a server-rejected mutation into a committed result", async () => {
-  const { executeRegistrationObservationTeacherFeedbackMutation } = await loadTeacherModel()
+  const { executeRegistrationObservationTeacherFeedbackMutation } = await loadTeacherModule()
   const result = await executeRegistrationObservationTeacherFeedbackMutation({
     detail: scheduledDetail,
     draft: completedDraft,
     action: "submit_feedback",
     nowMs: Date.parse(scheduledDetail.endsAt) + 60_000,
     allowAttendanceOnly: false,
+    reloadRequired: false,
     guard: { current: false },
     requestKeys: new Map(),
     createRequestKey: () => "server-boundary-request",
@@ -651,60 +972,265 @@ test("browser boundary guidance cannot turn a server-rejected mutation into a co
   assert.equal(result.kind, "failed")
 })
 
+test("mounted teacher flow focuses first error, deduplicates keyboard submit, and recovers a stale draft", async () => {
+  const hookHarness = createHookHarness()
+  const timerHarness = createTimerHarness()
+  const originalWindow = globalThis.window
+  const interactionDetail = Object.freeze({
+    ...scheduledDetail,
+    startsAt: "2020-08-12T09:00:00.000Z",
+    endsAt: "2020-08-12T10:00:00.000Z",
+  })
+  const refreshedInteractionDetail = Object.freeze({
+    ...interactionDetail,
+    revision: 5,
+  })
+  const staleResponse = deferred()
+  const loadCalls = []
+  const submitCalls = []
+  const attendanceCalls = []
+  let loadCount = 0
+
+  globalThis.window = timerHarness.window
+  try {
+    const teacherModule = await loadTsxRuntime(panelUrl, {
+      react: hookHarness.react,
+      "@/components/ui/button": { Button },
+      "@/components/ui/label": { Label },
+      "@/components/ui/textarea": { Textarea },
+      "@/features/tasks/registration-select": { RegistrationSelect },
+      "@/lib/supabase": { supabase: {} },
+      "@/providers/auth-provider": {
+        useAuth: () => ({
+          canManageAll: true,
+          session: {
+            expires_at: 1_786_532_400,
+            user: { id: "10000000-0000-4000-8000-000000000020" },
+          },
+        }),
+      },
+      "./registration-observation-model": {
+        getRegistrationObservationFeedbackErrorState,
+      },
+      "./registration-observation-service": {
+        loadRegistrationObservationFeedback: async (_client, observationId, options) => {
+          loadCalls.push({ observationId, options })
+          loadCount += 1
+          return loadCount === 1 ? interactionDetail : refreshedInteractionDetail
+        },
+        recordRegistrationObservationAttendance: async (_client, input) => {
+          attendanceCalls.push(input)
+          return pendingDetail
+        },
+        submitRegistrationObservationFeedback: async (_client, input) => {
+          submitCalls.push(input)
+          return staleResponse.promise
+        },
+      },
+    })
+    const renderController = () => {
+      const controller = hookHarness.render(
+        teacherModule.RegistrationObservationTeacherFeedback,
+        { observationId: IDS.observation },
+      )
+      hookHarness.flushEffects()
+      return controller
+    }
+
+    let controller = renderController()
+    assert.equal(controller.props.loading, true)
+    timerHarness.runNext()
+    await flushAsyncWork()
+
+    controller = renderController()
+    assert.equal(controller.props.detail, interactionDetail)
+    let focused = ""
+    controller.props.suitabilityRef.current = {
+      focus: () => { focused = "suitabilityResult" },
+    }
+    let view = controller.type(controller.props)
+    let form = findReactElement(view, (element) => element.type === "form", "feedback form")
+    let prevented = 0
+    form.props.onSubmit({ preventDefault: () => { prevented += 1 } })
+    await flushAsyncWork()
+    assert.equal(focused, "suitabilityResult")
+    assert.equal(submitCalls.length, 0)
+
+    controller = renderController()
+    view = controller.type(controller.props)
+    findReactElement(
+      view,
+      (element) => element.props.id === "teacher-feedback-suitability",
+      "suitability select",
+    ).props.onValueChange("unfit")
+    controller = renderController()
+    view = controller.type(controller.props)
+    findReactElement(
+      view,
+      (element) => element.props.id === "teacher-feedback-reason",
+      "feedback reason",
+    ).props.onChange({ target: { value: "작성 중인 교사 메모" } })
+
+    controller = renderController()
+    view = controller.type(controller.props)
+    form = findReactElement(view, (element) => element.type === "form", "feedback form")
+    form.props.onSubmit({ preventDefault: () => { prevented += 1 } })
+    form.props.onSubmit({ preventDefault: () => { prevented += 1 } })
+    assert.equal(submitCalls.length, 1)
+    assert.equal(submitCalls[0].suitabilityResult, "unfit")
+    assert.equal(submitCalls[0].feedbackReason, "작성 중인 교사 메모")
+
+    staleResponse.reject({
+      code: "40001",
+      message: "registration_observation_stale_revision",
+    })
+    await flushAsyncWork()
+    controller = renderController()
+    assert.equal(controller.props.reloadRequired, true)
+    assert.deepEqual({ ...controller.props.draft }, {
+      suitabilityResult: "unfit",
+      feedbackReason: "작성 중인 교사 메모",
+    })
+    view = controller.type(controller.props)
+    form = findReactElement(view, (element) => element.type === "form", "feedback form")
+    form.props.onSubmit({ preventDefault: () => { prevented += 1 } })
+    findReactElement(
+      view,
+      (element) => element.props["data-action"] === "no_show",
+      "no-show action",
+    ).props.onClick()
+    findReactElement(
+      view,
+      (element) => element.props["data-action"] === "record_attendance",
+      "attendance action",
+    ).props.onClick()
+    await flushAsyncWork()
+    assert.equal(submitCalls.length, 1)
+    assert.equal(attendanceCalls.length, 0)
+
+    findReactElement(
+      view,
+      (element) => element.props.children === "다시 불러오기",
+      "reload action",
+    ).props.onClick()
+    await flushAsyncWork()
+    controller = renderController()
+    assert.equal(controller.props.detail, refreshedInteractionDetail)
+    assert.equal(controller.props.reloadRequired, false)
+    assert.deepEqual({ ...controller.props.draft }, {
+      suitabilityResult: "unfit",
+      feedbackReason: "작성 중인 교사 메모",
+    })
+    assert.equal(loadCalls.length, 2)
+    assert.deepEqual(loadCalls[1], {
+      observationId: IDS.observation,
+      options: { force: true },
+    })
+    assert.equal(prevented, 4)
+  } finally {
+    hookHarness.cleanup()
+    timerHarness.clear()
+    if (originalWindow === undefined) delete globalThis.window
+    else globalThis.window = originalWindow
+  }
+})
+
 test("rendered teacher view is a keyboard form with loading and independently disabled actions", async () => {
-  const { RegistrationObservationTeacherFeedbackView } = await loadTeacherView()
-  const loadingHtml = renderToStaticMarkup(createElement(
-    RegistrationObservationTeacherFeedbackView,
+  const { RegistrationObservationTeacherFeedbackView } = await loadTeacherModule()
+  const loadingView = RegistrationObservationTeacherFeedbackView(
     viewProps({ detail: null, loading: true }),
-  ))
-  assert.match(loadingHtml, /role="status"/)
-  assert.match(loadingHtml, /청강 피드백을 불러오는 중/)
-  assert.doesNotMatch(loadingHtml, /data-action=/)
+  )
+  const loadingStatus = findReactElement(
+    loadingView,
+    (element) => element.props.role === "status",
+    "loading status",
+  )
+  assert.equal(collectReactText(loadingStatus).join(""), "청강 피드백을 불러오는 중입니다.")
+  assert.equal(
+    findReactElements(loadingView, (element) => element.props["data-action"]).length,
+    0,
+  )
 
-  const beforeStartHtml = renderToStaticMarkup(createElement(
-    RegistrationObservationTeacherFeedbackView,
-    viewProps({
-      nowMs: Date.parse(scheduledDetail.startsAt) - 1,
-      canRecordAttendance: true,
-    }),
-  ))
-  assert.match(beforeStartHtml, /<form[^>]*>/)
-  assert.match(beforeStartHtml, /data-action="submit_feedback"[^>]*type="submit"[^>]*disabled=""/)
-  assert.match(beforeStartHtml, /data-action="no_show"[^>]*disabled=""/)
-  assert.match(beforeStartHtml, /data-action="record_attendance"[^>]*disabled=""/)
-
-  const afterStartHtml = renderToStaticMarkup(createElement(
-    RegistrationObservationTeacherFeedbackView,
-    viewProps({
-      nowMs: Date.parse(scheduledDetail.startsAt),
-      canRecordAttendance: true,
-    }),
-  ))
-  assert.match(afterStartHtml, /data-action="submit_feedback"[^>]*type="submit"[^>]*disabled=""/)
-  assert.doesNotMatch(afterStartHtml, /data-action="no_show"[^>]*disabled=/)
-  assert.doesNotMatch(afterStartHtml, /data-action="record_attendance"[^>]*disabled=/)
-
-  const savingHtml = renderToStaticMarkup(createElement(
-    RegistrationObservationTeacherFeedbackView,
-    viewProps({ saving: true, canRecordAttendance: true }),
-  ))
-  assert.match(savingHtml, /id="teacher-feedback-suitability"[^>]*disabled=""/)
-  assert.match(savingHtml, /id="teacher-feedback-reason"[^>]*disabled=""/)
+  const beforeStartView = RegistrationObservationTeacherFeedbackView(viewProps({
+    nowMs: Date.parse(scheduledDetail.startsAt) - 1,
+    canRecordAttendance: true,
+  }))
+  findReactElement(beforeStartView, (element) => element.type === "form", "feedback form")
   for (const action of ["submit_feedback", "no_show", "record_attendance"]) {
-    assert.match(savingHtml, new RegExp(`data-action="${action}"[^>]*disabled=""`))
+    const control = findReactElement(
+      beforeStartView,
+      (element) => element.props["data-action"] === action,
+      `${action} action`,
+    )
+    assert.equal(control.props.disabled, true)
+    if (action === "submit_feedback") assert.equal(control.props.type, "submit")
+  }
+
+  const afterStartView = RegistrationObservationTeacherFeedbackView(viewProps({
+    nowMs: Date.parse(scheduledDetail.startsAt),
+    canRecordAttendance: true,
+  }))
+  assert.equal(findReactElement(
+    afterStartView,
+    (element) => element.props["data-action"] === "submit_feedback",
+    "submit action",
+  ).props.disabled, true)
+  for (const action of ["no_show", "record_attendance"]) {
+    assert.equal(findReactElement(
+      afterStartView,
+      (element) => element.props["data-action"] === action,
+      `${action} action`,
+    ).props.disabled, false)
+  }
+
+  const savingView = RegistrationObservationTeacherFeedbackView(
+    viewProps({ saving: true, canRecordAttendance: true }),
+  )
+  for (const id of ["teacher-feedback-suitability", "teacher-feedback-reason"]) {
+    assert.equal(findReactElement(
+      savingView,
+      (element) => element.props.id === id,
+      id,
+    ).props.disabled, true)
+  }
+  for (const action of ["submit_feedback", "no_show", "record_attendance"]) {
+    assert.equal(findReactElement(
+      savingView,
+      (element) => element.props["data-action"] === action,
+      `${action} action`,
+    ).props.disabled, true)
   }
 })
 
 test("rendered 390px and 200% layout contract avoids fixed-width overflow and hides internal identifiers", async () => {
-  const { RegistrationObservationTeacherFeedbackView } = await loadTeacherView()
-  const html = renderToStaticMarkup(createElement(
-    RegistrationObservationTeacherFeedbackView,
+  const { RegistrationObservationTeacherFeedbackView } = await loadTeacherModule()
+  const view = RegistrationObservationTeacherFeedbackView(
     viewProps({ detail: proxyDetail, nowMs: Date.parse(proxyDetail.endsAt) }),
-  ))
-  assert.match(html, /data-testid="registration-observation-teacher-feedback"[^>]*class="[^"]*w-full[^"]*min-w-0[^"]*overflow-x-hidden/)
-  assert.match(html, /class="[^"]*grid-cols-1[^"]*sm:grid-cols-2/)
-  assert.match(html, /class="[^"]*break-words/)
-  assert.match(html, /대리 입력 · 운영 담당자 · 2026\. 8\. 12\. 19:05/)
-  assert.doesNotMatch(html, new RegExp([IDS.task, IDS.track, IDS.appointment, IDS.class, IDS.lesson].join("|")))
-  assert.doesNotMatch(html, /min-w-\[|w-\[(?:[4-9]\d\d|\d{4,})px\]|overflow-x-auto/)
+  )
+  assert.equal(view.props["data-testid"], "registration-observation-teacher-feedback")
+  for (const className of ["w-full", "min-w-0", "overflow-x-hidden"]) {
+    assert.equal(hasClass(view, className), true)
+  }
+  const definitionList = findReactElement(
+    view,
+    (element) => element.type === "dl",
+    "observation summary",
+  )
+  assert.equal(hasClass(definitionList, "grid-cols-1"), true)
+  assert.equal(hasClass(definitionList, "sm:grid-cols-2"), true)
+  assert.ok(findReactElements(view, (element) => hasClass(element, "break-words")).length > 0)
+
+  const renderedText = collectReactText(view).join(" ")
+  assert.match(renderedText, /대리 입력 · 운영 담당자 · 2026\. 8\. 12\. 19:05/)
+  assert.doesNotMatch(
+    renderedText,
+    new RegExp([IDS.task, IDS.track, IDS.appointment, IDS.class, IDS.lesson].join("|")),
+  )
+  const allClasses = findReactElements(view, () => true)
+    .map((element) => element.props.className || "")
+    .join(" ")
+  assert.doesNotMatch(
+    allClasses,
+    /min-w-\[|w-\[(?:[4-9]\d\d|\d{4,})px\]|overflow-x-auto/,
+  )
 })

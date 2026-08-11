@@ -61,7 +61,18 @@ type RegistrationObservationTeacherFeedbackPlan =
       input: Omit<RecordRegistrationObservationAttendanceInput, "requestKey">
     }>
 
-// registration-observation-teacher-feedback-model:start
+export function getRegistrationObservationTeacherFeedbackOwnershipKey(
+  userId: string | undefined,
+  sessionExpiresAt: string | number | undefined,
+  observationId: string,
+) {
+  return JSON.stringify([
+    userId || "anonymous",
+    sessionExpiresAt ?? "no-session",
+    observationId,
+  ])
+}
+
 export function getRegistrationObservationTeacherFeedbackAvailability(
   detail: Pick<RegistrationObservationFeedbackDetail, "status" | "startsAt" | "endsAt">,
   nowMs: number,
@@ -297,6 +308,7 @@ export async function executeRegistrationObservationTeacherFeedbackMutation(
     action: RegistrationObservationTeacherFeedbackAction
     nowMs: number
     allowAttendanceOnly: boolean
+    reloadRequired: boolean
     guard: { current: boolean }
     requestKeys: Map<string, string>
     createRequestKey: () => string
@@ -318,6 +330,7 @@ export async function executeRegistrationObservationTeacherFeedbackMutation(
   },
 ) {
   if (input.guard.current) return { kind: "ignored" } as const
+  if (input.reloadRequired) return { kind: "reload_required" } as const
   const plan = buildRegistrationObservationTeacherFeedbackPlan(input)
   if (!plan.ok) {
     if (plan.field) input.focusField(plan.field)
@@ -360,8 +373,6 @@ export async function executeRegistrationObservationTeacherFeedbackMutation(
     input.guard.current = false
   }
 }
-// registration-observation-teacher-feedback-model:end
-
 type TeacherFeedbackState = Readonly<{
   ownershipKey: string
   detail: RegistrationObservationFeedbackDetail | null
@@ -397,6 +408,74 @@ function createTeacherFeedbackState(
     fieldError: null,
     reloadRequired: false,
     receipt: "",
+  }
+}
+
+type RegistrationObservationTeacherFeedbackLoadTransition =
+  | Readonly<{
+      kind: "reload_started"
+      ownershipKey: string
+    }>
+  | Readonly<{
+      kind: "loaded"
+      ownershipKey: string
+      detail: RegistrationObservationFeedbackDetail
+      preserveDraft: boolean
+    }>
+  | Readonly<{
+      kind: "failed"
+      ownershipKey: string
+      errorMessage: string
+      reloadRequired: boolean
+      preserveDraft: boolean
+    }>
+
+export function transitionRegistrationObservationTeacherFeedbackLoadState(
+  current: TeacherFeedbackState,
+  transition: RegistrationObservationTeacherFeedbackLoadTransition,
+): TeacherFeedbackState {
+  const sameOwnership = current.ownershipKey === transition.ownershipKey
+  if (transition.kind === "reload_started") {
+    if (!sameOwnership) return current
+    return {
+      ...current,
+      loading: true,
+      saving: false,
+      errorMessage: "",
+      fieldError: null,
+      receipt: "",
+    }
+  }
+  if (transition.kind === "loaded") {
+    return {
+      ownershipKey: transition.ownershipKey,
+      detail: transition.detail,
+      draft: transition.preserveDraft && sameOwnership
+        ? current.draft
+        : createTeacherFeedbackDraft(transition.detail),
+      loading: false,
+      saving: false,
+      errorMessage: "",
+      fieldError: null,
+      reloadRequired: false,
+      receipt: "",
+    }
+  }
+  if (transition.preserveDraft && sameOwnership && current.detail) {
+    return {
+      ...current,
+      loading: false,
+      saving: false,
+      errorMessage: transition.errorMessage,
+      fieldError: null,
+      reloadRequired: current.reloadRequired || transition.reloadRequired,
+      receipt: "",
+    }
+  }
+  return {
+    ...createTeacherFeedbackState(transition.ownershipKey, false),
+    errorMessage: transition.errorMessage,
+    reloadRequired: transition.reloadRequired,
   }
 }
 
@@ -501,6 +580,7 @@ export function RegistrationObservationTeacherFeedbackView({
     : undefined
   const endsAtLabel = formatRegistrationObservationTeacherFeedbackKst(detail.endsAt)
   const endsAtTime = endsAtLabel.slice(endsAtLabel.lastIndexOf(" ") + 1)
+  const mutationDisabled = saving || reloadRequired
 
   return (
     <main
@@ -579,7 +659,7 @@ export function RegistrationObservationTeacherFeedbackView({
                   { value: "fit", label: "적합" },
                   { value: "unfit", label: "부적합" },
                 ]}
-                disabled={saving}
+                disabled={mutationDisabled}
                 required
                 aria-invalid={fieldError === "suitabilityResult"}
                 aria-describedby={suitabilityErrorId}
@@ -598,7 +678,7 @@ export function RegistrationObservationTeacherFeedbackView({
                 ref={feedbackReasonRef}
                 id="teacher-feedback-reason"
                 value={draft.feedbackReason}
-                disabled={saving}
+                disabled={mutationDisabled}
                 required
                 rows={5}
                 aria-invalid={fieldError === "feedbackReason"}
@@ -630,7 +710,7 @@ export function RegistrationObservationTeacherFeedbackView({
               <Button
                 data-action="submit_feedback"
                 type="submit"
-                disabled={saving || !availability.submitFeedback}
+                disabled={mutationDisabled || !availability.submitFeedback}
                 className="w-full whitespace-normal sm:w-auto"
               >
                 {saving
@@ -644,7 +724,7 @@ export function RegistrationObservationTeacherFeedbackView({
                   data-action="no_show"
                   type="button"
                   variant="outline"
-                  disabled={saving || !availability.submitNoShow}
+                  disabled={mutationDisabled || !availability.submitNoShow}
                   className="w-full whitespace-normal sm:w-auto"
                   onClick={onNoShow}
                 >
@@ -656,7 +736,7 @@ export function RegistrationObservationTeacherFeedbackView({
                   data-action="record_attendance"
                   type="button"
                   variant="outline"
-                  disabled={saving || !availability.recordAttendance}
+                  disabled={mutationDisabled || !availability.recordAttendance}
                   className="w-full whitespace-normal sm:w-auto"
                   onClick={onRecordAttendance}
                 >
@@ -685,8 +765,13 @@ export function RegistrationObservationTeacherFeedbackView({
           ) : null}
           {reloadRequired ? (
             <div>
-              <Button type="button" variant="outline" disabled={saving} onClick={onReload}>
-                다시 불러오기
+              <Button
+                type="button"
+                variant="outline"
+                disabled={saving || loading}
+                onClick={onReload}
+              >
+                {loading ? "불러오는 중" : "다시 불러오기"}
               </Button>
             </div>
           ) : null}
@@ -702,11 +787,11 @@ export function RegistrationObservationTeacherFeedback({
   observationId: string
 }) {
   const { canManageAll, session } = useAuth()
-  const ownershipKey = [
-    session?.user.id || "anonymous",
-    session?.expires_at || "no-session",
+  const ownershipKey = getRegistrationObservationTeacherFeedbackOwnershipKey(
+    session?.user.id,
+    session?.expires_at,
     observationId,
-  ].join(":")
+  )
   const [state, setState] = useState<TeacherFeedbackState>(() => (
     createTeacherFeedbackState(ownershipKey, true)
   ))
@@ -725,7 +810,10 @@ export function RegistrationObservationTeacherFeedback({
     ownershipRef.current = ownershipKey
   }, [ownershipKey])
 
-  const loadFeedback = useCallback(async (force: boolean) => {
+  const loadFeedback = useCallback(async (
+    force: boolean,
+    preserveDraft = false,
+  ) => {
     const requestedOwnershipKey = ownershipKey
     const client = supabase
     const outcome = client
@@ -747,25 +835,28 @@ export function RegistrationObservationTeacherFeedback({
     if (outcome.kind === "stale") return
     if (outcome.kind === "failed") {
       if (ownershipRef.current !== requestedOwnershipKey) return
-      setState({
-        ...createTeacherFeedbackState(requestedOwnershipKey, false),
-        errorMessage: outcome.errorMessage,
-        reloadRequired: outcome.reloadRequired,
-      })
+      setState((current) => transitionRegistrationObservationTeacherFeedbackLoadState(
+        current,
+        {
+          kind: "failed",
+          ownershipKey: requestedOwnershipKey,
+          preserveDraft,
+          errorMessage: outcome.errorMessage,
+          reloadRequired: outcome.reloadRequired,
+        },
+      ))
       return
     }
     if (ownershipRef.current !== requestedOwnershipKey) return
-    setState({
-      ownershipKey: requestedOwnershipKey,
-      detail: outcome.detail,
-      draft: createTeacherFeedbackDraft(outcome.detail),
-      loading: false,
-      saving: false,
-      errorMessage: "",
-      fieldError: null,
-      reloadRequired: false,
-      receipt: "",
-    })
+    setState((current) => transitionRegistrationObservationTeacherFeedbackLoadState(
+      current,
+      {
+        kind: "loaded",
+        ownershipKey: requestedOwnershipKey,
+        detail: outcome.detail,
+        preserveDraft,
+      },
+    ))
   }, [observationId, ownershipKey])
 
   useEffect(() => {
@@ -820,7 +911,7 @@ export function RegistrationObservationTeacherFeedback({
   }
 
   async function runMutation(action: RegistrationObservationTeacherFeedbackAction) {
-    if (!state.detail || !supabase) return
+    if (!state.detail || !supabase || state.reloadRequired) return
     const client = supabase
     const requestedOwnershipKey = ownershipKey
     const resources = mutationResources
@@ -835,6 +926,7 @@ export function RegistrationObservationTeacherFeedback({
       action,
       nowMs,
       allowAttendanceOnly: canManageAll,
+      reloadRequired: state.reloadRequired,
       guard: resources.guard,
       requestKeys: resources.requestKeys,
       createRequestKey: () => (
@@ -911,8 +1003,11 @@ export function RegistrationObservationTeacherFeedback({
   }
 
   function reloadFeedback() {
-    setState(createTeacherFeedbackState(ownershipKey, true))
-    void loadFeedback(true)
+    setState((current) => transitionRegistrationObservationTeacherFeedbackLoadState(
+      current,
+      { kind: "reload_started", ownershipKey },
+    ))
+    void loadFeedback(true, true)
   }
 
   return (
