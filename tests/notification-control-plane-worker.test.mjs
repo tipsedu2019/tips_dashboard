@@ -2628,7 +2628,8 @@ test("관찰 first-attempt refresh가 durable frozen retry를 만들고 canonica
   ]) {
     const deliveryId = "80000000-0000-4000-8000-000000000009"
     const initialPayload = { progress: "42~49쪽" }
-    const refreshedPayload = { progress: "50~57쪽" }
+    const currentSource = { progress: "50~57쪽", revision: "7", reads: 0, retryReadForbidden: false }
+    const refreshedPayload = { progress: currentSource.progress, source_revision: currentSource.revision }
     const payloadFingerprint = createHash("sha256").update(JSON.stringify(refreshedPayload)).digest("hex")
     const renderFingerprint = createHash("sha256").update(JSON.stringify({ body: "B", href: "/admin/registration", title: "T" })).digest("hex")
     const state = { status: "pending", attempt: 0, frozen: null, sends: 0, claims: 0 }
@@ -2693,8 +2694,11 @@ test("관찰 first-attempt refresh가 durable frozen retry를 만들고 canonica
         async revalidateBeforeSend(input) {
           if (input.attemptCount === 0) {
             currentPreparationReads += 1
+            currentSource.reads += 1
+            if (currentSource.retryReadForbidden) throw new Error("retry must not read current preparation")
             return { ok: true, refreshedPayload, payloadSchemaVersion: 3, payloadFingerprint }
           }
+          if (currentSource.retryReadForbidden && currentSource.reads !== 1) throw new Error("retry read current preparation")
           assert.deepEqual(input.eventSnapshot, { payloadSchemaVersion: 3, payload: refreshedPayload })
           return { ok: true }
         },
@@ -2703,8 +2707,12 @@ test("관찰 first-attempt refresh가 durable frozen retry를 만들고 canonica
       }),
     })
     await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+    currentSource.progress = "B revision의 완전히 다른 진도"
+    currentSource.revision = "8"
+    currentSource.retryReadForbidden = true
     await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
     assert.equal(currentPreparationReads, 1, fixture.name)
+    assert.equal(currentSource.reads, 1, fixture.name)
     assert.equal(state.sends, fixture.retry ? 2 : 1, fixture.name)
     assert.equal(fetchCalls.length, fixture.retry ? 2 : 1, fixture.name)
     assert.equal(calls.filter((call) => call.name === "get_notification_render_snapshot_v1").length, 1, fixture.name)
@@ -2712,6 +2720,8 @@ test("관찰 first-attempt refresh가 durable frozen retry를 만들고 canonica
     assert.equal(calls.filter((call) => call.name === "register_notification_external_attempt_v1").length, fixture.retry ? 2 : 1, fixture.name)
     assert.equal(state.frozen.payloadFingerprint, payloadFingerprint, fixture.name)
     assert.equal(state.frozen.renderFingerprint, renderFingerprint, fixture.name)
+    assert.deepEqual(state.frozen.snapshot, refreshedPayload, fixture.name)
+    assert.doesNotMatch(JSON.stringify(state.frozen.snapshot), /B revision/, fixture.name)
     assert.deepEqual(fetchCalls.at(-1), fetchCalls[0], `${fixture.name} frozen transport bytes`)
   }
 })
