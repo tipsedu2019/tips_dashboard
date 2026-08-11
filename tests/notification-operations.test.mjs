@@ -277,10 +277,11 @@ test("schedule migration은 Vault fail-closed, 두 schedule, atomic watchdog와 
     "dashboard_private.manage_notification_schedules_v1",
   )
   const workerSchedule = scheduleManager.match(
-    /perform cron\.schedule\(\s*'tips-notification-worker-v1',\s*'([^']+)'/,
+    /perform cron\.schedule\(\s*'tips-notification-worker-v1',\s*'([^']+)',\s*\$command\$([^$]+)\$command\$\s*\);/,
   )
   assert.ok(workerSchedule)
   assert.match(workerSchedule[1], /^\* \* \* \* \*$/)
+  assert.equal(workerSchedule[2].trim(), "select dashboard_private.invoke_notification_worker_v1();")
   assert.match(scheduleManager, /pg_advisory_xact_lock/)
   assert.match(scheduleManager, /notification_active_cutover_scope_v1/)
   assert.match(scheduleManager, /for update of flag_row/)

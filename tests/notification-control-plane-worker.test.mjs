@@ -2331,6 +2331,43 @@ test("관찰 first-attempt generic payload는 locked frozen snapshot과 byte-ide
   assert.equal(revalidationCalls, 0)
 })
 
+test("관찰 booking hash drift는 locked read 뒤 source_schedule_changed로 닫고 prepare/provider를 호출하지 않는다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  const claim = createDeliveryClaim({
+    workflow_key: "registration", event_key: "registration.observation_reminder_due",
+    source_type: "registration_observation", source_id: "70000000-0000-4000-8000-000000000012",
+    source_revision: "1", rule_revision: "1", target_generation: "1", channel_key: "google_chat",
+    target: { target_kind: "connection", target_key: "connection:google_chat.management", target_profile_id: null, connection_key: "google_chat.management", target_snapshot: { connection_key: "google_chat.management" } },
+  })
+  const frozenPayload = { booking_fact_hash: "a".repeat(64) }
+  let providerLookups = 0
+  const harness = createRpcHarness({
+    claim_notification_deliveries_v1: [claim],
+    read_registration_observation_notification_delivery_frozen_state_v1: {
+      attemptCount: 0, expiresAt: "2026-08-17T10:00:00.000Z", snapshot: frozenPayload,
+      payloadFingerprint: null, renderFingerprint: null, title: null, body: null, href: null, lastAttemptStartedAt: null,
+    },
+    get_notification_render_snapshot_v1: {
+      event_id: EVENT_ID, workflow_key: "registration", event_key: claim.event_key, source_type: claim.source_type,
+      source_id: claim.source_id, source_revision: "1", occurrence_key: "booking-hash-drift", occurred_at: claim.scheduled_for,
+      payload_schema_version: 3, payload: frozenPayload, rule_id: RULE_ID, rule_revision: "1", template_id: TEMPLATE_ID,
+      channel_key: "google_chat", audience_key: "subject_team", rule_variant_key: "immediate", title_template: "T", body_template: "B",
+      allowed_variables: [], template_payload_schema_version: 3,
+    },
+  })
+  const worker = createNotificationWorkerRuntime({
+    rpc: harness.rpc, createRunId: () => RUN_ID, now: () => new Date("2026-08-17T08:00:00.000Z"),
+    getAdapter: () => createAdapter({ async revalidateBeforeSend() { return { ok: false, status: "canceled", reason: "source_schedule_changed" } } }),
+    getProvider: () => { providerLookups += 1; return null },
+  })
+  await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+  const finalize = harness.calls.find((call) => call.name === "finalize_notification_delivery_v1")
+  assert.equal(finalize.parameters.p_status, "canceled")
+  assert.equal(finalize.parameters.p_status_reason, "source_schedule_changed")
+  assert.equal(providerLookups, 0)
+  assert.equal(harness.calls.some((call) => ["refresh_registration_observation_notification_delivery_v1", "prepare_registration_observation_notification_delivery_v1", "register_notification_external_attempt_v1"].includes(call.name)), false)
+})
+
 test("관찰 final-prepare 결과는 닫힌 union·동일 delivery·in-app provider-zero receipt만 받는다", async () => {
   const { prepareRegistrationObservationDeliveryForDispatch } = await import(workerModuleUrl)
   const claim = createDeliveryClaim({
@@ -2410,6 +2447,48 @@ test("feedback_submitted의 in-app은 provider 0이고 빈 mention management Ch
   assert.equal(harness.calls.filter((call) => call.name === "prepare_registration_observation_notification_delivery_v1").length, 2)
   assert.equal(harness.calls.some((call) => JSON.stringify(call.parameters).includes("@all")), false)
   assert.equal(harness.calls.some((call) => JSON.stringify(call.parameters).includes("executive")), false)
+})
+
+test("nullable/inactive feedback director의 in-app cancel은 management Chat을 short-circuit하지 않는다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  for (const directorState of ["null", "inactive"]) {
+    const inAppDeliveryId = directorState === "null" ? "80000000-0000-4000-8000-000000000005" : "80000000-0000-4000-8000-000000000006"
+    const managementDeliveryId = directorState === "null" ? "80000000-0000-4000-8000-000000000007" : "80000000-0000-4000-8000-000000000008"
+    const base = {
+      workflow_key: "registration", event_key: "registration.observation_feedback_submitted", source_type: "registration_observation",
+      source_id: "70000000-0000-4000-8000-000000000023", source_revision: "7", rule_revision: "1", target_generation: "1", attempt_count: 1,
+    }
+    const claims = [
+      createDeliveryClaim({ ...base, delivery_id: inAppDeliveryId, channel_key: "in_app", target: { target_kind: "profile", target_key: `profile:${PROFILE_ID}`, target_profile_id: PROFILE_ID, connection_key: null, target_snapshot: { profile_id: PROFILE_ID } } }),
+      createDeliveryClaim({ ...base, delivery_id: managementDeliveryId, channel_key: "google_chat", target: { target_kind: "connection", target_key: "connection:google_chat.management", target_profile_id: null, connection_key: "google_chat.management", target_snapshot: { connection_key: "google_chat.management" } } }),
+    ]
+    const harness = createRpcHarness({
+      claim_notification_deliveries_v1: claims,
+      read_registration_observation_notification_delivery_frozen_state_v1: (parameters) => ({
+        attemptCount: 1, expiresAt: "2026-08-17T10:00:00.000Z", snapshot: { director_state: directorState, delivery: parameters.p_delivery_id },
+        payloadFingerprint: "a".repeat(64), renderFingerprint: "b".repeat(64), title: "제출", body: "피드백", href: "/admin/registration", lastAttemptStartedAt: "2026-08-17T07:00:00.000Z",
+      }),
+      prepare_registration_observation_notification_delivery_v1: (parameters) => parameters.p_delivery_id === inAppDeliveryId
+        ? { prepared: false, delivery_id: inAppDeliveryId, status: "canceled", status_reason: "recipient_revoked" }
+        : { prepared: true, delivery_id: managementDeliveryId, claim_token: CLAIM_TOKEN, dispatch_token: DISPATCH_TOKEN, status: "sending", channel_key: "google_chat", connection_key: "google_chat.management", webhook_url: GOOGLE_CHAT_URL, rendered_title: "제출", rendered_body: "피드백", mention_user_names: [] },
+    })
+    let lookups = 0
+    let sends = 0
+    const worker = createNotificationWorkerRuntime({
+      rpc: harness.rpc, getAdapter: () => createAdapter(), createRunId: () => RUN_ID,
+      getProvider: (channel) => {
+        lookups += 1
+        assert.equal(channel, "google_chat")
+        return { async send(context) { sends += 1; assert.deepEqual(context.mention_user_names, []); return { status: "sent", providerMessageId: "message", providerResponseCode: "200" } } }
+      },
+    })
+    await worker.runBatch({ workerId: "worker-fixture", batchSize: 2, leaseSeconds: 30 })
+    assert.equal(lookups, 1, directorState)
+    assert.equal(sends, 1, directorState)
+    assert.equal(harness.calls.filter((call) => call.name === "register_notification_external_attempt_v1").length, 1, directorState)
+    assert.equal(harness.calls.some((call) => JSON.stringify(call.parameters).includes("google_chat.executive")), false, directorState)
+    assert.equal(harness.calls.some((call) => JSON.stringify(call.parameters).includes("@all")), false, directorState)
+  }
 })
 
 test("관찰 frozen retry의 429/425만 두 번째 send를 허용하고 408·timeout·reset·5xx는 자동 재발송하지 않는다", async () => {
