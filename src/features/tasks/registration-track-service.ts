@@ -42,10 +42,16 @@ import type { RegistrationIntakeRuntimeState } from "./registration-intake-runti
 import {
   EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
   normalizeRegistrationObservationSummary,
+  type RegistrationObservationFeedbackDetail,
   type RegistrationObservationRuntimeState,
   type RegistrationObservationSummary,
   type RegistrationObservationTrackWorkflowStatus,
 } from "./registration-observation-model.ts"
+import {
+  loadRegistrationObservationFeedback,
+  loadRegistrationObservationManagerDetail,
+  type RegistrationObservationClient,
+} from "./registration-observation-service.ts"
 import {
   probeRegistrationObservationRuntime as probeRegistrationObservationRuntimeFromDatabase,
 } from "./registration-observation-runtime-probe.ts"
@@ -238,6 +244,7 @@ export type OpsRegistrationEnrollment = {
   classStartSessionKey: string | null
   classStartLessonSessionId: string | null
   classStartSession: string | null
+  classStartSourceObservationId?: string | null
   status: "planned" | "waitlisted" | "enrolled" | "canceled"
   makeeduRegistered: boolean
   rosterActive: boolean
@@ -656,7 +663,7 @@ export type StudentClassRosterModeResponse = {
   classWaitlistIds: string[]
 }
 
-export type RegistrationEnrollmentRowInput = {
+export type RegistrationEnrollmentRowInput = Readonly<{
   id?: string
   classId: string
   textbookId?: string | null
@@ -664,8 +671,9 @@ export type RegistrationEnrollmentRowInput = {
   classStartSessionKey?: string | null
   classStartLessonSessionId?: string | null
   classStartSession?: string | null
+  classStartSourceObservationId?: string | null
   sortOrder: number
-}
+}>
 
 export type CreateRegistrationCaseInput = {
   studentName: string; schoolGrade: string; schoolName: string; parentPhone: string
@@ -1183,6 +1191,25 @@ function rowNeedsRegistrationObservationSummary(row: Row): boolean {
     || value(row, "observation_feedback_revision", "observationFeedbackRevision") === undefined
 }
 
+function mapRegistrationEnrollmentRowInput(row: Row): RegistrationEnrollmentRowInput {
+  const id = nullableText(value(row, "id"))
+  return {
+    ...(id ? { id } : {}),
+    classId: text(value(row, "classId", "class_id")),
+    textbookId: nullableText(value(row, "textbookId", "textbook_id")),
+    classStartDate: nullableText(value(row, "classStartDate", "class_start_date")),
+    classStartSessionKey: nullableText(value(row, "classStartSessionKey", "class_start_session_key")),
+    classStartLessonSessionId: nullableText(value(row, "classStartLessonSessionId", "class_start_lesson_session_id")),
+    classStartSession: nullableText(value(row, "classStartSession", "class_start_session")),
+    classStartSourceObservationId: nullableText(value(
+      row,
+      "classStartSourceObservationId",
+      "class_start_source_observation_id",
+    )),
+    sortOrder: numberValue(value(row, "sortOrder", "sort_order")),
+  }
+}
+
 function mapTrackFields<
   TWorkflowStatus extends RegistrationObservationTrackWorkflowStatus,
 >(
@@ -1217,16 +1244,8 @@ function mapTrackFields<
     waitingDetailClassId: nullableText(value(row, "waiting_detail_class_id", "waitingDetailClassId")),
     waitingDetailRetakeDecision: retakeDecision(value(row, "waiting_detail_retake_decision", "waitingDetailRetakeDecision")),
     ...(value(row, "enrollment_detail_rows", "enrollmentDetailRows") === undefined ? {} : {
-      enrollmentDetailRows: rows(value(row, "enrollment_detail_rows", "enrollmentDetailRows")).map((item) => ({
-        id: nullableText(value(item, "id")) || undefined,
-        classId: text(value(item, "classId", "class_id")),
-        textbookId: nullableText(value(item, "textbookId", "textbook_id")),
-        classStartDate: nullableText(value(item, "classStartDate", "class_start_date")),
-        classStartSessionKey: nullableText(value(item, "classStartSessionKey", "class_start_session_key")),
-        classStartLessonSessionId: nullableText(value(item, "classStartLessonSessionId", "class_start_lesson_session_id")),
-        classStartSession: nullableText(value(item, "classStartSession", "class_start_session")),
-        sortOrder: numberValue(value(item, "sortOrder", "sort_order")),
-      })),
+      enrollmentDetailRows: rows(value(row, "enrollment_detail_rows", "enrollmentDetailRows"))
+        .map(mapRegistrationEnrollmentRowInput),
     }),
     levelTestRetakeDecision: retakeDecision(value(row, "level_test_retake_decision", "levelTestRetakeDecision")),
     migrationReviewRequired: bool(value(row, "migration_review_required", "migrationReviewRequired")),
@@ -1298,6 +1317,11 @@ function mapEnrollment(row: Row): OpsRegistrationEnrollment {
     classStartSessionKey: nullableText(value(row, "class_start_session_key", "classStartSessionKey")),
     classStartLessonSessionId: nullableText(value(row, "class_start_lesson_session_id", "classStartLessonSessionId")),
     classStartSession: nullableText(value(row, "class_start_session", "classStartSession")),
+    classStartSourceObservationId: nullableText(value(
+      row,
+      "class_start_source_observation_id",
+      "classStartSourceObservationId",
+    )),
     status: (text(value(row, "status")) || "planned") as OpsRegistrationEnrollment["status"],
     makeeduRegistered: bool(value(row, "makeedu_registered", "makeeduRegistered")),
     rosterActive: bool(value(row, "roster_active", "rosterActive")),
@@ -1638,6 +1662,20 @@ function mapTask(row: Row, detail: Row, comments: OpsTaskComment[], attachments:
 
 function normalizeUuid(input: unknown) {
   return nullableText(input)
+}
+
+function registrationEnrollmentRowPayload(row: RegistrationEnrollmentRowInput) {
+  return {
+    id: normalizeUuid(row.id),
+    classId: row.classId,
+    textbookId: normalizeUuid(row.textbookId),
+    classStartDate: nullableText(row.classStartDate),
+    classStartSessionKey: nullableText(row.classStartSessionKey),
+    classStartLessonSessionId: normalizeUuid(row.classStartLessonSessionId),
+    classStartSession: nullableText(row.classStartSession),
+    classStartSourceObservationId: normalizeUuid(row.classStartSourceObservationId),
+    sortOrder: row.sortOrder,
+  }
 }
 
 function requireRequestKey(input: unknown) {
@@ -3063,21 +3101,34 @@ export function createRegistrationTrackService(
     })
   }
 
+  async function loadRegistrationEnrollmentStartObservation(input: {
+    trackId: string
+  }): Promise<RegistrationObservationFeedbackDetail | null> {
+    const trackId = text(input.trackId)
+    if (!trackId) throw new Error("registration_track_id_invalid")
+    const observationClient = client as unknown as RegistrationObservationClient
+    const managerDetail = await loadRegistrationObservationManagerDetail(observationClient, {
+      trackId,
+      attemptLimit: 1,
+    })
+    if (managerDetail.track.trackId !== trackId) return null
+    const observationId = nullableText(managerDetail.latestEnrollmentDecisionObservationId)
+    if (!observationId) return null
+    const detail = await loadRegistrationObservationFeedback(
+      observationClient,
+      observationId,
+      { timeoutMs: requestTimeoutMs, force: true },
+    )
+    if (detail.observationId !== observationId || detail.trackId !== trackId) return null
+    return detail
+  }
+
   async function saveRegistrationEnrollmentRows(input: {
     trackId: string
     rows: RegistrationEnrollmentRowInput[]
     requestKey: string
   }): Promise<RegistrationEnrollmentRowsSaveResponse> {
-    const payloadRows = input.rows.map((row) => ({
-      id: normalizeUuid(row.id),
-      classId: row.classId,
-      textbookId: normalizeUuid(row.textbookId),
-      classStartDate: nullableText(row.classStartDate),
-      classStartSessionKey: nullableText(row.classStartSessionKey),
-      classStartLessonSessionId: normalizeUuid(row.classStartLessonSessionId),
-      classStartSession: nullableText(row.classStartSession),
-      sortOrder: row.sortOrder,
-    }))
+    const payloadRows = input.rows.map(registrationEnrollmentRowPayload)
     const result = await callRpc<RegistrationEnrollmentRowsSaveResponse>("save_registration_enrollment_rows", {
       p_track_id: input.trackId,
       p_rows: payloadRows,
@@ -3094,12 +3145,16 @@ export function createRegistrationTrackService(
     rows: RegistrationEnrollmentRowInput[]
     requestKey: string
   }): Promise<{ trackId: string; rows: RegistrationEnrollmentRowInput[] }> {
+    const payloadRows = input.rows.map(registrationEnrollmentRowPayload)
     const result = await callRpc<Row>("save_registration_enrollment_details_v1", {
       p_track_id: input.trackId,
-      p_rows: input.rows,
+      p_rows: payloadRows,
       p_request_key: requireRequestKey(input.requestKey),
     })
-    return { trackId: text(value(result, "track_id", "trackId")), rows: rows(value(result, "rows")).map((item) => ({ classId: text(value(item, "classId")), sortOrder: numberValue(value(item, "sortOrder")) })) }
+    return {
+      trackId: text(value(result, "track_id", "trackId")),
+      rows: rows(value(result, "rows")).map(mapRegistrationEnrollmentRowInput),
+    }
   }
 
   async function claimRegistrationAdmissionMessage(input: {
@@ -3380,6 +3435,7 @@ export function createRegistrationTrackService(
     transitionRegistrationWaiting,
     saveRegistrationWaitingDetails,
     routeRegistrationEnrollmentDecision,
+    loadRegistrationEnrollmentStartObservation,
     saveRegistrationEnrollmentRows,
     saveRegistrationEnrollmentDetails,
     listRegistrationLegacySourceIds,
@@ -3790,6 +3846,12 @@ export function routeRegistrationEnrollmentDecision(
   const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationTrackTransitionResponse>("routeRegistrationEnrollmentDecision", input)
   if (fixture) return fixture
   return defaultRegistrationTrackService.routeRegistrationEnrollmentDecision(input)
+}
+
+export function loadRegistrationEnrollmentStartObservation(
+  input: Parameters<typeof defaultRegistrationTrackService.loadRegistrationEnrollmentStartObservation>[0],
+): Promise<RegistrationObservationFeedbackDetail | null> {
+  return defaultRegistrationTrackService.loadRegistrationEnrollmentStartObservation(input)
 }
 
 export function saveRegistrationEnrollmentRows(

@@ -31,16 +31,23 @@ import {
 } from "./ops-task-service"
 import {
   applyRegistrationEnrollmentClassSelection,
+  applyRegistrationEnrollmentStartDefault,
+  applyRegistrationEnrollmentStartSelection,
   createRegistrationEnrollmentDraft,
+  createRegistrationEnrollmentStartLoadOwner,
   getRegistrationAdmissionBatchCancellationGroups,
   getRegistrationAdmissionBatchChecklist,
   getRegistrationAdmissionProgressDisplay,
   getRegistrationEnrollmentBlockers,
   getRegistrationEnrollmentCancellationState,
+  getRegistrationEnrollmentStartOptions,
+  getRegistrationEnrollmentStartSaveErrorMessage,
   getRegistrationSelectedAdmissionEnrollmentIds,
   restoreRegistrationEnrollmentDraft,
   serializeRegistrationEnrollmentRows,
   type RegistrationEnrollmentDraft,
+  type RegistrationEnrollmentStartOption,
+  type RegistrationScheduleSession,
 } from "./registration-track-model.js"
 import { getSelectableRegistrationScheduleSessions } from "./registration-workflow"
 import {
@@ -53,6 +60,7 @@ import {
   cancelRegistrationEnrollment,
   completeRegistrationAdmissionBatch,
   createRegistrationMutationRequestKey,
+  loadRegistrationEnrollmentStartObservation,
   saveRegistrationEnrollmentDetails,
   setRegistrationEnrollmentMakeedu,
   startRegistrationAdmissionBatch,
@@ -61,6 +69,7 @@ import {
   type OpsRegistrationTrackSummary,
   type RegistrationWaitingKind,
 } from "./registration-track-service"
+import type { RegistrationObservationFeedbackDetail } from "./registration-observation-model.ts"
 import type { RegistrationCustomerMessageTarget } from "./registration-customer-message-contract"
 
 type RegistrationManagementPermissions = {
@@ -131,38 +140,56 @@ function registrationCalendarDate(dateKey: string) {
   return new Date(year, month - 1, day)
 }
 
-type RegistrationScheduleSession = ReturnType<typeof getSelectableRegistrationScheduleSessions>[number]
+function registrationKoreanMonthDay(dateKey: string) {
+  const [, month, day] = dateKey.match(/^(\d{4})-(\d{2})-(\d{2})$/) || []
+  if (!month || !day) return dateKey
+  return `${Number(month)}월 ${Number(day)}일`
+}
 
 function RegistrationStartScheduleCalendar({
   subject,
   rowIndex,
   sessions,
   value,
+  sourceObservationId,
+  valueDate,
+  valueLabel,
   disabled,
   onSelect,
 }: {
   subject: string
   rowIndex: number
-  sessions: RegistrationScheduleSession[]
+  sessions: readonly RegistrationEnrollmentStartOption[]
   value: string
+  sourceObservationId: string
+  valueDate: string
+  valueLabel: string
   disabled: boolean
-  onSelect: (session: RegistrationScheduleSession) => void
+  onSelect: (session: RegistrationEnrollmentStartOption) => void
 }) {
-  const sessionsByDate = new Map(sessions.map((session) => [session.dateKey, session]))
-  const selectedSession = sessions.find((session) => session.value === value)
+  const sessionsByDate = new Map<string, RegistrationEnrollmentStartOption>()
+  for (const session of sessions) {
+    if (!sessionsByDate.has(session.sessionDate)) sessionsByDate.set(session.sessionDate, session)
+  }
+  const selectedSession = sessions.find((session) => (
+    session.classStartSessionKey === value
+    && session.sourceObservationId === sourceObservationId
+  ))
+  const selectedDate = selectedSession?.sessionDate || valueDate
+  const selectedLabel = selectedSession?.label || valueLabel
   return (
     <Popover>
       <PopoverTrigger asChild>
         <Button type="button" variant="outline" className="h-9 w-full min-w-0 justify-start font-normal" disabled={disabled} aria-label={`${subject} 수업 ${rowIndex} 시작 일정 선택`}>
           <CalendarDays className="size-4" aria-hidden="true" />
-          {selectedSession ? `${selectedSession.dateKey} · ${selectedSession.sessionLabel}` : "수업 시작일 선택"}
+          {selectedDate && selectedLabel ? `${selectedDate} · ${selectedLabel}` : "수업 시작일 선택"}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-auto p-0" disablePortal>
         <Calendar
           mode="single"
-          selected={selectedSession ? registrationCalendarDate(selectedSession.dateKey) : undefined}
-          defaultMonth={registrationCalendarDate(selectedSession?.dateKey || sessions[0]?.dateKey || registrationDateKey(new Date()))}
+          selected={selectedDate ? registrationCalendarDate(selectedDate) : undefined}
+          defaultMonth={registrationCalendarDate(selectedDate || sessions[0]?.sessionDate || registrationDateKey(new Date()))}
           disabled={(date) => !sessionsByDate.has(registrationDateKey(date))}
           onSelect={(date) => {
             const session = date ? sessionsByDate.get(registrationDateKey(date)) : null
@@ -335,6 +362,14 @@ export function RegistrationEnrollmentEditor({
     if (cachedEnrollmentDraft) return cachedEnrollmentDraft.rows.map((row) => ({ ...row }))
     return canonicalDraftRows
   })
+  const canonicalRowsHavePersistedOwnership = Boolean(
+    cachedEnrollmentDraft
+    || trackEnrollments.some(isMutableDraft)
+    || (track.enrollmentDetailRows || []).length > 0,
+  )
+  const observationDefaultEligibleClientKeysRef = useRef(new Set(
+    canonicalRowsHavePersistedOwnership ? [] : canonicalDraftRows.map((row) => row.clientKey),
+  ))
   const [classDetailById, setClassDetailById] = useState<Record<string, OpsRegistrationClassDetail | null>>({})
   const [loadingClassIds, setLoadingClassIds] = useState<Set<string>>(() => new Set())
   const [classDetailRetryToken, setClassDetailRetryToken] = useState(0)
@@ -349,7 +384,12 @@ export function RegistrationEnrollmentEditor({
   const [rowsValidationError, setRowsValidationError] = useState("")
   const [cancellationValidationError, setCancellationValidationError] = useState("")
   const [enrollmentHistoryOpen, setEnrollmentHistoryOpen] = useState(false)
+  const [matchingObservation, setMatchingObservation] = useState<RegistrationObservationFeedbackDetail | null>(null)
+  const currentMatchingObservation = matchingObservation?.trackId === track.id
+    ? matchingObservation
+    : null
   const sectionRef = useRef<HTMLElement | null>(null)
+  const observationLoadOwnerRef = useRef(createRegistrationEnrollmentStartLoadOwner())
   const initialDraftRowsRef = useRef(cachedEnrollmentDraft?.baseline || JSON.stringify(draftRows))
   const canonicalKeyRef = useRef(cachedEnrollmentDraft?.canonicalKey || canonicalEnrollmentKey)
   const submissionKeys = useSubmissionKeys()
@@ -403,6 +443,58 @@ export function RegistrationEnrollmentEditor({
       canonicalKey: canonicalKeyRef.current,
     })
   }, [draftRows, enrollmentDraftScopeKey, rowsDirty])
+
+  useEffect(() => {
+    observationDefaultEligibleClientKeysRef.current = new Set(
+      canonicalRowsHavePersistedOwnership ? [] : canonicalDraftRows.map((row) => row.clientKey),
+    )
+  // The track scope is the only reset boundary. Canonical refreshes must not re-arm a used default.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enrollmentDraftScopeKey])
+
+  useEffect(() => {
+    for (const row of draftRows) {
+      if ([
+        row.classStartDate,
+        row.classStartSessionKey,
+        row.classStartLessonSessionId,
+        row.classStartSession,
+        row.classStartSourceObservationId,
+      ].some(Boolean)) {
+        observationDefaultEligibleClientKeysRef.current.delete(row.clientKey)
+      }
+    }
+  }, [draftRows])
+
+  const observationFeedbackRevision = track.observationFeedbackRevision ?? null
+  useEffect(() => {
+    const owner = observationLoadOwnerRef.current
+    const token = owner.begin(track.id)
+    setMatchingObservation(null)
+    if (!permissions.canManage) {
+      return () => owner.release(token)
+    }
+
+    void loadRegistrationEnrollmentStartObservation({ trackId: track.id }).then((detail) => {
+      if (!owner.owns(token, track.id)) return
+      setMatchingObservation(detail)
+      if (!detail) return
+      const observationOption = getRegistrationEnrollmentStartOptions({
+        regularSessions: [],
+        matchingObservation: detail,
+        finalClassId: detail.classId,
+      }).find((option) => option.source === "observation") || null
+      if (!observationOption) return
+      const eligibleClientKeys = [...observationDefaultEligibleClientKeysRef.current]
+      setDraftRows((current) => applyRegistrationEnrollmentStartDefault(current, observationOption, {
+        eligibleClientKeys,
+      }))
+    }).catch(() => {
+      if (owner.owns(token, track.id)) setMatchingObservation(null)
+    })
+
+    return () => owner.release(token)
+  }, [observationFeedbackRevision, permissions.canManage, track.id])
 
   useEffect(() => {
     const missingClassIds = selectedClassIds.filter((classId) => !(classId in classDetailById))
@@ -461,11 +553,23 @@ export function RegistrationEnrollmentEditor({
   }, [classDetailById, textbookIds])
 
   const validScheduleSessionKeysByClassId = useMemo(() => Object.fromEntries(
-    selectedClassIds.map((classId) => [
-      classId,
-      getSelectableRegistrationScheduleSessions(classDetailById[classId]?.schedulePlan).map((session) => session.value),
-    ]),
-  ), [classDetailById, selectedClassIds])
+    selectedClassIds.map((classId) => {
+      const regularSessions = getSelectableRegistrationScheduleSessions(classDetailById[classId]?.schedulePlan)
+      const validKeys = getRegistrationEnrollmentStartOptions({
+        regularSessions: regularSessions as RegistrationScheduleSession[],
+        matchingObservation: currentMatchingObservation,
+        finalClassId: classId,
+      }).map((option) => option.classStartSessionKey)
+      for (const row of draftRows) {
+        if (
+          row.classId === classId
+          && row.classStartSourceObservationId
+          && row.classStartSessionKey
+        ) validKeys.push(row.classStartSessionKey)
+      }
+      return [classId, Array.from(new Set(validKeys))]
+    }),
+  ), [classDetailById, currentMatchingObservation, draftRows, selectedClassIds])
   const validTextbookIdsByClassId = useMemo(() => Object.fromEntries(
     selectedClassIds.map((classId) => [
       classId,
@@ -498,17 +602,49 @@ export function RegistrationEnrollmentEditor({
 
   function selectClass(clientKey: string, classId: string) {
     const classItem = subjectClasses.find((item) => item.id === classId) || null
-    setDraftRows((current) => current.map((row) => row.clientKey === clientKey
-      ? applyRegistrationEnrollmentClassSelection(row, { classItem, availableTextbookIds: textbookIds })
-      : row))
+    const previous = draftRows.find((row) => row.clientKey === clientKey)
+    if (previous?.classId && previous.classId !== classId) {
+      observationDefaultEligibleClientKeysRef.current.delete(clientKey)
+    }
+    const eligibleClientKeys = [...observationDefaultEligibleClientKeysRef.current]
+    setDraftRows((current) => {
+      const selectedRows = current.map((row) => row.clientKey === clientKey
+        ? applyRegistrationEnrollmentClassSelection(row, { classItem, availableTextbookIds: textbookIds })
+        : row)
+      const observationOption = getRegistrationEnrollmentStartOptions({
+        regularSessions: [],
+        matchingObservation: currentMatchingObservation,
+        finalClassId: classId,
+      }).find((option) => option.source === "observation") || null
+      return applyRegistrationEnrollmentStartDefault(selectedRows, observationOption, {
+        eligibleClientKeys,
+        preferredClientKey: clientKey,
+      })
+    })
+  }
+
+  function selectStartSession(clientKey: string, option: RegistrationEnrollmentStartOption) {
+    observationDefaultEligibleClientKeysRef.current.delete(clientKey)
+    setDraftRows((current) => current.map((row) => (
+      row.clientKey === clientKey
+        ? {
+            ...applyRegistrationEnrollmentStartSelection(row, option),
+            classStartSourceObservationId: option.source === "regular"
+              ? ""
+              : option.sourceObservationId,
+          }
+        : row
+    )))
   }
 
   function addRow() {
     if (!canEditRows) return
-    setDraftRows((current) => [...current, createRegistrationEnrollmentDraft({
-      clientKey: createRegistrationMutationRequestKey("enrollment-row", `${taskId}:${track.id}:${current.length}`),
-      sortOrder: current.length,
-    })])
+    const row = createRegistrationEnrollmentDraft({
+      clientKey: createRegistrationMutationRequestKey("enrollment-row", `${taskId}:${track.id}:${draftRows.length}`),
+      sortOrder: draftRows.length,
+    })
+    observationDefaultEligibleClientKeysRef.current.add(row.clientKey)
+    setDraftRows((current) => [...current, { ...row, sortOrder: current.length }])
   }
 
   function retryClassDetail(classId: string) {
@@ -575,7 +711,10 @@ export function RegistrationEnrollmentEditor({
       submissionKeys.clear("enrollment-rows", logicalId)
       await reloadCommitted({ kind: "rows" })
     } catch (error) {
-      onWarning(errorMessage(error, "수업 정보를 저장하지 못했습니다."))
+      onWarning(getRegistrationEnrollmentStartSaveErrorMessage(
+        error,
+        "수업 정보를 저장하지 못했습니다.",
+      ))
     } finally {
       setSaving(false)
     }
@@ -644,7 +783,17 @@ export function RegistrationEnrollmentEditor({
       <div data-registration-action-owner={`${track.subject}:enrollment-rows`} className="grid gap-3">
       {draftRows.map((row, index) => {
         const detail = row.classId ? classDetailById[row.classId] : null
-        const sessions = getSelectableRegistrationScheduleSessions(detail?.schedulePlan, { afterDateKey: registrationDecisionDateKey })
+        const regularSessions = getSelectableRegistrationScheduleSessions(detail?.schedulePlan, { afterDateKey: registrationDecisionDateKey })
+        const startOptions = getRegistrationEnrollmentStartOptions({
+          regularSessions: regularSessions as RegistrationScheduleSession[],
+          matchingObservation: currentMatchingObservation,
+          finalClassId: row.classId,
+        })
+        const observationOption = startOptions.find((option) => option.source === "observation") || null
+        const observationSelected = Boolean(
+          observationOption
+          && row.classStartSourceObservationId === observationOption.sourceObservationId,
+        )
         const linkedTextbookIds = detail?.textbookIds
           || subjectClasses.find((classItem) => classItem.id === row.classId)?.textbookIds
           || []
@@ -687,19 +836,22 @@ export function RegistrationEnrollmentEditor({
             </Label>
             <Label className="grid gap-1.5">
               <span>수업 시작 일정</span>
+              {observationSelected && currentMatchingObservation ? (
+                <div className="grid gap-0.5 rounded-md bg-muted/40 px-2.5 py-2 text-xs">
+                  <span className="font-medium">최근 적합 청강</span>
+                  <span>{registrationKoreanMonthDay(currentMatchingObservation.sessionDate)} · {currentMatchingObservation.className} · 참석 · 적합</span>
+                  <span className="text-muted-foreground">첫 수업일 기본값에 반영했습니다.</span>
+                </div>
+              ) : null}
               <RegistrationStartScheduleCalendar
                 subject={track.subject}
                 rowIndex={index + 1}
-                sessions={sessions}
+                sessions={startOptions}
                 value={row.classStartSessionKey}
-                onSelect={(session) => {
-                  updateRow(row.clientKey, {
-                    classStartDate: session.dateKey,
-                    classStartSessionKey: session.value,
-                    classStartLessonSessionId: session.lessonSessionId || "",
-                    classStartSession: session.sessionLabel,
-                  })
-                }}
+                sourceObservationId={row.classStartSourceObservationId}
+                valueDate={row.classStartDate}
+                valueLabel={row.classStartSession}
+                onSelect={(session) => selectStartSession(row.clientKey, session)}
                 disabled={!canEditRows || saving || !row.classId || loadingClassIds.has(row.classId) || classDetailById[row.classId] === null}
               />
             </Label>
@@ -709,6 +861,7 @@ export function RegistrationEnrollmentEditor({
               size="sm"
               onClick={() => {
                 if (row.id === null) {
+                  observationDefaultEligibleClientKeysRef.current.delete(row.clientKey)
                   setDraftRows((current) => current.filter((item) => item.clientKey !== row.clientKey).map((item, order) => ({ ...item, sortOrder: order })))
                   return
                 }

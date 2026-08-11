@@ -5,6 +5,7 @@ import test from "node:test";
 import vm from "node:vm";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import * as registrationTrackModel from "../src/features/tasks/registration-track-model.js";
 
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
@@ -1740,6 +1741,90 @@ test("enrollment editor supports stable repeated subject rows and exact class de
   assert.match(source, /enrollmentDetailRows/)
   assert.match(source, /submissionKeys\.getOrCreate\("enrollment-rows"/)
   assert.match(source, /sm:grid-cols/)
+})
+
+test("observation first lesson UI renders the approved compact copy before the picker and clears source on regular override", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
+  const editor = sourceBetween(source, "export function RegistrationEnrollmentEditor", "export type RegistrationAdmissionPanelProps")
+  const calendar = sourceBetween(source, "function RegistrationStartScheduleCalendar", "function useScopedDirtyState")
+  const suggestionIndex = editor.indexOf("최근 적합 청강")
+  const pickerIndex = editor.indexOf("<RegistrationStartScheduleCalendar")
+
+  assert.ok(suggestionIndex >= 0, "the compact suggestion is rendered")
+  assert.ok(pickerIndex > suggestionIndex, "the suggestion is immediately before the first lesson picker")
+  assert.match(editor, /참석 · 적합/)
+  assert.match(editor, /첫 수업일 기본값에 반영했습니다\./)
+  assert.match(editor, /applyRegistrationEnrollmentStartSelection/)
+  assert.match(editor, /classStartSourceObservationId:\s*option\.source === "regular"[\s\S]*?\? ""/)
+  assert.match(editor, /loadRegistrationEnrollmentStartObservation/)
+  assert.doesNotMatch(editor, /latestDecisionObservation|\.attempts\b/)
+  assert.match(calendar, /selectedSession\?\.sessionDate \|\| valueDate/)
+  assert.match(calendar, /selectedSession\?\.label \|\| valueLabel/)
+  assert.match(editor, /const currentMatchingObservation = matchingObservation\?\.trackId === track\.id[\s\S]*?\? matchingObservation[\s\S]*?: null/)
+  assert.equal((editor.match(/matchingObservation: currentMatchingObservation/g) || []).length, 3)
+})
+
+test("observation first lesson editor keeps async ownership wiring and React state updaters pure", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
+  const editor = sourceBetween(source, "export function RegistrationEnrollmentEditor", "export type RegistrationAdmissionPanelProps")
+  const loadEffect = sourceBetween(editor, "const observationFeedbackRevision", "const missingClassIds")
+  const loadTransition = sourceBetween(loadEffect, "const eligibleClientKeys", "}).catch")
+  const selectClass = sourceBetween(editor, "function selectClass", "function selectStartSession")
+  const selectClassUpdater = sourceBetween(selectClass, "setDraftRows((current) => {", "\n    })")
+  const addRow = sourceBetween(editor, "function addRow", "function retryClassDetail")
+  const addRowStateUpdate = addRow.slice(addRow.indexOf("setDraftRows"))
+
+  assert.match(loadEffect, /if \(!owner\.owns\(token, track\.id\)\) return/)
+  assert.match(loadEffect, /return \(\) => owner\.release\(token\)/)
+  assert.match(loadTransition, /setDraftRows\(\(current\) => applyRegistrationEnrollmentStartDefault\(current, observationOption/)
+  assert.doesNotMatch(loadTransition, /observationDefaultEligibleClientKeysRef\.current\.(?:add|delete)/)
+  assert.doesNotMatch(selectClassUpdater, /observationDefaultEligibleClientKeysRef\.current\.(?:add|delete)/)
+  assert.match(addRow, /observationDefaultEligibleClientKeysRef\.current\.add\(row\.clientKey\)[\s\S]*?setDraftRows/)
+  assert.doesNotMatch(addRowStateUpdate, /observationDefaultEligibleClientKeysRef\.current\.(?:add|delete)/)
+})
+
+test("observation first lesson async ownership rejects old track completions and released generations", () => {
+  const createOwner = registrationTrackModel.createRegistrationEnrollmentStartLoadOwner
+  assert.equal(typeof createOwner, "function")
+  const owner = createOwner()
+  const trackA = owner.begin("track-a")
+  assert.equal(owner.owns(trackA, "track-a"), true)
+
+  const trackB = owner.begin("track-b")
+  assert.equal(owner.owns(trackA, "track-a"), false)
+  assert.equal(owner.owns(trackA, "track-b"), false)
+  assert.equal(owner.owns(trackB, "track-b"), true)
+
+  owner.release(trackB)
+  assert.equal(owner.owns(trackB, "track-b"), false)
+})
+
+test("stale observation first lesson save errors stay private and keep a stable Korean recovery message", () => {
+  const getMessage = registrationTrackModel.getRegistrationEnrollmentStartSaveErrorMessage
+  assert.equal(typeof getMessage, "function")
+  const message = getMessage({
+    code: "23514",
+    message: "registration_observation_class_start_source_invalid: internal row 42",
+    details: "select * from public.ops_registration_observations",
+  }, "수업 정보를 저장하지 못했습니다.")
+
+  assert.equal(message, "청강 회차 정보가 변경되었습니다. 현재 수업 일정을 다시 선택해 주세요.")
+  assert.doesNotMatch(message, /23514|registration_|ops_registration|select/i)
+  assert.equal(
+    getMessage(new Error("registration_invalid_source_state"), "fallback"),
+    "등록 상태가 변경되었습니다. 최신 내용을 다시 불러와 주세요.",
+  )
+  assert.equal(getMessage(new Error("네트워크 오류"), "fallback"), "네트워크 오류")
+})
+
+test("enrollment save rejection uses the private stale-source message without replacing the draft", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
+  const editor = sourceBetween(source, "export function RegistrationEnrollmentEditor", "export type RegistrationAdmissionPanelProps")
+  const saveRows = sourceBetween(editor, "async function saveRows", "async function cancelPersistedEnrollment")
+  const catchBlock = sourceBetween(saveRows, "} catch (error) {", "} finally")
+
+  assert.match(catchBlock, /onWarning\(getRegistrationEnrollmentStartSaveErrorMessage\(/)
+  assert.doesNotMatch(catchBlock, /setDraftRows|initialDraftRowsRef|canonicalDraftRows/)
 })
 
 test("enrollment workspace delegates workflow status changes to the subject status selector", async () => {

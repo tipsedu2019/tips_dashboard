@@ -1,4 +1,5 @@
 import type { AcademicSubjectValue } from "../../lib/academic-subject-registry.ts"
+import type { RegistrationObservationFeedbackDetail } from "./registration-observation-model.ts"
 
 export type RegistrationSubject = AcademicSubjectValue
 
@@ -200,6 +201,7 @@ export type RegistrationEnrollmentDraft = {
   classStartSessionKey: string
   classStartLessonSessionId: string
   classStartSession: string
+  classStartSourceObservationId: string
   status: "planned" | "waitlisted" | "enrolled" | "canceled"
   makeeduRegistered: boolean
   rosterActive: boolean
@@ -230,8 +232,56 @@ export type RegistrationEnrollmentSerializedRow = {
   classStartSessionKey: string | null
   classStartLessonSessionId: string | null
   classStartSession: string | null
+  classStartSourceObservationId: string | null
   sortOrder: number
 }
+
+export type RegistrationScheduleSession = Readonly<{
+  value: string
+  lessonSessionId?: string
+  dateKey: string
+  sessionNumber: number
+  sessionLabel: string
+  state: "active" | "normal" | "makeup"
+}>
+
+export type RegistrationObservationEnrollmentStartSource =
+  | Readonly<{
+      sessionAuthority: "normalized"
+      classStartSessionKey: string
+      classStartLessonSessionId: string
+      legacySessionKey: null
+      sourceRevision: Readonly<{ authority: "normalized"; sessionId: string; revision: number }>
+    }>
+  | Readonly<{
+      sessionAuthority: "legacy"
+      classStartSessionKey: string
+      classStartLessonSessionId: null
+      legacySessionKey: string
+      sourceRevision: Readonly<{ authority: "legacy"; sessionKey: string; contentHash: string }>
+    }>
+
+export type RegistrationEnrollmentStartOption =
+  | Readonly<{
+      source: "regular"
+      sourceObservationId: ""
+      trackId: string
+      classId: string
+      classStartSessionKey: string
+      classStartLessonSessionId: string | null
+      sessionDate: string
+      label: string
+    }>
+  | (Readonly<{
+      source: "observation"
+      sourceObservationId: string
+      trackId: string
+      classId: string
+      sessionDate: string
+      startsAt: string
+      endsAt: string
+      label: string
+    }> & RegistrationObservationEnrollmentStartSource)
 
 export type RegistrationEnrollmentBlocker = {
   rowId: string
@@ -241,13 +291,47 @@ export type RegistrationEnrollmentBlocker = {
 
 export function createRegistrationEnrollmentDraft(input?: Partial<RegistrationEnrollmentDraft>): RegistrationEnrollmentDraft
 
-export function restoreRegistrationEnrollmentDraft(input?: Omit<Partial<RegistrationEnrollmentDraft>, "textbookId" | "classStartDate" | "classStartSessionKey" | "classStartLessonSessionId" | "classStartSession"> & {
+export function restoreRegistrationEnrollmentDraft(input?: Omit<Partial<RegistrationEnrollmentDraft>, "textbookId" | "classStartDate" | "classStartSessionKey" | "classStartLessonSessionId" | "classStartSession" | "classStartSourceObservationId"> & {
   textbookId?: string | null
   classStartDate?: string | null
   classStartSessionKey?: string | null
   classStartLessonSessionId?: string | null
   classStartSession?: string | null
+  classStartSourceObservationId?: string | null
 }): RegistrationEnrollmentDraft
+
+export function getRegistrationEnrollmentStartOptions(input: {
+  regularSessions: readonly RegistrationScheduleSession[]
+  matchingObservation: RegistrationObservationFeedbackDetail | null
+  finalClassId: string
+}): readonly RegistrationEnrollmentStartOption[]
+
+export function applyRegistrationEnrollmentStartSelection(
+  row: RegistrationEnrollmentDraft,
+  option: RegistrationEnrollmentStartOption,
+): RegistrationEnrollmentDraft
+
+export function applyRegistrationEnrollmentStartDefault(
+  rows: readonly RegistrationEnrollmentDraft[],
+  option: RegistrationEnrollmentStartOption | null,
+  input?: { eligibleClientKeys?: readonly string[]; preferredClientKey?: string },
+): RegistrationEnrollmentDraft[]
+
+export type RegistrationEnrollmentStartLoadToken = Readonly<{
+  trackId: string
+  generation: number
+}>
+
+export function createRegistrationEnrollmentStartLoadOwner(): {
+  begin: (trackId: string) => RegistrationEnrollmentStartLoadToken
+  owns: (token: RegistrationEnrollmentStartLoadToken, trackId: string) => boolean
+  release: (token: RegistrationEnrollmentStartLoadToken) => void
+}
+
+export function getRegistrationEnrollmentStartSaveErrorMessage(
+  error: unknown,
+  fallback?: string,
+): string
 
 export function applyRegistrationEnrollmentClassSelection(
   row: RegistrationEnrollmentDraft,
@@ -263,12 +347,13 @@ export function serializeRegistrationEnrollmentRows(
 
 export function mergeSavedRegistrationEnrollmentRows(
   localRows?: readonly RegistrationEnrollmentDraft[],
-  savedRows?: readonly (Omit<Partial<RegistrationEnrollmentDraft>, "textbookId" | "classStartDate" | "classStartSessionKey" | "classStartLessonSessionId" | "classStartSession"> & {
+  savedRows?: readonly (Omit<Partial<RegistrationEnrollmentDraft>, "textbookId" | "classStartDate" | "classStartSessionKey" | "classStartLessonSessionId" | "classStartSession" | "classStartSourceObservationId"> & {
     textbookId?: string | null
     classStartDate?: string | null
   classStartSessionKey?: string | null
   classStartLessonSessionId?: string | null
     classStartSession?: string | null
+    classStartSourceObservationId?: string | null
   })[],
 ): RegistrationEnrollmentDraft[]
 

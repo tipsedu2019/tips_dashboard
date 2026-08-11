@@ -290,6 +290,7 @@ export function createRegistrationEnrollmentDraft({
     classStartSessionKey: "",
     classStartLessonSessionId: "",
     classStartSession: "",
+    classStartSourceObservationId: "",
     status: "planned",
     makeeduRegistered: false,
     rosterActive: false,
@@ -310,7 +311,173 @@ export function restoreRegistrationEnrollmentDraft(enrollment = {}) {
     classStartSessionKey: enrollmentText(enrollment?.classStartSessionKey),
     classStartLessonSessionId: enrollmentText(enrollment?.classStartLessonSessionId),
     classStartSession: enrollmentText(enrollment?.classStartSession),
+    classStartSourceObservationId: enrollmentText(enrollment?.classStartSourceObservationId),
   })
+}
+
+function isEligibleRegistrationEnrollmentStartObservation(observation, finalClassId) {
+  if (!observation) return false
+  if (enrollmentText(observation.classId) !== enrollmentText(finalClassId)) return false
+  if (
+    observation.status !== "completed"
+    || observation.attendance !== "attended"
+    || observation.suitabilityResult !== "fit"
+    || observation.decisionKind !== "enrollment"
+  ) return false
+  if (
+    !enrollmentText(observation.observationId)
+    || !enrollmentText(observation.trackId)
+    || !enrollmentText(observation.sessionDate)
+    || !enrollmentText(observation.startsAt)
+    || !enrollmentText(observation.endsAt)
+    || !enrollmentText(observation.sessionKey)
+  ) return false
+  if (observation.sessionAuthority === "normalized") {
+    return Boolean(
+      enrollmentText(observation.classLessonSessionId)
+      && observation.legacySessionKey === null
+      && observation.sourceRevision?.authority === "normalized"
+      && enrollmentText(observation.sourceRevision.sessionId) === enrollmentText(observation.classLessonSessionId)
+      && Number.isFinite(Number(observation.sourceRevision.revision)),
+    )
+  }
+  return observation.sessionAuthority === "legacy"
+    && observation.classLessonSessionId === null
+    && Boolean(enrollmentText(observation.legacySessionKey))
+    && observation.sourceRevision?.authority === "legacy"
+    && enrollmentText(observation.sourceRevision.sessionKey) === enrollmentText(observation.legacySessionKey)
+    && Boolean(enrollmentText(observation.sourceRevision.contentHash))
+}
+
+export function getRegistrationEnrollmentStartOptions({
+  regularSessions = [],
+  matchingObservation = null,
+  finalClassId = "",
+} = {}) {
+  const classId = enrollmentText(finalClassId)
+  const trackId = enrollmentText(matchingObservation?.trackId)
+  const regularOptions = (Array.isArray(regularSessions) ? regularSessions : []).map((session) => ({
+    source: "regular",
+    sourceObservationId: "",
+    trackId,
+    classId,
+    classStartSessionKey: enrollmentText(session?.value),
+    classStartLessonSessionId: enrollmentText(session?.lessonSessionId) || null,
+    sessionDate: enrollmentText(session?.dateKey),
+    label: enrollmentText(session?.sessionLabel),
+  }))
+  if (!isEligibleRegistrationEnrollmentStartObservation(matchingObservation, classId)) {
+    return regularOptions
+  }
+
+  const common = {
+    source: "observation",
+    sourceObservationId: enrollmentText(matchingObservation.observationId),
+    trackId: enrollmentText(matchingObservation.trackId),
+    classId,
+    sessionDate: enrollmentText(matchingObservation.sessionDate),
+    startsAt: enrollmentText(matchingObservation.startsAt),
+    endsAt: enrollmentText(matchingObservation.endsAt),
+    label: "청강 회차",
+  }
+  const observationOption = matchingObservation.sessionAuthority === "normalized"
+    ? {
+        ...common,
+        sessionAuthority: "normalized",
+        classStartSessionKey: enrollmentText(matchingObservation.sessionKey),
+        classStartLessonSessionId: enrollmentText(matchingObservation.classLessonSessionId),
+        legacySessionKey: null,
+        sourceRevision: matchingObservation.sourceRevision,
+      }
+    : {
+        ...common,
+        sessionAuthority: "legacy",
+        classStartSessionKey: enrollmentText(matchingObservation.legacySessionKey),
+        classStartLessonSessionId: null,
+        legacySessionKey: enrollmentText(matchingObservation.legacySessionKey),
+        sourceRevision: matchingObservation.sourceRevision,
+      }
+  return [observationOption, ...regularOptions]
+}
+
+export function applyRegistrationEnrollmentStartSelection(row, option) {
+  if (!row || !option || enrollmentText(row.classId) !== enrollmentText(option.classId)) return row
+  return {
+    ...row,
+    classStartDate: enrollmentText(option.sessionDate),
+    classStartSessionKey: enrollmentText(option.classStartSessionKey),
+    classStartLessonSessionId: enrollmentText(option.classStartLessonSessionId),
+    classStartSession: enrollmentText(option.label),
+    classStartSourceObservationId: option.source === "observation"
+      ? enrollmentText(option.sourceObservationId)
+      : "",
+  }
+}
+
+export function applyRegistrationEnrollmentStartDefault(rows = [], option = null, input = {}) {
+  if (option?.source !== "observation") return rows
+  const eligibleClientKeys = new Set(
+    (Array.isArray(input.eligibleClientKeys) ? input.eligibleClientKeys : [])
+      .map(enrollmentText)
+      .filter(Boolean),
+  )
+  const preferredClientKey = enrollmentText(input.preferredClientKey)
+  const matchIndex = rows.findIndex((row) => (
+    eligibleClientKeys.has(enrollmentText(row?.clientKey))
+    && (!preferredClientKey || enrollmentText(row?.clientKey) === preferredClientKey)
+    && (row?.status || "planned") === "planned"
+    && enrollmentText(row?.classId) === enrollmentText(option.classId)
+    && [
+      row?.classStartDate,
+      row?.classStartSessionKey,
+      row?.classStartLessonSessionId,
+      row?.classStartSession,
+      row?.classStartSourceObservationId,
+    ].every((value) => !enrollmentText(value))
+  ))
+  if (matchIndex < 0) return rows
+  return rows.map((row, index) => (
+    index === matchIndex ? applyRegistrationEnrollmentStartSelection(row, option) : row
+  ))
+}
+
+export function createRegistrationEnrollmentStartLoadOwner() {
+  let generation = 0
+  let currentTrackId = ""
+  return {
+    begin(trackId) {
+      currentTrackId = enrollmentText(trackId)
+      generation += 1
+      return Object.freeze({ trackId: currentTrackId, generation })
+    },
+    owns(token, trackId) {
+      return Boolean(token)
+        && token.generation === generation
+        && token.trackId === currentTrackId
+        && currentTrackId === enrollmentText(trackId)
+    },
+    release(token) {
+      if (token?.generation === generation && token?.trackId === currentTrackId) {
+        generation += 1
+        currentTrackId = ""
+      }
+    },
+  }
+}
+
+export function getRegistrationEnrollmentStartSaveErrorMessage(error, fallback = "수업 정보를 저장하지 못했습니다.") {
+  const code = enrollmentText(error?.code)
+  const message = error instanceof Error
+    ? error.message
+    : enrollmentText(error?.message)
+  const source = `${code} ${message}`
+  if (
+    source.includes("registration_observation_class_start_source_invalid")
+  ) return "청강 회차 정보가 변경되었습니다. 현재 수업 일정을 다시 선택해 주세요."
+  if (source.includes("registration_invalid_source_state")) {
+    return "등록 상태가 변경되었습니다. 최신 내용을 다시 불러와 주세요."
+  }
+  return message || enrollmentText(fallback) || "수업 정보를 저장하지 못했습니다."
 }
 
 export function applyRegistrationEnrollmentClassSelection(row, input = {}) {
@@ -331,6 +498,7 @@ export function applyRegistrationEnrollmentClassSelection(row, input = {}) {
     classStartSessionKey: "",
     classStartLessonSessionId: "",
     classStartSession: "",
+    classStartSourceObservationId: "",
   }
 }
 
@@ -343,6 +511,7 @@ export function serializeRegistrationEnrollmentRows(rows = []) {
       classStartSessionKey: enrollmentText(row?.classStartSessionKey) || null,
       classStartLessonSessionId: enrollmentText(row?.classStartLessonSessionId) || null,
       classStartSession: enrollmentText(row?.classStartSession) || null,
+      classStartSourceObservationId: enrollmentText(row?.classStartSourceObservationId) || null,
       sortOrder: Number.isFinite(Number(row?.sortOrder)) ? Number(row.sortOrder) : index,
     }
     const id = enrollmentText(row?.id)
@@ -380,6 +549,7 @@ export function mergeSavedRegistrationEnrollmentRows(localRows = [], savedRows =
         classStartSessionKey: enrollmentText(savedRow?.classStartSessionKey),
         classStartLessonSessionId: enrollmentText(savedRow?.classStartLessonSessionId),
         classStartSession: enrollmentText(savedRow?.classStartSession),
+        classStartSourceObservationId: enrollmentText(savedRow?.classStartSourceObservationId),
         textbookExplicitlyCleared: localRow?.textbookExplicitlyCleared || false,
         sortOrder: Number.isFinite(Number(savedRow?.sortOrder)) ? Number(savedRow.sortOrder) : savedIndex,
       })

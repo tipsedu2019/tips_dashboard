@@ -31,6 +31,7 @@ import {
   restoreRegistrationEnrollmentDraft,
   serializeRegistrationEnrollmentRows,
 } from "../src/features/tasks/registration-track-model.js"
+import * as registrationTrackModel from "../src/features/tasks/registration-track-model.js"
 import {
   buildRegistrationCaseListItems,
   getRegistrationCaseTabCounts,
@@ -157,6 +158,7 @@ test("new enrollment rows keep stable keys and selecting a class defaults its li
     classStartSessionKey: null,
     classStartLessonSessionId: null,
     classStartSession: null,
+    classStartSourceObservationId: null,
     sortOrder: 0,
   })
 })
@@ -171,6 +173,276 @@ test("serialized enrollment rows retain the normalized lesson-session UUID", () 
     classStartSession: "수업",
     sortOrder: 0,
   }])[0].classStartLessonSessionId, "10000000-0000-4000-8000-000000000011")
+})
+
+const matchingEnrollmentObservation = Object.freeze({
+  observationId: "10000000-0000-4000-8000-000000000101",
+  taskId: "10000000-0000-4000-8000-000000000001",
+  trackId: "10000000-0000-4000-8000-000000000002",
+  classId: "10000000-0000-4000-8000-000000000003",
+  className: "중2 영어 A반",
+  sessionDate: "2026-08-17",
+  startsAt: "2026-08-17T10:00:00.000Z",
+  endsAt: "2026-08-17T11:30:00.000Z",
+  status: "completed",
+  attendance: "attended",
+  suitabilityResult: "fit",
+  decisionKind: "enrollment",
+  sessionAuthority: "normalized",
+  sessionKey: "normalized:2026-08-17:1",
+  classLessonSessionId: "10000000-0000-4000-8000-000000000004",
+  legacySessionKey: null,
+  sourceRevision: Object.freeze({
+    authority: "normalized",
+    sessionId: "10000000-0000-4000-8000-000000000004",
+    revision: 7,
+  }),
+})
+
+const futureEnrollmentSession = Object.freeze({
+  value: "normalized:2026-08-24:2",
+  lessonSessionId: "10000000-0000-4000-8000-000000000005",
+  dateKey: "2026-08-24",
+  sessionNumber: 2,
+  sessionLabel: "2회차",
+  state: "active",
+})
+
+test("matching fit observation is injected before future first lesson sessions with exact normalized identity", () => {
+  const getOptions = registrationTrackModel.getRegistrationEnrollmentStartOptions
+  assert.equal(typeof getOptions, "function")
+
+  const options = getOptions({
+    regularSessions: [futureEnrollmentSession],
+    matchingObservation: matchingEnrollmentObservation,
+    finalClassId: matchingEnrollmentObservation.classId,
+  })
+
+  assert.deepEqual(options, [{
+    source: "observation",
+    sourceObservationId: matchingEnrollmentObservation.observationId,
+    trackId: matchingEnrollmentObservation.trackId,
+    classId: matchingEnrollmentObservation.classId,
+    sessionDate: "2026-08-17",
+    startsAt: "2026-08-17T10:00:00.000Z",
+    endsAt: "2026-08-17T11:30:00.000Z",
+    label: "청강 회차",
+    sessionAuthority: "normalized",
+    classStartSessionKey: "normalized:2026-08-17:1",
+    classStartLessonSessionId: "10000000-0000-4000-8000-000000000004",
+    legacySessionKey: null,
+    sourceRevision: {
+      authority: "normalized",
+      sessionId: "10000000-0000-4000-8000-000000000004",
+      revision: 7,
+    },
+  }, {
+    source: "regular",
+    sourceObservationId: "",
+    trackId: matchingEnrollmentObservation.trackId,
+    classId: matchingEnrollmentObservation.classId,
+    classStartSessionKey: "normalized:2026-08-24:2",
+    classStartLessonSessionId: "10000000-0000-4000-8000-000000000005",
+    sessionDate: "2026-08-24",
+    label: "2회차",
+  }])
+})
+
+test("regular first lesson options remain unchanged when there is no matching observation", () => {
+  const options = registrationTrackModel.getRegistrationEnrollmentStartOptions({
+    regularSessions: [futureEnrollmentSession],
+    matchingObservation: null,
+    finalClassId: matchingEnrollmentObservation.classId,
+  })
+
+  assert.deepEqual(options, [{
+    source: "regular",
+    sourceObservationId: "",
+    trackId: "",
+    classId: matchingEnrollmentObservation.classId,
+    classStartSessionKey: futureEnrollmentSession.value,
+    classStartLessonSessionId: futureEnrollmentSession.lessonSessionId,
+    sessionDate: futureEnrollmentSession.dateKey,
+    label: futureEnrollmentSession.sessionLabel,
+  }])
+  assert.equal("startsAt" in options[0], false, "regular sessions never invent observation timing")
+  assert.equal("sourceRevision" in options[0], false, "regular sessions never invent a source revision")
+})
+
+test("legacy observation first lesson preserves its historical key, hash, dates, and times", () => {
+  const getOptions = registrationTrackModel.getRegistrationEnrollmentStartOptions
+  const legacyObservation = {
+    ...matchingEnrollmentObservation,
+    observationId: "10000000-0000-4000-8000-000000000111",
+    sessionAuthority: "legacy",
+    sessionKey: "legacy:2026-08-10:3",
+    classLessonSessionId: null,
+    legacySessionKey: "legacy:2026-08-10:3",
+    sourceRevision: {
+      authority: "legacy",
+      sessionKey: "legacy:2026-08-10:3",
+      contentHash: "legacy-content-hash",
+    },
+  }
+
+  assert.deepEqual(getOptions({
+    regularSessions: [],
+    matchingObservation: legacyObservation,
+    finalClassId: legacyObservation.classId,
+  })[0], {
+    source: "observation",
+    sourceObservationId: legacyObservation.observationId,
+    trackId: legacyObservation.trackId,
+    classId: legacyObservation.classId,
+    sessionDate: "2026-08-17",
+    startsAt: "2026-08-17T10:00:00.000Z",
+    endsAt: "2026-08-17T11:30:00.000Z",
+    label: "청강 회차",
+    sessionAuthority: "legacy",
+    classStartSessionKey: "legacy:2026-08-10:3",
+    classStartLessonSessionId: null,
+    legacySessionKey: "legacy:2026-08-10:3",
+    sourceRevision: {
+      authority: "legacy",
+      sessionKey: "legacy:2026-08-10:3",
+      contentHash: "legacy-content-hash",
+    },
+  })
+})
+
+test("first lesson observation eligibility excludes every incomplete or mismatched decision fact", () => {
+  const getOptions = registrationTrackModel.getRegistrationEnrollmentStartOptions
+  const mutations = [
+    ["status", "canceled"],
+    ["attendance", "no_show"],
+    ["suitabilityResult", "unfit"],
+    ["decisionKind", null],
+    ["decisionKind", "waiting_current_class"],
+    ["classId", "10000000-0000-4000-8000-000000000099"],
+  ]
+
+  for (const [key, value] of mutations) {
+    const options = getOptions({
+      regularSessions: [futureEnrollmentSession],
+      matchingObservation: { ...matchingEnrollmentObservation, [key]: value },
+      finalClassId: matchingEnrollmentObservation.classId,
+    })
+    assert.equal(options.length, 1, `${key}=${value} excludes the observation`)
+    assert.equal(options[0].source, "regular")
+  }
+})
+
+test("observation first lesson defaults only the first explicitly owned blank matching row", () => {
+  const applyDefault = registrationTrackModel.applyRegistrationEnrollmentStartDefault
+  const getOptions = registrationTrackModel.getRegistrationEnrollmentStartOptions
+  assert.equal(typeof applyDefault, "function")
+  const observationOption = getOptions({
+    regularSessions: [],
+    matchingObservation: matchingEnrollmentObservation,
+    finalClassId: matchingEnrollmentObservation.classId,
+  })[0]
+  const rows = [
+    createRegistrationEnrollmentDraft({ clientKey: "other", classId: "other-class" }),
+    createRegistrationEnrollmentDraft({ clientKey: "persisted-json", classId: matchingEnrollmentObservation.classId }),
+    createRegistrationEnrollmentDraft({ clientKey: "owned", classId: matchingEnrollmentObservation.classId }),
+    createRegistrationEnrollmentDraft({ clientKey: "owned-second", classId: matchingEnrollmentObservation.classId, sortOrder: 3 }),
+  ]
+
+  const defaulted = applyDefault(rows, observationOption, { eligibleClientKeys: ["owned", "owned-second"] })
+  assert.equal(defaulted[0].classStartSessionKey, "")
+  assert.equal(defaulted[1].classStartSessionKey, "", "a restored JSON row without an ID is still persisted ownership")
+  assert.equal(defaulted[2].classStartSourceObservationId, matchingEnrollmentObservation.observationId)
+  assert.equal(defaulted[2].classStartDate, matchingEnrollmentObservation.sessionDate)
+  assert.equal(defaulted[3].classStartSessionKey, "", "only one matching row receives the default")
+
+  const targeted = applyDefault(rows, observationOption, {
+    eligibleClientKeys: ["owned", "owned-second"],
+    preferredClientKey: "owned-second",
+  })
+  assert.equal(targeted[2].classStartSessionKey, "", "a row event never defaults its matching sibling")
+  assert.equal(targeted[3].classStartSourceObservationId, matchingEnrollmentObservation.observationId)
+
+  const manual = [{
+    ...rows[2],
+    classStartDate: futureEnrollmentSession.dateKey,
+    classStartSessionKey: futureEnrollmentSession.value,
+    classStartLessonSessionId: futureEnrollmentSession.lessonSessionId,
+    classStartSession: futureEnrollmentSession.sessionLabel,
+    classStartSourceObservationId: "",
+  }]
+  assert.strictEqual(applyDefault(manual, observationOption, { eligibleClientKeys: ["owned"] }), manual)
+})
+
+test("class changes and regular first lesson overrides clear the observation source and serialize DB null", () => {
+  const getOptions = registrationTrackModel.getRegistrationEnrollmentStartOptions
+  const selectStart = registrationTrackModel.applyRegistrationEnrollmentStartSelection
+  const observationOption = getOptions({
+    regularSessions: [futureEnrollmentSession],
+    matchingObservation: matchingEnrollmentObservation,
+    finalClassId: matchingEnrollmentObservation.classId,
+  })[0]
+  const regularOption = getOptions({
+    regularSessions: [futureEnrollmentSession],
+    matchingObservation: matchingEnrollmentObservation,
+    finalClassId: matchingEnrollmentObservation.classId,
+  })[1]
+  const selectedObservation = selectStart(
+    createRegistrationEnrollmentDraft({ clientKey: "owned", classId: matchingEnrollmentObservation.classId }),
+    observationOption,
+  )
+  assert.equal(selectedObservation.classStartSourceObservationId, matchingEnrollmentObservation.observationId)
+
+  const regularOverride = selectStart(selectedObservation, regularOption)
+  assert.equal(regularOverride.classStartSourceObservationId, "")
+  assert.equal(serializeRegistrationEnrollmentRows([regularOverride])[0].classStartSourceObservationId, null)
+
+  const changedClass = applyRegistrationEnrollmentClassSelection(selectedObservation, {
+    classItem: { id: "other-class", textbookIds: [] },
+    availableTextbookIds: [],
+  })
+  assert.deepEqual({
+    date: changedClass.classStartDate,
+    key: changedClass.classStartSessionKey,
+    lessonId: changedClass.classStartLessonSessionId,
+    label: changedClass.classStartSession,
+    sourceId: changedClass.classStartSourceObservationId,
+  }, { date: "", key: "", lessonId: "", label: "", sourceId: "" })
+})
+
+test("persisted historical observation first lessons restore and serialize outside future regular filtering", () => {
+  const restored = restoreRegistrationEnrollmentDraft({
+    id: "persisted-observation-row",
+    classId: matchingEnrollmentObservation.classId,
+    classStartDate: matchingEnrollmentObservation.sessionDate,
+    classStartSessionKey: matchingEnrollmentObservation.sessionKey,
+    classStartLessonSessionId: matchingEnrollmentObservation.classLessonSessionId,
+    classStartSession: "청강 회차",
+    classStartSourceObservationId: matchingEnrollmentObservation.observationId,
+  })
+  const futureOnly = registrationTrackModel.getRegistrationEnrollmentStartOptions({
+    regularSessions: [futureEnrollmentSession],
+    matchingObservation: null,
+    finalClassId: restored.classId,
+  })
+
+  assert.equal(futureOnly.some((option) => option.sessionDate === restored.classStartDate), false)
+  assert.deepEqual({
+    date: restored.classStartDate,
+    key: restored.classStartSessionKey,
+    lessonId: restored.classStartLessonSessionId,
+    label: restored.classStartSession,
+    sourceId: restored.classStartSourceObservationId,
+  }, {
+    date: matchingEnrollmentObservation.sessionDate,
+    key: matchingEnrollmentObservation.sessionKey,
+    lessonId: matchingEnrollmentObservation.classLessonSessionId,
+    label: "청강 회차",
+    sourceId: matchingEnrollmentObservation.observationId,
+  })
+  assert.equal(
+    serializeRegistrationEnrollmentRows([restored])[0].classStartSourceObservationId,
+    matchingEnrollmentObservation.observationId,
+  )
 })
 
 test("persisted null textbook restores as an explicit already-owned choice", () => {
@@ -732,7 +1004,7 @@ test("tab counts count one application case even when multiple subjects match a 
       { id: "math", taskId: "case-1", subject: "수학", status: "visit_consultation_scheduled", directorName: "", directorProfileId: null, stageEnteredAt: "", phoneReadyAt: null, migrationReviewRequired: false },
     ],
   }])
-  assert.deepEqual(getRegistrationCaseTabCounts(items), { inquiry: 0, level_test: 0, consultation_requested: 1, consultation_completed: 0, waiting: 0, enrollment: 0, payment: 0, completed: 0 })
+  assert.deepEqual(getRegistrationCaseTabCounts(items), { inquiry: 0, level_test: 0, consultation_requested: 1, consultation_completed: 0, observation: 0, waiting: 0, enrollment: 0, payment: 0, completed: 0 })
 })
 
 test("phone consultation completion requires an outcome and advances atomically", () => {

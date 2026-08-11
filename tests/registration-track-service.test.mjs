@@ -15,6 +15,7 @@ import {
   normalizeRegistrationObservationSummary,
 } from "../src/features/tasks/registration-observation-model.ts";
 import {
+  loadRegistrationObservationFeedback,
   loadRegistrationObservationManagerDetail,
 } from "../src/features/tasks/registration-observation-service.ts";
 import {
@@ -84,6 +85,8 @@ async function loadFactory(extraGlobals = {}) {
     normalizeRegistrationLevelTestPlace,
     EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
     normalizeRegistrationObservationSummary,
+    loadRegistrationObservationFeedback,
+    loadRegistrationObservationManagerDetail,
     parseAcademicSubject,
     REGISTRATION_WORKFLOW_STATUSES,
     getRegistrationWorkflowStatusFromLegacyTrack,
@@ -1629,7 +1632,9 @@ test("track summary loader uses the exact safe projection and skips profile look
         enrollment_detail_rows: [{
           classId: "class-1", textbookId: null, classStartDate: "2026-08-10",
           classStartSessionKey: null, classStartLessonSessionId: null,
-          classStartSession: "1회차", sortOrder: 0,
+          classStartSession: "청강 회차",
+          classStartSourceObservationId: "75000000-0000-4000-8000-000000000001",
+          sortOrder: 0,
         }],
         observation_attempt_count: 2,
         observation_current_id: "10000000-0000-4000-8000-000000000003",
@@ -1674,7 +1679,9 @@ test("track summary loader uses the exact safe projection and skips profile look
   assert.deepEqual(JSON.parse(JSON.stringify(enrollmentDetailRows)), [{
       classId: "class-1", textbookId: null, classStartDate: "2026-08-10",
       classStartSessionKey: null, classStartLessonSessionId: null,
-      classStartSession: "1회차", sortOrder: 0,
+      classStartSession: "청강 회차",
+      classStartSourceObservationId: "75000000-0000-4000-8000-000000000001",
+      sortOrder: 0,
   }]);
   assert.equal(harness.queries.length, 1);
   assert.equal(harness.queries[0].columns,
@@ -2196,6 +2203,92 @@ test("dedicated manager detail preserves the observation schedule and place hidd
   assert.equal(detail.attempts[0].classroomName, caseDetailObservationSecrets.place);
 });
 
+test("observation first lesson loader uses only the bounded enrollment-decision scalar and one correlated detail read", async () => {
+  const trackId = "72000000-0000-4000-8000-000000000001";
+  const observationId = "72000000-0000-4000-8000-000000000002";
+  const decoyObservationId = "72000000-0000-4000-8000-000000000099";
+  const managerCalls = [];
+  const feedbackCalls = [];
+  const detail = Object.freeze({ observationId, trackId, classId: "class-a" });
+  const harness = createClient();
+  const { createRegistrationTrackService } = await loadFactory({
+    async loadRegistrationObservationManagerDetail(client, input) {
+      managerCalls.push({ client, input });
+      return {
+        track: { trackId },
+        latestEnrollmentDecisionObservationId: observationId,
+        latestDecisionObservation: { observationId: decoyObservationId, decisionKind: "enrollment" },
+        attempts: [{ observationId: decoyObservationId, decisionKind: "enrollment" }],
+      };
+    },
+    async loadRegistrationObservationFeedback(client, requestedObservationId, options) {
+      feedbackCalls.push({ client, requestedObservationId, options });
+      return detail;
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({ requestTimeoutMs: 4321 }));
+
+  const result = await service.loadRegistrationEnrollmentStartObservation({ trackId });
+
+  assert.strictEqual(result, detail);
+  assert.equal(managerCalls.length, 1);
+  assert.strictEqual(managerCalls[0].client, harness.client);
+  assert.deepEqual({ ...managerCalls[0].input }, { trackId, attemptLimit: 1 });
+  assert.equal(feedbackCalls.length, 1);
+  assert.strictEqual(feedbackCalls[0].client, harness.client);
+  assert.equal(feedbackCalls[0].requestedObservationId, observationId);
+  assert.deepEqual({ ...feedbackCalls[0].options }, { timeoutMs: 4321, force: true });
+});
+
+test("observation first lesson loader never scans attempts and fails closed on detail identity mismatch", async () => {
+  const trackId = "73000000-0000-4000-8000-000000000001";
+  const observationId = "73000000-0000-4000-8000-000000000002";
+  const decoyObservationId = "73000000-0000-4000-8000-000000000003";
+  let feedbackCalls = 0;
+  const harness = createClient();
+
+  const noScalarFactory = await loadFactory({
+    async loadRegistrationObservationManagerDetail() {
+      return {
+        track: { trackId },
+        latestEnrollmentDecisionObservationId: null,
+        latestDecisionObservation: { observationId: decoyObservationId, decisionKind: "enrollment" },
+        attempts: [{ observationId: decoyObservationId, decisionKind: "enrollment" }],
+      };
+    },
+    async loadRegistrationObservationFeedback() {
+      feedbackCalls += 1;
+      return { observationId: decoyObservationId, trackId };
+    },
+  });
+  const noScalarService = noScalarFactory.createRegistrationTrackService(harness.client, readyOptions());
+  assert.equal(await noScalarService.loadRegistrationEnrollmentStartObservation({ trackId }), null);
+  assert.equal(feedbackCalls, 0, "attempt rows cannot become the candidate identity");
+
+  for (const mismatchedDetail of [
+    { observationId: decoyObservationId, trackId },
+    { observationId, trackId: "73000000-0000-4000-8000-000000000099" },
+  ]) {
+    const mismatchFactory = await loadFactory({
+      async loadRegistrationObservationManagerDetail() {
+        return {
+          track: { trackId },
+          latestEnrollmentDecisionObservationId: observationId,
+          latestDecisionObservation: null,
+          attempts: [],
+        };
+      },
+      async loadRegistrationObservationFeedback() {
+        feedbackCalls += 1;
+        return mismatchedDetail;
+      },
+    });
+    const mismatchService = mismatchFactory.createRegistrationTrackService(harness.client, readyOptions());
+    assert.equal(await mismatchService.loadRegistrationEnrollmentStartObservation({ trackId }), null);
+  }
+  assert.equal(feedbackCalls, 2, "each non-null scalar performs exactly one dedicated detail read");
+});
+
 test("observation-aware detail is broad while default detail fails closed and cannot share its cache", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient({
@@ -2705,6 +2798,55 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
   assert.equal(completed.enrollments[0].makeeduRegistered, true);
   assert.equal(createRegistrationMutationRequestKey("save", "track-1"), "save:track-1:uuid-from-crypto");
   assert.equal(mutationInvalidations, 27, "every successful registration RPC must invalidate parent consumers");
+});
+
+test("first lesson source serialization sends regular sentinel as null and maps the exact response key", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const sourceObservationId = "74000000-0000-4000-8000-000000000001";
+  const persistedSourceObservationId = "74000000-0000-4000-8000-000000000002";
+  const rows = [{
+    classId: "74000000-0000-4000-8000-000000000010",
+    textbookId: null,
+    classStartDate: "2026-08-17",
+    classStartSessionKey: "legacy:2026-08-17:1",
+    classStartLessonSessionId: null,
+    classStartSession: "청강 회차",
+    classStartSourceObservationId: sourceObservationId,
+    sortOrder: 0,
+  }, {
+    classId: "74000000-0000-4000-8000-000000000020",
+    textbookId: null,
+    classStartDate: "2026-08-24",
+    classStartSessionKey: "regular:2026-08-24:2",
+    classStartLessonSessionId: "74000000-0000-4000-8000-000000000021",
+    classStartSession: "2회차",
+    classStartSourceObservationId: "",
+    sortOrder: 1,
+  }];
+  const harness = createClient({
+    rpcHandler(name, args) {
+      assert.equal(name, "save_registration_enrollment_details_v1");
+      return { data: {
+        trackId: "74000000-0000-4000-8000-000000000030",
+        rows: args.p_rows.map((row, index) => index === 0
+          ? { ...row, classStartSourceObservationId: persistedSourceObservationId }
+          : row),
+      }, error: null };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const result = await service.saveRegistrationEnrollmentDetails({
+    trackId: "74000000-0000-4000-8000-000000000030",
+    rows,
+    requestKey: "first-lesson-source",
+  });
+
+  assert.equal(harness.rpcCalls[0][1].p_rows[0].classStartSourceObservationId, sourceObservationId);
+  assert.equal(harness.rpcCalls[0][1].p_rows[1].classStartSourceObservationId, null);
+  assert.equal(result.rows[0].classStartSourceObservationId, persistedSourceObservationId, "response hydration owns the reopened source id");
+  assert.equal(result.rows[1].classStartSourceObservationId, null);
+  assert.equal(result.rows[0].classStartSessionKey, "legacy:2026-08-17:1");
 });
 
 test("registration core legacy bridge reads only stable source event IDs", async () => {
