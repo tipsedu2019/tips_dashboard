@@ -966,6 +966,7 @@ test("calendar raw loader uses the canonical half-open scheduled query without c
   const input = {
     rangeStart: "2026-07-01T00:00:00+09:00",
     rangeEnd: "2026-08-01T00:00:00+09:00",
+    observationRuntimeVersion: 1,
   };
 
   const first = await service.loadRegistrationAppointmentCalendarRows(input);
@@ -977,7 +978,7 @@ test("calendar raw loader uses the canonical half-open scheduled query without c
   for (const query of harness.queries) {
     assert.equal(
       query.columns,
-      "appointment_id,task_id,student_name,kind,scheduled_at,place,status,notification_revision,track_ids,subjects",
+      "appointment_id,task_id,student_name,kind,scheduled_at,place,status,notification_revision,track_ids,subjects,observation_id,observation_track_id,observation_class_id,observation_class_name,observation_ends_at,observation_teacher_name,observation_classroom_name",
     );
     assert.deepEqual(query.filters, [
       ["gte", "scheduled_at", input.rangeStart],
@@ -991,6 +992,31 @@ test("calendar raw loader uses the canonical half-open scheduled query without c
   }
 });
 
+test("calendar raw loader selects observation snapshots and excludes them at runtime zero", async () => {
+  // Production break caught: the direct view DTO omits a bounded snapshot or a
+  // disabled runtime sends observation rows to the browser before model gating.
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient();
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  await service.loadRegistrationAppointmentCalendarRows({
+    rangeStart: "2026-08-01T00:00:00+09:00",
+    rangeEnd: "2026-09-01T00:00:00+09:00",
+    observationRuntimeVersion: 0,
+  });
+
+  assert.equal(harness.queries.length, 1);
+  assert.equal(
+    harness.queries[0].columns,
+    "appointment_id,task_id,student_name,kind,scheduled_at,place,status,notification_revision,track_ids,subjects,observation_id,observation_track_id,observation_class_id,observation_class_name,observation_ends_at,observation_teacher_name,observation_classroom_name",
+  );
+  assert.deepEqual(harness.queries[0].filters, [
+    ["neq", "kind", "observation_class"],
+    ["gte", "scheduled_at", "2026-08-01T00:00:00+09:00"],
+    ["lt", "scheduled_at", "2026-09-01T00:00:00+09:00"],
+    ["in", "status", ["scheduled"]],
+  ]);
+});
+
 test("calendar raw loader normalizes explicit statuses and skips an explicit empty selection", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient();
@@ -998,6 +1024,7 @@ test("calendar raw loader normalizes explicit statuses and skips an explicit emp
   const range = {
     rangeStart: "2026-07-01T00:00:00+09:00",
     rangeEnd: "2026-08-01T00:00:00+09:00",
+    observationRuntimeVersion: 1,
   };
 
   await service.loadRegistrationAppointmentCalendarRows({
@@ -1017,9 +1044,9 @@ test("calendar raw loader rejects invalid ranges and unsupported statuses before
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
   for (const input of [
-    { rangeStart: "invalid", rangeEnd: "2026-08-01T00:00:00+09:00" },
-    { rangeStart: "2026-08-01T00:00:00+09:00", rangeEnd: "2026-08-01T00:00:00+09:00" },
-    { rangeStart: "2026-07-01T00:00:00+09:00", rangeEnd: "2026-08-01T00:00:00+09:00", statuses: ["waiting"] },
+    { rangeStart: "invalid", rangeEnd: "2026-08-01T00:00:00+09:00", observationRuntimeVersion: 1 },
+    { rangeStart: "2026-08-01T00:00:00+09:00", rangeEnd: "2026-08-01T00:00:00+09:00", observationRuntimeVersion: 1 },
+    { rangeStart: "2026-07-01T00:00:00+09:00", rangeEnd: "2026-08-01T00:00:00+09:00", statuses: ["waiting"], observationRuntimeVersion: 1 },
   ]) {
     await assert.rejects(
       Promise.resolve().then(() => service.loadRegistrationAppointmentCalendarRows(input)),

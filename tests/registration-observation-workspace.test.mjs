@@ -32,6 +32,10 @@ async function loadEditorModel() {
       executeRegistrationObservationCommit,
       getRegistrationObservationRequestKey,
       getRegistrationObservationWithdrawalCorrection,
+      getRegistrationObservationEditorAttemptPlan:
+        typeof getRegistrationObservationEditorAttemptPlan === "function"
+          ? getRegistrationObservationEditorAttemptPlan
+          : undefined,
       reconcileRegistrationObservationWithdrawalValue,
       shouldLockRegistrationObservationMutation,
       executeRegistrationObservationWithdrawal:
@@ -61,6 +65,98 @@ async function loadEditorModel() {
   vm.runInNewContext(compiled, { module: sandboxModule, exports: sandboxModule.exports })
   return sandboxModule.exports
 }
+
+function observationAttempt(observationId, overrides = {}) {
+  return {
+    observationId,
+    taskId: "10000000-0000-4000-8000-000000000001",
+    trackId: "10000000-0000-4000-8000-000000000002",
+    appointmentId: "10000000-0000-4000-8000-000000000003",
+    appointmentStatus: "completed",
+    classId: "10000000-0000-4000-8000-000000000005",
+    subject: "영어",
+    className: "영어 심화반",
+    scheduleState: "active",
+    sessionDate: "2026-08-12",
+    startsAt: "2026-08-12T16:00:00+09:00",
+    endsAt: "2026-08-12T17:30:00+09:00",
+    teacherCatalogId: "10000000-0000-4000-8000-000000000006",
+    teacherProfileId: "10000000-0000-4000-8000-000000000007",
+    teacherName: "김선생",
+    classroomCatalogId: "10000000-0000-4000-8000-000000000008",
+    classroomName: "본관 301호",
+    campus: "본관",
+    textbooks: [],
+    progress: "",
+    bookingFactHash: "a".repeat(64),
+    status: "completed",
+    attendance: "attended",
+    suitabilityResult: "fit",
+    decisionKind: "enrollment",
+    revision: 3,
+    feedbackRevision: 2,
+    appointmentNotificationRevision: 4,
+    createdAt: "2026-08-10T00:00:00.000Z",
+    updatedAt: "2026-08-12T09:00:00.000Z",
+    sessionAuthority: "normalized",
+    classLessonSessionId: "10000000-0000-4000-8000-000000000009",
+    legacySessionKey: null,
+    sessionKey: "2026-08-12:16:00",
+    sessionSourceRevision: 1,
+    legacySessionSourceHash: null,
+    sourceRevision: {
+      authority: "normalized",
+      sessionId: "10000000-0000-4000-8000-000000000009",
+      revision: 1,
+    },
+    ...overrides,
+  }
+}
+
+test("calendar deep-linked attempt prepends beyond the recent limit and deduplicates exact payloads", async () => {
+  // Production break caught: the editor trusts the recent-50 array as
+  // authority, duplicates a returned row, or selects array position zero
+  // instead of the exact URL observation ID.
+  const { getRegistrationObservationEditorAttemptPlan } = await loadEditorModel()
+  assert.equal(typeof getRegistrationObservationEditorAttemptPlan, "function")
+  const recent = Array.from({ length: 50 }, (_, index) => observationAttempt(
+    `20000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+  ))
+  const oldestCalendarAttempt = observationAttempt(
+    "30000000-0000-4000-8000-000000000001",
+    { appointmentId: "30000000-0000-4000-8000-000000000002" },
+  )
+  const plan = getRegistrationObservationEditorAttemptPlan({
+    attempts: recent,
+    deepLinkedAttempt: oldestCalendarAttempt,
+    selectedObservationId: oldestCalendarAttempt.observationId,
+  })
+  assert.ok(plan)
+  assert.equal(plan.attempts.length, 51)
+  assert.equal(plan.attempts[0].observationId, oldestCalendarAttempt.observationId)
+  assert.equal(plan.selectedAttempt.observationId, oldestCalendarAttempt.observationId)
+  assert.equal(recent.some((attempt) => attempt.observationId === oldestCalendarAttempt.observationId), false)
+
+  const duplicate = recent[25]
+  const duplicatePlan = getRegistrationObservationEditorAttemptPlan({
+    attempts: recent,
+    deepLinkedAttempt: structuredClone(duplicate),
+    selectedObservationId: duplicate.observationId,
+  })
+  assert.ok(duplicatePlan)
+  assert.equal(duplicatePlan.attempts.length, 50)
+  assert.equal(duplicatePlan.attempts[0].observationId, duplicate.observationId)
+  assert.equal(
+    duplicatePlan.attempts.filter((attempt) => attempt.observationId === duplicate.observationId).length,
+    1,
+  )
+
+  assert.equal(getRegistrationObservationEditorAttemptPlan({
+    attempts: recent,
+    deepLinkedAttempt: { ...duplicate, teacherName: "다른 선생님" },
+    selectedObservationId: duplicate.observationId,
+  }), null)
+})
 
 test("application shell places observation between waiting and registration", async () => {
   const source = await readSource("src/features/tasks/registration-application-shell.tsx")

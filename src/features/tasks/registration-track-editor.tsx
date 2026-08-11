@@ -90,6 +90,7 @@ import { type RegistrationDirectorCatalogStatus } from "./registration-director-
 import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
 import {
   getRegistrationObservationFeedbackErrorState,
+  type RegistrationObservationAttempt,
   type RegistrationObservationFeedbackDetail,
   type RegistrationObservationManagerDetail,
   type RegistrationObservationRuntimeState,
@@ -198,6 +199,7 @@ export type RegistrationApplicationProps = {
   onDirtyChange?: (dirty: boolean) => void
   notificationToken?: string
   observationRuntime?: RegistrationObservationRuntimeState
+  deepLinkedAttempt?: RegistrationObservationAttempt | null
   closeAction: ReactNode
 }
 
@@ -333,6 +335,7 @@ export function RegistrationApplication({
   onDirtyChange,
   notificationToken = "",
   observationRuntime = UNAVAILABLE_REGISTRATION_OBSERVATION_RUNTIME,
+  deepLinkedAttempt = null,
   closeAction,
 }: RegistrationApplicationProps) {
   const [customerMessageTarget, setCustomerMessageTarget] = useState<RegistrationCustomerMessageTarget | null>(null)
@@ -404,6 +407,12 @@ export function RegistrationApplication({
   const activeTrackId = resolveRegistrationActiveTrackId(orderedTracks, focusTrackId)
   const activeTrack = orderedTracks.find((track) => track.id === activeTrackId) || null
   const activeGenericTrack = genericTracks.find((track) => track.id === activeTrackId) || null
+  const activeObservationTrackId = activeTrack?.id || null
+  const activeDeepLinkedAttempt = deepLinkedAttempt
+    && deepLinkedAttempt.taskId === detail.task.id
+    && deepLinkedAttempt.trackId === activeTrack?.id
+    ? deepLinkedAttempt
+    : null
   const activeObservationTrackIdRef = useRef(activeTrack?.id || null)
   const activeObservationTaskIdRef = useRef<string | null>(detail.task.id)
   activeObservationTrackIdRef.current = activeTrack?.id || null
@@ -435,14 +444,14 @@ export function RegistrationApplication({
   useEffect(() => {
     setObservationDetail(null)
     setObservationDetailError("")
-    if (!activeTrack || !observationWorkspaceAvailable) {
+    if (!activeObservationTrackId || !observationWorkspaceAvailable) {
       setObservationDetailLoading(false)
       return
     }
     let active = true
     setObservationDetailLoading(true)
     void loadRegistrationObservationManagerDetail(registrationObservationClient, {
-      trackId: activeTrack.id,
+      trackId: activeObservationTrackId,
     }).then((nextDetail) => {
       if (active) setObservationDetail(nextDetail)
     }).catch((error) => {
@@ -453,7 +462,7 @@ export function RegistrationApplication({
     return () => {
       active = false
     }
-  }, [activeTrack, observationWorkspaceAvailable])
+  }, [activeObservationTrackId, observationWorkspaceAvailable])
 
   useEffect(() => {
     const taskId = detail.task.id
@@ -685,12 +694,20 @@ export function RegistrationApplication({
     canManageObservation: canManageActiveObservation,
     canManageCase,
   })
-  const activeFeedbackObservationId = activeFeedbackMountPlan?.observationId || null
-  const activeFeedbackCorrectionOnly = activeFeedbackMountPlan?.correctionOnly === true
-  const activeFeedbackHistoryOnly = shouldMountRegistrationObservationFeedbackOnly({
-    correctionOnly: activeFeedbackCorrectionOnly,
-    workflowActionable: observationWorkflowActionable,
-  })
+  const activeFeedbackObservationId = activeDeepLinkedAttempt?.observationId
+    || activeFeedbackMountPlan?.observationId
+    || null
+  const activeFeedbackCorrectionOnly = activeDeepLinkedAttempt
+    ? activeDeepLinkedAttempt.decisionKind !== null
+    : activeFeedbackMountPlan?.correctionOnly === true
+  const activeFeedbackHistoryOnly = !activeDeepLinkedAttempt
+    && shouldMountRegistrationObservationFeedbackOnly({
+      correctionOnly: activeFeedbackCorrectionOnly,
+      workflowActionable: observationWorkflowActionable,
+    })
+  const activeFeedbackTeacherProfileId = activeDeepLinkedAttempt?.teacherProfileId
+    || activeObservationDetail?.currentObservation?.teacherProfileId
+    || null
   const activeFeedbackOwnershipKey = activeTrack
     && activeFeedbackObservationId
     ? `${detail.task.id}:${activeTrack.id}:${activeFeedbackObservationId}`
@@ -1189,7 +1206,7 @@ export function RegistrationApplication({
               canManageCase,
               isAssignedTeacher: Boolean(
                 viewerId
-                && viewerId === activeObservationDetail?.currentObservation?.teacherProfileId
+                && viewerId === activeFeedbackTeacherProfileId
               ),
               decisionKind: observationFeedbackDetail.decisionKind,
             })}
@@ -1417,9 +1434,14 @@ export function RegistrationApplication({
               key={activeTrack.id}
               trackId={activeTrack.id}
               workflowRevision={activeTrack.workflowRevision}
-              observationRevision={activeObservationDetail.currentObservation?.revision ?? null}
-              appointmentNotificationRevision={activeObservationDetail.currentObservation?.appointmentNotificationRevision ?? null}
+              observationRevision={activeDeepLinkedAttempt?.revision
+                ?? activeObservationDetail.currentObservation?.revision
+                ?? null}
+              appointmentNotificationRevision={activeDeepLinkedAttempt?.appointmentNotificationRevision
+                ?? activeObservationDetail.currentObservation?.appointmentNotificationRevision
+                ?? null}
               detail={activeObservationDetail}
+              deepLinkedAttempt={activeDeepLinkedAttempt}
               actions={registrationObservationActions}
               onSaved={handleObservationSaved}
               feedbackPanel={activeObservationFeedbackPanel}

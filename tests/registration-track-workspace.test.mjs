@@ -1557,6 +1557,23 @@ test("saved application keeps exception actions in their owning sections", async
   assert.match(admission, /cancelRegistrationAdmissionBatch|onOpenCustomerMessage/)
 })
 
+test("registration application threads the exact deep-linked attempt into the real observation editor mount", async () => {
+  // Production break caught: the workspace loads a bounded row but the actual
+  // RegistrationApplication/RegistrationObservationEditor mount drops it or
+  // lets the ordinary active attempt override the URL target.
+  const detail = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  assert.match(detail, /deepLinkedAttempt\?: RegistrationObservationAttempt \| null/)
+  assert.match(detail, /deepLinkedAttempt = null/)
+  assert.match(detail, /const activeDeepLinkedAttempt = deepLinkedAttempt[\s\S]*?deepLinkedAttempt\.trackId === activeTrack\?\.id/)
+  assert.match(detail, /deepLinkedAttempt=\{activeDeepLinkedAttempt\}/)
+  assert.match(detail, /activeFeedbackObservationId = activeDeepLinkedAttempt\?\.observationId/)
+  assert.match(
+    detail,
+    /const activeFeedbackTeacherProfileId = activeDeepLinkedAttempt\?\.teacherProfileId[\s\S]*?activeObservationDetail\?\.currentObservation\?\.teacherProfileId/,
+  )
+  assert.match(detail, /viewerId === activeFeedbackTeacherProfileId/)
+})
+
 test("canonical track detail resolves and persists director defaults only for management roles", async () => {
   const editor = await readRegistrationApplicationSource()
   const workspace = await readWorkspaceSource()

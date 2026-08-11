@@ -3,6 +3,11 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
+import {
+  buildRegistrationAppointmentCalendarItems,
+  buildRegistrationAppointmentHref,
+} from "../src/features/tasks/registration-appointment-calendar-model.ts";
+
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const migrationPath = path.join(
   repositoryRoot,
@@ -41,6 +46,116 @@ function assertInOrder(source, values) {
     cursor = next;
   }
 }
+
+const observationCalendarIds = Object.freeze({
+  taskId: "10000000-0000-4000-8000-000000000001",
+  trackId: "10000000-0000-4000-8000-000000000002",
+  appointmentId: "10000000-0000-4000-8000-000000000003",
+  observationId: "10000000-0000-4000-8000-000000000004",
+  classId: "10000000-0000-4000-8000-000000000005",
+});
+
+function observationCalendarRow(overrides = {}) {
+  return {
+    appointment_id: observationCalendarIds.appointmentId,
+    task_id: observationCalendarIds.taskId,
+    student_name: "청강학생",
+    kind: "observation_class",
+    scheduled_at: "2026-08-12T16:00:00+09:00",
+    place: "본관 301호",
+    status: "scheduled",
+    notification_revision: 3,
+    track_ids: [observationCalendarIds.trackId],
+    subjects: ["영어"],
+    observation_id: observationCalendarIds.observationId,
+    observation_track_id: observationCalendarIds.trackId,
+    observation_class_id: observationCalendarIds.classId,
+    observation_class_name: "영어 심화반",
+    observation_ends_at: "2026-08-12T17:30:00+09:00",
+    observation_teacher_name: "김선생",
+    observation_classroom_name: "본관 301호",
+    ...overrides,
+  };
+}
+
+test("observation calendar counts one appointment once and emits the canonical five-key link", () => {
+  // Production break caught: observation rows are duplicated, normalized as an
+  // appointment kind, or emit a provider-incompatible query order.
+  const items = buildRegistrationAppointmentCalendarItems(
+    [observationCalendarRow()],
+    { observationRuntimeVersion: 1 },
+  );
+  const observationItem = items.find((item) => item.kind === "observation");
+  assert.ok(observationItem);
+  assert.equal(items.filter((item) => item.kind === "observation").length, 1);
+  const orderedTuple = [
+    ["taskId", observationCalendarIds.taskId],
+    ["trackId", observationCalendarIds.trackId],
+    ["appointmentId", observationCalendarIds.appointmentId],
+    ["observationId", observationCalendarIds.observationId],
+    ["view", "calendar"],
+  ];
+  const expectedHref = `/admin/registration?${new URLSearchParams(orderedTuple).toString()}`;
+  assert.equal(observationItem.href, expectedHref);
+  assert.deepEqual(
+    [...new URL(observationItem.href, "https://tips.invalid").searchParams.entries()],
+    orderedTuple,
+  );
+  assert.equal(
+    buildRegistrationAppointmentHref(
+      observationCalendarIds.taskId,
+      observationCalendarIds.appointmentId,
+      { trackId: observationCalendarIds.trackId, observationId: observationCalendarIds.observationId },
+    ),
+    expectedHref,
+  );
+});
+
+test("runtime zero drops observation rows before they can become calendar items", () => {
+  // Production break caught: a disabled runtime still exposes observation
+  // counts, filter entries, or navigable details in the browser payload.
+  assert.deepEqual(
+    buildRegistrationAppointmentCalendarItems(
+      [observationCalendarRow()],
+      { observationRuntimeVersion: 0 },
+    ),
+    [],
+  );
+});
+
+test("runtime one rejects every observation cross-shape even outside the selected status", () => {
+  // Production break caught: a malformed observation snapshot is hidden by a
+  // client status filter and becomes visible later without revalidation.
+  for (const overrides of [
+    { observation_id: null },
+    { observation_track_id: "40000000-0000-4000-8000-000000000001" },
+    { observation_class_id: "not-a-uuid" },
+    { observation_class_name: " " },
+    { observation_ends_at: "2026-08-12T16:00:00+09:00" },
+    { observation_teacher_name: "" },
+    { observation_classroom_name: null },
+    {
+      track_ids: [observationCalendarIds.trackId, "40000000-0000-4000-8000-000000000002"],
+      subjects: ["영어", "수학"],
+    },
+  ]) {
+    assert.throws(
+      () => buildRegistrationAppointmentCalendarItems(
+        [observationCalendarRow(overrides)],
+        { statuses: ["completed"], observationRuntimeVersion: 1 },
+      ),
+      /registration_appointment_calendar_row_invalid/,
+    );
+  }
+
+  assert.throws(
+    () => buildRegistrationAppointmentCalendarItems([{
+      ...observationCalendarRow(),
+      kind: "level_test",
+    }], { statuses: ["completed"], observationRuntimeVersion: 1 }),
+    /registration_appointment_calendar_row_invalid:observation_id/,
+  );
+});
 
 test("calendar forward replacement preserves ten columns and appends seven bounded observation snapshots", async () => {
   // Production break caught: direct-view consumers see reordered legacy fields,

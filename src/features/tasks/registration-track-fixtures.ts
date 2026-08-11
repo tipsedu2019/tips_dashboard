@@ -2478,6 +2478,13 @@ export function getRegistrationSubjectTrackFixtureAppointmentCalendarRows(
           notification_revision: appointment.notificationRevision,
           track_ids: participants.map((trackItem) => trackItem.id),
           subjects: participants.map((trackItem) => trackItem.subject),
+          observation_id: null,
+          observation_track_id: null,
+          observation_class_id: null,
+          observation_class_name: null,
+          observation_ends_at: null,
+          observation_teacher_name: null,
+          observation_classroom_name: null,
         })
       }
     }

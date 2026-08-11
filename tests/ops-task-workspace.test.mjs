@@ -1237,6 +1237,90 @@ test("등록 예약 달력은 목록 흐름과 분리되고 딥링크 예약을 
   assert.doesNotMatch(calendarSource, /\bdraggable\b|onDrop|onDrag|resize|range-create|onDelete/);
 });
 
+test("observation calendar deep links use one exact attempt read without appointment fallback", async () => {
+  // Production break caught: the workspace scalarizes URLSearchParams, opens
+  // via the ordinary appointment loader, retries the bounded RPC, or retains a
+  // stale attempt after navigation/runtime shutdown.
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  assertIncludesAll(source, [
+    "loadRegistrationObservationManagerAttempt",
+    "loadRegistrationObservationDeepLinkedAttempt",
+    "const openRegistrationObservation = useCallback",
+    "searchParams: currentSearchParams",
+    "observationRuntimeVersion: registrationObservationRuntime.runtimeVersion",
+    'directRegistrationTarget.kind === "observation"',
+    "setRegistrationDeepLinkedAttempt",
+    "deepLinkedAttempt={registrationDeepLinkedAttempt}",
+    "observationRuntimeVersion={registrationObservationRuntime.runtimeVersion}",
+  ]);
+  const openObservation = source.slice(
+    source.indexOf("const openRegistrationObservation = useCallback"),
+    source.indexOf("const openRegistrationCalendarItem", source.indexOf("const openRegistrationObservation = useCallback")),
+  );
+  assert.equal((openObservation.match(/loadRegistrationObservationDeepLinkedAttempt\(/g) || []).length, 1);
+  assert.doesNotMatch(openObservation, /openRegistrationAppointment\(/);
+  assert.match(openObservation, /setRegistrationDeepLinkedAttempt\(attempt\)/);
+  assert.match(openObservation, /if \(!attempt\)[\s\S]*?setRegistrationApplicationHost\(\{ kind: "closed" \}\)/);
+
+  const deepLinkEffect = source.slice(
+    source.lastIndexOf("useEffect(() => {", source.indexOf("const currentSearchParams = new URLSearchParams(window.location.search)")),
+    source.indexOf("function handleDetailOpenChange", source.indexOf("const currentSearchParams = new URLSearchParams(window.location.search)")),
+  );
+  assert.match(deepLinkEffect, /if \(currentSearchParams\.has\("observationId"\)\) \{/);
+  assert.doesNotMatch(deepLinkEffect, /taskId:\s*deepLinkedTaskId[\s\S]*?trackId:\s*deepLinkedTrackId[\s\S]*?appointmentId:\s*deepLinkedAppointmentId/);
+  assert.match(source, /setRegistrationDeepLinkedAttempt\(null\)/);
+});
+
+test("malformed observation coordinates discard an already open DTO without legacy fallback", async () => {
+  // Production break caught: an invalid/duplicate/extra observation tuple is
+  // rejected by the route parser but leaves the previously authorized detail
+  // visible behind the malformed URL.
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const deepLinkEffect = source.slice(
+    source.lastIndexOf("useEffect(() => {", source.indexOf("const currentSearchParams = new URLSearchParams(window.location.search)")),
+    source.indexOf("function handleDetailOpenChange", source.indexOf("const currentSearchParams = new URLSearchParams(window.location.search)")),
+  );
+  const malformedBranch = deepLinkEffect.match(
+    /if \(currentSearchParams\.has\("observationId"\)\) \{([\s\S]*?)\n\s*\}/,
+  )?.[1] || "";
+  assertIncludesAll(malformedBranch, [
+    "setRegistrationDeepLinkedAttempt(null)",
+    "setRegistrationCaseDetail(null)",
+    "setSelectedRegistrationTrackId(null)",
+    "setSelectedRegistrationAppointmentId(null)",
+    'setRegistrationApplicationHost({ kind: "closed" })',
+    'registrationTrackSelectionRef.current = ""',
+    "registrationObservationDeepLinkTargetRef.current = null",
+    "return",
+  ]);
+  assert.doesNotMatch(malformedBranch, /openRegistrationAppointment\(|setMessage\(|setNotice\(/);
+
+  const runtimeZeroCleanup = source.slice(
+    source.indexOf("const hasObservationDetail = currentSearchParams.has"),
+    source.indexOf("const syncRegistrationConsultationOwnerScope"),
+  );
+  assertIncludesAll(runtimeZeroCleanup, [
+    "setRegistrationDeepLinkedAttempt(null)",
+    "setSelectedRegistrationAppointmentId(null)",
+    "buildRegistrationWorkspaceSearchParams(",
+    "currentSearchParams",
+  ]);
+  assert.match(
+    runtimeZeroCleanup,
+    /const nextMode = registrationView === "observation" \|\| hasObservationDetail \? "list" : registrationMode/,
+  );
+
+  const trackChange = source.slice(
+    source.indexOf("const handleSelectRegistrationTrack = useCallback"),
+    source.indexOf("const handleRegistrationAppointmentOpenChange"),
+  );
+  assertIncludesAll(trackChange, [
+    "const leavingObservationDeepLink = registrationObservationDeepLinkTargetRef.current !== null",
+    "setSelectedRegistrationAppointmentId(null)",
+    "leavingObservationDeepLink ? null : selectedRegistrationAppointmentId",
+  ]);
+});
+
 test("registration tabs render compact application rows without the retired parent table filters", async () => {
   const [workspaceSource, tableSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),

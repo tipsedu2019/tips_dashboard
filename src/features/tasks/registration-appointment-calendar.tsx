@@ -31,6 +31,7 @@ const STATUS_LABELS: Record<RegistrationAppointmentCalendarStatus, string> = {
 const KIND_LABELS = {
   level_test: "레벨테스트",
   visit_consultation: "방문상담",
+  observation: "청강",
 } as const
 const WEEKDAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"]
 
@@ -38,6 +39,7 @@ type CalendarView = "month" | "week"
 
 type RegistrationAppointmentCalendarProps = {
   onOpenAppointment: (item: RegistrationAppointmentCalendarItem) => void
+  observationRuntimeVersion: 0 | 1
   refreshToken?: string | number
   kindFilter?: RegistrationAppointmentCalendarKindFilter
   onKindCountsChange?: (counts: RegistrationAppointmentCalendarKindCounts) => void
@@ -101,6 +103,9 @@ function appointmentCard(
   onOpenAppointment: (item: RegistrationAppointmentCalendarItem) => void,
   compact = false,
 ) {
+  const timeLabel = item.kind === "observation"
+    ? `${formatSeoulTime(item.scheduledAt)}–${formatSeoulTime(item.observationEndsAt)}`
+    : formatSeoulTime(item.scheduledAt)
   return (
     <button
       key={item.id}
@@ -110,16 +115,27 @@ function appointmentCard(
       data-registration-calendar-appointment-id={item.appointmentId}
       data-registration-calendar-task-id={item.taskId}
       onClick={() => onOpenAppointment(item)}
-      aria-label={`${formatDateKey(getSeoulRegistrationDateKey(item.scheduledAt), { month: "long", day: "numeric", weekday: "short" })} ${item.studentName} ${KIND_LABELS[item.kind]} ${formatSeoulTime(item.scheduledAt)} ${STATUS_LABELS[item.status]} 상세`}
+      aria-label={`${formatDateKey(getSeoulRegistrationDateKey(item.scheduledAt), { month: "long", day: "numeric", weekday: "short" })} ${item.studentName} ${KIND_LABELS[item.kind]} ${timeLabel} ${STATUS_LABELS[item.status]} 상세`}
       className="grid w-full min-w-0 gap-1 rounded-md border bg-background px-2 py-2 text-left shadow-sm transition-colors hover:border-primary/45 hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <span className="flex min-w-0 items-center justify-between gap-2">
-        <span className="truncate text-xs font-semibold">{formatSeoulTime(item.scheduledAt)} · {item.studentName}</span>
+        <span className="truncate text-xs font-semibold">{timeLabel} · {item.studentName}</span>
         <Badge variant="outline" className={`shrink-0 ${compact ? "px-1.5 text-[9px]" : "text-[10px]"}`}>
           {STATUS_LABELS[item.status]}
         </Badge>
       </span>
-      <span className="truncate text-[11px] text-muted-foreground">{KIND_LABELS[item.kind]} · {item.place || "장소 미정"}</span>
+      {item.kind === "observation" ? (
+        <>
+          <span className="truncate text-[11px] text-muted-foreground">
+            {KIND_LABELS[item.kind]} · {item.subjects[0]} · {item.observationClassName}
+          </span>
+          <span className="truncate text-[11px] text-muted-foreground">
+            {item.observationTeacherName} · {item.observationClassroomName || item.place}
+          </span>
+        </>
+      ) : (
+        <span className="truncate text-[11px] text-muted-foreground">{KIND_LABELS[item.kind]} · {item.place || "장소 미정"}</span>
+      )}
       <span className="flex flex-wrap gap-1">
         {item.subjects.map((subject) => (
           <Badge key={`${item.id}:${subject}`} variant="secondary" className="px-1.5 py-0 text-[10px]">{subject}</Badge>
@@ -131,6 +147,7 @@ function appointmentCard(
 
 export function RegistrationAppointmentCalendar({
   onOpenAppointment,
+  observationRuntimeVersion,
   refreshToken = "",
   kindFilter = "all",
   onKindCountsChange,
@@ -184,6 +201,7 @@ export function RegistrationAppointmentCalendar({
         rangeStart: range.rangeStart,
         rangeEnd: range.rangeEnd,
         statuses,
+        observationRuntimeVersion,
       })
       if (loadGenerationRef.current !== generation) return
       setItems(nextItems)
@@ -194,7 +212,7 @@ export function RegistrationAppointmentCalendar({
     } finally {
       if (loadGenerationRef.current === generation) setLoading(false)
     }
-  }, [range.rangeEnd, range.rangeStart, statuses])
+  }, [observationRuntimeVersion, range.rangeEnd, range.rangeStart, statuses])
 
   useEffect(() => {
     void load()

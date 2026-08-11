@@ -196,6 +196,16 @@ async function loadServiceBoundary({
           normalizeRegistrationObservationSummary,
         }
       }
+      if (specifier === "./registration-observation-service.ts") {
+        return {
+          loadRegistrationObservationFeedback() {
+            throw new Error("unexpected observation feedback load")
+          },
+          loadRegistrationObservationManagerDetail() {
+            throw new Error("unexpected observation manager detail load")
+          },
+        }
+      }
       if (specifier === "./registration-observation-runtime-probe.ts") {
         return {
           probeRegistrationObservationRuntime: probeRegistrationObservationRuntimeClient,
@@ -1300,6 +1310,13 @@ test("fixture calendar adapter derives one live row per canonical appointment", 
       notification_revision: 1,
       track_ids: ["fixture-track-dual-english", "fixture-track-dual-math"],
       subjects: ["영어", "수학"],
+      observation_id: null,
+      observation_track_id: null,
+      observation_class_id: null,
+      observation_class_name: null,
+      observation_ends_at: null,
+      observation_teacher_name: null,
+      observation_classroom_name: null,
     },
   )
   assert.deepEqual(
@@ -1360,12 +1377,20 @@ test("public calendar service maps active fixture rows before any database query
     notification_revision: 3,
     track_ids: ["fixture-track-public"],
     subjects: ["영어"],
+    observation_id: null,
+    observation_track_id: null,
+    observation_class_id: null,
+    observation_class_name: null,
+    observation_ends_at: null,
+    observation_teacher_name: null,
+    observation_classroom_name: null,
   }])
   const { service, calls } = await loadServiceBoundary({ fixtureCalendarRows: fixtureRows })
   const input = {
     rangeStart: "2026-07-01T00:00:00+09:00",
     rangeEnd: "2026-08-01T00:00:00+09:00",
     statuses: ["completed"],
+    observationRuntimeVersion: 1,
   }
 
   const items = await service.loadRegistrationAppointmentCalendar(input)
@@ -1376,7 +1401,10 @@ test("public calendar service maps active fixture rows before any database query
   }])
   assert.equal(calls.calendarBuilds.length, 1)
   assert.strictEqual(calls.calendarBuilds[0][0], await fixtureRows)
-  assert.deepEqual(plain(calls.calendarBuilds[0][1]), { statuses: ["completed"] })
+  assert.deepEqual(plain(calls.calendarBuilds[0][1]), {
+    observationRuntimeVersion: 1,
+    statuses: ["completed"],
+  })
   assert.equal(calls.databaseProbe, 0)
   assert.deepEqual(calls.rpc, [])
 })

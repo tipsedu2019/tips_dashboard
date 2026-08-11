@@ -39,6 +39,13 @@ function calendarRow(overrides = {}) {
     notification_revision: 3,
     track_ids: ["track-english", "track-math"],
     subjects: ["영어", "수학"],
+    observation_id: null,
+    observation_track_id: null,
+    observation_class_id: null,
+    observation_class_name: null,
+    observation_ends_at: null,
+    observation_teacher_name: null,
+    observation_classroom_name: null,
     ...overrides,
   };
 }
@@ -73,6 +80,13 @@ test("공유 예약을 정확한 시각과 과목 순서를 보존하는 하나�
     notificationRevision: 3,
     trackIds: ["track-english", "track-math"],
     subjects: ["영어", "수학"],
+    observationId: null,
+    observationTrackId: null,
+    observationClassId: null,
+    observationClassName: null,
+    observationEndsAt: null,
+    observationTeacherName: null,
+    observationClassroomName: null,
     href: "/admin/registration?taskId=task-shared&appointmentId=appointment-shared&view=calendar",
   });
 });
@@ -102,6 +116,7 @@ test("같은 날의 서로 다른 예약 ID를 합치지 않고 명시한 상태
 
   const items = buildRegistrationAppointmentCalendarItems(rows, {
     statuses: ["scheduled", "completed", "canceled"],
+    observationRuntimeVersion: 1,
   });
 
   assert.deepEqual(
@@ -113,7 +128,10 @@ test("같은 날의 서로 다른 예약 ID를 합치지 않고 명시한 상태
     ],
   );
   assert.equal(new Set(items.map((item) => item.id)).size, 3);
-  assert.deepEqual(buildRegistrationAppointmentCalendarItems(rows, { statuses: [] }), []);
+  assert.deepEqual(buildRegistrationAppointmentCalendarItems(rows, {
+    statuses: [],
+    observationRuntimeVersion: 1,
+  }), []);
 });
 
 test("일정 유형 필터와 건수는 공유 예약을 과목별로 나누지 않는다", async () => {
@@ -141,6 +159,7 @@ test("일정 유형 필터와 건수는 공유 예약을 과목별로 나누지 
     all: 2,
     level_test: 1,
     visit_consultation: 1,
+    observation: 0,
   });
   const levelTests = filterRegistrationAppointmentCalendarItems(items, "level_test");
   assert.deepEqual(levelTests.map((item) => item.appointmentId), ["appointment-shared"]);

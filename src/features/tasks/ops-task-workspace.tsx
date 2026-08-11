@@ -37,6 +37,7 @@ import {
   parseAcademicSubject,
   subjectSupports,
 } from "@/lib/academic-subject-registry"
+import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/providers/auth-provider"
 
 import {
@@ -178,10 +179,12 @@ import {
   buildRegistrationWorkspaceSearchParams,
   getRegistrationDirectDeepLinkTarget,
   isRegistrationConsultationViewKey,
+  loadRegistrationObservationDeepLinkedAttempt,
   normalizeRegistrationConsultationOwnerScope,
   normalizeRegistrationWorkspaceCalendarKind,
   shouldDeferRegistrationWorkspaceLoad,
   type RegistrationConsultationOwnerScope,
+  type RegistrationDirectDeepLinkTarget,
   type RegistrationWorkspaceRouteTarget,
 } from "./registration-workspace-route"
 import {
@@ -207,7 +210,14 @@ import {
   type OpsRegistrationWorkflowStatus,
   type RegistrationSubject,
 } from "./registration-track-service"
-import type { RegistrationObservationRuntimeState } from "./registration-observation-model"
+import type {
+  RegistrationObservationAttempt,
+  RegistrationObservationRuntimeState,
+} from "./registration-observation-model"
+import {
+  loadRegistrationObservationManagerAttempt,
+  type RegistrationObservationClient,
+} from "./registration-observation-service"
 import { isRegistrationObservationWorkflowStatus } from "./registration-workflow-status.js"
 import { RegistrationApplicationCreate } from "./registration-application-create"
 import { resolveRegistrationCreateCatalogStatus } from "./registration-application-model"
@@ -728,7 +738,15 @@ const REGISTRATION_CALENDAR_KIND_TABS = [
   { key: "all", label: "전체 일정" },
   { key: "level_test", label: "레벨테스트" },
   { key: "visit_consultation", label: "방문상담" },
+  { key: "observation", label: "청강" },
 ] as const
+
+type RegistrationObservationDirectTarget = Extract<
+  RegistrationDirectDeepLinkTarget,
+  { kind: "observation" }
+>
+
+const registrationObservationClient = supabase as unknown as RegistrationObservationClient
 
 const REGISTRATION_GRADE_OPTIONS = getRegistrationGradeOptions()
 
@@ -8266,6 +8284,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     )),
     [registrationObservationRuntime.available],
   )
+  const registrationCalendarKindTabs = useMemo(
+    () => REGISTRATION_CALENDAR_KIND_TABS.filter((tab) => (
+      tab.key !== "observation" || registrationObservationRuntime.available
+    )),
+    [registrationObservationRuntime.available],
+  )
   const [registrationMode, setRegistrationMode] = useState<RegistrationWorkspaceMode>("list")
   const [registrationConsultationOwnerScope, setRegistrationConsultationOwnerScope] = useState<RegistrationConsultationOwnerScope>("mine")
   const [registrationCalendarKind, setRegistrationCalendarKind] = useState<RegistrationAppointmentCalendarKindFilter>("all")
@@ -8273,6 +8297,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     all: 0,
     level_test: 0,
     visit_consultation: 0,
+    observation: 0,
   })
   const [registrationCalendarRefreshToken, setRegistrationCalendarRefreshToken] = useState(0)
   const [taskHistoryRevision, setTaskHistoryRevision] = useState(0)
@@ -8313,6 +8338,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [selectedTask, setSelectedTask] = useState<OpsTask | null>(null)
   const [selectedRegistrationTrackId, setSelectedRegistrationTrackId] = useState<string | null>(null)
   const [selectedRegistrationAppointmentId, setSelectedRegistrationAppointmentId] = useState<string | null>(null)
+  const [registrationDeepLinkedAttempt, setRegistrationDeepLinkedAttempt] = useState<RegistrationObservationAttempt | null>(null)
   const [registrationApplicationDirty, setRegistrationApplicationDirty] = useState(false)
   const selectedRegistrationTrackIdRef = useRef<string | null>(selectedRegistrationTrackId)
   selectedRegistrationTrackIdRef.current = selectedRegistrationTrackId
@@ -8341,6 +8367,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const workspaceViewerGenerationRef = useRef(0)
   const workspaceDataViewerIdRef = useRef(currentUserId)
   const registrationTrackSelectionRef = useRef("")
+  const registrationObservationDeepLinkTargetRef = useRef<RegistrationObservationDirectTarget | null>(null)
   const registrationCreateAttemptRef = useRef<RegistrationCreateAttempt | null>(null)
   const registrationCommittedReceiptRef = useRef<RegistrationCommittedReceipt | null>(null)
   const registrationCloseDeepLinkRestoreRef = useRef<{
@@ -8535,8 +8562,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setSelectedTask(null)
       setSelectedRegistrationTrackId(null)
       setSelectedRegistrationAppointmentId(null)
+      setRegistrationDeepLinkedAttempt(null)
       setRegistrationCaseDetail(null)
       registrationTrackSelectionRef.current = ""
+      registrationObservationDeepLinkTargetRef.current = null
       registrationCreateAttemptRef.current = null
       registrationCommittedReceiptRef.current = null
       registrationCloseDeepLinkRestoreRef.current = null
@@ -8731,7 +8760,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setRegistrationMode(nextView === "calendar" ? "calendar" : "list")
       const normalizedRegistrationView = normalizeRegistrationViewKey(nextWorkflowFlow)
       if (normalizedRegistrationView) setRegistrationView(normalizedRegistrationView)
-      setRegistrationCalendarKind(normalizeRegistrationWorkspaceCalendarKind(searchParams.get("kind")))
+      setRegistrationCalendarKind(normalizeRegistrationWorkspaceCalendarKind(
+        searchParams.get("kind"),
+        registrationObservationRuntime.runtimeVersion,
+      ))
       setRegistrationConsultationOwnerScope(
         normalizedRegistrationView && isRegistrationConsultationViewKey(normalizedRegistrationView)
           ? normalizeRegistrationConsultationOwnerScope(searchParams.get("owner"))
@@ -8752,7 +8784,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     if (nextFocus && isTaskFocus(nextFocus)) {
       setTaskFocus(nextFocus)
     }
-  }, [isAssistant, isRegistrationWorkspace, isTodoWorkspace, isTransferWorkspace, isWithdrawalWorkspace, isWordRetestWorkspace, searchParams])
+  }, [isAssistant, isRegistrationWorkspace, isTodoWorkspace, isTransferWorkspace, isWithdrawalWorkspace, isWordRetestWorkspace, registrationObservationRuntime.runtimeVersion, searchParams])
 
   useEffect(() => {
     if (!isWordRetestWorkspace) return
@@ -8818,8 +8850,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setRegistrationApplicationHost({ kind: "closed" })
     setSelectedRegistrationTrackId(null)
     setSelectedRegistrationAppointmentId(null)
+    setRegistrationDeepLinkedAttempt(null)
     setRegistrationCaseDetail(null)
     registrationTrackSelectionRef.current = ""
+    registrationObservationDeepLinkTargetRef.current = null
     setNotice("")
   }
 
@@ -8849,30 +8883,56 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       !isRegistrationWorkspace
       || !registrationObservationRuntimeProbed
       || registrationObservationRuntime.available
-      || registrationView !== "observation"
     ) return
 
-    setRegistrationMode("list")
-    setRegistrationView("waiting")
-    setRegistrationConsultationOwnerScope("mine")
+    const currentSearchParams = new URLSearchParams(window.location.search)
+    const hasObservationDetail = currentSearchParams.has("observationId")
+    if (
+      registrationView !== "observation"
+      && registrationCalendarKind !== "observation"
+      && !registrationDeepLinkedAttempt
+      && !hasObservationDetail
+    ) return
+
+    const nextView = registrationView === "observation" ? "waiting" : registrationView
+    const nextMode = registrationView === "observation" || hasObservationDetail ? "list" : registrationMode
+    setRegistrationMode(nextMode)
+    setRegistrationView(nextView)
+    setRegistrationCalendarKind("all")
+    if (nextView === "waiting") setRegistrationConsultationOwnerScope("mine")
     setTaskFocus("none")
     setDetailOpen(false)
     setRegistrationApplicationHost({ kind: "closed" })
     setSelectedRegistrationTrackId(null)
     setSelectedRegistrationAppointmentId(null)
+    setRegistrationDeepLinkedAttempt(null)
     setRegistrationCaseDetail(null)
     registrationTrackSelectionRef.current = ""
+    registrationObservationDeepLinkTargetRef.current = null
     const nextSearchParams = buildRegistrationWorkspaceSearchParams(
-      new URLSearchParams(window.location.search),
-      { mode: "list", view: "waiting", ownerScope: "mine" },
+      currentSearchParams,
+      nextMode === "calendar"
+        ? { mode: "calendar", calendarKind: "all" }
+        : {
+            mode: "list",
+            view: nextView,
+            ownerScope: nextView === "consultation_requested" || nextView === "consultation_completed"
+              ? registrationConsultationOwnerScope
+              : "mine",
+          },
     )
     const queryString = nextSearchParams.toString()
     window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }, [
     isRegistrationWorkspace,
+    registrationCalendarKind,
+    registrationConsultationOwnerScope,
+    registrationDeepLinkedAttempt,
+    registrationMode,
     registrationObservationRuntime.available,
     registrationObservationRuntimeProbed,
     registrationView,
+    searchParams,
   ])
 
   const syncRegistrationConsultationOwnerScope = (ownerScope: RegistrationConsultationOwnerScope) => {
@@ -8923,13 +8983,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   ) {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
     event.preventDefault()
-    const currentIndex = REGISTRATION_CALENDAR_KIND_TABS.findIndex((tab) => tab.key === currentKind)
+    const currentIndex = registrationCalendarKindTabs.findIndex((tab) => tab.key === currentKind)
     const nextIndex = event.key === "Home"
       ? 0
       : event.key === "End"
-        ? REGISTRATION_CALENDAR_KIND_TABS.length - 1
-        : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + REGISTRATION_CALENDAR_KIND_TABS.length) % REGISTRATION_CALENDAR_KIND_TABS.length
-    const nextKind = REGISTRATION_CALENDAR_KIND_TABS[nextIndex]?.key
+        ? registrationCalendarKindTabs.length - 1
+        : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + registrationCalendarKindTabs.length) % registrationCalendarKindTabs.length
+    const nextKind = registrationCalendarKindTabs[nextIndex]?.key
     if (!nextKind) return
     syncRegistrationCalendarKind(nextKind)
     window.requestAnimationFrame(() => {
@@ -9040,6 +9100,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     historyIntent: "push" | "replace" = "replace",
   ) => {
     const searchParams = new URLSearchParams(window.location.search)
+    const hadObservationDetail = searchParams.has("observationId")
+    searchParams.delete("observationId")
+    if (hadObservationDetail) searchParams.delete("view")
     if (nextTaskId) {
       searchParams.set("taskId", nextTaskId)
     } else {
@@ -9978,7 +10041,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
     const selectionKey = `${taskId}:${trackId}`
     registrationTrackSelectionRef.current = selectionKey
+    registrationObservationDeepLinkTargetRef.current = null
     registrationCommittedReceiptRef.current = null
+    setRegistrationDeepLinkedAttempt(null)
     setFormOpen(false)
     setDetailOpen(false)
     setRegistrationApplicationDirty(false)
@@ -10062,7 +10127,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
     const selectionKey = `case:${taskId}`
     registrationTrackSelectionRef.current = selectionKey
+    registrationObservationDeepLinkTargetRef.current = null
     registrationCommittedReceiptRef.current = null
+    setRegistrationDeepLinkedAttempt(null)
     setFormOpen(false)
     setDetailOpen(false)
     setRegistrationApplicationDirty(false)
@@ -10148,7 +10215,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
     const selectionKey = `appointment:${taskId}:${appointmentId}`
     registrationTrackSelectionRef.current = selectionKey
+    registrationObservationDeepLinkTargetRef.current = null
     registrationCommittedReceiptRef.current = null
+    setRegistrationDeepLinkedAttempt(null)
     setRegistrationMode("calendar")
     setFormOpen(false)
     setDetailOpen(false)
@@ -10221,8 +10290,117 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
   }, [canManageRegistrationWorkflow, currentUserId, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, syncTaskDeepLink, taskById])
 
+  const openRegistrationObservation = useCallback(async (
+    target: RegistrationObservationDirectTarget,
+  ) => {
+    if (registrationObservationRuntime.runtimeVersion !== 1) return null
+    const task = taskById.get(target.taskId)
+    if (task && task.type !== "registration") return null
+
+    const selectionKey = `observation:${target.taskId}:${target.trackId}:${target.appointmentId}:${target.observationId}`
+    registrationTrackSelectionRef.current = selectionKey
+    registrationObservationDeepLinkTargetRef.current = target
+    registrationCommittedReceiptRef.current = null
+    setRegistrationMode("calendar")
+    setFormOpen(false)
+    setDetailOpen(false)
+    setRegistrationApplicationDirty(false)
+    setRegistrationDeepLinkedAttempt(null)
+    setSelectedTask(task || null)
+    setSelectedRegistrationTrackId(target.trackId)
+    setSelectedRegistrationAppointmentId(target.appointmentId)
+    setRegistrationCaseDetail(null)
+    setRegistrationDetailLoadError("")
+    setRegistrationApplicationHost({
+      kind: "loading_detail",
+      taskId: target.taskId,
+      focusTrackId: target.trackId,
+      appointmentId: target.appointmentId,
+    })
+    setMessage("")
+    setNotice("")
+
+    try {
+      const [detail, attempt] = await Promise.all([
+        loadRegistrationCaseForWorkspace(target.taskId),
+        loadRegistrationObservationDeepLinkedAttempt(
+          target,
+          (input) => loadRegistrationObservationManagerAttempt(registrationObservationClient, input),
+        ),
+      ])
+      if (
+        registrationTrackSelectionRef.current !== selectionKey
+        || (!task && latestWorkspaceViewerIdRef.current !== currentUserId)
+      ) return null
+      if (!attempt) {
+        setRegistrationDeepLinkedAttempt(null)
+        setRegistrationCaseDetail(null)
+        setSelectedTask(null)
+        setSelectedRegistrationTrackId(null)
+        setSelectedRegistrationAppointmentId(null)
+        setRegistrationApplicationHost({ kind: "closed" })
+        registrationObservationDeepLinkTargetRef.current = null
+        return null
+      }
+      const track = detail.task.id === target.taskId
+        ? detail.tracks.find((item) => item.id === target.trackId) || null
+        : null
+      if (!track) {
+        setRegistrationDeepLinkedAttempt(null)
+        setRegistrationCaseDetail(null)
+        setSelectedTask(null)
+        setSelectedRegistrationTrackId(null)
+        setSelectedRegistrationAppointmentId(null)
+        setRegistrationApplicationHost({ kind: "closed" })
+        registrationObservationDeepLinkTargetRef.current = null
+        return null
+      }
+
+      const exactTask = { ...detail.task, registrationTracks: detail.tracks }
+      if (!task) workspaceDataViewerIdRef.current = currentUserId
+      setRegistrationDetailLoadError("")
+      setRegistrationDeepLinkedAttempt(attempt)
+      setRegistrationCaseDetail(detail)
+      setSelectedTask(exactTask)
+      setSelectedRegistrationTrackId(track.id)
+      setSelectedRegistrationAppointmentId(target.appointmentId)
+      setRegistrationApplicationHost({
+        kind: "detail",
+        taskId: target.taskId,
+        focusTrackId: track.id,
+        appointmentId: target.appointmentId,
+      })
+      if (canManageRegistrationWorkflow) void ensureRegistrationOptions(true)
+      return { task: exactTask, detail, attempt, trackId: track.id }
+    } catch {
+      if (registrationTrackSelectionRef.current === selectionKey) {
+        setRegistrationDeepLinkedAttempt(null)
+        setRegistrationCaseDetail(null)
+        setSelectedTask(null)
+        setSelectedRegistrationTrackId(null)
+        setSelectedRegistrationAppointmentId(null)
+        setRegistrationApplicationHost({ kind: "closed" })
+        registrationObservationDeepLinkTargetRef.current = null
+      }
+      return null
+    }
+  }, [canManageRegistrationWorkflow, currentUserId, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, registrationObservationRuntime.runtimeVersion, taskById])
+
   const openRegistrationCalendarItem = useCallback((item: RegistrationAppointmentCalendarItem) => {
     const canonicalUrl = new URL(item.href, window.location.origin)
+    if (item.kind === "observation") {
+      const queryString = canonicalUrl.searchParams.toString()
+      writeTaskHistoryUrl(`${canonicalUrl.pathname}?${queryString}`, "push")
+      void openRegistrationObservation({
+        kind: "observation",
+        taskId: item.taskId,
+        trackId: item.observationTrackId,
+        appointmentId: item.appointmentId,
+        observationId: item.observationId,
+        view: "calendar",
+      })
+      return
+    }
     const currentSearchParams = new URLSearchParams(window.location.search)
     for (const key of ["fixture", "fixtureRole", "kind"] as const) {
       const value = currentSearchParams.get(key)
@@ -10231,23 +10409,38 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const queryString = canonicalUrl.searchParams.toString()
     writeTaskHistoryUrl(`${canonicalUrl.pathname}${queryString ? `?${queryString}` : ""}`, "push")
     void openRegistrationAppointment(item.taskId, item.appointmentId, item.trackIds[0] || null)
-  }, [openRegistrationAppointment, writeTaskHistoryUrl])
+  }, [openRegistrationAppointment, openRegistrationObservation, writeTaskHistoryUrl])
 
   const handleSelectRegistrationTrack = useCallback((trackId: string) => {
     const taskId = registrationCaseDetail?.task.id || selectedTask?.id || ""
     if (!taskId || !trackId) return
+    const leavingObservationDeepLink = registrationObservationDeepLinkTargetRef.current !== null
+    const nextAppointmentId = leavingObservationDeepLink ? null : selectedRegistrationAppointmentId
+    setRegistrationDeepLinkedAttempt(null)
+    registrationObservationDeepLinkTargetRef.current = null
     registrationTrackSelectionRef.current = `${taskId}:${trackId}`
     setSelectedRegistrationTrackId(trackId)
+    if (leavingObservationDeepLink) setSelectedRegistrationAppointmentId(null)
     setRegistrationApplicationHost((current) => current.kind === "detail"
-      ? { ...current, focusTrackId: trackId }
+      ? {
+          ...current,
+          focusTrackId: trackId,
+          appointmentId: nextAppointmentId,
+        }
       : current)
-    syncTaskDeepLink(taskId, trackId, selectedRegistrationAppointmentId)
+    if (leavingObservationDeepLink) {
+      syncTaskDeepLink(taskId, trackId, null)
+    } else {
+      syncTaskDeepLink(taskId, trackId, selectedRegistrationAppointmentId)
+    }
     setMessage("")
   }, [registrationCaseDetail?.task.id, selectedRegistrationAppointmentId, selectedTask?.id, syncTaskDeepLink])
 
   const handleRegistrationAppointmentOpenChange = useCallback((appointmentId: string | null) => {
     const taskId = registrationCaseDetail?.task.id || selectedTask?.id || ""
     const trackId = selectedRegistrationTrackIdRef.current
+    setRegistrationDeepLinkedAttempt(null)
+    registrationObservationDeepLinkTargetRef.current = null
     setSelectedRegistrationAppointmentId(appointmentId)
     setRegistrationApplicationHost((current) => current.kind === "detail"
       ? { ...current, appointmentId }
@@ -10259,6 +10452,86 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const taskId = registrationCaseDetail?.task.id || selectedTask?.id || ""
     const currentTrackId = preferredTrackId || selectedRegistrationTrackIdRef.current || ""
     if (!taskId || !registrationViewerId || !currentTrackId || isLegacyRegistrationTrackId(currentTrackId)) return
+    const deepLinkTarget = registrationObservationDeepLinkTargetRef.current
+    if (deepLinkTarget) {
+      const currentTarget = getRegistrationDirectDeepLinkTarget({
+        viewerId: registrationViewerId,
+        searchParams: new URLSearchParams(window.location.search),
+        observationRuntimeVersion: registrationObservationRuntime.runtimeVersion,
+        workspaceReady: true,
+        currentSelectionKey: "",
+      })
+      const exactTarget = currentTarget?.kind === "observation"
+        && currentTarget.taskId === deepLinkTarget.taskId
+        && currentTarget.trackId === deepLinkTarget.trackId
+        && currentTarget.appointmentId === deepLinkTarget.appointmentId
+        && currentTarget.observationId === deepLinkTarget.observationId
+        ? currentTarget
+        : null
+      if (!exactTarget) {
+        setFormOpen(false)
+        setDetailOpen(false)
+        setRegistrationApplicationDirty(false)
+        setRegistrationDeepLinkedAttempt(null)
+        setRegistrationCaseDetail(null)
+        setSelectedTask(null)
+        setSelectedRegistrationTrackId(null)
+        setSelectedRegistrationAppointmentId(null)
+        setRegistrationApplicationHost({ kind: "closed" })
+        registrationTrackSelectionRef.current = ""
+        registrationObservationDeepLinkTargetRef.current = null
+        return
+      }
+      const observationSelectionKey = `observation:${exactTarget.taskId}:${exactTarget.trackId}:${exactTarget.appointmentId}:${exactTarget.observationId}`
+      registrationTrackSelectionRef.current = observationSelectionKey
+      try {
+        const [detail, , attempt] = await Promise.all([
+          loadRegistrationCaseForWorkspace(exactTarget.taskId, true),
+          reload(true, false),
+          loadRegistrationObservationDeepLinkedAttempt(
+            exactTarget,
+            (input) => loadRegistrationObservationManagerAttempt(registrationObservationClient, input),
+          ),
+        ])
+        if (registrationTrackSelectionRef.current !== observationSelectionKey) return
+        const nextTrack = detail.task.id === exactTarget.taskId
+          ? detail.tracks.find((track) => track.id === exactTarget.trackId) || null
+          : null
+        if (!attempt || !nextTrack) {
+          setRegistrationDeepLinkedAttempt(null)
+          setRegistrationCaseDetail(null)
+          setSelectedTask(null)
+          setSelectedRegistrationTrackId(null)
+          setSelectedRegistrationAppointmentId(null)
+          setRegistrationApplicationHost({ kind: "closed" })
+          registrationObservationDeepLinkTargetRef.current = null
+          return
+        }
+        setRegistrationDeepLinkedAttempt(attempt)
+        setRegistrationCaseDetail(detail)
+        setSelectedTask({ ...detail.task, registrationTracks: detail.tracks })
+        setSelectedRegistrationTrackId(nextTrack.id)
+        setSelectedRegistrationAppointmentId(exactTarget.appointmentId)
+        setRegistrationApplicationHost({
+          kind: "detail",
+          taskId: exactTarget.taskId,
+          focusTrackId: nextTrack.id,
+          appointmentId: exactTarget.appointmentId,
+        })
+        return
+      } catch (error) {
+        if (registrationTrackSelectionRef.current === observationSelectionKey) {
+          setRegistrationDeepLinkedAttempt(null)
+          setRegistrationCaseDetail(null)
+          setSelectedTask(null)
+          setSelectedRegistrationTrackId(null)
+          setSelectedRegistrationAppointmentId(null)
+          setRegistrationApplicationHost({ kind: "closed" })
+          registrationObservationDeepLinkTargetRef.current = null
+        }
+        throw error
+      }
+    }
     const selectionKey = `${taskId}:${currentTrackId}`
     registrationTrackSelectionRef.current = selectionKey
     try {
@@ -10284,7 +10557,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       }
       throw error
     }
-  }, [loadRegistrationCaseForWorkspace, registrationCaseDetail?.task.id, registrationViewerId, reload, selectedRegistrationAppointmentId, selectedTask?.id, syncTaskDeepLink])
+  }, [loadRegistrationCaseForWorkspace, registrationCaseDetail?.task.id, registrationObservationRuntime.runtimeVersion, registrationViewerId, reload, selectedRegistrationAppointmentId, selectedTask?.id, syncTaskDeepLink])
 
   async function retryCommittedRegistrationCaseRefresh() {
     const committed = registrationCommittedReceiptRef.current
@@ -10388,11 +10661,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setSelectedTask(null)
     setSelectedRegistrationTrackId(null)
     setSelectedRegistrationAppointmentId(null)
+    setRegistrationDeepLinkedAttempt(null)
     setRegistrationCaseDetail(null)
     setRegistrationDetailLoadError("")
     setRegistrationApplicationDirty(false)
     setFormCompletionIntent(null)
     registrationTrackSelectionRef.current = ""
+    registrationObservationDeepLinkTargetRef.current = null
     registrationCreateAttemptRef.current = null
     registrationCommittedReceiptRef.current = null
     registrationCloseDeepLinkRestoreRef.current = null
@@ -10419,6 +10694,44 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const deepLinkedTaskId = currentSearchParams.get("taskId") || ""
     const deepLinkedTrackId = currentSearchParams.get("trackId") || ""
     const deepLinkedAppointmentId = currentSearchParams.get("appointmentId") || ""
+    const exactObservationTarget = currentSearchParams.has("observationId")
+      ? getRegistrationDirectDeepLinkTarget({
+          viewerId: registrationViewerId,
+          searchParams: currentSearchParams,
+          observationRuntimeVersion: registrationObservationRuntime.runtimeVersion,
+          workspaceReady: Boolean(data && workspaceDataBelongsToCurrentViewer),
+          currentSelectionKey: "",
+        })
+      : null
+    const directRegistrationTarget = getRegistrationDirectDeepLinkTarget({
+      viewerId: registrationViewerId,
+      searchParams: currentSearchParams,
+      observationRuntimeVersion: registrationObservationRuntime.runtimeVersion,
+      workspaceReady: Boolean(data && workspaceDataBelongsToCurrentViewer),
+      currentSelectionKey: registrationTrackSelectionRef.current,
+      currentAppointmentId: selectedRegistrationAppointmentId || "",
+      currentObservationId: registrationDeepLinkedAttempt?.observationId || "",
+    })
+    if (directRegistrationTarget && directRegistrationTarget.kind === "observation") {
+      void openRegistrationObservation(directRegistrationTarget)
+      return
+    }
+    if (currentSearchParams.has("observationId")) {
+      if (exactObservationTarget?.kind === "observation") return
+      setFormOpen(false)
+      setDetailOpen(false)
+      setRegistrationApplicationDirty(false)
+      setRegistrationDeepLinkedAttempt(null)
+      setRegistrationCaseDetail(null)
+      setSelectedTask(null)
+      setSelectedRegistrationTrackId(null)
+      setSelectedRegistrationAppointmentId(null)
+      setRegistrationDetailLoadError("")
+      setRegistrationApplicationHost({ kind: "closed" })
+      registrationTrackSelectionRef.current = ""
+      registrationObservationDeepLinkTargetRef.current = null
+      return
+    }
     if (!deepLinkedTaskId) {
       if (!["loading_detail", "detail", "refresh_failed"].includes(registrationApplicationHost.kind)) return
       if (!("taskId" in registrationApplicationHost)) return
@@ -10451,15 +10764,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       requestRegistrationApplicationClose()
       return
     }
-    const directRegistrationTarget = getRegistrationDirectDeepLinkTarget({
-      viewerId: registrationViewerId,
-      taskId: deepLinkedTaskId,
-      trackId: deepLinkedTrackId,
-      appointmentId: deepLinkedAppointmentId,
-      workspaceReady: Boolean(data && workspaceDataBelongsToCurrentViewer),
-      currentSelectionKey: registrationTrackSelectionRef.current,
-      currentAppointmentId: selectedRegistrationAppointmentId || "",
-    })
     if (directRegistrationTarget) {
       if (directRegistrationTarget.kind === "appointment") {
         void openRegistrationAppointment(
@@ -10546,16 +10850,18 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     registrationTrackSelectionRef.current = ""
     setSelectedTask(deepLinkedTask)
     setDetailOpen(true)
-  }, [data, deleteTarget, detailOpen, openRegistrationAppointment, openRegistrationCase, openRegistrationTrack, openWordRetestEditor, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, registrationViewerId, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
+  }, [data, deleteTarget, detailOpen, openRegistrationAppointment, openRegistrationCase, openRegistrationObservation, openRegistrationTrack, openWordRetestEditor, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, registrationDeepLinkedAttempt?.observationId, registrationObservationRuntime.runtimeVersion, registrationViewerId, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
 
   function handleDetailOpenChange(nextOpen: boolean) {
     setDetailOpen(nextOpen)
     if (!nextOpen) {
       setSelectedRegistrationTrackId(null)
       setSelectedRegistrationAppointmentId(null)
+      setRegistrationDeepLinkedAttempt(null)
       setRegistrationCaseDetail(null)
       setRegistrationDetailLoadError("")
       registrationTrackSelectionRef.current = ""
+      registrationObservationDeepLinkTargetRef.current = null
       syncTaskDeepLink(null)
     }
   }
@@ -12221,7 +12527,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	              })
 	              : isRegistrationWorkspace
 	                ? registrationMode === "calendar"
-	                  ? REGISTRATION_CALENDAR_KIND_TABS.map((tab) => {
+	                  ? registrationCalendarKindTabs.map((tab) => {
 	                    const registrationCount = registrationCalendarKindCounts[tab.key]
 
 	                    return (
@@ -12680,6 +12986,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               <RegistrationAppointmentCalendar
                 refreshToken={`${registrationFixtureRevision}:${registrationCalendarRefreshToken}`}
                 kindFilter={registrationCalendarKind}
+                observationRuntimeVersion={registrationObservationRuntime.runtimeVersion}
                 onKindCountsChange={setRegistrationCalendarKindCounts}
                 onOpenAppointment={openRegistrationCalendarItem}
               />
@@ -13400,6 +13707,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       viewerId={registrationViewerId}
                       viewerRole={registrationViewerRole}
                       observationRuntime={registrationObservationRuntime}
+                      deepLinkedAttempt={registrationDeepLinkedAttempt}
                       onFocusTrack={handleSelectRegistrationTrack}
                       onAppointmentOpenChange={handleRegistrationAppointmentOpenChange}
                       onAppointmentSaved={() => setRegistrationCalendarRefreshToken((current) => current + 1)}
@@ -13830,6 +14138,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 viewerId={registrationViewerId}
                 viewerRole={registrationViewerRole}
                 observationRuntime={registrationObservationRuntime}
+                deepLinkedAttempt={registrationDeepLinkedAttempt}
                 onFocusTrack={handleSelectRegistrationTrack}
                 onAppointmentOpenChange={handleRegistrationAppointmentOpenChange}
                 onAppointmentSaved={() => setRegistrationCalendarRefreshToken((current) => current + 1)}

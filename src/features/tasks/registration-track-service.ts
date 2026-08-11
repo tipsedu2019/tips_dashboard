@@ -901,6 +901,13 @@ const REGISTRATION_APPOINTMENT_CALENDAR_COLUMNS = [
   "notification_revision",
   "track_ids",
   "subjects",
+  "observation_id",
+  "observation_track_id",
+  "observation_class_id",
+  "observation_class_name",
+  "observation_ends_at",
+  "observation_teacher_name",
+  "observation_classroom_name",
 ].join(",")
 const REGISTRATION_APPOINTMENT_CALENDAR_STATUSES = [
   "scheduled",
@@ -938,6 +945,10 @@ function normalizeRegistrationAppointmentCalendarInput(
 ) {
   const rangeStart = text(input?.rangeStart)
   const rangeEnd = text(input?.rangeEnd)
+  const observationRuntimeVersion = input?.observationRuntimeVersion
+  if (observationRuntimeVersion !== 0 && observationRuntimeVersion !== 1) {
+    throw new Error("registration_calendar_observation_runtime_invalid")
+  }
   const startTime = Date.parse(rangeStart)
   const endTime = Date.parse(rangeEnd)
   if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || startTime >= endTime) {
@@ -953,7 +964,7 @@ function normalizeRegistrationAppointmentCalendarInput(
     throw new Error("registration_calendar_status_invalid")
   }
   const statuses = REGISTRATION_APPOINTMENT_CALENDAR_STATUSES.filter((status) => requested.has(status))
-  return { rangeStart, rangeEnd, statuses }
+  return { rangeStart, rangeEnd, statuses, observationRuntimeVersion }
 }
 
 function rows(input: unknown): Row[] {
@@ -1945,15 +1956,24 @@ export function createRegistrationTrackService(
   function loadRegistrationAppointmentCalendarRows(
     input: RegistrationAppointmentCalendarLoadInput,
   ): Promise<RegistrationAppointmentCalendarRow[]> {
-    const { rangeStart, rangeEnd, statuses } = normalizeRegistrationAppointmentCalendarInput(input)
+    const {
+      rangeStart,
+      rangeEnd,
+      statuses,
+      observationRuntimeVersion,
+    } = normalizeRegistrationAppointmentCalendarInput(input)
     if (statuses.length === 0) return Promise.resolve([])
 
     return measure("registration:appointment-calendar", false, async (metrics) => {
       await requireReadyRuntime()
       try {
+        let query = client.from("ops_registration_appointment_calendar")
+          .select(REGISTRATION_APPOINTMENT_CALENDAR_COLUMNS)
+        if (observationRuntimeVersion === 0) {
+          query = query.neq("kind", "observation_class")
+        }
         const calendarRows = await queryRows(
-          client.from("ops_registration_appointment_calendar")
-            .select(REGISTRATION_APPOINTMENT_CALENDAR_COLUMNS)
+          query
             .gte("scheduled_at", rangeStart)
             .lt("scheduled_at", rangeEnd)
             .in("status", statuses)
@@ -3637,7 +3657,10 @@ export async function loadRegistrationAppointmentCalendar(
   const calendarRows = fixtureRows
     ? await fixtureRows
     : await defaultRegistrationTrackService.loadRegistrationAppointmentCalendarRows(input)
-  const buildOptions = input.statuses === undefined ? undefined : { statuses: input.statuses }
+  const buildOptions = {
+    observationRuntimeVersion: input.observationRuntimeVersion,
+    ...(input.statuses === undefined ? {} : { statuses: input.statuses }),
+  }
   return buildRegistrationAppointmentCalendarItems(calendarRows, buildOptions)
 }
 

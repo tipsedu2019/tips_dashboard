@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label"
 
 import { RegistrationSelect } from "./registration-select"
 import type {
+  RegistrationObservationAttempt,
   RegistrationObservationManagerDetail,
   RegistrationObservationMutationResult,
   RegistrationObservationSessionOption,
@@ -42,6 +43,60 @@ export function canUseRegistrationObservationDetail(input: {
   detailTrackId: string | null
 }) {
   return Boolean(input.activeTrackId && input.activeTrackId === input.detailTrackId)
+}
+
+function hasExactRegistrationObservationPayload(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => hasExactRegistrationObservationPayload(value, right[index]))
+  }
+  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false
+  const leftRecord = left as Record<string, unknown>
+  const rightRecord = right as Record<string, unknown>
+  const leftKeys = Object.keys(leftRecord).sort()
+  const rightKeys = Object.keys(rightRecord).sort()
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key, index) => (
+      key === rightKeys[index]
+      && hasExactRegistrationObservationPayload(leftRecord[key], rightRecord[key])
+    ))
+}
+
+export function getRegistrationObservationEditorAttemptPlan(input: {
+  attempts: readonly RegistrationObservationAttempt[]
+  deepLinkedAttempt: RegistrationObservationAttempt | null
+  selectedObservationId: string | null
+}): Readonly<{
+  attempts: readonly RegistrationObservationAttempt[]
+  selectedAttempt: RegistrationObservationAttempt
+}> | null {
+  const selectedObservationId = input.selectedObservationId?.trim() || ""
+  if (!selectedObservationId) return null
+
+  let attempts = [...input.attempts]
+  if (input.deepLinkedAttempt) {
+    if (selectedObservationId !== input.deepLinkedAttempt.observationId) return null
+    const sameIdAttempts = attempts.filter(
+      (attempt) => attempt.observationId === input.deepLinkedAttempt?.observationId,
+    )
+    if (
+      sameIdAttempts.length > 1
+      || (sameIdAttempts.length === 1
+        && !hasExactRegistrationObservationPayload(sameIdAttempts[0], input.deepLinkedAttempt))
+    ) return null
+    attempts = [
+      input.deepLinkedAttempt,
+      ...attempts.filter((attempt) => attempt.observationId !== input.deepLinkedAttempt?.observationId),
+    ]
+  }
+
+  const selectedAttempt = attempts.find(
+    (attempt) => attempt.observationId === selectedObservationId,
+  )
+  return selectedAttempt ? { attempts, selectedAttempt } : null
 }
 
 export function canWithdrawRegistrationObservation(input: {
@@ -441,6 +496,7 @@ export type RegistrationObservationEditorProps = {
   observationRevision: number | null
   appointmentNotificationRevision: number | null
   detail: RegistrationObservationManagerDetail
+  deepLinkedAttempt?: RegistrationObservationAttempt | null
   actions: RegistrationObservationActions
   onSaved: (result: RegistrationObservationMutationResult) => void | Promise<void>
   feedbackPanel?: ReactNode
@@ -503,17 +559,38 @@ export function RegistrationObservationEditor({
   observationRevision,
   appointmentNotificationRevision,
   detail,
+  deepLinkedAttempt = null,
   actions,
   onSaved,
   feedbackPanel,
 }: RegistrationObservationEditorProps) {
-  const current = detail.currentObservation
+  const selectedObservationId = deepLinkedAttempt?.observationId
+    || detail.currentObservation?.observationId
+    || null
+  const attemptPlan = selectedObservationId
+    ? getRegistrationObservationEditorAttemptPlan({
+        attempts: detail.attempts,
+        deepLinkedAttempt,
+        selectedObservationId,
+      })
+    : null
+  const current = deepLinkedAttempt
+    ? attemptPlan?.selectedAttempt || null
+    : detail.currentObservation
+  const deepLinkedAttemptInvalid = Boolean(deepLinkedAttempt && !attemptPlan)
+  const deepLinkedAttemptIsCurrent = Boolean(
+    deepLinkedAttempt
+    && deepLinkedAttempt.observationId === detail.currentObservation?.observationId,
+  )
   const workflowStatus = detail.track.workflowStatus
-  const canEnter = workflowStatus === "consultation_completed"
+  const canEnter = !deepLinkedAttempt && (
+    workflowStatus === "consultation_completed"
     || workflowStatus === "waiting_current_class"
     || workflowStatus === "waiting_new_class"
     || workflowStatus === "waiting_next_opening"
+  )
   const canBook = workflowStatus === "observation_requested"
+    && (!deepLinkedAttempt || deepLinkedAttemptIsCurrent)
   const readOnly = workflowStatus === "observation_feedback_pending"
     || workflowStatus === "observation_completed"
   const [classId, setClassId] = useState(current?.classId || "")
@@ -836,6 +913,10 @@ export function RegistrationObservationEditor({
       },
     )
     if (result) setWithdrawOpen(false)
+  }
+
+  if (deepLinkedAttemptInvalid) {
+    return <p role="alert" className="text-sm text-destructive">청강 정보를 확인할 수 없습니다.</p>
   }
 
   if (canEnter) {

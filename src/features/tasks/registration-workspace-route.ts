@@ -1,5 +1,10 @@
 import type { RegistrationAppointmentCalendarKind } from "./registration-appointment-calendar-model"
 import type { RegistrationWorkflowViewKey } from "./registration-case-list-model"
+import type {
+  RegistrationObservationAttempt,
+  RegistrationObservationManagerAttemptDetail,
+} from "./registration-observation-model"
+import type { LoadRegistrationObservationManagerAttemptInput } from "./registration-observation-service"
 
 export type RegistrationConsultationOwnerScope = "mine" | "all"
 export type RegistrationWorkspaceCalendarKind = "all" | RegistrationAppointmentCalendarKind
@@ -27,9 +32,24 @@ export type RegistrationDirectDeepLinkTarget = {
   taskId: string
   trackId: string | null
   appointmentId: string
+} | {
+  kind: "observation"
+  taskId: string
+  trackId: string
+  appointmentId: string
+  observationId: string
+  view: "calendar"
 }
 
-const DETAIL_KEYS = ["taskId", "trackId", "appointmentId"] as const
+export const REGISTRATION_WORKSPACE_DETAIL_KEYS = [
+  "taskId",
+  "trackId",
+  "appointmentId",
+  "observationId",
+  "view",
+] as const
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export function isRegistrationConsultationViewKey(
   value: string,
@@ -45,26 +65,68 @@ export function normalizeRegistrationConsultationOwnerScope(
 
 export function normalizeRegistrationWorkspaceCalendarKind(
   value: string | null,
+  observationRuntimeVersion: 0 | 1,
 ): RegistrationWorkspaceCalendarKind {
-  return value === "level_test" || value === "visit_consultation" ? value : "all"
+  if (value === "level_test" || value === "visit_consultation") return value
+  return value === "observation" && observationRuntimeVersion === 1 ? value : "all"
 }
 
 export function getRegistrationDirectDeepLinkTarget(input: {
   viewerId: string
-  taskId: string
-  trackId: string
-  appointmentId: string
+  searchParams: URLSearchParams
+  observationRuntimeVersion: 0 | 1
   workspaceReady: boolean
   currentSelectionKey: string
   currentAppointmentId?: string
+  currentObservationId?: string
 }): RegistrationDirectDeepLinkTarget | null {
   const viewerId = input.viewerId.trim()
-  const taskId = input.taskId.trim()
-  const trackId = input.trackId.trim()
-  const appointmentId = input.appointmentId.trim()
+  if (!viewerId) return null
+
+  if (input.searchParams.has("observationId")) {
+    if (input.observationRuntimeVersion !== 1) return null
+    const entries = [...input.searchParams.entries()]
+    if (
+      entries.length !== REGISTRATION_WORKSPACE_DETAIL_KEYS.length
+      || entries.some(([key]) => !REGISTRATION_WORKSPACE_DETAIL_KEYS.includes(
+        key as (typeof REGISTRATION_WORKSPACE_DETAIL_KEYS)[number],
+      ))
+      || REGISTRATION_WORKSPACE_DETAIL_KEYS.some((key) => input.searchParams.getAll(key).length !== 1)
+    ) return null
+
+    const taskId = input.searchParams.get("taskId") || ""
+    const trackId = input.searchParams.get("trackId") || ""
+    const appointmentId = input.searchParams.get("appointmentId") || ""
+    const observationId = input.searchParams.get("observationId") || ""
+    const view = input.searchParams.get("view") || ""
+    if (
+      !UUID_PATTERN.test(taskId)
+      || !UUID_PATTERN.test(trackId)
+      || !UUID_PATTERN.test(appointmentId)
+      || !UUID_PATTERN.test(observationId)
+      || view !== "calendar"
+    ) return null
+
+    if (
+      input.currentSelectionKey === `observation:${taskId}:${trackId}:${appointmentId}:${observationId}`
+      || input.currentObservationId?.trim() === observationId
+    ) return null
+
+    return {
+      kind: "observation",
+      taskId,
+      trackId,
+      appointmentId,
+      observationId,
+      view: "calendar",
+    }
+  }
+
+  const taskId = (input.searchParams.get("taskId") || "").trim()
+  const trackId = (input.searchParams.get("trackId") || "").trim()
+  const appointmentId = (input.searchParams.get("appointmentId") || "").trim()
   if (
-    !viewerId
-    || !taskId
+    !taskId
   ) return null
 
   // A persisted workspace list can be stale. Exact URL targets remain authoritative
@@ -101,6 +163,31 @@ export function getRegistrationDirectDeepLinkTarget(input: {
   return { kind: "track", taskId, trackId }
 }
 
+export async function loadRegistrationObservationDeepLinkedAttempt(
+  target: Extract<RegistrationDirectDeepLinkTarget, { kind: "observation" }>,
+  load: (
+    input: LoadRegistrationObservationManagerAttemptInput,
+  ) => Promise<RegistrationObservationManagerAttemptDetail>,
+): Promise<RegistrationObservationAttempt | null> {
+  try {
+    const result = await load({
+      trackId: target.trackId,
+      observationId: target.observationId,
+    })
+    if (
+      result.taskId !== target.taskId
+      || result.trackId !== target.trackId
+      || result.observation.taskId !== target.taskId
+      || result.observation.trackId !== target.trackId
+      || result.observation.appointmentId !== target.appointmentId
+      || result.observation.observationId !== target.observationId
+    ) return null
+    return result.observation
+  } catch {
+    return null
+  }
+}
+
 export function shouldDeferRegistrationWorkspaceLoad(input: {
   viewerId: string
   taskId: string
@@ -127,7 +214,7 @@ export function buildRegistrationWorkspaceSearchParams(
   target: RegistrationWorkspaceRouteTarget,
 ): URLSearchParams {
   const next = new URLSearchParams(current)
-  for (const key of DETAIL_KEYS) next.delete(key)
+  for (const key of REGISTRATION_WORKSPACE_DETAIL_KEYS) next.delete(key)
   next.delete("list")
   next.delete("focus")
 
