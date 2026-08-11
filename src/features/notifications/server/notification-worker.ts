@@ -773,6 +773,7 @@ function observationJobClaim(job: JsonRecord): RegistrationObservationChatJobCla
   const mentionProfileIds = claimed.mention_profile_ids.map((value) => requiredUuid(value))
   if (claimed.mention_role !== "subject_teacher" && claimed.mention_role !== "track_director") workerEnvelopeError()
   observationRuleSnapshot(claimed.rule_snapshot)
+  requiredHash(claimed.reservation_snapshot_hash)
   const validSnapshots = eventKey === "registration.observation_rescheduled"
     ? previousBookingSnapshot !== null && preparationSnapshot !== null && submissionSnapshot === null && claimed.mention_role === "subject_teacher"
     : eventKey === "registration.observation_scheduled" || eventKey === "registration.observation_reminder_due"

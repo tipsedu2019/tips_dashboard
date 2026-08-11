@@ -257,7 +257,6 @@ test("schedule migration은 Vault fail-closed, 두 schedule, atomic watchdog와 
   assert.match(source, /octet_length\(p_secret\) < 32/)
   assert.match(source, /tips-notification-worker-v1/)
   assert.match(source, /tips-notification-cutover-watchdog-v1/)
-  assert.match(source, /tips-notification-worker-v1[\s\S]*?\* \* \* \* \*/)
   assert.equal(source.includes("tips-registration-observation-worker"), false)
   assert.equal(vercelJson.crons?.length || 0, 0)
   assert.match(source, /interval '3 minutes'/)
@@ -277,6 +276,11 @@ test("schedule migration은 Vault fail-closed, 두 schedule, atomic watchdog와 
     source,
     "dashboard_private.manage_notification_schedules_v1",
   )
+  const workerSchedule = scheduleManager.match(
+    /perform cron\.schedule\(\s*'tips-notification-worker-v1',\s*'([^']+)'/,
+  )
+  assert.ok(workerSchedule)
+  assert.match(workerSchedule[1], /^\* \* \* \* \*$/)
   assert.match(scheduleManager, /pg_advisory_xact_lock/)
   assert.match(scheduleManager, /notification_active_cutover_scope_v1/)
   assert.match(scheduleManager, /for update of flag_row/)

@@ -421,6 +421,26 @@ function createObservationChatJobClaim(overrides = {}) {
   }
 }
 
+function createObservationSourceForJob(job, overrides = {}) {
+  const booking = job.current_booking_snapshot
+  return {
+    observationId: job.observation_id,
+    appointmentId: job.appointment_id,
+    taskId: "70000000-0000-4000-8000-000000000031",
+    trackId: "70000000-0000-4000-8000-000000000032",
+    notificationRevision: job.notification_revision,
+    observationStatus: "scheduled", appointmentStatus: "scheduled", hasFeedback: false,
+    studentName: "청강생", subject: "영어", classId: booking.classId, className: booking.className,
+    sessionAuthority: booking.sessionAuthority, classLessonSessionId: booking.classLessonSessionId,
+    legacySessionKey: booking.legacySessionKey, scheduleState: booking.scheduleState,
+    startsAt: booking.startsAt, endsAt: booking.endsAt, teacherCatalogId: booking.teacherCatalogId,
+    teacherProfileId: booking.teacherProfileId, teacherName: booking.teacherName,
+    classroomCatalogId: booking.classroomCatalogId, classroomName: booking.classroomName, campus: booking.campus,
+    sourceRevision: job.source_revision, bookingFactHash: job.booking_fact_hash, directorProfileId: null,
+    ...overrides,
+  }
+}
+
 function createAdapter(overrides = {}) {
   return {
     workflowKey: "tasks",
@@ -1265,6 +1285,79 @@ test("관찰 Chat job의 잘못된 event와 일반 source timeout은 batch 중�
     assert.equal(finish.parameters.p_disposition, fixture.disposition, fixture.name)
     assert.equal(finish.parameters.p_error_code, fixture.errorCode, fixture.name)
     assert.equal(harness.calls.some((call) => call.name === "materialize_registration_observation_chat_job_v1"), false, fixture.name)
+  }
+})
+
+test("관찰 Chat claim은 reservation snapshot hash를 포함한 exact DTO를 hash 형식으로 닫는다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  const harness = createRpcHarness({
+    claim_registration_observation_chat_jobs_v1: [createObservationChatJobClaim({ reservation_snapshot_hash: "invalid" })],
+    finish_registration_observation_chat_job_v1: { outcome: "finished" },
+  })
+  const worker = createNotificationWorkerRuntime({
+    rpc: harness.rpc, getAdapter: () => createAdapter(), getProvider: () => null, createRunId: () => RUN_ID,
+    observationSourceReader: {
+      async readSource() { throw new Error("registration_observation_source_timeout") },
+      async readCurrentPreparation() { throw new Error("must not read") },
+    },
+  })
+  await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+  const finish = harness.calls.find((call) => call.name === "finish_registration_observation_chat_job_v1")
+  assert.equal(finish.parameters.p_disposition, "failed")
+  assert.equal(finish.parameters.p_error_code, "payload_schema_unsupported")
+})
+
+test("관찰 worker materialize는 source_dirty/suppressed를 terminal receipt로 두고 replay를 다시 materialize한다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  for (const outcome of ["source_dirty", "suppressed", "materialized"]) {
+    const job = createObservationChatJobClaim({ expires_at: "2026-08-18T01:00:00.000Z" })
+    const harness = createRpcHarness({
+      claim_registration_observation_chat_jobs_v1: [job],
+      materialize_registration_observation_chat_job_v1: { outcome },
+    })
+    const worker = createNotificationWorkerRuntime({
+      rpc: harness.rpc, getAdapter: () => null, getProvider: () => null, createRunId: () => RUN_ID,
+      observationSourceReader: {
+        async readSource() { return createObservationSourceForJob(job) },
+        async readCurrentPreparation() { return { textbookNames: ["현재 교재"], progressSummary: "50~57쪽" } },
+      },
+    })
+    await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+    assert.equal(harness.calls.filter((call) => call.name === "materialize_registration_observation_chat_job_v1").length, 1, outcome)
+    assert.equal(harness.calls.some((call) => call.name === "finish_registration_observation_chat_job_v1"), false, outcome)
+    if (outcome === "materialized") {
+      await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+      assert.equal(harness.calls.filter((call) => call.name === "materialize_registration_observation_chat_job_v1").length, 2, "replay")
+    }
+  }
+})
+
+test("관찰 worker는 scheduled 저장 preparation을 유지하고 reminder에는 현재 preparation만 materialize한다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  for (const fixture of [
+    { eventKey: "registration.observation_scheduled", expected: "42~49쪽", preparationReads: 0 },
+    { eventKey: "registration.observation_reminder_due", expected: "50~57쪽", preparationReads: 1 },
+  ]) {
+    const job = createObservationChatJobClaim({
+      event_key: fixture.eventKey, expires_at: "2026-08-18T01:00:00.000Z",
+      preparation_snapshot: { textbookNames: ["교재"], progressSummary: "42~49쪽" },
+    })
+    let preparationReads = 0
+    const harness = createRpcHarness({
+      claim_registration_observation_chat_jobs_v1: [job],
+      materialize_registration_observation_chat_job_v1: { outcome: "materialized" },
+    })
+    const worker = createNotificationWorkerRuntime({
+      rpc: harness.rpc, getAdapter: () => null, getProvider: () => null, createRunId: () => RUN_ID,
+      observationSourceReader: {
+        async readSource() { return createObservationSourceForJob(job) },
+        async readCurrentPreparation() { preparationReads += 1; return { textbookNames: ["교재"], progressSummary: "50~57쪽" } },
+      },
+    })
+    await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+    const materialized = harness.calls.find((call) => call.name === "materialize_registration_observation_chat_job_v1")
+    assert.match(materialized.parameters.p_payload.progress_summary, new RegExp(fixture.expected))
+    assert.equal(preparationReads, fixture.preparationReads, fixture.eventKey)
   }
 })
 
@@ -2264,6 +2357,109 @@ test("관찰 final-prepare 결과는 닫힌 union·동일 delivery·in-app provi
         throw new Error(`unexpected rpc ${name}`)
       },
     }), /worker DB 응답 형식/)
+  }
+})
+
+test("feedback_submitted의 in-app은 provider 0이고 빈 mention management Chat은 독립적으로 dispatch한다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  const inAppDeliveryId = "80000000-0000-4000-8000-000000000001"
+  const managementDeliveryId = "80000000-0000-4000-8000-000000000002"
+  const base = {
+    workflow_key: "registration", event_key: "registration.observation_feedback_submitted",
+    source_type: "registration_observation", source_id: "70000000-0000-4000-8000-000000000023",
+    source_revision: "7", rule_revision: "1", target_generation: "1", attempt_count: 1,
+  }
+  const frozen = (deliveryId) => ({
+    attemptCount: 1, expiresAt: "2026-08-17T10:00:00.000Z", snapshot: { frozen: deliveryId },
+    payloadFingerprint: "a".repeat(64), renderFingerprint: "b".repeat(64), title: "제출", body: "피드백", href: "/admin/registration",
+    lastAttemptStartedAt: "2026-08-17T07:00:00.000Z",
+  })
+  const claims = [
+    createDeliveryClaim({ ...base, delivery_id: inAppDeliveryId, channel_key: "in_app", target: {
+      target_kind: "profile", target_key: "profile:70000000-0000-4000-8000-000000000027", target_profile_id: "70000000-0000-4000-8000-000000000027",
+      connection_key: null, target_snapshot: { profile_id: "70000000-0000-4000-8000-000000000027" },
+    } }),
+    createDeliveryClaim({ ...base, delivery_id: managementDeliveryId, channel_key: "google_chat", target: {
+      target_kind: "connection", target_key: "connection:google_chat.management", target_profile_id: null,
+      connection_key: "google_chat.management", target_snapshot: { connection_key: "google_chat.management" },
+    } }),
+  ]
+  let providerLookups = 0
+  let providerSends = 0
+  const harness = createRpcHarness({
+    claim_notification_deliveries_v1: claims,
+    read_registration_observation_notification_delivery_frozen_state_v1: (parameters) => frozen(parameters.p_delivery_id),
+    prepare_registration_observation_notification_delivery_v1: (parameters) => parameters.p_delivery_id === inAppDeliveryId
+      ? { prepared: true, channel_key: "in_app", delivery_id: inAppDeliveryId, notification_id: "80000000-0000-4000-8000-000000000003", push_children_created: 0, status: "sent" }
+      : { prepared: true, delivery_id: managementDeliveryId, claim_token: CLAIM_TOKEN, dispatch_token: DISPATCH_TOKEN,
+        status: "sending", channel_key: "google_chat", connection_key: "google_chat.management", webhook_url: GOOGLE_CHAT_URL,
+        rendered_title: "제출", rendered_body: "피드백", mention_user_names: [] },
+  })
+  const worker = createNotificationWorkerRuntime({
+    rpc: harness.rpc, getAdapter: () => createAdapter(), createRunId: () => RUN_ID,
+    getProvider(channel) {
+      providerLookups += 1
+      assert.equal(channel, "google_chat")
+      return { async send(context) { providerSends += 1; assert.deepEqual(context.mention_user_names, []); return { status: "sent", providerMessageId: "message-1", providerResponseCode: "200" } } }
+    },
+  })
+  await worker.runBatch({ workerId: "worker-fixture", batchSize: 2, leaseSeconds: 30 })
+  assert.equal(providerLookups, 1)
+  assert.equal(providerSends, 1)
+  assert.equal(harness.calls.filter((call) => call.name === "register_notification_external_attempt_v1").length, 1)
+  assert.equal(harness.calls.filter((call) => call.name === "prepare_registration_observation_notification_delivery_v1").length, 2)
+  assert.equal(harness.calls.some((call) => JSON.stringify(call.parameters).includes("@all")), false)
+  assert.equal(harness.calls.some((call) => JSON.stringify(call.parameters).includes("executive")), false)
+})
+
+test("관찰 frozen retry의 429/425만 두 번째 send를 허용하고 408·timeout·reset·5xx는 자동 재발송하지 않는다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  for (const fixture of [
+    { name: "429", first: { status: "retry_wait", statusReason: "provider_rate_limited", providerResponseCode: "429" }, sends: 2 },
+    { name: "425", first: { status: "retry_wait", statusReason: "transient_pre_dispatch_failure", providerResponseCode: "425" }, sends: 2 },
+    { name: "408", first: { status: "delivery_unknown", statusReason: "provider_ambiguous_response", providerResponseCode: "408" }, sends: 1 },
+    { name: "timeout", first: { status: "delivery_unknown", statusReason: "provider_timeout_after_dispatch", providerResponseCode: null }, sends: 1 },
+    { name: "reset", first: { status: "delivery_unknown", statusReason: "connection_reset_after_dispatch", providerResponseCode: null }, sends: 1 },
+    { name: "5xx", first: { status: "delivery_unknown", statusReason: "provider_ambiguous_response", providerResponseCode: "500" }, sends: 1 },
+  ]) {
+    const deliveryId = "80000000-0000-4000-8000-000000000004"
+    const claim = createDeliveryClaim({
+      delivery_id: deliveryId, workflow_key: "registration", event_key: "registration.observation_feedback_submitted",
+      source_type: "registration_observation", source_id: "70000000-0000-4000-8000-000000000023",
+      source_revision: "7", rule_revision: "1", target_generation: "1", attempt_count: 1, channel_key: "google_chat",
+      target: { target_kind: "connection", target_key: "connection:google_chat.management", target_profile_id: null, connection_key: "google_chat.management", target_snapshot: { connection_key: "google_chat.management" } },
+    })
+    let claimCalls = 0
+    let sends = 0
+    const contexts = []
+    const frozen = {
+      attemptCount: 1, expiresAt: "2026-08-17T10:00:00.000Z", snapshot: { frozen: "42~49쪽" },
+      payloadFingerprint: "a".repeat(64), renderFingerprint: "b".repeat(64), title: "고정", body: "42~49쪽", href: "/admin/registration",
+      lastAttemptStartedAt: "2026-08-17T07:00:00.000Z",
+    }
+    const harness = createRpcHarness({
+      claim_notification_deliveries_v1: () => (++claimCalls <= fixture.sends ? [claim] : []),
+      read_registration_observation_notification_delivery_frozen_state_v1: frozen,
+      prepare_registration_observation_notification_delivery_v1: {
+        prepared: true, delivery_id: deliveryId, claim_token: CLAIM_TOKEN, dispatch_token: DISPATCH_TOKEN, status: "sending",
+        channel_key: "google_chat", connection_key: "google_chat.management", webhook_url: GOOGLE_CHAT_URL,
+        rendered_title: "고정", rendered_body: "42~49쪽", href: "/admin/registration", mention_user_names: [],
+      },
+    })
+    const worker = createNotificationWorkerRuntime({
+      rpc: harness.rpc, getAdapter: () => createAdapter({ async revalidateBeforeSend() { return { ok: true } } }), createRunId: () => RUN_ID,
+      now: () => new Date("2026-08-17T08:00:00.000Z"),
+      getProvider: () => ({ async send(context) { contexts.push(structuredClone(context)); sends += 1; return sends === 1 ? fixture.first : { status: "sent", providerMessageId: "message-2", providerResponseCode: "200" } } }),
+    })
+    await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+    await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+    assert.equal(sends, fixture.sends, fixture.name)
+    assert.equal(harness.calls.filter((call) => call.name === "read_registration_observation_notification_delivery_frozen_state_v1").length, fixture.sends, fixture.name)
+    assert.equal(harness.calls.some((call) => ["get_notification_render_snapshot_v1", "refresh_registration_observation_notification_delivery_v1"].includes(call.name)), false, fixture.name)
+    if (fixture.sends === 2) assert.deepEqual(contexts[1], contexts[0], `${fixture.name} frozen retry bytes`)
+    const finalizations = harness.calls.filter((call) => call.name === "finalize_notification_delivery_v1")
+    assert.equal(finalizations[0].parameters.p_status, fixture.first.status, fixture.name)
+    assert.equal(finalizations[0].parameters.p_next_attempt_at === null, fixture.sends === 1, fixture.name)
   }
 })
 
