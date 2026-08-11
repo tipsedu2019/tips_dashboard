@@ -223,6 +223,46 @@ const RULE_GROUPS = [
   },
   {
     workflowKey: "registration",
+    eventKeys: [
+      "registration.observation_scheduled",
+      "registration.observation_rescheduled",
+      "registration.observation_canceled",
+      "registration.observation_reminder_due",
+      "registration.observation_feedback_due",
+    ],
+    cells: [
+      { audienceKey: "subject_team", channelKey: "google_chat", ruleVariantKeys: IMMEDIATE },
+    ],
+    scopeState: "in_scope",
+    configurationKind: "editable_rule",
+    enabledState: "disabled",
+    dispatchOwner: "canonical",
+  },
+  {
+    workflowKey: "registration",
+    eventKeys: ["registration.observation_feedback_submitted"],
+    cells: [
+      { audienceKey: "management_team", channelKey: "google_chat", ruleVariantKeys: IMMEDIATE },
+      { audienceKey: "track_director", channelKey: "in_app", ruleVariantKeys: IMMEDIATE },
+    ],
+    scopeState: "in_scope",
+    configurationKind: "editable_rule",
+    enabledState: "disabled",
+    dispatchOwner: "canonical",
+  },
+  {
+    workflowKey: "registration",
+    eventKeys: ["registration.observation_director_reassigned"],
+    cells: [
+      { audienceKey: "management_team", channelKey: "google_chat", ruleVariantKeys: IMMEDIATE },
+    ],
+    scopeState: "in_scope",
+    configurationKind: "editable_rule",
+    enabledState: "disabled",
+    dispatchOwner: "canonical",
+  },
+  {
+    workflowKey: "registration",
     eventKeys: ["registration.admission_message_requested"],
     cells: [
       { audienceKey: "applicant_guardian", channelKey: "customer_message", ruleVariantKeys: IMMEDIATE },

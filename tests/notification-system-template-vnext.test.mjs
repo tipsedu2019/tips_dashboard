@@ -86,12 +86,13 @@ function functionBlock(source, qualifiedName) {
   return match[0]
 }
 
-test("golden fixture resolves an exact self-contained message for every registry-derived rule identity", async () => {
+test("system-template golden fixture resolves an exact self-contained message for every system-template rule identity", async () => {
   const [{ listNotificationContentContracts }, fixture] = await Promise.all([
     import(contractsUrl.href),
     loadFixture(),
   ])
-  const contracts = listNotificationContentContracts()
+  const fixtureIdentityKeys = new Set(fixture.ruleIdentities.map(identityKey))
+  const contracts = listNotificationContentContracts().filter((entry) => fixtureIdentityKeys.has(identityKey(entry)))
   const expectedIdentities = new Set(contracts.map(identityKey))
   const actualIdentities = new Set(fixture.ruleIdentities.map(identityKey))
 

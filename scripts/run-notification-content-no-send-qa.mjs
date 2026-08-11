@@ -230,6 +230,7 @@ export async function runNotificationContentNoSendQa() {
         rendered_title: renderedTitle,
         rendered_body: renderedBody,
         href,
+        workflow_key: identity.workflowKey,
       }
       const expected = buildGoogleChatCardPayload(context)
       assert.equal(expected.ok, true)

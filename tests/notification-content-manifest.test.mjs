@@ -27,6 +27,10 @@ const registrationManagementSeedUrl = new URL(
   "../supabase/migrations/20260806120000_registration_management_google_chat_events.sql",
   import.meta.url,
 )
+const registrationObservationSeedUrl = new URL(
+  "../supabase/migrations/20260809105000_registration_observation_google_chat.sql",
+  import.meta.url,
+)
 
 async function loadManifest() {
   const manifest = await import(manifestUrl.href).catch(() => null)
@@ -89,7 +93,32 @@ function sqlBetween(source, startMarker, endMarker) {
   return source.slice(start, end)
 }
 
-function extractSeedIdentityKeys(settingsSeed, reminderSeed, registrationFixedSeed, registrationManagementSeed) {
+function extractObservationSeedIdentityKeys(registrationObservationSeed) {
+  const observationSeed = sqlBetween(
+    registrationObservationSeed,
+    "with seed(\n  rule_id, template_id, event_key, audience_key, channel_key,",
+    "insert into dashboard_private.notification_settings_ui_registry(",
+  )
+  const identities = [...observationSeed.matchAll(
+    /^\s*\('[^']+'::uuid, '[^']+'::uuid, '(registration\.observation_[^']+)'::text, '([^']+)'::text, '(google_chat|in_app)'::text,/gmu,
+  )].map((match) => [
+    "registration",
+    match[1],
+    match[2],
+    match[3],
+    "immediate",
+  ].join("|"))
+  assert.equal(identities.length, 8, "observation seed must keep exactly eight reviewed identities")
+  return identities
+}
+
+function extractSeedIdentityKeys(
+  settingsSeed,
+  reminderSeed,
+  registrationFixedSeed,
+  registrationManagementSeed,
+  registrationObservationSeed,
+) {
   const identities = new Set()
 
   const baseEvents = [...sqlBetween(settingsSeed, "event_catalog(\n", "),\ncell_catalog(")
@@ -168,6 +197,7 @@ function extractSeedIdentityKeys(settingsSeed, reminderSeed, registrationFixedSe
   )
   assert.ok(managementIdentityMatch, "registration management identity fixture must exist")
   for (const identity of JSON.parse(managementIdentityMatch[1])) identities.add(identity)
+  for (const identity of extractObservationSeedIdentityKeys(registrationObservationSeed)) identities.add(identity)
 
   return [...identities].sort()
 }
@@ -211,6 +241,7 @@ test("manifest and the actual rule seeds match bidirectionally without a hardcod
     await readFile(reminderSeedUrl, "utf8"),
     await readFile(registrationFixedSeedUrl, "utf8"),
     await readFile(registrationManagementSeedUrl, "utf8"),
+    await readFile(registrationObservationSeedUrl, "utf8"),
   )
 
   assert.deepEqual(actualRuleKeys, expectedRuleKeys)

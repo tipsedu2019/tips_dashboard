@@ -18,6 +18,176 @@
       "body": "[문서] 7월 교재비 정산 · 작성자 박지영\n[기간] 2026년 7월\n[진행] 김철수님의 결재를 기다리고 있어요."
     }
   ],
+  "observationGoldenCards": [
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.observation_scheduled",
+      "audienceKey": "subject_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "titleTemplate": "[청강 예약] {학생}",
+      "bodyTemplate": "학생: {학생}\n과목/수업: [{과목}] {수업}\n일시: {일정}\n담당 선생님: {담당선생님}\n강의실: {강의실}\n교재: {교재}\n진도: {진도}\n교재 복사 등 청강 준비가 필요합니다.",
+      "templateValues": {
+        "학생": "청강 테스트",
+        "과목": "영어",
+        "수업": "중2 영어 A반",
+        "일정": "2026년 8월 17일 월요일 오후 6:00–8:00",
+        "담당선생님": "홍길동",
+        "강의실": "301호",
+        "교재": "능률 VOCA",
+        "진도": "42~49쪽 · 단어 시험"
+      },
+      "expectedTitle": "[청강 예약] 청강 테스트",
+      "expectedBody": "학생: 청강 테스트\n과목/수업: [영어] 중2 영어 A반\n일시: 2026년 8월 17일 월요일 오후 6:00–8:00\n담당 선생님: 홍길동\n강의실: 301호\n교재: 능률 VOCA\n진도: 42~49쪽 · 단어 시험\n교재 복사 등 청강 준비가 필요합니다.",
+      "buttonLabel": "청강 상세 보기",
+      "privateDeepLink": "/admin/registration?taskId=10000000-0000-4000-8000-000000000001&trackId=10000000-0000-4000-8000-000000000002&appointmentId=10000000-0000-4000-8000-000000000004&observationId=10000000-0000-4000-8000-000000000003&view=calendar"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.observation_rescheduled",
+      "audienceKey": "subject_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "titleTemplate": "[청강 일정 변경] {학생}",
+      "bodyTemplate": "학생: {학생}\n과목/수업: [{과목}] {수업}\n이전 일정: {기존일정}\n변경 일정: {일정}\n담당 선생님: {담당선생님}\n강의실: {강의실}\n교재: {교재}\n진도: {진도}\n변경된 일정에 맞춰 청강 준비가 필요합니다.",
+      "templateValues": {
+        "학생": "청강 테스트",
+        "과목": "영어",
+        "수업": "중2 영어 A반",
+        "기존일정": "2026년 8월 16일 일요일 오후 6:00–8:00",
+        "일정": "2026년 8월 17일 월요일 오후 6:00–8:00",
+        "담당선생님": "홍길동",
+        "강의실": "301호",
+        "교재": "능률 VOCA",
+        "진도": "42~49쪽 · 단어 시험"
+      },
+      "expectedTitle": "[청강 일정 변경] 청강 테스트",
+      "expectedBody": "학생: 청강 테스트\n과목/수업: [영어] 중2 영어 A반\n이전 일정: 2026년 8월 16일 일요일 오후 6:00–8:00\n변경 일정: 2026년 8월 17일 월요일 오후 6:00–8:00\n담당 선생님: 홍길동\n강의실: 301호\n교재: 능률 VOCA\n진도: 42~49쪽 · 단어 시험\n변경된 일정에 맞춰 청강 준비가 필요합니다.",
+      "buttonLabel": "청강 상세 보기",
+      "privateDeepLink": "/admin/registration?taskId=10000000-0000-4000-8000-000000000001&trackId=10000000-0000-4000-8000-000000000002&appointmentId=10000000-0000-4000-8000-000000000004&observationId=10000000-0000-4000-8000-000000000003&view=calendar"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.observation_canceled",
+      "audienceKey": "subject_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "titleTemplate": "[청강 취소] {학생}",
+      "bodyTemplate": "학생: {학생}\n과목/수업: [{과목}] {수업}\n취소 일정: {일정}\n청강 예약이 취소되었습니다.",
+      "templateValues": {
+        "학생": "청강 테스트",
+        "과목": "영어",
+        "수업": "중2 영어 A반",
+        "일정": "2026년 8월 17일 월요일 오후 6:00–8:00"
+      },
+      "expectedTitle": "[청강 취소] 청강 테스트",
+      "expectedBody": "학생: 청강 테스트\n과목/수업: [영어] 중2 영어 A반\n취소 일정: 2026년 8월 17일 월요일 오후 6:00–8:00\n청강 예약이 취소되었습니다.",
+      "buttonLabel": "청강 상세 보기",
+      "privateDeepLink": "/admin/registration?taskId=10000000-0000-4000-8000-000000000001&trackId=10000000-0000-4000-8000-000000000002&appointmentId=10000000-0000-4000-8000-000000000004&observationId=10000000-0000-4000-8000-000000000003&view=calendar"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.observation_reminder_due",
+      "audienceKey": "subject_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "titleTemplate": "[오늘 청강 준비] {학생}",
+      "bodyTemplate": "오늘 청강이 예정되어 있습니다.\n학생: {학생}\n과목/수업: [{과목}] {수업}\n일시: {일정}\n담당 선생님: {담당선생님}\n강의실: {강의실}\n교재: {교재}\n진도: {진도}\n교재 복사 등 준비 내용을 확인해 주세요.",
+      "templateValues": {
+        "학생": "청강 테스트",
+        "과목": "영어",
+        "수업": "중2 영어 A반",
+        "일정": "2026년 8월 17일 월요일 오후 6:00–8:00",
+        "담당선생님": "홍길동",
+        "강의실": "301호",
+        "교재": "능률 VOCA",
+        "진도": "42~49쪽 · 단어 시험"
+      },
+      "expectedTitle": "[오늘 청강 준비] 청강 테스트",
+      "expectedBody": "오늘 청강이 예정되어 있습니다.\n학생: 청강 테스트\n과목/수업: [영어] 중2 영어 A반\n일시: 2026년 8월 17일 월요일 오후 6:00–8:00\n담당 선생님: 홍길동\n강의실: 301호\n교재: 능률 VOCA\n진도: 42~49쪽 · 단어 시험\n교재 복사 등 준비 내용을 확인해 주세요.",
+      "buttonLabel": "청강 상세 보기",
+      "privateDeepLink": "/admin/registration?taskId=10000000-0000-4000-8000-000000000001&trackId=10000000-0000-4000-8000-000000000002&appointmentId=10000000-0000-4000-8000-000000000004&observationId=10000000-0000-4000-8000-000000000003&view=calendar"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.observation_feedback_due",
+      "audienceKey": "subject_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "titleTemplate": "[청강 피드백 요청] {학생}",
+      "bodyTemplate": "청강은 어땠나요? 적합 여부와 사유를 입력해 주세요.\n학생: {학생}\n과목/수업: [{과목}] {수업}\n수업 일시: {일정}\n담당 선생님: {담당선생님}\n강의실: {강의실}",
+      "templateValues": {
+        "학생": "청강 테스트",
+        "과목": "영어",
+        "수업": "중2 영어 A반",
+        "일정": "2026년 8월 17일 월요일 오후 6:00–8:00",
+        "담당선생님": "홍길동",
+        "강의실": "301호"
+      },
+      "expectedTitle": "[청강 피드백 요청] 청강 테스트",
+      "expectedBody": "청강은 어땠나요? 적합 여부와 사유를 입력해 주세요.\n학생: 청강 테스트\n과목/수업: [영어] 중2 영어 A반\n수업 일시: 2026년 8월 17일 월요일 오후 6:00–8:00\n담당 선생님: 홍길동\n강의실: 301호",
+      "buttonLabel": "피드백 입력",
+      "privateDeepLink": "/admin/registration/observations/10000000-0000-4000-8000-000000000003/feedback"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.observation_feedback_submitted",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "titleTemplate": "[청강 피드백 등록] {학생}",
+      "bodyTemplate": "청강 피드백이 등록되었습니다.\n학생: {학생}\n과목/수업: [{과목}] {수업}\n제출자: {제출자}\n제출시각: {제출시각}",
+      "templateValues": {
+        "학생": "청강 테스트",
+        "과목": "영어",
+        "수업": "중2 영어 A반",
+        "제출자": "홍길동",
+        "제출시각": "2026년 8월 17일 월요일 오후 8:05"
+      },
+      "expectedTitle": "[청강 피드백 등록] 청강 테스트",
+      "expectedBody": "청강 피드백이 등록되었습니다.\n학생: 청강 테스트\n과목/수업: [영어] 중2 영어 A반\n제출자: 홍길동\n제출시각: 2026년 8월 17일 월요일 오후 8:05",
+      "buttonLabel": "청강 상세 보기",
+      "privateDeepLink": "/admin/registration?taskId=10000000-0000-4000-8000-000000000001&trackId=10000000-0000-4000-8000-000000000002&appointmentId=10000000-0000-4000-8000-000000000004&observationId=10000000-0000-4000-8000-000000000003&view=calendar"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.observation_feedback_submitted",
+      "audienceKey": "track_director",
+      "channelKey": "in_app",
+      "ruleVariantKey": "immediate",
+      "titleTemplate": "[청강 피드백 등록] {학생}",
+      "bodyTemplate": "청강 피드백이 등록되었습니다.\n학생: {학생}\n과목/수업: [{과목}] {수업}\n제출자: {제출자}\n제출시각: {제출시각}",
+      "templateValues": {
+        "학생": "청강 테스트",
+        "과목": "영어",
+        "수업": "중2 영어 A반",
+        "제출자": "홍길동",
+        "제출시각": "2026년 8월 17일 월요일 오후 8:05"
+      },
+      "expectedTitle": "[청강 피드백 등록] 청강 테스트",
+      "expectedBody": "청강 피드백이 등록되었습니다.\n학생: 청강 테스트\n과목/수업: [영어] 중2 영어 A반\n제출자: 홍길동\n제출시각: 2026년 8월 17일 월요일 오후 8:05",
+      "buttonLabel": null,
+      "privateDeepLink": "/admin/registration?taskId=10000000-0000-4000-8000-000000000001&trackId=10000000-0000-4000-8000-000000000002&appointmentId=10000000-0000-4000-8000-000000000004&observationId=10000000-0000-4000-8000-000000000003&view=calendar"
+    },
+    {
+      "workflowKey": "registration",
+      "eventKey": "registration.observation_director_reassigned",
+      "audienceKey": "management_team",
+      "channelKey": "google_chat",
+      "ruleVariantKey": "immediate",
+      "titleTemplate": "[청강 담당 원장 변경] {학생}",
+      "bodyTemplate": "학생: {학생}\n과목/수업: [{과목}] {수업}\n담당 원장이 변경되었습니다.",
+      "templateValues": {
+        "학생": "청강 테스트",
+        "과목": "영어",
+        "수업": "중2 영어 A반"
+      },
+      "expectedTitle": "[청강 담당 원장 변경] 청강 테스트",
+      "expectedBody": "학생: 청강 테스트\n과목/수업: [영어] 중2 영어 A반\n담당 원장이 변경되었습니다.",
+      "buttonLabel": "청강 상세 보기",
+      "privateDeepLink": "/admin/registration?taskId=10000000-0000-4000-8000-000000000001&trackId=10000000-0000-4000-8000-000000000002&appointmentId=10000000-0000-4000-8000-000000000004&observationId=10000000-0000-4000-8000-000000000003&view=calendar"
+    }
+  ],
   "eventGoldens": [
     {
       "workflowKey": "tasks",

@@ -7,6 +7,53 @@ const registryUrl = new URL(
   import.meta.url,
 )
 const fixtureUrl = new URL("./fixtures/notification-content-contracts.json", import.meta.url)
+const goldenFixtureUrl = new URL("./fixtures/notification-content-golden.json", import.meta.url)
+
+const OBSERVATION_IDENTITIES = Object.freeze([
+  "registration|registration.observation_scheduled|subject_team|google_chat|immediate",
+  "registration|registration.observation_rescheduled|subject_team|google_chat|immediate",
+  "registration|registration.observation_canceled|subject_team|google_chat|immediate",
+  "registration|registration.observation_reminder_due|subject_team|google_chat|immediate",
+  "registration|registration.observation_feedback_due|subject_team|google_chat|immediate",
+  "registration|registration.observation_feedback_submitted|management_team|google_chat|immediate",
+  "registration|registration.observation_feedback_submitted|track_director|in_app|immediate",
+  "registration|registration.observation_director_reassigned|management_team|google_chat|immediate",
+])
+
+const OBSERVATION_DESTINATIONS = new Map([
+  ["registration.observation_scheduled|subject_team|google_chat", {
+    allowedConnectionKeys: ["google_chat.english", "google_chat.math", "google_chat.science"],
+    subjectScoped: true,
+  }],
+  ["registration.observation_rescheduled|subject_team|google_chat", {
+    allowedConnectionKeys: ["google_chat.english", "google_chat.math", "google_chat.science"],
+    subjectScoped: true,
+  }],
+  ["registration.observation_canceled|subject_team|google_chat", {
+    allowedConnectionKeys: ["google_chat.english", "google_chat.math", "google_chat.science"],
+    subjectScoped: true,
+  }],
+  ["registration.observation_reminder_due|subject_team|google_chat", {
+    allowedConnectionKeys: ["google_chat.english", "google_chat.math", "google_chat.science"],
+    subjectScoped: true,
+  }],
+  ["registration.observation_feedback_due|subject_team|google_chat", {
+    allowedConnectionKeys: ["google_chat.english", "google_chat.math", "google_chat.science"],
+    subjectScoped: true,
+  }],
+  ["registration.observation_feedback_submitted|management_team|google_chat", {
+    allowedConnectionKeys: ["google_chat.management"],
+    subjectScoped: false,
+  }],
+  ["registration.observation_feedback_submitted|track_director|in_app", {
+    allowedConnectionKeys: [],
+    subjectScoped: false,
+  }],
+  ["registration.observation_director_reassigned|management_team|google_chat", {
+    allowedConnectionKeys: ["google_chat.management"],
+    subjectScoped: false,
+  }],
+])
 
 async function loadRegistry() {
   const registry = await import(registryUrl.href).catch(() => null)
@@ -22,14 +69,31 @@ function eventContractMap(entries) {
   return new Map(entries.map((entry) => [entry.eventKey, entry]))
 }
 
-test("51 approved event meanings resolve one consistent semantic contract across every rule identity", async () => {
+function identityKey(entry) {
+  return [
+    entry.workflowKey,
+    entry.eventKey,
+    entry.audienceKey,
+    entry.channelKey,
+    entry.ruleVariantKey,
+  ].join("|")
+}
+
+function renderGoldenTemplate(template, values) {
+  return template.replace(/\{([^{}]+)\}/gu, (_, token) => {
+    assert.ok(Object.hasOwn(values, token), `golden values are missing ${token}`)
+    return values[token]
+  })
+}
+
+test("58 approved event meanings resolve one consistent semantic contract across every rule identity", async () => {
   const [registry, fixture] = await Promise.all([loadRegistry(), readFixture()])
   const expectedByEvent = eventContractMap(fixture.eventContracts)
   const entries = registry.listNotificationContentContracts()
   const actualEvents = new Set(entries.map((entry) => entry.eventKey))
 
-  assert.equal(expectedByEvent.size, 51)
-  assert.equal(actualEvents.size, 51)
+  assert.equal(expectedByEvent.size, 58)
+  assert.equal(actualEvents.size, 58)
   assert.deepEqual([...actualEvents].sort(), [...expectedByEvent.keys()].sort())
 
   for (const entry of entries) {
@@ -46,6 +110,68 @@ test("51 approved event meanings resolve one consistent semantic contract across
     const availableTokens = entry.contract.availableVariables.map(({ token }) => token)
     for (const token of [...entry.contract.requiredTokens, ...entry.contract.optionalLineTokens]) {
       assert.ok(availableTokens.includes(token), `${entry.eventKey} is missing ${token}`)
+    }
+  }
+})
+
+test("eight observation content identities keep exact destination, golden, and private-link boundaries", async () => {
+  const [registry, golden] = await Promise.all([
+    loadRegistry(),
+    readFile(goldenFixtureUrl, "utf8").then(JSON.parse),
+  ])
+  const contracts = new Map(registry.listNotificationContentContracts().map((entry) => [
+    identityKey(entry),
+    entry.contract,
+  ]))
+  assert.ok(Array.isArray(golden.observationGoldenCards))
+  assert.equal(golden.observationGoldenCards.length, 8)
+  const goldenCards = new Map(golden.observationGoldenCards.map((entry) => [identityKey(entry), entry]))
+  const forbiddenVariableKeys = new Set([
+    "phone",
+    "school",
+    "inquiry",
+    "suitability",
+    "feedback_result",
+    "feedback_reason",
+    "url",
+    "uuid",
+  ])
+
+  assert.deepEqual(
+    [...contracts.keys()].filter((key) => key.includes("|registration.observation_")).sort(),
+    [...OBSERVATION_IDENTITIES].sort(),
+  )
+  assert.deepEqual([...goldenCards.keys()].sort(), [...OBSERVATION_IDENTITIES].sort())
+
+  for (const identity of OBSERVATION_IDENTITIES) {
+    const contract = contracts.get(identity)
+    const card = goldenCards.get(identity)
+    assert.ok(contract, `missing contract ${identity}`)
+    assert.ok(card, `missing golden ${identity}`)
+    const [, eventKey, audienceKey, channelKey] = identity.split("|")
+    const destination = OBSERVATION_DESTINATIONS.get(`${eventKey}|${audienceKey}|${channelKey}`)
+    assert.ok(destination, `missing destination expectation ${identity}`)
+    assert.equal(contract.contractVersion, "1")
+    assert.deepEqual(contract.supportedPayloadVersions, [3])
+    assert.deepEqual(contract.destinationPolicy.allowedConnectionKeys, destination.allowedConnectionKeys)
+    assert.equal(contract.destinationPolicy.subjectScoped, destination.subjectScoped)
+    assert.equal(contract.availableVariables.some(({ key }) => forbiddenVariableKeys.has(key)), false)
+    assert.equal(Array.isArray(contract.requiredTokens), true)
+    assert.equal(Array.isArray(contract.optionalLineTokens), true)
+    assert.equal(Array.isArray(contract.mustHaveFacts), true)
+    assert.equal(typeof contract.freeTextVisibility, "object")
+    assert.equal(Array.isArray(contract.freeTextPriority), true)
+    assert.equal(typeof contract.fieldPresence, "object")
+    assert.equal(renderGoldenTemplate(card.titleTemplate, card.templateValues), card.expectedTitle)
+    assert.equal(renderGoldenTemplate(card.bodyTemplate, card.templateValues), card.expectedBody)
+    assert.doesNotMatch(`${card.expectedTitle}\n${card.expectedBody}`, /(?:https?:\/\/|\/admin\/|[0-9a-f]{8}-[0-9a-f-]{27,}|\+?\d{2,3}[ -]?\d{3,4}[ -]?\d{4}|[\u0000-\u0009\u000b-\u001f\u007f\u200e\u200f\u061c])/iu)
+    assert.match(card.privateDeepLink, /^\/admin\/registration(?:\?|\/observations\/)/u)
+    if (eventKey === "registration.observation_feedback_due") {
+      assert.equal(card.buttonLabel, "피드백 입력")
+    } else if (channelKey === "google_chat") {
+      assert.equal(card.buttonLabel, "청강 상세 보기")
+    } else {
+      assert.equal(card.buttonLabel, null)
     }
   }
 })

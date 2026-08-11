@@ -222,6 +222,129 @@ select is_empty($$
     )
 $$, 'observation contracts contain no executive destination or private fields');
 
+select is(
+  (
+    select pg_catalog.count(*)
+    from dashboard_private.notification_rules rule_row
+    where rule_row.workflow_key = 'registration'
+      and rule_row.event_key like 'registration.observation_%'
+  ),
+  8::bigint,
+  'exactly eight observation destination rules are installed'
+);
+
+select is_empty($$
+  select variable.item ->> 'key'
+  from dashboard_private.notification_templates template_row
+  join dashboard_private.notification_rules rule_row
+    on rule_row.id = template_row.rule_id
+  cross join lateral pg_catalog.jsonb_array_elements(template_row.allowed_variables) variable(item)
+  where rule_row.workflow_key = 'registration'
+    and rule_row.event_key like 'registration.observation_%'
+    and variable.item ->> 'key' in ('phone','school','inquiry','suitability','feedback_reason','url','uuid')
+$$, 'observation templates expose no forbidden variable key');
+
+select is_empty($$
+  select variable.item ->> 'key'
+  from dashboard_private.notification_templates template_row
+  join dashboard_private.notification_rules rule_row
+    on rule_row.id = template_row.rule_id
+  cross join lateral pg_catalog.jsonb_array_elements(template_row.allowed_variables) variable(item)
+  where rule_row.workflow_key = 'registration'
+    and rule_row.event_key = 'registration.observation_feedback_submitted'
+    and variable.item ->> 'key' in ('suitability','feedback_reason','result','reason')
+$$, 'feedback submitted exposes no result or reason token');
+
+select is_empty($$
+  with expected(
+    event_key,audience_key,channel_key,rule_variant_key,payload_schema_version,required_tokens,allowed_variables
+  ) as (
+    values
+      ('registration.observation_scheduled','subject_team','google_chat','immediate',3,
+       '["학생","과목","수업","일정","담당선생님","강의실","교재","진도"]'::jsonb,
+       '[{"key":"student_name","token":"학생","pii_class":"student_name"},{"key":"subjects","token":"과목","pii_class":"none"},{"key":"class_name","token":"수업","pii_class":"class_name"},{"key":"scheduled_at","token":"일정","pii_class":"schedule"},{"key":"teacher_name","token":"담당선생님","pii_class":"staff_name"},{"key":"classroom","token":"강의실","pii_class":"location"},{"key":"textbooks","token":"교재","pii_class":"none"},{"key":"progress","token":"진도","pii_class":"none"}]'::jsonb),
+      ('registration.observation_rescheduled','subject_team','google_chat','immediate',3,
+       '["학생","과목","수업","기존일정","일정","담당선생님","강의실","교재","진도"]'::jsonb,
+       '[{"key":"student_name","token":"학생","pii_class":"student_name"},{"key":"subjects","token":"과목","pii_class":"none"},{"key":"class_name","token":"수업","pii_class":"class_name"},{"key":"before_schedule","token":"기존일정","pii_class":"schedule"},{"key":"scheduled_at","token":"일정","pii_class":"schedule"},{"key":"teacher_name","token":"담당선생님","pii_class":"staff_name"},{"key":"classroom","token":"강의실","pii_class":"location"},{"key":"textbooks","token":"교재","pii_class":"none"},{"key":"progress","token":"진도","pii_class":"none"}]'::jsonb),
+      ('registration.observation_canceled','subject_team','google_chat','immediate',3,
+       '["학생","과목","수업","일정"]'::jsonb,
+       '[{"key":"student_name","token":"학생","pii_class":"student_name"},{"key":"subjects","token":"과목","pii_class":"none"},{"key":"class_name","token":"수업","pii_class":"class_name"},{"key":"scheduled_at","token":"일정","pii_class":"schedule"}]'::jsonb),
+      ('registration.observation_reminder_due','subject_team','google_chat','immediate',3,
+       '["학생","과목","수업","일정","담당선생님","강의실","교재","진도"]'::jsonb,
+       '[{"key":"student_name","token":"학생","pii_class":"student_name"},{"key":"subjects","token":"과목","pii_class":"none"},{"key":"class_name","token":"수업","pii_class":"class_name"},{"key":"scheduled_at","token":"일정","pii_class":"schedule"},{"key":"teacher_name","token":"담당선생님","pii_class":"staff_name"},{"key":"classroom","token":"강의실","pii_class":"location"},{"key":"textbooks","token":"교재","pii_class":"none"},{"key":"progress","token":"진도","pii_class":"none"}]'::jsonb),
+      ('registration.observation_feedback_due','subject_team','google_chat','immediate',3,
+       '["학생","과목","수업","일정","담당선생님","강의실"]'::jsonb,
+       '[{"key":"student_name","token":"학생","pii_class":"student_name"},{"key":"subjects","token":"과목","pii_class":"none"},{"key":"class_name","token":"수업","pii_class":"class_name"},{"key":"scheduled_at","token":"일정","pii_class":"schedule"},{"key":"teacher_name","token":"담당선생님","pii_class":"staff_name"},{"key":"classroom","token":"강의실","pii_class":"location"}]'::jsonb),
+      ('registration.observation_feedback_submitted','management_team','google_chat','immediate',3,
+       '["학생","과목","수업","제출자","제출시각"]'::jsonb,
+       '[{"key":"student_name","token":"학생","pii_class":"student_name"},{"key":"subjects","token":"과목","pii_class":"none"},{"key":"class_name","token":"수업","pii_class":"class_name"},{"key":"submitted_by_name","token":"제출자","pii_class":"staff_name"},{"key":"submitted_at","token":"제출시각","pii_class":"schedule"}]'::jsonb),
+      ('registration.observation_feedback_submitted','track_director','in_app','immediate',3,
+       '["학생","과목","수업","제출자","제출시각"]'::jsonb,
+       '[{"key":"student_name","token":"학생","pii_class":"student_name"},{"key":"subjects","token":"과목","pii_class":"none"},{"key":"class_name","token":"수업","pii_class":"class_name"},{"key":"submitted_by_name","token":"제출자","pii_class":"staff_name"},{"key":"submitted_at","token":"제출시각","pii_class":"schedule"}]'::jsonb),
+      ('registration.observation_director_reassigned','management_team','google_chat','immediate',3,
+       '["학생","과목","수업"]'::jsonb,
+       '[{"key":"student_name","token":"학생","pii_class":"student_name"},{"key":"subjects","token":"과목","pii_class":"none"},{"key":"class_name","token":"수업","pii_class":"class_name"}]'::jsonb)
+  ), actual as (
+    select
+      rule_row.event_key,
+      rule_row.audience_key,
+      rule_row.channel_key,
+      rule_row.rule_variant_key,
+      template_row.payload_schema_version,
+      contract_row.contract_json -> 'requiredTokens' as required_tokens,
+      template_row.allowed_variables
+    from dashboard_private.notification_rules rule_row
+    join dashboard_private.notification_templates template_row
+      on template_row.id = rule_row.active_template_id
+    join dashboard_private.notification_rule_content_contracts contract_row
+      on contract_row.rule_id = rule_row.id
+    where rule_row.workflow_key = 'registration'
+      and rule_row.event_key like 'registration.observation_%'
+      and template_row.checksum = dashboard_private.notification_seed_template_checksum_v1(
+        template_row.title_template,
+        template_row.body_template,
+        template_row.allowed_variables,
+        template_row.payload_schema_version
+      )
+  ), differences as (
+    (select * from expected except select * from actual)
+    union all
+    (select * from actual except select * from expected)
+  )
+  select * from differences
+$$, 'all eight observation contracts preserve exact schema-v3 Korean variable and checksum rows');
+
+select is_empty($$
+  with expected(event_key, audience_key, channel_key, title_template, body_template) as (
+    values
+      ('registration.observation_scheduled', 'subject_team', 'google_chat', '[청강 예약] {학생}', E'학생: {학생}\n과목/수업: [{과목}] {수업}\n일시: {일정}\n담당 선생님: {담당선생님}\n강의실: {강의실}\n교재: {교재}\n진도: {진도}\n교재 복사 등 청강 준비가 필요합니다.'),
+      ('registration.observation_rescheduled', 'subject_team', 'google_chat', '[청강 일정 변경] {학생}', E'학생: {학생}\n과목/수업: [{과목}] {수업}\n이전 일정: {기존일정}\n변경 일정: {일정}\n담당 선생님: {담당선생님}\n강의실: {강의실}\n교재: {교재}\n진도: {진도}\n변경된 일정에 맞춰 청강 준비가 필요합니다.'),
+      ('registration.observation_canceled', 'subject_team', 'google_chat', '[청강 취소] {학생}', E'학생: {학생}\n과목/수업: [{과목}] {수업}\n취소 일정: {일정}\n청강 예약이 취소되었습니다.'),
+      ('registration.observation_reminder_due', 'subject_team', 'google_chat', '[오늘 청강 준비] {학생}', E'오늘 청강이 예정되어 있습니다.\n학생: {학생}\n과목/수업: [{과목}] {수업}\n일시: {일정}\n담당 선생님: {담당선생님}\n강의실: {강의실}\n교재: {교재}\n진도: {진도}\n교재 복사 등 준비 내용을 확인해 주세요.'),
+      ('registration.observation_feedback_due', 'subject_team', 'google_chat', '[청강 피드백 요청] {학생}', E'청강은 어땠나요? 적합 여부와 사유를 입력해 주세요.\n학생: {학생}\n과목/수업: [{과목}] {수업}\n수업 일시: {일정}\n담당 선생님: {담당선생님}\n강의실: {강의실}'),
+      ('registration.observation_feedback_submitted', 'management_team', 'google_chat', '[청강 피드백 등록] {학생}', E'청강 피드백이 등록되었습니다.\n학생: {학생}\n과목/수업: [{과목}] {수업}\n제출자: {제출자}\n제출시각: {제출시각}'),
+      ('registration.observation_feedback_submitted', 'track_director', 'in_app', '[청강 피드백 등록] {학생}', E'청강 피드백이 등록되었습니다.\n학생: {학생}\n과목/수업: [{과목}] {수업}\n제출자: {제출자}\n제출시각: {제출시각}'),
+      ('registration.observation_director_reassigned', 'management_team', 'google_chat', '[청강 담당 원장 변경] {학생}', E'학생: {학생}\n과목/수업: [{과목}] {수업}\n담당 원장이 변경되었습니다.')
+  ), actual as (
+    select
+      rule_row.event_key,
+      rule_row.audience_key,
+      rule_row.channel_key,
+      template_row.title_template,
+      template_row.body_template
+    from dashboard_private.notification_rules rule_row
+    join dashboard_private.notification_templates template_row
+      on template_row.id = rule_row.active_template_id
+    where rule_row.workflow_key = 'registration'
+      and rule_row.event_key like 'registration.observation_%'
+  ), differences as (
+    (select * from expected except select * from actual)
+    union all
+    (select * from actual except select * from expected)
+  )
+  select * from differences
+$$, 'all eight observation active templates preserve exact Korean golden title and body rows');
+
 create temp table chat_contract_samples(
   current_booking jsonb not null,
   previous_booking jsonb not null,

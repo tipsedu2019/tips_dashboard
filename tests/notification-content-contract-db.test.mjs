@@ -10,6 +10,10 @@ const registrationManagementMigrationUrl = new URL(
   "../supabase/migrations/20260806120000_registration_management_google_chat_events.sql",
   import.meta.url,
 )
+const registrationObservationMigrationUrl = new URL(
+  "../supabase/migrations/20260809105000_registration_observation_google_chat.sql",
+  import.meta.url,
+)
 const registryUrl = new URL(
   "../src/features/notifications/notification-content-contract-registry.ts",
   import.meta.url,
@@ -111,9 +115,10 @@ test("migration creates private five-part contracts and immutable compliance evi
 })
 
 test("embedded SQL contract fixtures stay byte-for-byte equivalent to TypeScript contract inputs", async () => {
-  const [migration, extensionMigration, fixture, registry] = await Promise.all([
+  const [migration, extensionMigration, observationMigration, fixture, registry] = await Promise.all([
     readMigration(),
     readFile(registrationManagementMigrationUrl, "utf8"),
+    readFile(registrationObservationMigrationUrl, "utf8"),
     readFile(fixtureUrl, "utf8").then(JSON.parse),
     import(registryUrl.href),
   ])
@@ -122,15 +127,26 @@ test("embedded SQL contract fixtures stay byte-for-byte equivalent to TypeScript
     "registration.waiting_transitioned",
     "registration.admission_started",
   ])
+  const observationEventKeys = new Set([
+    "registration.observation_scheduled",
+    "registration.observation_rescheduled",
+    "registration.observation_canceled",
+    "registration.observation_reminder_due",
+    "registration.observation_feedback_due",
+    "registration.observation_feedback_submitted",
+    "registration.observation_director_reassigned",
+  ])
   const baseFixture = {
     ...fixture,
-    eventContracts: fixture.eventContracts.filter(({ eventKey }) => !extensionEventKeys.has(eventKey)),
+    eventContracts: fixture.eventContracts.filter(({ eventKey }) => (
+      !extensionEventKeys.has(eventKey) && !observationEventKeys.has(eventKey)
+    )),
   }
   const extensionFixture = fixture.eventContracts.filter(({ eventKey }) => extensionEventKeys.has(eventKey))
-  assert.equal(fixture.eventContracts.length, 51)
+  assert.equal(fixture.eventContracts.length, 58)
   assert.equal(
     new Set(registry.listNotificationContentContracts().map(({ eventKey }) => eventKey)).size,
-    51,
+    58,
   )
   assert.deepEqual(embeddedContractFixture(migration), baseFixture)
   assert.deepEqual(embeddedContractExtension(extensionMigration), extensionFixture)
@@ -148,6 +164,7 @@ test("embedded SQL contract fixtures stay byte-for-byte equivalent to TypeScript
   )
   const expectedVariables = new Map()
   for (const entry of registry.listNotificationContentContracts()) {
+    if (observationEventKeys.has(entry.eventKey)) continue
     for (const variable of entry.contract.availableVariables) {
       expectedVariables.set(variable.token, variable)
     }
@@ -156,6 +173,24 @@ test("embedded SQL contract fixtures stay byte-for-byte equivalent to TypeScript
     [...sqlVariables.entries()].sort(([left], [right]) => left.localeCompare(right)),
     [...expectedVariables.entries()].sort(([left], [right]) => left.localeCompare(right)),
   )
+
+  for (const identity of [
+    "registration.observation_scheduled|subject_team|google_chat",
+    "registration.observation_rescheduled|subject_team|google_chat",
+    "registration.observation_canceled|subject_team|google_chat",
+    "registration.observation_reminder_due|subject_team|google_chat",
+    "registration.observation_feedback_due|subject_team|google_chat",
+    "registration.observation_feedback_submitted|management_team|google_chat",
+    "registration.observation_feedback_submitted|track_director|in_app",
+    "registration.observation_director_reassigned|management_team|google_chat",
+  ]) {
+    const [eventKey, audienceKey, channelKey] = identity.split("|")
+    assert.match(
+      observationMigration,
+      new RegExp(`'${escapeRegex(eventKey)}'::text, '${escapeRegex(audienceKey)}'::text, '${escapeRegex(channelKey)}'::text`, "u"),
+      `observation seed identity missing: ${identity}`,
+    )
+  }
 })
 
 test("registration management extension is additive and cannot activate runtime or dispatch history", async () => {
