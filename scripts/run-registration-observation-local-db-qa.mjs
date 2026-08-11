@@ -197,6 +197,20 @@ const FOCUS_REGISTRY = new Map([
     },
   ],
   [
+    "chat-mentions",
+    {
+      ceiling: "20260809104500",
+      migrations: [
+        "20260809104500_dashboard_google_chat_profile_mentions.sql",
+      ],
+      tests: [
+        "supabase/tests/dashboard_google_chat_profile_mentions_test.sql",
+      ],
+      fixture: "noop",
+      providerOutboxStage: "core",
+    },
+  ],
+  [
     "google-chat",
     {
       ceiling: "20260809105000",

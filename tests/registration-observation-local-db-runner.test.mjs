@@ -214,6 +214,7 @@ test("runner keeps every independent database reviewer gate", async () => {
     "feedback-submit",
     "feedback",
     "enrollment",
+    "chat-mentions",
     "google-chat",
     "solapi-contract",
     "solapi-queue",
@@ -260,6 +261,23 @@ test("runner keeps every independent database reviewer gate", async () => {
       "supabase/tests/registration_observation_feedback_decisions_test.sql",
     ],
   });
+});
+
+test("Google Chat profile mentions own an isolated pre-provider database focus", async () => {
+  const runner = await loadRunner();
+
+  assert.deepEqual(
+    runner.getRegistrationObservationFocusContract("chat-mentions"),
+    {
+      ceiling: "20260809104500",
+      tests: ["supabase/tests/dashboard_google_chat_profile_mentions_test.sql"],
+    },
+  );
+  assert.equal(
+    runner.listRegistrationObservationFocusNames().indexOf("chat-mentions")
+      < runner.listRegistrationObservationFocusNames().indexOf("google-chat"),
+    true,
+  );
 });
 
 test("feedback owns the Task 2 committed manifest plus a director decision worker", async () => {
@@ -977,6 +995,11 @@ test("focus manifests prove provider and outbox presence plus exact zero delta",
   );
 
   assert.deepEqual(presence("schema"), {
+    "observation-domain-events": "present",
+    "observation-chat-jobs": "absent",
+    "observation-solapi-event-consumptions": "absent",
+  });
+  assert.deepEqual(presence("chat-mentions"), {
     "observation-domain-events": "present",
     "observation-chat-jobs": "absent",
     "observation-solapi-event-consumptions": "absent",
