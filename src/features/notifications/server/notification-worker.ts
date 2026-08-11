@@ -39,6 +39,7 @@ export type NotificationProvider = Readonly<{
 
 export interface NotificationWorker {
   runBatch(input: { workerId: string; batchSize: number; leaseSeconds: number }): Promise<{
+    observationDue: number
     fanout: number
     ruleReconciliation: number
     targetReconciliation: number
@@ -48,6 +49,7 @@ export interface NotificationWorker {
 }
 
 export type NotificationWorkerCounts = Readonly<{
+  observationDue: number
   fanout: number
   ruleReconciliation: number
   targetReconciliation: number
@@ -61,6 +63,10 @@ type NotificationWorkerRuntimeInput = Readonly<{
   getProvider: (channelKey: string) => NotificationProvider | null
   createRunId: () => string
   now?: () => Date
+  observationSourceReader?: Readonly<{
+    readSource(observationId: string): Promise<unknown>
+    readCurrentPreparation(source: unknown): Promise<unknown>
+  }>
 }>
 
 type RenderSnapshotInput = Readonly<{
@@ -364,6 +370,7 @@ export function renderNotificationSnapshot(input: RenderSnapshotInput): Rendered
 
 function countsForRpc(counts: NotificationWorkerCounts) {
   return {
+    observation_due: counts.observationDue,
     fanout: counts.fanout,
     rule_reconciliation: counts.ruleReconciliation,
     target_reconciliation: counts.targetReconciliation,
@@ -626,6 +633,146 @@ function finishParameters(
     p_outcome_summary: outcomeSummary,
     p_error_code: errorCode,
     p_next_attempt_at: nextAttemptAt,
+  }
+}
+
+const OBSERVATION_CHAT_EVENT_KEYS = new Set([
+  "registration.observation_scheduled",
+  "registration.observation_rescheduled",
+  "registration.observation_canceled",
+  "registration.observation_reminder_due",
+  "registration.observation_feedback_due",
+  "registration.observation_feedback_submitted",
+  "registration.observation_director_reassigned",
+])
+
+function observationJobRetryAt(now: Date, attemptCount: number, expiresAt: string) {
+  const seconds = Math.min(480, 30 * (2 ** Math.min(Math.max(attemptCount - 1, 0), 4)))
+  const next = new Date(now.getTime() + seconds * 1_000)
+  return next.getTime() < Date.parse(expiresAt) ? next.toISOString() : null
+}
+
+function observationJobClaim(job: JsonRecord) {
+  requiredUuid(job.job_id)
+  requiredUuid(job.claim_token)
+  requiredUuid(job.observation_id)
+  requiredUuid(job.appointment_id)
+  if (job.assignment_fact_id !== null && job.assignment_fact_id !== undefined) requiredUuid(job.assignment_fact_id)
+  requiredPositiveInteger(job.notification_revision)
+  const eventKey = requiredString(job.event_key)
+  if (!OBSERVATION_CHAT_EVENT_KEYS.has(eventKey)) workerEnvelopeError()
+  const dueAt = requiredString(job.due_at)
+  const expiresAt = requiredString(job.expires_at)
+  if (!Number.isFinite(Date.parse(dueAt)) || !Number.isFinite(Date.parse(expiresAt))) workerEnvelopeError()
+  const attemptCount = requiredPositiveInteger(job.attempt_count)
+  requiredHash(job.booking_fact_hash)
+  if (!isPlainRecord(job.current_booking_snapshot)) workerEnvelopeError()
+  if (job.previous_booking_snapshot !== null && job.previous_booking_snapshot !== undefined && !isPlainRecord(job.previous_booking_snapshot)) {
+    workerEnvelopeError()
+  }
+  if (job.preparation_snapshot !== null && job.preparation_snapshot !== undefined && !isPlainRecord(job.preparation_snapshot)) {
+    workerEnvelopeError()
+  }
+  if (job.submission_snapshot !== null && job.submission_snapshot !== undefined && !isPlainRecord(job.submission_snapshot)) {
+    workerEnvelopeError()
+  }
+  if (job.mention_role !== "subject_teacher" && job.mention_role !== "track_director") workerEnvelopeError()
+  if (!Array.isArray(job.mention_profile_ids) || job.mention_profile_ids.some((value) => typeof value !== "string" || !UUID_PATTERN.test(value))) {
+    workerEnvelopeError()
+  }
+  return { eventKey, expiresAt, attemptCount }
+}
+
+async function finishObservationChatJob(
+  job: JsonRecord,
+  disposition: "retry" | "failed" | "canceled" | "source_dirty" | "suppressed",
+  errorCode: string,
+  nextAttemptAt: string | null,
+  rpc: NotificationRpc,
+) {
+  await rpc("finish_registration_observation_chat_job_v1", {
+    p_job_id: asString(job.job_id),
+    p_claim_token: asString(job.claim_token),
+    p_disposition: disposition,
+    p_error_code: errorCode,
+    p_next_attempt_at: nextAttemptAt,
+  })
+}
+
+async function processRegistrationObservationChatJob(
+  job: JsonRecord,
+  input: NotificationWorkerRuntimeInput,
+) {
+  const { eventKey, expiresAt, attemptCount } = observationJobClaim(job)
+  const now = (input.now || (() => new Date()))()
+  if (Date.parse(expiresAt) <= now.getTime()) {
+    await finishObservationChatJob(job, "canceled", "notification_window_closed", null, input.rpc)
+    return
+  }
+  const sourceReader = input.observationSourceReader
+  if (!sourceReader) {
+    await finishObservationChatJob(job, "failed", "payload_schema_unsupported", null, input.rpc)
+    return
+  }
+  try {
+    const source = await sourceReader.readSource(requiredUuid(job.observation_id))
+    const preparation = eventKey === "registration.observation_reminder_due"
+      ? await sourceReader.readCurrentPreparation(source)
+      : eventKey === "registration.observation_scheduled" || eventKey === "registration.observation_rescheduled"
+        ? job.preparation_snapshot
+        : null
+    const { buildRegistrationObservationChatPayloadV3 } = await import(
+      "./adapters/registration-notification-adapter.ts"
+    )
+    const payload = buildRegistrationObservationChatPayloadV3({
+      job: {
+        jobId: requiredUuid(job.job_id),
+        claimToken: requiredUuid(job.claim_token),
+        observationId: requiredUuid(job.observation_id),
+        appointmentId: requiredUuid(job.appointment_id),
+        assignmentFactId: job.assignment_fact_id === null || job.assignment_fact_id === undefined
+          ? null : requiredUuid(job.assignment_fact_id),
+        notificationRevision: requiredPositiveInteger(job.notification_revision),
+        eventKey: eventKey as never,
+        dueAt: requiredString(job.due_at),
+        expiresAt,
+        attemptCount,
+        sourceRevision: job.source_revision as never,
+        bookingFactHash: requiredHash(job.booking_fact_hash),
+        currentBookingSnapshot: job.current_booking_snapshot as JsonRecord,
+        previousBookingSnapshot: (job.previous_booking_snapshot ?? null) as JsonRecord | null,
+        preparationSnapshot: (job.preparation_snapshot ?? null) as never,
+        submissionSnapshot: (job.submission_snapshot ?? null) as JsonRecord | null,
+        mentionRole: job.mention_role as never,
+        mentionProfileIds: job.mention_profile_ids as string[],
+      },
+      source: source as never,
+      preparation: preparation as never,
+    })
+    const receipt = asRecord(await input.rpc("materialize_registration_observation_chat_job_v1", {
+      p_job_id: asString(job.job_id),
+      p_claim_token: asString(job.claim_token),
+      p_payload_schema_version: 3,
+      p_payload: payload,
+    }))
+    if (![
+      "materialized",
+      "canceled",
+      "source_dirty",
+      "suppressed",
+    ].includes(requiredString(receipt.outcome))) workerEnvelopeError()
+  } catch (error) {
+    const code = normalizeWorkerErrorCode(error)
+    if (code === "notification_registration_observation_source_unavailable" || code === "notification_rpc_unavailable") {
+      const nextAttemptAt = observationJobRetryAt(now, attemptCount, expiresAt)
+      if (nextAttemptAt) {
+        await finishObservationChatJob(job, "retry", "transient_pre_dispatch_failure", nextAttemptAt, input.rpc)
+        return
+      }
+      await finishObservationChatJob(job, "canceled", "notification_window_closed", null, input.rpc)
+      return
+    }
+    await finishObservationChatJob(job, "failed", "payload_schema_unsupported", null, input.rpc)
   }
 }
 
@@ -1189,6 +1336,222 @@ function googleChatProviderContext(
   }) as unknown as NotificationBegunDeliveryContext
 }
 
+export type RegistrationObservationDeliveryPrepareInput = Readonly<{
+  claim: JsonRecord
+  adapter: NotificationWorkflowAdapter
+  rpc: NotificationRpc
+  now?: () => Date
+}>
+
+export type RegistrationObservationDeliveryPrepareResult =
+  | Readonly<{ kind: "provider_ready"; begun: JsonRecord }>
+  | Readonly<{ kind: "in_app_committed"; notificationId: string }>
+  | Readonly<{
+      kind: "terminal"
+      status: "canceled" | "failed" | "skipped"
+      reason: string | null
+    }>
+
+function requireExactRecord(value: unknown, keys: ReadonlyArray<string>) {
+  if (!isPlainRecord(value) || Object.keys(value).length !== keys.length || keys.some((key) => !(key in value))) {
+    workerEnvelopeError()
+  }
+  return value
+}
+
+function observationFrozenState(value: unknown) {
+  const frozen = requireExactRecord(value, [
+    "attemptCount",
+    "body",
+    "expiresAt",
+    "href",
+    "lastAttemptStartedAt",
+    "payloadFingerprint",
+    "renderFingerprint",
+    "snapshot",
+    "title",
+  ])
+  const attemptCount = toCount(frozen.attemptCount)
+  if (!Number.isInteger(Number(frozen.attemptCount)) || attemptCount < 0 || !isPlainRecord(frozen.snapshot)) {
+    workerEnvelopeError()
+  }
+  if (typeof frozen.expiresAt !== "string" || !Number.isFinite(Date.parse(frozen.expiresAt))) workerEnvelopeError()
+  for (const key of ["payloadFingerprint", "renderFingerprint"]) {
+    if (frozen[key] !== null && !HASH_PATTERN.test(asString(frozen[key]))) workerEnvelopeError()
+  }
+  for (const key of ["title", "body"]) {
+    if (frozen[key] !== null && typeof frozen[key] !== "string") workerEnvelopeError()
+  }
+  if (frozen.href !== null && typeof frozen.href !== "string") workerEnvelopeError()
+  if (frozen.lastAttemptStartedAt !== null && (
+    typeof frozen.lastAttemptStartedAt !== "string" || !Number.isFinite(Date.parse(frozen.lastAttemptStartedAt))
+  )) workerEnvelopeError()
+  if ((attemptCount === 0) !== (frozen.lastAttemptStartedAt === null)) workerEnvelopeError()
+  return Object.freeze({
+    attemptCount,
+    expiresAt: frozen.expiresAt,
+    snapshot: frozen.snapshot,
+    payloadFingerprint: frozen.payloadFingerprint as string | null,
+    renderFingerprint: frozen.renderFingerprint as string | null,
+    title: frozen.title as string | null,
+    body: frozen.body as string | null,
+    href: frozen.href as string | null,
+    lastAttemptStartedAt: frozen.lastAttemptStartedAt as string | null,
+  })
+}
+
+function observationPrepareParameters(claim: JsonRecord, payloadFingerprint: string, renderFingerprint: string) {
+  return {
+    p_delivery_id: asString(claim.delivery_id),
+    p_claim_token: asString(claim.claim_token),
+    p_expected_event_id: asString(claim.event_id),
+    p_expected_rule_id: asString(claim.rule_id),
+    p_expected_rule_revision: decimalString(claim.rule_revision),
+    p_expected_payload_fingerprint: payloadFingerprint,
+    p_expected_render_fingerprint: renderFingerprint,
+  }
+}
+
+async function observationTerminal(
+  claim: JsonRecord,
+  status: "canceled" | "failed",
+  reason: string | null,
+  rpc: NotificationRpc,
+): Promise<RegistrationObservationDeliveryPrepareResult> {
+  await finalizeDelivery(claim, status, reason, rpc)
+  return { kind: "terminal", status, reason }
+}
+
+function observationPrepareResult(value: unknown): RegistrationObservationDeliveryPrepareResult | null {
+  const prepared = asRecord(value)
+  if (prepared.prepared === false) {
+    const status = requiredString(prepared.status)
+    if (!(["canceled", "failed", "skipped"] as string[]).includes(status)) workerEnvelopeError()
+    return { kind: "terminal", status: status as "canceled" | "failed" | "skipped", reason: nullableString(prepared.status_reason) }
+  }
+  if (prepared.prepared !== true) workerEnvelopeError()
+  const channelKey = requiredString(prepared.channel_key)
+  if (channelKey === "in_app") {
+    requiredUuid(prepared.delivery_id)
+    requiredUuid(prepared.notification_id)
+    if (
+      prepared.status !== "sent"
+      || !Number.isInteger(Number(prepared.push_children_created))
+      || "dispatch_token" in prepared
+    ) workerEnvelopeError()
+    return { kind: "in_app_committed", notificationId: asString(prepared.notification_id) }
+  }
+  if (channelKey !== "google_chat" || prepared.status !== "sending") workerEnvelopeError()
+  return { kind: "provider_ready", begun: prepared }
+}
+
+export async function prepareRegistrationObservationDeliveryForDispatch(
+  input: RegistrationObservationDeliveryPrepareInput,
+): Promise<RegistrationObservationDeliveryPrepareResult> {
+  const { claim, adapter, rpc } = input
+  validateDeliveryClaim(claim)
+  if (claim.source_type !== "registration_observation" && claim.source_type !== "registration_observation_assignment_change") {
+    workerEnvelopeError()
+  }
+  const frozen = observationFrozenState(await rpc(
+    "read_registration_observation_notification_delivery_frozen_state_v1",
+    { p_delivery_id: asString(claim.delivery_id), p_claim_token: asString(claim.claim_token) },
+  ))
+  if (frozen.attemptCount !== Number(claim.attempt_count)) workerEnvelopeError()
+  if (Date.parse(frozen.expiresAt) <= (input.now || (() => new Date()))().getTime()) {
+    return observationTerminal(claim, "canceled", "notification_window_closed", rpc)
+  }
+
+  if (frozen.attemptCount > 0) {
+    if (!frozen.payloadFingerprint || !frozen.renderFingerprint) workerEnvelopeError()
+    const revalidation = await adapter.revalidateBeforeSend({
+      eventId: asString(claim.event_id), deliveryId: asString(claim.delivery_id),
+      eventKey: asString(claim.event_key), sourceType: asString(claim.source_type),
+      sourceId: asString(claim.source_id), sourceRevision: nullableString(claim.source_revision),
+      ruleId: asString(claim.rule_id), ruleRevision: decimalString(claim.rule_revision),
+      targetGeneration: decimalString(claim.target_generation), scheduledFor: asString(claim.scheduled_for),
+      attemptCount: frozen.attemptCount, target: targetFromClaim(claim.target),
+      eventSnapshot: { payloadSchemaVersion: 3, payload: frozen.snapshot },
+    })
+    if (!revalidation.ok) return observationTerminal(claim, revalidation.status, revalidation.reason, rpc)
+    if ("refreshedPayload" in revalidation) workerEnvelopeError()
+    return observationPrepareResult(await rpc(
+      "prepare_registration_observation_notification_delivery_v1",
+      observationPrepareParameters(claim, frozen.payloadFingerprint, frozen.renderFingerprint),
+    )) || workerEnvelopeError()
+  }
+
+  if (
+    frozen.payloadFingerprint !== null || frozen.renderFingerprint !== null || frozen.title !== null || frozen.body !== null || frozen.href !== null
+  ) workerEnvelopeError()
+  const snapshot = asRecord(await rpc("get_notification_render_snapshot_v1", {
+    p_event_id: asString(claim.event_id),
+    p_rule_id: asString(claim.rule_id),
+    p_rule_revision: decimalString(claim.rule_revision),
+  }))
+  const event = eventFromEnvelope(snapshot)
+  const rule = ruleFromClaim(snapshot)
+  const template = templateFromClaim(snapshot)
+  if (
+    event.eventId !== claim.event_id || event.workflowKey !== claim.workflow_key || event.eventKey !== claim.event_key
+    || event.sourceType !== claim.source_type || event.sourceId !== claim.source_id
+    || event.sourceRevision !== nullableString(claim.source_revision)
+    || event.payloadSchemaVersion !== 3 || rule.ruleId !== claim.rule_id || rule.ruleRevision !== decimalString(claim.rule_revision)
+  ) workerEnvelopeError()
+  const revalidation = await adapter.revalidateBeforeSend({
+    eventId: event.eventId, deliveryId: asString(claim.delivery_id), eventKey: event.eventKey,
+    sourceType: event.sourceType, sourceId: event.sourceId, sourceRevision: event.sourceRevision,
+    ruleId: rule.ruleId, ruleRevision: rule.ruleRevision, targetGeneration: decimalString(claim.target_generation),
+    scheduledFor: asString(claim.scheduled_for), attemptCount: 0, target: targetFromClaim(claim.target),
+    eventSnapshot: { payloadSchemaVersion: 3, payload: event.payload },
+  })
+  if (!revalidation.ok) return observationTerminal(claim, revalidation.status, revalidation.reason, rpc)
+  if (!("refreshedPayload" in revalidation) || revalidation.payloadSchemaVersion !== 3 || !HASH_PATTERN.test(revalidation.payloadFingerprint)) {
+    workerEnvelopeError()
+  }
+  const requestedContextKeys = requestedContextKeysForTemplate(template)
+  const renderInput = {
+    eventId: event.eventId, workflowKey: event.workflowKey, eventKey: event.eventKey,
+    sourceType: event.sourceType, sourceId: event.sourceId, sourceRevision: event.sourceRevision,
+    payloadSchemaVersion: 3, payload: revalidation.refreshedPayload, rule,
+    targetGeneration: decimalString(claim.target_generation), target: targetFromClaim(claim.target),
+    scheduledFor: asString(claim.scheduled_for), requestedContextKeys,
+  }
+  const [context, href] = await Promise.all([
+    adapter.buildRenderContext(renderInput), adapter.buildDeepLink(renderInput),
+  ])
+  const rendered = renderNotificationSnapshot({
+    workflowKey: event.workflowKey, payloadSchemaVersion: 3, template,
+    renderContext: filterNotificationRenderContext(context, template.allowedVariables), href,
+  })
+  const payloadFingerprint = createHash("sha256").update(canonicalJson(revalidation.refreshedPayload), "utf8").digest("hex")
+  if (payloadFingerprint !== revalidation.payloadFingerprint) workerEnvelopeError()
+  const renderFingerprint = createHash("sha256").update(canonicalJson({
+    title: rendered.renderedTitle, body: rendered.renderedBody, href: rendered.href,
+  }), "utf8").digest("hex")
+  await rpc("refresh_registration_observation_notification_delivery_v1", {
+    p_delivery_id: asString(claim.delivery_id), p_claim_token: asString(claim.claim_token),
+    p_expected_event_id: event.eventId, p_expected_rule_id: rule.ruleId,
+    p_expected_rule_revision: rule.ruleRevision, p_rendered_title: rendered.renderedTitle,
+    p_rendered_body: rendered.renderedBody, p_href: rendered.href, p_payload: revalidation.refreshedPayload,
+    p_payload_fingerprint: payloadFingerprint, p_render_fingerprint: renderFingerprint,
+  })
+  const confirmed = observationFrozenState(await rpc(
+    "read_registration_observation_notification_delivery_frozen_state_v1",
+    { p_delivery_id: asString(claim.delivery_id), p_claim_token: asString(claim.claim_token) },
+  ))
+  if (
+    confirmed.attemptCount !== 0 || confirmed.lastAttemptStartedAt !== null || confirmed.payloadFingerprint !== payloadFingerprint
+    || confirmed.renderFingerprint !== renderFingerprint || confirmed.title !== rendered.renderedTitle
+    || confirmed.body !== rendered.renderedBody || confirmed.href !== rendered.href
+    || canonicalJson(confirmed.snapshot) !== canonicalJson(revalidation.refreshedPayload)
+  ) workerEnvelopeError()
+  return observationPrepareResult(await rpc(
+    "prepare_registration_observation_notification_delivery_v1",
+    observationPrepareParameters(claim, payloadFingerprint, renderFingerprint),
+  )) || workerEnvelopeError()
+}
+
 async function processDelivery(
   claim: JsonRecord,
   input: NotificationWorkerRuntimeInput,
@@ -1208,39 +1571,52 @@ async function processDelivery(
     return
   }
 
-  const revalidation = await adapter.revalidateBeforeSend({
-    eventId: asString(claim.event_id),
-    deliveryId: asString(claim.delivery_id),
-    eventKey: asString(claim.event_key),
-    sourceType: asString(claim.source_type),
-    sourceId: asString(claim.source_id),
-    sourceRevision: nullableString(claim.source_revision),
-    ruleId: asString(claim.rule_id),
-    ruleRevision: decimalString(claim.rule_revision),
-    targetGeneration: decimalString(claim.target_generation),
-    scheduledFor: asString(claim.scheduled_for),
-    target: targetFromClaim(claim.target),
-  })
-  if (!revalidation.ok) {
-    await finalizeDelivery(claim, revalidation.status, revalidation.reason, input.rpc)
-    return
+  const observation = claim.source_type === "registration_observation"
+    || claim.source_type === "registration_observation_assignment_change"
+  let begun: JsonRecord
+  if (observation) {
+    const prepared = await prepareRegistrationObservationDeliveryForDispatch({
+      claim,
+      adapter,
+      rpc: input.rpc,
+      now: input.now,
+    })
+    if (prepared.kind !== "provider_ready") return
+    begun = prepared.begun
+  } else {
+    const revalidation = await adapter.revalidateBeforeSend({
+      eventId: asString(claim.event_id),
+      deliveryId: asString(claim.delivery_id),
+      eventKey: asString(claim.event_key),
+      sourceType: asString(claim.source_type),
+      sourceId: asString(claim.source_id),
+      sourceRevision: nullableString(claim.source_revision),
+      ruleId: asString(claim.rule_id),
+      ruleRevision: decimalString(claim.rule_revision),
+      targetGeneration: decimalString(claim.target_generation),
+      scheduledFor: asString(claim.scheduled_for),
+      target: targetFromClaim(claim.target),
+    })
+    if (!revalidation.ok) {
+      await finalizeDelivery(claim, revalidation.status, revalidation.reason, input.rpc)
+      return
+    }
+    begun = asRecord(await input.rpc("prepare_notification_immediate_delivery_v1", {
+      p_workflow_key: asString(claim.workflow_key),
+      p_event_id: asString(claim.event_id),
+      p_delivery_id: asString(claim.delivery_id),
+      p_claim_token: asString(claim.claim_token),
+      p_event_key: asString(claim.event_key),
+      p_source_type: asString(claim.source_type),
+      p_source_id: asString(claim.source_id),
+      p_source_revision: nullableString(claim.source_revision),
+      p_rule_id: asString(claim.rule_id),
+      p_rule_revision: decimalString(claim.rule_revision),
+      p_target_generation: decimalString(claim.target_generation),
+      p_scheduled_for: asString(claim.scheduled_for),
+      p_target: claim.target as JsonRecord,
+    }))
   }
-
-  const begun = asRecord(await input.rpc("prepare_notification_immediate_delivery_v1", {
-    p_workflow_key: asString(claim.workflow_key),
-    p_event_id: asString(claim.event_id),
-    p_delivery_id: asString(claim.delivery_id),
-    p_claim_token: asString(claim.claim_token),
-    p_event_key: asString(claim.event_key),
-    p_source_type: asString(claim.source_type),
-    p_source_id: asString(claim.source_id),
-    p_source_revision: nullableString(claim.source_revision),
-    p_rule_id: asString(claim.rule_id),
-    p_rule_revision: decimalString(claim.rule_revision),
-    p_target_generation: decimalString(claim.target_generation),
-    p_scheduled_for: asString(claim.scheduled_for),
-    p_target: claim.target as JsonRecord,
-  }))
   const begunStatus = requiredString(begun.status)
   if (begunStatus !== "sending") {
     if (
@@ -1360,6 +1736,7 @@ export function createNotificationWorkerRuntime(input: NotificationWorkerRuntime
         })
       }
       const counts = {
+        observationDue: 0,
         fanout: 0,
         ruleReconciliation: 0,
         targetReconciliation: 0,
@@ -1383,6 +1760,28 @@ export function createNotificationWorkerRuntime(input: NotificationWorkerRuntime
           p_batch_size: batchInput.batchSize,
           p_lease_seconds: batchInput.leaseSeconds,
         }
+        const observationReaped = asRecord(await input.rpc(
+          "reap_registration_observation_chat_job_leases_v1",
+          {
+            p_worker_id: batchInput.workerId,
+            p_batch_size: batchInput.batchSize,
+          },
+        ))
+        if (
+          !Number.isInteger(Number(observationReaped.reaped_count))
+          || !Number.isInteger(Number(observationReaped.failed_count))
+        ) workerEnvelopeError()
+        counts.reaped += toCount(observationReaped.reaped_count) + toCount(observationReaped.failed_count)
+
+        const observationJobs = toClaimRows(await input.rpc(
+          "claim_registration_observation_chat_jobs_v1",
+          claimParameters,
+        ))
+        for (const job of observationJobs) {
+          counts.observationDue += 1
+          await processRegistrationObservationChatJob(job, input)
+        }
+
         const fanoutJobs = toClaimRows(await input.rpc(
           "claim_notification_fanout_jobs_v1",
           claimParameters,
@@ -1418,7 +1817,7 @@ export function createNotificationWorkerRuntime(input: NotificationWorkerRuntime
           workerEnvelopeError()
         }
         const reaped = reapedValue
-        counts.reaped = toCount(reaped.reaped_count)
+        counts.reaped += toCount(reaped.reaped_count)
 
         const deliveries = toClaimRows(await input.rpc(
           "claim_notification_deliveries_v1",
@@ -1511,6 +1910,14 @@ async function createProductionWorkerRuntime(
         })
       })()
     : null
+  const { createRegistrationObservationNotificationSourceReader } = await import(
+    "./adapters/registration-observation-notification-source.ts"
+  )
+  const observationSourceReader = createRegistrationObservationNotificationSourceReader({
+    async getClient() {
+      return serviceClient as never
+    },
+  })
 
   return createNotificationWorkerRuntime({
     getAdapter,
@@ -1535,6 +1942,7 @@ async function createProductionWorkerRuntime(
       return null
     },
     createRunId: randomUUID,
+    observationSourceReader,
   })
 }
 

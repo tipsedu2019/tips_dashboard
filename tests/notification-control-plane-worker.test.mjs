@@ -325,6 +325,8 @@ function clone(value) {
 function createRpcHarness(responders = {}) {
   const calls = []
   const defaults = {
+    reap_registration_observation_chat_job_leases_v1: { reaped_count: 0, failed_count: 0 },
+    claim_registration_observation_chat_jobs_v1: [],
     claim_notification_fanout_jobs_v1: [],
     claim_notification_rule_reconciliation_jobs_v1: [],
     claim_notification_target_reconciliation_jobs_v1: [],
@@ -1139,6 +1141,7 @@ test("worker는 시작 heartbeat 뒤 정해진 순서로 bounded batch를 처리
   const result = await worker.runBatch({ workerId: "worker-fixture", batchSize: 7, leaseSeconds: 45 })
 
   assert.deepEqual(result, {
+    observationDue: 0,
     fanout: 0,
     ruleReconciliation: 0,
     targetReconciliation: 0,
@@ -1147,6 +1150,8 @@ test("worker는 시작 heartbeat 뒤 정해진 순서로 bounded batch를 처리
   })
   assert.deepEqual(harness.calls.map((call) => call.name), [
     "record_notification_worker_heartbeat_v1",
+    "reap_registration_observation_chat_job_leases_v1",
+    "claim_registration_observation_chat_jobs_v1",
     "claim_notification_fanout_jobs_v1",
     "claim_notification_rule_reconciliation_jobs_v1",
     "claim_notification_target_reconciliation_jobs_v1",
@@ -1160,6 +1165,7 @@ test("worker는 시작 heartbeat 뒤 정해진 순서로 bounded batch를 처리
   assert.deepEqual(heartbeats.map((call) => call.parameters.p_run_id), [RUN_ID, RUN_ID])
   for (const heartbeat of heartbeats) {
     assert.deepEqual(heartbeat.parameters.p_counts, {
+      observation_due: 0,
       fanout: 0,
       rule_reconciliation: 0,
       target_reconciliation: 0,
@@ -1169,6 +1175,7 @@ test("worker는 시작 heartbeat 뒤 정해진 순서로 bounded batch를 처리
     assertNoSensitiveValue(heartbeat.parameters)
   }
   for (const name of [
+    "claim_registration_observation_chat_jobs_v1",
     "claim_notification_fanout_jobs_v1",
     "claim_notification_rule_reconciliation_jobs_v1",
     "claim_notification_target_reconciliation_jobs_v1",
@@ -1217,6 +1224,7 @@ test("worker는 adapter나 선택 reconciler가 없으면 다른 workflow를 추
   const result = await worker.runBatch({ workerId: "worker-fixture", batchSize: 3, leaseSeconds: 30 })
 
   assert.deepEqual(result, {
+    observationDue: 0,
     fanout: 1,
     ruleReconciliation: 1,
     targetReconciliation: 1,
@@ -1991,6 +1999,54 @@ test("worker는 in-app 재검증과 투영을 단일 원자 prepare RPC로 처�
   assert.equal(prepare.parameters.p_claim_token, CLAIM_TOKEN)
 })
 
+test("관찰 delivery는 generic prepare 전에 잠긴 frozen state를 읽고 만료되면 provider 없이 닫는다", async () => {
+  const { prepareRegistrationObservationDeliveryForDispatch } = await import(workerModuleUrl)
+  assert.equal(typeof prepareRegistrationObservationDeliveryForDispatch, "function")
+  const claim = createDeliveryClaim({
+    workflow_key: "registration",
+    event_key: "registration.observation_reminder_due",
+    source_type: "registration_observation",
+    source_id: "70000000-0000-4000-8000-000000000012",
+    source_revision: "1",
+    rule_revision: "1",
+    target_generation: "1",
+  })
+  const calls = []
+  const result = await prepareRegistrationObservationDeliveryForDispatch({
+    claim,
+    adapter: createAdapter(),
+    now: () => new Date("2026-08-17T09:00:00.000Z"),
+    async rpc(name, parameters) {
+      calls.push({ name, parameters })
+      if (name === "read_registration_observation_notification_delivery_frozen_state_v1") {
+        return {
+          expiresAt: "2026-08-17T09:00:00.000Z",
+          snapshot: {},
+          payloadFingerprint: null,
+          renderFingerprint: null,
+          title: null,
+          body: null,
+          href: null,
+          lastAttemptStartedAt: null,
+          attemptCount: 0,
+        }
+      }
+      if (name === "finalize_notification_delivery_v1") return { ok: true }
+      throw new Error(`unexpected rpc ${name}`)
+    },
+  })
+
+  assert.deepEqual(result, {
+    kind: "terminal",
+    status: "canceled",
+    reason: "notification_window_closed",
+  })
+  assert.deepEqual(calls.map((call) => call.name), [
+    "read_registration_observation_notification_delivery_frozen_state_v1",
+    "finalize_notification_delivery_v1",
+  ])
+})
+
 test("worker는 외부 시도 등록 거부 또는 응답 불명확 시 provider를 0회 호출하고 unknown으로 닫는다", async () => {
   const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
   for (const fixture of [
@@ -2290,6 +2346,7 @@ test("worker 실패 heartbeat는 started와 failed 한 쌍만 남기고 오류 �
   assert.match(heartbeats[1].parameters.p_error_code, /^[a-z0-9_]{1,64}$/)
   assertNoSensitiveValue(heartbeats[1].parameters)
   assertExactKeys(heartbeats[1].parameters.p_counts, [
+    "observation_due",
     "fanout",
     "rule_reconciliation",
     "target_reconciliation",
