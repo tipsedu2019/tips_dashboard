@@ -30,6 +30,7 @@ const RULE_PREVIOUS = "81000000-0000-4000-8000-000000000051"
 const RULE_SAME_DAY = "81000000-0000-4000-8000-000000000052"
 const RULE_OFFSET = "81000000-0000-4000-8000-000000000053"
 const RULE_CHAT = "81000000-0000-4000-8000-000000000054"
+const RULE_OBSERVATION = "81000000-0000-4000-8000-000000000055"
 const TEMPLATE_A = "81000000-0000-4000-8000-000000000061"
 const BIG_GENERATION = "9007199254740993123456789"
 
@@ -819,6 +820,46 @@ test("규칙 재계산은 예약시각/id 안정 순서로 page를 유지하고 
   ])
 })
 
+test("청강 immediate rule 편집은 scheduled reconciliation에서 과거 source를 backfill하지 않는다", async () => {
+  const { createRegistrationNotificationAdapter } = await import(adapterModuleUrl)
+  let observationReads = 0
+  const fixture = createFixtureDependencies({
+    sourcePages: [{ items: [levelTestSource()], nextCursor: null, done: true }],
+  })
+  const adapter = createRegistrationNotificationAdapter({
+    ...fixture.dependencies,
+    observationSourceReader: {
+      async readSource() {
+        observationReads += 1
+        throw new Error("scheduled reconciliation must not enumerate observation rows")
+      },
+      async readCurrentPreparation() {
+        observationReads += 1
+        throw new Error("scheduled reconciliation must not read observation preparation")
+      },
+    },
+  })
+  assert.deepEqual(await adapter.reconcileScheduledRules({
+    jobId: "81000000-0000-4000-8000-000000000083",
+    claimToken: "81000000-0000-4000-8000-000000000084",
+    workflowKey: "registration",
+    ruleRevisionMap: { [RULE_OBSERVATION]: "2" },
+    cursor: null,
+    batchSize: 100,
+  }), {
+    sources: [{
+      sourceType: "registration_appointment",
+      sourceId: APPOINTMENT_A,
+      sourceRevision: "7",
+    }],
+    occurrences: [],
+    nextCursor: null,
+    done: true,
+  })
+  assert.equal(observationReads, 0)
+  assert.deepEqual(fixture.state.sourceCalls, [{ cursor: null, batchSize: 100 }])
+})
+
 test("대상 재계산은 future event/rule page에 live 세대·hash를 사용해 unchanged와 A→B→A supersession을 표현한다", async () => {
   const { createRegistrationNotificationAdapter } = await import(adapterModuleUrl)
   const currentRule = directorRule({ ruleRevision: "21" })
@@ -1502,4 +1543,11 @@ test("등록 adapter는 방문상담 변경과 예약 리마인더를 새 presen
   assert.equal(reminderContext.scheduled_at, "7월 22일(수) 15:00")
   assert.equal(reminderContext.place, "2층 상담실")
   assert.equal(reminderContext.progress_line, "[진행] 영어팀과 수학팀 담당 원장님의 일정 확인을 기다리고 있어요.")
+})
+
+test("등록 adapter source는 청강 schema 3를 legacy schema 2 분기와 섞지 않는다", async () => {
+  const source = await (await import("node:fs/promises")).readFile(adapterModuleUrl, "utf8")
+  assert.match(source, /registration_observation_assignment_change/)
+  assert.match(source, /parseRegistrationObservationChatPayloadV3/)
+  assert.match(source, /attemptCount/)
 })

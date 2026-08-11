@@ -61,3 +61,18 @@ export const GOOGLE_CHAT_CONNECTION_KEY_BY_CHANNEL: Record<
 > = Object.fromEntries(
   GOOGLE_CHAT_CONNECTION_CATALOG.map(({ connectionKey, channel }) => [channel, connectionKey]),
 ) as Record<GoogleChatConnectionChannel, NotificationConnectionKey>
+
+const OBSERVATION_DESTINATION_TEAM_BY_CONNECTION = Object.freeze({
+  "google_chat.management": "management",
+  "google_chat.english": "english",
+  "google_chat.math": "math",
+  "google_chat.science": "science",
+} as const)
+
+export function renderObservationDestinationTeam(connectionKey: string) {
+  const destination = OBSERVATION_DESTINATION_TEAM_BY_CONNECTION[
+    connectionKey as keyof typeof OBSERVATION_DESTINATION_TEAM_BY_CONNECTION
+  ]
+  if (!destination) throw new Error("notification_registration_destination_unsupported")
+  return destination
+}

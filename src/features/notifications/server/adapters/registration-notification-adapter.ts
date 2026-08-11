@@ -4,6 +4,7 @@ import type {
   NotificationRenderContext,
   NotificationRenderInput,
   NotificationResolveInput,
+  NotificationRevalidationInput,
   NotificationRevalidationResult,
   NotificationRuleSnapshot,
   NotificationTarget,
@@ -14,9 +15,24 @@ import type {
   TargetReconciliationBatch,
   TargetReconciliationInput,
 } from "../notification-workflow-adapter.ts"
+import { renderObservationDestinationTeam } from "../../notification-google-chat-catalog.ts"
+import type { NotificationConnectionKey } from "../../notification-google-chat-catalog.ts"
 import type { ImmediateNotificationAdapterDependencies } from "./immediate-notification-adapter.ts"
 import { immediateNotificationProductionDependencies } from "./immediate-notification-source-reader.ts"
 import { buildRegistrationNotificationPresentation } from "../presentation/registration-notification-presentation.ts"
+import {
+  createRegistrationObservationNotificationSourceReader,
+  parseRegistrationObservationChatPayloadV3,
+} from "./registration-observation-notification-source.ts"
+import type {
+  ObservationBookingPresentationFact,
+  RegistrationObservationChatPayloadV3,
+  RegistrationObservationNotificationSource,
+  RegistrationObservationNotificationSourceReader,
+  RegistrationObservationPreparation,
+  RegistrationObservationSessionSourceRevision,
+  RegistrationObservationSupabaseClient,
+} from "./registration-observation-notification-source.ts"
 import {
   ACADEMIC_SUBJECT_VALUES,
   parseAcademicSubject,
@@ -71,6 +87,7 @@ export type RegistrationNotificationPage<T> = Readonly<{
 
 export type RegistrationNotificationAdapterDependencies = Readonly<{
   now: () => Date
+  observationSourceReader?: RegistrationObservationNotificationSourceReader
   getSourceSnapshot(appointmentId: string): Promise<RegistrationNotificationSourceSnapshot | null>
   listScheduledSources(input: Readonly<{
     cursor: string | null
@@ -83,10 +100,42 @@ export type RegistrationNotificationAdapterDependencies = Readonly<{
   }>): Promise<RegistrationNotificationPage<RegistrationNotificationTargetItem>>
 }>
 
+export type RegistrationObservationChatJobClaim = Readonly<{
+  jobId: string
+  claimToken: string
+  observationId: string
+  appointmentId: string
+  assignmentFactId: string | null
+  notificationRevision: number
+  eventKey: RegistrationObservationChatPayloadV3["event_kind"]
+  dueAt: string
+  expiresAt: string
+  attemptCount: number
+  sourceRevision: RegistrationObservationSessionSourceRevision
+  bookingFactHash: string
+  currentBookingSnapshot: Readonly<Record<string, unknown>>
+  previousBookingSnapshot: Readonly<Record<string, unknown>> | null
+  preparationSnapshot: RegistrationObservationPreparation | null
+  submissionSnapshot: Readonly<Record<string, unknown>> | null
+  mentionRole: "subject_teacher" | "track_director"
+  mentionProfileIds: ReadonlyArray<string>
+}>
+
 type JsonRecord = Record<string, unknown>
 
 const EVENT_KEY = "registration.appointment_reminder_due"
 const SOURCE_TYPE = "registration_appointment"
+const OBSERVATION_SOURCE_TYPE = "registration_observation"
+const OBSERVATION_ASSIGNMENT_SOURCE_TYPE = "registration_observation_assignment_change"
+const OBSERVATION_EVENTS = new Set<RegistrationObservationChatPayloadV3["event_kind"]>([
+  "registration.observation_scheduled",
+  "registration.observation_rescheduled",
+  "registration.observation_canceled",
+  "registration.observation_reminder_due",
+  "registration.observation_feedback_due",
+  "registration.observation_feedback_submitted",
+  "registration.observation_director_reassigned",
+])
 const IMMEDIATE_CORE_EVENTS = new Set([
   "registration.case_created",
   "registration.inquiry_routed",
@@ -300,6 +349,296 @@ function targetSet(generation: string, targets: ReadonlyArray<NotificationTarget
     targetSetHash: hashTargets(frozenTargets),
     targets: frozenTargets,
   })
+}
+
+function observationConnectionTarget(connectionKey: string) {
+  if (!["google_chat.english", "google_chat.math", "google_chat.science", "google_chat.management"].includes(connectionKey)) {
+    adapterError("payload_schema_unsupported")
+  }
+  return freezeTarget({
+    targetKind: "connection",
+    targetKey: `connection:${connectionKey}`,
+    targetProfileId: null,
+    connectionKey,
+    targetSnapshot: { connection_key: connectionKey },
+  })
+}
+
+function isObservationEvent(eventKey: string): eventKey is RegistrationObservationChatPayloadV3["event_kind"] {
+  return OBSERVATION_EVENTS.has(eventKey as RegistrationObservationChatPayloadV3["event_kind"])
+}
+
+function subjectConnectionKey(subject: RegistrationObservationChatPayloadV3["subject"]) {
+  if (subject === "영어") return "google_chat.english"
+  if (subject === "수학") return "google_chat.math"
+  if (subject === "과학") return "google_chat.science"
+  adapterError("payload_schema_unsupported")
+}
+
+function observationPayload(input: NotificationResolveInput | NotificationRenderInput) {
+  if (
+    input.workflowKey !== "registration"
+    || !isObservationEvent(input.eventKey)
+    || input.payloadSchemaVersion !== 3
+    || input.sourceType !== (
+      input.eventKey === "registration.observation_director_reassigned"
+        ? OBSERVATION_ASSIGNMENT_SOURCE_TYPE
+        : OBSERVATION_SOURCE_TYPE
+    )
+    || !UUID_PATTERN.test(input.eventId)
+    || !UUID_PATTERN.test(input.sourceId)
+    || !Number.isFinite(Date.parse(input.scheduledFor))
+  ) adapterError("payload_schema_unsupported")
+  let payload: RegistrationObservationChatPayloadV3
+  try {
+    payload = parseRegistrationObservationChatPayloadV3(input.payload)
+  } catch {
+    adapterError("payload_schema_unsupported")
+  }
+  if (
+    payload.event_kind !== input.eventKey
+    || Date.parse(input.scheduledFor) !== Date.parse(payload.occurred_at)
+    || (payload.event_kind === "registration.observation_director_reassigned"
+      ? payload.assignment_fact_id !== input.sourceId || input.sourceRevision !== null
+      : payload.observation_id !== input.sourceId
+        || input.sourceRevision !== String(payload.appointment_notification_revision))
+  ) adapterError("payload_schema_unsupported")
+  return payload
+}
+
+function observationTargetSet(
+  payload: RegistrationObservationChatPayloadV3,
+  rule: NotificationRuleSnapshot,
+) {
+  const currentRule = normalizeRule({ ...rule }, false)
+  const generation = String(payload.appointment_notification_revision)
+  if (payload.event_kind === "registration.observation_feedback_submitted") {
+    if (
+      currentRule.channelKey === "google_chat"
+      && currentRule.audienceKey === "management_team"
+      && (currentRule.connectionKey === null
+        || currentRule.connectionKey === "google_chat.management")
+    ) return targetSet(generation, [managementConnectionTarget()])
+    if (
+      currentRule.channelKey === "in_app"
+      && currentRule.audienceKey === "track_director"
+      && currentRule.connectionKey === null
+    ) return targetSet(generation, profileTargets(payload.mention_profile_ids))
+    adapterError("payload_schema_unsupported")
+  }
+  if (payload.event_kind === "registration.observation_director_reassigned") {
+    if (
+      currentRule.channelKey !== "google_chat"
+      || currentRule.audienceKey !== "management_team"
+      || (currentRule.connectionKey !== null
+        && currentRule.connectionKey !== "google_chat.management")
+    ) adapterError("payload_schema_unsupported")
+    return targetSet(generation, [managementConnectionTarget()])
+  }
+  const connectionKey = subjectConnectionKey(payload.subject)
+  if (
+    currentRule.channelKey !== "google_chat"
+    || currentRule.audienceKey !== "subject_team"
+    || (currentRule.connectionKey !== null
+      && currentRule.connectionKey !== connectionKey)
+  ) adapterError("payload_schema_unsupported")
+  return targetSet(generation, [observationConnectionTarget(connectionKey)])
+}
+
+function jobBookingValue(value: Readonly<Record<string, unknown>>): ObservationBookingPresentationFact {
+  const payloadBooking = {
+    class_id: value.classId,
+    class_name: value.className,
+    session_authority: value.sessionAuthority,
+    class_lesson_session_id: value.classLessonSessionId,
+    legacy_session_key: value.legacySessionKey,
+    schedule_state: value.scheduleState,
+    starts_at: value.startsAt,
+    ends_at: value.endsAt,
+    teacher_name: value.teacherName,
+    classroom_name: value.classroomName,
+    campus: value.campus,
+  }
+  const probeSourceRevision = value.sessionAuthority === "legacy"
+    ? { authority: "legacy", sessionKey: value.legacySessionKey, contentHash: "0".repeat(64) }
+    : { authority: "normalized", sessionId: value.classLessonSessionId, revision: 0 }
+  const probe = parseRegistrationObservationChatPayloadV3({
+    task_id: "00000000-0000-4000-8000-000000000001",
+    track_id: "00000000-0000-4000-8000-000000000002",
+    observation_id: "00000000-0000-4000-8000-000000000003",
+    appointment_id: "00000000-0000-4000-8000-000000000004",
+    appointment_notification_revision: 1,
+    student_name: "검증",
+    subject: "영어",
+    source_revision: probeSourceRevision,
+    booking_fact_hash: "0".repeat(64),
+    occurred_at: "2026-01-01T00:00:00.000Z",
+    delivery_expires_at: "2026-01-02T00:00:00.000Z",
+    mention_role: "subject_teacher",
+    mention_profile_ids: [],
+    event_kind: "registration.observation_feedback_due",
+    booking: payloadBooking,
+  })
+  if (probe.event_kind !== "registration.observation_feedback_due") {
+    throw new Error("notification_registration_observation_payload_invalid")
+  }
+  return probe.booking
+}
+
+function sourceBookingValue(source: RegistrationObservationNotificationSource) {
+  return Object.freeze({
+    classId: source.classId,
+    className: source.className,
+    sessionAuthority: source.sessionAuthority,
+    classLessonSessionId: source.classLessonSessionId,
+    legacySessionKey: source.legacySessionKey,
+    scheduleState: source.scheduleState,
+    startsAt: source.startsAt,
+    endsAt: source.endsAt,
+    teacherCatalogId: source.teacherCatalogId,
+    teacherProfileId: source.teacherProfileId,
+    teacherName: source.teacherName,
+    classroomCatalogId: source.classroomCatalogId,
+    classroomName: source.classroomName,
+    campus: source.campus,
+  })
+}
+
+function preparationValue(value: unknown): RegistrationObservationPreparation {
+  if (!isRecord(value)) throw new Error("notification_registration_observation_payload_invalid")
+  requireExactKeys(value, ["progressSummary", "textbookNames"])
+  if (
+    !Array.isArray(value.textbookNames)
+    || value.textbookNames.length < 1
+    || value.textbookNames.some((item) => typeof item !== "string" || !item.trim())
+    || typeof value.progressSummary !== "string"
+    || !value.progressSummary.trim()
+  ) throw new Error("notification_registration_observation_payload_invalid")
+  return Object.freeze({
+    textbookNames: Object.freeze(value.textbookNames.map((item) => String(item).trim())),
+    progressSummary: value.progressSummary.trim(),
+  })
+}
+
+function canonicalUuidList(value: ReadonlyArray<string>) {
+  const values = value.map(requiredUuid)
+  const canonical = [...new Set(values)].sort()
+  if (canonical.length !== values.length || canonical.some((item, index) => item !== values[index])) {
+    throw new Error("notification_registration_observation_payload_invalid")
+  }
+  return Object.freeze(values)
+}
+
+export function buildRegistrationObservationChatPayloadV3(input: Readonly<{
+  job: RegistrationObservationChatJobClaim
+  source: RegistrationObservationNotificationSource
+  preparation: RegistrationObservationPreparation | null
+}>): RegistrationObservationChatPayloadV3 {
+  const { job, source } = input
+  if (
+    !job
+    || !source
+    || job.observationId !== source.observationId
+    || job.appointmentId !== source.appointmentId
+    || job.notificationRevision !== source.notificationRevision
+    || job.bookingFactHash !== source.bookingFactHash
+    || canonicalJson(job.sourceRevision) !== canonicalJson(source.sourceRevision)
+    || canonicalJson(job.currentBookingSnapshot) !== canonicalJson(sourceBookingValue(source))
+    || !isObservationEvent(job.eventKey)
+    || !observationLifecycleEligible(job.eventKey, source)
+    || !Number.isInteger(job.attemptCount)
+    || job.attemptCount < 0
+  ) throw new Error("notification_registration_observation_payload_invalid")
+  const readsPreparation = [
+    "registration.observation_scheduled",
+    "registration.observation_rescheduled",
+    "registration.observation_reminder_due",
+  ].includes(job.eventKey)
+  if ((readsPreparation && input.preparation === null) || (!readsPreparation && input.preparation !== null)) {
+    throw new Error("notification_registration_observation_payload_invalid")
+  }
+  const currentBooking = jobBookingValue(job.currentBookingSnapshot)
+  if (
+    job.eventKey === "registration.observation_reminder_due"
+    && timestamp(job.expiresAt, "payload_schema_unsupported") !== currentBooking.starts_at
+  ) throw new Error("notification_registration_observation_payload_invalid")
+  const mentionProfileIds = canonicalUuidList(job.mentionProfileIds)
+  const exactSemanticProfileIds = job.eventKey === "registration.observation_feedback_submitted"
+    ? source.directorProfileId ? [source.directorProfileId] : []
+    : [
+        "registration.observation_scheduled",
+        "registration.observation_canceled",
+        "registration.observation_reminder_due",
+        "registration.observation_feedback_due",
+      ].includes(job.eventKey)
+      ? source.teacherProfileId ? [source.teacherProfileId] : []
+      : null
+  if (
+    (exactSemanticProfileIds !== null
+      && canonicalJson(mentionProfileIds) !== canonicalJson(exactSemanticProfileIds))
+    || (exactSemanticProfileIds === null
+      && (mentionProfileIds.length > 2
+        || (job.eventKey === "registration.observation_rescheduled"
+          && source.teacherProfileId !== null
+          && !mentionProfileIds.includes(source.teacherProfileId))
+        || (job.eventKey === "registration.observation_director_reassigned"
+          && source.directorProfileId !== null
+          && !mentionProfileIds.includes(source.directorProfileId))))
+  ) throw new Error("notification_registration_observation_payload_invalid")
+  const base = {
+    task_id: source.taskId,
+    track_id: source.trackId,
+    observation_id: source.observationId,
+    appointment_id: source.appointmentId,
+    appointment_notification_revision: source.notificationRevision,
+    student_name: source.studentName,
+    subject: source.subject,
+    source_revision: source.sourceRevision,
+    booking_fact_hash: source.bookingFactHash,
+    occurred_at: timestamp(job.dueAt, "payload_schema_unsupported"),
+    delivery_expires_at: timestamp(job.expiresAt, "payload_schema_unsupported"),
+    mention_role: job.mentionRole,
+    mention_profile_ids: mentionProfileIds,
+  } as const
+  let candidate: unknown
+  if (job.eventKey === "registration.observation_scheduled") {
+    const preparation = preparationValue(input.preparation)
+    if (!job.preparationSnapshot || canonicalJson(preparation) !== canonicalJson(preparationValue(job.preparationSnapshot))) {
+      throw new Error("notification_registration_observation_payload_invalid")
+    }
+    candidate = { ...base, event_kind: job.eventKey, booking: currentBooking, textbook_names: preparation.textbookNames, progress_summary: preparation.progressSummary }
+  } else if (job.eventKey === "registration.observation_rescheduled") {
+    if (!job.previousBookingSnapshot || !job.preparationSnapshot) throw new Error("notification_registration_observation_payload_invalid")
+    const preparation = preparationValue(input.preparation)
+    if (canonicalJson(preparation) !== canonicalJson(preparationValue(job.preparationSnapshot))) {
+      throw new Error("notification_registration_observation_payload_invalid")
+    }
+    candidate = { ...base, event_kind: job.eventKey, previous_booking: jobBookingValue(job.previousBookingSnapshot), booking: currentBooking, textbook_names: preparation.textbookNames, progress_summary: preparation.progressSummary }
+  } else if (job.eventKey === "registration.observation_canceled") {
+    candidate = { ...base, event_kind: job.eventKey, canceled_booking: currentBooking }
+  } else if (job.eventKey === "registration.observation_reminder_due") {
+    const preparation = preparationValue(input.preparation)
+    if (!job.preparationSnapshot) throw new Error("notification_registration_observation_payload_invalid")
+    preparationValue(job.preparationSnapshot)
+    candidate = { ...base, event_kind: job.eventKey, booking: currentBooking, textbook_names: preparation.textbookNames, progress_summary: preparation.progressSummary }
+  } else if (job.eventKey === "registration.observation_feedback_due") {
+    candidate = { ...base, event_kind: job.eventKey, booking: currentBooking }
+  } else if (job.eventKey === "registration.observation_feedback_submitted") {
+    if (!job.submissionSnapshot) throw new Error("notification_registration_observation_payload_invalid")
+    requireExactKeys(job.submissionSnapshot as JsonRecord, ["submittedAt", "submittedByName"])
+    candidate = { ...base, event_kind: job.eventKey, booking: currentBooking, submitted_by_name: job.submissionSnapshot.submittedByName, submitted_at: job.submissionSnapshot.submittedAt }
+  } else {
+    if (!job.assignmentFactId) throw new Error("notification_registration_observation_payload_invalid")
+    const directorProfileIds = source.directorProfileId
+      ? canonicalUuidList([source.directorProfileId])
+      : Object.freeze([])
+    const directorSet = new Set(directorProfileIds)
+    const previousDirectorProfileIds = Object.freeze(
+      mentionProfileIds.filter((profileId) => !directorSet.has(profileId)),
+    )
+    candidate = { ...base, event_kind: job.eventKey, assignment_fact_id: job.assignmentFactId, booking: currentBooking, previous_director_profile_ids: previousDirectorProfileIds, director_profile_ids: directorProfileIds }
+  }
+  return parseRegistrationObservationChatPayloadV3(candidate)
 }
 
 function normalizeRule(value: unknown, scheduled = false): RegistrationNotificationRule {
@@ -559,6 +898,53 @@ function presentationInput(
       eventKey: input.eventKey,
       audienceKey: input.rule.audienceKey,
       channelKey: input.rule.channelKey,
+      ruleVariantKey: input.rule.ruleVariantKey,
+    }),
+    requestedContextKeys: Object.freeze([...requestedContextKeys]),
+    connectionKey,
+    destinationTeam,
+    scheduledFor: input.scheduledFor,
+  })
+}
+
+function observationPresentationInput(
+  input: NotificationRenderInput,
+  payload: RegistrationObservationChatPayloadV3,
+) {
+  const requestedContextKeys = input.requestedContextKeys ?? []
+  if (
+    !Array.isArray(requestedContextKeys)
+    || requestedContextKeys.some((key) => typeof key !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(key))
+    || new Set(requestedContextKeys).size !== requestedContextKeys.length
+  ) adapterError("payload_schema_unsupported")
+  const expectedTargets = observationTargetSet(payload, input.rule)
+  if (
+    input.targetGeneration !== expectedTargets.targetGeneration
+    || !expectedTargets.targets.some((target) => sameTarget(target, input.target))
+  ) adapterError("payload_schema_unsupported")
+  if (input.rule.channelKey !== "google_chat" && input.rule.channelKey !== "in_app") {
+    adapterError("payload_schema_unsupported")
+  }
+  const channelKey = input.rule.channelKey
+  const connectionKey = (channelKey === "google_chat"
+    ? input.target.connectionKey
+    : null) as NotificationConnectionKey | null
+  const destinationTeam = connectionKey === null
+    ? null
+    : renderObservationDestinationTeam(connectionKey)
+  return Object.freeze({
+    workflowKey: "registration" as const,
+    eventKey: payload.event_kind,
+    ruleVariantKey: input.rule.ruleVariantKey,
+    payloadSchemaVersion: 3,
+    payload,
+    audienceKey: input.rule.audienceKey,
+    channelKey,
+    contractIdentity: Object.freeze({
+      workflowKey: "registration" as const,
+      eventKey: payload.event_kind,
+      audienceKey: input.rule.audienceKey,
+      channelKey,
       ruleVariantKey: input.rule.ruleVariantKey,
     }),
     requestedContextKeys: Object.freeze([...requestedContextKeys]),
@@ -886,6 +1272,167 @@ function requiredRuleRevisionMap(value: Readonly<Record<string, string>>) {
   ]))
 }
 
+function observationLifecycleEligible(
+  eventKey: RegistrationObservationChatPayloadV3["event_kind"],
+  source: RegistrationObservationNotificationSource,
+) {
+  if ([
+    "registration.observation_scheduled",
+    "registration.observation_rescheduled",
+    "registration.observation_reminder_due",
+  ].includes(eventKey)) {
+    return source.observationStatus === "scheduled" && source.appointmentStatus === "scheduled"
+  }
+  if (eventKey === "registration.observation_canceled") {
+    return source.observationStatus === "canceled" && source.appointmentStatus === "canceled"
+  }
+  if (eventKey === "registration.observation_feedback_due") {
+    return ["scheduled", "attended_feedback_pending"].includes(source.observationStatus)
+      && ["scheduled", "completed"].includes(source.appointmentStatus)
+      && !source.hasFeedback
+  }
+  if (eventKey === "registration.observation_feedback_submitted") {
+    return source.observationStatus === "completed"
+      && source.appointmentStatus === "completed"
+      && source.hasFeedback
+  }
+  return !["canceled", "no_show"].includes(source.observationStatus)
+    && ["scheduled", "completed"].includes(source.appointmentStatus)
+}
+
+function observationTargetEligible(
+  payload: RegistrationObservationChatPayloadV3,
+  source: RegistrationObservationNotificationSource,
+  target: NotificationTarget,
+) {
+  if (payload.event_kind === "registration.observation_feedback_submitted") {
+    if (target.targetKind === "connection") {
+      return sameTarget(target, managementConnectionTarget())
+    }
+    if (!source.directorProfileId) return false
+    const expected = profileTargets([source.directorProfileId])[0]
+    return Boolean(expected && sameTarget(target, expected))
+  }
+  if (payload.event_kind === "registration.observation_director_reassigned") {
+    return sameTarget(target, managementConnectionTarget())
+  }
+  return sameTarget(target, observationConnectionTarget(subjectConnectionKey(source.subject)))
+}
+
+async function revalidateObservationBeforeSend(
+  input: NotificationRevalidationInput,
+  dependencies: RegistrationNotificationAdapterDependencies,
+): Promise<NotificationRevalidationResult> {
+  if (
+    !isObservationEvent(input.eventKey)
+    || !UUID_PATTERN.test(input.eventId)
+    || !UUID_PATTERN.test(input.deliveryId)
+    || !UUID_PATTERN.test(input.sourceId)
+    || !POSITIVE_DECIMAL_PATTERN.test(input.ruleRevision)
+    || !POSITIVE_DECIMAL_PATTERN.test(input.targetGeneration)
+    || !Number.isFinite(Date.parse(input.scheduledFor))
+    || !Number.isInteger(input.attemptCount)
+    || (input.attemptCount as number) < 0
+    || !isRecord(input.eventSnapshot)
+  ) return { ok: false, status: "failed", reason: "payload_schema_unsupported" }
+  try {
+    requireExactKeys(input.eventSnapshot, ["payload", "payloadSchemaVersion"])
+  } catch {
+    return { ok: false, status: "failed", reason: "payload_schema_unsupported" }
+  }
+  if (input.eventSnapshot.payloadSchemaVersion !== 3) {
+    return { ok: false, status: "failed", reason: "payload_schema_unsupported" }
+  }
+  let payload: RegistrationObservationChatPayloadV3
+  try {
+    payload = parseRegistrationObservationChatPayloadV3(input.eventSnapshot.payload)
+  } catch {
+    return { ok: false, status: "failed", reason: "payload_schema_unsupported" }
+  }
+  const assignmentChange = payload.event_kind === "registration.observation_director_reassigned"
+  const sourceIdentityInvalid = assignmentChange
+    ? payload.event_kind !== "registration.observation_director_reassigned"
+      || payload.assignment_fact_id !== input.sourceId
+      || input.sourceRevision !== null
+    : payload.observation_id !== input.sourceId || input.sourceRevision === null
+  if (
+    payload.event_kind !== input.eventKey
+    || Date.parse(input.scheduledFor) !== Date.parse(payload.occurred_at)
+    || input.sourceType !== (assignmentChange ? OBSERVATION_ASSIGNMENT_SOURCE_TYPE : OBSERVATION_SOURCE_TYPE)
+    || sourceIdentityInvalid
+  ) return { ok: false, status: "failed", reason: "payload_schema_unsupported" }
+  const sourceReader = dependencies.observationSourceReader
+  if (!sourceReader) return { ok: false, status: "failed", reason: "payload_schema_unsupported" }
+  let source: RegistrationObservationNotificationSource
+  try {
+    source = await sourceReader.readSource(payload.observation_id)
+  } catch {
+    return { ok: false, status: "failed", reason: "payload_schema_unsupported" }
+  }
+  if (
+    source.observationId !== payload.observation_id
+    || source.appointmentId !== payload.appointment_id
+    || source.taskId !== payload.task_id
+    || source.trackId !== payload.track_id
+    || source.subject !== payload.subject
+  ) return { ok: false, status: "failed", reason: "payload_schema_unsupported" }
+  if (
+    payload.appointment_notification_revision !== source.notificationRevision
+    || (!assignmentChange && input.sourceRevision !== String(source.notificationRevision))
+  ) return { ok: false, status: "canceled", reason: "source_revision_changed" }
+  if (!observationLifecycleEligible(payload.event_kind, source)) {
+    return { ok: false, status: "canceled", reason: "source_status_changed" }
+  }
+  if (payload.booking_fact_hash !== source.bookingFactHash) {
+    return { ok: false, status: "canceled", reason: "source_schedule_changed" }
+  }
+  if (input.targetGeneration !== String(source.notificationRevision)) {
+    return { ok: false, status: "canceled", reason: "recipient_revoked" }
+  }
+  if (!observationTargetEligible(payload, source, input.target)) {
+    return { ok: false, status: "canceled", reason: "recipient_revoked" }
+  }
+  const booking = payload.event_kind === "registration.observation_canceled"
+    ? payload.canceled_booking
+    : payload.booking
+  if (
+    payload.event_kind === "registration.observation_reminder_due"
+    && dependencies.now().getTime() >= Date.parse(booking.starts_at)
+  ) return { ok: false, status: "failed", reason: "retry_window_closed" }
+  if ((input.attemptCount as number) > 0) return { ok: true }
+
+  let refreshed: RegistrationObservationChatPayloadV3
+  try {
+    let candidate: Readonly<Record<string, unknown>> = {
+      ...payload,
+      source_revision: source.sourceRevision,
+    }
+    if (payload.event_kind === "registration.observation_reminder_due") {
+      const preparation = await sourceReader.readCurrentPreparation(source)
+      candidate = {
+        ...candidate,
+        textbook_names: preparation.textbookNames,
+        progress_summary: preparation.progressSummary,
+      }
+    }
+    if (payload.event_kind === "registration.observation_feedback_submitted") {
+      candidate = {
+        ...candidate,
+        mention_profile_ids: source.directorProfileId ? [source.directorProfileId] : [],
+      }
+    }
+    refreshed = parseRegistrationObservationChatPayloadV3(candidate)
+  } catch {
+    return { ok: false, status: "failed", reason: "payload_schema_unsupported" }
+  }
+  return Object.freeze({
+    ok: true,
+    refreshedPayload: refreshed,
+    payloadSchemaVersion: 3,
+    payloadFingerprint: createHash("sha256").update(canonicalJson(refreshed), "utf8").digest("hex"),
+  })
+}
+
 export function createRegistrationNotificationAdapter(
   dependencies: RegistrationNotificationAdapterDependencies,
   immediateDependencies: ImmediateNotificationAdapterDependencies = immediateNotificationProductionDependencies,
@@ -896,6 +1443,9 @@ export function createRegistrationNotificationAdapter(
     || typeof dependencies.getSourceSnapshot !== "function"
     || typeof dependencies.listScheduledSources !== "function"
     || typeof dependencies.listTargetItems !== "function"
+    || (dependencies.observationSourceReader !== undefined
+      && (typeof dependencies.observationSourceReader.readSource !== "function"
+        || typeof dependencies.observationSourceReader.readCurrentPreparation !== "function"))
   ) {
     adapterError("payload_schema_unsupported")
   }
@@ -904,6 +1454,9 @@ export function createRegistrationNotificationAdapter(
     workflowKey: "registration",
 
     async resolveTargets(input) {
+      if (isObservationEvent(input.eventKey)) {
+        return observationTargetSet(observationPayload(input), input.rule)
+      }
       if (isImmediateEvent(input.eventKey)) return immediateTargetSet(input)
       validateResolveEnvelope(input)
       const rawSource = await dependencies.getSourceSnapshot(input.sourceId)
@@ -915,6 +1468,10 @@ export function createRegistrationNotificationAdapter(
     },
 
     async buildRenderContext(input): Promise<NotificationRenderContext> {
+      if (isObservationEvent(input.eventKey)) {
+        const payload = observationPayload(input)
+        return buildRegistrationNotificationPresentation(observationPresentationInput(input, payload))
+      }
       if (isImmediateEvent(input.eventKey)) return immediateRenderContext(input)
       validateResolveEnvelope(input)
       const rawSource = await dependencies.getSourceSnapshot(input.sourceId)
@@ -944,6 +1501,15 @@ export function createRegistrationNotificationAdapter(
     },
 
     async buildDeepLink(input) {
+      if (isObservationEvent(input.eventKey)) {
+        const payload = observationPayload(input)
+        observationPresentationInput(input, payload)
+        const query = new URLSearchParams()
+        query.set("taskId", payload.task_id)
+        query.set("trackId", payload.track_id)
+        query.set("observationId", payload.observation_id)
+        return `/admin/registration?${query.toString()}`
+      }
       if (isImmediateEvent(input.eventKey)) return immediateDeepLink(input)
       validateResolveEnvelope(input)
       const rawSource = await dependencies.getSourceSnapshot(input.sourceId)
@@ -958,6 +1524,9 @@ export function createRegistrationNotificationAdapter(
     },
 
     async revalidateBeforeSend(input): Promise<NotificationRevalidationResult> {
+      if (isObservationEvent(input.eventKey)) {
+        return revalidateObservationBeforeSend(input, dependencies)
+      }
       if (isImmediateEvent(input.eventKey)) {
         if (
           input.sourceType !== immediateSourceType(input.eventKey)
@@ -1507,7 +2076,13 @@ function createProductionDependencies(): RegistrationNotificationAdapterDependen
     }
     return response.data
   }
-  return createRegistrationNotificationRpcDependencies({ rpc })
+  const legacyDependencies = createRegistrationNotificationRpcDependencies({ rpc })
+  const observationSourceReader = createRegistrationObservationNotificationSourceReader({
+    async getClient() {
+      return await client() as unknown as RegistrationObservationSupabaseClient
+    },
+  })
+  return Object.freeze({ ...legacyDependencies, observationSourceReader })
 }
 
 export const registrationNotificationAdapter: NotificationWorkflowAdapter =

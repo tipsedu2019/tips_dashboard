@@ -72,6 +72,13 @@ export const NOTIFICATION_EVENT_KEYS_BY_WORKFLOW = {
     "registration.admission_message_reconciled",
     "registration.admission_message_retry_released",
     "registration.appointment_reminder_due",
+    "registration.observation_scheduled",
+    "registration.observation_rescheduled",
+    "registration.observation_canceled",
+    "registration.observation_reminder_due",
+    "registration.observation_feedback_due",
+    "registration.observation_feedback_submitted",
+    "registration.observation_director_reassigned",
   ],
   transfer: [
     "transfer.submitted",

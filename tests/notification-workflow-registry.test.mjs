@@ -110,6 +110,23 @@ test("registry has seven exclusive ordered workflow owners", async () => {
   assert.equal(registry.getNotificationWorkflowAdapter("registration")?.workflowKey, "registration")
 })
 
+test("registration workflow registry owns the exact seven observation event keys", async () => {
+  const { NOTIFICATION_EVENT_KEYS_BY_WORKFLOW } = await import(
+    "../src/features/notifications/notification-control-plane-types.ts"
+  )
+  const observationKeys = NOTIFICATION_EVENT_KEYS_BY_WORKFLOW.registration.filter((eventKey) =>
+    eventKey.startsWith("registration.observation_"))
+  assert.deepEqual(observationKeys, [
+    "registration.observation_scheduled",
+    "registration.observation_rescheduled",
+    "registration.observation_canceled",
+    "registration.observation_reminder_due",
+    "registration.observation_feedback_due",
+    "registration.observation_feedback_submitted",
+    "registration.observation_director_reassigned",
+  ])
+})
+
 test("six immediate adapters render the installed seed templates with canonical variables and links", async () => {
   const [registry, worker, settingsSeed, makeupTemplateSeed] = await Promise.all([
     import(registryUrl.href),

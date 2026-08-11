@@ -71,11 +71,24 @@ export type NotificationRevalidationInput = Readonly<{
   ruleRevision: DbBigInt
   targetGeneration: DbBigInt
   scheduledFor: string
+  attemptCount?: number
   target: NotificationTarget
+  eventSnapshot?: NotificationRevalidationEventSnapshot
+}>
+
+export type NotificationRevalidationEventSnapshot = Readonly<{
+  payloadSchemaVersion: number
+  payload: Readonly<Record<string, unknown>>
 }>
 
 export type NotificationRevalidationResult =
   | Readonly<{ ok: true }>
+  | Readonly<{
+      ok: true
+      refreshedPayload: Readonly<Record<string, unknown>>
+      payloadSchemaVersion: 3
+      payloadFingerprint: string
+    }>
   | Readonly<{
       ok: false
       status: "canceled"

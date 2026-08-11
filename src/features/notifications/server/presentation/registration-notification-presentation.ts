@@ -1,5 +1,10 @@
 import type { NotificationRenderContext } from "../notification-workflow-adapter.ts"
 import type { NotificationPresentationInput } from "./notification-presentation.ts"
+import { parseRegistrationObservationChatPayloadV3 } from "../adapters/registration-observation-notification-source.ts"
+import type {
+  ObservationBookingPresentationFact,
+  RegistrationObservationChatPayloadV3,
+} from "../adapters/registration-observation-notification-source.ts"
 import {
   buildOptionalNotificationLine,
   formatNotificationKstDateTime,
@@ -24,6 +29,15 @@ const VISIT_EVENTS = new Set([
   "registration.visit_subject_deselected",
   "registration.visit_canceled",
 ])
+const OBSERVATION_EVENTS = new Set<RegistrationObservationChatPayloadV3["event_kind"]>([
+  "registration.observation_scheduled",
+  "registration.observation_rescheduled",
+  "registration.observation_canceled",
+  "registration.observation_reminder_due",
+  "registration.observation_feedback_due",
+  "registration.observation_feedback_submitted",
+  "registration.observation_director_reassigned",
+])
 const REGISTRATION_EVENTS = new Set([
   ...CORE_EVENTS,
   ...MANAGEMENT_PROGRESS_EVENTS,
@@ -35,7 +49,7 @@ const SUBJECT_ORDER = ["영어", "수학", "과학"] as const
 const SUBJECT_SET = new Set<string>(SUBJECT_ORDER)
 const UUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/iu
 const UNSAFE_STRUCTURED_PATTERN = /(?:<[^>]*>|(?:https?:\/\/|www\.)|\/admin\/|@(all|everyone|here|channel)\b)/iu
-const CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu
+const CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu
 
 function presentationError(code: string): never {
   throw new Error(code)
@@ -58,7 +72,9 @@ function structuredText(value: unknown, required = true) {
     return null
   }
   if (typeof value !== "string") presentationError("notification_presentation_required_field_invalid")
-  const normalized = value.replace(CONTROL_PATTERN, "").replace(/\s+/gu, " ").trim()
+  const withoutControls = value.replace(CONTROL_PATTERN, "")
+  if (withoutControls !== value) presentationError("notification_presentation_required_field_invalid")
+  const normalized = withoutControls.replace(/\s+/gu, " ").trim()
   if (!normalized) {
     if (required) presentationError("notification_presentation_required_field_invalid")
     return null
@@ -179,6 +195,127 @@ function validateDestination(input: NotificationPresentationInput) {
   if (!allowed) presentationError("notification_registration_destination_unsupported")
 }
 
+function observationConnection(subject: RegistrationObservationChatPayloadV3["subject"]) {
+  if (subject === "영어") return { connectionKey: "google_chat.english", destinationTeam: "english" }
+  if (subject === "수학") return { connectionKey: "google_chat.math", destinationTeam: "math" }
+  return { connectionKey: "google_chat.science", destinationTeam: "science" }
+}
+
+function validateObservationDestination(
+  input: NotificationPresentationInput,
+  payload: RegistrationObservationChatPayloadV3,
+) {
+  const exactContract = input.contractIdentity.workflowKey === "registration"
+    && input.contractIdentity.eventKey === payload.event_kind
+    && input.contractIdentity.audienceKey === input.audienceKey
+    && input.contractIdentity.channelKey === input.channelKey
+    && input.contractIdentity.ruleVariantKey === input.ruleVariantKey
+  if (!exactContract) presentationError("notification_payload_schema_unsupported")
+  if (payload.event_kind === "registration.observation_feedback_submitted") {
+    const managementChat = input.audienceKey === "management_team"
+      && input.channelKey === "google_chat"
+      && input.connectionKey === "google_chat.management"
+      && input.destinationTeam === "management"
+    const directorInbox = input.audienceKey === "track_director"
+      && input.channelKey === "in_app"
+      && input.connectionKey === null
+      && input.destinationTeam === null
+    if (!managementChat && !directorInbox) {
+      presentationError("notification_registration_destination_unsupported")
+    }
+    return
+  }
+  if (payload.event_kind === "registration.observation_director_reassigned") {
+    if (
+      input.audienceKey !== "management_team"
+      || input.channelKey !== "google_chat"
+      || input.connectionKey !== "google_chat.management"
+      || input.destinationTeam !== "management"
+    ) presentationError("notification_registration_destination_unsupported")
+    return
+  }
+  const destination = observationConnection(payload.subject)
+  if (
+    input.audienceKey !== "subject_team"
+    || input.channelKey !== "google_chat"
+    || input.connectionKey !== destination.connectionKey
+    || input.destinationTeam !== destination.destinationTeam
+  ) presentationError("notification_registration_destination_unsupported")
+}
+
+function observationBooking(payload: RegistrationObservationChatPayloadV3) {
+  return payload.event_kind === "registration.observation_canceled"
+    ? payload.canceled_booking
+    : payload.booking
+}
+
+function scheduleRange(booking: ObservationBookingPresentationFact, fallback: string) {
+  const start = formatNotificationKstDateTime(booking.starts_at, fallback)
+  const end = formatNotificationKstDateTime(booking.ends_at, fallback)
+  const startDate = start.replace(/ \d{2}:\d{2}$/u, "")
+  const endDate = end.replace(/ \d{2}:\d{2}$/u, "")
+  const startTime = start.slice(-5)
+  const endTime = end.slice(-5)
+  if (startDate !== endDate) presentationError("notification_presentation_required_field_invalid")
+  return `${startDate} ${startTime}~${endTime}`
+}
+
+function buildRegistrationObservationPresentation(
+  input: NotificationPresentationInput,
+): NotificationRenderContext {
+  if (input.payloadSchemaVersion !== 3 || !OBSERVATION_EVENTS.has(
+    input.eventKey as RegistrationObservationChatPayloadV3["event_kind"],
+  )) presentationError("notification_payload_schema_unsupported")
+  let payload: RegistrationObservationChatPayloadV3
+  try {
+    payload = parseRegistrationObservationChatPayloadV3(input.payload)
+  } catch {
+    presentationError("notification_payload_schema_unsupported")
+  }
+  if (payload.event_kind !== input.eventKey) presentationError("notification_payload_schema_unsupported")
+  validateObservationDestination(input, payload)
+  const requested = new Set(input.requestedContextKeys)
+  if (requested.size === 0) return Object.freeze({})
+  const booking = observationBooking(payload)
+  const context: Record<string, string> = {}
+  const add = (key: string, build: () => string) => {
+    if (requested.has(key)) context[key] = build()
+  }
+  add("student_name", () => studentName(payload))
+  add("subjects", () => payload.subject)
+  add("class_name", () => structuredText(booking.class_name) as string)
+  add("scheduled_at", () => scheduleRange(booking, input.scheduledFor))
+  add("before_schedule", () => {
+    if (payload.event_kind !== "registration.observation_rescheduled") {
+      presentationError("notification_registration_event_state_mismatch")
+    }
+    return scheduleRange(payload.previous_booking, input.scheduledFor)
+  })
+  add("teacher_name", () => structuredText(booking.teacher_name) as string)
+  add("classroom", () => `${structuredText(booking.campus)} ${structuredText(booking.classroom_name)}`)
+  add("textbooks", () => {
+    if (!("textbook_names" in payload)) presentationError("notification_registration_event_state_mismatch")
+    return listValues(payload.textbook_names, false).join(" · ")
+  })
+  add("progress", () => {
+    if (!("progress_summary" in payload)) presentationError("notification_registration_event_state_mismatch")
+    return structuredText(payload.progress_summary) as string
+  })
+  add("submitted_by_name", () => {
+    if (payload.event_kind !== "registration.observation_feedback_submitted") {
+      presentationError("notification_registration_event_state_mismatch")
+    }
+    return structuredText(payload.submitted_by_name) as string
+  })
+  add("submitted_at", () => {
+    if (payload.event_kind !== "registration.observation_feedback_submitted") {
+      presentationError("notification_registration_event_state_mismatch")
+    }
+    return formatNotificationKstDateTime(payload.submitted_at, input.scheduledFor)
+  })
+  return Object.freeze(context)
+}
+
 function progressLine(input: NotificationPresentationInput) {
   if (input.eventKey === "registration.case_created") {
     return "[진행] 관리팀의 등록 내용 확인을 기다리고 있어요."
@@ -216,6 +353,9 @@ function freeTextLines(input: NotificationPresentationInput) {
 export function buildRegistrationNotificationPresentation(
   input: NotificationPresentationInput,
 ): NotificationRenderContext {
+  if (OBSERVATION_EVENTS.has(input.eventKey as RegistrationObservationChatPayloadV3["event_kind"])) {
+    return buildRegistrationObservationPresentation(input)
+  }
   const expectedSchemaVersion = CORE_EVENTS.has(input.eventKey) ? 1 : 2
   if (
     input.workflowKey !== "registration"

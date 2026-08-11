@@ -289,3 +289,11 @@ test("unknown 과목과 목적지는 실패 폐쇄하고 기존 template의 빈 
     [],
   )), {})
 })
+
+test("청강 schema 3은 과목방과 관리팀방 목적지를 섞지 않는다", async () => {
+  const source = await (await import("node:fs/promises")).readFile(presentationUrl, "utf8")
+  assert.match(source, /registration\.observation_scheduled/)
+  assert.match(source, /registration\.observation_feedback_submitted/)
+  assert.match(source, /google_chat\.english/)
+  assert.match(source, /google_chat\.management/)
+})
