@@ -93,6 +93,25 @@ test("공통 패널은 page와 dialog가 동일한 서버 스냅샷, 초안, 저
   assert.doesNotMatch(source, /autoSave|autosave/i)
 })
 
+test("멘션 토글은 기존 초안 저장과 별도 행 상태를 사용하고 응답 없는 규칙에는 렌더하지 않는다", async () => {
+  const [panelSource, mentionSource, modelSource, serviceSource] = await Promise.all([
+    readOptionalSource("src/features/notifications/notification-control-panel.tsx"),
+    readOptionalSource("src/features/notifications/notification-mention-settings.tsx"),
+    readOptionalSource("src/features/notifications/notification-control-plane-model.ts"),
+    readOptionalSource("src/features/notifications/notification-control-plane-service.ts"),
+  ])
+
+  assert.match(mentionSource, /담당자 멘션/)
+  assert.match(mentionSource, /확인된 Google Chat 계정만 멘션합니다\./)
+  assert.match(panelSource, /mentionSettings\.get\(rule\.id\)/)
+  assert.match(panelSource, /new AbortController\(\)/)
+  assert.match(panelSource, /mentionController\.abort\(\)/)
+  assert.match(panelSource, /mentionLoadGenerationRef\.current !== mentionLoadGeneration/)
+  assert.match(panelSource, /mentionMutationGenerationRef\.current\.get\(setting\.ruleId\) !== generation/)
+  assert.doesNotMatch(modelSource, /mentionEnabled|mention_enabled/)
+  assert.doesNotMatch(serviceSource, /mentionEnabled|mention_enabled/)
+})
+
 test("공통 패널은 서버가 반환한 규칙만 데스크톱 표와 모바일 카드에 렌더한다", async () => {
   const source = await readOptionalSource(
     "src/features/notifications/notification-control-panel.tsx",

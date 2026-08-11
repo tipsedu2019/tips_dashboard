@@ -38,6 +38,12 @@ import {
   NotificationControlPlaneHttpError,
 } from "./notification-control-plane-service"
 import {
+  createNotificationMentionSettingsService,
+  NotificationMentionSettingsHttpError,
+} from "./notification-mention-settings-service"
+import { NotificationMentionToggle } from "./notification-mention-settings"
+import type { NotificationMentionSettingDto } from "./notification-mention-settings-types"
+import {
   NOTIFICATION_CONNECTION_KEYS,
   NOTIFICATION_WORKFLOW_OPTIONS,
   type NotificationConnectionDto,
@@ -153,6 +159,13 @@ async function getAccessToken() {
 
 function createBrowserControlPlaneService() {
   return createNotificationControlPlaneService({
+    baseUrl: typeof window === "undefined" ? "http://localhost" : window.location.origin,
+    getAccessToken,
+  })
+}
+
+function createBrowserMentionSettingsService() {
+  return createNotificationMentionSettingsService({
     baseUrl: typeof window === "undefined" ? "http://localhost" : window.location.origin,
     getAccessToken,
   })
@@ -340,10 +353,14 @@ type RuleToggleProps = {
   rule: NotificationRuleDto
   draft: NotificationDraft
   connections: ReadonlyArray<NotificationConnectionDto>
+  mentionSetting: NotificationMentionSettingDto | undefined
+  mentionSaving: boolean
+  mentionError: string | null
   saving: boolean
   surfaceKey: "desktop" | "mobile"
   compact?: boolean
   onChange: (ruleId: string, patch: NotificationRulePatch) => void
+  onMentionChange: (setting: NotificationMentionSettingDto, mentionEnabled: boolean) => void
   onEditTemplate: (ruleId: string) => void
 }
 
@@ -351,10 +368,14 @@ function RuleToggle({
   rule,
   draft,
   connections,
+  mentionSetting,
+  mentionSaving,
+  mentionError,
   saving,
   surfaceKey,
   compact = false,
   onChange,
+  onMentionChange,
   onEditTemplate,
 }: RuleToggleProps) {
   const value = draft.rules[rule.id]
@@ -443,6 +464,13 @@ function RuleToggle({
           내용 수정
         </Button>
       </div>
+      <NotificationMentionToggle
+        setting={mentionSetting}
+        saving={mentionSaving}
+        surfaceKey={surfaceKey}
+        error={mentionError}
+        onChange={onMentionChange}
+      />
     </div>
   )
 }
@@ -451,8 +479,12 @@ type RulesViewProps = {
   rules: ReadonlyArray<NotificationRuleDto>
   draft: NotificationDraft
   connections: ReadonlyArray<NotificationConnectionDto>
+  mentionSettings: ReadonlyMap<string, NotificationMentionSettingDto>
+  mentionSavingRuleIds: ReadonlySet<string>
+  mentionErrors: Readonly<Record<string, string>>
   saving: boolean
   onChange: RuleToggleProps["onChange"]
+  onMentionChange: RuleToggleProps["onMentionChange"]
   onEditTemplate: RuleToggleProps["onEditTemplate"]
 }
 
@@ -460,8 +492,12 @@ function RulesView({
   rules,
   draft,
   connections,
+  mentionSettings,
+  mentionSavingRuleIds,
+  mentionErrors,
   saving,
   onChange,
+  onMentionChange,
   onEditTemplate,
 }: RulesViewProps) {
   const visibleRules = React.useMemo(
@@ -524,9 +560,13 @@ function RulesView({
                     rule={rule}
                     draft={draft}
                     connections={connections}
+                    mentionSetting={mentionSettings.get(rule.id)}
+                    mentionSaving={mentionSavingRuleIds.has(rule.id)}
+                    mentionError={mentionErrors[rule.id] ?? null}
                     saving={saving}
                     surfaceKey="desktop"
                     onChange={onChange}
+                    onMentionChange={onMentionChange}
                     onEditTemplate={onEditTemplate}
                   />
                 </td>
@@ -552,10 +592,14 @@ function RulesView({
                   rule={rule}
                   draft={draft}
                   connections={connections}
+                  mentionSetting={mentionSettings.get(rule.id)}
+                  mentionSaving={mentionSavingRuleIds.has(rule.id)}
+                  mentionError={mentionErrors[rule.id] ?? null}
                   saving={saving}
                   surfaceKey="mobile"
                   compact
                   onChange={onChange}
+                  onMentionChange={onMentionChange}
                   onEditTemplate={onEditTemplate}
                 />
               ))}
@@ -932,6 +976,7 @@ export function NotificationControlPanel({
   initialSection = "rules",
 }: NotificationControlPanelProps) {
   const service = React.useMemo(createBrowserControlPlaneService, [])
+  const mentionService = React.useMemo(createBrowserMentionSettingsService, [])
   const [pageWorkflow, setPageWorkflow] = React.useState<NotificationWorkflowKey>(workflowKey)
   const activeWorkflow = presentation === "dialog" ? workflowKey : pageWorkflow
   const visible = presentation === "page" || open === true
@@ -952,6 +997,13 @@ export function NotificationControlPanel({
   const [latestSnapshotConfirmationOpen, setLatestSnapshotConfirmationOpen] = React.useState(false)
   const [connectionBusyKey, setConnectionBusyKey] = React.useState<NotificationConnectionKey | null>(null)
   const [connectionError, setConnectionError] = React.useState<string | null>(null)
+  const [mentionSettings, setMentionSettings] = React.useState<ReadonlyMap<string, NotificationMentionSettingDto>>(
+    () => new Map(),
+  )
+  const [mentionSavingRuleIds, setMentionSavingRuleIds] = React.useState<ReadonlySet<string>>(
+    () => new Set(),
+  )
+  const [mentionErrors, setMentionErrors] = React.useState<Readonly<Record<string, string>>>({})
   const [pendingConnectionAction, setPendingConnectionAction] = React.useState<{
     connection: NotificationConnectionDto
     action: "verify" | "disconnect"
@@ -960,6 +1012,8 @@ export function NotificationControlPanel({
   const [reconciliationRetrying, setReconciliationRetrying] = React.useState(false)
   const reconciliationPollGenerationRef = React.useRef(0)
   const saveRequestRef = React.useRef<{ signature: string; requestId: string } | null>(null)
+  const mentionLoadGenerationRef = React.useRef(0)
+  const mentionMutationGenerationRef = React.useRef(new Map<string, number>())
 
   React.useEffect(() => {
     if (!visible) return
@@ -972,6 +1026,12 @@ export function NotificationControlPanel({
     setLatestSnapshotConfirmationOpen(false)
     setEditingRuleId(null)
     saveRequestRef.current = null
+    const mentionController = new AbortController()
+    const mentionLoadGeneration = mentionLoadGenerationRef.current + 1
+    mentionLoadGenerationRef.current = mentionLoadGeneration
+    setMentionSettings(new Map())
+    setMentionSavingRuleIds(new Set())
+    setMentionErrors({})
     void service.getControlPlane({ workflowKey: activeWorkflow }).then((nextSnapshot) => {
       if (!active) return
       const nextDraft = createNotificationDraft(nextSnapshot)
@@ -989,10 +1049,25 @@ export function NotificationControlPanel({
     }).finally(() => {
       if (active) setLoading(false)
     })
+    void mentionService.getMentionSettings({
+      workflowKey: activeWorkflow,
+      signal: mentionController.signal,
+    }).then((settings) => {
+      if (!active || mentionLoadGenerationRef.current !== mentionLoadGeneration) return
+      setMentionSettings(new Map(settings.map((setting) => [setting.ruleId, setting])))
+    }).catch((error: unknown) => {
+      if (!active || mentionController.signal.aborted || mentionLoadGenerationRef.current !== mentionLoadGeneration) return
+      setMentionErrors({
+        _load: error instanceof NotificationMentionSettingsHttpError && error.code === "notification_forbidden"
+          ? "담당자 멘션 설정 권한이 없습니다."
+          : "담당자 멘션 설정을 불러오지 못했습니다.",
+      })
+    })
     return () => {
       active = false
+      mentionController.abort()
     }
-  }, [activeWorkflow, loadAttempt, service, visible])
+  }, [activeWorkflow, loadAttempt, mentionService, service, visible])
 
   const dirty = React.useMemo(() => (
     baseDraft !== null && draft !== null && isNotificationDraftDirty(baseDraft, draft)
@@ -1025,6 +1100,51 @@ export function NotificationControlPanel({
     setMessage(null)
     setSavePhase("idle")
   }, [conflictOverride, snapshot])
+
+  const updateMentionSetting = React.useCallback(async (
+    setting: NotificationMentionSettingDto,
+    mentionEnabled: boolean,
+  ) => {
+    const generation = (mentionMutationGenerationRef.current.get(setting.ruleId) ?? 0) + 1
+    mentionMutationGenerationRef.current.set(setting.ruleId, generation)
+    setMentionSavingRuleIds((current) => new Set(current).add(setting.ruleId))
+    setMentionErrors((current) => {
+      const next = { ...current }
+      delete next[setting.ruleId]
+      return next
+    })
+    try {
+      const saved = await mentionService.saveMentionSetting({
+        ruleId: setting.ruleId,
+        mentionEnabled,
+        expectedRevision: setting.revision,
+        requestId: crypto.randomUUID(),
+      })
+      if (mentionMutationGenerationRef.current.get(setting.ruleId) !== generation) return
+      setMentionSettings((current) => {
+        const next = new Map(current)
+        next.set(saved.ruleId, saved)
+        return next
+      })
+    } catch (error) {
+      if (mentionMutationGenerationRef.current.get(setting.ruleId) !== generation) return
+      setMentionErrors((current) => ({
+        ...current,
+        [setting.ruleId]: error instanceof NotificationMentionSettingsHttpError
+          && error.code === "notification_mention_setting_revision_conflict"
+          ? "다른 사용자가 담당자 멘션을 먼저 변경했습니다. 다시 확인해 주세요."
+          : "담당자 멘션을 저장하지 못했습니다.",
+      }))
+    } finally {
+      if (mentionMutationGenerationRef.current.get(setting.ruleId) === generation) {
+        setMentionSavingRuleIds((current) => {
+          const next = new Set(current)
+          next.delete(setting.ruleId)
+          return next
+        })
+      }
+    }
+  }, [mentionService])
 
   const pollReconciliation = React.useCallback(async (initialJob: ReconciliationJobState) => {
     const generation = reconciliationPollGenerationRef.current + 1
@@ -1334,6 +1454,11 @@ export function NotificationControlPanel({
           {message}
         </div>
       ) : null}
+      {mentionErrors._load ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {mentionErrors._load}
+        </div>
+      ) : null}
 
       {conflict ? (
         <div className="space-y-3 rounded-lg border border-amber-300 bg-amber-50 p-4">
@@ -1396,8 +1521,12 @@ export function NotificationControlPanel({
             rules={snapshot.rules}
             draft={draft}
             connections={snapshot.connections}
+            mentionSettings={mentionSettings}
+            mentionSavingRuleIds={mentionSavingRuleIds}
+            mentionErrors={mentionErrors}
             saving={saving}
             onChange={updateRule}
+            onMentionChange={updateMentionSetting}
             onEditTemplate={setEditingRuleId}
           />
         </TabsContent>

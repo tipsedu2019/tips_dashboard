@@ -964,6 +964,35 @@ test("Supabase save adapter selects the v2 RPC and exact audit parameters only f
   })
 })
 
+test("기존 v2 저장 직렬화는 멘션 상태 없이 기존 초안 패치만 전송한다", async () => {
+  const { createNotificationControlPlaneService } = await import(serviceModuleUrl)
+  const requests = []
+  const service = createNotificationControlPlaneService({
+    baseUrl: "http://localhost",
+    getAccessToken: async () => "session-token",
+    fetch: async (_url, init) => {
+      requests.push(JSON.parse(init.body))
+      return jsonResponse(createWireSnapshot())
+    },
+  })
+
+  await service.saveControlPlane({
+    workflowKey: "tasks",
+    expectedRuleRevisions: { [RULE_ID]: BIG_REVISION },
+    expectedContractVersions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
+    patch: { rules: { [RULE_ID]: { enabled: true, titleTemplate: "새 제목" } } },
+    requestId: REQUEST_ID,
+  })
+
+  assert.deepEqual(requests[0], {
+    workflow_key: "tasks",
+    expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
+    expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
+    patch: { rules: { [RULE_ID]: { enabled: true, title_template: "새 제목" } } },
+    request_id: REQUEST_ID,
+  })
+})
+
 test("control-plane route forwards one strict save and returns a safe 409 snapshot on conflict", async () => {
   const { createNotificationControlPlaneRouteHandlers } = await import(controlPlaneRouteUrl)
   const calls = []
