@@ -1,10 +1,16 @@
 begin;
 
-select plan(69);
+select plan(70);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '120s';
 set local lock_timeout = '5s';
+
+create temporary table chat_existing_notification_rule_state_baseline
+on commit drop
+as
+select rule.id, rule.enabled, rule.revision, rule.active_template_id
+from dashboard_private.notification_rules rule;
 
 select is(
   (
@@ -1495,6 +1501,34 @@ select throws_ok(
     where profile_id = '99450000-0000-4000-8000-000000000101'$$,
   '55000', 'google_chat_mention_row_immutable',
   'identity audit rows are immutable after insert'
+);
+
+select is(
+  (
+    select pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'id', rule.id,
+        'enabled', rule.enabled,
+        'revision', rule.revision,
+        'activeTemplateId', rule.active_template_id
+      ) order by rule.id
+    )
+    from dashboard_private.notification_rules rule
+    join chat_existing_notification_rule_state_baseline baseline
+      on baseline.id = rule.id
+  ),
+  (
+    select pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'id', baseline.id,
+        'enabled', baseline.enabled,
+        'revision', baseline.revision,
+        'activeTemplateId', baseline.active_template_id
+      ) order by baseline.id
+    )
+    from chat_existing_notification_rule_state_baseline baseline
+  ),
+  'identity, setting, resolver and snapshot transitions preserve all pre-existing rule states'
 );
 
 select throws_ok(

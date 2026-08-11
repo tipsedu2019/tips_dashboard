@@ -343,6 +343,30 @@ test("removing role, stale, replay, or non-Google guards would call the setting 
   ))).status, 400)
 })
 
+test("an unadopted workflow returns an empty closed setting list without a save transition", async () => {
+  const calls = []
+  const { createNotificationMentionSettingsRouteHandlers } = await import(routeModuleUrl)
+  const handlers = createNotificationMentionSettingsRouteHandlers({
+    authenticate: async () => ({ userId: ADMIN_ID, role: "admin", client: {} }),
+    getMentionSettings: async ({ workflowKey }) => {
+      calls.push(["get", workflowKey])
+      return []
+    },
+    saveMentionSetting: async () => {
+      calls.push(["save"])
+      throw new Error("unadopted workflow must not save")
+    },
+  })
+
+  const result = await handlers.get(request(
+    "http://localhost/api/notifications/mention-settings?workflow_key=registration",
+    "GET",
+  ))
+  assert.equal(result.status, 200)
+  assert.deepEqual(await result.json(), { settings: [] })
+  assert.deepEqual(calls, [["get", "registration"]])
+})
+
 test("real panel keeps the draft isolated while retrying, scoping, and applying per-rule mention saves", async () => {
   const fixtureRoot = await mkdtemp(join(tmpdir(), "tips-notification-mention-"))
   let server

@@ -421,7 +421,7 @@ test("production Directory readiness is not configured without all three server 
 
 test("GET route requires bearer admin/staff and rejects query parameters", async () => {
   for (const role of ["admin", "staff"]) {
-    const { handlers, actorClient } = makeRoute({ role })
+    const { handlers, actorClient, lookups } = makeRoute({ role })
     const response = await handlers.get(new Request("https://dashboard.test/api/admin/google-chat-identities", {
       headers: { Authorization: "Bearer exact-session-token" },
     }))
@@ -431,6 +431,7 @@ test("GET route requires bearer admin/staff and rejects query parameters", async
       { kind: "getUser", token: "exact-session-token" },
       { kind: "rpc", name: "current_dashboard_role", args: undefined },
     ])
+    assert.equal(lookups.length, 0)
   }
 
   for (const role of ["teacher", "assistant", "viewer", ""]) {
@@ -454,7 +455,7 @@ test("GET route requires bearer admin/staff and rejects query parameters", async
 })
 
 test("GET route returns only strict identities plus closed Directory readiness", async () => {
-  const { handlers } = makeRoute({ directoryConfigured: false })
+  const { handlers, lookups } = makeRoute({ directoryConfigured: false })
   const response = await handlers.get(new Request("https://dashboard.test/api/admin/google-chat-identities", {
     headers: { Authorization: "Bearer token" },
   }))
@@ -463,6 +464,7 @@ test("GET route returns only strict identities plus closed Directory readiness",
     directory: { status: "not_configured", configured: false },
     editable: true,
   })
+  assert.equal(lookups.length, 0)
 
   const unsafe = makeRoute({ identities: [{ ...IDENTITY, rawSdkError: "credential-secret" }] })
   const unsafeResponse = await unsafe.handlers.get(new Request(
@@ -650,6 +652,7 @@ test("missing Directory credentials never persist and raw provider failures neve
     missing.serviceClient.calls.some(({ name }) => name === "apply_google_chat_profile_identity_sync_v1"),
     false,
   )
+  assert.equal(missing.lookups.length, 0)
 
   const secret = "private-key-secret access-token-secret raw-sdk-stack"
   const failed = makeRoute({
