@@ -40,7 +40,7 @@ const MAX_GOOGLE_CHAT_MESSAGE_BYTES = 32_000
 const GOOGLE_CHAT_CARD_ID = "tips-dashboard-notification"
 const GOOGLE_CHAT_BUTTON_TEXT = "대시보드에서 보기"
 const GOOGLE_CHAT_USER_NAME_PATTERN = /^users\/[1-9]\d{0,31}$/u
-const GOOGLE_CHAT_UNSAFE_TEXT_PATTERN = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]|<|>|(?:^|[^A-Za-z0-9_])@(all|everyone|here|channel)(?=$|[^A-Za-z0-9_])/iu
+const GOOGLE_CHAT_UNSAFE_TEXT_PATTERN = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]|<|>|(?:^|[^A-Za-z0-9_])@(all|everyone|here|channel)(?=$|[^A-Za-z0-9_])/iu
 const GOOGLE_CHAT_LINK_QUERY_KEYS: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
   "/admin/tasks": new Set(["taskId", "focus"]),
   "/admin/word-retests": new Set(["taskId"]),
@@ -187,6 +187,37 @@ function flattenGoogleChatText(value: unknown) {
   return flattened || undefined
 }
 
+function canonicalGoogleChatMentionUserNames(value: unknown) {
+  try {
+    if (
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(value) !== Array.prototype ||
+      Object.prototype.hasOwnProperty.call(value, "some") ||
+      Object.prototype.hasOwnProperty.call(value, Symbol.iterator) ||
+      value.length > 20
+    ) return undefined
+    const canonical: string[] = []
+    for (let index = 0; index < value.length; index += 1) {
+      if (!Object.prototype.hasOwnProperty.call(value, index)) return undefined
+      const userName = value[index]
+      if (typeof userName !== "string" || !GOOGLE_CHAT_USER_NAME_PATTERN.test(userName)) {
+        return undefined
+      }
+      let duplicate = false
+      for (let knownIndex = 0; knownIndex < canonical.length; knownIndex += 1) {
+        if (canonical[knownIndex] === userName) {
+          duplicate = true
+          break
+        }
+      }
+      if (!duplicate) canonical.push(userName)
+    }
+    return canonical
+  } catch {
+    return undefined
+  }
+}
+
 export function buildGoogleChatCardPayload(input: Pick<
   GoogleChatBegunDeliveryContext,
   "rendered_title" | "rendered_body" | "href"
@@ -244,20 +275,16 @@ function buildGoogleChatMessagePayload(context: GoogleChatBegunDeliveryContext):
     return { ok: true, payload: builtCard.payload }
   }
 
-  const mentionUserNames = context.mention_user_names
-  if (
-    !Array.isArray(mentionUserNames) ||
-    mentionUserNames.length > 20 ||
-    mentionUserNames.some((value) => (
-      typeof value !== "string" || !GOOGLE_CHAT_USER_NAME_PATTERN.test(value)
-    ))
-  ) return { ok: false }
+  const mentionUserNames = canonicalGoogleChatMentionUserNames(context.mention_user_names)
+  if (!mentionUserNames) return { ok: false }
 
   const title = flattenGoogleChatText(context.rendered_title)
   const body = flattenGoogleChatText(context.rendered_body)
   if (!title || !body) return { ok: false }
-  const uniqueUserNames = [...new Set(mentionUserNames)]
-  const mentionText = uniqueUserNames.map((userName) => `<${userName}>`).join(" ")
+  let mentionText = ""
+  for (let index = 0; index < mentionUserNames.length; index += 1) {
+    mentionText += `${index ? " " : ""}<${mentionUserNames[index]}>`
+  }
   const payload: GoogleChatMessagePayload = Object.freeze({
     text: `${mentionText ? `${mentionText} ` : ""}${title} — ${body}`,
     cardsV2: builtCard.payload.cardsV2,

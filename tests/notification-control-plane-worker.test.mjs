@@ -2489,6 +2489,38 @@ test("Google Chat provider는 verified resource names를 canonical text로 dedup
   assert.equal(payloads.length, callsBeforeRejections, "malformed 또는 21개 mention은 fetch 전에 막아야 한다")
 })
 
+test("Google Chat provider는 caller-owned array callback과 custom prototype을 신뢰하지 않고 transport 전에 거절한다", async () => {
+  const { createGoogleChatProvider } = await import(googleChatProviderModuleUrl)
+  let transportCalls = 0
+  const provider = createGoogleChatProvider({
+    fetch: async () => {
+      transportCalls += 1
+      return new Response(JSON.stringify({ name: "spaces/fixture/messages/mentions" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    },
+  })
+  const overriddenSome = ["users/123456789", "<users/987654321>"]
+  overriddenSome.some = () => false
+  const customPrototype = ["users/123456789"]
+  Object.setPrototypeOf(customPrototype, Object.create(Array.prototype))
+  const overriddenIterator = ["users/123456789"]
+  overriddenIterator[Symbol.iterator] = function* () {
+    yield "users/123456789"
+    yield "<users/987654321>"
+  }
+
+  for (const mention_user_names of [overriddenSome, customPrototype, overriddenIterator]) {
+    assertProviderResult(
+      await provider.send(createBegunGoogleChatContext({ mention_user_names })),
+      "failed",
+      "render_validation_failed",
+    )
+    assert.equal(transportCalls, 0, "adversarial mention array는 fetch 전에 거절해야 한다")
+  }
+})
+
 test("Google Chat provider는 adopted text를 Unicode whitespace로 평탄화하고 markup·@all·control·bidi·외부 URL·32KB 초과를 fetch 전에 막는다", async () => {
   const { createGoogleChatProvider } = await import(googleChatProviderModuleUrl)
   const payloads = []
@@ -2518,6 +2550,9 @@ test("Google Chat provider는 adopted text를 Unicode whitespace로 평탄화하
     { rendered_title: "<users/123456789> 새 할 일" },
     { rendered_body: "@all 확인" },
     { rendered_body: "제어\u0007문자" },
+    { rendered_body: "bidi\u061c문자" },
+    { rendered_body: "bidi\u200e문자" },
+    { rendered_body: "bidi\u200f문자" },
     { rendered_body: "bidi\u202e문자" },
     { rendered_body: "https://evil.invalid" },
     { rendered_body: "a".repeat(31_600) },
@@ -2600,6 +2635,48 @@ test("Google Chat worker는 sending/google_chat begun context의 mention_user_na
     invalidHarness.calls.some((call) => call.name === "register_notification_external_attempt_v1"),
     false,
   )
+})
+
+test("Google Chat worker는 caller-owned mention array callback과 custom prototype을 external attempt 전에 거절한다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  const overriddenSome = ["users/123456789", "<users/987654321>"]
+  overriddenSome.some = () => false
+  const customPrototype = ["users/123456789"]
+  Object.setPrototypeOf(customPrototype, Object.create(Array.prototype))
+  const overriddenIterator = ["users/123456789"]
+  overriddenIterator[Symbol.iterator] = function* () {
+    yield "users/123456789"
+    yield "<users/987654321>"
+  }
+
+  for (const mention_user_names of [overriddenSome, customPrototype, overriddenIterator]) {
+    let providerCalls = 0
+    const harness = createRpcHarness({
+      claim_notification_deliveries_v1: [createDeliveryClaim()],
+      prepare_notification_immediate_delivery_v1: () => createBegunGoogleChatContext({ mention_user_names }),
+    })
+    const worker = createNotificationWorkerRuntime({
+      getAdapter: () => createAdapter(),
+      rpc: harness.rpc,
+      getProvider: () => ({
+        async send() {
+          providerCalls += 1
+          throw new Error("adversarial mention array는 provider에 도달하면 안 됩니다.")
+        },
+      }),
+      createRunId: () => RUN_ID,
+    })
+
+    await assert.rejects(
+      worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 }),
+      (error) => error?.code === "worker_envelope_invalid",
+    )
+    assert.equal(providerCalls, 0)
+    assert.equal(
+      harness.calls.some((call) => call.name === "register_notification_external_attempt_v1"),
+      false,
+    )
+  }
 })
 
 test("Google Chat provider는 안전한 상대 링크만 고정 origin의 전체 URL로 보내고 잘못된 링크는 전송 전에 닫는다", async () => {

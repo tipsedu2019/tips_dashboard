@@ -1177,13 +1177,24 @@ async function finalizeDelivery(
 function validateGoogleChatMentionUserNames(context: JsonRecord) {
   const mentionUserNames = context.mention_user_names
   if (mentionUserNames === undefined) return
-  if (
-    !Array.isArray(mentionUserNames) ||
-    mentionUserNames.length > 20 ||
-    mentionUserNames.some((value) => (
-      typeof value !== "string" || !GOOGLE_CHAT_USER_NAME_PATTERN.test(value)
-    ))
-  ) workerEnvelopeError()
+  try {
+    if (
+      !Array.isArray(mentionUserNames) ||
+      Object.getPrototypeOf(mentionUserNames) !== Array.prototype ||
+      Object.prototype.hasOwnProperty.call(mentionUserNames, "some") ||
+      Object.prototype.hasOwnProperty.call(mentionUserNames, Symbol.iterator) ||
+      mentionUserNames.length > 20
+    ) workerEnvelopeError()
+    for (let index = 0; index < mentionUserNames.length; index += 1) {
+      if (
+        !Object.prototype.hasOwnProperty.call(mentionUserNames, index) ||
+        typeof mentionUserNames[index] !== "string" ||
+        !GOOGLE_CHAT_USER_NAME_PATTERN.test(mentionUserNames[index])
+      ) workerEnvelopeError()
+    }
+  } catch {
+    workerEnvelopeError()
+  }
 }
 
 async function processDelivery(
