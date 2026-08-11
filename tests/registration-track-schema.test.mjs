@@ -3879,3 +3879,79 @@ test("manual workflow status is revisioned, idempotent, audited, and free of ope
     /grant execute on function public\.set_registration_workflow_status_v1\(uuid, text, integer, text\)\s+to authenticated;/i,
   )
 })
+
+test("observation enrollment source forward migration keeps the registration gateway atomic", async () => {
+  // Production break caught: Task 6 grows a second receipt-bearing save path,
+  // persists the browser session label, or drops response fields consumed by
+  // the existing registration workspace.
+  const sql = await readMigration("registration_observation_enrollment_source")
+  const trimmed = sql.trim()
+  const wrapper = readFunctionBlock(
+    sql,
+    "public",
+    "save_registration_enrollment_rows",
+  )
+  const canonical = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "save_registration_enrollment_rows_canonical_v1",
+  )
+  const details = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "save_registration_enrollment_details_impl",
+  )
+
+  assert.match(trimmed, /^begin;/i)
+  assert.match(trimmed, /commit;$/i)
+  assert.deepEqual(readFunctionArgumentTypes(wrapper), ["uuid", "jsonb", "text"])
+  assert.deepEqual(readFunctionArgumentTypes(canonical), ["uuid", "jsonb", "uuid"])
+  assert.deepEqual(readFunctionArgumentTypes(details), ["uuid", "jsonb", "text"])
+  assert.match(wrapper, /security definer/)
+  assert.match(canonical, /security definer/)
+  assert.match(details, /security definer/)
+  assert.match(wrapper, /set search_path = ''/)
+  assert.match(canonical, /set search_path = ''/)
+  assert.match(details, /set search_path = ''/)
+  assert.equal(
+    (wrapper.match(/insert into dashboard_private\.ops_registration_mutations/g) || []).length,
+    1,
+  )
+  assert.equal(
+    (details.match(/insert into dashboard_private\.ops_registration_mutations/g) || []).length,
+    1,
+  )
+  assert.doesNotMatch(canonical, /ops_registration_mutations|p_request_key/)
+  assert.doesNotMatch(sql, /:canonical-rows/)
+  assertInOrder(canonical, [
+    "-- enrollment_source_enrollment_locks",
+    "-- enrollment_source_class_locks",
+    "-- enrollment_source_final_rows",
+    "insert into public.ops_registration_enrollments",
+    "write_registration_track_event_v2",
+    "recompute_registration_parent",
+  ])
+  for (const responseKey of [
+    "studentId",
+    "admissionBatchId",
+    "classId",
+    "textbookId",
+    "classStartDate",
+    "classStartSessionKey",
+    "classStartSession",
+    "classStartLessonSessionId",
+    "classStartSourceObservationId",
+    "status",
+    "makeeduRegistered",
+    "rosterActive",
+    "rosterReleasedAt",
+    "rosterReleaseReason",
+    "rosterReleaseSourceTaskId",
+    "rosterReleaseKind",
+    "sortOrder",
+  ]) assert.match(canonical, new RegExp(`'${responseKey}'`))
+  assert.doesNotMatch(
+    sql,
+    /solapi|google_chat|http_post|net\.http|send_web_push/i,
+  )
+})

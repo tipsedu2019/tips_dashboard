@@ -554,6 +554,170 @@ test("feedback committed fixture cleans up after setup pgTAP and cleanup failure
   }
 });
 
+test("enrollment owns a committed runtime-zero activation fixture and marked deactivation cleanup", async () => {
+  // Production break caught: enrollment aliases a downstream placeholder,
+  // pre-activates runtime, or leaves the real activation receipt/fixtures
+  // behind after its cross-session single-winner rehearsal.
+  const runner = await loadRunner();
+  const contract = runner.getRegistrationObservationFocusContract("enrollment");
+  const setupSql = runner.registrationObservationFocusSetupSql("enrollment");
+  const cleanupSql = runner.registrationObservationFocusCleanupSql("enrollment");
+  const freshSql = runner.registrationObservationSchemaFreshAssertionSql(
+    "enrollment",
+  );
+
+  assert.deepEqual(contract, {
+    ceiling: "20260809104000",
+    fixture: { kind: "committed" },
+    tests: ["supabase/tests/registration_observation_enrollment_test.sql"],
+  });
+  assert.match(setupSql, /^begin;/i);
+  assert.match(setupSql, /create extension if not exists dblink;/i);
+  for (const id of [
+    "99300000-0000-4000-8000-000000000001",
+    "99300000-0000-4000-8000-000000000106",
+    "99300000-0000-4000-8000-000000000108",
+  ]) assert.match(setupSql, new RegExp(id, "i"));
+  assert.match(
+    setupSql,
+    /registration_observation_runtime_settings[\s\S]*activation_version = 0/i,
+  );
+  assert.doesNotMatch(
+    setupSql,
+    /set\s+activation_version\s*=\s*1/i,
+  );
+  assert.match(setupSql, /commit;$/i);
+
+  const deactivate = cleanupSql.indexOf(
+    "$registration_observation_runtime_deactivate_v1$",
+  );
+  const enrollmentReceiptDelete = cleanupSql.indexOf(
+    "delete from dashboard_private.ops_registration_mutations",
+  );
+  const activationReceiptDelete = cleanupSql.indexOf(
+    "delete from dashboard_private.registration_observation_mutation_requests",
+  );
+  const observationDelete = cleanupSql.indexOf(
+    "delete from public.ops_registration_observations",
+  );
+  const appointmentDelete = cleanupSql.indexOf(
+    "delete from public.ops_registration_appointments",
+  );
+  const trackDelete = cleanupSql.indexOf(
+    "delete from public.ops_registration_subject_tracks",
+  );
+  assert.ok(deactivate >= 0 && deactivate < enrollmentReceiptDelete);
+  assert.ok(enrollmentReceiptDelete < activationReceiptDelete);
+  assert.ok(activationReceiptDelete < observationDelete);
+  assert.ok(observationDelete < appointmentDelete);
+  assert.ok(appointmentDelete < trackDelete);
+  assert.match(cleanupSql, /v_current not in \(0, 1\)/i);
+  assert.match(
+    cleanupSql,
+    /if v_current = 1[\s\S]*activation_version = 0[\s\S]*updated_by = null/i,
+  );
+  assert.match(cleanupSql, /^begin;/i);
+  assert.match(cleanupSql, /commit;$/i);
+
+  assert.match(freshSql, /registration_observation_runtime_not_zero/i);
+  assert.match(freshSql, /registration_observation_runtime_actor_not_cleared/i);
+  assert.match(freshSql, /99300000-0000-4000-8000-000000000108/i);
+  assert.match(freshSql, /registration_observation_enrollment_fixture_remains/i);
+  assert.match(freshSql, /registration_observation_provider_outbox_delta=0/i);
+});
+
+test("enrollment committed plan keeps exact argv and cleanup order on every failure", async () => {
+  // Production break caught: pgTAP runs before the committed fixture or a
+  // setup/test/cleanup error skips deactivation, fresh runtime-zero proof, or
+  // the final isolated database stop.
+  const runner = await loadRunner();
+  const setupSql = runner.registrationObservationFocusSetupSql("enrollment");
+  const cleanupSql = runner.registrationObservationFocusCleanupSql("enrollment");
+  const freshSql = runner.registrationObservationSchemaFreshAssertionSql(
+    "enrollment",
+  );
+  const enrollmentDirectory = path.join(
+    temporaryProjectPath,
+    "supabase/focus-tests/enrollment",
+  );
+  const input = {
+    ...planInput(),
+    focus: "enrollment",
+    focusTestDirectoryPath: enrollmentDirectory,
+    setupSql,
+    cleanupSql,
+    freshAssertSql: freshSql,
+  };
+  const plan = runner.buildRegistrationObservationLocalDbQaPlan(input);
+  const psqlArgv = (sql) => [
+    "docker", "exec", "-i", containerName, "psql", "-X", "-qAt",
+    "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres",
+    "-c", sql,
+  ];
+  assert.deepEqual(plan.steps[2].argv, psqlArgv(setupSql));
+  assert.deepEqual(plan.steps[3].argv, [
+    pinnedSupabaseGo,
+    "test",
+    "db",
+    "--workdir",
+    temporaryProjectPath,
+    enrollmentDirectory,
+    "--db-url",
+    loopbackDbUrl,
+  ]);
+  assert.deepEqual(plan.steps[4].argv, psqlArgv(cleanupSql));
+  assert.deepEqual(plan.steps[5].argv, psqlArgv(freshSql));
+
+  const expectedSuccess = [
+    "db-start",
+    "db-reset",
+    "focus-fixture-setup",
+    "pgtap",
+    "focus-fixture-cleanup",
+    "fresh-runtime0-assert",
+    "db-stop",
+  ];
+  assert.deepEqual(plan.steps.map(({ name }) => name), expectedSuccess);
+  for (const failedStep of [
+    "focus-fixture-setup",
+    "pgtap",
+    "focus-fixture-cleanup",
+  ]) {
+    const calls = [];
+    const result = await runner.executeRegistrationObservationLocalDbQaPlan(
+      plan,
+      {
+        runStep: async (step) => {
+          calls.push(step.name);
+          if (step.name === failedStep) {
+            throw new Error(`synthetic ${failedStep} failure`);
+          }
+          return {
+            stdout: step.name === "fresh-runtime0-assert"
+              ? "registration_observation_provider_outbox_delta=0\n"
+              : "",
+          };
+        },
+        inspectResources: async () => [],
+      },
+    );
+    assert.equal(result.status, 1);
+    assert.deepEqual(
+      calls,
+      failedStep === "focus-fixture-setup"
+        ? [
+            "db-start",
+            "db-reset",
+            "focus-fixture-setup",
+            "focus-fixture-cleanup",
+            "fresh-runtime0-assert",
+            "db-stop",
+          ]
+        : expectedSuccess,
+    );
+  }
+});
+
 test("booking focus owns a committed runtime-one concurrency fixture and exact reverse cleanup", async () => {
   const runner = await loadRunner();
   const setupSql = runner.registrationObservationFocusSetupSql("booking");
@@ -834,17 +998,17 @@ test("focus manifests prove provider and outbox presence plus exact zero delta",
   assert.match(setupSql, /commit;$/i);
 });
 
-test("downstream focus fails explicitly until its files exist", () => {
+test("next downstream focus fails explicitly until its files exist", () => {
   const result = runRunner([
     "--execute",
     "--approved-local-db",
     "--focus",
-    "enrollment",
+    "google-chat",
   ]);
   assert.equal(result.status, 2);
   assert.match(
     result.stderr,
-    /registration_observation_local_db_focus_unavailable:enrollment/,
+    /registration_observation_local_db_focus_unavailable:google-chat/,
   );
 });
 
