@@ -301,13 +301,10 @@ export function createRegistrationCustomerReminderRouteHandlers(
           const settings = normalizedSettings(await dependencies.getSettings({
             actorProfileId: context.actorProfileId,
           }))
-          const templateContract = settings.activeKinds?.length
-            ? dependencies.templateContractForSettings?.(settings) ?? dependencies.templateContract
-            : dependencies.templateContract
           return json({
             ok: true,
             settings: {
-              ...publicSettings(settings, templateContract),
+              ...publicSettings(settings, dependencies.templateContract),
               editable: context.role === "admin",
             },
           })
@@ -322,6 +319,9 @@ export function createRegistrationCustomerReminderRouteHandlers(
         const currentSettings = normalizedSettings(await dependencies.getSettings({
           actorProfileId: context.actorProfileId,
         }))
+        if (mutation.enabled && currentSettings.activeKinds?.length === 0) {
+          throw new RegistrationCustomerReminderHttpError(409, "registration_customer_reminder_not_ready")
+        }
         const templateContract = mutation.enabled && currentSettings.activeKinds
           ? dependencies.templateContractForSettings?.(currentSettings)
           : dependencies.templateContract
@@ -333,13 +333,10 @@ export function createRegistrationCustomerReminderRouteHandlers(
           ...mutation,
           templateContract,
         }))
-        const responseTemplateContract = settings.activeKinds?.length
-          ? dependencies.templateContractForSettings?.(settings) ?? templateContract
-          : templateContract
         return json({
           ok: true,
           settings: {
-            ...publicSettings(settings, responseTemplateContract),
+            ...publicSettings(settings, templateContract),
             editable: true,
           },
         })
@@ -354,7 +351,8 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const REGISTRATION_CUSTOMER_REMINDER_RPC_TIMEOUT_MS = 12_000
 type ServiceRpcOptions = Readonly<{
   sourceIneligibleIsTerminal?: boolean
-  reminderSourceRead?: boolean
+  observationSourceRead?: boolean
+  settingsMutation?: boolean
 }>
 
 function environmentText(value: unknown) {
@@ -372,27 +370,30 @@ function serviceClient(environment: NodeJS.ProcessEnv = process.env) {
   })
 }
 
-function rpcFailure(error: unknown, options: ServiceRpcOptions = {}): never {
+export function normalizeRegistrationCustomerReminderRpcFailure(
+  error: unknown,
+  options: ServiceRpcOptions = {},
+): never {
   const message = isRecord(error) ? text(error.message) : ""
-  if (options.reminderSourceRead && message === "registration_customer_reminder_booking_fact_changed") {
+  if (options.observationSourceRead && message === "registration_customer_reminder_booking_fact_changed") {
     throw new RegistrationCustomerReminderBookingFactChangedError()
   }
-  if (options.reminderSourceRead && message === "registration_observation_runtime_inactive") {
+  if (options.observationSourceRead && message === "registration_observation_runtime_inactive") {
     throw new RegistrationObservationRuntimeInactiveError()
   }
   if (
     options.sourceIneligibleIsTerminal
-    && message.includes("registration_customer_message_source_ineligible")
+    && message === "registration_customer_message_source_ineligible"
   ) {
     throw new RegistrationCustomerReminderSourceIneligibleError()
   }
-  if (message.includes("registration_customer_reminder_not_ready")) {
+  if (options.settingsMutation && message === "registration_customer_reminder_not_ready") {
     throw new RegistrationCustomerReminderHttpError(409, "registration_customer_reminder_not_ready")
   }
-  if (message.includes("registration_customer_reminder_settings_conflict")) {
+  if (options.settingsMutation && message === "registration_customer_reminder_settings_conflict") {
     throw new RegistrationCustomerReminderHttpError(409, "registration_customer_reminder_settings_conflict")
   }
-  if (message.includes("invalid")) {
+  if (options.settingsMutation && message === "registration_customer_reminder_settings_invalid") {
     throw new RegistrationCustomerReminderHttpError(400, "registration_customer_reminder_settings_invalid")
   }
   throw new RegistrationCustomerReminderHttpError(503, "registration_customer_reminder_runtime_unavailable")
@@ -407,7 +408,7 @@ async function serviceRpc(
   const result = await client.rpc(name, args)
     .abortSignal(AbortSignal.timeout(REGISTRATION_CUSTOMER_REMINDER_RPC_TIMEOUT_MS))
     .retry(false)
-  if (result.error) rpcFailure(result.error, options)
+  if (result.error) normalizeRegistrationCustomerReminderRpcFailure(result.error, options)
   return result.data
 }
 
@@ -426,7 +427,7 @@ function reminderClaimFields(value: JsonRecord) {
     || !Number.isSafeInteger(sourceRevision)
     || (sourceRevision as number) < 0
     || !Number.isFinite(Date.parse(scheduledFor))
-  ) rpcFailure(null)
+  ) normalizeRegistrationCustomerReminderRpcFailure(null)
   return { jobId, appointmentId, claimToken, sourceRevision: sourceRevision as number, scheduledFor, requestKey }
 }
 
@@ -434,7 +435,7 @@ export function parseRegistrationCustomerReminderClaim(
   value: unknown,
 ): RegistrationCustomerReminderClaim | null {
   if (value === null) return null
-  if (!isRecord(value)) rpcFailure(null)
+  if (!isRecord(value)) normalizeRegistrationCustomerReminderRpcFailure(null)
   if (exactKeys(value, [
     "jobId", "appointmentId", "claimToken", "sourceRevision", "scheduledFor", "requestKey",
   ])) {
@@ -449,32 +450,41 @@ export function parseRegistrationCustomerReminderClaim(
     "scheduledFor", "requestKey",
   ])) {
     const observationId = text(value.observationId)
-    if (value.messageKind !== "observation_reminder" || !UUID_PATTERN.test(observationId)) rpcFailure(null)
+    if (value.messageKind !== "observation_reminder" || !UUID_PATTERN.test(observationId)) {
+      normalizeRegistrationCustomerReminderRpcFailure(null)
+    }
     return Object.freeze({
       ...reminderClaimFields(value),
       messageKind: "observation_reminder",
       observationId,
     })
   }
-  return rpcFailure(null)
+  return normalizeRegistrationCustomerReminderRpcFailure(null)
 }
 
-function reminderBegin(value: unknown): RegistrationCustomerReminderBegin {
-  if (!isRecord(value)) rpcFailure(null)
-  if (!exactKeys(value, ["allowed", "messageId", "dispatchToken", "currentStatus"])) rpcFailure(null)
+export function parseRegistrationCustomerReminderBegin(value: unknown): RegistrationCustomerReminderBegin {
+  if (!isRecord(value)) normalizeRegistrationCustomerReminderRpcFailure(null)
+  if (!exactKeys(value, ["allowed", "messageId", "dispatchToken", "currentStatus"])) {
+    normalizeRegistrationCustomerReminderRpcFailure(null)
+  }
   const messageId = value.messageId === null ? null : text(value.messageId)
   const dispatchToken = value.dispatchToken === null ? null : text(value.dispatchToken)
   const currentStatus = text(value.currentStatus)
+  const terminalStatus = [
+    "canceled", "refresh_required", "settings_refresh_required", "runtime_inactive", "source_dirty",
+  ].includes(currentStatus)
+  const existingMessageStatus = [
+    "pending", "accepted", "unknown", "failed_hold", "duplicate_locked",
+  ].includes(currentStatus)
   if (
     typeof value.allowed !== "boolean"
     || (messageId !== null && !UUID_PATTERN.test(messageId))
     || (dispatchToken !== null && !UUID_PATTERN.test(dispatchToken))
-    || (value.allowed && (!messageId || !dispatchToken))
-    || ![
-      "pending", "accepted", "unknown", "failed_hold", "refresh_required",
-      "settings_refresh_required", "runtime_inactive", "source_dirty", "duplicate_locked",
-    ].includes(currentStatus)
-  ) rpcFailure(null)
+    || (value.allowed && (currentStatus !== "pending" || !messageId || !dispatchToken))
+    || (!value.allowed && terminalStatus && (messageId !== null || dispatchToken !== null))
+    || (!value.allowed && existingMessageStatus && (!messageId || !dispatchToken))
+    || (!value.allowed && !terminalStatus && !existingMessageStatus)
+  ) normalizeRegistrationCustomerReminderRpcFailure(null)
   return Object.freeze({
     allowed: value.allowed,
     messageId,
@@ -575,7 +585,7 @@ export function createProductionRegistrationCustomerReminderRouteHandlers(
         p_claim_token: claim.claimToken,
       }, {
         sourceIneligibleIsTerminal: true,
-        reminderSourceRead: true,
+        observationSourceRead: claim.messageKind === "observation_reminder",
       })
       const resolver = createRegistrationCustomerMessageSourceResolver({
         catalog,
@@ -605,7 +615,7 @@ export function createProductionRegistrationCustomerReminderRouteHandlers(
       })
     },
     async begin({ claim, prepared }) {
-      return reminderBegin(await serviceRpc(client, "begin_registration_customer_reminder_dispatch_v1", {
+      return parseRegistrationCustomerReminderBegin(await serviceRpc(client, "begin_registration_customer_reminder_dispatch_v1", {
         p_job_id: claim.jobId,
         p_claim_token: claim.claimToken,
         p_contract: prepared.contract,
@@ -666,7 +676,7 @@ export function createProductionRegistrationCustomerReminderRouteHandlers(
         p_lead_hours: input.leadHours,
         p_expected_revision: input.expectedRevision,
         p_template_contract: input.templateContract,
-      })
+      }, { settingsMutation: true })
     },
     templateContract,
     templateContractForSettings(settings) {

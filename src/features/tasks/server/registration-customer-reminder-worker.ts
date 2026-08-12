@@ -36,6 +36,7 @@ export type RegistrationCustomerReminderBegin = Readonly<{
     | "runtime_inactive"
     | "source_dirty"
     | "duplicate_locked"
+    | "canceled"
 }>
 
 type RegistrationCustomerReminderWorkerDependencies = Readonly<{

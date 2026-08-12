@@ -29,6 +29,16 @@ const TEMPLATE = Object.freeze({
   catalogChecksum: "a".repeat(64),
 })
 
+const DATABASE_OFF_SETTINGS = Object.freeze({
+  enabled: false,
+  leadHours: 3,
+  revision: "7",
+  updatedAt: "2026-08-12T00:00:00.000Z",
+  ready: false,
+  status: "not_ready",
+  activeKinds: Object.freeze(["observation_reminder"]),
+})
+
 function request(path, init = {}) {
   return new Request(`http://localhost${path}`, init)
 }
@@ -175,6 +185,57 @@ test("OFF 전환은 승인 상태와 무관하게 저장할 수 있다", async (
   assert.equal(setInput.enabled, false)
   assert.equal(setInput.leadHours, 5)
   assert.deepEqual(setInput.templateContract, TEMPLATE)
+})
+
+test("DB activeKinds가 남아 있어도 OFF 조회·저장은 템플릿 환경 없이 성공한다", async () => {
+  let templateContractReads = 0
+  const { calls, handlers } = makeDependencies({
+    async getSettings() {
+      calls.get += 1
+      return DATABASE_OFF_SETTINGS
+    },
+    async setSettings() {
+      calls.set += 1
+      return { ...DATABASE_OFF_SETTINGS, revision: "8" }
+    },
+    templateContractForSettings() {
+      templateContractReads += 1
+      throw new Error("observation template must not be read while OFF")
+    },
+  })
+
+  const get = await handlers.settings(request("/settings"))
+  assert.equal(get.status, 200)
+  assert.deepEqual(await get.json(), {
+    ok: true,
+    settings: {
+      enabled: false,
+      leadHours: 3,
+      revision: "7",
+      updatedAt: "2026-08-12T00:00:00.000Z",
+      ready: false,
+      status: "not_ready",
+      editable: true,
+    },
+  })
+
+  const patch = await handlers.settings(request("/settings", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ enabled: false, leadHours: 3, expectedRevision: "7" }),
+  }))
+  assert.equal(patch.status, 200)
+  assert.equal(calls.set, 1)
+  assert.equal(templateContractReads, 0)
+  assert.deepEqual((await patch.json()).settings, {
+    enabled: false,
+    leadHours: 3,
+    revision: "8",
+    updatedAt: "2026-08-12T00:00:00.000Z",
+    ready: false,
+    status: "not_ready",
+    editable: true,
+  })
 })
 
 test("reminder settings contract derives active kinds from the server catalog", () => {

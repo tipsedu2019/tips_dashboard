@@ -134,10 +134,20 @@ function productionWorkerScenario({
   read = OBSERVATION_SOURCE,
   begin = { allowed: true, messageId: MESSAGE_ID, dispatchToken: DISPATCH_TOKEN, currentStatus: "pending" },
 } = {}) {
-  const calls = { claim: 0, read: 0, begin: 0, release: [], finalize: [], provider: 0 }
+  const calls = {
+    claim: 0,
+    read: 0,
+    begin: 0,
+    release: [],
+    finalize: [],
+    provider: 0,
+    rpc: [],
+    providerPayloads: [],
+  }
   const value = (input) => typeof input === "function" ? input() : input
   const client = {
     rpc(name, args = {}) {
+      calls.rpc.push({ name, args })
       if (name === "claim_registration_customer_reminder_job_v1") {
         calls.claim += 1
         return rpcResponse(value(claim))
@@ -170,8 +180,9 @@ function productionWorkerScenario({
   const handlers = reminderRoute.createProductionRegistrationCustomerReminderRouteHandlers({
     client,
     environment: productionEnvironment(),
-    async providerFetch() {
+    async providerFetch(_url, init) {
       calls.provider += 1
+      calls.providerPayloads.push(JSON.parse(init.body))
       throw new Error("test provider boundary")
     },
   })
@@ -180,6 +191,26 @@ function productionWorkerScenario({
     headers: { authorization: "Bearer worker-secret" },
   }))
   return { calls, run }
+}
+
+function rpcNames(calls) {
+  return calls.rpc.map(({ name }) => name)
+}
+
+function canonicalClaimGate(input) {
+  const transitions = []
+  const { calls, run } = productionWorkerScenario({
+    claim() {
+      transitions.push(`claim:${input.kind}:${input.state}`)
+      if (input.state !== "scheduled") return null
+      if (input.kind === "observation_reminder" && input.runtimeVersion !== 1) return null
+      if (input.kind === "appointment_reminder" && input.activationMode !== "live") return null
+      if (input.receiptReady === false || input.afterCutoff === false || input.bookingHashCurrent === false) return null
+      transitions.push("claimed")
+      return input.kind === "appointment_reminder" ? LEGACY_CLAIM : OBSERVATION_CLAIM
+    },
+  })
+  return { calls, run, transitions }
 }
 
 test("claim parser normalizes the exact legacy shape only after preserving its raw six-key contract", () => {
@@ -204,6 +235,109 @@ test("claim parser preserves the job-locked observation identity and rejects ext
   const parse = reminderRoute.parseRegistrationCustomerReminderClaim
   assert.deepEqual(parse(OBSERVATION_CLAIM), OBSERVATION_CLAIM)
   assert.throws(() => parse({ ...OBSERVATION_CLAIM, unexpected: true }))
+})
+
+test("begin parser accepts every Task 3 discriminated result shape and rejects cross-shape markers", () => {
+  const parse = reminderRoute.parseRegistrationCustomerReminderBegin
+  const terminal = [
+    "canceled",
+    "refresh_required",
+    "settings_refresh_required",
+    "runtime_inactive",
+    "source_dirty",
+  ]
+  for (const currentStatus of terminal) {
+    assert.deepEqual(parse({
+      allowed: false,
+      messageId: null,
+      dispatchToken: null,
+      currentStatus,
+    }), {
+      allowed: false,
+      messageId: null,
+      dispatchToken: null,
+      currentStatus,
+    })
+  }
+  for (const currentStatus of ["pending", "accepted", "unknown", "failed_hold", "duplicate_locked"]) {
+    assert.deepEqual(parse({
+      allowed: false,
+      messageId: MESSAGE_ID,
+      dispatchToken: DISPATCH_TOKEN,
+      currentStatus,
+    }), {
+      allowed: false,
+      messageId: MESSAGE_ID,
+      dispatchToken: DISPATCH_TOKEN,
+      currentStatus,
+    })
+  }
+  assert.deepEqual(parse({
+    allowed: true,
+    messageId: MESSAGE_ID,
+    dispatchToken: DISPATCH_TOKEN,
+    currentStatus: "pending",
+  }), {
+    allowed: true,
+    messageId: MESSAGE_ID,
+    dispatchToken: DISPATCH_TOKEN,
+    currentStatus: "pending",
+  })
+  for (const malformed of [
+    { allowed: true, messageId: MESSAGE_ID, dispatchToken: DISPATCH_TOKEN, currentStatus: "accepted" },
+    { allowed: false, messageId: MESSAGE_ID, dispatchToken: DISPATCH_TOKEN, currentStatus: "refresh_required" },
+    { allowed: false, messageId: null, dispatchToken: null, currentStatus: "duplicate_locked" },
+    { allowed: true, messageId: null, dispatchToken: null, currentStatus: "pending" },
+  ]) {
+    assert.throws(() => parse(malformed))
+  }
+})
+
+test("RPC failure normalization accepts only exact terminal literals in their expected boundary", () => {
+  const normalize = reminderRoute.normalizeRegistrationCustomerReminderRpcFailure
+  assert.throws(
+    () => normalize({ message: "registration_customer_message_source_ineligible" }, {
+      sourceIneligibleIsTerminal: true,
+    }),
+    { name: "RegistrationCustomerReminderSourceIneligibleError" },
+  )
+  assert.throws(
+    () => normalize({ message: "registration_customer_message_source_ineligible_suffix" }, {
+      sourceIneligibleIsTerminal: true,
+    }),
+    /registration_customer_reminder_runtime_unavailable/,
+  )
+  for (const [message, name] of [
+    ["registration_customer_reminder_booking_fact_changed", "RegistrationCustomerReminderBookingFactChangedError"],
+    ["registration_observation_runtime_inactive", "RegistrationObservationRuntimeInactiveError"],
+  ]) {
+    assert.throws(
+      () => normalize({ message }, { observationSourceRead: true }),
+      { name },
+    )
+    assert.throws(
+      () => normalize({ message: `${message}_suffix` }, { observationSourceRead: true }),
+      /registration_customer_reminder_runtime_unavailable/,
+    )
+    assert.throws(
+      () => normalize({ message }, { observationSourceRead: false }),
+      /registration_customer_reminder_runtime_unavailable/,
+    )
+  }
+  for (const [message, status] of [
+    ["registration_customer_reminder_not_ready", 409],
+    ["registration_customer_reminder_settings_conflict", 409],
+    ["registration_customer_reminder_settings_invalid", 400],
+  ]) {
+    assert.throws(
+      () => normalize({ message }, { settingsMutation: true }),
+      (error) => error.status === status,
+    )
+    assert.throws(
+      () => normalize({ message: `${message}_suffix` }, { settingsMutation: true }),
+      (error) => error.status === 503,
+    )
+  }
 })
 
 test("worker refreshes exactly once and sends only the refreshed observation payload", async () => {
@@ -237,6 +371,45 @@ test("worker refreshes exactly once and sends only the refreshed observation pay
   assert.equal(calls.finalize.length, 1)
 })
 
+test("production refresh re-reads once, mutates between begin attempts, and sends only the second payload", async () => {
+  const secondSource = Object.freeze({ ...OBSERVATION_SOURCE, teacherName: "새 담당 선생님" })
+  const sources = [OBSERVATION_SOURCE, secondSource]
+  const markers = [
+    { allowed: false, messageId: null, dispatchToken: null, currentStatus: "refresh_required" },
+    { allowed: true, messageId: MESSAGE_ID, dispatchToken: DISPATCH_TOKEN, currentStatus: "pending" },
+  ]
+  const scenario = productionWorkerScenario({
+    read: () => sources.shift(),
+    begin: () => markers.shift(),
+  })
+
+  const response = await scenario.run()
+
+  assert.equal((await response.json()).outcome, "unknown")
+  assert.deepEqual(rpcNames(scenario.calls), [
+    "claim_registration_customer_reminder_job_v1",
+    "read_registration_customer_reminder_source_v1",
+    "begin_registration_customer_reminder_dispatch_v1",
+    "read_registration_customer_reminder_source_v1",
+    "begin_registration_customer_reminder_dispatch_v1",
+    "finalize_registration_customer_reminder_dispatch_v1",
+  ])
+  assert.deepEqual(
+    scenario.calls.rpc.filter(({ name }) => name === "read_registration_customer_reminder_source_v1")
+      .map(({ args }) => args),
+    [
+      { p_job_id: JOB_ID, p_claim_token: CLAIM_TOKEN },
+      { p_job_id: JOB_ID, p_claim_token: CLAIM_TOKEN },
+    ],
+  )
+  assert.equal(scenario.calls.begin, 2)
+  assert.equal(scenario.calls.read, 2)
+  assert.equal(scenario.calls.provider, 1)
+  assert.equal(scenario.calls.finalize.length, 1)
+  assert.equal(JSON.stringify(scenario.calls.providerPayloads[0]).includes("새 담당 선생님"), true)
+  assert.equal(JSON.stringify(scenario.calls.providerPayloads[0]).includes("팁스 선생님"), false)
+})
+
 test("worker stops after the second observation revision drift without a marker or provider call", async () => {
   const { calls, worker } = workerFixture({
     async begin() {
@@ -254,6 +427,38 @@ test("worker stops after the second observation revision drift without a marker 
   assert.equal(calls.begin, 2)
   assert.equal(calls.send, 0)
   assert.equal(calls.finalize.length, 0)
+})
+
+test("production second drift stops after two reads and two begin attempts without a third read or provider", async () => {
+  const sources = [OBSERVATION_SOURCE, Object.freeze({ ...OBSERVATION_SOURCE, className: "변경된 수업" })]
+  const markers = [
+    { allowed: false, messageId: null, dispatchToken: null, currentStatus: "refresh_required" },
+    { allowed: false, messageId: null, dispatchToken: null, currentStatus: "source_dirty" },
+  ]
+  const scenario = productionWorkerScenario({
+    read: () => sources.shift(),
+    begin: () => markers.shift(),
+  })
+
+  const response = await scenario.run()
+
+  assert.deepEqual(await response.json(), {
+    ok: true,
+    processed: true,
+    providerAttempted: false,
+    outcome: "skipped",
+  })
+  assert.deepEqual(rpcNames(scenario.calls), [
+    "claim_registration_customer_reminder_job_v1",
+    "read_registration_customer_reminder_source_v1",
+    "begin_registration_customer_reminder_dispatch_v1",
+    "read_registration_customer_reminder_source_v1",
+    "begin_registration_customer_reminder_dispatch_v1",
+  ])
+  assert.equal(scenario.calls.read, 2)
+  assert.equal(scenario.calls.begin, 2)
+  assert.equal(scenario.calls.provider, 0)
+  assert.equal(scenario.calls.finalize.length, 0)
 })
 
 test("worker maps booking fact and runtime gate failures to terminal provider-zero releases", async () => {
@@ -298,18 +503,19 @@ test("terminal begin states never cross the observation provider marker boundary
   }
 })
 
-test("ineligible observation jobs stay provider-zero before claim, including runtime off and verification fences", async () => {
-  for (const cause of [
-    "canceled",
-    "completed",
-    "no_show",
-    "runtime_off_at_claim",
-    "booking_hash_dirty_at_claim",
-    "appointment_verification",
-    "observation_receipt_drift",
-    "pre_cutoff_backlog",
-  ]) {
-    const { calls, run } = productionWorkerScenario({ claim: null })
+test("canonical claim fences stop each ineligible state before any source read or marker", async () => {
+  const fixtures = [
+    ["canceled", { kind: "observation_reminder", state: "canceled", runtimeVersion: 1 }],
+    ["completed", { kind: "observation_reminder", state: "completed", runtimeVersion: 1 }],
+    ["no show", { kind: "observation_reminder", state: "no_show", runtimeVersion: 1 }],
+    ["runtime 0", { kind: "observation_reminder", state: "scheduled", runtimeVersion: 0 }],
+    ["claim booking dirty", { kind: "observation_reminder", state: "scheduled", runtimeVersion: 1, bookingHashCurrent: false }],
+    ["appointment verification", { kind: "appointment_reminder", state: "scheduled", activationMode: "verification" }],
+    ["receipt drift", { kind: "observation_reminder", state: "scheduled", runtimeVersion: 1, receiptReady: false }],
+    ["cutoff backlog", { kind: "observation_reminder", state: "scheduled", runtimeVersion: 1, afterCutoff: false }],
+  ]
+  for (const [cause, fixture] of fixtures) {
+    const { calls, run, transitions } = canonicalClaimGate(fixture)
     const response = await run()
     assert.deepEqual(await response.json(), {
       ok: true,
@@ -317,7 +523,10 @@ test("ineligible observation jobs stay provider-zero before claim, including run
       providerAttempted: false,
       outcome: "idle",
     }, cause)
+    assert.deepEqual(transitions, [`claim:${fixture.kind}:${fixture.state}`], cause)
+    assert.equal(calls.read, 0, cause)
     assert.equal(calls.begin, 0, cause)
+    assert.equal(calls.release.length, 0, cause)
     assert.equal(calls.provider, 0, cause)
     assert.equal(calls.finalize.length, 0, cause)
   }
@@ -344,6 +553,19 @@ test("runtime and booking gates fail provider-zero both before source preparatio
   assert.equal(beforeMarker.calls.provider, 0)
   assert.equal(beforeMarker.calls.finalize.length, 0)
 
+  const canceled = productionWorkerScenario({
+    begin: { allowed: false, messageId: null, dispatchToken: null, currentStatus: "canceled" },
+  })
+  const canceledResponse = await canceled.run()
+  assert.equal((await canceledResponse.json()).outcome, "skipped")
+  assert.deepEqual(rpcNames(canceled.calls), [
+    "claim_registration_customer_reminder_job_v1",
+    "read_registration_customer_reminder_source_v1",
+    "begin_registration_customer_reminder_dispatch_v1",
+  ])
+  assert.equal(canceled.calls.provider, 0)
+  assert.equal(canceled.calls.finalize.length, 0)
+
   const bookingChanged = productionWorkerScenario({
     read: new Error("registration_customer_reminder_booking_fact_changed"),
   })
@@ -361,6 +583,26 @@ test("runtime and booking gates fail provider-zero both before source preparatio
   assert.equal((await sourceDirtyResponse.json()).outcome, "skipped")
   assert.equal(sourceDirty.calls.provider, 0)
   assert.equal(sourceDirty.calls.finalize.length, 0)
+})
+
+test("observation runtime source errors are terminal only for observation claims", async () => {
+  const observation = productionWorkerScenario({
+    read: new Error("registration_observation_runtime_inactive"),
+  })
+  const observationResponse = await observation.run()
+  assert.equal((await observationResponse.json()).outcome, "skipped")
+  assert.deepEqual(observation.calls.release.map(({ p_error_code }) => p_error_code), ["runtime_inactive"])
+  assert.equal(observation.calls.provider, 0)
+
+  const legacy = productionWorkerScenario({
+    claim: LEGACY_CLAIM,
+    read: new Error("registration_observation_runtime_inactive"),
+  })
+  const legacyResponse = await legacy.run()
+  assert.equal((await legacyResponse.json()).outcome, "held")
+  assert.deepEqual(legacy.calls.release.map(({ p_error_code }) => p_error_code), ["pre_send_preparation_failed"])
+  assert.equal(legacy.calls.provider, 0)
+  assert.equal(legacy.calls.finalize.length, 0)
 })
 
 test("not-ready settings and a requested refresh stay provider-zero without a final marker", async () => {
@@ -382,6 +624,38 @@ test("not-ready settings and a requested refresh stay provider-zero without a fi
   assert.equal((await response.json()).outcome, "skipped")
   assert.equal(refreshRequired.calls.provider, 0)
   assert.equal(refreshRequired.calls.finalize.length, 0)
+})
+
+test("settings refresh defers the recomputed-due job until a subsequent claim", async () => {
+  const claims = [OBSERVATION_CLAIM, null, OBSERVATION_CLAIM]
+  const markers = [
+    { allowed: false, messageId: null, dispatchToken: null, currentStatus: "settings_refresh_required" },
+    { allowed: true, messageId: MESSAGE_ID, dispatchToken: DISPATCH_TOKEN, currentStatus: "pending" },
+  ]
+  const scenario = productionWorkerScenario({
+    claim: () => claims.shift(),
+    begin: () => markers.shift(),
+  })
+
+  const first = await scenario.run()
+  const second = await scenario.run()
+  const third = await scenario.run()
+
+  assert.equal((await first.json()).outcome, "skipped")
+  assert.equal((await second.json()).outcome, "idle")
+  assert.equal((await third.json()).outcome, "unknown")
+  assert.deepEqual(rpcNames(scenario.calls), [
+    "claim_registration_customer_reminder_job_v1",
+    "read_registration_customer_reminder_source_v1",
+    "begin_registration_customer_reminder_dispatch_v1",
+    "claim_registration_customer_reminder_job_v1",
+    "claim_registration_customer_reminder_job_v1",
+    "read_registration_customer_reminder_source_v1",
+    "begin_registration_customer_reminder_dispatch_v1",
+    "finalize_registration_customer_reminder_dispatch_v1",
+  ])
+  assert.equal(scenario.calls.provider, 1)
+  assert.equal(scenario.calls.finalize.length, 1)
 })
 
 test("unknown observation dispatch is never retried by a second worker invocation", async () => {
