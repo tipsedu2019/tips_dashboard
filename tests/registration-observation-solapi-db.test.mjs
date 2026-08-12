@@ -339,6 +339,49 @@ test("dispatch centralizes observation identity across the manual source pipelin
   assert.match(history, /'observationId', message\.observation_id/);
 });
 
+test("manual post-marker stages use durable observation identity instead of live eligibility", async () => {
+  const sql = normalizeSql(await readFile(dispatchMigrationUrl, "utf8"));
+  const storedIdentity = functionBlock(
+    sql,
+    "dashboard_private.registration_customer_message_assert_stored_observation_v1",
+  );
+  assert.match(storedIdentity, /security definer/);
+  assert.match(storedIdentity, /set search_path = ''/);
+  assert.match(storedIdentity, /auth\.role\(\)/);
+  assert.match(storedIdentity, /message\.preview_id = p_message\.preview_id/);
+  assert.match(storedIdentity, /preview\.source_fingerprint = p_message\.source_fingerprint/);
+  assert.match(storedIdentity, /event\.notification_revision = p_message\.source_revision/);
+  assert.match(storedIdentity, /observation\.task_id = p_message\.task_id/);
+  assert.doesNotMatch(storedIdentity, /observation\.status|appointment\.status/);
+
+  for (const name of [
+    "dashboard_private.registration_customer_message_result_v1",
+    "public.release_registration_customer_message_pre_send_claim_v1",
+    "public.release_registration_customer_message_pre_send_claim_admin_v1",
+    "public.finalize_registration_customer_message_v1",
+    "public.record_registration_customer_message_provider_check_v1",
+    "public.reconcile_registration_customer_message_v1",
+  ]) {
+    const block = functionBlock(sql, name);
+    assert.match(
+      block,
+      /registration_customer_message_assert_stored_observation_v1/,
+      `${name} must validate the durable stored observation identity`,
+    );
+    assert.doesNotMatch(
+      block,
+      /resolve_registration_customer_message_source_v1_impl/,
+      `${name} must not re-run live eligibility after claim or provider marker`,
+    );
+  }
+
+  const marker = functionBlock(
+    sql,
+    "public.mark_registration_customer_message_attempt_started_v1",
+  );
+  assert.match(marker, /registration_customer_message_assert_current_v1/);
+});
+
 test("automatic dispatch is job locked, bounded, and keeps the legacy raw result", async () => {
   const sql = normalizeSql(await readFile(dispatchMigrationUrl, "utf8"));
   const claim = functionBlock(sql, "public.claim_registration_customer_reminder_job_v1");

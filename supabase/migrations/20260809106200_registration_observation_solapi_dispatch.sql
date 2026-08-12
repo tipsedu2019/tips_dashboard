@@ -100,6 +100,138 @@ revoke all on function dashboard_private.registration_customer_message_stored_so
   uuid, uuid, uuid, uuid
 ) from public, anon, authenticated, service_role;
 
+-- Once a provider-capable marker exists, current source eligibility is no
+-- longer the authority for recording the outcome. Validate the immutable
+-- message receipt and its captured observation ownership instead. This keeps
+-- terminal or superseded source state from erasing an already-started attempt
+-- while still rejecting a row spliced onto another task or observation.
+create function dashboard_private.registration_customer_message_assert_stored_observation_v1(
+  p_message public.ops_registration_customer_messages
+)
+returns void
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if (select auth.role()) <> 'service_role' then
+    raise exception 'registration_customer_message_access_denied'
+      using errcode = '42501';
+  end if;
+  if p_message.message_kind not in ('observation_booking', 'observation_reminder')
+    or not exists (
+      select 1
+      from public.ops_registration_customer_messages message
+      join public.ops_registration_observations observation
+        on observation.id = message.observation_id
+      join public.ops_registration_appointments appointment
+        on appointment.id = message.appointment_id
+      join public.ops_registration_subject_tracks track
+        on track.id = message.track_id
+      where message.id = p_message.id
+        and message.preview_id is not distinct from p_message.preview_id
+        and message.task_id = p_message.task_id
+        and message.track_id = p_message.track_id
+        and message.appointment_id = p_message.appointment_id
+        and message.observation_id = p_message.observation_id
+        and message.message_kind = p_message.message_kind
+        and message.source_revision = p_message.source_revision
+        and message.source_fingerprint = p_message.source_fingerprint
+        and message.source_facts_checksum = p_message.source_facts_checksum
+        and message.recipient_hash = p_message.recipient_hash
+        and message.template_key = p_message.template_key
+        and message.template_revision = p_message.template_revision
+        and message.template_checksum = p_message.template_checksum
+        and message.rendered_variables_checksum = p_message.rendered_variables_checksum
+        and message.rendered_body_checksum = p_message.rendered_body_checksum
+        and message.rendered_buttons_checksum = p_message.rendered_buttons_checksum
+        and message.dedupe_key = p_message.dedupe_key
+        and message.request_key = p_message.request_key
+        and message.delivery_origin = p_message.delivery_origin
+        and message.scheduled_job_id is not distinct from p_message.scheduled_job_id
+        and message.scheduled_source_identity is not distinct from p_message.scheduled_source_identity
+        and observation.task_id = p_message.task_id
+        and observation.track_id = p_message.track_id
+        and observation.appointment_id = p_message.appointment_id
+        and appointment.task_id = p_message.task_id
+        and appointment.kind = 'observation_class'
+        and track.task_id = p_message.task_id
+        and track.subject = observation.subject
+        and (
+          (
+            message.delivery_origin = 'manual'
+            and message.confirmed_by is not null
+            and exists (
+              select 1
+              from public.ops_registration_customer_message_previews preview
+              where message.preview_id = p_message.preview_id
+                and preview.id = message.preview_id
+                and preview.created_by = message.confirmed_by
+                and preview.task_id = message.task_id
+                and preview.track_id = message.track_id
+                and preview.appointment_id = message.appointment_id
+                and preview.observation_id = message.observation_id
+                and preview.message_kind = message.message_kind
+                and preview.source_revision = message.source_revision
+                and preview.source_fingerprint = p_message.source_fingerprint
+                and preview.source_facts_checksum = message.source_facts_checksum
+                and preview.recipient_hash = message.recipient_hash
+                and preview.template_key = message.template_key
+                and preview.template_revision = message.template_revision
+                and preview.template_checksum = message.template_checksum
+                and preview.rendered_variables_checksum = message.rendered_variables_checksum
+                and preview.rendered_body_checksum = message.rendered_body_checksum
+                and preview.rendered_buttons_checksum = message.rendered_buttons_checksum
+                and preview.consumed_at is not null
+            )
+            and exists (
+              select 1
+              from dashboard_private.registration_observation_domain_events event
+              where event.observation_id = message.observation_id
+                and event.appointment_id = message.appointment_id
+                and event.notification_revision = p_message.source_revision
+                and event.event_kind in ('observation_scheduled', 'observation_rescheduled')
+            )
+          )
+          or (
+            message.delivery_origin = 'scheduled'
+            and message.confirmed_by is null
+            and exists (
+              select 1
+              from dashboard_private.registration_customer_reminder_jobs job
+              join dashboard_private.registration_observation_domain_events event
+                on event.event_id = job.source_event_id
+              where job.job_id = message.scheduled_job_id
+                and job.message_id = message.id
+                and job.task_id = message.task_id
+                and job.appointment_id = message.appointment_id
+                and job.observation_id = message.observation_id
+                and job.message_kind = message.message_kind
+                and job.source_revision = message.source_revision
+                and job.source_identity = message.scheduled_source_identity
+                and event.observation_id = message.observation_id
+                and event.appointment_id = message.appointment_id
+                and event.notification_revision = p_message.source_revision
+                and event.event_kind in ('observation_scheduled', 'observation_rescheduled')
+            )
+          )
+        )
+    )
+  then
+    raise exception 'registration_customer_message_stored_identity_invalid'
+      using errcode = '40001';
+  end if;
+end;
+$$;
+
+alter function dashboard_private.registration_customer_message_assert_stored_observation_v1(
+  public.ops_registration_customer_messages
+) owner to postgres;
+revoke all on function dashboard_private.registration_customer_message_assert_stored_observation_v1(
+  public.ops_registration_customer_messages
+) from public, anon, authenticated, service_role;
+
 create function dashboard_private.registration_customer_message_source_task_v1(
   p_message_kind text,
   p_source_id uuid
@@ -435,7 +567,6 @@ as $$
 declare
   v_message public.ops_registration_customer_messages%rowtype;
   v_result jsonb;
-  v_source jsonb;
 begin
   if (select auth.role()) <> 'service_role' then
     raise exception 'registration_customer_message_access_denied'
@@ -456,18 +587,12 @@ begin
     p_claim_owned
   );
   if v_message.message_kind in ('observation_booking', 'observation_reminder') then
-    v_source := dashboard_private.resolve_registration_customer_message_source_v1_impl(
-      v_message.message_kind,
-      dashboard_private.registration_customer_message_stored_source_id_v1(
-        v_message.observation_id,
-        v_message.appointment_id,
-        v_message.track_id,
-        v_message.task_id
-      )
+    perform dashboard_private.registration_customer_message_assert_stored_observation_v1(
+      v_message
     );
     v_result := v_result || pg_catalog.jsonb_build_object(
-      'sourceId', v_source -> 'sourceId',
-      'observationId', v_source -> 'observationId'
+      'sourceId', v_message.observation_id,
+      'observationId', v_message.observation_id
     );
   end if;
   return v_result;
@@ -935,12 +1060,8 @@ begin
     v_actor_id, v_message.task_id, 'send'
   );
   if v_message.message_kind in ('observation_booking', 'observation_reminder') then
-    perform dashboard_private.resolve_registration_customer_message_source_v1_impl(
-      v_message.message_kind,
-      dashboard_private.registration_customer_message_stored_source_id_v1(
-        v_message.observation_id, v_message.appointment_id,
-        v_message.track_id, v_message.task_id
-      )
+    perform dashboard_private.registration_customer_message_assert_stored_observation_v1(
+      v_message
     );
   end if;
   return dashboard_private.release_registration_customer_message_pre_send_claim_legacy_v1(
@@ -984,12 +1105,8 @@ begin
     p_actor_profile_id, v_message.task_id, 'admin'
   );
   if v_message.message_kind in ('observation_booking', 'observation_reminder') then
-    perform dashboard_private.resolve_registration_customer_message_source_v1_impl(
-      v_message.message_kind,
-      dashboard_private.registration_customer_message_stored_source_id_v1(
-        v_message.observation_id, v_message.appointment_id,
-        v_message.track_id, v_message.task_id
-      )
+    perform dashboard_private.registration_customer_message_assert_stored_observation_v1(
+      v_message
     );
   end if;
   return dashboard_private.release_reg_customer_msg_claim_admin_legacy_v1(
@@ -1129,12 +1246,8 @@ begin
     v_message.confirmed_by, v_message.task_id, 'send'
   );
   if v_message.message_kind in ('observation_booking', 'observation_reminder') then
-    perform dashboard_private.resolve_registration_customer_message_source_v1_impl(
-      v_message.message_kind,
-      dashboard_private.registration_customer_message_stored_source_id_v1(
-        v_message.observation_id, v_message.appointment_id,
-        v_message.track_id, v_message.task_id
-      )
+    perform dashboard_private.registration_customer_message_assert_stored_observation_v1(
+      v_message
     );
   end if;
   return dashboard_private.finalize_registration_customer_message_pre_observation_v1(
@@ -1338,12 +1451,8 @@ begin
     p_actor_profile_id, v_message.task_id, 'send'
   );
   if v_message.message_kind in ('observation_booking', 'observation_reminder') then
-    perform dashboard_private.resolve_registration_customer_message_source_v1_impl(
-      v_message.message_kind,
-      dashboard_private.registration_customer_message_stored_source_id_v1(
-        v_message.observation_id, v_message.appointment_id,
-        v_message.track_id, v_message.task_id
-      )
+    perform dashboard_private.registration_customer_message_assert_stored_observation_v1(
+      v_message
     );
   end if;
   return dashboard_private.record_registration_customer_message_provider_check_legacy_v1(
@@ -1389,12 +1498,8 @@ begin
     p_actor_profile_id, v_message.task_id, 'admin'
   );
   if v_message.message_kind in ('observation_booking', 'observation_reminder') then
-    perform dashboard_private.resolve_registration_customer_message_source_v1_impl(
-      v_message.message_kind,
-      dashboard_private.registration_customer_message_stored_source_id_v1(
-        v_message.observation_id, v_message.appointment_id,
-        v_message.track_id, v_message.task_id
-      )
+    perform dashboard_private.registration_customer_message_assert_stored_observation_v1(
+      v_message
     );
   end if;
   return dashboard_private.reconcile_registration_customer_message_pre_observation_v1(

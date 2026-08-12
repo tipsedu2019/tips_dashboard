@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists dblink;
 
-select plan(89);
+select plan(99);
 
 select has_function('public', 'resolve_registration_customer_message_source_v1', array['uuid','text','uuid'], 'public source resolver exists');
 select has_function('public', 'inspect_registration_observation_solapi_readiness_v1', array[]::text[], 'operational readiness exists');
@@ -41,6 +41,39 @@ select function_privs_are(
   'dashboard_private', 'registration_customer_message_result_v1',
   array['uuid','boolean','boolean','boolean'], 'service_role', array[]::text[],
   'result capability is not directly executable by service role'
+);
+select has_function(
+  'dashboard_private', 'registration_customer_message_assert_stored_observation_v1',
+  array['public.ops_registration_customer_messages'],
+  'stored observation identity capability exists'
+);
+select function_privs_are(
+  'dashboard_private', 'registration_customer_message_assert_stored_observation_v1',
+  array['public.ops_registration_customer_messages'], 'service_role', array[]::text[],
+  'stored observation identity capability is not directly executable by service role'
+);
+select is(
+  (
+    select proc.prosecdef
+      and proc.proconfig @> array['search_path=""']
+    from pg_catalog.pg_proc proc
+    where proc.oid = pg_catalog.to_regprocedure(
+      'dashboard_private.registration_customer_message_assert_stored_observation_v1(public.ops_registration_customer_messages)'
+    )
+  ),
+  true,
+  'stored observation identity capability is a definer with an empty search path'
+);
+select is(
+  (
+    select count(*)
+    from pg_catalog.pg_proc proc
+    join pg_catalog.pg_namespace namespace on namespace.oid = proc.pronamespace
+    where namespace.nspname = 'dashboard_private'
+      and proc.proname = 'registration_customer_message_assert_stored_observation_v1'
+  ),
+  1::bigint,
+  'stored observation identity capability has no overload'
 );
 select function_privs_are(
   'public', 'resolve_registration_customer_message_source_v1',
@@ -662,10 +695,125 @@ exception when others then
   );
 end;
 $$;
+create function pg_temp.capture_manual_finalize(
+  p_message_id uuid,
+  p_dispatch_token uuid,
+  p_result text,
+  p_provider_result jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  return public.finalize_registration_customer_message_v1(
+    p_message_id, p_dispatch_token, p_result, p_provider_result
+  );
+exception when others then
+  return pg_catalog.jsonb_build_object(
+    'caughtSqlstate', sqlstate,
+    'caughtError', sqlerrm
+  );
+end;
+$$;
+create function pg_temp.capture_manual_release(
+  p_message_id uuid,
+  p_claim_token uuid,
+  p_error_code text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  return public.release_registration_customer_message_pre_send_claim_v1(
+    p_message_id, p_claim_token, p_error_code
+  );
+exception when others then
+  return pg_catalog.jsonb_build_object(
+    'caughtSqlstate', sqlstate,
+    'caughtError', sqlerrm
+  );
+end;
+$$;
+create function pg_temp.capture_manual_provider_check(
+  p_actor_profile_id uuid,
+  p_message_id uuid,
+  p_resolution text,
+  p_provider_evidence jsonb,
+  p_request_key text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  return public.record_registration_customer_message_provider_check_v1(
+    p_actor_profile_id, p_message_id, p_resolution,
+    p_provider_evidence, p_request_key
+  );
+exception when others then
+  return pg_catalog.jsonb_build_object(
+    'caughtSqlstate', sqlstate,
+    'caughtError', sqlerrm
+  );
+end;
+$$;
+create function pg_temp.capture_manual_reconcile(
+  p_actor_profile_id uuid,
+  p_message_id uuid,
+  p_resolution text,
+  p_provider_evidence jsonb,
+  p_reason text,
+  p_request_key text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  return public.reconcile_registration_customer_message_v1(
+    p_actor_profile_id, p_message_id, p_resolution,
+    p_provider_evidence, p_reason, p_request_key
+  );
+exception when others then
+  return pg_catalog.jsonb_build_object(
+    'caughtSqlstate', sqlstate,
+    'caughtError', sqlerrm
+  );
+end;
+$$;
+create function pg_temp.assert_stored_observation(p_message_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_message public.ops_registration_customer_messages%rowtype;
+begin
+  select message.*
+  into strict v_message
+  from public.ops_registration_customer_messages message
+  where message.id = p_message_id;
+  perform dashboard_private.registration_customer_message_assert_stored_observation_v1(
+    v_message
+  );
+end;
+$$;
 grant execute on function pg_temp.dispatch_contract(jsonb, text, text) to service_role;
 grant execute on function pg_temp.dispatch_readiness_contract(jsonb, text, text) to service_role;
 grant execute on function pg_temp.capture_automatic_begin(uuid, uuid, jsonb, jsonb) to service_role;
 grant execute on function pg_temp.capture_automatic_claim() to service_role;
+grant execute on function pg_temp.capture_manual_finalize(uuid, uuid, text, jsonb) to service_role;
+grant execute on function pg_temp.capture_manual_release(uuid, uuid, text) to service_role;
+grant execute on function pg_temp.capture_manual_provider_check(uuid, uuid, text, jsonb, text) to service_role;
+grant execute on function pg_temp.capture_manual_reconcile(uuid, uuid, text, jsonb, text, text) to service_role;
+grant execute on function pg_temp.assert_stored_observation(uuid) to service_role;
 create temporary table dispatch_rpc_results(
   label text primary key,
   response jsonb not null
@@ -932,8 +1080,49 @@ select 'booking marker', public.mark_registration_customer_message_attempt_start
     'observation_booking'
   )
 );
+reset role;
+update public.ops_registration_appointments
+set notification_revision = 5
+where id = 'd6200000-0000-4000-8000-000000000012';
+insert into dashboard_private.registration_observation_domain_events(
+  event_id, observation_id, appointment_id, notification_revision,
+  event_kind, booking_fact_hash, source_revision, occurred_at
+)
+select
+  'd6200000-0000-4000-8000-000000000120', observation.id,
+  observation.appointment_id, 5, 'observation_rescheduled',
+  observation.booking_fact_hash, observation.source_revision,
+  (
+    select coalesce(max(event.occurred_at), pg_catalog.clock_timestamp()) + interval '1 second'
+    from dashboard_private.registration_observation_domain_events event
+    where event.observation_id = observation.id
+  )
+from public.ops_registration_observations observation
+where observation.id = 'd6200000-0000-4000-8000-000000000013';
+update public.ops_registration_observations
+set status = 'canceled'
+where id = 'd6200000-0000-4000-8000-000000000013';
+update public.ops_registration_appointments
+set status = 'canceled'
+where id = 'd6200000-0000-4000-8000-000000000012';
+insert into dashboard_private.registration_observation_domain_events(
+  event_id, observation_id, appointment_id, notification_revision,
+  event_kind, booking_fact_hash, source_revision, occurred_at
+)
+select
+  'd6200000-0000-4000-8000-000000000119', observation.id,
+  observation.appointment_id, 5, 'observation_canceled',
+  observation.booking_fact_hash, observation.source_revision,
+  (
+    select coalesce(max(event.occurred_at), pg_catalog.clock_timestamp()) + interval '1 second'
+    from dashboard_private.registration_observation_domain_events event
+    where event.observation_id = observation.id
+  )
+from public.ops_registration_observations observation
+where observation.id = 'd6200000-0000-4000-8000-000000000013';
+set local role service_role;
 insert into dispatch_rpc_results(label, response)
-select 'booking finalized', public.finalize_registration_customer_message_v1(
+select 'booking finalized', pg_temp.capture_manual_finalize(
   (select (response ->> 'messageId')::uuid from dispatch_rpc_results where label = 'booking reacquired'),
   (select (response ->> 'dispatchToken')::uuid from dispatch_rpc_results where label = 'booking reacquired'),
   'accepted',
@@ -963,15 +1152,440 @@ select is(
       'markerAllowed', marker.response -> 'allowed',
       'finalStatus', finalized.response ->> 'currentStatus',
       'sourceId', history.response -> 'items' -> 0 ->> 'sourceId',
-      'observationId', history.response -> 'items' -> 0 ->> 'observationId'
+      'observationId', history.response -> 'items' -> 0 ->> 'observationId',
+      'providerMessageId', message.provider_evidence ->> 'providerMessageId',
+      'resolutionSource', message.resolution_source
     )
     from dispatch_rpc_results marker
     join dispatch_rpc_results finalized on finalized.label = 'booking finalized'
     join dispatch_rpc_results history on history.label = 'booking history'
+    join public.ops_registration_customer_messages message
+      on message.id = (finalized.response ->> 'messageId')::uuid
     where marker.label = 'booking marker'
   ),
-  '{"finalStatus":"accepted","markerAllowed":true,"observationId":"d6200000-0000-4000-8000-000000000013","sourceId":"d6200000-0000-4000-8000-000000000013"}'::jsonb,
-  'manual marker, finalize, and history retain canonical observation identity'
+  '{"finalStatus":"accepted","markerAllowed":true,"observationId":"d6200000-0000-4000-8000-000000000013","providerMessageId":"synthetic-dispatch-booking","resolutionSource":"provider_send","sourceId":"d6200000-0000-4000-8000-000000000013"}'::jsonb,
+  'manual accepted result and history survive reschedule and cancellation after the provider marker'
+);
+
+update public.ops_registration_observations
+set status = 'scheduled'
+where id = 'd6200000-0000-4000-8000-000000000013';
+update public.ops_registration_appointments
+set status = 'scheduled', notification_revision = 4
+where id = 'd6200000-0000-4000-8000-000000000012';
+delete from dashboard_private.registration_observation_domain_events
+where event_id in (
+  'd6200000-0000-4000-8000-000000000119',
+  'd6200000-0000-4000-8000-000000000120'
+);
+
+-- A second manual revision reaches the provider marker while eligible. A
+-- no-show committed during the provider request must not erase the durable
+-- result seam or force a second provider path during the later provider check.
+update public.ops_registration_appointments
+set notification_revision = 5
+where id = 'd6200000-0000-4000-8000-000000000012';
+insert into dashboard_private.registration_observation_domain_events(
+  event_id, observation_id, appointment_id, notification_revision,
+  event_kind, booking_fact_hash, source_revision, occurred_at
+)
+select
+  'd6200000-0000-4000-8000-000000000121', observation.id,
+  observation.appointment_id, 5, 'observation_rescheduled',
+  observation.booking_fact_hash, observation.source_revision,
+  (
+    select coalesce(max(event.occurred_at), pg_catalog.clock_timestamp()) + interval '1 second'
+    from dashboard_private.registration_observation_domain_events event
+    where event.observation_id = observation.id
+  )
+from public.ops_registration_observations observation
+where observation.id = 'd6200000-0000-4000-8000-000000000013';
+set local role service_role;
+insert into dispatch_rpc_results(label, response)
+select 'booking source revision 5', public.resolve_registration_customer_message_source_v1(
+  'd6200000-0000-4000-8000-000000000001',
+  'observation_booking',
+  'd6200000-0000-4000-8000-000000000013'
+);
+insert into dispatch_rpc_results(label, response)
+select 'booking preview revision 5', public.create_registration_customer_message_preview_v1(
+  'd6200000-0000-4000-8000-000000000001',
+  'observation_booking',
+  'd6200000-0000-4000-8000-000000000013',
+  pg_temp.dispatch_contract(
+    (select response from dispatch_rpc_results where label = 'booking source revision 5'),
+    'observation_booking'
+  )
+);
+insert into dispatch_rpc_results(label, response)
+select 'booking claim revision 5', public.claim_registration_customer_message_v1(
+  'd6200000-0000-4000-8000-000000000001',
+  (select (response ->> 'previewId')::uuid from dispatch_rpc_results where label = 'booking preview revision 5'),
+  'd6200000-0000-4000-8000-000000000122',
+  pg_temp.dispatch_contract(
+    (select response from dispatch_rpc_results where label = 'booking source revision 5'),
+    'observation_booking'
+  )
+);
+insert into dispatch_rpc_results(label, response)
+select 'booking marker revision 5', public.mark_registration_customer_message_attempt_started_v1(
+  (select (response ->> 'messageId')::uuid from dispatch_rpc_results where label = 'booking claim revision 5'),
+  (select (response ->> 'claimToken')::uuid from dispatch_rpc_results where label = 'booking claim revision 5'),
+  (select (response ->> 'dispatchToken')::uuid from dispatch_rpc_results where label = 'booking claim revision 5'),
+  pg_temp.dispatch_contract(
+    (select response from dispatch_rpc_results where label = 'booking source revision 5'),
+    'observation_booking'
+  )
+);
+reset role;
+update public.ops_registration_observations
+set status = 'no_show',
+    attendance = 'no_show',
+    attendance_recorded_by = 'd6200000-0000-4000-8000-000000000001',
+    attendance_recorded_at = pg_catalog.clock_timestamp()
+where id = 'd6200000-0000-4000-8000-000000000013';
+update public.ops_registration_appointments
+set status = 'completed'
+where id = 'd6200000-0000-4000-8000-000000000012';
+insert into dashboard_private.registration_observation_domain_events(
+  event_id, observation_id, appointment_id, notification_revision,
+  event_kind, booking_fact_hash, source_revision, occurred_at
+)
+select
+  'd6200000-0000-4000-8000-000000000123', observation.id,
+  observation.appointment_id, 5, 'observation_no_show',
+  observation.booking_fact_hash, observation.source_revision,
+  (
+    select coalesce(max(event.occurred_at), pg_catalog.clock_timestamp()) + interval '1 second'
+    from dashboard_private.registration_observation_domain_events event
+    where event.observation_id = observation.id
+  )
+from public.ops_registration_observations observation
+where observation.id = 'd6200000-0000-4000-8000-000000000013';
+set local role service_role;
+insert into dispatch_rpc_results(label, response)
+select 'booking unknown revision 5', pg_temp.capture_manual_finalize(
+  (select (response ->> 'messageId')::uuid from dispatch_rpc_results where label = 'booking claim revision 5'),
+  (select (response ->> 'dispatchToken')::uuid from dispatch_rpc_results where label = 'booking claim revision 5'),
+  'unknown',
+  pg_catalog.jsonb_build_object(
+    'statusCode', 'provider_dispatch_uncertain',
+    'statusMessage', 'outcome unknown',
+    'observedAt', '2026-08-12T06:01:00Z',
+    'requestKeyMatched', true
+  )
+);
+reset role;
+select is(
+  (
+    select pg_catalog.jsonb_build_object(
+      'responseStatus', result.response ->> 'currentStatus',
+      'storedStatus', message.status,
+      'statusCode', message.provider_evidence ->> 'statusCode',
+      'resolutionSource', message.resolution_source,
+      'markers', message.provider_attempt_count
+    )
+    from dispatch_rpc_results result
+    join public.ops_registration_customer_messages message
+      on message.id = (select (response ->> 'messageId')::uuid from dispatch_rpc_results where label = 'booking claim revision 5')
+    where result.label = 'booking unknown revision 5'
+  ),
+  '{"markers":1,"resolutionSource":"provider_send","responseStatus":"unknown","statusCode":"provider_dispatch_uncertain","storedStatus":"unknown"}'::jsonb,
+  'manual unknown result persists exact provider evidence after no-show'
+);
+update public.ops_registration_customer_messages
+set created_at = pg_catalog.clock_timestamp() - interval '20 minutes',
+    provider_attempt_started_at = pg_catalog.clock_timestamp() - interval '16 minutes'
+where id = (select (response ->> 'messageId')::uuid from dispatch_rpc_results where label = 'booking claim revision 5');
+insert into dispatch_rpc_results(label, response)
+select 'booking request key revision 5', pg_catalog.jsonb_build_object('requestKey', message.request_key)
+from public.ops_registration_customer_messages message
+where message.id = (select (response ->> 'messageId')::uuid from dispatch_rpc_results where label = 'booking claim revision 5');
+set local role service_role;
+insert into dispatch_rpc_results(label, response)
+select 'booking provider lookup revision 5', pg_temp.capture_manual_provider_check(
+  'd6200000-0000-4000-8000-000000000001',
+  (select (response ->> 'messageId')::uuid from dispatch_rpc_results where label = 'booking claim revision 5'),
+  'lookup_context', '{}'::jsonb, null
+);
+insert into dispatch_rpc_results(label, response)
+select 'booking provider repair revision 5', pg_temp.capture_manual_provider_check(
+  'd6200000-0000-4000-8000-000000000001',
+  (select (response ->> 'messageId')::uuid from dispatch_rpc_results where label = 'booking claim revision 5'),
+  'accepted',
+  pg_catalog.jsonb_build_object(
+    'providerMessageId', 'synthetic-provider-check-revision-5',
+    'statusCode', '200',
+    'statusMessage', 'accepted after lookup',
+    'observedAt', '2026-08-12T06:20:00Z',
+    'requestKeyMatched', true
+  ),
+  (select response ->> 'requestKey' from dispatch_rpc_results where label = 'booking request key revision 5')
+);
+reset role;
+select is(
+  (
+    select pg_catalog.jsonb_build_object(
+      'lookupMessageId', lookup.response ->> 'messageId',
+      'repairStatus', repair.response ->> 'currentStatus',
+      'storedStatus', message.status,
+      'providerMessageId', message.provider_evidence ->> 'providerMessageId',
+      'resolutionSource', message.resolution_source,
+      'markers', message.provider_attempt_count
+    )
+    from dispatch_rpc_results lookup
+    join dispatch_rpc_results repair on repair.label = 'booking provider repair revision 5'
+    join public.ops_registration_customer_messages message
+      on message.id = (select (response ->> 'messageId')::uuid from dispatch_rpc_results where label = 'booking claim revision 5')
+    where lookup.label = 'booking provider lookup revision 5'
+  ),
+  pg_catalog.jsonb_build_object(
+    'lookupMessageId', (
+      select response ->> 'messageId' from dispatch_rpc_results where label = 'booking claim revision 5'
+    ),
+    'markers', 1,
+    'providerMessageId', 'synthetic-provider-check-revision-5',
+    'repairStatus', 'accepted',
+    'resolutionSource', 'provider_check',
+    'storedStatus', 'accepted'
+  ),
+  'provider check repairs the stored unknown result after no-show without a second marker'
+);
+
+update public.ops_registration_observations
+set status = 'scheduled',
+    attendance = null,
+    attendance_recorded_by = null,
+    attendance_recorded_at = null
+where id = 'd6200000-0000-4000-8000-000000000013';
+update public.ops_registration_appointments
+set status = 'scheduled'
+where id = 'd6200000-0000-4000-8000-000000000012';
+delete from dashboard_private.registration_observation_domain_events
+where event_id = 'd6200000-0000-4000-8000-000000000123';
+
+update public.ops_registration_customer_messages
+set status = 'unknown'
+where id = (select (response ->> 'messageId')::uuid from dispatch_rpc_results where label = 'booking claim revision 5');
+update public.ops_registration_observations
+set status = 'attended_feedback_pending',
+    attendance = 'attended',
+    attendance_recorded_by = 'd6200000-0000-4000-8000-000000000001',
+    attendance_recorded_at = pg_catalog.clock_timestamp()
+where id = 'd6200000-0000-4000-8000-000000000013';
+update public.ops_registration_appointments
+set status = 'completed'
+where id = 'd6200000-0000-4000-8000-000000000012';
+insert into dashboard_private.registration_observation_domain_events(
+  event_id, observation_id, appointment_id, notification_revision,
+  event_kind, booking_fact_hash, source_revision, occurred_at
+)
+select
+  'd6200000-0000-4000-8000-000000000124', observation.id,
+  observation.appointment_id, 5, 'observation_attendance_recorded',
+  observation.booking_fact_hash, observation.source_revision,
+  (
+    select coalesce(max(event.occurred_at), pg_catalog.clock_timestamp()) + interval '1 second'
+    from dashboard_private.registration_observation_domain_events event
+    where event.observation_id = observation.id
+  )
+from public.ops_registration_observations observation
+where observation.id = 'd6200000-0000-4000-8000-000000000013';
+set local role service_role;
+insert into dispatch_rpc_results(label, response)
+select 'booking reconcile after attendance', pg_temp.capture_manual_reconcile(
+  'd6200000-0000-4000-8000-000000000001',
+  (select (response ->> 'messageId')::uuid from dispatch_rpc_results where label = 'booking claim revision 5'),
+  'failed_hold',
+  pg_catalog.jsonb_build_object(
+    'statusCode', '404',
+    'statusMessage', 'not accepted after admin review',
+    'observedAt', '2026-08-12T06:30:00Z',
+    'requestKeyMatched', true
+  ),
+  'provider dashboard reviewed after attendance',
+  'd6200000-0000-4000-8000-000000000125'
+);
+reset role;
+select is(
+  (
+    select pg_catalog.jsonb_build_object(
+      'responseStatus', result.response ->> 'currentStatus',
+      'storedStatus', message.status,
+      'statusCode', message.provider_evidence ->> 'statusCode',
+      'resolutionSource', message.resolution_source,
+      'markers', message.provider_attempt_count
+    )
+    from dispatch_rpc_results result
+    join public.ops_registration_customer_messages message
+      on message.id = (select (response ->> 'messageId')::uuid from dispatch_rpc_results where label = 'booking claim revision 5')
+    where result.label = 'booking reconcile after attendance'
+  ),
+  '{"markers":1,"resolutionSource":"admin_reconcile","responseStatus":"failed_hold","statusCode":"404","storedStatus":"failed_hold"}'::jsonb,
+  'admin reconcile persists exact evidence after attendance without a second marker'
+);
+
+update public.ops_registration_observations
+set status = 'scheduled',
+    attendance = null,
+    attendance_recorded_by = null,
+    attendance_recorded_at = null
+where id = 'd6200000-0000-4000-8000-000000000013';
+update public.ops_registration_appointments
+set status = 'scheduled', notification_revision = 6
+where id = 'd6200000-0000-4000-8000-000000000012';
+delete from dashboard_private.registration_observation_domain_events
+where event_id = 'd6200000-0000-4000-8000-000000000124';
+insert into dashboard_private.registration_observation_domain_events(
+  event_id, observation_id, appointment_id, notification_revision,
+  event_kind, booking_fact_hash, source_revision, occurred_at
+)
+select
+  'd6200000-0000-4000-8000-000000000126', observation.id,
+  observation.appointment_id, 6, 'observation_rescheduled',
+  observation.booking_fact_hash, observation.source_revision,
+  (
+    select coalesce(max(event.occurred_at), pg_catalog.clock_timestamp()) + interval '1 second'
+    from dashboard_private.registration_observation_domain_events event
+    where event.observation_id = observation.id
+  )
+from public.ops_registration_observations observation
+where observation.id = 'd6200000-0000-4000-8000-000000000013';
+set local role service_role;
+insert into dispatch_rpc_results(label, response)
+select 'booking source revision 6', public.resolve_registration_customer_message_source_v1(
+  'd6200000-0000-4000-8000-000000000001',
+  'observation_booking',
+  'd6200000-0000-4000-8000-000000000013'
+);
+insert into dispatch_rpc_results(label, response)
+select 'booking preview revision 6', public.create_registration_customer_message_preview_v1(
+  'd6200000-0000-4000-8000-000000000001',
+  'observation_booking',
+  'd6200000-0000-4000-8000-000000000013',
+  pg_temp.dispatch_contract(
+    (select response from dispatch_rpc_results where label = 'booking source revision 6'),
+    'observation_booking'
+  )
+);
+insert into dispatch_rpc_results(label, response)
+select 'booking claim revision 6', public.claim_registration_customer_message_v1(
+  'd6200000-0000-4000-8000-000000000001',
+  (select (response ->> 'previewId')::uuid from dispatch_rpc_results where label = 'booking preview revision 6'),
+  'd6200000-0000-4000-8000-000000000127',
+  pg_temp.dispatch_contract(
+    (select response from dispatch_rpc_results where label = 'booking source revision 6'),
+    'observation_booking'
+  )
+);
+reset role;
+update public.ops_registration_observations
+set status = 'canceled'
+where id = 'd6200000-0000-4000-8000-000000000013';
+update public.ops_registration_appointments
+set status = 'canceled'
+where id = 'd6200000-0000-4000-8000-000000000012';
+insert into dashboard_private.registration_observation_domain_events(
+  event_id, observation_id, appointment_id, notification_revision,
+  event_kind, booking_fact_hash, source_revision, occurred_at
+)
+select
+  'd6200000-0000-4000-8000-000000000128', observation.id,
+  observation.appointment_id, 6, 'observation_canceled',
+  observation.booking_fact_hash, observation.source_revision,
+  (
+    select coalesce(max(event.occurred_at), pg_catalog.clock_timestamp()) + interval '1 second'
+    from dashboard_private.registration_observation_domain_events event
+    where event.observation_id = observation.id
+  )
+from public.ops_registration_observations observation
+where observation.id = 'd6200000-0000-4000-8000-000000000013';
+set local role service_role;
+insert into dispatch_rpc_results(label, response)
+select 'booking release after cancellation', pg_temp.capture_manual_release(
+  (select (response ->> 'messageId')::uuid from dispatch_rpc_results where label = 'booking claim revision 6'),
+  (select (response ->> 'claimToken')::uuid from dispatch_rpc_results where label = 'booking claim revision 6'),
+  'source_ineligible'
+);
+insert into dispatch_rpc_results(label, response)
+select 'booking history after cancellation', pg_catalog.jsonb_build_object(
+  'items', public.list_registration_customer_messages_v1(
+    'd6200000-0000-4000-8000-000000000001',
+    'observation_booking',
+    'd6200000-0000-4000-8000-000000000013',
+    10
+  )
+);
+reset role;
+select is(
+  (
+    select pg_catalog.jsonb_build_object(
+      'responseStatus', released.response ->> 'currentStatus',
+      'claimActive', message.claim_active,
+      'releaseReason', message.claim_release_reason,
+      'markers', message.provider_attempt_count
+    )
+    from dispatch_rpc_results released
+    join public.ops_registration_customer_messages message
+      on message.id = (select (response ->> 'messageId')::uuid from dispatch_rpc_results where label = 'booking claim revision 6')
+    where released.label = 'booking release after cancellation'
+  ),
+  '{"claimActive":false,"markers":0,"releaseReason":"pre_send:source_ineligible","responseStatus":"pending"}'::jsonb,
+  'pre-marker release cleans the exact stored message after cancellation'
+);
+select is(
+  (
+    select pg_catalog.jsonb_build_object(
+      'count', pg_catalog.jsonb_array_length(response -> 'items'),
+      'sourceId', response -> 'items' -> 0 ->> 'sourceId',
+      'observationId', response -> 'items' -> 0 ->> 'observationId',
+      'hasPhone', (response -> 'items' -> 0) ? 'parentPhoneDigits',
+      'hasFingerprint', (response -> 'items' -> 0) ? 'sourceFingerprint',
+      'hasRecipientHash', (response -> 'items' -> 0) ? 'recipientHash'
+    )
+    from dispatch_rpc_results
+    where label = 'booking history after cancellation'
+  ),
+  '{"count":3,"hasFingerprint":false,"hasPhone":false,"hasRecipientHash":false,"observationId":"d6200000-0000-4000-8000-000000000013","sourceId":"d6200000-0000-4000-8000-000000000013"}'::jsonb,
+  'terminal observation history stays available and masked'
+);
+
+insert into public.ops_tasks(
+  id, title, type, status, priority, requested_by, assignee_id, student_name
+) values (
+  'd6200000-0000-4000-8000-000000000129', 'cross-message identity fixture',
+  'registration', 'requested', 'normal',
+  'd6200000-0000-4000-8000-000000000001',
+  'd6200000-0000-4000-8000-000000000001', '다른 학생'
+);
+update public.ops_registration_customer_messages
+set task_id = 'd6200000-0000-4000-8000-000000000129'
+where id = (select (response ->> 'messageId')::uuid from dispatch_rpc_results where label = 'booking claim revision 6');
+set local role service_role;
+select throws_ok(
+  $$select pg_temp.assert_stored_observation(
+      (select (response ->> 'messageId')::uuid
+       from dispatch_rpc_results where label = 'booking claim revision 6')
+    )$$,
+  '40001', 'registration_customer_message_stored_identity_invalid',
+  'stored observation validation rejects cross-task message repair'
+);
+reset role;
+update public.ops_registration_customer_messages
+set task_id = 'd6200000-0000-4000-8000-000000000010'
+where id = (select (response ->> 'messageId')::uuid from dispatch_rpc_results where label = 'booking claim revision 6');
+
+update public.ops_registration_observations
+set status = 'scheduled'
+where id = 'd6200000-0000-4000-8000-000000000013';
+update public.ops_registration_appointments
+set status = 'scheduled', notification_revision = 4
+where id = 'd6200000-0000-4000-8000-000000000012';
+delete from dashboard_private.registration_observation_domain_events
+where event_id in (
+  'd6200000-0000-4000-8000-000000000121',
+  'd6200000-0000-4000-8000-000000000126',
+  'd6200000-0000-4000-8000-000000000128'
 );
 
 -- Build the legacy appointment live-test evidence through the unchanged manual
