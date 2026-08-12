@@ -219,7 +219,14 @@ test("runner keeps every independent database reviewer gate", async () => {
     "solapi-contract",
     "solapi-queue",
     "solapi",
+    "worker-schedule",
   ]);
+  assert.deepEqual(runner.getRegistrationObservationFocusContract("worker-schedule"), {
+    ceiling: "20260812195130",
+    tests: [
+      "supabase/tests/notification_worker_production_schedule_test.sql",
+    ],
+  });
   assert.deepEqual(runner.getRegistrationObservationFocusContract("workspace"), {
     ceiling: "20260809102200",
     tests: [

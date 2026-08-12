@@ -32,9 +32,21 @@ const PROCESSING_READINESS_PROBE_SHA256 =
 const ADAPTER_FORWARD_INSTALL_FILE = "20260812002019_notification_adapters_forward_install.sql"
 const ADAPTER_FORWARD_INSTALL_SHA256 =
   "f0c22f18906d8a9bcaf2dbbdb682d4458682565ea756bb7e515c18aaeed3243a"
+const WORKER_PRODUCTION_SCHEDULE_FILE =
+  "20260812195130_notification_worker_production_schedule.sql"
+const WORKER_PRODUCTION_SCHEDULE_SHA256 =
+  "7b902a798422d6003c3f2bcd0ef5bf3c7f1b86597c92316601b17b810db48c94"
 const PROCESSING_READINESS_PROBE_MARKER_IDS = Object.freeze([
   "worker_schedule.watchdog_heartbeats",
   "worker_schedule.runtime_version",
+])
+const WORKER_PRODUCTION_SCHEDULE_MARKER_IDS = Object.freeze([
+  "worker_schedule.stop_latch",
+  "worker_schedule.watchdog_heartbeats",
+  "worker_schedule.manage_rpc",
+  "worker_schedule.runtime_version",
+  "worker_schedule.watchdog_job",
+  "forward_compat.worker_guard",
 ])
 const REMOTE_HISTORY_ALIGNED_SQL = Object.freeze([
   ["20260730161538_notification_google_chat_connection_catalog.sql", "a3f72d4ec2a410796d5796019649859d5a329d5bec0e3e83f48242272dd88dda"],
@@ -806,6 +818,25 @@ function adapterForwardInstallContractValid(source) {
     && !/cron\.schedule|net\.http|pg_net|vault|manage_notification_worker_schedule_v1|activate_notification_dispatch_cutover_v1/i.test(source)
 }
 
+function workerProductionScheduleContractValid(source) {
+  return source.startsWith("begin;\n")
+    && source.endsWith("\ncommit;\n")
+    && /create\s+table\s+dashboard_private\.notification_worker_stop_latch\b/i.test(source)
+    && /create\s+table\s+dashboard_private\.notification_watchdog_heartbeats\b/i.test(source)
+    && /create\s+or\s+replace\s+function\s+public\.assert_notification_worker_run_allowed_v1\s*\(\s*p_worker_id\s+text\s*\)/i.test(source)
+    && /create\s+or\s+replace\s+function\s+public\.manage_notification_worker_schedule_v1\s*\(\s*p_action\s+text\s*,\s*p_request_id\s+uuid\s*\)/i.test(source)
+    && /'tips-notification-worker-v1'\s*,\s*'\* \* \* \* \*'/i.test(source)
+    && /'tips-notification-cutover-watchdog-v1'\s*,\s*'\* \* \* \* \*'/i.test(source)
+    && /select dashboard_private\.invoke_notification_worker_v1\(\);/i.test(source)
+    && /select dashboard_private\.run_notification_worker_watchdog_v1\(\);/i.test(source)
+    && /notification_worker_bearer_secret/i.test(source)
+    && /revoke\s+all\s+on\s+function\s+public\.manage_notification_worker_schedule_v1\s*\(\s*text\s*,\s*uuid\s*\)\s+from\s+public\s*,\s*anon\s*,\s*authenticated\s*,\s*service_role/i.test(source)
+    && /grant\s+execute\s+on\s+function\s+public\.manage_notification_worker_schedule_v1\s*\(\s*text\s*,\s*uuid\s*\)\s+to\s+service_role/i.test(source)
+    && !/activate_notification_dispatch_cutover_v1|app\.notification_cutover_activation_authorized/i.test(source)
+    && !/\bupdate\s+dashboard_private\.notification_(?:runtime_flags|rules)\b/i.test(source)
+    && !/pending-migrations|20260716195500_notification_worker_schedule/i.test(source)
+}
+
 function processingReadinessProbeContractValid(source) {
   const definitions = functionDefinitionSources(
     source,
@@ -1076,6 +1107,9 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       const isExactAdapterForwardInstall = entry === ADAPTER_FORWARD_INSTALL_FILE
         && sourceHash === ADAPTER_FORWARD_INSTALL_SHA256
         && adapterForwardInstallContractValid(sourceText)
+      const isExactWorkerProductionSchedule = entry === WORKER_PRODUCTION_SCHEDULE_FILE
+        && sourceHash === WORKER_PRODUCTION_SCHEDULE_SHA256
+        && workerProductionScheduleContractValid(sourceText)
 
       for (const family of COMPILED_CUTOVER_MARKER_FAMILIES) {
         const reservedMarkerIds = matchingMarkerIds(sourceMarkerTokens, family.reserved)
@@ -1092,6 +1126,10 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
           if (
             isExactAdapterForwardInstall
             && markerId === "worker_schedule.runtime_version"
+          ) continue
+          if (
+            isExactWorkerProductionSchedule
+            && WORKER_PRODUCTION_SCHEDULE_MARKER_IDS.includes(markerId)
           ) continue
           addError(
             errors,
@@ -1126,6 +1164,11 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
         if (isExactAdapterForwardInstall) {
           thresholdMarkerIds = thresholdMarkerIds.filter(
             (id) => id !== "worker_schedule.runtime_version",
+          )
+        }
+        if (isExactWorkerProductionSchedule) {
+          thresholdMarkerIds = thresholdMarkerIds.filter(
+            (id) => !WORKER_PRODUCTION_SCHEDULE_MARKER_IDS.includes(id),
           )
         }
         if (new Set(thresholdMarkerIds).size >= 2) {

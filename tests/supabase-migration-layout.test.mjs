@@ -37,6 +37,10 @@ const PROCESSING_READINESS_PROBE_SHA256 =
 const ADAPTER_FORWARD_INSTALL_FILE = "20260812002019_notification_adapters_forward_install.sql"
 const ADAPTER_FORWARD_INSTALL_SHA256 =
   "f0c22f18906d8a9bcaf2dbbdb682d4458682565ea756bb7e515c18aaeed3243a"
+const WORKER_PRODUCTION_SCHEDULE_FILE =
+  "20260812195130_notification_worker_production_schedule.sql"
+const WORKER_PRODUCTION_SCHEDULE_SHA256 =
+  "7b902a798422d6003c3f2bcd0ef5bf3c7f1b86597c92316601b17b810db48c94"
 const REMOTE_HISTORY_ALIGNED_SQL = Object.freeze([
   ["20260730161538_notification_google_chat_connection_catalog.sql", "a3f72d4ec2a410796d5796019649859d5a329d5bec0e3e83f48242272dd88dda"],
   ["20260731011040_notification_transfer_withdrawal_deep_links.sql", "ed5dfb81c2cb5d1bc6dca5c38de62745c02d88b5a4b858ec57e8f0d2c6afb5ab"],
@@ -656,6 +660,42 @@ test("adapter forward marker는 생성 migration의 exact path, byte hash, passi
     await validateSupabaseMigrationLayout({ repoRoot: copiedQuarantineFixture }),
     "cutover_reserved_object_present_in_active_lane",
     copiedFile,
+  )
+})
+
+test("worker schedule marker는 current-schema exact migration에만 허용한다", async () => {
+  assert.equal(
+    await sha256(join(activeDir, WORKER_PRODUCTION_SCHEDULE_FILE)),
+    WORKER_PRODUCTION_SCHEDULE_SHA256,
+  )
+  assert.deepEqual(await validateSupabaseMigrationLayout({ repoRoot }), [])
+
+  const driftFixture = await createRepoFixture()
+  await appendFile(
+    join(driftFixture, "supabase", "migrations", WORKER_PRODUCTION_SCHEDULE_FILE),
+    "\n-- worker schedule drift\n",
+  )
+  assertIncludesErrorForFile(
+    await validateSupabaseMigrationLayout({ repoRoot: driftFixture }),
+    "cutover_reserved_object_present_in_active_lane",
+    WORKER_PRODUCTION_SCHEDULE_FILE,
+  )
+
+  const activationFixture = await createRepoFixture()
+  const activationPath = join(
+    activationFixture,
+    "supabase",
+    "migrations",
+    WORKER_PRODUCTION_SCHEDULE_FILE,
+  )
+  await appendFile(
+    activationPath,
+    "\nselect public.activate_notification_dispatch_cutover_v1('registration','registration', '{}'::jsonb, gen_random_uuid());\n",
+  )
+  assertIncludesErrorForFile(
+    await validateSupabaseMigrationLayout({ repoRoot: activationFixture }),
+    "cutover_activation_marker_present_in_active_lane",
+    WORKER_PRODUCTION_SCHEDULE_FILE,
   )
 })
 
