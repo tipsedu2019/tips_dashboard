@@ -257,16 +257,18 @@ const FOCUS_REGISTRY = new Map([
   [
     "solapi",
     {
-      ceiling: "20260809106200",
+      ceiling: "20260812193844",
       migrations: [
         "20260809106000_registration_observation_solapi_contract.sql",
         "20260809106100_registration_observation_solapi_queue.sql",
         "20260809106200_registration_observation_solapi_dispatch.sql",
+        "20260812193844_registration_observation_notification_compliance_repair.sql",
       ],
       tests: [
         "supabase/tests/registration_observation_solapi_contract_test.sql",
         "supabase/tests/registration_observation_solapi_queue_test.sql",
         "supabase/tests/registration_observation_solapi_dispatch_test.sql",
+        "supabase/tests/registration_observation_notification_compliance_repair_test.sql",
       ],
       fixture: "noop",
       providerOutboxStage: "solapi-queue",
