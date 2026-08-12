@@ -36,6 +36,35 @@ async function oneMigration(suffix) {
   return matches[0] ? join(migrationDirectory, matches[0]) : null;
 }
 
+function functionBlock(source, name) {
+  const start = source.search(new RegExp(`create\\s+or\\s+replace\\s+function\\s+(?:public\\.)?${name}\\s*\\(`, "iu"));
+  assert.notEqual(start, -1, `missing function ${name}`);
+  const rest = source.slice(start);
+  const end = rest.search(/\n\$\$;\s*(?:\n|$)/u);
+  assert.notEqual(end, -1, `missing function terminator ${name}`);
+  return rest.slice(0, end + 4);
+}
+
+test("expired claimed deliveries return to pending without a retry-only timestamp", async () => {
+  const leaseReapMigration = await oneMigration(
+    "_notification_delivery_lease_reap_schedule_fix.sql",
+  );
+  assert.ok(leaseReapMigration, "lease reaper schedule fix migration must exist");
+
+  const reaper = functionBlock(
+    await readFile(leaseReapMigration, "utf8"),
+    "reap_notification_leases_v1",
+  );
+  assert.match(
+    reaper,
+    /delivery\.status\s*=\s*'claimed'[\s\S]*?set status\s*=\s*'pending',[\s\S]*?next_attempt_at\s*=\s*null/iu,
+  );
+  assert.doesNotMatch(
+    reaper,
+    /delivery\.status\s*=\s*'claimed'[\s\S]*?set status\s*=\s*'pending',[\s\S]*?next_attempt_at\s*=\s*pg_catalog\.clock_timestamp\(\)/iu,
+  );
+});
+
 test("an enabled canonical fanout materializes a claimable pending delivery without a retry timestamp", async () => {
   // Break caught: assigning next_attempt_at to a first pending delivery
   // violates the ledger's retry-only constraint and prevents real fanout.
