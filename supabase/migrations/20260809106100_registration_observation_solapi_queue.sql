@@ -62,6 +62,14 @@ alter table dashboard_private.registration_customer_reminder_jobs
   drop constraint registration_customer_reminder_jobs_message_check,
   drop constraint registration_customer_reminder_jobs_error_check;
 
+-- Old releases allowed these audit outcomes on completed jobs.  Preserve their
+-- meaning under the stricter terminal-state model before re-attaching checks.
+update dashboard_private.registration_customer_reminder_jobs
+set status = 'delivery_unknown',
+    last_error_code = 'provider_dispatch_uncertain'
+where status = 'completed'
+  and last_error_code in ('provider_dispatch_uncertain', 'scheduled_marker_recovery');
+
 alter table dashboard_private.registration_customer_reminder_jobs
   alter column job_id set not null,
   alter column message_kind set not null,
@@ -109,7 +117,11 @@ alter table dashboard_private.registration_customer_reminder_jobs
         and (session_source_revision ->> 'revision')::bigint >= 0
       )
       or (
-        session_source_revision ?& array['authority', 'sessionKey', 'contentHash']
+        session_source_revision = pg_catalog.jsonb_build_object(
+          'authority', 'legacy',
+          'sessionKey', session_source_revision ->> 'sessionKey',
+          'contentHash', session_source_revision ->> 'contentHash'
+        )
         and session_source_revision ->> 'authority' = 'legacy'
         and nullif(pg_catalog.btrim(session_source_revision ->> 'sessionKey'), '') is not null
         and nullif(pg_catalog.btrim(session_source_revision ->> 'contentHash'), '') is not null
@@ -188,6 +200,25 @@ begin
   if (select auth.role()) <> 'service_role' then
     raise exception 'registration_customer_reminder_worker_unauthorized' using errcode = '42501';
   end if;
+  update public.ops_registration_customer_messages message
+  set status = 'unknown', error_code = 'scheduled_marker_recovery',
+      resolution_source = 'scheduled_marker_recovery', resolved_at = pg_catalog.clock_timestamp(), updated_at = pg_catalog.clock_timestamp()
+  from dashboard_private.registration_customer_reminder_jobs job
+  where job.message_kind = 'appointment_reminder' and job.status = 'dispatching' and job.message_id = message.id
+    and message.delivery_origin = 'scheduled' and message.status = 'pending' and message.provider_attempt_count = 1
+    and message.provider_attempt_started_at <= pg_catalog.clock_timestamp() - interval '15 minutes';
+  update dashboard_private.registration_customer_reminder_jobs job
+  set status = case when message.status = 'unknown' then 'delivery_unknown' else 'completed' end,
+      claim_token = null, claim_expires_at = null,
+      last_error_code = case when message.status = 'unknown' then 'provider_dispatch_uncertain' when message.status = 'failed_hold' then 'provider_rejected' else null end
+  from public.ops_registration_customer_messages message
+  where job.message_kind = 'appointment_reminder' and job.message_id = message.id and job.status = 'dispatching'
+    and message.status in ('accepted', 'unknown', 'failed_hold');
+  update dashboard_private.registration_customer_reminder_jobs job
+  set status = 'pending', claim_token = null, claim_expires_at = null,
+      available_at = pg_catalog.clock_timestamp(), last_error_code = 'claim_lease_expired'
+  where job.message_kind = 'appointment_reminder' and job.status = 'claimed'
+    and job.claim_expires_at <= pg_catalog.clock_timestamp();
   update dashboard_private.registration_customer_reminder_jobs job
   set status = 'canceled', claim_token = null, claim_expires_at = null,
       last_error_code = 'appointment_revision_replaced'
@@ -196,6 +227,16 @@ begin
     and job.appointment_id = appointment.id
     and job.status in ('pending', 'claimed')
     and job.source_revision <> appointment.notification_revision;
+  update dashboard_private.registration_customer_reminder_jobs job
+  set status = 'canceled', claim_token = null, claim_expires_at = null,
+      last_error_code = 'appointment_not_eligible'
+  where job.message_kind = 'appointment_reminder' and job.status in ('pending', 'claimed')
+    and not exists (
+      select 1 from public.ops_registration_appointments appointment
+      where appointment.id = job.appointment_id and appointment.task_id = job.task_id
+        and appointment.kind in ('level_test', 'visit_consultation') and appointment.status = 'scheduled'
+        and appointment.scheduled_at > pg_catalog.clock_timestamp()
+    );
   insert into dashboard_private.registration_customer_reminder_jobs(
     job_id, appointment_id, task_id, message_kind, source_revision, scheduled_for,
     due_at, available_at, request_key, status, last_error_code
@@ -208,6 +249,10 @@ begin
   cross join dashboard_private.registration_customer_reminder_settings settings
   where settings.singleton and appointment.kind in ('level_test', 'visit_consultation')
     and appointment.status = 'scheduled' and appointment.scheduled_at > pg_catalog.clock_timestamp()
+    and not exists (
+      select 1 from public.ops_registration_customer_messages message
+      where message.appointment_id = appointment.id and message.message_kind = 'appointment_reminder'
+    )
   on conflict (appointment_id, source_revision, message_kind)
     where message_kind = 'appointment_reminder'
   do update set task_id = excluded.task_id, scheduled_for = excluded.scheduled_for,
@@ -227,6 +272,9 @@ returns jsonb language plpgsql volatile security definer set search_path = '' se
 declare v_job dashboard_private.registration_customer_reminder_jobs%rowtype;
 begin
   if (select auth.role()) <> 'service_role' then raise exception 'registration_customer_reminder_worker_unauthorized' using errcode = '42501'; end if;
+  insert into dashboard_private.registration_customer_reminder_worker_heartbeats(singleton, succeeded_at, updated_at)
+  values (true, pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp())
+  on conflict (singleton) do update set succeeded_at = excluded.succeeded_at, updated_at = excluded.updated_at;
   if not (select enabled from dashboard_private.registration_customer_reminder_settings where singleton) then return null; end if;
   perform dashboard_private.sync_registration_customer_reminder_jobs_v1();
   select job.* into v_job from dashboard_private.registration_customer_reminder_jobs job
@@ -296,20 +344,43 @@ create or replace function public.begin_registration_customer_reminder_dispatch_
 returns jsonb language plpgsql volatile security definer set search_path = '' as $$
 declare
   v_job dashboard_private.registration_customer_reminder_jobs%rowtype;
+  v_settings dashboard_private.registration_customer_reminder_settings%rowtype;
   v_activation dashboard_private.registration_customer_solapi_activation%rowtype;
   v_receipt dashboard_private.registration_customer_solapi_template_receipts%rowtype;
+  v_live_message public.ops_registration_customer_messages%rowtype;
+  v_existing public.ops_registration_customer_messages%rowtype;
   v_source jsonb;
   v_source_facts_checksum text;
   v_message public.ops_registration_customer_messages%rowtype;
+  v_now timestamptz := pg_catalog.clock_timestamp();
 begin
   if (select auth.role()) <> 'service_role' then raise exception 'registration_customer_reminder_worker_unauthorized' using errcode = '42501'; end if;
+  perform dashboard_private.registration_customer_message_assert_contract_v1(p_contract, 'appointment_reminder');
+  if p_readiness_contract is null or pg_catalog.jsonb_typeof(p_readiness_contract) <> 'object'
+    or p_readiness_contract - array['credentialsConfigured','pfId','templateId','catalogChecksum','recipientHash','sourceFingerprint','sourceFactsChecksum']::text[] <> '{}'::jsonb
+    or not p_readiness_contract ?& array['credentialsConfigured','pfId','templateId','catalogChecksum','recipientHash','sourceFingerprint','sourceFactsChecksum']::text[]
+    or coalesce((p_readiness_contract ->> 'credentialsConfigured')::boolean, false) is not true
+    or (p_readiness_contract ->> 'catalogChecksum') !~ '^[a-f0-9]{64}$'
+    or (p_readiness_contract ->> 'recipientHash') !~ '^[a-f0-9]{64}$'
+    or (p_readiness_contract ->> 'sourceFingerprint') !~ '^[a-f0-9]{64}$'
+    or (p_readiness_contract ->> 'sourceFactsChecksum') !~ '^[a-f0-9]{64}$' then
+    raise exception 'registration_customer_reminder_contract_invalid' using errcode = '22023';
+  end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('registration-customer-reminder:' || p_job_id::text, 0));
   select job.* into v_job from dashboard_private.registration_customer_reminder_jobs job
   where job.job_id = p_job_id and job.message_kind = 'appointment_reminder' and job.status = 'claimed'
-    and job.claim_token = p_claim_token and job.claim_expires_at > pg_catalog.clock_timestamp() for update;
+    and job.claim_token = p_claim_token and job.claim_expires_at > v_now for update;
   if not found then raise exception 'registration_customer_reminder_claim_invalid' using errcode = '40001'; end if;
-  if not (select settings.enabled from dashboard_private.registration_customer_reminder_settings settings where settings.singleton)
-    or not dashboard_private.registration_customer_reminder_schedule_ready_v1() then
+  select settings.* into strict v_settings from dashboard_private.registration_customer_reminder_settings settings where settings.singleton for share;
+  if v_settings.enabled is not true or not dashboard_private.registration_customer_reminder_schedule_ready_v1() then
     raise exception 'registration_customer_reminder_not_ready' using errcode = '55000';
+  end if;
+  select message.* into v_existing from public.ops_registration_customer_messages message
+  where message.appointment_id = v_job.appointment_id and message.message_kind = 'appointment_reminder' for update;
+  if found then
+    update dashboard_private.registration_customer_reminder_jobs job set status = 'completed', claim_token = null, claim_expires_at = null, message_id = v_existing.id, last_error_code = 'duplicate_locked'
+    where job.job_id = v_job.job_id;
+    return pg_catalog.jsonb_build_object('allowed', false, 'messageId', v_existing.id, 'dispatchToken', v_existing.dispatch_token, 'currentStatus', v_existing.status);
   end if;
   select activation.* into strict v_activation from dashboard_private.registration_customer_solapi_activation activation
   where activation.message_kind = 'appointment_reminder';
@@ -317,17 +388,27 @@ begin
   where receipt.message_kind = 'appointment_reminder';
   if v_activation.mode is distinct from 'live' or v_receipt.message_kind is null
     or v_receipt.provider_status is distinct from 'sendable'
-    or v_receipt.catalog_checksum is distinct from v_receipt.provider_checksum then
+    or v_receipt.catalog_checksum is distinct from v_receipt.provider_checksum
+    or v_receipt.catalog_checksum is distinct from p_readiness_contract ->> 'catalogChecksum'
+    or v_receipt.template_id is distinct from nullif(pg_catalog.btrim(p_readiness_contract ->> 'templateId'), '')
+    or v_receipt.pf_id is distinct from nullif(pg_catalog.btrim(p_readiness_contract ->> 'pfId'), '') then
     raise exception 'registration_customer_reminder_not_ready' using errcode = '55000';
   end if;
-  if p_contract is null or p_readiness_contract is null then
-    raise exception 'registration_customer_reminder_contract_invalid' using errcode = '22023';
+  select message.* into v_live_message from public.ops_registration_customer_messages message
+  where message.id = v_activation.live_test_message_id and message.status = 'accepted'
+    and message.message_kind = 'appointment_reminder' and message.task_id = v_activation.verification_task_id
+    and message.recipient_hash = v_activation.verification_recipient_hash and message.template_checksum = v_receipt.catalog_checksum;
+  if not found or v_activation.live_test_confirmed_at is null then
+    raise exception 'registration_customer_reminder_not_ready' using errcode = '55000';
   end if;
   v_source := dashboard_private.resolve_registration_customer_message_source_v1_impl('appointment_reminder', v_job.appointment_id);
   v_source_facts_checksum := dashboard_private.registration_customer_message_source_facts_checksum_v1(v_source);
   if nullif(v_source ->> 'sourceRevision', '')::bigint is distinct from v_job.source_revision
     or v_source ->> 'parentPhoneDigits' is distinct from p_contract ->> 'parentPhoneDigits'
-    or v_source_facts_checksum is distinct from p_readiness_contract ->> 'sourceFactsChecksum' then
+    or v_source_facts_checksum is distinct from p_readiness_contract ->> 'sourceFactsChecksum'
+    or p_contract ->> 'recipientHash' is distinct from p_readiness_contract ->> 'recipientHash'
+    or p_contract ->> 'sourceFingerprint' is distinct from p_readiness_contract ->> 'sourceFingerprint'
+    or p_contract ->> 'templateChecksum' is distinct from p_readiness_contract ->> 'catalogChecksum' then
     raise exception 'registration_customer_reminder_source_stale' using errcode = '40001';
   end if;
   insert into public.ops_registration_customer_messages(
@@ -357,6 +438,16 @@ begin
   where job.job_id = v_job.job_id;
   return pg_catalog.jsonb_build_object('allowed', true, 'messageId', v_message.id,
     'dispatchToken', v_message.dispatch_token, 'currentStatus', v_message.status);
+exception when unique_violation then
+  select message.* into v_existing from public.ops_registration_customer_messages message
+  where message.appointment_id = v_job.appointment_id and message.message_kind = 'appointment_reminder';
+  if v_existing.id is null then raise; end if;
+  update dashboard_private.registration_customer_reminder_jobs job
+  set status = 'completed', claim_token = null, claim_expires_at = null,
+      message_id = v_existing.id, last_error_code = 'duplicate_locked'
+  where job.job_id = p_job_id;
+  return pg_catalog.jsonb_build_object('allowed', false, 'messageId', v_existing.id,
+    'dispatchToken', v_existing.dispatch_token, 'currentStatus', v_existing.status);
 end;
 $$;
 alter function public.begin_registration_customer_reminder_dispatch_v1(uuid, uuid, jsonb, jsonb) owner to postgres;
@@ -364,8 +455,10 @@ revoke all on function public.begin_registration_customer_reminder_dispatch_v1(u
 grant execute on function public.begin_registration_customer_reminder_dispatch_v1(uuid, uuid, jsonb, jsonb) to service_role;
 
 create or replace function public.finalize_registration_customer_reminder_dispatch_v1(p_message_id uuid, p_dispatch_token uuid, p_result text, p_provider_result jsonb)
-returns jsonb language plpgsql volatile security definer set search_path = '' as $$
-declare v_message public.ops_registration_customer_messages%rowtype;
+returns jsonb language plpgsql volatile security definer set search_path = '' set timezone = 'UTC' as $$
+declare
+  v_message public.ops_registration_customer_messages%rowtype;
+  v_provider_result jsonb;
 begin
   if (select auth.role()) <> 'service_role' then
     raise exception 'registration_customer_reminder_worker_unauthorized' using errcode = '42501';
@@ -373,17 +466,40 @@ begin
   if p_result not in ('accepted', 'failed_hold', 'unknown') then
     raise exception 'registration_customer_reminder_finalize_invalid' using errcode = '22023';
   end if;
+  v_provider_result := dashboard_private.registration_customer_message_provider_evidence_v1(p_provider_result);
   select message.* into v_message from public.ops_registration_customer_messages message where message.id = p_message_id for update;
-  if not found or v_message.delivery_origin <> 'scheduled' or v_message.dispatch_token is distinct from p_dispatch_token then
+  if not found or v_message.delivery_origin <> 'scheduled' or v_message.message_kind <> 'appointment_reminder'
+    or v_message.dispatch_token is distinct from p_dispatch_token or v_message.provider_attempt_count <> 1
+    or v_message.provider_attempt_started_at is null then
     raise exception 'registration_customer_reminder_finalize_not_allowed' using errcode = '40001';
   end if;
+  if v_message.status in ('accepted', 'unknown', 'failed_hold') then
+    return pg_catalog.jsonb_build_object('ok', v_message.status = 'accepted', 'messageId', v_message.id,
+      'currentStatus', v_message.status, 'idempotent', true, 'confirmedByName', '자동 발송',
+      'confirmedAt', v_message.confirmed_at, 'updatedAt', v_message.updated_at,
+      'recipientLast4', v_message.recipient_last4, 'canCheck', false);
+  end if;
+  update public.ops_registration_customer_messages message
+  set status = p_result,
+      provider_message_id = v_provider_result ->> 'providerMessageId',
+      provider_group_id = v_provider_result ->> 'providerGroupId',
+      provider_status_code = v_provider_result ->> 'statusCode',
+      provider_status_message = v_provider_result ->> 'statusMessage',
+      provider_evidence = v_provider_result,
+      error_code = case when p_result = 'failed_hold' then 'provider_rejected' else null end,
+      resolution_source = 'scheduled_provider_send', resolved_by = null,
+      resolved_at = pg_catalog.clock_timestamp(), updated_at = pg_catalog.clock_timestamp()
+  where message.id = v_message.id returning * into v_message;
   update dashboard_private.registration_customer_reminder_jobs job set status = case when p_result = 'unknown' then 'delivery_unknown' else 'completed' end,
     claim_token = null, claim_expires_at = null,
     last_error_code = case when p_result = 'failed_hold' then 'provider_rejected' when p_result = 'unknown' then 'provider_dispatch_uncertain' else null end
   where job.job_id = v_message.scheduled_job_id and job.appointment_id = v_message.appointment_id
     and job.message_kind = v_message.message_kind and job.source_revision = v_message.source_revision
     and job.source_identity = v_message.scheduled_source_identity and job.message_id = v_message.id;
-  return pg_catalog.jsonb_build_object('ok', p_result = 'accepted', 'messageId', p_message_id, 'currentStatus', p_result);
+  return pg_catalog.jsonb_build_object('ok', v_message.status = 'accepted', 'messageId', v_message.id,
+    'currentStatus', v_message.status, 'idempotent', false, 'confirmedByName', '자동 발송',
+    'confirmedAt', v_message.confirmed_at, 'updatedAt', v_message.updated_at,
+    'recipientLast4', v_message.recipient_last4, 'canCheck', false);
 end;
 $$;
 alter function public.finalize_registration_customer_reminder_dispatch_v1(uuid, uuid, text, jsonb) owner to postgres;
