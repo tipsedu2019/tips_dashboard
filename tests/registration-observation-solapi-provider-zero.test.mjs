@@ -140,7 +140,10 @@ function createDbOwnedLifecycleScenario(options = {}) {
     dueAt: options.dueAt ?? expectedDueAt(options.leadHours ?? 3),
     job: {
       activationModeSnapshot: options.activationModeSnapshot ?? initialActivationMode,
+      availableAt: "2026-08-11T23:59:59.000Z",
       claimed: false,
+      claimExpiresAt: null,
+      claimToken: null,
       refreshCount: 0,
       status: "pending",
       verificationRecipientHash: options.jobVerificationRecipientHash ?? "recipient-hash-v1",
@@ -154,6 +157,7 @@ function createDbOwnedLifecycleScenario(options = {}) {
     },
     runtimeVersion: options.runtimeVersion ?? 1,
     sourceEvent: {
+      consumptionAction: options.sourceEventConsumptionAction ?? "created",
       occurredAt: options.sourceEventOccurredAt ?? "2026-08-12T00:30:00.000Z",
     },
     production: null,
@@ -188,6 +192,13 @@ function createDbOwnedLifecycleScenario(options = {}) {
           "claim:booking-hash",
           state.claimedBookingHash === state.bookingHash,
         )
+        const verificationEventCurrent = lifecycleGate(
+          "claim:verification-after-activation",
+          state.job.activationModeSnapshot !== "verification"
+            || state.activation.mode !== "verification"
+            || Date.parse(state.sourceEvent.occurredAt)
+              >= Date.parse(state.job.verificationStartedAt),
+        )
         const liveCutoffCurrent = lifecycleGate(
           "claim:live-cutoff",
           state.job.activationModeSnapshot !== "live"
@@ -197,7 +208,15 @@ function createDbOwnedLifecycleScenario(options = {}) {
                 >= Date.parse(state.activation.automaticDeliveryCutoffAt)
             ),
         )
-        if (!liveCutoffCurrent) {
+        if (!verificationEventCurrent) {
+          state.job.availableAt = null
+          state.job.claimExpiresAt = null
+          state.job.claimToken = null
+          state.job.claimed = false
+          state.job.lastErrorCode = "verification_scope_changed"
+          state.job.status = "canceled"
+          response = result(null)
+        } else if (!liveCutoffCurrent) {
           state.job.lastErrorCode = "pre_cutoff_backlog"
           state.job.status = "canceled"
           response = result(null)
@@ -205,7 +224,10 @@ function createDbOwnedLifecycleScenario(options = {}) {
           response = result(null)
         } else {
           state.job.claimed = true
+          state.job.availableAt = null
+          state.job.claimExpiresAt = "2026-08-12T00:02:00.000Z"
           state.job.status = "claimed"
+          state.job.claimToken = CLAIM_TOKEN
           state.job.claimedBookingHash = state.bookingHash
           state.job.claimedDueAt = state.dueAt
           options.afterClaim?.({ state })
@@ -434,14 +456,6 @@ test("DB-owned terminal and runtime gates stay provider-zero through the product
 test("DB-owned observation readiness and identity drifts stay provider-zero", async () => {
   // Break caught: a stale verification scope, booking, revision, or canonical phone reaches send-many before begin rejects it.
   const cases = [
-    ["verification source event predates activation", {
-      activationMode: "verification",
-      activationModeSnapshot: "verification",
-      sourceEventOccurredAt: "2026-08-10T23:59:59.000Z",
-    }, "begin:verification-after-activation", {
-      status: "canceled",
-      error: "verification_scope_changed",
-    }],
     ["verification task restart", {
       activationMode: "verification",
       activationModeSnapshot: "verification",
@@ -480,6 +494,60 @@ test("DB-owned observation readiness and identity drifts stay provider-zero", as
       )
     }
   }
+})
+
+test("a pre-activation verification event cancels the existing job before the worker claim", async () => {
+  // Break caught: moving the source-event scope check from claim back to begin
+  // performs a stale source read and makes a provider-capable worker branch.
+  const scenario = createDbOwnedLifecycleScenario({
+    activationMode: "verification",
+    activationModeSnapshot: "verification",
+    sourceEventOccurredAt: "2026-08-10T23:59:59.000Z",
+  })
+  const response = await scenario.run()
+
+  assert.deepEqual(await response.json(), {
+    ok: true,
+    processed: false,
+    providerAttempted: false,
+    outcome: "idle",
+  })
+  assert.deepEqual(
+    scenario.calls.rpc.map(({ name }) => name),
+    ["claim_registration_customer_reminder_job_v1"],
+  )
+  assert.deepEqual(
+    {
+      availableAt: scenario.state.job.availableAt,
+      claimed: scenario.state.job.claimed,
+      claimExpiresAt: scenario.state.job.claimExpiresAt,
+      claimToken: scenario.state.job.claimToken,
+      error: scenario.state.job.lastErrorCode,
+      status: scenario.state.job.status,
+    },
+    {
+      availableAt: null,
+      claimed: false,
+      claimExpiresAt: null,
+      claimToken: null,
+      error: "verification_scope_changed",
+      status: "canceled",
+    },
+  )
+  assert.deepEqual(scenario.state.sourceEvent, {
+    consumptionAction: "created",
+    occurredAt: "2026-08-10T23:59:59.000Z",
+  })
+  assert.equal(scenario.calls.gates.includes("claim:verification-after-activation"), true)
+  assert.equal(scenario.calls.fetches.length, 0)
+  assert.equal(scenario.calls.globalFetchAttempts, 0)
+  assert.equal(scenario.calls.globalFetchRestores, 1)
+  assert.equal(scenario.calls.markerCount, 0)
+  assert.equal(
+    scenario.calls.rpc.filter(({ name }) => name === "finalize_registration_customer_reminder_dispatch_v1").length,
+    0,
+  )
+  assertExactRpcTransport(scenario)
 })
 
 test("double revision drift gets only two real source reads and remains provider-zero", async () => {
