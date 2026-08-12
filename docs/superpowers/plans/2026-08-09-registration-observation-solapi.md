@@ -2109,7 +2109,19 @@ Expected: the reviewed commit exists at one remote feature ref while `main` stil
 
 - [ ] **Step 3: Consume the master Gate B preflight, dispatch the exact feature ref, and diff the full ledger**
 
-This subordinate plan does not redefine Gate B. For this first installation, the only valid pre-dispatch installation baseline is the exact token `not_installed`; do not require runtime `0` before the runtime relation exists. A trusted read-only catalog receipt earns `not_installed` only when `dashboard_private.registration_observation_runtime_settings`, `dashboard_private.registration_observation_domain_events`, `dashboard_private.google_chat_profile_identities`, `dashboard_private.registration_observation_chat_jobs`, and `dashboard_private.registration_observation_solapi_event_consumptions` are all absent, no observation provider attempt exists, and the linked ledger shows all twelve reviewed migrations below as local-only pending in this exact order, including profile mention foundation `20260809104500` before Google Chat `20260809105000`, with unreviewed pending count exactly `0`. A partial object set, any one remote version from this set, an unreadable catalog/ledger, or any attempt count makes the baseline `drifted`, not `not_installed`, and blocks dispatch. If a future rollout starts from an already installed schema, it must use the master's separate exact-token `installed_runtime0` preflight; the first-install exception cannot be reused. Freeze this receipt and `TIPS_RELEASE_SHA` before the first `gh workflow run`.
+This subordinate plan does not redefine Gate B. For this first installation, the only valid pre-dispatch installation baseline is the exact token `not_installed`; do not require runtime `0` before the runtime relation exists. A trusted read-only catalog receipt earns `not_installed` only when `dashboard_private.registration_observation_runtime_settings`, `dashboard_private.registration_observation_domain_events`, `dashboard_private.google_chat_profile_identities`, `dashboard_private.registration_observation_chat_jobs`, and `dashboard_private.registration_observation_solapi_event_consumptions` are all absent, no observation provider attempt exists, and the linked ledger shows all seventeen reviewed migrations below as local-only pending in this exact order, including profile mention foundation `20260809104500` before Google Chat `20260809105000`, with unreviewed pending count exactly `0`. The added `20260809102200`, `20260809102400`, and `20260809102450` rows are reviewed prerequisites, while `20260812002019` and `20260812003000` are reviewed follow-up fixes; none is an unreviewed extra. A partial object set, any one remote version from this set, an unreadable catalog/ledger, or any attempt count makes the baseline `drifted`, not `not_installed`, and blocks dispatch. If a future rollout starts from an already installed schema, it must use the master's separate exact-token `installed_runtime0` preflight; the first-install exception cannot be reused. Freeze this receipt and `TIPS_RELEASE_SHA` before the first `gh workflow run`.
+
+Before `not_installed` is accepted, the migration-layout verifier must also prove that these nine remote-history-aligned source identities are present locally with their exact SHA-256 values; they are already represented in the remote ledger and are not additions to the seventeen local-only pending rows:
+
+- `20260807030434`: `53e0d49c96c9ea38418e082370755a071ab75d3d44fe7b12c6240eb44fd6945e`
+- `20260807111442`: `e367278104df0fad8d74e17cafd7eb0fd24baa90e32efb1cdec18e0cb8ac6b5b`
+- `20260807125038`: `3cb54293dbef73b0eccbc92e14bda2e7f51d2c51e0a55d927daa8192ce720f37`
+- `20260808044202`: `06f57db749b84e41d4647ce44d231633a1ad2f54da9b2149cd93bd33349990bb`
+- `20260808050410`: `068349ad45c5c230a45c789d70fab3ce7b1c19e69ea6f958c68f921941048004`
+- `20260808124315`: `c75e570cb032c5d4d7ec266b2128d103618a0490e293255aab6f688d71574ef0`
+- `20260811142055`: `340b7d2c8d53ade12c7a2f9df98669218826d56a8b6e02f920e897788378d547`
+- `20260811142152`: `e5abe58f49fe926eb3e35a4471cd9adb49c052f0d677453ffd0f48d80a88c491`
+- `20260811142353`: `aa177ab5d3151d7f2fa55883f7efc8526999828ee5cbd210693f5ddafc09fc30`
 
 ```bash
 TIPS_SUPABASE_CLI=/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supabase/cli-darwin-arm64/bin/supabase-go
@@ -2129,6 +2141,9 @@ printf '%s\n' \
   20260809100000 \
   20260809101000 \
   20260809102000 \
+  20260809102200 \
+  20260809102400 \
+  20260809102450 \
   20260809102500 \
   20260809103000 \
   20260809103500 \
@@ -2137,7 +2152,9 @@ printf '%s\n' \
   20260809105000 \
   20260809106000 \
   20260809106100 \
-  20260809106200 > "${TIPS_EXPECTED_PENDING}"
+  20260809106200 \
+  20260812002019 \
+  20260812003000 > "${TIPS_EXPECTED_PENDING}"
 cmp -s "${TIPS_EXPECTED_PENDING}" "${TIPS_PENDING_BEFORE_DISPATCH}"
 TIPS_DB_DISPATCHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 gh workflow run supabase-db-push.yml --ref "${TIPS_FEATURE_REF}"
@@ -2181,7 +2198,7 @@ test -s "${TIPS_LEDGER_DISPATCH_DIFF}"
 shasum -a 256 "${TIPS_LEDGER_BEFORE_DISPATCH}" "${TIPS_LEDGER_AFTER_DISPATCH}" "${TIPS_LEDGER_DISPATCH_DIFF}"
 ```
 
-Require the selected run to have `event=workflow_dispatch`, `headBranch=TIPS_FEATURE_REF`, `headSha=TIPS_RELEASE_SHA`, `createdAt >= TIPS_DB_DISPATCHED_AT`, `conclusion=success`. The pre-dispatch `cmp` against the twelve explicit full 14-digit versions above is the machine gate for the exact reviewed pending set; shorthand versions are not accepted. It therefore proves inclusion and order of profile mention `20260809104500`, Google Chat `20260809105000`, and unreviewed pending count `0`. After dispatch, inspect and retain the **complete** before/after ledgers, unified diff, three hashes, exact applied-version delta and empty removed-version set; checking only the three SOLAPI rows is forbidden. Each expected version must occur once remotely and no other ledger row may change.
+Require the selected run to have `event=workflow_dispatch`, `headBranch=TIPS_FEATURE_REF`, `headSha=TIPS_RELEASE_SHA`, `createdAt >= TIPS_DB_DISPATCHED_AT`, `conclusion=success`. The pre-dispatch `cmp` against the seventeen explicit full 14-digit versions above is the machine gate for the exact reviewed pending set; shorthand versions are not accepted. It therefore proves inclusion and order of profile mention `20260809104500`, Google Chat `20260809105000`, the five reviewed prerequisite/follow-up rows, and unreviewed pending count `0`. After dispatch, inspect and retain the **complete** before/after ledgers, unified diff, three hashes, exact applied-version delta and empty removed-version set; checking only the three SOLAPI rows is forbidden. Each expected version must occur once remotely and no other ledger row may change.
 
 Before `main` changes, replace—not compare byte-for-byte with—the `not_installed` receipt by an exact trusted read-only `installed_inert` receipt from the just-installed schema. It must prove `public.registration_observation_runtime_version()=0`; all eight registration-observation destination rules exist and `enabled` count is `0`; exactly seven adopted Google Chat mention-setting rows exist with the approved six ON/one OFF defaults but cannot send while rules are OFF; SOLAPI `observation_booking` and `observation_reminder` modes are both `off`; `registration_observation_domain_events`, `registration_observation_chat_jobs`, `registration_observation_solapi_event_consumptions`, and observation-reminder job counts are each `0`; `count(*)` from `dashboard_private.registration_customer_solapi_template_receipts` where `message_kind='observation_booking'` is exactly `0`; the same count where `message_kind='observation_reminder'` is exactly `0`; and observation customer-message, delivery-attempt marker, notification external-attempt audit, and actual provider-call deltas are each `0`. A combined template count or readiness booleans such as `bookingReceipt=false` / `reminderReceipt=false` are not substitutes for the two separate exact counts.
 
