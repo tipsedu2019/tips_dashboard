@@ -2567,9 +2567,13 @@ async function main() {
   }
 
   if (!parsed.execute) {
+    const focusContract = FOCUS_REGISTRY.get(parsed.focus);
     process.stdout.write(
       `DRY RUN — zero database changes\n${JSON.stringify({
         focus: parsed.focus,
+        migrationCeiling: focusContract.ceiling,
+        migrations: focusContract.migrations,
+        pgTapTests: focusContract.tests,
         databaseHost: LOOPBACK_HOST,
         ports: "allocated uniquely per execution",
         providerCalls: 0,

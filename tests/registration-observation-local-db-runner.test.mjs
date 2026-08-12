@@ -1025,17 +1025,17 @@ test("focus manifests prove provider and outbox presence plus exact zero delta",
   assert.match(setupSql, /commit;$/i);
 });
 
-test("next downstream focus fails explicitly until its files exist", () => {
+test("SOLAPI contract focus dry-runs its current committed migration and pgTAP contract", () => {
   const result = runRunner([
-    "--execute",
-    "--approved-local-db",
     "--focus",
     "solapi-contract",
   ]);
-  assert.equal(result.status, 2);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /DRY RUN.*zero database changes/s);
+  assert.match(result.stdout, /20260809106000/);
   assert.match(
-    result.stderr,
-    /registration_observation_local_db_focus_unavailable:solapi-contract/,
+    result.stdout,
+    /registration_observation_solapi_contract_test\.sql/,
   );
 });
 

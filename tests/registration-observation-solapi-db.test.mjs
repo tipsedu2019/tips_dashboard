@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 const contractMigrationUrl = new URL(
   "../supabase/migrations/20260809106000_registration_observation_solapi_contract.sql",
@@ -14,6 +16,15 @@ const dispatchMigrationUrl = new URL(
   "../supabase/migrations/20260809106200_registration_observation_solapi_dispatch.sql",
   import.meta.url,
 );
+const reminderRouteUrl = new URL(
+  "../src/features/tasks/server/registration-customer-reminder-route.ts",
+  import.meta.url,
+);
+const solapiAdapterUrl = new URL(
+  "../src/features/tasks/server/registration-customer-message-solapi.ts",
+  import.meta.url,
+);
+const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 function normalizeSql(source) {
   return source.replace(/--[^\n]*/g, " ").replace(/\s+/g, " ").trim();
@@ -42,6 +53,54 @@ function uniqueIndexBlock(source, indexName) {
   assert.ok(match, `missing unique index block: ${indexName}`);
   return match[0];
 }
+
+test("core runner exposes the final cumulative SOLAPI focus", () => {
+  const result = spawnSync(process.execPath, [
+    "--experimental-strip-types",
+    "scripts/run-registration-observation-local-db-qa.mjs",
+    "--focus",
+    "solapi",
+  ], { cwd: repoRoot, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /20260809106200/);
+  assert.match(result.stdout, /registration_observation_solapi_contract_test\.sql/);
+  assert.match(result.stdout, /registration_observation_solapi_queue_test\.sql/);
+  assert.match(result.stdout, /registration_observation_solapi_dispatch_test\.sql/);
+  assert.match(result.stdout, /dry[- ]run/i);
+});
+
+test("automatic SOLAPI assembly keeps the injected adapter boundary and frozen v2 ownership", async () => {
+  const [route, adapter, ...migrations] = await Promise.all([
+    readFile(reminderRouteUrl, "utf8"),
+    readFile(solapiAdapterUrl, "utf8"),
+    readFile(contractMigrationUrl, "utf8"),
+    readFile(queueMigrationUrl, "utf8"),
+    readFile(dispatchMigrationUrl, "utf8"),
+  ]);
+  assert.match(
+    route,
+    /const providerFetch = overrides\.providerFetch \?\? globalThis\.fetch\.bind\(globalThis\)/,
+  );
+  assert.match(
+    route,
+    /createRegistrationCustomerMessageSolapi\(\{[\s\S]*fetch: providerFetch,[\s\S]*\}\)/,
+  );
+  assert.match(
+    adapter,
+    /SOLAPI_SEND_MANY_URL = "https:\/\/api\.solapi\.com\/messages\/v4\/send-many\/detail"/,
+  );
+  assert.match(adapter, /providerFetch\(SOLAPI_SEND_MANY_URL,/);
+  for (const migration of migrations) {
+    assert.doesNotMatch(
+      migration,
+      /create or replace function public\.save_notification_control_plane_v2/i,
+    );
+    assert.doesNotMatch(
+      migration,
+      /save_notification_control_plane_v2\([^)]*override/i,
+    );
+  }
+});
 
 test("observation customer kinds are closed and revision scoped", async () => {
   const source = await readFile(contractMigrationUrl, "utf8");

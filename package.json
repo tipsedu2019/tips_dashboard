@@ -19,6 +19,7 @@
     "verify:notification-content:browser": "node scripts/verify-notification-content-browser.mjs",
     "verify:registration-customer-message:isolated-db": "node --experimental-strip-types scripts/run-registration-customer-solapi-local-db-qa.mjs",
     "verify:registration-observation:local-db": "node --experimental-strip-types scripts/run-registration-observation-local-db-qa.mjs",
+    "verify:registration-observation:solapi:plan": "node --experimental-strip-types scripts/run-registration-observation-local-db-qa.mjs --focus solapi",
     "verify:registration-observation:google-chat": "node --experimental-strip-types scripts/run-registration-observation-google-chat-provider-zero.mjs --execute --approved-local-db",
     "verify:registration-customer-message:browser": "node --experimental-strip-types scripts/verify-registration-customer-message-browser.mjs"
   },
