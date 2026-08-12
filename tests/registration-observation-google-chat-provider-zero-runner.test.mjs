@@ -24,11 +24,67 @@ const http = require("node:http");
 const https = require("node:https");
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
+const packageJsonPath = path.join(repositoryRoot, "package.json");
 const frozenCommonRunnerPath = path.join(
   repositoryRoot,
   "scripts/run-registration-observation-local-db-qa.mjs",
 );
 const forwardPgTapPath = "supabase/tests/notification_adapters_forward_install_test.sql";
+const pendingSchedulePgTapPath = "supabase/tests/notification_delivery_pending_schedule_test.sql";
+const coreReceiptFixture = JSON.stringify({
+  coreReadiness: { schemaReady: true, missingObjects: [], runtimeVersion: 0 },
+  coreActivation: { previousVersion: 0, runtimeVersion: 1, replayEqual: true },
+  heartbeat: {
+    workerId: "notification-worker-route-v1",
+    phase: "succeeded",
+    countKeys: [
+      "observation_due",
+      "fanout",
+      "rule_reconciliation",
+      "target_reconciliation",
+      "deliveries",
+      "reaped",
+    ],
+    allZero: true,
+  },
+  sharedFlags: {
+    notification_control_plane_settings_ui_enabled: { enabled: true, revision: "2" },
+    notification_control_plane_dispatch_registration_enabled: { enabled: true, revision: "2" },
+  },
+  externalAttemptAudit: 0,
+});
+const lifecycleReceiptFixture = JSON.stringify({
+  v2RuleSaveReceiptExact: true,
+  googleChatPrepareBoundaryReached: true,
+  googleChatDeliveryStatus: "sending",
+  scheduledMentionUserNames: ["users/123456788"],
+  feedbackMentionUserNames: ["users/123456789"],
+  directorReassignedMentionUserNames: ["users/123456789", "users/987654321"],
+  missingIdentityMentionUserNames: [],
+  inAppCommitBoundaryReached: true,
+  inAppDeliveryStatus: "sent",
+  inAppDashboardNotificationCount: 1,
+  inAppPushChildrenCreated: 0,
+  missingDirectorPair: {
+    managementStatus: "sending",
+    managementConnectionKey: "google_chat.management",
+    inAppStatus: "canceled",
+    inAppStatusReason: "recipient_revoked",
+  },
+  inactiveDirectorPair: {
+    managementStatus: "sending",
+    managementConnectionKey: "google_chat.management",
+    inAppStatus: "canceled",
+    inAppStatusReason: "recipient_revoked",
+  },
+  missingDirectorBeforeFanout: {
+    managementDeliveryCount: 1,
+    inAppDeliveryCount: 0,
+  },
+  customerQueueUnchanged: true,
+  solapiMessagesUnchanged: true,
+  externalAttemptAudit: 0,
+});
 
 async function forwardMigrationPath() {
   const migrationDirectory = path.join(repositoryRoot, "supabase", "migrations");
@@ -36,6 +92,15 @@ async function forwardMigrationPath() {
     .filter((entry) => /^[0-9]{14}_notification_adapters_forward_install\.sql$/u.test(entry))
     .sort();
   assert.equal(entries.length, 1, "forward migration fixture must be singular");
+  return path.join(migrationDirectory, entries[0]);
+}
+
+async function pendingScheduleMigrationPath() {
+  const migrationDirectory = path.join(repositoryRoot, "supabase", "migrations");
+  const entries = (await readdir(migrationDirectory))
+    .filter((entry) => /^[0-9]{14}_notification_delivery_pending_schedule_fix\.sql$/u.test(entry))
+    .sort();
+  assert.equal(entries.length, 1, "pending-delivery migration fixture must be singular");
   return path.join(migrationDirectory, entries[0]);
 }
 
@@ -103,10 +168,13 @@ async function createRecordedRun() {
       return { stdout: "", stderr: "" };
     }
     if (executable === "docker" && args[0] === "exec") {
+      const sql = args.at(-1);
       return {
-        stdout: args.at(-1).includes("registration_observation_provider_zero_baseline")
-          ? "registration_observation_provider_zero_baseline_marker_missing\n"
-          : "",
+        stdout: sql.includes("registration_observation_provider_zero_lifecycle_receipt")
+          ? `${lifecycleReceiptFixture}\n`
+          : sql.includes("registration_observation_provider_zero_core_receipt")
+            ? `${coreReceiptFixture}\n`
+            : "",
         stderr: "",
       };
     }
@@ -148,6 +216,16 @@ test("rejects unapproved provider-zero invocation before allocating a local proj
   assert.deepEqual(
     parseProviderZeroArguments(["--execute", "--approved-local-db"]),
     { execute: true, approvedLocalDb: true },
+  );
+});
+
+test("exposes only the approved local lifecycle command", async () => {
+  // Break caught: without this narrow package command, an operator can mistake
+  // the common local-db runner for the provider-zero lifecycle proof.
+  const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
+  assert.equal(
+    packageJson.scripts?.["verify:registration-observation:google-chat"],
+    "node --experimental-strip-types scripts/run-registration-observation-google-chat-provider-zero.mjs --execute --approved-local-db",
   );
 });
 
@@ -194,9 +272,9 @@ test("owns byte-identical prerequisite and history fixtures without importing th
   );
 });
 
-test("executes only owned loopback commands and reports the real adapters-marker baseline boundary", async () => {
-  // Break caught: replacing the production setter path, using another project,
-  // or accepting a non-marker failure would fabricate the provider-zero proof.
+test("executes only owned loopback commands and reports the staged lifecycle receipt", async () => {
+  // Break caught: applying the forward package outside the owned project, or
+  // accepting a marker-only receipt, would fabricate the provider-zero proof.
   const recorded = await createRecordedRun();
   try {
     const receipt = await runRegistrationObservationGoogleChatProviderZero({
@@ -210,9 +288,44 @@ test("executes only owned loopback commands and reports the real adapters-marker
       inspectResources: async () => [],
     });
 
-    assert.equal(receipt.mode, "baseline-marker-missing");
-    assert.equal(receipt.baselineMarkerMissing, true);
-    assert.equal(receipt.runtimeVersion, 0);
+    assert.equal(receipt.mode, "provider-zero-lifecycle-receipt");
+    assert.deepEqual(receipt.callTrace, [
+      "readiness",
+      "activate",
+      "heartbeat.started",
+      "heartbeat.succeeded",
+      "flag.settings-ui",
+      "flag.registration-dispatch",
+      "v2-save",
+      "lifecycle",
+    ]);
+    assert.deepEqual(receipt.coreReadiness, { schemaReady: true, missingObjects: [], runtimeVersion: 0 });
+    assert.deepEqual(receipt.coreActivation, { previousVersion: 0, runtimeVersion: 1, replayEqual: true });
+    assert.equal(receipt.v2RuleSaveReceiptExact, true);
+    assert.equal(receipt.googleChatDeliveryStatus, "sending");
+    assert.deepEqual(receipt.directorReassignedMentionUserNames, [
+      "users/123456789",
+      "users/987654321",
+    ]);
+    assert.deepEqual(receipt.missingIdentityMentionUserNames, []);
+    assert.equal(receipt.inAppDeliveryStatus, "sent");
+    assert.equal(receipt.inAppDashboardNotificationCount, 1);
+    assert.deepEqual(receipt.missingDirectorPair, {
+      managementStatus: "sending",
+      managementConnectionKey: "google_chat.management",
+      inAppStatus: "canceled",
+      inAppStatusReason: "recipient_revoked",
+    });
+    assert.deepEqual(receipt.inactiveDirectorPair, {
+      managementStatus: "sending",
+      managementConnectionKey: "google_chat.management",
+      inAppStatus: "canceled",
+      inAppStatusReason: "recipient_revoked",
+    });
+    assert.deepEqual(receipt.missingDirectorBeforeFanout, {
+      managementDeliveryCount: 1,
+      inAppDeliveryCount: 0,
+    });
     assert.equal(receipt.fetch, 0);
     assert.equal(receipt.http, 0);
     assert.equal(receipt.https, 0);
@@ -247,10 +360,9 @@ test("executes only owned loopback commands and reports the real adapters-marker
   }
 });
 
-test("resets the disposable database after committed pgTAP workers before reading flag revisions", async () => {
-  // Break caught: the frozen Google Chat suite uses committed dblink workers
-  // whose cleanup restores enabled=false but advances a flag revision, so the
-  // baseline setter proof must start from migration state rather than test residue.
+test("resets the disposable database between every focused pgTAP suite and the core receipt", async () => {
+  // Break caught: carrying committed pgTAP worker or adapter state into the
+  // receipt would fabricate initial revisions and dependency readiness.
   const recorded = await createRecordedRun();
   try {
     await runRegistrationObservationGoogleChatProviderZero({
@@ -272,6 +384,10 @@ test("resets the disposable database after committed pgTAP workers before readin
       "db reset",
       "test db",
       "db reset",
+      "test db",
+      "db reset",
+      "test db",
+      "db reset",
       "stop --workdir",
     ]);
   } finally {
@@ -283,8 +399,9 @@ test("stages exactly the generated forward migration after the baseline and runs
   // Break caught: applying a future active migration before the baseline, or
   // accepting an arbitrary test path, would fabricate the forward-install proof.
   const recorded = await createRecordedRun();
+  let project;
   try {
-    const project = await createOwnedProviderZeroProject({
+    project = await createOwnedProviderZeroProject({
       repositoryRoot,
       env: safeEnvironment(),
       makeTempRoot: recorded.makeTempRoot,
@@ -329,6 +446,59 @@ test("stages exactly the generated forward migration after the baseline and runs
       "forward pgTAP command must target only its staged focused directory",
     );
   } finally {
+    if (project) await project.cleanupOwnedResources();
+    await recorded.cleanup();
+  }
+});
+
+test("stages the pending-delivery constraint fix after the adapter package and runs its focused pgTAP", async () => {
+  // Break caught: omitting the additive delivery fix leaves the provider-zero
+  // lifecycle on the known pending/retry constraint violation after activation.
+  const recorded = await createRecordedRun();
+  let project;
+  try {
+    project = await createOwnedProviderZeroProject({
+      repositoryRoot,
+      env: safeEnvironment(),
+      makeTempRoot: recorded.makeTempRoot,
+      spawnImpl: recorded.spawnImpl,
+      randomBytes: recorded.randomBytes,
+      allocateLoopbackPort: sequentialPorts(55500),
+      inspectResources: async () => [],
+    });
+    const adapterMigration = await forwardMigrationPath();
+    const pendingScheduleMigration = await pendingScheduleMigrationPath();
+    await project.applyMigrationsThrough("20260809105000");
+    await project.applyForwardMigration(adapterMigration, forwardPgTapPath);
+    await project.runPgTap(forwardPgTapPath);
+    await project.applyForwardMigration(
+      pendingScheduleMigration,
+      pendingSchedulePgTapPath,
+    );
+    await project.runPgTap(pendingSchedulePgTapPath);
+
+    const stagedMigration = path.join(
+      project.runtimeRoot,
+      "supabase",
+      "migrations",
+      path.basename(pendingScheduleMigration),
+    );
+    assert.equal(
+      await readFile(stagedMigration, "utf8"),
+      await readFile(pendingScheduleMigration, "utf8"),
+    );
+    const testCalls = recorded.calls.filter(
+      ({ executable, args }) => executable === PINNED_SUPABASE_GO && args[0] === "test" && args[1] === "db",
+    );
+    assert.equal(testCalls.length, 2);
+    assert.ok(
+      testCalls[1].args.some((argument) =>
+        /focus-tests\/notification-delivery-pending-schedule$/u.test(argument),
+      ),
+      "pending-delivery pgTAP command must target only its staged focused directory",
+    );
+  } finally {
+    if (project) await project.cleanupOwnedResources();
     await recorded.cleanup();
   }
 });
