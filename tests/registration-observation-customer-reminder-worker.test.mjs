@@ -11,6 +11,10 @@ const CLAIM_TOKEN = "00000000-0000-4000-8000-000000000104"
 const REQUEST_KEY = "00000000-0000-4000-8000-000000000105"
 const MESSAGE_ID = "00000000-0000-4000-8000-000000000106"
 const DISPATCH_TOKEN = "00000000-0000-4000-8000-000000000107"
+const SECOND_JOB_ID = "00000000-0000-4000-8000-000000000111"
+const LEGACY_JOB_ID = "00000000-0000-4000-8000-000000000112"
+const SECOND_CLAIM_TOKEN = "00000000-0000-4000-8000-000000000113"
+const LEGACY_CLAIM_TOKEN = "00000000-0000-4000-8000-000000000114"
 
 const OBSERVATION_CLAIM = Object.freeze({
   jobId: JOB_ID,
@@ -54,6 +58,29 @@ const OBSERVATION_SOURCE = Object.freeze({
   place: "201호",
   campus: "본관",
   teacherName: "팁스 선생님",
+})
+
+const LEGACY_SOURCE = Object.freeze({
+  messageKind: "appointment_reminder",
+  sourceId: APPOINTMENT_ID,
+  taskId: "00000000-0000-4000-8000-000000000108",
+  trackId: null,
+  appointmentId: APPOINTMENT_ID,
+  sourceRevision: 4,
+  studentName: "김팁스",
+  parentPhoneDigits: "01012345678",
+  subjects: ["수학"],
+  participants: [Object.freeze({
+    trackId: "00000000-0000-4000-8000-000000000109",
+    subject: "수학",
+    workflowStatus: "level_test_requested",
+    workflowRevision: 4,
+    activityId: "00000000-0000-4000-8000-000000000110",
+    activityStatus: "scheduled",
+  })],
+  appointmentKind: "level_test",
+  scheduledAt: "2099-08-17T09:00:00Z",
+  place: "본관",
 })
 
 const PREPARED = Object.freeze({
@@ -129,42 +156,207 @@ function productionEnvironment() {
   }
 }
 
-function productionWorkerScenario({
-  claim = OBSERVATION_CLAIM,
-  read = OBSERVATION_SOURCE,
-  begin = { allowed: true, messageId: MESSAGE_ID, dispatchToken: DISPATCH_TOKEN, currentStatus: "pending" },
+function statefulJob({
+  jobId = JOB_ID,
+  messageKind = "observation_reminder",
+  claimToken = CLAIM_TOKEN,
+  scheduledFor = "2026-08-12T03:00:00.000Z",
+  dueAt = "2026-08-12T00:00:00.000Z",
+  availableAt = dueAt,
+  existingStatus = null,
+} = {}) {
+  return {
+    jobId,
+    messageKind,
+    appointmentId: APPOINTMENT_ID,
+    observationId: messageKind === "observation_reminder" ? OBSERVATION_ID : null,
+    claimToken,
+    sourceRevision: 4,
+    scheduledFor,
+    dueAt,
+    availableAt,
+    status: "pending",
+    sourceRevisionAtRead: 7,
+    lastReadRevision: 7,
+    sourceRefreshCount: 0,
+    existingStatus,
+    lastErrorCode: null,
+  }
+}
+
+function createStatefulReminderService({
+  jobs = [statefulJob()],
+  now = "2026-08-12T00:00:00.000Z",
+  leadHours = 3,
+  runtimeVersion = 1,
+  activationMode = "live",
+  receiptSendable = true,
+  afterClaim,
+  afterRead,
 } = {}) {
   const calls = {
-    claim: 0,
-    read: 0,
-    begin: 0,
+    rpc: [],
     release: [],
     finalize: [],
     provider: 0,
-    rpc: [],
     providerPayloads: [],
+    failures: [],
   }
-  const value = (input) => typeof input === "function" ? input() : input
+  const state = {
+    jobs,
+    now: new Date(now),
+    settings: { enabled: true, leadHours },
+    runtimeVersion,
+    activation: { mode: activationMode },
+    receipt: { sendable: receiptSendable },
+    transitions: [],
+  }
+  const date = (value) => new Date(value).getTime()
+  const sourceFor = (job) => job.messageKind === "appointment_reminder"
+    ? LEGACY_SOURCE
+    : Object.freeze({
+      ...OBSERVATION_SOURCE,
+      sessionSourceRevision: Object.freeze({
+        authority: "normalized",
+        sessionId: "00000000-0000-4000-8000-000000000110",
+        revision: job.sourceRevisionAtRead,
+      }),
+      teacherName: `담당 ${job.sourceRevisionAtRead}`,
+    })
+  const rawClaim = (job) => job.messageKind === "appointment_reminder"
+    ? Object.freeze({
+      jobId: job.jobId,
+      appointmentId: job.appointmentId,
+      claimToken: job.claimToken,
+      sourceRevision: job.sourceRevision,
+      scheduledFor: job.scheduledFor,
+      requestKey: job.jobId,
+    })
+    : Object.freeze({
+      jobId: job.jobId,
+      messageKind: "observation_reminder",
+      appointmentId: job.appointmentId,
+      observationId: job.observationId,
+      claimToken: job.claimToken,
+      sourceRevision: job.sourceRevision,
+      scheduledFor: job.scheduledFor,
+      requestKey: job.jobId,
+    })
+  const jobFor = (args) => state.jobs.find((job) => (
+    job.jobId === args.p_job_id && job.claimToken === args.p_claim_token
+  ))
+  const expectedDue = (job) => new Date(
+    date(job.scheduledFor) - state.settings.leadHours * 60 * 60 * 1000,
+  ).toISOString()
   const client = {
     rpc(name, args = {}) {
       calls.rpc.push({ name, args })
       if (name === "claim_registration_customer_reminder_job_v1") {
-        calls.claim += 1
-        return rpcResponse(value(claim))
+        const job = state.jobs.find((candidate) => (
+          candidate.status === "pending"
+          && date(candidate.dueAt) <= state.now.getTime()
+          && date(candidate.availableAt) <= state.now.getTime()
+          && (candidate.messageKind !== "observation_reminder" || state.runtimeVersion === 1)
+        ))
+        if (!job) return rpcResponse(null)
+        job.status = "claimed"
+        job.availableAt = null
+        state.transitions.push(`claim:${job.jobId}`)
+        afterClaim?.({ state, job })
+        return rpcResponse(rawClaim(job))
       }
       if (name === "read_registration_customer_reminder_source_v1") {
-        calls.read += 1
-        const result = value(read)
-        return result instanceof Error
-          ? rpcResponse(null, { message: result.message })
-          : rpcResponse(result)
+        const job = jobFor(args)
+        if (!job || job.status !== "claimed") {
+          calls.failures.push("read:claim_invalid")
+          return rpcResponse(null, { message: "registration_customer_reminder_claim_invalid" })
+        }
+        if (job.messageKind === "observation_reminder" && state.runtimeVersion !== 1) {
+          calls.failures.push("read:runtime_inactive")
+          return rpcResponse(null, { message: "registration_observation_runtime_inactive" })
+        }
+        if (job.bookingFactChanged) {
+          calls.failures.push("read:booking_fact_changed")
+          return rpcResponse(null, { message: "registration_customer_reminder_booking_fact_changed" })
+        }
+        const source = sourceFor(job)
+        state.transitions.push(`read:${job.jobId}:${job.sourceRevisionAtRead}`)
+        afterRead?.({ state, job, source })
+        return rpcResponse(source)
       }
       if (name === "begin_registration_customer_reminder_dispatch_v1") {
-        calls.begin += 1
-        const result = value(begin)
-        return result instanceof Error
-          ? rpcResponse(null, { message: result.message })
-          : rpcResponse(result)
+        const job = jobFor(args)
+        if (!job || job.status !== "claimed") {
+          calls.failures.push("begin:claim_invalid")
+          return rpcResponse(null, { message: "registration_customer_reminder_claim_invalid" })
+        }
+        state.transitions.push(`begin:${job.jobId}`)
+        if (job.existingStatus) {
+          return rpcResponse({
+            allowed: false,
+            messageId: MESSAGE_ID,
+            dispatchToken: DISPATCH_TOKEN,
+            currentStatus: job.existingStatus,
+          })
+        }
+        if (job.messageKind === "observation_reminder" && state.runtimeVersion !== 1) {
+          job.status = "canceled"
+          job.lastErrorCode = "runtime_inactive"
+          return rpcResponse({
+            allowed: false,
+            messageId: null,
+            dispatchToken: null,
+            currentStatus: "runtime_inactive",
+          })
+        }
+        if (job.messageKind === "observation_reminder" && state.activation.mode === "off") {
+          job.status = "canceled"
+          job.lastErrorCode = "activation_off"
+          calls.failures.push("begin:activation_off")
+          return rpcResponse(null, { message: "registration_customer_reminder_claim_invalid" })
+        }
+        if (job.messageKind === "observation_reminder" && !state.receipt.sendable) {
+          calls.failures.push("begin:receipt_drift")
+          return rpcResponse(null, { message: "registration_customer_reminder_not_ready" })
+        }
+        if (job.dueAt !== expectedDue(job)) {
+          job.dueAt = expectedDue(job)
+          job.availableAt = job.dueAt
+          job.status = "pending"
+          job.lastErrorCode = "settings_changed"
+          return rpcResponse({
+            allowed: false,
+            messageId: null,
+            dispatchToken: null,
+            currentStatus: "settings_refresh_required",
+          })
+        }
+        if (job.messageKind === "observation_reminder" && job.lastReadRevision !== job.sourceRevisionAtRead) {
+          job.lastReadRevision = job.sourceRevisionAtRead
+          if (job.sourceRefreshCount === 0) {
+            job.sourceRefreshCount = 1
+            return rpcResponse({
+              allowed: false,
+              messageId: null,
+              dispatchToken: null,
+              currentStatus: "refresh_required",
+            })
+          }
+          job.status = "source_dirty"
+          job.lastErrorCode = "source_revision_unstable"
+          return rpcResponse({
+            allowed: false,
+            messageId: null,
+            dispatchToken: null,
+            currentStatus: "source_dirty",
+          })
+        }
+        return rpcResponse({
+          allowed: true,
+          messageId: MESSAGE_ID,
+          dispatchToken: DISPATCH_TOKEN,
+          currentStatus: "pending",
+        })
       }
       if (name === "release_registration_customer_reminder_job_v1") {
         calls.release.push(args)
@@ -172,6 +364,8 @@ function productionWorkerScenario({
       }
       if (name === "finalize_registration_customer_reminder_dispatch_v1") {
         calls.finalize.push(args)
+        const job = state.jobs.find((candidate) => candidate.status === "claimed")
+        if (job) job.status = "delivery_unknown"
         return rpcResponse({ ok: true })
       }
       throw new Error(`unexpected rpc: ${name}`)
@@ -190,28 +384,21 @@ function productionWorkerScenario({
     method: "POST",
     headers: { authorization: "Bearer worker-secret" },
   }))
-  return { calls, run }
+  return {
+    calls,
+    state,
+    run,
+    advanceTo(value) {
+      state.now = new Date(value)
+      state.transitions.push(`clock:${state.now.toISOString()}`)
+    },
+  }
 }
 
 function rpcNames(calls) {
   return calls.rpc.map(({ name }) => name)
 }
 
-function canonicalClaimGate(input) {
-  const transitions = []
-  const { calls, run } = productionWorkerScenario({
-    claim() {
-      transitions.push(`claim:${input.kind}:${input.state}`)
-      if (input.state !== "scheduled") return null
-      if (input.kind === "observation_reminder" && input.runtimeVersion !== 1) return null
-      if (input.kind === "appointment_reminder" && input.activationMode !== "live") return null
-      if (input.receiptReady === false || input.afterCutoff === false || input.bookingHashCurrent === false) return null
-      transitions.push("claimed")
-      return input.kind === "appointment_reminder" ? LEGACY_CLAIM : OBSERVATION_CLAIM
-    },
-  })
-  return { calls, run, transitions }
-}
 
 test("claim parser normalizes the exact legacy shape only after preserving its raw six-key contract", () => {
   const parse = reminderRoute.parseRegistrationCustomerReminderClaim
@@ -372,15 +559,13 @@ test("worker refreshes exactly once and sends only the refreshed observation pay
 })
 
 test("production refresh re-reads once, mutates between begin attempts, and sends only the second payload", async () => {
-  const secondSource = Object.freeze({ ...OBSERVATION_SOURCE, teacherName: "새 담당 선생님" })
-  const sources = [OBSERVATION_SOURCE, secondSource]
-  const markers = [
-    { allowed: false, messageId: null, dispatchToken: null, currentStatus: "refresh_required" },
-    { allowed: true, messageId: MESSAGE_ID, dispatchToken: DISPATCH_TOKEN, currentStatus: "pending" },
-  ]
-  const scenario = productionWorkerScenario({
-    read: () => sources.shift(),
-    begin: () => markers.shift(),
+  const scenario = createStatefulReminderService({
+    afterRead({ state, job }) {
+      if (job.jobId === JOB_ID && job.sourceRevisionAtRead === 7) {
+        job.sourceRevisionAtRead = 8
+        state.transitions.push("source:after_read:8")
+      }
+    },
   })
 
   const response = await scenario.run()
@@ -402,12 +587,30 @@ test("production refresh re-reads once, mutates between begin attempts, and send
       { p_job_id: JOB_ID, p_claim_token: CLAIM_TOKEN },
     ],
   )
-  assert.equal(scenario.calls.begin, 2)
-  assert.equal(scenario.calls.read, 2)
+  assert.deepEqual(
+    scenario.calls.rpc.filter(({ name }) => name === "begin_registration_customer_reminder_dispatch_v1")
+      .map(({ args }) => ({
+        jobId: args.p_job_id,
+        claimToken: args.p_claim_token,
+        keys: Object.keys(args).sort(),
+      })),
+    [
+      { jobId: JOB_ID, claimToken: CLAIM_TOKEN, keys: ["p_claim_token", "p_contract", "p_job_id", "p_readiness_contract"] },
+      { jobId: JOB_ID, claimToken: CLAIM_TOKEN, keys: ["p_claim_token", "p_contract", "p_job_id", "p_readiness_contract"] },
+    ],
+  )
   assert.equal(scenario.calls.provider, 1)
   assert.equal(scenario.calls.finalize.length, 1)
-  assert.equal(JSON.stringify(scenario.calls.providerPayloads[0]).includes("새 담당 선생님"), true)
-  assert.equal(JSON.stringify(scenario.calls.providerPayloads[0]).includes("팁스 선생님"), false)
+  assert.equal(JSON.stringify(scenario.calls.providerPayloads[0]).includes("담당 8"), true)
+  assert.equal(JSON.stringify(scenario.calls.providerPayloads[0]).includes("담당 7"), false)
+  assert.deepEqual(scenario.state.transitions, [
+    `claim:${JOB_ID}`,
+    `read:${JOB_ID}:7`,
+    "source:after_read:8",
+    `begin:${JOB_ID}`,
+    `read:${JOB_ID}:8`,
+    `begin:${JOB_ID}`,
+  ])
 })
 
 test("worker stops after the second observation revision drift without a marker or provider call", async () => {
@@ -430,14 +633,11 @@ test("worker stops after the second observation revision drift without a marker 
 })
 
 test("production second drift stops after two reads and two begin attempts without a third read or provider", async () => {
-  const sources = [OBSERVATION_SOURCE, Object.freeze({ ...OBSERVATION_SOURCE, className: "변경된 수업" })]
-  const markers = [
-    { allowed: false, messageId: null, dispatchToken: null, currentStatus: "refresh_required" },
-    { allowed: false, messageId: null, dispatchToken: null, currentStatus: "source_dirty" },
-  ]
-  const scenario = productionWorkerScenario({
-    read: () => sources.shift(),
-    begin: () => markers.shift(),
+  const scenario = createStatefulReminderService({
+    afterRead({ state, job }) {
+      job.sourceRevisionAtRead += 1
+      state.transitions.push(`source:after_read:${job.sourceRevisionAtRead}`)
+    },
   })
 
   const response = await scenario.run()
@@ -455,10 +655,17 @@ test("production second drift stops after two reads and two begin attempts witho
     "read_registration_customer_reminder_source_v1",
     "begin_registration_customer_reminder_dispatch_v1",
   ])
-  assert.equal(scenario.calls.read, 2)
-  assert.equal(scenario.calls.begin, 2)
   assert.equal(scenario.calls.provider, 0)
   assert.equal(scenario.calls.finalize.length, 0)
+  assert.deepEqual(scenario.state.transitions, [
+    `claim:${JOB_ID}`,
+    `read:${JOB_ID}:7`,
+    "source:after_read:8",
+    `begin:${JOB_ID}`,
+    `read:${JOB_ID}:8`,
+    "source:after_read:9",
+    `begin:${JOB_ID}`,
+  ])
 })
 
 test("worker maps booking fact and runtime gate failures to terminal provider-zero releases", async () => {
@@ -484,11 +691,10 @@ test("worker maps booking fact and runtime gate failures to terminal provider-ze
 
 test("terminal begin states never cross the observation provider marker boundary", async () => {
   for (const currentStatus of [
+    "canceled",
     "runtime_inactive",
     "settings_refresh_required",
     "source_dirty",
-    "duplicate_locked",
-    "accepted",
   ]) {
     const { calls, worker } = workerFixture({
       async begin() {
@@ -503,147 +709,208 @@ test("terminal begin states never cross the observation provider marker boundary
   }
 })
 
-test("canonical claim fences stop each ineligible state before any source read or marker", async () => {
-  const fixtures = [
-    ["canceled", { kind: "observation_reminder", state: "canceled", runtimeVersion: 1 }],
-    ["completed", { kind: "observation_reminder", state: "completed", runtimeVersion: 1 }],
-    ["no show", { kind: "observation_reminder", state: "no_show", runtimeVersion: 1 }],
-    ["runtime 0", { kind: "observation_reminder", state: "scheduled", runtimeVersion: 0 }],
-    ["claim booking dirty", { kind: "observation_reminder", state: "scheduled", runtimeVersion: 1, bookingHashCurrent: false }],
-    ["appointment verification", { kind: "appointment_reminder", state: "scheduled", activationMode: "verification" }],
-    ["receipt drift", { kind: "observation_reminder", state: "scheduled", runtimeVersion: 1, receiptReady: false }],
-    ["cutoff backlog", { kind: "observation_reminder", state: "scheduled", runtimeVersion: 1, afterCutoff: false }],
-  ]
-  for (const [cause, fixture] of fixtures) {
-    const { calls, run, transitions } = canonicalClaimGate(fixture)
-    const response = await run()
-    assert.deepEqual(await response.json(), {
-      ok: true,
-      processed: false,
-      providerAttempted: false,
-      outcome: "idle",
-    }, cause)
-    assert.deepEqual(transitions, [`claim:${fixture.kind}:${fixture.state}`], cause)
-    assert.equal(calls.read, 0, cause)
-    assert.equal(calls.begin, 0, cause)
-    assert.equal(calls.release.length, 0, cause)
-    assert.equal(calls.provider, 0, cause)
-    assert.equal(calls.finalize.length, 0, cause)
-  }
+test("production consumer treats DB claim:null as idle without a source read, marker, or provider", async () => {
+  const scenario = createStatefulReminderService({ jobs: [] })
+  const response = await scenario.run()
+
+  assert.deepEqual(await response.json(), {
+    ok: true,
+    processed: false,
+    providerAttempted: false,
+    outcome: "idle",
+  })
+  assert.deepEqual(rpcNames(scenario.calls), ["claim_registration_customer_reminder_job_v1"])
+  assert.equal(scenario.calls.provider, 0)
+  assert.equal(scenario.calls.finalize.length, 0)
 })
 
-test("runtime and booking gates fail provider-zero both before source preparation and before the marker", async () => {
-  const beforeRead = productionWorkerScenario({
-    read: new Error("registration_observation_runtime_inactive"),
+test("stateful production RPC boundary preserves legacy delivery while runtime flips at observation claim, read, and begin", async () => {
+  const afterReadJob = statefulJob({
+    jobId: SECOND_JOB_ID,
+    claimToken: SECOND_CLAIM_TOKEN,
   })
-  const beforeReadResponse = await beforeRead.run()
-  assert.equal((await beforeReadResponse.json()).outcome, "skipped")
-  assert.deepEqual(beforeRead.calls.release.map(({ p_error_code }) => p_error_code), ["runtime_inactive"])
-  assert.equal(beforeRead.calls.begin, 0)
-  assert.equal(beforeRead.calls.provider, 0)
-  assert.equal(beforeRead.calls.finalize.length, 0)
+  const legacyJob = statefulJob({
+    jobId: LEGACY_JOB_ID,
+    messageKind: "appointment_reminder",
+    claimToken: LEGACY_CLAIM_TOKEN,
+  })
+  const scenario = createStatefulReminderService({
+    jobs: [statefulJob(), afterReadJob, legacyJob],
+    runtimeVersion: 0,
+    afterClaim({ state, job }) {
+      if (job.jobId === JOB_ID) {
+        state.runtimeVersion = 0
+        state.transitions.push("runtime:after_claim:0")
+      }
+    },
+    afterRead({ state, job }) {
+      if (job.jobId === SECOND_JOB_ID) {
+        state.runtimeVersion = 0
+        state.transitions.push("runtime:after_read:0")
+      }
+    },
+  })
 
-  const beforeMarker = productionWorkerScenario({
-    begin: { allowed: false, messageId: null, dispatchToken: null, currentStatus: "runtime_inactive" },
-  })
-  const beforeMarkerResponse = await beforeMarker.run()
-  assert.equal((await beforeMarkerResponse.json()).outcome, "skipped")
-  assert.equal(beforeMarker.calls.read, 1)
-  assert.equal(beforeMarker.calls.begin, 1)
-  assert.equal(beforeMarker.calls.provider, 0)
-  assert.equal(beforeMarker.calls.finalize.length, 0)
+  const legacy = await scenario.run()
+  scenario.state.runtimeVersion = 1
+  scenario.state.transitions.push("runtime:before_observation_claim:1")
+  const afterClaim = await scenario.run()
+  scenario.state.runtimeVersion = 1
+  scenario.state.transitions.push("runtime:before_observation_read:1")
+  const afterRead = await scenario.run()
 
-  const canceled = productionWorkerScenario({
-    begin: { allowed: false, messageId: null, dispatchToken: null, currentStatus: "canceled" },
-  })
-  const canceledResponse = await canceled.run()
-  assert.equal((await canceledResponse.json()).outcome, "skipped")
-  assert.deepEqual(rpcNames(canceled.calls), [
+  assert.equal((await legacy.json()).outcome, "unknown")
+  assert.equal((await afterClaim.json()).outcome, "skipped")
+  assert.equal((await afterRead.json()).outcome, "skipped")
+  assert.deepEqual(rpcNames(scenario.calls), [
+    "claim_registration_customer_reminder_job_v1",
+    "read_registration_customer_reminder_source_v1",
+    "begin_registration_customer_reminder_dispatch_v1",
+    "finalize_registration_customer_reminder_dispatch_v1",
+    "claim_registration_customer_reminder_job_v1",
+    "read_registration_customer_reminder_source_v1",
+    "release_registration_customer_reminder_job_v1",
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
     "begin_registration_customer_reminder_dispatch_v1",
   ])
-  assert.equal(canceled.calls.provider, 0)
-  assert.equal(canceled.calls.finalize.length, 0)
-
-  const bookingChanged = productionWorkerScenario({
-    read: new Error("registration_customer_reminder_booking_fact_changed"),
-  })
-  const bookingChangedResponse = await bookingChanged.run()
-  assert.equal((await bookingChangedResponse.json()).outcome, "skipped")
-  assert.deepEqual(bookingChanged.calls.release.map(({ p_error_code }) => p_error_code), ["booking_fact_changed"])
-  assert.equal(bookingChanged.calls.begin, 0)
-  assert.equal(bookingChanged.calls.provider, 0)
-  assert.equal(bookingChanged.calls.finalize.length, 0)
-
-  const sourceDirty = productionWorkerScenario({
-    begin: { allowed: false, messageId: null, dispatchToken: null, currentStatus: "source_dirty" },
-  })
-  const sourceDirtyResponse = await sourceDirty.run()
-  assert.equal((await sourceDirtyResponse.json()).outcome, "skipped")
-  assert.equal(sourceDirty.calls.provider, 0)
-  assert.equal(sourceDirty.calls.finalize.length, 0)
+  assert.deepEqual(
+    scenario.calls.rpc.filter(({ name }) => name === "read_registration_customer_reminder_source_v1")
+      .map(({ args }) => args),
+    [
+      { p_job_id: LEGACY_JOB_ID, p_claim_token: LEGACY_CLAIM_TOKEN },
+      { p_job_id: JOB_ID, p_claim_token: CLAIM_TOKEN },
+      { p_job_id: SECOND_JOB_ID, p_claim_token: SECOND_CLAIM_TOKEN },
+    ],
+  )
+  assert.deepEqual(scenario.calls.release, [{
+    p_job_id: JOB_ID,
+    p_claim_token: CLAIM_TOKEN,
+    p_error_code: "runtime_inactive",
+  }])
+  assert.equal(scenario.calls.provider, 1)
+  assert.equal(scenario.calls.finalize.length, 1)
+  assert.deepEqual(scenario.state.transitions, [
+    `claim:${LEGACY_JOB_ID}`,
+    `read:${LEGACY_JOB_ID}:7`,
+    `begin:${LEGACY_JOB_ID}`,
+    "runtime:before_observation_claim:1",
+    `claim:${JOB_ID}`,
+    "runtime:after_claim:0",
+    "runtime:before_observation_read:1",
+    `claim:${SECOND_JOB_ID}`,
+    `read:${SECOND_JOB_ID}:7`,
+    "runtime:after_read:0",
+    `begin:${SECOND_JOB_ID}`,
+  ])
 })
 
-test("observation runtime source errors are terminal only for observation claims", async () => {
-  const observation = productionWorkerScenario({
-    read: new Error("registration_observation_runtime_inactive"),
+test("deferred booking-fact change at the production read boundary releases terminally provider-zero", async () => {
+  const scenario = createStatefulReminderService({
+    afterClaim({ state, job }) {
+      job.bookingFactChanged = true
+      state.transitions.push("booking:after_claim:changed")
+    },
   })
-  const observationResponse = await observation.run()
-  assert.equal((await observationResponse.json()).outcome, "skipped")
-  assert.deepEqual(observation.calls.release.map(({ p_error_code }) => p_error_code), ["runtime_inactive"])
-  assert.equal(observation.calls.provider, 0)
+  const response = await scenario.run()
 
-  const legacy = productionWorkerScenario({
-    claim: LEGACY_CLAIM,
-    read: new Error("registration_observation_runtime_inactive"),
-  })
-  const legacyResponse = await legacy.run()
-  assert.equal((await legacyResponse.json()).outcome, "held")
-  assert.deepEqual(legacy.calls.release.map(({ p_error_code }) => p_error_code), ["pre_send_preparation_failed"])
-  assert.equal(legacy.calls.provider, 0)
-  assert.equal(legacy.calls.finalize.length, 0)
-})
-
-test("not-ready settings and a requested refresh stay provider-zero without a final marker", async () => {
-  for (const cause of ["activation_off", "observation_receipt_drift"]) {
-    const { calls, run } = productionWorkerScenario({
-      begin: new Error("registration_customer_reminder_not_ready"),
-    })
-    const response = await run()
-    assert.equal((await response.json()).outcome, "held", cause)
-    assert.deepEqual(calls.release.map(({ p_error_code }) => p_error_code), ["pre_send_preparation_failed"], cause)
-    assert.equal(calls.provider, 0, cause)
-    assert.equal(calls.finalize.length, 0, cause)
-  }
-
-  const refreshRequired = productionWorkerScenario({
-    begin: { allowed: false, messageId: null, dispatchToken: null, currentStatus: "settings_refresh_required" },
-  })
-  const response = await refreshRequired.run()
   assert.equal((await response.json()).outcome, "skipped")
-  assert.equal(refreshRequired.calls.provider, 0)
-  assert.equal(refreshRequired.calls.finalize.length, 0)
+  assert.deepEqual(rpcNames(scenario.calls), [
+    "claim_registration_customer_reminder_job_v1",
+    "read_registration_customer_reminder_source_v1",
+    "release_registration_customer_reminder_job_v1",
+  ])
+  assert.deepEqual(scenario.calls.release, [{
+    p_job_id: JOB_ID,
+    p_claim_token: CLAIM_TOKEN,
+    p_error_code: "booking_fact_changed",
+  }])
+  assert.deepEqual(scenario.calls.failures, ["read:booking_fact_changed"])
+  assert.equal(scenario.calls.provider, 0)
+  assert.equal(scenario.calls.finalize.length, 0)
 })
 
-test("settings refresh defers the recomputed-due job until a subsequent claim", async () => {
-  const claims = [OBSERVATION_CLAIM, null, OBSERVATION_CLAIM]
-  const markers = [
-    { allowed: false, messageId: null, dispatchToken: null, currentStatus: "settings_refresh_required" },
-    { allowed: true, messageId: MESSAGE_ID, dispatchToken: DISPATCH_TOKEN, currentStatus: "pending" },
-  ]
-  const scenario = productionWorkerScenario({
-    claim: () => claims.shift(),
-    begin: () => markers.shift(),
+test("activation OFF after read cancels the claimed observation at begin without provider evidence", async () => {
+  const scenario = createStatefulReminderService({
+    afterRead({ state, job }) {
+      state.activation.mode = "off"
+      job.status = "canceled"
+      job.lastErrorCode = "activation_off"
+      state.transitions.push("activation:after_read:off")
+    },
+  })
+  const response = await scenario.run()
+
+  assert.equal((await response.json()).outcome, "held")
+  assert.equal(scenario.state.activation.mode, "off")
+  assert.deepEqual(scenario.calls.failures, ["begin:claim_invalid"])
+  assert.deepEqual(rpcNames(scenario.calls), [
+    "claim_registration_customer_reminder_job_v1",
+    "read_registration_customer_reminder_source_v1",
+    "begin_registration_customer_reminder_dispatch_v1",
+    "release_registration_customer_reminder_job_v1",
+  ])
+  assert.equal(scenario.calls.provider, 0)
+  assert.equal(scenario.calls.finalize.length, 0)
+})
+
+test("receipt drift after read reaches the distinct readiness failure without provider evidence", async () => {
+  const scenario = createStatefulReminderService({
+    afterRead({ state }) {
+      state.receipt.sendable = false
+      state.transitions.push("receipt:after_read:not_sendable")
+    },
+  })
+  const response = await scenario.run()
+
+  assert.equal((await response.json()).outcome, "held")
+  assert.equal(scenario.state.receipt.sendable, false)
+  assert.deepEqual(scenario.calls.failures, ["begin:receipt_drift"])
+  assert.deepEqual(rpcNames(scenario.calls), [
+    "claim_registration_customer_reminder_job_v1",
+    "read_registration_customer_reminder_source_v1",
+    "begin_registration_customer_reminder_dispatch_v1",
+    "release_registration_customer_reminder_job_v1",
+  ])
+  assert.equal(scenario.calls.provider, 0)
+  assert.equal(scenario.calls.finalize.length, 0)
+})
+
+test("lead-hours change after claim recomputes due, defers the next claim, and processes once at the new clock", async () => {
+  const job = statefulJob({
+    scheduledFor: "2026-08-13T12:00:00.000Z",
+    dueAt: "2026-08-12T00:00:00.000Z",
+  })
+  const scenario = createStatefulReminderService({
+    jobs: [job],
+    leadHours: 36,
+    afterClaim({ state }) {
+      if (state.settings.leadHours === 36) {
+        state.settings.leadHours = 3
+        state.transitions.push("settings:after_claim:lead_hours_3")
+      }
+    },
   })
 
   const first = await scenario.run()
-  const second = await scenario.run()
-  const third = await scenario.run()
+  const immediate = await scenario.run()
+  scenario.advanceTo("2026-08-13T09:00:00.000Z")
+  const recomputedDue = await scenario.run()
 
   assert.equal((await first.json()).outcome, "skipped")
-  assert.equal((await second.json()).outcome, "idle")
-  assert.equal((await third.json()).outcome, "unknown")
+  assert.equal((await immediate.json()).outcome, "idle")
+  assert.equal((await recomputedDue.json()).outcome, "unknown")
+  assert.deepEqual({
+    dueAt: job.dueAt,
+    availableAt: job.availableAt,
+    status: job.status,
+    lastErrorCode: job.lastErrorCode,
+  }, {
+    dueAt: "2026-08-13T09:00:00.000Z",
+    availableAt: null,
+    status: "delivery_unknown",
+    lastErrorCode: "settings_changed",
+  })
   assert.deepEqual(rpcNames(scenario.calls), [
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
@@ -658,59 +925,49 @@ test("settings refresh defers the recomputed-due job until a subsequent claim", 
   assert.equal(scenario.calls.finalize.length, 1)
 })
 
-test("unknown observation dispatch is never retried by a second worker invocation", async () => {
-  const claims = [OBSERVATION_CLAIM, null]
-  const { calls, run } = productionWorkerScenario({ claim: () => claims.shift() })
+test("canonical existing-message accepted and duplicate locks are parsed before provider-zero exit", async () => {
+  for (const existingStatus of ["accepted", "duplicate_locked"]) {
+    const scenario = createStatefulReminderService({
+      jobs: [statefulJob({ existingStatus })],
+    })
+    const response = await scenario.run()
 
-  const first = await run()
-  const second = await run()
+    assert.equal((await response.json()).outcome, "skipped", existingStatus)
+    const begin = scenario.calls.rpc.find(({ name }) => (
+      name === "begin_registration_customer_reminder_dispatch_v1"
+    ))
+    assert.deepEqual(
+      {
+        jobId: begin.args.p_job_id,
+        claimToken: begin.args.p_claim_token,
+        keys: Object.keys(begin.args).sort(),
+      },
+      {
+        jobId: JOB_ID,
+        claimToken: CLAIM_TOKEN,
+        keys: ["p_claim_token", "p_contract", "p_job_id", "p_readiness_contract"],
+      },
+      existingStatus,
+    )
+    assert.equal(scenario.calls.provider, 0, existingStatus)
+    assert.equal(scenario.calls.finalize.length, 0, existingStatus)
+  }
+})
+
+test("unknown observation dispatch is never retried by a second worker invocation", async () => {
+  const scenario = createStatefulReminderService()
+  const first = await scenario.run()
+  const second = await scenario.run()
 
   assert.equal((await first.json()).outcome, "unknown")
   assert.equal((await second.json()).outcome, "idle")
-  assert.equal(calls.provider, 1)
-  assert.equal(calls.finalize.length, 1)
-})
-
-test("production assembly keeps observation source job-locked and finalizes an ambiguous provider attempt once", async () => {
-  const rpcCalls = []
-  let providerCalls = 0
-  const client = {
-    rpc(name, args = {}) {
-      rpcCalls.push({ name, args })
-      if (name === "claim_registration_customer_reminder_job_v1") return rpcResponse(OBSERVATION_CLAIM)
-      if (name === "read_registration_customer_reminder_source_v1") return rpcResponse(OBSERVATION_SOURCE)
-      if (name === "begin_registration_customer_reminder_dispatch_v1") {
-        return rpcResponse({ allowed: true, messageId: MESSAGE_ID, dispatchToken: DISPATCH_TOKEN, currentStatus: "pending" })
-      }
-      if (name === "finalize_registration_customer_reminder_dispatch_v1") return rpcResponse({ ok: true })
-      throw new Error(`unexpected rpc: ${name}`)
-    },
-  }
-  const handlers = reminderRoute.createProductionRegistrationCustomerReminderRouteHandlers({
-    client,
-    environment: productionEnvironment(),
-    async providerFetch() {
-      providerCalls += 1
-      throw new Error("ambiguous network boundary")
-    },
-  })
-
-  const response = await handlers.worker(new Request("http://localhost/worker", {
-    method: "POST",
-    headers: { authorization: "Bearer worker-secret" },
-  }))
-
-  assert.equal(response.status, 200)
-  assert.deepEqual(await response.json(), {
-    ok: true,
-    processed: true,
-    providerAttempted: true,
-    outcome: "unknown",
-  })
-  assert.equal(providerCalls, 1)
-  assert.deepEqual(rpcCalls.filter(({ name }) => name === "read_registration_customer_reminder_source_v1")[0], {
-    name: "read_registration_customer_reminder_source_v1",
-    args: { p_job_id: JOB_ID, p_claim_token: CLAIM_TOKEN },
-  })
-  assert.equal(rpcCalls.filter(({ name }) => name === "finalize_registration_customer_reminder_dispatch_v1").length, 1)
+  assert.deepEqual(rpcNames(scenario.calls), [
+    "claim_registration_customer_reminder_job_v1",
+    "read_registration_customer_reminder_source_v1",
+    "begin_registration_customer_reminder_dispatch_v1",
+    "finalize_registration_customer_reminder_dispatch_v1",
+    "claim_registration_customer_reminder_job_v1",
+  ])
+  assert.equal(scenario.calls.provider, 1)
+  assert.equal(scenario.calls.finalize.length, 1)
 })
