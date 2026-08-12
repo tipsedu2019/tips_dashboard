@@ -19,7 +19,9 @@ const EXPECTED_PENDING = Object.freeze([
 ])
 
 import assert from "node:assert/strict"
-import { readdir, readFile } from "node:fs/promises"
+import { spawnSync } from "node:child_process"
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import test from "node:test"
@@ -52,6 +54,62 @@ function bounded(source, startMarker, endMarker) {
   const end = source.indexOf(endMarker, start)
   assert.notEqual(end, -1, `missing end marker: ${endMarker}`)
   return source.slice(start, end)
+}
+
+function preDispatchShell(task10) {
+  return bounded(
+    task10,
+    'TIPS_REMOTE_ONLY_BEFORE_DISPATCH="$(mktemp)"',
+    'TIPS_DB_RUN_ID="$(gh run list',
+  )
+}
+
+async function runPreDispatchFixture({ localOnly, remoteOnly }) {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), "tips-observation-ledger-guard-"))
+  const ledgerPath = join(fixtureRoot, "ledger.txt")
+  const ghSentinelPath = join(fixtureRoot, "gh-called.txt")
+  const ledgerRows = [
+    ...localOnly.map((version) => `${version} |`),
+    ...remoteOnly.map((version) => ` | ${version}`),
+  ]
+  await writeFile(ledgerPath, `${ledgerRows.join("\n")}\n`)
+
+  const task10 = bounded(
+    await readFile(solapiPlanPath, "utf8"),
+    "### Task 10:",
+    "### Task 11:",
+  )
+  const result = spawnSync(
+    "/bin/bash",
+    [
+      "-c",
+      [
+        'gh() { printf \'%s\\n\' "$*" >> "${GH_SENTINEL_PATH}"; }',
+        preDispatchShell(task10),
+      ].join("\n"),
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GH_SENTINEL_PATH: ghSentinelPath,
+        TIPS_FEATURE_REF: "fixture-only-ref",
+        TIPS_LEDGER_BEFORE_DISPATCH: ledgerPath,
+      },
+    },
+  )
+
+  let ghCalled = false
+  try {
+    await readFile(ghSentinelPath, "utf8")
+    ghCalled = true
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error
+  } finally {
+    await rm(fixtureRoot, { force: true, recursive: true })
+  }
+
+  return { ...result, ghCalled }
 }
 
 test("Task 10 and master Gate B freeze the exact seventeen pending migrations", async () => {
@@ -103,13 +161,37 @@ test("Task 10 and master Gate B reject any pre-dispatch remote-only migration", 
     /if \(local_version == "" && remote_version ~ \/\^\[0-9\]\+\$\/ && length\(remote_version\) == 14\) print remote_version/u,
   )
   assert.match(
-    remoteOnlyGuard,
-    /test ! -s "\$\{TIPS_REMOTE_ONLY_BEFORE_DISPATCH\}"/u,
-  )
-  assert.match(
     masterBaseline,
     /remote-only migration set is empty \(`remote-only=0`\)/u,
   )
+})
+
+test("Task 10 remote-only guard exits before workflow dispatch", async () => {
+  const result = await runPreDispatchFixture({
+    localOnly: EXPECTED_PENDING,
+    remoteOnly: ["20260813123456"],
+  })
+
+  assert.notEqual(
+    result.status,
+    0,
+    `remote-only drift must fail the shell, received stdout=${result.stdout} stderr=${result.stderr}`,
+  )
+  assert.equal(result.ghCalled, false, "remote-only drift must stop before gh workflow run")
+})
+
+test("Task 10 exact-seventeen guard exits before workflow dispatch", async () => {
+  const result = await runPreDispatchFixture({
+    localOnly: EXPECTED_PENDING.slice(0, -1),
+    remoteOnly: [],
+  })
+
+  assert.notEqual(
+    result.status,
+    0,
+    `pending-set drift must fail the shell, received stdout=${result.stdout} stderr=${result.stderr}`,
+  )
+  assert.equal(result.ghCalled, false, "pending-set drift must stop before gh workflow run")
 })
 
 test("every allowed pending version has one local migration identity", async () => {

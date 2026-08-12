@@ -2136,7 +2136,10 @@ awk -F '|' '{
   gsub(/[[:space:]]/, "", remote_version)
   if (local_version == "" && remote_version ~ /^[0-9]+$/ && length(remote_version) == 14) print remote_version
 }' "${TIPS_LEDGER_BEFORE_DISPATCH}" > "${TIPS_REMOTE_ONLY_BEFORE_DISPATCH}"
-test ! -s "${TIPS_REMOTE_ONLY_BEFORE_DISPATCH}"
+if test -s "${TIPS_REMOTE_ONLY_BEFORE_DISPATCH}"; then
+  echo "Pre-dispatch remote-only migration drift detected; refusing workflow dispatch." >&2
+  exit 1
+fi
 TIPS_PENDING_BEFORE_DISPATCH="$(mktemp)"
 awk -F '|' '{
   local_version=$1
@@ -2164,7 +2167,10 @@ printf '%s\n' \
   20260809106200 \
   20260812002019 \
   20260812003000 > "${TIPS_EXPECTED_PENDING}"
-cmp -s "${TIPS_EXPECTED_PENDING}" "${TIPS_PENDING_BEFORE_DISPATCH}"
+if ! cmp -s "${TIPS_EXPECTED_PENDING}" "${TIPS_PENDING_BEFORE_DISPATCH}"; then
+  echo "Pre-dispatch local-only migration set differs from the exact reviewed seventeen; refusing workflow dispatch." >&2
+  exit 1
+fi
 TIPS_DB_DISPATCHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 gh workflow run supabase-db-push.yml --ref "${TIPS_FEATURE_REF}"
 TIPS_DB_RUN_ID="$(gh run list --workflow supabase-db-push.yml --event workflow_dispatch --branch "${TIPS_FEATURE_REF}" --commit "${TIPS_RELEASE_SHA}" --limit 1 --json databaseId --jq '.[0].databaseId')"

@@ -203,8 +203,16 @@ test("원격 이력과 정렬한 migration identity와 바이트를 독립 상�
 })
 
 test("원격 이력 정렬 migration의 누락·변조·구 timestamp 재등장을 거부한다", async () => {
-  const [alignedFile] = REMOTE_HISTORY_ALIGNED_SQL[3]
-  const obsoleteFile = OBSOLETE_REMOTE_HISTORY_SQL[3]
+  const alignedFile = "20260807030434_registration_korean_template_renderer.sql"
+  const obsoleteFile = "20260807025103_registration_korean_template_renderer.sql"
+  assert.ok(
+    REMOTE_HISTORY_ALIGNED_SQL.some(([file]) => file === alignedFile),
+    `missing task-specific aligned fixture identity: ${alignedFile}`,
+  )
+  assert.ok(
+    OBSOLETE_REMOTE_HISTORY_SQL.includes(obsoleteFile),
+    `missing task-specific obsolete fixture identity: ${obsoleteFile}`,
+  )
 
   const missingFixture = await createRepoFixture()
   await rm(join(missingFixture, "supabase", "migrations", alignedFile), { force: true })
