@@ -29,6 +29,9 @@ const PROCESSING_READINESS_PROBE_FILE =
   "20260806133000_registration_notification_processing_readiness.sql"
 const PROCESSING_READINESS_PROBE_SHA256 =
   "4e6fcbafb63d48bcd547cecb19d050148776554fed1a56f58903039e61a569d8"
+const ADAPTER_FORWARD_INSTALL_FILE = "20260812002019_notification_adapters_forward_install.sql"
+const ADAPTER_FORWARD_INSTALL_SHA256 =
+  "f0c22f18906d8a9bcaf2dbbdb682d4458682565ea756bb7e515c18aaeed3243a"
 const PROCESSING_READINESS_PROBE_MARKER_IDS = Object.freeze([
   "worker_schedule.watchdog_heartbeats",
   "worker_schedule.runtime_version",
@@ -777,6 +780,17 @@ function prepareAclMigrationContractValid(source) {
     && !/\b(?:insert\s+into|update|delete\s+from|merge\s+into|truncate)\b/i.test(source)
 }
 
+function adapterForwardInstallContractValid(source) {
+  return source.startsWith("begin;\n")
+    && source.endsWith("\ncommit;\n")
+    && /create\s+table\s+dashboard_private\.notification_cutover_owners\b/i.test(source)
+    && /notification_dispatch_scope_for_event_v1/i.test(source)
+    && /create\s+or\s+replace\s+function\s+public\.notification_workflow_adapters_runtime_version\s*\(\s*\)/i.test(source)
+    && /revoke\s+all\s+on\s+function\s+public\.notification_workflow_adapters_runtime_version\s*\(\s*\)\s+from\s+public\s*,\s*anon/i.test(source)
+    && /grant\s+execute\s+on\s+function\s+public\.notification_workflow_adapters_runtime_version\s*\(\s*\)\s+to\s+authenticated\s*,\s*service_role/i.test(source)
+    && !/cron\.schedule|net\.http|pg_net|vault|manage_notification_worker_schedule_v1|activate_notification_dispatch_cutover_v1/i.test(source)
+}
+
 function processingReadinessProbeContractValid(source) {
   const definitions = functionDefinitionSources(
     source,
@@ -1044,6 +1058,9 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       const isExactProcessingReadinessProbe = entry === PROCESSING_READINESS_PROBE_FILE
         && sourceHash === PROCESSING_READINESS_PROBE_SHA256
         && processingReadinessProbeContractValid(sourceText)
+      const isExactAdapterForwardInstall = entry === ADAPTER_FORWARD_INSTALL_FILE
+        && sourceHash === ADAPTER_FORWARD_INSTALL_SHA256
+        && adapterForwardInstallContractValid(sourceText)
 
       for (const family of COMPILED_CUTOVER_MARKER_FAMILIES) {
         const reservedMarkerIds = matchingMarkerIds(sourceMarkerTokens, family.reserved)
@@ -1056,6 +1073,10 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
           if (
             isExactProcessingReadinessProbe
             && PROCESSING_READINESS_PROBE_MARKER_IDS.includes(markerId)
+          ) continue
+          if (
+            isExactAdapterForwardInstall
+            && markerId === "worker_schedule.runtime_version"
           ) continue
           addError(
             errors,
@@ -1085,6 +1106,11 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
         if (isExactProcessingReadinessProbe) {
           thresholdMarkerIds = thresholdMarkerIds.filter(
             (id) => !PROCESSING_READINESS_PROBE_MARKER_IDS.includes(id),
+          )
+        }
+        if (isExactAdapterForwardInstall) {
+          thresholdMarkerIds = thresholdMarkerIds.filter(
+            (id) => id !== "worker_schedule.runtime_version",
           )
         }
         if (new Set(thresholdMarkerIds).size >= 2) {

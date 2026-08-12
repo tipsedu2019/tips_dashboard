@@ -44,6 +44,8 @@ const LEASE_ROOT = path.join(
 const MIGRATION_CEILING = "20260809105000";
 const GOOGLE_CHAT_TEST_PATH =
   "supabase/tests/registration_observation_google_chat_test.sql";
+const FORWARD_MIGRATION_SUFFIX = "_notification_adapters_forward_install.sql";
+const FORWARD_PGTAP_PATH = "supabase/tests/notification_adapters_forward_install_test.sql";
 const BASELINE_RECEIPT =
   "registration_observation_provider_zero_baseline_marker_missing";
 const SAFE_CHILD_ENVIRONMENT_KEYS = [
@@ -530,9 +532,9 @@ function psqlCommand(projectId, sql) {
 async function writeProjectFiles(project) {
   const supabaseRoot = path.join(project.runtimeRoot, "supabase");
   const migrationRoot = path.join(supabaseRoot, "migrations");
-  const testRoot = path.join(supabaseRoot, "focus-tests", "google-chat");
+  const googleChatTestRoot = path.join(supabaseRoot, "focus-tests", "google-chat");
   await mkdir(migrationRoot, { recursive: true });
-  await mkdir(testRoot, { recursive: true });
+  await mkdir(googleChatTestRoot, { recursive: true });
   await writeFile(
     path.join(migrationRoot, "00000000000000_registration_observation_local_qa_prerequisites.sql"),
     registrationObservationProviderZeroPrerequisiteSql(),
@@ -549,15 +551,54 @@ async function writeProjectFiles(project) {
   }
   await cp(
     path.join(project.repositoryRoot, GOOGLE_CHAT_TEST_PATH),
-    path.join(testRoot, "001_registration_observation_google_chat_test.sql"),
+    path.join(googleChatTestRoot, "001_registration_observation_google_chat_test.sql"),
   );
   await writeFile(
     path.join(supabaseRoot, "config.toml"),
     providerZeroConfigToml(project.projectId, project.ports),
     "utf8",
   );
-  project.focusTestDirectoryPath = testRoot;
+  project.focusTestDirectories.set(GOOGLE_CHAT_TEST_PATH, googleChatTestRoot);
   project.migrations = migrations.map((entry) => path.basename(entry));
+}
+
+async function stageForwardMigration(project, resetMigrationBaseline, migrationPath, testPath) {
+  if (!project.started || !project.focusTestDirectories.has(GOOGLE_CHAT_TEST_PATH)) {
+    fail("registration_observation_google_chat_provider_zero_forward_migration_order_rejected");
+  }
+  if (testPath !== FORWARD_PGTAP_PATH) {
+    fail("registration_observation_google_chat_provider_zero_forward_pgtap_path_rejected");
+  }
+  const migrationsRoot = path.join(project.repositoryRoot, "supabase", "migrations");
+  const resolvedMigrationPath = path.resolve(migrationPath ?? "");
+  const migrationBaseName = path.basename(resolvedMigrationPath);
+  if (
+    path.dirname(resolvedMigrationPath) !== migrationsRoot
+    || !/^[0-9]{14}/u.test(migrationBaseName)
+    || !migrationBaseName.endsWith(FORWARD_MIGRATION_SUFFIX)
+  ) {
+    fail("registration_observation_google_chat_provider_zero_forward_migration_path_rejected");
+  }
+  const migrationStat = await lstat(resolvedMigrationPath).catch(() => null);
+  if (!migrationStat?.isFile()) {
+    fail("registration_observation_google_chat_provider_zero_forward_migration_path_rejected");
+  }
+  const testSourcePath = path.join(project.repositoryRoot, testPath);
+  const testStat = await lstat(testSourcePath).catch(() => null);
+  if (!testStat?.isFile()) {
+    fail("registration_observation_google_chat_provider_zero_forward_pgtap_path_rejected");
+  }
+
+  const supabaseRoot = path.join(project.runtimeRoot, "supabase");
+  const stagedMigrationPath = path.join(supabaseRoot, "migrations", migrationBaseName);
+  const forwardTestRoot = path.join(supabaseRoot, "focus-tests", "notification-adapters-forward-install");
+  await mkdir(forwardTestRoot, { recursive: true });
+  await cp(resolvedMigrationPath, stagedMigrationPath);
+  await cp(testSourcePath, path.join(forwardTestRoot, "001_notification_adapters_forward_install_test.sql"));
+  project.focusTestDirectories.set(FORWARD_PGTAP_PATH, forwardTestRoot);
+  project.migrations = [...project.migrations, migrationBaseName];
+  await resetMigrationBaseline();
+  return Object.freeze([...project.migrations]);
 }
 
 function baselineSql() {
@@ -813,7 +854,7 @@ export async function createOwnedProviderZeroProject({
     manifestPath,
     started: false,
     cleaned: false,
-    focusTestDirectoryPath: null,
+    focusTestDirectories: new Map(),
     migrations: [],
   };
   await writeFile(
@@ -923,8 +964,12 @@ export async function createOwnedProviderZeroProject({
       }
       return command("docker", psqlCommand(projectId, sql));
     },
+    async applyForwardMigration(migrationPath, testPath = FORWARD_PGTAP_PATH) {
+      return stageForwardMigration(project, resetMigrationBaseline, migrationPath, testPath);
+    },
     async runPgTap(testPath = GOOGLE_CHAT_TEST_PATH) {
-      if (testPath !== GOOGLE_CHAT_TEST_PATH || !project.focusTestDirectoryPath) {
+      const focusTestDirectoryPath = project.focusTestDirectories.get(testPath);
+      if (!focusTestDirectoryPath) {
         fail("registration_observation_google_chat_provider_zero_pgtap_path_rejected");
       }
       return command(PINNED_SUPABASE_GO, [
@@ -932,7 +977,7 @@ export async function createOwnedProviderZeroProject({
         "db",
         "--workdir",
         runtimeRoot,
-        project.focusTestDirectoryPath,
+        focusTestDirectoryPath,
         "--db-url",
         project.dbUrl,
       ]);

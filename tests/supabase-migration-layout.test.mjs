@@ -34,6 +34,9 @@ const PROCESSING_READINESS_PROBE_FILE =
   "20260806133000_registration_notification_processing_readiness.sql"
 const PROCESSING_READINESS_PROBE_SHA256 =
   "4e6fcbafb63d48bcd547cecb19d050148776554fed1a56f58903039e61a569d8"
+const ADAPTER_FORWARD_INSTALL_FILE = "20260812002019_notification_adapters_forward_install.sql"
+const ADAPTER_FORWARD_INSTALL_SHA256 =
+  "f0c22f18906d8a9bcaf2dbbdb682d4458682565ea756bb7e515c18aaeed3243a"
 const REMOTE_HISTORY_ALIGNED_SQL = Object.freeze([
   ["20260730161538_notification_google_chat_connection_catalog.sql", "a3f72d4ec2a410796d5796019649859d5a329d5bec0e3e83f48242272dd88dda"],
   ["20260731011040_notification_transfer_withdrawal_deep_links.sql", "ed5dfb81c2cb5d1bc6dca5c38de62745c02d88b5a4b858ec57e8f0d2c6afb5ab"],
@@ -581,6 +584,55 @@ test("등록 처리 준비도 probe는 읽기 전용 원문과 exact path에만 
     await validateSupabaseMigrationLayout({ repoRoot: renameFixture }),
     "cutover_reserved_object_present_in_active_lane",
     renamedProbeFile,
+  )
+})
+
+test("adapter forward marker는 생성 migration의 exact path, byte hash, passive contract에만 허용한다", async () => {
+  // Break caught: a broad marker exception lets a drifted migration or copied
+  // quarantine source bypass the active-lane cutover boundary.
+  assert.equal(
+    await sha256(join(activeDir, ADAPTER_FORWARD_INSTALL_FILE)),
+    ADAPTER_FORWARD_INSTALL_SHA256,
+  )
+  assert.deepEqual(await validateSupabaseMigrationLayout({ repoRoot }), [])
+
+  const driftFixture = await createRepoFixture()
+  await appendFile(
+    join(driftFixture, "supabase", "migrations", ADAPTER_FORWARD_INSTALL_FILE),
+    "\n-- raw forward migration drift\n",
+  )
+  assertIncludesErrorForFile(
+    await validateSupabaseMigrationLayout({ repoRoot: driftFixture }),
+    "cutover_reserved_object_present_in_active_lane",
+    ADAPTER_FORWARD_INSTALL_FILE,
+  )
+
+  const tokenFixture = await createRepoFixture()
+  const tokenPath = join(tokenFixture, "supabase", "migrations", ADAPTER_FORWARD_INSTALL_FILE)
+  const tokenSource = await readFile(tokenPath, "utf8")
+  await writeFile(
+    tokenPath,
+    tokenSource.replace(
+      "notification_dispatch_scope_for_event_v1",
+      "notification_dispatch_scope_for_event_v2",
+    ),
+  )
+  assertIncludesErrorForFile(
+    await validateSupabaseMigrationLayout({ repoRoot: tokenFixture }),
+    "cutover_reserved_object_present_in_active_lane",
+    ADAPTER_FORWARD_INSTALL_FILE,
+  )
+
+  const copiedQuarantineFixture = await createRepoFixture()
+  const copiedFile = "20990103000003_copied_quarantine_worker.sql"
+  await copyFile(
+    join(copiedQuarantineFixture, "supabase", "pending-migrations", "notification-cutover", EXPECTED_SQL[1][0]),
+    join(copiedQuarantineFixture, "supabase", "migrations", copiedFile),
+  )
+  assertIncludesErrorForFile(
+    await validateSupabaseMigrationLayout({ repoRoot: copiedQuarantineFixture }),
+    "cutover_reserved_object_present_in_active_lane",
+    copiedFile,
   )
 })
 

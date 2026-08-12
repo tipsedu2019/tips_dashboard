@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes as nodeRandomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -28,6 +28,16 @@ const frozenCommonRunnerPath = path.join(
   repositoryRoot,
   "scripts/run-registration-observation-local-db-qa.mjs",
 );
+const forwardPgTapPath = "supabase/tests/notification_adapters_forward_install_test.sql";
+
+async function forwardMigrationPath() {
+  const migrationDirectory = path.join(repositoryRoot, "supabase", "migrations");
+  const entries = (await readdir(migrationDirectory))
+    .filter((entry) => /^[0-9]{14}_notification_adapters_forward_install\.sql$/u.test(entry))
+    .sort();
+  assert.equal(entries.length, 1, "forward migration fixture must be singular");
+  return path.join(migrationDirectory, entries[0]);
+}
 
 function sha256(value) {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -264,6 +274,60 @@ test("resets the disposable database after committed pgTAP workers before readin
       "db reset",
       "stop --workdir",
     ]);
+  } finally {
+    await recorded.cleanup();
+  }
+});
+
+test("stages exactly the generated forward migration after the baseline and runs only its focused pgTAP", async () => {
+  // Break caught: applying a future active migration before the baseline, or
+  // accepting an arbitrary test path, would fabricate the forward-install proof.
+  const recorded = await createRecordedRun();
+  try {
+    const project = await createOwnedProviderZeroProject({
+      repositoryRoot,
+      env: safeEnvironment(),
+      makeTempRoot: recorded.makeTempRoot,
+      spawnImpl: recorded.spawnImpl,
+      randomBytes: recorded.randomBytes,
+      allocateLoopbackPort: sequentialPorts(55400),
+      inspectResources: async () => [],
+    });
+    const migrationPath = await forwardMigrationPath();
+    await project.applyMigrationsThrough("20260809105000");
+    await project.applyForwardMigration(migrationPath, forwardPgTapPath);
+    await project.runPgTap(forwardPgTapPath);
+
+    const stagedMigration = path.join(
+      project.runtimeRoot,
+      "supabase",
+      "migrations",
+      path.basename(migrationPath),
+    );
+    assert.equal(await readFile(stagedMigration, "utf8"), await readFile(migrationPath, "utf8"));
+    assert.equal(
+      await readFile(
+        path.join(
+          project.runtimeRoot,
+          "supabase",
+          "focus-tests",
+          "notification-adapters-forward-install",
+          "001_notification_adapters_forward_install_test.sql",
+        ),
+        "utf8",
+      ),
+      await readFile(path.join(repositoryRoot, forwardPgTapPath), "utf8"),
+    );
+    const testCall = recorded.calls.find(
+      ({ executable, args }) => executable === PINNED_SUPABASE_GO && args[0] === "test" && args[1] === "db",
+    );
+    assert.ok(testCall, "forward pgTAP must run through the owned Supabase CLI project");
+    assert.ok(
+      testCall.args.some((argument) =>
+        /focus-tests\/notification-adapters-forward-install$/u.test(argument),
+      ),
+      "forward pgTAP command must target only its staged focused directory",
+    );
   } finally {
     await recorded.cleanup();
   }
