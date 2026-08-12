@@ -419,6 +419,46 @@ test("production Directory readiness is not configured without all three server 
   assert.deepEqual(client.configuration, { status: "not_configured", configured: false })
 })
 
+test("production Directory uses only an exact closed operator allowlist when Workspace credentials are absent", async () => {
+  const client = createProductionGoogleWorkspaceDirectoryClient({
+    GOOGLE_CHAT_PROFILE_IDENTITY_ALLOWLIST: JSON.stringify({
+      "teacher@example.com": CHAT_USER_ID,
+      "second@example.com": "98765432109876543210",
+    }),
+  })
+  assert.deepEqual(client.configuration, { status: "ready", configured: true })
+  assert.deepEqual(await client.lookup("teacher@example.com"), {
+    kind: "found",
+    id: CHAT_USER_ID,
+    primaryEmail: "teacher@example.com",
+    aliases: [],
+    suspended: false,
+  })
+  assert.deepEqual(await client.lookup(CHAT_USER_ID), {
+    kind: "found",
+    id: CHAT_USER_ID,
+    primaryEmail: "teacher@example.com",
+    aliases: [],
+    suspended: false,
+  })
+  assert.deepEqual(await client.lookup("missing@example.com"), { kind: "not_found" })
+
+  for (const unsafe of [
+    "{}",
+    "[]",
+    "not-json",
+    JSON.stringify({ "Teacher@example.com": CHAT_USER_ID }),
+    JSON.stringify({ "teacher@example.com": "users/123" }),
+    JSON.stringify({ "teacher@example.com": CHAT_USER_ID, "second@example.com": CHAT_USER_ID }),
+  ]) {
+    const closed = createProductionGoogleWorkspaceDirectoryClient({
+      GOOGLE_CHAT_PROFILE_IDENTITY_ALLOWLIST: unsafe,
+    })
+    assert.deepEqual(closed.configuration, { status: "not_configured", configured: false })
+    assert.deepEqual(await closed.lookup(ACCOUNT_EMAIL), { kind: "provider_error" })
+  }
+})
+
 test("GET route requires bearer admin/staff and rejects query parameters", async () => {
   for (const role of ["admin", "staff"]) {
     const { handlers, actorClient, lookups } = makeRoute({ role })

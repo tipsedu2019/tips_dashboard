@@ -35,6 +35,7 @@ type DirectoryClientDependencies = Readonly<{
 type DirectoryEnvironment = Readonly<Record<string, string | undefined>>
 
 const CHAT_USER_ID = /^[1-9][0-9]{0,31}$/u
+const ACCOUNT_EMAIL = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/u
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -116,6 +117,26 @@ function environmentValue(environment: DirectoryEnvironment, name: string) {
   return typeof value === "string" ? value : ""
 }
 
+function closedOperatorAllowlist(value: string) {
+  if (!value) return null
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!isRecord(parsed) || Object.getPrototypeOf(parsed) !== Object.prototype) return null
+    const entries = Object.entries(parsed)
+    if (entries.length === 0) return null
+    const ids = new Set<string>()
+    for (const [email, id] of entries) {
+      if (!ACCOUNT_EMAIL.test(email) || typeof id !== "string" || !CHAT_USER_ID.test(id) || ids.has(id)) {
+        return null
+      }
+      ids.add(id)
+    }
+    return new Map(entries as ReadonlyArray<readonly [string, string]>)
+  } catch {
+    return null
+  }
+}
+
 export function createProductionGoogleWorkspaceDirectoryClient(
   environment: DirectoryEnvironment = process.env,
 ): GoogleWorkspaceDirectoryClient {
@@ -123,6 +144,29 @@ export function createProductionGoogleWorkspaceDirectoryClient(
   const privateKey = environmentValue(environment, "GOOGLE_WORKSPACE_DIRECTORY_PRIVATE_KEY")
   const subject = environmentValue(environment, "GOOGLE_WORKSPACE_DIRECTORY_SUBJECT").trim()
   if (!clientEmail || !privateKey.trim() || !subject) {
+    const allowlist = closedOperatorAllowlist(
+      environmentValue(environment, "GOOGLE_CHAT_PROFILE_IDENTITY_ALLOWLIST").trim(),
+    )
+    if (allowlist) {
+      return createGoogleWorkspaceDirectoryClient({
+        configured: true,
+        async getUser({ userKey }) {
+          const byEmail = allowlist.get(userKey)
+          const matched = byEmail
+            ? [userKey, byEmail] as const
+            : [...allowlist.entries()].find(([, id]) => id === userKey)
+          if (!matched) throw Object.assign(new Error("google_chat_profile_identity_not_found"), { code: 404 })
+          return {
+            data: {
+              id: matched[1],
+              primaryEmail: matched[0],
+              aliases: [],
+              suspended: false,
+            },
+          }
+        },
+      })
+    }
     return createGoogleWorkspaceDirectoryClient({
       configured: false,
       async getUser() {
