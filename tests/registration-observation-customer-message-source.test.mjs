@@ -131,12 +131,12 @@ test("both observation kinds build the same canonical facts and server-derived t
 
   assert.deepEqual(booking.facts, reminder.facts)
   assert.deepEqual(bookingPrivate.transportVariables, {
-    학원위치URL: OBSERVATION_LOCATION_URLS.본관,
+    학원위치URL: OBSERVATION_LOCATION_URLS.본관.slice("https://".length),
   })
   assert.deepEqual(reminderPrivate.transportVariables, bookingPrivate.transportVariables)
   assert.equal(
     bookingPrivate.rendered.variables["#{학원위치URL}"],
-    OBSERVATION_LOCATION_URLS.본관,
+    OBSERVATION_LOCATION_URLS.본관.slice("https://".length),
   )
   assert.equal(bookingPrivate.rendered.buttons[0].linkMobile, OBSERVATION_LOCATION_URLS.본관)
   assert.equal(bookingPrivate.rendered.buttons[0].linkPc, OBSERVATION_LOCATION_URLS.본관)
@@ -147,7 +147,7 @@ test("observation source fingerprints cover canonical source, rendering, revisio
   const base = readRegistrationCustomerMessagePrivateSource(await resolveRaw(RAW))
   assert.equal(
     base.sourceFingerprint,
-    "f294d3043769b7395ae66c39880efd213279653fa5fe7cac0ff542935872748f",
+    "e07d1f18847f5cf7dd49ef7d58bc5f3c7e1074d095722edb0303e7480b50e402",
   )
   assert.equal(
     base.sourceFactsChecksum,

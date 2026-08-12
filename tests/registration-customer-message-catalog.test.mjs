@@ -183,7 +183,7 @@ function sha256(value) {
 }
 
 test("catalog maps exactly seven kinds to the approved server-only environment keys", () => {
-  assert.equal(REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION, 5)
+  assert.equal(REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION, 6)
   assert.deepEqual(REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS, {
     level_test_booking: "SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID",
     visit_consultation_booking: "SOLAPI_REGISTRATION_VISIT_BOOKING_TEMPLATE_ID",
@@ -199,8 +199,8 @@ test("catalog maps exactly seven kinds to the approved server-only environment k
     appointment_reminder: 3,
     waiting_notice: 2,
     admission_application: 3,
-    observation_booking: 1,
-    observation_reminder: 1,
+    observation_booking: 2,
+    observation_reminder: 2,
   })
   assert.equal(Object.isFrozen(REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_REVISIONS), true)
   assert.throws(() => {

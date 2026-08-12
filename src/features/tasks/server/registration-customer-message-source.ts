@@ -4,7 +4,7 @@ import type {
   RegistrationCustomerMessageKind,
 } from "../registration-customer-message-contract.ts"
 import {
-  OBSERVATION_LOCATION_URLS,
+  OBSERVATION_LOCATION_TRANSPORT_VALUES,
   renderRegistrationCustomerMessage,
   type RegistrationCustomerMessageAdmissionPlan,
   type RegistrationCustomerMessageButton,
@@ -905,7 +905,7 @@ function observationTransportVariables(
   facts: RegistrationObservationCustomerMessageFacts,
 ) {
   return Object.freeze({
-    학원위치URL: OBSERVATION_LOCATION_URLS[facts.campus],
+    학원위치URL: OBSERVATION_LOCATION_TRANSPORT_VALUES[facts.campus],
   })
 }
 

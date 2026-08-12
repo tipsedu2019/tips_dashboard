@@ -5,7 +5,7 @@ import {
   type RegistrationCustomerMessageKind,
 } from "../registration-customer-message-contract.ts"
 
-export const REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION = 5 as const
+export const REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION = 6 as const
 
 export type RegistrationCustomerMessageTemplateEnvKey =
   | "SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID"
@@ -36,8 +36,8 @@ export const REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_REVISIONS: Readonly<
   appointment_reminder: 3,
   waiting_notice: 2,
   admission_application: 3,
-  observation_booking: 1,
-  observation_reminder: 1,
+  observation_booking: 2,
+  observation_reminder: 2,
 })
 
 export type RegistrationCustomerMessageServerEnv = Readonly<{
@@ -238,12 +238,16 @@ export const OBSERVATION_LOCATION_URLS = Object.freeze({
   본관: "https://map.naver.com/p/entry/place/1218797840?placePath=%3Fentry%3Dpll%26from%3Dnx%26fromNxList%3Dtrue&placeSearchOption=entry%3Dpll%26fromNxList%3Dtrue&searchType=place&c=15.00,0,0,0,dh",
   별관: "https://map.naver.com/p/search/%EC%A0%9C%EC%A3%BC%EC%88%98%ED%95%99%ED%95%99%EC%9B%90/place/1962638110?c=10.00,0,0,0,dh&placePath=%3Fentry%253Dbmp",
 } as const)
+export const OBSERVATION_LOCATION_TRANSPORT_VALUES = Object.freeze({
+  본관: OBSERVATION_LOCATION_URLS.본관.slice("https://".length),
+  별관: OBSERVATION_LOCATION_URLS.별관.slice("https://".length),
+} as const)
 const OBSERVATION_BUTTONS = Object.freeze([
   Object.freeze({
     name: "학원 위치 보기",
     type: "WL" as const,
-    linkMobile: "#{학원위치URL}",
-    linkPc: "#{학원위치URL}",
+    linkMobile: "https://#{학원위치URL}",
+    linkPc: "https://#{학원위치URL}",
   }),
   CONTACT_BUTTON,
 ] as const)
@@ -960,7 +964,7 @@ function renderVariables(
       facts.teacherName,
       "registration_customer_message_teacher_name_invalid",
     )
-    values.학원위치URL = OBSERVATION_LOCATION_URLS[campus]
+    values.학원위치URL = OBSERVATION_LOCATION_TRANSPORT_VALUES[campus]
     labels.scheduleLabel = schedule
     labels.placeLabel = place
   }
@@ -984,10 +988,14 @@ function renderButtons(
   variables: Readonly<Record<string, string>>,
 ) {
   if (!definition.transportVariables) return definition.buttons
+  const renderLink = (link: string) => link.replace(/#\{[^}]+\}/gu, (token) => (
+    variables[token]
+    ?? catalogError("registration_customer_message_variable_missing")
+  ))
   return Object.freeze(definition.buttons.map((button) => Object.freeze({
     ...button,
-    linkMobile: variables[button.linkMobile] ?? button.linkMobile,
-    linkPc: variables[button.linkPc] ?? button.linkPc,
+    linkMobile: renderLink(button.linkMobile),
+    linkPc: renderLink(button.linkPc),
   })))
 }
 

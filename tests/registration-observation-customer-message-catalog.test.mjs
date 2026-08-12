@@ -46,8 +46,8 @@ const OBSERVATION_VARIABLES = ["학생명", "과목", "수업명", "예약일시
 const OBSERVATION_TEMPLATE_BUTTONS = [{
   name: "학원 위치 보기",
   type: "WL",
-  linkMobile: "#{학원위치URL}",
-  linkPc: "#{학원위치URL}",
+  linkMobile: "https://#{학원위치URL}",
+  linkPc: "https://#{학원위치URL}",
 }, {
   name: "문의하기",
   type: "WL",
@@ -56,16 +56,16 @@ const OBSERVATION_TEMPLATE_BUTTONS = [{
 }]
 const OBSERVATION_CHECKSUMS = {
   observation_booking: {
-    template: "9c00669690349b65dfa0a0f602171c1ef9a7aae4464aba953c74f7e8862d3482",
+    template: "459e5ef5c9544d2c2f57f7d2d9313d6e1b99dca651a4e3e5191bcef0b92c3bba",
     content: "0561bc1f68d1227ccd7b4f7cc326e46fab499ac1237c22b33b298bec1bf7b627",
     variables: "88cf2df2671accb00ab91958db121800a6717fcb68fafe158949a2d23df0858a",
-    buttons: "74f463db0106991934045f0fa28a2de020cc1b1584fc4d00813e60c1c10b5adc",
+    buttons: "ba19d26190401fc63f86d5b8c06e58a37b752c01789a22c7284a256a0a8375ee",
   },
   observation_reminder: {
-    template: "8fe5ad14aa5acbedecf13ed6e75fae9df675af8488176145d9fa6104bd8ab243",
+    template: "3e5543bb5bfec79738d4be467aa97a0ac739614466f26fbb92b917e738e587b6",
     content: "fd2eac68d81cad4c5614916160cc1194c2cdacf4254a5b56df29df92e5f37117",
     variables: "88cf2df2671accb00ab91958db121800a6717fcb68fafe158949a2d23df0858a",
-    buttons: "74f463db0106991934045f0fa28a2de020cc1b1584fc4d00813e60c1c10b5adc",
+    buttons: "ba19d26190401fc63f86d5b8c06e58a37b752c01789a22c7284a256a0a8375ee",
   },
 }
 
@@ -83,7 +83,7 @@ const ENV = Object.freeze({
 })
 
 test("catalog maps all seven kinds and preserves every legacy checksum receipt", () => {
-  assert.equal(REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION, 5)
+  assert.equal(REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION, 6)
   assert.deepEqual(Object.keys(REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS), REGISTRATION_CUSTOMER_MESSAGE_KINDS)
   assert.deepEqual(REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS, {
     level_test_booking: "SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID",
@@ -100,8 +100,8 @@ test("catalog maps all seven kinds and preserves every legacy checksum receipt",
     appointment_reminder: 3,
     waiting_notice: 2,
     admission_application: 3,
-    observation_booking: 1,
-    observation_reminder: 1,
+    observation_booking: 2,
+    observation_reminder: 2,
   })
 
   const catalog = createRegistrationCustomerMessageCatalog(ENV)
@@ -166,7 +166,7 @@ test("observation renderer derives the transport URL only from canonical campus"
         "#{예약일시}": "2026년 8월 17일 월요일 오후 6:00",
         "#{장소}": `${campus} 301호`,
         "#{담당선생님}": "홍길동",
-        "#{학원위치URL}": locationUrl,
+        "#{학원위치URL}": locationUrl.slice("https://".length),
       })
       assert.deepEqual(rendered.buttons, [{
         name: "학원 위치 보기",
