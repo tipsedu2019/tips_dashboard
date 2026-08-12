@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto"
 
+import type { RegistrationCustomerMessageStatus } from "../registration-customer-message-contract.ts"
 import type { RegistrationCustomerMessageButton } from "./registration-customer-message-catalog.ts"
 import type { RegistrationCustomerMessageProviderResult } from "./registration-customer-message-solapi.ts"
 
@@ -7,7 +8,9 @@ type JsonRecord = Record<string, unknown>
 
 export type RegistrationCustomerReminderClaim = Readonly<{
   jobId: string
+  messageKind: "appointment_reminder" | "observation_reminder"
   appointmentId: string
+  observationId: string | null
   claimToken: string
   sourceRevision: number
   scheduledFor: string
@@ -25,9 +28,14 @@ export type RegistrationCustomerReminderPrepared = Readonly<{
 
 export type RegistrationCustomerReminderBegin = Readonly<{
   allowed: boolean
-  messageId: string
-  dispatchToken: string
-  currentStatus: "pending" | "accepted" | "unknown" | "failed_hold"
+  messageId: string | null
+  dispatchToken: string | null
+  currentStatus: RegistrationCustomerMessageStatus
+    | "refresh_required"
+    | "settings_refresh_required"
+    | "runtime_inactive"
+    | "source_dirty"
+    | "duplicate_locked"
 }>
 
 type RegistrationCustomerReminderWorkerDependencies = Readonly<{
@@ -67,6 +75,20 @@ export class RegistrationCustomerReminderSourceIneligibleError extends Error {
   }
 }
 
+export class RegistrationCustomerReminderBookingFactChangedError extends Error {
+  constructor() {
+    super("registration_customer_reminder_booking_fact_changed")
+    this.name = "RegistrationCustomerReminderBookingFactChangedError"
+  }
+}
+
+export class RegistrationObservationRuntimeInactiveError extends Error {
+  constructor() {
+    super("registration_observation_runtime_inactive")
+    this.name = "RegistrationObservationRuntimeInactiveError"
+  }
+}
+
 function secretDigest(value: string) {
   return createHash("sha256").update(value, "utf8").digest()
 }
@@ -100,26 +122,40 @@ export function createRegistrationCustomerReminderWorker(
       const claim = await dependencies.claim()
       if (!claim) return result("idle", false, false)
 
-      let prepared: RegistrationCustomerReminderPrepared
-      try {
-        prepared = await dependencies.prepare(claim)
-      } catch (error) {
-        if (error instanceof RegistrationCustomerReminderSourceIneligibleError) {
-          try {
-            await dependencies.release({ claim, errorCode: "source_ineligible" })
-            return result("skipped", false)
-          } catch {
-            return result("held", false)
-          }
-        }
+      const releaseTerminal = async (errorCode: string) => {
         try {
-          await dependencies.release({ claim, errorCode: "pre_send_preparation_failed" })
+          await dependencies.release({ claim, errorCode })
+          return result("skipped", false)
         } catch {
-          // The lease expires without crossing the provider boundary.
+          return result("held", false)
         }
-        return result("held", false)
+      }
+      const prepare = async () => {
+        try {
+          return await dependencies.prepare(claim)
+        } catch (error) {
+          if (error instanceof RegistrationCustomerReminderSourceIneligibleError) {
+            return releaseTerminal("source_ineligible")
+          }
+          if (error instanceof RegistrationCustomerReminderBookingFactChangedError) {
+            return releaseTerminal("booking_fact_changed")
+          }
+          if (error instanceof RegistrationObservationRuntimeInactiveError) {
+            return releaseTerminal("runtime_inactive")
+          }
+          try {
+            await dependencies.release({ claim, errorCode: "pre_send_preparation_failed" })
+          } catch {
+            // The lease expires without crossing the provider boundary.
+          }
+          return result("held", false)
+        }
       }
 
+      const initialPrepared = await prepare()
+      if ("outcome" in initialPrepared) return initialPrepared
+
+      let prepared = initialPrepared
       let begin: RegistrationCustomerReminderBegin
       try {
         begin = await dependencies.begin({ claim, prepared })
@@ -130,6 +166,22 @@ export function createRegistrationCustomerReminderWorker(
           // The lease expires without crossing the provider boundary.
         }
         return result("held", false)
+      }
+
+      if (begin.currentStatus === "refresh_required") {
+        const refreshedPrepared = await prepare()
+        if ("outcome" in refreshedPrepared) return refreshedPrepared
+        prepared = refreshedPrepared
+        try {
+          begin = await dependencies.begin({ claim, prepared })
+        } catch {
+          try {
+            await dependencies.release({ claim, errorCode: "pre_send_preparation_failed" })
+          } catch {
+            // The lease expires without crossing the provider boundary.
+          }
+          return result("held", false)
+        }
       }
 
       if (!begin.allowed) return result("skipped", false)

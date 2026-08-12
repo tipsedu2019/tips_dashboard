@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import {
   createRegistrationCustomerMessageCatalog,
 } from "./registration-customer-message-catalog.ts"
+import type { RegistrationCustomerMessageCatalog } from "./registration-customer-message-catalog.ts"
 import {
   RegistrationCustomerMessageHttpError,
   createProductionRegistrationCustomerMessageAuth,
@@ -15,7 +16,9 @@ import {
   readRegistrationCustomerMessagePrivateSource,
 } from "./registration-customer-message-source.ts"
 import {
+  RegistrationCustomerReminderBookingFactChangedError,
   RegistrationCustomerReminderSourceIneligibleError,
+  RegistrationObservationRuntimeInactiveError,
   authorizeRegistrationCustomerReminderWorker,
   createRegistrationCustomerReminderWorker,
 } from "./registration-customer-reminder-worker.ts"
@@ -33,18 +36,32 @@ type ReminderSettingsRecord = Readonly<{
   leadHours: number
   revision: string
   updatedAt: string
-  activationMode: "off" | "verification" | "live"
-  templateVerified: boolean
-  scheduleReady: boolean
-  verifiedTemplateId: string | null
-  verifiedPfId: string | null
-  verifiedCatalogChecksum: string | null
+  activationMode?: "off" | "verification" | "live"
+  templateVerified?: boolean
+  scheduleReady?: boolean
+  verifiedTemplateId?: string | null
+  verifiedPfId?: string | null
+  verifiedCatalogChecksum?: string | null
+  activeKinds?: ReadonlyArray<ReminderKind>
+  ready?: boolean
+  status?: "ready" | "not_ready"
 }>
 
-type ReminderTemplateContract = Readonly<{
+type ReminderKind = "appointment_reminder" | "observation_reminder"
+
+type LegacyReminderTemplateContract = Readonly<{
   templateId: string | null
   pfId: string | null
   catalogChecksum: string
+}>
+
+type ReminderTemplateContract = LegacyReminderTemplateContract | Readonly<{
+  templates: ReadonlyArray<Readonly<{
+    messageKind: ReminderKind
+    templateId: string | null
+    pfId: string | null
+    catalogChecksum: string
+  }>>
 }>
 
 type ReminderRouteDependencies = Readonly<{
@@ -65,6 +82,7 @@ type ReminderRouteDependencies = Readonly<{
     templateContract: ReminderTemplateContract
   }>): Promise<unknown>
   templateContract: ReminderTemplateContract
+  templateContractForSettings?(settings: ReminderSettingsRecord): ReminderTemplateContract
 }>
 
 export class RegistrationCustomerReminderHttpError extends Error {
@@ -104,6 +122,33 @@ function json(value: unknown, status = 200) {
 function normalizedSettings(value: unknown): ReminderSettingsRecord {
   if (!isRecord(value)) {
     throw new RegistrationCustomerReminderHttpError(503, "registration_customer_reminder_runtime_unavailable")
+  }
+  if (
+    Array.isArray(value.activeKinds)
+    && typeof value.ready === "boolean"
+    && (value.status === "ready" || value.status === "not_ready")
+  ) {
+    const activeKinds = value.activeKinds.map((kind) => text(kind))
+    if (
+      typeof value.enabled !== "boolean"
+      || !Number.isInteger(value.leadHours)
+      || (value.leadHours as number) < 1
+      || (value.leadHours as number) > 72
+      || !/^\d+$/u.test(text(value.revision))
+      || !text(value.updatedAt)
+      || activeKinds.some((kind) => !["appointment_reminder", "observation_reminder"].includes(kind))
+    ) {
+      throw new RegistrationCustomerReminderHttpError(503, "registration_customer_reminder_runtime_unavailable")
+    }
+    return Object.freeze({
+      enabled: value.enabled,
+      leadHours: value.leadHours as number,
+      revision: text(value.revision),
+      updatedAt: text(value.updatedAt),
+      activeKinds: Object.freeze(activeKinds as ReminderKind[]),
+      ready: value.ready,
+      status: value.status,
+    })
   }
   const activationMode = text(value.activationMode)
   const updatedAt = text(value.updatedAt)
@@ -147,6 +192,27 @@ function publicSettings(
   value: ReminderSettingsRecord,
   contract: ReminderTemplateContract,
 ) {
+  if (value.activeKinds) {
+    return Object.freeze({
+      enabled: value.enabled,
+      leadHours: value.leadHours,
+      revision: value.revision,
+      updatedAt: value.updatedAt,
+      ready: value.ready,
+      status: value.status,
+    })
+  }
+  if (
+    !value.activationMode
+    || value.templateVerified === undefined
+    || value.scheduleReady === undefined
+    || value.verifiedTemplateId === undefined
+    || value.verifiedPfId === undefined
+    || value.verifiedCatalogChecksum === undefined
+    || "templates" in contract
+  ) {
+    throw new RegistrationCustomerReminderHttpError(503, "registration_customer_reminder_runtime_unavailable")
+  }
   const approvalReady = value.activationMode === "live"
     && value.templateVerified
     && Boolean(contract.templateId)
@@ -235,10 +301,13 @@ export function createRegistrationCustomerReminderRouteHandlers(
           const settings = normalizedSettings(await dependencies.getSettings({
             actorProfileId: context.actorProfileId,
           }))
+          const templateContract = settings.activeKinds?.length
+            ? dependencies.templateContractForSettings?.(settings) ?? dependencies.templateContract
+            : dependencies.templateContract
           return json({
             ok: true,
             settings: {
-              ...publicSettings(settings, dependencies.templateContract),
+              ...publicSettings(settings, templateContract),
               editable: context.role === "admin",
             },
           })
@@ -250,15 +319,27 @@ export function createRegistrationCustomerReminderRouteHandlers(
           throw new RegistrationCustomerReminderHttpError(403, "registration_customer_reminder_forbidden")
         }
         const mutation = await settingsMutation(request)
+        const currentSettings = normalizedSettings(await dependencies.getSettings({
+          actorProfileId: context.actorProfileId,
+        }))
+        const templateContract = mutation.enabled && currentSettings.activeKinds
+          ? dependencies.templateContractForSettings?.(currentSettings)
+          : dependencies.templateContract
+        if (!templateContract) {
+          throw new RegistrationCustomerReminderHttpError(409, "registration_customer_reminder_not_ready")
+        }
         const settings = normalizedSettings(await dependencies.setSettings({
           actorProfileId: context.actorProfileId,
           ...mutation,
-          templateContract: dependencies.templateContract,
+          templateContract,
         }))
+        const responseTemplateContract = settings.activeKinds?.length
+          ? dependencies.templateContractForSettings?.(settings) ?? templateContract
+          : templateContract
         return json({
           ok: true,
           settings: {
-            ...publicSettings(settings, dependencies.templateContract),
+            ...publicSettings(settings, responseTemplateContract),
             editable: true,
           },
         })
@@ -271,15 +352,18 @@ export function createRegistrationCustomerReminderRouteHandlers(
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
 const REGISTRATION_CUSTOMER_REMINDER_RPC_TIMEOUT_MS = 12_000
-type ServiceRpcOptions = Readonly<{ sourceIneligibleIsTerminal?: boolean }>
+type ServiceRpcOptions = Readonly<{
+  sourceIneligibleIsTerminal?: boolean
+  reminderSourceRead?: boolean
+}>
 
 function environmentText(value: unknown) {
   return typeof value === "string" ? value.trim() : ""
 }
 
-function serviceClient() {
-  const url = environmentText(process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL)
-  const key = environmentText(process.env.SUPABASE_SERVICE_ROLE_KEY)
+function serviceClient(environment: NodeJS.ProcessEnv = process.env) {
+  const url = environmentText(environment.NEXT_PUBLIC_SUPABASE_URL || environment.VITE_SUPABASE_URL)
+  const key = environmentText(environment.SUPABASE_SERVICE_ROLE_KEY)
   if (!url || !key) {
     throw new RegistrationCustomerReminderHttpError(503, "registration_customer_reminder_runtime_unavailable")
   }
@@ -290,6 +374,12 @@ function serviceClient() {
 
 function rpcFailure(error: unknown, options: ServiceRpcOptions = {}): never {
   const message = isRecord(error) ? text(error.message) : ""
+  if (options.reminderSourceRead && message === "registration_customer_reminder_booking_fact_changed") {
+    throw new RegistrationCustomerReminderBookingFactChangedError()
+  }
+  if (options.reminderSourceRead && message === "registration_observation_runtime_inactive") {
+    throw new RegistrationObservationRuntimeInactiveError()
+  }
   if (
     options.sourceIneligibleIsTerminal
     && message.includes("registration_customer_message_source_ineligible")
@@ -321,46 +411,69 @@ async function serviceRpc(
   return result.data
 }
 
-function reminderClaim(value: unknown): RegistrationCustomerReminderClaim | null {
-  if (value === null) return null
-  if (!isRecord(value)) rpcFailure(null)
+function reminderClaimFields(value: JsonRecord) {
   const jobId = text(value.jobId)
   const appointmentId = text(value.appointmentId)
   const claimToken = text(value.claimToken)
   const scheduledFor = text(value.scheduledFor)
   const requestKey = text(value.requestKey)
-  const sourceRevision = typeof value.sourceRevision === "number"
-    ? value.sourceRevision
-    : Number(value.sourceRevision)
+  const sourceRevision = value.sourceRevision
   if (
     !UUID_PATTERN.test(jobId)
     || !UUID_PATTERN.test(appointmentId)
     || !UUID_PATTERN.test(claimToken)
     || !UUID_PATTERN.test(requestKey)
     || !Number.isSafeInteger(sourceRevision)
-    || sourceRevision < 0
+    || (sourceRevision as number) < 0
     || !Number.isFinite(Date.parse(scheduledFor))
   ) rpcFailure(null)
-  return Object.freeze({
-    jobId,
-    appointmentId,
-    claimToken,
-    sourceRevision,
-    scheduledFor,
-    requestKey,
-  })
+  return { jobId, appointmentId, claimToken, sourceRevision: sourceRevision as number, scheduledFor, requestKey }
+}
+
+export function parseRegistrationCustomerReminderClaim(
+  value: unknown,
+): RegistrationCustomerReminderClaim | null {
+  if (value === null) return null
+  if (!isRecord(value)) rpcFailure(null)
+  if (exactKeys(value, [
+    "jobId", "appointmentId", "claimToken", "sourceRevision", "scheduledFor", "requestKey",
+  ])) {
+    return Object.freeze({
+      ...reminderClaimFields(value),
+      messageKind: "appointment_reminder",
+      observationId: null,
+    })
+  }
+  if (exactKeys(value, [
+    "jobId", "messageKind", "appointmentId", "observationId", "claimToken", "sourceRevision",
+    "scheduledFor", "requestKey",
+  ])) {
+    const observationId = text(value.observationId)
+    if (value.messageKind !== "observation_reminder" || !UUID_PATTERN.test(observationId)) rpcFailure(null)
+    return Object.freeze({
+      ...reminderClaimFields(value),
+      messageKind: "observation_reminder",
+      observationId,
+    })
+  }
+  return rpcFailure(null)
 }
 
 function reminderBegin(value: unknown): RegistrationCustomerReminderBegin {
   if (!isRecord(value)) rpcFailure(null)
-  const messageId = text(value.messageId)
-  const dispatchToken = text(value.dispatchToken)
+  if (!exactKeys(value, ["allowed", "messageId", "dispatchToken", "currentStatus"])) rpcFailure(null)
+  const messageId = value.messageId === null ? null : text(value.messageId)
+  const dispatchToken = value.dispatchToken === null ? null : text(value.dispatchToken)
   const currentStatus = text(value.currentStatus)
   if (
     typeof value.allowed !== "boolean"
-    || !UUID_PATTERN.test(messageId)
-    || !UUID_PATTERN.test(dispatchToken)
-    || !["pending", "accepted", "unknown", "failed_hold"].includes(currentStatus)
+    || (messageId !== null && !UUID_PATTERN.test(messageId))
+    || (dispatchToken !== null && !UUID_PATTERN.test(dispatchToken))
+    || (value.allowed && (!messageId || !dispatchToken))
+    || ![
+      "pending", "accepted", "unknown", "failed_hold", "refresh_required",
+      "settings_refresh_required", "runtime_inactive", "source_dirty", "duplicate_locked",
+    ].includes(currentStatus)
   ) rpcFailure(null)
   return Object.freeze({
     allowed: value.allowed,
@@ -370,24 +483,73 @@ function reminderBegin(value: unknown): RegistrationCustomerReminderBegin {
   })
 }
 
-export function createProductionRegistrationCustomerReminderRouteHandlers() {
-  const client = serviceClient()
+export function reminderTemplateContract(
+  catalog: RegistrationCustomerMessageCatalog,
+  activeKinds: ReadonlyArray<ReminderKind>,
+): ReminderTemplateContract {
+  const uniqueKinds = [...new Set(activeKinds)]
+  if (
+    uniqueKinds.length !== activeKinds.length
+    || uniqueKinds.length === 0
+    || uniqueKinds.some((kind) => !["appointment_reminder", "observation_reminder"].includes(kind))
+  ) {
+    throw new Error("registration_customer_reminder_template_contract_invalid")
+  }
+  const templates = uniqueKinds.map((messageKind) => {
+    const entry = catalog.templates[messageKind]
+    if (!entry.templateId || !catalog.pfId) {
+      throw new Error("registration_customer_reminder_not_ready")
+    }
+    return Object.freeze({
+      messageKind,
+      templateId: entry.templateId,
+      pfId: catalog.pfId,
+      catalogChecksum: entry.checksums.template,
+    })
+  })
+  if (uniqueKinds.length === 1 && uniqueKinds[0] === "appointment_reminder") {
+    const legacy = templates[0]
+    return Object.freeze({
+      templateId: legacy.templateId,
+      pfId: legacy.pfId,
+      catalogChecksum: legacy.catalogChecksum,
+    })
+  }
+  return Object.freeze({ templates: Object.freeze(templates) })
+}
+
+export type RegistrationCustomerReminderProductionOverrides = Readonly<{
+  client?: SupabaseClient
+  environment?: NodeJS.ProcessEnv
+  providerFetch?: typeof globalThis.fetch
+}>
+
+export function createProductionRegistrationCustomerReminderRouteHandlers(
+  overrides: RegistrationCustomerReminderProductionOverrides = {},
+) {
+  const environment = overrides.environment ?? process.env
+  const client = overrides.client ?? serviceClient(environment)
+  const providerFetch = overrides.providerFetch ?? globalThis.fetch.bind(globalThis)
   const catalog = createRegistrationCustomerMessageCatalog({
-    SOLAPI_API_KEY: process.env.SOLAPI_API_KEY,
-    SOLAPI_API_SECRET: process.env.SOLAPI_API_SECRET,
-    SOLAPI_KAKAO_PF_ID: process.env.SOLAPI_KAKAO_PF_ID,
+    SOLAPI_API_KEY: environment.SOLAPI_API_KEY,
+    SOLAPI_API_SECRET: environment.SOLAPI_API_SECRET,
+    SOLAPI_KAKAO_PF_ID: environment.SOLAPI_KAKAO_PF_ID,
     SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID:
-      process.env.SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID,
+      environment.SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID,
     SOLAPI_REGISTRATION_VISIT_BOOKING_TEMPLATE_ID:
-      process.env.SOLAPI_REGISTRATION_VISIT_BOOKING_TEMPLATE_ID,
+      environment.SOLAPI_REGISTRATION_VISIT_BOOKING_TEMPLATE_ID,
     SOLAPI_REGISTRATION_APPOINTMENT_REMINDER_TEMPLATE_ID:
-      process.env.SOLAPI_REGISTRATION_APPOINTMENT_REMINDER_TEMPLATE_ID,
+      environment.SOLAPI_REGISTRATION_APPOINTMENT_REMINDER_TEMPLATE_ID,
     SOLAPI_REGISTRATION_WAITING_TEMPLATE_ID:
-      process.env.SOLAPI_REGISTRATION_WAITING_TEMPLATE_ID,
+      environment.SOLAPI_REGISTRATION_WAITING_TEMPLATE_ID,
     SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID:
-      process.env.SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID,
+      environment.SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID,
+    SOLAPI_REGISTRATION_OBSERVATION_BOOKING_TEMPLATE_ID:
+      environment.SOLAPI_REGISTRATION_OBSERVATION_BOOKING_TEMPLATE_ID,
+    SOLAPI_REGISTRATION_OBSERVATION_REMINDER_TEMPLATE_ID:
+      environment.SOLAPI_REGISTRATION_OBSERVATION_REMINDER_TEMPLATE_ID,
     REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER:
-      process.env.REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER,
+      environment.REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER,
   })
   const reminderTemplate = catalog.templates.appointment_reminder
   const templateContract: ReminderTemplateContract = Object.freeze({
@@ -396,14 +558,16 @@ export function createProductionRegistrationCustomerReminderRouteHandlers() {
     catalogChecksum: reminderTemplate.checksums.template,
   })
   const provider = createRegistrationCustomerMessageSolapi({
-    apiKey: environmentText(process.env.SOLAPI_API_KEY),
-    apiSecret: environmentText(process.env.SOLAPI_API_SECRET),
-    pfId: environmentText(process.env.SOLAPI_KAKAO_PF_ID),
-    fetch: globalThis.fetch.bind(globalThis),
+    apiKey: environmentText(environment.SOLAPI_API_KEY),
+    apiSecret: environmentText(environment.SOLAPI_API_SECRET),
+    pfId: environmentText(environment.SOLAPI_KAKAO_PF_ID),
+    fetch: providerFetch,
   })
   const worker = createRegistrationCustomerReminderWorker({
     async claim() {
-      return reminderClaim(await serviceRpc(client, "claim_registration_customer_reminder_job_v1"))
+      return parseRegistrationCustomerReminderClaim(
+        await serviceRpc(client, "claim_registration_customer_reminder_job_v1"),
+      )
     },
     async prepare(claim): Promise<RegistrationCustomerReminderPrepared> {
       const rawSource = await serviceRpc(client, "read_registration_customer_reminder_source_v1", {
@@ -411,16 +575,21 @@ export function createProductionRegistrationCustomerReminderRouteHandlers() {
         p_claim_token: claim.claimToken,
       }, {
         sourceIneligibleIsTerminal: true,
+        reminderSourceRead: true,
       })
       const resolver = createRegistrationCustomerMessageSourceResolver({
         catalog,
-        recipientHashPepper: environmentText(process.env.REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER),
+        recipientHashPepper: environmentText(environment.REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER),
         resolveSource: async () => rawSource,
       })
+      const sourceId = claim.messageKind === "observation_reminder"
+        ? claim.observationId
+        : claim.appointmentId
+      if (!sourceId) throw new Error("registration_customer_reminder_claim_invalid")
       const source = await resolver.resolve({
         actorProfileId: "00000000-0000-4000-8000-000000000000",
-        messageKind: "appointment_reminder",
-        sourceId: claim.appointmentId,
+        messageKind: claim.messageKind,
+        sourceId,
       })
       const privateSource = readRegistrationCustomerMessagePrivateSource(source)
       if (!privateSource.readinessContract.templateId) {
@@ -471,7 +640,7 @@ export function createProductionRegistrationCustomerReminderRouteHandlers() {
   let productionAuth: ReturnType<typeof createProductionRegistrationCustomerMessageAuth> | null = null
 
   return createRegistrationCustomerReminderRouteHandlers({
-    workerSecret: environmentText(process.env.REGISTRATION_CUSTOMER_REMINDER_WORKER_SECRET),
+    workerSecret: environmentText(environment.REGISTRATION_CUSTOMER_REMINDER_WORKER_SECRET),
     worker,
     async authenticate(request) {
       try {
@@ -500,5 +669,18 @@ export function createProductionRegistrationCustomerReminderRouteHandlers() {
       })
     },
     templateContract,
+    templateContractForSettings(settings) {
+      if (!settings.activeKinds) {
+        throw new RegistrationCustomerReminderHttpError(503, "registration_customer_reminder_runtime_unavailable")
+      }
+      try {
+        return reminderTemplateContract(catalog, settings.activeKinds)
+      } catch (error) {
+        if (error instanceof Error && error.message === "registration_customer_reminder_not_ready") {
+          throw new RegistrationCustomerReminderHttpError(409, "registration_customer_reminder_not_ready")
+        }
+        throw new RegistrationCustomerReminderHttpError(503, "registration_customer_reminder_runtime_unavailable")
+      }
+    },
   })
 }

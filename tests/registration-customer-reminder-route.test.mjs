@@ -1,11 +1,12 @@
 import assert from "node:assert/strict"
-import { readFile } from "node:fs/promises"
 import test from "node:test"
 
+import * as reminderRoute from "../src/features/tasks/server/registration-customer-reminder-route.ts"
 import {
   RegistrationCustomerReminderHttpError,
   createRegistrationCustomerReminderRouteHandlers,
 } from "../src/features/tasks/server/registration-customer-reminder-route.ts"
+import { createRegistrationCustomerMessageCatalog } from "../src/features/tasks/server/registration-customer-message-catalog.ts"
 
 const ACTOR = "00000000-0000-4000-8000-000000000001"
 
@@ -176,39 +177,37 @@ test("OFF 전환은 승인 상태와 무관하게 저장할 수 있다", async (
   assert.deepEqual(setInput.templateContract, TEMPLATE)
 })
 
-test("production route는 service RPC·canonical renderer·기존 SOLAPI adapter만 조합한다", async () => {
-  const [source, workerRoute, settingsRoute] = await Promise.all([
-    readFile(new URL("../src/features/tasks/server/registration-customer-reminder-route.ts", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/api/solapi/registration/reminders/worker/route.ts", import.meta.url), "utf8").catch(() => ""),
-    readFile(new URL("../src/app/api/solapi/registration/reminders/settings/route.ts", import.meta.url), "utf8").catch(() => ""),
-  ])
+test("reminder settings contract derives active kinds from the server catalog", () => {
+  const catalog = createRegistrationCustomerMessageCatalog({
+    SOLAPI_API_KEY: "api-key",
+    SOLAPI_API_SECRET: "api-secret",
+    SOLAPI_KAKAO_PF_ID: "pf-id",
+    SOLAPI_REGISTRATION_APPOINTMENT_REMINDER_TEMPLATE_ID: "template-appointment",
+    SOLAPI_REGISTRATION_OBSERVATION_REMINDER_TEMPLATE_ID: "template-observation",
+    REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER: "server-only-recipient-pepper",
+  })
+  const appointment = catalog.templates.appointment_reminder
+  const observation = catalog.templates.observation_reminder
+  const contract = reminderRoute.reminderTemplateContract
 
-  assert.match(source, /export function createProductionRegistrationCustomerReminderRouteHandlers/)
-  assert.match(source, /SUPABASE_SERVICE_ROLE_KEY/)
-  assert.match(source, /REGISTRATION_CUSTOMER_REMINDER_WORKER_SECRET/)
-  assert.match(source, /createRegistrationCustomerMessageCatalog/)
-  assert.match(source, /createRegistrationCustomerMessageSourceResolver/)
-  assert.match(source, /createRegistrationCustomerMessageSolapi/)
-  assert.match(source, /const REGISTRATION_CUSTOMER_REMINDER_RPC_TIMEOUT_MS = 12_000/)
-  assert.match(source, /type ServiceRpcOptions = Readonly<\{ sourceIneligibleIsTerminal\?: boolean \}>/)
-  assert.match(source, /client\.rpc\(name, args\)[\s\S]*\.abortSignal\(AbortSignal\.timeout\(REGISTRATION_CUSTOMER_REMINDER_RPC_TIMEOUT_MS\)\)[\s\S]*\.retry\(false\)/)
-  assert.match(
-    source,
-    /read_registration_customer_reminder_source_v1[\s\S]*sourceIneligibleIsTerminal:\s*true/,
+  assert.deepEqual(contract(catalog, ["appointment_reminder"]), {
+    templateId: appointment.templateId,
+    pfId: catalog.pfId,
+    catalogChecksum: appointment.checksums.template,
+  })
+  assert.deepEqual(contract(catalog, ["observation_reminder"]), {
+    templates: [{
+      messageKind: "observation_reminder",
+      templateId: observation.templateId,
+      pfId: catalog.pfId,
+      catalogChecksum: observation.checksums.template,
+    }],
+  })
+  assert.equal(contract(catalog, ["appointment_reminder", "observation_reminder"]).templates.length, 2)
+  assert.throws(() => contract(catalog, []), /template_contract_invalid/)
+  assert.throws(
+    () => contract(catalog, ["observation_reminder", "observation_reminder"]),
+    /template_contract_invalid/,
   )
-  assert.match(source, /new RegistrationCustomerReminderSourceIneligibleError\(\)/)
-  for (const rpc of [
-    "claim_registration_customer_reminder_job_v1",
-    "read_registration_customer_reminder_source_v1",
-    "begin_registration_customer_reminder_dispatch_v1",
-    "release_registration_customer_reminder_job_v1",
-    "finalize_registration_customer_reminder_dispatch_v1",
-    "get_registration_customer_reminder_settings_v1",
-    "set_registration_customer_reminder_settings_v1",
-  ]) {
-    assert.match(source, new RegExp(rpc))
-  }
-  assert.match(workerRoute, /handlers\.worker\(request\)/)
-  assert.match(settingsRoute, /(?:handlers|productionHandlers\(\))\.settings\(request\)/)
-  assert.doesNotMatch(workerRoute + settingsRoute, /SOLAPI_API_SECRET|SUPABASE_SERVICE_ROLE_KEY/)
+  assert.throws(() => contract(catalog, ["unknown_reminder"]), /template_contract_invalid|not_ready/)
 })
