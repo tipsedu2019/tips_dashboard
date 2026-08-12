@@ -889,6 +889,144 @@ test("send claims, re-reads canonical source, commits the marker, then calls SOL
   assert.equal(JSON.stringify(result.body).includes("provider"), false)
 })
 
+test("all five legacy kinds preserve the same preview and provider sequence without an observation-runtime dependency", async () => {
+  for (const messageKind of [
+    "level_test_booking",
+    "visit_consultation_booking",
+    "appointment_reminder",
+    "waiting_notice",
+    "admission_application",
+  ]) {
+    const target = { messageKind, sourceId: IDS.source }
+    const source = { ...SOURCE, messageKind }
+    const order = []
+    const { deps } = makeDeps({
+      async resolveTaskId(input) {
+        assert.deepEqual({ messageKind: input.messageKind, sourceId: input.sourceId }, target)
+        return IDS.task
+      },
+      async resolveSource(input) {
+        order.push("canonical-source")
+        assert.deepEqual({ messageKind: input.messageKind, sourceId: input.sourceId }, target)
+        return source
+      },
+      readPrivateSource(input) {
+        assert.equal(input, source)
+        return PRIVATE_SOURCE
+      },
+      async listHistory() {
+        return []
+      },
+      async createPreview() {
+        order.push("create-preview")
+        return {
+          previewId: IDS.preview,
+          expiresAt: "2026-08-05T00:10:00.000Z",
+          messageKind,
+          recipientLast4: "5678",
+        }
+      },
+      async readPreviewTarget() {
+        return { ...target, taskId: IDS.task }
+      },
+      async claimMessage() {
+        order.push("claim")
+        return {
+          ok: false,
+          messageId: IDS.message,
+          messageKind,
+          currentStatus: "pending",
+          recipientLast4: "5678",
+          confirmedByName: "김관리",
+          confirmedAt: "2026-08-05T00:05:00.000Z",
+          updatedAt: "2026-08-05T00:05:00.000Z",
+          canCheck: false,
+          idempotent: false,
+          owner: true,
+          claimToken: IDS.claim,
+          dispatchToken: IDS.dispatch,
+        }
+      },
+      async markAttemptStarted() {
+        order.push("marker")
+        return {
+          allowed: true,
+          messageId: IDS.message,
+          currentStatus: "pending",
+          dispatchToken: IDS.dispatch,
+        }
+      },
+      async sendProvider() {
+        order.push("provider")
+        return {
+          outcome: "accepted",
+          evidence: {
+            providerMessageId: "provider-message-1",
+            statusCode: "2000",
+            statusMessage: "접수",
+            observedAt: "2026-08-05T00:06:00.000Z",
+            requestKeyMatched: true,
+          },
+        }
+      },
+      async finalizeMessage() {
+        order.push("finalize")
+        return {
+          ok: true,
+          messageId: IDS.message,
+          messageKind,
+          currentStatus: "accepted",
+          recipientLast4: "5678",
+          confirmedByName: "김관리",
+          confirmedAt: "2026-08-05T00:05:00.000Z",
+          updatedAt: "2026-08-05T00:06:00.000Z",
+          canCheck: false,
+          idempotent: false,
+        }
+      },
+    })
+    const handlers = createRegistrationCustomerMessageRouteHandlers(deps)
+    const preview = await json(await handlers.preview(request("/preview", {
+      method: "POST",
+      body: JSON.stringify(target),
+    })))
+    assert.equal(preview.response.status, 200, messageKind)
+    assert.equal(
+      JSON.stringify(preview.body),
+      JSON.stringify({
+        ok: true,
+        previewId: IDS.preview,
+        expiresAt: "2026-08-05T00:10:00.000Z",
+        messageKind,
+        studentName: "김팁스",
+        recipientLast4: "5678",
+        facts: SOURCE.facts,
+        body: SOURCE.body,
+        buttons: [],
+        readiness: ACTIVE_READINESS,
+        latestMessage: null,
+      }),
+      messageKind,
+    )
+    const send = await json(await handlers.send(request("/send", {
+      method: "POST",
+      body: JSON.stringify({ previewId: IDS.preview, requestKey: IDS.request }),
+    })))
+    assert.equal(send.response.status, 200, messageKind)
+    assert.equal(send.body.currentStatus, "accepted", messageKind)
+    assert.deepEqual(order, [
+      "canonical-source",
+      "create-preview",
+      "canonical-source",
+      "claim",
+      "canonical-source",
+      "marker",
+      "provider",
+      "finalize",
+    ], messageKind)
+  }
+})
+
 test("dedupe/exact replay returns the existing masked result with provider zero", async () => {
   for (const currentStatus of ["accepted", "unknown", "failed_hold"]) {
     const { deps, calls } = makeDeps({

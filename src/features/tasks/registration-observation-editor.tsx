@@ -23,6 +23,9 @@ import type {
   RegistrationObservationSessionOption,
 } from "./registration-observation-model"
 import type {
+  RegistrationCustomerMessageTarget,
+} from "./registration-customer-message-contract"
+import type {
   CancelRegistrationObservationInput,
   EnterRegistrationObservationInput,
   LoadRegistrationObservationSessionsInput,
@@ -524,6 +527,7 @@ export type RegistrationObservationEditorProps = {
   deepLinkedAttempt?: RegistrationObservationAttempt | null
   actions: RegistrationObservationActions
   onSaved: (result: RegistrationObservationMutationResult) => void | Promise<void>
+  onOpenCustomerMessage?: (target: RegistrationCustomerMessageTarget) => void
   feedbackPanel?: ReactNode
 }
 
@@ -587,6 +591,7 @@ export function RegistrationObservationEditor({
   deepLinkedAttempt = null,
   actions,
   onSaved,
+  onOpenCustomerMessage,
   feedbackPanel,
 }: RegistrationObservationEditorProps) {
   const selectedObservationId = deepLinkedAttempt?.observationId
@@ -643,6 +648,7 @@ export function RegistrationObservationEditor({
   const [withdrawValueTouched, setWithdrawValueTouched] = useState(false)
   const [withdrawReason, setWithdrawReason] = useState("")
   const [receipt, setReceipt] = useState("")
+  const [savedCustomerMessageTarget, setSavedCustomerMessageTarget] = useState<RegistrationCustomerMessageTarget | null>(null)
 
   const canonicalMutationKey = JSON.stringify([
     trackId,
@@ -653,6 +659,16 @@ export function RegistrationObservationEditor({
     appointmentNotificationRevision,
   ])
   const mutationCommitted = committedCanonicalKey === canonicalMutationKey
+  const currentCustomerMessageTarget: RegistrationCustomerMessageTarget | null = current
+    && current.status === "scheduled"
+    && current.appointmentStatus === "scheduled"
+    && observationRevision !== null
+    && appointmentNotificationRevision !== null
+    ? { messageKind: "observation_booking", sourceId: current.observationId }
+    : null
+  const customerMessageTarget = receipt === "예약 필요"
+    ? null
+    : savedCustomerMessageTarget ?? currentCustomerMessageTarget
   const withdrawAvailable = canWithdrawRegistrationObservation({
     workflowStatus,
     currentObservation: current,
@@ -865,6 +881,23 @@ export function RegistrationObservationEditor({
       }),
     ), { scope, fingerprint, requestKey })
     if (!result) return
+    const savedObservation = result.observation
+    const savedAppointment = result.appointment
+    if (
+      savedObservation
+      && savedAppointment
+      && savedObservation.status === "scheduled"
+      && savedObservation.appointmentStatus === "scheduled"
+      && savedObservation.appointmentId === savedAppointment.appointmentId
+      && savedObservation.appointmentNotificationRevision === savedAppointment.notificationRevision
+    ) {
+      setSavedCustomerMessageTarget({
+        messageKind: "observation_booking",
+        sourceId: savedObservation.observationId,
+      })
+    } else {
+      setSavedCustomerMessageTarget(null)
+    }
     setReceipt("예약 저장됨")
     setSaveConfirmOpen(false)
   }
@@ -887,6 +920,7 @@ export function RegistrationObservationEditor({
       }),
     ), { scope, fingerprint, requestKey })
     if (!result) return
+    setSavedCustomerMessageTarget(null)
     setReceipt("예약 필요")
   }
 
@@ -1014,9 +1048,22 @@ export function RegistrationObservationEditor({
 
           <div className="flex flex-wrap gap-2">
             <Button ref={saveDialogTriggerRef} type="button" onClick={() => setSaveConfirmOpen(true)} disabled={saving || mutationCommitted || Boolean(prerequisiteError)}>저장</Button>
+            {onOpenCustomerMessage ? (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={saving || !customerMessageTarget}
+                onClick={() => {
+                  if (customerMessageTarget) onOpenCustomerMessage(customerMessageTarget)
+                }}
+              >
+                청강 예약 안내 알림톡
+              </Button>
+            ) : null}
             {current?.appointmentStatus === "scheduled" ? <Button type="button" variant="outline" onClick={() => void cancelBooking()} disabled={saving || mutationCommitted}>예약 취소</Button> : null}
             {withdrawAvailable ? <Button ref={withdrawDialogTriggerRef} type="button" variant="ghost" onClick={() => setWithdrawOpen(true)} disabled={saving || mutationCommitted}>청강 철회</Button> : null}
           </div>
+          {onOpenCustomerMessage && !customerMessageTarget ? <p className="text-xs text-muted-foreground">청강 예약을 저장한 뒤 알림톡을 보낼 수 있습니다.</p> : null}
           {current?.appointmentStatus === "scheduled" ? <p className="text-xs text-muted-foreground">예약을 취소한 뒤 청강을 철회할 수 있습니다.</p> : null}
         </div>
       ) : null}

@@ -1615,6 +1615,7 @@ export function RegistrationApplication({
               deepLinkedAttempt={activeDeepLinkedAttempt}
               actions={registrationObservationActions}
               onSaved={handleObservationSaved}
+              onOpenCustomerMessage={canManageCase ? openCustomerMessage : undefined}
               feedbackPanel={activeObservationFeedbackPanel}
             />
           )

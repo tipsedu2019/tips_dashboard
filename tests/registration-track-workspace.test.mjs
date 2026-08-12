@@ -297,7 +297,10 @@ async function loadMountedRegistrationApplication({
     return createElement("section", { "data-mounted-registration-shell": "" }, props.children)
   }
   const RegistrationObservationEditor = function MountedRegistrationObservationEditor(props) {
-    return createElement("div", { "data-mounted-observation-editor": props.deepLinkedAttempt?.observationId || "" })
+    return createElement("div", {
+      "data-mounted-observation-editor": props.deepLinkedAttempt?.observationId || "",
+      "data-has-customer-message-callback": String(typeof props.onOpenCustomerMessage === "function"),
+    })
   }
   const RegistrationObservationFeedbackPanel = function MountedRegistrationObservationFeedbackPanel() {
     return createElement("div", { "data-mounted-observation-feedback": "" })
@@ -1943,6 +1946,11 @@ test("mounted terminal deep links preserve exact feedback role and status rules"
         "historical observation editor",
       )
       assert.equal(editor.props.deepLinkedAttempt, deepLinkedAttempt)
+      assert.equal(
+        typeof editor.props.onOpenCustomerMessage,
+        roleCase.canManageCase ? "function" : "undefined",
+        `${roleCase.label}:${status} observation customer-message ownership`,
+      )
       const feedbackPanel = findMountedRegistrationElement(
         editor.props.feedbackPanel,
         (node) => node.type === mounted.RegistrationObservationFeedbackPanel,
@@ -3369,6 +3377,7 @@ test("canonical registration editors expose five preview-first alimtalk targets 
   assert.doesNotMatch(admission, /onSendAdmissionMessage|onReconcileAdmissionMessage|onReleaseAdmissionMessageRetry|제공사 확인 증빙|재발송 허용/)
 
   assert.equal((application.match(/onOpenCustomerMessage=\{openCustomerMessage\}/g) || []).length, 4)
+  assert.match(application, /onOpenCustomerMessage=\{canManageCase \? openCustomerMessage : undefined\}/)
   assert.doesNotMatch(application, /admissionActions/)
 })
 

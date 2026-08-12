@@ -94,9 +94,9 @@ async function loadMountedObservationEditor() {
   const DialogClose = ({ children }) => children
   const Input = (props) => createElement("input", props)
   const Label = ({ children, ...props }) => createElement("label", props, children)
-  const RegistrationSelect = ({ options = [], ...props }) => createElement(
+  const RegistrationSelect = ({ options = [], onValueChange, ...props }) => createElement(
     "select",
-    props,
+    { ...props, onChange: (event) => onValueChange?.(event.target.value) },
     options.map((option) => createElement("option", { key: option.value, value: option.value }, option.label)),
   )
   const runtimeModule = { exports: {} }
@@ -278,6 +278,50 @@ test("mounted historical observation uses its exact attempt status and exposes n
     assert.match(markup, new RegExp(`role="status"[^>]*>${expectedLabel}<`), status)
     assert.doesNotMatch(markup, />청강 진행<|>저장<|>예약 취소<|>청강 철회</, status)
   }
+})
+
+test("mounted saved observation exposes one booking AlimTalk action with the canonical observation ID", async () => {
+  const RegistrationObservationEditor = await loadMountedObservationEditor()
+  const scheduled = observationAttempt(
+    "34000000-0000-4000-8000-000000000001",
+    { status: "scheduled", appointmentStatus: "scheduled", decisionKind: null },
+  )
+  const targets = []
+  const markup = renderToStaticMarkup(createElement(RegistrationObservationEditor, {
+    trackId: scheduled.trackId,
+    workflowRevision: 12,
+    observationRevision: scheduled.revision,
+    appointmentNotificationRevision: scheduled.appointmentNotificationRevision,
+    detail: {
+      track: {
+        trackId: scheduled.trackId,
+        taskId: scheduled.taskId,
+        subject: "영어",
+        workflowStatus: "observation_requested",
+        workflowRevision: 12,
+        observationReturnWorkflowStatus: "consultation_completed",
+        directorProfileId: scheduled.teacherProfileId,
+      },
+      currentObservation: scheduled,
+      latestEnrollmentDecisionObservationId: null,
+      latestDecisionObservation: null,
+      attempts: [scheduled],
+      classes: [],
+    },
+    actions: {
+      enterRegistrationObservation: async () => ({ changed: false }),
+      loadRegistrationObservationSessions: async () => [],
+      saveRegistrationObservationBooking: async () => ({ changed: false }),
+      cancelRegistrationObservation: async () => ({ changed: false }),
+      withdrawRegistrationObservation: async () => ({ changed: false }),
+    },
+    onSaved: async () => undefined,
+    onOpenCustomerMessage: (target) => targets.push(target),
+  }))
+
+  assert.match(markup, />청강 예약 안내 알림톡</)
+  assert.doesNotMatch(markup, /disabled=""[^>]*>청강 예약 안내 알림톡</)
+  assert.deepEqual(targets, [], "rendering alone must not dispatch the customer-message action")
 })
 
 test("historical attempt status outranks a receipt retained by the same track editor", async () => {

@@ -198,16 +198,16 @@ export function RegistrationAlimtalkPreviewDialog({
   }
 
   async function confirm() {
-    if (confirmDisabled || !preview?.previewId || !target) return
+    if (confirmationLockedRef.current || confirmDisabled || !preview?.previewId || !target) return
     const generation = generationRef.current
     const confirmedTarget = target
     requestKeyRef.current ??= createRequestKey()
+    confirmationLockedRef.current = true
     setSending(true)
     setError("")
     try {
       const next = await client.send({ previewId: preview.previewId, requestKey: requestKeyRef.current })
       if (generation !== generationRef.current) return
-      confirmationLockedRef.current = true
       applyResult(next)
       if (next.ok && onSendSuccess) {
         try {
@@ -220,6 +220,7 @@ export function RegistrationAlimtalkPreviewDialog({
       }
     } catch (cause) {
       if (generation !== generationRef.current) return
+      confirmationLockedRef.current = false
       setError(getRegistrationCustomerMessageErrorMessage(cause, "발송 요청을 처리하지 못했습니다."))
     } finally {
       if (generation === generationRef.current) setSending(false)
@@ -289,6 +290,13 @@ export function RegistrationAlimtalkPreviewDialog({
 
   const last4 = result?.recipientLast4 || preview?.recipientLast4 || latestMessage?.recipientLast4 || ""
   const auditMessage = result || latestMessage
+  const observationFacts = preview?.messageKind === "observation_booking"
+    || preview?.messageKind === "observation_reminder"
+    ? preview.facts as RegistrationCustomerMessagePreviewResponse["facts"] & Readonly<{
+        className: string
+        teacherLabel: string
+      }>
+    : null
   const confirmLabel = sending
     ? "처리 중"
     : duplicateLocked || Boolean(currentStatus)
@@ -328,8 +336,10 @@ export function RegistrationAlimtalkPreviewDialog({
               <div><dt className="inline text-muted-foreground">학생 · </dt><dd className="inline">{preview.studentName}</dd></div>
               <div><dt className="inline text-muted-foreground">학부모 전화 · </dt><dd className="inline">끝 {preview.recipientLast4}</dd></div>
               <div><dt className="inline text-muted-foreground">대상 · </dt><dd className="inline">{preview.facts.subjectLabel}</dd></div>
+              {observationFacts?.className ? <div><dt className="inline text-muted-foreground">수업 · </dt><dd className="inline">{observationFacts.className}</dd></div> : null}
               {preview.facts.scheduleLabel ? <div><dt className="inline text-muted-foreground">일정 · </dt><dd className="inline">{preview.facts.scheduleLabel}</dd></div> : null}
               {preview.facts.placeLabel ? <div><dt className="inline text-muted-foreground">장소 · </dt><dd className="inline">{preview.facts.placeLabel}</dd></div> : null}
+              {observationFacts?.teacherLabel ? <div><dt className="inline text-muted-foreground">선생님 · </dt><dd className="inline">{observationFacts.teacherLabel}</dd></div> : null}
               {preview.facts.waitingKindLabel ? <div><dt className="inline text-muted-foreground">대기 · </dt><dd className="inline">{preview.facts.waitingKindLabel} {preview.facts.waitingDetailLabel || ""}</dd></div> : null}
             </dl>
             {preview.facts.admissionPlans?.map((plan, index) => (

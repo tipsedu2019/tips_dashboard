@@ -1,10 +1,16 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
+import { createRequire } from "node:module"
 import test from "node:test"
 import vm from "node:vm"
 
+import { act, createElement, forwardRef } from "react"
+import { createRoot } from "react-dom/client"
 import ts from "typescript"
 import { assertRegistrationCustomerMessagePublicPayload } from "../src/features/tasks/registration-customer-message-contract.ts"
+
+const require = createRequire(import.meta.url)
+const { JSDOM } = require("jsdom")
 
 const serviceUrl = new URL("../src/features/tasks/registration-customer-message-service.ts", import.meta.url)
 const dialogUrl = new URL("../src/features/tasks/registration-alimtalk-preview-dialog.tsx", import.meta.url)
@@ -43,6 +49,191 @@ async function loadService(fetch) {
   })
   return sandboxModule.exports
 }
+
+async function loadMountedDialog() {
+  const source = await sourceOrEmpty(dialogUrl)
+  const output = ts.transpileModule(source, {
+    compilerOptions: {
+      esModuleInterop: true,
+      jsx: ts.JsxEmit.ReactJSX,
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: dialogUrl.pathname,
+  }).outputText
+  const Button = forwardRef(function MountedButton({ children, ...props }, ref) {
+    return createElement("button", { ...props, ref }, children)
+  })
+  const Dialog = ({ open, children }) => open ? createElement("div", null, children) : null
+  const Wrapper = ({ children, ...props }) => {
+    delete props.overlayClassName
+    delete props.showCloseButton
+    delete props.onEscapeKeyDown
+    return createElement("div", props, children)
+  }
+  const runtimeModule = { exports: {} }
+  const localModules = new Map([
+    ["@/components/ui/button", { Button }],
+    ["@/components/ui/dialog", {
+      Dialog,
+      DialogClose: ({ children }) => children,
+      DialogContent: Wrapper,
+      DialogDescription: Wrapper,
+      DialogFooter: Wrapper,
+      DialogHeader: Wrapper,
+      DialogTitle: Wrapper,
+    }],
+    ["./registration-customer-message-errors", {
+      getRegistrationCustomerMessageErrorMessage: (_error, fallback) => fallback,
+    }],
+  ])
+  const runtimeRequire = (specifier) => {
+    if (specifier === "react" || specifier === "react/jsx-runtime") return require(specifier)
+    const local = localModules.get(specifier)
+    if (local) return local
+    throw new Error(`unexpected mounted dialog import: ${specifier}`)
+  }
+  const factory = vm.runInThisContext(`(function(require, module, exports) {${output}\n})`, {
+    filename: dialogUrl.pathname,
+  })
+  factory(runtimeRequire, runtimeModule, runtimeModule.exports)
+  return runtimeModule.exports.RegistrationAlimtalkPreviewDialog
+}
+
+function observationPreview(sourceId, className = "중2 영어 A반") {
+  return {
+    ok: true,
+    previewId: "d6400000-0000-4000-8000-000000000001",
+    expiresAt: "2099-08-12T00:10:00.000Z",
+    messageKind: "observation_booking",
+    studentName: sourceId === "d6400000-0000-4000-8000-000000000003" ? "두번째 학생" : "첫번째 학생",
+    recipientLast4: "5678",
+    facts: {
+      subjectLabel: "영어",
+      className,
+      scheduleLabel: "2026년 8월 17일 월요일 오후 6:00",
+      placeLabel: "본관 301호",
+      teacherLabel: "홍길동",
+    },
+    body: `청강 예약 안내 ${className}`,
+    buttons: [{ name: "학원 위치 보기", type: "WL", host: "map.naver.com" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
+    readiness: {
+      runtimeReady: true,
+      activationMode: "live",
+      activationEligible: true,
+      credentialsConfigured: true,
+      pfConfigured: true,
+      templateConfigured: true,
+      templateVerified: true,
+      verifiedAt: "2026-08-12T00:00:00.000Z",
+      sourceValid: true,
+      sendAllowed: true,
+      blockers: [],
+    },
+    latestMessage: null,
+  }
+}
+
+function controlledPromise() {
+  let resolve
+  const promise = new Promise((onResolve) => { resolve = onResolve })
+  return { promise, resolve }
+}
+
+test("mounted observation dialog ignores a stale preview and one confirmation gesture can call send only once", async () => {
+  const Dialog = await loadMountedDialog()
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>")
+  const originalWindow = globalThis.window
+  const originalDocument = globalThis.document
+  const originalNavigator = globalThis.navigator
+  const originalActEnvironment = globalThis.IS_REACT_ACT_ENVIRONMENT
+  const first = controlledPromise()
+  const second = controlledPromise()
+  const previewCalls = []
+  let sendCalls = 0
+  const client = {
+    preview(target) {
+      previewCalls.push(target)
+      return target.sourceId === "d6400000-0000-4000-8000-000000000002" ? first.promise : second.promise
+    },
+    async send() {
+      sendCalls += 1
+      return {
+        ok: true,
+        messageId: "d6400000-0000-4000-8000-000000000004",
+        messageKind: "observation_booking",
+        currentStatus: "accepted",
+        recipientLast4: "5678",
+        confirmedByName: "김관리",
+        confirmedAt: "2026-08-12T00:01:00.000Z",
+        updatedAt: "2026-08-12T00:01:00.000Z",
+        canCheck: false,
+        idempotent: false,
+      }
+    },
+    async check() { throw new Error("not used") },
+    async reconcile() { throw new Error("not used") },
+    async releasePreSend() { throw new Error("not used") },
+  }
+  let root
+
+  globalThis.window = dom.window
+  globalThis.document = dom.window.document
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator })
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: dom.window.crypto })
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+
+  const render = async (sourceId) => act(async () => {
+    root.render(createElement(Dialog, {
+      open: true,
+      onOpenChange: () => undefined,
+      target: { messageKind: "observation_booking", sourceId },
+      client,
+      viewerRole: "staff",
+    }))
+    await new Promise((resolve) => setImmediate(resolve))
+  })
+
+  try {
+    root = createRoot(dom.window.document.getElementById("root"))
+    await render("d6400000-0000-4000-8000-000000000002")
+    await render("d6400000-0000-4000-8000-000000000003")
+    await act(async () => {
+      second.resolve(observationPreview("d6400000-0000-4000-8000-000000000003", "중2 영어 B반"))
+      await second.promise
+    })
+    await act(async () => {
+      first.resolve(observationPreview("d6400000-0000-4000-8000-000000000002"))
+      await first.promise
+    })
+    assert.match(dom.window.document.body.textContent, /두번째 학생/)
+    assert.match(dom.window.document.body.textContent, /중2 영어 B반/)
+    assert.match(dom.window.document.body.textContent, /홍길동/)
+    assert.doesNotMatch(dom.window.document.body.textContent, /첫번째 학생/)
+
+    const confirm = [...dom.window.document.querySelectorAll("button")]
+      .find((button) => button.textContent === "확인 후 발송")
+    assert.ok(confirm)
+    await act(async () => {
+      confirm.click()
+      confirm.click()
+      await new Promise((resolve) => setImmediate(resolve))
+    })
+    assert.equal(sendCalls, 1)
+    assert.deepEqual(previewCalls, [
+      { messageKind: "observation_booking", sourceId: "d6400000-0000-4000-8000-000000000002" },
+      { messageKind: "observation_booking", sourceId: "d6400000-0000-4000-8000-000000000003" },
+    ])
+    assert.match(dom.window.document.body.textContent, /발송 요청 · 김관리/)
+  } finally {
+    if (root) await act(async () => root.unmount())
+    dom.window.close()
+    globalThis.window = originalWindow
+    globalThis.document = originalDocument
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: originalNavigator })
+    globalThis.IS_REACT_ACT_ENVIRONMENT = originalActEnvironment
+  }
+})
 
 test("registration customer message client sends only strict target and confirmation DTOs", async () => {
   const calls = []
@@ -214,8 +405,9 @@ test("알림톡 미리보기의 배경과 내용은 등록 상세 모달보다 �
 
 test("입학 미리보기는 정규 수업 정보를 먼저 보여주고 첫 수업일을 마지막에 강조한다", async () => {
   const source = await sourceOrEmpty(dialogUrl)
+  const admissionSection = source.slice(source.indexOf("preview.facts.admissionPlans?.map"))
   const labels = ["과목/수업 · ", "교재 · ", "요일/시간 · ", "선생님 · ", "강의실 · ", "첫 수업일 · "]
-  const positions = labels.map((label) => source.indexOf(label))
+  const positions = labels.map((label) => admissionSection.indexOf(label))
 
   assert.equal(positions.every((position) => position >= 0), true)
   assert.deepEqual(positions, [...positions].sort((left, right) => left - right))

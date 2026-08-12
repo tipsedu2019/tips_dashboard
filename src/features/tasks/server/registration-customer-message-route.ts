@@ -619,11 +619,15 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
           context.role,
           target.messageKind,
         )
-        const latestMessage = normalizedHistory[0] ?? null
+        const latestMessage = target.messageKind === "observation_booking"
+          && !normalizedReadiness.blockers.includes("duplicate_locked")
+          ? null
+          : normalizedHistory[0] ?? null
         if (
           latestMessage
           && (!("messageId" in latestMessage) || !("canCheck" in latestMessage))
         ) httpError(503, "registration_customer_message_history_unavailable")
+        const operatorLatestMessage = latestMessage as RegistrationCustomerMessageHistoryItem | null
         let receipt: { previewId: string; expiresAt: string; recipientLast4: string } | null = null
         if (normalizedReadiness.sendAllowed) {
           receipt = previewReceipt(await dependencies.createPreview({
@@ -648,7 +652,7 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
           body: source.body,
           buttons: source.buttons,
           readiness: normalizedReadiness,
-          latestMessage,
+          latestMessage: operatorLatestMessage,
         }
         return json(assertRegistrationCustomerMessagePublicPayload(payload))
       } catch (error) {
@@ -1018,36 +1022,50 @@ async function historyRpc(context: HandlerAuthContext, args: JsonRecord) {
   return result.data
 }
 
-export function createProductionRegistrationCustomerMessageRouteHandlers() {
+type RegistrationCustomerMessageProductionOverrides = Readonly<{
+  auth?: ReturnType<typeof createProductionRegistrationCustomerMessageAuth>
+  environment?: NodeJS.ProcessEnv
+  providerFetch?: typeof globalThis.fetch
+}>
+
+export function createProductionRegistrationCustomerMessageRouteHandlers(
+  overrides: RegistrationCustomerMessageProductionOverrides = {},
+) {
+  const environment = overrides.environment ?? process.env
+  const providerFetch = overrides.providerFetch ?? globalThis.fetch.bind(globalThis)
   const catalog = createRegistrationCustomerMessageCatalog({
-    SOLAPI_API_KEY: process.env.SOLAPI_API_KEY,
-    SOLAPI_API_SECRET: process.env.SOLAPI_API_SECRET,
-    SOLAPI_KAKAO_PF_ID: process.env.SOLAPI_KAKAO_PF_ID,
+    SOLAPI_API_KEY: environment.SOLAPI_API_KEY,
+    SOLAPI_API_SECRET: environment.SOLAPI_API_SECRET,
+    SOLAPI_KAKAO_PF_ID: environment.SOLAPI_KAKAO_PF_ID,
     SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID:
-      process.env.SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID,
+      environment.SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID,
     SOLAPI_REGISTRATION_VISIT_BOOKING_TEMPLATE_ID:
-      process.env.SOLAPI_REGISTRATION_VISIT_BOOKING_TEMPLATE_ID,
+      environment.SOLAPI_REGISTRATION_VISIT_BOOKING_TEMPLATE_ID,
     SOLAPI_REGISTRATION_APPOINTMENT_REMINDER_TEMPLATE_ID:
-      process.env.SOLAPI_REGISTRATION_APPOINTMENT_REMINDER_TEMPLATE_ID,
+      environment.SOLAPI_REGISTRATION_APPOINTMENT_REMINDER_TEMPLATE_ID,
     SOLAPI_REGISTRATION_WAITING_TEMPLATE_ID:
-      process.env.SOLAPI_REGISTRATION_WAITING_TEMPLATE_ID,
+      environment.SOLAPI_REGISTRATION_WAITING_TEMPLATE_ID,
     SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID:
-      process.env.SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID,
+      environment.SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID,
+    SOLAPI_REGISTRATION_OBSERVATION_BOOKING_TEMPLATE_ID:
+      environment.SOLAPI_REGISTRATION_OBSERVATION_BOOKING_TEMPLATE_ID,
+    SOLAPI_REGISTRATION_OBSERVATION_REMINDER_TEMPLATE_ID:
+      environment.SOLAPI_REGISTRATION_OBSERVATION_REMINDER_TEMPLATE_ID,
     REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER:
-      process.env.REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER,
+      environment.REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER,
   })
-  const pepper = text(process.env.REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER)
+  const pepper = text(environment.REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER)
   const provider = createRegistrationCustomerMessageSolapi({
-    apiKey: text(process.env.SOLAPI_API_KEY),
-    apiSecret: text(process.env.SOLAPI_API_SECRET),
-    pfId: text(process.env.SOLAPI_KAKAO_PF_ID),
-    fetch: globalThis.fetch.bind(globalThis),
+    apiKey: text(environment.SOLAPI_API_KEY),
+    apiSecret: text(environment.SOLAPI_API_SECRET),
+    pfId: text(environment.SOLAPI_KAKAO_PF_ID),
+    fetch: providerFetch,
   })
-  let auth: ReturnType<typeof createProductionRegistrationCustomerMessageAuth> | null = null
-  const productionAuth = () => {
-    auth ??= createProductionRegistrationCustomerMessageAuth()
-    return auth
-  }
+  let defaultAuth: ReturnType<typeof createProductionRegistrationCustomerMessageAuth> | null = null
+  const productionAuth = () => (
+    overrides.auth
+    ?? (defaultAuth ??= createProductionRegistrationCustomerMessageAuth())
+  )
 
   return createRegistrationCustomerMessageRouteHandlers({
     authenticate(request) {
@@ -1077,7 +1095,10 @@ export function createProductionRegistrationCustomerMessageRouteHandlers() {
       if (input.messageKind === "admission_application") return input.sourceId
       const table = input.messageKind === "waiting_notice"
         ? "ops_registration_subject_tracks"
-        : "ops_registration_appointments"
+        : input.messageKind === "observation_booking"
+          || input.messageKind === "observation_reminder"
+          ? "ops_registration_observations"
+          : "ops_registration_appointments"
       const result = await actorClient(input.context)
         .from(table)
         .select("task_id")
