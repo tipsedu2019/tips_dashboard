@@ -1,6 +1,6 @@
 begin;
 
-select plan(89);
+select plan(90);
 
 select has_column('dashboard_private', 'registration_customer_reminder_jobs', 'job_id', 'queue uses a UUID job identity');
 select has_column('dashboard_private', 'registration_customer_reminder_jobs', 'message_kind', 'queue distinguishes reminder kinds');
@@ -1026,6 +1026,75 @@ insert into public.ops_registration_level_tests(
   'f6000000-0000-4000-8000-000000000101',
   'f6000000-0000-4000-8000-000000000102', 1, 'scheduled'
 );
+
+alter table dashboard_private.registration_customer_reminder_settings
+  disable trigger sync_registration_customer_reminder_cron_active;
+update dashboard_private.registration_customer_reminder_settings
+set enabled = false
+where singleton;
+alter table dashboard_private.registration_customer_reminder_settings
+  enable trigger sync_registration_customer_reminder_cron_active;
+
+create temporary table queue_off_heartbeat_snapshot as
+select * from dashboard_private.registration_customer_reminder_worker_heartbeats;
+create temporary table queue_off_job_snapshot as
+select * from dashboard_private.registration_customer_reminder_jobs;
+create temporary table queue_off_message_snapshot as
+select * from public.ops_registration_customer_messages;
+create temporary table queue_off_claim_result(payload jsonb) on commit drop;
+grant insert, select on table queue_off_claim_result to service_role;
+
+set local role service_role;
+select pg_catalog.set_config('request.jwt.claim.role', 'service_role', true);
+insert into queue_off_claim_result(payload)
+select public.claim_registration_customer_reminder_job_v1();
+reset role;
+
+select is(
+  pg_catalog.jsonb_build_object(
+    'claimResult', (select payload from queue_off_claim_result),
+    'heartbeatDelta', (
+      select pg_catalog.count(*)
+      from (
+        (select * from dashboard_private.registration_customer_reminder_worker_heartbeats
+         except all select * from queue_off_heartbeat_snapshot)
+        union all
+        (select * from queue_off_heartbeat_snapshot
+         except all select * from dashboard_private.registration_customer_reminder_worker_heartbeats)
+      ) delta
+    ),
+    'jobDelta', (
+      select pg_catalog.count(*)
+      from (
+        (select * from dashboard_private.registration_customer_reminder_jobs
+         except all select * from queue_off_job_snapshot)
+        union all
+        (select * from queue_off_job_snapshot
+         except all select * from dashboard_private.registration_customer_reminder_jobs)
+      ) delta
+    ),
+    'messageDelta', (
+      select pg_catalog.count(*)
+      from (
+        (select * from public.ops_registration_customer_messages
+         except all select * from queue_off_message_snapshot)
+        union all
+        (select * from queue_off_message_snapshot
+         except all select * from public.ops_registration_customer_messages)
+      ) delta
+    )
+  ),
+  '{"claimResult":null,"heartbeatDelta":0,"jobDelta":0,"messageDelta":0}'::jsonb,
+  'OFF claim returns no job without heartbeat, queue, or message mutation'
+);
+
+alter table dashboard_private.registration_customer_reminder_settings
+  disable trigger sync_registration_customer_reminder_cron_active;
+update dashboard_private.registration_customer_reminder_settings
+set enabled = true
+where singleton;
+alter table dashboard_private.registration_customer_reminder_settings
+  enable trigger sync_registration_customer_reminder_cron_active;
 
 create temporary table queue_worker_results(
   label text primary key,

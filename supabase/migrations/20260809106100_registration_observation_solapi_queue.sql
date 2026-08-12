@@ -272,10 +272,10 @@ returns jsonb language plpgsql volatile security definer set search_path = '' se
 declare v_job dashboard_private.registration_customer_reminder_jobs%rowtype;
 begin
   if (select auth.role()) <> 'service_role' then raise exception 'registration_customer_reminder_worker_unauthorized' using errcode = '42501'; end if;
+  if not (select enabled from dashboard_private.registration_customer_reminder_settings where singleton) then return null; end if;
   insert into dashboard_private.registration_customer_reminder_worker_heartbeats(singleton, succeeded_at, updated_at)
   values (true, pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp())
   on conflict (singleton) do update set succeeded_at = excluded.succeeded_at, updated_at = excluded.updated_at;
-  if not (select enabled from dashboard_private.registration_customer_reminder_settings where singleton) then return null; end if;
   perform dashboard_private.sync_registration_customer_reminder_jobs_v1();
   select job.* into v_job from dashboard_private.registration_customer_reminder_jobs job
   join public.ops_registration_appointments appointment on appointment.id = job.appointment_id
