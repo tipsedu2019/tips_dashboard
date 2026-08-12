@@ -356,6 +356,8 @@ const FIXTURE_CUSTOMER_MESSAGE_SOURCES: Record<RegistrationCustomerMessageKind, 
       buttons: [{ name: "입학신청서 작성", type: "WL", host: "tips.edu" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
     },
   },
+  observation_booking: {},
+  observation_reminder: {},
 }
 
 function fixtureCustomerMessageReadiness(blockers: RegistrationCustomerMessageReadiness["blockers"]): RegistrationCustomerMessageReadiness {

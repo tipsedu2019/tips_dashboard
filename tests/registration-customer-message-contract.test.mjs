@@ -17,6 +17,8 @@ test("browser-safe runtime unions expose exactly the approved customer-message v
     "appointment_reminder",
     "waiting_notice",
     "admission_application",
+    "observation_booking",
+    "observation_reminder",
   ])
   assert.deepEqual(contract.REGISTRATION_CUSTOMER_MESSAGE_STATUSES, [
     "pending",
@@ -67,6 +69,19 @@ test("preview target parsing accepts only an exact message kind and canonical UU
   ]) {
     assert.equal(contract.parseRegistrationCustomerMessageTarget(invalid), null)
   }
+})
+
+test("observation rollout labels stay hidden until their dedicated UI task", async () => {
+  const source = await readFile(
+    new URL("../src/features/tasks/registration-customer-message-rollout-panel.tsx", import.meta.url),
+    "utf8",
+  )
+  assert.match(source, /observation_booking:\s*"청강 예약 안내"/u)
+  assert.match(source, /observation_reminder:\s*"청강 일정 안내"/u)
+  assert.match(source, /const ROLLOUT_PANEL_MESSAGE_KINDS[\s\S]*"admission_application"/u)
+  assert.doesNotMatch(source, /ROLLOUT_PANEL_MESSAGE_KINDS[\s\S]*"observation_booking"/u)
+  assert.match(source, /ROLLOUT_PANEL_MESSAGE_KINDS\.map\(\(messageKind\)/u)
+  assert.doesNotMatch(source, /REGISTRATION_CUSTOMER_MESSAGE_KINDS\.map\(\(messageKind\)/u)
 })
 
 test("send and check parsing reject extra browser-owned provider facts", () => {

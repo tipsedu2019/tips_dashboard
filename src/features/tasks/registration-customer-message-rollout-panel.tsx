@@ -12,10 +12,7 @@ import { Label } from "@/components/ui/label"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/providers/auth-provider"
 
-import {
-  REGISTRATION_CUSTOMER_MESSAGE_KINDS,
-  type RegistrationCustomerMessageKind,
-} from "./registration-customer-message-contract"
+import type { RegistrationCustomerMessageKind } from "./registration-customer-message-contract"
 import { createRegistrationCustomerMessageAdminClient } from "./registration-customer-message-service"
 import { runRegistrationCustomerMessageRolloutAction } from "./registration-customer-message-rollout"
 
@@ -27,7 +24,16 @@ const MESSAGE_KIND_LABELS: Readonly<Record<RegistrationCustomerMessageKind, stri
   appointment_reminder: "예약 리마인드",
   waiting_notice: "대기 안내",
   admission_application: "입학신청서 안내",
+  observation_booking: "청강 예약 안내",
+  observation_reminder: "청강 일정 안내",
 })
+const ROLLOUT_PANEL_MESSAGE_KINDS: ReadonlyArray<RegistrationCustomerMessageKind> = Object.freeze([
+  "level_test_booking",
+  "visit_consultation_booking",
+  "appointment_reminder",
+  "waiting_notice",
+  "admission_application",
+])
 
 type RolloutRowState = Readonly<{
   status: "off" | "verification" | "live" | "error"
@@ -166,7 +172,7 @@ export function RegistrationCustomerMessageRolloutPanel() {
         </CardContent>
       </Card>
 
-      {REGISTRATION_CUSTOMER_MESSAGE_KINDS.map((messageKind) => {
+      {ROLLOUT_PANEL_MESSAGE_KINDS.map((messageKind) => {
         const state = rowState[messageKind] ?? INITIAL_ROW_STATE
         const working = workingKind === messageKind
         return (

@@ -4,6 +4,8 @@ export const REGISTRATION_CUSTOMER_MESSAGE_KINDS = Object.freeze([
   "appointment_reminder",
   "waiting_notice",
   "admission_application",
+  "observation_booking",
+  "observation_reminder",
 ] as const)
 
 export type RegistrationCustomerMessageKind =

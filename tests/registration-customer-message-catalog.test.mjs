@@ -16,6 +16,7 @@ import {
   renderRegistrationCustomerMessage,
   resolveRegistrationCustomerMessageWaitingLabels,
 } from "../src/features/tasks/server/registration-customer-message-catalog.ts"
+import { createRegistrationSubjectTrackFixtureCustomerMessageClient } from "../src/features/tasks/registration-track-fixtures.ts"
 
 const LEVEL_TEST_BODY = `[팁스영어수학학원] 레벨테스트 예약 안내
 
@@ -159,6 +160,8 @@ const TEMPLATE_IDS = {
   appointment_reminder: "template-reminder",
   waiting_notice: "template-waiting",
   admission_application: "template-admission",
+  observation_booking: "template-observation-booking",
+  observation_reminder: "template-observation-reminder",
 }
 
 const FULL_ENV = {
@@ -170,6 +173,8 @@ const FULL_ENV = {
   SOLAPI_REGISTRATION_APPOINTMENT_REMINDER_TEMPLATE_ID: TEMPLATE_IDS.appointment_reminder,
   SOLAPI_REGISTRATION_WAITING_TEMPLATE_ID: TEMPLATE_IDS.waiting_notice,
   SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID: TEMPLATE_IDS.admission_application,
+  SOLAPI_REGISTRATION_OBSERVATION_BOOKING_TEMPLATE_ID: TEMPLATE_IDS.observation_booking,
+  SOLAPI_REGISTRATION_OBSERVATION_REMINDER_TEMPLATE_ID: TEMPLATE_IDS.observation_reminder,
   REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER: "recipient-pepper-secret-value",
 }
 
@@ -177,14 +182,16 @@ function sha256(value) {
   return createHash("sha256").update(value, "utf8").digest("hex")
 }
 
-test("catalog maps exactly five kinds to the approved server-only environment keys", () => {
-  assert.equal(REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION, 4)
+test("catalog maps exactly seven kinds to the approved server-only environment keys", () => {
+  assert.equal(REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION, 5)
   assert.deepEqual(REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS, {
     level_test_booking: "SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID",
     visit_consultation_booking: "SOLAPI_REGISTRATION_VISIT_BOOKING_TEMPLATE_ID",
     appointment_reminder: "SOLAPI_REGISTRATION_APPOINTMENT_REMINDER_TEMPLATE_ID",
     waiting_notice: "SOLAPI_REGISTRATION_WAITING_TEMPLATE_ID",
     admission_application: "SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID",
+    observation_booking: "SOLAPI_REGISTRATION_OBSERVATION_BOOKING_TEMPLATE_ID",
+    observation_reminder: "SOLAPI_REGISTRATION_OBSERVATION_REMINDER_TEMPLATE_ID",
   })
   assert.deepEqual(REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_REVISIONS, {
     level_test_booking: 3,
@@ -192,6 +199,8 @@ test("catalog maps exactly five kinds to the approved server-only environment ke
     appointment_reminder: 3,
     waiting_notice: 2,
     admission_application: 3,
+    observation_booking: 1,
+    observation_reminder: 1,
   })
   assert.equal(Object.isFrozen(REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_REVISIONS), true)
   assert.throws(() => {
@@ -205,6 +214,8 @@ test("catalog maps exactly five kinds to the approved server-only environment ke
     "appointment_reminder",
     "waiting_notice",
     "admission_application",
+    "observation_booking",
+    "observation_reminder",
   ])
   assert.equal(catalog.credentialsConfigured, true)
   assert.equal(catalog.pfId, "pf-tipsedu")
@@ -256,6 +267,8 @@ test("catalog never falls back to process.env at import or factory time", () => 
       SOLAPI_REGISTRATION_APPOINTMENT_REMINDER_TEMPLATE_ID: "must-not-be-read",
       SOLAPI_REGISTRATION_WAITING_TEMPLATE_ID: "must-not-be-read",
       SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID: "must-not-be-read",
+      SOLAPI_REGISTRATION_OBSERVATION_BOOKING_TEMPLATE_ID: "must-not-be-read",
+      SOLAPI_REGISTRATION_OBSERVATION_REMINDER_TEMPLATE_ID: "must-not-be-read",
       REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER: "must-not-be-read",
     },
   })
@@ -265,7 +278,7 @@ test("catalog never falls back to process.env at import or factory time", () => 
     credentialsConfigured: false,
     pfId: null,
     recipientHashPepperConfigured: false,
-    templateIds: [null, null, null, null, null],
+    templateIds: [null, null, null, null, null, null, null],
   })
 })
 
@@ -305,15 +318,26 @@ test("catalog pins exact approved copy and place-aware Naver buttons", () => {
     },
   }
 
-  for (const [kind, entry] of Object.entries(catalog.templates)) {
-    assert.equal(entry.content, expected[kind].content)
-    assert.deepEqual(entry.variables, expected[kind].variables)
-    assert.deepEqual(entry.buttons, expected[kind].buttons)
+  for (const [kind, pinned] of Object.entries(expected)) {
+    const entry = catalog.templates[kind]
+    assert.equal(entry.content, pinned.content)
+    assert.deepEqual(entry.variables, pinned.variables)
+    assert.deepEqual(entry.buttons, pinned.buttons)
     assert.deepEqual(entry.send, { type: "ATA", disableSms: true })
     assert.equal(Object.isFrozen(entry.send), true)
     assert.throws(() => {
       entry.send.disableSms = false
     }, TypeError)
+  }
+})
+
+test("fixture observation kinds stay unsupported until their dedicated UI fixture task", async () => {
+  const client = createRegistrationSubjectTrackFixtureCustomerMessageClient()
+  for (const messageKind of ["observation_booking", "observation_reminder"]) {
+    await assert.rejects(
+      client.preview({ messageKind, sourceId: "97000000-0000-4000-8000-000000000001" }),
+      /registration_customer_message_source_not_found/,
+    )
   }
 })
 

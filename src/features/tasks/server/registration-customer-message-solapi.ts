@@ -7,6 +7,7 @@ import {
   checksumRegistrationCustomerMessageTemplate,
   type RegistrationCustomerMessageButton,
   type RegistrationCustomerMessageCatalogEntry,
+  type RegistrationCustomerMessageTemplate,
   type RegistrationCustomerMessageVariableName,
 } from "./registration-customer-message-catalog.ts"
 
@@ -136,6 +137,36 @@ function normalizedVariables(value: unknown): RegistrationCustomerMessageVariabl
     const match = raw.match(/^#\{(.+)\}$/u)
     return exactText(match?.[1] ?? raw)
   }).filter(Boolean) as RegistrationCustomerMessageVariableName[]
+}
+
+function observationVariableContract(
+  value: unknown,
+  entry: RegistrationCustomerMessageCatalogEntry,
+) {
+  if (!Array.isArray(value) || !entry.transportVariables) return null
+  const names: string[] = []
+  for (const item of value) {
+    const raw = typeof item === "string"
+      ? item
+      : isRecord(item)
+        ? exactText(item.name ?? item.variableName ?? item.key)
+        : ""
+    const match = raw.match(/^#\{([^{}]+)\}$/u)
+    const name = match?.[1] ?? raw
+    if (!name) return null
+    names.push(name)
+  }
+
+  const body = [...entry.variables]
+  const transport = [...entry.transportVariables]
+  const expected: ReadonlyArray<string> = [...body, ...transport]
+  if (
+    names.length !== expected.length
+    || new Set(names).size !== names.length
+    || names.some((name) => !expected.includes(name))
+    || expected.some((name) => !names.includes(name))
+  ) return null
+  return { variables: body, transportVariables: transport }
 }
 
 function normalizedButtons(value: unknown): RegistrationCustomerMessageButton[] {
@@ -373,10 +404,15 @@ export function createRegistrationCustomerMessageSolapi(dependencies: SolapiDepe
         const template = rows(payload?.templateList).find((candidate) => (
           exactText(candidate.templateId, 200) === input.entry.templateId
         ))
-        const normalized = template
+        const variableContract = template
+          ? input.entry.transportVariables
+            ? observationVariableContract(template.variables, input.entry)
+            : { variables: normalizedVariables(template.variables) }
+          : null
+        const normalized: RegistrationCustomerMessageTemplate | null = template && variableContract
           ? {
               content: exactText(template.content, 20_000),
-              variables: normalizedVariables(template.variables),
+              ...variableContract,
               buttons: normalizedButtons(template.buttons),
             }
           : null
@@ -391,6 +427,10 @@ export function createRegistrationCustomerMessageSolapi(dependencies: SolapiDepe
           && providerChecksum === input.entry.checksums.template
           && normalized
           && sameJson(normalized.variables, [...input.entry.variables])
+          && sameJson(
+            normalized.transportVariables ?? [],
+            [...(input.entry.transportVariables ?? [])],
+          )
           && sameJson(normalized.buttons, [...input.entry.buttons]),
         )
         if (!matched) return Object.freeze({ matched: false as const, code: "template_drift" as const })

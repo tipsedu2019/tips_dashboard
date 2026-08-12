@@ -325,3 +325,51 @@ test("template preflight accepts only an exact APPROVED channel/content/variable
     assert.equal("receipt" in drift, false)
   }
 })
+
+test("observation preflight accepts reordered exact variables and rejects closed-contract drift without send calls", async () => {
+  const observationEntry = createRegistrationCustomerMessageCatalog({
+    ...ENV,
+    SOLAPI_REGISTRATION_OBSERVATION_BOOKING_TEMPLATE_ID: "template-observation-booking",
+  }).templates.observation_booking
+  const exactObservationTemplate = {
+    templateId: observationEntry.templateId,
+    channelId: PF_ID,
+    status: "APPROVED",
+    content: observationEntry.content,
+    variables: [...observationEntry.variables, ...observationEntry.transportVariables]
+      .map((name) => `#{${name}}`),
+    buttons: observationEntry.buttons.map((button) => ({
+      buttonName: button.name,
+      buttonType: button.type,
+      linkMo: button.linkMobile,
+      linkPc: button.linkPc,
+    })),
+  }
+  const observationDriftCases = [
+    { ...exactObservationTemplate, variables: exactObservationTemplate.variables.slice(0, -1) },
+    { ...exactObservationTemplate, variables: [...exactObservationTemplate.variables, "#{임의변수}"] },
+    { ...exactObservationTemplate, variables: [...exactObservationTemplate.variables.slice(0, -1), exactObservationTemplate.variables[0]] },
+    { ...exactObservationTemplate, buttons: [
+      { ...exactObservationTemplate.buttons[0], linkMo: "https://bit.ly/tips", linkPc: "https://bit.ly/tips" },
+      exactObservationTemplate.buttons[1],
+    ] },
+    { ...exactObservationTemplate, buttons: exactObservationTemplate.buttons.slice(0, 1) },
+  ]
+  const urls = []
+  const preflight = async (template) => makeAdapter(async (url) => {
+    urls.push(String(url))
+    return response({ templateList: [template] })
+  }).preflight({ entry: observationEntry })
+
+  for (const changed of observationDriftCases) {
+    assert.deepEqual(await preflight(changed), { matched: false, code: "template_drift" })
+  }
+  const reordered = {
+    ...exactObservationTemplate,
+    variables: [...exactObservationTemplate.variables].reverse(),
+  }
+  assert.equal((await preflight(reordered)).matched, true)
+  assert.equal(urls.length, observationDriftCases.length + 1)
+  assert.equal(urls.some((url) => url === SOLAPI_SEND_MANY_URL), false)
+  assert.equal(urls.every((url) => url.startsWith("https://api.solapi.com/kakao/v2/templates/")), true)
+})

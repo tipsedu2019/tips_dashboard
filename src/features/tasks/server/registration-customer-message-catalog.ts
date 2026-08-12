@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto"
 
 import {
-  REGISTRATION_CUSTOMER_MESSAGE_KINDS,
   isRegistrationCustomerMessageKind,
   type RegistrationCustomerMessageKind,
 } from "../registration-customer-message-contract.ts"
 
-export const REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION = 4 as const
+export const REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION = 5 as const
 
 export type RegistrationCustomerMessageTemplateEnvKey =
   | "SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID"
@@ -14,6 +13,8 @@ export type RegistrationCustomerMessageTemplateEnvKey =
   | "SOLAPI_REGISTRATION_APPOINTMENT_REMINDER_TEMPLATE_ID"
   | "SOLAPI_REGISTRATION_WAITING_TEMPLATE_ID"
   | "SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID"
+  | "SOLAPI_REGISTRATION_OBSERVATION_BOOKING_TEMPLATE_ID"
+  | "SOLAPI_REGISTRATION_OBSERVATION_REMINDER_TEMPLATE_ID"
 
 export const REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS: Readonly<
   Record<RegistrationCustomerMessageKind, RegistrationCustomerMessageTemplateEnvKey>
@@ -23,6 +24,8 @@ export const REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS: Readonly<
   appointment_reminder: "SOLAPI_REGISTRATION_APPOINTMENT_REMINDER_TEMPLATE_ID",
   waiting_notice: "SOLAPI_REGISTRATION_WAITING_TEMPLATE_ID",
   admission_application: "SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID",
+  observation_booking: "SOLAPI_REGISTRATION_OBSERVATION_BOOKING_TEMPLATE_ID",
+  observation_reminder: "SOLAPI_REGISTRATION_OBSERVATION_REMINDER_TEMPLATE_ID",
 })
 
 export const REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_REVISIONS: Readonly<
@@ -33,6 +36,8 @@ export const REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_REVISIONS: Readonly<
   appointment_reminder: 3,
   waiting_notice: 2,
   admission_application: 3,
+  observation_booking: 1,
+  observation_reminder: 1,
 })
 
 export type RegistrationCustomerMessageServerEnv = Readonly<{
@@ -44,6 +49,8 @@ export type RegistrationCustomerMessageServerEnv = Readonly<{
   SOLAPI_REGISTRATION_APPOINTMENT_REMINDER_TEMPLATE_ID?: string
   SOLAPI_REGISTRATION_WAITING_TEMPLATE_ID?: string
   SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID?: string
+  SOLAPI_REGISTRATION_OBSERVATION_BOOKING_TEMPLATE_ID?: string
+  SOLAPI_REGISTRATION_OBSERVATION_REMINDER_TEMPLATE_ID?: string
   REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER?: string
 }>
 
@@ -97,6 +104,9 @@ export type RegistrationCustomerMessageCanonicalFacts = Readonly<{
   waitingKind?: RegistrationCustomerMessageWaitingKind
   waitingClassName?: string
   enrollmentPlans?: ReadonlyArray<RegistrationCustomerMessageAdmissionPlan>
+  className?: string
+  campus?: "본관" | "별관"
+  teacherName?: string
 }>
 
 export type RegistrationCustomerMessageVariableName =
@@ -109,6 +119,10 @@ export type RegistrationCustomerMessageVariableName =
   | "대기종류"
   | "대기내용"
   | "등록수업안내"
+  | "수업명"
+  | "담당선생님"
+
+export type RegistrationCustomerMessageTransportVariableName = "학원위치URL"
 
 export type RegistrationCustomerMessageButton = Readonly<{
   name: string
@@ -125,6 +139,7 @@ export type RegistrationCustomerMessageSendDefinition = Readonly<{
 export type RegistrationCustomerMessageTemplate = Readonly<{
   content: string
   variables: ReadonlyArray<RegistrationCustomerMessageVariableName>
+  transportVariables?: ReadonlyArray<RegistrationCustomerMessageTransportVariableName>
   buttons: ReadonlyArray<RegistrationCustomerMessageButton>
 }>
 
@@ -219,6 +234,19 @@ const PLACE_BUTTONS = Object.freeze([
   }),
   CONTACT_BUTTON,
 ] as const)
+export const OBSERVATION_LOCATION_URLS = Object.freeze({
+  본관: "https://map.naver.com/p/entry/place/1218797840?placePath=%3Fentry%3Dpll%26from%3Dnx%26fromNxList%3Dtrue&placeSearchOption=entry%3Dpll%26fromNxList%3Dtrue&searchType=place&c=15.00,0,0,0,dh",
+  별관: "https://map.naver.com/p/search/%EC%A0%9C%EC%A3%BC%EC%88%98%ED%95%99%ED%95%99%EC%9B%90/place/1962638110?c=10.00,0,0,0,dh&placePath=%3Fentry%253Dbmp",
+} as const)
+const OBSERVATION_BUTTONS = Object.freeze([
+  Object.freeze({
+    name: "학원 위치 보기",
+    type: "WL" as const,
+    linkMobile: "#{학원위치URL}",
+    linkPc: "#{학원위치URL}",
+  }),
+  CONTACT_BUTTON,
+] as const)
 
 const TEMPLATE_DEFINITIONS: Readonly<
   Record<RegistrationCustomerMessageKind, TemplateDefinition>
@@ -306,6 +334,40 @@ const TEMPLATE_DEFINITIONS: Readonly<
       }),
       CONTACT_BUTTON,
     ] as const),
+  }),
+  observation_booking: Object.freeze({
+    kind: "observation_booking",
+    content: `[팁스영어수학학원] 청강 예약 안내
+
+안녕하세요. #{학생명} 학생의 #{과목} 청강 예약을 안내드립니다.
+
+수업: #{수업명}
+일시: #{예약일시}
+장소: #{장소}
+담당 선생님: #{담당선생님}
+
+수업 준비를 위해 예약 시간에 맞춰 방문해 주세요.
+일정 변경 및 문의는 아래 문의하기 버튼을 이용해 주세요.`,
+    variables: Object.freeze(["학생명", "과목", "수업명", "예약일시", "장소", "담당선생님"] as const),
+    transportVariables: Object.freeze(["학원위치URL"] as const),
+    buttons: OBSERVATION_BUTTONS,
+  }),
+  observation_reminder: Object.freeze({
+    kind: "observation_reminder",
+    content: `[팁스영어수학학원] 청강 일정 안내
+
+안녕하세요. #{학생명} 학생의 #{과목} 청강 일정을 다시 안내드립니다.
+
+수업: #{수업명}
+일시: #{예약일시}
+장소: #{장소}
+담당 선생님: #{담당선생님}
+
+예약 시간에 맞춰 방문해 주세요.
+변동사항 및 문의는 아래 문의하기 버튼을 이용해 주세요.`,
+    variables: Object.freeze(["학생명", "과목", "수업명", "예약일시", "장소", "담당선생님"] as const),
+    transportVariables: Object.freeze(["학원위치URL"] as const),
+    buttons: OBSERVATION_BUTTONS,
   }),
 })
 
@@ -722,14 +784,27 @@ function normalizedButtons(buttons: ReadonlyArray<RegistrationCustomerMessageBut
   }))
 }
 
-export function checksumRegistrationCustomerMessageTemplate(
-  template: RegistrationCustomerMessageTemplate,
-) {
-  return sha256(canonicalJson({
+function templateChecksumPayload(template: RegistrationCustomerMessageTemplate) {
+  const legacy = {
     content: template.content,
     variables: [...template.variables],
     buttons: normalizedButtons(template.buttons),
-  }))
+  }
+  return template.transportVariables
+    ? { ...legacy, transportVariables: [...template.transportVariables] }
+    : legacy
+}
+
+function variableChecksumPayload(template: RegistrationCustomerMessageTemplate) {
+  return template.transportVariables
+    ? { body: [...template.variables], transport: [...template.transportVariables] }
+    : [...template.variables]
+}
+
+export function checksumRegistrationCustomerMessageTemplate(
+  template: RegistrationCustomerMessageTemplate,
+) {
+  return sha256(canonicalJson(templateChecksumPayload(template)))
 }
 
 function templateChecksums(template: RegistrationCustomerMessageTemplate) {
@@ -737,29 +812,43 @@ function templateChecksums(template: RegistrationCustomerMessageTemplate) {
   return Object.freeze({
     template: checksumRegistrationCustomerMessageTemplate(template),
     content: sha256(template.content),
-    variables: sha256(canonicalJson([...template.variables])),
+    variables: sha256(canonicalJson(variableChecksumPayload(template))),
     buttons: sha256(canonicalJson(buttons)),
+  })
+}
+
+function catalogEntry(
+  kind: RegistrationCustomerMessageKind,
+  env: RegistrationCustomerMessageServerEnv,
+): RegistrationCustomerMessageCatalogEntry {
+  const definition = TEMPLATE_DEFINITIONS[kind]
+  const envKey = REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS[kind]
+  const templateId = text(env[envKey]) || null
+  return Object.freeze({
+    ...definition,
+    revision: REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_REVISIONS[kind],
+    envKey,
+    send: SEND_DEFINITION,
+    templateId,
+    templateConfigured: Boolean(templateId),
+    checksums: templateChecksums(definition),
   })
 }
 
 export function createRegistrationCustomerMessageCatalog(
   env: RegistrationCustomerMessageServerEnv,
 ): RegistrationCustomerMessageCatalog {
-  const templates = {} as Record<RegistrationCustomerMessageKind, RegistrationCustomerMessageCatalogEntry>
-  for (const kind of REGISTRATION_CUSTOMER_MESSAGE_KINDS) {
-    const definition = TEMPLATE_DEFINITIONS[kind]
-    const envKey = REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS[kind]
-    const templateId = text(env[envKey]) || null
-    templates[kind] = Object.freeze({
-      ...definition,
-      revision: REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_REVISIONS[kind],
-      envKey,
-      send: SEND_DEFINITION,
-      templateId,
-      templateConfigured: Boolean(templateId),
-      checksums: templateChecksums(definition),
-    })
-  }
+  const templates: Readonly<
+    Record<RegistrationCustomerMessageKind, RegistrationCustomerMessageCatalogEntry>
+  > = Object.freeze({
+    level_test_booking: catalogEntry("level_test_booking", env),
+    visit_consultation_booking: catalogEntry("visit_consultation_booking", env),
+    appointment_reminder: catalogEntry("appointment_reminder", env),
+    waiting_notice: catalogEntry("waiting_notice", env),
+    admission_application: catalogEntry("admission_application", env),
+    observation_booking: catalogEntry("observation_booking", env),
+    observation_reminder: catalogEntry("observation_reminder", env),
+  })
 
   const pfId = text(env.SOLAPI_KAKAO_PF_ID) || null
   return Object.freeze({
@@ -768,7 +857,7 @@ export function createRegistrationCustomerMessageCatalog(
     pfId,
     pfConfigured: Boolean(pfId),
     recipientHashPepperConfigured: Boolean(text(env.REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER)),
-    templates: Object.freeze(templates),
+    templates,
   })
 }
 
@@ -808,7 +897,10 @@ function renderVariables(
   const definition = TEMPLATE_DEFINITIONS[kind]
   const studentName = studentNameVariable(facts.studentName)
   const subjectLabel = formatRegistrationCustomerMessageSubjects(facts.subjects)
-  const values: Partial<Record<RegistrationCustomerMessageVariableName, string>> = {
+  const values: Partial<Record<
+    RegistrationCustomerMessageVariableName | RegistrationCustomerMessageTransportVariableName,
+    string
+  >> = {
     학생명: studentName,
     과목: subjectLabel,
   }
@@ -854,13 +946,49 @@ function renderVariables(
     labels.admissionPlans = admission.plans
   }
 
+  if (kind === "observation_booking" || kind === "observation_reminder") {
+    const campus = facts.campus
+    if (campus !== "본관" && campus !== "별관") {
+      catalogError("registration_customer_message_campus_invalid")
+    }
+    const schedule = formatRegistrationCustomerMessageSchedule(facts.scheduledAt as string | Date)
+    const place = requiredText(facts.place, "registration_customer_message_place_invalid")
+    values.수업명 = requiredText(facts.className, "registration_customer_message_class_name_invalid")
+    values.예약일시 = schedule
+    values.장소 = place
+    values.담당선생님 = requiredText(
+      facts.teacherName,
+      "registration_customer_message_teacher_name_invalid",
+    )
+    values.학원위치URL = OBSERVATION_LOCATION_URLS[campus]
+    labels.scheduleLabel = schedule
+    labels.placeLabel = place
+  }
+
   const variables: Record<string, string> = {}
   for (const name of definition.variables) {
     const value = values[name]
     if (!value) catalogError("registration_customer_message_variable_missing")
     variables[`#{${name}}`] = value
   }
+  for (const name of definition.transportVariables ?? []) {
+    const value = values[name]
+    if (!value) catalogError("registration_customer_message_variable_missing")
+    variables[`#{${name}}`] = value
+  }
   return { variables: Object.freeze(variables), labels: Object.freeze(labels) }
+}
+
+function renderButtons(
+  definition: TemplateDefinition,
+  variables: Readonly<Record<string, string>>,
+) {
+  if (!definition.transportVariables) return definition.buttons
+  return Object.freeze(definition.buttons.map((button) => Object.freeze({
+    ...button,
+    linkMobile: variables[button.linkMobile] ?? button.linkMobile,
+    linkPc: variables[button.linkPc] ?? button.linkPc,
+  })))
 }
 
 export function renderRegistrationCustomerMessage(input: {
@@ -879,17 +1007,18 @@ export function renderRegistrationCustomerMessage(input: {
   if (Array.from(body).length > 1_000) {
     catalogError("registration_customer_message_body_too_long")
   }
+  const buttons = renderButtons(definition, rendered.variables)
 
   return Object.freeze({
     kind: input.kind,
     body,
     variables: rendered.variables,
-    buttons: definition.buttons,
+    buttons,
     facts: rendered.labels,
     checksums: Object.freeze({
       variables: sha256(canonicalJson(rendered.variables)),
       body: sha256(body),
-      buttons: sha256(canonicalJson(normalizedButtons(definition.buttons))),
+      buttons: sha256(canonicalJson(normalizedButtons(buttons))),
     }),
   })
 }
