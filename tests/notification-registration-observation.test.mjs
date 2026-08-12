@@ -641,6 +641,39 @@ test("builder binds claim snapshots to the canonical source and rejects one-byte
   )
 })
 
+test("fanout transport restores the nullable booking key stripped by the generic claim envelope", async () => {
+  const { createRegistrationNotificationAdapter } = await import(adapterModuleUrl)
+  const adapter = createRegistrationNotificationAdapter({
+    now: () => new Date("2026-08-17T07:00:00.000Z"),
+    getSourceSnapshot: async () => null,
+    listScheduledSources: async () => ({ items: [], nextCursor: null, done: true }),
+    listTargetItems: async () => ({ items: [], nextCursor: null, done: true }),
+  })
+  const strippedBooking = { ...booking }
+  delete strippedBooking.legacy_session_key
+  const targets = await adapter.resolveTargets({
+    eventId: EVENT_ID,
+    workflowKey: "registration",
+    eventKey: payloads.scheduled.event_kind,
+    sourceType: "registration_observation",
+    sourceId: OBSERVATION_ID,
+    sourceRevision: "1",
+    payloadSchemaVersion: 3,
+    payload: { ...payloads.scheduled, booking: strippedBooking },
+    scheduledFor: payloads.scheduled.occurred_at,
+    rule: {
+      ruleId: RULE_ID,
+      ruleRevision: "1",
+      templateId: TEMPLATE_ID,
+      audienceKey: "subject_team",
+      channelKey: "google_chat",
+      connectionKey: null,
+      ruleVariantKey: "immediate",
+    },
+  })
+  assert.deepEqual(targets.targets.map((target) => target.connectionKey), ["google_chat.english"])
+})
+
 test("builder enforces event lifecycle and preparation-read boundaries before materialization", async () => {
   const { buildRegistrationObservationChatPayloadV3 } = await import(adapterModuleUrl)
   assert.throws(

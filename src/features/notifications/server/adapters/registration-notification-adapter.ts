@@ -375,6 +375,26 @@ function subjectConnectionKey(subject: RegistrationObservationChatPayloadV3["sub
   adapterError("payload_schema_unsupported")
 }
 
+function restoreObservationBookingTransportNulls(value: unknown) {
+  if (!isRecord(value)) return value
+  const restoreBooking = (booking: unknown) => {
+    if (!isRecord(booking)) return booking
+    if (booking.session_authority === "normalized" && !("legacy_session_key" in booking)) {
+      return { ...booking, legacy_session_key: null }
+    }
+    if (booking.session_authority === "legacy" && !("class_lesson_session_id" in booking)) {
+      return { ...booking, class_lesson_session_id: null }
+    }
+    return booking
+  }
+  return {
+    ...value,
+    ...(value.booking === undefined ? {} : { booking: restoreBooking(value.booking) }),
+    ...(value.previous_booking === undefined ? {} : { previous_booking: restoreBooking(value.previous_booking) }),
+    ...(value.canceled_booking === undefined ? {} : { canceled_booking: restoreBooking(value.canceled_booking) }),
+  }
+}
+
 function observationPayload(input: NotificationResolveInput | NotificationRenderInput) {
   if (
     input.workflowKey !== "registration"
@@ -391,7 +411,9 @@ function observationPayload(input: NotificationResolveInput | NotificationRender
   ) adapterError("payload_schema_unsupported")
   let payload: RegistrationObservationChatPayloadV3
   try {
-    payload = parseRegistrationObservationChatPayloadV3(input.payload)
+    payload = parseRegistrationObservationChatPayloadV3(
+      restoreObservationBookingTransportNulls(input.payload),
+    )
   } catch {
     adapterError("payload_schema_unsupported")
   }
