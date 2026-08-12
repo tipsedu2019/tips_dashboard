@@ -1,6 +1,6 @@
 begin;
 
-select plan(18);
+select plan(27);
 
 select has_column('dashboard_private', 'registration_customer_reminder_jobs', 'job_id', 'queue uses a UUID job identity');
 select has_column('dashboard_private', 'registration_customer_reminder_jobs', 'message_kind', 'queue distinguishes reminder kinds');
@@ -35,6 +35,95 @@ select is_empty(
 select is_empty(
   $$select 1 from dashboard_private.registration_observation_solapi_event_consumptions$$,
   'queue migration does not consume or send historic events'
+);
+
+select ok(
+  not exists(
+    select 1 from pg_catalog.pg_proc proc
+    where proc.oid in (
+      'dashboard_private.materialize_registration_observation_solapi_events_v1(integer)'::regprocedure,
+      'public.claim_registration_customer_reminder_job_v1()'::regprocedure,
+      'public.read_registration_customer_reminder_source_v1(uuid,uuid)'::regprocedure,
+      'public.release_registration_customer_reminder_job_v1(uuid,uuid,text)'::regprocedure,
+      'public.begin_registration_customer_reminder_dispatch_v1(uuid,uuid,jsonb,jsonb)'::regprocedure,
+      'public.finalize_registration_customer_reminder_dispatch_v1(uuid,uuid,text,jsonb)'::regprocedure
+    ) and (not proc.prosecdef or not exists(
+      select 1 from pg_catalog.unnest(coalesce(proc.proconfig, '{}'::text[])) setting
+      where setting in ('search_path=', 'search_path=""')
+    ))
+  ),
+  'all queue worker definers use an empty search path'
+);
+
+set local role anon;
+select throws_ok(
+  $$select public.claim_registration_customer_reminder_job_v1()$$,
+  '42501', null, 'anon cannot invoke the legacy queue claim'
+);
+reset role;
+
+create temporary table queue_legacy_fixture as
+select appointment.id as appointment_id, appointment.task_id
+from public.ops_registration_appointments appointment
+limit 1;
+
+select ok(exists(select 1 from queue_legacy_fixture), 'local fixture has an appointment');
+
+select throws_ok(
+  $$
+    insert into dashboard_private.registration_customer_reminder_jobs(
+      job_id, appointment_id, task_id, message_kind, source_revision,
+      scheduled_for, due_at, available_at, request_key, status
+    ) select gen_random_uuid(), appointment_id, task_id, 'appointment_reminder',
+      987654321, pg_catalog.clock_timestamp() + interval '1 day',
+      pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp(), gen_random_uuid(), 'claimed'
+    from queue_legacy_fixture
+  $$,
+  '23514', null, 'claimed job without lease is rejected by the database'
+);
+
+select throws_ok(
+  $$
+    insert into dashboard_private.registration_customer_reminder_jobs(
+      job_id, appointment_id, task_id, message_kind, source_revision,
+      scheduled_for, due_at, available_at, request_key, status, last_error_code
+    ) select gen_random_uuid(), appointment_id, task_id, 'appointment_reminder',
+      987654322, pg_catalog.clock_timestamp() + interval '1 day',
+      pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp(), gen_random_uuid(), 'completed', 'provider_dispatch_uncertain'
+    from queue_legacy_fixture
+  $$,
+  '23514', null, 'completed job cannot carry an uncertain-delivery error'
+);
+
+select throws_ok(
+  $$
+    insert into dashboard_private.registration_customer_reminder_jobs(
+      job_id, appointment_id, task_id, message_kind, source_revision,
+      scheduled_for, due_at, available_at, request_key, status,
+      observation_id, source_event_id, booking_fact_hash, session_source_revision,
+      activation_mode_snapshot, verification_started_at, verification_recipient_hash
+    ) select gen_random_uuid(), appointment_id, task_id, 'appointment_reminder',
+      987654323, pg_catalog.clock_timestamp() + interval '1 day',
+      pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp(), gen_random_uuid(), 'pending',
+      null, null, null, '{"authority":"legacy","sessionKey":"s","contentHash":"h","extra":"x"}'::jsonb,
+      null, null, null
+    from queue_legacy_fixture
+  $$,
+  '23514', null, 'legacy session source revision rejects extra keys'
+);
+
+select ok(
+  not exists(
+    select 1 from information_schema.routine_privileges privilege
+    where privilege.routine_name in (
+      'claim_registration_customer_reminder_job_v1',
+      'read_registration_customer_reminder_source_v1',
+      'release_registration_customer_reminder_job_v1',
+      'begin_registration_customer_reminder_dispatch_v1',
+      'finalize_registration_customer_reminder_dispatch_v1'
+    ) and privilege.grantee in ('PUBLIC', 'anon', 'authenticated')
+  ),
+  'worker RPCs have no browser execute grant'
 );
 
 select * from finish();
