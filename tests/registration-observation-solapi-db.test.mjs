@@ -10,6 +10,10 @@ const queueMigrationUrl = new URL(
   "../supabase/migrations/20260809106100_registration_observation_solapi_queue.sql",
   import.meta.url,
 );
+const dispatchMigrationUrl = new URL(
+  "../supabase/migrations/20260809106200_registration_observation_solapi_dispatch.sql",
+  import.meta.url,
+);
 
 function normalizeSql(source) {
   return source.replace(/--[^\n]*/g, " ").replace(/\s+/g, " ").trim();
@@ -124,4 +128,273 @@ test("queue migration preserves old jobs before adding observation jobs", async 
   const claimEnd = sql.indexOf("alter function public.claim_registration_customer_reminder_job_v1()", claimStart);
   assert.ok(claimStart >= 0 && claimEnd > claimStart);
   assert.doesNotMatch(sql.slice(claimStart, claimEnd), /where job\.appointment_id = p_job_id/);
+});
+
+test("dispatch rechecks source before the provider marker", async () => {
+  const sql = normalizeSql(await readFile(dispatchMigrationUrl, "utf8"));
+  const currentHash = sql.indexOf("booking_fact_hash is distinct from");
+  const marker = sql.indexOf("provider_attempt_started_at");
+  assert.ok(currentHash >= 0 && marker > currentHash);
+  assert.match(sql, /status = 'source_dirty'/);
+  assert.match(sql, /status = 'delivery_unknown'/);
+  assert.match(sql, /materialize_registration_observation_solapi_events_v1\(100\)/);
+  const readSource = functionBlock(
+    sql,
+    "public.read_registration_customer_reminder_source_v1",
+  );
+  assert.match(readSource, /where job\.job_id = p_job_id/);
+  assert.match(readSource, /for update/);
+  assert.match(readSource, /message_kind = 'observation_reminder'/);
+  assert.match(
+    readSource,
+    /resolve_registration_customer_message_source_v1_impl\('observation_reminder',\s*v_job\.observation_id\)/,
+  );
+  assert.doesNotMatch(readSource, /where job\.appointment_id = p_job_id/);
+  const publicResolve = functionBlock(
+    sql,
+    "public.resolve_registration_customer_message_source_v1",
+  );
+  const publicResolveRoleFence = publicResolve.indexOf("auth.role()");
+  const publicResolveFirstRead = publicResolve.indexOf(
+    "registration_customer_message_source_task_v1",
+  );
+  assert.ok(publicResolveRoleFence >= 0 && publicResolveFirstRead > publicResolveRoleFence);
+  assert.match(publicResolve, /registration_customer_message_assert_actor_v1/);
+  assert.match(publicResolve, /resolve_registration_customer_message_source_v1_impl/);
+  assert.match(
+    sql,
+    /revoke all on function public\.resolve_registration_customer_message_source_v1\(uuid,\s*text,\s*uuid\).*public,\s*anon,\s*authenticated,\s*service_role/s,
+  );
+  assert.match(
+    sql,
+    /grant execute on function public\.resolve_registration_customer_message_source_v1\(uuid,\s*text,\s*uuid\).*to service_role/s,
+  );
+  const finalize = functionBlock(
+    sql,
+    "public.finalize_registration_customer_reminder_dispatch_v1",
+  );
+  assert.match(finalize, /p_message_id uuid/);
+  assert.doesNotMatch(finalize, /p_job_id uuid/);
+});
+
+test("every observation provider-capable DB stage owns a runtime fence", async () => {
+  const sql = normalizeSql(await readFile(dispatchMigrationUrl, "utf8"));
+  for (const name of [
+    "public.claim_registration_customer_reminder_job_v1",
+    "public.get_registration_customer_solapi_readiness_v1",
+  ]) {
+    const block = functionBlock(sql, name);
+    assert.match(block, /registration_observation_runtime_version\(\)/);
+    assert.match(block, /observation_(?:booking|reminder)/);
+  }
+  for (const name of [
+    "public.read_registration_customer_reminder_source_v1",
+    "public.begin_registration_customer_reminder_dispatch_v1",
+    "public.claim_registration_customer_message_v1",
+    "public.mark_registration_customer_message_attempt_started_v1",
+  ]) {
+    const block = functionBlock(sql, name);
+    assert.match(block, /assert_registration_observation_runtime_v1\(\)/);
+    assert.match(block, /observation_(?:booking|reminder)/);
+  }
+  const marker = functionBlock(
+    sql,
+    "public.mark_registration_customer_message_attempt_started_v1",
+  );
+  assert.match(
+    marker,
+    /assert_registration_observation_runtime_v1\(\)[\s\S]*set\s+provider_attempt_count/i,
+  );
+  assert.match(sql, /registration_observation_runtime_inactive/);
+});
+
+test("dispatch centralizes observation identity across the manual source pipeline", async () => {
+  const sql = normalizeSql(await readFile(dispatchMigrationUrl, "utf8"));
+  const storedSource = functionBlock(
+    sql,
+    "dashboard_private.registration_customer_message_stored_source_id_v1",
+  );
+  assert.match(
+    storedSource,
+    /coalesce\(p_observation_id, p_appointment_id, p_track_id, p_task_id\)/,
+  );
+
+  for (const name of [
+    "dashboard_private.registration_customer_message_source_task_v1",
+    "dashboard_private.resolve_registration_customer_message_source_v1_impl",
+    "dashboard_private.registration_customer_message_assert_current_v1",
+    "dashboard_private.registration_customer_message_result_v1",
+  ]) {
+    const block = functionBlock(sql, name);
+    assert.match(block, /security definer/);
+    assert.match(block, /set search_path = ''/);
+    assert.match(block, /auth\.role\(\)/);
+    assert.match(block, /observation_(?:booking|reminder)/);
+    const signature = name.replace("dashboard_private.", "dashboard_private\\.");
+    assert.match(
+      sql,
+      new RegExp(`revoke all on function ${signature}\\(`),
+    );
+  }
+  assert.doesNotMatch(
+    sql,
+    /grant execute on function dashboard_private\.registration_customer_message_(?:source_task_v1|assert_current_v1|result_v1)/,
+  );
+  assert.doesNotMatch(
+    sql,
+    /grant execute on function dashboard_private\.resolve_registration_customer_message_source_v1_impl/,
+  );
+
+  for (const name of [
+    "public.create_registration_customer_message_preview_v1",
+    "public.claim_registration_customer_message_v1",
+    "public.release_registration_customer_message_pre_send_claim_v1",
+    "public.release_registration_customer_message_pre_send_claim_admin_v1",
+    "public.mark_registration_customer_message_attempt_started_v1",
+    "public.finalize_registration_customer_message_v1",
+    "public.read_registration_customer_message_preview_target_v1",
+    "public.list_registration_customer_messages_v1",
+    "public.record_registration_customer_message_provider_check_v1",
+    "public.reconcile_registration_customer_message_v1",
+  ]) {
+    const block = functionBlock(sql, name);
+    const roleFence = block.indexOf("auth.role()");
+    assert.ok(roleFence >= 0, `${name} lacks an explicit role fence`);
+    assert.match(block, /observation_(?:booking|reminder)|observation_id/);
+  }
+
+  const preview = functionBlock(
+    sql,
+    "public.create_registration_customer_message_preview_v1",
+  );
+  assert.match(preview, /track_id, appointment_id, observation_id/);
+  const claim = functionBlock(sql, "public.claim_registration_customer_message_v1");
+  assert.match(claim, /registration_customer_message_stored_source_id_v1/);
+  assert.match(claim, /registration_customer_message_delivery_origin_invalid/);
+  assert.match(
+    claim,
+    /message\.observation_id = v_preview\.observation_id and message\.message_kind = v_preview\.message_kind and message\.source_revision = v_preview\.source_revision/,
+  );
+  const history = functionBlock(sql, "public.list_registration_customer_messages_v1");
+  assert.match(history, /'sourceId', message\.observation_id/);
+  assert.match(history, /'observationId', message\.observation_id/);
+});
+
+test("automatic dispatch is job locked, bounded, and keeps the legacy raw result", async () => {
+  const sql = normalizeSql(await readFile(dispatchMigrationUrl, "utf8"));
+  const claim = functionBlock(sql, "public.claim_registration_customer_reminder_job_v1");
+  assert.match(claim, /materialize_registration_observation_solapi_events_v1\(100\)/);
+  assert.match(claim, /order by job\.due_at, job\.job_id for update of job skip locked limit 100/);
+  assert.match(claim, /claim_lease_expired/);
+  assert.match(claim, /scheduled_marker_recovery/);
+  const legacyResult = claim.match(
+    /if v_job\.message_kind = 'appointment_reminder' then return pg_catalog\.jsonb_build_object\([\s\S]*?\); end if;/,
+  );
+  assert.ok(legacyResult, "missing isolated legacy claim result");
+  assert.match(legacyResult[0], /'jobId'/);
+  assert.match(legacyResult[0], /'appointmentId'/);
+  assert.match(legacyResult[0], /'claimToken'/);
+  assert.match(legacyResult[0], /'sourceRevision'/);
+  assert.match(legacyResult[0], /'scheduledFor'/);
+  assert.match(legacyResult[0], /'requestKey'/);
+  assert.doesNotMatch(legacyResult[0], /'messageKind'|'observationId'/);
+
+  const read = functionBlock(sql, "public.read_registration_customer_reminder_source_v1");
+  assert.ok(read.indexOf("auth.role()") < read.indexOf("from dashboard_private.registration_customer_reminder_jobs"));
+  assert.match(read, /job\.job_id = p_job_id/);
+  assert.match(read, /job\.claim_token = p_claim_token/);
+  assert.match(read, /for update/);
+  assert.match(
+    read,
+    /message_kind = 'observation_reminder'[\s\S]*assert_registration_observation_runtime_v1\(\)[\s\S]*resolve_registration_customer_message_source_v1_impl\('observation_reminder', v_job\.observation_id\)/,
+  );
+  assert.match(
+    read,
+    /message_kind = 'appointment_reminder'[\s\S]*resolve_registration_customer_message_source_v1_impl\('appointment_reminder', v_job\.appointment_id\)/,
+  );
+});
+
+test("begin and finalize own marker, refresh, uncertainty, and composite identity", async () => {
+  const sql = normalizeSql(await readFile(dispatchMigrationUrl, "utf8"));
+  const begin = functionBlock(
+    sql,
+    "public.begin_registration_customer_reminder_dispatch_v1",
+  );
+  assert.match(begin, /where job\.job_id = p_job_id/);
+  assert.match(begin, /source_refresh_count = 1/);
+  assert.match(begin, /'currentStatus', 'refresh_required'/);
+  assert.match(begin, /'currentStatus', 'settings_refresh_required'/);
+  assert.match(begin, /'currentStatus', 'runtime_inactive'/);
+  assert.match(begin, /last_error_code = 'source_revision_unstable'/);
+  assert.equal(
+    (
+      begin.match(
+        /last_error_code = 'duplicate_locked'[\s\S]*?'currentStatus', 'duplicate_locked'/g,
+      ) ?? []
+    ).length,
+    2,
+    "both duplicate paths must return the stable duplicate_locked status",
+  );
+  assert.match(
+    begin,
+    /assert_registration_observation_runtime_v1\(\)[\s\S]*provider_attempt_started_at, provider_attempt_count/,
+  );
+  assert.match(
+    begin,
+    /job\.source_identity = v_message\.scheduled_source_identity/,
+  );
+
+  const finalize = functionBlock(
+    sql,
+    "public.finalize_registration_customer_reminder_dispatch_v1",
+  );
+  assert.match(finalize, /p_message_id uuid/);
+  assert.match(finalize, /where message\.id = p_message_id for update/);
+  assert.match(finalize, /when p_result = 'unknown' then 'delivery_unknown'/);
+  assert.match(finalize, /where job\.job_id = v_message\.scheduled_job_id/);
+  assert.match(finalize, /job\.source_identity = v_message\.scheduled_source_identity/);
+});
+
+test("settings and readiness keep automatic kinds independent and redact provider inputs", async () => {
+  const sql = normalizeSql(await readFile(dispatchMigrationUrl, "utf8"));
+  const settings = functionBlock(
+    sql,
+    "public.set_registration_customer_reminder_settings_v1",
+  );
+  assert.match(
+    settings,
+    /activation\.message_kind = 'appointment_reminder' and activation\.mode = 'live'/,
+  );
+  assert.match(
+    settings,
+    /activation\.message_kind = 'observation_reminder' and activation\.mode in \('verification', 'live'\)/,
+  );
+  assert.match(settings, /job\.message_kind = 'observation_reminder'/);
+  assert.match(settings, /job\.status = 'pending'/);
+  assert.match(settings, /job\.claim_token is null/);
+  assert.doesNotMatch(settings, /save_notification_control_plane_v2/);
+
+  const readiness = functionBlock(
+    sql,
+    "public.inspect_registration_observation_solapi_readiness_v1",
+  );
+  assert.match(readiness, /registration_observation_runtime_version\(\) = 1/);
+  assert.match(
+    readiness,
+    /v_last_succeeded_at >= pg_catalog\.clock_timestamp\(\) - interval '5 minutes'/,
+  );
+  for (const key of [
+    "installed",
+    "active",
+    "contractReady",
+    "vaultReady",
+    "heartbeatCurrent",
+    "lastSucceededAt",
+  ]) {
+    assert.match(readiness, new RegExp(`'${key}'`));
+  }
+  assert.doesNotMatch(
+    readiness,
+    /verification_recipient_hash|verification_task_id|template_id|parent_phone|vault_decrypted_secrets/,
+  );
 });
