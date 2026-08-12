@@ -36,6 +36,16 @@ function activeKindsLabel(settings: Settings) {
     .join(", ")
 }
 
+function canEnableAutomaticReminder(settings: Settings | null) {
+  if (!settings) return false
+  if (settings.enabled) return true
+  return settings.activeKinds.length > 0 && (
+    settings.status === "ready"
+    || settings.status === "approval_pending"
+    || settings.status === "scheduler_pending"
+  )
+}
+
 function errorMessage(error: unknown) {
   if (error instanceof Error && /[가-힣]/u.test(error.message)) return error.message
   return "자동 리마인드 설정을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요."
@@ -76,7 +86,7 @@ export function RegistrationCustomerReminderSettings() {
     enabled !== settings?.enabled || leadHours !== settings?.leadHours
   )
   const validLeadHours = Number.isInteger(leadHours) && leadHours >= 1 && leadHours <= 72
-  const canEnable = settings?.ready || enabled
+  const canEnable = canEnableAutomaticReminder(settings)
 
   async function save() {
     if (!settings || !dirty || !validLeadHours || saving) return

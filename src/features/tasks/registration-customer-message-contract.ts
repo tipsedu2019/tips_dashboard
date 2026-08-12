@@ -236,7 +236,7 @@ export type RegistrationCustomerMessageClient = Readonly<{
 }>
 
 export type RegistrationCustomerMessageAdminClient = Readonly<{
-  inspectObservationReadiness: () => Promise<RegistrationObservationSolapiReadiness>
+  inspectObservationReadiness: (signal?: AbortSignal) => Promise<RegistrationObservationSolapiReadiness>
   preflightTemplate: (
     messageKind: RegistrationCustomerMessageKind,
   ) => Promise<RegistrationCustomerMessageReadiness>

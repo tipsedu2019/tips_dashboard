@@ -543,10 +543,11 @@ async function createFixtureObservationBookingScenario(requestKeySuffix) {
   }
   const getState = () => state
   const replaceState = (next) => { state = next }
-  const client = fixture.createRegistrationSubjectTrackFixtureAdapter({
+  const adapter = fixture.createRegistrationSubjectTrackFixtureAdapter({
     getState,
     replaceState,
-  }).observationClient
+  })
+  const client = adapter.observationClient
   await ensureFixtureObservationReady(
     client,
     getState,
@@ -574,12 +575,40 @@ async function createFixtureObservationBookingScenario(requestKeySuffix) {
     changedSession,
     classId,
     client,
+    customerMessageClient: adapter.customerMessageClient,
     getState,
     originalSession,
     replaceState,
     trackId,
   }
 }
+
+test("fixture observation customer messages resolve only a generated observation ID", async () => {
+  const {
+    booked,
+    customerMessageClient,
+    getState,
+  } = await createFixtureObservationBookingScenario("customer-message-source")
+  const observationId = booked.data.observation.observationId
+
+  for (const messageKind of ["observation_booking", "observation_reminder"]) {
+    const preview = await customerMessageClient.preview({ messageKind, sourceId: observationId })
+    assert.equal(preview.previewId, null)
+    assert.equal(preview.readiness.activationMode, "off")
+    assert.equal(preview.readiness.sendAllowed, false)
+    assert.deepEqual(Array.from(preview.readiness.blockers), ["activation_off"])
+    assert.deepEqual(plain(await customerMessageClient.list({ messageKind, sourceId: observationId })), [])
+  }
+
+  await assert.rejects(
+    customerMessageClient.preview({
+      messageKind: "observation_booking",
+      sourceId: "29999999-0000-4000-8000-000000000999",
+    }),
+    /registration_customer_message_source_not_found/,
+  )
+  assert.equal(getState().externalCallLedger.length, 0)
+})
 
 test("fixture reschedule preserves same-hash snapshots and increments a changed hash once", async () => {
   const {
@@ -866,7 +895,7 @@ test("fixture feedback read submit and non-registration decision preserve exact 
   assert.equal(getState().caseDetails[decided.taskId], undefined)
 })
 
-test("fixture customer message client keeps all seven preview/send states in memory without provider ledger entries", async () => {
+test("fixture customer message client keeps legacy preview/send states in memory without provider ledger entries", async () => {
   const fixture = await loadFixtureModule()
   let state = fixture.createRegistrationSubjectTrackFixtureState()
   const client = fixture.createRegistrationSubjectTrackFixtureCustomerMessageClient()
@@ -876,8 +905,6 @@ test("fixture customer message client keeps all seven preview/send states in mem
     ["appointment_reminder", "fixture-appointment-dual-test"],
     ["waiting_notice", "fixture-track-waiting-notice-english"],
     ["admission_application", "fixture-task-multiple-classes"],
-    ["observation_booking", "fixture-observation-english"],
-    ["observation_reminder", "fixture-observation-english"],
   ]
 
   assert.deepEqual(
@@ -895,17 +922,10 @@ test("fixture customer message client keeps all seven preview/send states in mem
 
   for (const [messageKind, sourceId] of targets) {
     const preview = await client.preview({ messageKind, sourceId })
-    const observation = messageKind === "observation_booking" || messageKind === "observation_reminder"
-    assert.equal(preview.previewId !== null, !observation)
-    assert.equal(preview.readiness.activationMode, observation ? "off" : "verification")
-    assert.equal(preview.readiness.sendAllowed, !observation)
+    assert.equal(preview.previewId !== null, true)
+    assert.equal(preview.readiness.activationMode, "verification")
+    assert.equal(preview.readiness.sendAllowed, true)
     assert.equal(preview.body.includes("010"), false)
-    if (observation) {
-      assert.equal(fixture.FIXTURE_CUSTOMER_MESSAGE_SOURCES[messageKind][sourceId].sourceRevision, 1)
-      assert.equal(preview.facts.subjectLabel, "영어")
-      assert.equal(preview.facts.scheduleLabel.includes("2026년 8월"), true)
-      assert.deepEqual(Array.from(preview.readiness.blockers), ["activation_off"])
-    }
   }
 
   const acceptedPreview = await client.preview({

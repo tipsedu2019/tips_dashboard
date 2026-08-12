@@ -279,14 +279,16 @@ export type RegistrationSubjectTrackFixtureCustomerMessageClient = RegistrationC
   debugSetSourceDirty: (sourceId: string, dirty: boolean) => void
 }
 
-export const FIXTURE_CUSTOMER_MESSAGE_SOURCES: Record<RegistrationCustomerMessageKind, Record<string, Readonly<{
+type FixtureCustomerMessageSource = Readonly<{
   studentName: string
   recipientLast4: string
   sourceRevision: number
   facts: RegistrationCustomerMessagePreviewResponse["facts"]
   body: string
   buttons: RegistrationCustomerMessagePreviewResponse["buttons"]
-}>>> = {
+}>
+
+export const FIXTURE_CUSTOMER_MESSAGE_SOURCES: Record<RegistrationCustomerMessageKind, Record<string, FixtureCustomerMessageSource>> = {
   level_test_booking: {
     "fixture-appointment-dual-test": {
       studentName: "김다미", recipientLast4: "5678", sourceRevision: 1,
@@ -357,22 +359,8 @@ export const FIXTURE_CUSTOMER_MESSAGE_SOURCES: Record<RegistrationCustomerMessag
       buttons: [{ name: "입학신청서 작성", type: "WL", host: "tips.edu" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
     },
   },
-  observation_booking: {
-    "fixture-observation-english": {
-      studentName: "Emily", recipientLast4: "5678", sourceRevision: 1,
-      facts: { subjectLabel: "영어", scheduleLabel: "2026년 8월 17일 오후 6:00", placeLabel: "본관 301호" },
-      body: "TIPS 청강 예약 안내\nEmily 학생의 영어 청강 수업이 예약되었습니다.",
-      buttons: [{ name: "예약 확인", type: "WL", host: "tips.edu" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
-    },
-  },
-  observation_reminder: {
-    "fixture-observation-english": {
-      studentName: "Emily", recipientLast4: "5678", sourceRevision: 1,
-      facts: { subjectLabel: "영어", scheduleLabel: "2026년 8월 17일 오후 6:00", placeLabel: "본관 301호" },
-      body: "TIPS 청강 리마인드\nEmily 학생의 영어 청강 수업 일정을 다시 안내드립니다.",
-      buttons: [{ name: "예약 확인", type: "WL", host: "tips.edu" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
-    },
-  },
+  observation_booking: {},
+  observation_reminder: {},
 }
 
 function fixtureCustomerMessageReadiness(
@@ -394,8 +382,53 @@ function fixtureCustomerMessageReadiness(
   }
 }
 
-export function createRegistrationSubjectTrackFixtureCustomerMessageClient(): RegistrationSubjectTrackFixtureCustomerMessageClient {
+function fixtureObservationCustomerMessageSource(
+  state: RegistrationSubjectTrackFixtureState,
+  messageKind: "observation_booking" | "observation_reminder",
+  sourceId: string,
+): FixtureCustomerMessageSource | null {
+  const attempt = Object.values(state.observation.managerDetails)
+    .flatMap((detail) => detail.attempts)
+    .find((candidate) => (
+      candidate.observationId === sourceId
+      && candidate.status === "scheduled"
+      && candidate.appointmentStatus === "scheduled"
+    ))
+  if (!attempt) return null
+
+  const label = messageKind === "observation_booking" ? "청강 예약 안내" : "청강 리마인드"
+  const body = messageKind === "observation_booking"
+    ? `TIPS ${label}\nFixture 청강 학생의 ${attempt.subject} 청강 수업이 예약되었습니다.`
+    : `TIPS ${label}\nFixture 청강 학생의 ${attempt.subject} 청강 수업 일정을 다시 안내드립니다.`
+  return {
+    studentName: "Fixture 청강 학생",
+    recipientLast4: "5678",
+    sourceRevision: attempt.appointmentNotificationRevision,
+    facts: {
+      subjectLabel: attempt.subject,
+      scheduleLabel: `${attempt.sessionDate} ${attempt.startsAt.slice(11, 16)}`,
+      placeLabel: attempt.classroomName,
+    },
+    body,
+    buttons: [
+      { name: "예약 확인", type: "WL", host: "tips.edu" },
+      { name: "문의하기", type: "WL", host: "tipsedu.channel.io" },
+    ],
+  }
+}
+
+type FixtureCustomerMessageClientOptions = Readonly<{
+  resolveObservationSource?: (
+    messageKind: "observation_booking" | "observation_reminder",
+    sourceId: string,
+  ) => FixtureCustomerMessageSource | null
+}>
+
+export function createRegistrationSubjectTrackFixtureCustomerMessageClient(
+  options: FixtureCustomerMessageClientOptions = {},
+): RegistrationSubjectTrackFixtureCustomerMessageClient {
   const previews = new Map<string, RegistrationCustomerMessageTarget>()
+  const previewSources = new Map<string, FixtureCustomerMessageSource>()
   const results = new Map<string, RegistrationCustomerMessageSendResult>()
   const resultTargets = new Map<string, RegistrationCustomerMessageTarget>()
   const replayResultKeys = new Map<string, string>()
@@ -409,12 +442,16 @@ export function createRegistrationSubjectTrackFixtureCustomerMessageClient(): Re
   const targetKey = (target: RegistrationCustomerMessageTarget) => `${target.messageKind}:${target.sourceId}`
   const previewId = () => `20000000-0000-4000-8000-${(++previewSequence).toString().padStart(12, "0")}`
   const messageId = () => `30000000-0000-4000-8000-${(++messageSequence).toString().padStart(12, "0")}`
-  const resultFor = (target: RegistrationCustomerMessageTarget, status: "accepted" | "unknown" | "failed_hold"): RegistrationCustomerMessageSendResult => ({
+  const resultFor = (
+    target: RegistrationCustomerMessageTarget,
+    source: FixtureCustomerMessageSource,
+    status: "accepted" | "unknown" | "failed_hold",
+  ): RegistrationCustomerMessageSendResult => ({
     ok: status === "accepted",
     messageId: messageId(),
     messageKind: target.messageKind,
     currentStatus: status,
-    recipientLast4: FIXTURE_CUSTOMER_MESSAGE_SOURCES[target.messageKind][target.sourceId].recipientLast4,
+    recipientLast4: source.recipientLast4,
     confirmedByName: "김관리",
     confirmedAt: "2026-08-05T00:00:00.000Z",
     updatedAt: "2026-08-05T00:00:00.000Z",
@@ -424,10 +461,11 @@ export function createRegistrationSubjectTrackFixtureCustomerMessageClient(): Re
 
   return Object.freeze({
     async preview(target) {
-      const source = FIXTURE_CUSTOMER_MESSAGE_SOURCES[target.messageKind]?.[target.sourceId]
-      if (!source) throw new Error("registration_customer_message_source_not_found")
       const observation = target.messageKind === "observation_booking"
         || target.messageKind === "observation_reminder"
+      const source = FIXTURE_CUSTOMER_MESSAGE_SOURCES[target.messageKind]?.[target.sourceId]
+        || (observation ? options.resolveObservationSource?.(target.messageKind, target.sourceId) : null)
+      if (!source) throw new Error("registration_customer_message_source_not_found")
       const blockers = dirtySources.has(target.sourceId)
         ? ["source_dirty"] as const
         : observation
@@ -440,7 +478,10 @@ export function createRegistrationSubjectTrackFixtureCustomerMessageClient(): Re
         observation ? "off" : "verification",
       )
       const nextPreviewId = blockers.length ? null : previewId()
-      if (nextPreviewId) previews.set(nextPreviewId, { ...target })
+      if (nextPreviewId) {
+        previews.set(nextPreviewId, { ...target })
+        previewSources.set(nextPreviewId, source)
+      }
       const latest = [...results.entries()].reverse().find(([key]) => {
         const resultTarget = resultTargets.get(key)
         return resultTarget?.messageKind === target.messageKind && resultTarget.sourceId === target.sourceId
@@ -473,16 +514,19 @@ export function createRegistrationSubjectTrackFixtureCustomerMessageClient(): Re
       const replay = results.get(replayResultKeys.get(replayKey) || "")
       if (replay) return { ...replay, idempotent: true }
       const target = previews.get(input.previewId)
+      const source = previewSources.get(input.previewId)
       const boundPreviewId = requestKeyBindings.get(input.requestKey)
       if (boundPreviewId && boundPreviewId !== input.previewId) {
         throw new Error("registration_customer_message_confirmation_conflict")
       }
-      if (!target || lockedTargets.has(targetKey(target))) throw new Error("registration_customer_message_confirmation_conflict")
+      if (!target || !source || lockedTargets.has(targetKey(target))) {
+        throw new Error("registration_customer_message_confirmation_conflict")
+      }
       requestKeyBindings.set(input.requestKey, input.previewId)
       const sendKey = `send-${++sendSequence}`
       const status = nextStatus
       nextStatus = "accepted"
-      const next = resultFor(target, status)
+      const next = resultFor(target, source, status)
       replayResultKeys.set(replayKey, sendKey)
       results.set(sendKey, next)
       resultTargets.set(sendKey, target)
@@ -1387,7 +1431,13 @@ export function createRegistrationSubjectTrackFixtureAdapter(
   let lastCreate: RegistrationSubjectTrackFixtureDebugSnapshot["lastCreate"] = null
   let nextActionBehavior: Required<RegistrationSubjectTrackFixtureDebugActionBehavior> | null = null
   let nextFault: RegistrationSubjectTrackFixtureDebugFault | null = null
-  const customerMessageClient = createRegistrationSubjectTrackFixtureCustomerMessageClient()
+  const customerMessageClient = createRegistrationSubjectTrackFixtureCustomerMessageClient({
+    resolveObservationSource: (messageKind, sourceId) => fixtureObservationCustomerMessageSource(
+      runtime.getState(),
+      messageKind,
+      sourceId,
+    ),
+  })
   const observationClient = createRegistrationObservationFixtureClient(runtime)
 
   function debugCounts(state: RegistrationSubjectTrackFixtureState): RegistrationSubjectTrackFixtureDebugCounts {

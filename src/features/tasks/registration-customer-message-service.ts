@@ -64,28 +64,38 @@ function requestAdminJson<T>(
     ? configuredTimeout
     : DEFAULT_ADMIN_TIMEOUT_MS
   const controller = new AbortController()
+  const externalSignal = init.signal
 
   return new Promise<T>((resolve, reject) => {
     let settled = false
-    const timeout = setTimeout(() => {
+    const cleanup = () => externalSignal?.removeEventListener("abort", onExternalAbort)
+    const settle = (callback: () => void) => {
       if (settled) return
       settled = true
+      clearTimeout(timeout)
+      cleanup()
+      callback()
+    }
+    const timeout = setTimeout(() => {
       controller.abort()
-      reject(new Error("registration_customer_message_admin_timeout"))
+      settle(() => reject(new Error("registration_customer_message_admin_timeout")))
     }, timeoutMs)
+    const onExternalAbort = () => {
+      controller.abort(externalSignal?.reason)
+      settle(() => reject(externalSignal?.reason || new Error("registration_customer_message_admin_aborted")))
+    }
+    if (externalSignal?.aborted) {
+      onExternalAbort()
+      return
+    }
+    externalSignal?.addEventListener("abort", onExternalAbort, { once: true })
 
     void requestJson<T>(options, url, { ...init, signal: controller.signal }).then(
       (value) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timeout)
-        resolve(value)
+        settle(() => resolve(value))
       },
       (error) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timeout)
-        reject(error)
+        settle(() => reject(error))
       },
     )
   })
@@ -168,12 +178,16 @@ export function createRegistrationCustomerMessageAdminClient(
   )
 
   return Object.freeze({
-    async inspectObservationReadiness(): Promise<RegistrationObservationSolapiReadiness> {
+    async inspectObservationReadiness(signal?: AbortSignal): Promise<RegistrationObservationSolapiReadiness> {
       const readiness = parseRegistrationObservationSolapiReadiness(
         await requestAdminJson<unknown>(
           options,
           "/api/solapi/registration/admin",
-          { method: "POST", body: JSON.stringify({ action: "inspect_observation_readiness" }) },
+          {
+            method: "POST",
+            body: JSON.stringify({ action: "inspect_observation_readiness" }),
+            signal,
+          },
         ),
       )
       if (!readiness) throw new Error("registration_observation_solapi_readiness_invalid")

@@ -77,6 +77,14 @@ function readinessFact(value: boolean) {
   return value ? "준비됨" : "미준비"
 }
 
+function rolloutRowStateFromServerMode(
+  mode: RegistrationObservationSolapiReadiness["bookingMode"],
+): RolloutRowState {
+  if (mode === "live") return { status: "live", detail: "서버에서 운영 발송을 허용했습니다." }
+  if (mode === "verification") return { status: "verification", detail: "서버에서 테스트 발송만 허용했습니다." }
+  return { status: "off", detail: "서버에서 이 종류의 고객 발송을 껐습니다." }
+}
+
 export function RegistrationCustomerMessageRolloutPanel() {
   const { isAdmin } = useAuth()
   const client = React.useMemo(() => createRegistrationCustomerMessageAdminClient({ getAccessToken }), [])
@@ -84,20 +92,83 @@ export function RegistrationCustomerMessageRolloutPanel() {
   const [messageIds, setMessageIds] = React.useState<Partial<Record<RegistrationCustomerMessageKind, string>>>({})
   const [receiptConfirmed, setReceiptConfirmed] = React.useState<Partial<Record<RegistrationCustomerMessageKind, boolean>>>({})
   const [rowState, setRowState] = React.useState<Partial<Record<RegistrationCustomerMessageKind, RolloutRowState>>>({})
-  const [workingKind, setWorkingKind] = React.useState<RegistrationCustomerMessageKind | null>(null)
+  const [workingKinds, setWorkingKinds] = React.useState<Partial<Record<RegistrationCustomerMessageKind, true>>>({})
   const [readiness, setReadiness] = React.useState<RegistrationObservationSolapiReadiness | null>(null)
   const [readinessError, setReadinessError] = React.useState("")
   const [refreshingReadiness, setRefreshingReadiness] = React.useState(false)
+  const mountedRef = React.useRef(true)
+  const rowRequestGenerationsRef = React.useRef(new Map<RegistrationCustomerMessageKind, number>())
+  const rowLatestMutationGenerationsRef = React.useRef(new Map<RegistrationCustomerMessageKind, number>())
+  const nextRequestGenerationRef = React.useRef(0)
+  const readinessControllerRef = React.useRef<AbortController | null>(null)
+  const readinessGenerationRef = React.useRef(0)
+
+  React.useEffect(() => {
+    const rowRequestGenerations = rowRequestGenerationsRef.current
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      readinessControllerRef.current?.abort()
+      readinessControllerRef.current = null
+      rowRequestGenerations.clear()
+    }
+  }, [])
 
   const updateRow = React.useCallback((messageKind: RegistrationCustomerMessageKind, next: RolloutRowState) => {
     setRowState((current) => ({ ...current, [messageKind]: next }))
+  }, [])
+
+  const beginRowRequest = React.useCallback((messageKind: RegistrationCustomerMessageKind) => {
+    if (rowRequestGenerationsRef.current.has(messageKind)) return null
+    const generation = ++nextRequestGenerationRef.current
+    rowRequestGenerationsRef.current.set(messageKind, generation)
+    rowLatestMutationGenerationsRef.current.set(messageKind, generation)
+    setWorkingKinds((current) => ({ ...current, [messageKind]: true }))
+    return generation
+  }, [])
+
+  const completeRowRequest = React.useCallback((
+    messageKind: RegistrationCustomerMessageKind,
+    generation: number,
+    next: RolloutRowState,
+  ) => {
+    if (rowRequestGenerationsRef.current.get(messageKind) !== generation) return
+    rowRequestGenerationsRef.current.delete(messageKind)
+    if (!mountedRef.current) return
+    updateRow(messageKind, next)
+    setWorkingKinds((current) => {
+      if (!current[messageKind]) return current
+      const remaining = { ...current }
+      delete remaining[messageKind]
+      return remaining
+    })
+  }, [updateRow])
+
+  const hydrateObservationRows = React.useCallback((
+    next: RegistrationObservationSolapiReadiness,
+    generationsAtRefreshStart: Readonly<Record<"observation_booking" | "observation_reminder", number>>,
+  ) => {
+    setRowState((current) => {
+      const hydrated = { ...current }
+      const modes = {
+        observation_booking: next.bookingMode,
+        observation_reminder: next.reminderMode,
+      } as const
+      for (const messageKind of ["observation_booking", "observation_reminder"] as const) {
+        if (
+          rowRequestGenerationsRef.current.has(messageKind)
+          || (rowLatestMutationGenerationsRef.current.get(messageKind) ?? 0) !== generationsAtRefreshStart[messageKind]
+        ) continue
+        hydrated[messageKind] = rolloutRowStateFromServerMode(modes[messageKind])
+      }
+      return hydrated
+    })
   }, [])
 
   const run = React.useCallback(async (
     messageKind: RegistrationCustomerMessageKind,
     action: "prepare_verification" | "set_off" | "record_receipt_and_live",
   ) => {
-    if (workingKind) return
     if (action === "prepare_verification" && !UUID_PATTERN.test(verificationTaskId.trim())) {
       updateRow(messageKind, { status: "error", detail: "테스트 등록 ID를 먼저 확인해 주세요." })
       return
@@ -108,7 +179,9 @@ export function RegistrationCustomerMessageRolloutPanel() {
       return
     }
 
-    setWorkingKind(messageKind)
+    const generation = beginRowRequest(messageKind)
+    if (generation === null) return
+    let next: RolloutRowState
     try {
       if (action === "prepare_verification") {
         await runRegistrationCustomerMessageRolloutAction(client, {
@@ -116,10 +189,10 @@ export function RegistrationCustomerMessageRolloutPanel() {
           messageKind,
           verificationTaskId: verificationTaskId.trim(),
         })
-        updateRow(messageKind, {
+        next = {
           status: "verification",
           detail: "승인 템플릿이 일치하며 이 테스트 등록에만 발송할 수 있습니다.",
-        })
+        }
       } else if (action === "record_receipt_and_live") {
         await runRegistrationCustomerMessageRolloutAction(client, {
           action,
@@ -127,36 +200,60 @@ export function RegistrationCustomerMessageRolloutPanel() {
           messageId,
           receivedAt: new Date().toISOString(),
         })
-        updateRow(messageKind, {
+        next = {
           status: "live",
           detail: "실제 수신 증거가 기록되어 운영 발송을 사용할 수 있습니다.",
-        })
+        }
       } else {
         await runRegistrationCustomerMessageRolloutAction(client, { action, messageKind })
-        updateRow(messageKind, {
+        next = {
           status: "off",
           detail: "이 종류의 고객 발송을 껐습니다.",
-        })
+        }
       }
     } catch (error) {
-      updateRow(messageKind, { status: "error", detail: readableError(error) })
+      next = { status: "error", detail: readableError(error) }
     } finally {
-      setWorkingKind(null)
+      completeRowRequest(messageKind, generation, next!)
     }
-  }, [client, messageIds, receiptConfirmed, updateRow, verificationTaskId, workingKind])
+  }, [beginRowRequest, client, completeRowRequest, messageIds, receiptConfirmed, updateRow, verificationTaskId])
 
   const refreshReadiness = React.useCallback(async () => {
-    if (refreshingReadiness) return
+    if (readinessControllerRef.current) return
+    const controller = new AbortController()
+    const generation = ++readinessGenerationRef.current
+    const observationGenerationsAtRefreshStart = {
+      observation_booking: rowLatestMutationGenerationsRef.current.get("observation_booking") ?? 0,
+      observation_reminder: rowLatestMutationGenerationsRef.current.get("observation_reminder") ?? 0,
+    }
+    readinessControllerRef.current = controller
     setRefreshingReadiness(true)
     setReadinessError("")
     try {
-      setReadiness(await client.inspectObservationReadiness())
+      const next = await client.inspectObservationReadiness(controller.signal)
+      if (
+        !mountedRef.current
+        || readinessControllerRef.current !== controller
+        || readinessGenerationRef.current !== generation
+      ) return
+      setReadiness(next)
+      hydrateObservationRows(next, observationGenerationsAtRefreshStart)
     } catch (error) {
+      if (
+        controller.signal.aborted
+        || !mountedRef.current
+        || readinessControllerRef.current !== controller
+        || readinessGenerationRef.current !== generation
+      ) return
       setReadinessError(readableError(error))
     } finally {
-      setRefreshingReadiness(false)
+      if (readinessControllerRef.current !== controller) return
+      readinessControllerRef.current = null
+      if (mountedRef.current && readinessGenerationRef.current === generation) {
+        setRefreshingReadiness(false)
+      }
     }
-  }, [client, refreshingReadiness])
+  }, [client, hydrateObservationRows])
 
   if (!isAdmin) {
     return (
@@ -222,7 +319,7 @@ export function RegistrationCustomerMessageRolloutPanel() {
 
       {ROLLOUT_PANEL_MESSAGE_KINDS.map((messageKind) => {
         const state = rowState[messageKind] ?? INITIAL_ROW_STATE
-        const working = workingKind === messageKind
+        const working = Boolean(workingKinds[messageKind])
         return (
           <Card key={messageKind}>
             <CardHeader className="pb-3">
@@ -237,7 +334,7 @@ export function RegistrationCustomerMessageRolloutPanel() {
                 <Button
                   type="button"
                   onClick={() => void run(messageKind, "prepare_verification")}
-                  disabled={Boolean(workingKind)}
+                  disabled={working}
                 >
                   {working ? <Loader2 className="animate-spin" /> : null}
                   템플릿 검증·테스트 허용
@@ -246,7 +343,7 @@ export function RegistrationCustomerMessageRolloutPanel() {
                   type="button"
                   variant="outline"
                   onClick={() => void run(messageKind, "set_off")}
-                  disabled={Boolean(workingKind)}
+                  disabled={working}
                 >
                   발송 끄기
                 </Button>
@@ -277,7 +374,7 @@ export function RegistrationCustomerMessageRolloutPanel() {
                   type="button"
                   variant="secondary"
                   onClick={() => void run(messageKind, "record_receipt_and_live")}
-                  disabled={Boolean(workingKind) || !receiptConfirmed[messageKind] || !messageIds[messageKind]}
+                  disabled={working || !receiptConfirmed[messageKind] || !messageIds[messageKind]}
                 >
                   수신 확인·운영 전환
                 </Button>
