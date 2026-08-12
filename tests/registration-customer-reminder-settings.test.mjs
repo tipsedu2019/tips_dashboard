@@ -4,7 +4,8 @@ import { createRequire } from "node:module"
 import test from "node:test"
 import vm from "node:vm"
 
-import { createElement } from "react"
+import { JSDOM } from "jsdom"
+import { act, createElement } from "react"
 import ts from "typescript"
 
 import {
@@ -28,100 +29,13 @@ const settingsPanelUrl = new URL(
   import.meta.url,
 )
 
-function createMountedHookHarness() {
-  const slots = []
-  let cursor = 0
-  let pendingEffects = []
-
-  function sameDependencies(left, right) {
-    return Boolean(left && right && left.length === right.length && left.every((value, index) => (
-      Object.is(value, right[index])
-    )))
-  }
-
-  function useState(initialValue) {
-    const index = cursor++
-    if (!slots[index]) slots[index] = {
-      kind: "state",
-      value: typeof initialValue === "function" ? initialValue() : initialValue,
-    }
-    return [slots[index].value, (next) => {
-      slots[index].value = typeof next === "function" ? next(slots[index].value) : next
-    }]
-  }
-
-  function useEffect(effect, dependencies) {
-    const index = cursor++
-    const slot = slots[index]
-    if (!slot || !sameDependencies(slot.dependencies, dependencies)) {
-      pendingEffects.push({ effect, index })
-      slots[index] = { kind: "effect", cleanup: slot?.cleanup, dependencies }
-    }
-  }
-
-  function memo(factory, dependencies) {
-    const index = cursor++
-    const slot = slots[index]
-    if (!slot || !sameDependencies(slot.dependencies, dependencies)) {
-      slots[index] = { kind: "memo", value: factory(), dependencies }
-    }
-    return slots[index].value
-  }
-
-  return {
-    react: {
-      ...require("react"),
-      useEffect,
-      useMemo: memo,
-      useState,
-    },
-    render(Component) {
-      assert.equal(pendingEffects.length, 0, "effects must flush before rerender")
-      cursor = 0
-      return Component({})
-    },
-    flushEffects() {
-      const effects = pendingEffects
-      pendingEffects = []
-      for (const { effect, index } of effects) {
-        slots[index].cleanup?.()
-        slots[index].cleanup = effect()
-      }
-    },
-    cleanup() {
-      for (const slot of slots) slot?.cleanup?.()
-      pendingEffects = []
-    },
+function passthrough(tag) {
+  return function Passthrough({ children, ...props }) {
+    return createElement(tag, props, children)
   }
 }
 
-function findMountedElement(node, predicate, description) {
-  const matches = []
-  const visit = (current) => {
-    if (Array.isArray(current)) {
-      current.forEach(visit)
-    } else if (current && typeof current === "object" && "props" in current) {
-      if (predicate(current)) matches.push(current)
-      visit(current.props.children)
-    }
-  }
-  visit(node)
-  assert.equal(matches.length, 1, `expected one ${description}, received ${matches.length}`)
-  return matches[0]
-}
-
-function mountedText(node, values = []) {
-  if (Array.isArray(node)) node.forEach((child) => mountedText(child, values))
-  else if (typeof node === "string" || typeof node === "number") values.push(String(node))
-  else if (node && typeof node === "object" && "props" in node) mountedText(node.props.children, values)
-  return values.join("")
-}
-
-async function flushMountedWork() {
-  await new Promise((resolve) => setImmediate(resolve))
-}
-
-async function loadMountedSettingsPanel(fetch) {
+async function loadRealSettingsPanel(fetch) {
   const source = await readFile(settingsPanelUrl, "utf8")
   const output = ts.transpileModule(source, {
     compilerOptions: {
@@ -132,16 +46,21 @@ async function loadMountedSettingsPanel(fetch) {
     },
     fileName: settingsPanelUrl.pathname,
   }).outputText
-  const hookHarness = createMountedHookHarness()
-  const passthrough = (tag) => function Passthrough({ children, ...props }) {
-    return createElement(tag, props, children)
-  }
+  const SwitchRoot = ({ checked, children, onCheckedChange, ...props }) => createElement(
+    "button",
+    {
+      ...props,
+      "aria-checked": checked,
+      onClick: () => onCheckedChange?.(!checked),
+    },
+    children,
+  )
   const runtimeModule = { exports: {} }
   const factory = vm.runInThisContext(`(function(require, module, exports) {${output}\n})`, {
     filename: settingsPanelUrl.pathname,
   })
   const localModules = new Map([
-    ["@radix-ui/react-switch", { Root: passthrough("button"), Thumb: passthrough("span") }],
+    ["@radix-ui/react-switch", { Root: SwitchRoot, Thumb: passthrough("span") }],
     ["lucide-react", { Loader2: () => null }],
     ["@/components/ui/button", { Button: passthrough("button") }],
     ["@/components/ui/card", {
@@ -162,45 +81,102 @@ async function loadMountedSettingsPanel(fetch) {
     }],
   ])
   factory((specifier) => {
-    if (specifier === "react") return hookHarness.react
+    if (specifier === "react") return require(specifier)
     if (specifier === "react/jsx-runtime") return require(specifier)
     const local = localModules.get(specifier)
     if (local) return local
     throw new Error(`unexpected reminder settings import: ${specifier}`)
   }, runtimeModule, runtimeModule.exports)
-  return { hookHarness, Component: runtimeModule.exports.RegistrationCustomerReminderSettings }
+  return runtimeModule.exports.RegistrationCustomerReminderSettings
 }
 
-test("disabled active kind in approval_pending allows one exact ON settings patch", async () => {
+const DOM_GLOBALS = [
+  "window",
+  "document",
+  "navigator",
+  "HTMLElement",
+  "Node",
+  "Event",
+  "MouseEvent",
+  "getComputedStyle",
+  "IS_REACT_ACT_ENVIRONMENT",
+]
+
+async function withSettingsDom(run) {
+  const previous = new Map(DOM_GLOBALS.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://tipsedu.co.kr" })
+  for (const key of DOM_GLOBALS) {
+    const value = key === "IS_REACT_ACT_ENVIRONMENT"
+      ? true
+      : dom.window[key]
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value })
+  }
+  const container = document.createElement("div")
+  document.body.append(container)
+  const { createRoot } = await import("react-dom/client")
+  const root = createRoot(container)
+
+  try {
+    return await run({ container, root })
+  } finally {
+    await act(async () => { root.unmount() })
+    dom.window.close()
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else delete globalThis[key]
+    }
+  }
+}
+
+async function flushReactWork() {
+  await new Promise((resolve) => setImmediate(resolve))
+}
+
+async function mountSettings(root, Component) {
+  await act(async () => { root.render(createElement(Component)) })
+  await act(async () => { await flushReactWork() })
+}
+
+test("real React settings keeps empty active kinds disabled without a PATCH", async () => {
+  for (const status of ["approval_pending", "scheduler_pending"]) {
+    const calls = []
+    const Component = await loadRealSettingsPanel(async (_url, init) => {
+      calls.push(init)
+      return Response.json({
+        ok: true,
+        settings: { ...SETTINGS, activeKinds: [], status },
+      })
+    })
+
+    await withSettingsDom(async ({ container, root }) => {
+      await mountSettings(root, Component)
+      const toggle = container.querySelector("#registration-customer-reminder-enabled")
+      assert.ok(toggle)
+      assert.equal(toggle.disabled, true)
+      await act(async () => { toggle.click() })
+      assert.equal(calls.filter((call) => call.method === "PATCH").length, 0)
+    })
+  }
+})
+
+test("real React settings permits an active kind and sends one exact ON PATCH", async () => {
   const calls = []
   const enabledSettings = { ...SETTINGS, enabled: true, revision: "3", updatedAt: "2026-08-08T06:01:00.000Z" }
-  const { hookHarness, Component } = await loadMountedSettingsPanel(async (_url, init) => {
+  const Component = await loadRealSettingsPanel(async (_url, init) => {
     calls.push(init)
     return Response.json({ ok: true, settings: init.method === "GET" ? SETTINGS : enabledSettings })
   })
 
-  try {
-    hookHarness.render(Component)
-    hookHarness.flushEffects()
-    await flushMountedWork()
-    let view = hookHarness.render(Component)
-    const toggle = findMountedElement(
-      view,
-      (element) => element.props.id === "registration-customer-reminder-enabled",
-      "automatic reminder toggle",
-    )
-    assert.equal(toggle.props.disabled, false)
-
-    toggle.props.onCheckedChange(true)
-    view = hookHarness.render(Component)
-    const save = findMountedElement(
-      view,
-      (element) => typeof element.props.onClick === "function" && mountedText(element.props.children) === "저장",
-      "save button",
-    )
-    save.props.onClick()
-    await flushMountedWork()
-
+  await withSettingsDom(async ({ container, root }) => {
+    await mountSettings(root, Component)
+    const toggle = container.querySelector("#registration-customer-reminder-enabled")
+    assert.ok(toggle)
+    assert.equal(toggle.disabled, false)
+    await act(async () => { toggle.click() })
+    const save = [...container.querySelectorAll("button")].find((button) => button.textContent === "저장")
+    assert.ok(save)
+    assert.equal(save.disabled, false)
+    await act(async () => { save.click(); await flushReactWork() })
     const patches = calls.filter((call) => call.method === "PATCH")
     assert.equal(patches.length, 1)
     assert.deepEqual(JSON.parse(patches[0].body), {
@@ -208,9 +184,7 @@ test("disabled active kind in approval_pending allows one exact ON settings patc
       leadHours: 3,
       expectedRevision: "2",
     })
-  } finally {
-    hookHarness.cleanup()
-  }
+  })
 })
 
 test("설정 service는 access token을 사용하고 provider 식별자를 받지 않는다", async () => {

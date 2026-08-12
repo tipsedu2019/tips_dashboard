@@ -3,7 +3,8 @@ import { createRequire } from "node:module"
 import test from "node:test"
 import vm from "node:vm"
 
-import { createElement, forwardRef } from "react"
+import { JSDOM } from "jsdom"
+import { act, createElement, forwardRef } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import ts from "typescript"
 
@@ -12,6 +13,8 @@ import {
   assertRegistrationCustomerMessagePublicPayload,
   parseRegistrationObservationSolapiReadiness,
 } from "../src/features/tasks/registration-customer-message-contract.ts"
+import { runRegistrationCustomerMessageRolloutAction } from "../src/features/tasks/registration-customer-message-rollout.ts"
+import { createRegistrationCustomerMessageAdminClient } from "../src/features/tasks/registration-customer-message-service.ts"
 
 const require = createRequire(import.meta.url)
 const panelUrl = new URL("../src/features/tasks/registration-customer-message-rollout-panel.tsx", import.meta.url)
@@ -108,6 +111,209 @@ function createControlledPromise() {
   })
   return { promise, resolve, reject }
 }
+
+const ROLLOUT_DOM_GLOBALS = [
+  "window",
+  "document",
+  "navigator",
+  "HTMLElement",
+  "Node",
+  "Event",
+  "MouseEvent",
+  "getComputedStyle",
+  "IS_REACT_ACT_ENVIRONMENT",
+]
+
+async function withRealRolloutDom(run) {
+  const previous = new Map(ROLLOUT_DOM_GLOBALS.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://tipsedu.co.kr" })
+  for (const key of ROLLOUT_DOM_GLOBALS) {
+    const value = key === "IS_REACT_ACT_ENVIRONMENT" ? true : dom.window[key]
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value })
+  }
+  const container = document.createElement("div")
+  document.body.append(container)
+  const { createRoot } = await import("react-dom/client")
+  const root = createRoot(container)
+  let unmounted = false
+  const unmount = async () => {
+    if (unmounted) return
+    unmounted = true
+    await act(async () => { root.unmount() })
+  }
+
+  try {
+    return await run({ container, unmount, root })
+  } finally {
+    await unmount()
+    dom.window.close()
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else delete globalThis[key]
+    }
+  }
+}
+
+async function flushRealReactWork() {
+  await new Promise((resolve) => setImmediate(resolve))
+}
+
+async function waitFor(predicate) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (predicate()) return
+    await flushRealReactWork()
+  }
+  assert.fail("timed out waiting for real React interaction")
+}
+
+async function loadRealRolloutPanel(client) {
+  const source = await (await import("node:fs/promises")).readFile(panelUrl, "utf8")
+  const output = ts.transpileModule(source, {
+    compilerOptions: {
+      esModuleInterop: true,
+      jsx: ts.JsxEmit.ReactJSX,
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: panelUrl.pathname,
+  }).outputText
+  const Checkbox = forwardRef(function Checkbox({ checked, onCheckedChange, ...props }, ref) {
+    return createElement("input", {
+      ...props,
+      ref,
+      type: "checkbox",
+      checked,
+      onChange: (event) => onCheckedChange?.(event.target.checked),
+    })
+  })
+  const runtimeModule = { exports: {} }
+  const localModules = new Map([
+    ["lucide-react", { Loader2: () => null, ShieldCheck: () => null }],
+    ["@/components/ui/badge", { Badge: passthrough("span") }],
+    ["@/components/ui/button", { Button: passthrough("button") }],
+    ["@/components/ui/card", {
+      Card: passthrough("section"),
+      CardContent: passthrough("div"),
+      CardDescription: passthrough("p"),
+      CardHeader: passthrough("header"),
+      CardTitle: passthrough("h2"),
+    }],
+    ["@/components/ui/checkbox", { Checkbox }],
+    ["@/components/ui/input", { Input: passthrough("input") }],
+    ["@/components/ui/label", { Label: passthrough("label") }],
+    ["@/lib/supabase", { supabase: null }],
+    ["@/providers/auth-provider", { useAuth: () => ({ isAdmin: true }) }],
+    ["./registration-customer-message-service", {
+      createRegistrationCustomerMessageAdminClient: () => client,
+    }],
+    ["./registration-customer-message-rollout", { runRegistrationCustomerMessageRolloutAction }],
+  ])
+  const runtimeRequire = (specifier) => {
+    if (specifier === "react" || specifier === "react/jsx-runtime") return require(specifier)
+    const local = localModules.get(specifier)
+    if (local) return local
+    throw new Error(`unexpected real rollout panel import: ${specifier}`)
+  }
+  const factory = vm.runInThisContext(`(function(require, module, exports) {${output}\n})`, {
+    filename: panelUrl.pathname,
+  })
+  factory(runtimeRequire, runtimeModule, runtimeModule.exports)
+  return runtimeModule.exports.RegistrationCustomerMessageRolloutPanel
+}
+
+async function mountRealRolloutPanel(root, Component) {
+  await act(async () => { root.render(createElement(Component)) })
+  await act(async () => { await flushRealReactWork() })
+}
+
+function buttonWithText(container, text, occurrence = 0) {
+  const button = [...container.querySelectorAll("button")]
+    .filter((candidate) => candidate.textContent?.includes(text))[occurrence]
+  assert.ok(button, `expected ${text} button`)
+  return button
+}
+
+async function setInputValue(input, value) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set
+  assert.ok(setter)
+  await act(async () => {
+    setter.call(input, value)
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+    input.dispatchEvent(new Event("change", { bubbles: true }))
+    await flushRealReactWork()
+  })
+}
+
+test("real React rollout aborts a preflight request on unmount before activation", async () => {
+  const requests = []
+  const client = createRegistrationCustomerMessageAdminClient({
+    getAccessToken: async () => "access-token",
+    adminTimeoutMs: 5,
+    fetch: async (_url, init) => {
+      requests.push(init)
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true })
+      })
+    },
+  })
+  const Component = await loadRealRolloutPanel(client)
+
+  await withRealRolloutDom(async ({ container, root, unmount }) => {
+    await mountRealRolloutPanel(root, Component)
+    const taskId = container.querySelector("#verification-task-id")
+    assert.ok(taskId)
+    await setInputValue(taskId, "90000000-0000-4000-8000-000000000004")
+    await act(async () => { buttonWithText(container, "템플릿 검증·테스트 허용", 5).click() })
+    await waitFor(() => requests.length === 1)
+    assert.equal(requests[0].body, JSON.stringify({ action: "preflight_template", messageKind: "observation_booking" }))
+
+    await unmount()
+    const abortedOnUnmount = requests[0].signal.aborted
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.equal(abortedOnUnmount, true)
+    assert.equal(requests.length, 1)
+    assert.equal(container.innerHTML, "")
+  })
+})
+
+test("real React rollout aborts after receipt and prevents the live activation request", async () => {
+  const requests = []
+  const receiptJson = createControlledPromise()
+  const client = createRegistrationCustomerMessageAdminClient({
+    getAccessToken: async () => "access-token",
+    fetch: async (_url, init) => {
+      requests.push(init)
+      if (requests.length !== 1) throw new Error("activation request must not reach fetch after unmount")
+      return {
+        ok: true,
+        json: () => receiptJson.promise,
+      }
+    },
+  })
+  const Component = await loadRealRolloutPanel(client)
+
+  await withRealRolloutDom(async ({ container, root, unmount }) => {
+    await mountRealRolloutPanel(root, Component)
+    const messageId = container.querySelector("#message-id-observation_booking")
+    assert.ok(messageId)
+    await setInputValue(messageId, "90000000-0000-4000-8000-000000000005")
+    const receipt = messageId.parentElement?.parentElement?.querySelector('input[type="checkbox"]')
+    assert.ok(receipt)
+    await act(async () => { receipt.click(); await flushRealReactWork() })
+    await act(async () => { buttonWithText(container, "수신 확인·운영 전환", 5).click() })
+    await waitFor(() => requests.length >= 1)
+    assert.equal(requests[0].body.includes("record_live_test_receipt"), true)
+    await unmount()
+    const abortedOnUnmount = requests[0].signal.aborted
+    receiptJson.resolve(READINESS)
+    await flushRealReactWork()
+    await flushRealReactWork()
+
+    assert.equal(abortedOnUnmount, true)
+    assert.equal(requests.length, 1)
+    assert.equal(container.innerHTML, "")
+  })
+})
 
 function createMountedRolloutHookHarness() {
   const slots = []

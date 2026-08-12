@@ -239,19 +239,20 @@ export type RegistrationCustomerMessageAdminClient = Readonly<{
   inspectObservationReadiness: (signal?: AbortSignal) => Promise<RegistrationObservationSolapiReadiness>
   preflightTemplate: (
     messageKind: RegistrationCustomerMessageKind,
+    signal?: AbortSignal,
   ) => Promise<RegistrationCustomerMessageReadiness>
   setActivation: (input: Readonly<{
     messageKind: RegistrationCustomerMessageKind
     mode: RegistrationCustomerMessageActivationMode
     verificationTaskId?: string
     requestKey: string
-  }>) => Promise<RegistrationCustomerMessageReadiness>
+  }>, signal?: AbortSignal) => Promise<RegistrationCustomerMessageReadiness>
   recordLiveTestReceipt: (input: Readonly<{
     messageKind: RegistrationCustomerMessageKind
     messageId: string
     receivedAt: string
     requestKey: string
-  }>) => Promise<RegistrationCustomerMessageReadiness>
+  }>, signal?: AbortSignal) => Promise<RegistrationCustomerMessageReadiness>
 }>
 
 type JsonRecord = Record<string, unknown>

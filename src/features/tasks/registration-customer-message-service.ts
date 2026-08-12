@@ -169,11 +169,11 @@ export function createRegistrationCustomerMessageClient(
 export function createRegistrationCustomerMessageAdminClient(
   options: RegistrationCustomerMessageServiceOptions,
 ): RegistrationCustomerMessageAdminClient {
-  const adminRequest = (body: Record<string, unknown>) => (
+  const adminRequest = (body: Record<string, unknown>, signal?: AbortSignal) => (
     requestAdminJson<RegistrationCustomerMessageReadiness>(
       options,
       "/api/solapi/registration/admin",
-      { method: "POST", body: JSON.stringify(body) },
+      { method: "POST", body: JSON.stringify(body), signal },
     )
   )
 
@@ -193,26 +193,26 @@ export function createRegistrationCustomerMessageAdminClient(
       if (!readiness) throw new Error("registration_observation_solapi_readiness_invalid")
       return readiness
     },
-    preflightTemplate(messageKind) {
-      return adminRequest({ action: "preflight_template", messageKind })
+    preflightTemplate(messageKind, signal) {
+      return adminRequest({ action: "preflight_template", messageKind }, signal)
     },
-    setActivation(input) {
+    setActivation(input, signal) {
       return adminRequest({
         action: "set_activation",
         messageKind: input.messageKind,
         mode: input.mode,
         ...(input.verificationTaskId ? { verificationTaskId: input.verificationTaskId } : {}),
         requestKey: input.requestKey,
-      })
+      }, signal)
     },
-    recordLiveTestReceipt(input) {
+    recordLiveTestReceipt(input, signal) {
       return adminRequest({
         action: "record_live_test_receipt",
         messageKind: input.messageKind,
         messageId: input.messageId,
         receivedAt: input.receivedAt,
         requestKey: input.requestKey,
-      })
+      }, signal)
     },
   })
 }

@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/providers/auth-provider"
 
 import type {
+  RegistrationCustomerMessageAdminClient,
   RegistrationCustomerMessageKind,
   RegistrationObservationSolapiReadiness,
 } from "./registration-customer-message-contract"
@@ -85,6 +86,18 @@ function rolloutRowStateFromServerMode(
   return { status: "off", detail: "서버에서 이 종류의 고객 발송을 껐습니다." }
 }
 
+function signalBoundAdminClient(
+  client: RegistrationCustomerMessageAdminClient,
+  signal: AbortSignal,
+): RegistrationCustomerMessageAdminClient {
+  return Object.freeze({
+    inspectObservationReadiness: (requestedSignal) => client.inspectObservationReadiness(requestedSignal || signal),
+    preflightTemplate: (messageKind) => client.preflightTemplate(messageKind, signal),
+    setActivation: (input) => client.setActivation(input, signal),
+    recordLiveTestReceipt: (input) => client.recordLiveTestReceipt(input, signal),
+  })
+}
+
 export function RegistrationCustomerMessageRolloutPanel() {
   const { isAdmin } = useAuth()
   const client = React.useMemo(() => createRegistrationCustomerMessageAdminClient({ getAccessToken }), [])
@@ -99,17 +112,21 @@ export function RegistrationCustomerMessageRolloutPanel() {
   const mountedRef = React.useRef(true)
   const rowRequestGenerationsRef = React.useRef(new Map<RegistrationCustomerMessageKind, number>())
   const rowLatestMutationGenerationsRef = React.useRef(new Map<RegistrationCustomerMessageKind, number>())
+  const rowControllersRef = React.useRef(new Map<RegistrationCustomerMessageKind, AbortController>())
   const nextRequestGenerationRef = React.useRef(0)
   const readinessControllerRef = React.useRef<AbortController | null>(null)
   const readinessGenerationRef = React.useRef(0)
 
   React.useEffect(() => {
     const rowRequestGenerations = rowRequestGenerationsRef.current
+    const rowControllers = rowControllersRef.current
     mountedRef.current = true
     return () => {
       mountedRef.current = false
       readinessControllerRef.current?.abort()
       readinessControllerRef.current = null
+      for (const controller of rowControllers.values()) controller.abort()
+      rowControllers.clear()
       rowRequestGenerations.clear()
     }
   }, [])
@@ -121,10 +138,12 @@ export function RegistrationCustomerMessageRolloutPanel() {
   const beginRowRequest = React.useCallback((messageKind: RegistrationCustomerMessageKind) => {
     if (rowRequestGenerationsRef.current.has(messageKind)) return null
     const generation = ++nextRequestGenerationRef.current
+    const controller = new AbortController()
     rowRequestGenerationsRef.current.set(messageKind, generation)
     rowLatestMutationGenerationsRef.current.set(messageKind, generation)
+    rowControllersRef.current.set(messageKind, controller)
     setWorkingKinds((current) => ({ ...current, [messageKind]: true }))
-    return generation
+    return { controller, generation }
   }, [])
 
   const completeRowRequest = React.useCallback((
@@ -134,6 +153,7 @@ export function RegistrationCustomerMessageRolloutPanel() {
   ) => {
     if (rowRequestGenerationsRef.current.get(messageKind) !== generation) return
     rowRequestGenerationsRef.current.delete(messageKind)
+    rowControllersRef.current.delete(messageKind)
     if (!mountedRef.current) return
     updateRow(messageKind, next)
     setWorkingKinds((current) => {
@@ -179,12 +199,13 @@ export function RegistrationCustomerMessageRolloutPanel() {
       return
     }
 
-    const generation = beginRowRequest(messageKind)
-    if (generation === null) return
+    const request = beginRowRequest(messageKind)
+    if (request === null) return
+    const actionClient = signalBoundAdminClient(client, request.controller.signal)
     let next: RolloutRowState
     try {
       if (action === "prepare_verification") {
-        await runRegistrationCustomerMessageRolloutAction(client, {
+        await runRegistrationCustomerMessageRolloutAction(actionClient, {
           action,
           messageKind,
           verificationTaskId: verificationTaskId.trim(),
@@ -194,7 +215,7 @@ export function RegistrationCustomerMessageRolloutPanel() {
           detail: "승인 템플릿이 일치하며 이 테스트 등록에만 발송할 수 있습니다.",
         }
       } else if (action === "record_receipt_and_live") {
-        await runRegistrationCustomerMessageRolloutAction(client, {
+        await runRegistrationCustomerMessageRolloutAction(actionClient, {
           action,
           messageKind,
           messageId,
@@ -205,7 +226,7 @@ export function RegistrationCustomerMessageRolloutPanel() {
           detail: "실제 수신 증거가 기록되어 운영 발송을 사용할 수 있습니다.",
         }
       } else {
-        await runRegistrationCustomerMessageRolloutAction(client, { action, messageKind })
+        await runRegistrationCustomerMessageRolloutAction(actionClient, { action, messageKind })
         next = {
           status: "off",
           detail: "이 종류의 고객 발송을 껐습니다.",
@@ -214,7 +235,7 @@ export function RegistrationCustomerMessageRolloutPanel() {
     } catch (error) {
       next = { status: "error", detail: readableError(error) }
     } finally {
-      completeRowRequest(messageKind, generation, next!)
+      completeRowRequest(messageKind, request.generation, next!)
     }
   }, [beginRowRequest, client, completeRowRequest, messageIds, receiptConfirmed, updateRow, verificationTaskId])
 
