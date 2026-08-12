@@ -1106,6 +1106,44 @@ set due_at = pg_catalog.clock_timestamp() - interval '1 minute',
     available_at = pg_catalog.clock_timestamp() - interval '1 minute'
 where job_id = 'f6000000-0000-4000-8000-000000000091';
 
+-- Task 3 preserves the legacy raw-claim contract but restores its live-only
+-- eligibility. Establish the existing accepted live-test evidence before the
+-- inherited claim fixture rather than only before begin.
+update public.ops_registration_customer_messages message
+set status = 'accepted',
+    provider_message_id = 'synthetic-live-message',
+    provider_group_id = 'synthetic-live-group',
+    provider_status_code = '202',
+    provider_status_message = 'accepted',
+    provider_evidence = '{"providerMessageId":"synthetic-live-message","providerGroupId":"synthetic-live-group","statusCode":"202","statusMessage":"accepted","observedAt":"2026-08-12T06:00:00Z","requestKeyMatched":true}'::jsonb,
+    resolution_source = 'scheduled_provider_send',
+    resolved_at = pg_catalog.clock_timestamp()
+where message.scheduled_job_id = 'f6000000-0000-4000-8000-000000000090';
+insert into dashboard_private.registration_customer_solapi_template_receipts(
+  message_kind, template_id, pf_id, catalog_checksum,
+  provider_checksum, provider_status, verified_by
+) values (
+  'appointment_reminder', 'queue-template', 'queue-pf', repeat('4', 64),
+  repeat('4', 64), 'sendable', 'f6000000-0000-4000-8000-000000000001'
+)
+on conflict (message_kind) do update set
+  template_id = excluded.template_id,
+  pf_id = excluded.pf_id,
+  catalog_checksum = excluded.catalog_checksum,
+  provider_checksum = excluded.provider_checksum,
+  provider_status = excluded.provider_status,
+  verified_by = excluded.verified_by;
+update dashboard_private.registration_customer_solapi_activation activation
+set mode = 'live',
+    verification_task_id = 'f6000000-0000-4000-8000-000000000010',
+    verification_recipient_hash = repeat('3', 64),
+    live_test_message_id = message.id,
+    live_test_confirmed_at = pg_catalog.clock_timestamp(),
+    updated_by = 'f6000000-0000-4000-8000-000000000001'
+from public.ops_registration_customer_messages message
+where activation.message_kind = 'appointment_reminder'
+  and message.scheduled_job_id = 'f6000000-0000-4000-8000-000000000090';
+
 set local role service_role;
 select pg_catalog.set_config('request.jwt.claim.role', 'service_role', true);
 insert into queue_worker_results(label, payload)
@@ -1208,41 +1246,6 @@ select is(
   '{"sameJob":true,"error":null,"status":"claimed"}'::jsonb,
   'reclaim targets the same UUID job and clears the retry error'
 );
-
-update public.ops_registration_customer_messages message
-set status = 'accepted',
-    provider_message_id = 'synthetic-live-message',
-    provider_group_id = 'synthetic-live-group',
-    provider_status_code = '202',
-    provider_status_message = 'accepted',
-    provider_evidence = '{"providerMessageId":"synthetic-live-message","providerGroupId":"synthetic-live-group","statusCode":"202","statusMessage":"accepted","observedAt":"2026-08-12T06:00:00Z","requestKeyMatched":true}'::jsonb,
-    resolution_source = 'scheduled_provider_send',
-    resolved_at = pg_catalog.clock_timestamp()
-where message.scheduled_job_id = 'f6000000-0000-4000-8000-000000000090';
-insert into dashboard_private.registration_customer_solapi_template_receipts(
-  message_kind, template_id, pf_id, catalog_checksum,
-  provider_checksum, provider_status, verified_by
-) values (
-  'appointment_reminder', 'queue-template', 'queue-pf', repeat('4', 64),
-  repeat('4', 64), 'sendable', 'f6000000-0000-4000-8000-000000000001'
-)
-on conflict (message_kind) do update set
-  template_id = excluded.template_id,
-  pf_id = excluded.pf_id,
-  catalog_checksum = excluded.catalog_checksum,
-  provider_checksum = excluded.provider_checksum,
-  provider_status = excluded.provider_status,
-  verified_by = excluded.verified_by;
-update dashboard_private.registration_customer_solapi_activation activation
-set mode = 'live',
-    verification_task_id = 'f6000000-0000-4000-8000-000000000010',
-    verification_recipient_hash = repeat('3', 64),
-    live_test_message_id = message.id,
-    live_test_confirmed_at = pg_catalog.clock_timestamp(),
-    updated_by = 'f6000000-0000-4000-8000-000000000001'
-from public.ops_registration_customer_messages message
-where activation.message_kind = 'appointment_reminder'
-  and message.scheduled_job_id = 'f6000000-0000-4000-8000-000000000090';
 
 create or replace function dashboard_private.registration_customer_reminder_schedule_ready_v1()
 returns boolean

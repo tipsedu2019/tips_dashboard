@@ -285,6 +285,11 @@ test("automatic dispatch is job locked, bounded, and keeps the legacy raw result
   const claim = functionBlock(sql, "public.claim_registration_customer_reminder_job_v1");
   assert.match(claim, /materialize_registration_observation_solapi_events_v1\(100\)/);
   assert.match(claim, /order by job\.due_at, job\.job_id for update of job skip locked limit 100/);
+  assert.match(
+    claim,
+    /job\.message_kind = 'appointment_reminder' or v_runtime_version = 1/,
+    "runtime-zero observation rows must be filtered before the bounded page",
+  );
   assert.match(claim, /claim_lease_expired/);
   assert.match(claim, /scheduled_marker_recovery/);
   const legacyResult = claim.match(
@@ -298,6 +303,18 @@ test("automatic dispatch is job locked, bounded, and keeps the legacy raw result
   assert.match(legacyResult[0], /'scheduledFor'/);
   assert.match(legacyResult[0], /'requestKey'/);
   assert.doesNotMatch(legacyResult[0], /'messageKind'|'observationId'/);
+  const legacyGate = claim.slice(
+    claim.indexOf("if v_job.message_kind = 'appointment_reminder' then"),
+    claim.indexOf(
+      "update dashboard_private.registration_customer_reminder_jobs",
+      claim.indexOf("if v_job.message_kind = 'appointment_reminder' then"),
+    ),
+  );
+  assert.match(legacyGate, /v_activation\.mode is distinct from 'live'/);
+  assert.match(legacyGate, /v_receipt\.message_kind is null/);
+  assert.match(legacyGate, /live_test_confirmed_at is null/);
+  assert.match(legacyGate, /status = 'accepted'/);
+  assert.match(legacyGate, /live_test_message_id/);
 
   const read = functionBlock(sql, "public.read_registration_customer_reminder_source_v1");
   assert.ok(read.indexOf("auth.role()") < read.indexOf("from dashboard_private.registration_customer_reminder_jobs"));
@@ -337,8 +354,28 @@ test("begin and finalize own marker, refresh, uncertainty, and composite identit
   );
   assert.match(
     begin,
-    /assert_registration_observation_runtime_v1\(\)[\s\S]*provider_attempt_started_at, provider_attempt_count/,
+    /for share[\s\S]*assert_registration_observation_runtime_v1\(\)[\s\S]*provider_attempt_started_at, provider_attempt_count/,
   );
+  const finalRuntimeLock = begin.lastIndexOf(
+    "from dashboard_private.registration_observation_runtime_settings",
+  );
+  const duplicateLock = begin.lastIndexOf(
+    "from public.ops_registration_customer_messages message",
+    finalRuntimeLock,
+  );
+  const finalRuntimeAssert = begin.lastIndexOf(
+    "assert_registration_observation_runtime_v1()",
+  );
+  const markerInsert = begin.indexOf(
+    "insert into public.ops_registration_customer_messages",
+    finalRuntimeAssert,
+  );
+  assert.ok(
+    duplicateLock < finalRuntimeLock && finalRuntimeLock < finalRuntimeAssert && finalRuntimeAssert < markerInsert,
+    "the runtime row lock/assert must be the final authorization after duplicate locking and before marker mutation",
+  );
+  assert.match(begin, /last_error_code = 'verification_scope_changed'/);
+  assert.match(begin, /'currentStatus', 'canceled'/);
   assert.match(
     begin,
     /job\.source_identity = v_message\.scheduled_source_identity/,

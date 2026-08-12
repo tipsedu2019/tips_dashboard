@@ -1423,7 +1423,9 @@ declare
   v_job dashboard_private.registration_customer_reminder_jobs%rowtype;
   v_activation dashboard_private.registration_customer_solapi_activation%rowtype;
   v_receipt dashboard_private.registration_customer_solapi_template_receipts%rowtype;
+  v_live_message public.ops_registration_customer_messages%rowtype;
   v_source jsonb;
+  v_runtime_version integer;
 begin
   if (select auth.role()) <> 'service_role' then
     raise exception 'registration_customer_reminder_worker_unauthorized' using errcode = '42501';
@@ -1440,6 +1442,7 @@ begin
     set succeeded_at = excluded.succeeded_at, updated_at = excluded.updated_at;
   perform dashboard_private.materialize_registration_observation_solapi_events_v1(100);
   perform dashboard_private.sync_registration_customer_reminder_jobs_v1();
+  v_runtime_version := public.registration_observation_runtime_version();
 
   update public.ops_registration_customer_messages message
   set status = 'unknown',
@@ -1490,6 +1493,10 @@ begin
       and job.due_at <= pg_catalog.clock_timestamp()
       and appointment.status = 'scheduled'
       and appointment.scheduled_at > pg_catalog.clock_timestamp()
+      and (
+        job.message_kind = 'appointment_reminder'
+        or v_runtime_version = 1
+      )
     order by job.due_at, job.job_id
     for update of job skip locked
     limit 100
@@ -1504,6 +1511,22 @@ begin
       and receipt.catalog_checksum = receipt.provider_checksum;
 
     if v_job.message_kind = 'appointment_reminder' then
+      if v_activation.mode is distinct from 'live'
+        or v_receipt.message_kind is null
+      then
+        continue;
+      end if;
+      select message.* into v_live_message
+      from public.ops_registration_customer_messages message
+      where message.id = v_activation.live_test_message_id
+        and message.status = 'accepted'
+        and message.message_kind = 'appointment_reminder'
+        and message.task_id = v_activation.verification_task_id
+        and message.recipient_hash = v_activation.verification_recipient_hash
+        and message.template_checksum = v_receipt.catalog_checksum;
+      if not found or v_activation.live_test_confirmed_at is null then
+        continue;
+      end if;
       if v_job.source_revision is distinct from (
         select appointment.notification_revision
         from public.ops_registration_appointments appointment
@@ -1857,6 +1880,28 @@ begin
   from dashboard_private.registration_customer_solapi_template_receipts receipt
   where receipt.message_kind = 'observation_reminder'
   for share;
+  if v_job.activation_mode_snapshot = 'verification' and (
+    v_activation.mode is distinct from 'verification'
+    or v_job.task_id is distinct from v_activation.verification_task_id
+    or v_job.verification_started_at is distinct from v_activation.updated_at
+    or v_job.verification_recipient_hash is distinct from v_activation.verification_recipient_hash
+    or p_readiness_contract ->> 'recipientHash' is distinct from v_activation.verification_recipient_hash
+    or not exists (
+      select 1
+      from dashboard_private.registration_observation_domain_events source_event
+      where source_event.event_id = v_job.source_event_id
+        and source_event.occurred_at >= v_job.verification_started_at
+    )
+  ) then
+    update dashboard_private.registration_customer_reminder_jobs job
+    set status = 'canceled', claim_token = null, claim_expires_at = null,
+        available_at = null, last_error_code = 'verification_scope_changed'
+    where job.job_id = v_job.job_id;
+    return pg_catalog.jsonb_build_object(
+      'allowed', false, 'messageId', null, 'dispatchToken', null,
+      'currentStatus', 'canceled'
+    );
+  end if;
   if v_activation.mode not in ('verification', 'live')
     or v_receipt.message_kind is null
     or v_receipt.provider_status is distinct from 'sendable'
@@ -1867,16 +1912,7 @@ begin
   then
     raise exception 'registration_customer_reminder_not_ready' using errcode = '55000';
   end if;
-  if v_activation.mode = 'verification' then
-    if v_job.task_id is distinct from v_activation.verification_task_id
-      or v_job.activation_mode_snapshot is distinct from 'verification'
-      or v_job.verification_started_at is distinct from v_activation.updated_at
-      or v_job.verification_recipient_hash is distinct from v_activation.verification_recipient_hash
-      or p_readiness_contract ->> 'recipientHash' is distinct from v_activation.verification_recipient_hash
-    then
-      raise exception 'registration_customer_reminder_not_ready' using errcode = '55000';
-    end if;
-  else
+  if v_activation.mode = 'live' then
     if v_job.activation_mode_snapshot is distinct from 'live'
       or v_activation.automatic_delivery_cutoff_at is null
       or not exists (
@@ -1960,23 +1996,6 @@ begin
     raise exception 'registration_customer_reminder_source_stale' using errcode = '40001';
   end if;
 
-  begin
-    perform dashboard_private.assert_registration_observation_runtime_v1();
-  exception
-    when sqlstate '55000' then
-      if sqlerrm <> 'registration_observation_runtime_inactive' then
-        raise;
-      end if;
-      update dashboard_private.registration_customer_reminder_jobs job
-      set status = 'canceled', claim_token = null, claim_expires_at = null,
-          available_at = null, last_error_code = 'runtime_inactive'
-      where job.job_id = v_job.job_id;
-      return pg_catalog.jsonb_build_object(
-        'allowed', false, 'messageId', null, 'dispatchToken', null,
-        'currentStatus', 'runtime_inactive'
-      );
-  end;
-
   select message.* into v_existing
   from public.ops_registration_customer_messages message
   where message.observation_id = v_job.observation_id
@@ -1994,6 +2013,34 @@ begin
       'currentStatus', 'duplicate_locked'
     );
   end if;
+
+  -- This shared singleton lock is the final authorization before the marker.
+  -- It both rechecks a committed runtime rollback after any duplicate-row wait
+  -- and prevents a new 1 -> 0 transition from committing ahead of this insert.
+  begin
+    perform 1
+    from dashboard_private.registration_observation_runtime_settings runtime
+    where runtime.singleton
+      and runtime.activation_version = 1
+    for share;
+    if not found then
+      raise exception 'registration_observation_runtime_inactive' using errcode = '55000';
+    end if;
+    perform dashboard_private.assert_registration_observation_runtime_v1();
+  exception
+    when sqlstate '55000' then
+      if sqlerrm <> 'registration_observation_runtime_inactive' then
+        raise;
+      end if;
+      update dashboard_private.registration_customer_reminder_jobs job
+      set status = 'canceled', claim_token = null, claim_expires_at = null,
+          available_at = null, last_error_code = 'runtime_inactive'
+      where job.job_id = v_job.job_id;
+      return pg_catalog.jsonb_build_object(
+        'allowed', false, 'messageId', null, 'dispatchToken', null,
+        'currentStatus', 'runtime_inactive'
+      );
+  end;
 
   insert into public.ops_registration_customer_messages(
     preview_id, task_id, track_id, appointment_id, observation_id,
