@@ -91,6 +91,21 @@ function acceptedProviderResponse() {
   })
 }
 
+async function withGlobalFetchPoison(calls, action) {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    calls.globalFetchAttempts += 1
+    calls.globalFetchUrls.push(String(url))
+    throw new Error("global_fetch_poisoned_before_network")
+  }
+  try {
+    return await action()
+  } finally {
+    globalThis.fetch = originalFetch
+    calls.globalFetchRestores += 1
+  }
+}
+
 /**
  * This fake represents only DB-owned RPC lifecycle decisions. The production
  * route, worker, catalog, source resolver, and SOLAPI adapter remain real.
@@ -99,16 +114,24 @@ function createDbOwnedLifecycleScenario(options = {}) {
   const calls = {
     fetches: [],
     gates: [],
+    globalFetchAttempts: 0,
+    globalFetchRestores: 0,
+    globalFetchUrls: [],
     markerCount: 0,
-    providerFetchInjected: true,
+    providerFetchInjected: options.omitProviderFetch !== true,
     rpc: [],
     rpcChains: [],
   }
+  const initialActivationMode = options.activationMode ?? "live"
+  const activationUpdatedAt = options.activationUpdatedAt ?? "2026-08-11T00:00:00.000Z"
+  const automaticDeliveryCutoffAt = options.automaticDeliveryCutoffAt ?? "2026-08-11T00:00:00.000Z"
   const state = {
     activation: {
-      activatedAt: "2026-08-11T00:00:00.000Z",
-      mode: options.activationMode ?? "live",
-      verificationTaskId: options.verificationTaskId ?? SOURCE_TASK_ID,
+      automaticDeliveryCutoffAt,
+      mode: initialActivationMode,
+      updatedAt: activationUpdatedAt,
+      verificationRecipientHash: options.activationVerificationRecipientHash ?? "recipient-hash-v1",
+      verificationTaskId: options.activationVerificationTaskId ?? SOURCE_TASK_ID,
     },
     bookingHash: options.bookingHash ?? "b".repeat(64),
     claimedBookingHash: options.claimedBookingHash ?? "b".repeat(64),
@@ -116,19 +139,24 @@ function createDbOwnedLifecycleScenario(options = {}) {
     currentRevision: options.currentRevision ?? 7,
     dueAt: options.dueAt ?? expectedDueAt(options.leadHours ?? 3),
     job: {
+      activationModeSnapshot: options.activationModeSnapshot ?? initialActivationMode,
       claimed: false,
       refreshCount: 0,
       status: "pending",
+      verificationRecipientHash: options.jobVerificationRecipientHash ?? "recipient-hash-v1",
+      verificationStartedAt: options.verificationStartedAt ?? activationUpdatedAt,
     },
     leadHours: options.leadHours ?? 3,
+    now: new Date("2026-08-12T00:00:00.000Z"),
     operationalState: options.operationalState ?? "scheduled",
     receipt: {
-      recipientHash: options.receiptRecipientHash ?? "recipient-hash-v1",
-      recordedAt: options.receiptRecordedAt ?? "2026-08-11T01:00:00.000Z",
       sendable: options.receiptSendable ?? true,
-      taskId: options.receiptTaskId ?? SOURCE_TASK_ID,
     },
     runtimeVersion: options.runtimeVersion ?? 1,
+    sourceEvent: {
+      occurredAt: options.sourceEventOccurredAt ?? "2026-08-12T00:30:00.000Z",
+    },
+    production: null,
   }
 
   const claim = () => Object.freeze({
@@ -160,7 +188,20 @@ function createDbOwnedLifecycleScenario(options = {}) {
           "claim:booking-hash",
           state.claimedBookingHash === state.bookingHash,
         )
-        if (!schedulable || !runtimeReady || !bookingCurrent || state.job.status !== "pending") {
+        const liveCutoffCurrent = lifecycleGate(
+          "claim:live-cutoff",
+          state.job.activationModeSnapshot !== "live"
+            || (
+              state.activation.automaticDeliveryCutoffAt !== null
+              && Date.parse(state.sourceEvent.occurredAt)
+                >= Date.parse(state.activation.automaticDeliveryCutoffAt)
+            ),
+        )
+        if (!liveCutoffCurrent) {
+          state.job.lastErrorCode = "pre_cutoff_backlog"
+          state.job.status = "canceled"
+          response = result(null)
+        } else if (!schedulable || !runtimeReady || !bookingCurrent || state.job.status !== "pending") {
           response = result(null)
         } else {
           state.job.claimed = true
@@ -204,37 +245,54 @@ function createDbOwnedLifecycleScenario(options = {}) {
         })
         if (!exactClaim || !state.job.claimed || state.job.status !== "claimed") {
           response = result(null, { message: "registration_customer_reminder_claim_invalid" })
-        } else if (!lifecycleGate("begin:runtime", state.runtimeVersion === 1)) {
-          response = refresh("runtime_inactive")
-        } else if (!lifecycleGate(
-          `begin:activation:${state.activation.mode}`,
-          state.activation.mode === "live",
-        )) {
-          response = refresh("canceled")
-        } else if (!lifecycleGate("begin:receipt", state.receipt.sendable)) {
-          response = refresh("canceled")
-        } else if (!lifecycleGate(
-          "begin:verification-after-activation",
-          Date.parse(state.receipt.recordedAt) >= Date.parse(state.activation.activatedAt),
-        )) {
-          response = refresh("canceled")
-        } else if (!lifecycleGate(
-          "begin:verification-task",
-          state.receipt.taskId === state.activation.verificationTaskId,
-        )) {
-          response = refresh("canceled")
-        } else if (!lifecycleGate(
-          "begin:receipt-recipient-hash",
-          state.receipt.recipientHash === "recipient-hash-v1",
-        )) {
-          response = refresh("canceled")
         } else if (!lifecycleGate(
           "begin:lead-hours",
           state.job.claimedDueAt === expectedDueAt(state.leadHours),
         )) {
-          state.job.status = "pending"
           state.dueAt = expectedDueAt(state.leadHours)
+          const enoughLeadTime = Date.parse("2026-08-12T03:00:00.000Z") >= (
+            state.now.getTime() + state.leadHours * 60 * 60 * 1_000
+          )
+          state.job.status = enoughLeadTime ? "pending" : "canceled"
+          state.job.lastErrorCode = enoughLeadTime
+            ? "settings_changed"
+            : "lead_time_changed_insufficient"
           response = refresh("settings_refresh_required")
+        } else if (!lifecycleGate(
+          `begin:activation:${state.activation.mode}`,
+          state.activation.mode === "live" || state.activation.mode === "verification",
+        )) {
+          response = result(null, { message: "registration_customer_reminder_not_ready" })
+        } else if (state.job.activationModeSnapshot === "verification" && !lifecycleGate(
+          "begin:verification-after-activation",
+          Date.parse(state.sourceEvent.occurredAt) >= Date.parse(state.job.verificationStartedAt),
+        )) {
+          state.job.lastErrorCode = "verification_scope_changed"
+          state.job.status = "canceled"
+          response = refresh("canceled")
+        } else if (state.job.activationModeSnapshot === "verification" && !lifecycleGate(
+          "begin:verification-task",
+          SOURCE_TASK_ID === state.activation.verificationTaskId,
+        )) {
+          state.job.lastErrorCode = "verification_scope_changed"
+          state.job.status = "canceled"
+          response = refresh("canceled")
+        } else if (state.job.activationModeSnapshot === "verification" && !lifecycleGate(
+          "begin:receipt-recipient-hash",
+          state.job.verificationRecipientHash === state.activation.verificationRecipientHash,
+        )) {
+          state.job.lastErrorCode = "verification_scope_changed"
+          state.job.status = "canceled"
+          response = refresh("canceled")
+        } else if (!lifecycleGate("begin:receipt", state.receipt.sendable)) {
+          response = result(null, { message: "registration_customer_reminder_not_ready" })
+        } else if (state.job.activationModeSnapshot === "live" && !lifecycleGate(
+          "begin:live-cutoff",
+          state.activation.automaticDeliveryCutoffAt !== null
+            && Date.parse(state.sourceEvent.occurredAt)
+              >= Date.parse(state.activation.automaticDeliveryCutoffAt),
+        )) {
+          response = result(null, { message: "registration_customer_reminder_not_ready" })
         } else if (!lifecycleGate(
           "begin:booking-hash",
           state.job.readBookingHash === state.bookingHash,
@@ -251,6 +309,10 @@ function createDbOwnedLifecycleScenario(options = {}) {
         )) {
           state.job.refreshCount += 1
           response = refresh(state.job.refreshCount === 1 ? "refresh_required" : "source_dirty")
+        } else if (!lifecycleGate("begin:runtime", state.runtimeVersion === 1)) {
+          state.job.lastErrorCode = "runtime_inactive"
+          state.job.status = "canceled"
+          response = refresh("runtime_inactive")
         } else {
           calls.markerCount += 1
           state.job.status = "dispatching"
@@ -262,7 +324,13 @@ function createDbOwnedLifecycleScenario(options = {}) {
           })
         }
       } else if (name === "release_registration_customer_reminder_job_v1") {
-        state.job.status = "released"
+        state.job.status = [
+          "source_ineligible",
+          "runtime_inactive",
+          "booking_fact_changed",
+          "source_revision_unstable",
+        ].includes(args.p_error_code) ? "canceled" : "pending"
+        state.job.lastErrorCode = args.p_error_code
         response = result({ released: true })
       } else if (name === "finalize_registration_customer_reminder_dispatch_v1") {
         state.job.status = args.p_result === "accepted" ? "accepted" : "delivery_unknown"
@@ -279,21 +347,26 @@ function createDbOwnedLifecycleScenario(options = {}) {
     if (options.providerMode === "throw") throw new Error("synthetic_provider_transport_unknown")
     return acceptedProviderResponse()
   }
-  const production = createProductionRegistrationCustomerReminderRouteHandlers({
+  const productionOverrides = {
     client,
     environment: FIXED_OFF_ENV,
-    providerFetch,
-  })
+    ...(options.omitProviderFetch ? {} : { providerFetch }),
+  }
   return Object.freeze({
     calls,
-    production,
-    run: () => production.worker(new Request(
-      "http://localhost/api/solapi/registration/reminders/worker",
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${FIXED_OFF_ENV.REGISTRATION_CUSTOMER_REMINDER_WORKER_SECRET}` },
-      },
-    )),
+    get production() {
+      return state.production
+    },
+    run: () => withGlobalFetchPoison(calls, () => {
+      state.production = createProductionRegistrationCustomerReminderRouteHandlers(productionOverrides)
+      return state.production.worker(new Request(
+        "http://localhost/api/solapi/registration/reminders/worker",
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${FIXED_OFF_ENV.REGISTRATION_CUSTOMER_REMINDER_WORKER_SECRET}` },
+        },
+      ))
+    }),
     state,
   })
 }
@@ -319,6 +392,8 @@ async function assertProviderZero(name, scenario, expectedGate) {
   assert.equal(response.status, 200, name)
   assert.equal(typeof scenario.production.worker, "function", name)
   assert.equal(scenario.calls.providerFetchInjected, true, name)
+  assert.equal(scenario.calls.globalFetchAttempts, 0, name)
+  assert.equal(scenario.calls.globalFetchRestores, 1, name)
   assert.equal(scenario.calls.fetches.length, 0, name)
   assert.equal(scenario.calls.markerCount - markerBefore, 0, name)
   assert.equal(scenario.calls.gates.includes(expectedGate), true, name)
@@ -356,17 +431,26 @@ test("DB-owned terminal and runtime gates stay provider-zero through the product
   }
 })
 
-test("DB-owned observation readiness, cutoff, and identity drifts stay provider-zero", async () => {
-  // Break caught: a stale activation, receipt, cutoff, booking, revision, or canonical phone reaches send-many before begin rejects it.
+test("DB-owned observation readiness and identity drifts stay provider-zero", async () => {
+  // Break caught: a stale verification scope, booking, revision, or canonical phone reaches send-many before begin rejects it.
   const cases = [
-    ["receipt predates activation", {
-      receiptRecordedAt: "2026-08-10T23:59:59.000Z",
-    }, "begin:verification-after-activation"],
+    ["verification source event predates activation", {
+      activationMode: "verification",
+      activationModeSnapshot: "verification",
+      sourceEventOccurredAt: "2026-08-10T23:59:59.000Z",
+    }, "begin:verification-after-activation", {
+      status: "canceled",
+      error: "verification_scope_changed",
+    }],
     ["verification task restart", {
-      receiptTaskId: "90000000-0000-4000-8000-000000000199",
+      activationMode: "verification",
+      activationModeSnapshot: "verification",
+      activationVerificationTaskId: "90000000-0000-4000-8000-000000000199",
     }, "begin:verification-task"],
     ["verification recipient hash restart", {
-      receiptRecipientHash: "recipient-hash-v2",
+      activationMode: "verification",
+      activationModeSnapshot: "verification",
+      activationVerificationRecipientHash: "recipient-hash-v2",
     }, "begin:receipt-recipient-hash"],
     ["booking hash drift at claim", {
       claimedBookingHash: "c".repeat(64),
@@ -385,8 +469,16 @@ test("DB-owned observation readiness, cutoff, and identity drifts stay provider-
       afterClaim({ state }) { state.leadHours = 3 },
     }, "begin:lead-hours"],
   ]
-  for (const [name, options, expectedGate] of cases) {
-    await assertProviderZero(name, createDbOwnedLifecycleScenario(options), expectedGate)
+  for (const [name, options, expectedGate, expectedState] of cases) {
+    const scenario = createDbOwnedLifecycleScenario(options)
+    await assertProviderZero(name, scenario, expectedGate)
+    if (expectedState) {
+      assert.deepEqual(
+        { status: scenario.state.job.status, error: scenario.state.job.lastErrorCode },
+        expectedState,
+        name,
+      )
+    }
   }
 })
 
@@ -428,6 +520,8 @@ test("one refreshed observation payload crosses the real SOLAPI adapter exactly 
     outcome: "accepted",
   })
   assert.equal(SOLAPI_SEND_MANY_URL, "https://api.solapi.com/messages/v4/send-many/detail")
+  assert.equal(scenario.calls.globalFetchAttempts, 0)
+  assert.equal(scenario.calls.globalFetchRestores, 1)
   assert.equal(scenario.calls.fetches.length, 1)
   assert.equal(scenario.calls.markerCount - markerBefore, 1)
   assert.equal(scenario.calls.fetches[0].url, SOLAPI_SEND_MANY_URL)
@@ -447,5 +541,89 @@ test("unknown synthetic provider dispatch is finalized once and a second invocat
   assert.equal(callsAfterFirst, 1)
   assert.equal(scenario.calls.fetches.length, 1)
   assert.equal(scenario.calls.markerCount, 1)
+  assert.equal(scenario.calls.globalFetchAttempts, 0)
+  assert.equal(scenario.calls.globalFetchRestores, 2)
+  assert.equal(scenario.state.job.status, "delivery_unknown")
+  assert.deepEqual(
+    scenario.calls.rpc
+      .filter(({ name }) => name === "finalize_registration_customer_reminder_dispatch_v1")
+      .map(({ args }) => args.p_result),
+    ["unknown"],
+  )
   assertExactRpcTransport(scenario)
+})
+
+test("poisoned global fetch catches an omitted production override before any real network attempt", async () => {
+  // Break caught: the production factory silently stops forwarding its injected
+  // transport and falls back to global fetch at the SOLAPI boundary.
+  const scenario = createDbOwnedLifecycleScenario({ omitProviderFetch: true })
+  const response = await scenario.run()
+
+  assert.equal((await response.json()).outcome, "unknown")
+  assert.equal(scenario.calls.fetches.length, 0)
+  assert.equal(scenario.calls.globalFetchAttempts, 1)
+  assert.equal(scenario.calls.globalFetchRestores, 1)
+  assert.deepEqual(scenario.calls.globalFetchUrls, [SOLAPI_SEND_MANY_URL])
+  assert.equal(scenario.state.job.status, "delivery_unknown")
+})
+
+test("live cutoff drift after a real automatic read holds before marker mutation", async () => {
+  // Break caught: a live automatic-delivery cutoff changed after the source read
+  // does not prevent the production worker from crossing the provider boundary.
+  const scenario = createDbOwnedLifecycleScenario({
+    afterRead({ state }) {
+      state.activation.automaticDeliveryCutoffAt = "2026-08-13T00:00:00.000Z"
+    },
+  })
+  const response = await scenario.run()
+
+  assert.deepEqual(await response.json(), {
+    ok: true,
+    processed: true,
+    providerAttempted: false,
+    outcome: "held",
+  })
+  assert.equal(scenario.calls.gates.includes("begin:live-cutoff"), true)
+  assert.equal(scenario.calls.fetches.length, 0)
+  assert.equal(scenario.calls.globalFetchAttempts, 0)
+  assert.equal(scenario.calls.globalFetchRestores, 1)
+  assert.equal(scenario.calls.markerCount, 0)
+  assert.equal(scenario.state.job.status, "pending")
+  assert.equal(scenario.state.job.lastErrorCode, "pre_send_preparation_failed")
+  assertExactRpcTransport(scenario)
+})
+
+test("claimed lead-hours changes distinguish a pending refresh from an insufficient terminal cancel", async () => {
+  // Break caught: a claimed job with a changed lead time either sends, or loses
+  // the DB's distinct settings_changed versus lead_time_changed_insufficient state.
+  const refresh = createDbOwnedLifecycleScenario({
+    leadHours: 36,
+    afterClaim({ state }) { state.leadHours = 3 },
+  })
+  const insufficient = createDbOwnedLifecycleScenario({
+    leadHours: 3,
+    afterClaim({ state }) { state.leadHours = 4 },
+  })
+
+  const refreshed = await refresh.run()
+  const canceled = await insufficient.run()
+
+  assert.equal((await refreshed.json()).outcome, "skipped")
+  assert.deepEqual(
+    { status: refresh.state.job.status, error: refresh.state.job.lastErrorCode },
+    { status: "pending", error: "settings_changed" },
+  )
+  assert.equal((await canceled.json()).outcome, "skipped")
+  assert.deepEqual(
+    { status: insufficient.state.job.status, error: insufficient.state.job.lastErrorCode },
+    { status: "canceled", error: "lead_time_changed_insufficient" },
+  )
+  for (const scenario of [refresh, insufficient]) {
+    assert.equal(scenario.calls.gates.includes("begin:lead-hours"), true)
+    assert.equal(scenario.calls.fetches.length, 0)
+    assert.equal(scenario.calls.globalFetchAttempts, 0)
+    assert.equal(scenario.calls.globalFetchRestores, 1)
+    assert.equal(scenario.calls.markerCount, 0)
+    assertExactRpcTransport(scenario)
+  }
 })
