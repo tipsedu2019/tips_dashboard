@@ -4,6 +4,7 @@ import type {
   RegistrationCustomerMessageKind,
 } from "../registration-customer-message-contract.ts"
 import {
+  OBSERVATION_LOCATION_URLS,
   renderRegistrationCustomerMessage,
   type RegistrationCustomerMessageAdmissionPlan,
   type RegistrationCustomerMessageButton,
@@ -22,6 +23,24 @@ export type RegistrationCustomerMessageSourceRequest = Readonly<{
   sourceId: string
 }>
 
+export type RegistrationObservationCustomerMessageFacts = Readonly<{
+  studentName: string
+  subject: RegistrationCustomerMessageSubject
+  className: string
+  scheduledAt: string
+  place: string
+  campus: "본관" | "별관"
+  teacherName: string
+}>
+
+export type RegistrationObservationCustomerMessagePublicFacts = Readonly<{
+  subjectLabel: string
+  className: string
+  scheduleLabel: string
+  placeLabel: string
+  teacherLabel: string
+}>
+
 export type RegistrationCustomerMessagePublicSource = Readonly<{
   messageKind: RegistrationCustomerMessageKind
   sourceId: string
@@ -29,7 +48,9 @@ export type RegistrationCustomerMessagePublicSource = Readonly<{
   sourceRevision: number
   studentName: string
   recipientLast4: string
-  facts: RegistrationCustomerMessageRendered["facts"]
+  facts:
+    | RegistrationCustomerMessageRendered["facts"]
+    | RegistrationObservationCustomerMessagePublicFacts
   body: string
   buttons: ReadonlyArray<Readonly<{ name: string; type: "WL"; host: string }>>
 }>
@@ -63,6 +84,7 @@ export type RegistrationCustomerMessagePrivateSource = Readonly<{
   sourceFingerprint: string
   sourceFactsChecksum: string
   rendered: RegistrationCustomerMessageRendered
+  transportVariables?: Readonly<{ 학원위치URL: string }>
   previewContract: RegistrationCustomerMessagePreviewContract
   readinessContract: RegistrationCustomerMessageReadinessContract
 }>
@@ -84,6 +106,7 @@ const RFC3339_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/u
 const CLOCK_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u
 const HASH_PATTERN = /^[0-9a-f]{64}$/iu
+const LOWERCASE_HASH_PATTERN = /^[0-9a-f]{64}$/u
 const SUBJECT_ORDER: ReadonlyArray<RegistrationCustomerMessageSubject> = ["영어", "수학", "과학"]
 const WAITING_WORKFLOW_KIND: Readonly<Record<string, RegistrationCustomerMessageWaitingKind>> = {
   waiting_current_class: "current_class",
@@ -91,6 +114,36 @@ const WAITING_WORKFLOW_KIND: Readonly<Record<string, RegistrationCustomerMessage
   waiting_next_opening: "next_term_opening",
 }
 const PRIVATE_SOURCES = new WeakMap<object, RegistrationCustomerMessagePrivateSource>()
+
+const OBSERVATION_SOURCE_KEYS = Object.freeze([
+  "messageKind",
+  "sourceId",
+  "taskId",
+  "trackId",
+  "observationId",
+  "appointmentId",
+  "sourceRevision",
+  "sessionSourceRevision",
+  "bookingFactHash",
+  "studentName",
+  "parentPhoneDigits",
+  "subject",
+  "className",
+  "scheduledAt",
+  "place",
+  "campus",
+  "teacherName",
+])
+const NORMALIZED_SESSION_SOURCE_REVISION_KEYS = Object.freeze([
+  "authority",
+  "sessionId",
+  "revision",
+])
+const LEGACY_SESSION_SOURCE_REVISION_KEYS = Object.freeze([
+  "authority",
+  "sessionKey",
+  "contentHash",
+])
 
 class CanonicalNumber {
   readonly value: string
@@ -660,12 +713,121 @@ function admissionFacts(
   } as const
 }
 
+function observationSessionSourceRevision(value: unknown) {
+  const code = "registration_customer_message_source_invalid"
+  if (!isRecord(value)) sourceError(code)
+  if (
+    value.authority === "normalized"
+    && hasExactKeys(value, NORMALIZED_SESSION_SOURCE_REVISION_KEYS)
+  ) {
+    return Object.freeze({
+      authority: "normalized" as const,
+      sessionId: requiredUuid(value.sessionId, code),
+      revision: nonnegativeInteger(value.revision, code),
+    })
+  }
+  if (
+    value.authority === "legacy"
+    && hasExactKeys(value, LEGACY_SESSION_SOURCE_REVISION_KEYS)
+  ) {
+    return Object.freeze({
+      authority: "legacy" as const,
+      sessionKey: requiredText(value.sessionKey, code),
+      contentHash: requiredText(value.contentHash, code),
+    })
+  }
+  return sourceError(code)
+}
+
+function normalizedObservationSource(
+  kind: "observation_booking" | "observation_reminder",
+  inputSourceId: string,
+  raw: JsonRecord,
+) {
+  const code = "registration_customer_message_source_invalid"
+  if (!hasExactKeys(raw, OBSERVATION_SOURCE_KEYS) || raw.messageKind !== kind) {
+    sourceError(code)
+  }
+  const sourceId = requiredUuid(raw.sourceId, code)
+  const observationId = requiredUuid(raw.observationId, code)
+  if (sourceId !== inputSourceId || sourceId !== observationId) sourceError(code)
+  const taskId = requiredUuid(raw.taskId, code)
+  const trackId = requiredUuid(raw.trackId, code)
+  const appointmentId = requiredUuid(raw.appointmentId, code)
+  const revision = nonnegativeInteger(raw.sourceRevision, code)
+  if (revision < 1) sourceError(code)
+  const sessionSourceRevision = observationSessionSourceRevision(raw.sessionSourceRevision)
+  const bookingFactHash = requiredText(raw.bookingFactHash, code)
+  if (!LOWERCASE_HASH_PATTERN.test(bookingFactHash)) sourceError(code)
+  const studentName = requiredText(raw.studentName, code)
+  const parentPhoneDigits = requiredText(raw.parentPhoneDigits, code)
+  if (!PHONE_PATTERN.test(parentPhoneDigits)) sourceError(code)
+  if (!SUBJECT_ORDER.includes(raw.subject as RegistrationCustomerMessageSubject)) {
+    sourceError(code)
+  }
+  const subject = raw.subject as RegistrationCustomerMessageSubject
+  const className = requiredText(raw.className, code)
+  const scheduledAt = requiredText(raw.scheduledAt, code)
+  const scheduledAtEpoch = parsedTimestamp(scheduledAt, code).epoch
+  const place = requiredText(raw.place, code)
+  if (raw.campus !== "본관" && raw.campus !== "별관") sourceError(code)
+  const campus = raw.campus
+  const teacherName = requiredText(raw.teacherName, code)
+  const observationFacts = Object.freeze({
+    studentName,
+    subject,
+    className,
+    scheduledAt,
+    place,
+    campus,
+    teacherName,
+  }) satisfies RegistrationObservationCustomerMessageFacts
+  return {
+    taskId,
+    studentName,
+    parentPhoneDigits,
+    subjects: Object.freeze([subject]),
+    sourceRevision: revision,
+    observationFacts,
+    canonicalFacts: {
+      studentName,
+      subjects: Object.freeze([subject]),
+      className,
+      scheduledAt,
+      place,
+      campus,
+      teacherName,
+    } satisfies RegistrationCustomerMessageCanonicalFacts,
+    canonicalSource: {
+      messageKind: kind,
+      sourceId,
+      taskId,
+      trackId,
+      observationId,
+      appointmentId,
+      sourceRevision: revision,
+      sessionSourceRevision,
+      bookingFactHash,
+      studentName,
+      subject,
+      className,
+      scheduledAtEpoch,
+      place,
+      campus,
+      teacherName,
+    },
+  }
+}
+
 function normalizedSource(
   kind: RegistrationCustomerMessageKind,
   sourceId: string,
   raw: JsonRecord,
   now: Date,
 ) {
+  if (kind === "observation_booking" || kind === "observation_reminder") {
+    return normalizedObservationSource(kind, sourceId, raw)
+  }
   if (raw.messageKind !== kind || requiredUuid(raw.sourceId) !== sourceId) {
     sourceError("registration_customer_message_source_mismatch")
   }
@@ -739,6 +901,48 @@ function publicButtons(buttons: ReadonlyArray<RegistrationCustomerMessageButton>
   })))
 }
 
+function observationTransportVariables(
+  facts: RegistrationObservationCustomerMessageFacts,
+) {
+  return Object.freeze({
+    학원위치URL: OBSERVATION_LOCATION_URLS[facts.campus],
+  })
+}
+
+function observationBodyVariables(rendered: RegistrationCustomerMessageRendered) {
+  const value = (name: string) => requiredText(
+    rendered.variables[`#{${name}}`],
+    "registration_customer_message_source_invalid",
+  )
+  return Object.freeze({
+    학생명: value("학생명"),
+    과목: value("과목"),
+    수업명: value("수업명"),
+    예약일시: value("예약일시"),
+    장소: value("장소"),
+    담당선생님: value("담당선생님"),
+  })
+}
+
+function observationPublicFacts(
+  facts: RegistrationObservationCustomerMessageFacts,
+  rendered: RegistrationCustomerMessageRendered,
+): RegistrationObservationCustomerMessagePublicFacts {
+  return Object.freeze({
+    subjectLabel: rendered.facts.subjectLabel,
+    className: facts.className,
+    scheduleLabel: requiredText(
+      rendered.facts.scheduleLabel,
+      "registration_customer_message_source_invalid",
+    ),
+    placeLabel: requiredText(
+      rendered.facts.placeLabel,
+      "registration_customer_message_source_invalid",
+    ),
+    teacherLabel: facts.teacherName,
+  })
+}
+
 export function createRegistrationCustomerMessageSourceResolver(
   dependencies: SourceResolverDependencies,
 ): RegistrationCustomerMessageSourceResolver {
@@ -764,16 +968,40 @@ export function createRegistrationCustomerMessageSourceResolver(
         normalized.parentPhoneDigits,
         dependencies.recipientHashPepper,
       )
-      const fingerprint = sha256(canonicalJson({
-        domain: "registration-customer-message-source-fingerprint-v1",
-        recipientHash: hash,
-        source: normalized.canonicalSource,
-        template: {
-          key: input.messageKind,
-          revision: template.revision,
-          checksum: template.checksums.template,
-        },
-      }))
+      let observationFacts: RegistrationObservationCustomerMessageFacts | null = null
+      let transportVariables: Readonly<{ 학원위치URL: string }> | null = null
+      let fingerprint: string
+      if ("observationFacts" in normalized) {
+        observationFacts = normalized.observationFacts
+        transportVariables = observationTransportVariables(normalized.observationFacts)
+        fingerprint = sha256(canonicalJson({
+          domain: "registration-customer-message-source-fingerprint-v1",
+          rawCanonicalJson: canonicalJson(raw),
+          bodyVariables: observationBodyVariables(rendered),
+          transportVariables,
+          finalBody: rendered.body,
+          finalButtons: rendered.buttons,
+          appointmentNotificationRevision: normalized.sourceRevision,
+          bookingFactHash: normalized.canonicalSource.bookingFactHash,
+          recipientHash: hash,
+          template: {
+            key: input.messageKind,
+            revision: template.revision,
+            checksum: template.checksums.template,
+          },
+        }))
+      } else {
+        fingerprint = sha256(canonicalJson({
+          domain: "registration-customer-message-source-fingerprint-v1",
+          recipientHash: hash,
+          source: normalized.canonicalSource,
+          template: {
+            key: input.messageKind,
+            revision: template.revision,
+            checksum: template.checksums.template,
+          },
+        }))
+      }
       const factsChecksum = sourceFactsChecksum(raw)
       const publicSource = Object.freeze({
         messageKind: input.messageKind,
@@ -782,7 +1010,9 @@ export function createRegistrationCustomerMessageSourceResolver(
         sourceRevision: normalized.sourceRevision,
         studentName: normalized.studentName,
         recipientLast4: normalized.parentPhoneDigits.slice(-4),
-        facts: rendered.facts,
+        facts: observationFacts
+          ? observationPublicFacts(observationFacts, rendered)
+          : rendered.facts,
         body: rendered.body,
         buttons: publicButtons(rendered.buttons),
       })
@@ -804,6 +1034,7 @@ export function createRegistrationCustomerMessageSourceResolver(
         sourceFingerprint: fingerprint,
         sourceFactsChecksum: factsChecksum,
         rendered,
+        ...(transportVariables ? { transportVariables } : {}),
         previewContract,
         readinessContract: Object.freeze({
           credentialsConfigured: dependencies.catalog.credentialsConfigured,

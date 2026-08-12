@@ -255,6 +255,17 @@ test("appointment source is normalized, stably sorted, and rendered in KST", asy
   assert.match(resolved.body, /김팁스 학생의 레벨테스트 예약/u)
   assert.match(resolved.body, /일시: 2026년 8월 5일 수요일 오후 3:30/u)
   assert.match(resolved.body, /과목: 영어 · 수학/u)
+
+  const privateSource = readRegistrationCustomerMessagePrivateSource(resolved)
+  assert.equal(
+    privateSource.sourceFingerprint,
+    "42f8d43b4d855e5b60e5511b40d2099184548f6478d0a337eca3dea81f829f51",
+  )
+  assert.equal(
+    privateSource.sourceFactsChecksum,
+    "68583e2955b18f4fa649daadf1e39f7a96d538bf4e26bf98e05f2186d89a101a",
+  )
+  assert.equal(Object.hasOwn(privateSource, "transportVariables"), false)
 })
 
 test("waiting and admission variants normalize their canonical facts", async () => {
