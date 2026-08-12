@@ -269,7 +269,7 @@ function timestamp(value: unknown, code: "payload_schema_unsupported" | "schedul
   if (typeof value !== "string" || !value.trim() || !Number.isFinite(Date.parse(value))) {
     adapterError(code)
   }
-  return new Date(value).toISOString()
+  return value.trim()
 }
 
 function canonicalJson(value: unknown): string {

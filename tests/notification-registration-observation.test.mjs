@@ -619,6 +619,18 @@ test("builder binds claim snapshots to the canonical source and rejects one-byte
     source,
     preparation: job.preparationSnapshot,
   }), payloads.scheduled)
+  const microsecondJob = {
+    ...job,
+    dueAt: "2026-08-17T08:00:00.123456+00:00",
+    expiresAt: "2026-08-18T08:00:00.654321+00:00",
+  }
+  const microsecondPayload = buildRegistrationObservationChatPayloadV3({
+    job: microsecondJob,
+    source,
+    preparation: microsecondJob.preparationSnapshot,
+  })
+  assert.equal(microsecondPayload.occurred_at, microsecondJob.dueAt)
+  assert.equal(microsecondPayload.delivery_expires_at, microsecondJob.expiresAt)
   assert.throws(
     () => buildRegistrationObservationChatPayloadV3({
       job: { ...job, bookingFactHash: "b".repeat(64) },
