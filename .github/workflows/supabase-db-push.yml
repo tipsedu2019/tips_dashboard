@@ -46,9 +46,21 @@ jobs:
           echo "Using Supabase project ref from supabase/config.toml"
 
       - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v2
-        with:
-          version: 2.107.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="2.107.0"
+          archive="supabase_${version}_linux_amd64.tar.gz"
+          cli_dir="${RUNNER_TEMP}/supabase-cli"
+          archive_path="${RUNNER_TEMP}/${archive}"
+
+          curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 --output "${archive_path}" "https://github.com/supabase/cli/releases/download/v${version}/${archive}"
+          echo "ea233b337be698cee5bbca0795ee3e63b9dd154948c515c03cb72f191b3d103c  ${archive_path}" | sha256sum --check --strict
+
+          mkdir -p "${cli_dir}"
+          tar -xzf "${archive_path}" -C "${cli_dir}"
+          "${cli_dir}/supabase" --version
+          echo "${cli_dir}" >> "${GITHUB_PATH}"
 
       - name: Link project
         env:

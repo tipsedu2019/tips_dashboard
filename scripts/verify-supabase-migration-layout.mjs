@@ -10,7 +10,7 @@ const WORKFLOWS_RELATIVE_PATH = join(".github", "workflows")
 const REQUIRED_DB_PUSH_WORKFLOW = "supabase-db-push.yml"
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand Supabase secret scope before the verifier exits.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "0c278043f29b67b24035a9fc03f72247739ee59cd89f6b84b846913c568004ca"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "d2ee5d1a1d55207d78870a7fc5b7ab0fea7e44064f2955a9fb92bda8933bf807"
 const SCIENCE_MIGRATION_FILE = "20260722120000_science_notification_connection.sql"
 const SCIENCE_MIGRATION_SHA256 = "ce0ca95663fe2a7dd5ae54ebad6b09ae315dbed548bbc074185230907441dd46"
 const PREPARE_ACL_MIGRATION_FILE = "20260722130000_notification_prepare_acl_hardening.sql"
