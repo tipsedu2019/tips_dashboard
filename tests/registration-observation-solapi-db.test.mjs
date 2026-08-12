@@ -287,9 +287,10 @@ test("automatic dispatch is job locked, bounded, and keeps the legacy raw result
   assert.match(claim, /order by job\.due_at, job\.job_id for update of job skip locked limit 100/);
   assert.match(
     claim,
-    /job\.message_kind = 'appointment_reminder' or v_runtime_version = 1/,
-    "runtime-zero observation rows must be filtered before the bounded page",
+    /case job\.message_kind when 'appointment_reminder' then true when 'observation_reminder' then public\.registration_observation_runtime_version\(\) = 1 else false end/,
+    "only observation rows may read runtime while filtering before the bounded page",
   );
+  assert.doesNotMatch(claim, /v_runtime_version\s*:=/);
   assert.match(claim, /claim_lease_expired/);
   assert.match(claim, /scheduled_marker_recovery/);
   const legacyResult = claim.match(

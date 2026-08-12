@@ -1425,7 +1425,6 @@ declare
   v_receipt dashboard_private.registration_customer_solapi_template_receipts%rowtype;
   v_live_message public.ops_registration_customer_messages%rowtype;
   v_source jsonb;
-  v_runtime_version integer;
 begin
   if (select auth.role()) <> 'service_role' then
     raise exception 'registration_customer_reminder_worker_unauthorized' using errcode = '42501';
@@ -1442,7 +1441,6 @@ begin
     set succeeded_at = excluded.succeeded_at, updated_at = excluded.updated_at;
   perform dashboard_private.materialize_registration_observation_solapi_events_v1(100);
   perform dashboard_private.sync_registration_customer_reminder_jobs_v1();
-  v_runtime_version := public.registration_observation_runtime_version();
 
   update public.ops_registration_customer_messages message
   set status = 'unknown',
@@ -1493,10 +1491,12 @@ begin
       and job.due_at <= pg_catalog.clock_timestamp()
       and appointment.status = 'scheduled'
       and appointment.scheduled_at > pg_catalog.clock_timestamp()
-      and (
-        job.message_kind = 'appointment_reminder'
-        or v_runtime_version = 1
-      )
+      and case job.message_kind
+        when 'appointment_reminder' then true
+        when 'observation_reminder' then
+          public.registration_observation_runtime_version() = 1
+        else false
+      end
     order by job.due_at, job.job_id
     for update of job skip locked
     limit 100

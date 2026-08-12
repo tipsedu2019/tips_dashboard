@@ -647,9 +647,25 @@ exception when others then
   );
 end;
 $$;
+create function pg_temp.capture_automatic_claim()
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  return public.claim_registration_customer_reminder_job_v1();
+exception when others then
+  return pg_catalog.jsonb_build_object(
+    'caughtSqlstate', sqlstate,
+    'caughtError', sqlerrm
+  );
+end;
+$$;
 grant execute on function pg_temp.dispatch_contract(jsonb, text, text) to service_role;
 grant execute on function pg_temp.dispatch_readiness_contract(jsonb, text, text) to service_role;
 grant execute on function pg_temp.capture_automatic_begin(uuid, uuid, jsonb, jsonb) to service_role;
+grant execute on function pg_temp.capture_automatic_claim() to service_role;
 create temporary table dispatch_rpc_results(
   label text primary key,
   response jsonb not null
@@ -1241,15 +1257,54 @@ update dashboard_private.registration_customer_solapi_activation
 set live_test_message_id = (select (response ->> 'messageId')::uuid from dispatch_rpc_results where label = 'appointment manual claim'),
     live_test_confirmed_at = pg_catalog.clock_timestamp()
 where message_kind = 'appointment_reminder';
+
+-- Preserve and temporarily replace the real runtime reader. A fully eligible
+-- legacy claim must succeed without invoking this observation-only dependency.
+create temporary table dispatch_runtime_reader_definition as
+select pg_catalog.pg_get_functiondef(
+  'public.registration_observation_runtime_version()'::pg_catalog.regprocedure
+) as definition;
+create or replace function public.registration_observation_runtime_version()
+returns integer
+language plpgsql
+stable
+security invoker
+set search_path = ''
+as $$
+begin
+  raise exception 'registration_observation_runtime_reader_unavailable'
+    using errcode = '55000';
+end;
+$$;
 set local role service_role;
 insert into dispatch_appointment_claim_results values
-  ('appointment live', public.claim_registration_customer_reminder_job_v1());
+  ('appointment live', pg_temp.capture_automatic_claim());
 reset role;
 select is(
-  (select response ->> 'jobId' from dispatch_appointment_claim_results where label = 'appointment live'),
-  'd6200000-0000-4000-8000-000000000060',
-  'appointment live with matching receipt and accepted live test retains the legacy raw claim'
+  (
+    select pg_catalog.jsonb_build_object(
+      'jobId', result.response ->> 'jobId',
+      'caughtError', result.response ->> 'caughtError',
+      'observationJobs', (
+        select count(*)
+        from dashboard_private.registration_customer_reminder_jobs job
+        where job.message_kind = 'observation_reminder'
+      )
+    )
+    from dispatch_appointment_claim_results result
+    where result.label = 'appointment live'
+  ),
+  '{"caughtError":null,"jobId":"d6200000-0000-4000-8000-000000000060","observationJobs":0}'::jsonb,
+  'fully eligible appointment claim succeeds without invoking the observation runtime reader'
 );
+do $restore_runtime_reader$
+begin
+  execute (
+    select definition
+    from dispatch_runtime_reader_definition
+  );
+end;
+$restore_runtime_reader$;
 update dashboard_private.registration_customer_reminder_jobs
 set status = 'pending', claim_token = null, claim_expires_at = null,
     available_at = pg_catalog.clock_timestamp() - interval '1 hour',
