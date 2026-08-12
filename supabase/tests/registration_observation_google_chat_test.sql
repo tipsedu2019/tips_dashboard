@@ -1864,7 +1864,7 @@ select
   '94000000-0000-4000-8000-000000000209',
   observation.id,observation.appointment_id,1,'observation_scheduled',
   observation.booking_fact_hash,observation.source_revision,
-  clock.starts_at - interval '2 hours 59 minutes 59 seconds'
+  pg_catalog.clock_timestamp()
 from public.ops_registration_observations observation
 cross join chat_lifecycle_clock clock
 where observation.id='94000000-0000-4000-8000-000000000208';
@@ -4499,6 +4499,8 @@ declare
   v_payload_fingerprint text;
   v_before_notifications bigint;
   v_before_attempts bigint;
+  v_expired_at timestamptz := pg_catalog.clock_timestamp()-interval '1 second';
+  v_occurred_at timestamptz := v_expired_at-interval '1 minute';
   v_receipt jsonb;
   v_result jsonb;
 begin
@@ -4511,9 +4513,13 @@ begin
     where audit.entity_kind='notification_external_attempt'
       and audit.action='external_attempt_registered';
     select pg_catalog.jsonb_set(
-      event.payload,
+      pg_catalog.jsonb_set(
+        event.payload,
+        '{occurred_at}',
+        pg_catalog.to_jsonb(v_occurred_at)
+      ),
       '{delivery_expires_at}',
-      pg_catalog.to_jsonb(pg_catalog.clock_timestamp()-interval '1 second')
+      pg_catalog.to_jsonb(v_expired_at)
     ) into v_payload
     from dashboard_private.notification_events event
     where event.id=p_event_id;
@@ -4521,7 +4527,8 @@ begin
       dashboard_private.notification_canonical_json_v1(v_payload)
     );
     update dashboard_private.notification_events
-    set payload=v_payload
+    set occurred_at=v_occurred_at,
+        payload=v_payload
     where id=p_event_id;
     update dashboard_private.notification_deliveries
     set observation_payload_snapshot=v_payload,
