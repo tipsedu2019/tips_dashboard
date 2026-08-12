@@ -751,6 +751,11 @@ export function RegistrationApplication({
       ? customerMessageTarget.sourceId === detail.task.id
       : customerMessageTarget.messageKind === "waiting_notice"
         ? orderedTracks.some((track) => track.id === customerMessageTarget.sourceId)
+        : customerMessageTarget.messageKind === "observation_booking"
+          ? activeObservationDetail?.track.taskId === detail.task.id
+            && activeObservationDetail.currentObservation?.taskId === detail.task.id
+            && activeObservationDetail.currentObservation.trackId === activeObservationDetail.track.trackId
+            && activeObservationDetail.currentObservation.observationId === customerMessageTarget.sourceId
         : detail.appointments.some((appointment) => appointment.id === customerMessageTarget.sourceId)
   ) ? customerMessageTarget : null
   const admissionApplicationState = getRegistrationAdmissionApplicationState({

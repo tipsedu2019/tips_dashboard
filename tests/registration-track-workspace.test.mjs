@@ -305,6 +305,11 @@ async function loadMountedRegistrationApplication({
   const RegistrationObservationFeedbackPanel = function MountedRegistrationObservationFeedbackPanel() {
     return createElement("div", { "data-mounted-observation-feedback": "" })
   }
+  const RegistrationAlimtalkPreviewDialog = function MountedRegistrationAlimtalkPreviewDialog(props) {
+    return createElement("div", {
+      "data-mounted-customer-message-dialog": String(props.open),
+    })
+  }
   const sectionStates = Object.fromEntries([
     "inquiry",
     "level_test",
@@ -333,7 +338,7 @@ async function loadMountedRegistrationApplication({
     ["@/components/ui/button", { Button }],
     ["@/lib/supabase", { supabase: {} }],
     ["./registration-application-admission-section", { RegistrationApplicationAdmissionSection: Passthrough }],
-    ["./registration-alimtalk-preview-dialog", { RegistrationAlimtalkPreviewDialog: Passthrough }],
+    ["./registration-alimtalk-preview-dialog", { RegistrationAlimtalkPreviewDialog }],
     ["./registration-application-consultation-section", { RegistrationApplicationConsultationSection: Passthrough }],
     ["./registration-application-inquiry-section", {
       RegistrationApplicationInquirySection: Passthrough,
@@ -472,6 +477,7 @@ async function loadMountedRegistrationApplication({
   return {
     RegistrationApplication: runtimeModule.exports.RegistrationApplication,
     RegistrationApplicationShell,
+    RegistrationAlimtalkPreviewDialog,
     RegistrationObservationEditor,
     RegistrationObservationFeedbackPanel,
   }
@@ -1776,6 +1782,149 @@ test("registration application threads the exact deep-linked attempt into the re
     /const activeFeedbackTeacherProfileId = activeDeepLinkedAttempt\?\.teacherProfileId[\s\S]*?activeObservationDetail\?\.currentObservation\?\.teacherProfileId/,
   )
   assert.match(detail, /viewerId === activeFeedbackTeacherProfileId/)
+})
+
+test("mounted registration application accepts only its canonical observation booking target", async () => {
+  const taskId = "76500000-0000-4000-8000-000000000001"
+  const trackId = "76500000-0000-4000-8000-000000000002"
+  const appointmentId = "76500000-0000-4000-8000-000000000003"
+  const observationId = "76500000-0000-4000-8000-000000000004"
+  const unknownObservationId = "76500000-0000-4000-8000-000000000005"
+  const directorId = "76500000-0000-4000-8000-000000000006"
+  const currentObservation = {
+    observationId,
+    taskId,
+    trackId,
+    appointmentId,
+    status: "scheduled",
+    appointmentStatus: "scheduled",
+    revision: 3,
+    appointmentNotificationRevision: 4,
+    teacherProfileId: directorId,
+  }
+  const managerDetail = {
+    track: {
+      trackId,
+      taskId,
+      subject: "영어",
+      workflowStatus: "observation_requested",
+      workflowRevision: 9,
+      observationReturnWorkflowStatus: null,
+      directorProfileId: directorId,
+    },
+    currentObservation,
+    latestEnrollmentDecisionObservationId: null,
+    latestDecisionObservation: null,
+    attempts: [currentObservation],
+    classes: [],
+  }
+  const hookHarness = createRegistrationEditorHookHarness()
+  const mounted = await loadMountedRegistrationApplication({
+    hookHarness,
+    loadManagerDetail: async () => managerDetail,
+    loadFeedback: async () => null,
+  })
+  const props = {
+    task: { id: taskId, title: "김학생 등록", studentName: "김학생", type: "registration" },
+    detail: {
+      task: { id: taskId, title: "김학생 등록", studentName: "김학생", registration: null },
+      commonRevision: 1,
+      tracks: [{
+        id: trackId,
+        taskId,
+        subject: "영어",
+        status: "observation_requested",
+        workflowStatus: "observation_requested",
+        workflowRevision: 9,
+        directorProfileId: directorId,
+        observationAttemptCount: 1,
+        observationSummaryVisible: true,
+        migrationReviewRequired: false,
+        legacy: false,
+        waitingKind: null,
+      }],
+      appointments: [{ id: appointmentId, taskId, trackId }],
+      levelTests: [],
+      consultations: [],
+      enrollments: [],
+      admissionBatches: [],
+      admissionApplicationMessageStatus: "not_sent",
+      admissionApplicationMessageClaimActive: false,
+      admissionApplicationMessageId: null,
+    },
+    focusTrackId: trackId,
+    viewerId: "76500000-0000-4000-8000-000000000007",
+    viewerRole: "staff",
+    onFocusTrack: () => undefined,
+    onReload: async () => undefined,
+    onWarning: () => undefined,
+    subjectCapabilities: [],
+    customerMessageClient: {},
+    observationRuntime: { available: true, runtimeVersion: 1 },
+    closeAction: null,
+  }
+  const originalWindow = globalThis.window
+  const originalDocument = globalThis.document
+  const originalHTMLElement = globalThis.HTMLElement
+  globalThis.HTMLElement = class HTMLElement {}
+  globalThis.window = {
+    requestAnimationFrame(callback) {
+      callback()
+      return 1
+    },
+    cancelAnimationFrame() {},
+  }
+  globalThis.document = {
+    activeElement: null,
+    getElementById() {
+      return { scrollIntoView() {} }
+    },
+  }
+
+  try {
+    let view = hookHarness.render(mounted.RegistrationApplication, props)
+    hookHarness.flushEffects()
+    await flushMountedRegistrationWork()
+    view = hookHarness.render(mounted.RegistrationApplication, props)
+    hookHarness.flushEffects()
+    const shell = findMountedRegistrationElement(
+      view,
+      (node) => node.type === mounted.RegistrationApplicationShell,
+      "registration application shell",
+    )
+    const editor = findMountedRegistrationElement(
+      shell.props.observation,
+      (node) => node.type === mounted.RegistrationObservationEditor,
+      "current observation editor",
+    )
+
+    editor.props.onOpenCustomerMessage({ messageKind: "observation_booking", sourceId: observationId })
+    view = hookHarness.render(mounted.RegistrationApplication, props)
+    hookHarness.flushEffects()
+    let dialog = findMountedRegistrationElement(
+      view,
+      (node) => node.type === mounted.RegistrationAlimtalkPreviewDialog,
+      "customer message dialog",
+    )
+    assert.equal(dialog.props.open, true)
+    assert.deepEqual(dialog.props.target, { messageKind: "observation_booking", sourceId: observationId })
+
+    editor.props.onOpenCustomerMessage({ messageKind: "observation_booking", sourceId: unknownObservationId })
+    view = hookHarness.render(mounted.RegistrationApplication, props)
+    hookHarness.flushEffects()
+    dialog = findMountedRegistrationElement(
+      view,
+      (node) => node.type === mounted.RegistrationAlimtalkPreviewDialog,
+      "fail-closed customer message dialog",
+    )
+    assert.equal(dialog.props.open, false)
+    assert.equal(dialog.props.target, null)
+  } finally {
+    hookHarness.cleanup()
+    globalThis.window = originalWindow
+    globalThis.document = originalDocument
+    globalThis.HTMLElement = originalHTMLElement
+  }
 })
 
 test("mounted terminal deep links preserve exact feedback role and status rules", async (t) => {

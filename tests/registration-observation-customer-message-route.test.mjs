@@ -123,6 +123,7 @@ function createObservationProductionHarness({
   activationMode = "off",
   readinessBlockers = [],
   providerOutcome = "accepted",
+  interleavedHistory = false,
 } = {}) {
   const calls = {
     actorTables: [],
@@ -131,6 +132,7 @@ function createObservationProductionHarness({
     providerSend: 0,
     marker: 0,
     release: 0,
+    currentHistoryFilters: [],
   }
   const previews = new Map()
   const messages = new Map()
@@ -143,6 +145,7 @@ function createObservationProductionHarness({
   let currentRawSource = structuredClone(RAW_SOURCE)
   let sourceIneligible = false
   let runtimeBeforeNextMarker = null
+  let currentContractIdentity = null
 
   const actorClient = {
     from(table) {
@@ -168,6 +171,94 @@ function createObservationProductionHarness({
   }
 
   const serviceClient = {
+    from(table) {
+      if (table === "ops_registration_customer_messages") {
+        const filters = []
+        const orders = []
+        return {
+          select(columns) {
+            assert.match(columns, /source_fingerprint/)
+            return this
+          },
+          eq(column, value) {
+            filters.push([column, value])
+            return this
+          },
+          order(column, options) {
+            orders.push([column, options])
+            return this
+          },
+          async limit(value) {
+            assert.equal(value, 1)
+            assert.deepEqual(filters, [
+              ["task_id", IDS.task],
+              ["observation_id", IDS.observation],
+              ["message_kind", "observation_booking"],
+              ["source_revision", currentRawSource.sourceRevision],
+              ["source_fingerprint", currentContractIdentity.sourceFingerprint],
+              ["recipient_hash", currentContractIdentity.recipientHash],
+            ])
+            assert.deepEqual(orders, [
+              ["created_at", { ascending: false }],
+              ["id", { ascending: false }],
+            ])
+            calls.currentHistoryFilters.push(...filters)
+            if (!interleavedHistory) {
+              return {
+                data: [...messages.values()]
+                  .filter((state) => state.sourceFingerprint === currentContractIdentity.sourceFingerprint)
+                  .slice(-value)
+                  .reverse()
+                  .map((state) => ({
+                    id: state.messageId,
+                    message_kind: "observation_booking",
+                    status: state.status,
+                    confirmed_by: IDS.actor,
+                    confirmed_at: "2026-08-12T01:00:00.000Z",
+                    updated_at: "2026-08-12T01:00:01.000Z",
+                    recipient_last4: "5678",
+                    provider_attempt_count: state.status === "pending" ? 0 : 1,
+                    provider_attempt_started_at: state.status === "pending"
+                      ? null
+                      : "2026-08-12T00:00:00.000Z",
+                    delivery_origin: "manual",
+                  })),
+                error: null,
+              }
+            }
+            return {
+              data: [{
+                id: IDS.message,
+                message_kind: "observation_booking",
+                status: "unknown",
+                confirmed_by: IDS.actor,
+                confirmed_at: "2026-08-12T02:00:00.000Z",
+                updated_at: "2026-08-12T02:01:00.000Z",
+                recipient_last4: "5678",
+                provider_attempt_count: 1,
+                provider_attempt_started_at: "2000-01-01T00:00:00.000Z",
+                delivery_origin: "manual",
+              }],
+              error: null,
+            }
+          },
+        }
+      }
+      if (table === "profiles") {
+        return {
+          select(columns) {
+            assert.equal(columns, "id,name")
+            return this
+          },
+          async in(column, values) {
+            assert.equal(column, "id")
+            assert.deepEqual(values, [IDS.actor])
+            return { data: [{ id: IDS.actor, name: "현재 담당자" }], error: null }
+          },
+        }
+      }
+      throw new Error(`unexpected observation production table: ${table}`)
+    },
     async rpc(name, args) {
       calls.rpcNames.push(name)
       if (name === "resolve_registration_customer_message_source_v1") {
@@ -182,9 +273,13 @@ function createObservationProductionHarness({
         return { data: structuredClone(currentRawSource), error: null }
       }
       if (name === "get_registration_customer_solapi_readiness_v1") {
+        currentContractIdentity = {
+          sourceFingerprint: args.p_template_contract.sourceFingerprint,
+          recipientHash: args.p_template_contract.recipientHash,
+        }
         const duplicateLocked = [...messages.values()].some(
           (state) => state.sourceFingerprint === args.p_template_contract.sourceFingerprint,
-        )
+        ) || interleavedHistory
         return {
           data: readiness(committedRuntimeVersion, currentActivationMode, [
             ...readinessBlockers,
@@ -194,6 +289,21 @@ function createObservationProductionHarness({
         }
       }
       if (name === "list_registration_customer_messages_v1") {
+        if (interleavedHistory) {
+          return {
+            data: [{
+              messageId: IDS.raceMessage,
+              messageKind: "observation_booking",
+              currentStatus: "accepted",
+              confirmedByName: "이전 담당자",
+              confirmedAt: "2026-08-12T00:00:00.000Z",
+              updatedAt: "2026-08-12T00:01:00.000Z",
+              recipientLast4: "5678",
+              canCheck: false,
+            }],
+            error: null,
+          }
+        }
         const history = [...messages.values()].map((state) => ({
           messageId: state.messageId,
           messageKind: "observation_booking",
@@ -529,4 +639,31 @@ test("a prior booking revision stays in history without locking a rescheduled re
   assert.equal(rescheduled.readiness.blockers.includes("duplicate_locked"), false)
   assert.equal(rescheduled.latestMessage, null)
   assert.equal(harness.calls.providerSend, 1)
+})
+
+test("observation preview binds sender, time, and status to the current private contract before limiting history", async () => {
+  const harness = createObservationProductionHarness({
+    runtimeVersion: 1,
+    activationMode: "live",
+    interleavedHistory: true,
+  })
+
+  const response = await harness.handlers.preview(operatorRequest("/preview", OBSERVATION_BOOKING_TARGET))
+  const preview = await response.json()
+
+  assert.equal(response.status, 200)
+  assert.equal(preview.previewId, null)
+  assert.equal(preview.readiness.blockers.includes("duplicate_locked"), true)
+  assert.deepEqual(preview.latestMessage, {
+    messageId: IDS.message,
+    messageKind: "observation_booking",
+    currentStatus: "unknown",
+    confirmedByName: "현재 담당자",
+    confirmedAt: "2026-08-12T02:00:00.000Z",
+    updatedAt: "2026-08-12T02:01:00.000Z",
+    recipientLast4: "5678",
+    canCheck: true,
+  })
+  assert.equal(harness.calls.currentHistoryFilters.length, 6)
+  assert.equal(harness.calls.providerSend, 0)
 })
