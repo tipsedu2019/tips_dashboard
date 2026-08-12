@@ -12,20 +12,23 @@ import { Label } from "@/components/ui/label"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/providers/auth-provider"
 
-import type { RegistrationCustomerMessageKind } from "./registration-customer-message-contract"
+import type {
+  RegistrationCustomerMessageKind,
+  RegistrationObservationSolapiReadiness,
+} from "./registration-customer-message-contract"
 import { createRegistrationCustomerMessageAdminClient } from "./registration-customer-message-service"
 import { runRegistrationCustomerMessageRolloutAction } from "./registration-customer-message-rollout"
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-const MESSAGE_KIND_LABELS: Readonly<Record<RegistrationCustomerMessageKind, string>> = Object.freeze({
+export const MESSAGE_KIND_LABELS: Readonly<Record<RegistrationCustomerMessageKind, string>> = Object.freeze({
   level_test_booking: "레벨테스트 예약 안내",
   visit_consultation_booking: "방문상담 예약 안내",
   appointment_reminder: "예약 리마인드",
   waiting_notice: "대기 안내",
   admission_application: "입학신청서 안내",
   observation_booking: "청강 예약 안내",
-  observation_reminder: "청강 일정 안내",
+  observation_reminder: "청강 리마인드",
 })
 const ROLLOUT_PANEL_MESSAGE_KINDS: ReadonlyArray<RegistrationCustomerMessageKind> = Object.freeze([
   "level_test_booking",
@@ -33,6 +36,8 @@ const ROLLOUT_PANEL_MESSAGE_KINDS: ReadonlyArray<RegistrationCustomerMessageKind
   "appointment_reminder",
   "waiting_notice",
   "admission_application",
+  "observation_booking",
+  "observation_reminder",
 ])
 
 type RolloutRowState = Readonly<{
@@ -68,6 +73,10 @@ function statusLabel(status: RolloutRowState["status"]) {
   return "꺼짐"
 }
 
+function readinessFact(value: boolean) {
+  return value ? "준비됨" : "미준비"
+}
+
 export function RegistrationCustomerMessageRolloutPanel() {
   const { isAdmin } = useAuth()
   const client = React.useMemo(() => createRegistrationCustomerMessageAdminClient({ getAccessToken }), [])
@@ -76,6 +85,9 @@ export function RegistrationCustomerMessageRolloutPanel() {
   const [receiptConfirmed, setReceiptConfirmed] = React.useState<Partial<Record<RegistrationCustomerMessageKind, boolean>>>({})
   const [rowState, setRowState] = React.useState<Partial<Record<RegistrationCustomerMessageKind, RolloutRowState>>>({})
   const [workingKind, setWorkingKind] = React.useState<RegistrationCustomerMessageKind | null>(null)
+  const [readiness, setReadiness] = React.useState<RegistrationObservationSolapiReadiness | null>(null)
+  const [readinessError, setReadinessError] = React.useState("")
+  const [refreshingReadiness, setRefreshingReadiness] = React.useState(false)
 
   const updateRow = React.useCallback((messageKind: RegistrationCustomerMessageKind, next: RolloutRowState) => {
     setRowState((current) => ({ ...current, [messageKind]: next }))
@@ -133,6 +145,19 @@ export function RegistrationCustomerMessageRolloutPanel() {
     }
   }, [client, messageIds, receiptConfirmed, updateRow, verificationTaskId, workingKind])
 
+  const refreshReadiness = React.useCallback(async () => {
+    if (refreshingReadiness) return
+    setRefreshingReadiness(true)
+    setReadinessError("")
+    try {
+      setReadiness(await client.inspectObservationReadiness())
+    } catch (error) {
+      setReadinessError(readableError(error))
+    } finally {
+      setRefreshingReadiness(false)
+    }
+  }, [client, refreshingReadiness])
+
   if (!isAdmin) {
     return (
       <Card className="mx-auto max-w-2xl">
@@ -161,6 +186,29 @@ export function RegistrationCustomerMessageRolloutPanel() {
           </div>
         </CardHeader>
         <CardContent className="grid gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">청강 자동 발송 준비 상태</p>
+              <p className="text-sm text-muted-foreground">상태 확인은 읽기 전용이며 발송·전환을 실행하지 않습니다.</p>
+            </div>
+            <Button type="button" variant="outline" onClick={() => void refreshReadiness()} disabled={refreshingReadiness}>
+              {refreshingReadiness ? <Loader2 className="animate-spin" /> : null}
+              상태 새로고침
+            </Button>
+          </div>
+          {readiness ? (
+            <dl className="grid gap-2 rounded-md bg-muted/45 p-3 text-sm sm:grid-cols-2">
+              <div><dt className="text-xs text-muted-foreground">스케줄 설치</dt><dd>{readinessFact(readiness.schedule.installed)}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">스케줄 활성</dt><dd>{readinessFact(readiness.schedule.active)}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">계약 준비</dt><dd>{readinessFact(readiness.schedule.contractReady)}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">Vault 준비</dt><dd>{readinessFact(readiness.schedule.vaultReady)}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">최근 실행</dt><dd>{readiness.schedule.heartbeatCurrent ? readiness.schedule.lastSucceededAt || "확인 필요" : "확인 필요"}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">청강 예약 수신 확인</dt><dd>{readinessFact(readiness.bookingReceipt)}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">청강 리마인드 수신 확인</dt><dd>{readinessFact(readiness.reminderReceipt)}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">대기 작업</dt><dd>{readiness.pending}</dd></div>
+            </dl>
+          ) : null}
+          {readinessError ? <p role="alert" className="text-sm text-destructive">{readinessError}</p> : null}
           <Label htmlFor="verification-task-id">테스트 등록 ID</Label>
           <Input
             id="verification-task-id"

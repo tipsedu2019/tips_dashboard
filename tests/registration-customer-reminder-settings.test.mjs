@@ -9,11 +9,12 @@ import {
 const SETTINGS = Object.freeze({
   enabled: false,
   leadHours: 3,
-  revision: "1",
+  revision: "2",
   updatedAt: "2026-08-08T06:00:00.000Z",
   ready: false,
   status: "approval_pending",
   editable: true,
+  activeKinds: Object.freeze(["observation_reminder"]),
 })
 
 test("설정 service는 access token을 사용하고 provider 식별자를 받지 않는다", async () => {
@@ -28,14 +29,18 @@ test("설정 service는 access token을 사용하고 provider 식별자를 받�
   })
 
   assert.deepEqual(await service.get(), SETTINGS)
-  assert.deepEqual(await service.update({ enabled: true, leadHours: 4, expectedRevision: "1" }), SETTINGS)
+  assert.deepEqual(await service.update({ enabled: true, leadHours: 3, expectedRevision: "2" }), SETTINGS)
   assert.equal(calls[0].init.headers.Authorization, "Bearer access-token")
   assert.equal(calls[1].init.method, "PATCH")
-  assert.deepEqual(JSON.parse(calls[1].init.body), {
+  const updateRequest = calls[1].init
+  assert.deepEqual(JSON.parse(updateRequest.body), {
     enabled: true,
-    leadHours: 4,
-    expectedRevision: "1",
+    leadHours: 3,
+    expectedRevision: "2",
   })
+  assert.equal(updateRequest.body.includes("templateId"), false)
+  assert.equal(updateRequest.body.includes("catalogChecksum"), false)
+  assert.equal(updateRequest.body.includes("pfId"), false)
   assert.equal(calls.some(({ init }) => JSON.stringify(init).includes("templateId")), false)
 })
 
@@ -69,7 +74,7 @@ test("설정 조회와 저장은 서버가 멈춰도 제한시간 내 종료한�
   })
 
   await assert.rejects(service.get())
-  await assert.rejects(service.update({ enabled: false, leadHours: 3, expectedRevision: "1" }))
+  await assert.rejects(service.update({ enabled: false, leadHours: 3, expectedRevision: "2" }))
   assert.equal(signals.length, 2)
   assert.equal(signals.every((signal) => signal?.aborted), true)
 })
@@ -83,8 +88,10 @@ test("등록 알림 화면은 고객 자동 발송과 예약 N시간 전만 노�
   assert.match(panel, /activeWorkflow === "registration"[\s\S]*RegistrationCustomerReminderSettings/)
   assert.match(panel, /rule\.eventKey !== "registration\.appointment_reminder_due"/)
   assert.doesNotMatch(panel, /현재 예약 알림이 발송되지 않습니다/)
-  assert.match(component, />자동 발송</)
+  assert.match(component, />자동 발송 ON\/OFF</)
   assert.match(component, /예약[\s\S]*시간 전/)
+  assert.match(component, /activeKindsLabel/)
+  assert.match(component, /청강 리마인드/)
   assert.match(component, /min=\{1\}/)
   assert.match(component, /max=\{72\}/)
   assert.doesNotMatch(component, /전날|당일|분 전|대상 선택/)

@@ -147,7 +147,36 @@ export type RegistrationCustomerMessageProviderEvidenceInput = Readonly<{
   requestKeyMatched: boolean
 }>
 
+export type RegistrationObservationSolapiScheduleReadiness = Readonly<{
+  installed: boolean
+  active: boolean
+  contractReady: boolean
+  vaultReady: boolean
+  heartbeatCurrent: boolean
+  lastSucceededAt: string | null
+}>
+
+export type RegistrationObservationSolapiReadiness = Readonly<{
+  runtimeReady: boolean
+  settingsEnabled: boolean
+  leadHours: number
+  schedule: RegistrationObservationSolapiScheduleReadiness
+  bookingMode: RegistrationCustomerMessageActivationMode
+  reminderMode: RegistrationCustomerMessageActivationMode
+  bookingReceipt: boolean
+  reminderReceipt: boolean
+  reminderCutoffAt: string | null
+  observationMessages: number
+  providerAttemptMarkers: number
+  pending: number
+  sourceDirty: number
+  deliveryUnknown: number
+}>
+
 export type RegistrationCustomerMessageAdminAction =
+  | Readonly<{
+      action: "inspect_observation_readiness"
+    }>
   | Readonly<{
       action: "preflight_template"
       messageKind: RegistrationCustomerMessageKind
@@ -207,6 +236,7 @@ export type RegistrationCustomerMessageClient = Readonly<{
 }>
 
 export type RegistrationCustomerMessageAdminClient = Readonly<{
+  inspectObservationReadiness: () => Promise<RegistrationObservationSolapiReadiness>
   preflightTemplate: (
     messageKind: RegistrationCustomerMessageKind,
   ) => Promise<RegistrationCustomerMessageReadiness>
@@ -259,10 +289,16 @@ const REGISTRATION_CUSTOMER_MESSAGE_PUBLIC_RESPONSE_KEYS = new Set([
   "previewId",
   "readiness",
   "recipientLast4",
+  "reminderCutoffAt",
+  "reminderMode",
+  "reminderReceipt",
   "runtimeReady",
+  "schedule",
   "scheduleLabel",
   "sendAllowed",
+  "settingsEnabled",
   "sourceValid",
+  "sourceDirty",
   "studentName",
   "subjectLabel",
   "templateConfigured",
@@ -272,6 +308,19 @@ const REGISTRATION_CUSTOMER_MESSAGE_PUBLIC_RESPONSE_KEYS = new Set([
   "type",
   "updatedAt",
   "verifiedAt",
+  "active",
+  "bookingMode",
+  "bookingReceipt",
+  "contractReady",
+  "deliveryUnknown",
+  "heartbeatCurrent",
+  "installed",
+  "lastSucceededAt",
+  "leadHours",
+  "observationMessages",
+  "pending",
+  "providerAttemptMarkers",
+  "vaultReady",
   "waitingDetailLabel",
   "waitingKindLabel",
 ])
@@ -349,6 +398,94 @@ function isRegistrationCustomerMessageActivationMode(
     && (REGISTRATION_CUSTOMER_MESSAGE_ACTIVATION_MODES as readonly string[]).includes(value)
 }
 
+function nonNegativeInteger(value: unknown) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+}
+
+export function parseRegistrationObservationSolapiReadiness(
+  value: unknown,
+): RegistrationObservationSolapiReadiness | null {
+  if (!isRecord(value) || !hasExactKeys(value, [
+    "runtimeReady",
+    "settingsEnabled",
+    "leadHours",
+    "schedule",
+    "bookingMode",
+    "reminderMode",
+    "bookingReceipt",
+    "reminderReceipt",
+    "reminderCutoffAt",
+    "observationMessages",
+    "providerAttemptMarkers",
+    "pending",
+    "sourceDirty",
+    "deliveryUnknown",
+  ]) || !isRecord(value.schedule) || !hasExactKeys(value.schedule, [
+    "installed",
+    "active",
+    "contractReady",
+    "vaultReady",
+    "heartbeatCurrent",
+    "lastSucceededAt",
+  ])) return null
+
+  const schedule = value.schedule
+  const lastSucceededAt = schedule.lastSucceededAt === null
+    ? null
+    : normalizedTimestamp(schedule.lastSucceededAt)
+  const reminderCutoffAt = value.reminderCutoffAt === null
+    ? null
+    : normalizedTimestamp(value.reminderCutoffAt)
+  if (
+    typeof value.runtimeReady !== "boolean"
+    || typeof value.settingsEnabled !== "boolean"
+    || !Number.isInteger(value.leadHours)
+    || (value.leadHours as number) < 1
+    || (value.leadHours as number) > 72
+    || typeof schedule.installed !== "boolean"
+    || typeof schedule.active !== "boolean"
+    || typeof schedule.contractReady !== "boolean"
+    || typeof schedule.vaultReady !== "boolean"
+    || typeof schedule.heartbeatCurrent !== "boolean"
+    || (schedule.lastSucceededAt !== null && !lastSucceededAt)
+    || (schedule.heartbeatCurrent && !lastSucceededAt)
+    || !isRegistrationCustomerMessageActivationMode(value.bookingMode)
+    || !isRegistrationCustomerMessageActivationMode(value.reminderMode)
+    || typeof value.bookingReceipt !== "boolean"
+    || typeof value.reminderReceipt !== "boolean"
+    || (value.reminderCutoffAt !== null && !reminderCutoffAt)
+    || !nonNegativeInteger(value.observationMessages)
+    || !nonNegativeInteger(value.providerAttemptMarkers)
+    || !nonNegativeInteger(value.pending)
+    || !nonNegativeInteger(value.sourceDirty)
+    || !nonNegativeInteger(value.deliveryUnknown)
+  ) return null
+
+  return Object.freeze({
+    runtimeReady: value.runtimeReady,
+    settingsEnabled: value.settingsEnabled,
+    leadHours: value.leadHours as number,
+    schedule: Object.freeze({
+      installed: schedule.installed,
+      active: schedule.active,
+      contractReady: schedule.contractReady,
+      vaultReady: schedule.vaultReady,
+      heartbeatCurrent: schedule.heartbeatCurrent,
+      lastSucceededAt,
+    }),
+    bookingMode: value.bookingMode,
+    reminderMode: value.reminderMode,
+    bookingReceipt: value.bookingReceipt,
+    reminderReceipt: value.reminderReceipt,
+    reminderCutoffAt,
+    observationMessages: value.observationMessages as number,
+    providerAttemptMarkers: value.providerAttemptMarkers as number,
+    pending: value.pending as number,
+    sourceDirty: value.sourceDirty as number,
+    deliveryUnknown: value.deliveryUnknown as number,
+  })
+}
+
 export function parseRegistrationCustomerMessageTarget(
   value: unknown,
 ): RegistrationCustomerMessageTarget | null {
@@ -419,6 +556,10 @@ export function parseRegistrationCustomerMessageAdminAction(
   value: unknown,
 ): RegistrationCustomerMessageAdminAction | null {
   if (!isRecord(value) || typeof value.action !== "string") return null
+
+  if (value.action === "inspect_observation_readiness") {
+    return hasExactKeys(value, ["action"]) ? { action: value.action } : null
+  }
 
   if (value.action === "preflight_template") {
     if (!hasExactKeys(value, ["action", "messageKind"])) return null

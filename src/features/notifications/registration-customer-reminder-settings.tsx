@@ -29,6 +29,13 @@ function statusLabel(settings: Settings) {
   return "SOLAPI 승인 대기"
 }
 
+function activeKindsLabel(settings: Settings) {
+  if (settings.activeKinds.length === 0) return "자동 발송 대상 없음"
+  return settings.activeKinds
+    .map((kind) => kind === "observation_reminder" ? "청강 리마인드" : "예약 리마인드")
+    .join(", ")
+}
+
 function errorMessage(error: unknown) {
   if (error instanceof Error && /[가-힣]/u.test(error.message)) return error.message
   return "자동 리마인드 설정을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요."
@@ -104,7 +111,7 @@ export function RegistrationCustomerReminderSettings() {
       </CardHeader>
       <CardContent className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
         <div className="flex min-h-11 items-center justify-between gap-3 rounded-md border px-3">
-          <Label htmlFor="registration-customer-reminder-enabled">자동 발송</Label>
+          <Label htmlFor="registration-customer-reminder-enabled">자동 발송 ON/OFF</Label>
           <SwitchPrimitive.Root
             id="registration-customer-reminder-enabled"
             checked={enabled}
@@ -147,9 +154,9 @@ export function RegistrationCustomerReminderSettings() {
           <p role="status" className="text-sm text-muted-foreground sm:col-span-3">{message}</p>
         ) : settings && !settings.ready ? (
           <p className="text-sm text-muted-foreground sm:col-span-3">
-            SOLAPI 승인과 자동 실행 준비가 끝나면 ON으로 전환할 수 있습니다.
+            {activeKindsLabel(settings)} · {statusLabel(settings)}
           </p>
-        ) : null}
+        ) : settings ? <p className="text-sm text-muted-foreground sm:col-span-3">{activeKindsLabel(settings)}</p> : null}
       </CardContent>
     </Card>
   )

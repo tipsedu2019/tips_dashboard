@@ -6,6 +6,7 @@ export type RegistrationCustomerReminderSettings = Readonly<{
   ready: boolean
   status: "ready" | "approval_pending" | "scheduler_pending"
   editable: boolean
+  activeKinds: ReadonlyArray<"appointment_reminder" | "observation_reminder">
 }>
 
 type Dependencies = Readonly<{
@@ -39,6 +40,7 @@ function settingsFromResponse(value: unknown): RegistrationCustomerReminderSetti
       "ready",
       "status",
       "editable",
+      "activeKinds",
     ])
     || typeof value.enabled !== "boolean"
     || !Number.isInteger(value.leadHours)
@@ -51,6 +53,11 @@ function settingsFromResponse(value: unknown): RegistrationCustomerReminderSetti
     || typeof value.ready !== "boolean"
     || !["ready", "approval_pending", "scheduler_pending"].includes(String(value.status))
     || typeof value.editable !== "boolean"
+    || !Array.isArray(value.activeKinds)
+    || value.activeKinds.some((kind) => (
+      kind !== "appointment_reminder" && kind !== "observation_reminder"
+    ))
+    || new Set(value.activeKinds).size !== value.activeKinds.length
   ) throw new Error("registration_customer_reminder_settings_invalid")
   return Object.freeze({
     enabled: value.enabled,
@@ -60,6 +67,7 @@ function settingsFromResponse(value: unknown): RegistrationCustomerReminderSetti
     ready: value.ready,
     status: value.status as RegistrationCustomerReminderSettings["status"],
     editable: value.editable,
+    activeKinds: Object.freeze([...value.activeKinds] as RegistrationCustomerReminderSettings["activeKinds"][number][]),
   })
 }
 

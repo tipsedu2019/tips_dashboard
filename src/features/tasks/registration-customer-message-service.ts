@@ -9,8 +9,12 @@ import type {
   RegistrationCustomerMessageSendInput,
   RegistrationCustomerMessageSendResult,
   RegistrationCustomerMessageTarget,
+  RegistrationObservationSolapiReadiness,
 } from "./registration-customer-message-contract.ts"
-import { assertRegistrationCustomerMessagePublicPayload } from "./registration-customer-message-contract.ts"
+import {
+  assertRegistrationCustomerMessagePublicPayload,
+  parseRegistrationObservationSolapiReadiness,
+} from "./registration-customer-message-contract.ts"
 
 type RegistrationCustomerMessageServiceOptions = Readonly<{
   getAccessToken: () => Promise<string | null>
@@ -164,6 +168,17 @@ export function createRegistrationCustomerMessageAdminClient(
   )
 
   return Object.freeze({
+    async inspectObservationReadiness(): Promise<RegistrationObservationSolapiReadiness> {
+      const readiness = parseRegistrationObservationSolapiReadiness(
+        await requestAdminJson<unknown>(
+          options,
+          "/api/solapi/registration/admin",
+          { method: "POST", body: JSON.stringify({ action: "inspect_observation_readiness" }) },
+        ),
+      )
+      if (!readiness) throw new Error("registration_observation_solapi_readiness_invalid")
+      return readiness
+    },
     preflightTemplate(messageKind) {
       return adminRequest({ action: "preflight_template", messageKind })
     },

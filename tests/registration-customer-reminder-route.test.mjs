@@ -107,6 +107,7 @@ test("설정 조회는 인증된 운영자에게 안전한 준비 상태만 반�
       ready: false,
       status: "approval_pending",
       editable: true,
+      activeKinds: [],
     },
   })
   assert.equal(JSON.stringify(body).includes("template-reminder"), false)
@@ -187,7 +188,7 @@ test("OFF 전환은 승인 상태와 무관하게 저장할 수 있다", async (
   assert.deepEqual(setInput.templateContract, TEMPLATE)
 })
 
-test("DB activeKinds가 남아 있어도 OFF 조회·저장은 템플릿 환경 없이 성공한다", async () => {
+test("DB activeKinds는 서버가 공개하고 OFF 조회·저장은 템플릿 환경 없이 성공한다", async () => {
   let templateContractReads = 0
   const { calls, handlers } = makeDependencies({
     async getSettings() {
@@ -214,8 +215,9 @@ test("DB activeKinds가 남아 있어도 OFF 조회·저장은 템플릿 환경 
       revision: "7",
       updatedAt: "2026-08-12T00:00:00.000Z",
       ready: false,
-      status: "not_ready",
+      status: "approval_pending",
       editable: true,
+      activeKinds: ["observation_reminder"],
     },
   })
 
@@ -233,9 +235,40 @@ test("DB activeKinds가 남아 있어도 OFF 조회·저장은 템플릿 환경 
     revision: "8",
     updatedAt: "2026-08-12T00:00:00.000Z",
     ready: false,
-    status: "not_ready",
+    status: "approval_pending",
     editable: true,
+    activeKinds: ["observation_reminder"],
   })
+})
+
+test("enabled active kinds with an unready schedule stay scheduler_pending without exposing template facts", async () => {
+  const { handlers } = makeDependencies({
+    async getSettings() {
+      return {
+        ...DATABASE_OFF_SETTINGS,
+        enabled: true,
+        revision: "9",
+      }
+    },
+  })
+
+  const response = await handlers.settings(request("/settings"))
+  const body = await response.json()
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(body.settings, {
+    enabled: true,
+    leadHours: 3,
+    revision: "9",
+    updatedAt: "2026-08-12T00:00:00.000Z",
+    ready: false,
+    status: "scheduler_pending",
+    editable: true,
+    activeKinds: ["observation_reminder"],
+  })
+  assert.equal(JSON.stringify(body).includes("templateId"), false)
+  assert.equal(JSON.stringify(body).includes("pfId"), false)
+  assert.equal(JSON.stringify(body).includes("catalogChecksum"), false)
 })
 
 test("reminder settings contract derives active kinds from the server catalog", () => {

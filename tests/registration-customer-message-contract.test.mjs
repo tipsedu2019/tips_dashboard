@@ -71,17 +71,15 @@ test("preview target parsing accepts only an exact message kind and canonical UU
   }
 })
 
-test("observation rollout labels stay hidden until their dedicated UI task", async () => {
+test("observation rollout's legacy source guard requires the Task 8 rows and labels", async () => {
   const source = await readFile(
     new URL("../src/features/tasks/registration-customer-message-rollout-panel.tsx", import.meta.url),
     "utf8",
   )
   assert.match(source, /observation_booking:\s*"청강 예약 안내"/u)
-  assert.match(source, /observation_reminder:\s*"청강 일정 안내"/u)
-  assert.match(source, /const ROLLOUT_PANEL_MESSAGE_KINDS[\s\S]*"admission_application"/u)
-  assert.doesNotMatch(source, /ROLLOUT_PANEL_MESSAGE_KINDS[\s\S]*"observation_booking"/u)
-  assert.match(source, /ROLLOUT_PANEL_MESSAGE_KINDS\.map\(\(messageKind\)/u)
-  assert.doesNotMatch(source, /REGISTRATION_CUSTOMER_MESSAGE_KINDS\.map\(\(messageKind\)/u)
+  assert.match(source, /observation_reminder:\s*"청강 리마인드"/u)
+  assert.match(source, /ROLLOUT_PANEL_MESSAGE_KINDS[\s\S]*"observation_booking"/u)
+  assert.match(source, /ROLLOUT_PANEL_MESSAGE_KINDS[\s\S]*"observation_reminder"/u)
 })
 
 test("send and check parsing reject extra browser-owned provider facts", () => {
@@ -160,6 +158,9 @@ test("admin action parsing is an exact discriminated union with normalized evide
       reason: "provider 호출 전 준비 실패",
       requestKey: REQUEST_KEY,
     },
+    {
+      action: "inspect_observation_readiness",
+    },
   ]
 
   for (const action of validActions) {
@@ -205,6 +206,13 @@ test("admin action parsing is an exact discriminated union with normalized evide
     contract.parseRegistrationCustomerMessageAdminAction({
       action: "preflight_template",
       messageKind: "level_test_booking",
+      templateId: "browser-owned-template",
+    }),
+    null,
+  )
+  assert.equal(
+    contract.parseRegistrationCustomerMessageAdminAction({
+      action: "inspect_observation_readiness",
       templateId: "browser-owned-template",
     }),
     null,

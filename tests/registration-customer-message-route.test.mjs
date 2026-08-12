@@ -146,6 +146,7 @@ function makeDeps(overrides = {}) {
     preflight: 0,
     receipt: 0,
     admin: 0,
+    observationReadiness: 0,
   }
   const deps = {
     now: () => new Date("2026-08-05T00:00:00.000Z"),
@@ -316,6 +317,32 @@ function makeDeps(overrides = {}) {
     async performAdminAction(input) {
       calls.admin += 1
       return { ok: true, action: input.action.action }
+    },
+    async inspectObservationReadiness() {
+      calls.observationReadiness += 1
+      return {
+        runtimeReady: true,
+        settingsEnabled: true,
+        leadHours: 3,
+        schedule: {
+          installed: true,
+          active: true,
+          contractReady: true,
+          vaultReady: true,
+          heartbeatCurrent: true,
+          lastSucceededAt: "2026-08-12T00:00:00.000Z",
+        },
+        bookingMode: "off",
+        reminderMode: "verification",
+        bookingReceipt: false,
+        reminderReceipt: false,
+        reminderCutoffAt: null,
+        observationMessages: 0,
+        providerAttemptMarkers: 0,
+        pending: 1,
+        sourceDirty: 2,
+        deliveryUnknown: 3,
+      }
     },
     ...overrides,
   }
@@ -1247,4 +1274,156 @@ test("admin mutation responses are reduced to action-specific public DTOs", asyn
     updatedAt: "2026-08-05T00:30:00.000Z",
   })
   assert.equal(JSON.stringify(result.body).includes("secret"), false)
+})
+
+test("admin observation readiness refresh is admin-only, parser-strict, and provider-zero", async () => {
+  const readiness = makeDeps({
+    authenticate: async () => ({ actorProfileId: IDS.actor, role: "admin", actorClient: {} }),
+    async inspectObservationReadiness() {
+      readiness.calls.observationReadiness += 1
+      return {
+        runtimeReady: true,
+        settingsEnabled: true,
+        leadHours: 3,
+        schedule: {
+          installed: true,
+          active: true,
+          contractReady: true,
+          vaultReady: true,
+          heartbeatCurrent: true,
+          lastSucceededAt: "2026-08-12T00:00:00.000Z",
+        },
+        bookingMode: "off",
+        reminderMode: "verification",
+        bookingReceipt: false,
+        reminderReceipt: false,
+        reminderCutoffAt: null,
+        observationMessages: 0,
+        providerAttemptMarkers: 0,
+        pending: 1,
+        sourceDirty: 2,
+        deliveryUnknown: 3,
+        recipientHash: "must-not-escape",
+        taskId: IDS.task,
+        templateId: "must-not-escape",
+        apiSecret: "must-not-escape",
+        parentPhone: "01012345678",
+      }
+    },
+  })
+  const malformed = await json(await createRegistrationCustomerMessageRouteHandlers(readiness.deps).admin(
+    request("/admin", { method: "POST", body: JSON.stringify({ action: "inspect_observation_readiness" }) }),
+  ))
+  assert.equal(malformed.response.status, 500)
+  assert.equal(readiness.calls.observationReadiness, 1)
+  assert.equal(readiness.calls.providerSend, 0)
+
+  const admin = makeDeps({
+    authenticate: async () => ({ actorProfileId: IDS.actor, role: "admin", actorClient: {} }),
+  })
+  const current = await json(await createRegistrationCustomerMessageRouteHandlers(admin.deps).admin(
+    request("/admin", { method: "POST", body: JSON.stringify({ action: "inspect_observation_readiness" }) }),
+  ))
+  assert.equal(current.response.status, 200)
+  assert.deepEqual(current.body.schedule, {
+    installed: true,
+    active: true,
+    contractReady: true,
+    vaultReady: true,
+    heartbeatCurrent: true,
+    lastSucceededAt: "2026-08-12T00:00:00.000Z",
+  })
+  assert.equal(admin.calls.observationReadiness, 1)
+  assert.equal(admin.calls.admin, 0)
+  assert.equal(admin.calls.providerSend, 0)
+  const serialized = JSON.stringify(current.body)
+  for (const privateKey of ["recipientHash", "taskId", "templateId", "apiSecret", "parentPhone"]) {
+    assert.equal(serialized.includes(privateKey), false)
+  }
+
+  const missing = makeDeps({
+    authenticate: async () => ({ actorProfileId: IDS.actor, role: "admin", actorClient: {} }),
+    inspectObservationReadiness: async () => ({
+      runtimeReady: true,
+      settingsEnabled: false,
+      leadHours: 3,
+      schedule: {
+        installed: true,
+        active: false,
+        contractReady: false,
+        vaultReady: false,
+        heartbeatCurrent: false,
+        lastSucceededAt: null,
+      },
+      bookingMode: "off",
+      reminderMode: "off",
+      bookingReceipt: false,
+      reminderReceipt: false,
+      reminderCutoffAt: null,
+      observationMessages: 0,
+      providerAttemptMarkers: 0,
+      pending: 0,
+      sourceDirty: 0,
+      deliveryUnknown: 0,
+    }),
+  })
+  const noHeartbeat = await json(await createRegistrationCustomerMessageRouteHandlers(missing.deps).admin(
+    request("/admin", { method: "POST", body: JSON.stringify({ action: "inspect_observation_readiness" }) }),
+  ))
+  assert.equal(noHeartbeat.response.status, 200)
+  assert.deepEqual(noHeartbeat.body.schedule, {
+    installed: true,
+    active: false,
+    contractReady: false,
+    vaultReady: false,
+    heartbeatCurrent: false,
+    lastSucceededAt: null,
+  })
+
+  const stale = makeDeps({
+    authenticate: async () => ({ actorProfileId: IDS.actor, role: "admin", actorClient: {} }),
+    inspectObservationReadiness: async () => ({
+      runtimeReady: true,
+      settingsEnabled: false,
+      leadHours: 3,
+      schedule: {
+        installed: true,
+        active: true,
+        contractReady: true,
+        vaultReady: true,
+        heartbeatCurrent: false,
+        lastSucceededAt: "2026-08-11T23:00:00.000Z",
+      },
+      bookingMode: "off",
+      reminderMode: "off",
+      bookingReceipt: false,
+      reminderReceipt: false,
+      reminderCutoffAt: null,
+      observationMessages: 0,
+      providerAttemptMarkers: 0,
+      pending: 0,
+      sourceDirty: 0,
+      deliveryUnknown: 0,
+    }),
+  })
+  const staleHeartbeat = await json(await createRegistrationCustomerMessageRouteHandlers(stale.deps).admin(
+    request("/admin", { method: "POST", body: JSON.stringify({ action: "inspect_observation_readiness" }) }),
+  ))
+  assert.equal(staleHeartbeat.response.status, 200)
+  assert.deepEqual(staleHeartbeat.body.schedule, {
+    installed: true,
+    active: true,
+    contractReady: true,
+    vaultReady: true,
+    heartbeatCurrent: false,
+    lastSucceededAt: "2026-08-11T23:00:00.000Z",
+  })
+
+  const staff = makeDeps()
+  const denied = await json(await createRegistrationCustomerMessageRouteHandlers(staff.deps).admin(
+    request("/admin", { method: "POST", body: JSON.stringify({ action: "inspect_observation_readiness" }) }),
+  ))
+  assert.equal(denied.response.status, 403)
+  assert.equal(staff.calls.observationReadiness, 0)
+  assert.equal(staff.calls.providerSend, 0)
 })

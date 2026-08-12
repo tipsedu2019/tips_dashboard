@@ -10,6 +10,7 @@ import {
   parseRegistrationCustomerMessageCheckInput,
   parseRegistrationCustomerMessageSendInput,
   parseRegistrationCustomerMessageTarget,
+  parseRegistrationObservationSolapiReadiness,
   type RegistrationCustomerMessageAdminAction,
   type RegistrationCustomerMessageHistoryItem,
   type RegistrationCustomerMessageKind,
@@ -18,6 +19,7 @@ import {
   type RegistrationCustomerMessageReadiness,
   type RegistrationCustomerMessageSendResult,
   type RegistrationCustomerMessageStatus,
+  type RegistrationObservationSolapiReadiness,
 } from "../registration-customer-message-contract.ts"
 import {
   RegistrationCustomerMessageHttpError,
@@ -176,6 +178,9 @@ type RouteDependencies = Readonly<{
     actorProfileId: string
     messageKind: RegistrationCustomerMessageKind
     receipt: JsonRecord
+    context: HandlerAuthContext
+  }>): Promise<unknown>
+  inspectObservationReadiness(input: Readonly<{
     context: HandlerAuthContext
   }>): Promise<unknown>
   performAdminAction(input: Readonly<{
@@ -373,6 +378,12 @@ function readiness(value: unknown): RegistrationCustomerMessageReadiness {
   })
 }
 
+function observationSolapiReadiness(value: unknown): RegistrationObservationSolapiReadiness {
+  const parsed = parseRegistrationObservationSolapiReadiness(value)
+  if (!parsed) httpError(500, "registration_observation_solapi_readiness_unavailable")
+  return parsed
+}
+
 function historyItem(
   value: unknown,
   role: string,
@@ -558,6 +569,9 @@ function checkContext(value: unknown) {
 function adminPublicResult(action: RegistrationCustomerMessageAdminAction, value: unknown) {
   if (action.action === "reconcile" || action.action === "release_pre_send") {
     return publicSendResult(sendResult(value))
+  }
+  if (action.action === "inspect_observation_readiness") {
+    return observationSolapiReadiness(value)
   }
   if (!isRecord(value) || value.messageKind !== action.messageKind) {
     httpError(503, "registration_customer_message_admin_result_unavailable")
@@ -865,6 +879,11 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
         const action = await adminInput(request)
         const context = await dependencies.authenticate(request)
         requireRole(context, ["admin"])
+        if (action.action === "inspect_observation_readiness") {
+          return json(assertRegistrationCustomerMessagePublicPayload(
+            observationSolapiReadiness(await dependencies.inspectObservationReadiness({ context })),
+          ))
+        }
         if (action.action === "preflight_template") {
           const preflight = await dependencies.preflightTemplate({
             messageKind: action.messageKind,
@@ -1323,6 +1342,9 @@ export function createProductionRegistrationCustomerMessageRouteHandlers(
         p_message_kind: input.messageKind,
         p_receipt: input.receipt,
       })
+    },
+    inspectObservationReadiness(input) {
+      return exactRpc(input.context, "inspect_registration_observation_solapi_readiness_v1", {})
     },
     async performAdminAction(input) {
       const action = input.action

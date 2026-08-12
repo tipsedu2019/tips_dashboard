@@ -279,22 +279,23 @@ export type RegistrationSubjectTrackFixtureCustomerMessageClient = RegistrationC
   debugSetSourceDirty: (sourceId: string, dirty: boolean) => void
 }
 
-const FIXTURE_CUSTOMER_MESSAGE_SOURCES: Record<RegistrationCustomerMessageKind, Record<string, Readonly<{
+export const FIXTURE_CUSTOMER_MESSAGE_SOURCES: Record<RegistrationCustomerMessageKind, Record<string, Readonly<{
   studentName: string
   recipientLast4: string
+  sourceRevision: number
   facts: RegistrationCustomerMessagePreviewResponse["facts"]
   body: string
   buttons: RegistrationCustomerMessagePreviewResponse["buttons"]
 }>>> = {
   level_test_booking: {
     "fixture-appointment-dual-test": {
-      studentName: "김다미", recipientLast4: "5678",
+      studentName: "김다미", recipientLast4: "5678", sourceRevision: 1,
       facts: { subjectLabel: "영어, 수학", scheduleLabel: "2026년 7월 15일 10:00", placeLabel: "본관" },
       body: "TIPS 레벨테스트 예약 안내\n김다미 학생의 영어, 수학 레벨테스트가 예약되었습니다.",
       buttons: [{ name: "예약 확인", type: "WL", host: "tips.edu" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
     },
     "fixture-appointment-calendar-neighbor": {
-      studentName: "오하늘", recipientLast4: "5678",
+      studentName: "오하늘", recipientLast4: "5678", sourceRevision: 1,
       facts: { subjectLabel: "영어", scheduleLabel: "2026년 7월 15일 11:00", placeLabel: "본관" },
       body: "TIPS 레벨테스트 예약 안내\n오하늘 학생의 영어 레벨테스트가 예약되었습니다.",
       buttons: [{ name: "예약 확인", type: "WL", host: "tips.edu" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
@@ -302,7 +303,7 @@ const FIXTURE_CUSTOMER_MESSAGE_SOURCES: Record<RegistrationCustomerMessageKind, 
   },
   visit_consultation_booking: {
     "fixture-appointment-split-visit": {
-      studentName: "박서준", recipientLast4: "5678",
+      studentName: "박서준", recipientLast4: "5678", sourceRevision: 1,
       facts: { subjectLabel: "영어", scheduleLabel: "2026년 7월 16일 14:00", placeLabel: "본관" },
       body: "TIPS 방문상담 예약 안내\n박서준 학생의 방문상담이 예약되었습니다.",
       buttons: [{ name: "상담 안내", type: "WL", host: "tips.edu" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
@@ -310,7 +311,7 @@ const FIXTURE_CUSTOMER_MESSAGE_SOURCES: Record<RegistrationCustomerMessageKind, 
   },
   appointment_reminder: {
     "fixture-appointment-dual-test": {
-      studentName: "김다미", recipientLast4: "5678",
+      studentName: "김다미", recipientLast4: "5678", sourceRevision: 1,
       facts: { subjectLabel: "영어, 수학", scheduleLabel: "2026년 7월 15일 10:00", placeLabel: "본관" },
       body: "TIPS 예약 리마인드\n김다미 학생의 레벨테스트 일정을 다시 안내드립니다.",
       buttons: [{ name: "예약 확인", type: "WL", host: "tips.edu" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
@@ -318,7 +319,7 @@ const FIXTURE_CUSTOMER_MESSAGE_SOURCES: Record<RegistrationCustomerMessageKind, 
   },
   waiting_notice: {
     "fixture-track-waiting-notice-english": {
-      studentName: "문하늘", recipientLast4: "5678",
+      studentName: "문하늘", recipientLast4: "5678", sourceRevision: 1,
       facts: { subjectLabel: "영어", waitingKindLabel: "신규반 대기", waitingDetailLabel: "고1 영어 정규 A" },
       body: "TIPS 대기 안내\n문하늘 학생의 영어 신규반 대기 신청이 접수되었습니다.",
       buttons: [{ name: "대기 안내", type: "WL", host: "tips.edu" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
@@ -326,7 +327,7 @@ const FIXTURE_CUSTOMER_MESSAGE_SOURCES: Record<RegistrationCustomerMessageKind, 
   },
   admission_application: {
     "fixture-task-multiple-classes": {
-      studentName: "최유진", recipientLast4: "5678",
+      studentName: "최유진", recipientLast4: "5678", sourceRevision: 1,
       facts: {
         subjectLabel: "영어",
         admissionPlans: [{
@@ -356,22 +357,39 @@ const FIXTURE_CUSTOMER_MESSAGE_SOURCES: Record<RegistrationCustomerMessageKind, 
       buttons: [{ name: "입학신청서 작성", type: "WL", host: "tips.edu" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
     },
   },
-  observation_booking: {},
-  observation_reminder: {},
+  observation_booking: {
+    "fixture-observation-english": {
+      studentName: "Emily", recipientLast4: "5678", sourceRevision: 1,
+      facts: { subjectLabel: "영어", scheduleLabel: "2026년 8월 17일 오후 6:00", placeLabel: "본관 301호" },
+      body: "TIPS 청강 예약 안내\nEmily 학생의 영어 청강 수업이 예약되었습니다.",
+      buttons: [{ name: "예약 확인", type: "WL", host: "tips.edu" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
+    },
+  },
+  observation_reminder: {
+    "fixture-observation-english": {
+      studentName: "Emily", recipientLast4: "5678", sourceRevision: 1,
+      facts: { subjectLabel: "영어", scheduleLabel: "2026년 8월 17일 오후 6:00", placeLabel: "본관 301호" },
+      body: "TIPS 청강 리마인드\nEmily 학생의 영어 청강 수업 일정을 다시 안내드립니다.",
+      buttons: [{ name: "예약 확인", type: "WL", host: "tips.edu" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
+    },
+  },
 }
 
-function fixtureCustomerMessageReadiness(blockers: RegistrationCustomerMessageReadiness["blockers"]): RegistrationCustomerMessageReadiness {
+function fixtureCustomerMessageReadiness(
+  blockers: RegistrationCustomerMessageReadiness["blockers"],
+  activationMode: RegistrationCustomerMessageReadiness["activationMode"] = "verification",
+): RegistrationCustomerMessageReadiness {
   return {
     runtimeReady: true,
-    activationMode: "verification",
-    activationEligible: true,
+    activationMode,
+    activationEligible: activationMode !== "off",
     credentialsConfigured: true,
     pfConfigured: true,
     templateConfigured: true,
     templateVerified: true,
     verifiedAt: "2026-08-05T00:00:00.000Z",
     sourceValid: blockers.length === 0,
-    sendAllowed: blockers.length === 0,
+    sendAllowed: activationMode !== "off" && blockers.length === 0,
     blockers,
   }
 }
@@ -408,12 +426,19 @@ export function createRegistrationSubjectTrackFixtureCustomerMessageClient(): Re
     async preview(target) {
       const source = FIXTURE_CUSTOMER_MESSAGE_SOURCES[target.messageKind]?.[target.sourceId]
       if (!source) throw new Error("registration_customer_message_source_not_found")
+      const observation = target.messageKind === "observation_booking"
+        || target.messageKind === "observation_reminder"
       const blockers = dirtySources.has(target.sourceId)
         ? ["source_dirty"] as const
+        : observation
+          ? ["activation_off"] as const
         : lockedTargets.has(targetKey(target))
           ? ["duplicate_locked"] as const
           : [] as const
-      const readiness = fixtureCustomerMessageReadiness([...blockers])
+      const readiness = fixtureCustomerMessageReadiness(
+        [...blockers],
+        observation ? "off" : "verification",
+      )
       const nextPreviewId = blockers.length ? null : previewId()
       if (nextPreviewId) previews.set(nextPreviewId, { ...target })
       const latest = [...results.entries()].reverse().find(([key]) => {

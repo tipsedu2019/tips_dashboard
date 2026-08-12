@@ -193,13 +193,19 @@ function publicSettings(
   contract: ReminderTemplateContract,
 ) {
   if (value.activeKinds) {
+    const status = value.ready
+      ? "ready"
+      : value.enabled && value.activeKinds.length > 0
+        ? "scheduler_pending"
+        : "approval_pending"
     return Object.freeze({
       enabled: value.enabled,
       leadHours: value.leadHours,
       revision: value.revision,
       updatedAt: value.updatedAt,
       ready: value.ready,
-      status: value.status,
+      status,
+      activeKinds: value.activeKinds,
     })
   }
   if (
@@ -233,6 +239,7 @@ function publicSettings(
     updatedAt: value.updatedAt,
     ready,
     status,
+    activeKinds: Object.freeze([]),
   })
 }
 

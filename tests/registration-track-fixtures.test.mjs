@@ -866,7 +866,7 @@ test("fixture feedback read submit and non-registration decision preserve exact 
   assert.equal(getState().caseDetails[decided.taskId], undefined)
 })
 
-test("fixture customer message client keeps all five preview/send states in memory without provider ledger entries", async () => {
+test("fixture customer message client keeps all seven preview/send states in memory without provider ledger entries", async () => {
   const fixture = await loadFixtureModule()
   let state = fixture.createRegistrationSubjectTrackFixtureState()
   const client = fixture.createRegistrationSubjectTrackFixtureCustomerMessageClient()
@@ -876,13 +876,36 @@ test("fixture customer message client keeps all five preview/send states in memo
     ["appointment_reminder", "fixture-appointment-dual-test"],
     ["waiting_notice", "fixture-track-waiting-notice-english"],
     ["admission_application", "fixture-task-multiple-classes"],
+    ["observation_booking", "fixture-observation-english"],
+    ["observation_reminder", "fixture-observation-english"],
   ]
+
+  assert.deepEqual(
+    Object.keys(fixture.FIXTURE_CUSTOMER_MESSAGE_SOURCES),
+    [
+      "level_test_booking",
+      "visit_consultation_booking",
+      "appointment_reminder",
+      "waiting_notice",
+      "admission_application",
+      "observation_booking",
+      "observation_reminder",
+    ],
+  )
 
   for (const [messageKind, sourceId] of targets) {
     const preview = await client.preview({ messageKind, sourceId })
-    assert.equal(preview.previewId !== null, true)
-    assert.equal(preview.readiness.sendAllowed, true)
+    const observation = messageKind === "observation_booking" || messageKind === "observation_reminder"
+    assert.equal(preview.previewId !== null, !observation)
+    assert.equal(preview.readiness.activationMode, observation ? "off" : "verification")
+    assert.equal(preview.readiness.sendAllowed, !observation)
     assert.equal(preview.body.includes("010"), false)
+    if (observation) {
+      assert.equal(fixture.FIXTURE_CUSTOMER_MESSAGE_SOURCES[messageKind][sourceId].sourceRevision, 1)
+      assert.equal(preview.facts.subjectLabel, "영어")
+      assert.equal(preview.facts.scheduleLabel.includes("2026년 8월"), true)
+      assert.deepEqual(Array.from(preview.readiness.blockers), ["activation_off"])
+    }
   }
 
   const acceptedPreview = await client.preview({
