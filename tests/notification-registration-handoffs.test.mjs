@@ -11,11 +11,11 @@ const contentMigrationUrl = new URL(
   import.meta.url,
 )
 const koreanRendererMigrationUrl = new URL(
-  "../supabase/migrations/20260807025103_registration_korean_template_renderer.sql",
+  "../supabase/migrations/20260807030434_registration_korean_template_renderer.sql",
   import.meta.url,
 )
 const managementDispatchMigrationUrl = new URL(
-  "../supabase/migrations/20260807110530_registration_management_google_chat_dispatch.sql",
+  "../supabase/migrations/20260807111442_registration_management_google_chat_dispatch.sql",
   import.meta.url,
 )
 const serviceUrl = new URL("../src/features/tasks/registration-track-service.ts", import.meta.url)

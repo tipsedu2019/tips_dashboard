@@ -1,8 +1,5 @@
 begin;
 
--- registration_director_default_stale is a business-state conflict, not a
--- PostgreSQL serialization failure. Letting SQLSTATE 40001 escape causes the
--- Data API transaction runner to retry one request continuously.
 create or replace function public.assign_registration_track_director(
   p_track_id uuid,
   p_director_profile_id uuid,

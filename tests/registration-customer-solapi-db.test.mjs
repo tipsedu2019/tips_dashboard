@@ -13,7 +13,7 @@ const ACTIVATION_MIGRATION =
 const AUDIT_DEDUPE_MIGRATION =
   "20260806130000_registration_customer_message_audit_dedupe.sql"
 const PREVIEW_TARGET_MIGRATION =
-  "20260807125500_registration_customer_message_preview_target_rpc.sql"
+  "20260807125038_registration_customer_message_preview_target_rpc.sql"
 const SUBJECT_ADMISSION_DETAILS_SUFFIX =
   "_registration_customer_message_subject_admission_details.sql"
 const PREVIOUS_MIGRATION =
@@ -1287,7 +1287,7 @@ test("isolated DB runner applies the source migration and seeds complete synthet
 
   assert.match(
     normalized,
-    /20260808120425_registration_customer_message_subject_admission_details\.sql/,
+    /20260808124315_registration_customer_message_subject_admission_details\.sql/,
   )
   assert.match(normalized, /create table public\.class_schedule_slots/)
   assert.match(normalized, /create table public\.class_lesson_sessions/)

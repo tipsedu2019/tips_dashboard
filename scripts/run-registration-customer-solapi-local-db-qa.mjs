@@ -29,7 +29,7 @@ const MESSAGE_MIGRATIONS = [
   "20260805111000_registration_customer_solapi_message_rpc.sql",
   "20260805112000_registration_customer_solapi_activation.sql",
   "20260806130000_registration_customer_message_audit_dedupe.sql",
-  "20260808120425_registration_customer_message_subject_admission_details.sql",
+  "20260808124315_registration_customer_message_subject_admission_details.sql",
 ];
 const CONTAINER_PREFIX = `supabase_db_${PROJECT_ID_PREFIX}`;
 const FORBIDDEN_OPTIONS = new Set(["--linked", "--remote", "--production"]);

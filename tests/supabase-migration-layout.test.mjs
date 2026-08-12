@@ -41,11 +41,26 @@ const REMOTE_HISTORY_ALIGNED_SQL = Object.freeze([
   ["20260730161538_notification_google_chat_connection_catalog.sql", "a3f72d4ec2a410796d5796019649859d5a329d5bec0e3e83f48242272dd88dda"],
   ["20260731011040_notification_transfer_withdrawal_deep_links.sql", "ed5dfb81c2cb5d1bc6dca5c38de62745c02d88b5a4b858ec57e8f0d2c6afb5ab"],
   ["20260731011229_notification_owner_aware_delivery_summary.sql", "eb06042e4e70e05d4fc745053dccc52ac01fa253928f3f04fa442f5ec9704b54"],
+  ["20260807030434_registration_korean_template_renderer.sql", "53e0d49c96c9ea38418e082370755a071ab75d3d44fe7b12c6240eb44fd6945e"],
+  ["20260807111442_registration_management_google_chat_dispatch.sql", "e367278104df0fad8d74e17cafd7eb0fd24baa90e32efb1cdec18e0cb8ac6b5b"],
+  ["20260807125038_registration_customer_message_preview_target_rpc.sql", "3cb54293dbef73b0eccbc92e14bda2e7f51d2c51e0a55d927daa8192ce720f37"],
+  ["20260808044202_registration_level_test_summary_consultation_chat.sql", "06f57db749b84e41d4647ce44d231633a1ad2f54da9b2149cd93bd33349990bb"],
+  ["20260808050410_registration_director_retry_circuit_breaker.sql", "068349ad45c5c230a45c789d70fab3ce7b1c19e69ea6f958c68f921941048004"],
+  ["20260808124315_registration_customer_message_subject_admission_details.sql", "c75e570cb032c5d4d7ec266b2128d103618a0490e293255aab6f688d71574ef0"],
+  ["20260811142055_science_consultation_requests.sql", "340b7d2c8d53ade12c7a2f9df98669218826d56a8b6e02f920e897788378d547"],
+  ["20260811142152_science_consultation_requests_deny_policy.sql", "e5abe58f49fe926eb3e35a4471cd9adb49c052f0d677453ffd0f48d80a88c491"],
+  ["20260811142353_science_consultation_rate_limits.sql", "aa177ab5d3151d7f2fa55883f7efc8526999828ee5cbd210693f5ddafc09fc30"],
 ])
 const OBSOLETE_REMOTE_HISTORY_SQL = Object.freeze([
   "20260730143000_notification_google_chat_connection_catalog.sql",
   "20260730143100_notification_transfer_withdrawal_deep_links.sql",
   "20260730143200_notification_owner_aware_delivery_summary.sql",
+  "20260807025103_registration_korean_template_renderer.sql",
+  "20260807110530_registration_management_google_chat_dispatch.sql",
+  "20260807125500_registration_customer_message_preview_target_rpc.sql",
+  "20260808043659_registration_level_test_summary_consultation_chat.sql",
+  "20260808051000_registration_director_retry_circuit_breaker.sql",
+  "20260808120425_registration_customer_message_subject_admission_details.sql",
 ])
 
 const EXPECTED_SQL = Object.freeze([
@@ -167,7 +182,7 @@ after(async () => {
   await Promise.all(fixtureRoots.map((fixtureRoot) => rm(fixtureRoot, { force: true, recursive: true })))
 })
 
-test("원격 이력과 정렬한 세 migration identity와 바이트를 독립 상수로 고정한다", async () => {
+test("원격 이력과 정렬한 migration identity와 바이트를 독립 상수로 고정한다", async () => {
   for (const [file, expectedHash] of REMOTE_HISTORY_ALIGNED_SQL) {
     let actualHash
     try {
@@ -188,8 +203,8 @@ test("원격 이력과 정렬한 세 migration identity와 바이트를 독립 �
 })
 
 test("원격 이력 정렬 migration의 누락·변조·구 timestamp 재등장을 거부한다", async () => {
-  const [alignedFile] = REMOTE_HISTORY_ALIGNED_SQL[0]
-  const obsoleteFile = OBSOLETE_REMOTE_HISTORY_SQL[0]
+  const [alignedFile] = REMOTE_HISTORY_ALIGNED_SQL[3]
+  const obsoleteFile = OBSOLETE_REMOTE_HISTORY_SQL[3]
 
   const missingFixture = await createRepoFixture()
   await rm(join(missingFixture, "supabase", "migrations", alignedFile), { force: true })

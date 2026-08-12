@@ -41,7 +41,7 @@ const notificationContentMigrationUrl = new URL(
   import.meta.url,
 );
 const levelTestSummaryConsultationChatMigrationUrl = new URL(
-  "../supabase/migrations/20260808043659_registration_level_test_summary_consultation_chat.sql",
+  "../supabase/migrations/20260808044202_registration_level_test_summary_consultation_chat.sql",
   import.meta.url,
 );
 
