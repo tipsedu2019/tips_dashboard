@@ -199,6 +199,12 @@ function createDbOwnedLifecycleScenario(options = {}) {
             || Date.parse(state.sourceEvent.occurredAt)
               >= Date.parse(state.job.verificationStartedAt),
         )
+        const verificationStartedAtCurrent = lifecycleGate(
+          "claim:verification-started-at",
+          state.job.activationModeSnapshot !== "verification"
+            || state.activation.mode !== "verification"
+            || state.job.verificationStartedAt === state.activation.updatedAt,
+        )
         const liveCutoffCurrent = lifecycleGate(
           "claim:live-cutoff",
           state.job.activationModeSnapshot !== "live"
@@ -208,7 +214,7 @@ function createDbOwnedLifecycleScenario(options = {}) {
                 >= Date.parse(state.activation.automaticDeliveryCutoffAt)
             ),
         )
-        if (!verificationEventCurrent) {
+        if (!verificationEventCurrent || !verificationStartedAtCurrent) {
           state.job.availableAt = null
           state.job.claimExpiresAt = null
           state.job.claimToken = null
@@ -496,13 +502,18 @@ test("DB-owned observation readiness and identity drifts stay provider-zero", as
   }
 })
 
-test("a pre-activation verification event cancels the existing job before the worker claim", async () => {
-  // Break caught: moving the source-event scope check from claim back to begin
-  // performs a stale source read and makes a provider-capable worker branch.
+test("a verification restart cancels an existing T0 job before the worker claim", async () => {
+  // Break caught: omitting the stored-versus-current activation snapshot check
+  // claims a T0 job after the verification restart at T2.
+  const T0 = "2026-08-11T00:00:00.000Z"
+  const T1 = "2026-08-11T01:00:00.000Z"
+  const T2 = "2026-08-11T02:00:00.000Z"
   const scenario = createDbOwnedLifecycleScenario({
     activationMode: "verification",
     activationModeSnapshot: "verification",
-    sourceEventOccurredAt: "2026-08-10T23:59:59.000Z",
+    activationUpdatedAt: T2,
+    sourceEventOccurredAt: T1,
+    verificationStartedAt: T0,
   })
   const response = await scenario.run()
 
@@ -536,9 +547,17 @@ test("a pre-activation verification event cancels the existing job before the wo
   )
   assert.deepEqual(scenario.state.sourceEvent, {
     consumptionAction: "created",
-    occurredAt: "2026-08-10T23:59:59.000Z",
+    occurredAt: T1,
   })
+  assert.deepEqual(
+    {
+      currentActivationUpdatedAt: scenario.state.activation.updatedAt,
+      jobVerificationStartedAt: scenario.state.job.verificationStartedAt,
+    },
+    { currentActivationUpdatedAt: T2, jobVerificationStartedAt: T0 },
+  )
   assert.equal(scenario.calls.gates.includes("claim:verification-after-activation"), true)
+  assert.equal(scenario.calls.gates.includes("claim:verification-started-at"), true)
   assert.equal(scenario.calls.fetches.length, 0)
   assert.equal(scenario.calls.globalFetchAttempts, 0)
   assert.equal(scenario.calls.globalFetchRestores, 1)
