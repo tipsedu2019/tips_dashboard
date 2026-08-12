@@ -433,5 +433,5 @@ test("등록 fixture도 입학 수업정보와 모든 문의하기 버튼을 실
   assert.match(source, /teacherLabel:\s*"홍길동"/)
   assert.match(source, /classroomLabel:\s*"본관 301호"/)
   assert.match(source, /firstLessonLabel:\s*"8월 17일 월요일 오후 6:00–8:00"/)
-  assert.equal((source.match(/host:\s*"tipsedu\.channel\.io"/g) || []).length, 6)
+  assert.equal((source.match(/host:\s*"tipsedu\.channel\.io"/g) || []).length, 7)
 })
