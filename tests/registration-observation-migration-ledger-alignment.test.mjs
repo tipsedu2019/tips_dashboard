@@ -81,6 +81,37 @@ test("Task 10 and master Gate B freeze the exact seventeen pending migrations", 
   }
 })
 
+test("Task 10 and master Gate B reject any pre-dispatch remote-only migration", async () => {
+  const [solapiPlan, masterPlan] = await Promise.all([
+    readFile(solapiPlanPath, "utf8"),
+    readFile(masterPlanPath, "utf8"),
+  ])
+  const task10 = bounded(solapiPlan, "### Task 10:", "### Task 11:")
+  const remoteOnlyGuard = bounded(
+    task10,
+    'TIPS_REMOTE_ONLY_BEFORE_DISPATCH="$(mktemp)"',
+    'TIPS_PENDING_BEFORE_DISPATCH="$(mktemp)"',
+  )
+  const masterBaseline = bounded(
+    masterPlan,
+    "First installation, exact token `not_installed`",
+    "Do not require a runtime probe",
+  )
+
+  assert.match(
+    remoteOnlyGuard,
+    /if \(local_version == "" && remote_version ~ \/\^\[0-9\]\+\$\/ && length\(remote_version\) == 14\) print remote_version/u,
+  )
+  assert.match(
+    remoteOnlyGuard,
+    /test ! -s "\$\{TIPS_REMOTE_ONLY_BEFORE_DISPATCH\}"/u,
+  )
+  assert.match(
+    masterBaseline,
+    /remote-only migration set is empty \(`remote-only=0`\)/u,
+  )
+})
+
 test("every allowed pending version has one local migration identity", async () => {
   const files = await readdir(join(repoRoot, "supabase", "migrations"))
   const counts = new Map()
