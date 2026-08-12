@@ -31,6 +31,7 @@ const frozenCommonRunnerPath = path.join(
 );
 const forwardPgTapPath = "supabase/tests/notification_adapters_forward_install_test.sql";
 const pendingSchedulePgTapPath = "supabase/tests/notification_delivery_pending_schedule_test.sql";
+const baselineReceiptFixture = "registration_observation_provider_zero_baseline_marker_missing";
 const coreReceiptFixture = JSON.stringify({
   coreReadiness: { schemaReady: true, missingObjects: [], runtimeVersion: 0 },
   coreActivation: { previousVersion: 0, runtimeVersion: 1, replayEqual: true },
@@ -83,6 +84,18 @@ const lifecycleReceiptFixture = JSON.stringify({
   },
   customerQueueUnchanged: true,
   solapiMessagesUnchanged: true,
+  externalAttemptAudit: 0,
+  nodeDispatchClaim: {
+    delivery_id: "95200000-0000-4000-8000-000000000117",
+    claim_token: "95200000-0000-4000-8000-000000000118",
+  },
+});
+const nodeDispatchReceiptFixture = Object.freeze({
+  productionDispatchSeam: true,
+  status: "sending",
+  channelKey: "google_chat",
+  connectionKey: "google_chat.management",
+  mentionUserNames: ["users/987654321"],
   externalAttemptAudit: 0,
 });
 
@@ -144,7 +157,10 @@ function sequentialPorts(firstPort) {
   };
 }
 
-async function createRecordedRun() {
+async function createRecordedRun({
+  coreReceipt = coreReceiptFixture,
+  lifecycleReceipt = lifecycleReceiptFixture,
+} = {}) {
   const calls = [];
   let runtimeRoot;
   const makeTempRoot = async () => {
@@ -167,13 +183,31 @@ async function createRecordedRun() {
     if (executable === "docker" && args[0] === "volume") {
       return { stdout: "", stderr: "" };
     }
+    if (executable === "docker" && args[0] === "context" && args[1] === "inspect") {
+      return {
+        stdout: JSON.stringify([
+          { Endpoints: { docker: { Host: "unix:///var/run/docker.sock" } } },
+        ]),
+        stderr: "",
+      };
+    }
     if (executable === "docker" && args[0] === "exec") {
       const sql = args.at(-1);
+      if (sql.includes(baselineReceiptFixture)) {
+        return {
+          stdout: sql.includes("set_notification_runtime_flag_v1")
+            && sql.includes("notification_control_plane_dispatch_registration_enabled")
+            && sql.includes("notification_runtime_not_ready")
+            ? `${baselineReceiptFixture}\n`
+            : "",
+          stderr: "",
+        };
+      }
       return {
         stdout: sql.includes("registration_observation_provider_zero_lifecycle_receipt")
-          ? `${lifecycleReceiptFixture}\n`
+          ? `${lifecycleReceipt}\n`
           : sql.includes("registration_observation_provider_zero_core_receipt")
-            ? `${coreReceiptFixture}\n`
+            ? `${coreReceipt}\n`
             : "",
         stderr: "",
       };
@@ -185,11 +219,60 @@ async function createRecordedRun() {
     makeTempRoot,
     spawnImpl,
     randomBytes: () => Buffer.from("0123456789ab", "hex"),
+    async runProductionDispatch() {
+      return nodeDispatchReceiptFixture;
+    },
     async cleanup() {
       if (runtimeRoot) await rm(runtimeRoot, { recursive: true, force: true });
     },
   };
 }
+
+test("requires the real production dispatch seam before accepting provider-zero evidence", async () => {
+  // Break caught: SQL-only refresh/final-prepare receipts must not stand in for
+  // the exported TypeScript worker preparation path required by the lifecycle
+  // contract.
+  const recorded = await createRecordedRun();
+  let receivedClaim = null;
+  try {
+    const receipt = await runRegistrationObservationGoogleChatProviderZero({
+      argv: ["--execute", "--approved-local-db"],
+      env: safeEnvironment(),
+      repositoryRoot,
+      makeTempRoot: recorded.makeTempRoot,
+      spawnImpl: recorded.spawnImpl,
+      randomBytes: recorded.randomBytes,
+      allocateLoopbackPort: sequentialPorts(55000),
+      inspectResources: async () => [],
+      runProductionDispatch: async (_project, claim) => {
+        receivedClaim = claim;
+        return nodeDispatchReceiptFixture;
+      },
+    });
+    assert.deepEqual(receivedClaim, JSON.parse(lifecycleReceiptFixture).nodeDispatchClaim);
+    assert.deepEqual(receipt.nodeDispatch, nodeDispatchReceiptFixture);
+  } finally {
+    await recorded.cleanup();
+  }
+});
+
+test("derives the local fanout target generation from the materialized observation payload", async () => {
+  // Break caught: a hard-coded target generation lets the SQL-only fixture
+  // reach prepare while the exported worker correctly cancels the same delivery
+  // as recipient_revoked against the current notification revision.
+  const runnerSource = await readFile(
+    path.join(repositoryRoot, "scripts", "run-registration-observation-google-chat-provider-zero.mjs"),
+    "utf8",
+  );
+  assert.match(
+    runnerSource,
+    /v_target_generation bigint;[\s\S]*v_target_generation := \(v_event\.payload ->> 'appointment_notification_revision'\)::bigint;/u,
+  );
+  assert.match(
+    runnerSource,
+    /\(v_rule_snapshot ->> 'rule_revision'\)::bigint,\n    v_target_generation,\n    dashboard_private\.notification_target_set_hash_v1/u,
+  );
+});
 
 test("rejects unapproved provider-zero invocation before allocating a local project", async () => {
   // Break caught: removing the explicit two-flag approval lets a CLI invocation
@@ -249,6 +332,30 @@ test("rejects provider secrets and strips all non-local child environment values
   );
 });
 
+test("rejects a notification worker secret before allocating or spawning the provider-zero lifecycle", async () => {
+  // Break caught: omitting NOTIFICATION_WORKER_SECRET from the entry boundary
+  // lets a credential-bearing process begin the supposedly provider-zero run.
+  let makeTempRootCalls = 0;
+  let spawnCalls = 0;
+  await assert.rejects(
+    runRegistrationObservationGoogleChatProviderZero({
+      argv: ["--execute", "--approved-local-db"],
+      env: safeEnvironment({ NOTIFICATION_WORKER_SECRET: "forbidden" }),
+      makeTempRoot: async () => {
+        makeTempRootCalls += 1;
+        return "/tmp/should-not-exist";
+      },
+      spawnImpl: async () => {
+        spawnCalls += 1;
+        return { stdout: "", stderr: "" };
+      },
+    }),
+    /provider_zero_secret_environment_forbidden/,
+  );
+  assert.equal(makeTempRootCalls, 0);
+  assert.equal(spawnCalls, 0);
+});
+
 test("owns byte-identical prerequisite and history fixtures without importing the frozen runner", async () => {
   // Break caught: changing either independently-owned fixture byte can make the
   // baseline schema differ from the established local-db proof.
@@ -286,19 +393,11 @@ test("executes only owned loopback commands and reports the staged lifecycle rec
       randomBytes: recorded.randomBytes,
       allocateLoopbackPort: sequentialPorts(55100),
       inspectResources: async () => [],
+      runProductionDispatch: recorded.runProductionDispatch,
     });
 
-    assert.equal(receipt.mode, "provider-zero-lifecycle-receipt");
-    assert.deepEqual(receipt.callTrace, [
-      "readiness",
-      "activate",
-      "heartbeat.started",
-      "heartbeat.succeeded",
-      "flag.settings-ui",
-      "flag.registration-dispatch",
-      "v2-save",
-      "lifecycle",
-    ]);
+    assert.equal(receipt.baselineMarkerMissing, true);
+    assert.equal(receipt.orderedCallTraceExact, true);
     assert.deepEqual(receipt.coreReadiness, { schemaReady: true, missingObjects: [], runtimeVersion: 0 });
     assert.deepEqual(receipt.coreActivation, { previousVersion: 0, runtimeVersion: 1, replayEqual: true });
     assert.equal(receipt.v2RuleSaveReceiptExact, true);
@@ -331,8 +430,8 @@ test("executes only owned loopback commands and reports the staged lifecycle rec
     assert.equal(receipt.https, 0);
     assert.equal(receipt.provider, 0);
     assert.equal(receipt.directory, 0);
-    assert.equal(receipt.externalAttempt, 0);
-    assert.equal(receipt.cleanup, "passed");
+    assert.equal(receipt.externalAttemptAudit, 0);
+    assert.equal(receipt.cleanupComplete, true);
 
     const projectCommands = recorded.calls.filter(({ executable }) =>
       executable === PINNED_SUPABASE_GO,
@@ -348,13 +447,52 @@ test("executes only owned loopback commands and reports the staged lifecycle rec
       .flatMap(({ args }) => args.flatMap((argument, index) =>
         argument === "--workdir" ? [args[index + 1]] : [],
       ));
-    assert.deepEqual(workdirs, Array(workdirs.length).fill(receipt.runtimeRoot));
+    assert.ok(workdirs.length > 0);
+    assert.equal(new Set(workdirs).size, 1);
+    assert.match(workdirs[0], /tips-registration-observation-provider-zero-/u);
     const projectIds = recorded.calls
       .map(({ args }) => projectIdFromCommand(args))
       .filter(Boolean);
-    assert.deepEqual(projectIds, Array(projectIds.length).fill(receipt.projectId));
-    assert.match(receipt.projectId, /^tips_obs_provider_zero_[a-f0-9]{12}$/u);
-    assert.match(receipt.dbUrl, /^postgresql:\/\/postgres:postgres@127\.0\.0\.1:[0-9]+\/postgres$/u);
+    assert.ok(projectIds.length > 0);
+    assert.equal(new Set(projectIds).size, 1);
+    assert.match(projectIds[0], /^tips_obs_provider_zero_[a-f0-9]{12}$/u);
+    const dbUrls = recorded.calls
+      .flatMap(({ args }) => args.flatMap((argument, index) =>
+        argument === "--db-url" ? [args[index + 1]] : [],
+      ));
+    assert.ok(dbUrls.length > 0);
+    assert.equal(new Set(dbUrls).size, 1);
+    assert.match(dbUrls[0], /^postgresql:\/\/postgres:postgres@127\.0\.0\.1:[0-9]+\/postgres$/u);
+  } finally {
+    await recorded.cleanup();
+  }
+});
+
+test("rejects a lifecycle receipt that records an external attempt", async () => {
+  // Break caught: returning raw SQL JSON without a closed evidence gate can
+  // report a provider-zero success even when the lifecycle crossed its stop.
+  const lifecycleReceipt = {
+    ...JSON.parse(lifecycleReceiptFixture),
+    externalAttemptAudit: 1,
+  };
+  const recorded = await createRecordedRun({
+    lifecycleReceipt: JSON.stringify(lifecycleReceipt),
+  });
+  try {
+    await assert.rejects(
+      runRegistrationObservationGoogleChatProviderZero({
+        argv: ["--execute", "--approved-local-db"],
+        env: safeEnvironment(),
+        repositoryRoot,
+        makeTempRoot: recorded.makeTempRoot,
+        spawnImpl: recorded.spawnImpl,
+        randomBytes: recorded.randomBytes,
+        allocateLoopbackPort: sequentialPorts(55200),
+        inspectResources: async () => [],
+        runProductionDispatch: recorded.runProductionDispatch,
+      }),
+      /registration_observation_google_chat_provider_zero_evidence_invalid/,
+    );
   } finally {
     await recorded.cleanup();
   }
@@ -374,6 +512,7 @@ test("resets the disposable database between every focused pgTAP suite and the c
       randomBytes: recorded.randomBytes,
       allocateLoopbackPort: sequentialPorts(55300),
       inspectResources: async () => [],
+      runProductionDispatch: recorded.runProductionDispatch,
     });
     const lifecycle = recorded.calls
       .filter(({ executable }) => executable === PINNED_SUPABASE_GO)
@@ -383,6 +522,7 @@ test("resets the disposable database between every focused pgTAP suite and the c
       "db start",
       "db reset",
       "test db",
+      "db reset",
       "db reset",
       "test db",
       "db reset",
@@ -582,6 +722,111 @@ test("removes its owned temp root when the pinned CLI preflight rejects", async 
   assert.equal(existsSync(runtimeRoot), false);
 });
 
+test("cleans manifest-owned resources when db start fails after partial creation", async () => {
+  // Break caught: marking the project as started only after db start returns
+  // skips stop/inventory if the CLI creates Docker resources before failing.
+  const calls = [];
+  let inventoryCalls = 0;
+  const runtimeRoot = await mkdtemp(
+    path.join(os.tmpdir(), "tips-registration-observation-provider-zero-test-"),
+  );
+  let project;
+  try {
+    project = await createOwnedProviderZeroProject({
+      repositoryRoot,
+      env: safeEnvironment(),
+      makeTempRoot: async () => runtimeRoot,
+      spawnImpl: async (executable, args, options = {}) => {
+        calls.push({ executable, args: [...args], options });
+        if (executable === PINNED_SUPABASE_GO && args[0] === "--version") {
+          return { stdout: `${PINNED_SUPABASE_VERSION}\n`, stderr: "" };
+        }
+        if (executable === "docker" && args[0] === "context" && args[1] === "inspect") {
+          return {
+            stdout: JSON.stringify([
+              { Endpoints: { docker: { Host: "unix:///var/run/docker.sock" } } },
+            ]),
+            stderr: "",
+          };
+        }
+        if (executable === PINNED_SUPABASE_GO && args[0] === "db" && args[1] === "start") {
+          throw new Error("provider_zero_db_start_partial_failure");
+        }
+        return { stdout: "", stderr: "" };
+      },
+      randomBytes: () => Buffer.from("fedcba987654", "hex"),
+      allocateLoopbackPort: sequentialPorts(55600),
+      inspectResources: async () => {
+        inventoryCalls += 1;
+        return [];
+      },
+    });
+    await assert.rejects(
+      project.applyMigrationsThrough("20260809105000"),
+      /provider_zero_db_start_partial_failure/,
+    );
+    await project.cleanupOwnedResources();
+    assert.equal(
+      calls.filter(({ executable, args }) =>
+        executable === PINNED_SUPABASE_GO && args[0] === "stop",
+      ).length,
+      1,
+    );
+    assert.equal(inventoryCalls, 2);
+  } finally {
+    if (project) await project.cleanupOwnedResources().catch(() => undefined);
+    await rm(runtimeRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects a remote Docker context before starting an owned provider-zero database", async () => {
+  // Break caught: relying on Docker's ambient context can run the local-only
+  // harness against a remote daemon before its loopback project exists.
+  const calls = [];
+  const runtimeRoot = await mkdtemp(
+    path.join(os.tmpdir(), "tips-registration-observation-provider-zero-test-"),
+  );
+  let project;
+  try {
+    project = await createOwnedProviderZeroProject({
+      repositoryRoot,
+      env: safeEnvironment(),
+      makeTempRoot: async () => runtimeRoot,
+      spawnImpl: async (executable, args, options = {}) => {
+        calls.push({ executable, args: [...args], options });
+        if (executable === PINNED_SUPABASE_GO && args[0] === "--version") {
+          return { stdout: `${PINNED_SUPABASE_VERSION}\n`, stderr: "" };
+        }
+        if (executable === "docker" && args[0] === "context" && args[1] === "inspect") {
+          return {
+            stdout: JSON.stringify([
+              { Endpoints: { docker: { Host: "tcp://docker.example.invalid:2376" } } },
+            ]),
+            stderr: "",
+          };
+        }
+        return { stdout: "", stderr: "" };
+      },
+      randomBytes: () => Buffer.from("1234567890ab", "hex"),
+      allocateLoopbackPort: sequentialPorts(55700),
+      inspectResources: async () => [],
+    });
+    await assert.rejects(
+      project.applyMigrationsThrough("20260809105000"),
+      /registration_observation_google_chat_provider_zero_docker_context_rejected/,
+    );
+    assert.equal(
+      calls.filter(({ executable, args }) =>
+        executable === PINNED_SUPABASE_GO && args[0] === "db" && args[1] === "start",
+      ).length,
+      0,
+    );
+  } finally {
+    if (project) await project.cleanupOwnedResources().catch(() => undefined);
+    await rm(runtimeRoot, { recursive: true, force: true });
+  }
+});
+
 test("blocks every non-owned Node transport before a provider-zero lifecycle starts", async () => {
   // Break caught: leaving http/https unpatched lets a future adapter bypass the
   // fetch trap and make a provider request during a supposedly no-send proof.
@@ -599,10 +844,20 @@ test("blocks every non-owned Node transport before a provider-zero lifecycle sta
       () => https.get("https://provider.example.invalid/send"),
       /registration_observation_provider_zero_external_https_forbidden/,
     );
+    const esmHttp = await import("node:http");
+    const esmHttps = await import("node:https");
+    assert.throws(
+      () => esmHttp.get("http://provider.example.invalid/send"),
+      /registration_observation_provider_zero_external_http_forbidden/,
+    );
+    assert.throws(
+      () => esmHttps.get("https://provider.example.invalid/send"),
+      /registration_observation_provider_zero_external_https_forbidden/,
+    );
     assert.deepEqual(traps.counters, {
       fetch: 1,
-      http: 1,
-      https: 1,
+      http: 2,
+      https: 2,
       provider: 0,
       directory: 0,
       externalAttempt: 0,

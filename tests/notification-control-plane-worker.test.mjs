@@ -2277,7 +2277,7 @@ test("관찰 delivery는 generic prepare 전에 잠긴 frozen state를 읽고 �
   ])
 })
 
-test("관찰 첫 시도는 locked snapshot만 adapter에 전달하고 두 번째 locked read의 expiry를 다시 검증한다", async () => {
+test("관찰 첫 시도는 fanout의 provisional render를 덮어쓰고 locked snapshot만 adapter에 전달하며 두 번째 locked read의 expiry를 다시 검증한다", async () => {
   const { prepareRegistrationObservationDeliveryForDispatch } = await import(workerModuleUrl)
   const claim = createDeliveryClaim({
     workflow_key: "registration", event_key: "registration.observation_reminder_due",
@@ -2307,7 +2307,8 @@ test("관찰 첫 시도는 locked snapshot만 adapter에 전달하고 두 번째
         readCount += 1
         return readCount === 1 ? {
           expiresAt: "2026-08-17T10:00:00.000Z", snapshot: frozenPayload,
-          payloadFingerprint: null, renderFingerprint: null, title: null, body: null, href: null,
+          payloadFingerprint: null, renderFingerprint: null,
+          title: "fanout provisional title", body: "fanout provisional body", href: "/admin/registration",
           lastAttemptStartedAt: null, attemptCount: 0,
         } : {
           expiresAt: "2026-08-17T07:59:59.000Z", snapshot: frozenPayload,

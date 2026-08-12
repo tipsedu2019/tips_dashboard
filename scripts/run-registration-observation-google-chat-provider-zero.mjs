@@ -62,6 +62,8 @@ const FORWARD_MIGRATION_PACKAGES = Object.freeze([
     focusDirectory: "notification-delivery-pending-schedule",
   }),
 ]);
+const BASELINE_RECEIPT =
+  "registration_observation_provider_zero_baseline_marker_missing";
 const CORE_RECEIPT = "registration_observation_provider_zero_core_receipt";
 const SAFE_CHILD_ENVIRONMENT_KEYS = [
   "HOME",
@@ -71,6 +73,7 @@ const SAFE_CHILD_ENVIRONMENT_KEYS = [
   "TMPDIR",
   "USER",
 ];
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 function fail(code, detail = "") {
   throw new Error(`${code}${detail ? `:${detail}` : ""}`);
@@ -93,7 +96,7 @@ export function parseProviderZeroArguments(argv) {
 export function assertProviderZeroEnvironment(env) {
   const environment = env ?? {};
   const forbidden = Object.keys(environment).filter((key) =>
-    /SUPABASE_(URL|KEY|DB_PASSWORD)|GOOGLE_CHAT|SOLAPI|WEBHOOK/i.test(key),
+    /SUPABASE_(URL|KEY|DB_PASSWORD)|GOOGLE_CHAT|SOLAPI|WEBHOOK|^NOTIFICATION_WORKER_SECRET$/i.test(key),
   );
   if (forbidden.length > 0) {
     throw new Error("provider_zero_secret_environment_forbidden");
@@ -649,6 +652,138 @@ async function forwardMigrationPath(repositoryRoot, testPath = FORWARD_PGTAP_PAT
   return path.join(migrationsRoot, matches[0]);
 }
 
+function baselineMarkerMissingSql() {
+  return `
+begin;
+
+insert into auth.users(
+  id, instance_id, aud, role, email, encrypted_password,
+  email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+  created_at, updated_at
+) values (
+  '95100000-0000-4000-8000-000000000001',
+  '00000000-0000-0000-0000-000000000000',
+  'authenticated',
+  'authenticated',
+  'provider-zero-admin@example.invalid',
+  crypt('provider-zero-admin-only', gen_salt('bf')),
+  now(),
+  '{"provider":"email","providers":["email"]}'::jsonb,
+  '{}'::jsonb,
+  now(),
+  now()
+)
+on conflict (id) do update set
+  deleted_at = null,
+  banned_until = null,
+  updated_at = excluded.updated_at;
+
+insert into public.profiles(id, role, name, email, created_at, updated_at)
+values (
+  '95100000-0000-4000-8000-000000000001',
+  'admin',
+  'provider-zero 관리자',
+  'provider-zero-admin@example.invalid',
+  now(),
+  now()
+)
+on conflict (id) do update set
+  role = excluded.role,
+  name = excluded.name,
+  email = excluded.email,
+  updated_at = excluded.updated_at;
+
+do $$
+declare
+  v_readiness jsonb;
+  v_activation jsonb;
+  v_heartbeat_counts jsonb := '{"observation_due":0,"fanout":0,"rule_reconciliation":0,"target_reconciliation":0,"deliveries":0,"reaped":0}'::jsonb;
+  v_enabled boolean;
+  v_revision bigint;
+  v_settings jsonb;
+begin
+  perform set_config('request.jwt.claim.sub', '95100000-0000-4000-8000-000000000001', true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  v_readiness := public.registration_observation_schema_readiness_v1();
+  if v_readiness is distinct from '{"schemaReady":true,"missingObjects":[],"runtimeVersion":0}'::jsonb then
+    raise exception 'registration_observation_provider_zero_baseline_readiness_invalid';
+  end if;
+  v_activation := public.activate_registration_observation_runtime_v1(
+    0,
+    'provider-zero-baseline-activate-v1'
+  );
+  if v_activation ->> 'operation' is distinct from 'activate'
+    or v_activation ->> 'requestKey' is distinct from 'provider-zero-baseline-activate-v1'
+    or (v_activation ->> 'previousVersion')::integer <> 0
+    or (v_activation ->> 'runtimeVersion')::integer <> 1
+  then
+    raise exception 'registration_observation_provider_zero_baseline_activation_invalid';
+  end if;
+
+  perform set_config('request.jwt.claim.role', 'service_role', true);
+  perform public.record_notification_worker_heartbeat_v1(
+    'notification-worker-route-v1',
+    '95100000-0000-4000-8000-000000000010',
+    'started',
+    v_heartbeat_counts,
+    null
+  );
+  perform public.record_notification_worker_heartbeat_v1(
+    'notification-worker-route-v1',
+    '95100000-0000-4000-8000-000000000010',
+    'succeeded',
+    v_heartbeat_counts,
+    null
+  );
+
+  select enabled, revision into strict v_enabled, v_revision
+  from dashboard_private.notification_runtime_flags
+  where flag_key = 'notification_control_plane_settings_ui_enabled'
+  for update;
+  if v_enabled or v_revision <> 1 then
+    raise exception 'registration_observation_provider_zero_baseline_settings_flag_invalid';
+  end if;
+  v_settings := public.set_notification_runtime_flag_v1(
+    'notification_control_plane_settings_ui_enabled',
+    true,
+    v_revision,
+    '95100000-0000-4000-8000-000000000011'
+  );
+  if (v_settings ->> 'enabled')::boolean is not true
+    or (v_settings ->> 'revision')::bigint <> 2
+  then
+    raise exception 'registration_observation_provider_zero_baseline_settings_receipt_invalid';
+  end if;
+
+  select enabled, revision into strict v_enabled, v_revision
+  from dashboard_private.notification_runtime_flags
+  where flag_key = 'notification_control_plane_dispatch_registration_enabled'
+  for update;
+  if v_enabled or v_revision <> 1 then
+    raise exception 'registration_observation_provider_zero_baseline_dispatch_flag_invalid';
+  end if;
+  begin
+    perform public.set_notification_runtime_flag_v1(
+      'notification_control_plane_dispatch_registration_enabled',
+      true,
+      v_revision,
+      '95100000-0000-4000-8000-000000000012'
+    );
+    raise exception 'registration_observation_provider_zero_dispatch_marker_unexpected_success';
+  exception
+    when sqlstate '55000' then
+      if sqlerrm is distinct from 'notification_runtime_not_ready' then
+        raise;
+      end if;
+  end;
+end;
+$$;
+
+select '${BASELINE_RECEIPT}';
+commit;
+`;
+}
+
 function coreLifecycleSql() {
   return `
 begin;
@@ -1190,6 +1325,7 @@ declare
   v_scheduled_for timestamptz;
   v_delivery_count integer;
   v_target_set jsonb;
+  v_target_generation bigint;
   v_delivery jsonb;
   v_delivery_id uuid;
   v_done boolean;
@@ -1229,6 +1365,10 @@ begin
   select event_row.* into strict v_event
   from dashboard_private.notification_events event_row
   where event_row.id = p_event_id;
+  v_target_generation := (v_event.payload ->> 'appointment_notification_revision')::bigint;
+  if v_target_generation is null or v_target_generation < 1 then
+    raise exception 'registration_observation_provider_zero_fanout_target_generation_invalid';
+  end if;
   v_rule_index := coalesce(v_current_cursor::integer, 0);
   v_rule_count := pg_catalog.jsonb_array_length(v_event.rule_snapshot);
   v_rule_snapshot := v_event.rule_snapshot -> v_rule_index;
@@ -1252,7 +1392,7 @@ begin
     v_current_cursor,
     p_expected_rule_id,
     (v_rule_snapshot ->> 'rule_revision')::bigint,
-    1,
+    v_target_generation,
     dashboard_private.notification_target_set_hash_v1(v_target_set),
     jsonb_build_object('deliveries', jsonb_build_array(v_delivery)),
     case when v_done then null else (v_rule_index + 1)::text end,
@@ -1495,6 +1635,7 @@ declare
   v_missing_director_event constant uuid := '95200000-0000-4000-8000-000000000114';
   v_inactive_director_event constant uuid := '95200000-0000-4000-8000-000000000115';
   v_missing_director_before_fanout_event constant uuid := '95200000-0000-4000-8000-000000000116';
+  v_node_dispatch_event constant uuid := '95200000-0000-4000-8000-000000000117';
   v_rule_scheduled constant uuid := '81000000-0000-4000-8000-000000000001';
   v_rule_feedback_chat constant uuid := '81000000-0000-4000-8000-000000000006';
   v_rule_feedback_in_app constant uuid := '81000000-0000-4000-8000-000000000007';
@@ -1575,6 +1716,13 @@ declare
   v_reassignment_render_hash text;
   v_reassignment_prepare jsonb;
   v_reassignment_fanout_state jsonb;
+  v_node_dispatch_job dashboard_private.registration_observation_chat_jobs%rowtype;
+  v_node_dispatch_job_claim jsonb;
+  v_node_dispatch_payload jsonb;
+  v_node_dispatch_materialized jsonb;
+  v_node_dispatch_event_id uuid;
+  v_node_dispatch_delivery uuid;
+  v_node_dispatch_claim jsonb;
   v_customer_before jsonb;
   v_customer_after jsonb;
   v_notification_count bigint;
@@ -2410,6 +2558,67 @@ begin
     raise exception 'registration_observation_provider_zero_reassignment_prepare_invalid';
   end if;
 
+  -- Keep one fresh, claimed management delivery for the real Node worker
+  -- seam. The runner invokes the exported production preparation function
+  -- after this transaction commits and stops at the returned sending boundary.
+  update public.ops_registration_appointments
+  set notification_revision = 7,
+      updated_at = clock_timestamp()
+  where id = v_appointment;
+  select dashboard_private.get_registration_observation_notification_source_impl_v1(v_observation)
+  into strict v_source;
+  insert into dashboard_private.registration_observation_domain_events(
+    event_id, observation_id, appointment_id, notification_revision, event_kind,
+    booking_fact_hash, source_revision, occurred_at
+  ) values (
+    v_node_dispatch_event, v_observation, v_appointment,
+    (v_source ->> 'notificationRevision')::integer,
+    'observation_feedback_submitted', v_source ->> 'bookingFactHash',
+    v_source -> 'sourceRevision', clock_timestamp()
+  );
+  select job.* into strict v_node_dispatch_job
+  from dashboard_private.registration_observation_chat_jobs job
+  where job.domain_event_id = v_node_dispatch_event
+    and job.event_key = 'registration.observation_feedback_submitted';
+  select claim into strict v_node_dispatch_job_claim
+  from public.claim_registration_observation_chat_jobs_v1(
+    'provider-zero-google-chat-node-dispatch-job-v1', 10, 60
+  ) claim
+  where (claim ->> 'job_id')::uuid = v_node_dispatch_job.job_id;
+  v_node_dispatch_payload := pg_temp.provider_zero_payload_for_job_v1(
+    v_node_dispatch_job.job_id
+  );
+  v_node_dispatch_materialized := public.materialize_registration_observation_chat_job_v1(
+    v_node_dispatch_job.job_id,
+    (v_node_dispatch_job_claim ->> 'claim_token')::uuid,
+    3,
+    v_node_dispatch_payload
+  );
+  if v_node_dispatch_materialized ->> 'outcome' is distinct from 'materialized'
+    or v_node_dispatch_materialized ->> 'event_id' is null then
+    raise exception 'registration_observation_provider_zero_node_dispatch_materialize_invalid';
+  end if;
+  v_node_dispatch_event_id := (v_node_dispatch_materialized ->> 'event_id')::uuid;
+  v_node_dispatch_delivery := pg_temp.provider_zero_apply_fanout_v1(
+    v_node_dispatch_event_id,
+    v_rule_feedback_chat,
+    jsonb_build_object(
+      'target_kind','connection',
+      'target_key','connection:google_chat.management',
+      'target_profile_id',null,
+      'connection_key','google_chat.management',
+      'target_snapshot',jsonb_build_object('connection_key','google_chat.management')
+    ),
+    '[청강 피드백 등록] provider-zero 청강학생',
+    '학생: provider-zero 청강학생 · 청강 피드백이 등록되었습니다.',
+    '/admin/registration?taskId=95200000-0000-4000-8000-000000000106'
+  );
+  select claim into strict v_node_dispatch_claim
+  from public.claim_notification_deliveries_v1(
+    'provider-zero-google-chat-node-dispatch-delivery-v1', 10, 60
+  ) claim
+  where (claim ->> 'delivery_id')::uuid = v_node_dispatch_delivery;
+
   select jsonb_build_object(
     'customerMessages', (select count(*) from public.ops_registration_customer_messages),
     'reminders', (select count(*) from dashboard_private.registration_customer_reminder_jobs)
@@ -2444,6 +2653,7 @@ begin
       'managementDeliveryCount', v_missing_director_before_fanout_count,
       'inAppDeliveryCount', v_missing_director_before_fanout_in_app_count
     ),
+    'nodeDispatchClaim', v_node_dispatch_claim,
     'customerQueueUnchanged', true,
     'solapiMessagesUnchanged', true,
     'externalAttemptAudit', 0
@@ -2477,6 +2687,17 @@ function parseCoreReceipt(stdout) {
   return receipt;
 }
 
+function parseBaselineReceipt(stdout) {
+  const values = String(stdout ?? "")
+    .split(/\r?\n/u)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (values.length !== 1 || values[0] !== BASELINE_RECEIPT) {
+    fail("registration_observation_provider_zero_baseline_receipt_missing");
+  }
+  return true;
+}
+
 function parseLifecycleReceipt(stdout) {
   const values = String(stdout ?? "")
     .split(/\r?\n/u)
@@ -2495,6 +2716,447 @@ function parseLifecycleReceipt(stdout) {
     fail("registration_observation_provider_zero_lifecycle_receipt_invalid");
   }
   return receipt;
+}
+
+function exactKeys(value, expectedKeys) {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Object.keys(value).length === expectedKeys.length
+    && expectedKeys.every((key) => Object.prototype.hasOwnProperty.call(value, key)),
+  );
+}
+
+function sqlText(value, code) {
+  if (typeof value !== "string") fail(code);
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function sqlUuid(value, code) {
+  if (typeof value !== "string" || !UUID_PATTERN.test(value)) fail(code);
+  return `${sqlText(value, code)}::uuid`;
+}
+
+function sqlPositiveInteger(value, code) {
+  if (typeof value !== "string" || !/^[1-9][0-9]*$/u.test(value)) fail(code);
+  return value;
+}
+
+function sqlNullableText(value, code) {
+  if (value === null) return "null";
+  return sqlText(value, code);
+}
+
+function sqlNullableTimestamp(value, code) {
+  if (value === null) return "null";
+  if (typeof value !== "string" || Number.isNaN(Date.parse(value))) fail(code);
+  return `${sqlText(value, code)}::timestamptz`;
+}
+
+function sqlJson(value, code) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail(code);
+  return `${sqlText(JSON.stringify(value), code)}::jsonb`;
+}
+
+function serviceRoleRpcSql(name, parameters) {
+  const invalid = "registration_observation_google_chat_provider_zero_worker_rpc_rejected";
+  if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) fail(invalid);
+  let call;
+  if (name === "read_registration_observation_notification_delivery_frozen_state_v1") {
+    if (!exactKeys(parameters, ["p_delivery_id", "p_claim_token"])) fail(invalid);
+    call = `public.read_registration_observation_notification_delivery_frozen_state_v1(
+      ${sqlUuid(parameters.p_delivery_id, invalid)},
+      ${sqlUuid(parameters.p_claim_token, invalid)}
+    )`;
+  } else if (name === "get_registration_observation_notification_source_v1") {
+    if (!exactKeys(parameters, ["p_observation_id"])) fail(invalid);
+    call = `public.get_registration_observation_notification_source_v1(
+      ${sqlUuid(parameters.p_observation_id, invalid)}
+    )`;
+  } else if (name === "get_notification_render_snapshot_v1") {
+    if (!exactKeys(parameters, ["p_event_id", "p_rule_id", "p_rule_revision"])) fail(invalid);
+    call = `public.get_notification_render_snapshot_v1(
+      ${sqlUuid(parameters.p_event_id, invalid)},
+      ${sqlUuid(parameters.p_rule_id, invalid)},
+      ${sqlPositiveInteger(String(parameters.p_rule_revision), invalid)}::bigint
+    )`;
+  } else if (name === "refresh_registration_observation_notification_delivery_v1") {
+    if (!exactKeys(parameters, [
+      "p_delivery_id", "p_claim_token", "p_expected_event_id", "p_expected_rule_id",
+      "p_expected_rule_revision", "p_rendered_title", "p_rendered_body", "p_href", "p_payload",
+      "p_payload_fingerprint", "p_render_fingerprint",
+    ])) fail(invalid);
+    call = `public.refresh_registration_observation_notification_delivery_v1(
+      ${sqlUuid(parameters.p_delivery_id, invalid)},
+      ${sqlUuid(parameters.p_claim_token, invalid)},
+      ${sqlUuid(parameters.p_expected_event_id, invalid)},
+      ${sqlUuid(parameters.p_expected_rule_id, invalid)},
+      ${sqlPositiveInteger(String(parameters.p_expected_rule_revision), invalid)}::bigint,
+      ${sqlText(parameters.p_rendered_title, invalid)},
+      ${sqlText(parameters.p_rendered_body, invalid)},
+      ${sqlNullableText(parameters.p_href, invalid)},
+      ${sqlJson(parameters.p_payload, invalid)},
+      ${sqlText(parameters.p_payload_fingerprint, invalid)},
+      ${sqlText(parameters.p_render_fingerprint, invalid)}
+    )`;
+  } else if (name === "prepare_registration_observation_notification_delivery_v1") {
+    if (!exactKeys(parameters, [
+      "p_delivery_id", "p_claim_token", "p_expected_event_id", "p_expected_rule_id",
+      "p_expected_rule_revision", "p_expected_payload_fingerprint", "p_expected_render_fingerprint",
+    ])) fail(invalid);
+    call = `public.prepare_registration_observation_notification_delivery_v1(
+      ${sqlUuid(parameters.p_delivery_id, invalid)},
+      ${sqlUuid(parameters.p_claim_token, invalid)},
+      ${sqlUuid(parameters.p_expected_event_id, invalid)},
+      ${sqlUuid(parameters.p_expected_rule_id, invalid)},
+      ${sqlPositiveInteger(String(parameters.p_expected_rule_revision), invalid)}::bigint,
+      ${sqlText(parameters.p_expected_payload_fingerprint, invalid)},
+      ${sqlText(parameters.p_expected_render_fingerprint, invalid)}
+    )`;
+  } else if (name === "finalize_notification_delivery_v1") {
+    if (!exactKeys(parameters, [
+      "p_delivery_id", "p_claim_token", "p_status", "p_status_reason",
+      "p_provider_message_id", "p_provider_response_code", "p_error_code", "p_error_summary",
+      "p_next_attempt_at",
+    ])) fail(invalid);
+    call = `public.finalize_notification_delivery_v1(
+      ${sqlUuid(parameters.p_delivery_id, invalid)},
+      ${sqlUuid(parameters.p_claim_token, invalid)},
+      ${sqlText(parameters.p_status, invalid)},
+      ${sqlNullableText(parameters.p_status_reason, invalid)},
+      ${sqlNullableText(parameters.p_provider_message_id, invalid)},
+      ${sqlNullableText(parameters.p_provider_response_code, invalid)},
+      ${sqlNullableText(parameters.p_error_code, invalid)},
+      ${sqlNullableText(parameters.p_error_summary, invalid)},
+      ${sqlNullableTimestamp(parameters.p_next_attempt_at, invalid)}
+    )`;
+  } else {
+    fail(invalid);
+  }
+  return `
+begin;
+set local "request.jwt.claim.role" = 'service_role';
+select pg_catalog.jsonb_build_object('result', ${call})::text;
+commit;
+`;
+}
+
+function parseServiceRoleRpcResult(stdout) {
+  const values = String(stdout ?? "")
+    .split(/\r?\n/u)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (values.length !== 1) {
+    fail("registration_observation_google_chat_provider_zero_worker_rpc_result_invalid");
+  }
+  let envelope;
+  try {
+    envelope = JSON.parse(values[0]);
+  } catch {
+    fail("registration_observation_google_chat_provider_zero_worker_rpc_result_invalid");
+  }
+  if (!exactKeys(envelope, ["result"])) {
+    fail("registration_observation_google_chat_provider_zero_worker_rpc_result_invalid");
+  }
+  return envelope.result;
+}
+
+async function providerZeroServiceRoleRpc(project, name, parameters) {
+  try {
+    return parseServiceRoleRpcResult(
+      (await project.execSql(serviceRoleRpcSql(name, parameters)))?.stdout,
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("worker_rpc_rejected")) {
+      fail("registration_observation_google_chat_provider_zero_worker_rpc_rejected", name);
+    }
+    if (error instanceof Error && error.message.includes("worker_rpc_result_invalid")) {
+      fail("registration_observation_google_chat_provider_zero_worker_rpc_result_invalid", name);
+    }
+    throw error;
+  }
+}
+
+function providerZeroQuery(call) {
+  const promise = Promise.resolve()
+    .then(call)
+    .then(
+      (data) => ({ data, error: null }),
+      (error) => ({
+        data: null,
+        error: { code: "P0001", message: error instanceof Error ? error.message : String(error) },
+      }),
+    );
+  const query = {
+    abortSignal() {
+      return query;
+    },
+    retry() {
+      return query;
+    },
+    then(onfulfilled, onrejected) {
+      return promise.then(onfulfilled, onrejected);
+    },
+  };
+  return Object.freeze(query);
+}
+
+function nodeDispatchStateSql(deliveryId) {
+  const invalid = "registration_observation_google_chat_provider_zero_node_dispatch_state_rejected";
+  return `
+begin;
+set local "request.jwt.claim.role" = 'service_role';
+select pg_catalog.jsonb_build_object(
+  'result', pg_catalog.jsonb_build_object(
+    'deliveryFound', pg_catalog.count(delivery.id) = 1,
+    'attemptCount', pg_catalog.max(delivery.attempt_count),
+    'externalAttemptAudit', (
+      select pg_catalog.count(*)
+      from dashboard_private.notification_audit_logs audit
+      where audit.entity_kind = 'notification_external_attempt'
+        and audit.action = 'external_attempt_registered'
+    ),
+    'status', pg_catalog.max(delivery.status)
+  )
+)::text
+from dashboard_private.notification_deliveries delivery
+where delivery.id = ${sqlUuid(deliveryId, invalid)};
+commit;
+`;
+}
+
+async function runProductionDispatchSeam(project, claim) {
+  const invalid = "registration_observation_google_chat_provider_zero_node_dispatch_invalid";
+  if (!claim || typeof claim !== "object" || Array.isArray(claim)) fail(invalid);
+  const [workerModule, adapterModule, sourceModule] = await Promise.all([
+    import("../src/features/notifications/server/notification-worker.ts"),
+    import("../src/features/notifications/server/adapters/registration-notification-adapter.ts"),
+    import("../src/features/notifications/server/adapters/registration-observation-notification-source.ts"),
+  ]);
+  const rpc = (name, parameters) => providerZeroServiceRoleRpc(project, name, parameters);
+  const sourceReader = sourceModule.createRegistrationObservationNotificationSourceReader({
+    async getClient() {
+      return Object.freeze({
+        rpc(name, parameters) {
+          return providerZeroQuery(() => rpc(name, parameters));
+        },
+        from() {
+          fail(invalid);
+        },
+      });
+    },
+  });
+  const adapter = adapterModule.createRegistrationNotificationAdapter({
+    ...adapterModule.createRegistrationNotificationRpcDependencies({
+      rpc,
+      now: () => new Date(),
+    }),
+    observationSourceReader: sourceReader,
+  });
+  const initialFrozen = await rpc(
+    "read_registration_observation_notification_delivery_frozen_state_v1",
+    { p_delivery_id: claim.delivery_id, p_claim_token: claim.claim_token },
+  );
+  if (!exactKeys(initialFrozen, [
+    "attemptCount", "body", "expiresAt", "href", "lastAttemptStartedAt", "payloadFingerprint",
+    "renderFingerprint", "snapshot", "title",
+  ])
+    || initialFrozen.attemptCount !== 0
+    || initialFrozen.lastAttemptStartedAt !== null
+    || initialFrozen.payloadFingerprint !== null
+    || initialFrozen.renderFingerprint !== null
+  ) fail(
+    `${invalid}:first_attempt_not_fresh:${initialFrozen.attemptCount}:${initialFrozen.payloadFingerprint === null ? "unfrozen" : "frozen"}`,
+  );
+  const prepared = await workerModule.prepareRegistrationObservationDeliveryForDispatch({
+    claim,
+    adapter,
+    rpc,
+    now: () => new Date(),
+  });
+  if (prepared?.kind !== "provider_ready") {
+    if (prepared?.kind === "terminal") {
+      fail(`${invalid}:terminal:${String(prepared.status)}:${String(prepared.reason)}`);
+    }
+    fail(invalid);
+  }
+  const begun = prepared.begun;
+  if (
+    !exactKeys(begun, [
+      "channel_key", "claim_token", "connection_key", "delivery_id", "dispatch_token", "href",
+      "mention_user_names", "prepared", "rendered_body", "rendered_title", "status", "webhook_url",
+    ])
+    || begun.status !== "sending"
+    || begun.channel_key !== "google_chat"
+    || begun.connection_key !== "google_chat.management"
+    || !Array.isArray(begun.mention_user_names)
+    || begun.mention_user_names.length !== 1
+    || begun.mention_user_names[0] !== "users/987654321"
+  ) fail(invalid);
+  const stateStdout = (await project.execSql(nodeDispatchStateSql(claim.delivery_id)))?.stdout;
+  let state;
+  try {
+    state = parseServiceRoleRpcResult(stateStdout);
+  } catch {
+    const stateLines = String(stateStdout ?? "")
+      .split(/\r?\n/u)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    fail(`${invalid}:state_result_lines:${stateLines.length}`);
+  }
+  if (!exactKeys(state, ["attemptCount", "deliveryFound", "externalAttemptAudit", "status"])
+    || state.deliveryFound !== true
+    || state.status !== "sending"
+    || state.attemptCount !== 1
+    || state.externalAttemptAudit !== 0
+  ) fail(`${invalid}:state:${JSON.stringify(state)}`);
+  return Object.freeze({
+    productionDispatchSeam: true,
+    status: "sending",
+    channelKey: "google_chat",
+    connectionKey: "google_chat.management",
+    mentionUserNames: ["users/987654321"],
+    externalAttemptAudit: 0,
+  });
+}
+
+function exactValue(actual, expected) {
+  if (Array.isArray(expected)) {
+    return Array.isArray(actual)
+      && actual.length === expected.length
+      && actual.every((value, index) => exactValue(value, expected[index]));
+  }
+  if (expected && typeof expected === "object") {
+    if (!actual || typeof actual !== "object" || Array.isArray(actual)) return false;
+    const actualKeys = Object.keys(actual).sort();
+    const expectedKeys = Object.keys(expected).sort();
+    return actualKeys.length === expectedKeys.length
+      && actualKeys.every((key, index) => key === expectedKeys[index])
+      && expectedKeys.every((key) => exactValue(actual[key], expected[key]));
+  }
+  return Object.is(actual, expected);
+}
+
+function assertProviderZeroEvidence(receipt) {
+  const expectedCallTrace = [
+    "readiness",
+    "activate",
+    "heartbeat.started",
+    "heartbeat.succeeded",
+    "flag.settings-ui",
+    "flag.registration-dispatch",
+    "v2-save",
+    "lifecycle",
+    "node-dispatch",
+  ];
+  const expectedCore = {
+    baselineMarkerMissing: true,
+    coreReadiness: { schemaReady: true, missingObjects: [], runtimeVersion: 0 },
+    coreActivation: { previousVersion: 0, runtimeVersion: 1, replayEqual: true },
+    heartbeat: {
+      workerId: "notification-worker-route-v1",
+      phase: "succeeded",
+      countKeys: [
+        "observation_due",
+        "fanout",
+        "rule_reconciliation",
+        "target_reconciliation",
+        "deliveries",
+        "reaped",
+      ],
+      allZero: true,
+    },
+    sharedFlags: {
+      notification_control_plane_settings_ui_enabled: { enabled: true, revision: "2" },
+      notification_control_plane_dispatch_registration_enabled: { enabled: true, revision: "2" },
+    },
+    v2RuleSaveReceiptExact: true,
+    googleChatPrepareBoundaryReached: true,
+    googleChatDeliveryStatus: "sending",
+    scheduledMentionUserNames: ["users/123456788"],
+    feedbackMentionUserNames: ["users/123456789"],
+    directorReassignedMentionUserNames: ["users/123456789", "users/987654321"],
+    missingIdentityMentionUserNames: [],
+    inAppCommitBoundaryReached: true,
+    inAppDeliveryStatus: "sent",
+    inAppDashboardNotificationCount: 1,
+    inAppPushChildrenCreated: 0,
+    missingDirectorPair: {
+      managementStatus: "sending",
+      managementConnectionKey: "google_chat.management",
+      inAppStatus: "canceled",
+      inAppStatusReason: "recipient_revoked",
+    },
+    inactiveDirectorPair: {
+      managementStatus: "sending",
+      managementConnectionKey: "google_chat.management",
+      inAppStatus: "canceled",
+      inAppStatusReason: "recipient_revoked",
+    },
+    missingDirectorBeforeFanout: {
+      managementDeliveryCount: 1,
+      inAppDeliveryCount: 0,
+    },
+    nodeDispatch: {
+      productionDispatchSeam: true,
+      status: "sending",
+      channelKey: "google_chat",
+      connectionKey: "google_chat.management",
+      mentionUserNames: ["users/987654321"],
+      externalAttemptAudit: 0,
+    },
+    customerQueueUnchanged: true,
+    solapiMessagesUnchanged: true,
+    fetch: 0,
+    http: 0,
+    https: 0,
+    directory: 0,
+    provider: 0,
+    externalAttempt: 0,
+    externalAttemptAudit: 0,
+  };
+  if (
+    !receipt
+    || typeof receipt !== "object"
+    || !exactValue(receipt.callTrace, expectedCallTrace)
+    || receipt.cleanup !== "passed"
+    || !Object.entries(expectedCore).every(([key, expected]) => exactValue(receipt[key], expected))
+  ) {
+    fail("registration_observation_google_chat_provider_zero_evidence_invalid");
+  }
+  return Object.freeze({
+    baselineMarkerMissing: true,
+    coreReadiness: expectedCore.coreReadiness,
+    coreActivation: expectedCore.coreActivation,
+    heartbeat: expectedCore.heartbeat,
+    sharedFlags: expectedCore.sharedFlags,
+    v2RuleSaveReceiptExact: true,
+    orderedCallTraceExact: true,
+    fetch: 0,
+    http: 0,
+    https: 0,
+    directory: 0,
+    provider: 0,
+    externalAttemptAudit: 0,
+    googleChatPrepareBoundaryReached: true,
+    googleChatDeliveryStatus: "sending",
+    scheduledMentionUserNames: expectedCore.scheduledMentionUserNames,
+    feedbackMentionUserNames: expectedCore.feedbackMentionUserNames,
+    directorReassignedMentionUserNames: expectedCore.directorReassignedMentionUserNames,
+    missingIdentityMentionUserNames: expectedCore.missingIdentityMentionUserNames,
+    inAppCommitBoundaryReached: true,
+    inAppDeliveryStatus: "sent",
+    inAppDashboardNotificationCount: 1,
+    inAppPushChildrenCreated: 0,
+    missingDirectorPair: expectedCore.missingDirectorPair,
+    inactiveDirectorPair: expectedCore.inactiveDirectorPair,
+    missingDirectorBeforeFanout: expectedCore.missingDirectorBeforeFanout,
+    nodeDispatch: expectedCore.nodeDispatch,
+    customerQueueUnchanged: true,
+    solapiMessagesUnchanged: true,
+    cleanupComplete: true,
+  });
 }
 
 function isOwnedLoopbackTarget(input, getOwnedPorts) {
@@ -2516,6 +3178,21 @@ function isOwnedLoopbackTarget(input, getOwnedPorts) {
   }
   return hostname === LOOPBACK_HOST
     && [ports.apiPort, ports.dbPort, ports.shadowPort, ports.poolerPort].includes(port);
+}
+
+function assertLocalDockerContext(stdout) {
+  let contexts;
+  try {
+    contexts = JSON.parse(String(stdout ?? ""));
+  } catch {
+    fail("registration_observation_google_chat_provider_zero_docker_context_rejected");
+  }
+  const endpoint = Array.isArray(contexts) && contexts.length === 1
+    ? contexts[0]?.Endpoints?.docker?.Host
+    : null;
+  if (typeof endpoint !== "string" || !endpoint.startsWith("unix://")) {
+    fail("registration_observation_google_chat_provider_zero_docker_context_rejected");
+  }
 }
 
 export function installProviderZeroTransportTraps(getOwnedPorts) {
@@ -2625,6 +3302,7 @@ export async function createOwnedProviderZeroProject({
     childEnvironment,
     manifestPath,
     started: false,
+    startAttempted: false,
     cleaned: false,
     focusTestDirectories: new Map(),
     migrations: [],
@@ -2652,7 +3330,7 @@ export async function createOwnedProviderZeroProject({
   const cleanupOwnedResources = async () => {
     if (project.cleaned) return;
     const cleanupErrors = [];
-    if (project.started) {
+    if (project.startAttempted) {
       try {
         await command(PINNED_SUPABASE_GO, [
           "stop",
@@ -2725,7 +3403,10 @@ export async function createOwnedProviderZeroProject({
       if (version !== MIGRATION_CEILING) {
         fail("registration_observation_google_chat_provider_zero_migration_ceiling_rejected");
       }
+      const dockerContext = await command("docker", ["context", "inspect"]);
+      assertLocalDockerContext(dockerContext?.stdout);
       await writeProjectFiles(project);
+      project.startAttempted = true;
       await command(PINNED_SUPABASE_GO, ["db", "start", "--workdir", runtimeRoot]);
       project.started = true;
       await resetMigrationBaseline();
@@ -2794,6 +3475,10 @@ export async function runRegistrationObservationGoogleChatProviderZero(options =
     project = await createOwnedProviderZeroProject(options);
     await project.applyMigrationsThrough(MIGRATION_CEILING);
     await project.runPgTap();
+    await project.resetMigrationBaseline();
+    const baselineMarkerMissing = parseBaselineReceipt(
+      (await project.execSql(baselineMarkerMissingSql()))?.stdout,
+    );
     await project.applyForwardMigration(
       await forwardMigrationPath(project.repositoryRoot, FORWARD_PGTAP_PATH),
       FORWARD_PGTAP_PATH,
@@ -2810,6 +3495,10 @@ export async function runRegistrationObservationGoogleChatProviderZero(options =
     const lifecycle = parseLifecycleReceipt(
       (await project.execSql(providerZeroLifecycleSql()))?.stdout,
     );
+    const nodeDispatch = await (options.runProductionDispatch ?? runProductionDispatchSeam)(
+      project,
+      lifecycle.nodeDispatchClaim,
+    );
     receipt = {
       mode: "provider-zero-lifecycle-receipt",
       projectId: project.projectId,
@@ -2824,9 +3513,12 @@ export async function runRegistrationObservationGoogleChatProviderZero(options =
         "flag.registration-dispatch",
         "v2-save",
         "lifecycle",
+        "node-dispatch",
       ],
+      baselineMarkerMissing,
       ...core,
       ...lifecycle,
+      nodeDispatch,
       ...traps.counters,
     };
   } catch (error) {
@@ -2845,7 +3537,7 @@ export async function runRegistrationObservationGoogleChatProviderZero(options =
     else throw cleanupError;
   }
   if (primaryError) throw primaryError;
-  return Object.freeze({ ...receipt, cleanup: "passed" });
+  return assertProviderZeroEvidence({ ...receipt, cleanup: "passed" });
 }
 
 async function main() {

@@ -1613,9 +1613,7 @@ export async function prepareRegistrationObservationDeliveryForDispatch(
     ), claim) || workerEnvelopeError()
   }
 
-  if (
-    frozen.payloadFingerprint !== null || frozen.renderFingerprint !== null || frozen.title !== null || frozen.body !== null || frozen.href !== null
-  ) workerEnvelopeError()
+  if (frozen.payloadFingerprint !== null || frozen.renderFingerprint !== null) workerEnvelopeError()
   const snapshot = asRecord(await rpc("get_notification_render_snapshot_v1", {
     p_event_id: asString(claim.event_id),
     p_rule_id: asString(claim.rule_id),

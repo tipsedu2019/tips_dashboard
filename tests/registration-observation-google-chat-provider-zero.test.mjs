@@ -26,16 +26,8 @@ test("provider-zero runner stages the adapter package before the real core recei
     env: localOnlyEnvironment(),
   });
 
-  assert.deepEqual(receipt.callTrace, [
-    "readiness",
-    "activate",
-    "heartbeat.started",
-    "heartbeat.succeeded",
-    "flag.settings-ui",
-    "flag.registration-dispatch",
-    "v2-save",
-    "lifecycle",
-  ]);
+  assert.equal(receipt.orderedCallTraceExact, true);
+  assert.equal(receipt.baselineMarkerMissing, true);
   assert.deepEqual(receipt.coreReadiness, {
     schemaReady: true,
     missingObjects: [],
@@ -57,7 +49,15 @@ test("provider-zero runner stages the adapter package before the real core recei
   assert.equal(receipt.directory, 0);
   assert.equal(receipt.provider, 0);
   assert.equal(receipt.externalAttemptAudit, 0);
-  assert.equal(receipt.cleanup, "passed");
+  assert.deepEqual(receipt.nodeDispatch, {
+    productionDispatchSeam: true,
+    status: "sending",
+    channelKey: "google_chat",
+    connectionKey: "google_chat.management",
+    mentionUserNames: ["users/987654321"],
+    externalAttemptAudit: 0,
+  });
+  assert.equal(receipt.cleanupComplete, true);
 });
 
 test("provider-zero runner commits the scheduled and paired feedback lifecycle without a provider", async () => {
@@ -69,16 +69,7 @@ test("provider-zero runner commits the scheduled and paired feedback lifecycle w
     env: localOnlyEnvironment(),
   });
 
-  assert.deepEqual(receipt.callTrace.slice(0, 8), [
-    "readiness",
-    "activate",
-    "heartbeat.started",
-    "heartbeat.succeeded",
-    "flag.settings-ui",
-    "flag.registration-dispatch",
-    "v2-save",
-    "lifecycle",
-  ]);
+  assert.equal(receipt.orderedCallTraceExact, true);
   assert.equal(receipt.v2RuleSaveReceiptExact, true);
   assert.equal(receipt.googleChatPrepareBoundaryReached, true);
   assert.equal(receipt.googleChatDeliveryStatus, "sending");
@@ -117,5 +108,13 @@ test("provider-zero runner commits the scheduled and paired feedback lifecycle w
   assert.equal(receipt.directory, 0);
   assert.equal(receipt.provider, 0);
   assert.equal(receipt.externalAttemptAudit, 0);
-  assert.equal(receipt.cleanup, "passed");
+  assert.deepEqual(receipt.nodeDispatch, {
+    productionDispatchSeam: true,
+    status: "sending",
+    channelKey: "google_chat",
+    connectionKey: "google_chat.management",
+    mentionUserNames: ["users/987654321"],
+    externalAttemptAudit: 0,
+  });
+  assert.equal(receipt.cleanupComplete, true);
 });
