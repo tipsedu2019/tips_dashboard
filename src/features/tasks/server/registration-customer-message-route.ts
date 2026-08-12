@@ -208,6 +208,19 @@ const TEACHER_HISTORY_READINESS: RegistrationCustomerMessageReadiness = Object.f
   sendAllowed: false,
   blockers: ["role_not_authorized"] as RegistrationCustomerMessageReadiness["blockers"],
 })
+const OBSERVATION_HISTORY_READINESS: RegistrationCustomerMessageReadiness = Object.freeze({
+  runtimeReady: false,
+  activationMode: "off",
+  activationEligible: false,
+  credentialsConfigured: false,
+  pfConfigured: false,
+  templateConfigured: false,
+  templateVerified: false,
+  verifiedAt: null,
+  sourceValid: false,
+  sendAllowed: false,
+  blockers: ["source_invalid"] as RegistrationCustomerMessageReadiness["blockers"],
+})
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -938,30 +951,44 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
         if (!authorizedTaskId || !await dependencies.authorizeTask(context, authorizedTaskId)) {
           httpError(404, "registration_customer_message_source_not_found")
         }
-        const source = await resolvePreviewSource(dependencies, {
-          actorProfileId: context.actorProfileId,
-          ...target,
-          context,
-        })
-        if (source.taskId !== authorizedTaskId) {
-          httpError(503, "registration_customer_message_source_unavailable")
-        }
-        const privateSource = dependencies.readPrivateSource(source)
-        const [readinessValue, historyValue] = await Promise.all([
-          dependencies.getReadiness({
-            actorProfileId: context.actorProfileId,
-            taskId: source.taskId,
-            ...target,
-            contract: privateSource.readinessContract,
-            context,
-          }),
-          dependencies.listHistory({
+        const observationHistory = target.messageKind === "observation_booking"
+          || target.messageKind === "observation_reminder"
+        let readinessValue: unknown
+        let historyValue: unknown
+        if (observationHistory) {
+          readinessValue = OBSERVATION_HISTORY_READINESS
+          historyValue = await dependencies.listHistory({
             actorProfileId: context.actorProfileId,
             ...target,
             limit: 20,
             context,
-          }),
-        ])
+          })
+        } else {
+          const source = await resolvePreviewSource(dependencies, {
+            actorProfileId: context.actorProfileId,
+            ...target,
+            context,
+          })
+          if (source.taskId !== authorizedTaskId) {
+            httpError(503, "registration_customer_message_source_unavailable")
+          }
+          const privateSource = dependencies.readPrivateSource(source)
+          ;[readinessValue, historyValue] = await Promise.all([
+            dependencies.getReadiness({
+              actorProfileId: context.actorProfileId,
+              taskId: source.taskId,
+              ...target,
+              contract: privateSource.readinessContract,
+              context,
+            }),
+            dependencies.listHistory({
+              actorProfileId: context.actorProfileId,
+              ...target,
+              limit: 20,
+              context,
+            }),
+          ])
+        }
         const payload = Object.freeze({
           ok: true,
           messageKind: target.messageKind,

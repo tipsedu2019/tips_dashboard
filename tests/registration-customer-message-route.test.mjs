@@ -6,6 +6,7 @@ import {
   createRegistrationCustomerMessageAuth,
 } from "../src/features/tasks/server/registration-customer-message-auth.ts"
 import {
+  createProductionRegistrationCustomerMessageRouteHandlers,
   createRegistrationCustomerMessageRouteHandlers,
   registrationCustomerMessageHistoryRpcError,
   registrationCustomerMessageSourceRpcError,
@@ -117,6 +118,147 @@ const HISTORY = Object.freeze([{
   recipientLast4: "5678",
   canCheck: true,
 }])
+
+const TERMINAL_OBSERVATION_TARGET = Object.freeze({
+  messageKind: "observation_booking",
+  sourceId: "00000000-0000-4000-8000-000000000009",
+})
+
+const TERMINAL_OBSERVATION_HISTORY = Object.freeze([{
+  messageId: IDS.message,
+  messageKind: "observation_booking",
+  sourceId: TERMINAL_OBSERVATION_TARGET.sourceId,
+  observationId: TERMINAL_OBSERVATION_TARGET.sourceId,
+  currentStatus: "accepted",
+  confirmedByName: "김관리",
+  confirmedAt: "2026-08-05T00:05:00.000Z",
+  updatedAt: "2026-08-05T00:06:00.000Z",
+  recipientLast4: "5678",
+  canCheck: false,
+  deliveryOrigin: "manual",
+  providerMessageId: "must-not-leak",
+}])
+
+const TERMINAL_HISTORY_READINESS = Object.freeze({
+  runtimeReady: false,
+  activationMode: "off",
+  activationEligible: false,
+  credentialsConfigured: false,
+  pfConfigured: false,
+  templateConfigured: false,
+  templateVerified: false,
+  verifiedAt: null,
+  sourceValid: false,
+  sendAllowed: false,
+  blockers: Object.freeze(["source_invalid"]),
+})
+
+const PRODUCTION_HISTORY_ENV = Object.freeze({
+  SOLAPI_API_KEY: "local-api-key",
+  SOLAPI_API_SECRET: "local-api-secret",
+  SOLAPI_KAKAO_PF_ID: "local-pf",
+  SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID: "level-test",
+  SOLAPI_REGISTRATION_VISIT_BOOKING_TEMPLATE_ID: "visit",
+  SOLAPI_REGISTRATION_APPOINTMENT_REMINDER_TEMPLATE_ID: "reminder",
+  SOLAPI_REGISTRATION_WAITING_TEMPLATE_ID: "waiting",
+  SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID: "admission",
+  SOLAPI_REGISTRATION_OBSERVATION_BOOKING_TEMPLATE_ID: "observation-booking",
+  SOLAPI_REGISTRATION_OBSERVATION_REMINDER_TEMPLATE_ID: "observation-reminder",
+  REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER: "local-history-pepper",
+})
+
+function createProductionHistoryHarness({
+  role = "staff",
+  messageKind = TERMINAL_OBSERVATION_TARGET.messageKind,
+  sourceState = "canceled",
+  sourceExists = true,
+  taskVisible = true,
+} = {}) {
+  const calls = {
+    actorTables: [],
+    rpcNames: [],
+    provider: 0,
+  }
+  const actorClient = {
+    auth: {
+      async getUser(token) {
+        assert.equal(token, "test-token")
+        return { data: { user: { id: IDS.actor } }, error: null }
+      },
+    },
+    from(table) {
+      calls.actorTables.push(table)
+      const filters = []
+      return {
+        select() { return this },
+        eq(column, value) {
+          filters.push([column, value])
+          return this
+        },
+        async maybeSingle() {
+          if (table === "ops_registration_observations") {
+            assert.deepEqual(filters, [["id", TERMINAL_OBSERVATION_TARGET.sourceId]])
+            return { data: sourceExists ? { task_id: IDS.task } : null, error: null }
+          }
+          assert.equal(table, "ops_tasks")
+          assert.deepEqual(filters, [["id", IDS.task], ["type", "registration"]])
+          return { data: taskVisible ? { id: IDS.task, type: "registration" } : null, error: null }
+        },
+      }
+    },
+  }
+  const serviceClient = {
+    from(table) {
+      assert.equal(table, "profiles")
+      return {
+        select() { return this },
+        eq() { return this },
+        async maybeSingle() { return { data: { role }, error: null } },
+      }
+    },
+    async rpc(name, args) {
+      calls.rpcNames.push(name)
+      if (name === "list_registration_customer_messages_v1") {
+        assert.deepEqual(args, {
+          p_actor_profile_id: IDS.actor,
+          p_message_kind: messageKind,
+          p_source_id: TERMINAL_OBSERVATION_TARGET.sourceId,
+          p_limit: 20,
+        })
+        return {
+          data: TERMINAL_OBSERVATION_HISTORY.map((row) => ({ ...row, messageKind })),
+          error: null,
+        }
+      }
+      if (name === "resolve_registration_customer_message_source_v1") {
+        assert.ok(["canceled", "attended", "no_show", "elapsed"].includes(sourceState))
+        return {
+          data: null,
+          error: {
+            code: "22023",
+            message: "registration_customer_message_source_ineligible",
+          },
+        }
+      }
+      throw new Error(`unexpected production history RPC: ${name}`)
+    },
+  }
+  const auth = createRegistrationCustomerMessageAuth({
+    createAuthenticatedClient: () => actorClient,
+    createServiceClient: () => serviceClient,
+  })
+  return {
+    calls,
+    handlers: createProductionRegistrationCustomerMessageRouteHandlers({
+      auth,
+      environment: PRODUCTION_HISTORY_ENV,
+      providerFetch: async () => {
+        calls.provider += 1
+        throw new Error("terminal_history_must_not_call_provider")
+      },
+    }),
+  }
+}
 
 function request(path, init = {}) {
   return new Request(`http://localhost${path}`, {
@@ -701,6 +843,97 @@ test("history uses strict query input and masks teacher-only fields", async () =
     assert.equal(calls.history, 1)
     assert.equal(calls.resolveTaskId, role === "teacher" ? 0 : 1)
   }
+})
+
+test("production operator history never consults terminal observation eligibility or exposes stored internals", async () => {
+  for (const role of ["admin", "staff"]) {
+    for (const messageKind of ["observation_booking", "observation_reminder"]) {
+      for (const sourceState of ["canceled", "attended", "no_show", "elapsed"]) {
+        const label = `${role}:${messageKind}:${sourceState}`
+        const harness = createProductionHistoryHarness({ role, messageKind, sourceState })
+        const result = await json(await harness.handlers.messages(request(
+          `/messages?messageKind=${messageKind}&sourceId=${TERMINAL_OBSERVATION_TARGET.sourceId}`,
+        )))
+
+        assert.equal(result.response.status, 200, label)
+        assert.deepEqual(result.body, {
+          ok: true,
+          messageKind,
+          readiness: TERMINAL_HISTORY_READINESS,
+          history: [{
+            messageId: IDS.message,
+            messageKind,
+            currentStatus: "accepted",
+            confirmedByName: "김관리",
+            confirmedAt: "2026-08-05T00:05:00.000Z",
+            updatedAt: "2026-08-05T00:06:00.000Z",
+            recipientLast4: "5678",
+            canCheck: false,
+          }],
+        }, label)
+        assert.deepEqual(harness.calls.actorTables, [
+          "ops_registration_observations",
+          "ops_tasks",
+        ], label)
+        assert.equal(
+          harness.calls.rpcNames.filter((name) => name === "list_registration_customer_messages_v1").length,
+          1,
+          label,
+        )
+        assert.equal(
+          harness.calls.rpcNames.filter((name) => name === "resolve_registration_customer_message_source_v1").length,
+          0,
+          label,
+        )
+        assert.equal(harness.calls.rpcNames.includes("get_registration_customer_solapi_readiness_v1"), false)
+        assert.equal(harness.calls.provider, 0)
+        const serialized = JSON.stringify(result.body)
+        for (const forbidden of [
+          "providerMessageId", "deliveryOrigin", "sourceId", "observationId", "must-not-leak",
+        ]) assert.equal(serialized.includes(forbidden), false, `${label}:${forbidden}`)
+      }
+    }
+  }
+})
+
+test("production observation history keeps source, task, and role authorization before service history", async () => {
+  for (const [label, configuration, expectedStatus] of [
+    ["wrong observation", { sourceExists: false }, 404],
+    ["wrong task", { taskVisible: false }, 404],
+    ["wrong role", { role: "assistant" }, 403],
+  ]) {
+    const harness = createProductionHistoryHarness(configuration)
+    const result = await json(await harness.handlers.messages(request(
+      `/messages?messageKind=${TERMINAL_OBSERVATION_TARGET.messageKind}&sourceId=${TERMINAL_OBSERVATION_TARGET.sourceId}`,
+    )))
+    assert.equal(result.response.status, expectedStatus, label)
+    assert.equal(harness.calls.rpcNames.length, 0, label)
+    assert.equal(harness.calls.provider, 0, label)
+  }
+})
+
+test("production teacher terminal observation history stays DB-authorized and route-masked", async () => {
+  const harness = createProductionHistoryHarness({ role: "teacher" })
+  const result = await json(await harness.handlers.messages(request(
+    `/messages?messageKind=${TERMINAL_OBSERVATION_TARGET.messageKind}&sourceId=${TERMINAL_OBSERVATION_TARGET.sourceId}`,
+  )))
+
+  assert.equal(result.response.status, 200)
+  assert.deepEqual(result.body, {
+    ok: true,
+    messageKind: "observation_booking",
+    readiness: TEACHER_HISTORY_READINESS,
+    history: [{
+      messageKind: "observation_booking",
+      currentStatus: "accepted",
+      confirmedByName: "김관리",
+      confirmedAt: "2026-08-05T00:05:00.000Z",
+      updatedAt: "2026-08-05T00:06:00.000Z",
+    }],
+  })
+  assert.deepEqual(harness.calls.actorTables, [])
+  assert.deepEqual(harness.calls.rpcNames, ["list_registration_customer_messages_v1"])
+  assert.equal(harness.calls.provider, 0)
 })
 
 test("assigned-teacher history delegates visibility to the masked service RPC", async () => {
