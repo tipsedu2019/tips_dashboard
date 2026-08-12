@@ -256,7 +256,7 @@ begin
   on conflict (appointment_id, source_revision, message_kind)
     where message_kind = 'appointment_reminder'
   do update set task_id = excluded.task_id, scheduled_for = excluded.scheduled_for,
-    due_at = excluded.due_at, available_at = pg_catalog.least(
+    due_at = excluded.due_at, available_at = least(
       dashboard_private.registration_customer_reminder_jobs.available_at, excluded.available_at
     ), last_error_code = null
   where dashboard_private.registration_customer_reminder_jobs.status = 'pending';
