@@ -117,7 +117,9 @@ select throws_ok(
 -- Real parity fixtures: 31 roster students, duplicate JSON ids, inferred grades,
 -- weekly overlaps, two exam rules, and one class hidden by an authenticated RLS policy.
 insert into public.academic_schools(id, name, category)
-values ('86200000-0000-4000-8000-000000000601', '통계검증고', '고등학교');
+values
+  ('86200000-0000-4000-8000-000000000601', '통계검증고', '고등학교'),
+  ('86200000-0000-4000-8000-000000000602', '통계검증중', '중학교');
 
 insert into public.students(
   id, name, uid, school, grade, contact, parent_contact, status,
@@ -136,6 +138,26 @@ select
   '[]'::jsonb
 from pg_catalog.generate_series(1, 31) series_value;
 
+insert into public.students(
+  id, name, uid, school, grade, contact, parent_contact, status,
+  class_ids, waitlist_class_ids
+)
+values
+  (
+    '86200000-0000-4000-8000-000000000041', '추론 고등학생',
+    'statistics-inferred-high', '통계검증고', '고1', '01080000041', '01090000041', '재원',
+    pg_catalog.jsonb_build_array('86200000-0000-4000-8000-000000000306'), '[]'::jsonb
+  ),
+  (
+    '86200000-0000-4000-8000-000000000042', '추론 중학생',
+    'statistics-inferred-middle', '통계검증중', '중3', '01080000042', '01090000042', '재원',
+    pg_catalog.jsonb_build_array(
+      '86200000-0000-4000-8000-000000000306',
+      '86200000-0000-4000-8000-000000000307'
+    ),
+    '[]'::jsonb
+  );
+
 insert into public.classes(
   id, name, class_type, subject, grade, teacher, schedule, room,
   capacity, fee, status, student_ids, waitlist_ids, textbook_ids,
@@ -146,7 +168,8 @@ select
   '과학', '고3', '통계검증 선생님', '월수 10:00-11:00', '통계 1강',
   40, 100000, '수업 진행 중',
   (select pg_catalog.jsonb_agg(student.id::text order by student.id)
-   from public.students student where student.uid like 'statistics-fixture-%'),
+   from public.students student where student.uid like 'statistics-fixture-%')
+    || pg_catalog.jsonb_build_array('86200000-0000-4000-8000-000000000001'),
   pg_catalog.jsonb_build_array(
     '86200000-0000-4000-8000-000000000031',
     '86200000-0000-4000-8000-000000000031'
@@ -185,15 +208,60 @@ select
       'date', (current_date + 10)::text,
       'sessionNumber', 1,
       'scheduleState', 'active'
+    ),
+    pg_catalog.jsonb_build_object(
+      'date', (current_date + 30)::text,
+      'sessionNumber', 2,
+      'scheduleState', 'active'
+    ),
+    pg_catalog.jsonb_build_object(
+      'date', (current_date + 39)::text,
+      'sessionNumber', 3,
+      'scheduleState', 'active'
+    )
+  ))
+union all
+select
+  '86200000-0000-4000-8000-000000000306', '통계 추론 중2', '정규',
+  '과학', null, '추론 선생님', '목 17:00-18:00', '통계 3강',
+  10, 100000, '수업 진행 중',
+  pg_catalog.jsonb_build_array(
+    '86200000-0000-4000-8000-000000000041',
+    '86200000-0000-4000-8000-000000000042'
+  ),
+  '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, '{}'::jsonb
+union all
+select
+  '86200000-0000-4000-8000-000000000307', '직접 학사 과학', '정규',
+  '과학', '중3', '학사 선생님', '금 17:00-18:00', '통계 4강',
+  10, 100000, '수업 진행 중',
+  pg_catalog.jsonb_build_array('86200000-0000-4000-8000-000000000042'),
+  '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
+  pg_catalog.jsonb_build_object('sessions', pg_catalog.jsonb_build_array(
+    pg_catalog.jsonb_build_object(
+      'date', (current_date + 20)::text,
+      'sessionNumber', 1,
+      'scheduleState', 'active'
     )
   ));
 
 insert into public.academic_events(id, title, date, type, grade, note, school_id)
-values (
-  '86200000-0000-4000-8000-000000000501', '통계검증 시험기간',
-  current_date + 10, '시험기간', '고3', 'statistics pgTAP',
-  '86200000-0000-4000-8000-000000000601'
-);
+values
+  (
+    '86200000-0000-4000-8000-000000000501', '통계검증 시험기간',
+    current_date + 10, '시험기간', '고3', 'statistics pgTAP',
+    '86200000-0000-4000-8000-000000000601'
+  ),
+  (
+    '86200000-0000-4000-8000-000000000502', '통계검증 과학 시험일',
+    current_date + 20, '과학시험일', '중3', 'subject event parity',
+    '86200000-0000-4000-8000-000000000602'
+  ),
+  (
+    '86200000-0000-4000-8000-000000000503', '통계검증 비시험 상세',
+    current_date + 40, '체험학습', '고3', 'detail rows do not type-filter',
+    '86200000-0000-4000-8000-000000000601'
+  );
 
 insert into public.academic_event_exam_details(
   id, academic_event_id, school_id, grade, subject, exam_date, exam_date_status, sort_order
@@ -210,6 +278,27 @@ values
     '86200000-0000-4000-8000-000000000501',
     '86200000-0000-4000-8000-000000000601',
     '고3', '수학', current_date + 11, 'exact', 2
+  ),
+  (
+    '86200000-0000-4000-8000-000000000513',
+    '86200000-0000-4000-8000-000000000503',
+    '86200000-0000-4000-8000-000000000601',
+    '고3', '영어', current_date + 40, 'exact', 3
+  );
+
+insert into public.academic_exam_days(
+  id, school_id, grade, subject, exam_date, label, note, sort_order
+)
+values
+  (
+    '86200000-0000-4000-8000-000000000521',
+    '86200000-0000-4000-8000-000000000601', '고3', '수학',
+    current_date + 31, 'legacy 수학 시험', 'fallback parity', 1
+  ),
+  (
+    '86200000-0000-4000-8000-000000000522',
+    '86200000-0000-4000-8000-000000000601', '고3', '수학',
+    current_date + 40, 'legacy suppressed by modern detail date', 'fallback date precedence', 2
   );
 
 select is(
@@ -242,8 +331,8 @@ select is(
 );
 select is(
   dashboard_private.dashboard_statistics_inferred_grade_labels_v1(null, '중2 반', array['고1']),
-  array['중2']::text[],
-  'class-name grade wins over student grades'
+  array['고1', '중2']::text[],
+  'name and enrolled grades are combined when direct grade is absent'
 );
 select is(
   dashboard_private.dashboard_statistics_inferred_grade_labels_v1(null, '이름 미정', array['고1']),
@@ -342,6 +431,94 @@ select is(
   ),
   1,
   'RLS-hidden statistics rows are excluded by the security-invoker class drilldown'
+);
+
+select is(
+  (
+    select pg_catalog.jsonb_array_length(class.student_ids)
+      - pg_catalog.count(distinct enrolled.student_id)
+    from public.classes class
+    cross join lateral pg_catalog.jsonb_array_elements_text(class.student_ids) enrolled(student_id)
+    where class.id = '86200000-0000-4000-8000-000000000301'
+    group by class.student_ids
+  ),
+  1::bigint,
+  'registered duplicate id is present in class 301 source'
+);
+
+select is(
+  public.get_dashboard_statistics_sources_v1(
+    'students_classes', 'science', 'high', null, null
+  ) #>> '{summary,registeredEnrollmentCount}',
+  '33',
+  'registered aggregate count deduplicates class 301 source'
+);
+
+with payload as (
+  select public.get_dashboard_statistics_sources_v1(
+    'students_classes', 'science', 'high', null, null
+  ) as value
+)
+select is(
+  (
+    select group_row.value ->> 'enrollmentCount'
+    from payload
+    cross join lateral pg_catalog.jsonb_array_elements(
+      payload.value #> '{classGroups,byTeacher}'
+    ) group_row(value)
+    where group_row.value ->> 'key' = '통계검증 선생님'
+  ),
+  '31',
+  'class group count matches deduplicated class 301 source'
+);
+
+with first_page as (
+  select public.list_dashboard_statistics_class_roster_v1(
+    '86200000-0000-4000-8000-000000000301', null, null, 30
+  ) as payload
+), second_page as (
+  select public.list_dashboard_statistics_class_roster_v1(
+    '86200000-0000-4000-8000-000000000301',
+    first_page.payload #>> '{nextCursor,sortValue}',
+    (first_page.payload #>> '{nextCursor,id}')::uuid,
+    30
+  ) as payload
+  from first_page
+), roster_ids as (
+  select row_value ->> 'id' as student_id
+  from first_page
+  cross join lateral pg_catalog.jsonb_array_elements(first_page.payload -> 'rows') row_value
+  union all
+  select row_value ->> 'id'
+  from second_page
+  cross join lateral pg_catalog.jsonb_array_elements(second_page.payload -> 'rows') row_value
+)
+select ok(
+  (select pg_catalog.count(*) = 31 and pg_catalog.count(distinct student_id) = 31 from roster_ids),
+  'class roster drilldown deduplicates class 301 source'
+);
+
+with payload as (
+  select public.get_dashboard_statistics_sources_v1(
+    'students_classes', 'science', 'all', null, null
+  ) as value
+), aggregate_grade as (
+  select group_row.value
+  from payload
+  cross join lateral pg_catalog.jsonb_array_elements(
+    payload.value #> '{classGroups,byGrade}'
+  ) group_row(value)
+  where group_row.value ->> 'key' = '중2'
+), drilldown as (
+  select public.list_dashboard_statistics_class_group_v1(
+    'science', 'all', 'grade', '중2', null, null, 30
+  ) as value
+)
+select ok(
+  (select value ->> 'classCount' = '1' from aggregate_grade)
+    and (select pg_catalog.jsonb_array_length(value -> 'rows') = 1 from drilldown)
+    and (select value #>> '{rows,0,id}' = '86200000-0000-4000-8000-000000000306' from drilldown),
+  'inferred grade aggregate and drilldown stay in parity'
 );
 
 select ok(
@@ -447,8 +624,61 @@ select is(
       and conflict.value -> 'classIds' ? '86200000-0000-4000-8000-000000000305'
       and pg_catalog.jsonb_array_length(conflict.value -> 'affectedStudentIds') = 2
   ),
-  2::bigint,
-  '400-day exact parity returns both exam rules and merges affected students by stable key'
+  3::bigint,
+  '400-day exact parity preserves stable conflict grouping and merges affected students by key'
+);
+
+with payload as (
+  select public.get_dashboard_statistics_sources_v1(
+    'schedule_conflicts', null, null, current_date, current_date + 400
+  ) as value
+)
+select ok(
+  exists (
+    select 1
+    from payload
+    cross join lateral pg_catalog.jsonb_array_elements(payload.value -> 'examConflicts') conflict(value)
+    where conflict.value ->> 'key' = 'exam:v1:86200000-0000-4000-8000-000000000307:'
+        || (current_date + 20)::text || ':same-day-subject'
+      and conflict.value #> '{source,examEventIds}'
+        = pg_catalog.jsonb_build_array('86200000-0000-4000-8000-000000000502')
+      and conflict.value #> '{source,examDetailIds}' = '[]'::jsonb
+  ),
+  'subject-specific academic event participates in same-day exam parity'
+);
+
+with payload as (
+  select public.get_dashboard_statistics_sources_v1(
+    'schedule_conflicts', null, null, current_date, current_date + 400
+  ) as value
+)
+select ok(
+  exists (
+    select 1
+    from payload
+    cross join lateral pg_catalog.jsonb_array_elements(payload.value -> 'examConflicts') conflict(value)
+    where conflict.value ->> 'key' = 'exam:v1:86200000-0000-4000-8000-000000000305:'
+        || (current_date + 31)::text || ':day-before-other-subject'
+      and conflict.value #> '{source,examEventIds}' = '[]'::jsonb
+      and conflict.value #> '{source,examDetailIds}' = '[]'::jsonb
+  ),
+  'academic exam day supplies date-level fallback when no modern exam source exists'
+);
+
+with payload as (
+  select public.get_dashboard_statistics_sources_v1(
+    'schedule_conflicts', null, null, current_date, current_date + 400
+  ) as value
+)
+select ok(
+  not exists (
+    select 1
+    from payload
+    cross join lateral pg_catalog.jsonb_array_elements(payload.value -> 'examConflicts') conflict(value)
+    where conflict.value ->> 'key' = 'exam:v1:86200000-0000-4000-8000-000000000305:'
+        || (current_date + 40)::text || ':day-before-other-subject'
+  ),
+  'non-exam parent event detail keeps legacy no-type-filter date precedence'
 );
 
 select * from finish();

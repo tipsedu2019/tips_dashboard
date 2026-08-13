@@ -302,6 +302,7 @@ declare
   direct_labels text[];
   name_labels text[];
   student_labels text[];
+  inferred_labels text[];
 begin
   select coalesce(pg_catalog.array_agg(distinct label order by label), array[]::text[])
   into direct_labels
@@ -329,12 +330,18 @@ begin
   ) values_row
   where label is not null;
 
-  return case
-    when pg_catalog.cardinality(direct_labels) > 0 then direct_labels
-    when pg_catalog.cardinality(name_labels) > 0 then name_labels
-    when pg_catalog.cardinality(student_labels) > 0 then student_labels
-    else array['미정']::text[]
-  end;
+  if pg_catalog.cardinality(direct_labels) > 0 then
+    return direct_labels;
+  end if;
+
+  select coalesce(pg_catalog.array_agg(distinct label order by label), array[]::text[])
+  into inferred_labels
+  from pg_catalog.unnest(name_labels || student_labels) label;
+
+  if pg_catalog.cardinality(inferred_labels) > 0 then
+    return inferred_labels;
+  end if;
+  return array['미정']::text[];
 end;
 $function$;
 
@@ -845,25 +852,15 @@ begin
       join public.list_dashboard_class_session_dates_v1(range_from, range_to) session
         on session.class_id = class.id
     ),
-    exam_matches as materialized (
-      select
-        'exam:v1:' || session.class_id::text || ':' || detail.exam_date::text || ':'
-          || case
-            when session.session_date = detail.exam_date then 'same-day-subject'
-            else 'day-before-other-subject'
-          end as conflict_key,
-        case
-          when session.session_date = detail.exam_date then 'same-day-subject'
-          else 'day-before-other-subject'
-        end as exam_rule,
-        session.session_date,
+    enrolled_sessions as materialized (
+      select distinct
         session.class_id,
         session.class_name,
         session.subject,
+        session.session_date,
         student.id as student_id,
-        detail.exam_date,
-        detail.academic_event_id,
-        detail.id as exam_detail_id
+        student.grade as student_grade,
+        school.id as school_id
       from session_rows session
       cross join lateral (
         select distinct element.value as student_id
@@ -873,30 +870,114 @@ begin
       join public.academic_schools school
         on pg_catalog.lower(pg_catalog.regexp_replace(school.name, '\s+', '', 'g'))
           = pg_catalog.lower(pg_catalog.regexp_replace(student.school, '\s+', '', 'g'))
+    ),
+    student_exam_context as materialized (
+      select distinct session.student_id, session.student_grade, session.school_id
+      from enrolled_sessions session
+    ),
+    modern_exam_sources as materialized (
+      select
+        student.student_id,
+        detail.exam_date,
+        dashboard_private.dashboard_statistics_subject_key_v1(detail.subject) as subject_key,
+        detail.academic_event_id,
+        detail.id as exam_detail_id
+      from student_exam_context student
       join public.academic_event_exam_details detail
-        on detail.school_id = school.id
-        and (detail.grade is null or detail.grade in ('all', '전체') or detail.grade = student.grade)
+        on (
+          detail.grade is null
+          or detail.grade in ('all', '전체')
+          or detail.grade = student.student_grade
+        )
+      left join public.academic_events event on event.id = detail.academic_event_id
+      where coalesce(detail.school_id, event.school_id) = student.school_id
+        and detail.exam_date is not null
+        and nullif(dashboard_private.dashboard_statistics_subject_key_v1(detail.subject), '') is not null
+      union all
+      select
+        student.student_id,
+        event.date as exam_date,
+        dashboard_private.dashboard_statistics_subject_key_v1(
+          dashboard_private.dashboard_conflict_subject_from_event_v1(pg_catalog.to_jsonb(event))
+        ) as subject_key,
+        event.id as academic_event_id,
+        null::uuid as exam_detail_id
+      from public.academic_events event
+      join student_exam_context student
+        on event.school_id = student.school_id
+        and (
+          event.grade is null
+          or event.grade in ('all', '전체')
+          or event.grade = student.student_grade
+        )
+      where dashboard_private.dashboard_conflict_event_type_v1(pg_catalog.to_jsonb(event))
+          in ('영어시험일', '수학시험일', '과학시험일')
+        and event.date is not null
+    ),
+    fallback_exam_sources as materialized (
+      select
+        student.student_id,
+        exam_day.exam_date,
+        dashboard_private.dashboard_statistics_subject_key_v1(exam_day.subject) as subject_key,
+        null::uuid as academic_event_id,
+        null::uuid as exam_detail_id
+      from public.academic_exam_days exam_day
+      join student_exam_context student
+        on exam_day.school_id = student.school_id
+        and (
+          exam_day.grade is null
+          or exam_day.grade in ('all', '전체')
+          or exam_day.grade = student.student_grade
+        )
+      where exam_day.exam_date is not null
+        and nullif(dashboard_private.dashboard_statistics_subject_key_v1(exam_day.subject), '') is not null
+        and not exists (
+          select 1
+          from modern_exam_sources modern_source
+          where modern_source.student_id = student.student_id
+            and modern_source.exam_date = exam_day.exam_date
+        )
+    ),
+    student_exam_sources as materialized (
+      select source.* from modern_exam_sources source
+      union all
+      select source.* from fallback_exam_sources source
+    ),
+    exam_matches as materialized (
+      select
+        'exam:v1:' || session.class_id::text || ':' || source.exam_date::text || ':'
+          || case
+            when session.session_date = source.exam_date then 'same-day-subject'
+            else 'day-before-other-subject'
+          end as conflict_key,
+        case
+          when session.session_date = source.exam_date then 'same-day-subject'
+          else 'day-before-other-subject'
+        end as exam_rule,
+        session.session_date,
+        session.class_id,
+        session.class_name,
+        session.subject,
+        session.student_id,
+        source.exam_date,
+        source.academic_event_id,
+        source.exam_detail_id
+      from enrolled_sessions session
+      join student_exam_sources source on source.student_id = session.student_id
         and (
           (
-            detail.exam_date = session.session_date
-            and dashboard_private.dashboard_statistics_subject_key_v1(detail.subject)
-              = dashboard_private.dashboard_statistics_subject_key_v1(session.subject)
+            source.exam_date = session.session_date
+            and source.subject_key = dashboard_private.dashboard_statistics_subject_key_v1(session.subject)
           )
           or (
-            session.session_date = detail.exam_date - 1
-            and dashboard_private.dashboard_statistics_subject_key_v1(detail.subject)
-              <> dashboard_private.dashboard_statistics_subject_key_v1(session.subject)
+            session.session_date = source.exam_date - 1
+            and source.subject_key <> dashboard_private.dashboard_statistics_subject_key_v1(session.subject)
             and not exists (
               select 1
-              from public.academic_event_exam_details same_subject_detail
-              where same_subject_detail.school_id = detail.school_id
-                and same_subject_detail.exam_date = detail.exam_date
-                and (
-                  same_subject_detail.grade is null
-                  or same_subject_detail.grade in ('all', '전체')
-                  or same_subject_detail.grade = student.grade
-                )
-                and dashboard_private.dashboard_statistics_subject_key_v1(same_subject_detail.subject)
+              from student_exam_sources same_subject_source
+              where same_subject_source.student_id = session.student_id
+                and same_subject_source.exam_date = source.exam_date
+                and same_subject_source.subject_key
                   = dashboard_private.dashboard_statistics_subject_key_v1(session.subject)
             )
           )

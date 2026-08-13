@@ -215,8 +215,14 @@ test("statistics source preserves exam-rule parity and merges students by stable
 
   assert.match(aggregate, /'same-day-subject'/iu)
   assert.match(aggregate, /'day-before-other-subject'/iu)
-  assert.match(aggregate, /session\.session_date\s*=\s*detail\.exam_date\s*-\s*1/iu)
-  assert.match(aggregate, /not exists \( select 1 from public\.academic_event_exam_details same_subject_detail/iu)
+  assert.match(aggregate, /modern_exam_sources\s+as\s+materialized/iu)
+  assert.match(aggregate, /fallback_exam_sources\s+as\s+materialized/iu)
+  assert.match(aggregate, /(?:from|join) public\.academic_event_exam_details detail/iu)
+  assert.match(aggregate, /from public\.academic_events event/iu)
+  assert.match(aggregate, /from public\.academic_exam_days exam_day/iu)
+  assert.match(aggregate, /session\.session_date\s*=\s*source\.exam_date\s*-\s*1/iu)
+  assert.match(aggregate, /not exists \([^;]*modern_exam_sources[^;]*exam_date/iu)
+  assert.match(aggregate, /not exists \([^;]*student_exam_sources same_subject_source/iu)
   assert.match(aggregate, /group by[^;]*conflict_key/iu)
   assert.match(aggregate, /dashboard_statistics_unique_text_jsonb_v1/iu)
 })
@@ -231,16 +237,30 @@ test("statistics source normalizes legacy textbook statuses and expands multi-da
   assert.match(sql, /dashboard_statistics_schedule_day_count_v1\(slot_match\[1\]\)/iu)
 })
 
-test("statistics enrollment counts deduplicate repeated JSON ids", async () => {
-  const sql = normalizeSql(await readFile(migrationPath, "utf8"))
+test("statistics enrollment counts deduplicate the class fixture across aggregate and drilldowns", async () => {
+  const [migration, pgTap] = await Promise.all([
+    readFile(migrationPath, "utf8"),
+    readFile(pgTapPath, "utf8"),
+  ])
+  const sql = normalizeSql(migration)
+  const tap = normalizeSql(pgTap)
 
   assert.match(sql, /dashboard_statistics_distinct_jsonb_count_v1/iu)
   assert.doesNotMatch(sql, /jsonb_array_length\(class\.(?:student_ids|waitlist_ids)\)/iu)
   assert.match(sql, /select distinct[^;]*student_id/iu)
+  assert.match(tap, /registered duplicate id is present in class 301 source/iu)
+  assert.match(tap, /registered aggregate count deduplicates class 301 source/iu)
+  assert.match(tap, /class group count matches deduplicated class 301 source/iu)
+  assert.match(tap, /class roster drilldown deduplicates class 301 source/iu)
 })
 
-test("statistics class grade grouping and drilldown share direct-name-student precedence", async () => {
-  const sql = normalizeSql(await readFile(migrationPath, "utf8"))
+test("statistics class grade grouping and drilldown share direct-or-name-plus-student inference", async () => {
+  const [migration, pgTap] = await Promise.all([
+    readFile(migrationPath, "utf8"),
+    readFile(pgTapPath, "utf8"),
+  ])
+  const sql = normalizeSql(migration)
+  const tap = normalizeSql(pgTap)
   const helper = functionBlock(
     sql,
     "dashboard_private.dashboard_statistics_inferred_grade_labels_v1",
@@ -248,9 +268,8 @@ test("statistics class grade grouping and drilldown share direct-name-student pr
   )
 
   assert.match(sql, /dashboard_statistics_inferred_grade_labels_v1/iu)
-  assert.match(helper, /when pg_catalog\.cardinality\(direct_labels\) > 0 then direct_labels/iu)
-  assert.match(helper, /when pg_catalog\.cardinality\(name_labels\) > 0 then name_labels/iu)
-  assert.match(helper, /when pg_catalog\.cardinality\(student_labels\) > 0 then student_labels/iu)
+  assert.match(helper, /if pg_catalog\.cardinality\(direct_labels\) > 0 then return direct_labels/iu)
+  assert.match(helper, /name_labels\s*\|\|\s*student_labels/iu)
 
   const classGroup = functionBlock(
     sql,
@@ -258,4 +277,6 @@ test("statistics class grade grouping and drilldown share direct-name-student pr
     "public.list_dashboard_statistics_class_roster_v1",
   )
   assert.match(classGroup, /p_key\s*=\s*any\s*\(class\.grade_labels\)/iu)
+  assert.match(tap, /name and enrolled grades are combined when direct grade is absent/iu)
+  assert.match(tap, /inferred grade aggregate and drilldown stay in parity/iu)
 })
