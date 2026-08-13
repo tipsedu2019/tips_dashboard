@@ -35,5 +35,6 @@
     "public.ops_tasks",
     "public.students"
   ],
+  "requiredKinds": ["role", "schema", "type", "sequence", "table", "default", "constraint", "index", "function", "rls", "policy", "grant", "trigger"],
   "forbiddenTerms": ["vault", "cron", "webhook", "secret", "token", "phone", "student row", "uuid"]
 }

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, randomBytes as secureRandomBytes } from "node:crypto";
-import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -64,6 +64,26 @@ export async function validateBaselineArtifactHashes({ root = ROOT, manifest }) 
   return true;
 }
 
+async function loadBaselineState(root) {
+  const base = join(root, "supabase/test-baselines");
+  const fallback = { manifestPath: join(base, "dashboard-free-tier-v1.manifest.json"), baselinePath: join(base, "dashboard-free-tier-v1.sql"), catalogPath: join(base, "dashboard-free-tier-origin-main-catalog.json"), parityPath: join(root, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql") };
+  try {
+    const pointer = JSON.parse(await readFile(join(base, "dashboard-free-tier-v1.active.json"), "utf8"));
+    if (!/^[a-f0-9]{16}$/u.test(pointer?.captureId || "")) fail("isolated_supabase_db_baseline_review_required");
+    const capture = join(base, "dashboard-free-tier-v1-captures", pointer.captureId);
+    return { manifestPath: join(capture, "manifest.json"), baselinePath: join(capture, "baseline.sql"), catalogPath: join(capture, "catalog.json"), parityPath: join(capture, "parity.sql") };
+  } catch (error) {
+    if (error?.code === "ENOENT") return fallback;
+    throw error;
+  }
+}
+
+async function validateArtifactPaths({ paths, manifest }) {
+  const [baseline, catalog] = await Promise.all([readFile(paths.baselinePath), readFile(paths.catalogPath)]);
+  if (sha256(baseline) !== manifest.baselineSha256) fail("isolated_supabase_db_baseline_hash_drift");
+  if (sha256(catalog) !== manifest.catalogSha256) fail("isolated_supabase_db_catalog_hash_drift");
+}
+
 export async function validateManifestMigrations({ root = ROOT, manifest }) {
   for (const migration of manifest.orderedNewMigrations) {
     const path = join(root, "supabase/migrations", migration.fileName);
@@ -92,19 +112,25 @@ async function prepareRuntime({ requestId, randomBytes = secureRandomBytes, allo
   const ports = { api: await allocatePort(), db: await allocatePort(), studio: await allocatePort(), inbucket: await allocatePort() };
   if (new Set(Object.values(ports)).size !== 4 || !Object.values(ports).every((port) => Number.isInteger(port) && port >= 1024 && port <= 65535)) fail("isolated_supabase_db_port_invalid");
   const configPath = join(tempRoot, "supabase/config.toml");
-  await mkdir(dirname(configPath), { recursive: true, mode: 0o700 });
-  await writeFile(configPath, safeConfig(projectId, ports), { mode: 0o600 });
   return { tempRoot, projectId, ports, configPath };
 }
 
 async function stageFile(source, target) { await mkdir(dirname(target), { recursive: true, mode: 0o700 }); await copyFile(source, target); }
+async function stageRequestedTests(root, runtime, paths) {
+  for (const path of paths) {
+    const source = safeRepoPath(root, path);
+    try { await readFile(source); } catch { fail("isolated_supabase_db_target_missing"); }
+    await stageFile(source, join(runtime.tempRoot, path));
+  }
+}
 
 export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2), root = ROOT, log = () => {}, randomBytes, allocatePort, retainTempRoot = false, executeProcess = (invocation) => processResult(invocation.command, invocation.args, invocation) } = {}) {
   const args = parseIsolatedDbArguments(argv);
-  const manifest = validateBaselineManifest(JSON.parse(await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.manifest.json"), "utf8")));
-  await validateBaselineArtifactHashes({ root, manifest });
+  const artifactPaths = await loadBaselineState(root);
+  const manifest = validateBaselineManifest(JSON.parse(await readFile(artifactPaths.manifestPath, "utf8")));
+  await validateArtifactPaths({ paths: artifactPaths, manifest });
   if (!args.execute) return { status: "plan", tests: args.tests, probes: args.probes, manifest };
-  const catalog = JSON.parse(await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json"), "utf8"));
+  const catalog = JSON.parse(await readFile(artifactPaths.catalogPath, "utf8"));
   if (catalog.captureStatus !== "reviewed" || catalog.originMainSha !== manifest.originMainSha) fail("isolated_supabase_db_baseline_review_required");
   const migrations = await validateManifestMigrations({ root, manifest });
   const runtime = await prepareRuntime({ requestId: args.requestId, randomBytes, allocatePort });
@@ -117,14 +143,19 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   let startAttempted = false;
   try {
     await invoke(["init", "--workdir", runtime.tempRoot, "--yes"]);
-    await writeFile(runtime.configPath, safeConfig(runtime.projectId, runtime.ports), { mode: 0o600 });
-    await stageFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"), join(runtime.tempRoot, "supabase/migrations/00000000000000_dashboard_free_tier_test_baseline.sql"));
-    for (const file of ["dashboard_free_tier_catalog_parity_test.sql", "dashboard_free_tier_baseline_smoke_test.sql"]) await stageFile(join(root, "supabase/tests", file), join(runtime.tempRoot, "supabase/tests", file));
+    await mkdir(dirname(runtime.configPath), { recursive: true, mode: 0o700 });
+    const temporaryConfig = `${runtime.configPath}.tmp-${process.pid}`;
+    await writeFile(temporaryConfig, safeConfig(runtime.projectId, runtime.ports), { mode: 0o600 });
+    await rename(temporaryConfig, runtime.configPath);
+    await stageFile(artifactPaths.baselinePath, join(runtime.tempRoot, "supabase/migrations/00000000000000_dashboard_free_tier_test_baseline.sql"));
+    await stageFile(artifactPaths.parityPath, join(runtime.tempRoot, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"));
+    await stageFile(join(root, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"), join(runtime.tempRoot, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"));
     startAttempted = true;
     await invoke(["db", "start", "--workdir", runtime.tempRoot, "--yes"]);
     await invoke(["test", "db", "--local", "--workdir", runtime.tempRoot, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql", "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"]);
     for (const migration of migrations) await stageFile(join(root, "supabase/migrations", migration.fileName), join(runtime.tempRoot, "supabase/migrations", migration.fileName));
     await invoke(["migration", "up", "--local", "--workdir", runtime.tempRoot, "--include-all"]);
+    await stageRequestedTests(root, runtime, args.tests);
     if (args.tests.length) await invoke(["test", "db", "--local", "--workdir", runtime.tempRoot, ...args.tests]);
     const status = await invoke(["status", "--workdir", runtime.tempRoot, "--output", "json"]);
     const localDbUrl = parseLocalDbUrl(status.stdout, runtime.ports.db);

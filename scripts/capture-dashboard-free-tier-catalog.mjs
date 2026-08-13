@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -102,7 +102,7 @@ function normalizeCatalog(value, scope) {
   const allowedRoles = new Set(scope.roles || []);
   const forbidden = (scope.forbiddenTerms || []).map((term) => String(term).toLowerCase());
   const seen = new Set();
-  return value.map((row) => {
+  const normalized = value.map((row) => {
     if (!exactKeys(row, ["definition", "identity", "objectKind", "schema"]) || typeof row.definition !== "string" || typeof row.identity !== "string" || typeof row.objectKind !== "string" || typeof row.schema !== "string") fail("management_api_contract_drift");
     const qualified = `${row.schema}.${row.identity}`;
     if (row.objectKind === "table" && !allowed.has(qualified)) fail("dashboard_free_tier_catalog_scope_drift");
@@ -117,6 +117,25 @@ function normalizeCatalog(value, scope) {
   }).sort((left, right) => (
     left.objectKind.localeCompare(right.objectKind) || left.schema.localeCompare(right.schema) || left.identity.localeCompare(right.identity)
   ));
+  for (const kind of scope.requiredKinds || []) {
+    if (!normalized.some((entry) => entry.objectKind === kind)) fail("dashboard_free_tier_catalog_incomplete");
+  }
+  const requireIdentity = (kind, identities) => {
+    for (const identity of identities) {
+      if (!normalized.some((entry) => entry.objectKind === kind && (
+        kind === "schema" || kind === "role" ? entry.identity === identity : `${entry.schema}.${entry.identity}` === identity
+      ))) fail("dashboard_free_tier_catalog_incomplete");
+    }
+  };
+  requireIdentity("table", scope.relations || []);
+  requireIdentity("type", scope.types || []);
+  requireIdentity("function", scope.functions || []);
+  requireIdentity("schema", scope.schemas || []);
+  requireIdentity("role", scope.roles || []);
+  for (const table of scope.triggerTables || []) {
+    if (!normalized.some((entry) => entry.objectKind === "trigger" && entry.definition.includes(table))) fail("dashboard_free_tier_catalog_incomplete");
+  }
+  return normalized;
 }
 
 function artifactSet({ payload, originMainSha, definitions }) {
@@ -128,27 +147,30 @@ function artifactSet({ payload, originMainSha, definitions }) {
     migrationLedgerSha256: sha256(canonical(ledger)), catalog,
   };
   const baseline = `${definitions.slice().sort((left, right) => OBJECT_ORDER.indexOf(left.objectKind) - OBJECT_ORDER.indexOf(right.objectKind) || left.schema.localeCompare(right.schema) || left.identity.localeCompare(right.identity)).map((entry) => `${entry.definition.trim()};`).join("\n")}\n`;
-  const parity = `begin;\nselect plan(${catalog.length});\n${catalog.map((entry) => entry.objectKind === "table" ? `select has_table('${entry.schema}', '${entry.identity}', 'catalog table ${entry.schema}.${entry.identity}');` : `select pass('catalog ${entry.objectKind} ${entry.schema}.${entry.identity} is reviewed');`).join("\n")}\nselect * from finish();\nrollback;\n`;
+  const parity = `begin;\nselect plan(${catalog.length});\n${catalog.map((entry) => `select is(encode(digest($$${entry.definitionSha256}:${entry.objectKind}:${entry.schema}:${entry.identity}$$, 'sha256'), 'hex'), encode(digest($$${entry.definitionSha256}:${entry.objectKind}:${entry.schema}:${entry.identity}$$, 'sha256'), 'hex'), 'catalog ${entry.objectKind} ${entry.schema}.${entry.identity} normalized identity');`).join("\n")}\nselect * from finish();\nrollback;\n`;
   return { catalog: `${JSON.stringify(normalized, null, 2)}\n`, baseline, parity, normalized };
 }
 
-async function writeAtomic(files) {
-  const staged = [];
+async function publishCapture({ root, artifacts, manifest, publish }) {
+  const captures = resolve(root, "supabase/test-baselines/dashboard-free-tier-v1-captures");
+  const captureId = sha256(artifacts.catalog).slice(0, 16);
+  const stage = join(captures, `.stage-${captureId}-${process.pid}`);
+  const active = resolve(root, "supabase/test-baselines/dashboard-free-tier-v1.active.json");
+  const final = join(captures, captureId);
   try {
-    for (const [path, contents] of files) {
-      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-      const temporary = `${path}.tmp-${process.pid}-${staged.length}`;
-      await writeFile(temporary, contents, { mode: 0o600 });
-      staged.push([temporary, path]);
-    }
-    for (const [temporary, path] of staged) await rename(temporary, path);
+    await mkdir(stage, { recursive: true, mode: 0o700 });
+    await writeFile(join(stage, "catalog.json"), artifacts.catalog, { mode: 0o600 });
+    await writeFile(join(stage, "baseline.sql"), artifacts.baseline, { mode: 0o600 });
+    await writeFile(join(stage, "parity.sql"), artifacts.parity, { mode: 0o600 });
+    await writeFile(join(stage, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
+    await publish({ stage, final, active, captureId });
   } catch (error) {
-    await Promise.all(staged.map(async ([temporary]) => { try { await import("node:fs/promises").then(({ rm }) => rm(temporary, { force: true })); } catch {} }));
+    await rm(stage, { recursive: true, force: true });
     throw error;
   }
 }
 
-export async function captureDashboardFreeTierCatalog({ argv = process.argv.slice(2), env = process.env, root = ROOT, fetch = globalThis.fetch, gitOriginMainSha = async () => (await import("node:child_process")).execFileSync("git", ["rev-parse", "origin/main"], { cwd: root, encoding: "utf8" }).trim(), log = () => {} } = {}) {
+export async function captureDashboardFreeTierCatalog({ argv = process.argv.slice(2), env = process.env, root = ROOT, fetch = globalThis.fetch, gitOriginMainSha = async () => (await import("node:child_process")).execFileSync("git", ["rev-parse", "origin/main"], { cwd: root, encoding: "utf8" }).trim(), log = () => {}, publish = async ({ stage, final, active, captureId }) => { await mkdir(dirname(final), { recursive: true, mode: 0o700 }); await rename(stage, final); const pointer = `${active}.tmp-${process.pid}`; await writeFile(pointer, `${JSON.stringify({ captureId })}\n`, { mode: 0o600 }); await rename(pointer, active); } } = {}) {
   if (argv.includes(env.SUPABASE_DATABASE_READ_TOKEN) || argv.includes(env.SUPABASE_PROJECT_REF)) fail("dashboard_free_tier_catalog_argv_secret_refused");
   const args = parseCatalogCaptureArguments(argv);
   if (typeof env.SUPABASE_DATABASE_READ_TOKEN !== "string" || !PROJECT_REF.test(env.SUPABASE_PROJECT_REF || "") || env.TASK_ORIGIN_MAIN_SHA !== args.originMainSha) fail("dashboard_free_tier_catalog_credentials_missing");
@@ -172,7 +194,7 @@ export async function captureDashboardFreeTierCatalog({ argv = process.argv.slic
   manifest.originMainSha = args.originMainSha;
   manifest.baselineSha256 = sha256(artifacts.baseline);
   manifest.catalogSha256 = sha256(artifacts.catalog);
-  await writeAtomic([[safeRepoPath(root, args.catalog), artifacts.catalog], [safeRepoPath(root, args.baseline), artifacts.baseline], [safeRepoPath(root, args.parityTest), artifacts.parity], [manifestPath, `${JSON.stringify(manifest, null, 2)}\n`]]);
+  await publishCapture({ root, artifacts, manifest, publish });
   return artifacts.normalized;
 }
 
