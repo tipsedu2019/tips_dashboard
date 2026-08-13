@@ -372,11 +372,14 @@ export function buildAdminNavGroups({
   const managementItems: NavItem[] = []
 
   if (canEditCurriculumPlanning) {
-    managementItems.push({
-      title: "수업계획",
-      url: "/admin/curriculum",
-      icon: NotebookPen,
-    })
+    managementItems.push(
+      {
+        title: "수업계획",
+        url: "/admin/curriculum",
+        icon: NotebookPen,
+      },
+      { title: "교재관리", url: "/admin/textbooks", icon: BookOpen },
+    )
   }
 
   if (canManageAll) {
@@ -391,7 +394,6 @@ export function buildAdminNavGroups({
         url: "/admin/classes",
         icon: GraduationCap,
       },
-      { title: "교재관리", url: "/admin/textbooks", icon: BookOpen },
     )
   }
 

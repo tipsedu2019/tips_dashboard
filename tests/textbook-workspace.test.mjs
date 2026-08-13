@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { extname } from "node:path";
+import { registerHooks } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   buildSaleLineStatusTransition,
   buildTextbookMonthlyClosing,
@@ -10,6 +14,81 @@ import {
 } from "../src/features/textbooks/textbook-ledger.js";
 
 const root = new URL("../", import.meta.url);
+
+let textbookServicePromise;
+
+function loadTextbookService() {
+  if (!textbookServicePromise) {
+    const supabaseStubUrl = `data:text/javascript,${encodeURIComponent('export const supabase = null; export const supabaseConfigError = "";')}`;
+    const withKnownExtension = (url) => {
+      const path = fileURLToPath(url);
+      if (extname(path)) return url;
+      for (const extension of [".ts", ".js"]) {
+        if (existsSync(`${path}${extension}`)) return pathToFileURL(`${path}${extension}`).href;
+      }
+      return url;
+    };
+    registerHooks({
+      resolve(specifier, context, nextResolve) {
+        if (specifier === "@/lib/supabase") {
+          return { url: supabaseStubUrl, shortCircuit: true };
+        }
+        if ((specifier.startsWith("./") || specifier.startsWith("../")) && context.parentURL) {
+          return nextResolve(withKnownExtension(new URL(specifier, context.parentURL).href), context);
+        }
+        return nextResolve(specifier, context);
+      },
+    });
+    textbookServicePromise = import("../src/features/textbooks/textbook-service.ts");
+  }
+  return textbookServicePromise;
+}
+
+test("textbook request creation uses the constrained request RPC", async () => {
+  const { textbookService } = await loadTextbookService();
+  const calls = [];
+  const response = { data: { order: { id: "order-1" }, lines: [] }, error: null };
+  const client = {
+    async rpc(name, parameters) {
+      calls.push({ name, parameters });
+      return response;
+    },
+  };
+
+  const result = await textbookService.createTextbookRequest({
+    textbookId: "10000000-0000-4000-8000-000000000001",
+    requestedTextbookTitle: "개념원리",
+    classId: "20000000-0000-4000-8000-000000000001",
+    locationId: "30000000-0000-4000-8000-000000000001",
+    studentRequestedQuantity: 12,
+    teacherRequestedQuantity: 1,
+    memo: "수업 시작 전 필요",
+  }, client);
+
+  assert.deepEqual(calls, [{
+    name: "create_textbook_request_v1",
+    parameters: {
+      p_textbook_id: "10000000-0000-4000-8000-000000000001",
+      p_requested_textbook_title: "개념원리",
+      p_class_id: "20000000-0000-4000-8000-000000000001",
+      p_location_id: "30000000-0000-4000-8000-000000000001",
+      p_student_requested_quantity: 12,
+      p_teacher_requested_quantity: 1,
+      p_memo: "수업 시작 전 필요",
+    },
+  }]);
+  assert.deepEqual(result, response.data);
+
+  const deniedClient = {
+    async rpc() {
+      return { data: null, error: new Error("denied") };
+    },
+  };
+  await assert.rejects(
+    () => textbookService.createTextbookRequest({}, deniedClient),
+    { message: "denied" },
+  );
+});
 
 test("admin textbooks route uses the dedicated operations workspace", async () => {
   const pageSource = await readFile(new URL("src/app/admin/textbooks/page.tsx", root), "utf8");
@@ -2348,6 +2427,48 @@ test("textbook workspace keeps teacher request access separate from management d
   assert.match(serviceSource, /canLoadManagementTables \? readTable\(client, "textbook_monthly_closings"/);
 });
 
+test("teachers can add requests but cannot manage existing textbook requests", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const requestDialogStart = workspaceSource.indexOf('{purchaseForm.requestStage === "request" ? (');
+  const requestDialogEnd = workspaceSource.indexOf(
+    '{purchaseForm.requestStage !== "request" && purchaseForm.requestedTextbookTitle',
+    requestDialogStart,
+  );
+  const requestDialogSource = workspaceSource.slice(requestDialogStart, requestDialogEnd);
+
+  assert.match(workspaceSource, /const \{ role, canManageAll, isAdmin, isStaff, isTeacher \} = useAuth\(\)/);
+  assert.match(workspaceSource, /const canCreateTextbookRequest = isTeacher \|\| canManageTextbookOperations/);
+  assert.match(workspaceSource, /requestBy: currentUserLabel/);
+  assert.match(workspaceSource, /purchaseForm\.requestStage === "request"[\s\S]*textbookService\.createTextbookRequest/);
+  assert.match(workspaceSource, /canManageRequestLines=\{canManageTextbookOperations\}/);
+  assert.match(workspaceSource, /canManageRequestLines && onSelectLine/);
+  assert.match(workspaceSource, /canManageRequestLines && isCancelablePurchaseLine/);
+  assert.match(workspaceSource, /canManageRequestLines && nextStatus/);
+  assert.match(requestDialogSource, /canManageTextbookOperations \? \([\s\S]*<TeacherSelect[\s\S]*\) : \([\s\S]*currentUserLabel/);
+  assert.match(requestDialogSource, /canManageTextbookOperations \? \([\s\S]*selectedPurchaseLineId \? \([\s\S]*<TeacherSelect/);
+});
+
+test("teacher request save stays on the unfiltered request tab synchronously", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const savedPurchaseFlowSource = workspaceSource.slice(
+    workspaceSource.indexOf("function showSavedPurchaseFlow"),
+    workspaceSource.indexOf("function openInventoryShortageQueue"),
+  );
+
+  assert.match(savedPurchaseFlowSource, /setActiveTab\(canManageTextbookOperations \? "purchase" : "requests"\)/);
+  assert.match(
+    savedPurchaseFlowSource,
+    /setPurchaseRequestFilter\(canManageTextbookOperations\s*\? getSavedPurchaseRequestFilter\(stage, hasCatalogTextbook\)\s*:\s*"all"\)/,
+  );
+  assert.doesNotMatch(savedPurchaseFlowSource, /setActiveTab\("purchase"\)/);
+});
+
 test("textbook workspace locks 50 daily-operation polish safeguards", async () => {
   const workspaceSource = await readFile(
     new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
@@ -2878,7 +2999,7 @@ test("textbook workspace locks 50 saved purchase visibility safeguards", async (
     /setActiveTab\("purchase"\)/,
     /updateOperationSearchQuery\(title\)/,
     /setPurchaseBoardScope\(getSavedPurchaseBoardScope\(stage\)\)/,
-    /setPurchaseRequestFilter\(getSavedPurchaseRequestFilter\(stage, hasCatalogTextbook\)\)/,
+    /setPurchaseRequestFilter\(canManageTextbookOperations \? getSavedPurchaseRequestFilter\(stage, hasCatalogTextbook\) : "all"\)/,
     /setPurchaseOrderFilter\(getSavedPurchaseOrderFilter\(stage, hasCatalogTextbook\)\)/,
     /operationSearchRef\.current\?\.select\(\)/,
     /const requestedCatalogTextbook = getTextbookById\(activeTextbooks, purchaseRequestTitle\)/,

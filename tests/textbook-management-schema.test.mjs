@@ -117,3 +117,44 @@ test("textbook migrations keep master writes compatible with updated_at payloads
     "public.textbooks must add updated_at in its own alter statement",
   );
 });
+
+test("textbook teacher request migration creates only server-owned requested rows", async () => {
+  const sql = await readFile(
+    new URL("supabase/migrations/20260813053000_textbook_teacher_request_access.sql", root),
+    "utf8",
+  );
+
+  assert.match(sql, /^begin;/);
+  assert.match(sql, /create or replace function public\.create_textbook_request_v1\(/);
+  assert.match(sql, /v_actor_id uuid := auth\.uid\(\)/);
+  assert.match(sql, /v_role text := coalesce\(public\.current_dashboard_role\(\), ''\)/);
+  assert.match(sql, /v_role not in \('admin', 'staff', 'teacher'\)/);
+  assert.match(sql, /status, requested_by, created_by[\s\S]*'requested', v_requester_name, v_actor_id/);
+  assert.match(sql, /ordered_quantity, received_quantity[\s\S]*0, 0/);
+  assert.match(sql, /copy_scope[\s\S]*'student'/);
+  assert.match(sql, /copy_scope[\s\S]*'teacher'/);
+  assert.match(sql, /revoke all on function public\.create_textbook_request_v1[\s\S]*from public, anon/);
+  assert.match(sql, /grant execute on function public\.create_textbook_request_v1[\s\S]*to authenticated/);
+});
+
+test("textbook teacher request pgTAP covers RPC and direct-write authorization", async () => {
+  const sql = await readFile(
+    new URL("supabase/tests/textbook_teacher_request_access_test.sql", root),
+    "utf8",
+  );
+
+  assert.match(sql, /^begin;/);
+  assert.match(sql, /select no_plan\(\)/);
+  assert.match(sql, /set local role authenticated/);
+  assert.match(sql, /public\.create_textbook_request_v1\(/);
+  assert.match(sql, /teacher RPC stores the server-owned requester and creator/);
+  assert.match(sql, /teacher RPC creates requested-only zero-fulfillment lines/);
+  assert.match(sql, /teacher RPC creates no stock moves/);
+  assert.match(sql, /viewer cannot call the textbook request RPC/);
+  assert.match(sql, /assistant cannot call the textbook request RPC/);
+  assert.match(sql, /teacher cannot directly update a textbook request/);
+  assert.match(sql, /teacher cannot directly delete a textbook request/);
+  assert.match(sql, /teacher cannot directly update textbook request lines/);
+  assert.match(sql, /teacher cannot directly delete textbook request lines/);
+  assert.match(sql, /select \* from finish\(\);\s*rollback;\s*$/);
+});
