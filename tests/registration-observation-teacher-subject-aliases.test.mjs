@@ -6,7 +6,7 @@ import test from "node:test";
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const migrationPath = path.join(
   repositoryRoot,
-  "supabase/migrations/20260813014603_registration_observation_teacher_subject_aliases.sql",
+  "supabase/migrations/20260813014859_registration_observation_teacher_subject_aliases.sql",
 );
 
 test("observation teacher catalog matching accepts canonical team aliases without widening visibility", async () => {
