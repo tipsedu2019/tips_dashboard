@@ -1,0 +1,194 @@
+import assert from "node:assert/strict"
+import { execFileSync, spawnSync } from "node:child_process"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
+import test from "node:test"
+
+import {
+  QUERY_SURFACE_DEBT_MANIFEST,
+  verifyQuerySurfaceBudget,
+} from "../src/lib/query-surface-budget.js"
+
+async function createFixtureRepository(files) {
+  const root = await mkdtemp(join(tmpdir(), "query-surface-budget-"))
+  for (const [relativePath, contents] of Object.entries(files)) {
+    const path = join(root, relativePath)
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, contents)
+  }
+  execFileSync("git", ["init", "--quiet"], { cwd: root })
+  execFileSync("git", ["config", "user.email", "query-budget@example.invalid"], { cwd: root })
+  execFileSync("git", ["config", "user.name", "Query budget fixture"], { cwd: root })
+  execFileSync("git", ["add", "."], { cwd: root })
+  execFileSync("git", ["commit", "--quiet", "-m", "baseline"], { cwd: root })
+  return root
+}
+
+function commitFixture(root) {
+  execFileSync("git", ["add", "."], { cwd: root })
+  execFileSync("git", ["commit", "--quiet", "-m", "candidate"], { cwd: root })
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim()
+}
+
+async function verifyFixture({ surface = "tasks", source }) {
+  const root = await createFixtureRepository({ "src/features/tasks/list-tasks.ts": "export const untouched = true\n" })
+  try {
+    const baseSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim()
+    await writeFile(join(root, "src/features/tasks/list-tasks.ts"), source)
+    const headSha = commitFixture(root)
+    return await verifyQuerySurfaceBudget({ surface, baseSha, headSha, root })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}
+
+test("query budget verifier identifies a new list select-star by exact file, symbol, and reason", async () => {
+  const result = await verifyFixture({
+    source: `export async function listTasks(client) {
+  return client.from("ops_tasks").select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.ok, false)
+  assert.deepEqual(result.violations, [{
+    file: "src/features/tasks/list-tasks.ts",
+    symbol: "listTasks",
+    surface: "tasks",
+    reason: "list_select_star",
+  }])
+})
+
+test("query budget verifier rejects an over-budget list limit", async () => {
+  const result = await verifyFixture({
+    source: `export async function listTasks(client) {
+  return client.from("ops_tasks").select("id").limit(31).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/tasks/list-tasks.ts",
+    symbol: "listTasks",
+    surface: "tasks",
+    reason: "list_limit_exceeds_30",
+  }])
+})
+
+test("query budget verifier rejects an RPC page limit over 30", async () => {
+  const result = await verifyFixture({
+    source: `export async function listTasks(client) {
+  return client.rpc("list_ops_task_page_v1", { p_limit: 31 }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/tasks/list-tasks.ts",
+    symbol: "listTasks",
+    surface: "tasks",
+    reason: "rpc_page_limit_exceeds_30",
+  }])
+})
+
+test("query budget verifier rejects list requests without timeout and no-retry protections", async () => {
+  const result = await verifyFixture({
+    source: `export async function listTasks(client) {
+  return client.from("ops_tasks").select("id").limit(30)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [
+    {
+      file: "src/features/tasks/list-tasks.ts",
+      symbol: "listTasks",
+      surface: "tasks",
+      reason: "list_abort_signal_missing",
+    },
+    {
+      file: "src/features/tasks/list-tasks.ts",
+      symbol: "listTasks",
+      surface: "tasks",
+      reason: "list_retry_false_missing",
+    },
+  ])
+})
+
+test("query budget verifier rejects task child list fan-out by task IDs", async () => {
+  const result = await verifyFixture({
+    source: `export async function listTasks(client, taskIds) {
+  return client.from("ops_task_comments").select("id").in("task_id", taskIds).limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/tasks/list-tasks.ts",
+    symbol: "listTasks",
+    surface: "tasks",
+    reason: "task_id_batch_in_list",
+  }])
+})
+
+test("query budget worktree mode includes unstaged source additions", async () => {
+  const root = await createFixtureRepository({ "src/features/tasks/list-tasks.ts": "export const untouched = true\n" })
+  try {
+    await writeFile(join(root, "src/features/tasks/list-tasks.ts"), `export async function listTasks(client) {
+  return client.from("ops_tasks").select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`)
+    const result = await verifyQuerySurfaceBudget({ surface: "tasks", baseSha: "HEAD", includeWorktree: true, root })
+    assert.deepEqual(result.violations, [{
+      file: "src/features/tasks/list-tasks.ts",
+      symbol: "listTasks",
+      surface: "tasks",
+      reason: "list_select_star",
+    }])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("legacy query debt is an exact literal manifest and not a wildcard exception", () => {
+  assert.ok(QUERY_SURFACE_DEBT_MANIFEST.length > 0)
+  for (const entry of QUERY_SURFACE_DEBT_MANIFEST) {
+    assert.deepEqual(Object.keys(entry).sort(), ["baselineSha", "file", "surface", "symbol", "violation"].sort())
+    assert.match(entry.file, /^src\/[\w./-]+\.(?:ts|tsx|js)$/u)
+    assert.doesNotMatch(entry.file, /[*?]/u)
+    assert.match(entry.symbol, /^[A-Za-z_$][\w$]*$/u)
+    assert.match(entry.baselineSha, /^[0-9a-f]{40}$/u)
+    assert.ok(["tasks", "management", "operations", "academic", "public"].includes(entry.surface))
+  }
+})
+
+test("query budget verifier fails closed for an unknown surface", async () => {
+  await assert.rejects(
+    verifyQuerySurfaceBudget({ surface: "everything", baseSha: "HEAD", root: process.cwd() }),
+    { code: "query_surface_unknown" },
+  )
+})
+
+test("query budget CLI requires exactly one CI or worktree mode", () => {
+  const script = new URL("../scripts/verify-query-surface-budget.mjs", import.meta.url)
+  const missingMode = spawnSync(process.execPath, [script.pathname, "--surface", "tasks", "--base", "HEAD"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  })
+  assert.equal(missingMode.status, 2)
+  assert.match(missingMode.stderr, /query_surface_mode_invalid/u)
+
+  const unknownSurface = spawnSync(process.execPath, [script.pathname, "--surface", "unknown", "--base", "HEAD", "--worktree"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  })
+  assert.equal(unknownSurface.status, 2)
+  assert.match(unknownSurface.stderr, /query_surface_unknown/u)
+
+  const worktree = spawnSync(process.execPath, [script.pathname, "--surface", "tasks", "--base", "HEAD", "--worktree"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  })
+  assert.equal(worktree.status, 0)
+})
