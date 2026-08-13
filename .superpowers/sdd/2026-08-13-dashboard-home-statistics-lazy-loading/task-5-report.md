@@ -136,3 +136,15 @@ Fresh focused verification after the review fix passed 28/28:
 Direct ESLint of the changed cache/hook/test files, `tsc --noEmit`, and `git diff --check` exited 0. The SQL migration was not changed, so its candidate SHA-256 remains `7ce560e6c3b6864f4b99adcf1cbe9271235ca8e0906d1e93ce985f6f22ca5de0`.
 
 The authorized isolated DB harness was re-attempted and again returned the exact fail-closed result `isolated_supabase_db_baseline_review_required` before database allocation. No migration replay, pgTAP execution, production read, production migration, or deployment is claimed. The manifest remains `candidate`.
+
+## Review fix round 2
+
+### RED
+
+Added a valid-looking response envelope containing `ok`, contract/tab, timestamps, and cache status but no own `data` field. Before the normalizer fix, the focused cache suite reported 13 pass / 1 intended failure: the cache returned and retained that envelope instead of raising `dashboard_statistics_response_invalid`.
+
+### Change and GREEN
+
+`normalizeDashboardStatisticsSnapshot` now requires an own `data` property using `Object.prototype.hasOwnProperty.call`. This rejects a missing field even if the rest of the envelope is valid-looking, while preserving `data: null` as an explicit payload. Because memory-cache normalization occurs before storage, the rejected promise removes the in-flight entry; the regression test proves a following valid loader is invoked and cached rather than receiving the invalid result.
+
+Fresh focused verification passed 29/29 across the cache and resource-pressure suites. Direct ESLint of the changed contract/test files, `tsc --noEmit`, and `git diff --check` exited 0. No SQL, manifest, DB runtime, production database, or deployment change was made; the migration remains at the same candidate hash and the previously recorded isolated DB baseline blocker remains authoritative.

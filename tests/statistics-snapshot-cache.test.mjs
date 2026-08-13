@@ -448,6 +448,31 @@ test("browser cache rejects expired or malformed snapshots without retaining the
   assert.equal(calls, 3)
 })
 
+test("browser cache rejects a valid-looking envelope without its own data field", async () => {
+  const now = Date.parse("2026-08-14T00:00:00.000Z")
+  let calls = 0
+  const cache = cacheModule.createDashboardStatisticsMemoryCache({ now: () => now })
+  const key = "actor:admin:dashboard-statistics-v1:overview:all:all::"
+  const missingData = snapshot()
+  delete missingData.data
+
+  await assert.rejects(
+    cache.load(key, async () => {
+      calls += 1
+      return missingData
+    }),
+    /dashboard_statistics_response_invalid/,
+  )
+  assert.deepEqual(
+    await cache.load(key, async () => {
+      calls += 1
+      return snapshot({ value: 2 })
+    }),
+    snapshot({ value: 2 }),
+  )
+  assert.equal(calls, 2)
+})
+
 test("force refresh stays pending across StrictMode cleanup and dependency abort until success", () => {
   assert.equal(typeof cacheModule.createDashboardStatisticsForceIntent, "function")
   const initial = cacheModule.createDashboardStatisticsForceIntent()

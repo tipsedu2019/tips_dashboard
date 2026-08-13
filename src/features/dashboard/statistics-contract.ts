@@ -209,6 +209,7 @@ export function normalizeDashboardStatisticsSnapshot(value: unknown): DashboardS
   const candidate = value as Record<string, unknown>
   if (
     candidate.ok !== true ||
+    !Object.prototype.hasOwnProperty.call(candidate, "data") ||
     candidate.contractVersion !== DASHBOARD_STATISTICS_CONTRACT_VERSION ||
     typeof candidate.tab !== "string" || !isTab(candidate.tab) ||
     typeof candidate.generatedAt !== "string" || !Number.isFinite(Date.parse(candidate.generatedAt)) ||
