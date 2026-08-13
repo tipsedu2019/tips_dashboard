@@ -7,6 +7,7 @@ import {
   ClipboardCheck,
   FileCheck2,
   GraduationCap,
+  ChartNoAxesCombined,
   LayoutDashboard,
   LayoutGrid,
   NotebookPen,
@@ -53,6 +54,14 @@ const workspaceMetaEntries: Array<{
   match: string
   meta: AdminWorkspaceMeta
 }> = [
+  {
+    match: "/admin/statistics",
+    meta: {
+      section: "운영",
+      title: "통계",
+      summary: "학생, 수업, 일정 충돌, 교재 운영 지표를 필요할 때 확인합니다.",
+    },
+  },
   {
     match: "/admin/settings/subjects",
     meta: {
@@ -337,6 +346,7 @@ export function buildAdminNavGroups({
   ]
   const fullOverviewItems: NavItem[] = [
     { title: "대시보드", url: "/admin/dashboard", icon: LayoutDashboard },
+    { title: "통계", url: "/admin/statistics", icon: ChartNoAxesCombined },
     {
       title: "할 일",
       url: "/admin/tasks",

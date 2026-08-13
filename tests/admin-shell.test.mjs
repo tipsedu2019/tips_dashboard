@@ -241,6 +241,15 @@ test("dashboard renders only the daily brief path instead of live statistics sou
   }
 });
 
+test("admin statistics route stays in the dashboard navigation role boundary", async () => {
+  const navigationSource = await readSource("src/lib/navigation.ts");
+  const statisticsPage = await readSource("src/app/admin/statistics/page.tsx");
+
+  assert.match(statisticsPage, /StatisticsWorkspace/);
+  assert.match(navigationSource, /title: "통계", url: "\/admin\/statistics"/);
+  assert.match(navigationSource, /resolveAdminWorkspaceMeta/);
+});
+
 test("dashboard focuses on student, enrollment, class, and conflict signals", async () => {
   const source = await readSource("src/app/admin/dashboard/components/section-cards.tsx");
 
