@@ -2451,6 +2451,20 @@ test("teachers can add requests but cannot manage existing textbook requests", a
   assert.match(requestDialogSource, /canManageTextbookOperations \? \([\s\S]*selectedPurchaseLineId \? \([\s\S]*<TeacherSelect/);
 });
 
+test("teacher request save stays on the request tab synchronously", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const savedPurchaseFlowSource = workspaceSource.slice(
+    workspaceSource.indexOf("function showSavedPurchaseFlow"),
+    workspaceSource.indexOf("function openInventoryShortageQueue"),
+  );
+
+  assert.match(savedPurchaseFlowSource, /setActiveTab\(canManageTextbookOperations \? "purchase" : "requests"\)/);
+  assert.doesNotMatch(savedPurchaseFlowSource, /setActiveTab\("purchase"\)/);
+});
+
 test("textbook workspace locks 50 daily-operation polish safeguards", async () => {
   const workspaceSource = await readFile(
     new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),

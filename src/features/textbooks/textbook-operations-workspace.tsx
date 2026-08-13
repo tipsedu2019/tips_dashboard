@@ -3936,7 +3936,7 @@ export function TextbookOperationsWorkspace() {
   }
 
   function showSavedPurchaseFlow(stage: string, title: string, hasCatalogTextbook: boolean) {
-    setActiveTab("purchase");
+    setActiveTab(canManageTextbookOperations ? "purchase" : "requests");
     updateOperationSearchQuery(title);
     setPurchaseBoardScope(getSavedPurchaseBoardScope(stage));
     setPurchaseRequestFilter(getSavedPurchaseRequestFilter(stage, hasCatalogTextbook));
