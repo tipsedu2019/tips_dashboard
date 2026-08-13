@@ -2545,14 +2545,14 @@ function shouldShowPurchaseLineOnBoard(line: Row, scope: PurchaseBoardScope) {
 }
 
 function useTextbookOperationsData() {
-  const { user, loading: authLoading, role, canManageAll, isAdmin, isStaff } = useAuth();
+  const { user, loading: authLoading, role, canManageAll, isAdmin, isStaff, isTeacher } = useAuth();
   const [data, setData] = useState<TextbookOperationsData>(emptyData);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [lastLoadedAt, setLastLoadedAt] = useState("");
   const [loadDurationMs, setLoadDurationMs] = useState(0);
   const loadRequestIdRef = useRef(0);
-  const canLoadManagementTextbookData = canManageAll || isAdmin || isStaff || role === "admin" || role === "staff";
+  const canLoadManagementTextbookData = !isTeacher && (canManageAll || isAdmin || isStaff || role === "admin" || role === "staff");
 
   const load = useCallback(async () => {
     if (authLoading) {
@@ -2709,7 +2709,7 @@ function getOperationSearchLabel(activeTab: string) {
 
 export function TextbookOperationsWorkspace() {
   const { data, loading, error, refresh, user, lastLoadedAt, loadDurationMs } = useTextbookOperationsData();
-  const { role, canManageAll, isAdmin, isStaff } = useAuth();
+  const { role, canManageAll, isAdmin, isStaff, isTeacher } = useAuth();
   const [saving, setSaving] = useState("");
   const [message, setMessage] = useState("");
   const [actionErrorMessage, setActionErrorMessage] = useState("");
@@ -2786,6 +2786,7 @@ export function TextbookOperationsWorkspace() {
   const currentUserLabel = text(user?.email || user?.id);
   const currentUserEmail = normalizeEmailValue(user?.email);
   const canManageTextbookOperations = canManageAll || isAdmin || isStaff || role === "admin" || role === "staff";
+  const canCreateTextbookRequest = isTeacher || canManageTextbookOperations;
   const canDeleteTextbookHistory =
     canManageAll ||
     isAdmin ||
@@ -3758,7 +3759,7 @@ export function TextbookOperationsWorkspace() {
   function openNewRequestDialog() {
     setSelectedPurchaseLineId("");
     setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
-    setPurchaseForm({ ...emptyPurchaseForm, requestStage: "request" });
+    setPurchaseForm({ ...emptyPurchaseForm, requestStage: "request", requestBy: currentUserLabel });
     setPurchaseRequestInputMode("catalog");
     setMessage("");
     setPurchaseDialogOpen(true);
@@ -4578,6 +4579,38 @@ export function TextbookOperationsWorkspace() {
     const completedPurchaseStage = purchaseForm.requestStage;
     const completedPurchaseTitle = purchaseRequestTitle;
     const completedPurchaseHasCatalogTextbook = Boolean(selectedPurchaseTextbookId || getRecordId(requestedCatalogTextbook || {}) || purchaseForm.textbookId);
+    if (purchaseForm.requestStage === "request" && !selectedPurchaseLineId) {
+      if (!canCreateTextbookRequest) {
+        setActionErrorMessage("교재 요청을 등록할 권한이 없습니다.");
+        return;
+      }
+      void runAction(
+        "purchase",
+        () => textbookService.createTextbookRequest({
+          textbookId: selectedPurchaseTextbookId || getRecordId(requestedCatalogTextbook || {}) || purchaseForm.textbookId,
+          requestedTextbookTitle: normalizeStoredTextInput(purchaseRequestTitle),
+          classId: purchaseForm.classId,
+          locationId: selectedLocationId,
+          studentRequestedQuantity: getPurchaseScopeQuantity(purchaseForm, "student", "requested"),
+          teacherRequestedQuantity: getPurchaseScopeQuantity(purchaseForm, "teacher", "requested"),
+          memo: normalizeStoredTextInput(purchaseForm.memo),
+        }),
+        purchaseSuccessMessage(purchaseForm.requestStage, false),
+      ).then((ok) => {
+        if (ok) {
+          showSavedPurchaseFlow(completedPurchaseStage, completedPurchaseTitle, completedPurchaseHasCatalogTextbook);
+          setPurchaseDialogOpen(false);
+          setSelectedPurchaseLineId("");
+          setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
+          setPurchaseForm(emptyPurchaseForm);
+        }
+      });
+      return;
+    }
+    if (!canManageTextbookOperations) {
+      setActionErrorMessage("교재 요청을 관리할 권한이 없습니다.");
+      return;
+    }
     const purchasePayloads = (["student", "teacher"] as TextbookCopyScope[]).flatMap((scope) => {
       const scopeLineId = selectedPurchaseScopeLineIds[scope] || "";
       const scopeLine = scopeLineId ? purchaseLinesById.get(scopeLineId) : undefined;
@@ -5686,14 +5719,30 @@ export function TextbookOperationsWorkspace() {
                   <Field label="교사용 요청">
                     <Input value={purchaseForm.teacherRequestedQuantity} onChange={(event) => setPurchaseField("teacherRequestedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="교사용 요청 수량" />
                   </Field>
-                  <Field label="선생님">
-                    <TeacherSelect
-                      teachers={data.teacherCatalogs}
-                      value={purchaseForm.requestBy}
-                      onValueChange={(value) => setPurchaseField("requestBy", value)}
-                      ariaLabel="선생님 선택"
-                    />
-                  </Field>
+                  {canManageTextbookOperations ? (
+                    selectedPurchaseLineId ? (
+                      <Field label="선생님">
+                        <TeacherSelect
+                          teachers={data.teacherCatalogs}
+                          value={purchaseForm.requestBy}
+                          onValueChange={(value) => setPurchaseField("requestBy", value)}
+                          ariaLabel="선생님 선택"
+                        />
+                      </Field>
+                    ) : (
+                      <Field label="요청자">
+                        <div className="flex h-10 items-center rounded-md border bg-muted/30 px-3 text-sm text-foreground">
+                          {currentUserLabel || "-"}
+                        </div>
+                      </Field>
+                    )
+                  ) : (
+                    <Field label="요청자">
+                      <div className="flex h-10 items-center rounded-md border bg-muted/30 px-3 text-sm text-foreground">
+                        {currentUserLabel || "-"}
+                      </div>
+                    </Field>
+                  )}
                   <div className="sm:col-span-2">
                     <Field label="위치">
                       <LocationSelect
@@ -6598,6 +6647,7 @@ export function TextbookOperationsWorkspace() {
         <TabsContent value="requests" className="mt-4 grid min-w-0 content-start gap-4">
           <PurchaseProcessTable
             mode="request"
+            canManageRequestLines={canManageTextbookOperations}
             orders={data.purchaseOrders}
             lines={activePurchaseOrderLines}
             textbooks={data.textbooks}
@@ -9892,6 +9942,7 @@ function ProcessGroupEmptyState({
 
 function PurchaseProcessTable({
   mode,
+  canManageRequestLines = true,
   orders,
   lines,
   textbooks,
@@ -9925,6 +9976,7 @@ function PurchaseProcessTable({
   onClearSearch,
 }: {
   mode: "request" | "order";
+  canManageRequestLines?: boolean;
   orders: Row[];
   lines: Row[];
   textbooks: Row[];
@@ -10627,15 +10679,21 @@ function PurchaseProcessTable({
                           ) : null}
                           <div className="min-w-0 flex-1">
                             <div className="flex min-w-0 items-start justify-between gap-2">
-                              <button
-                                type="button"
-                                onClick={() => onSelectLine(line, order)}
-                                aria-label={`${textbookTitle} ${mode === "request" ? "요청" : "주문·입고"} 상세 열기`}
-                                title={textbookTitle}
-                                className="min-w-0 flex-1 truncate text-left text-sm font-semibold underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                              >
-                                {textbookTitle}
-                              </button>
+                              {canManageRequestLines && onSelectLine ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onSelectLine(line, order)}
+                                  aria-label={`${textbookTitle} ${mode === "request" ? "요청" : "주문·입고"} 상세 열기`}
+                                  title={textbookTitle}
+                                  className="min-w-0 flex-1 truncate text-left text-sm font-semibold underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                >
+                                  {textbookTitle}
+                                </button>
+                              ) : (
+                                <span className="min-w-0 flex-1 truncate text-sm font-semibold" title={textbookTitle}>
+                                  {textbookTitle}
+                                </span>
+                              )}
                               <Badge variant="outline" className={cn("shrink-0 rounded-md", processStatusPillClass(status))}>
                                 {purchaseStatusLabel(status, ordered, received)}
                               </Badge>
@@ -10711,10 +10769,12 @@ function PurchaseProcessTable({
                         </div>
                         <div className="mt-3 grid min-w-0 grid-cols-2 gap-2 [&>button]:w-full">
                           {mode === "request" ? (
-                            <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} 요청 수정`} onClick={() => onSelectLine(line, order)}>
-                              <Pencil className="mr-1 size-3.5" />
-                              수정
-                            </Button>
+                            canManageRequestLines && onSelectLine ? (
+                              <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} 요청 수정`} onClick={() => onSelectLine(line, order)}>
+                                <Pencil className="mr-1 size-3.5" />
+                                수정
+                              </Button>
+                            ) : null
                           ) : (
                             <>
                               <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} 주문·입고 수정`} onClick={() => onSelectLine(line, order)}>
@@ -10736,7 +10796,7 @@ function PurchaseProcessTable({
                                   ) : null}
                                 </>
                               ) : null}
-                              {nextStatus && !isMissingTextbookRequest ? (
+                              {canManageRequestLines && nextStatus && !isMissingTextbookRequest ? (
                                 <Button
                                   type="button"
                                   variant="outline"
@@ -10754,7 +10814,7 @@ function PurchaseProcessTable({
                                   {processAction?.label || "이동"}
                                 </Button>
                               ) : null}
-                              {isReturnablePurchaseLine && onReturnLine ? (
+                              {canManageRequestLines && isReturnablePurchaseLine && onReturnLine ? (
                                 <Button
                                   type="button"
                                   variant="outline"
@@ -10768,7 +10828,7 @@ function PurchaseProcessTable({
                               ) : null}
                             </>
                           )}
-                          {isCancelablePurchaseLine ? (
+                          {canManageRequestLines && isCancelablePurchaseLine ? (
                             <Button
                               type="button"
                               variant="outline"
@@ -10901,15 +10961,21 @@ function PurchaseProcessTable({
                             {isPurchaseColumnVisible("requester") ? <TableCell className="max-w-[104px] truncate">{draft.requestBy || "-"}</TableCell> : null}
                             {isPurchaseColumnVisible("textbook") ? (
                             <TableCell>
-                              <button
-                                type="button"
-                                onClick={() => onSelectLine(line, order)}
-                                aria-label={`${textbookTitle} ${mode === "request" ? "요청" : "주문·입고"} 상세 열기`}
-                                title={textbookTitle}
-                                className="max-w-[360px] truncate text-left font-medium hover:underline"
-                              >
-                                {textbookTitle}
-                              </button>
+                              {canManageRequestLines && onSelectLine ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onSelectLine(line, order)}
+                                  aria-label={`${textbookTitle} ${mode === "request" ? "요청" : "주문·입고"} 상세 열기`}
+                                  title={textbookTitle}
+                                  className="max-w-[360px] truncate text-left font-medium hover:underline"
+                                >
+                                  {textbookTitle}
+                                </button>
+                              ) : (
+                                <span className="block max-w-[360px] truncate font-medium" title={textbookTitle}>
+                                  {textbookTitle}
+                                </span>
+                              )}
                               {!textbook ? (
                                 <div className="text-xs text-amber-700">미등록</div>
                               ) : null}
@@ -10979,12 +11045,12 @@ function PurchaseProcessTable({
                             <TableCell className={stickyActionCellClassName}>
                               <div className="flex justify-end gap-1">
                                 {mode === "request" ? (
-                                  <>
+                                  canManageRequestLines && onSelectLine ? (
                                     <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} 요청 수정`} onClick={() => onSelectLine(line, order)}>
                                       <Pencil className="mr-1 size-3.5" />
                                       수정
                                     </Button>
-                                  </>
+                                  ) : null
                                 ) : (
                                   <>
                                     <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} 주문·입고 수정`} onClick={() => onSelectLine(line, order)}>
@@ -11006,7 +11072,7 @@ function PurchaseProcessTable({
                                         ) : null}
                                       </>
                                     ) : null}
-                                    {nextStatus && !isMissingTextbookRequest ? (
+                                    {canManageRequestLines && nextStatus && !isMissingTextbookRequest ? (
                                       <Button
                                         type="button"
                                         variant="outline"
@@ -11024,7 +11090,7 @@ function PurchaseProcessTable({
                                         {processAction?.label || "이동"}
                                       </Button>
                                     ) : null}
-                                    {isReturnablePurchaseLine && onReturnLine ? (
+                                    {canManageRequestLines && isReturnablePurchaseLine && onReturnLine ? (
                                       <Button
                                         type="button"
                                         variant="outline"
@@ -11038,7 +11104,7 @@ function PurchaseProcessTable({
                                     ) : null}
                                   </>
                                 )}
-                                {isCancelablePurchaseLine ? (
+                                {canManageRequestLines && isCancelablePurchaseLine ? (
                                   <Button
                                     type="button"
                                     variant="outline"

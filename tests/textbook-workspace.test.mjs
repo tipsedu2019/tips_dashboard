@@ -2427,6 +2427,30 @@ test("textbook workspace keeps teacher request access separate from management d
   assert.match(serviceSource, /canLoadManagementTables \? readTable\(client, "textbook_monthly_closings"/);
 });
 
+test("teachers can add requests but cannot manage existing textbook requests", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const requestDialogStart = workspaceSource.indexOf('{purchaseForm.requestStage === "request" ? (');
+  const requestDialogEnd = workspaceSource.indexOf(
+    '{purchaseForm.requestStage !== "request" && purchaseForm.requestedTextbookTitle',
+    requestDialogStart,
+  );
+  const requestDialogSource = workspaceSource.slice(requestDialogStart, requestDialogEnd);
+
+  assert.match(workspaceSource, /const \{ role, canManageAll, isAdmin, isStaff, isTeacher \} = useAuth\(\)/);
+  assert.match(workspaceSource, /const canCreateTextbookRequest = isTeacher \|\| canManageTextbookOperations/);
+  assert.match(workspaceSource, /requestBy: currentUserLabel/);
+  assert.match(workspaceSource, /purchaseForm\.requestStage === "request"[\s\S]*textbookService\.createTextbookRequest/);
+  assert.match(workspaceSource, /canManageRequestLines=\{canManageTextbookOperations\}/);
+  assert.match(workspaceSource, /canManageRequestLines && onSelectLine/);
+  assert.match(workspaceSource, /canManageRequestLines && isCancelablePurchaseLine/);
+  assert.match(workspaceSource, /canManageRequestLines && nextStatus/);
+  assert.match(requestDialogSource, /canManageTextbookOperations \? \([\s\S]*<TeacherSelect[\s\S]*\) : \([\s\S]*currentUserLabel/);
+  assert.match(requestDialogSource, /canManageTextbookOperations \? \([\s\S]*selectedPurchaseLineId \? \([\s\S]*<TeacherSelect/);
+});
+
 test("textbook workspace locks 50 daily-operation polish safeguards", async () => {
   const workspaceSource = await readFile(
     new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
