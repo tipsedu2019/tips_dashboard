@@ -10,3 +10,4 @@ Task 1 fix round 2: fail closed for opaque list projection, limit, RPC, and comp
 Task 1 fix round 3: compare exact debt occurrences, inspect no-limit and optional computed query entrypoints, and reject ambiguous canonical cursor-scope inputs.
 Task 1 fix round 4: enforce contracts per direct query chain, bind each baseline-debt exception to an exact recorded-SHA fingerprint, retain only explicit single/range list exemptions, and reject mixed/whitespace wildcard projections.
 Task 1 fix round 5: replace regex extraction with TypeScript AST receiver/alias analysis, compare changed legacy files against exact caller-baseline deltas, refresh baseline fingerprints, and preserve nested PostgREST projections.
+Task 1 fix round 6: make the exact debt manifest the sole allowance for touched query chains, add structural timeout/order/exact-detail contracts, and reject recursive nested projection wildcards without broadening the legacy ledger.

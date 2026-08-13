@@ -114,3 +114,30 @@ git diff --check
 ```
 
 All commands exited successfully. No migration, production action, or `pnpm-workspace.yaml` change was made.
+
+## Fix round 6 — manifest authority and deterministic list contracts
+
+- Design decision: the manifest remains the sole legacy-debt allowance and was not expanded into a broad snapshot of historical findings. The diff verifier now considers only query chains whose source span is touched by the caller's diff; an unchanged old chain is outside the candidate set. For every touched chain, only an exact manifest `surface + file + symbol + violation + baseline fingerprint` can permit its legacy finding. There is no candidate-vs-baseline grandfathering.
+- This keeps Task 2–6 practical when they edit unrelated portions of a legacy source file, while making a changed or new query fail unless it complies or preserves an exact listed legacy chain. RED fixtures prove both a removed manifest row and a touched unmanifested legacy query fail.
+- `abortSignal` is now structurally checked as exactly `.abortSignal(AbortSignal.timeout(8000))`; a fallback/or expression containing that text does not pass.
+- A page list must provide an actual `.limit(...)` and `.order(...)`. `.single()` / `.maybeSingle()` is an exception only with an exact-key `.eq("id", value)` predicate; otherwise it is treated as an unbounded list request and fails with explicit detail/limit/order reasons.
+- Projection wildcard recognition is recursive across PostgREST nesting, rejecting `owner:profiles(*)` as well as top-level wildcard fields while continuing to allow explicit nested fields.
+- RED-first fixtures cover manifest-row removal, unmanifested touched debt, timeout fallback bypass, bare single, unordered page, exact-key detail, and nested wildcard behavior. Final focused result: **41 pass, 0 fail**.
+
+## Fix round 6 verification
+
+```bash
+"$TASK_NODE" --test --experimental-strip-types \
+  tests/query-surface-budget.test.mjs \
+  tests/keyset-pagination.test.mjs
+
+"$TASK_NODE" scripts/verify-query-surface-budget.mjs \
+  --surface all --base HEAD --head HEAD
+
+"$TASK_NODE" scripts/verify-query-surface-budget.mjs \
+  --surface all --base fad56ae59f6b5ec6999e3232bbe68e4c1d26b101 --worktree
+
+git diff --check
+```
+
+All commands exited successfully. No migration, production action, or `pnpm-workspace.yaml` change was made.

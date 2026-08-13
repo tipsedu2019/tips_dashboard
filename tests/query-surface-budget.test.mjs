@@ -48,7 +48,7 @@ async function verifyFixture({ surface = "tasks", file = "src/features/tasks/lis
 test("query budget verifier identifies a new list select-star by exact file, symbol, and reason", async () => {
   const result = await verifyFixture({
     source: `export async function listTasks(client) {
-  return client.from("ops_tasks").select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })
@@ -65,7 +65,7 @@ test("query budget verifier identifies a new list select-star by exact file, sym
 test("query budget verifier rejects an over-budget list limit", async () => {
   const result = await verifyFixture({
     source: `export async function listTasks(client) {
-  return client.from("ops_tasks").select("id").limit(31).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from("ops_tasks").select("id").limit(31).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })
@@ -105,6 +105,12 @@ test("query budget verifier inspects manifest-listed symbols even when their nam
       file: "src/features/management/management-service.js",
       symbol: "selectRows",
       surface: "management",
+      reason: "list_order_missing",
+    },
+    {
+      file: "src/features/management/management-service.js",
+      symbol: "selectRows",
+      surface: "management",
       reason: "list_retry_false_missing",
     },
     {
@@ -121,7 +127,7 @@ test("query budget verifier resolves local projection and limit constants withou
     source: `export async function opaque(client) {
   const columns = "*"
   const pageSize = 31
-  return client.from("ops_tasks").select(columns).limit(pageSize).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from("ops_tasks").select(columns).limit(pageSize).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })
@@ -148,7 +154,7 @@ test("manifest-listed list symbols reject an opaque projection expression", asyn
     file: "src/features/management/management-service.js",
     source: `async function selectRows(client, table) {
   const projection = ["*"].join("")
-  return client.from(table).select(projection).limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from(table).select(projection).limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })
@@ -167,7 +173,7 @@ test("manifest-listed list symbols reject an opaque limit expression", async () 
     file: "src/features/management/management-service.js",
     source: `async function selectRows(client, table) {
   const pageSize = Number("31")
-  return client.from(table).select("id").limit(pageSize).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from(table).select("id").limit(pageSize).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })
@@ -186,7 +192,7 @@ test("manifest-listed list symbols reject a computed query entrypoint", async ()
     file: "src/features/management/management-service.js",
     source: `async function selectRows(client, table) {
   const method = getMethod()
-  return client[method](table).select("id").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client[method](table).select("id").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })
@@ -201,7 +207,7 @@ test("manifest-listed list symbols reject a computed query entrypoint", async ()
 
 test("query budget rejects a second occurrence of the same legacy violation", async () => {
   const baselineSource = `async function selectRows(client, table) {
-  await client.from(table).select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  await client.from(table).select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
   return []
 }
 `
@@ -210,8 +216,8 @@ test("query budget rejects a second occurrence of the same legacy violation", as
     file: "src/features/management/management-service.js",
     baselineSource,
     source: `async function selectRows(client, table) {
-  await client.from(table).select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
-  return client.from(table).select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  await client.from(table).select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from(table).select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
     debtManifest: (baseSha) => [{
@@ -236,9 +242,9 @@ test("query budget rejects a second occurrence of the same legacy violation", as
   }])
 })
 
-test("query budget debt exception binds an exact baseline chain instead of a current same-code count", async () => {
+test("an unchanged legacy chain is outside the diff candidate set when a safe neighbor is added", async () => {
   const baselineSource = `async function selectRows(client, table) {
-  return client.from(table).select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from(table).select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `
   const result = await verifyFixture({
@@ -247,8 +253,8 @@ test("query budget debt exception binds an exact baseline chain instead of a cur
     baselineSource,
     source: `async function selectRows(client, table) {
   const projection = "id"
-  await client.from(table).select(projection).limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
-  return client.from(table).select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  await client.from(table).select(projection).limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from(table).select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
     debtManifest: (baseSha) => [{
@@ -265,18 +271,13 @@ test("query budget debt exception binds an exact baseline chain instead of a cur
     }],
   })
 
-  assert.deepEqual(result.violations, [{
-    file: "src/features/management/management-service.js",
-    symbol: "selectRows",
-    surface: "management",
-    reason: "list_select_star",
-  }])
+  assert.deepEqual(result, { ok: true, violations: [] })
 })
 
 test("all direct owned-surface query chains are inspected even without a list marker", async () => {
   const result = await verifyFixture({
     source: `async function opaque(client) {
-  return client.from("ops_tasks").select("*").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from("ops_tasks").select("*").order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })
@@ -290,8 +291,8 @@ test("all direct owned-surface query chains are inspected even without a list ma
 test("query controls are enforced per request chain rather than borrowed from a neighboring request", async () => {
   const result = await verifyFixture({
     source: `async function opaque(client) {
-  await client.from("ops_tasks").select("id").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
-  return client.from("ops_tasks").select("id").limit(30).abortSignal(AbortSignal.timeout(8_000))
+  await client.from("ops_tasks").select("id").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from("ops_tasks").select("id").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000))
 }
 `,
   })
@@ -306,8 +307,8 @@ test("query controls are enforced per request chain rather than borrowed from a 
 
 test("query extraction covers module prefixes and single-parameter arrow functions", async () => {
   const result = await verifyFixture({
-    source: `client.from("ops_tasks").select("id").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
-export const loadRows = async client => client.from("ops_tasks").select("*").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+    source: `client.from("ops_tasks").select("id").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+export const loadRows = async client => client.from("ops_tasks").select("*").order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 `,
   })
 
@@ -320,7 +321,7 @@ export const loadRows = async client => client.from("ops_tasks").select("*").abo
 test("nonliteral optional computed query entrypoints are rejected outside manifest-listed symbols", async () => {
   const result = await verifyFixture({
     source: `async function opaque(client, method) {
-  return client?.[method]?.("ops_tasks").select("id").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client?.[method]?.("ops_tasks").select("id").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })
@@ -338,7 +339,7 @@ test("manifest-listed list symbols inspect direct queries even when no page limi
     surface: "management",
     file: "src/features/management/management-service.js",
     source: `async function selectRows(client, table) {
-  return client.from(table).select("*").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from(table).select("*").order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })
@@ -365,7 +366,7 @@ test("manifest-listed list symbols reject nonliteral and optional computed query
     file: "src/features/management/management-service.js",
     source: `async function selectRows(client, table) {
   const method = "from"
-  return client?.[method]?.(table).select("id").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client?.[method]?.(table).select("id").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })
@@ -385,7 +386,7 @@ test("statically resolved explicit list projection and page limit remain allowed
     source: `async function selectRows(client, table) {
   const projection = "id,name"
   const pageSize = 30
-  return client.from(table).select(projection).limit(pageSize).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from(table).select(projection).limit(pageSize).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })
@@ -393,11 +394,11 @@ test("statically resolved explicit list projection and page limit remain allowed
   assert.deepEqual(result, { ok: true, violations: [] })
 })
 
-test("single-row and bounded range query chains are explicit list-limit exemptions", async () => {
+test("exact-key single-row and ordered bounded range query chains are explicit list-limit exemptions", async () => {
   const result = await verifyFixture({
     source: `async function readRows(client) {
-  await client.from("ops_tasks").select("id").single().abortSignal(AbortSignal.timeout(8_000)).retry(false)
-  return client.from("ops_tasks").select("id").range(0, 29).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  await client.from("ops_tasks").select("id").eq("id", id).single().abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from("ops_tasks").select("id").range(0, 29).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })
@@ -440,8 +441,8 @@ test("query budget reports an RPC without an argument envelope instead of throwi
 test("query budget rejects wildcard fields with whitespace or mixed projections", async () => {
   const result = await verifyFixture({
     source: `async function readRows(client) {
-  await client.from("ops_tasks").select(" *, name ").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
-  return client.from("ops_tasks").select("id, *").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  await client.from("ops_tasks").select(" *, name ").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from("ops_tasks").select("id, *").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })
@@ -482,7 +483,7 @@ test("query budget verifier rejects an RPC page limit over 30", async () => {
 test("query budget verifier rejects list requests without timeout and no-retry protections", async () => {
   const result = await verifyFixture({
     source: `export async function listTasks(client) {
-  return client.from("ops_tasks").select("id").limit(30)
+  return client.from("ops_tasks").select("id").limit(30).order("id")
 }
 `,
   })
@@ -506,7 +507,7 @@ test("query budget verifier rejects list requests without timeout and no-retry p
 test("query budget verifier rejects task child list fan-out by task IDs", async () => {
   const result = await verifyFixture({
     source: `export async function listTasks(client, taskIds) {
-  return client.from("ops_task_comments").select("id").in("task_id", taskIds).limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from("ops_task_comments").select("id").in("task_id", taskIds).limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })
@@ -523,7 +524,7 @@ test("query budget worktree mode includes unstaged source additions", async () =
   const root = await createFixtureRepository({ "src/features/tasks/list-tasks.ts": "export const untouched = true\n" })
   try {
     await writeFile(join(root, "src/features/tasks/list-tasks.ts"), `export async function listTasks(client) {
-  return client.from("ops_tasks").select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `)
     const result = await verifyQuerySurfaceBudget({ surface: "tasks", baseSha: "HEAD", includeWorktree: true, root, debtManifest: [] })
@@ -597,7 +598,7 @@ test("query budget compares a changed real legacy task source against its baseli
   const addedViolation = await verifyFixture({
     file,
     baselineSource,
-    source: `${currentSource}\nexport const queryBudgetInjected = (client) => client.from("ops_tasks").select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)\n`,
+    source: `${currentSource}\nexport const queryBudgetInjected = (client) => client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)\n`,
   })
   assert.deepEqual(addedViolation.violations, [{
     file,
@@ -615,9 +616,10 @@ test("receiver-aware query analysis accepts Supabase aliases, optional calls, mu
   query = query
     .select("id, owner:profiles(id, name)")
     .limit(30)
+    .order("id")
   query = query.abortSignal(AbortSignal.timeout(8_000)).retry(false)
   const unrelated = Array.from([1, 2, 3])
-  return client.from?.("ops_tasks").select("id, class:classes(id, teacher:profiles(id))").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from?.("ops_tasks").select("id, class:classes(id, teacher:profiles(id))").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })
@@ -629,9 +631,9 @@ test("receiver-aware query analysis rejects nonliteral methods and unprovable Su
   const result = await verifyFixture({
     source: `async function load(client, method, makeOther) {
   const db = client
-  await db[method]("ops_tasks").select("id").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  await db[method]("ops_tasks").select("id").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
   const other = makeOther()
-  return other.from("ops_tasks").select("id").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return other.from("ops_tasks").select("id").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })
@@ -656,5 +658,88 @@ test("receiver-aware query analysis fails closed for an unprovable bare from req
     symbol: "load",
     surface: "tasks",
     reason: "list_query_receiver_unresolved",
+  }])
+})
+
+test("manifest is the sole legacy-debt allowance for a touched query chain", async () => {
+  const baselineSource = `async function load(client) {
+  return client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`
+  const baseDebt = inspectQuerySurfaceSource({
+    surface: "tasks",
+    file: "src/features/tasks/list-tasks.ts",
+    source: baselineSource,
+  }).find((violation) => violation.reason === "list_select_star")
+  const makeManifest = (baseSha) => [{
+    surface: "tasks",
+    file: "src/features/tasks/list-tasks.ts",
+    symbol: "load",
+    violation: "list_select_star",
+    baselineSha: baseSha,
+    fingerprint: baseDebt.fingerprint,
+  }]
+  const candidate = baselineSource.replace("retry(false)", "retry(false) // touched")
+
+  assert.deepEqual(await verifyFixture({ baselineSource, source: candidate, debtManifest: makeManifest }), { ok: true, violations: [] })
+  assert.deepEqual((await verifyFixture({ baselineSource, source: candidate, debtManifest: [] })).violations, [{
+    file: "src/features/tasks/list-tasks.ts",
+    symbol: "load",
+    surface: "tasks",
+    reason: "list_select_star",
+  }])
+})
+
+test("an unmanifested legacy finding fails when its query chain is touched", async () => {
+  const baselineSource = `async function load(client) {
+  return client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`
+  const result = await verifyFixture({
+    baselineSource,
+    source: baselineSource.replace("retry(false)", "retry(false) // touched"),
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/tasks/list-tasks.ts",
+    symbol: "load",
+    surface: "tasks",
+    reason: "list_select_star",
+  }])
+})
+
+test("list contracts require an exact timeout call, deterministic order, and exact-key detail predicate", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client, id, fallbackSignal) {
+  await client.from("ops_tasks").select("id").limit(30).order("id").abortSignal(fallbackSignal || AbortSignal.timeout(8_000)).retry(false)
+  await client.from("ops_tasks").select("id").single().abortSignal(AbortSignal.timeout(8000)).retry(false)
+  return client.from("ops_tasks").select("id").limit(30).abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [
+    { file: "src/features/tasks/list-tasks.ts", symbol: "load", surface: "tasks", reason: "list_abort_signal_missing" },
+    { file: "src/features/tasks/list-tasks.ts", symbol: "load", surface: "tasks", reason: "list_detail_predicate_missing" },
+    { file: "src/features/tasks/list-tasks.ts", symbol: "load", surface: "tasks", reason: "list_limit_missing" },
+    { file: "src/features/tasks/list-tasks.ts", symbol: "load", surface: "tasks", reason: "list_order_missing" },
+    { file: "src/features/tasks/list-tasks.ts", symbol: "load", surface: "tasks", reason: "list_order_missing" },
+  ])
+})
+
+test("ordered exact-key details and nested projections without wildcards remain allowed", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client, id) {
+  await client.from("ops_tasks").select("id, owner:profiles(id, name)").eq("id", id).single().abortSignal(AbortSignal.timeout(8000)).retry(false)
+  return client.from("ops_tasks").select("id, owner:profiles(*)").limit(30).order("id").abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/tasks/list-tasks.ts",
+    symbol: "load",
+    surface: "tasks",
+    reason: "list_select_star",
   }])
 })

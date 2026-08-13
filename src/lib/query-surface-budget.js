@@ -217,7 +217,35 @@ export function createQueryChainFingerprint({ symbol, ordinal, operations }) {
 }
 
 function chainHasWildcardProjection(value) {
-  return value.split(",").some((field) => field.trim() === "*")
+  return /(?:^|[,(])\s*(?:[A-Za-z_$][\w$]*\s*:\s*)?\*(?=\s*(?:[,)]|$))/u.test(value)
+}
+
+function isExactTimeoutAbortSignal(call) {
+  if (callMethod(call) !== "abortSignal" || call.arguments.length !== 1) return false
+  const timeout = unwrap(call.arguments[0])
+  if (!ts.isCallExpression(timeout) || timeout.arguments.length !== 1) return false
+  const access = accessParts(timeout)
+  return access?.method === "timeout" && rootIdentifier(access.receiver) === "AbortSignal"
+    && argumentValue(timeout.arguments[0], new Map()) === 8000
+}
+
+function hasExactDetailPredicate(operations, constants) {
+  return operations.some((operation) => callMethod(operation) === "eq" && operation.arguments.length === 2
+    && argumentValue(operation.arguments[0], constants) === "id" && operation.arguments[1] !== undefined)
+}
+
+function hasExplicitOrder(operations) {
+  return operations.some((operation) => callMethod(operation) === "order" && operation.arguments.length >= 1)
+}
+
+function queryLineSpan(scope, query) {
+  const sourceFile = scope.getSourceFile()
+  const start = query.entry.getStart(sourceFile)
+  const end = Math.max(...query.operations.map((operation) => operation.end))
+  return {
+    startLine: sourceFile.getLineAndCharacterOfPosition(start).line + 1,
+    endLine: sourceFile.getLineAndCharacterOfPosition(end).line + 1,
+  }
 }
 
 function analyzeChain({ surface, file, symbol, scope, query }) {
@@ -227,7 +255,8 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
   else if (query.directMethod === null) reasons.push("list_query_method_unresolved")
   if (reasons.length > 0) {
     const fingerprint = createQueryChainFingerprint({ symbol, ordinal: query.ordinal, operations: query.operations })
-    return reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint }))
+    const { startLine, endLine } = queryLineSpan(scope, query)
+    return reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint, startLine, endLine }))
   }
   if (query.directMethod === "from") {
     const projections = query.operations.filter((operation) => callMethod(operation) === "select")
@@ -241,7 +270,10 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
     const limits = query.operations.filter((operation) => callMethod(operation) === "limit")
     const singleResult = query.operations.some((operation) => ["maybeSingle", "single"].includes(callMethod(operation)))
     const ranges = query.operations.filter((operation) => callMethod(operation) === "range")
-    if (limits.length === 0 && !singleResult && ranges.length === 0) reasons.push("list_limit_missing")
+    const exactDetail = singleResult && hasExactDetailPredicate(query.operations, constants)
+    if (singleResult && !exactDetail) reasons.push("list_detail_predicate_missing")
+    if (limits.length === 0 && !exactDetail && ranges.length === 0) reasons.push("list_limit_missing")
+    if (!exactDetail && !hasExplicitOrder(query.operations)) reasons.push("list_order_missing")
     for (const limit of limits) {
       const value = limit.arguments[0] && argumentValue(limit.arguments[0], constants)
       if (value === undefined) reasons.push("list_limit_unresolved")
@@ -267,11 +299,12 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
       else if (value > 30) reasons.push("rpc_page_limit_exceeds_30")
     }
   }
-  if (query.directMethod && !query.operations.some((operation) => callMethod(operation) === "abortSignal" && operation.getText().replace(/\s+/gu, "").includes("AbortSignal.timeout(8_000)"))) reasons.push("list_abort_signal_missing")
+  if (query.directMethod && !query.operations.some(isExactTimeoutAbortSignal)) reasons.push("list_abort_signal_missing")
   if (query.directMethod && !query.operations.some((operation) => callMethod(operation) === "retry" && operation.arguments[0]?.kind === ts.SyntaxKind.FalseKeyword)) reasons.push("list_retry_false_missing")
   if (surface === "tasks" && query.operations.some((operation) => callMethod(operation) === "in" && argumentValue(operation.arguments[0], constants) === "task_id" && ts.isIdentifier(unwrap(operation.arguments[1])) && unwrap(operation.arguments[1]).text === "taskIds")) reasons.push("task_id_batch_in_list")
   const fingerprint = createQueryChainFingerprint({ symbol, ordinal: query.ordinal, operations: query.operations })
-  return reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint }))
+  const { startLine, endLine } = queryLineSpan(scope, query)
+  return reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint, startLine, endLine }))
 }
 
 function analyzeScope({ surface, file, scope, symbol }) {
@@ -351,9 +384,30 @@ function changedFiles({ root, baseSha, headSha, includeWorktree }) {
   return [...new Set([...changed, ...untracked])]
 }
 
+function changedLineRanges({ root, baseSha, headSha, includeWorktree, file, baselineExists }) {
+  if (!baselineExists) return [{ start: 1, end: Infinity }]
+  const args = includeWorktree
+    ? ["diff", "--unified=0", baseSha, "--", file]
+    : ["diff", "--unified=0", `${baseSha}..${headSha}`, "--", file]
+  const ranges = []
+  for (const line of git(root, args).split("\n")) {
+    const match = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/u)
+    if (!match) continue
+    const start = Number(match[1])
+    const count = match[2] === undefined ? 1 : Number(match[2])
+    if (count > 0) ranges.push({ start, end: start + count - 1 })
+  }
+  return ranges
+}
+
+function overlapsChangedRange(violation, ranges) {
+  return ranges.some((range) => violation.startLine <= range.end && violation.endLine >= range.start)
+}
+
 /**
- * Checks changed list-query source files. Existing debt is accepted only when an
- * exact manifest record names its surface, file, symbol, and violation code.
+ * Checks query chains touched by a changed owned source file. Existing debt is
+ * accepted only by its exact manifest fingerprint; unchanged legacy chains are
+ * outside this diff guard's candidate set.
  */
 export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, includeWorktree = false, root = process.cwd(), debtManifest = QUERY_SURFACE_DEBT_MANIFEST }) {
   assertSurface(surface)
@@ -364,6 +418,7 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
   const surfaces = selectedSurfaces(surface)
   const files = changedFiles({ root, baseSha, headSha, includeWorktree })
   if (!Array.isArray(debtManifest)) throw queryBudgetError("query_surface_debt_manifest_invalid")
+  const allowedDebt = new Set()
   for (const entry of debtManifest.filter((candidate) => surfaces.includes(candidate.surface))) {
     if (!entry || typeof entry.file !== "string" || typeof entry.symbol !== "string" || typeof entry.violation !== "string"
       || typeof entry.baselineSha !== "string" || typeof entry.fingerprint !== "string" || !/^[0-9a-f]{40}$/u.test(entry.baselineSha)
@@ -376,6 +431,7 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
     if (!countedViolations(manifestBaseline, entry.surface, entry.file).has(baselineKey)) {
       throw queryBudgetError("query_surface_debt_manifest_invalid")
     }
+    allowedDebt.add(baselineKey)
   }
   const violations = []
   for (const file of files) {
@@ -384,18 +440,15 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
     const source = await sourceAt({ root, file, revision: headSha, includeWorktree })
     if (source === null) continue
     const baselineSource = await sourceAt({ root, file, revision: baseSha, includeWorktree: false })
-    const baselineDebt = baselineSource === null ? new Map() : countedViolations(baselineSource, owner, file)
-    const candidateDebt = new Map()
+    const ranges = changedLineRanges({ root, baseSha, headSha, includeWorktree, file, baselineExists: baselineSource !== null })
     for (const violation of inspectQuerySurfaceSource({ surface: owner, file, source })) {
         const key = exactDebtKey(violation)
-        const occurrence = (candidateDebt.get(key) ?? 0) + 1
-        candidateDebt.set(key, occurrence)
-        if (occurrence > (baselineDebt.get(key) ?? 0)) violations.push(violation)
+        if (overlapsChangedRange(violation, ranges) && !allowedDebt.has(key)) violations.push(violation)
     }
   }
   violations.sort((left, right) => exactDebtKey(left).localeCompare(exactDebtKey(right)))
   return {
     ok: violations.length === 0,
-    violations: violations.map(({ fingerprint, ...violation }) => violation),
+    violations: violations.map(({ fingerprint, startLine, endLine, ...violation }) => violation),
   }
 }
