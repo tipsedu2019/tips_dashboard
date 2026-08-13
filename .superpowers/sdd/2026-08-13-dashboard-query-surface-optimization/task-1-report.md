@@ -141,3 +141,29 @@ git diff --check
 ```
 
 All commands exited successfully. No migration, production action, or `pnpm-workspace.yaml` change was made.
+
+## Fix round 7 — deletion-safe, root-scoped query contracts
+
+- Diff candidate selection now maps deletion-only hunks to their adjacent candidate line and rechecks every query chain in the enclosing changed function. This deliberately conservative scope analysis catches removal of `.limit`, root `.order`, timeout abort, or no-retry controls and also catches an edited local projection/page-size constant outside a chain's textual span.
+- A debt allowance now requires two proofs: the literal manifest fingerprint must exist at its recorded historical baseline **and** the identical finding must still exist at the caller's `--base`. A historical row that was fixed in the caller base cannot grandfather a later reintroduction.
+- Root list control validation ignores `.limit` / `.order` calls targeted at `foreignTable` or `referencedTable`. Root page lists require a root order and an explicit root `id` tie-break; detail requests still require an actual `.eq("id", value)` with a defined value.
+- Timeout and retry use the effective final control call in a chain. A final non-timeout abort signal or final `retry(true)` therefore fails even when an earlier safe-looking control exists.
+- RED-first fixtures cover true deletion-only hunks, external constant dependencies, root-vs-foreign controls, tie breaks, `eq("id", undefined)`, effective-last control overrides, and stale manifest reintroduction. Final focused result: **46 pass, 0 fail** (query budget plus keyset cursor suites).
+
+## Fix round 7 verification
+
+```bash
+"$TASK_NODE" --test --experimental-strip-types \
+  tests/query-surface-budget.test.mjs \
+  tests/keyset-pagination.test.mjs
+
+"$TASK_NODE" scripts/verify-query-surface-budget.mjs \
+  --surface all --base HEAD --head HEAD
+
+"$TASK_NODE" scripts/verify-query-surface-budget.mjs \
+  --surface all --base fad56ae59f6b5ec6999e3232bbe68e4c1d26b101 --worktree
+
+git diff --check
+```
+
+All commands exited successfully. The 36 literal manifest records were also rechecked against their recorded baseline sources. No migration, production action, or `pnpm-workspace.yaml` change was made.

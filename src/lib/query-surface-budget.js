@@ -192,7 +192,7 @@ function queryOperations(call) {
 }
 
 function callMethod(call) {
-  return accessParts(call)?.method ?? null
+  return call ? accessParts(call)?.method ?? null : null
 }
 
 function receiverAliases(scope) {
@@ -231,11 +231,39 @@ function isExactTimeoutAbortSignal(call) {
 
 function hasExactDetailPredicate(operations, constants) {
   return operations.some((operation) => callMethod(operation) === "eq" && operation.arguments.length === 2
-    && argumentValue(operation.arguments[0], constants) === "id" && operation.arguments[1] !== undefined)
+    && argumentValue(operation.arguments[0], constants) === "id" && isDefinedDetailValue(operation.arguments[1]))
+}
+
+function isDefinedDetailValue(argument) {
+  const value = unwrap(argument)
+  if (ts.isIdentifier(value) && value.text === "undefined") return false
+  return value.kind !== ts.SyntaxKind.NullKeyword
+}
+
+function optionName(property) {
+  return ts.isIdentifier(property.name) || ts.isStringLiteral(property.name) ? property.name.text : null
+}
+
+function hasForeignTarget(operation, optionIndex = 1) {
+  const options = operation.arguments[optionIndex] && unwrap(operation.arguments[optionIndex])
+  return Boolean(options && ts.isObjectLiteralExpression(options) && options.properties.some((property) => ts.isPropertyAssignment(property)
+    && ["foreignTable", "referencedTable"].includes(optionName(property))))
+}
+
+function rootOperations(operations, method, optionIndex = 1) {
+  return operations.filter((operation) => callMethod(operation) === method && !hasForeignTarget(operation, optionIndex))
 }
 
 function hasExplicitOrder(operations) {
-  return operations.some((operation) => callMethod(operation) === "order" && operation.arguments.length >= 1)
+  return rootOperations(operations, "order").length > 0
+}
+
+function hasIdTieBreak(operations, constants) {
+  return rootOperations(operations, "order").some((operation) => argumentValue(operation.arguments[0], constants) === "id")
+}
+
+function finalOperation(operations, method) {
+  return [...operations].reverse().find((operation) => callMethod(operation) === method)
 }
 
 function queryLineSpan(scope, query) {
@@ -248,6 +276,14 @@ function queryLineSpan(scope, query) {
   }
 }
 
+function scopeLineSpan(scope) {
+  const sourceFile = scope.getSourceFile()
+  return {
+    scopeStartLine: sourceFile.getLineAndCharacterOfPosition(scope.getStart(sourceFile)).line + 1,
+    scopeEndLine: sourceFile.getLineAndCharacterOfPosition(scope.end).line + 1,
+  }
+}
+
 function analyzeChain({ surface, file, symbol, scope, query }) {
   const constants = primitiveConstants(scope)
   const reasons = []
@@ -256,7 +292,7 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
   if (reasons.length > 0) {
     const fingerprint = createQueryChainFingerprint({ symbol, ordinal: query.ordinal, operations: query.operations })
     const { startLine, endLine } = queryLineSpan(scope, query)
-    return reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint, startLine, endLine }))
+    return reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint, startLine, endLine, ...scopeLineSpan(scope) }))
   }
   if (query.directMethod === "from") {
     const projections = query.operations.filter((operation) => callMethod(operation) === "select")
@@ -267,13 +303,14 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
       else if (typeof value !== "string" || value.trim() === "") reasons.push("list_projection_invalid")
       else if (chainHasWildcardProjection(value)) reasons.push("list_select_star")
     }
-    const limits = query.operations.filter((operation) => callMethod(operation) === "limit")
+    const limits = rootOperations(query.operations, "limit")
     const singleResult = query.operations.some((operation) => ["maybeSingle", "single"].includes(callMethod(operation)))
-    const ranges = query.operations.filter((operation) => callMethod(operation) === "range")
+    const ranges = rootOperations(query.operations, "range", 2)
     const exactDetail = singleResult && hasExactDetailPredicate(query.operations, constants)
     if (singleResult && !exactDetail) reasons.push("list_detail_predicate_missing")
     if (limits.length === 0 && !exactDetail && ranges.length === 0) reasons.push("list_limit_missing")
     if (!exactDetail && !hasExplicitOrder(query.operations)) reasons.push("list_order_missing")
+    else if (!exactDetail && !hasIdTieBreak(query.operations, constants)) reasons.push("list_order_tie_break_missing")
     for (const limit of limits) {
       const value = limit.arguments[0] && argumentValue(limit.arguments[0], constants)
       if (value === undefined) reasons.push("list_limit_unresolved")
@@ -299,12 +336,13 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
       else if (value > 30) reasons.push("rpc_page_limit_exceeds_30")
     }
   }
-  if (query.directMethod && !query.operations.some(isExactTimeoutAbortSignal)) reasons.push("list_abort_signal_missing")
-  if (query.directMethod && !query.operations.some((operation) => callMethod(operation) === "retry" && operation.arguments[0]?.kind === ts.SyntaxKind.FalseKeyword)) reasons.push("list_retry_false_missing")
+  if (query.directMethod && !isExactTimeoutAbortSignal(finalOperation(query.operations, "abortSignal"))) reasons.push("list_abort_signal_missing")
+  const retry = finalOperation(query.operations, "retry")
+  if (query.directMethod && !(retry && retry.arguments.length === 1 && retry.arguments[0].kind === ts.SyntaxKind.FalseKeyword)) reasons.push("list_retry_false_missing")
   if (surface === "tasks" && query.operations.some((operation) => callMethod(operation) === "in" && argumentValue(operation.arguments[0], constants) === "task_id" && ts.isIdentifier(unwrap(operation.arguments[1])) && unwrap(operation.arguments[1]).text === "taskIds")) reasons.push("task_id_batch_in_list")
   const fingerprint = createQueryChainFingerprint({ symbol, ordinal: query.ordinal, operations: query.operations })
   const { startLine, endLine } = queryLineSpan(scope, query)
-  return reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint, startLine, endLine }))
+  return reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint, startLine, endLine, ...scopeLineSpan(scope) }))
 }
 
 function analyzeScope({ surface, file, scope, symbol }) {
@@ -395,13 +433,20 @@ function changedLineRanges({ root, baseSha, headSha, includeWorktree, file, base
     if (!match) continue
     const start = Number(match[1])
     const count = match[2] === undefined ? 1 : Number(match[2])
-    if (count > 0) ranges.push({ start, end: start + count - 1 })
+    // A pure deletion has no candidate-side lines. Associate it with the
+    // adjacent candidate line so the containing function is rechecked.
+    ranges.push(count > 0 ? { start, end: start + count - 1 } : { start: Math.max(1, start - 1), end: start })
   }
   return ranges
 }
 
 function overlapsChangedRange(violation, ranges) {
-  return ranges.some((range) => violation.startLine <= range.end && violation.endLine >= range.start)
+  return ranges.some((range) => (violation.startLine <= range.end && violation.endLine >= range.start)
+    || (violation.scopeStartLine <= range.end && violation.scopeEndLine >= range.start))
+}
+
+function publicViolation({ file, symbol, surface, reason }) {
+  return { file, symbol, surface, reason }
 }
 
 /**
@@ -418,7 +463,7 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
   const surfaces = selectedSurfaces(surface)
   const files = changedFiles({ root, baseSha, headSha, includeWorktree })
   if (!Array.isArray(debtManifest)) throw queryBudgetError("query_surface_debt_manifest_invalid")
-  const allowedDebt = new Set()
+  const manifestDebt = new Set()
   for (const entry of debtManifest.filter((candidate) => surfaces.includes(candidate.surface))) {
     if (!entry || typeof entry.file !== "string" || typeof entry.symbol !== "string" || typeof entry.violation !== "string"
       || typeof entry.baselineSha !== "string" || typeof entry.fingerprint !== "string" || !/^[0-9a-f]{40}$/u.test(entry.baselineSha)
@@ -431,7 +476,7 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
     if (!countedViolations(manifestBaseline, entry.surface, entry.file).has(baselineKey)) {
       throw queryBudgetError("query_surface_debt_manifest_invalid")
     }
-    allowedDebt.add(baselineKey)
+    manifestDebt.add(baselineKey)
   }
   const violations = []
   for (const file of files) {
@@ -441,14 +486,16 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
     if (source === null) continue
     const baselineSource = await sourceAt({ root, file, revision: baseSha, includeWorktree: false })
     const ranges = changedLineRanges({ root, baseSha, headSha, includeWorktree, file, baselineExists: baselineSource !== null })
+    const baseDebt = baselineSource === null ? new Map() : countedViolations(baselineSource, owner, file)
     for (const violation of inspectQuerySurfaceSource({ surface: owner, file, source })) {
         const key = exactDebtKey(violation)
-        if (overlapsChangedRange(violation, ranges) && !allowedDebt.has(key)) violations.push(violation)
+        const allowedDebt = manifestDebt.has(key) && baseDebt.has(key)
+        if (overlapsChangedRange(violation, ranges) && !allowedDebt) violations.push(violation)
     }
   }
   violations.sort((left, right) => exactDebtKey(left).localeCompare(exactDebtKey(right)))
   return {
     ok: violations.length === 0,
-    violations: violations.map(({ fingerprint, startLine, endLine, ...violation }) => violation),
+    violations: violations.map(publicViolation),
   }
 }

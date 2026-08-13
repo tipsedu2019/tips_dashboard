@@ -252,9 +252,9 @@ test("an unchanged legacy chain is outside the diff candidate set when a safe ne
     file: "src/features/management/management-service.js",
     baselineSource,
     source: `async function selectRows(client, table) {
+  return client.from(table).select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
   const projection = "id"
   await client.from(table).select(projection).limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
-  return client.from(table).select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
     debtManifest: (baseSha) => [{
@@ -742,4 +742,108 @@ test("ordered exact-key details and nested projections without wildcards remain 
     surface: "tasks",
     reason: "list_select_star",
   }])
+})
+
+test("deletion-only query-control diffs recheck every chain in the affected function", async () => {
+  const baselineSource = `async function load(client) {
+  return client.from("ops_tasks")
+    .select("id")
+    .limit(30)
+    .order("id")
+    .abortSignal(AbortSignal.timeout(8000))
+    .retry(false)
+}
+`
+  const cases = [
+    ["    .limit(30)\n", "list_limit_missing"],
+    ["    .order(\"id\")\n", "list_order_missing"],
+    ["    .abortSignal(AbortSignal.timeout(8000))\n", "list_abort_signal_missing"],
+    ["    .retry(false)\n", "list_retry_false_missing"],
+  ]
+  for (const [removedControl, reason] of cases) {
+    const result = await verifyFixture({ baselineSource, source: baselineSource.replace(removedControl, "") })
+    assert.ok(result.violations.some((violation) => violation.reason === reason), `expected ${reason} after deleting ${removedControl}`)
+  }
+})
+
+test("constant dependency changes recheck every chain in the affected function", async () => {
+  const baselineSource = `async function load(client) {
+  const projection = "id"
+  const pageSize = 30
+  return client.from("ops_tasks").select(projection).limit(pageSize).order("id").abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`
+  const projection = await verifyFixture({ baselineSource, source: baselineSource.replace('"id"', '"*"') })
+  assert.ok(projection.violations.some((violation) => violation.reason === "list_select_star"))
+  const pageSize = await verifyFixture({ baselineSource, source: baselineSource.replace("pageSize = 30", "pageSize = 31") })
+  assert.ok(pageSize.violations.some((violation) => violation.reason === "list_limit_exceeds_30"))
+})
+
+test("root list controls do not accept foreign-table controls and require an id tie break", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client) {
+  return client.from("ops_tasks").select("id").limit(30, { foreignTable: "children" }).order("created_at", { referencedTable: "children" }).abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [
+    { file: "src/features/tasks/list-tasks.ts", symbol: "load", surface: "tasks", reason: "list_limit_missing" },
+    { file: "src/features/tasks/list-tasks.ts", symbol: "load", surface: "tasks", reason: "list_order_missing" },
+  ])
+
+  const unorderedTieBreak = await verifyFixture({
+    source: `async function load(client) {
+  return client.from("ops_tasks").select("id").limit(30).order("created_at").abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+  assert.deepEqual(unorderedTieBreak.violations, [{
+    file: "src/features/tasks/list-tasks.ts", symbol: "load", surface: "tasks", reason: "list_order_tie_break_missing",
+  }])
+})
+
+test("detail predicates and effective final abort and retry controls are fail-closed", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client, otherSignal) {
+  return client.from("ops_tasks").select("id").eq("id", undefined).single().abortSignal(AbortSignal.timeout(8000)).abortSignal(otherSignal).retry(false).retry(true)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [
+    { file: "src/features/tasks/list-tasks.ts", symbol: "load", surface: "tasks", reason: "list_abort_signal_missing" },
+    { file: "src/features/tasks/list-tasks.ts", symbol: "load", surface: "tasks", reason: "list_detail_predicate_missing" },
+    { file: "src/features/tasks/list-tasks.ts", symbol: "load", surface: "tasks", reason: "list_limit_missing" },
+    { file: "src/features/tasks/list-tasks.ts", symbol: "load", surface: "tasks", reason: "list_order_missing" },
+    { file: "src/features/tasks/list-tasks.ts", symbol: "load", surface: "tasks", reason: "list_retry_false_missing" },
+  ])
+})
+
+test("a stale manifest fingerprint cannot grandfather a reintroduced query debt", async () => {
+  const file = "src/features/tasks/list-tasks.ts"
+  const original = `async function load(client) {
+  return client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`
+  const fixed = original.replace('select("*")', 'select("id")')
+  const root = await createFixtureRepository({ [file]: original })
+  try {
+    const historicalSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim()
+    const fingerprint = inspectQuerySurfaceSource({ surface: "tasks", file, source: original }).find((violation) => violation.reason === "list_select_star").fingerprint
+    await writeFile(join(root, file), fixed)
+    const baseSha = commitFixture(root)
+    await writeFile(join(root, file), original)
+    const headSha = commitFixture(root)
+    const result = await verifyQuerySurfaceBudget({
+      surface: "tasks",
+      baseSha,
+      headSha,
+      root,
+      debtManifest: [{ surface: "tasks", file, symbol: "load", violation: "list_select_star", baselineSha: historicalSha, fingerprint }],
+    })
+    assert.deepEqual(result.violations, [{ file, symbol: "load", surface: "tasks", reason: "list_select_star" }])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
