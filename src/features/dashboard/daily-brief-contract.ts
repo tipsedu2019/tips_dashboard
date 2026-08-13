@@ -29,6 +29,8 @@ export type DashboardDailyBrief = Readonly<{
 }>
 
 const DAILY_BRIEF_ERROR = "dashboard_daily_brief_contract_invalid"
+const CALENDAR_DATE_PATTERN = /^(\d{4}-\d{2}-\d{2})$/u
+const TIMESTAMP_PATTERN = /^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,6})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/u
 
 function fail(): never {
   throw new Error(DAILY_BRIEF_ERROR)
@@ -49,8 +51,19 @@ function text(value: unknown): string {
   return value
 }
 
+function calendarDate(value: unknown): string {
+  const result = text(value)
+  if (!CALENDAR_DATE_PATTERN.test(result)) fail()
+  const parsed = new Date(`${result}T00:00:00.000Z`)
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== result) fail()
+  return result
+}
+
 function timestamp(value: unknown): string {
   const result = text(value)
+  const match = TIMESTAMP_PATTERN.exec(result)
+  if (!match) fail()
+  calendarDate(match[1])
   if (!Number.isFinite(Date.parse(result))) fail()
   return result
 }
@@ -84,8 +97,7 @@ function normalizeUpcomingItem(value: unknown): DashboardDailyBriefUpcomingItem 
 export function normalizeDashboardDailyBrief(value: unknown): DashboardDailyBrief {
   const brief = record(value)
   if (!hasExactKeys(brief, ["counts", "generatedAt", "localDate", "upcoming"])) fail()
-  const localDate = text(brief.localDate)
-  if (!/^\d{4}-\d{2}-\d{2}$/u.test(localDate)) fail()
+  const localDate = calendarDate(brief.localDate)
 
   const counts = record(brief.counts)
   if (!hasExactKeys(counts, ["levelTests", "observationClasses", "openTasks", "visitConsultations"])) fail()

@@ -192,3 +192,73 @@ test("daily brief contract fails closed for a sixth item or unknown source kind"
     /dashboard_daily_brief_contract_invalid/,
   )
 })
+
+test("daily brief contract rejects invalid calendar dates and timestamps without an explicit timezone", async () => {
+  const { normalizeDashboardDailyBrief } = await import("../src/features/dashboard/daily-brief-contract.ts")
+
+  for (const invalidBrief of [
+    { ...dailyBriefFixture, localDate: "2026-02-30" },
+    { ...dailyBriefFixture, generatedAt: "2026-02-30T09:00:00+09:00" },
+    { ...dailyBriefFixture, generatedAt: "2026-08-14" },
+    { ...dailyBriefFixture, generatedAt: "2026-08-14T09:00:00" },
+    {
+      ...dailyBriefFixture,
+      upcoming: [{ ...dailyBriefFixture.upcoming[0], scheduledAt: "2026-08-14T09:00:00" }],
+    },
+  ]) {
+    assert.throws(
+      () => normalizeDashboardDailyBrief(invalidBrief),
+      /dashboard_daily_brief_contract_invalid/,
+    )
+  }
+})
+
+test("daily brief contract rejects null top-level data and malformed count or appointment fields", async () => {
+  const { normalizeDashboardDailyBrief } = await import("../src/features/dashboard/daily-brief-contract.ts")
+
+  for (const invalidBrief of [
+    null,
+    [],
+    { ...dailyBriefFixture, counts: null },
+    { ...dailyBriefFixture, counts: { ...dailyBriefFixture.counts, openTasks: 1.5 } },
+    {
+      ...dailyBriefFixture,
+      upcoming: [{ ...dailyBriefFixture.upcoming[0], subjectLabels: ["수학", 3] }],
+    },
+    {
+      ...dailyBriefFixture,
+      upcoming: [{ ...dailyBriefFixture.upcoming[0], placeLabel: false }],
+    },
+  ]) {
+    assert.throws(
+      () => normalizeDashboardDailyBrief(invalidBrief),
+      /dashboard_daily_brief_contract_invalid/,
+    )
+  }
+})
+
+test("daily brief service rejects a null payload and propagates RPC errors", async () => {
+  const { readDashboardDailyBrief } = await import("../src/features/dashboard/daily-brief-service.ts")
+  const rpcError = new Error("daily brief unavailable")
+  const createClient = (result) => ({
+    rpc() {
+      return {
+        abortSignal() {
+          return this
+        },
+        async retry() {
+          return result
+        },
+      }
+    },
+  })
+
+  await assert.rejects(
+    readDashboardDailyBrief(createClient({ data: null, error: null })),
+    /dashboard_daily_brief_contract_invalid/,
+  )
+  await assert.rejects(
+    readDashboardDailyBrief(createClient({ data: dailyBriefFixture, error: rpcError })),
+    rpcError,
+  )
+})
