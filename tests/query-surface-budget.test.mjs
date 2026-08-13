@@ -6,6 +6,7 @@ import { dirname, join } from "node:path"
 import test from "node:test"
 
 import {
+  inspectQuerySurfaceSource,
   QUERY_SURFACE_DEBT_MANIFEST,
   verifyQuerySurfaceBudget,
 } from "../src/lib/query-surface-budget.js"
@@ -31,13 +32,14 @@ function commitFixture(root) {
   return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim()
 }
 
-async function verifyFixture({ surface = "tasks", file = "src/features/tasks/list-tasks.ts", baselineSource = "export const untouched = true\n", source }) {
+async function verifyFixture({ surface = "tasks", file = "src/features/tasks/list-tasks.ts", baselineSource = "export const untouched = true\n", source, debtManifest }) {
   const root = await createFixtureRepository({ [file]: baselineSource })
   try {
     const baseSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim()
     await writeFile(join(root, file), source)
     const headSha = commitFixture(root)
-    return await verifyQuerySurfaceBudget({ surface, baseSha, headSha, root })
+    const manifest = typeof debtManifest === "function" ? debtManifest(baseSha) : debtManifest
+    return await verifyQuerySurfaceBudget({ surface, baseSha, headSha, root, debtManifest: manifest ?? [] })
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -197,17 +199,32 @@ test("manifest-listed list symbols reject a computed query entrypoint", async ()
 })
 
 test("query budget rejects a second occurrence of the same legacy violation", async () => {
+  const baselineSource = `async function selectRows(client, table) {
+  await client.from(table).select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return []
+}
+`
   const result = await verifyFixture({
     surface: "management",
     file: "src/features/management/management-service.js",
-    baselineSource: `async function selectRows(client, table) {
+    baselineSource,
+    source: `async function selectRows(client, table) {
+  await client.from(table).select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
   return client.from(table).select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
-    source: `async function selectRows(client, table) {
-  return client.from(table).select("*").select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
-}
-`,
+    debtManifest: (baseSha) => [{
+      surface: "management",
+      file: "src/features/management/management-service.js",
+      symbol: "selectRows",
+      violation: "list_select_star",
+      baselineSha: baseSha,
+      fingerprint: inspectQuerySurfaceSource({
+        surface: "management",
+        file: "src/features/management/management-service.js",
+        source: baselineSource,
+      }).find((violation) => violation.reason === "list_select_star").fingerprint,
+    }],
   })
 
   assert.deepEqual(result.violations, [{
@@ -215,6 +232,103 @@ test("query budget rejects a second occurrence of the same legacy violation", as
     symbol: "selectRows",
     surface: "management",
     reason: "list_select_star",
+  }])
+})
+
+test("query budget debt exception binds an exact baseline chain instead of a current same-code count", async () => {
+  const baselineSource = `async function selectRows(client, table) {
+  return client.from(table).select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`
+  const result = await verifyFixture({
+    surface: "management",
+    file: "src/features/management/management-service.js",
+    baselineSource,
+    source: `async function selectRows(client, table) {
+  const projection = "id"
+  await client.from(table).select(projection).limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from(table).select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+    debtManifest: (baseSha) => [{
+      surface: "management",
+      file: "src/features/management/management-service.js",
+      symbol: "selectRows",
+      violation: "list_select_star",
+      baselineSha: baseSha,
+      fingerprint: inspectQuerySurfaceSource({
+        surface: "management",
+        file: "src/features/management/management-service.js",
+        source: baselineSource,
+      }).find((violation) => violation.reason === "list_select_star").fingerprint,
+    }],
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/management/management-service.js",
+    symbol: "selectRows",
+    surface: "management",
+    reason: "list_select_star",
+  }])
+})
+
+test("all direct owned-surface query chains are inspected even without a list marker", async () => {
+  const result = await verifyFixture({
+    source: `async function opaque(client) {
+  return client.from("ops_tasks").select("*").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [
+    { file: "src/features/tasks/list-tasks.ts", symbol: "opaque", surface: "tasks", reason: "list_limit_missing" },
+    { file: "src/features/tasks/list-tasks.ts", symbol: "opaque", surface: "tasks", reason: "list_select_star" },
+  ])
+})
+
+test("query controls are enforced per request chain rather than borrowed from a neighboring request", async () => {
+  const result = await verifyFixture({
+    source: `async function opaque(client) {
+  await client.from("ops_tasks").select("id").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from("ops_tasks").select("id").limit(30).abortSignal(AbortSignal.timeout(8_000))
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/tasks/list-tasks.ts",
+    symbol: "opaque",
+    surface: "tasks",
+    reason: "list_retry_false_missing",
+  }])
+})
+
+test("query extraction covers module prefixes and single-parameter arrow functions", async () => {
+  const result = await verifyFixture({
+    source: `client.from("ops_tasks").select("id").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+export const loadRows = async client => client.from("ops_tasks").select("*").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+`,
+  })
+
+  assert.deepEqual(result.violations, [
+    { file: "src/features/tasks/list-tasks.ts", symbol: "loadRows", surface: "tasks", reason: "list_limit_missing" },
+    { file: "src/features/tasks/list-tasks.ts", symbol: "loadRows", surface: "tasks", reason: "list_select_star" },
+  ])
+})
+
+test("nonliteral optional computed query entrypoints are rejected outside manifest-listed symbols", async () => {
+  const result = await verifyFixture({
+    source: `async function opaque(client, method) {
+  return client?.[method]?.("ops_tasks").select("id").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/tasks/list-tasks.ts",
+    symbol: "opaque",
+    surface: "tasks",
+    reason: "list_query_method_unresolved",
   }])
 })
 
@@ -276,6 +390,49 @@ test("statically resolved explicit list projection and page limit remain allowed
   })
 
   assert.deepEqual(result, { ok: true, violations: [] })
+})
+
+test("single-row and bounded range query chains are explicit list-limit exemptions", async () => {
+  const result = await verifyFixture({
+    source: `async function readRows(client) {
+  await client.from("ops_tasks").select("id").single().abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from("ops_tasks").select("id").range(0, 29).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result, { ok: true, violations: [] })
+})
+
+test("query budget rejects direct RPC query chains without an explicit page limit", async () => {
+  const result = await verifyFixture({
+    source: `async function readRows(client) {
+  return client.rpc("list_ops_task_page_v1", {}).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/tasks/list-tasks.ts",
+    symbol: "readRows",
+    surface: "tasks",
+    reason: "rpc_page_limit_missing",
+  }])
+})
+
+test("query budget rejects wildcard fields with whitespace or mixed projections", async () => {
+  const result = await verifyFixture({
+    source: `async function readRows(client) {
+  await client.from("ops_tasks").select(" *, name ").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.from("ops_tasks").select("id, *").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [
+    { file: "src/features/tasks/list-tasks.ts", symbol: "readRows", surface: "tasks", reason: "list_select_star" },
+    { file: "src/features/tasks/list-tasks.ts", symbol: "readRows", surface: "tasks", reason: "list_select_star" },
+  ])
 })
 
 test("statically resolved bounded RPC page arguments remain allowed", async () => {
@@ -352,7 +509,7 @@ test("query budget worktree mode includes unstaged source additions", async () =
   return client.from("ops_tasks").select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `)
-    const result = await verifyQuerySurfaceBudget({ surface: "tasks", baseSha: "HEAD", includeWorktree: true, root })
+    const result = await verifyQuerySurfaceBudget({ surface: "tasks", baseSha: "HEAD", includeWorktree: true, root, debtManifest: [] })
     assert.deepEqual(result.violations, [{
       file: "src/features/tasks/list-tasks.ts",
       symbol: "listTasks",
@@ -367,11 +524,12 @@ test("query budget worktree mode includes unstaged source additions", async () =
 test("legacy query debt is an exact literal manifest and not a wildcard exception", () => {
   assert.ok(QUERY_SURFACE_DEBT_MANIFEST.length > 0)
   for (const entry of QUERY_SURFACE_DEBT_MANIFEST) {
-    assert.deepEqual(Object.keys(entry).sort(), ["baselineSha", "file", "surface", "symbol", "violation"].sort())
+    assert.deepEqual(Object.keys(entry).sort(), ["baselineSha", "file", "fingerprint", "surface", "symbol", "violation"].sort())
     assert.match(entry.file, /^src\/[\w./-]+\.(?:ts|tsx|js)$/u)
     assert.doesNotMatch(entry.file, /[*?]/u)
     assert.match(entry.symbol, /^[A-Za-z_$][\w$]*$/u)
     assert.match(entry.baselineSha, /^[0-9a-f]{40}$/u)
+    assert.match(entry.fingerprint, /^[0-9a-f]{64}$/u)
     assert.ok(["tasks", "management", "operations", "academic", "public"].includes(entry.surface))
   }
 })

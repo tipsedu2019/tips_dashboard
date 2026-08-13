@@ -8,3 +8,4 @@ Task 1: `a7813801` established the query-surface budget verifier and cursor cont
 Task 1 fix round 1: enforce manifest-listed symbols, resolve local query constants, and validate decoded cursor scopes.
 Task 1 fix round 2: fail closed for opaque list projection, limit, RPC, and computed query-entry expressions while preserving statically resolved bounded queries.
 Task 1 fix round 3: compare exact debt occurrences, inspect no-limit and optional computed query entrypoints, and reject ambiguous canonical cursor-scope inputs.
+Task 1 fix round 4: enforce contracts per direct query chain, bind each baseline-debt exception to an exact recorded-SHA fingerprint, retain only explicit single/range list exemptions, and reject mixed/whitespace wildcard projections.

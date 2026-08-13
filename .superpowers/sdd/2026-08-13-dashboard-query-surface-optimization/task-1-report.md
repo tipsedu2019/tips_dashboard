@@ -60,3 +60,30 @@ Task 2–6 should remove only their completed surface's manifest rows in the sam
 - Every direct `.from(...)` or `.rpc(...)` in a manifest-listed symbol is inspected even without a page-limit expression; missing limits therefore fail under the existing exact contract. Computed and optional computed entrypoints such as `client?.[method]?.(...)` are detected and rejected as `list_query_method_unresolved`.
 - `canonicalScopeHash` is exported as the sole SHA-256 canonical scope boundary. It now rejects `undefined`, non-finite numbers, sparse arrays, and non-plain objects rather than serializing ambiguous values; `createCursorScope` uses this boundary.
 - RED-first fixtures cover the duplicate same-code violation, no-limit direct query, nonliteral optional computed entrypoint, and all invalid canonical-scope values. The focused suite reports **24 pass, 0 fail**.
+
+## Fix round 4 — chain-complete request contracts
+
+- Every direct `.from(...)` and `.rpc(...)` request chain in an owned changed surface is inspected. Limits are required per chain; the only direct-list exemptions are explicit `.single()` / `.maybeSingle()` or a statically bounded `.range(first, last)` of at most 30 rows.
+- Query control checks no longer borrow `.select(...)`, `.limit(...)`, abort, or retry configuration from a neighbouring request. Computed query entrypoints continue to fail closed.
+- Extraction includes module prefixes and single-parameter arrow functions. It stops each request at its statement boundary, so a second query chain cannot modify the first chain's fingerprint or compliance result.
+- Every debt row now includes an exact SHA-256 query-chain fingerprint. The verifier loads the row's recorded baseline SHA and proves that fingerprint exists there before accepting it; a moved, fixed-then-reintroduced, or duplicated same-code violation is rejected.
+- Wildcard projections are rejected when `*` appears as a trimmed field anywhere in the comma-separated projection, including `" *, name "` and `"id, *"`.
+- RED-first fixtures cover direct no-limit `.from` and `.rpc` requests, per-chain controls, prefix/arrow extraction, duplicate/moved debt, explicit single/range exemptions, and wildcard spacing/mixed fields. Final focused result: **32 pass, 0 fail**.
+
+## Fix round 4 verification
+
+```bash
+"$TASK_NODE" --test --experimental-strip-types \
+  tests/query-surface-budget.test.mjs \
+  tests/keyset-pagination.test.mjs
+
+"$TASK_NODE" scripts/verify-query-surface-budget.mjs \
+  --surface all --base HEAD --head HEAD
+
+"$TASK_NODE" scripts/verify-query-surface-budget.mjs \
+  --surface all --base fad56ae59f6b5ec6999e3232bbe68e4c1d26b101 --worktree
+
+git diff --check
+```
+
+All commands exited successfully. No migration, production database/deployment action, or `pnpm-workspace.yaml` modification was made.
