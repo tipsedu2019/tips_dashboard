@@ -15,6 +15,14 @@ const pgTapPath = new URL(
   "../supabase/tests/dashboard_statistics_sources_test.sql",
   import.meta.url,
 )
+const cacheMigrationPath = new URL(
+  "../supabase/migrations/20260813205051_dashboard_statistics_cache.sql",
+  import.meta.url,
+)
+const cachePgTapPath = new URL(
+  "../supabase/tests/dashboard_statistics_cache_test.sql",
+  import.meta.url,
+)
 
 const normalizeSql = (value) => value.replace(/--[^\n]*/gu, " ").replace(/\s+/gu, " ").trim()
 const sha256 = (value) => createHash("sha256").update(value).digest("hex")
@@ -27,6 +35,83 @@ function functionBlock(sql, functionName, nextFunctionName = "") {
     : sql.length
   return sql.slice(start, end === -1 ? sql.length : end)
 }
+
+test("statistics private cache is actor scoped, aggregate only, and manifest owned", async () => {
+  const [migration, manifestSource] = await Promise.all([
+    readFile(cacheMigrationPath),
+    readFile(manifestPath, "utf8"),
+  ])
+  const manifest = JSON.parse(manifestSource)
+  const entry = manifest.orderedNewMigrations.find(
+    (candidate) => candidate.fileName === "20260813205051_dashboard_statistics_cache.sql",
+  )
+
+  assert.ok(entry)
+  assert.ok(["candidate", "final"].includes(entry.status))
+  assert.equal(entry.sha256, sha256(migration))
+
+  const sql = normalizeSql(migration.toString("utf8"))
+  assert.match(sql, /create table dashboard_private\.dashboard_statistics_cache/iu)
+  for (const column of [
+    "actor_profile_id", "role", "contract_version", "request_hash", "tab", "generation",
+    "status", "claim_token", "lease_expires_at", "generated_at", "expires_at", "payload",
+  ]) assert.match(sql, new RegExp(`\\b${column}\\b`, "iu"))
+  assert.match(sql, /unique \(actor_profile_id, role, contract_version, request_hash\)/iu)
+  assert.match(sql, /interval '10 minutes'/iu)
+  assert.match(sql, /interval '15 seconds'/iu)
+  assert.doesNotMatch(sql, /student_roster|class_summaries|parent_contact|message_content/iu)
+})
+
+test("statistics cache wrappers use service-only definer CAS and bounded actor cleanup", async () => {
+  const sql = normalizeSql(await readFile(cacheMigrationPath, "utf8"))
+  const signatures = [
+    "public.read_dashboard_statistics_cache_v1(uuid, text, text, text)",
+    "public.claim_dashboard_statistics_cache_v1(uuid, text, text, text, text, boolean)",
+    "public.finalize_dashboard_statistics_cache_v1(uuid, text, text, text, bigint, uuid, jsonb)",
+    "public.invalidate_dashboard_statistics_cache_v1(uuid, text, text, text, bigint)",
+  ]
+  for (const signature of signatures) {
+    const escaped = signature.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
+    const block = functionBlock(sql, signature.slice(0, signature.indexOf("(")))
+    assert.match(block, /security definer set search_path = ''/iu)
+    assert.match(sql, new RegExp(`revoke all on function ${escaped} from public, anon, authenticated`, "iu"))
+    assert.match(sql, new RegExp(`grant execute on function ${escaped} to service_role`, "iu"))
+  }
+  assert.match(sql, /order by expires_at, role, contract_version, request_hash/iu)
+  assert.match(sql, /limit 20/iu)
+  assert.match(sql, /actor_profile_id = p_actor_profile_id/iu)
+  assert.match(sql, /expires_at < pg_catalog\.clock_timestamp\(\) - interval '24 hours'/iu)
+  assert.doesNotMatch(sql, /pg_cron|cron\.schedule/iu)
+})
+
+test("statistics cache source specifies takeover, force, invalidation, and stale-finalize CAS", async () => {
+  const [migration, tap] = await Promise.all([
+    readFile(cacheMigrationPath, "utf8"),
+    readFile(cachePgTapPath, "utf8"),
+  ])
+  const sql = normalizeSql(migration)
+  const normalizedTap = normalizeSql(tap)
+
+  assert.match(sql, /on conflict \(actor_profile_id, role, contract_version, request_hash\) do nothing/iu)
+  assert.match(sql, /for update/iu)
+  assert.match(sql, /p_force/iu)
+  assert.match(sql, /generation = generation \+ 1/iu)
+  assert.match(sql, /claim_token = p_claim_token/iu)
+  assert.match(sql, /generation = p_generation/iu)
+  assert.match(sql, /'superseded'/iu)
+  for (const label of [
+    "599999ms remains ready",
+    "600001ms is a miss",
+    "concurrent claim dedupe",
+    "failed payload is not stored",
+    "actor role tab filter isolation",
+    "force refresh increments generation",
+    "invalidation supersedes slow finalize",
+    "cleanup removes exactly 20 own expired rows",
+  ]) assert.match(normalizedTap, new RegExp(label, "iu"))
+  assert.match(normalizedTap, /set local role service_role/iu)
+  assert.match(normalizedTap, /set local role authenticated/iu)
+})
 
 test("statistics source migration is the CLI-created manifest-owned artifact", async () => {
   const [migration, manifestSource] = await Promise.all([
