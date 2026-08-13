@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "source": "https://supabase.com/docs/reference/api/v1-read-only-query",
+  "beta": true,
+  "method": "POST",
+  "pathTemplate": "/v1/projects/{ref}/database/query/read-only",
+  "oauthScope": "database:read",
+  "fineGrainedPermission": "database_read",
+  "request": {
+    "contentType": "application/json",
+    "required": { "query": "string" },
+    "optional": { "parameters": "unknown[]" },
+    "schemaQualifiedEntitiesRequired": true
+  },
+  "successStatus": 201,
+  "errorStatuses": [401, 403, 429, 500]
+}

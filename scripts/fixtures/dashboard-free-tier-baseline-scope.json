@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "schemas": ["auth", "dashboard_private", "extensions", "public", "supabase_migrations"],
+  "relations": [
+    "auth.users",
+    "public.academic_event_exam_details",
+    "public.academic_events",
+    "public.academic_schools",
+    "public.class_groups",
+    "public.class_group_members",
+    "public.class_lesson_sessions",
+    "public.class_terms",
+    "public.classes",
+    "public.ops_registration_appointment_calendar",
+    "public.ops_tasks",
+    "public.profiles",
+    "public.students",
+    "public.textbooks"
+  ],
+  "types": ["public.academic_event_type", "public.class_status", "public.user_role"],
+  "collations": [],
+  "functions": [
+    "public.get_dashboard_conflict_sources_v1(date,date)",
+    "public.get_dashboard_summary_sources_v1()",
+    "public.list_dashboard_class_session_dates_v1(date,date)"
+  ],
+  "roles": ["anon", "authenticated", "postgres", "service_role"],
+  "triggerTables": [
+    "public.classes",
+    "public.class_groups",
+    "public.class_group_members",
+    "public.class_lesson_sessions",
+    "public.ops_registration_appointment_calendar",
+    "public.ops_tasks",
+    "public.students"
+  ],
+  "forbiddenTerms": ["vault", "cron", "webhook", "secret", "token", "phone", "student row", "uuid"]
+}

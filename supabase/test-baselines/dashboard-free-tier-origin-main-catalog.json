@@ -1,0 +1,10 @@
+{
+  "captureStatus": "blocked",
+  "reason": "approved_management_api_read_only_capture_required",
+  "originMainSha": null,
+  "migrationLedgerCount": null,
+  "migrationLedgerMaxVersion": null,
+  "migrationLedgerSha256": null,
+  "serverMajor": null,
+  "catalog": []
+}

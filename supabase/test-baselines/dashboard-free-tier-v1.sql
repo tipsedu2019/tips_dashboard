@@ -1,0 +1,3 @@
+-- BLOCKED: this file remains intentionally empty until an approved, least-privilege
+-- Management API read-only capture is reviewed. Do not replay repository migration
+-- history as a substitute baseline.

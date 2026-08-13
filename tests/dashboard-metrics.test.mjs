@@ -8,11 +8,116 @@ import {
   buildScheduleCollisionSummary,
   findExamConflictsForClasses,
 } from "../src/features/dashboard/metrics.js";
+import * as dashboardMetricsModule from "../src/features/dashboard/metrics.js";
 
 const metricsSource = readFileSync(
   new URL("../src/features/dashboard/metrics.js", import.meta.url),
   "utf8",
 );
+
+test("dashboard statistics overview slice preserves the legacy subject and division summary", () => {
+  const input = {
+    classes: [
+      {
+        id: "math-high",
+        name: "수학 고등",
+        subject: "수학",
+        grade: "고1",
+        status: "수업 진행 중",
+        schedule: "월 10:00-12:00",
+        student_ids: ["student-1", "student-2"],
+        waitlist_student_ids: ["student-3"],
+      },
+      {
+        id: "english-middle",
+        name: "영어 중등",
+        subject: "영어",
+        grade: "중2",
+        status: "수업 진행 중",
+        schedule: "화 10:00-11:00",
+        student_ids: ["student-3"],
+      },
+    ],
+    students: [
+      { id: "student-1", name: "가학생", grade: "고1", school: "대기고" },
+      { id: "student-2", name: "나학생", grade: "고2", school: "중앙고" },
+      { id: "student-3", name: "다학생", grade: "중2", school: "중앙중" },
+    ],
+  };
+
+  const legacy = buildDashboardMetrics(input);
+  const slice = dashboardMetricsModule.buildDashboardMetricsSlice(input, {
+    tab: "overview",
+    subject: "math",
+    division: "high",
+  });
+
+  assert.deepEqual(slice, {
+    summary: legacy.analyticsByView.math.high.summary,
+  });
+});
+
+test("dashboard statistics students/classes and conflict slices retain aggregate meaning without roster payloads", () => {
+  const input = {
+    classes: [
+      { id: "math-high", name: "수학 고등", subject: "수학", grade: "고1", status: "수업 진행 중", schedule: "월 10:00-12:00", teacher: "김선생", classroom: "1강", student_ids: ["student-1", "student-2"] },
+      { id: "math-high-2", name: "수학 고등2", subject: "수학", grade: "고1", status: "수업 진행 중", schedule: "월 11:00-13:00", teacher: "김선생", classroom: "1강", student_ids: ["student-1"] },
+    ],
+    students: [
+      { id: "student-1", name: "가학생", grade: "고1", school: "대기고" },
+      { id: "student-2", name: "나학생", grade: "고1", school: "중앙고" },
+    ],
+    now: new Date("2026-08-14T00:00:00.000Z"),
+  };
+  const studentsClasses = dashboardMetricsModule.buildDashboardMetricsSlice(input, {
+    tab: "students_classes", subject: "math", division: "high",
+  });
+  const conflicts = dashboardMetricsModule.buildDashboardMetricsSlice(input, {
+    tab: "schedule_conflicts", dateFrom: "2026-08-14", dateTo: "2026-11-12",
+  });
+
+  assert.equal(studentsClasses.summary.registeredEnrollmentCount, 3);
+  assert.deepEqual(studentsClasses.studentBreakdowns.byGrade[0], {
+    key: "고1", label: "고1", enrollmentCount: 3, studentCount: 2,
+    children: [
+      { key: "대기고", label: "대기고", enrollmentCount: 2, studentCount: 1 },
+      { key: "중앙고", label: "중앙고", enrollmentCount: 1, studentCount: 1 },
+    ],
+  });
+  assert.equal("studentRoster" in studentsClasses.studentBreakdowns.byGrade[0], false);
+  assert.equal("classSummaries" in studentsClasses.classGroups.byTeacher[0], false);
+  assert.equal(conflicts.teacherConflicts.length, 1);
+  assert.equal(conflicts.classroomConflicts.length, 1);
+  assert.deepEqual(conflicts.examConflicts, []);
+});
+
+test("dashboard statistics textbook slice counts only the requested period and active-class assignment", () => {
+  const slice = dashboardMetricsModule.buildDashboardMetricsSlice({
+    classes: [
+      { id: "assigned", subject: "수학", status: "수업 진행 중", textbook_id: "book-1" },
+      { id: "unassigned", subject: "수학", status: "수업 진행 중" },
+      { id: "english", subject: "영어", status: "수업 진행 중", textbook_id: "book-2" },
+    ],
+    textbooks: [{ id: "book-1", subject: "수학" }, { id: "book-2", subject: "영어" }],
+    progressLogs: [
+      { status: "pending", updated_at: "2026-07-01T10:00:00.000Z" },
+      { status: "partial", updated_at: "2026-07-15T10:00:00.000Z" },
+      { status: "done", updated_at: "2026-08-01T10:00:00.000Z" },
+      { status: "done", updated_at: "2026-06-01T10:00:00.000Z" },
+    ],
+  }, {
+    tab: "textbooks", subject: "math", dateFrom: "2026-07-01", dateTo: "2026-07-31",
+  });
+
+  assert.deepEqual(slice, {
+    range: { dateFrom: "2026-07-01", dateTo: "2026-07-31" },
+    activeTitles: 1,
+    activeClassesWithTextbook: 1,
+    activeClassesWithoutTextbook: 1,
+    progressSessions: { pending: 1, partial: 1, done: 0 },
+    updatedProgressSessions: 2,
+  });
+});
 
 test("detects teacher and classroom schedule overlaps", () => {
   const classes = [

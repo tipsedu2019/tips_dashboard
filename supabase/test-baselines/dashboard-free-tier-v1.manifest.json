@@ -1,0 +1,8 @@
+{
+  "baselineVersion": "dashboard-free-tier-v1",
+  "originMainSha": "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101",
+  "baselineSha256": "bf88bc7b1eeefa2de9edd12bd9b1c98090b8354d8eabdaf97e523d9e1d024223",
+  "catalogSha256": "ee638486e13d844d7d8b33a4064156cee9b127a15c57260a4c934a2f91053bd4",
+  "requiredObjectSignatures": [],
+  "orderedNewMigrations": []
+}

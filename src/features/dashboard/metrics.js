@@ -1806,6 +1806,103 @@ export function createEmptyDashboardMetrics() {
   };
 }
 
+export function buildDashboardMetricsSlice(input = {}, request = {}) {
+  const metrics = buildDashboardMetrics(input);
+  const subject = text(request.subject) || "all";
+  const division = text(request.division) || "all";
+  const bucket = metrics.analyticsByView?.[subject]?.[division];
+  const summary = bucket?.summary || {
+    activeClassesCount: 0,
+    registeredEnrollmentCount: 0,
+    waitlistEnrollmentCount: 0,
+    uniqueRegisteredStudentCount: 0,
+    uniqueWaitlistStudentCount: 0,
+    schoolCount: 0,
+    gradeCount: 0,
+    weeklyMinutes: 0,
+    weeklyHoursLabel: "0분",
+  };
+  const breakdownRows = (rows = [], childrenKey) => rows.map((row) => ({
+    key: row.label,
+    label: row.label,
+    enrollmentCount: row.enrollmentCount,
+    studentCount: row.studentCount,
+    children: (row[childrenKey] || []).map((child) => ({
+      key: child.label,
+      label: child.label,
+      enrollmentCount: child.enrollmentCount,
+      studentCount: child.studentCount,
+    })),
+  }));
+  const classGroupRows = (rows = []) => rows.map((row) => ({
+    key: row.label,
+    label: row.label,
+    classCount: row.classCount,
+    studentCount: row.studentCount,
+    enrollmentCount: row.enrollmentCount,
+    weeklyMinutes: row.weeklyMinutes,
+    weeklyHoursLabel: row.weeklyHoursLabel,
+  }));
+
+  if (request.tab === "overview") {
+    return { summary };
+  }
+
+  if (request.tab === "students_classes") {
+    return {
+      summary,
+      studentBreakdowns: {
+        byGrade: breakdownRows(bucket?.studentBreakdowns?.byGrade, "schools"),
+        bySchool: breakdownRows(bucket?.studentBreakdowns?.bySchool, "grades"),
+      },
+      classGroups: {
+        byGrade: classGroupRows(bucket?.classBreakdowns?.byGrade),
+        byTeacher: classGroupRows(bucket?.classBreakdowns?.byTeacher),
+        byClassroom: classGroupRows(bucket?.classBreakdowns?.byClassroom),
+      },
+    };
+  }
+
+  if (request.tab === "schedule_conflicts") {
+    return {
+      range: { dateFrom: text(request.dateFrom), dateTo: text(request.dateTo) },
+      teacherConflicts: metrics.conflictRows.filter((row) => row.type === "teacher"),
+      classroomConflicts: metrics.conflictRows.filter((row) => row.type === "classroom"),
+      examConflicts: metrics.conflictRows.filter((row) => row.type === "exam"),
+    };
+  }
+
+  if (request.tab === "textbooks") {
+    const subjectFilter = DASHBOARD_SUBJECT_FILTERS.find((entry) => entry.key === subject)?.subject;
+    const activeClasses = (input.classes || []).filter((classItem) => (
+      isActiveClass(classItem) && matchesDashboardSubject(classItem, subjectFilter)
+    ));
+    const titles = (input.textbooks || []).filter((textbook) => (
+      matchesDashboardSubject({ subject: textbook.subject || textbook.subject_name }, subjectFilter)
+    ));
+    const dateFrom = text(request.dateFrom);
+    const dateTo = text(request.dateTo);
+    const progress = (input.progressLogs || []).filter((row) => {
+      const date = text(row.updated_at || row.updatedAt || row.date).slice(0, 10);
+      return date >= dateFrom && date <= dateTo;
+    });
+    const statusCount = (status) => progress.filter((row) => text(row.status).toLowerCase() === status).length;
+    const hasTextbook = (classItem) => Boolean(text(
+      classItem.textbook_id || classItem.textbookId || classItem.textbook || classItem.textbook_info,
+    ));
+    return {
+      range: { dateFrom, dateTo },
+      activeTitles: titles.length,
+      activeClassesWithTextbook: activeClasses.filter(hasTextbook).length,
+      activeClassesWithoutTextbook: activeClasses.filter((classItem) => !hasTextbook(classItem)).length,
+      progressSessions: { pending: statusCount("pending"), partial: statusCount("partial"), done: statusCount("done") },
+      updatedProgressSessions: progress.length,
+    };
+  }
+
+  throw new Error("dashboard_metrics_slice_tab_invalid");
+}
+
 export function buildDashboardMetrics({
   classes = [],
   students = [],
