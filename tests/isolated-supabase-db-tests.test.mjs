@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -92,8 +93,9 @@ test("catalog capture pins the Management API read-only request and redacts cred
   assert.equal(request.url, "https://api.supabase.com/v1/projects/abcdefghijklmnopqrst/database/query/read-only");
   assert.equal(request.init.method, "POST");
   assert.equal(request.init.headers.Authorization, "Bearer sbp_only-read-secret");
-  assert.deepEqual(JSON.parse(request.init.body), { query: request.init.query, parameters: [] });
-  assert.doesNotMatch(request.init.query, /\b(?:vault|cron|webhook)\b/i);
+  const body = JSON.parse(request.init.body);
+  assert.deepEqual(body, { query: body.query, parameters: [] });
+  assert.doesNotMatch(body.query, /\b(?:vault|cron|webhook)\b/i);
   await rm(root, { recursive: true, force: true });
 });
 
@@ -143,4 +145,93 @@ test("isolated DB runner binds the source-controlled baseline and catalog to man
     validateBaselineArtifactHashes({ root, manifest }),
     /isolated_supabase_db_baseline_hash_drift/,
   );
+});
+
+test("reviewed catalog capture atomically writes normalized catalog, baseline SQL, and parity checks", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const root = await makeRepo(t);
+  const originMainSha = "a".repeat(40);
+  const output = [
+    "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json",
+    "supabase/test-baselines/dashboard-free-tier-v1.sql",
+    "supabase/tests/dashboard_free_tier_catalog_parity_test.sql",
+  ];
+  const result = await captureDashboardFreeTierCatalog({
+    root,
+    argv: ["--mode", "execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", output[0], "--baseline", output[1], "--parity-test", output[2]],
+    env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+    gitOriginMainSha: async () => originMainSha,
+    fetch: async () => new Response(JSON.stringify({
+      serverMajor: 17,
+      migrationLedger: [{ version: "20260813093446", name: "registration_observation_legacy_schedule_slot_catalogs", statements_sha256: "a".repeat(64) }],
+      catalog: [{ objectKind: "table", schema: "public", identity: "classes", definition: "create table public.classes (id text primary key)" }],
+    }), { status: 201 }),
+  });
+  const catalog = JSON.parse(await readFile(join(root, output[0]), "utf8"));
+  const baseline = await readFile(join(root, output[1]), "utf8");
+  const parity = await readFile(join(root, output[2]), "utf8");
+  assert.equal(result.captureStatus, "reviewed");
+  assert.equal(catalog.catalog[0].definition, undefined);
+  assert.equal(catalog.catalog[0].definitionSha256, createHash("sha256").update("create table public.classes (id text primary key)").digest("hex"));
+  assert.match(baseline, /create table public\.classes/u);
+  assert.match(parity, /has_table\('public', 'classes'/u);
+});
+
+test("capture leaves all target artifacts unchanged for redirect, 405, and malformed JSON", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const root = await makeRepo(t);
+  const originMainSha = "a".repeat(40);
+  const argv = ["--mode", "execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"];
+  const before = await Promise.all(argv.filter((value) => value.startsWith("supabase/")).map((path) => readFile(join(root, path), "utf8")));
+  for (const response of [
+    new Response("", { status: 405 }),
+    { status: 201, redirected: true, json: async () => ({}) },
+    new Response("not json", { status: 201 }),
+  ]) {
+    await assert.rejects(captureDashboardFreeTierCatalog({ root, argv, env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha }, gitOriginMainSha: async () => originMainSha, fetch: async () => response }));
+  }
+  const after = await Promise.all(argv.filter((value) => value.startsWith("supabase/")).map((path) => readFile(join(root, path), "utf8")));
+  assert.deepEqual(after, before);
+});
+
+test("isolated DB execute uses sanitized temp config, verifies candidate bytes, gates probes, and stops once", async (t) => {
+  const { runIsolatedSupabaseDbTests, sha256 } = await import(runnerUrl.href);
+  const root = await makeRepo(t);
+  const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"));
+  const reviewedCatalog = JSON.stringify({ captureStatus: "reviewed", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101", catalog: [] });
+  await writeFile(join(root, "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json"), reviewedCatalog);
+  await mkdir(join(root, "supabase/migrations"), { recursive: true });
+  await mkdir(join(root, "tests"), { recursive: true });
+  await writeFile(join(root, "supabase/migrations/20260814000000_candidate.sql"), "select 1;\n");
+  await writeFile(join(root, "tests/probe.mjs"), "if (!process.env.TASK_LOCAL_DB_URL || !process.env.TASK_LOCAL_DB_NONCE) process.exit(1);\n");
+  await writeFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.manifest.json"), JSON.stringify({
+    baselineVersion: "dashboard-free-tier-v1", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101",
+    baselineSha256: sha256(baseline), catalogSha256: sha256(reviewedCatalog), requiredObjectSignatures: [],
+    orderedNewMigrations: [{ fileName: "20260814000000_candidate.sql", status: "candidate", sha256: sha256("select 1;\n") }],
+  }));
+  const calls = [];
+  const result = await runIsolatedSupabaseDbTests({
+    root,
+    argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f", "--test", "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql", "--probe", "tests/probe.mjs"],
+    randomBytes: () => Buffer.from("a1b2c3d4e5f6", "hex"),
+    retainTempRoot: true,
+    allocatePort: (() => {
+      let port = 55431;
+      return () => ++port;
+    })(),
+    executeProcess: async (invocation) => {
+      calls.push(invocation);
+      if (invocation.args[0] === "status") return { code: 0, stdout: JSON.stringify({ DB_URL: "postgresql://postgres:postgres@127.0.0.1:55433/postgres" }), stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  });
+  assert.equal(result.status, "passed");
+  assert.deepEqual(calls.filter((call) => call.command.endsWith("/supabase")).map((call) => call.args[0]), ["init", "db", "test", "migration", "test", "status", "stop"]);
+  assert.equal(calls.filter((call) => call.args[0] === "stop").length, 1);
+  assert.equal(calls.find((call) => call.command === process.execPath).env.TASK_LOCAL_DB_URL.includes("127.0.0.1"), true);
+  assert.equal(calls.find((call) => call.command === process.execPath).env.SUPABASE_DATABASE_READ_TOKEN, undefined);
+  assert.match(await readFile(result.runtime.configPath, "utf8"), /project_id = "tips_supabase_db_qa_a1b2c3d4e5f6"/u);
+  t.after(() => rm(result.runtime.tempRoot, { recursive: true, force: true }));
+  await writeFile(join(root, "supabase/migrations/20260814000000_candidate.sql"), "select 2;\n");
+  await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_migration_hash_drift/);
 });

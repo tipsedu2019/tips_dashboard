@@ -13,6 +13,7 @@
     "public.classes",
     "public.ops_registration_appointment_calendar",
     "public.ops_tasks",
+    "public.progress_logs",
     "public.profiles",
     "public.students",
     "public.textbooks"
