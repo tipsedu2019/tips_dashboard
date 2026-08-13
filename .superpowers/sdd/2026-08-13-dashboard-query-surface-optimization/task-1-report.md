@@ -53,3 +53,10 @@ Task 2–6 should remove only their completed surface's manifest rows in the sam
 - Existing violations caused by unresolved/missing projection or limit contracts were added as exact literal baseline-debt rows only for the affected current symbols. No wildcard exception was added.
 - The verifier continues to allow direct `.from(table)` with a statically resolved explicit projection/page size and a direct RPC with `p_limit: 30`.
 - RED-first fixtures cover `['*'].join('')`, `Number('31')`, and `client['from'](...)`; the focused suite reports **20 pass, 0 fail**.
+
+## Fix round 3 — occurrence debt and canonical scope safety
+
+- Legacy-debt matching is now occurrence-count based for each exact `surface + file + symbol + violation` key. A second occurrence of an already-manifested violation is reported rather than being hidden by the first baseline occurrence.
+- Every direct `.from(...)` or `.rpc(...)` in a manifest-listed symbol is inspected even without a page-limit expression; missing limits therefore fail under the existing exact contract. Computed and optional computed entrypoints such as `client?.[method]?.(...)` are detected and rejected as `list_query_method_unresolved`.
+- `canonicalScopeHash` is exported as the sole SHA-256 canonical scope boundary. It now rejects `undefined`, non-finite numbers, sparse arrays, and non-plain objects rather than serializing ambiguous values; `createCursorScope` uses this boundary.
+- RED-first fixtures cover the duplicate same-code violation, no-limit direct query, nonliteral optional computed entrypoint, and all invalid canonical-scope values. The focused suite reports **24 pass, 0 fail**.

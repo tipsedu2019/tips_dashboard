@@ -31,8 +31,8 @@ function commitFixture(root) {
   return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim()
 }
 
-async function verifyFixture({ surface = "tasks", file = "src/features/tasks/list-tasks.ts", source }) {
-  const root = await createFixtureRepository({ [file]: "export const untouched = true\n" })
+async function verifyFixture({ surface = "tasks", file = "src/features/tasks/list-tasks.ts", baselineSource = "export const untouched = true\n", source }) {
+  const root = await createFixtureRepository({ [file]: baselineSource })
   try {
     const baseSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim()
     await writeFile(join(root, file), source)
@@ -184,6 +184,73 @@ test("manifest-listed list symbols reject a computed query entrypoint", async ()
     file: "src/features/management/management-service.js",
     source: `async function selectRows(client, table) {
   return client["from"](table).select("id").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/management/management-service.js",
+    symbol: "selectRows",
+    surface: "management",
+    reason: "list_query_method_unresolved",
+  }])
+})
+
+test("query budget rejects a second occurrence of the same legacy violation", async () => {
+  const result = await verifyFixture({
+    surface: "management",
+    file: "src/features/management/management-service.js",
+    baselineSource: `async function selectRows(client, table) {
+  return client.from(table).select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+    source: `async function selectRows(client, table) {
+  return client.from(table).select("*").select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/management/management-service.js",
+    symbol: "selectRows",
+    surface: "management",
+    reason: "list_select_star",
+  }])
+})
+
+test("manifest-listed list symbols inspect direct queries even when no page limit is present", async () => {
+  const result = await verifyFixture({
+    surface: "management",
+    file: "src/features/management/management-service.js",
+    source: `async function selectRows(client, table) {
+  return client.from(table).select("*").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [
+    {
+      file: "src/features/management/management-service.js",
+      symbol: "selectRows",
+      surface: "management",
+      reason: "list_limit_missing",
+    },
+    {
+      file: "src/features/management/management-service.js",
+      symbol: "selectRows",
+      surface: "management",
+      reason: "list_select_star",
+    },
+  ])
+})
+
+test("manifest-listed list symbols reject nonliteral and optional computed query entrypoints", async () => {
+  const result = await verifyFixture({
+    surface: "management",
+    file: "src/features/management/management-service.js",
+    source: `async function selectRows(client, table) {
+  const method = "from"
+  return client?.[method]?.(table).select("id").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })

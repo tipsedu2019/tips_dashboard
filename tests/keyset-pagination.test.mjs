@@ -3,6 +3,7 @@ import { createHash } from "node:crypto"
 import test from "node:test"
 
 import {
+  canonicalScopeHash,
   createCursorScope,
   decodeKeysetCursor,
   decodeManagementRelationCursor,
@@ -67,6 +68,24 @@ test("public keyset cursor has a 1024-character transport ceiling and validates 
   assert.throws(
     () => decodeKeysetCursor(cursor, { scope: "a".repeat(64), sortTypes: ["number", "number"] }),
     { code: "cursor_sort_type_invalid" },
+  )
+})
+
+test("canonical cursor scope rejects undefined, non-finite, sparse, and non-plain values", () => {
+  const invalid = [
+    undefined,
+    { count: Number.NaN },
+    { count: Number.POSITIVE_INFINITY },
+    { values: [, "middle"] },
+    { when: new Date("2026-08-14T00:00:00.000Z") },
+    new Map([["status", "active"]]),
+  ]
+  for (const value of invalid) {
+    assert.throws(() => canonicalScopeHash(value), { code: "cursor_scope_canonical_invalid" })
+  }
+  assert.throws(
+    () => createCursorScope({ surface: "public", role: "teacher", filters: undefined, sort: { by: "name" } }),
+    { code: "cursor_scope_canonical_invalid" },
   )
 })
 

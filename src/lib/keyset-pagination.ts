@@ -11,8 +11,22 @@ function cursorError(code: string): Error & { code: string } {
 }
 
 function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value)
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`
+  if (value === null) return "null"
+  if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value)
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw cursorError("cursor_scope_canonical_invalid")
+    return JSON.stringify(value)
+  }
+  if (typeof value !== "object") throw cursorError("cursor_scope_canonical_invalid")
+  if (Array.isArray(value)) {
+    const entries = []
+    for (let index = 0; index < value.length; index += 1) {
+      if (!(index in value)) throw cursorError("cursor_scope_canonical_invalid")
+      entries.push(canonicalJson(value[index]))
+    }
+    return `[${entries.join(",")}]`
+  }
+  if (Object.getPrototypeOf(value) !== Object.prototype) throw cursorError("cursor_scope_canonical_invalid")
   const record = value as Record<string, unknown>
   return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`
 }
@@ -71,7 +85,11 @@ export function createCursorScope({ surface, role, filters, sort }: {
   sort: unknown
 }): string {
   if (!surface || !role) throw cursorError("cursor_scope_invalid")
-  return createHash("sha256").update(canonicalJson({ surface, role, filters, sort })).digest("hex")
+  return canonicalScopeHash({ surface, role, filters, sort })
+}
+
+export function canonicalScopeHash(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex")
 }
 
 export function encodeKeysetCursor({ sortValues, id, scope }: { sortValues: SortValue[]; id: string; scope: string }): string {

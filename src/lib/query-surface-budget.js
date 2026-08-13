@@ -110,7 +110,7 @@ function isBudgetedList({ file, symbol, source }) {
 function analyzeBlock({ surface, file, symbol, source }) {
   const hasFrom = /\.from\s*\(/u.test(source)
   const hasRpc = /\.rpc\s*\(/u.test(source)
-  const hasComputedQueryMethod = /\[\s*["'](?:from|rpc)["']\s*\]\s*\(/u.test(source)
+  const hasComputedQueryMethod = /\b(?:client|supabase)\s*(?:\?\.)?\[\s*[^\]]+\s*\]\s*(?:\?\.)?\(/u.test(source)
   const hasRequest = hasFrom || hasRpc || hasComputedQueryMethod
   if (!hasRequest || !isBudgetedList({ file, symbol, source })) return []
   const constants = primitiveConstants(source)
@@ -147,7 +147,18 @@ function analyzeBlock({ surface, file, symbol, source }) {
   if (!/\.abortSignal\(\s*AbortSignal\.timeout\(\s*8_000\s*\)\s*\)/u.test(source)) reasons.push("list_abort_signal_missing")
   if (!/\.retry\(\s*false\s*\)/u.test(source)) reasons.push("list_retry_false_missing")
   if (surface === "tasks" && /\.in\(\s*["']task_id["']\s*,\s*taskIds\s*\)/u.test(source)) reasons.push("task_id_batch_in_list")
-  return [...new Set(reasons)].map((reason) => ({ file, symbol, surface, reason }))
+  return reasons.map((reason) => ({ file, symbol, surface, reason }))
+}
+
+function countedViolations(source, surface, file) {
+  const counts = new Map()
+  for (const block of functionBlocks(source)) {
+    for (const violation of analyzeBlock({ surface, file, ...block })) {
+      const key = exactDebtKey(violation)
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+  }
+  return counts
 }
 
 function exactDebtKey({ surface, file, symbol, reason }) {
@@ -189,7 +200,6 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
       .filter((entry) => surfaces.includes(entry.surface) && entry.baselineSha === BASELINE_SHA)
       .map((entry) => exactDebtKey({ ...entry, reason: entry.violation })),
   )
-  const baselineDebt = new Set()
   const violations = []
   for (const file of files) {
     const owner = surfaces.find((candidate) => isSurfacePath(candidate, file))
@@ -197,17 +207,14 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
     const source = await sourceAt({ root, file, revision: headSha, includeWorktree })
     if (source === null) continue
     const baseSource = await sourceAt({ root, file, revision: baseSha, includeWorktree: false })
-    if (baseSource !== null) {
-      for (const block of functionBlocks(baseSource)) {
-        for (const violation of analyzeBlock({ surface: owner, file, ...block })) {
-          baselineDebt.add(exactDebtKey(violation))
-        }
-      }
-    }
+    const baselineDebt = baseSource === null ? new Map() : countedViolations(baseSource, owner, file)
+    const currentDebt = new Map()
     for (const block of functionBlocks(source)) {
       for (const violation of analyzeBlock({ surface: owner, file, ...block })) {
         const key = exactDebtKey(violation)
-        if (!allowedDebt.has(key) || !baselineDebt.has(key)) violations.push(violation)
+        const occurrence = (currentDebt.get(key) ?? 0) + 1
+        currentDebt.set(key, occurrence)
+        if (!allowedDebt.has(key) || occurrence > (baselineDebt.get(key) ?? 0)) violations.push(violation)
       }
     }
   }
