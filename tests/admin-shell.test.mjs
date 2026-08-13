@@ -219,22 +219,14 @@ test("dashboard omits introductory briefing copy and redundant workspace heading
   assert.doesNotMatch(source, /운영 워크스페이스 바로가기/);
 });
 
-test("dashboard starts with live metrics and removes the inaccurate todo summary", async () => {
-  const [pageSource, serviceSource] = await Promise.all([
-    readSource("src/app/admin/dashboard/page.tsx"),
-    readSource("src/features/tasks/ops-task-service.ts"),
-  ]);
+test("dashboard renders only the daily brief path instead of live statistics sources", async () => {
+  const pageSource = await readSource("src/app/admin/dashboard/page.tsx");
 
-  assert.match(pageSource, /SectionCards/);
-  assert.doesNotMatch(pageSource, /OpsTaskDashboardSummary/);
-  assert.equal(
-    await pathExists("src/features/tasks/ops-task-dashboard-summary.tsx"),
-    false,
-  );
-  assert.doesNotMatch(
-    serviceSource,
-    /OpsTodoDashboardSummaryData|loadOpsTodoDashboardSummaryData/,
-  );
+  assert.match(pageSource, /DashboardDailyBrief/);
+  assert.doesNotMatch(pageSource, /useTipsDashboardMetrics/);
+  assert.doesNotMatch(pageSource, /SectionCards/);
+  assert.doesNotMatch(pageSource, /get_dashboard_summary_sources_v1/);
+  assert.doesNotMatch(pageSource, /get_dashboard_conflict_sources_v1/);
 
   for (const pathname of [
     "src/app/admin/dashboard/components/chart-area-interactive.tsx",

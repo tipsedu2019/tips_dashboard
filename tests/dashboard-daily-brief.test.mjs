@@ -125,3 +125,70 @@ test("daily brief RPC is authenticated-only and pgTAP owns boundary RLS fixtures
     assert.match(tap, new RegExp(contract, "iu"))
   }
 })
+
+const dailyBriefFixture = Object.freeze({
+  localDate: "2026-08-14",
+  generatedAt: "2026-08-14T00:00:00.000Z",
+  counts: {
+    levelTests: 1,
+    visitConsultations: 2,
+    observationClasses: 3,
+    openTasks: 4,
+  },
+  upcoming: [
+    {
+      sourceKind: "level_test",
+      sourceId: "appointment-1",
+      scheduledAt: "2026-08-14T01:00:00.000Z",
+      title: "학생 · 레벨테스트",
+      subjectLabels: ["수학"],
+      placeLabel: "본관",
+      href: "/admin/registration?appointmentId=appointment-1&view=calendar",
+    },
+  ],
+})
+
+test("daily brief service makes one bounded RPC request and returns the strict contract", async () => {
+  const { readDashboardDailyBrief } = await import("../src/features/dashboard/daily-brief-service.ts")
+  const calls = []
+  const client = {
+    rpc(name) {
+      calls.push({ name })
+      return {
+        abortSignal(signal) {
+          calls[0].signal = signal
+          return this
+        },
+        async retry(value) {
+          calls[0].retry = value
+          return { data: dailyBriefFixture, error: null }
+        },
+      }
+    },
+  }
+
+  assert.deepEqual(await readDashboardDailyBrief(client), dailyBriefFixture)
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].name, "get_dashboard_daily_brief_v1")
+  assert.equal(calls[0].retry, false)
+  assert.ok(calls[0].signal instanceof AbortSignal)
+})
+
+test("daily brief contract fails closed for a sixth item or unknown source kind", async () => {
+  const { normalizeDashboardDailyBrief } = await import("../src/features/dashboard/daily-brief-contract.ts")
+
+  assert.throws(
+    () => normalizeDashboardDailyBrief({
+      ...dailyBriefFixture,
+      upcoming: Array.from({ length: 6 }, () => dailyBriefFixture.upcoming[0]),
+    }),
+    /dashboard_daily_brief_contract_invalid/,
+  )
+  assert.throws(
+    () => normalizeDashboardDailyBrief({
+      ...dailyBriefFixture,
+      upcoming: [{ ...dailyBriefFixture.upcoming[0], sourceKind: "task" }],
+    }),
+    /dashboard_daily_brief_contract_invalid/,
+  )
+})
