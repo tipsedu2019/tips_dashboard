@@ -511,6 +511,21 @@ export async function purgeInactiveTextbooks(idList: string[] | string, clientIn
   };
 }
 
+export async function createTextbookRequest(record: Row, clientInput?: SupabaseClientLike | null) {
+  const client = ensureClient(clientInput);
+  const { data, error } = await client.rpc("create_textbook_request_v1", {
+    p_textbook_id: normalizeOptionalUuid(record.textbookId || record.textbook_id),
+    p_requested_textbook_title: text(record.requestedTextbookTitle || record.requested_textbook_title),
+    p_class_id: normalizeOptionalUuid(record.classId || record.class_id),
+    p_location_id: normalizeOptionalUuid(record.locationId || record.location_id),
+    p_student_requested_quantity: Math.max(0, Math.floor(numberValue(record.studentRequestedQuantity || record.student_requested_quantity))),
+    p_teacher_requested_quantity: Math.max(0, Math.floor(numberValue(record.teacherRequestedQuantity || record.teacher_requested_quantity))),
+    p_memo: text(record.memo),
+  });
+  if (error) throw error;
+  return data as Row;
+}
+
 export async function createPurchaseReceipt(record: Row, clientInput?: SupabaseClientLike | null) {
   const client = ensureClient(clientInput);
   const textbookId = text(record.textbookId || record.textbook_id);
@@ -1236,6 +1251,7 @@ export const textbookService = {
   upsertTextbookMaster,
   deleteTextbookMasters,
   purgeInactiveTextbooks,
+  createTextbookRequest,
   createPurchaseReceipt,
   updatePurchaseLifecycle,
   deletePurchaseLifecycle,
