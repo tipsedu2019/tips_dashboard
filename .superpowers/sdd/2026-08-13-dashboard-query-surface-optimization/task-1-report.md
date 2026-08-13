@@ -115,6 +115,34 @@ git diff --check
 
 All commands exited successfully. No migration, production action, or `pnpm-workspace.yaml` change was made.
 
+## Fix round 10 — alias-complete builder and task membership analysis
+
+- Direct builder aliases such as `const unsafe = query` and assignments between builder aliases now retain the same logical request ancestry. Subsequent operations on any alias form a derived request branch, so wildcard projections, over-budget limits, and retry overrides on `unsafe` are checked rather than disappearing from analysis.
+- Bound query-entry aliases propagate transitively: a safe `const from = client.from.bind(client)` remains known after `const run = from`, and calls through `run` receive the `from` contract. Bound operations on a known builder, such as `query.in.bind(query)`, are recorded as the actual operation in the derived chain.
+- For the tasks surface, `.in` column resolution uses the same statically proven constant rules. A resolved `task_id` is forbidden regardless of list value; an unresolved `.in` column is rejected as `task_in_column_unresolved`. Explicit non-task columns continue to avoid this task-specific finding.
+- RED-first fixtures cover direct builder alias mutations, transitive bound `from` aliases, statically computed `task_id`, and an unresolved column through a bound `.in` operation. Final focused result: **58 pass, 0 fail**.
+
+## Fix round 10 verification
+
+```bash
+"$TASK_NODE" --test --experimental-strip-types \
+  tests/query-surface-budget.test.mjs \
+  tests/keyset-pagination.test.mjs
+
+"$TASK_NODE" node_modules/eslint/bin/eslint.js \
+  src/lib/query-surface-budget.js tests/query-surface-budget.test.mjs
+
+"$TASK_NODE" scripts/verify-query-surface-budget.mjs \
+  --surface all --base HEAD --head HEAD
+
+"$TASK_NODE" scripts/verify-query-surface-budget.mjs \
+  --surface all --base fad56ae59f6b5ec6999e3232bbe68e4c1d26b101 --worktree
+
+git diff --check
+```
+
+All commands exited successfully. No migration, production action, or `pnpm-workspace.yaml` change was made.
+
 ## Fix round 9 — control-flow and lexical-proof hardening
 
 - A query alias write inside `if`, conditional expression, loop, switch, or try/catch is marked `list_query_control_flow_unresolved` and that provenance follows later builder branches. The verifier no longer treats a conditionally added limit/order as unconditional request controls.

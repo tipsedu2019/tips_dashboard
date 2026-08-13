@@ -991,3 +991,50 @@ test("task_id membership rejects literal arrays while exact task_id details rema
   })
   assert.deepEqual(detail, { ok: true, violations: [] })
 })
+
+test("query builder aliases preserve unsafe branch mutations", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client) {
+  const query = client.from("ops_tasks").select("id")
+  const unsafe = query
+  return unsafe.select("*").limit(100).order("id").abortSignal(AbortSignal.timeout(8000)).retry(true)
+}
+`,
+  })
+  assert.ok(result.violations.some((violation) => violation.reason === "list_select_star"))
+  assert.ok(result.violations.some((violation) => violation.reason === "list_limit_exceeds_30"))
+  assert.ok(result.violations.some((violation) => violation.reason === "list_retry_false_missing"))
+})
+
+test("bound query entry aliases remain known after alias assignment", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client) {
+  const from = client.from.bind(client)
+  const run = from
+  return run("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+  assert.ok(result.violations.some((violation) => violation.reason === "list_select_star"))
+})
+
+test("task in columns resolve constants and bound operations fail closed when unknown", async () => {
+  const computed = await verifyFixture({
+    source: `async function load(client) {
+  const column = "task_id"
+  return client.from("ops_task_comments").select("id").in(column, []).limit(30).order("id").abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+  assert.ok(computed.violations.some((violation) => violation.reason === "task_id_batch_in_list"))
+
+  const bound = await verifyFixture({
+    source: `async function load(client) {
+  const query = client.from("ops_task_comments").select("id")
+  const filter = query.in.bind(query)
+  return filter(getColumn(), []).limit(30).order("id").abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+  assert.ok(bound.violations.some((violation) => violation.reason === "task_in_column_unresolved"))
+})

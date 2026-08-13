@@ -14,3 +14,4 @@ Task 1 fix round 6: make the exact debt manifest the sole allowance for touched 
 Task 1 fix round 7: recheck all chains in deletion- or dependency-affected functions, bind manifest debt to both historical and caller baselines, enforce root-only deterministic list controls, and use effective final abort/retry settings.
 Task 1 fix round 8: fail closed for uncertain relation options and local values, model shared Supabase builders as immutable request branches, reject RPC spreads and arbitrary task-ID fan-out, and tighten detail-key validity.
 Task 1 fix round 9: propagate conditional builder provenance, resolve constants/options at their lexical use site with object-mutation tracking, inspect bound Supabase methods, and prohibit all task-ID `.in` fan-out.
+Task 1 fix round 10: connect direct builder aliases and transitive bound query aliases to the same request graph, inspect bound builder operations, and fail closed for resolved or unknown tasks `.in` columns.

@@ -6,6 +6,7 @@ import ts from "typescript"
 
 export const QUERY_SURFACES = Object.freeze(["tasks", "management", "operations", "academic", "public"])
 const BASELINE_SHA = "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101"
+const BOUND_OPERATION_METHODS = new WeakMap()
 
 // These are deliberately literal records, not path patterns. Each one binds a
 // specific baseline query chain, so moving or duplicating legacy debt is a new
@@ -254,7 +255,7 @@ function queryOperations(call) {
 }
 
 function callMethod(call) {
-  return call ? accessParts(call)?.method ?? null : null
+  return call ? accessParts(call)?.method ?? BOUND_OPERATION_METHODS.get(call) ?? null : null
 }
 
 function receiverAliases(scope) {
@@ -274,19 +275,22 @@ function receiverAliases(scope) {
 
 function boundQueryMethods(scope, aliases) {
   const methods = new Map()
+  const declarations = []
   const visit = (node) => {
     if (node !== scope && ts.isFunctionLike(node)) return
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && isImmutableConst(node)) {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && isImmutableConst(node)) declarations.push(node)
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(scope, visit)
+  for (const node of declarations.sort((left, right) => left.pos - right.pos)) {
       const initializer = unwrap(node.initializer)
       const bind = ts.isCallExpression(initializer) && callMethod(initializer) === "bind" ? accessParts(initializer) : null
       const target = bind && (ts.isPropertyAccessExpression(bind.receiver) || ts.isElementAccessExpression(bind.receiver)) ? bind.receiver : null
       const targetMethod = target && (ts.isPropertyAccessExpression(target) ? target.name.text : (ts.isStringLiteral(target.argumentExpression) ? target.argumentExpression.text : null))
       const receiver = target && unwrap(target.expression)
       if (["from", "rpc"].includes(targetMethod) && isTrustedReceiver(receiver, aliases)) methods.set(node.name.text, targetMethod)
-    }
-    ts.forEachChild(node, visit)
+      else if (ts.isIdentifier(initializer) && methods.has(initializer.text)) methods.set(node.name.text, methods.get(initializer.text))
   }
-  ts.forEachChild(scope, visit)
   return methods
 }
 
@@ -297,6 +301,42 @@ function isConditionalExecution(node, scope) {
       || ts.isTryStatement(parent) || ts.isCatchClause(parent)) return true
   }
   return false
+}
+
+function aliasAssignments(scope) {
+  const assignments = []
+  const visit = (node) => {
+    if (node !== scope && ts.isFunctionLike(node)) return
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && ts.isIdentifier(unwrap(node.initializer))) {
+      assignments.push({ pos: node.end, name: node.name.text, source: unwrap(node.initializer).text, node })
+    }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      && ts.isIdentifier(unwrap(node.left)) && ts.isIdentifier(unwrap(node.right))) {
+      assignments.push({ pos: node.end, name: unwrap(node.left).text, source: unwrap(node.right).text, node })
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(scope, visit)
+  return assignments.sort((left, right) => left.pos - right.pos)
+}
+
+function boundOperationAssignments(scope) {
+  const assignments = []
+  const visit = (node) => {
+    if (node !== scope && ts.isFunctionLike(node)) return
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && isImmutableConst(node)) {
+      const initializer = unwrap(node.initializer)
+      const bind = ts.isCallExpression(initializer) && callMethod(initializer) === "bind" ? accessParts(initializer) : null
+      const target = bind && (ts.isPropertyAccessExpression(bind.receiver) || ts.isElementAccessExpression(bind.receiver)) ? bind.receiver : null
+      const method = target && (ts.isPropertyAccessExpression(target) ? target.name.text : (target.argumentExpression && (ts.isStringLiteral(target.argumentExpression) || ts.isNoSubstitutionTemplateLiteral(target.argumentExpression)) ? target.argumentExpression.text : null))
+      const source = target && rootIdentifier(target.expression)
+      const boundTo = ts.isCallExpression(initializer) && initializer.arguments[0] && rootIdentifier(initializer.arguments[0])
+      if (source && boundTo === source && method) assignments.push({ pos: node.end, name: node.name.text, source, method, node })
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(scope, visit)
+  return assignments.sort((left, right) => left.pos - right.pos)
 }
 
 export function createQueryChainFingerprint({ symbol, ordinal, operations }) {
@@ -447,8 +487,12 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
   if (query.directMethod && !isExactTimeoutAbortSignal(finalOperation(query.operations, "abortSignal"))) reasons.push("list_abort_signal_missing")
   const retry = finalOperation(query.operations, "retry")
   if (query.directMethod && !(retry && retry.arguments.length === 1 && retry.arguments[0].kind === ts.SyntaxKind.FalseKeyword)) reasons.push("list_retry_false_missing")
-  if (surface === "tasks" && query.directMethod === "from" && query.operations.some((operation) => callMethod(operation) === "in"
-    && argumentValue(operation.arguments[0], constants) === "task_id")) reasons.push("task_id_batch_in_list")
+  if (surface === "tasks" && query.directMethod === "from") {
+    for (const operation of query.operations.filter((candidate) => callMethod(candidate) === "in")) {
+      if (argumentValue(operation.arguments[0], constants) === "task_id") reasons.push("task_id_batch_in_list")
+      else if (argumentValue(operation.arguments[0], constants) === undefined) reasons.push("task_in_column_unresolved")
+    }
+  }
   const fingerprint = createQueryChainFingerprint({ symbol, ordinal: query.ordinal, operations: query.operations })
   const { startLine, endLine } = queryLineSpan(scope, query)
   return reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint, startLine, endLine, ...scopeLineSpan(scope) }))
@@ -458,6 +502,11 @@ function analyzeScope({ surface, file, scope, symbol }) {
   const aliases = receiverAliases(scope)
   const boundMethods = boundQueryMethods(scope, aliases)
   const queryAliases = new Map()
+  const operationAliases = new Map()
+  const aliasesToAssign = aliasAssignments(scope)
+  const operationsToAssign = boundOperationAssignments(scope)
+  let aliasIndex = 0
+  let operationIndex = 0
   const records = []
   const calls = []
   const visit = (node) => {
@@ -467,6 +516,40 @@ function analyzeScope({ surface, file, scope, symbol }) {
   }
   ts.forEachChild(scope, visit)
   for (const call of calls.sort((left, right) => left.pos - right.pos)) {
+    while (aliasIndex < aliasesToAssign.length && aliasesToAssign[aliasIndex].pos <= call.pos) {
+      const assignment = aliasesToAssign[aliasIndex]
+      const parent = queryAliases.get(assignment.source)
+      if (parent) {
+        parent.controlFlowUnresolved ||= isConditionalExecution(assignment.node, scope)
+        queryAliases.set(assignment.name, parent)
+      }
+      aliasIndex += 1
+    }
+    while (operationIndex < operationsToAssign.length && operationsToAssign[operationIndex].pos <= call.pos) {
+      const assignment = operationsToAssign[operationIndex]
+      const parent = queryAliases.get(assignment.source)
+      if (parent) operationAliases.set(assignment.name, { parent, method: assignment.method, node: assignment.node })
+      operationIndex += 1
+    }
+    const operationAlias = ts.isIdentifier(call.expression) ? operationAliases.get(call.expression.text) : null
+    if (operationAlias) {
+      const parent = operationAlias.parent
+      const firstBranch = !parent.usedAsReceiver
+      parent.usedAsReceiver = true
+      BOUND_OPERATION_METHODS.set(call, operationAlias.method)
+      const record = {
+        entry: parent.entry,
+        directMethod: parent.directMethod,
+        receiverUnresolved: parent.receiverUnresolved,
+        controlFlowUnresolved: parent.controlFlowUnresolved || isConditionalExecution(operationAlias.node, scope),
+        ordinal: firstBranch ? parent.ordinal : records.length,
+        operations: [...parent.operations, ...queryOperations(call)],
+      }
+      records.push(record)
+      const name = assignmentName(call)
+      if (name) queryAliases.set(name, record)
+      continue
+    }
     const boundMethod = ts.isIdentifier(call.expression) ? boundMethods.get(call.expression.text) : null
     if (boundMethod) {
       const record = { entry: call, directMethod: boundMethod, receiverUnresolved: false, ordinal: records.length, operations: queryOperations(call) }
