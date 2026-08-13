@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { access, readdir, readFile } from "node:fs/promises";
+import { getRoleCapabilities } from "../src/lib/auth-utils.ts";
+import { buildAdminNavGroups } from "../src/lib/navigation.ts";
 
 const root = new URL("../", import.meta.url);
 
@@ -117,6 +119,36 @@ test("admin navigation exposes the persistent notification settings workspace", 
   assert.match(navigationSource, /match:\s*"\/admin\/settings\/notifications"/);
   assert.match(navigationSource, /title:\s*"알림 설정"/);
   assert.match(navigationSource, /url:\s*"\/admin\/settings\/notifications"/);
+});
+
+test("role-based navigation exposes textbook requests to teachers without manager-only links", () => {
+  const navUrlsForRole = (role) => {
+    const capabilities = getRoleCapabilities(role);
+    return buildAdminNavGroups(capabilities)
+      .flatMap((group) => group.items)
+      .map((item) => item.url);
+  };
+
+  for (const role of ["admin", "staff", "teacher"]) {
+    assert.ok(
+      navUrlsForRole(role).includes("/admin/textbooks"),
+      `${role} should discover textbook management`,
+    );
+  }
+
+  const teacherUrls = navUrlsForRole("teacher");
+  assert.ok(teacherUrls.includes("/admin/curriculum"));
+  assert.equal(teacherUrls.includes("/admin/students"), false);
+  assert.equal(teacherUrls.includes("/admin/classes"), false);
+  assert.equal(teacherUrls.some((url) => url.startsWith("/admin/settings/")), false);
+
+  for (const role of ["assistant", "viewer"]) {
+    assert.equal(
+      navUrlsForRole(role).includes("/admin/textbooks"),
+      false,
+      `${role} should not discover textbook management`,
+    );
+  }
 });
 
 test("legacy admin redirect routes do not keep template implementation files", async () => {

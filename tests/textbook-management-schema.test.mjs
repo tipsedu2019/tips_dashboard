@@ -136,3 +136,25 @@ test("textbook teacher request migration creates only server-owned requested row
   assert.match(sql, /revoke all on function public\.create_textbook_request_v1[\s\S]*from public, anon/);
   assert.match(sql, /grant execute on function public\.create_textbook_request_v1[\s\S]*to authenticated/);
 });
+
+test("textbook teacher request pgTAP covers RPC and direct-write authorization", async () => {
+  const sql = await readFile(
+    new URL("supabase/tests/textbook_teacher_request_access_test.sql", root),
+    "utf8",
+  );
+
+  assert.match(sql, /^begin;/);
+  assert.match(sql, /select no_plan\(\)/);
+  assert.match(sql, /set local role authenticated/);
+  assert.match(sql, /public\.create_textbook_request_v1\(/);
+  assert.match(sql, /teacher RPC stores the server-owned requester and creator/);
+  assert.match(sql, /teacher RPC creates requested-only zero-fulfillment lines/);
+  assert.match(sql, /teacher RPC creates no stock moves/);
+  assert.match(sql, /viewer cannot call the textbook request RPC/);
+  assert.match(sql, /assistant cannot call the textbook request RPC/);
+  assert.match(sql, /teacher cannot directly update a textbook request/);
+  assert.match(sql, /teacher cannot directly delete a textbook request/);
+  assert.match(sql, /teacher cannot directly update textbook request lines/);
+  assert.match(sql, /teacher cannot directly delete textbook request lines/);
+  assert.match(sql, /select \* from finish\(\);\s*rollback;\s*$/);
+});

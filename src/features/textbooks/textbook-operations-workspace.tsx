@@ -3939,7 +3939,7 @@ export function TextbookOperationsWorkspace() {
     setActiveTab(canManageTextbookOperations ? "purchase" : "requests");
     updateOperationSearchQuery(title);
     setPurchaseBoardScope(getSavedPurchaseBoardScope(stage));
-    setPurchaseRequestFilter(getSavedPurchaseRequestFilter(stage, hasCatalogTextbook));
+    setPurchaseRequestFilter(canManageTextbookOperations ? getSavedPurchaseRequestFilter(stage, hasCatalogTextbook) : "all");
     setPurchaseOrderFilter(getSavedPurchaseOrderFilter(stage, hasCatalogTextbook));
     window.setTimeout(() => operationSearchRef.current?.select(), 0);
   }

@@ -2451,7 +2451,7 @@ test("teachers can add requests but cannot manage existing textbook requests", a
   assert.match(requestDialogSource, /canManageTextbookOperations \? \([\s\S]*selectedPurchaseLineId \? \([\s\S]*<TeacherSelect/);
 });
 
-test("teacher request save stays on the request tab synchronously", async () => {
+test("teacher request save stays on the unfiltered request tab synchronously", async () => {
   const workspaceSource = await readFile(
     new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
     "utf8",
@@ -2462,6 +2462,10 @@ test("teacher request save stays on the request tab synchronously", async () => 
   );
 
   assert.match(savedPurchaseFlowSource, /setActiveTab\(canManageTextbookOperations \? "purchase" : "requests"\)/);
+  assert.match(
+    savedPurchaseFlowSource,
+    /setPurchaseRequestFilter\(canManageTextbookOperations\s*\? getSavedPurchaseRequestFilter\(stage, hasCatalogTextbook\)\s*:\s*"all"\)/,
+  );
   assert.doesNotMatch(savedPurchaseFlowSource, /setActiveTab\("purchase"\)/);
 });
 
@@ -2995,7 +2999,7 @@ test("textbook workspace locks 50 saved purchase visibility safeguards", async (
     /setActiveTab\("purchase"\)/,
     /updateOperationSearchQuery\(title\)/,
     /setPurchaseBoardScope\(getSavedPurchaseBoardScope\(stage\)\)/,
-    /setPurchaseRequestFilter\(getSavedPurchaseRequestFilter\(stage, hasCatalogTextbook\)\)/,
+    /setPurchaseRequestFilter\(canManageTextbookOperations \? getSavedPurchaseRequestFilter\(stage, hasCatalogTextbook\) : "all"\)/,
     /setPurchaseOrderFilter\(getSavedPurchaseOrderFilter\(stage, hasCatalogTextbook\)\)/,
     /operationSearchRef\.current\?\.select\(\)/,
     /const requestedCatalogTextbook = getTextbookById\(activeTextbooks, purchaseRequestTitle\)/,
