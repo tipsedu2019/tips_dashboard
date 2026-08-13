@@ -156,6 +156,16 @@ values
       '86200000-0000-4000-8000-000000000307'
     ),
     '[]'::jsonb
+  ),
+  (
+    '86200000-0000-4000-8000-000000000043', '다른 학년 학생',
+    'statistics-other-grade', '통계검증고', '고2', '01080000043', '01090000043', '재원',
+    pg_catalog.jsonb_build_array('86200000-0000-4000-8000-000000000305'), '[]'::jsonb
+  ),
+  (
+    '86200000-0000-4000-8000-000000000044', '학년 미정 학생',
+    'statistics-missing-grade', '통계검증고', '', '01080000044', '01090000044', '재원',
+    pg_catalog.jsonb_build_array('86200000-0000-4000-8000-000000000305'), '[]'::jsonb
   );
 
 insert into public.classes(
@@ -200,7 +210,9 @@ select
   pg_catalog.jsonb_build_array(
     '86200000-0000-4000-8000-000000000001',
     '86200000-0000-4000-8000-000000000002',
-    '86200000-0000-4000-8000-000000000002'
+    '86200000-0000-4000-8000-000000000002',
+    '86200000-0000-4000-8000-000000000043',
+    '86200000-0000-4000-8000-000000000044'
   ),
   '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
   pg_catalog.jsonb_build_object('sessions', pg_catalog.jsonb_build_array(
@@ -254,7 +266,7 @@ values
   ),
   (
     '86200000-0000-4000-8000-000000000502', '통계검증 과학 시험일',
-    current_date + 20, '과학시험일', '중3', 'subject event parity',
+    current_date + 20, '과학시험일', '중2, 중3', 'subject event parity',
     '86200000-0000-4000-8000-000000000602'
   ),
   (
@@ -271,13 +283,13 @@ values
     '86200000-0000-4000-8000-000000000511',
     '86200000-0000-4000-8000-000000000501',
     '86200000-0000-4000-8000-000000000601',
-    '고3', '영어', current_date + 10, 'exact', 1
+    null, '영어', current_date + 10, 'exact', 1
   ),
   (
     '86200000-0000-4000-8000-000000000512',
     '86200000-0000-4000-8000-000000000501',
     '86200000-0000-4000-8000-000000000601',
-    '고3', '수학', current_date + 11, 'exact', 2
+    '고2, 고3', '수학', current_date + 11, 'exact', 2
   ),
   (
     '86200000-0000-4000-8000-000000000513',
@@ -292,7 +304,7 @@ insert into public.academic_exam_days(
 values
   (
     '86200000-0000-4000-8000-000000000521',
-    '86200000-0000-4000-8000-000000000601', '고3', '수학',
+    '86200000-0000-4000-8000-000000000601', '고2, 고3', '수학',
     current_date + 31, 'legacy 수학 시험', 'fallback parity', 1
   ),
   (
@@ -622,10 +634,84 @@ select is(
     cross join lateral pg_catalog.jsonb_array_elements(payload.value -> 'examConflicts') conflict(value)
     where conflict.value #>> '{source,examRule}' in ('same-day-subject', 'day-before-other-subject')
       and conflict.value -> 'classIds' ? '86200000-0000-4000-8000-000000000305'
-      and pg_catalog.jsonb_array_length(conflict.value -> 'affectedStudentIds') = 2
   ),
   3::bigint,
   '400-day exact parity preserves stable conflict grouping and merges affected students by key'
+);
+
+with payload as (
+  select public.get_dashboard_statistics_sources_v1(
+    'schedule_conflicts', null, null, current_date, current_date + 400
+  ) as value
+)
+select ok(
+  exists (
+    select 1
+    from payload
+    cross join lateral pg_catalog.jsonb_array_elements(payload.value -> 'examConflicts') conflict(value)
+    where conflict.value ->> 'key' = 'exam:v1:86200000-0000-4000-8000-000000000305:'
+        || (current_date + 10)::text || ':same-day-subject'
+      and conflict.value #> '{source,examDetailIds}'
+        = pg_catalog.jsonb_build_array('86200000-0000-4000-8000-000000000511')
+      and conflict.value -> 'affectedStudentIds' ? '86200000-0000-4000-8000-000000000001'
+  ),
+  'null detail inherits its parent academic event grade'
+);
+
+with payload as (
+  select public.get_dashboard_statistics_sources_v1(
+    'schedule_conflicts', null, null, current_date, current_date + 400
+  ) as value
+)
+select ok(
+  exists (
+    select 1
+    from payload
+    cross join lateral pg_catalog.jsonb_array_elements(payload.value -> 'examConflicts') conflict(value)
+    where conflict.value ->> 'key' = 'exam:v1:86200000-0000-4000-8000-000000000305:'
+        || (current_date + 11)::text || ':day-before-other-subject'
+      and conflict.value -> 'affectedStudentIds' ?& array[
+        '86200000-0000-4000-8000-000000000001',
+        '86200000-0000-4000-8000-000000000002',
+        '86200000-0000-4000-8000-000000000043',
+        '86200000-0000-4000-8000-000000000044'
+      ]
+  ),
+  'comma-separated detail grades match every listed grade'
+);
+
+with payload as (
+  select public.get_dashboard_statistics_sources_v1(
+    'schedule_conflicts', null, null, current_date, current_date + 400
+  ) as value
+)
+select ok(
+  exists (
+    select 1
+    from payload
+    cross join lateral pg_catalog.jsonb_array_elements(payload.value -> 'examConflicts') conflict(value)
+    where conflict.value ->> 'key' = 'exam:v1:86200000-0000-4000-8000-000000000305:'
+        || (current_date + 10)::text || ':same-day-subject'
+      and conflict.value -> 'affectedStudentIds' ? '86200000-0000-4000-8000-000000000044'
+  ),
+  'student without a grade matches an inherited parent grade'
+);
+
+with payload as (
+  select public.get_dashboard_statistics_sources_v1(
+    'schedule_conflicts', null, null, current_date, current_date + 400
+  ) as value
+)
+select ok(
+  not exists (
+    select 1
+    from payload
+    cross join lateral pg_catalog.jsonb_array_elements(payload.value -> 'examConflicts') conflict(value)
+    where conflict.value ->> 'key' = 'exam:v1:86200000-0000-4000-8000-000000000305:'
+        || (current_date + 10)::text || ':same-day-subject'
+      and conflict.value -> 'affectedStudentIds' ? '86200000-0000-4000-8000-000000000043'
+  ),
+  'parent high-school grade excludes a different student grade'
 );
 
 with payload as (
@@ -644,7 +730,7 @@ select ok(
         = pg_catalog.jsonb_build_array('86200000-0000-4000-8000-000000000502')
       and conflict.value #> '{source,examDetailIds}' = '[]'::jsonb
   ),
-  'subject-specific academic event participates in same-day exam parity'
+  'comma-separated subject event grades use the shared matcher'
 );
 
 with payload as (
@@ -661,8 +747,9 @@ select ok(
         || (current_date + 31)::text || ':day-before-other-subject'
       and conflict.value #> '{source,examEventIds}' = '[]'::jsonb
       and conflict.value #> '{source,examDetailIds}' = '[]'::jsonb
+      and conflict.value -> 'affectedStudentIds' ? '86200000-0000-4000-8000-000000000043'
   ),
-  'academic exam day supplies date-level fallback when no modern exam source exists'
+  'comma-separated fallback grades use the shared matcher'
 );
 
 with payload as (

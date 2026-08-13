@@ -287,6 +287,28 @@ as $function$
   where nullif(pg_catalog.btrim(element.value), '') is not null;
 $function$;
 
+create or replace function dashboard_private.dashboard_statistics_exam_grade_matches_student_v1(
+  p_grade text,
+  p_student_grade text
+)
+returns boolean
+language sql
+immutable
+security invoker
+set search_path = ''
+as $function$
+  select case
+    when nullif(pg_catalog.btrim(coalesce(p_student_grade, '')), '') is null then true
+    when nullif(pg_catalog.btrim(coalesce(p_grade, '')), '') is null then true
+    else exists (
+      select 1
+      from pg_catalog.regexp_split_to_table(p_grade, ',') grade_item
+      where pg_catalog.btrim(grade_item) in ('all', '전체')
+        or pg_catalog.btrim(grade_item) = pg_catalog.btrim(p_student_grade)
+    )
+  end;
+$function$;
+
 create or replace function dashboard_private.dashboard_statistics_inferred_grade_labels_v1(
   p_direct text,
   p_name text,
@@ -882,16 +904,19 @@ begin
         dashboard_private.dashboard_statistics_subject_key_v1(detail.subject) as subject_key,
         detail.academic_event_id,
         detail.id as exam_detail_id
-      from student_exam_context student
-      join public.academic_event_exam_details detail
-        on (
-          detail.grade is null
-          or detail.grade in ('all', '전체')
-          or detail.grade = student.student_grade
-        )
+      from public.academic_event_exam_details detail
       left join public.academic_events event on event.id = detail.academic_event_id
-      where coalesce(detail.school_id, event.school_id) = student.school_id
-        and detail.exam_date is not null
+      join student_exam_context student
+        on coalesce(detail.school_id, event.school_id) = student.school_id
+        and dashboard_private.dashboard_statistics_exam_grade_matches_student_v1(
+          coalesce(
+            nullif(pg_catalog.btrim(detail.grade), ''),
+            nullif(pg_catalog.btrim(event.grade), ''),
+            'all'
+          ),
+          student.student_grade
+        )
+      where detail.exam_date is not null
         and nullif(dashboard_private.dashboard_statistics_subject_key_v1(detail.subject), '') is not null
       union all
       select
@@ -905,10 +930,9 @@ begin
       from public.academic_events event
       join student_exam_context student
         on event.school_id = student.school_id
-        and (
-          event.grade is null
-          or event.grade in ('all', '전체')
-          or event.grade = student.student_grade
+        and dashboard_private.dashboard_statistics_exam_grade_matches_student_v1(
+          coalesce(nullif(pg_catalog.btrim(event.grade), ''), 'all'),
+          student.student_grade
         )
       where dashboard_private.dashboard_conflict_event_type_v1(pg_catalog.to_jsonb(event))
           in ('영어시험일', '수학시험일', '과학시험일')
@@ -924,10 +948,9 @@ begin
       from public.academic_exam_days exam_day
       join student_exam_context student
         on exam_day.school_id = student.school_id
-        and (
-          exam_day.grade is null
-          or exam_day.grade in ('all', '전체')
-          or exam_day.grade = student.student_grade
+        and dashboard_private.dashboard_statistics_exam_grade_matches_student_v1(
+          coalesce(nullif(pg_catalog.btrim(exam_day.grade), ''), 'all'),
+          student.student_grade
         )
       where exam_day.exam_date is not null
         and nullif(dashboard_private.dashboard_statistics_subject_key_v1(exam_day.subject), '') is not null

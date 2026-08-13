@@ -227,6 +227,49 @@ test("statistics source preserves exam-rule parity and merges students by stable
   assert.match(aggregate, /dashboard_statistics_unique_text_jsonb_v1/iu)
 })
 
+test("statistics exam sources share parent-aware comma-grade matching semantics", async () => {
+  const [migration, pgTap] = await Promise.all([
+    readFile(migrationPath, "utf8"),
+    readFile(pgTapPath, "utf8"),
+  ])
+  const sql = normalizeSql(migration)
+  const tap = normalizeSql(pgTap)
+  const helper = functionBlock(
+    sql,
+    "dashboard_private.dashboard_statistics_exam_grade_matches_student_v1",
+    "dashboard_private.dashboard_statistics_inferred_grade_labels_v1",
+  )
+  const aggregate = functionBlock(
+    sql,
+    "public.get_dashboard_statistics_sources_v1",
+    "public.list_dashboard_statistics_student_roster_v1",
+  )
+
+  assert.match(helper, /nullif\(pg_catalog\.btrim\(coalesce\(p_student_grade, ''\)\), ''\) is null then true/iu)
+  assert.match(helper, /pg_catalog\.regexp_split_to_table\(p_grade, ','\)/iu)
+  assert.match(helper, /pg_catalog\.btrim\(grade_item\) in \('all', '전체'\)/iu)
+  assert.match(helper, /pg_catalog\.btrim\(grade_item\) = pg_catalog\.btrim\(p_student_grade\)/iu)
+  assert.equal(
+    (aggregate.match(/dashboard_statistics_exam_grade_matches_student_v1/giu) || []).length,
+    3,
+  )
+  assert.match(
+    aggregate,
+    /coalesce\(\s*nullif\(pg_catalog\.btrim\(detail\.grade\), ''\),\s*nullif\(pg_catalog\.btrim\(event\.grade\), ''\),\s*'all'\s*\)/iu,
+  )
+
+  for (const contract of [
+    "null detail inherits its parent academic event grade",
+    "comma-separated detail grades match every listed grade",
+    "student without a grade matches an inherited parent grade",
+    "parent high-school grade excludes a different student grade",
+    "comma-separated subject event grades use the shared matcher",
+    "comma-separated fallback grades use the shared matcher",
+  ]) {
+    assert.match(tap, new RegExp(contract, "iu"))
+  }
+})
+
 test("statistics source normalizes legacy textbook statuses and expands multi-day schedules", async () => {
   const sql = normalizeSql(await readFile(migrationPath, "utf8"))
 

@@ -10,7 +10,7 @@
 ## Migration lifecycle
 
 - `draft`: `supabase/migrations/20260813194812_dashboard_statistics_sources.sql`, created only by Supabase CLI v2.103.0 with `migration new dashboard_statistics_sources`; manifest hash `null`.
-- `candidate`: SHA-256 `5b69ac8d86161ca82b84491dd4e3b851bcfc44cced7ea3fba06134cabffce482`, refreshed after review-fix round 2 and recorded after the migration, source contract test, and fixture-backed pgTAP source were written.
+- `candidate`: SHA-256 `7a881cccbd97cef0daf76cf81d45aa15e4676c1a572a927f339b8eb5f3bef3e0`, refreshed after review-fix round 3 and recorded after the migration, source contract test, and fixture-backed pgTAP source were written.
 - `final`: not promoted. The approved reviewed active baseline capture is absent, so migration replay and pgTAP did not run. Promoting without pgTAP GREEN would violate the shared manifest lifecycle.
 
 ## Files changed
@@ -108,6 +108,32 @@ Fresh source verification after round 2 passed 34/34:
 ```
 
 `"$TASK_NODE" --check tests/statistics-resource-pressure.test.mjs`, `git diff --check`, and candidate hash equality also passed. The authorized isolated DB command again stopped before allocation with `isolated_supabase_db_baseline_review_required`; therefore the new pgTAP assertions remain fixture-backed source coverage, not a claimed pgTAP runtime pass.
+
+## Review fix round 3
+
+### RED
+
+The focused source suite was run after adding the new grade-reference contract and pgTAP fixtures but before changing the migration. It reported 11 pass / 1 intended failure: `dashboard_private.dashboard_statistics_exam_grade_matches_student_v1` did not exist, proving that the prior per-source equality branches did not satisfy the canonical contract.
+
+### Changes
+
+- Added one immutable SECURITY INVOKER grade-reference helper. It treats a blank student grade as eligible, treats a blank/all/전체 source grade as universal, trims comma-separated grade items, and compares every source through the same predicate.
+- A null or blank `academic_event_exam_details.grade` now inherits its parent `academic_events.grade` before falling back to `all`. A parent `고3` event therefore includes `고3` and missing-grade students but excludes a `고2` student.
+- Subject-specific `academic_events` and legacy `academic_exam_days` now call the same helper as detail rows. The fixture exercises comma lists on all three source shapes while preserving date-level modern/fallback precedence.
+- Added fixture-backed pgTAP assertions for parent-grade inheritance, comma-list matching, missing-student-grade matching, different-grade exclusion, subject-event matching, and fallback matching.
+- Kept the migration lifecycle at `candidate` and refreshed the manifest hash to `7a881cccbd97cef0daf76cf81d45aa15e4676c1a572a927f339b8eb5f3bef3e0`.
+
+### GREEN and blocked DB lane
+
+Fresh source verification after round 3 passed 35/35:
+
+```bash
+"$TASK_NODE" --test --experimental-strip-types \
+  tests/statistics-resource-pressure.test.mjs \
+  tests/dashboard-metrics.test.mjs
+```
+
+`"$TASK_NODE" --check tests/statistics-resource-pressure.test.mjs`, `git diff --check`, and candidate hash equality also passed. The authorized isolated DB command stopped before database allocation with `isolated_supabase_db_baseline_review_required`; no migration replay or pgTAP runtime execution is claimed.
 
 ## DB runtime gate — blocked, not passed
 
