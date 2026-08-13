@@ -167,3 +167,32 @@ git diff --check
 ```
 
 All commands exited successfully. The 36 literal manifest records were also rechecked against their recorded baseline sources. No migration, production action, or `pnpm-workspace.yaml` change was made.
+
+## Fix round 8 — immutable builder branches and proof-only local values
+
+- Root `.limit`, `.order`, and `.range` controls now accept an options argument only when the AST proves it is root-scoped. Spread, shorthand, computed, nonliteral, mutable, and unresolvable option objects fail closed; immutable `const` object aliases are recursively inspected for `foreignTable` / `referencedTable` before being accepted.
+- Query aliases are immutable branch records. A first linear reassignment retains the root ordinal for the existing legacy fingerprint, while subsequent uses of the same builder form independent sibling requests. A bounded sibling can no longer lend controls to an unbounded returned branch.
+- Projection, limit, and RPC values resolve only from immutable `const` primitives without later writes. `let`, reassigned, and unknown values are unresolved. RPC envelopes containing a spread are also unresolved because a spread can override `p_limit`.
+- Task fan-out now rejects any nonliteral `.in("task_id", value)` list membership, independent of identifier name. Detail-key exemptions reject `void 0`, `undefined`, null, unknown expressions, and non-primitive identifiers; explicit primitives and known nonnull local/parameter identifiers remain valid.
+- RED-first fixtures cover relation option aliases/spreads/shorthands, shared builder branches, mutable constants, RPC spreads, arbitrary task-ID identifiers, and `void 0` detail keys. Final focused result: **51 pass, 0 fail**.
+
+## Fix round 8 verification
+
+```bash
+"$TASK_NODE" --test --experimental-strip-types \
+  tests/query-surface-budget.test.mjs \
+  tests/keyset-pagination.test.mjs
+
+"$TASK_NODE" node_modules/eslint/bin/eslint.js \
+  src/lib/query-surface-budget.js tests/query-surface-budget.test.mjs
+
+"$TASK_NODE" scripts/verify-query-surface-budget.mjs \
+  --surface all --base HEAD --head HEAD
+
+"$TASK_NODE" scripts/verify-query-surface-budget.mjs \
+  --surface all --base fad56ae59f6b5ec6999e3232bbe68e4c1d26b101 --worktree
+
+git diff --check
+```
+
+All commands exited successfully. No migration, production action, or `pnpm-workspace.yaml` change was made.

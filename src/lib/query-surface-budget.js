@@ -128,17 +128,50 @@ function accessParts(call) {
 
 function primitiveConstants(node) {
   const values = new Map()
+  const declarations = []
   const visit = (child) => {
     if (child !== node && ts.isFunctionLike(child)) return
-    if (ts.isVariableDeclaration(child) && ts.isIdentifier(child.name) && child.initializer) {
-      const value = unwrap(child.initializer)
-      if (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value)) values.set(child.name.text, value.text)
-      else if (ts.isNumericLiteral(value)) values.set(child.name.text, Number(value.text))
-    }
+    if (ts.isVariableDeclaration(child) && ts.isIdentifier(child.name) && child.initializer) declarations.push(child)
     ts.forEachChild(child, visit)
   }
   ts.forEachChild(node, visit)
+  for (const declaration of declarations) {
+    if (!isImmutableConst(declaration) || hasLaterWrite(node, declaration.name.text, declaration.end)) continue
+    const value = unwrap(declaration.initializer)
+    if (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value)) values.set(declaration.name.text, value.text)
+    else if (ts.isNumericLiteral(value)) values.set(declaration.name.text, Number(value.text))
+  }
   return values
+}
+
+function isImmutableConst(declaration) {
+  return ts.isVariableDeclarationList(declaration.parent) && (declaration.parent.flags & ts.NodeFlags.Const) !== 0
+}
+
+function hasLaterWrite(scope, name, after) {
+  let written = false
+  const visit = (node) => {
+    if (written || (node !== scope && ts.isFunctionLike(node))) return
+    if (node.pos >= after && ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      && ts.isIdentifier(unwrap(node.left)) && unwrap(node.left).text === name) written = true
+    if (node.pos >= after && (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node))
+      && ts.isIdentifier(unwrap(node.operand)) && unwrap(node.operand).text === name) written = true
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(scope, visit)
+  return written
+}
+
+function immutableConstInitializers(scope) {
+  const bindings = new Map()
+  const visit = (node) => {
+    if (node !== scope && ts.isFunctionLike(node)) return
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer
+      && isImmutableConst(node) && !hasLaterWrite(scope, node.name.text, node.end)) bindings.set(node.name.text, node.initializer)
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(scope, visit)
+  return bindings
 }
 
 function argumentValue(argument, constants) {
@@ -229,41 +262,63 @@ function isExactTimeoutAbortSignal(call) {
     && argumentValue(timeout.arguments[0], new Map()) === 8000
 }
 
-function hasExactDetailPredicate(operations, constants) {
+function hasExactDetailPredicate(operations, constants, scope) {
   return operations.some((operation) => callMethod(operation) === "eq" && operation.arguments.length === 2
-    && argumentValue(operation.arguments[0], constants) === "id" && isDefinedDetailValue(operation.arguments[1]))
+    && argumentValue(operation.arguments[0], constants) === "id" && isDefinedDetailValue(operation.arguments[1], constants, scope))
 }
 
-function isDefinedDetailValue(argument) {
+function isDefinedDetailValue(argument, constants, scope) {
   const value = unwrap(argument)
-  if (ts.isIdentifier(value) && value.text === "undefined") return false
-  return value.kind !== ts.SyntaxKind.NullKeyword
+  if (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value) || ts.isNumericLiteral(value)) return true
+  if (ts.isPrefixUnaryExpression(value) && value.operator === ts.SyntaxKind.MinusToken && ts.isNumericLiteral(value.operand)) return true
+  if (!ts.isIdentifier(value) || value.text === "undefined") return false
+  if (constants.has(value.text)) return true
+  return scope.parameters.some((parameter) => ts.isIdentifier(parameter.name) && parameter.name.text === value.text)
 }
 
 function optionName(property) {
   return ts.isIdentifier(property.name) || ts.isStringLiteral(property.name) ? property.name.text : null
 }
 
-function hasForeignTarget(operation, optionIndex = 1) {
-  const options = operation.arguments[optionIndex] && unwrap(operation.arguments[optionIndex])
-  return Boolean(options && ts.isObjectLiteralExpression(options) && options.properties.some((property) => ts.isPropertyAssignment(property)
-    && ["foreignTable", "referencedTable"].includes(optionName(property))))
+function optionTarget(operation, bindings, optionIndex = 1, seen = new Set()) {
+  const options = operation.arguments[optionIndex]
+  if (!options) return "root"
+  const value = unwrap(options)
+  if (ts.isIdentifier(value)) {
+    if (seen.has(value.text) || !bindings.has(value.text)) return "unproven"
+    seen.add(value.text)
+    return optionTarget({ arguments: [undefined, bindings.get(value.text)] }, bindings, 1, seen)
+  }
+  if (!ts.isObjectLiteralExpression(value)) return "unproven"
+  for (const property of value.properties) {
+    if (!ts.isPropertyAssignment(property) || property.name.kind === ts.SyntaxKind.ComputedPropertyName) return "unproven"
+    if (["foreignTable", "referencedTable"].includes(optionName(property))) return "relation"
+  }
+  return "root"
 }
 
-function rootOperations(operations, method, optionIndex = 1) {
-  return operations.filter((operation) => callMethod(operation) === method && !hasForeignTarget(operation, optionIndex))
+function rootOperations(operations, method, bindings, optionIndex = 1) {
+  return operations.filter((operation) => callMethod(operation) === method && optionTarget(operation, bindings, optionIndex) === "root")
 }
 
-function hasExplicitOrder(operations) {
-  return rootOperations(operations, "order").length > 0
+function hasExplicitOrder(operations, bindings) {
+  return rootOperations(operations, "order", bindings).length > 0
 }
 
-function hasIdTieBreak(operations, constants) {
-  return rootOperations(operations, "order").some((operation) => argumentValue(operation.arguments[0], constants) === "id")
+function hasIdTieBreak(operations, constants, bindings) {
+  return rootOperations(operations, "order", bindings).some((operation) => argumentValue(operation.arguments[0], constants) === "id")
 }
 
 function finalOperation(operations, method) {
   return [...operations].reverse().find((operation) => callMethod(operation) === method)
+}
+
+function isLiteralList(argument) {
+  const value = argument && unwrap(argument)
+  return Boolean(value && ts.isArrayLiteralExpression(value) && value.elements.every((element) => {
+    const item = unwrap(element)
+    return ts.isStringLiteral(item) || ts.isNoSubstitutionTemplateLiteral(item) || ts.isNumericLiteral(item)
+  }))
 }
 
 function queryLineSpan(scope, query) {
@@ -286,6 +341,7 @@ function scopeLineSpan(scope) {
 
 function analyzeChain({ surface, file, symbol, scope, query }) {
   const constants = primitiveConstants(scope)
+  const optionBindings = immutableConstInitializers(scope)
   const reasons = []
   if (query.receiverUnresolved) reasons.push("list_query_receiver_unresolved")
   else if (query.directMethod === null) reasons.push("list_query_method_unresolved")
@@ -303,14 +359,14 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
       else if (typeof value !== "string" || value.trim() === "") reasons.push("list_projection_invalid")
       else if (chainHasWildcardProjection(value)) reasons.push("list_select_star")
     }
-    const limits = rootOperations(query.operations, "limit")
+    const limits = rootOperations(query.operations, "limit", optionBindings)
     const singleResult = query.operations.some((operation) => ["maybeSingle", "single"].includes(callMethod(operation)))
-    const ranges = rootOperations(query.operations, "range", 2)
-    const exactDetail = singleResult && hasExactDetailPredicate(query.operations, constants)
+    const ranges = rootOperations(query.operations, "range", optionBindings, 2)
+    const exactDetail = singleResult && hasExactDetailPredicate(query.operations, constants, scope)
     if (singleResult && !exactDetail) reasons.push("list_detail_predicate_missing")
     if (limits.length === 0 && !exactDetail && ranges.length === 0) reasons.push("list_limit_missing")
-    if (!exactDetail && !hasExplicitOrder(query.operations)) reasons.push("list_order_missing")
-    else if (!exactDetail && !hasIdTieBreak(query.operations, constants)) reasons.push("list_order_tie_break_missing")
+    if (!exactDetail && !hasExplicitOrder(query.operations, optionBindings)) reasons.push("list_order_missing")
+    else if (!exactDetail && !hasIdTieBreak(query.operations, constants, optionBindings)) reasons.push("list_order_tie_break_missing")
     for (const limit of limits) {
       const value = limit.arguments[0] && argumentValue(limit.arguments[0], constants)
       if (value === undefined) reasons.push("list_limit_unresolved")
@@ -326,9 +382,11 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
   }
   if (query.directMethod === "rpc") {
     const argument = query.entry.arguments[1] ? unwrap(query.entry.arguments[1]) : null
+    const hasSpread = argument && ts.isObjectLiteralExpression(argument) && argument.properties.some((property) => ts.isSpreadAssignment(property))
     const limits = argument && ts.isObjectLiteralExpression(argument) ? argument.properties.filter((property) => ts.isPropertyAssignment(property)
       && ((ts.isIdentifier(property.name) && property.name.text === "p_limit") || (ts.isStringLiteral(property.name) && property.name.text === "p_limit"))) : []
-    if (limits.length === 0) reasons.push("rpc_page_limit_missing")
+    if (hasSpread) reasons.push("rpc_page_limit_unresolved")
+    else if (limits.length === 0) reasons.push("rpc_page_limit_missing")
     for (const limit of limits) {
       const value = argumentValue(limit.initializer, constants)
       if (value === undefined) reasons.push("rpc_page_limit_unresolved")
@@ -339,7 +397,8 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
   if (query.directMethod && !isExactTimeoutAbortSignal(finalOperation(query.operations, "abortSignal"))) reasons.push("list_abort_signal_missing")
   const retry = finalOperation(query.operations, "retry")
   if (query.directMethod && !(retry && retry.arguments.length === 1 && retry.arguments[0].kind === ts.SyntaxKind.FalseKeyword)) reasons.push("list_retry_false_missing")
-  if (surface === "tasks" && query.operations.some((operation) => callMethod(operation) === "in" && argumentValue(operation.arguments[0], constants) === "task_id" && ts.isIdentifier(unwrap(operation.arguments[1])) && unwrap(operation.arguments[1]).text === "taskIds")) reasons.push("task_id_batch_in_list")
+  if (surface === "tasks" && query.directMethod === "from" && query.operations.some((operation) => callMethod(operation) === "in"
+    && argumentValue(operation.arguments[0], constants) === "task_id" && !isLiteralList(operation.arguments[1]))) reasons.push("task_id_batch_in_list")
   const fingerprint = createQueryChainFingerprint({ symbol, ordinal: query.ordinal, operations: query.operations })
   const { startLine, endLine } = queryLineSpan(scope, query)
   return reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint, startLine, endLine, ...scopeLineSpan(scope) }))
@@ -371,13 +430,24 @@ function analyzeScope({ surface, file, scope, symbol }) {
       continue
     }
     const alias = rootIdentifier(access.receiver)
-    const record = alias && queryAliases.get(alias)
-    if (!record) continue
-    for (const operation of queryOperations(call)) if (!record.operations.includes(operation)) record.operations.push(operation)
+    const parent = alias && queryAliases.get(alias)
+    if (!parent) continue
+    const firstBranch = !parent.usedAsReceiver
+    parent.usedAsReceiver = true
+    const record = {
+      entry: parent.entry,
+      directMethod: parent.directMethod,
+      receiverUnresolved: parent.receiverUnresolved,
+      // Preserve the root record's historical fingerprint through one linear
+      // reassignment; subsequent uses are independent sibling branches.
+      ordinal: firstBranch ? parent.ordinal : records.length,
+      operations: [...parent.operations, ...queryOperations(call)],
+    }
+    records.push(record)
     const name = assignmentName(call)
     if (name) queryAliases.set(name, record)
   }
-  return records.flatMap((query) => analyzeChain({ surface, file, symbol, scope, query }))
+  return records.filter((query) => !query.usedAsReceiver).flatMap((query) => analyzeChain({ surface, file, symbol, scope, query }))
 }
 
 export function inspectQuerySurfaceSource({ surface, file, source }) {

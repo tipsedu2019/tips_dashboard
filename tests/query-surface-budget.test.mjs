@@ -396,7 +396,7 @@ test("statically resolved explicit list projection and page limit remain allowed
 
 test("exact-key single-row and ordered bounded range query chains are explicit list-limit exemptions", async () => {
   const result = await verifyFixture({
-    source: `async function readRows(client) {
+    source: `async function readRows(client, id) {
   await client.from("ops_tasks").select("id").eq("id", id).single().abortSignal(AbortSignal.timeout(8_000)).retry(false)
   return client.from("ops_tasks").select("id").range(0, 29).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
@@ -846,4 +846,82 @@ test("a stale manifest fingerprint cannot grandfather a reintroduced query debt"
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test("root controls fail closed for spread, shorthand, and aliased relation options", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client, foreignTable) {
+  const relation = { foreignTable: "children" }
+  return client.from("ops_tasks").select("id").limit(30, relation).order("id", { foreignTable }).abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+
+  assert.ok(result.violations.some((violation) => violation.reason === "list_limit_missing"))
+  assert.ok(result.violations.some((violation) => violation.reason === "list_order_missing"))
+
+  const spread = await verifyFixture({
+    source: `async function load(client, options) {
+  return client.from("ops_tasks").select("id").limit(30, { ...options }).order("id", { ...options }).abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+  assert.ok(spread.violations.some((violation) => violation.reason === "list_limit_missing"))
+  assert.ok(spread.violations.some((violation) => violation.reason === "list_order_missing"))
+})
+
+test("shared query builders create separate immutable request branches", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client) {
+  const builder = client.from("ops_tasks").select("id")
+  const safe = builder.limit(30).order("id").abortSignal(AbortSignal.timeout(8000)).retry(false)
+  return builder.abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+
+  assert.ok(result.violations.some((violation) => violation.reason === "list_limit_missing"))
+  assert.ok(result.violations.some((violation) => violation.reason === "list_order_missing"))
+})
+
+test("mutable constants and RPC argument spreads are unresolved", async () => {
+  const list = await verifyFixture({
+    source: `async function load(client) {
+  let projection = "id"
+  let pageSize = 30
+  projection = "*"
+  return client.from("ops_tasks").select(projection).limit(pageSize).order("id").abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+  assert.ok(list.violations.some((violation) => violation.reason === "list_projection_unresolved"))
+  assert.ok(list.violations.some((violation) => violation.reason === "list_limit_unresolved"))
+
+  const rpc = await verifyFixture({
+    source: `async function load(client, page) {
+  return client.rpc("list_ops_task_page_v1", { ...page, p_limit: 30 }).abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+  assert.ok(rpc.violations.some((violation) => violation.reason === "rpc_page_limit_unresolved"))
+})
+
+test("task fan-out rejects any nonliteral task_id membership list", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client, ids) {
+  return client.from("ops_task_comments").select("id").in("task_id", ids).limit(30).order("id").abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+  assert.ok(result.violations.some((violation) => violation.reason === "task_id_batch_in_list"))
+})
+
+test("detail requests reject void and statically invalid id values", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client) {
+  return client.from("ops_tasks").select("id").eq("id", void 0).single().abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+  assert.ok(result.violations.some((violation) => violation.reason === "list_detail_predicate_missing"))
 })
