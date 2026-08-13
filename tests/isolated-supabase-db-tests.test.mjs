@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -36,14 +36,20 @@ async function withPostgres17(t, run) {
   const psql = (sql) => invoke(["exec", "--interactive", name, "psql", "--quiet", "--tuples-only", "--no-align", "--set", "ON_ERROR_STOP=1", "--username", "supabase_admin", "--dbname", "postgres"], { input: sql });
   const setup = psql(`
     create schema if not exists supabase_migrations;
-    create table if not exists supabase_migrations.schema_migrations(version text, name text, statements_sha256 text);
+    create table if not exists supabase_migrations.schema_migrations(version text primary key, statements text[], name text);
+    create schema if not exists extensions;
+    create extension if not exists pgcrypto with schema extensions;
     create schema if not exists dashboard_private;
     create or replace function dashboard_private.continuous_class_schedule_hash_v1(value jsonb)
     returns text language sql immutable as $$ select repeat('0', 64) $$;
-    create or replace function public.get_dashboard_conflict_sources_v1(date, date)
+    create or replace function public.get_dashboard_conflict_sources_v1(p_date_from date, p_date_to date)
     returns void language plpgsql as $$ begin end $$;
     do $$ begin create role anon; exception when duplicate_object then null; end $$;
     create extension if not exists pgtap;
+    do $$ begin create role catalog_reader nologin; exception when duplicate_object then null; end $$;
+    grant usage on schema supabase_migrations to catalog_reader;
+    grant select on supabase_migrations.schema_migrations to catalog_reader;
+    revoke all on function dashboard_private.continuous_class_schedule_hash_v1(jsonb) from public, catalog_reader;
   `);
   assert.equal(setup.status, 0, setup.stderr);
   return run({ psql });
@@ -71,6 +77,19 @@ async function makeRepo(t) {
 
 async function writeCaptureScope(root) {
   await writeFile(join(root, "scripts/fixtures/dashboard-free-tier-baseline-scope.json"), JSON.stringify(captureScopeFixture()));
+}
+
+async function activateCanonicalBaseline(root, captureId = "f".repeat(16)) {
+  const base = join(root, "supabase/test-baselines");
+  const capture = join(base, "dashboard-free-tier-v1-captures", captureId);
+  await mkdir(capture, { recursive: true });
+  for (const [source, target] of [
+    [join(base, "dashboard-free-tier-v1.manifest.json"), join(capture, "manifest.json")],
+    [join(base, "dashboard-free-tier-v1.sql"), join(capture, "baseline.sql")],
+    [join(base, "dashboard-free-tier-origin-main-catalog.json"), join(capture, "catalog.json")],
+    [join(root, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"), join(capture, "parity.sql")],
+  ]) await writeFile(target, await readFile(source));
+  await writeFile(join(base, "dashboard-free-tier-v1.active.json"), JSON.stringify({ captureSetVersion: 1, captureId, artifactPaths: { catalog: "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", baseline: "supabase/test-baselines/dashboard-free-tier-v1.sql", parityTest: "supabase/tests/dashboard_free_tier_catalog_parity_test.sql" } }));
 }
 
 test("catalog capture refuses unapproved or incomplete production reads before HTTP", async () => {
@@ -165,6 +184,12 @@ test("isolated DB runner only plans without the explicit local authorization con
   );
 });
 
+test("isolated DB runner refuses canonical files when no active capture-set pointer exists", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const root = await makeRepo(t);
+  await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: [] }), /isolated_supabase_db_baseline_review_required/);
+});
+
 test("isolated DB runner refuses draft or hash-drift migrations before a local process", async () => {
   const { validateBaselineManifest } = await import(runnerUrl.href);
   assert.throws(
@@ -193,7 +218,7 @@ test("isolated DB runner binds the source-controlled baseline and catalog to man
   );
 });
 
-test("reviewed catalog capture atomically writes normalized catalog, baseline SQL, and parity checks", async (t) => {
+test("reviewed catalog capture activates an immutable set and publishes canonical copies", async (t) => {
   const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
   const root = await makeRepo(t);
   await writeCaptureScope(root);
@@ -210,7 +235,7 @@ test("reviewed catalog capture atomically writes normalized catalog, baseline SQ
     gitOriginMainSha: async () => originMainSha,
     fetch: async () => new Response(JSON.stringify({
       serverMajor: 17,
-      migrationLedger: [{ version: "20260813093446", name: "registration_observation_legacy_schedule_slot_catalogs", statements_sha256: "a".repeat(64) }],
+      migrationLedger: [{ version: "20260813093446", statements: ["select 1;"], name: "registration_observation_legacy_schedule_slot_catalogs" }],
       catalog: completeCatalogFixture(),
     }), { status: 201 }),
   });
@@ -225,13 +250,16 @@ test("reviewed catalog capture atomically writes normalized catalog, baseline SQ
   assert.equal(result.captureStatus, "reviewed");
   assert.equal(catalog.catalog[0].definition, undefined);
   assert.equal(catalog.catalog.find((entry) => entry.objectKind === "table" && entry.identity === "classes").definitionSha256, createHash("sha256").update("create table public.classes (id text primary key)").digest("hex"));
+  assert.equal(catalog.migrationLedgerSha256, createHash("sha256").update(JSON.stringify([{ name: "registration_observation_legacy_schedule_slot_catalogs", statementsSha256: createHash("sha256").update('["select 1;"]').digest("hex"), version: "20260813093446" }])).digest("hex"));
+  assert.equal(JSON.stringify(catalog).includes("select 1;"), false);
   assert.match(baseline, /create table public\.classes/u);
   assert.match(parity, /pg_get_functiondef/u);
-  assert.match(parity, /catalog trigger public\.classes\.before\.01\.normalize fingerprint/u);
+  assert.match(parity, /catalog trigger public\.classes\.before\.insert\.01\.normalize fingerprint/u);
   assert.equal(canonicalCatalog, JSON.stringify(catalog, null, 2) + "\n");
   assert.equal(canonicalBaseline, baseline);
   assert.equal(canonicalParity, parity);
   assert.deepEqual(pointer.artifactPaths, { catalog: output[0], baseline: output[1], parityTest: output[2] });
+  assert.equal(pointer.captureSetVersion, 1);
 });
 
 test("capture leaves all target artifacts unchanged for redirect, 405, and malformed JSON", async (t) => {
@@ -267,6 +295,7 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
     baselineSha256: sha256(baseline), catalogSha256: sha256(reviewedCatalog), requiredObjectSignatures: [],
     orderedNewMigrations: [{ fileName: "20260814000000_candidate.sql", status: "candidate", sha256: sha256("select 1;\n") }],
   }));
+  await activateCanonicalBaseline(root);
   const calls = [];
   const result = await runIsolatedSupabaseDbTests({
     root,
@@ -303,6 +332,7 @@ test("runner stages each requested SQL file after init and before target pgtap",
   await mkdir(join(root, "supabase/tests"), { recursive: true });
   await writeFile(join(root, "supabase/tests/target_test.sql"), "select 1;\n");
   await writeFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.manifest.json"), JSON.stringify({ baselineVersion: "dashboard-free-tier-v1", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101", baselineSha256: sha256(baseline), catalogSha256: sha256(catalog), requiredObjectSignatures: [], orderedNewMigrations: [] }));
+  await activateCanonicalBaseline(root);
   let sawTarget = false;
   await runIsolatedSupabaseDbTests({
     root,
@@ -327,7 +357,7 @@ test("incomplete required catalog kinds and a post-rename publication failure le
   const originMainSha = "a".repeat(40);
   const argv = ["--mode", "execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"];
   const env = { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha };
-  const payload = { serverMajor: 17, migrationLedger: [{ version: "20260813093446", name: "registration_observation_legacy_schedule_slot_catalogs", statements_sha256: "a".repeat(64) }], catalog: [{ objectKind: "table", schema: "public", identity: "classes", definition: "create table public.classes (id text primary key)" }] };
+  const payload = { serverMajor: 17, migrationLedger: [{ version: "20260813093446", statements: ["select 1;"], name: "registration_observation_legacy_schedule_slot_catalogs" }], catalog: [{ objectKind: "table", schema: "public", identity: "classes", definition: "create table public.classes (id text primary key)" }] };
   await assert.rejects(captureDashboardFreeTierCatalog({ root, argv, env, gitOriginMainSha: async () => originMainSha, fetch: async () => new Response(JSON.stringify(payload), { status: 201 }) }), /dashboard_free_tier_catalog_incomplete/);
   const pointer = join(root, "supabase/test-baselines/dashboard-free-tier-v1.active.json");
   await writeFile(pointer, JSON.stringify({ captureId: "prior" }));
@@ -353,11 +383,33 @@ test("canonical artifact publication rolls back earlier files when a later renam
     argv: ["--mode", "execute", "--authorized", "--request-id", "5f77e691-9f40-49aa-9bc4-0be2321e2c8f", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
     env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
     gitOriginMainSha: async () => originMainSha,
-    fetch: async () => new Response(JSON.stringify({ serverMajor: 17, migrationLedger: [{ version: "20260813093446", name: "registration_observation_legacy_schedule_slot_catalogs", statements_sha256: "a".repeat(64) }], catalog: completeCatalogFixture() }), { status: 201 }),
+    fetch: async () => new Response(JSON.stringify({ serverMajor: 17, migrationLedger: [{ version: "20260813093446", statements: ["select 1;"], name: "registration_observation_legacy_schedule_slot_catalogs" }], catalog: completeCatalogFixture() }), { status: 201 }),
   }));
   assert.equal(await readFile(catalogPath, "utf8"), priorCatalog);
   assert.equal(await readFile(join(baselinePath, "sentinel"), "utf8"), "keep\n");
   assert.deepEqual(JSON.parse(await readFile(pointerPath, "utf8")), { captureId: "prior" });
+});
+
+test("canonical publication reports rollback failure and never advances the active capture", async (t) => {
+  const { publishDashboardFreeTierCapture } = await import(captureUrl.href);
+  const root = await mkdtemp(join(tmpdir(), "tips-dashboard-publish-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const stage = join(root, "stage"); const final = join(root, "captures", "a".repeat(16));
+  const active = join(root, "active.json");
+  const artifactTargets = { catalog: join(root, "catalog.json"), baseline: join(root, "baseline.sql"), parityTest: join(root, "parity.sql") };
+  await mkdir(stage, { recursive: true });
+  await writeFile(active, JSON.stringify({ captureSetVersion: 1, captureId: "b".repeat(16), artifactPaths: {} }));
+  for (const target of Object.values(artifactTargets)) await writeFile(target, "prior\n");
+  const injectedRename = async (source, target) => {
+    if (source.includes(".tmp-") && target === artifactTargets.baseline) throw new Error("replacement_failed");
+    if (source.includes(".restore-") && target === artifactTargets.catalog) throw new Error("rollback_failed");
+    await rename(source, target);
+  };
+  await assert.rejects(
+    publishDashboardFreeTierCapture({ stage, final, active, captureId: "a".repeat(16), artifactPaths: {}, artifactTargets, artifacts: { catalog: "new catalog\n", baseline: "new baseline\n", parity: "new parity\n" }, renameFile: injectedRename }),
+    (error) => error instanceof AggregateError && error.message === "dashboard_free_tier_catalog_publication_and_rollback_failed" && error.errors.some((entry) => entry.message === "rollback_failed"),
+  );
+  assert.equal(JSON.parse(await readFile(active, "utf8")).captureId, "b".repeat(16));
 });
 
 test("fixed read-only capture statement enumerates every scoped catalog kind without raw definition output", async () => {
@@ -367,31 +419,68 @@ test("fixed read-only capture statement enumerates every scoped catalog kind wit
     assert.match(statement, new RegExp(catalog));
   }
   for (const kind of ["role", "schema", "type", "sequence", "table", "default", "constraint", "index", "function", "rls", "policy", "grant", "trigger"]) assert.match(statement, new RegExp(`'${kind}'`));
-  assert.match(statement, /definitionSha256/u);
+  assert.match(statement, /'fingerprint',\s*scoped_catalog\.fingerprint::text/u);
   assert.match(statement, /allowed_relations/u);
   assert.doesNotMatch(statement, /'definition',\s*scoped_catalog/u);
   assert.match(statement, /begin read only/u);
+  assert.match(statement, /migration_row\.statements/u);
+  assert.doesNotMatch(statement, /statements_sha256/u);
+  assert.doesNotMatch(statement, /dashboard_private\.continuous_class_schedule_hash_v1/u);
 });
 
-test("PostgreSQL 17 executes the fixed capture statement and returns one JSON object", async (t) => {
-  const { dashboardFreeTierCatalogStatement } = await import(captureUrl.href);
+test("PostgreSQL trigger capture and parity follow name order across the full BEFORE UPDATE group", async (t) => {
+  const { buildDashboardFreeTierParitySql, dashboardFreeTierCatalogStatement } = await import(captureUrl.href);
   await withPostgres17(t, ({ psql }) => {
+    const setup = psql(`
+      create table public.classes(id bigint);
+      create function public.trigger_fixture() returns trigger language plpgsql as $$ begin return new; end $$;
+      create trigger z_last before update on public.classes for each row execute function public.trigger_fixture();
+      create trigger a_first before update on public.classes for each row execute function public.trigger_fixture();
+    `);
+    assert.equal(setup.status, 0, setup.stderr);
     const result = psql(dashboardFreeTierCatalogStatement());
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim());
+    const triggers = payload.catalog.filter((entry) => entry.objectKind === "trigger");
+    assert.deepEqual(triggers.map((entry) => entry.identity), [
+      "classes.before.update.01.a_first",
+      "classes.before.update.02.z_last",
+    ]);
+    assert.deepEqual(triggers.map((entry) => JSON.parse(entry.fingerprint).order), [1, 2]);
+    const parityCatalog = triggers.map((entry) => ({ ...entry, definitionSha256: createHash("sha256").update(entry.fingerprint).digest("hex") }));
+    const parity = psql(`set search_path to public, extensions, pg_catalog;\n${buildDashboardFreeTierParitySql(parityCatalog)}`);
+    assert.equal(parity.status, 0, parity.stderr);
+    assert.equal((parity.stdout.match(/^ok /gmu) || []).length, 2, parity.stdout);
+  });
+});
+
+test("PostgreSQL 17 restricted catalog reader executes the fixed statement against the real migration shape", async (t) => {
+  const { dashboardFreeTierCatalogStatement, normalizeDashboardFunctionIdentity } = await import(captureUrl.href);
+  await withPostgres17(t, ({ psql }) => {
+    const seeded = psql("insert into supabase_migrations.schema_migrations(version, statements, name) values ('20260813093446', array['select 1;', 'select 2;'], 'fixture');");
+    assert.equal(seeded.status, 0, seeded.stderr);
+    const result = psql(`set role catalog_reader;\n${dashboardFreeTierCatalogStatement()}`);
     assert.equal(result.status, 0, result.stderr);
     const rows = result.stdout.trim().split("\n").filter(Boolean);
     assert.equal(rows.length, 1);
     const payload = JSON.parse(rows[0]);
     assert.equal(payload.serverMajor, 17);
-    assert.deepEqual(payload.migrationLedger, []);
+    assert.deepEqual(payload.migrationLedger, [{ version: "20260813093446", statements: ["select 1;", "select 2;"], name: "fixture" }]);
     assert.ok(Array.isArray(payload.catalog));
     assert.ok(payload.catalog.some((entry) => entry.objectKind === "function" && entry.identity === "get_dashboard_conflict_sources_v1(date,date)"));
+    const identity = psql("select proname || '(' || pg_catalog.pg_get_function_identity_arguments(oid) || ')' from pg_catalog.pg_proc where oid = 'public.get_dashboard_conflict_sources_v1(date,date)'::regprocedure;");
+    assert.equal(identity.status, 0, identity.stderr);
+    assert.equal(identity.stdout.trim(), "get_dashboard_conflict_sources_v1(p_date_from date, p_date_to date)");
+    assert.equal(normalizeDashboardFunctionIdentity(identity.stdout.trim()), "get_dashboard_conflict_sources_v1(date,date)");
   });
 });
 
-test("function identities accept spaced or unspaced separators but reject different types", async () => {
+test("function identities canonicalize named and unnamed arguments but reject different types", async () => {
   const { normalizeDashboardFreeTierCatalog, normalizeDashboardFunctionIdentity } = await import(captureUrl.href);
   assert.equal(normalizeDashboardFunctionIdentity("get_dashboard_conflict_sources_v1(date, date)"), "get_dashboard_conflict_sources_v1(date,date)");
   assert.equal(normalizeDashboardFunctionIdentity("get_dashboard_conflict_sources_v1(date,date)"), "get_dashboard_conflict_sources_v1(date,date)");
+  assert.equal(normalizeDashboardFunctionIdentity("get_dashboard_conflict_sources_v1(p_date_from date, p_date_to date)"), "get_dashboard_conflict_sources_v1(date,date)");
+  assert.equal(normalizeDashboardFunctionIdentity("example(IN p_value double precision, VARIADIC p_tags text[] )"), "example(double precision,text[])");
   const scope = captureScopeFixture(["public.get_dashboard_conflict_sources_v1(date,date)"]);
   const spaced = completeCatalogFixture("get_dashboard_conflict_sources_v1(date, date)");
   const normalized = normalizeDashboardFreeTierCatalog(spaced, scope);
@@ -426,14 +515,15 @@ test("generated parity uses pg catalog definitions and detects representative ob
     root,
     argv: ["--mode", "execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
     env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha }, gitOriginMainSha: async () => originMainSha,
-    fetch: async () => new Response(JSON.stringify({ serverMajor: 17, migrationLedger: [{ version: "20260813093446", name: "registration_observation_legacy_schedule_slot_catalogs", statements_sha256: "a".repeat(64) }], catalog: completeCatalogFixture() }), { status: 201 }),
+    fetch: async () => new Response(JSON.stringify({ serverMajor: 17, migrationLedger: [{ version: "20260813093446", statements: ["select 1;"], name: "registration_observation_legacy_schedule_slot_catalogs" }], catalog: completeCatalogFixture() }), { status: 201 }),
   });
   const pointer = JSON.parse(await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.active.json"), "utf8"));
   const parity = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1-captures", pointer.captureId, "parity.sql"), "utf8");
   for (const expression of ["pg_get_functiondef", "pg_get_constraintdef", "pg_get_indexdef", "pg_get_triggerdef", "pg_policy", "pg_roles", "aclexplode"]) assert.match(parity, new RegExp(expression));
   assert.doesNotMatch(parity, /is\(encode\(digest\(\$\$[a-f0-9]{64}:/u);
   await withPostgres17(t, ({ psql }) => {
-    const catalog = [{ objectKind: "role", schema: "", identity: "anon", definitionSha256: "0".repeat(64) }];
+    const roleFingerprint = '{"login": false, "inherit": true, "superuser": false}';
+    const catalog = [{ objectKind: "role", schema: "", identity: "anon", definitionSha256: createHash("sha256").update(roleFingerprint).digest("hex") }];
     const matching = psql(`set search_path to public, extensions, pg_catalog;\n${buildDashboardFreeTierParitySql(catalog)}`);
     assert.equal(matching.status, 0, matching.stdout + matching.stderr);
     assert.match(matching.stdout, /ok 1 - catalog role \.anon fingerprint/u);
@@ -457,6 +547,6 @@ function completeCatalogFixture(functionIdentity = "get_dashboard_summary_source
     { objectKind: "rls", schema: "public", identity: "classes", definition: "alter table public.classes enable row level security" },
     { objectKind: "policy", schema: "public", identity: "classes.authenticated_select", definition: "create policy authenticated_select on public.classes for select to authenticated using (true)" },
     { objectKind: "grant", schema: "public", identity: "classes.authenticated", definition: "grant select on public.classes to authenticated" },
-    { objectKind: "trigger", schema: "public", identity: "classes.before.01.normalize", definition: "create trigger normalize before insert on public.classes execute function public.normalize()" },
+    { objectKind: "trigger", schema: "public", identity: "classes.before.insert.01.normalize", definition: "create trigger normalize before insert on public.classes execute function public.normalize()" },
   ];
 }

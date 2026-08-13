@@ -66,16 +66,23 @@ export async function validateBaselineArtifactHashes({ root = ROOT, manifest }) 
 
 async function loadBaselineState(root) {
   const base = join(root, "supabase/test-baselines");
-  const fallback = { manifestPath: join(base, "dashboard-free-tier-v1.manifest.json"), baselinePath: join(base, "dashboard-free-tier-v1.sql"), catalogPath: join(base, "dashboard-free-tier-origin-main-catalog.json"), parityPath: join(root, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql") };
+  const expectedArtifactPaths = { catalog: "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", baseline: "supabase/test-baselines/dashboard-free-tier-v1.sql", parityTest: "supabase/tests/dashboard_free_tier_catalog_parity_test.sql" };
   try {
     const pointer = JSON.parse(await readFile(join(base, "dashboard-free-tier-v1.active.json"), "utf8"));
-    if (!/^[a-f0-9]{16}$/u.test(pointer?.captureId || "")) fail("isolated_supabase_db_baseline_review_required");
+    if (!exactActivePointer(pointer, expectedArtifactPaths)) fail("isolated_supabase_db_baseline_review_required");
     const capture = join(base, "dashboard-free-tier-v1-captures", pointer.captureId);
     return { manifestPath: join(capture, "manifest.json"), baselinePath: join(capture, "baseline.sql"), catalogPath: join(capture, "catalog.json"), parityPath: join(capture, "parity.sql") };
   } catch (error) {
-    if (error?.code === "ENOENT") return fallback;
+    if (error?.code === "ENOENT" || error instanceof SyntaxError) fail("isolated_supabase_db_baseline_review_required");
     throw error;
   }
+}
+
+function exactActivePointer(pointer, expectedArtifactPaths) {
+  return pointer && typeof pointer === "object" && !Array.isArray(pointer)
+    && Object.keys(pointer).sort().join("|") === "artifactPaths|captureId|captureSetVersion"
+    && pointer.captureSetVersion === 1 && /^[a-f0-9]{16}$/u.test(pointer.captureId || "")
+    && JSON.stringify(pointer.artifactPaths) === JSON.stringify(expectedArtifactPaths);
 }
 
 async function validateArtifactPaths({ paths, manifest }) {
