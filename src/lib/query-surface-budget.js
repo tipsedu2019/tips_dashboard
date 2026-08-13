@@ -27,6 +27,10 @@ export const QUERY_SURFACE_DEBT_MANIFEST = Object.freeze([
   { surface: "public", file: "src/server/public-classes-payload.js", symbol: "buildPublicClassesPayload", violation: "list_retry_false_missing", baselineSha: BASELINE_SHA },
 ])
 
+const MANIFEST_LIST_SYMBOLS = new Set(
+  QUERY_SURFACE_DEBT_MANIFEST.map(({ file, symbol }) => `${file}\u0000${symbol}`),
+)
+
 const SURFACE_PREFIXES = Object.freeze({
   tasks: ["src/features/tasks/"],
   management: ["src/features/management/"],
@@ -71,24 +75,50 @@ function functionBlocks(source) {
   }))
 }
 
-function isListFunction(symbol, source) {
-  if (/^(?:list|load|read|fetch)/u.test(symbol)) return true
-  if (symbol === "buildPublicClassesPayload" || symbol === "useManagementRecords") return true
-  return /\.(?:from|rpc)\(/u.test(source) && /\b(?:list|page|rows|workspace|classes|students|textbooks|curriculum)\b/iu.test(symbol)
+function primitiveConstants(source) {
+  const values = new Map()
+  const matcher = /\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:(["'])([^"'\n]*)\2|(-?\d+(?:\.\d+)?))\s*(?:;|\n)/gu
+  for (const match of source.matchAll(matcher)) {
+    values.set(match[1], match[3] ?? Number(match[4]))
+  }
+  return values
+}
+
+function argumentValue(argument, constants) {
+  const trimmed = argument.trim()
+  const quoted = trimmed.match(/^(["'])(.*)\1$/u)
+  if (quoted) return quoted[2]
+  if (/^-?\d+(?:\.\d+)?$/u.test(trimmed)) return Number(trimmed)
+  return constants.get(trimmed)
+}
+
+function isBudgetedList({ file, symbol, source }) {
+  if (MANIFEST_LIST_SYMBOLS.has(`${file}\u0000${symbol}`)) return true
+  return /\.limit\s*\(/u.test(source)
+    || /\bp_limit\s*:/u.test(source)
+    || /\.in\(\s*["']task_id["']\s*,\s*taskIds\s*\)/u.test(source)
 }
 
 function analyzeBlock({ surface, file, symbol, source }) {
-  if (!isListFunction(symbol, source)) return []
   const hasRequest = /\.(?:from|rpc)\(/u.test(source)
-  if (!hasRequest) return []
+  if (!hasRequest || !isBudgetedList({ file, symbol, source })) return []
+  const constants = primitiveConstants(source)
   const reasons = []
-  if (/\.select\(\s*["']\*["']\s*\)/u.test(source)) reasons.push("list_select_star")
-  if (/\.limit\(\s*(?:3[1-9]|[4-9]\d|\d{3,})\s*\)/u.test(source)) reasons.push("list_limit_exceeds_30")
-  if (/\.rpc\([^]*?\bp_limit\s*:\s*(?:3[1-9]|[4-9]\d|\d{3,})\b/u.test(source)) reasons.push("rpc_page_limit_exceeds_30")
+  for (const match of source.matchAll(/\.select\(\s*([^)]*?)\s*\)/gu)) {
+    if (argumentValue(match[1], constants) === "*") reasons.push("list_select_star")
+  }
+  for (const match of source.matchAll(/\.limit\(\s*([^)]*?)\s*\)/gu)) {
+    const value = argumentValue(match[1], constants)
+    if (typeof value === "number" && value > 30) reasons.push("list_limit_exceeds_30")
+  }
+  for (const match of source.matchAll(/\bp_limit\s*:\s*([^,}\n]+)/gu)) {
+    const value = argumentValue(match[1], constants)
+    if (typeof value === "number" && value > 30) reasons.push("rpc_page_limit_exceeds_30")
+  }
   if (!/\.abortSignal\(\s*AbortSignal\.timeout\(\s*8_000\s*\)\s*\)/u.test(source)) reasons.push("list_abort_signal_missing")
   if (!/\.retry\(\s*false\s*\)/u.test(source)) reasons.push("list_retry_false_missing")
   if (surface === "tasks" && /\.in\(\s*["']task_id["']\s*,\s*taskIds\s*\)/u.test(source)) reasons.push("task_id_batch_in_list")
-  return reasons.map((reason) => ({ file, symbol, surface, reason }))
+  return [...new Set(reasons)].map((reason) => ({ file, symbol, surface, reason }))
 }
 
 function exactDebtKey({ surface, file, symbol, reason }) {

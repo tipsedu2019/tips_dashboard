@@ -25,6 +25,10 @@ function assertUuid(value: unknown, code: string): asserts value is string {
   if (typeof value !== "string" || !UUID.test(value)) throw cursorError(code)
 }
 
+function assertScope(value: unknown): asserts value is string {
+  if (typeof value !== "string" || !/^[0-9a-f]{64}$/iu.test(value)) throw cursorError("cursor_scope_invalid")
+}
+
 function decodeEnvelope(cursor: unknown): Record<string, unknown> {
   if (typeof cursor !== "string" || cursor.length === 0) throw cursorError("cursor_malformed")
   if (cursor.length > MAX_CURSOR_LENGTH) throw cursorError("cursor_too_long")
@@ -73,7 +77,7 @@ export function createCursorScope({ surface, role, filters, sort }: {
 export function encodeKeysetCursor({ sortValues, id, scope }: { sortValues: SortValue[]; id: string; scope: string }): string {
   assertUuid(id, "cursor_id_invalid")
   if (!Array.isArray(sortValues) || !sortValues.every((value) => value === null || typeof value === "string" || (typeof value === "number" && Number.isFinite(value)))) throw cursorError("cursor_sort_type_invalid")
-  if (typeof scope !== "string" || !/^[0-9a-f]{64}$/iu.test(scope)) throw cursorError("cursor_scope_invalid")
+  assertScope(scope)
   const cursor = Buffer.from(JSON.stringify({ v: 1, s: sortValues, id, scope })).toString("base64url")
   if (cursor.length > MAX_CURSOR_LENGTH) throw cursorError("cursor_too_long")
   return cursor
@@ -82,6 +86,8 @@ export function encodeKeysetCursor({ sortValues, id, scope }: { sortValues: Sort
 export function decodeKeysetCursor(cursor: unknown, { scope, sortTypes }: { scope: string; sortTypes: readonly SortType[] }): { sortValues: SortValue[]; id: string } {
   const envelope = decodeEnvelope(cursor)
   if (envelope.v !== 1) throw cursorError("cursor_version_unknown")
+  assertScope(envelope.scope)
+  assertScope(scope)
   if (envelope.scope !== scope) throw cursorError("cursor_scope_mismatch")
   assertUuid(envelope.id, "cursor_id_invalid")
   assertSortValues(envelope.s, sortTypes)

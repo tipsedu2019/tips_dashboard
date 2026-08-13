@@ -38,3 +38,10 @@ All commands exited successfully. Worktree mode combines committed, index, unsta
 ## Handoff
 
 Task 2–6 should remove only their completed surface's manifest rows in the same commit as the corresponding replacement query path. This guard does not apply any database migration or alter current runtime queries itself.
+
+## Fix round 1 — review follow-up
+
+- The verifier now treats every manifest-listed `file + symbol` as an explicit list rule, rather than inferring list status from the symbol name. This covers the legacy `management-service.js:selectRows` row.
+- New list-path detection is independent of names: a query with a page limit, RPC `p_limit`, or task-ID batch list read is inspected. Simple local string/numeric constants are resolved before checking `.select(...)`, `.limit(...)`, and `p_limit`, so `columns = "*"` and `pageSize = 31` cannot bypass the guard.
+- `decodeKeysetCursor` now validates both the envelope scope and the expected scope as exact 64-character SHA-256 hex strings before scope comparison.
+- RED-first follow-up fixtures were added for all three regressions; the focused suite now reports **15 pass, 0 fail**.

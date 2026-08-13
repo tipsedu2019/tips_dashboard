@@ -47,6 +47,11 @@ test("public keyset cursor rejects malformed, non-base64url, unknown-version, an
     () => decodeKeysetCursor(mismatched, { scope, sortTypes: [] }),
     { code: "cursor_scope_mismatch" },
   )
+  const malformedScope = Buffer.from(JSON.stringify({ v: 1, s: [], id: ID, scope: "not-a-sha256" })).toString("base64url")
+  assert.throws(
+    () => decodeKeysetCursor(malformedScope, { scope: "not-a-sha256", sortTypes: [] }),
+    { code: "cursor_scope_invalid" },
+  )
 })
 
 test("public keyset cursor has a 1024-character transport ceiling and validates sort tuple arity and types", () => {

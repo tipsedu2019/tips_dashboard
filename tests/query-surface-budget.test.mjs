@@ -31,11 +31,11 @@ function commitFixture(root) {
   return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim()
 }
 
-async function verifyFixture({ surface = "tasks", source }) {
-  const root = await createFixtureRepository({ "src/features/tasks/list-tasks.ts": "export const untouched = true\n" })
+async function verifyFixture({ surface = "tasks", file = "src/features/tasks/list-tasks.ts", source }) {
+  const root = await createFixtureRepository({ [file]: "export const untouched = true\n" })
   try {
     const baseSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim()
-    await writeFile(join(root, "src/features/tasks/list-tasks.ts"), source)
+    await writeFile(join(root, file), source)
     const headSha = commitFixture(root)
     return await verifyQuerySurfaceBudget({ surface, baseSha, headSha, root })
   } finally {
@@ -74,6 +74,64 @@ test("query budget verifier rejects an over-budget list limit", async () => {
     surface: "tasks",
     reason: "list_limit_exceeds_30",
   }])
+})
+
+test("query budget verifier inspects manifest-listed symbols even when their names do not look like list paths", async () => {
+  const result = await verifyFixture({
+    surface: "management",
+    file: "src/features/management/management-service.js",
+    source: `async function selectRows(client, table) {
+  return client.from(table).select("*")
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [
+    {
+      file: "src/features/management/management-service.js",
+      symbol: "selectRows",
+      surface: "management",
+      reason: "list_abort_signal_missing",
+    },
+    {
+      file: "src/features/management/management-service.js",
+      symbol: "selectRows",
+      surface: "management",
+      reason: "list_retry_false_missing",
+    },
+    {
+      file: "src/features/management/management-service.js",
+      symbol: "selectRows",
+      surface: "management",
+      reason: "list_select_star",
+    },
+  ])
+})
+
+test("query budget verifier resolves local projection and limit constants without relying on a list-like symbol name", async () => {
+  const result = await verifyFixture({
+    source: `export async function opaque(client) {
+  const columns = "*"
+  const pageSize = 31
+  return client.from("ops_tasks").select(columns).limit(pageSize).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [
+    {
+      file: "src/features/tasks/list-tasks.ts",
+      symbol: "opaque",
+      surface: "tasks",
+      reason: "list_limit_exceeds_30",
+    },
+    {
+      file: "src/features/tasks/list-tasks.ts",
+      symbol: "opaque",
+      surface: "tasks",
+      reason: "list_select_star",
+    },
+  ])
 })
 
 test("query budget verifier rejects an RPC page limit over 30", async () => {
