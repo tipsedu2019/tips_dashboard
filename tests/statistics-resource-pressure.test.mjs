@@ -186,3 +186,76 @@ test("statistics RPC ACL, RLS fixtures, parity oracle, and payload budget are ex
   }
   assert.match(tap, /204800/iu)
 })
+
+test("statistics pgTAP uses executable fixtures and cursor, RLS, parity, and payload assertions", async () => {
+  const tap = normalizeSql(await readFile(pgTapPath, "utf8"))
+
+  assert.match(tap, /insert into public\.students/iu)
+  assert.match(tap, /generate_series\(1,\s*31\)/iu)
+  assert.match(tap, /create policy dashboard_statistics_fixture_/iu)
+  assert.match(tap, /set local role authenticated/iu)
+  assert.match(tap, /jsonb_array_length\([^;]*->\s*'rows'[^;]*\),\s*30,\s*'31 rows read and 30 returned'/iu)
+  assert.match(tap, /->>\s*'hasMore'[^;]*true/iu)
+  assert.match(tap, /nextCursor/iu)
+  assert.match(tap, /pg_get_functiondef/iu)
+  assert.match(tap, /same-day-subject/iu)
+  assert.match(tap, /day-before-other-subject/iu)
+  assert.match(tap, /affectedStudentIds/iu)
+  assert.match(tap, /octet_length\([^;]*::text[^;]*204800/iu)
+  assert.doesNotMatch(tap, /ok\(\s*true\s*,\s*'(?:RLS-hidden statistics rows|31 rows read and 30 returned|400-day academy-wide conflict parity)'/iu)
+})
+
+test("statistics source preserves exam-rule parity and merges students by stable conflict key", async () => {
+  const sql = normalizeSql(await readFile(migrationPath, "utf8"))
+  const aggregate = functionBlock(
+    sql,
+    "public.get_dashboard_statistics_sources_v1",
+    "public.list_dashboard_statistics_student_roster_v1",
+  )
+
+  assert.match(aggregate, /'same-day-subject'/iu)
+  assert.match(aggregate, /'day-before-other-subject'/iu)
+  assert.match(aggregate, /session\.session_date\s*=\s*detail\.exam_date\s*-\s*1/iu)
+  assert.match(aggregate, /not exists \( select 1 from public\.academic_event_exam_details same_subject_detail/iu)
+  assert.match(aggregate, /group by[^;]*conflict_key/iu)
+  assert.match(aggregate, /dashboard_statistics_unique_text_jsonb_v1/iu)
+})
+
+test("statistics source normalizes legacy textbook statuses and expands multi-day schedules", async () => {
+  const sql = normalizeSql(await readFile(migrationPath, "utf8"))
+
+  assert.match(sql, /dashboard_statistics_textbook_active_v1/iu)
+  assert.match(sql, /when '사용중' then true/iu)
+  assert.match(sql, /when '미사용' then false/iu)
+  assert.match(sql, /dashboard_statistics_schedule_day_count_v1/iu)
+  assert.match(sql, /dashboard_statistics_schedule_day_count_v1\(slot_match\[1\]\)/iu)
+})
+
+test("statistics enrollment counts deduplicate repeated JSON ids", async () => {
+  const sql = normalizeSql(await readFile(migrationPath, "utf8"))
+
+  assert.match(sql, /dashboard_statistics_distinct_jsonb_count_v1/iu)
+  assert.doesNotMatch(sql, /jsonb_array_length\(class\.(?:student_ids|waitlist_ids)\)/iu)
+  assert.match(sql, /select distinct[^;]*student_id/iu)
+})
+
+test("statistics class grade grouping and drilldown share direct-name-student precedence", async () => {
+  const sql = normalizeSql(await readFile(migrationPath, "utf8"))
+  const helper = functionBlock(
+    sql,
+    "dashboard_private.dashboard_statistics_inferred_grade_labels_v1",
+    "dashboard_private.get_dashboard_statistics_students_classes_v1",
+  )
+
+  assert.match(sql, /dashboard_statistics_inferred_grade_labels_v1/iu)
+  assert.match(helper, /when pg_catalog\.cardinality\(direct_labels\) > 0 then direct_labels/iu)
+  assert.match(helper, /when pg_catalog\.cardinality\(name_labels\) > 0 then name_labels/iu)
+  assert.match(helper, /when pg_catalog\.cardinality\(student_labels\) > 0 then student_labels/iu)
+
+  const classGroup = functionBlock(
+    sql,
+    "public.list_dashboard_statistics_class_group_v1",
+    "public.list_dashboard_statistics_class_roster_v1",
+  )
+  assert.match(classGroup, /p_key\s*=\s*any\s*\(class\.grade_labels\)/iu)
+})

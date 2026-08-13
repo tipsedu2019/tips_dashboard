@@ -143,6 +143,23 @@ as $function$
   from normalized;
 $function$;
 
+create or replace function dashboard_private.dashboard_statistics_schedule_day_count_v1(
+  p_schedule text
+)
+returns integer
+language sql
+immutable
+security invoker
+set search_path = ''
+as $function$
+  select coalesce(pg_catalog.sum(pg_catalog.char_length(day_match[1])), 0)::integer
+  from pg_catalog.regexp_matches(
+    coalesce(p_schedule, ''),
+    '([월화수목금토일]+)',
+    'g'
+  ) day_match;
+$function$;
+
 create or replace function dashboard_private.dashboard_statistics_weekly_minutes_v1(
   p_schedule text
 )
@@ -152,20 +169,63 @@ immutable
 security invoker
 set search_path = ''
 as $function$
-  select coalesce(pg_catalog.sum(
-    pg_catalog.greatest(
+  with parsed_slots as (
+    select slot_match
+    from pg_catalog.regexp_matches(
+      coalesce(p_schedule, ''),
+      '([월화수목금토일]+)\s*([0-9]{1,2}:[0-9]{2})\s*-\s*([0-9]{1,2}:[0-9]{2})',
+      'g'
+    ) slot_match
+  ), parsed_total as (
+    select coalesce(pg_catalog.sum(
+      dashboard_private.dashboard_statistics_schedule_day_count_v1(slot_match[1])
+        * pg_catalog.greatest(
+          0,
+          pg_catalog.split_part(slot_match[3], ':', 1)::integer * 60
+            + pg_catalog.split_part(slot_match[3], ':', 2)::integer
+            - pg_catalog.split_part(slot_match[2], ':', 1)::integer * 60
+            - pg_catalog.split_part(slot_match[2], ':', 2)::integer
+        )
+    ), 0)::integer as minutes,
+    pg_catalog.count(*) as slot_count
+    from parsed_slots
+  ), fallback_total as (
+    select coalesce(pg_catalog.sum(pg_catalog.greatest(
       0,
       pg_catalog.split_part(time_match[2], ':', 1)::integer * 60
         + pg_catalog.split_part(time_match[2], ':', 2)::integer
         - pg_catalog.split_part(time_match[1], ':', 1)::integer * 60
         - pg_catalog.split_part(time_match[1], ':', 2)::integer
-    )
-  ), 0)::integer
-  from pg_catalog.regexp_matches(
-    coalesce(p_schedule, ''),
-    '([0-9]{1,2}:[0-9]{2})\s*-\s*([0-9]{1,2}:[0-9]{2})',
-    'g'
-  ) time_match;
+    )), 0)::integer as minutes
+    from pg_catalog.regexp_matches(
+      coalesce(p_schedule, ''),
+      '([0-9]{1,2}:[0-9]{2})\s*-\s*([0-9]{1,2}:[0-9]{2})',
+      'g'
+    ) time_match
+  )
+  select case when parsed_total.slot_count > 0
+    then parsed_total.minutes
+    else fallback_total.minutes
+  end
+  from parsed_total cross join fallback_total;
+$function$;
+
+create or replace function dashboard_private.dashboard_statistics_textbook_active_v1(
+  p_status text
+)
+returns boolean
+language sql
+immutable
+security invoker
+set search_path = ''
+as $function$
+  select case pg_catalog.lower(pg_catalog.btrim(coalesce(p_status, 'active')))
+    when 'active' then true
+    when '사용중' then true
+    when 'inactive' then false
+    when '미사용' then false
+    else false
+  end;
 $function$;
 
 create or replace function dashboard_private.dashboard_statistics_hours_label_v1(
@@ -213,6 +273,71 @@ as $function$
   ) item;
 $function$;
 
+create or replace function dashboard_private.dashboard_statistics_distinct_jsonb_count_v1(
+  p_values jsonb
+)
+returns integer
+language sql
+immutable
+security invoker
+set search_path = ''
+as $function$
+  select pg_catalog.count(distinct element.value)::integer
+  from pg_catalog.jsonb_array_elements_text(coalesce(p_values, '[]'::jsonb)) element(value)
+  where nullif(pg_catalog.btrim(element.value), '') is not null;
+$function$;
+
+create or replace function dashboard_private.dashboard_statistics_inferred_grade_labels_v1(
+  p_direct text,
+  p_name text,
+  p_student_grades text[]
+)
+returns text[]
+language plpgsql
+immutable
+security invoker
+set search_path = ''
+as $function$
+declare
+  direct_labels text[];
+  name_labels text[];
+  student_labels text[];
+begin
+  select coalesce(pg_catalog.array_agg(distinct label order by label), array[]::text[])
+  into direct_labels
+  from (
+    select nullif(pg_catalog.regexp_replace(pg_catalog.btrim(value), '\s+', '', 'g'), '') as label
+    from pg_catalog.regexp_split_to_table(coalesce(p_direct, ''), '[,/&·\n]+') value
+  ) values_row
+  where label is not null;
+
+  select coalesce(pg_catalog.array_agg(distinct label order by label), array[]::text[])
+  into name_labels
+  from (
+    select pg_catalog.regexp_replace(match_row[1], '\s+', '', 'g') as label
+    from pg_catalog.regexp_matches(coalesce(p_name, ''), '([초중고]\s*[1-6])', 'gi') match_row
+    union all
+    select 'Grade' || match_row[1]
+    from pg_catalog.regexp_matches(coalesce(p_name, ''), '(?:grade|g)\s*(1[0-2]|[1-9])', 'gi') match_row
+  ) values_row;
+
+  select coalesce(pg_catalog.array_agg(distinct label order by label), array[]::text[])
+  into student_labels
+  from (
+    select nullif(pg_catalog.regexp_replace(pg_catalog.btrim(value), '\s+', '', 'g'), '') as label
+    from pg_catalog.unnest(coalesce(p_student_grades, array[]::text[])) value
+  ) values_row
+  where label is not null;
+
+  return case
+    when pg_catalog.cardinality(direct_labels) > 0 then direct_labels
+    when pg_catalog.cardinality(name_labels) > 0 then name_labels
+    when pg_catalog.cardinality(student_labels) > 0 then student_labels
+    else array['미정']::text[]
+  end;
+end;
+$function$;
+
 create or replace function dashboard_private.get_dashboard_statistics_students_classes_v1(
   p_subject text,
   p_division text,
@@ -242,7 +367,16 @@ as $function$
       class.textbook_ids,
       class.status,
       class.start_date,
-      class.end_date
+      class.end_date,
+      dashboard_private.dashboard_statistics_inferred_grade_labels_v1(
+        class.grade,
+        class.name,
+        array(
+          select student.grade
+          from visible_students student
+          where coalesce(class.student_ids, '[]'::jsonb) ? student.id::text
+        )
+      ) as grade_labels
     from public.classes class
     where dashboard_private.dashboard_statistics_class_active_v1(
       class.status,
@@ -258,21 +392,10 @@ as $function$
     select candidate.*
     from candidate_classes candidate
     where p_division = 'all'
-      or dashboard_private.dashboard_statistics_division_label_matches_v1(candidate.grade, p_division)
-      or (
-        nullif(pg_catalog.btrim(coalesce(candidate.grade, '')), '') is null
-        and dashboard_private.dashboard_statistics_division_label_matches_v1(candidate.name, p_division)
-      )
-      or (
-        nullif(pg_catalog.btrim(coalesce(candidate.grade, '')), '') is null
-        and not dashboard_private.dashboard_statistics_division_label_matches_v1(candidate.name, 'high')
-        and not dashboard_private.dashboard_statistics_division_label_matches_v1(candidate.name, 'middle')
-        and exists (
-          select 1
-          from visible_students student
-          where coalesce(candidate.student_ids, '[]'::jsonb) ? student.id::text
-            and dashboard_private.dashboard_statistics_division_label_matches_v1(student.grade, p_division)
-        )
+      or exists (
+        select 1
+        from pg_catalog.unnest(candidate.grade_labels) grade_label
+        where dashboard_private.dashboard_statistics_division_label_matches_v1(grade_label, p_division)
       )
   ),
   registered_enrollments as materialized (
@@ -286,20 +409,21 @@ as $function$
       coalesce(nullif(pg_catalog.btrim(student.grade), ''), '미정') as grade_label,
       coalesce(nullif(pg_catalog.btrim(student.school), ''), '미정') as school_label
     from visible_classes class
-    cross join lateral pg_catalog.jsonb_array_elements_text(
-      coalesce(class.student_ids, '[]'::jsonb)
-    ) enrolled(student_id)
+    cross join lateral (
+      select distinct element.value as student_id
+      from pg_catalog.jsonb_array_elements_text(coalesce(class.student_ids, '[]'::jsonb)) element(value)
+    ) enrolled
     join visible_students student on student.id::text = enrolled.student_id
   ),
   registered_ids as (
-    select enrolled.student_id
+    select distinct class.id as class_id, enrolled.student_id
     from visible_classes class
     cross join lateral pg_catalog.jsonb_array_elements_text(
       coalesce(class.student_ids, '[]'::jsonb)
     ) enrolled(student_id)
   ),
   waitlist_ids as (
-    select waitlisted.student_id
+    select distinct class.id as class_id, waitlisted.student_id
     from visible_classes class
     cross join lateral pg_catalog.jsonb_array_elements_text(
       coalesce(class.waitlist_ids, '[]'::jsonb)
@@ -385,18 +509,19 @@ as $function$
   class_axis_rows as (
     select
       'grade'::text as axis,
-      coalesce(nullif(pg_catalog.btrim(class.grade), ''), '미정') as label,
+      grade_label as label,
       class.id,
       dashboard_private.dashboard_statistics_weekly_minutes_v1(class.schedule) as weekly_minutes,
-      coalesce(pg_catalog.jsonb_array_length(class.student_ids), 0)::integer as enrollment_count
+      dashboard_private.dashboard_statistics_distinct_jsonb_count_v1(class.student_ids) as enrollment_count
     from visible_classes class
+    cross join lateral pg_catalog.unnest(class.grade_labels) grade_label
     union all
     select
       'teacher',
       coalesce(nullif(pg_catalog.btrim(teacher_label), ''), '미정'),
       class.id,
       dashboard_private.dashboard_statistics_weekly_minutes_v1(class.schedule),
-      coalesce(pg_catalog.jsonb_array_length(class.student_ids), 0)::integer
+      dashboard_private.dashboard_statistics_distinct_jsonb_count_v1(class.student_ids)
     from visible_classes class
     cross join lateral pg_catalog.regexp_split_to_table(
       coalesce(class.teacher, ''), '[,/&·\n]+'
@@ -407,7 +532,7 @@ as $function$
       coalesce(nullif(pg_catalog.btrim(classroom_label), ''), '미정'),
       class.id,
       dashboard_private.dashboard_statistics_weekly_minutes_v1(class.schedule),
-      coalesce(pg_catalog.jsonb_array_length(class.student_ids), 0)::integer
+      dashboard_private.dashboard_statistics_distinct_jsonb_count_v1(class.student_ids)
     from visible_classes class
     cross join lateral pg_catalog.regexp_split_to_table(
       coalesce(class.room, ''), '[,/&·\n]+'
@@ -720,44 +845,30 @@ begin
       join public.list_dashboard_class_session_dates_v1(range_from, range_to) session
         on session.class_id = class.id
     ),
-    exam_rows as (
-      select distinct pg_catalog.jsonb_build_object(
-        'key', 'exam:v1:' || session.class_id::text || ':' || detail.exam_date::text
-          || ':same-day-subject',
-        'type', 'exam',
-        'occurrenceKind', 'dated',
-        'title', '시험 일정 충돌',
-        'nextOccurrenceAt', session.session_date::text || 'T00:00:00+09:00',
-        'problem', session.class_name || ' 수업이 해당 과목 시험일과 겹칩니다.',
-        'ownerLabel', '담당 선생님',
-        'resolution', '수업일 변경 또는 휴강·보강 확정 후 학생·보호자 안내',
-        'classIds', pg_catalog.jsonb_build_array(session.class_id),
-        'classNames', pg_catalog.jsonb_build_array(session.class_name),
-        'affectedStudentIds', pg_catalog.jsonb_build_array(student.id),
-        'subject', session.subject,
-        'campus', '',
-        'primaryAssigneeProfileId', '',
-        'secondaryAssigneeProfileId', '',
-        'assigneeTeam', '관리팀',
-        'source', pg_catalog.jsonb_build_object(
-          'classIds', pg_catalog.jsonb_build_array(session.class_id),
-          'studentIds', pg_catalog.jsonb_build_array(student.id),
-          'examEventIds', case when detail.academic_event_id is null then '[]'::jsonb else pg_catalog.jsonb_build_array(detail.academic_event_id) end,
-          'examDetailIds', pg_catalog.jsonb_build_array(detail.id),
-          'teacherCatalogIds', '[]'::jsonb,
-          'classroomCatalogIds', '[]'::jsonb,
-          'weekday', '',
-          'overlapStart', '',
-          'overlapEnd', '',
-          'examDate', detail.exam_date,
-          'examRule', 'same-day-subject'
-        )
-      ) as row_value,
-      session.session_date, session.class_id, detail.id
+    exam_matches as materialized (
+      select
+        'exam:v1:' || session.class_id::text || ':' || detail.exam_date::text || ':'
+          || case
+            when session.session_date = detail.exam_date then 'same-day-subject'
+            else 'day-before-other-subject'
+          end as conflict_key,
+        case
+          when session.session_date = detail.exam_date then 'same-day-subject'
+          else 'day-before-other-subject'
+        end as exam_rule,
+        session.session_date,
+        session.class_id,
+        session.class_name,
+        session.subject,
+        student.id as student_id,
+        detail.exam_date,
+        detail.academic_event_id,
+        detail.id as exam_detail_id
       from session_rows session
-      cross join lateral pg_catalog.jsonb_array_elements_text(
-        coalesce(session.student_ids, '[]'::jsonb)
-      ) enrolled(student_id)
+      cross join lateral (
+        select distinct element.value as student_id
+        from pg_catalog.jsonb_array_elements_text(coalesce(session.student_ids, '[]'::jsonb)) element(value)
+      ) enrolled
       join public.students student on student.id::text = enrolled.student_id
       join public.academic_schools school
         on pg_catalog.lower(pg_catalog.regexp_replace(school.name, '\s+', '', 'g'))
@@ -765,15 +876,96 @@ begin
       join public.academic_event_exam_details detail
         on detail.school_id = school.id
         and (detail.grade is null or detail.grade in ('all', '전체') or detail.grade = student.grade)
-        and detail.exam_date = session.session_date
-        and dashboard_private.dashboard_statistics_subject_key_v1(detail.subject)
-          = dashboard_private.dashboard_statistics_subject_key_v1(session.subject)
+        and (
+          (
+            detail.exam_date = session.session_date
+            and dashboard_private.dashboard_statistics_subject_key_v1(detail.subject)
+              = dashboard_private.dashboard_statistics_subject_key_v1(session.subject)
+          )
+          or (
+            session.session_date = detail.exam_date - 1
+            and dashboard_private.dashboard_statistics_subject_key_v1(detail.subject)
+              <> dashboard_private.dashboard_statistics_subject_key_v1(session.subject)
+            and not exists (
+              select 1
+              from public.academic_event_exam_details same_subject_detail
+              where same_subject_detail.school_id = detail.school_id
+                and same_subject_detail.exam_date = detail.exam_date
+                and (
+                  same_subject_detail.grade is null
+                  or same_subject_detail.grade in ('all', '전체')
+                  or same_subject_detail.grade = student.grade
+                )
+                and dashboard_private.dashboard_statistics_subject_key_v1(same_subject_detail.subject)
+                  = dashboard_private.dashboard_statistics_subject_key_v1(session.subject)
+            )
+          )
+        )
+    ),
+    exam_grouped as materialized (
+      select
+        conflict_key,
+        exam_rule,
+        pg_catalog.min(session_date) as session_date,
+        class_id,
+        pg_catalog.min(class_name) as class_name,
+        pg_catalog.min(subject) as subject,
+        exam_date,
+        dashboard_private.dashboard_statistics_unique_text_jsonb_v1(
+          pg_catalog.jsonb_agg(distinct student_id::text)
+        ) as affected_student_ids,
+        dashboard_private.dashboard_statistics_unique_text_jsonb_v1(
+          pg_catalog.jsonb_agg(distinct academic_event_id::text) filter (where academic_event_id is not null)
+        ) as exam_event_ids,
+        dashboard_private.dashboard_statistics_unique_text_jsonb_v1(
+          pg_catalog.jsonb_agg(distinct exam_detail_id::text)
+        ) as exam_detail_ids
+      from exam_matches
+      group by conflict_key, exam_rule, class_id, exam_date
+    ),
+    exam_rows as (
+      select pg_catalog.jsonb_build_object(
+        'key', conflict.conflict_key,
+        'type', 'exam',
+        'occurrenceKind', 'dated',
+        'title', '시험 일정 충돌',
+        'nextOccurrenceAt', conflict.session_date::text || 'T00:00:00+09:00',
+        'problem', case conflict.exam_rule
+          when 'same-day-subject' then conflict.class_name || ' 수업이 해당 과목 시험일과 겹칩니다.'
+          else conflict.class_name || ' 수업이 다른 과목 시험 전날과 겹칩니다.'
+        end,
+        'ownerLabel', '담당 선생님',
+        'resolution', '수업일 변경 또는 휴강·보강 확정 후 학생·보호자 안내',
+        'classIds', pg_catalog.jsonb_build_array(conflict.class_id),
+        'classNames', pg_catalog.jsonb_build_array(conflict.class_name),
+        'affectedStudentIds', conflict.affected_student_ids,
+        'subject', conflict.subject,
+        'campus', '',
+        'primaryAssigneeProfileId', '',
+        'secondaryAssigneeProfileId', '',
+        'assigneeTeam', '관리팀',
+        'source', pg_catalog.jsonb_build_object(
+          'classIds', pg_catalog.jsonb_build_array(conflict.class_id),
+          'studentIds', conflict.affected_student_ids,
+          'examEventIds', conflict.exam_event_ids,
+          'examDetailIds', conflict.exam_detail_ids,
+          'teacherCatalogIds', '[]'::jsonb,
+          'classroomCatalogIds', '[]'::jsonb,
+          'weekday', '',
+          'overlapStart', '',
+          'overlapEnd', '',
+          'examDate', conflict.exam_date,
+          'examRule', conflict.exam_rule
+        )
+      ) as row_value,
+      conflict.session_date, conflict.class_id, conflict.conflict_key
+      from exam_grouped conflict
     )
     select pg_catalog.jsonb_build_object(
       'range', pg_catalog.jsonb_build_object('dateFrom', range_from, 'dateTo', range_to),
       'teacherConflicts', coalesce((select pg_catalog.jsonb_agg(row_value order by weekday, overlap_start, left_id, right_id) from teacher_rows), '[]'::jsonb),
       'classroomConflicts', coalesce((select pg_catalog.jsonb_agg(row_value order by weekday, overlap_start, left_id, right_id) from classroom_rows), '[]'::jsonb),
-      'examConflicts', coalesce((select pg_catalog.jsonb_agg(row_value order by session_date, class_id, id) from exam_rows), '[]'::jsonb)
+      'examConflicts', coalesce((select pg_catalog.jsonb_agg(row_value order by session_date, class_id, conflict_key) from exam_rows), '[]'::jsonb)
     ) into result;
     return result;
   end if;
@@ -806,7 +998,7 @@ begin
   visible_textbooks as materialized (
     select textbook.id
     from public.textbooks textbook
-    where coalesce(pg_catalog.lower(textbook.status), 'active') = 'active'
+    where dashboard_private.dashboard_statistics_textbook_active_v1(textbook.status)
       and (
         normalized_subject = 'all'
         or dashboard_private.dashboard_statistics_subject_key_v1(textbook.subject) = normalized_subject
@@ -863,19 +1055,36 @@ begin
     raise exception 'dashboard_statistics_drilldown_request_invalid' using errcode = '22023';
   end if;
 
-  with visible_classes as materialized (
-    select class.id, class.student_ids
+  with visible_students as materialized (
+    select student.id, student.grade
+    from public.students student
+  ),
+  candidate_classes as materialized (
+    select class.id, class.student_ids,
+      dashboard_private.dashboard_statistics_inferred_grade_labels_v1(
+        class.grade,
+        class.name,
+        array(
+          select student.grade
+          from visible_students student
+          where coalesce(class.student_ids, '[]'::jsonb) ? student.id::text
+        )
+      ) as grade_labels
     from public.classes class
     where dashboard_private.dashboard_statistics_class_active_v1(
       class.status,
       class.start_date::text,
       class.end_date::text
-    )
+      )
       and (p_subject = 'all' or dashboard_private.dashboard_statistics_subject_key_v1(class.subject) = p_subject)
-      and (
-        p_division = 'all'
-        or dashboard_private.dashboard_statistics_division_label_matches_v1(class.grade, p_division)
-        or dashboard_private.dashboard_statistics_division_label_matches_v1(class.name, p_division)
+  ),
+  visible_classes as materialized (
+    select class.*
+    from candidate_classes class
+    where p_division = 'all'
+      or exists (
+        select 1 from pg_catalog.unnest(class.grade_labels) grade_label
+        where dashboard_private.dashboard_statistics_division_label_matches_v1(grade_label, p_division)
       )
   ),
   matched as materialized (
@@ -886,7 +1095,10 @@ begin
       coalesce(student.grade, '') as grade,
       dashboard_private.dashboard_statistics_normalized_name_v1(student.name) as normalized_name
     from visible_classes class
-    cross join lateral pg_catalog.jsonb_array_elements_text(coalesce(class.student_ids, '[]'::jsonb)) enrolled(student_id)
+    cross join lateral (
+      select distinct element.value as student_id
+      from pg_catalog.jsonb_array_elements_text(coalesce(class.student_ids, '[]'::jsonb)) element(value)
+    ) enrolled
     join public.students student on student.id::text = enrolled.student_id
     where case p_axis
       when 'grade' then coalesce(nullif(pg_catalog.btrim(student.grade), ''), '미정') = p_key
@@ -958,7 +1170,11 @@ begin
     raise exception 'dashboard_statistics_drilldown_request_invalid' using errcode = '22023';
   end if;
 
-  with matching_classes as materialized (
+  with visible_students as materialized (
+    select student.id, student.grade
+    from public.students student
+  ),
+  candidate_classes as materialized (
     select
       class.id,
       class.name as title,
@@ -967,6 +1183,15 @@ begin
       class.teacher,
       class.room,
       class.student_ids,
+      dashboard_private.dashboard_statistics_inferred_grade_labels_v1(
+        class.grade,
+        class.name,
+        array(
+          select student.grade
+          from visible_students student
+          where coalesce(class.student_ids, '[]'::jsonb) ? student.id::text
+        )
+      ) as grade_labels,
       dashboard_private.dashboard_statistics_normalized_name_v1(class.name) as normalized_name
     from public.classes class
     where dashboard_private.dashboard_statistics_class_active_v1(
@@ -975,13 +1200,19 @@ begin
       class.end_date::text
     )
       and (p_subject = 'all' or dashboard_private.dashboard_statistics_subject_key_v1(class.subject) = p_subject)
-      and (
+  ),
+  matching_classes as materialized (
+    select class.*
+    from candidate_classes class
+    where (
         p_division = 'all'
-        or dashboard_private.dashboard_statistics_division_label_matches_v1(class.grade, p_division)
-        or dashboard_private.dashboard_statistics_division_label_matches_v1(class.name, p_division)
+        or exists (
+          select 1 from pg_catalog.unnest(class.grade_labels) grade_label
+          where dashboard_private.dashboard_statistics_division_label_matches_v1(grade_label, p_division)
+        )
       )
       and case p_axis
-        when 'grade' then coalesce(nullif(pg_catalog.btrim(class.grade), ''), '미정') = p_key
+        when 'grade' then p_key = any (class.grade_labels)
         when 'teacher' then exists (
           select 1 from pg_catalog.regexp_split_to_table(coalesce(class.teacher, ''), '[,/&·\n]+') label
           where coalesce(nullif(pg_catalog.btrim(label), ''), '미정') = p_key
@@ -995,7 +1226,7 @@ begin
       and (
         p_cursor_name is null
         or (
-          dashboard_private.dashboard_statistics_normalized_name_v1(class.name) collate dashboard_private.ko_numeric,
+          class.normalized_name collate dashboard_private.ko_numeric,
           class.id
         ) > (
           dashboard_private.dashboard_statistics_normalized_name_v1(p_cursor_name) collate dashboard_private.ko_numeric,
@@ -1018,8 +1249,8 @@ begin
         'scheduleLabel', coalesce(nullif(schedule, ''), '시간 미정'),
         'teacherLabel', coalesce(nullif(teacher, ''), '미정'),
         'classroomLabel', coalesce(nullif(room, ''), '미정'),
-        'studentCount', pg_catalog.jsonb_array_length(coalesce(student_ids, '[]'::jsonb)),
-        'enrollmentCount', pg_catalog.jsonb_array_length(coalesce(student_ids, '[]'::jsonb)),
+        'studentCount', dashboard_private.dashboard_statistics_distinct_jsonb_count_v1(student_ids),
+        'enrollmentCount', dashboard_private.dashboard_statistics_distinct_jsonb_count_v1(student_ids),
         'weeklyMinutes', dashboard_private.dashboard_statistics_weekly_minutes_v1(schedule),
         'weeklyHoursLabel', dashboard_private.dashboard_statistics_hours_label_v1(
           dashboard_private.dashboard_statistics_weekly_minutes_v1(schedule)
@@ -1065,7 +1296,10 @@ begin
       coalesce(student.grade, '') as grade,
       dashboard_private.dashboard_statistics_normalized_name_v1(student.name) as normalized_name
     from public.classes class
-    cross join lateral pg_catalog.jsonb_array_elements_text(coalesce(class.student_ids, '[]'::jsonb)) enrolled(student_id)
+    cross join lateral (
+      select distinct element.value as student_id
+      from pg_catalog.jsonb_array_elements_text(coalesce(class.student_ids, '[]'::jsonb)) element(value)
+    ) enrolled
     join public.students student on student.id::text = enrolled.student_id
     where class.id = p_class_id
       and dashboard_private.dashboard_statistics_class_active_v1(
