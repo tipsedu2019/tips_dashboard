@@ -58,3 +58,23 @@ test("only the schedule-conflict panel mounts conflict actions and the textbook 
   assert.match(textbooks, /activeClassesWithoutTextbook/);
   assert.match(textbooks, /updatedProgressSessions/);
 });
+
+test("statistics keeps the legacy class-average KPI and full conflict task workflow", async () => {
+  const [workspace, sectionCards] = await Promise.all([
+    source("src/features/dashboard/statistics-workspace.tsx"),
+    source("src/app/admin/dashboard/components/section-cards.tsx"),
+  ]);
+  const summary = workspace.slice(workspace.indexOf("function SummaryCards"), workspace.indexOf("function OverviewPanel"));
+  const conflicts = workspace.slice(
+    workspace.indexOf("function ScheduleConflictsPanel"),
+    workspace.indexOf("function TextbookStatisticsPanel"),
+  );
+
+  assert.match(summary, /"수업당"/);
+  assert.match(summary, /registeredEnrollmentCount/);
+  assert.match(summary, /activeClassesCount/);
+  assert.match(conflicts, /DashboardConflictWarning/);
+  assert.match(sectionCards, /export function ConflictWarning/);
+  assert.match(sectionCards, /createDashboardConflictTask/);
+  assert.match(sectionCards, /listDashboardConflictTaskLinks/);
+});

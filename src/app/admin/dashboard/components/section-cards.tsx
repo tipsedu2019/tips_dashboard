@@ -1092,7 +1092,11 @@ function getConflictActionError(error: unknown) {
   return getDashboardSourceError(error, "할 일을 등록하지 못했습니다.")
 }
 
-function ConflictWarning({ metrics }: { metrics: DashboardMetrics }) {
+export function ConflictWarning({
+  metrics,
+}: {
+  metrics: Pick<DashboardMetrics, "conflictRows" | "conflictSources" | "retryConflictSources">
+}) {
   const { role } = useAuth()
   const [showAllConflicts, setShowAllConflicts] = useState(false)
   const [actionStateByKey, setActionStateByKey] = useState<Record<string, ConflictActionState>>({})

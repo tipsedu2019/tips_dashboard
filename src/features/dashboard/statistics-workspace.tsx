@@ -2,9 +2,10 @@
 
 import { useState, type ReactNode } from "react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ConflictWarning as DashboardConflictWarning } from "@/app/admin/dashboard/components/section-cards"
+import type { DashboardConflictRow } from "@/features/dashboard/conflict-contract"
 import { DASHBOARD_STATISTICS_RANGE_PRESETS, type DashboardStatisticsTab } from "@/features/dashboard/statistics-contract"
 import { StatisticsDrilldown } from "@/features/dashboard/statistics-drilldown"
 import { useStatisticsSnapshot } from "@/features/dashboard/use-statistics-snapshot"
@@ -38,12 +39,14 @@ function PanelState({
   error,
   generatedAt,
   onRefresh,
+  renderOnError = false,
   children,
 }: {
   loading: boolean
   error: string | null
   generatedAt: string | null
   onRefresh: () => void
+  renderOnError?: boolean
   children: ReactNode
 }) {
   const updated = generatedAt ? new Intl.DateTimeFormat("ko-KR", { dateStyle: "short", timeStyle: "short" }).format(new Date(generatedAt)) : "-"
@@ -53,17 +56,21 @@ function PanelState({
       <Button type="button" size="sm" variant="outline" onClick={onRefresh}>새로고침</Button>
     </div>
     {loading ? <Card><CardContent className="py-10 text-sm text-muted-foreground">통계를 불러오는 중입니다.</CardContent></Card> : null}
-    {error ? <Card><CardContent className="flex items-center justify-between gap-3 py-6 text-sm"><span>{error}</span><Button type="button" size="sm" onClick={onRefresh}>다시 시도</Button></CardContent></Card> : null}
-    {!loading && !error ? children : null}
+    {error && !renderOnError ? <Card><CardContent className="flex items-center justify-between gap-3 py-6 text-sm"><span>{error}</span><Button type="button" size="sm" onClick={onRefresh}>다시 시도</Button></CardContent></Card> : null}
+    {!loading && (!error || renderOnError) ? children : null}
   </div>
 }
 
 function SummaryCards({ summary }: { summary: Data }) {
+  const activeClassesCount = number(summary.activeClassesCount)
+  const averageEnrollmentsPerClass = activeClassesCount > 0
+    ? (number(summary.registeredEnrollmentCount) / activeClassesCount).toLocaleString("ko-KR", { maximumFractionDigits: 1 })
+    : "-"
   const values = [
     ["재원", `${format(summary.uniqueRegisteredStudentCount)}명`, summary.uniqueWaitlistStudentCount ? `대기 ${format(summary.uniqueWaitlistStudentCount)}명` : ""],
     ["수강", `${format(summary.registeredEnrollmentCount)}명`, ""],
     ["수업", `${format(summary.activeClassesCount)}개`, text(summary.weeklyHoursLabel) ? `주간 ${text(summary.weeklyHoursLabel)}` : ""],
-    ["학교 · 학년", `${format(summary.schoolCount)} · ${format(summary.gradeCount)}`, ""],
+    ["수업당", `${averageEnrollmentsPerClass}명`, ""],
   ]
   return <section aria-label="핵심 운영 지표" className="grid overflow-hidden rounded-xl border bg-background md:grid-cols-2 lg:grid-cols-4">
     {values.map(([label, value, sub], index) => <div key={label} className={`min-w-0 px-4 py-3 ${index > 0 ? "border-t md:border-l md:border-t-0" : ""}`}>
@@ -119,24 +126,32 @@ function StudentsClassesPanel() {
   const [division, setDivision] = useState<Division>("all")
   const state = useStatisticsSnapshot({ tab: "students_classes", subject, division })
   const data = object(state.data)
-  return <PanelState {...state} onRefresh={state.refresh}>
+  return <PanelState {...state} onRefresh={state.refresh} renderOnError>
     <div className="flex flex-wrap gap-4"><FilterButtons label="과목" values={subjects} active={subject} onChange={setSubject} /><FilterButtons label="부서" values={divisions} active={division} onChange={setDivision} /></div>
     <SummaryCards summary={object(data.summary)} /><StudentBreakdowns data={data} subject={subject} division={division} /><ClassGroups data={data} subject={subject} division={division} />
   </PanelState>
-}
-
-function ConflictWarning({ rows }: { rows: Data[] }) {
-  if (!rows.length) return <Card><CardContent className="py-8 text-sm text-muted-foreground">일정 충돌이 없습니다.</CardContent></Card>
-  return <Card className="border-amber-300"><CardHeader><CardTitle className="text-base">일정 충돌 {format(rows.length)}건</CardTitle></CardHeader><CardContent className="grid gap-2">{rows.map((row) => <div key={text(row.key)} className="rounded-lg border border-amber-200 p-3"><div className="flex flex-wrap gap-2"><Badge variant="outline">{text(row.type) === "exam" ? "시험" : text(row.type) === "teacher" ? "선생님" : "강의실"}</Badge><span className="font-medium">{text(row.problem)}</span></div><p className="mt-1 text-sm text-muted-foreground">담당 {text(row.ownerLabel)} · 처리 {text(row.resolution)}</p></div>)}</CardContent></Card>
 }
 
 function ScheduleConflictsPanel() {
   const state = useStatisticsSnapshot({ tab: "schedule_conflicts" })
   const data = object(state.data)
   const rows = [...list(data.teacherConflicts), ...list(data.classroomConflicts), ...list(data.examConflicts)]
+  const sourceStatus: "loading" | "ready" | "error" = state.loading
+    ? "loading"
+    : state.error
+      ? "error"
+      : "ready"
+  const conflictMetrics = {
+    conflictRows: rows as DashboardConflictRow[],
+    conflictSources: {
+      schedule: { status: sourceStatus, error: state.error || "" },
+      exam: { status: sourceStatus, error: state.error || "" },
+    },
+    retryConflictSources: state.refresh,
+  }
   return <PanelState {...state} onRefresh={state.refresh}>
     <div className="flex flex-wrap gap-1.5">{DASHBOARD_STATISTICS_RANGE_PRESETS.schedule_conflicts.map((preset) => <Button key={preset} type="button" size="sm" variant={state.range === preset ? "default" : "outline"} onClick={() => state.setRange(preset)}>앞으로 {preset}일</Button>)}</div>
-    <ConflictWarning rows={rows} />
+    <DashboardConflictWarning metrics={conflictMetrics} />
   </PanelState>
 }
 

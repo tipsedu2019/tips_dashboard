@@ -153,6 +153,12 @@ export function createDashboardStatisticsRouteHandler(dependencies: RouteDepende
           code: "dashboard_statistics_unauthorized",
         })
       }
+      if (!["admin", "staff", "teacher"].includes(context.role)) {
+        throw Object.assign(new Error("dashboard statistics forbidden"), {
+          status: 403,
+          code: "dashboard_statistics_forbidden",
+        })
+      }
     } catch (error) {
       return failure(error)
     }
