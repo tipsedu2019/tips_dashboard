@@ -81,9 +81,7 @@ values (
         'sessionKey', 'legacy-slot-session-a',
         'date', (current_date + 21)::text,
         'scheduleState', 'active',
-        'teacherCatalogId', 'f7000000-0000-4000-8000-000000000011',
         'teacherName', '구형 일정 선생님',
-        'classroomCatalogId', 'f7000000-0000-4000-8000-000000000012',
         'classroomName', '구형 일정 101호'
       )
     ),

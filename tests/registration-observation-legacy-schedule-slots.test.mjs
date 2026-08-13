@@ -11,6 +11,10 @@ const migrationPath = path.join(
   repositoryRoot,
   "supabase/migrations/20260813064146_registration_observation_legacy_schedule_slots.sql",
 );
+const catalogMigrationPath = path.join(
+  repositoryRoot,
+  "supabase/migrations/20260813093446_registration_observation_legacy_schedule_slot_catalogs.sql",
+);
 const pgTapPath = path.join(
   repositoryRoot,
   "supabase/tests/registration_observation_legacy_schedule_slots_test.sql",
@@ -67,6 +71,17 @@ test("legacy schedule migration fail-closes and patches all four consumers", asy
   );
 });
 
+test("legacy slot catalog follow-up resolves unique teacher and classroom identities", async () => {
+  const sql = await readFile(catalogMigrationPath, "utf8");
+  assert.match(sql, /^begin;/i);
+  assert.match(sql, /commit;\s*$/i);
+  assert.match(sql, /teacher_pick\.match_count = 1[\s\S]*?teacher_pick\.selected_id/i);
+  assert.match(sql, /classroom_pick\.match_count = 1[\s\S]*?classroom_pick\.selected_id/i);
+  assert.match(sql, /registration_observation_teacher_subject_matches_v1/i);
+  assert.match(sql, /registration_observation_legacy_schedule_catalog_dependency_drift/i);
+  assert.doesNotMatch(sql, /\b(?:http|https|net\.http|pg_net|solapi|provider_attempt)\b/i);
+});
+
 test("legacy schedule pgTAP plan exactly covers list save feedback notification and slot precedence", async () => {
   const sql = await readFile(pgTapPath, "utf8");
   const plan = [...sql.matchAll(/select\s+plan\((\d+)\);/gi)];
@@ -94,9 +109,10 @@ test("local DB runner exposes the exact provider-zero legacy-schedule focus", as
   assert.match(stdout, /DRY RUN — zero database changes/);
   const receipt = JSON.parse(stdout.slice(stdout.indexOf("{") ));
   assert.equal(receipt.focus, "legacy-schedule");
-  assert.equal(receipt.migrationCeiling, "20260813064146");
+  assert.equal(receipt.migrationCeiling, "20260813093446");
   assert.deepEqual(receipt.migrations, [
     "20260813064146_registration_observation_legacy_schedule_slots.sql",
+    "20260813093446_registration_observation_legacy_schedule_slot_catalogs.sql",
   ]);
   assert.deepEqual(receipt.pgTapTests, [
     "supabase/tests/registration_observation_legacy_schedule_slots_test.sql",
