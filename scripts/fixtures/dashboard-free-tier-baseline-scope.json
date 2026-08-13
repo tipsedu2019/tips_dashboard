@@ -19,6 +19,7 @@
     "public.textbooks"
   ],
   "types": ["public.academic_event_type", "public.class_status", "public.user_role"],
+  "sequences": ["public.classes_id_seq"],
   "collations": [],
   "functions": [
     "public.get_dashboard_conflict_sources_v1(date,date)",
