@@ -290,6 +290,20 @@ const FOCUS_REGISTRY = new Map([
       providerOutboxStage: "solapi-queue",
     },
   ],
+  [
+    "legacy-schedule",
+    {
+      ceiling: "20260813064146",
+      migrations: [
+        "20260813064146_registration_observation_legacy_schedule_slots.sql",
+      ],
+      tests: [
+        "supabase/tests/registration_observation_legacy_schedule_slots_test.sql",
+      ],
+      fixture: "noop",
+      providerOutboxStage: "solapi-queue",
+    },
+  ],
 ]);
 
 const PROVIDER_OUTBOX_STAGE_RANK = new Map([
