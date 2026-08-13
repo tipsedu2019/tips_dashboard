@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 
 import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
 import type {
@@ -1295,19 +1296,22 @@ export function RegistrationConsultationOutcomeEditor({
   onDirtyChange,
 }: RegistrationConsultationOutcomeEditorProps): JSX.Element {
   const [outcome, setOutcome] = useState<"" | "enrollment" | "waiting" | "not_registered">(consultation.outcome || "")
+  const [note, setNote] = useState(consultation.note || "")
   const [saving, setSaving] = useState(false)
   const [refreshPending, setRefreshPending] = useState(false)
   const submissionKeys = useSubmissionKeys()
   const saveState = getRegistrationConsultationOutcomeSaveState({
     savedOutcome: consultation.outcome,
     draftOutcome: outcome,
+    savedNote: consultation.note,
+    draftNote: note,
     canCompleteConsultation: editable,
   })
-  useOwnedDirtyState(!refreshPending && saveState.canSave, onDirtyChange)
+  useOwnedDirtyState(!refreshPending && saveState.editable && saveState.dirty, onDirtyChange)
 
   async function submit() {
     if (!outcome || !saveState.canSave || saving || refreshPending) return
-    const normalizedDraft = JSON.stringify({ consultationId: consultation.id, outcome })
+    const normalizedDraft = JSON.stringify({ consultationId: consultation.id, outcome, note })
     const kind = "consultation-details"
     const requestKey = submissionKeys.getOrCreate(kind, normalizedDraft)
     setSaving(true)
@@ -1316,6 +1320,7 @@ export function RegistrationConsultationOutcomeEditor({
         consultationId: consultation.id,
         status: "completed",
         outcome,
+        note,
         requestKey,
       })
     } catch (error) {
@@ -1372,8 +1377,19 @@ export function RegistrationConsultationOutcomeEditor({
               <Button type="button" aria-label={`${subject} 상담 결과 미등록`} className="col-span-2 sm:col-span-1" variant={outcome === "not_registered" ? "default" : "outline"} aria-pressed={outcome === "not_registered"} disabled={saving || !saveState.editable} onClick={() => setOutcome("not_registered")}>미등록</Button>
             </div>
           </fieldset>
+          <div className="grid gap-2">
+            <Label htmlFor={`${subject}-consultation-note`}>상담 내용</Label>
+            <Textarea
+              id={`${subject}-consultation-note`}
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              placeholder="상담에서 확인한 내용과 다음 조치를 기록하세요."
+              rows={6}
+              disabled={saving || !saveState.editable}
+            />
+          </div>
           {!saveState.editable && consultation.status !== "completed" ? (
-            <p className="text-xs text-muted-foreground">상담 책임자만 결과를 수정할 수 있습니다.</p>
+            <p className="text-xs text-muted-foreground">상담 책임자만 결과와 내용을 수정할 수 있습니다.</p>
           ) : null}
           <div className="flex justify-end">
             <RegistrationSaveButton

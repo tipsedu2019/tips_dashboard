@@ -3000,7 +3000,7 @@ export function createRegistrationTrackService(
     consultationId: string
     status: "waiting" | "scheduled" | "completed" | "canceled"
     outcome: "" | "enrollment" | "waiting" | "not_registered"
-    note?: string
+    note: string
     requestKey: string
   }): Promise<RegistrationConsultationDetailsSaveResponse> {
     const result = await callRpc<Row>("save_registration_consultation_details_v1", {
