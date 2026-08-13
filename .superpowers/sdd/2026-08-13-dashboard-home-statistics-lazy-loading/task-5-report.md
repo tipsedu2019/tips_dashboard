@@ -104,3 +104,35 @@ The runner stopped at the reviewed active-baseline gate. It did not allocate/sta
 - Rechecked waiters never calculate, retry PostgREST, or steal a live lease.
 - Rechecked roster drilldowns and access tokens are absent from cache storage and persistent browser storage.
 - Remaining empirical risk is exactly the blocked PostgreSQL lane: migration execution, privileges/RLS, CAS fixture behavior, expiry boundaries, and cleanup count are specified in pgTAP source but cannot be claimed passed until a reviewed active baseline is available.
+
+## Review fix round 1
+
+### RED
+
+Four behavior tests were added before the implementation change. The focused cache suite reported 9 pass / 4 intended failures:
+
+- a cache hit received at 9:59 before the authoritative server expiry was incorrectly retained for a fresh browser ten-minute window;
+- already-expired and malformed snapshots were returned and retained rather than rejected;
+- no force-intent state machine existed to preserve a forced request through StrictMode cleanup or a dependency-change abort;
+- snapshot state was not keyed, so the prior tab/filter/range result could remain visible until the next request settled.
+
+### Changes
+
+- Successful browser snapshots are normalized inside the memory cache and cached until `min(receivedAt + 10 minutes, snapshot.expiresAt)`. A snapshot whose authoritative expiry is at or before receipt raises `dashboard_statistics_snapshot_expired`; malformed and expired results are removed from the in-flight entry and never retained.
+- The test now fixes a server hit at 9:59, proves it is reused for only the remaining 999ms, and proves the browser does not extend it past the server's 10:00 expiry.
+- Force refresh now has requested/completed revisions. Starting an effect does not consume the request. StrictMode cleanup, cancellation, request-key dependency changes, failures, and stale earlier completions preserve the pending intent; only the matching successful forced fetch marks it completed.
+- Snapshot state now stores `{key, snapshot}`. The hook exposes a snapshot only when its stored key equals the active cache key, so tab, preset, subject, division, and date changes hide the prior result synchronously rather than waiting for the replacement request.
+
+### GREEN and blocked DB lane
+
+Fresh focused verification after the review fix passed 28/28:
+
+```bash
+"$TASK_NODE" --test --experimental-strip-types \
+  tests/statistics-snapshot-cache.test.mjs \
+  tests/statistics-resource-pressure.test.mjs
+```
+
+Direct ESLint of the changed cache/hook/test files, `tsc --noEmit`, and `git diff --check` exited 0. The SQL migration was not changed, so its candidate SHA-256 remains `7ce560e6c3b6864f4b99adcf1cbe9271235ca8e0906d1e93ce985f6f22ca5de0`.
+
+The authorized isolated DB harness was re-attempted and again returned the exact fail-closed result `isolated_supabase_db_baseline_review_required` before database allocation. No migration replay, pgTAP execution, production read, production migration, or deployment is claimed. The manifest remains `candidate`.

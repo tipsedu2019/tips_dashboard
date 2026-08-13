@@ -11,9 +11,15 @@ import {
 } from "./statistics-contract.ts"
 import {
   buildDashboardStatisticsCacheKey,
+  createDashboardStatisticsForceIntent,
+  dashboardStatisticsSnapshotForKey,
   dashboardStatisticsMemoryCache,
   fetchDashboardStatisticsSnapshot,
+  isDashboardStatisticsForcePending,
   loadActiveDashboardStatisticsSnapshot,
+  requestDashboardStatisticsForce,
+  settleDashboardStatisticsForce,
+  type DashboardStatisticsKeyedSnapshot,
 } from "./statistics-cache.ts"
 import { useAuth } from "@/providers/auth-provider"
 
@@ -55,11 +61,11 @@ export function useStatisticsSnapshot(input: StatisticsSnapshotInput): Statistic
       ? rangeOverride.value
       : normalizeDashboardStatisticsRange(selectedRangeTab, input.rangeQuery)
     : 90
-  const [snapshot, setSnapshot] = useState<DashboardStatisticsSnapshot | null>(null)
+  const [snapshotResult, setSnapshotResult] = useState<DashboardStatisticsKeyedSnapshot | null>(null)
   const [loading, setLoading] = useState(Boolean(input.active ?? true))
   const [error, setError] = useState<string | null>(null)
-  const [revision, setRevision] = useState(0)
-  const forceNextRequestRef = useRef(false)
+  const [forceRevision, setForceRevision] = useState(0)
+  const forceIntentRef = useRef(createDashboardStatisticsForceIntent())
 
   const request = useMemo(() => buildDashboardStatisticsRequest({
     tab: input.tab,
@@ -87,15 +93,18 @@ export function useStatisticsSnapshot(input: StatisticsSnapshotInput): Statistic
   const refresh = useCallback(() => {
     if (!cacheKey) return
     dashboardStatisticsMemoryCache.invalidate(cacheKey)
-    forceNextRequestRef.current = true
-    setRevision((current) => current + 1)
+    const requested = requestDashboardStatisticsForce(forceIntentRef.current)
+    forceIntentRef.current = requested
+    setForceRevision(requested.requestedRevision)
   }, [cacheKey])
+
+  const snapshot = dashboardStatisticsSnapshotForKey(snapshotResult, cacheKey)
 
   useEffect(() => {
     const active = input.active ?? true
     const controller = new AbortController()
-    const force = forceNextRequestRef.current
-    forceNextRequestRef.current = false
+    const requestForceRevision = forceIntentRef.current.requestedRevision
+    const force = isDashboardStatisticsForcePending(forceIntentRef.current)
 
     async function load() {
       await Promise.resolve()
@@ -105,7 +114,7 @@ export function useStatisticsSnapshot(input: StatisticsSnapshotInput): Statistic
         return
       }
       if (!userId || !role || !accessToken) {
-        setSnapshot(null)
+        setSnapshotResult(null)
         setLoading(false)
         setError("통계를 불러오려면 다시 로그인해 주세요.")
         return
@@ -127,11 +136,15 @@ export function useStatisticsSnapshot(input: StatisticsSnapshotInput): Statistic
           }),
         })
         if (controller.signal.aborted || !nextSnapshot) return
-        setSnapshot(nextSnapshot)
+        setSnapshotResult({ key: cacheKey, snapshot: nextSnapshot })
+        forceIntentRef.current = settleDashboardStatisticsForce(forceIntentRef.current, {
+          revision: requestForceRevision,
+          completed: force,
+        })
         setLoading(false)
       } catch (loadError: unknown) {
         if (controller.signal.aborted) return
-        setSnapshot(null)
+        setSnapshotResult(null)
         setLoading(false)
         setError(
           loadError instanceof Error && loadError.message === "statistics_cache_busy"
@@ -144,7 +157,7 @@ export function useStatisticsSnapshot(input: StatisticsSnapshotInput): Statistic
     void load()
 
     return () => controller.abort()
-  }, [accessToken, cacheKey, input.active, request, revision, role, userId])
+  }, [accessToken, cacheKey, forceRevision, input.active, request, role, userId])
 
   return {
     snapshot,

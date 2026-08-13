@@ -36,6 +36,51 @@ type MemoryEntry = {
   expiresAt?: number
 }
 
+export type DashboardStatisticsForceIntent = Readonly<{
+  requestedRevision: number
+  completedRevision: number
+}>
+
+export type DashboardStatisticsKeyedSnapshot = Readonly<{
+  key: string
+  snapshot: DashboardStatisticsSnapshot
+}>
+
+export function createDashboardStatisticsForceIntent(): DashboardStatisticsForceIntent {
+  return { requestedRevision: 0, completedRevision: 0 }
+}
+
+export function requestDashboardStatisticsForce(
+  intent: DashboardStatisticsForceIntent,
+): DashboardStatisticsForceIntent {
+  return {
+    requestedRevision: intent.requestedRevision + 1,
+    completedRevision: intent.completedRevision,
+  }
+}
+
+export function isDashboardStatisticsForcePending(intent: DashboardStatisticsForceIntent) {
+  return intent.requestedRevision > intent.completedRevision
+}
+
+export function settleDashboardStatisticsForce(
+  intent: DashboardStatisticsForceIntent,
+  result: Readonly<{ revision: number; completed: boolean }>,
+): DashboardStatisticsForceIntent {
+  if (!result.completed || result.revision !== intent.requestedRevision) return intent
+  return {
+    ...intent,
+    completedRevision: Math.max(intent.completedRevision, result.revision),
+  }
+}
+
+export function dashboardStatisticsSnapshotForKey(
+  result: DashboardStatisticsKeyedSnapshot | null,
+  key: string,
+) {
+  return result?.key === key ? result.snapshot : null
+}
+
 export function createDashboardStatisticsMemoryCache({
   now = () => Date.now(),
   ttlMs = DASHBOARD_STATISTICS_TTL_MS,
@@ -70,17 +115,23 @@ export function createDashboardStatisticsMemoryCache({
       loadResult = Promise.reject(error)
     }
     const promise = Promise.resolve(loadResult).then((value) => {
+      const normalized = normalizeDashboardStatisticsSnapshot(value)
+      const receivedAt = now()
+      const authoritativeExpiresAt = Date.parse(normalized.expiresAt)
+      if (authoritativeExpiresAt <= receivedAt) {
+        throw new Error("dashboard_statistics_snapshot_expired")
+      }
       if (
         generation(key) === requestGeneration &&
         entries.get(key)?.promise === promise
       ) {
         entries.set(key, {
           generation: requestGeneration,
-          value,
-          expiresAt: now() + ttlMs,
+          value: normalized,
+          expiresAt: Math.min(receivedAt + ttlMs, authoritativeExpiresAt),
         })
       }
-      return value
+      return normalized
     }).catch((error) => {
       if (entries.get(key)?.promise === promise) entries.delete(key)
       throw error

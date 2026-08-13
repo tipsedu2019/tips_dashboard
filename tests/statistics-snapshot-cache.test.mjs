@@ -20,6 +20,24 @@ function deferred() {
   return { promise, resolve, reject }
 }
 
+function snapshot({
+  tab = "overview",
+  value = 1,
+  generatedAt = "2026-08-14T00:00:00.000Z",
+  expiresAt = "2026-08-14T00:10:00.000Z",
+  cacheStatus = "hit",
+} = {}) {
+  return {
+    ok: true,
+    contractVersion: "dashboard-statistics-v1",
+    tab,
+    data: { value },
+    generatedAt,
+    expiresAt,
+    cacheStatus,
+  }
+}
+
 function request(query, token = "token-a") {
   return new Request(`http://localhost/api/dashboard/statistics?${query}`, {
     headers: { authorization: `Bearer ${token}` },
@@ -315,7 +333,7 @@ test("private cache isolates actor, role, tab, filters, and ranges", async () =>
 })
 
 test("client memory cache loads only the active tab, deduplicates in flight, and expires without browser storage", async () => {
-  let now = 1_000
+  let now = Date.parse("2026-08-14T00:00:00.000Z")
   let calls = 0
   const pending = deferred()
   const cache = cacheModule.createDashboardStatisticsMemoryCache({ now: () => now })
@@ -332,33 +350,146 @@ test("client memory cache loads only the active tab, deduplicates in flight, and
   const first = cacheModule.loadActiveDashboardStatisticsSnapshot(input)
   const duplicate = cacheModule.loadActiveDashboardStatisticsSnapshot(input)
   assert.equal(calls, 1)
-  pending.resolve({ data: { value: 1 } })
-  assert.deepEqual(await first, { data: { value: 1 } })
-  assert.deepEqual(await duplicate, { data: { value: 1 } })
+  pending.resolve(snapshot())
+  assert.deepEqual(await first, snapshot())
+  assert.deepEqual(await duplicate, snapshot())
 
   assert.equal(await cacheModule.loadActiveDashboardStatisticsSnapshot({ ...input, active: false }), null)
   assert.equal(calls, 1)
   now += 599_999
-  assert.deepEqual(await cacheModule.loadActiveDashboardStatisticsSnapshot(input), { data: { value: 1 } })
+  assert.deepEqual(await cacheModule.loadActiveDashboardStatisticsSnapshot(input), snapshot())
   assert.equal(calls, 1)
   assert.deepEqual(
     await cacheModule.loadActiveDashboardStatisticsSnapshot({
       ...input,
       key: "actor:admin:dashboard-statistics-v1:textbooks:all::2026-05-17:2026-08-14",
-      loader: async () => ({ data: { value: ++calls } }),
+      loader: async () => snapshot({ tab: "textbooks", value: ++calls }),
     }),
-    { data: { value: 2 } },
+    snapshot({ tab: "textbooks", value: 2 }),
   )
-  assert.deepEqual(await cacheModule.loadActiveDashboardStatisticsSnapshot(input), { data: { value: 1 } })
+  assert.deepEqual(await cacheModule.loadActiveDashboardStatisticsSnapshot(input), snapshot())
   assert.equal(calls, 2)
   now += 2
   assert.deepEqual(
     await cacheModule.loadActiveDashboardStatisticsSnapshot({
       ...input,
-      loader: async () => ({ data: { value: ++calls } }),
+      loader: async () => snapshot({
+        value: ++calls,
+        generatedAt: "2026-08-14T00:10:00.001Z",
+        expiresAt: "2026-08-14T00:20:00.001Z",
+      }),
     }),
-    { data: { value: 3 } },
+    snapshot({
+      value: 3,
+      generatedAt: "2026-08-14T00:10:00.001Z",
+      expiresAt: "2026-08-14T00:20:00.001Z",
+    }),
   )
+})
+
+test("browser cache never extends a server hit beyond authoritative expiresAt", async () => {
+  let now = Date.parse("2026-08-14T00:09:59.000Z")
+  let calls = 0
+  const cache = cacheModule.createDashboardStatisticsMemoryCache({ now: () => now })
+  const key = "actor:admin:dashboard-statistics-v1:overview:all:all::"
+  const loader = async () => {
+    calls += 1
+    return snapshot()
+  }
+
+  assert.deepEqual(await cache.load(key, loader), snapshot())
+  now += 999
+  assert.deepEqual(await cache.load(key, loader), snapshot())
+  assert.equal(calls, 1)
+
+  now += 2
+  await assert.rejects(
+    cache.load(key, async () => snapshot()),
+    /dashboard_statistics_snapshot_expired/,
+  )
+  assert.equal(calls, 1)
+})
+
+test("browser cache rejects expired or malformed snapshots without retaining them", async () => {
+  const now = Date.parse("2026-08-14T00:10:00.001Z")
+  let calls = 0
+  const cache = cacheModule.createDashboardStatisticsMemoryCache({ now: () => now })
+  const key = "actor:admin:dashboard-statistics-v1:overview:all:all::"
+
+  await assert.rejects(
+    cache.load(key, async () => {
+      calls += 1
+      return snapshot()
+    }),
+    /dashboard_statistics_snapshot_expired/,
+  )
+  await assert.rejects(
+    cache.load(key, async () => {
+      calls += 1
+      return { data: { unsafe: true } }
+    }),
+    /dashboard_statistics_response_invalid/,
+  )
+  assert.deepEqual(
+    await cache.load(key, async () => {
+      calls += 1
+      return snapshot({
+        value: 3,
+        generatedAt: "2026-08-14T00:10:00.001Z",
+        expiresAt: "2026-08-14T00:20:00.001Z",
+      })
+    }),
+    snapshot({
+      value: 3,
+      generatedAt: "2026-08-14T00:10:00.001Z",
+      expiresAt: "2026-08-14T00:20:00.001Z",
+    }),
+  )
+  assert.equal(calls, 3)
+})
+
+test("force refresh stays pending across StrictMode cleanup and dependency abort until success", () => {
+  assert.equal(typeof cacheModule.createDashboardStatisticsForceIntent, "function")
+  const initial = cacheModule.createDashboardStatisticsForceIntent()
+  const requested = cacheModule.requestDashboardStatisticsForce(initial)
+  assert.equal(cacheModule.isDashboardStatisticsForcePending(requested), true)
+
+  const strictModeCleanup = cacheModule.settleDashboardStatisticsForce(requested, {
+    revision: requested.requestedRevision,
+    completed: false,
+  })
+  assert.deepEqual(strictModeCleanup, requested)
+  assert.equal(cacheModule.isDashboardStatisticsForcePending(strictModeCleanup), true)
+
+  const dependencyAbort = cacheModule.settleDashboardStatisticsForce(strictModeCleanup, {
+    revision: requested.requestedRevision,
+    completed: false,
+  })
+  assert.equal(cacheModule.isDashboardStatisticsForcePending(dependencyAbort), true)
+
+  const completed = cacheModule.settleDashboardStatisticsForce(dependencyAbort, {
+    revision: requested.requestedRevision,
+    completed: true,
+  })
+  assert.equal(cacheModule.isDashboardStatisticsForcePending(completed), false)
+})
+
+test("keyed snapshots never expose the prior tab, preset, or filter result", () => {
+  assert.equal(typeof cacheModule.dashboardStatisticsSnapshotForKey, "function")
+  const overviewKey = "actor:admin:dashboard-statistics-v1:overview:all:all::"
+  const overviewResult = { key: overviewKey, snapshot: snapshot() }
+
+  assert.deepEqual(
+    cacheModule.dashboardStatisticsSnapshotForKey(overviewResult, overviewKey),
+    snapshot(),
+  )
+  for (const changedKey of [
+    "actor:admin:dashboard-statistics-v1:textbooks:all::2026-05-17:2026-08-14",
+    "actor:admin:dashboard-statistics-v1:textbooks:all::2026-02-16:2026-08-14",
+    "actor:admin:dashboard-statistics-v1:overview:math:all::",
+  ]) {
+    assert.equal(cacheModule.dashboardStatisticsSnapshotForKey(overviewResult, changedKey), null)
+  }
 })
 
 test("range presets are tab-specific, URL allowlisted, and use local calendar bounds", () => {
