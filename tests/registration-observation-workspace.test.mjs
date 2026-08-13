@@ -921,6 +921,17 @@ test("save and withdrawal dialogs wire guarded close and explicit focus return o
   )
 })
 
+test("nested observation confirmations render above the registration detail modal", async () => {
+  const source = await readSource("src/features/tasks/registration-observation-editor.tsx")
+  const dialogContents = [...source.matchAll(/<DialogContent([\s\S]*?)>/g)].map((match) => match[1])
+
+  assert.equal(dialogContents.length, 2, "예약 저장과 청강 철회 확인창을 모두 검사한다")
+  for (const content of dialogContents) {
+    assert.match(content, /className="z-\[90\]"/)
+    assert.match(content, /overlayClassName="z-\[90\]"/)
+  }
+})
+
 test("dialog close focus falls back to the active subject tab before suppressing Radix default", async () => {
   const source = await readSource("src/features/tasks/registration-observation-editor.tsx")
   const fallbackLookup = /document\.getElementById\(`registration-subject-tab-\$\{trackId\}`\)/g

@@ -38,6 +38,7 @@ import { RegistrationApplicationShell } from "./registration-application-shell"
 import { RegistrationApplicationSubjectTabs } from "./registration-application-subject-tabs"
 import {
   RegistrationObservationEditor,
+  buildRegistrationObservationWithdrawalInput,
   canLoadRegistrationObservationWorkspace,
   canUseRegistrationObservationDetail,
   getRegistrationObservationUiErrorMessage,
@@ -1034,6 +1035,16 @@ export function RegistrationApplication({
       directorProfileId: activeGenericTrack.directorProfileId,
     })
     : []
+  const observationWorkflowStatusOptions = activeTrack
+    && isRegistrationObservationWorkflowStatus(activeTrack.workflowStatus)
+    && activeObservationDetail?.currentObservation === null
+    && activeObservationDetail.track.observationReturnWorkflowStatus
+    && canManageActiveObservation
+    ? [{
+        value: activeObservationDetail.track.observationReturnWorkflowStatus,
+        label: REGISTRATION_WORKFLOW_STATUS_LABELS[activeObservationDetail.track.observationReturnWorkflowStatus],
+      }]
+    : []
   async function changeWorkflowStatus(nextStatus: string) {
     if (!activeGenericTrack || nextStatus === activeGenericTrack.workflowStatus || workflowStatusSaving) return
     if (
@@ -1073,6 +1084,40 @@ export function RegistrationApplication({
       }
     } catch (error) {
       onWarning(errorMessage(error, "진행상태를 변경하지 못했습니다. 최신 정보를 확인해 주세요."))
+    } finally {
+      setWorkflowStatusSaving(false)
+    }
+  }
+  async function changeObservationWorkflowStatus(nextStatus: string) {
+    if (
+      !activeTrack
+      || !activeObservationDetail
+      || workflowStatusSaving
+      || nextStatus === activeTrack.workflowStatus
+    ) return
+    const nextObservationStatus = observationWorkflowStatusOptions.find(
+      (option) => option.value === nextStatus,
+    )?.value
+    if (!nextObservationStatus) return
+    setWorkflowStatusSaving(true)
+    try {
+      await registrationObservationActions.withdrawRegistrationObservation(
+        buildRegistrationObservationWithdrawalInput({
+          trackId: activeTrack.id,
+          workflowRevision: activeTrack.workflowRevision,
+          exitKind: "return_to_previous",
+          targetWorkflowStatus: nextObservationStatus,
+          reason: "",
+          requestKey: `registration-observation-withdraw:${activeTrack.id}:${crypto.randomUUID()}`,
+          correction: null,
+        }),
+      )
+      await onReload(activeTrack.id)
+    } catch (error) {
+      onWarning(getRegistrationObservationUiErrorMessage(
+        error,
+        "청강 진행상태를 변경하지 못했습니다. 최신 정보를 확인해 주세요.",
+      ))
     } finally {
       setWorkflowStatusSaving(false)
     }
@@ -1455,7 +1500,18 @@ export function RegistrationApplication({
           ) : activeTrack ? (
             <div data-registration-workflow-status="observation" className="grid min-w-0 gap-1.5">
               <span className="text-xs font-medium text-muted-foreground">진행상태</span>
-              <Badge variant="outline">{REGISTRATION_WORKFLOW_STATUS_LABELS[activeTrack.workflowStatus]}</Badge>
+              <select
+                aria-label={`${activeTrack.subject} 진행상태`}
+                value={activeTrack.workflowStatus}
+                disabled={workflowStatusSaving || observationWorkflowStatusOptions.length === 0}
+                onChange={(event) => void changeObservationWorkflowStatus(event.target.value)}
+                className="h-10 min-w-0 rounded-md border border-primary/30 bg-primary/5 px-3 text-sm font-semibold text-primary outline-none focus:ring-2 focus:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value={activeTrack.workflowStatus}>{REGISTRATION_WORKFLOW_STATUS_LABELS[activeTrack.workflowStatus]}</option>
+                {observationWorkflowStatusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
             </div>
           ) : null}
         </div>

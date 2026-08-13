@@ -1081,6 +1081,8 @@ export function RegistrationObservationEditor({
 
       <Dialog open={saveConfirmOpen} onOpenChange={handleSaveConfirmOpenChange}>
         <DialogContent
+          className="z-[90]"
+          overlayClassName="z-[90]"
           showCloseButton={!saving}
           onEscapeKeyDown={handleDialogEscape}
           onCloseAutoFocus={handleSaveDialogCloseAutoFocus}
@@ -1098,6 +1100,8 @@ export function RegistrationObservationEditor({
 
       <Dialog open={withdrawOpen} onOpenChange={handleWithdrawOpenChange}>
         <DialogContent
+          className="z-[90]"
+          overlayClassName="z-[90]"
           showCloseButton={!saving}
           onEscapeKeyDown={handleDialogEscape}
           onCloseAutoFocus={handleWithdrawDialogCloseAutoFocus}
