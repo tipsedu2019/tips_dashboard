@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -7,6 +8,46 @@ import test from "node:test";
 
 const captureUrl = new URL("../scripts/capture-dashboard-free-tier-catalog.mjs", import.meta.url);
 const runnerUrl = new URL("../scripts/run-isolated-supabase-db-tests.mjs", import.meta.url);
+const docker = "/usr/local/bin/docker";
+const postgres17Image = "public.ecr.aws/supabase/postgres:17.6.1.156";
+
+function captureScopeFixture(functions = ["public.get_dashboard_summary_sources_v1()"]) {
+  return {
+    version: 1, schemas: ["public"], relations: ["public.classes"], types: ["public.class_status"], sequences: ["public.classes_id_seq"],
+    collations: [], functions, roles: ["anon"], triggerTables: ["public.classes"],
+    requiredKinds: ["role", "schema", "type", "sequence", "table", "default", "constraint", "index", "function", "rls", "policy", "grant", "trigger"], forbiddenTerms: ["vault", "cron", "webhook", "secret", "token"],
+  };
+}
+
+async function withPostgres17(t, run) {
+  const name = `tips-task1-postgres17-${process.pid}-${randomBytes(4).toString("hex")}`;
+  const invoke = (args, options = {}) => spawnSync(docker, args, { encoding: "utf8", timeout: 60_000, ...options });
+  const started = invoke(["run", "--rm", "--detach", "--name", name, "--env", "POSTGRES_PASSWORD=task-local-only", postgres17Image]);
+  assert.equal(started.status, 0, started.stderr);
+  t.after(() => invoke(["rm", "--force", name]));
+  let consecutiveReadyChecks = 0;
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const result = invoke(["exec", name, "psql", "--quiet", "--tuples-only", "--no-align", "--username", "supabase_admin", "--dbname", "postgres", "--command", "select 1"]);
+    consecutiveReadyChecks = result.status === 0 ? consecutiveReadyChecks + 1 : 0;
+    if (consecutiveReadyChecks === 3) break;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  assert.equal(consecutiveReadyChecks, 3, "isolated PostgreSQL 17 did not become stably ready");
+  const psql = (sql) => invoke(["exec", "--interactive", name, "psql", "--quiet", "--tuples-only", "--no-align", "--set", "ON_ERROR_STOP=1", "--username", "supabase_admin", "--dbname", "postgres"], { input: sql });
+  const setup = psql(`
+    create schema if not exists supabase_migrations;
+    create table if not exists supabase_migrations.schema_migrations(version text, name text, statements_sha256 text);
+    create schema if not exists dashboard_private;
+    create or replace function dashboard_private.continuous_class_schedule_hash_v1(value jsonb)
+    returns text language sql immutable as $$ select repeat('0', 64) $$;
+    create or replace function public.get_dashboard_conflict_sources_v1(date, date)
+    returns void language plpgsql as $$ begin end $$;
+    do $$ begin create role anon; exception when duplicate_object then null; end $$;
+    create extension if not exists pgtap;
+  `);
+  assert.equal(setup.status, 0, setup.stderr);
+  return run({ psql });
+}
 
 async function makeRepo(t) {
   const root = await mkdtemp(join(tmpdir(), "tips-dashboard-baseline-"));
@@ -29,11 +70,7 @@ async function makeRepo(t) {
 }
 
 async function writeCaptureScope(root) {
-  await writeFile(join(root, "scripts/fixtures/dashboard-free-tier-baseline-scope.json"), JSON.stringify({
-    version: 1, schemas: ["public"], relations: ["public.classes"], types: ["public.class_status"], sequences: ["public.classes_id_seq"],
-    collations: [], functions: ["public.get_dashboard_summary_sources_v1()"], roles: ["anon"], triggerTables: ["public.classes"],
-    requiredKinds: ["role", "schema", "type", "sequence", "table", "default", "constraint", "index", "function", "rls", "policy", "grant", "trigger"], forbiddenTerms: ["vault", "cron", "webhook", "secret", "token"],
-  }));
+  await writeFile(join(root, "scripts/fixtures/dashboard-free-tier-baseline-scope.json"), JSON.stringify(captureScopeFixture()));
 }
 
 test("catalog capture refuses unapproved or incomplete production reads before HTTP", async () => {
@@ -182,12 +219,19 @@ test("reviewed catalog capture atomically writes normalized catalog, baseline SQ
   const catalog = JSON.parse(await readFile(join(active, "catalog.json"), "utf8"));
   const baseline = await readFile(join(active, "baseline.sql"), "utf8");
   const parity = await readFile(join(active, "parity.sql"), "utf8");
+  const canonicalCatalog = await readFile(join(root, output[0]), "utf8");
+  const canonicalBaseline = await readFile(join(root, output[1]), "utf8");
+  const canonicalParity = await readFile(join(root, output[2]), "utf8");
   assert.equal(result.captureStatus, "reviewed");
   assert.equal(catalog.catalog[0].definition, undefined);
   assert.equal(catalog.catalog.find((entry) => entry.objectKind === "table" && entry.identity === "classes").definitionSha256, createHash("sha256").update("create table public.classes (id text primary key)").digest("hex"));
   assert.match(baseline, /create table public\.classes/u);
   assert.match(parity, /pg_get_functiondef/u);
   assert.match(parity, /catalog trigger public\.classes\.before\.01\.normalize fingerprint/u);
+  assert.equal(canonicalCatalog, JSON.stringify(catalog, null, 2) + "\n");
+  assert.equal(canonicalBaseline, baseline);
+  assert.equal(canonicalParity, parity);
+  assert.deepEqual(pointer.artifactPaths, { catalog: output[0], baseline: output[1], parityTest: output[2] });
 });
 
 test("capture leaves all target artifacts unchanged for redirect, 405, and malformed JSON", async (t) => {
@@ -291,6 +335,31 @@ test("incomplete required catalog kinds and a post-rename publication failure le
   assert.deepEqual(JSON.parse(await readFile(pointer, "utf8")), { captureId: "prior" });
 });
 
+test("canonical artifact publication rolls back earlier files when a later rename fails", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const root = await makeRepo(t);
+  await writeCaptureScope(root);
+  const originMainSha = "c".repeat(40);
+  const catalogPath = join(root, "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json");
+  const baselinePath = join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql");
+  const pointerPath = join(root, "supabase/test-baselines/dashboard-free-tier-v1.active.json");
+  const priorCatalog = await readFile(catalogPath, "utf8");
+  await rm(baselinePath);
+  await mkdir(baselinePath);
+  await writeFile(join(baselinePath, "sentinel"), "keep\n");
+  await writeFile(pointerPath, JSON.stringify({ captureId: "prior" }));
+  await assert.rejects(captureDashboardFreeTierCatalog({
+    root,
+    argv: ["--mode", "execute", "--authorized", "--request-id", "5f77e691-9f40-49aa-9bc4-0be2321e2c8f", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
+    env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+    gitOriginMainSha: async () => originMainSha,
+    fetch: async () => new Response(JSON.stringify({ serverMajor: 17, migrationLedger: [{ version: "20260813093446", name: "registration_observation_legacy_schedule_slot_catalogs", statements_sha256: "a".repeat(64) }], catalog: completeCatalogFixture() }), { status: 201 }),
+  }));
+  assert.equal(await readFile(catalogPath, "utf8"), priorCatalog);
+  assert.equal(await readFile(join(baselinePath, "sentinel"), "utf8"), "keep\n");
+  assert.deepEqual(JSON.parse(await readFile(pointerPath, "utf8")), { captureId: "prior" });
+});
+
 test("fixed read-only capture statement enumerates every scoped catalog kind without raw definition output", async () => {
   const { dashboardFreeTierCatalogStatement } = await import(captureUrl.href);
   const statement = dashboardFreeTierCatalogStatement();
@@ -304,19 +373,52 @@ test("fixed read-only capture statement enumerates every scoped catalog kind wit
   assert.match(statement, /begin read only/u);
 });
 
+test("PostgreSQL 17 executes the fixed capture statement and returns one JSON object", async (t) => {
+  const { dashboardFreeTierCatalogStatement } = await import(captureUrl.href);
+  await withPostgres17(t, ({ psql }) => {
+    const result = psql(dashboardFreeTierCatalogStatement());
+    assert.equal(result.status, 0, result.stderr);
+    const rows = result.stdout.trim().split("\n").filter(Boolean);
+    assert.equal(rows.length, 1);
+    const payload = JSON.parse(rows[0]);
+    assert.equal(payload.serverMajor, 17);
+    assert.deepEqual(payload.migrationLedger, []);
+    assert.ok(Array.isArray(payload.catalog));
+    assert.ok(payload.catalog.some((entry) => entry.objectKind === "function" && entry.identity === "get_dashboard_conflict_sources_v1(date,date)"));
+  });
+});
+
+test("function identities accept spaced or unspaced separators but reject different types", async () => {
+  const { normalizeDashboardFreeTierCatalog, normalizeDashboardFunctionIdentity } = await import(captureUrl.href);
+  assert.equal(normalizeDashboardFunctionIdentity("get_dashboard_conflict_sources_v1(date, date)"), "get_dashboard_conflict_sources_v1(date,date)");
+  assert.equal(normalizeDashboardFunctionIdentity("get_dashboard_conflict_sources_v1(date,date)"), "get_dashboard_conflict_sources_v1(date,date)");
+  const scope = captureScopeFixture(["public.get_dashboard_conflict_sources_v1(date,date)"]);
+  const spaced = completeCatalogFixture("get_dashboard_conflict_sources_v1(date, date)");
+  const normalized = normalizeDashboardFreeTierCatalog(spaced, scope);
+  assert.equal(normalized.find((entry) => entry.objectKind === "function").identity, "get_dashboard_conflict_sources_v1(date,date)");
+  assert.throws(
+    () => normalizeDashboardFreeTierCatalog(completeCatalogFixture("get_dashboard_conflict_sources_v1(timestamp,date)"), scope),
+    /dashboard_free_tier_catalog_scope_drift/,
+  );
+});
+
 test("capture rejects non-canonical documented artifact paths before HTTP", async () => {
   const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
   const originMainSha = "a".repeat(40);
-  await assert.rejects(captureDashboardFreeTierCatalog({
-    argv: ["--mode", "execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/other.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
-    env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
-    gitOriginMainSha: async () => originMainSha,
-    fetch: async () => { throw new Error("HTTP must not run"); },
-  }), /dashboard_free_tier_catalog_output_path_invalid/);
+  const canonical = ["supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "supabase/test-baselines/dashboard-free-tier-v1.sql", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"];
+  for (const index of [0, 1, 2]) {
+    const output = canonical.with(index, `supabase/test-baselines/noncanonical-${index}.json`);
+    await assert.rejects(captureDashboardFreeTierCatalog({
+      argv: ["--mode", "execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", output[0], "--baseline", output[1], "--parity-test", output[2]],
+      env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+      gitOriginMainSha: async () => originMainSha,
+      fetch: async () => { throw new Error("HTTP must not run"); },
+    }), /dashboard_free_tier_catalog_output_path_invalid/);
+  }
 });
 
 test("generated parity uses pg catalog definitions and detects representative object drift", async (t) => {
-  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const { buildDashboardFreeTierParitySql, captureDashboardFreeTierCatalog } = await import(captureUrl.href);
   const root = await makeRepo(t);
   await writeCaptureScope(root);
   const originMainSha = "b".repeat(40);
@@ -330,9 +432,18 @@ test("generated parity uses pg catalog definitions and detects representative ob
   const parity = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1-captures", pointer.captureId, "parity.sql"), "utf8");
   for (const expression of ["pg_get_functiondef", "pg_get_constraintdef", "pg_get_indexdef", "pg_get_triggerdef", "pg_policy", "pg_roles", "aclexplode"]) assert.match(parity, new RegExp(expression));
   assert.doesNotMatch(parity, /is\(encode\(digest\(\$\$[a-f0-9]{64}:/u);
+  await withPostgres17(t, ({ psql }) => {
+    const catalog = [{ objectKind: "role", schema: "", identity: "anon", definitionSha256: "0".repeat(64) }];
+    const matching = psql(`set search_path to public, extensions, pg_catalog;\n${buildDashboardFreeTierParitySql(catalog)}`);
+    assert.equal(matching.status, 0, matching.stdout + matching.stderr);
+    assert.match(matching.stdout, /ok 1 - catalog role \.anon fingerprint/u);
+    const drifted = psql(`set search_path to public, extensions, pg_catalog;\n${buildDashboardFreeTierParitySql([{ ...catalog[0], definitionSha256: "a".repeat(64) }])}`);
+    assert.equal(drifted.status, 0, drifted.stderr);
+    assert.match(drifted.stdout, /not ok 1 - catalog role \.anon fingerprint/u);
+  });
 });
 
-function completeCatalogFixture() {
+function completeCatalogFixture(functionIdentity = "get_dashboard_summary_sources_v1()") {
   return [
     { objectKind: "role", schema: "", identity: "anon", definition: "create role anon" },
     { objectKind: "schema", schema: "", identity: "public", definition: "create schema public" },
@@ -342,7 +453,7 @@ function completeCatalogFixture() {
     { objectKind: "default", schema: "public", identity: "classes.id", definition: "alter table public.classes alter column id set default 'x'" },
     { objectKind: "constraint", schema: "public", identity: "classes.classes_pkey", definition: "alter table public.classes add constraint classes_pkey primary key (id)" },
     { objectKind: "index", schema: "public", identity: "classes_id_idx", definition: "create index classes_id_idx on public.classes (id)" },
-    { objectKind: "function", schema: "public", identity: "get_dashboard_summary_sources_v1()", definition: "create function public.get_dashboard_summary_sources_v1() returns jsonb language sql as 'select ''{}''::jsonb'" },
+    { objectKind: "function", schema: "public", identity: functionIdentity, definition: `create function public.${functionIdentity} returns jsonb language sql as 'select ''{}''::jsonb'` },
     { objectKind: "rls", schema: "public", identity: "classes", definition: "alter table public.classes enable row level security" },
     { objectKind: "policy", schema: "public", identity: "classes.authenticated_select", definition: "create policy authenticated_select on public.classes for select to authenticated using (true)" },
     { objectKind: "grant", schema: "public", identity: "classes.authenticated", definition: "grant select on public.classes to authenticated" },
