@@ -10,20 +10,28 @@ const BASELINE_SHA = "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101"
 export const QUERY_SURFACE_DEBT_MANIFEST = Object.freeze([
   { surface: "tasks", file: "src/features/tasks/ops-task-service.ts", symbol: "readTaskScopedTable", violation: "task_id_batch_in_list", baselineSha: BASELINE_SHA },
   { surface: "tasks", file: "src/features/tasks/ops-task-service.ts", symbol: "readTaskScopedTable", violation: "list_abort_signal_missing", baselineSha: BASELINE_SHA },
+  { surface: "tasks", file: "src/features/tasks/ops-task-service.ts", symbol: "readTaskScopedTable", violation: "list_limit_missing", baselineSha: BASELINE_SHA },
+  { surface: "tasks", file: "src/features/tasks/ops-task-service.ts", symbol: "readTaskScopedTable", violation: "list_projection_unresolved", baselineSha: BASELINE_SHA },
   { surface: "tasks", file: "src/features/tasks/ops-task-service.ts", symbol: "readTaskScopedTable", violation: "list_retry_false_missing", baselineSha: BASELINE_SHA },
   { surface: "tasks", file: "src/features/tasks/ops-task-service.ts", symbol: "readOpsTaskWorkspaceData", violation: "list_select_star", baselineSha: BASELINE_SHA },
   { surface: "tasks", file: "src/features/tasks/ops-task-service.ts", symbol: "readOpsTaskWorkspaceData", violation: "list_abort_signal_missing", baselineSha: BASELINE_SHA },
+  { surface: "tasks", file: "src/features/tasks/ops-task-service.ts", symbol: "readOpsTaskWorkspaceData", violation: "list_limit_missing", baselineSha: BASELINE_SHA },
   { surface: "tasks", file: "src/features/tasks/ops-task-service.ts", symbol: "readOpsTaskWorkspaceData", violation: "list_retry_false_missing", baselineSha: BASELINE_SHA },
   { surface: "management", file: "src/features/management/management-service.js", symbol: "selectRows", violation: "list_select_star", baselineSha: BASELINE_SHA },
   { surface: "management", file: "src/features/management/management-service.js", symbol: "selectRows", violation: "list_abort_signal_missing", baselineSha: BASELINE_SHA },
+  { surface: "management", file: "src/features/management/management-service.js", symbol: "selectRows", violation: "list_limit_missing", baselineSha: BASELINE_SHA },
   { surface: "management", file: "src/features/management/management-service.js", symbol: "selectRows", violation: "list_retry_false_missing", baselineSha: BASELINE_SHA },
   { surface: "management", file: "src/features/management/use-management-records.ts", symbol: "useManagementRecords", violation: "list_select_star", baselineSha: BASELINE_SHA },
   { surface: "management", file: "src/features/management/use-management-records.ts", symbol: "useManagementRecords", violation: "list_abort_signal_missing", baselineSha: BASELINE_SHA },
+  { surface: "management", file: "src/features/management/use-management-records.ts", symbol: "useManagementRecords", violation: "list_limit_missing", baselineSha: BASELINE_SHA },
   { surface: "management", file: "src/features/management/use-management-records.ts", symbol: "useManagementRecords", violation: "list_retry_false_missing", baselineSha: BASELINE_SHA },
   { surface: "operations", file: "src/features/operations/use-operations-workspace-data.ts", symbol: "readTable", violation: "list_select_star", baselineSha: BASELINE_SHA },
+  { surface: "operations", file: "src/features/operations/use-operations-workspace-data.ts", symbol: "readTable", violation: "list_limit_missing", baselineSha: BASELINE_SHA },
   { surface: "academic", file: "src/features/academic/use-academic-workspace-data.ts", symbol: "readTable", violation: "list_select_star", baselineSha: BASELINE_SHA },
+  { surface: "academic", file: "src/features/academic/use-academic-workspace-data.ts", symbol: "readTable", violation: "list_limit_missing", baselineSha: BASELINE_SHA },
   { surface: "public", file: "src/server/public-classes-payload.js", symbol: "buildPublicClassesPayload", violation: "list_select_star", baselineSha: BASELINE_SHA },
   { surface: "public", file: "src/server/public-classes-payload.js", symbol: "buildPublicClassesPayload", violation: "list_abort_signal_missing", baselineSha: BASELINE_SHA },
+  { surface: "public", file: "src/server/public-classes-payload.js", symbol: "buildPublicClassesPayload", violation: "list_limit_missing", baselineSha: BASELINE_SHA },
   { surface: "public", file: "src/server/public-classes-payload.js", symbol: "buildPublicClassesPayload", violation: "list_retry_false_missing", baselineSha: BASELINE_SHA },
 ])
 
@@ -100,20 +108,41 @@ function isBudgetedList({ file, symbol, source }) {
 }
 
 function analyzeBlock({ surface, file, symbol, source }) {
-  const hasRequest = /\.(?:from|rpc)\(/u.test(source)
+  const hasFrom = /\.from\s*\(/u.test(source)
+  const hasRpc = /\.rpc\s*\(/u.test(source)
+  const hasComputedQueryMethod = /\[\s*["'](?:from|rpc)["']\s*\]\s*\(/u.test(source)
+  const hasRequest = hasFrom || hasRpc || hasComputedQueryMethod
   if (!hasRequest || !isBudgetedList({ file, symbol, source })) return []
   const constants = primitiveConstants(source)
   const reasons = []
-  for (const match of source.matchAll(/\.select\(\s*([^)]*?)\s*\)/gu)) {
-    if (argumentValue(match[1], constants) === "*") reasons.push("list_select_star")
+  if (hasComputedQueryMethod && !hasFrom && !hasRpc) reasons.push("list_query_method_unresolved")
+  if (hasFrom) {
+    const projections = [...source.matchAll(/\.select\s*\(\s*([^)]*?)\s*\)/gu)]
+    if (projections.length === 0) reasons.push("list_projection_missing")
+    for (const match of projections) {
+      const value = argumentValue(match[1], constants)
+      if (value === undefined) reasons.push("list_projection_unresolved")
+      else if (typeof value !== "string" || value.trim() === "") reasons.push("list_projection_invalid")
+      else if (value === "*") reasons.push("list_select_star")
+    }
+    const limits = [...source.matchAll(/\.limit\s*\(\s*([^)]*?)\s*\)/gu)]
+    if (limits.length === 0) reasons.push("list_limit_missing")
+    for (const match of limits) {
+      const value = argumentValue(match[1], constants)
+      if (value === undefined) reasons.push("list_limit_unresolved")
+      else if (typeof value !== "number" || !Number.isInteger(value) || value < 1) reasons.push("list_limit_invalid")
+      else if (value > 30) reasons.push("list_limit_exceeds_30")
+    }
   }
-  for (const match of source.matchAll(/\.limit\(\s*([^)]*?)\s*\)/gu)) {
-    const value = argumentValue(match[1], constants)
-    if (typeof value === "number" && value > 30) reasons.push("list_limit_exceeds_30")
-  }
-  for (const match of source.matchAll(/\bp_limit\s*:\s*([^,}\n]+)/gu)) {
-    const value = argumentValue(match[1], constants)
-    if (typeof value === "number" && value > 30) reasons.push("rpc_page_limit_exceeds_30")
+  if (hasRpc) {
+    const limits = [...source.matchAll(/\bp_limit\s*:\s*([^,}\n]+)/gu)]
+    if (limits.length === 0) reasons.push("rpc_page_limit_missing")
+    for (const match of limits) {
+      const value = argumentValue(match[1], constants)
+      if (value === undefined) reasons.push("rpc_page_limit_unresolved")
+      else if (typeof value !== "number" || !Number.isInteger(value) || value < 1) reasons.push("rpc_page_limit_invalid")
+      else if (value > 30) reasons.push("rpc_page_limit_exceeds_30")
+    }
   }
   if (!/\.abortSignal\(\s*AbortSignal\.timeout\(\s*8_000\s*\)\s*\)/u.test(source)) reasons.push("list_abort_signal_missing")
   if (!/\.retry\(\s*false\s*\)/u.test(source)) reasons.push("list_retry_false_missing")

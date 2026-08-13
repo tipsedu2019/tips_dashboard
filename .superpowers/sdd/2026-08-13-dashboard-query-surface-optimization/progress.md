@@ -6,3 +6,4 @@ Prior plan commits: 7e364c1b..c820e853
 
 Task 1: `a7813801` established the query-surface budget verifier and cursor contracts.
 Task 1 fix round 1: enforce manifest-listed symbols, resolve local query constants, and validate decoded cursor scopes.
+Task 1 fix round 2: fail closed for opaque list projection, limit, RPC, and computed query-entry expressions while preserving statically resolved bounded queries.

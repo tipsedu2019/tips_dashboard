@@ -97,6 +97,12 @@ test("query budget verifier inspects manifest-listed symbols even when their nam
       file: "src/features/management/management-service.js",
       symbol: "selectRows",
       surface: "management",
+      reason: "list_limit_missing",
+    },
+    {
+      file: "src/features/management/management-service.js",
+      symbol: "selectRows",
+      surface: "management",
       reason: "list_retry_false_missing",
     },
     {
@@ -132,6 +138,88 @@ test("query budget verifier resolves local projection and limit constants withou
       reason: "list_select_star",
     },
   ])
+})
+
+test("manifest-listed list symbols reject an opaque projection expression", async () => {
+  const result = await verifyFixture({
+    surface: "management",
+    file: "src/features/management/management-service.js",
+    source: `async function selectRows(client, table) {
+  const projection = ["*"].join("")
+  return client.from(table).select(projection).limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/management/management-service.js",
+    symbol: "selectRows",
+    surface: "management",
+    reason: "list_projection_unresolved",
+  }])
+})
+
+test("manifest-listed list symbols reject an opaque limit expression", async () => {
+  const result = await verifyFixture({
+    surface: "management",
+    file: "src/features/management/management-service.js",
+    source: `async function selectRows(client, table) {
+  const pageSize = Number("31")
+  return client.from(table).select("id").limit(pageSize).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/management/management-service.js",
+    symbol: "selectRows",
+    surface: "management",
+    reason: "list_limit_unresolved",
+  }])
+})
+
+test("manifest-listed list symbols reject a computed query entrypoint", async () => {
+  const result = await verifyFixture({
+    surface: "management",
+    file: "src/features/management/management-service.js",
+    source: `async function selectRows(client, table) {
+  return client["from"](table).select("id").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/management/management-service.js",
+    symbol: "selectRows",
+    surface: "management",
+    reason: "list_query_method_unresolved",
+  }])
+})
+
+test("statically resolved explicit list projection and page limit remain allowed", async () => {
+  const result = await verifyFixture({
+    surface: "management",
+    file: "src/features/management/management-service.js",
+    source: `async function selectRows(client, table) {
+  const projection = "id,name"
+  const pageSize = 30
+  return client.from(table).select(projection).limit(pageSize).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result, { ok: true, violations: [] })
+})
+
+test("statically resolved bounded RPC page arguments remain allowed", async () => {
+  const result = await verifyFixture({
+    source: `export async function listTasks(client) {
+  return client.rpc("list_ops_task_page_v1", { p_limit: 30 }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result, { ok: true, violations: [] })
 })
 
 test("query budget verifier rejects an RPC page limit over 30", async () => {

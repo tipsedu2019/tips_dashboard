@@ -45,3 +45,11 @@ Task 2–6 should remove only their completed surface's manifest rows in the sam
 - New list-path detection is independent of names: a query with a page limit, RPC `p_limit`, or task-ID batch list read is inspected. Simple local string/numeric constants are resolved before checking `.select(...)`, `.limit(...)`, and `p_limit`, so `columns = "*"` and `pageSize = 31` cannot bypass the guard.
 - `decodeKeysetCursor` now validates both the envelope scope and the expected scope as exact 64-character SHA-256 hex strings before scope comparison.
 - RED-first follow-up fixtures were added for all three regressions; the focused suite now reports **15 pass, 0 fail**.
+
+## Fix round 2 — fail-closed query expressions
+
+- Manifest-listed list symbols now receive a complete direct-query contract: direct `.from(...)` lists require a statically resolved explicit projection and positive integer limit of at most 30; direct `.rpc(...)` lists require a statically resolved `p_limit` in the same range.
+- Opaque projection expressions, opaque limits, and computed query entrypoints receive distinct exact violation codes: `list_projection_unresolved`, `list_limit_unresolved`, and `list_query_method_unresolved`.
+- Existing violations caused by unresolved/missing projection or limit contracts were added as exact literal baseline-debt rows only for the affected current symbols. No wildcard exception was added.
+- The verifier continues to allow direct `.from(table)` with a statically resolved explicit projection/page size and a direct RPC with `p_limit: 30`.
+- RED-first fixtures cover `['*'].join('')`, `Number('31')`, and `client['from'](...)`; the focused suite reports **20 pass, 0 fail**.
