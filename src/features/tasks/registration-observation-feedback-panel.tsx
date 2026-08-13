@@ -94,6 +94,34 @@ export function canEditRegistrationObservationFeedback(input: {
     || (input.decisionKind === null && input.isAssignedTeacher)
 }
 
+export function getRegistrationObservationFeedbackPanelAvailability(
+  detail: Pick<RegistrationObservationFeedbackDetail, "status" | "startsAt" | "endsAt">,
+  nowMs: number,
+) {
+  const startsAtMs = Date.parse(detail.startsAt)
+  const endsAtMs = Date.parse(detail.endsAt)
+  const validClock = Number.isFinite(nowMs)
+    && Number.isFinite(startsAtMs)
+    && Number.isFinite(endsAtMs)
+
+  if (!validClock) {
+    return {
+      submitFeedback: false,
+      submitNoShow: false,
+      recordAttendance: false,
+    } as const
+  }
+
+  return {
+    submitFeedback: (
+      detail.status === "scheduled"
+      || detail.status === "attended_feedback_pending"
+    ) && nowMs >= endsAtMs,
+    submitNoShow: detail.status === "scheduled" && nowMs >= startsAtMs,
+    recordAttendance: detail.status === "scheduled" && nowMs >= startsAtMs,
+  } as const
+}
+
 export function canKeepRegistrationObservationFeedbackHistoryMounted(input: {
   canManageCase: boolean
   observationAttemptCount: number
@@ -191,6 +219,7 @@ export function applyRegistrationObservationFeedbackPanelOutcome(
 export function buildRegistrationObservationFeedbackSavePlan(
   state: RegistrationObservationFeedbackPanelState,
   requestKey: string,
+  nowMs = Date.now(),
 ):
   | Readonly<{ ok: false; message: string }>
   | Readonly<{
@@ -241,6 +270,13 @@ export function buildRegistrationObservationFeedbackSavePlan(
     : draft.attendance
   if (attendance !== "attended" && attendance !== "no_show") {
     return { ok: false, message: "참석 여부를 선택하세요." }
+  }
+  const availability = getRegistrationObservationFeedbackPanelAvailability(detail, nowMs)
+  if (attendance === "no_show" && !availability.submitNoShow) {
+    return { ok: false, message: "노쇼 처리는 수업 시작 후 저장할 수 있습니다." }
+  }
+  if (attendance === "attended" && !availability.submitFeedback) {
+    return { ok: false, message: "참석 피드백은 수업 종료 후 저장할 수 있습니다." }
   }
   if (attendance === "no_show") {
     return {
@@ -479,6 +515,10 @@ export function RegistrationObservationFeedbackPanel({
   const requestKeysRef = useRef(new Map<string, string>())
   const mutationGuardRef = useRef(false)
   const proxyLabel = getRegistrationObservationProxyLabel(state.detail)
+  const availability = getRegistrationObservationFeedbackPanelAvailability(
+    state.detail,
+    Date.now(),
+  )
   const feedbackEditable = canEditFeedback && (
     state.detail.status === "scheduled"
     || state.detail.status === "attended_feedback_pending"
@@ -487,6 +527,10 @@ export function RegistrationObservationFeedbackPanel({
   const decisionEditable = canDecide
     && state.detail.decisionKind === null
     && (state.detail.status === "completed" || state.detail.status === "no_show")
+  const feedbackCommitAvailable = state.detail.status === "completed"
+    || (state.draft.attendance === "no_show"
+      ? availability.submitNoShow
+      : availability.submitFeedback)
 
   useEffect(() => {
     dispatch({ type: "reset", detail })
@@ -556,7 +600,11 @@ export function RegistrationObservationFeedbackPanel({
   }
 
   async function recordAttendance() {
-    if (mutationGuardRef.current || state.detail.status !== "scheduled") return
+    if (
+      mutationGuardRef.current
+      || state.detail.status !== "scheduled"
+      || !getRegistrationObservationFeedbackPanelAvailability(state.detail, Date.now()).recordAttendance
+    ) return
     const fingerprint = JSON.stringify({
       observationId: state.detail.observationId,
       revision: state.detail.revision,
@@ -718,15 +766,21 @@ export function RegistrationObservationFeedbackPanel({
             </div>
           ) : null}
           <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={() => void commitFeedback()} disabled={state.saving}>
+            <Button type="button" onClick={() => void commitFeedback()} disabled={state.saving || !feedbackCommitAvailable}>
               {state.saving ? "저장 중" : state.detail.status === "completed" ? "피드백 정정" : "피드백 저장"}
             </Button>
             {canRecordAttendance && state.detail.status === "scheduled" ? (
-              <Button type="button" variant="outline" onClick={() => void recordAttendance()} disabled={state.saving}>
+              <Button type="button" variant="outline" onClick={() => void recordAttendance()} disabled={state.saving || !availability.recordAttendance}>
                 참석만 확인
               </Button>
             ) : null}
           </div>
+          {state.detail.status === "scheduled" && !availability.recordAttendance ? (
+            <p className="text-sm text-muted-foreground">수업 시작 후 노쇼 또는 참석 확인을 사용할 수 있습니다.</p>
+          ) : null}
+          {state.draft.attendance !== "no_show" && !availability.submitFeedback ? (
+            <p className="text-sm text-muted-foreground">수업 종료 후 참석 피드백을 저장할 수 있습니다.</p>
+          ) : null}
         </div>
       ) : null}
 

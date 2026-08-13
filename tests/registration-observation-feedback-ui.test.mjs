@@ -97,6 +97,10 @@ async function loadPanelModel() {
           : undefined,
       formatRegistrationObservationFeedbackKst,
       getRegistrationObservationProxyLabel,
+      getRegistrationObservationFeedbackPanelAvailability:
+        typeof getRegistrationObservationFeedbackPanelAvailability === "function"
+          ? getRegistrationObservationFeedbackPanelAvailability
+          : undefined,
       getRegistrationObservationFeedbackRefreshPlan:
         typeof getRegistrationObservationFeedbackRefreshPlan === "function"
           ? getRegistrationObservationFeedbackRefreshPlan
@@ -129,6 +133,63 @@ async function loadPanelModel() {
   })
   return sandboxModule.exports
 }
+
+test("manager feedback respects the exact class start and end boundaries", async () => {
+  const {
+    buildRegistrationObservationFeedbackSavePlan,
+    createRegistrationObservationFeedbackPanelState,
+    getRegistrationObservationFeedbackPanelAvailability,
+  } = await loadPanelModel()
+  assert.equal(typeof getRegistrationObservationFeedbackPanelAvailability, "function")
+
+  const scheduled = {
+    ...detail,
+    status: "scheduled",
+    attendance: null,
+    suitabilityResult: null,
+    feedbackReason: null,
+    feedbackSubmittedAt: null,
+    feedbackSubmittedByName: null,
+    proxySubmitted: false,
+    startsAt: "2026-08-14T10:30:00.000Z",
+    endsAt: "2026-08-14T12:30:00.000Z",
+  }
+  const beforeStart = Date.parse("2026-08-14T10:29:59.999Z")
+  const atStart = Date.parse(scheduled.startsAt)
+  const atEnd = Date.parse(scheduled.endsAt)
+
+  assert.deepEqual(
+    { ...getRegistrationObservationFeedbackPanelAvailability(scheduled, beforeStart) },
+    { submitFeedback: false, submitNoShow: false, recordAttendance: false },
+  )
+  assert.deepEqual(
+    { ...getRegistrationObservationFeedbackPanelAvailability(scheduled, atStart) },
+    { submitFeedback: false, submitNoShow: true, recordAttendance: true },
+  )
+  assert.deepEqual(
+    { ...getRegistrationObservationFeedbackPanelAvailability(scheduled, atEnd) },
+    { submitFeedback: true, submitNoShow: true, recordAttendance: true },
+  )
+
+  const state = {
+    ...createRegistrationObservationFeedbackPanelState(scheduled),
+    draft: {
+      attendance: "attended",
+      suitabilityResult: "fit",
+      feedbackReason: "수업 참여가 좋았습니다.",
+      correctionReason: "",
+      decisionKind: "",
+    },
+  }
+  assert.deepEqual(
+    { ...buildRegistrationObservationFeedbackSavePlan(state, "before-end", beforeStart) },
+    { ok: false, message: "참석 피드백은 수업 종료 후 저장할 수 있습니다." },
+  )
+  assert.equal(
+    buildRegistrationObservationFeedbackSavePlan(state, "at-end", atEnd).ok,
+    true,
+  )
+})
 
 test("feedback save failure preserves every operator input and exposes a stale reload action", async () => {
   const {

@@ -1,5 +1,5 @@
 begin;
-select plan(69);
+select plan(71);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '120s';
@@ -1710,6 +1710,53 @@ select is(
   'counter appointment observation event audit and receipt roll back together'
 );
 reset role;
+
+update public.teacher_catalogs
+set subjects = array['영어팀']::text[]
+where id = '99100000-0000-4000-8000-000000000101';
+
+do $$
+begin
+  perform dashboard_private.with_continuous_class_schedule_audit_context_v1(
+    '99100000-0000-4000-8000-000000000103',
+    '99100000-0000-4000-8000-000000000199',
+    'registration_observation_booking_test'
+  );
+end;
+$$;
+insert into public.class_lesson_sessions(
+  id, class_id, session_key, session_date, schedule_state, start_time, end_time,
+  teacher_catalog_id, teacher_name_snapshot, classroom_catalog_id,
+  classroom_name_snapshot, origin, revision
+)
+values (
+  '99100000-0000-4000-8000-000000000199',
+  '99100000-0000-4000-8000-000000000103',
+  'booking-team-alias-session', current_date + 30, 'active', '18:00', '20:00',
+  '99100000-0000-4000-8000-000000000101', '청강 예약 원장',
+  '99100000-0000-4000-8000-000000000102', '청강 예약 101호',
+  'manual', 1
+);
+
+set local role authenticated;
+select lives_ok(
+  $$select public.save_class_lesson_session_v1(
+    '99100000-0000-4000-8000-000000000199', 1, 'active', current_date + 30,
+    '18:00', '20:00',
+    '99100000-0000-4000-8000-000000000101',
+    '99100000-0000-4000-8000-000000000102',
+    '', '', '', '99100000-0000-4000-8000-000000000198',
+    '청강 회차 교사 과목 별칭 검증'
+  )$$,
+  'class session save accepts a team-suffixed teacher subject for the same academic subject'
+);
+reset role;
+select is(
+  (select revision from public.class_lesson_sessions
+    where id = '99100000-0000-4000-8000-000000000199'),
+  2::bigint,
+  'team-subject class session save commits the new revision'
+);
 
 select ok(
   not exists (
