@@ -9,6 +9,11 @@
       "fileName": "20260813192115_dashboard_daily_brief.sql",
       "status": "candidate",
       "sha256": "7ce3eaa85df822396728b9e39b5973507a3c1399c1d92dfe067de824249a0e25"
+    },
+    {
+      "fileName": "20260813194812_dashboard_statistics_sources.sql",
+      "status": "candidate",
+      "sha256": "539bf59d8e1a29eb4cea163abe0e5bee35e7c88da41b955cc4bb54c19ca08cd9"
     }
   ]
 }
