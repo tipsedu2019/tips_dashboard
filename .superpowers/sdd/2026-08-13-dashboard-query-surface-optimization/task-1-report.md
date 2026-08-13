@@ -115,6 +115,35 @@ git diff --check
 
 All commands exited successfully. No migration, production action, or `pnpm-workspace.yaml` change was made.
 
+## Fix round 9 — control-flow and lexical-proof hardening
+
+- A query alias write inside `if`, conditional expression, loop, switch, or try/catch is marked `list_query_control_flow_unresolved` and that provenance follows later builder branches. The verifier no longer treats a conditionally added limit/order as unconditional request controls.
+- Local primitive and option-object resolution is now use-site lexical: only a visible immutable `const` binding declared before the use is accepted. Shadowed declarations are resolved by their actual block scope, and writes to a bound object property (including computed property writes) invalidate that option binding without poisoning a shadowed outer/inner binding.
+- Immutable `client.from.bind(client)` and `client.rpc.bind(client)` aliases are registered as direct AST query entry points, so their resulting chains receive the same projection/limit/timeout/retry contracts as property calls.
+- `tasks` now rejects every `.in("task_id", ...)` list request, including literal arrays. A single-row task detail may use the proven valid `.eq("task_id", value).single()` shape; it remains subject to all other request controls.
+- RED-first fixtures cover conditional builder assignment, lexical shadowing, option property mutation, bound `from`/`rpc` aliases, literal task-ID membership, and the permitted task detail shape. Final focused result: **55 pass, 0 fail**.
+
+## Fix round 9 verification
+
+```bash
+"$TASK_NODE" --test --experimental-strip-types \
+  tests/query-surface-budget.test.mjs \
+  tests/keyset-pagination.test.mjs
+
+"$TASK_NODE" node_modules/eslint/bin/eslint.js \
+  src/lib/query-surface-budget.js tests/query-surface-budget.test.mjs
+
+"$TASK_NODE" scripts/verify-query-surface-budget.mjs \
+  --surface all --base HEAD --head HEAD
+
+"$TASK_NODE" scripts/verify-query-surface-budget.mjs \
+  --surface all --base fad56ae59f6b5ec6999e3232bbe68e4c1d26b101 --worktree
+
+git diff --check
+```
+
+All commands exited successfully. No migration, production action, or `pnpm-workspace.yaml` change was made.
+
 ## Fix round 6 — manifest authority and deterministic list contracts
 
 - Design decision: the manifest remains the sole legacy-debt allowance and was not expanded into a broad snapshot of historical findings. The diff verifier now considers only query chains whose source span is touched by the caller's diff; an unchanged old chain is outside the candidate set. For every touched chain, only an exact manifest `surface + file + symbol + violation + baseline fingerprint` can permit its legacy finding. There is no candidate-vs-baseline grandfathering.

@@ -925,3 +925,69 @@ test("detail requests reject void and statically invalid id values", async () =>
   })
   assert.ok(result.violations.some((violation) => violation.reason === "list_detail_predicate_missing"))
 })
+
+test("conditional builder writes fail closed instead of lending controls to the final query", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client, enabled) {
+  let query = client.from("ops_tasks").select("id")
+  if (enabled) query = query.limit(30).order("id")
+  return query.abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+  assert.ok(result.violations.some((violation) => violation.reason === "list_query_control_flow_unresolved"))
+})
+
+test("shadowed bindings and object property mutations are unresolved", async () => {
+  const shadow = await verifyFixture({
+    source: `async function load(client) {
+  const projection = "*"
+  { const projection = "id" }
+  return client.from("ops_tasks").select(projection).limit(30).order("id").abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+  assert.ok(shadow.violations.some((violation) => violation.reason === "list_select_star"))
+
+  const mutation = await verifyFixture({
+    source: `async function load(client) {
+  const options = {}
+  options.foreignTable = "children"
+  return client.from("ops_tasks").select("id").limit(30, options).order("id").abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+  assert.ok(mutation.violations.some((violation) => violation.reason === "list_limit_missing"))
+})
+
+test("bound Supabase from and rpc aliases remain inspected query entry points", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client) {
+  const from = client.from.bind(client)
+  const rpc = client.rpc.bind(client)
+  await from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8000)).retry(false)
+  return rpc("list_ops_task_page_v1", {}).abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+  assert.ok(result.violations.some((violation) => violation.reason === "list_select_star"))
+  assert.ok(result.violations.some((violation) => violation.reason === "rpc_page_limit_missing"))
+})
+
+test("task_id membership rejects literal arrays while exact task_id details remain allowed", async () => {
+  const list = await verifyFixture({
+    source: `async function load(client) {
+  return client.from("ops_task_comments").select("id").in("task_id", ["task-1"]).limit(30).order("id").abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+  assert.ok(list.violations.some((violation) => violation.reason === "task_id_batch_in_list"))
+
+  const detail = await verifyFixture({
+    source: `async function load(client, taskId) {
+  return client.from("ops_task_comments").select("id").eq("task_id", taskId).single().abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+  assert.deepEqual(detail, { ok: true, violations: [] })
+})

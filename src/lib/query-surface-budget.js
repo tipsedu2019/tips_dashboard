@@ -126,7 +126,7 @@ function accessParts(call) {
   return null
 }
 
-function primitiveConstants(node) {
+function primitiveConstants(node, use) {
   const values = new Map()
   const declarations = []
   const visit = (child) => {
@@ -136,7 +136,8 @@ function primitiveConstants(node) {
   }
   ts.forEachChild(node, visit)
   for (const declaration of declarations) {
-    if (!isImmutableConst(declaration) || hasLaterWrite(node, declaration.name.text, declaration.end)) continue
+    if (!isImmutableConst(declaration) || !isVisibleBindingAt(declaration, use, node)
+      || hasLaterWrite(node, declaration)) continue
     const value = unwrap(declaration.initializer)
     if (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value)) values.set(declaration.name.text, value.text)
     else if (ts.isNumericLiteral(value)) values.set(declaration.name.text, Number(value.text))
@@ -148,26 +149,54 @@ function isImmutableConst(declaration) {
   return ts.isVariableDeclarationList(declaration.parent) && (declaration.parent.flags & ts.NodeFlags.Const) !== 0
 }
 
-function hasLaterWrite(scope, name, after) {
+function hasLaterWrite(scope, declaration) {
+  const name = declaration.name.text
   let written = false
   const visit = (node) => {
     if (written || (node !== scope && ts.isFunctionLike(node))) return
-    if (node.pos >= after && ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
-      && ts.isIdentifier(unwrap(node.left)) && unwrap(node.left).text === name) written = true
-    if (node.pos >= after && (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node))
-      && ts.isIdentifier(unwrap(node.operand)) && unwrap(node.operand).text === name) written = true
+    if (node.pos >= declaration.end && ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      && isWriteTarget(node.left, name) && nearestDeclaration(scope, name, node.left) === declaration) written = true
+    if (node.pos >= declaration.end && (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node))
+      && isWriteTarget(node.operand, name) && nearestDeclaration(scope, name, node.operand) === declaration) written = true
     ts.forEachChild(node, visit)
   }
   ts.forEachChild(scope, visit)
   return written
 }
 
-function immutableConstInitializers(scope) {
+function nearestDeclaration(scope, name, use) {
+  let nearest = null
+  const visit = (node) => {
+    if (node !== scope && ts.isFunctionLike(node)) return
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name
+      && isVisibleBindingAt(node, use, scope) && (!nearest || node.pos > nearest.pos)) nearest = node
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(scope, visit)
+  return nearest
+}
+
+function isWriteTarget(target, name) {
+  const value = unwrap(target)
+  if (ts.isIdentifier(value)) return value.text === name
+  if (ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) return rootIdentifier(value.expression) === name
+  return false
+}
+
+function isVisibleBindingAt(declaration, use, scope) {
+  if (!use || declaration.pos >= use.pos) return false
+  for (let parent = declaration.parent; parent && parent !== scope; parent = parent.parent) {
+    if (ts.isBlock(parent) && !(parent.pos <= use.pos && use.end <= parent.end)) return false
+  }
+  return true
+}
+
+function immutableConstInitializers(scope, use) {
   const bindings = new Map()
   const visit = (node) => {
     if (node !== scope && ts.isFunctionLike(node)) return
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer
-      && isImmutableConst(node) && !hasLaterWrite(scope, node.name.text, node.end)) bindings.set(node.name.text, node.initializer)
+      && isImmutableConst(node) && isVisibleBindingAt(node, use, scope) && !hasLaterWrite(scope, node)) bindings.set(node.name.text, node.initializer)
     ts.forEachChild(node, visit)
   }
   ts.forEachChild(scope, visit)
@@ -243,6 +272,33 @@ function receiverAliases(scope) {
   return aliases
 }
 
+function boundQueryMethods(scope, aliases) {
+  const methods = new Map()
+  const visit = (node) => {
+    if (node !== scope && ts.isFunctionLike(node)) return
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && isImmutableConst(node)) {
+      const initializer = unwrap(node.initializer)
+      const bind = ts.isCallExpression(initializer) && callMethod(initializer) === "bind" ? accessParts(initializer) : null
+      const target = bind && (ts.isPropertyAccessExpression(bind.receiver) || ts.isElementAccessExpression(bind.receiver)) ? bind.receiver : null
+      const targetMethod = target && (ts.isPropertyAccessExpression(target) ? target.name.text : (ts.isStringLiteral(target.argumentExpression) ? target.argumentExpression.text : null))
+      const receiver = target && unwrap(target.expression)
+      if (["from", "rpc"].includes(targetMethod) && isTrustedReceiver(receiver, aliases)) methods.set(node.name.text, targetMethod)
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(scope, visit)
+  return methods
+}
+
+function isConditionalExecution(node, scope) {
+  for (let parent = node.parent; parent && parent !== scope; parent = parent.parent) {
+    if (ts.isIfStatement(parent) || ts.isConditionalExpression(parent) || ts.isForStatement(parent) || ts.isForInStatement(parent)
+      || ts.isForOfStatement(parent) || ts.isWhileStatement(parent) || ts.isDoStatement(parent) || ts.isSwitchStatement(parent)
+      || ts.isTryStatement(parent) || ts.isCatchClause(parent)) return true
+  }
+  return false
+}
+
 export function createQueryChainFingerprint({ symbol, ordinal, operations }) {
   return createHash("sha256")
     .update(`${symbol}\u0000${ordinal}\u0000${operations.map((operation) => operation.getText().replace(/\s+/gu, " ")).join("\u0000")}`)
@@ -262,9 +318,10 @@ function isExactTimeoutAbortSignal(call) {
     && argumentValue(timeout.arguments[0], new Map()) === 8000
 }
 
-function hasExactDetailPredicate(operations, constants, scope) {
+function hasExactDetailPredicate(operations, constants, scope, surface) {
   return operations.some((operation) => callMethod(operation) === "eq" && operation.arguments.length === 2
-    && argumentValue(operation.arguments[0], constants) === "id" && isDefinedDetailValue(operation.arguments[1], constants, scope))
+    && ["id", ...(surface === "tasks" ? ["task_id"] : [])].includes(argumentValue(operation.arguments[0], constants))
+    && isDefinedDetailValue(operation.arguments[1], constants, scope))
 }
 
 function isDefinedDetailValue(argument, constants, scope) {
@@ -313,14 +370,6 @@ function finalOperation(operations, method) {
   return [...operations].reverse().find((operation) => callMethod(operation) === method)
 }
 
-function isLiteralList(argument) {
-  const value = argument && unwrap(argument)
-  return Boolean(value && ts.isArrayLiteralExpression(value) && value.elements.every((element) => {
-    const item = unwrap(element)
-    return ts.isStringLiteral(item) || ts.isNoSubstitutionTemplateLiteral(item) || ts.isNumericLiteral(item)
-  }))
-}
-
 function queryLineSpan(scope, query) {
   const sourceFile = scope.getSourceFile()
   const start = query.entry.getStart(sourceFile)
@@ -340,12 +389,13 @@ function scopeLineSpan(scope) {
 }
 
 function analyzeChain({ surface, file, symbol, scope, query }) {
-  const constants = primitiveConstants(scope)
-  const optionBindings = immutableConstInitializers(scope)
+  const constants = primitiveConstants(scope, query.entry)
+  const optionBindings = immutableConstInitializers(scope, query.entry)
   const reasons = []
   if (query.receiverUnresolved) reasons.push("list_query_receiver_unresolved")
   else if (query.directMethod === null) reasons.push("list_query_method_unresolved")
-  if (reasons.length > 0) {
+  if (query.controlFlowUnresolved) reasons.push("list_query_control_flow_unresolved")
+  if (query.receiverUnresolved || query.directMethod === null) {
     const fingerprint = createQueryChainFingerprint({ symbol, ordinal: query.ordinal, operations: query.operations })
     const { startLine, endLine } = queryLineSpan(scope, query)
     return reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint, startLine, endLine, ...scopeLineSpan(scope) }))
@@ -362,7 +412,7 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
     const limits = rootOperations(query.operations, "limit", optionBindings)
     const singleResult = query.operations.some((operation) => ["maybeSingle", "single"].includes(callMethod(operation)))
     const ranges = rootOperations(query.operations, "range", optionBindings, 2)
-    const exactDetail = singleResult && hasExactDetailPredicate(query.operations, constants, scope)
+    const exactDetail = singleResult && hasExactDetailPredicate(query.operations, constants, scope, surface)
     if (singleResult && !exactDetail) reasons.push("list_detail_predicate_missing")
     if (limits.length === 0 && !exactDetail && ranges.length === 0) reasons.push("list_limit_missing")
     if (!exactDetail && !hasExplicitOrder(query.operations, optionBindings)) reasons.push("list_order_missing")
@@ -398,7 +448,7 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
   const retry = finalOperation(query.operations, "retry")
   if (query.directMethod && !(retry && retry.arguments.length === 1 && retry.arguments[0].kind === ts.SyntaxKind.FalseKeyword)) reasons.push("list_retry_false_missing")
   if (surface === "tasks" && query.directMethod === "from" && query.operations.some((operation) => callMethod(operation) === "in"
-    && argumentValue(operation.arguments[0], constants) === "task_id" && !isLiteralList(operation.arguments[1]))) reasons.push("task_id_batch_in_list")
+    && argumentValue(operation.arguments[0], constants) === "task_id")) reasons.push("task_id_batch_in_list")
   const fingerprint = createQueryChainFingerprint({ symbol, ordinal: query.ordinal, operations: query.operations })
   const { startLine, endLine } = queryLineSpan(scope, query)
   return reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint, startLine, endLine, ...scopeLineSpan(scope) }))
@@ -406,6 +456,7 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
 
 function analyzeScope({ surface, file, scope, symbol }) {
   const aliases = receiverAliases(scope)
+  const boundMethods = boundQueryMethods(scope, aliases)
   const queryAliases = new Map()
   const records = []
   const calls = []
@@ -416,6 +467,17 @@ function analyzeScope({ surface, file, scope, symbol }) {
   }
   ts.forEachChild(scope, visit)
   for (const call of calls.sort((left, right) => left.pos - right.pos)) {
+    const boundMethod = ts.isIdentifier(call.expression) ? boundMethods.get(call.expression.text) : null
+    if (boundMethod) {
+      const record = { entry: call, directMethod: boundMethod, receiverUnresolved: false, ordinal: records.length, operations: queryOperations(call) }
+      records.push(record)
+      const name = assignmentName(call)
+      if (name) {
+        record.controlFlowUnresolved = isConditionalExecution(call, scope)
+        queryAliases.set(name, record)
+      }
+      continue
+    }
     const access = accessParts(call)
     if (!access) continue
     const trusted = isTrustedReceiver(access.receiver, aliases)
@@ -426,7 +488,10 @@ function analyzeScope({ surface, file, scope, symbol }) {
       const record = { entry: call, directMethod: entryMethod, receiverUnresolved: unknownReceiver, ordinal: records.length, operations: queryOperations(call) }
       records.push(record)
       const name = assignmentName(call)
-      if (name) queryAliases.set(name, record)
+      if (name) {
+        record.controlFlowUnresolved = isConditionalExecution(call, scope)
+        queryAliases.set(name, record)
+      }
       continue
     }
     const alias = rootIdentifier(access.receiver)
@@ -438,6 +503,7 @@ function analyzeScope({ surface, file, scope, symbol }) {
       entry: parent.entry,
       directMethod: parent.directMethod,
       receiverUnresolved: parent.receiverUnresolved,
+      controlFlowUnresolved: parent.controlFlowUnresolved,
       // Preserve the root record's historical fingerprint through one linear
       // reassignment; subsequent uses are independent sibling branches.
       ordinal: firstBranch ? parent.ordinal : records.length,
@@ -445,7 +511,10 @@ function analyzeScope({ surface, file, scope, symbol }) {
     }
     records.push(record)
     const name = assignmentName(call)
-    if (name) queryAliases.set(name, record)
+    if (name) {
+      record.controlFlowUnresolved ||= isConditionalExecution(call, scope)
+      queryAliases.set(name, record)
+    }
   }
   return records.filter((query) => !query.usedAsReceiver).flatMap((query) => analyzeChain({ surface, file, symbol, scope, query }))
 }
