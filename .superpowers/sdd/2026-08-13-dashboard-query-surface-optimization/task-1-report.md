@@ -115,6 +115,33 @@ git diff --check
 
 All commands exited successfully. No migration, production action, or `pnpm-workspace.yaml` change was made.
 
+## Fix round 11 — transitive bound operation aliases
+
+- Bound builder-operation aliases now propagate through direct immutable alias assignments. `const filter = query.in.bind(query); const run = filter; run("task_id", [])` is recorded as the original query's `.in(...)` operation rather than an opaque ordinary function call.
+- This is intentionally limited to immutable variable aliases and does not broaden the query extraction strategy. The operation-binding event is applied before alias propagation so the mapping exists when the later alias is resolved.
+- RED-first fixture proves the transitive alias is rejected with `task_id_batch_in_list`. Final focused result: **59 pass, 0 fail**.
+
+## Fix round 11 verification
+
+```bash
+"$TASK_NODE" --test --experimental-strip-types \
+  tests/query-surface-budget.test.mjs \
+  tests/keyset-pagination.test.mjs
+
+"$TASK_NODE" node_modules/eslint/bin/eslint.js \
+  src/lib/query-surface-budget.js tests/query-surface-budget.test.mjs
+
+"$TASK_NODE" scripts/verify-query-surface-budget.mjs \
+  --surface all --base HEAD --head HEAD
+
+"$TASK_NODE" scripts/verify-query-surface-budget.mjs \
+  --surface all --base fad56ae59f6b5ec6999e3232bbe68e4c1d26b101 --worktree
+
+git diff --check
+```
+
+All commands exited successfully. No migration, production action, or `pnpm-workspace.yaml` change was made.
+
 ## Fix round 10 — alias-complete builder and task membership analysis
 
 - Direct builder aliases such as `const unsafe = query` and assignments between builder aliases now retain the same logical request ancestry. Subsequent operations on any alias form a derived request branch, so wildcard projections, over-budget limits, and retry overrides on `unsafe` are checked rather than disappearing from analysis.

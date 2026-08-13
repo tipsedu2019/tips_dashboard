@@ -1038,3 +1038,16 @@ test("task in columns resolve constants and bound operations fail closed when un
   })
   assert.ok(bound.violations.some((violation) => violation.reason === "task_in_column_unresolved"))
 })
+
+test("bound operation aliases propagate through immutable assignments", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client) {
+  const query = client.from("ops_task_comments").select("id")
+  const filter = query.in.bind(query)
+  const run = filter
+  return run("task_id", []).limit(30).order("id").abortSignal(AbortSignal.timeout(8000)).retry(false)
+}
+`,
+  })
+  assert.ok(result.violations.some((violation) => violation.reason === "task_id_batch_in_list"))
+})

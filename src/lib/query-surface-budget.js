@@ -516,6 +516,12 @@ function analyzeScope({ surface, file, scope, symbol }) {
   }
   ts.forEachChild(scope, visit)
   for (const call of calls.sort((left, right) => left.pos - right.pos)) {
+    while (operationIndex < operationsToAssign.length && operationsToAssign[operationIndex].pos <= call.pos) {
+      const assignment = operationsToAssign[operationIndex]
+      const parent = queryAliases.get(assignment.source)
+      if (parent) operationAliases.set(assignment.name, { parent, method: assignment.method, node: assignment.node })
+      operationIndex += 1
+    }
     while (aliasIndex < aliasesToAssign.length && aliasesToAssign[aliasIndex].pos <= call.pos) {
       const assignment = aliasesToAssign[aliasIndex]
       const parent = queryAliases.get(assignment.source)
@@ -523,13 +529,11 @@ function analyzeScope({ surface, file, scope, symbol }) {
         parent.controlFlowUnresolved ||= isConditionalExecution(assignment.node, scope)
         queryAliases.set(assignment.name, parent)
       }
+      const operation = operationAliases.get(assignment.source)
+      if (operation && ts.isVariableDeclaration(assignment.node) && isImmutableConst(assignment.node)) {
+        operationAliases.set(assignment.name, { ...operation, node: assignment.node })
+      }
       aliasIndex += 1
-    }
-    while (operationIndex < operationsToAssign.length && operationsToAssign[operationIndex].pos <= call.pos) {
-      const assignment = operationsToAssign[operationIndex]
-      const parent = queryAliases.get(assignment.source)
-      if (parent) operationAliases.set(assignment.name, { parent, method: assignment.method, node: assignment.node })
-      operationIndex += 1
     }
     const operationAlias = ts.isIdentifier(call.expression) ? operationAliases.get(call.expression.text) : null
     if (operationAlias) {
