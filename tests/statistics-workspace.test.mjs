@@ -78,3 +78,19 @@ test("statistics keeps the legacy class-average KPI and full conflict task workf
   assert.match(sectionCards, /createDashboardConflictTask/);
   assert.match(sectionCards, /listDashboardConflictTaskLinks/);
 });
+
+test("only schedule conflicts renders its contextual error and retry workflow", async () => {
+  const workspace = await source("src/features/dashboard/statistics-workspace.tsx");
+  const students = workspace.slice(
+    workspace.indexOf("function StudentsClassesPanel"),
+    workspace.indexOf("function ScheduleConflictsPanel"),
+  );
+  const conflicts = workspace.slice(
+    workspace.indexOf("function ScheduleConflictsPanel"),
+    workspace.indexOf("function TextbookStatisticsPanel"),
+  );
+
+  assert.doesNotMatch(students, /renderOnError/);
+  assert.match(conflicts, /renderOnError/);
+  assert.match(conflicts, /DashboardConflictWarning metrics=\{conflictMetrics\}/);
+});

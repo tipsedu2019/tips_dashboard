@@ -126,7 +126,7 @@ function StudentsClassesPanel() {
   const [division, setDivision] = useState<Division>("all")
   const state = useStatisticsSnapshot({ tab: "students_classes", subject, division })
   const data = object(state.data)
-  return <PanelState {...state} onRefresh={state.refresh} renderOnError>
+  return <PanelState {...state} onRefresh={state.refresh}>
     <div className="flex flex-wrap gap-4"><FilterButtons label="과목" values={subjects} active={subject} onChange={setSubject} /><FilterButtons label="부서" values={divisions} active={division} onChange={setDivision} /></div>
     <SummaryCards summary={object(data.summary)} /><StudentBreakdowns data={data} subject={subject} division={division} /><ClassGroups data={data} subject={subject} division={division} />
   </PanelState>
@@ -149,7 +149,7 @@ function ScheduleConflictsPanel() {
     },
     retryConflictSources: state.refresh,
   }
-  return <PanelState {...state} onRefresh={state.refresh}>
+  return <PanelState {...state} onRefresh={state.refresh} renderOnError>
     <div className="flex flex-wrap gap-1.5">{DASHBOARD_STATISTICS_RANGE_PRESETS.schedule_conflicts.map((preset) => <Button key={preset} type="button" size="sm" variant={state.range === preset ? "default" : "outline"} onClick={() => state.setRange(preset)}>앞으로 {preset}일</Button>)}</div>
     <DashboardConflictWarning metrics={conflictMetrics} />
   </PanelState>

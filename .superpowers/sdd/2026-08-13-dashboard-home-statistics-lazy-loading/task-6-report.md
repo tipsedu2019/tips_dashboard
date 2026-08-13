@@ -62,3 +62,13 @@ Two regressions were added before this correction. The focused run reported two 
 ### GREEN
 
 Fresh focused verification passed 49/49 across workspace, aggregate-auth, cache, and admin-shell coverage, plus TypeScript and changed-file ESLint with no errors. No production data, migration, deployment, or provider action was performed.
+
+## Fix round 2
+
+### RED/GREEN
+
+A focused workspace regression split the students/classes and schedule-conflicts panel source boundaries. It failed as expected because `renderOnError` was attached to students/classes, which allowed empty aggregate data to be presented as valid, while the schedule panel hid the established contextual conflict retry UI.
+
+`renderOnError` now belongs only to `ScheduleConflictsPanel`. Students/classes keeps the generic `PanelState` error/retry card and never renders summary, distribution, or class-group content after an aggregate failure. The schedule panel mounts `DashboardConflictWarning` with error source statuses so its existing contextual error and retry behavior remains active.
+
+Fresh focused workspace test: **5 pass, 0 fail**. TypeScript, changed-file ESLint, and `git diff --check` passed. No production action was taken.
