@@ -4,5 +4,11 @@
   "baselineSha256": "bf88bc7b1eeefa2de9edd12bd9b1c98090b8354d8eabdaf97e523d9e1d024223",
   "catalogSha256": "ee638486e13d844d7d8b33a4064156cee9b127a15c57260a4c934a2f91053bd4",
   "requiredObjectSignatures": [],
-  "orderedNewMigrations": []
+  "orderedNewMigrations": [
+    {
+      "fileName": "20260813192115_dashboard_daily_brief.sql",
+      "status": "candidate",
+      "sha256": "7ce3eaa85df822396728b9e39b5973507a3c1399c1d92dfe067de824249a0e25"
+    }
+  ]
 }
