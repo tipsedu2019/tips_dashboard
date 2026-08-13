@@ -127,6 +127,7 @@ import {
   type OpsRegistrationCaseDetail,
   type OpsRegistrationObservationCaseDetail,
   type OpsRegistrationConsultation,
+  type OpsRegistrationWorkflowStatus,
   type RegistrationAppointmentMutationResponse,
 } from "./registration-track-service"
 import { createRegistrationObservationAsyncOwnership } from "./registration-workspace-route"
@@ -1000,6 +1001,21 @@ export function RegistrationApplication({
     await handleObservationSaved()
     await refreshActiveObservationFeedback(activeFeedbackObservationId)
   }, [activeFeedbackObservationId, handleObservationSaved, refreshActiveObservationFeedback])
+  const canEnterObservationFromWorkflowStatus = Boolean(
+    activeGenericTrack
+    && canManageActiveObservation
+    && observationRuntime.available
+    && canStartRegistrationObservation(activeGenericTrack),
+  )
+  const observationSectionLockReason = !canManageActiveObservation
+    ? "청강 예약을 처리할 권한이 없습니다"
+    : observationWorkspaceAvailable
+      ? ""
+      : observationRuntime.available
+        ? canEnterObservationFromWorkflowStatus
+          ? "우측 진행상태에서 청강 예약 필요를 선택하세요"
+          : "상담 완료 또는 대기 단계에서 청강 예약 필요를 선택하면 청강 회차를 예약할 수 있습니다."
+        : "청강 신청 기능을 사용할 수 없습니다. 등록 정보를 다시 불러와 주세요."
   const openSectionStates = Object.fromEntries(
     Object.entries(sectionStates).map(([section, state]) => [section, {
       ...state,
@@ -1009,11 +1025,11 @@ export function RegistrationApplication({
         ? false
         : section === "admission"
           ? admissionEditable
-          : section === "observation" ? canManageActiveObservation : canManageCase,
+          : section === "observation" ? canManageActiveObservation && observationWorkspaceAvailable : canManageCase,
       lockReason: section === "history"
         ? "저장 시 자동 기록됩니다"
         : section === "observation"
-          ? canManageActiveObservation ? "" : "청강 예약을 처리할 권한이 없습니다"
+          ? observationSectionLockReason
           : canManageCase ? "" : "등록 정보를 수정할 권한이 없습니다",
     }]),
   ) as typeof sectionStates
@@ -1028,13 +1044,19 @@ export function RegistrationApplication({
   const waitingState = splitPlacementState()
   const registrationState = splitPlacementState()
   const focusedContext = trackContexts.find((context) => context.track.id === activeTrackId) || null
-  const workflowStatusOptions = activeGenericTrack
+  const genericWorkflowStatusOptions = activeGenericTrack
     ? getRegistrationWorkflowStatusOptions({
       viewerId,
       viewerRole,
       directorProfileId: activeGenericTrack.directorProfileId,
     })
     : []
+  const workflowStatusOptions = [
+    ...genericWorkflowStatusOptions,
+    ...(canEnterObservationFromWorkflowStatus
+      ? [{ value: "observation_requested", label: REGISTRATION_WORKFLOW_STATUS_LABELS.observation_requested }]
+      : []),
+  ]
   const observationWorkflowStatusOptions = activeTrack
     && isRegistrationObservationWorkflowStatus(activeTrack.workflowStatus)
     && activeObservationDetail?.currentObservation === null
@@ -1047,17 +1069,37 @@ export function RegistrationApplication({
     : []
   async function changeWorkflowStatus(nextStatus: string) {
     if (!activeGenericTrack || nextStatus === activeGenericTrack.workflowStatus || workflowStatusSaving) return
+    const nextOption = workflowStatusOptions.find((option) => option.value === nextStatus)
+    if (!nextOption) return
+    if (nextOption.value === "observation_requested") {
+      if (!canEnterObservationFromWorkflowStatus) return
+      setWorkflowStatusSaving(true)
+      try {
+        await registrationObservationActions.enterRegistrationObservation({
+          trackId: activeGenericTrack.id,
+          expectedWorkflowRevision: activeGenericTrack.workflowRevision,
+          requestKey: `registration-observation-enter:${activeGenericTrack.id}:${crypto.randomUUID()}`,
+        })
+        await onReload(activeGenericTrack.id)
+      } catch (error) {
+        onWarning(getRegistrationObservationUiErrorMessage(
+          error,
+          "청강 진행상태를 변경하지 못했습니다. 최신 정보를 확인해 주세요.",
+        ))
+      } finally {
+        setWorkflowStatusSaving(false)
+      }
+      return
+    }
     if (
       isRegistrationObservationWorkflowStatus(activeGenericTrack.workflowStatus)
       || isRegistrationObservationWorkflowStatus(nextStatus)
     ) return
-    const nextOption = workflowStatusOptions.find((option) => option.value === nextStatus)
-    if (!nextOption) return
     setWorkflowStatusSaving(true)
     try {
       const savedStatus = await setRegistrationWorkflowStatus({
         trackId: activeGenericTrack.id,
-        workflowStatus: nextOption.value,
+        workflowStatus: nextOption.value as OpsRegistrationWorkflowStatus,
         expectedWorkflowRevision: activeGenericTrack.workflowRevision,
         requestKey: `registration-workflow-status:${activeGenericTrack.id}:${crypto.randomUUID()}`,
       })
@@ -1685,7 +1727,11 @@ export function RegistrationApplication({
         ) : observationDetailLoading ? (
           <p className="text-sm text-muted-foreground">청강 정보를 불러오는 중입니다.</p>
         ) : null
-      ) : undefined}
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {observationSectionLockReason}
+        </p>
+      )}
       registration={registrationSection}
       admission={(
         <RegistrationApplicationAdmissionSection

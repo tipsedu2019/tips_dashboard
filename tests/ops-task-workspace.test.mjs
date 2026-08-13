@@ -998,7 +998,7 @@ test("leaving a registration fixture clears provider retry targets before produc
   ]);
 });
 
-test("registration keeps eight ordered legacy tabs and inserts observation only for runtime one", async () => {
+test("registration keeps the observation tab in its fixed position before runtime probing settles", async () => {
   const [workspaceSource, caseListSource, trackModelSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/registration-case-list.tsx"),
@@ -1009,20 +1009,16 @@ test("registration keeps eight ordered legacy tabs and inserts observation only 
     workspaceSource.indexOf("const REGISTRATION_GRADE_OPTIONS"),
   );
 
-  const runtimeZeroTabs = [
+  const expectedTabs = [
     '{ key: "inquiry", label: "문의" }',
     '{ key: "level_test", label: "레벨테스트 신청" }',
     '{ key: "consultation_requested", label: "상담 신청" }',
     '{ key: "consultation_completed", label: "상담 완료" }',
     '{ key: "waiting", label: "대기 신청" }',
+    '{ key: "observation", label: "청강 신청" }',
     '{ key: "enrollment", label: "등록 신청" }',
     '{ key: "payment", label: "입학 진행" }',
     '{ key: "completed", label: "완료" }',
-  ];
-  const runtimeOneTabs = [
-    ...runtimeZeroTabs.slice(0, 5),
-    '{ key: "observation", label: "청강 신청" }',
-    ...runtimeZeroTabs.slice(5),
   ];
   const declaredTabs = tabsSource
     .slice(tabsSource.indexOf("[", tabsSource.indexOf("REGISTRATION_VIEW_TABS")) + 1, tabsSource.indexOf("\n]"))
@@ -1033,13 +1029,8 @@ test("registration keeps eight ordered legacy tabs and inserts observation only 
     })
     .filter((line) => line.startsWith("{ key:"));
 
-  assert.deepEqual(declaredTabs, runtimeOneTabs, "runtime1 must expose exactly nine tabs in the approved order");
-  assert.deepEqual(
-    declaredTabs.filter((tab) => !tab.includes('key: "observation"')),
-    runtimeZeroTabs,
-    "runtime0 must retain exactly the original eight-tab path",
-  );
-  assert.ok(workspaceSource.includes('tab.key !== "observation" || registrationObservationRuntime.available'));
+  assert.deepEqual(declaredTabs, expectedTabs, "the fixed nine-tab order must not change after a runtime probe");
+  assert.ok(!workspaceSource.includes('tab.key !== "observation" || registrationObservationRuntime.available'));
   assert.ok(workspaceSource.includes(": registrationViewTabs.map((tab) => {"));
   assertIncludesAll(trackModelSource, [
     'level_test_scheduled: "level_test"',
@@ -1813,12 +1804,12 @@ test("registration workspace supplies one stable real-or-fixture customer messag
   assert.doesNotMatch(source, /메이크에듀용 내용 복사|입학신청서 다시 발송/);
 })
 
-test("registration workspace probes observation runtime and hides its tab when unavailable", async () => {
+test("registration workspace probes observation runtime without moving its tab", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx")
 
   assert.match(source, /probeRegistrationObservationRuntime\(\)/)
   assert.match(source, /registrationObservationRuntime\.available/)
-  assert.match(source, /tab\.key !== "observation" \|\| registrationObservationRuntime\.available/)
+  assert.match(source, /const registrationViewTabs = useMemo\(\(\) => REGISTRATION_VIEW_TABS, \[\]\)/)
   assert.match(source, /registrationObservationRuntimeError/)
   assert.match(source, /observationRuntime=\{registrationObservationRuntime\}/)
   assert.match(source, /청강 신청 기능 상태를 확인하지 못했습니다\. 등록 정보를 다시 불러와 주세요\./)

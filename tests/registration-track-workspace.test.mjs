@@ -279,8 +279,11 @@ async function loadMountedRegistrationApplication({
   loadManagerDetail,
   loadFeedback,
   withdrawObservation = async () => ({ changed: false }),
+  enterObservation = async () => ({ changed: false }),
   setWorkflowStatus = async () => undefined,
   isOpsStatus = () => true,
+  workflowStatusOptions = () => [],
+  canStartObservation = () => false,
 }) {
   const fileName = new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url)
   const source = await readFile(fileName, "utf8")
@@ -327,7 +330,7 @@ async function loadMountedRegistrationApplication({
     cancelRegistrationObservation: async () => ({ changed: false }),
     correctRegistrationObservationFeedback: async () => ({ changed: false }),
     decideRegistrationObservation: async () => ({ changed: false }),
-    enterRegistrationObservation: async () => ({ changed: false }),
+    enterRegistrationObservation: (_client, input) => enterObservation(input),
     loadRegistrationObservationFeedback: loadFeedback,
     loadRegistrationObservationManagerDetail: loadManagerDetail,
     loadRegistrationObservationSessions: async () => [],
@@ -433,7 +436,7 @@ async function loadMountedRegistrationApplication({
       RegistrationMigrationReviewEditor: Passthrough,
       RegistrationTrackDirectorSection: Passthrough,
       RegistrationWaitingDetailsEditor: Passthrough,
-      canStartRegistrationObservation: () => false,
+      canStartRegistrationObservation: canStartObservation,
       getRegistrationIdentityEditLock: () => false,
     }],
     ["./registration-appointment-editor", { RegistrationAppointmentEditor: Passthrough }],
@@ -475,7 +478,7 @@ async function loadMountedRegistrationApplication({
     ["./registration-workflow-status.js", {
       REGISTRATION_WORKFLOW_STATUS_LABELS: new Proxy({}, { get: () => "등록 신청" }),
       getRegistrationWorkflowViewKey: () => "registration",
-      getRegistrationWorkflowStatusOptions: () => [],
+      getRegistrationWorkflowStatusOptions: workflowStatusOptions,
       isRegistrationObservationWorkflowStatus: (status) => String(status).startsWith("observation_"),
     }],
   ])
@@ -2086,6 +2089,194 @@ test("mounted observation status selector returns an unbooked request through th
     })
     assert.match(withdrawalCalls[0].requestKey, new RegExp(`^registration-observation-withdraw:${trackId}:`))
     assert.deepEqual(reloadCalls, [trackId])
+  } finally {
+    hookHarness.cleanup()
+    globalThis.window = originalWindow
+    globalThis.document = originalDocument
+    globalThis.HTMLElement = originalHTMLElement
+  }
+})
+
+test("mounted consultation status selector enters observation through the same top-level control", async () => {
+  const taskId = "76700000-0000-4000-8000-000000000001"
+  const trackId = "76700000-0000-4000-8000-000000000002"
+  const directorId = "76700000-0000-4000-8000-000000000003"
+  const enterCalls = []
+  const genericStatusCalls = []
+  const reloadCalls = []
+  const managerDetail = {
+    track: {
+      trackId,
+      taskId,
+      subject: "수학",
+      workflowStatus: "consultation_completed",
+      workflowRevision: 6,
+      observationReturnWorkflowStatus: null,
+      directorProfileId: directorId,
+    },
+    currentObservation: null,
+    latestEnrollmentDecisionObservationId: null,
+    latestDecisionObservation: null,
+    attempts: [],
+    classes: [],
+  }
+  const hookHarness = createRegistrationEditorHookHarness()
+  const mounted = await loadMountedRegistrationApplication({
+    hookHarness,
+    loadManagerDetail: async () => managerDetail,
+    loadFeedback: async () => null,
+    enterObservation: async (input) => {
+      enterCalls.push(input)
+      return { changed: true }
+    },
+    setWorkflowStatus: async (input) => genericStatusCalls.push(input),
+    workflowStatusOptions: () => [{ value: "consultation_completed", label: "상담 완료" }],
+    canStartObservation: (track) => track.workflowStatus === "consultation_completed",
+  })
+  const props = {
+    task: { id: taskId, title: "수학 등록", studentName: "김학생", type: "registration" },
+    detail: {
+      task: { id: taskId, title: "수학 등록", studentName: "김학생", registration: null },
+      commonRevision: 1,
+      tracks: [{
+        id: trackId,
+        taskId,
+        subject: "수학",
+        status: "consultation_waiting",
+        workflowStatus: "consultation_completed",
+        workflowRevision: 6,
+        directorProfileId: directorId,
+        observationAttemptCount: 0,
+        observationSummaryVisible: true,
+        migrationReviewRequired: false,
+        legacy: false,
+        waitingKind: null,
+      }],
+      appointments: [],
+      levelTests: [],
+      consultations: [],
+      enrollments: [],
+      admissionBatches: [],
+      admissionApplicationMessageStatus: "not_sent",
+      admissionApplicationMessageClaimActive: false,
+      admissionApplicationMessageId: null,
+    },
+    focusTrackId: trackId,
+    viewerId: directorId,
+    viewerRole: "admin",
+    onFocusTrack: () => undefined,
+    onReload: async (preferredTrackId) => reloadCalls.push(preferredTrackId),
+    onWarning: () => undefined,
+    subjectCapabilities: [],
+    customerMessageClient: {},
+    observationRuntime: { available: true, runtimeVersion: 1 },
+    closeAction: null,
+  }
+  const originalWindow = globalThis.window
+  const originalDocument = globalThis.document
+  const originalHTMLElement = globalThis.HTMLElement
+  globalThis.HTMLElement = class HTMLElement {}
+  globalThis.window = { requestAnimationFrame(callback) { callback(); return 1 }, cancelAnimationFrame() {} }
+  globalThis.document = { activeElement: null, getElementById() { return { scrollIntoView() {} } } }
+
+  try {
+    let view = hookHarness.render(mounted.RegistrationApplication, props)
+    hookHarness.flushEffects()
+    await flushMountedRegistrationWork()
+    view = hookHarness.render(mounted.RegistrationApplication, props)
+    const shell = findMountedRegistrationElement(view, (node) => node.type === mounted.RegistrationApplicationShell, "registration application shell")
+    const statusSelect = findMountedRegistrationElement(
+      shell.props.subjectNavigation,
+      (node) => node.type === "select" && node.props["aria-label"] === "수학 진행상태",
+      "consultation workflow status select",
+    )
+    assert.equal(statusSelect.props.disabled, false)
+    assert.deepEqual(
+      statusSelect.props.children.flat().filter(Boolean).map((option) => option.props.value),
+      ["consultation_completed", "observation_requested"],
+    )
+
+    statusSelect.props.onChange({ target: { value: "observation_requested" } })
+    await flushMountedRegistrationWork()
+
+    assert.equal(genericStatusCalls.length, 0)
+    assert.equal(enterCalls.length, 1)
+    assert.deepEqual(enterCalls[0], {
+      trackId,
+      expectedWorkflowRevision: 6,
+      requestKey: enterCalls[0].requestKey,
+    })
+    assert.match(enterCalls[0].requestKey, new RegExp(`^registration-observation-enter:${trackId}:`))
+    assert.deepEqual(reloadCalls, [trackId])
+  } finally {
+    hookHarness.cleanup()
+    globalThis.window = originalWindow
+    globalThis.document = originalDocument
+    globalThis.HTMLElement = originalHTMLElement
+  }
+})
+
+test("mounted pre-observation detail keeps the guided observation section visible", async () => {
+  const taskId = "76800000-0000-4000-8000-000000000001"
+  const trackId = "76800000-0000-4000-8000-000000000002"
+  const directorId = "76800000-0000-4000-8000-000000000003"
+  const hookHarness = createRegistrationEditorHookHarness()
+  const mounted = await loadMountedRegistrationApplication({
+    hookHarness,
+    loadManagerDetail: async () => null,
+    loadFeedback: async () => null,
+  })
+  const props = {
+    task: { id: taskId, title: "영어 등록", studentName: "김학생", type: "registration" },
+    detail: {
+      tracks: [{
+        id: trackId,
+        taskId,
+        subject: "영어",
+        status: "consultation_waiting",
+        workflowStatus: "consultation_requested",
+        workflowRevision: 1,
+        directorProfileId: directorId,
+        observationAttemptCount: 0,
+        observationSummaryVisible: false,
+        migrationReviewRequired: false,
+        legacy: false,
+        waitingKind: null,
+      }],
+      task: { id: taskId, title: "영어 등록", studentName: "김학생", registration: null },
+      commonRevision: 1,
+      appointments: [],
+      levelTests: [],
+      consultations: [],
+      enrollments: [],
+      admissionBatches: [],
+      admissionApplicationMessageStatus: "not_sent",
+      admissionApplicationMessageClaimActive: false,
+      admissionApplicationMessageId: null,
+    },
+    focusTrackId: trackId,
+    viewerId: directorId,
+    viewerRole: "admin",
+    onFocusTrack: () => undefined,
+    onReload: async () => undefined,
+    onWarning: () => undefined,
+    subjectCapabilities: [],
+    customerMessageClient: {},
+    observationRuntime: { available: true, runtimeVersion: 1 },
+    closeAction: null,
+  }
+  const originalWindow = globalThis.window
+  const originalDocument = globalThis.document
+  const originalHTMLElement = globalThis.HTMLElement
+  globalThis.HTMLElement = class HTMLElement {}
+  globalThis.window = { requestAnimationFrame(callback) { callback(); return 1 }, cancelAnimationFrame() {} }
+  globalThis.document = { activeElement: null, getElementById() { return { scrollIntoView() {} } } }
+
+  try {
+    const view = hookHarness.render(mounted.RegistrationApplication, props)
+    const shell = findMountedRegistrationElement(view, (node) => node.type === mounted.RegistrationApplicationShell, "pre-observation application shell")
+    assert.notEqual(shell.props.observation, undefined)
+    assert.match(renderToStaticMarkup(shell.props.observation), /상담 완료 또는 대기 단계에서 청강 예약 필요를 선택하면 청강 회차를 예약할 수 있습니다\./)
   } finally {
     hookHarness.cleanup()
     globalThis.window = originalWindow

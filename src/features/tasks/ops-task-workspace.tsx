@@ -8281,18 +8281,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   })
   const [registrationObservationRuntimeProbed, setRegistrationObservationRuntimeProbed] = useState(false)
   const [registrationObservationRuntimeError, setRegistrationObservationRuntimeError] = useState("")
-  const registrationViewTabs = useMemo(
-    () => REGISTRATION_VIEW_TABS.filter((tab) => (
-      tab.key !== "observation" || registrationObservationRuntime.available
-    )),
-    [registrationObservationRuntime.available],
-  )
-  const registrationCalendarKindTabs = useMemo(
-    () => REGISTRATION_CALENDAR_KIND_TABS.filter((tab) => (
-      tab.key !== "observation" || registrationObservationRuntime.available
-    )),
-    [registrationObservationRuntime.available],
-  )
+  const registrationViewTabs = useMemo(() => REGISTRATION_VIEW_TABS, [])
+  const registrationCalendarKindTabs = useMemo(() => REGISTRATION_CALENDAR_KIND_TABS, [])
   const [registrationMode, setRegistrationMode] = useState<RegistrationWorkspaceMode>("list")
   const [registrationConsultationOwnerScope, setRegistrationConsultationOwnerScope] = useState<RegistrationConsultationOwnerScope>("mine")
   const [registrationCalendarKind, setRegistrationCalendarKind] = useState<RegistrationAppointmentCalendarKindFilter>("all")
