@@ -291,6 +291,7 @@ export type OpsRegistrationConsultation = {
   readySource: RegistrationPhoneReadySource | null
   completedAt: string | null
   outcome: "enrollment" | "waiting" | "not_registered" | null
+  note: string | null
   createdAt: string
   updatedAt: string
 }
@@ -560,6 +561,7 @@ export type RegistrationConsultationDetailsSaveResponse = {
   trackId: string
   status: "waiting" | "scheduled" | "completed" | "canceled"
   outcome: "" | "enrollment" | "waiting" | "not_registered"
+  note: string | null
 }
 
 export type RegistrationEnrollmentRowsSaveResponse = {
@@ -1386,6 +1388,7 @@ function mapConsultation(row: Row): OpsRegistrationConsultation {
     readySource: phoneReadySource(value(row, "ready_source", "readySource")),
     completedAt: nullableText(value(row, "completed_at", "completedAt")),
     outcome: (["enrollment", "waiting", "not_registered"].includes(outcome || "") ? outcome : null) as OpsRegistrationConsultation["outcome"],
+    note: nullableText(value(row, "note")),
     createdAt: text(value(row, "created_at", "createdAt")),
     updatedAt: text(value(row, "updated_at", "updatedAt")),
   }
@@ -2997,12 +3000,14 @@ export function createRegistrationTrackService(
     consultationId: string
     status: "waiting" | "scheduled" | "completed" | "canceled"
     outcome: "" | "enrollment" | "waiting" | "not_registered"
+    note?: string
     requestKey: string
   }): Promise<RegistrationConsultationDetailsSaveResponse> {
     const result = await callRpc<Row>("save_registration_consultation_details_v1", {
       p_consultation_id: input.consultationId,
       p_status: input.status,
       p_outcome: input.status === "completed" ? input.outcome : null,
+      p_note: nullableText(input.note),
       p_request_key: requireRequestKey(input.requestKey),
     })
     const status = text(value(result, "status"))
@@ -3016,6 +3021,7 @@ export function createRegistrationTrackService(
       trackId: text(value(result, "track_id", "trackId")),
       status: status as RegistrationConsultationDetailsSaveResponse["status"],
       outcome: outcome as RegistrationConsultationDetailsSaveResponse["outcome"],
+      note: nullableText(value(result, "note")),
     }
   }
 

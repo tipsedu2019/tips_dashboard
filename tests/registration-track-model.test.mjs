@@ -1167,6 +1167,8 @@ test("consultation outcome save state distinguishes persisted, changed, and unau
   assert.deepEqual(getRegistrationConsultationOutcomeSaveState({
     savedOutcome: "waiting",
     draftOutcome: "waiting",
+    savedNote: "기존 상담 내용",
+    draftNote: "기존 상담 내용",
     canCompleteConsultation: true,
   }), {
     editable: true,
@@ -1177,6 +1179,8 @@ test("consultation outcome save state distinguishes persisted, changed, and unau
   assert.deepEqual(getRegistrationConsultationOutcomeSaveState({
     savedOutcome: "waiting",
     draftOutcome: "enrollment",
+    savedNote: "기존 상담 내용",
+    draftNote: "기존 상담 내용",
     canCompleteConsultation: true,
   }), {
     editable: true,
@@ -1187,6 +1191,8 @@ test("consultation outcome save state distinguishes persisted, changed, and unau
   assert.deepEqual(getRegistrationConsultationOutcomeSaveState({
     savedOutcome: "",
     draftOutcome: "enrollment",
+    savedNote: "",
+    draftNote: "",
     canCompleteConsultation: true,
   }), {
     editable: true,
@@ -1197,9 +1203,35 @@ test("consultation outcome save state distinguishes persisted, changed, and unau
   assert.deepEqual(getRegistrationConsultationOutcomeSaveState({
     savedOutcome: "waiting",
     draftOutcome: "enrollment",
+    savedNote: "기존 상담 내용",
+    draftNote: "기존 상담 내용",
     canCompleteConsultation: false,
   }), {
     editable: false,
+    dirty: true,
+    canSave: false,
+    label: "상담 결과 저장",
+  })
+  assert.deepEqual(getRegistrationConsultationOutcomeSaveState({
+    savedOutcome: "waiting",
+    draftOutcome: "waiting",
+    savedNote: "기존 상담 내용",
+    draftNote: "  수정한 상담 내용  ",
+    canCompleteConsultation: true,
+  }), {
+    editable: true,
+    dirty: true,
+    canSave: true,
+    label: "상담 결과 저장",
+  })
+  assert.deepEqual(getRegistrationConsultationOutcomeSaveState({
+    savedOutcome: "",
+    draftOutcome: "",
+    savedNote: "",
+    draftNote: "결과 없는 내용",
+    canCompleteConsultation: true,
+  }), {
+    editable: true,
     dirty: true,
     canSave: false,
     label: "상담 결과 저장",

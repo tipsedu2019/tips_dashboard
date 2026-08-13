@@ -3691,9 +3691,10 @@ test("consultation records use their dedicated data-only RPC", async () => {
         p_consultation_id: "consultation-1",
         p_status: "completed",
         p_outcome: "waiting",
+        p_note: "보호자가 다음 학기 반을 요청함",
         p_request_key: "consultation-details-request",
       });
-      return { data: { consultationId: "consultation-1", trackId: "track-1", status: "completed", outcome: "waiting" }, error: null };
+      return { data: { consultationId: "consultation-1", trackId: "track-1", status: "completed", outcome: "waiting", note: "보호자가 다음 학기 반을 요청함" }, error: null };
     },
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
@@ -3702,6 +3703,7 @@ test("consultation records use their dedicated data-only RPC", async () => {
     consultationId: "consultation-1",
     status: "completed",
     outcome: "waiting",
+    note: "보호자가 다음 학기 반을 요청함",
     requestKey: "consultation-details-request",
   });
 
@@ -3710,5 +3712,6 @@ test("consultation records use their dedicated data-only RPC", async () => {
     trackId: "track-1",
     status: "completed",
     outcome: "waiting",
+    note: "보호자가 다음 학기 반을 요청함",
   });
 });

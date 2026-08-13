@@ -91,6 +91,7 @@ export const REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS = [
   "completeRegistrationLevelTestAttempt",
   "saveRegistrationLevelTestResult",
   "closeRegistrationLevelTestTrack",
+  "saveRegistrationConsultationDetails",
   "completeRegistrationConsultation",
   "saveRegistrationPhoneConsultation",
   "transitionRegistrationWaiting",
@@ -2009,6 +2010,7 @@ function buildFixtureCases() {
       readySource: null,
       completedAt: null,
       outcome: null,
+      note: null,
       createdAt: FIXTURE_NOW,
       updatedAt: FIXTURE_NOW,
     },
@@ -2023,6 +2025,7 @@ function buildFixtureCases() {
       readySource: "inquiry",
       completedAt: null,
       outcome: null,
+      note: null,
       createdAt: "2026-07-10T09:00:00+09:00",
       updatedAt: "2026-07-10T09:00:00+09:00",
     },
@@ -2066,6 +2069,7 @@ function buildFixtureCases() {
     readySource: "inquiry",
     completedAt: null,
     outcome: null,
+    note: null,
     createdAt: "2026-07-09T09:00:00+09:00",
     updatedAt: "2026-07-09T09:00:00+09:00",
   }
@@ -3311,6 +3315,7 @@ function createFixtureRegistrationCaseWithInitialWorkflow(
       readySource: "inquiry",
       completedAt: null,
       outcome: null,
+      note: null,
       createdAt: FIXTURE_NOW,
       updatedAt: FIXTURE_NOW,
     }
@@ -3358,6 +3363,7 @@ function createFixtureRegistrationCaseWithInitialWorkflow(
         readySource: null,
         completedAt: null,
         outcome: null,
+        note: null,
         createdAt: FIXTURE_NOW,
         updatedAt: FIXTURE_NOW,
       }
@@ -3589,6 +3595,7 @@ export function reduceRegistrationSubjectTrackFixture(
           readySource: detail.task.registration?.inquiryAt ? "inquiry" : null,
           completedAt: null,
           outcome: null,
+          note: null,
           createdAt: FIXTURE_NOW,
           updatedAt: FIXTURE_NOW,
         })
@@ -3625,6 +3632,7 @@ export function reduceRegistrationSubjectTrackFixture(
           readySource: "director_resolved",
           completedAt: null,
           outcome: null,
+          note: null,
           createdAt: FIXTURE_NOW,
           updatedAt: FIXTURE_NOW,
         })
@@ -3711,7 +3719,7 @@ export function reduceRegistrationSubjectTrackFixture(
               materialLink: null,
             })
           } else if (selected.directorProfileId) {
-            detail.consultations.push({ id: nextId(state, "consultation"), trackId, appointmentId: appointment.id, mode: "visit", status: "scheduled", directorProfileId: selected.directorProfileId, readyAt: null, readySource: null, completedAt: null, outcome: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW })
+            detail.consultations.push({ id: nextId(state, "consultation"), trackId, appointmentId: appointment.id, mode: "visit", status: "scheduled", directorProfileId: selected.directorProfileId, readyAt: null, readySource: null, completedAt: null, outcome: null, note: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW })
           } else {
             requiresDirectorAssignmentTrackIds.push(trackId)
           }
@@ -3784,6 +3792,7 @@ export function reduceRegistrationSubjectTrackFixture(
               readySource: "visit_reopened",
               completedAt: null,
               outcome: null,
+              note: null,
               createdAt: FIXTURE_NOW,
               updatedAt: FIXTURE_NOW,
             })
@@ -3811,7 +3820,7 @@ export function reduceRegistrationSubjectTrackFixture(
                 item.updatedAt = FIXTURE_NOW
               }
             })
-            detail.consultations.push({ id: nextId(state, "consultation"), trackId, appointmentId: appointment.id, mode: "visit", status: "scheduled", directorProfileId: selected.directorProfileId || "", readyAt: null, readySource: null, completedAt: null, outcome: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW })
+            detail.consultations.push({ id: nextId(state, "consultation"), trackId, appointmentId: appointment.id, mode: "visit", status: "scheduled", directorProfileId: selected.directorProfileId || "", readyAt: null, readySource: null, completedAt: null, outcome: null, note: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW })
           }
         }
       }
@@ -3859,7 +3868,7 @@ export function reduceRegistrationSubjectTrackFixture(
           selected.status = "consultation_waiting"
           const hasActiveConsultation = detail.consultations.some((item) => item.trackId === trackId && ["waiting", "scheduled"].includes(item.status))
           if (selected.directorProfileId && !hasActiveConsultation) {
-            detail.consultations.push({ id: nextId(state, "consultation"), trackId, appointmentId: null, mode: "phone", status: "waiting", directorProfileId: selected.directorProfileId, readyAt: FIXTURE_NOW, readySource: "visit_reopened", completedAt: null, outcome: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW })
+            detail.consultations.push({ id: nextId(state, "consultation"), trackId, appointmentId: null, mode: "phone", status: "waiting", directorProfileId: selected.directorProfileId, readyAt: FIXTURE_NOW, readySource: "visit_reopened", completedAt: null, outcome: null, note: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW })
           } else if (!selected.directorProfileId) {
             requiresDirectorAssignmentTrackIds.push(trackId)
           }
@@ -3898,7 +3907,7 @@ export function reduceRegistrationSubjectTrackFixture(
       let consultationId: string | null = null
       if (attempt.status === "completed") {
         selected.status = "consultation_waiting"
-        const consultation: OpsRegistrationConsultation = { id: nextId(state, "consultation"), trackId: selected.id, appointmentId: null, mode: "phone", status: "waiting", directorProfileId: selected.directorProfileId || "", readyAt: FIXTURE_NOW, readySource: "level_test_completion", completedAt: null, outcome: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW }
+        const consultation: OpsRegistrationConsultation = { id: nextId(state, "consultation"), trackId: selected.id, appointmentId: null, mode: "phone", status: "waiting", directorProfileId: selected.directorProfileId || "", readyAt: FIXTURE_NOW, readySource: "level_test_completion", completedAt: null, outcome: null, note: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW }
         detail.consultations.push(consultation)
         consultationId = consultation.id
       } else {
@@ -3936,6 +3945,26 @@ export function reduceRegistrationSubjectTrackFixture(
       result = transitionResult(selected)
       break
     }
+    case "saveRegistrationConsultationDetails": {
+      const detail = requireCase(findCaseByConsultationId(state, asText(payload, "consultationId")), "consultation_not_found")
+      const consultation = requireCase(detail.consultations.find((item) => item.id === payload.consultationId), "consultation_not_found")
+      const status = payload.status as OpsRegistrationConsultation["status"]
+      const outcome = asText(payload, "outcome") as OpsRegistrationConsultation["outcome"]
+      consultation.status = status
+      consultation.outcome = status === "completed" ? outcome : null
+      consultation.note = asText(payload, "note").trim() || null
+      consultation.completedAt = status === "completed" ? consultation.completedAt || FIXTURE_NOW : null
+      consultation.updatedAt = FIXTURE_NOW
+      syncCase(state, detail)
+      result = {
+        consultationId: consultation.id,
+        trackId: consultation.trackId,
+        status: consultation.status,
+        outcome: consultation.outcome || "",
+        note: consultation.note,
+      }
+      break
+    }
     case "completeRegistrationConsultation": {
       const detail = requireCase(findCaseByConsultationId(state, asText(payload, "consultationId")), "consultation_not_found")
       const consultation = requireCase(detail.consultations.find((item) => item.id === payload.consultationId), "consultation_not_found")
@@ -3971,6 +4000,7 @@ export function reduceRegistrationSubjectTrackFixture(
           readySource: "director_resolved",
           completedAt: null,
           outcome: null,
+          note: null,
           createdAt: FIXTURE_NOW,
           updatedAt: FIXTURE_NOW,
         }
@@ -4168,6 +4198,7 @@ export function reduceRegistrationSubjectTrackFixture(
             readySource: "migration",
             completedAt: null,
             outcome: null,
+            note: null,
             createdAt: FIXTURE_NOW,
             updatedAt: FIXTURE_NOW,
           })
@@ -4216,6 +4247,7 @@ export function reduceRegistrationSubjectTrackFixture(
           readySource: "track_reopened",
           completedAt: null,
           outcome: null,
+          note: null,
           createdAt: FIXTURE_NOW,
           updatedAt: FIXTURE_NOW,
         })

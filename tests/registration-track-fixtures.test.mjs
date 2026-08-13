@@ -1792,6 +1792,39 @@ test("fixture 상담 결과는 현재반 대기 claim만 enrollment로 materiali
   assert.equal(nextTerm.state.caseDetails[otherSplit.task.id].enrollments.some((item) => item.rosterActive), false)
 })
 
+test("fixture 상담 상세 저장은 장문 내용을 trim하고 결과와 같은 상담 행에 보존한다", async () => {
+  const {
+    createRegistrationSubjectTrackFixtureState,
+    reduceRegistrationSubjectTrackFixture,
+  } = await loadFixtureModule()
+  const initial = createRegistrationSubjectTrackFixtureState()
+  const consultationId = "fixture-consultation-split-english"
+
+  const saved = reduceRegistrationSubjectTrackFixture(initial, {
+    type: "saveRegistrationConsultationDetails",
+    requestKey: "fixture-consultation-details-note",
+    payload: {
+      consultationId,
+      status: "completed",
+      outcome: "waiting",
+      note: "  첫 문단\n\n다음 학기 반을 다시 안내하기로 함  ",
+    },
+  })
+
+  assert.deepEqual(plain(saved.result), {
+    consultationId,
+    trackId: "fixture-track-split-english",
+    status: "completed",
+    outcome: "waiting",
+    note: "첫 문단\n\n다음 학기 반을 다시 안내하기로 함",
+  })
+  assert.equal(
+    saved.state.caseDetails["fixture-task-split-consultation"].consultations
+      .find((item) => item.id === consultationId)?.note,
+    "첫 문단\n\n다음 학기 반을 다시 안내하기로 함",
+  )
+})
+
 test("fixture 등록 결정 이탈은 계획 수업을 취소하고 현재반 대기 claim만 남긴다", async () => {
   const { createRegistrationSubjectTrackFixtureState, reduceRegistrationSubjectTrackFixture } = await loadFixtureModule()
   const outcome = reduceRegistrationSubjectTrackFixture(createRegistrationSubjectTrackFixtureState(), {
@@ -3243,6 +3276,7 @@ test("every fixture UI mutation is declared and produces an idempotency receipt"
     "completeRegistrationLevelTestAttempt",
     "saveRegistrationLevelTestResult",
     "closeRegistrationLevelTestTrack",
+    "saveRegistrationConsultationDetails",
     "completeRegistrationConsultation",
     "saveRegistrationPhoneConsultation",
     "transitionRegistrationWaiting",

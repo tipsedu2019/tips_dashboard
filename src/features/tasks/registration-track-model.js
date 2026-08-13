@@ -762,12 +762,14 @@ export function getRegistrationConsultationOutcomeSaveState(input = {}) {
   const draftOutcome = REGISTRATION_CONSULTATION_OUTCOMES.has(String(input.draftOutcome || ""))
     ? String(input.draftOutcome)
     : ""
+  const savedNote = enrollmentText(input.savedNote)
+  const draftNote = enrollmentText(input.draftNote)
   const editable = Boolean(input.canCompleteConsultation)
-  const dirty = Boolean(draftOutcome) && draftOutcome !== savedOutcome
+  const dirty = draftOutcome !== savedOutcome || draftNote !== savedNote
   return {
     editable,
     dirty,
-    canSave: editable && dirty,
+    canSave: editable && dirty && Boolean(draftOutcome),
     label: dirty ? "상담 결과 저장" : savedOutcome ? "저장됨" : "상담 결과를 선택하세요",
   }
 }

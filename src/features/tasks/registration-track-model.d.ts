@@ -442,6 +442,8 @@ export function getRegistrationAdmissionRecoveryDelayMs(
 export function getRegistrationConsultationOutcomeSaveState(input?: {
   savedOutcome?: "" | "enrollment" | "waiting" | "not_registered" | null
   draftOutcome?: "" | "enrollment" | "waiting" | "not_registered" | null
+  savedNote?: string | null
+  draftNote?: string | null
   canCompleteConsultation?: boolean
 }): {
   editable: boolean
