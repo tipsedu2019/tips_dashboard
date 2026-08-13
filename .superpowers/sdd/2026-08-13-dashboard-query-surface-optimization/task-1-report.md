@@ -87,3 +87,30 @@ git diff --check
 ```
 
 All commands exited successfully. No migration, production database/deployment action, or `pnpm-workspace.yaml` modification was made.
+
+## Fix round 5 — AST receiver analysis and baseline deltas
+
+- Replaced regex query extraction with the installed TypeScript 5.9 AST parser; no dependency or lockfile change was made. The scanner attributes query calls to their enclosing named function (including anonymous callbacks owned by that function).
+- Query detection is receiver-aware: it recognizes `client`, `supabase`, and `db` aliases; optional calls; literal computed entrypoints such as `db["from"]`; and progressive multiline query reassignment. `Array.from(...)` is ignored, while dynamic computed entrypoints and unprovable `.from` / `.rpc` receivers fail closed with exact reasons.
+- `.select(...)` arguments are read as balanced AST call arguments, so explicit nested PostgREST projections remain valid instead of being cut at an inner parenthesis.
+- For each changed owned file, candidate findings are compared occurrence-by-occurrence with exact findings from the caller's `--base` source. This permits Task 2–6 to modify a legacy file without enumerating every historical scanner finding, while a new chain/violation still fails. The literal debt ledger remains baseline-SHA validated; its fingerprints were regenerated from the AST baseline, and the old public summary false-positive row was removed.
+- Added RED-first fixtures for the real `ops-task-service.ts` baseline-delta case (unchanged legacy source passes; injected select-star fails), aliases, optional/literal/dynamic computed receivers, multiline reassignment, `Array.from`, unprovable bare receivers, nested projections, and an RPC without an argument envelope.
+- Final focused result: **37 pass, 0 fail**. The parser guard also correctly reports a missing RPC page limit rather than throwing for `rpc(name)`.
+
+## Fix round 5 verification
+
+```bash
+"$TASK_NODE" --test --experimental-strip-types \
+  tests/query-surface-budget.test.mjs \
+  tests/keyset-pagination.test.mjs
+
+"$TASK_NODE" scripts/verify-query-surface-budget.mjs \
+  --surface all --base HEAD --head HEAD
+
+"$TASK_NODE" scripts/verify-query-surface-budget.mjs \
+  --surface all --base fad56ae59f6b5ec6999e3232bbe68e4c1d26b101 --worktree
+
+git diff --check
+```
+
+All commands exited successfully. No migration, production action, or `pnpm-workspace.yaml` change was made.

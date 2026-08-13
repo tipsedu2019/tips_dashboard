@@ -185,7 +185,8 @@ test("manifest-listed list symbols reject a computed query entrypoint", async ()
     surface: "management",
     file: "src/features/management/management-service.js",
     source: `async function selectRows(client, table) {
-  return client["from"](table).select("id").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  const method = getMethod()
+  return client[method](table).select("id").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `,
   })
@@ -420,6 +421,22 @@ test("query budget rejects direct RPC query chains without an explicit page limi
   }])
 })
 
+test("query budget reports an RPC without an argument envelope instead of throwing", async () => {
+  const result = await verifyFixture({
+    source: `async function readRows(client) {
+  return client.rpc("list_ops_task_page_v1").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/tasks/list-tasks.ts",
+    symbol: "readRows",
+    surface: "tasks",
+    reason: "rpc_page_limit_missing",
+  }])
+})
+
 test("query budget rejects wildcard fields with whitespace or mixed projections", async () => {
   const result = await verifyFixture({
     source: `async function readRows(client) {
@@ -562,4 +579,82 @@ test("query budget CLI requires exactly one CI or worktree mode", () => {
     encoding: "utf8",
   })
   assert.equal(worktree.status, 0)
+})
+
+test("query budget compares a changed real legacy task source against its baseline delta", async () => {
+  const file = "src/features/tasks/ops-task-service.ts"
+  const baselineSha = "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101"
+  const baselineSource = execFileSync("git", ["show", `${baselineSha}:${file}`], { cwd: process.cwd(), encoding: "utf8" })
+  const currentSource = execFileSync("git", ["show", `HEAD:${file}`], { cwd: process.cwd(), encoding: "utf8" })
+
+  const unchangedDebt = await verifyFixture({
+    file,
+    baselineSource,
+    source: `${currentSource}\n// Task 2 changes this legacy source without adding a request.\n`,
+  })
+  assert.deepEqual(unchangedDebt, { ok: true, violations: [] })
+
+  const addedViolation = await verifyFixture({
+    file,
+    baselineSource,
+    source: `${currentSource}\nexport const queryBudgetInjected = (client) => client.from("ops_tasks").select("*").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)\n`,
+  })
+  assert.deepEqual(addedViolation.violations, [{
+    file,
+    symbol: "queryBudgetInjected",
+    surface: "tasks",
+    reason: "list_select_star",
+  }])
+})
+
+test("receiver-aware query analysis accepts Supabase aliases, optional calls, multiline reassignment, and nested projections", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client) {
+  const db = client
+  let query = db["from"]("ops_tasks")
+  query = query
+    .select("id, owner:profiles(id, name)")
+    .limit(30)
+  query = query.abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  const unrelated = Array.from([1, 2, 3])
+  return client.from?.("ops_tasks").select("id, class:classes(id, teacher:profiles(id))").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result, { ok: true, violations: [] })
+})
+
+test("receiver-aware query analysis rejects nonliteral methods and unprovable Supabase-like receivers", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client, method, makeOther) {
+  const db = client
+  await db[method]("ops_tasks").select("id").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  const other = makeOther()
+  return other.from("ops_tasks").select("id").limit(30).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [
+    { file: "src/features/tasks/list-tasks.ts", symbol: "load", surface: "tasks", reason: "list_query_method_unresolved" },
+    { file: "src/features/tasks/list-tasks.ts", symbol: "load", surface: "tasks", reason: "list_query_receiver_unresolved" },
+  ])
+})
+
+test("receiver-aware query analysis fails closed for an unprovable bare from request while ignoring Array.from", async () => {
+  const result = await verifyFixture({
+    source: `async function load(makeOther) {
+  const values = Array.from([1, 2, 3])
+  return makeOther().from("ops_tasks")
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/tasks/list-tasks.ts",
+    symbol: "load",
+    surface: "tasks",
+    reason: "list_query_receiver_unresolved",
+  }])
 })
