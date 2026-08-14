@@ -34,6 +34,11 @@
       "fileName": "20260814035710_operations_scoped_reads.sql",
       "status": "candidate",
       "sha256": "47d6af4718be42c95d402fe183a229d9709bc50e3523466d34a7b19b4a2cf67c"
+    },
+    {
+      "fileName": "20260814062437_academic_scoped_reads.sql",
+      "status": "candidate",
+      "sha256": "e0b63bb40b98b66ff9d5791511631175748b5ec6da3c3088d44c721395ac858e"
     }
   ]
 }

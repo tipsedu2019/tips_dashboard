@@ -41,7 +41,7 @@ test("curriculum default period follows the configured period option", async () 
   assert.match(source, /const option = \{ value, label, aliases \}/);
   assert.match(source, /if \(isDefault === true\) \{\s*option\.isDefault = true;\s*\}/);
   assert.match(typeSource, /classGroupOptions: Array<\{ value: string; label: string; aliases\?: string\[\]; isDefault\?: boolean \}>/);
-  assert.match(workspaceSource, /const defaultPeriod = useMemo\(\(\) => pickDefaultPeriodValue\(baseModel\.classGroupOptions\), \[baseModel\.classGroupOptions\]\)/);
+  assert.match(workspaceSource, /const defaultPeriod = useMemo\(\(\) => pickDefaultPeriodValue\(model\.classGroupOptions\), \[model\.classGroupOptions\]\)/);
 });
 
 test("curriculum summary shows actionable planning workload", async () => {
@@ -57,33 +57,25 @@ test("curriculum overview has a PC-first work queue and dense table shell", asyn
 
   assert.match(source, /const curriculumWorkQueueItems = useMemo/);
   assert.match(source, /CURRICULUM_VIEW_MODES\.map/);
-  assert.match(source, /\[model\.rows\]/);
+  assert.match(source, /const visibleViewRows = model\.rows/);
   assert.match(source, /data-testid="curriculum-work-queue"/);
   assert.match(source, /className="grid grid-cols-2 gap-2 xl:grid-cols-5"/);
   assert.match(source, /flex h-10 items-center justify-between rounded-md border px-3 text-left text-sm transition-colors/);
-  assert.match(source, /const viewRowSessionCount = viewRowTotals\.sessions/);
-  assert.match(source, /const viewRowTextbookCount = viewRowTotals\.textbooks/);
-  assert.match(source, /const CURRICULUM_CLASS_PAGE_SIZE = 40/);
-  assert.match(source, /const \[classListLimitsByScope, setClassListLimitsByScope\] = useState<Record<string, number>>\(\{\}\)/);
-  assert.match(source, /const classListScopeKey = \[/);
-  assert.match(source, /const classListLimit = classListLimitsByScope\[classListScopeKey\] \|\| CURRICULUM_CLASS_PAGE_SIZE/);
-  assert.match(source, /const visibleViewRows = useMemo\(\(\) => viewRows\.slice\(0, classListLimit\), \[classListLimit, viewRows\]\)/);
-  assert.match(source, /const hasMoreViewRows = visibleViewRows\.length < viewRows\.length/);
-  assert.match(source, /const viewRowTotals = useMemo/);
-  assert.match(source, /const curriculumViewModeCounts = useMemo/);
+  assert.match(source, /const CURRICULUM_CLASS_PAGE_SIZE = 30/);
+  assert.match(source, /useAcademicWorkspaceData\(\{\s*mode: "curriculum"/);
+  assert.match(source, /cursor: null/);
+  assert.match(source, /const visibleViewRows = model\.rows/);
+  assert.match(source, /const hasMoreViewRows = Boolean\(page\?\.hasMore\)/);
+  assert.match(source, /const viewRowSessionCount = Number\(model\.summary\.totalSessions/);
+  assert.match(source, /const curriculumViewModeCounts = model\.summary\.viewModeCounts/);
   assert.match(source, /data-testid="curriculum-mobile-list"/);
   assert.match(source, /data-testid=\{`curriculum-mobile-card-\$\{row\.id\}`\}/);
   assert.match(source, /data-testid="curriculum-desktop-scroll-anchor"/);
   assert.match(source, /<ScrollArea className="hidden h-\[38rem\] \[contain-intrinsic-size:640px\] \[content-visibility:auto\] md:block">/);
-  assert.match(source, /for \(const row of model\.rows\)/);
-  assert.match(source, /counts\.unlinked \+= 1/);
-  assert.match(source, /counts\.unscheduled \+= 1/);
-  assert.match(source, /counts\.update \+= 1/);
-  assert.match(source, /counts\.done \+= 1/);
-  assert.doesNotMatch(source, /rowMatchesViewMode\(row, mode\.value\)/);
+  assert.match(source, /const curriculumViewModeCounts = model\.summary\.viewModeCounts/);
   assert.match(source, /\{visibleViewRows\.map\(\(row\) =>/);
-  assert.match(source, /setClassListLimitsByScope\(\(current\) => \(\{/);
-  assert.match(source, /\[classListScopeKey\]: \(current\[classListScopeKey\] \|\| CURRICULUM_CLASS_PAGE_SIZE\) \+ CURRICULUM_CLASS_PAGE_SIZE/);
+  assert.match(source, /onClick=\{\(\) => void loadMore\(\)\}/);
+  assert.match(source, /`다음 \$\{CURRICULUM_CLASS_PAGE_SIZE\}건`/);
   assert.match(source, /\{viewRowSessionCount\}회차 · \{viewRowTextbookCount\}권/);
   assert.doesNotMatch(source, /\{model\.summary\.totalSessions\}회차 · \{model\.summary\.linkedTextbooks\}권/);
   assert.doesNotMatch(source, /selectedClassId/);
@@ -108,6 +100,22 @@ test("curriculum overview has a PC-first work queue and dense table shell", asyn
   assert.match(source, /formatProgressMeta\(row\.plannedProgressSessions, row\.delayedProgressSessions, progressTargetSessionCount\)/);
   assert.match(source, /교재 연결 필요/);
   assert.doesNotMatch(source, /교재를 연결한 뒤 회차별 진도를 배정합니다\./);
+});
+
+test("curriculum workspace delegates all filters and continuation to the scoped service", async () => {
+  const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
+  const hookSource = await readFile(new URL("src/features/academic/use-academic-workspace-data.ts", root), "utf8");
+  assert.match(source, /periodId: period \|\| null/);
+  assert.match(source, /search: deferredSearch/);
+  assert.match(source, /status,/);
+  assert.match(source, /subject,/);
+  assert.match(source, /grade,/);
+  assert.match(source, /teacher,/);
+  assert.match(source, /classroom,/);
+  assert.match(source, /viewMode,/);
+  assert.match(source, /loadingMore/);
+  assert.match(hookSource, /loadCurriculumDetail/);
+  assert.doesNotMatch(source, /\.slice\(0, classListLimit\)/);
 });
 
 test("curriculum workspace removes duplicated right detail panel", async () => {

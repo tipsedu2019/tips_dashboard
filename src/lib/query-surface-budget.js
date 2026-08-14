@@ -20,6 +20,8 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "get_operations_class_lesson_design_detail_v1",
   "list_operations_catalogs_v1",
   "list_active_science_subject_areas_v1",
+  "get_academic_timetable_range_v1",
+  "get_academic_curriculum_detail_v1",
 ])
 
 // These are deliberately literal records, not path patterns. Each one binds a
@@ -49,8 +51,6 @@ export const QUERY_SURFACE_DEBT_MANIFEST = Object.freeze([
   legacyDebt("management", "src/features/management/use-management-records.ts", "useManagementRecords", "list_retry_false_missing", "91089c83905a97981897078f1f116d88f17314217f4a04d1958b91c83ff2cb58"),
   legacyDebt("operations", "src/features/operations/use-operations-workspace-data.ts", "readTable", "list_select_star", "7ad267651103e94ecda0049485e915e7c577351c85c5693bc4d87c4e6c17cbbb"),
   legacyDebt("operations", "src/features/operations/use-operations-workspace-data.ts", "readTable", "list_limit_missing", "7ad267651103e94ecda0049485e915e7c577351c85c5693bc4d87c4e6c17cbbb"),
-  legacyDebt("academic", "src/features/academic/use-academic-workspace-data.ts", "readTable", "list_select_star", "9c4456bfadebd9c19fe3272fc78ee97be5846d526651ff2e7fe1a3992a911b5d"),
-  legacyDebt("academic", "src/features/academic/use-academic-workspace-data.ts", "readTable", "list_limit_missing", "9c4456bfadebd9c19fe3272fc78ee97be5846d526651ff2e7fe1a3992a911b5d"),
   legacyDebt("public", "src/server/public-classes-payload.js", "buildPublicClassesPayload", "list_select_star", "65280cf9e7670073ed6c2af811fba866f2a819a0e814dc736bc30e85325a9f76"),
   legacyDebt("public", "src/server/public-classes-payload.js", "buildPublicClassesPayload", "list_select_star", "8eb0d3f8f2d72a47ab438bb9f74a837ca9a23162cc611b6b2d02f5150b2c5790"),
   legacyDebt("public", "src/server/public-classes-payload.js", "buildPublicClassesPayload", "list_select_star", "193816049298234fe788de7b9aec7bbab89eebaab8aadb18da74705673611b94"),

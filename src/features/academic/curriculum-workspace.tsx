@@ -26,11 +26,11 @@ import {
   type ClassFilterPanelSelect,
 } from "@/features/management/class-filter-panel";
 import { pickDefaultPeriodValue } from "@/features/management/period-preferences";
-import { buildCurriculumWorkspaceModel } from "./records.js";
+import { buildCurriculumWorkspaceModel, type CurriculumRow } from "./records.js";
 import { useAcademicWorkspaceData } from "./use-academic-workspace-data";
 
 const DEFAULT_CURRICULUM_STATUS_FILTER = "수강";
-const CURRICULUM_CLASS_PAGE_SIZE = 40;
+const CURRICULUM_CLASS_PAGE_SIZE = 30;
 const CURRICULUM_VIEW_MODES = [
   { value: "all", label: "전체" },
   { value: "unlinked", label: "교재 미연결" },
@@ -40,22 +40,6 @@ const CURRICULUM_VIEW_MODES = [
 ] as const;
 const CURRICULUM_QUICK_FILTER_IDS = ["subject", "grade", "teacher", "classroom"];
 const CURRICULUM_SCROLL_STORAGE_PREFIX = "tips:curriculum-work-queue-scroll:";
-
-function rowMatchesViewMode(row: Record<string, unknown>, viewMode: string) {
-  if (viewMode === "unlinked") {
-    return Number(row.textbookCount || 0) === 0;
-  }
-  if (viewMode === "unscheduled") {
-    return Number(row.totalSessions || 0) === 0;
-  }
-  if (viewMode === "update") {
-    return text(row.stateLabel) === "진도 미배정";
-  }
-  if (viewMode === "done") {
-    return text(row.stateLabel) === "계획 완료";
-  }
-  return true;
-}
 
 function getStateVariant(stateLabel: string) {
   if (stateLabel.includes("완료")) {
@@ -246,7 +230,6 @@ export function AcademicCurriculumWorkspace() {
   const searchParams = useSearchParams();
   const searchParamString = searchParams.toString();
   const desktopListRef = useRef<HTMLDivElement | null>(null);
-  const { data, loading, error } = useAcademicWorkspaceData();
   const [search, setSearch] = useState(() => text(searchParams.get("q")));
   const [period, setPeriod] = useState(() => text(searchParams.get("period")));
   const [status, setStatus] = useState(() => text(searchParams.get("status")) || DEFAULT_CURRICULUM_STATUS_FILTER);
@@ -255,89 +238,80 @@ export function AcademicCurriculumWorkspace() {
   const [teacher, setTeacher] = useState(() => text(searchParams.get("teacher")));
   const [classroom, setClassroom] = useState(() => text(searchParams.get("classroom")));
   const [viewMode, setViewMode] = useState(() => normalizeCurriculumViewMode(searchParams.get("view")));
-  const [classListLimitsByScope, setClassListLimitsByScope] = useState<Record<string, number>>({});
   const deferredSearch = useDeferredValue(search);
-
-  const baseModel = useMemo(
-    () =>
-      buildCurriculumWorkspaceModel({
-        classes: data.classes,
-        classTerms: data.classTerms,
-        classGroups: data.classGroups,
-        classGroupMembers: data.classGroupMembers,
-        textbooks: data.textbooks,
-        progressLogs: data.progressLogs,
-        teacherCatalogs: data.teacherCatalogs,
-        classroomCatalogs: data.classroomCatalogs,
-        filters: {
-          search: deferredSearch,
-          classGroupId: "",
-          status,
-          subject,
-          grade,
-          teacher,
-          classroom,
-        },
-      }),
-    [
-      classroom,
-      data.classGroupMembers,
-      data.classGroups,
-      data.classTerms,
-      data.classes,
-      data.classroomCatalogs,
-      data.progressLogs,
-      data.teacherCatalogs,
-      data.textbooks,
-      deferredSearch,
-      grade,
-      status,
-      subject,
-      teacher,
-    ],
-  );
-  const defaultPeriod = useMemo(() => pickDefaultPeriodValue(baseModel.classGroupOptions), [baseModel.classGroupOptions]);
-  const normalizedPeriod =
-    period && baseModel.classGroupOptions.some((option) => option.value === period) ? period : defaultPeriod;
-  const model = useMemo(
-    () =>
-      buildCurriculumWorkspaceModel({
-        classes: data.classes,
-        classTerms: data.classTerms,
-        classGroups: data.classGroups,
-        classGroupMembers: data.classGroupMembers,
-        textbooks: data.textbooks,
-        progressLogs: data.progressLogs,
-        teacherCatalogs: data.teacherCatalogs,
-        classroomCatalogs: data.classroomCatalogs,
-        filters: {
-          search: deferredSearch,
-          classGroupId: normalizedPeriod,
-          status,
-          subject,
-          grade,
-          teacher,
-          classroom,
-        },
-      }),
-    [
-      classroom,
-      data.classGroupMembers,
-      data.classGroups,
-      data.classTerms,
-      data.classes,
-      data.classroomCatalogs,
-      data.progressLogs,
-      data.teacherCatalogs,
-      data.textbooks,
-      deferredSearch,
-      grade,
-      normalizedPeriod,
-      status,
-      subject,
-      teacher,
-    ],
-  );
+  const {
+    data: curriculumData,
+    loading,
+    loadingMore,
+    error,
+    loadMore,
+  } = useAcademicWorkspaceData({
+    mode: "curriculum",
+    periodId: period || null,
+    search: deferredSearch,
+    status,
+    subject: subject || null,
+    grade: grade || null,
+    teacher: teacher || null,
+    classroom: classroom || null,
+    viewMode,
+    cursor: null,
+  });
+  const page = (curriculumData?.page || {}) as {
+    rows?: CurriculumRow[];
+    hasMore?: boolean;
+  };
+  const stats = (curriculumData?.stats || {}) as Record<string, unknown>;
+  const filterOptions = (curriculumData?.filterOptions || {}) as Record<string, unknown>;
+  const model = useMemo(() => {
+    const derived = buildCurriculumWorkspaceModel({
+      precomputedRows: Array.isArray(page.rows) ? page.rows : [],
+    });
+    const optionValues = (key: string) => Array.isArray(filterOptions[key])
+      ? (filterOptions[key] as unknown[]).map((value) => text(value)).filter(Boolean)
+      : [];
+    const classGroupOptions = Array.isArray(filterOptions.periods)
+      ? (filterOptions.periods as Array<Record<string, unknown>>).map((option) => ({
+          value: text(option.value || option.id),
+          label: text(option.label || option.name || option.value || option.id),
+          isDefault: option.isDefault === true || option.is_default === true,
+        })).filter((option) => option.value)
+      : [];
+    return {
+      ...derived,
+      classGroupOptions,
+      statusOptions: optionValues("statuses"),
+      subjectOptions: optionValues("subjects"),
+      gradeOptions: optionValues("grades"),
+      teacherOptions: optionValues("teachers"),
+      classroomOptions: optionValues("classrooms"),
+      summary: {
+        ...derived.summary,
+        classCount: Number(stats.total || 0),
+        managedClassCount: Number(stats.managedClassCount || 0),
+        totalSessions: Number(stats.totalSessions || 0),
+        completedSessions: Number(stats.completedSessions || 0),
+        pendingSessions: Number(stats.pendingSessions || 0),
+        linkedTextbooks: Number(stats.linkedTextbooks || 0),
+        unlinkedClassCount: Number(stats.unlinkedClassCount || 0),
+        noScheduleClassCount: Number(stats.noScheduleClassCount || 0),
+        updateNeededClassCount: Number(stats.updateNeededClassCount || 0),
+        completedClassCount: Number(stats.completedClassCount || 0),
+        viewModeCounts: stats.viewModeCounts && typeof stats.viewModeCounts === "object"
+          ? stats.viewModeCounts as Record<string, number>
+          : {},
+      },
+    };
+  }, [filterOptions, page.rows, stats]);
+  const defaultPeriod = useMemo(() => pickDefaultPeriodValue(model.classGroupOptions), [model.classGroupOptions]);
+  const normalizedPeriod = period && model.classGroupOptions.some((option) => option.value === period)
+    ? period
+    : defaultPeriod;
+  useEffect(() => {
+    if (defaultPeriod && period !== normalizedPeriod) {
+      setPeriod(normalizedPeriod);
+    }
+  }, [defaultPeriod, normalizedPeriod, period]);
   const hasNonDefaultPeriodFilter = Boolean(normalizedPeriod && normalizedPeriod !== defaultPeriod);
   const hasNonDefaultStatusFilter = status !== DEFAULT_CURRICULUM_STATUS_FILTER;
   const hasActiveFilters = Boolean(
@@ -350,50 +324,13 @@ export function AcademicCurriculumWorkspace() {
       classroom ||
       viewMode !== "all",
   );
-  const viewRows = useMemo(
-    () => model.rows.filter((row) => rowMatchesViewMode(row, viewMode)),
-    [model.rows, viewMode],
-  );
-  const classListScopeKey = [
-    normalizedPeriod || "none",
-    status || "all",
-    subject || "all",
-    grade || "all",
-    teacher || "all",
-    classroom || "all",
-    viewMode,
-    deferredSearch.trim(),
-    viewRows.length,
-  ].join(":");
-  const classListLimit = classListLimitsByScope[classListScopeKey] || CURRICULUM_CLASS_PAGE_SIZE;
-  const visibleViewRows = useMemo(() => viewRows.slice(0, classListLimit), [classListLimit, viewRows]);
-  const hasMoreViewRows = visibleViewRows.length < viewRows.length;
-  const viewRowTotals = useMemo(
-    () => {
-      let sessions = 0;
-      let textbooks = 0;
-      for (const row of viewRows) {
-        sessions += Number(row.totalSessions || 0);
-        textbooks += Number(row.textbookCount || 0);
-      }
-      return { sessions, textbooks };
-    },
-    [viewRows],
-  );
-  const viewRowSessionCount = viewRowTotals.sessions;
-  const viewRowTextbookCount = viewRowTotals.textbooks;
+  const viewRows = model.rows;
+  const visibleViewRows = model.rows;
+  const hasMoreViewRows = Boolean(page?.hasMore);
+  const viewRowSessionCount = Number(model.summary.totalSessions || 0);
+  const viewRowTextbookCount = Number(model.summary.linkedTextbooks || 0);
   const viewModeLabel = CURRICULUM_VIEW_MODES.find((mode) => mode.value === viewMode)?.label || "전체";
-  const curriculumViewModeCounts = useMemo(() => {
-    const counts = Object.fromEntries(CURRICULUM_VIEW_MODES.map((mode) => [mode.value, 0])) as Record<string, number>;
-    for (const row of model.rows) {
-      counts.all += 1;
-      if (Number(row.textbookCount || 0) === 0) counts.unlinked += 1;
-      if (Number(row.totalSessions || 0) === 0) counts.unscheduled += 1;
-      if (text(row.stateLabel) === "진도 미배정") counts.update += 1;
-      if (text(row.stateLabel) === "계획 완료") counts.done += 1;
-    }
-    return counts;
-  }, [model.rows]);
+  const curriculumViewModeCounts = model.summary.viewModeCounts;
   const curriculumWorkQueueItems = useMemo(
     () =>
       CURRICULUM_VIEW_MODES.map((mode) => ({
@@ -602,7 +539,7 @@ export function AcademicCurriculumWorkspace() {
     classroom ? { id: "classroom", label: <>강의실 {classroom}</> } : null,
   ].filter(Boolean) as ClassFilterPanelChip[];
 
-  if (loading) {
+  if (loading && !curriculumData) {
     return <CurriculumWorkspaceSkeleton />;
   }
 
@@ -696,8 +633,8 @@ export function AcademicCurriculumWorkspace() {
               <div className="flex items-center gap-2">
                 <ClipboardList className="size-4 text-muted-foreground" />
                 <p className="text-sm font-semibold text-foreground">반별 수업계획</p>
-                <Badge variant="secondary">{viewRows.length}개</Badge>
-                {hasMoreViewRows ? <Badge variant="outline">{visibleViewRows.length}/{viewRows.length}</Badge> : null}
+                <Badge variant="secondary">{model.summary.classCount}개</Badge>
+                {hasMoreViewRows ? <Badge variant="outline">{visibleViewRows.length}/{model.summary.classCount}</Badge> : null}
               </div>
               <div className="text-xs text-muted-foreground">
                 {viewRowSessionCount}회차 · {viewRowTextbookCount}권
@@ -927,12 +864,10 @@ export function AcademicCurriculumWorkspace() {
                       variant="outline"
                       size="sm"
                       className="min-w-44"
-                      onClick={() => setClassListLimitsByScope((current) => ({
-                        ...current,
-                        [classListScopeKey]: (current[classListScopeKey] || CURRICULUM_CLASS_PAGE_SIZE) + CURRICULUM_CLASS_PAGE_SIZE,
-                      }))}
+                      disabled={loadingMore}
+                      onClick={() => void loadMore()}
                     >
-                      더 보기 · {visibleViewRows.length}/{viewRows.length}개
+                      {loadingMore ? "불러오는 중" : `다음 ${CURRICULUM_CLASS_PAGE_SIZE}건`} · {visibleViewRows.length}/{model.summary.classCount}개
                     </Button>
                   </div>
                 ) : null}

@@ -238,6 +238,7 @@ export function parseAcademicSchedule(
 }>;
 export function buildTimetableWorkspaceModel(input?: {
   classes?: AcademicSourceRow[];
+  precomputedRows?: TimetableRow[];
   classTerms?: AcademicSourceRow[];
   classGroups?: AcademicSourceRow[];
   classGroupMembers?: AcademicSourceRow[];
@@ -253,6 +254,7 @@ export function buildTimetableGridPanels(input?: {
 }): TimetableGridPanelsModel;
 export function buildCurriculumWorkspaceModel(input?: {
   classes?: AcademicSourceRow[];
+  precomputedRows?: CurriculumRow[];
   classTerms?: AcademicSourceRow[];
   classGroups?: AcademicSourceRow[];
   classGroupMembers?: AcademicSourceRow[];

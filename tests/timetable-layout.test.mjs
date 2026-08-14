@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import {
   buildTimetableGridPanels,
@@ -116,6 +117,48 @@ test("teacher timetable filters only academic teams for the selected subject", (
   assert.deepEqual(englishOnly.teacherOptions, ["강부희"]);
   assert.deepEqual(mathOnly.teacherOptions, ["김민경"]);
   assert.deepEqual(scienceOnly.teacherOptions, ["이과학"]);
+});
+
+test("precomputed timetable rows preserve the legacy workspace and grid model", () => {
+  const classes = [{
+    id: "class-1",
+    name: "[수학] 고1 심화",
+    academic_year: "2026",
+    subject: "수학",
+    subject_area_key: "math",
+    grade: "고1",
+    teacher: "김교사",
+    classroom: "본3",
+    schedule: "월수 18:00-19:30",
+    status: "수강",
+  }];
+  const legacy = buildTimetableWorkspaceModel({ classes });
+  const precomputed = buildTimetableWorkspaceModel({
+    classes: [],
+    precomputedRows: legacy.rows,
+  });
+
+  assert.deepEqual(precomputed.rows, legacy.rows);
+  assert.deepEqual(precomputed.summary, legacy.summary);
+  assert.deepEqual(precomputed.teacherLoad, legacy.teacherLoad);
+  assert.deepEqual(precomputed.classroomLoad, legacy.classroomLoad);
+  assert.deepEqual(
+    buildTimetableGridPanels({ workspace: precomputed, view: "teacher-weekly", gridCount: 1 }),
+    buildTimetableGridPanels({ workspace: legacy, view: "teacher-weekly", gridCount: 1 }),
+  );
+});
+
+test("timetable workspace requests only its active mode and keeps dense recovery explicit", async () => {
+  const source = await readFile(
+    new URL("../src/features/academic/timetable-workspace.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /useAcademicWorkspaceData\(\{\s*mode: "timetable"/);
+  assert.match(source, /precomputedRows: data\.rows/);
+  assert.match(source, /densityError\?\.code === "visible_range_too_dense"/);
+  assert.match(source, /한 주 보기/);
+  assert.match(source, /densityError\?\.code === "timetable_collection_too_dense"/);
+  assert.doesNotMatch(source, /data\.textbooks|data\.progressLogs/);
 });
 
 test("weekly timetable panels fit all weekdays without horizontal scrolling", () => {

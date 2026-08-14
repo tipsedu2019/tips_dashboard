@@ -91,6 +91,19 @@ const VIEW_OPTIONS: TimetableViewOption[] = [
 const GRID_OPTIONS = [1, 2] as const;
 const PRIMARY_SUBJECT_FILTERS = ["영어", "수학"];
 
+function buildTimetableVisibleRange(days: 7 | 14) {
+  const today = new Date();
+  const start = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+  const day = start.getUTCDay();
+  start.setUTCDate(start.getUTCDate() - (day === 0 ? 6 : day - 1));
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + days - 1);
+  return {
+    dateFrom: start.toISOString().slice(0, 10),
+    dateTo: end.toISOString().slice(0, 10),
+  };
+}
+
 function TimetableWorkspaceSkeleton() {
   return (
     <div className="flex flex-col gap-4 px-4 lg:px-6">
@@ -176,22 +189,48 @@ function getTimetablePanelSummary(blocks: TimetablePanelBlockSummary[] = []) {
 }
 
 export function AcademicTimetableWorkspace() {
-  const { data, loading, error } = useAcademicWorkspaceData();
   const [view, setView] = useState<TimetableView>("teacher-weekly");
   const [classGroupId, setClassGroupId] = useState("");
   const [status, setStatus] = useState("수강");
   const [subject, setSubject] = useState("");
+  const [rangeDays, setRangeDays] = useState<7 | 14>(14);
   const [gridCount, setGridCount] = useState(2);
   const [selectedTeachers, setSelectedTeachers] = useState<string[]>([]);
   const [selectedClassrooms, setSelectedClassrooms] = useState<string[]>([]);
   const [selectedDays, setSelectedDays] = useState<string[]>([]);
   const [savingPanelId, setSavingPanelId] = useState("");
   const timetablePanelRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const visibleRange = useMemo(() => buildTimetableVisibleRange(rangeDays), [rangeDays]);
+  const {
+    data: timetableData,
+    densityError,
+    loading,
+    error,
+  } = useAcademicWorkspaceData({
+    mode: "timetable",
+    dateFrom: visibleRange.dateFrom,
+    dateTo: visibleRange.dateTo,
+    filters: {
+      classGroupId: classGroupId || null,
+      status: status || null,
+      subject: subject || null,
+    },
+  });
+  const data = useMemo(() => ({
+    rows: Array.isArray(timetableData?.rows) ? timetableData.rows : [],
+    classSummaries: Array.isArray(timetableData?.classSummaries) ? timetableData.classSummaries : [],
+    classTerms: Array.isArray(timetableData?.classTerms) ? timetableData.classTerms : [],
+    classGroups: Array.isArray(timetableData?.classGroups) ? timetableData.classGroups : [],
+    classGroupMembers: Array.isArray(timetableData?.classGroupMembers) ? timetableData.classGroupMembers : [],
+    teacherCatalogs: Array.isArray(timetableData?.teacherCatalogs) ? timetableData.teacherCatalogs : [],
+    classroomCatalogs: Array.isArray(timetableData?.classroomCatalogs) ? timetableData.classroomCatalogs : [],
+  }), [timetableData]);
 
   const workspace = useMemo(
     () =>
       buildTimetableWorkspaceModel({
-        classes: data.classes,
+        classes: data.classSummaries,
+        precomputedRows: data.rows,
         classTerms: data.classTerms,
         classGroups: data.classGroups,
         classGroupMembers: data.classGroupMembers,
@@ -208,8 +247,9 @@ export function AcademicTimetableWorkspace() {
       data.classGroupMembers,
       data.classGroups,
       data.classTerms,
-      data.classes,
+      data.classSummaries,
       data.classroomCatalogs,
+      data.rows,
       data.teacherCatalogs,
       status,
       subject,
@@ -365,7 +405,7 @@ export function AcademicTimetableWorkspace() {
     }
   };
 
-  if (loading) {
+  if (loading && !timetableData) {
     return <TimetableWorkspaceSkeleton />;
   }
 
@@ -374,6 +414,25 @@ export function AcademicTimetableWorkspace() {
       {error ? (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {densityError?.code === "visible_range_too_dense" ? (
+        <Alert variant="destructive">
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+            <span>선택 범위의 시간표가 너무 많습니다. 기존 시간표를 유지했습니다.</span>
+            <Button type="button" size="sm" variant="outline" onClick={() => setRangeDays(7)}>
+              한 주 보기
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {densityError?.code === "timetable_collection_too_dense" ? (
+        <Alert variant="destructive">
+          <AlertDescription>
+            참조 항목이 많습니다. 기간·수업 상태·과목을 더 좁게 선택해 주세요. 기존 시간표는 유지됩니다.
+          </AlertDescription>
         </Alert>
       ) : null}
 

@@ -30,3 +30,14 @@ test("public classes payload keeps the compatibility schedule JSON and never rea
   assert.match(source, /schedulePlan: row\.schedule_plan/)
   assert.doesNotMatch(source, /class_lesson_sessions|lessonSessions/)
 })
+
+test("academic active modes no longer share a table fan-out loader", async () => {
+  const source = await readFile(
+    new URL("../src/features/academic/use-academic-workspace-data.ts", import.meta.url),
+    "utf8",
+  )
+  assert.match(source, /createAcademicReadService/)
+  assert.match(source, /AcademicWorkspaceRequest/)
+  assert.doesNotMatch(source, /\.from\(|select\("\*"\)|readTable\(/)
+  assert.doesNotMatch(source, /Promise\.all\(/)
+})

@@ -1346,6 +1346,7 @@ function buildCurriculumOptions(
 
 export function buildTimetableWorkspaceModel({
   classes = [],
+  precomputedRows,
   classTerms = [],
   classGroups = [],
   classGroupMembers = [],
@@ -1356,16 +1357,18 @@ export function buildTimetableWorkspaceModel({
   const eligibleClasses = toArray(classes);
   const groupContext = buildClassGroupContext(eligibleClasses, classTerms, classGroups, classGroupMembers);
   const allRows = sortTimetableRows(
-    eligibleClasses.flatMap((classItem) =>
-      parseAcademicSchedule(classItem?.schedule, classItem).map((slot) =>
-        createTimetableRow(
-          classItem,
-          classTerms,
-          slot,
-          groupContext.groupsByClassId.get(text(classItem?.id)) || [],
+    Array.isArray(precomputedRows)
+      ? precomputedRows
+      : eligibleClasses.flatMap((classItem) =>
+          parseAcademicSchedule(classItem?.schedule, classItem).map((slot) =>
+            createTimetableRow(
+              classItem,
+              classTerms,
+              slot,
+              groupContext.groupsByClassId.get(text(classItem?.id)) || [],
+            ),
+          ),
         ),
-      ),
-    ),
   );
 
   const selectedGroup = text(filters.classGroupId || filters.classGroup || filters.group);
@@ -1426,6 +1429,7 @@ export function buildTimetableWorkspaceModel({
 
 export function buildCurriculumWorkspaceModel({
   classes = [],
+  precomputedRows,
   classTerms = [],
   classGroups = [],
   classGroupMembers = [],
@@ -1439,15 +1443,17 @@ export function buildCurriculumWorkspaceModel({
   const groupContext = buildClassGroupContext(eligibleClasses, classTerms, classGroups, classGroupMembers);
   const progressSummaryByClass = buildProgressLogSummary(progressLogs);
   const allRows = sortCurriculumRows(
-    eligibleClasses.map((classItem) =>
-      createCurriculumRow(
-        classItem,
-        classTerms,
-        textbooks,
-        progressSummaryByClass,
-        groupContext.groupsByClassId.get(text(classItem?.id)) || [],
-      ),
-    ),
+    Array.isArray(precomputedRows)
+      ? precomputedRows
+      : eligibleClasses.map((classItem) =>
+          createCurriculumRow(
+            classItem,
+            classTerms,
+            textbooks,
+            progressSummaryByClass,
+            groupContext.groupsByClassId.get(text(classItem?.id)) || [],
+          ),
+        ),
   );
 
   const selectedGroup = text(filters.classGroupId || filters.classGroup || filters.group);

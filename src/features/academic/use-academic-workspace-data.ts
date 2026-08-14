@@ -1,131 +1,185 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/providers/auth-provider";
 
-type AcademicWorkspaceRow = Record<string, unknown>;
+import {
+  appendAcademicCurriculumPageIfCurrent,
+  createAcademicReadService,
+} from "./academic-read-service.js";
 
-type AcademicWorkspaceData = {
-  classes: AcademicWorkspaceRow[];
-  classTerms: AcademicWorkspaceRow[];
-  classGroups: AcademicWorkspaceRow[];
-  classGroupMembers: AcademicWorkspaceRow[];
-  textbooks: AcademicWorkspaceRow[];
-  progressLogs: AcademicWorkspaceRow[];
-  teacherCatalogs: AcademicWorkspaceRow[];
-  classroomCatalogs: AcademicWorkspaceRow[];
+export type AcademicKeysetCursor = {
+  sortValues: [string];
+  id: string;
+  scopeHash: string;
 };
 
-const EMPTY_DATA: AcademicWorkspaceData = {
-  classes: [],
-  classTerms: [],
-  classGroups: [],
-  classGroupMembers: [],
-  textbooks: [],
-  progressLogs: [],
-  teacherCatalogs: [],
-  classroomCatalogs: [],
-};
+export type AcademicWorkspaceRequest =
+  | {
+      mode: "timetable";
+      dateFrom: string;
+      dateTo: string;
+      filters: {
+        classGroupId: string | null;
+        status: string | null;
+        subject: string | null;
+      };
+    }
+  | {
+      mode: "curriculum";
+      periodId: string | null;
+      search: string;
+      status: string | null;
+      subject: string | null;
+      grade: string | null;
+      teacher: string | null;
+      classroom: string | null;
+      viewMode: string;
+      cursor: AcademicKeysetCursor | null;
+    };
 
-const ACADEMIC_TABLE_TIMEOUT_MS = 8000;
+export type AcademicDensityError =
+  | {
+      ok: false;
+      code: "visible_range_too_dense";
+      rows: [];
+      observedRowsAtLeast: 2001;
+      suggestedDays: 7;
+    }
+  | {
+      ok: false;
+      code: "timetable_collection_too_dense";
+      collection: "class_summaries" | "class_terms" | "class_groups" | "class_group_members" | "teacher_catalogs" | "classroom_catalogs";
+      observedItemsAtLeast: 501;
+      action: "narrow_filters";
+      rows: [];
+    };
 
-function isMissingRelationError(error: unknown) {
-  const code = String((error as { code?: string })?.code || "").trim();
-  const message = String((error as { message?: string })?.message || "").toLowerCase();
+type AcademicResult = Record<string, unknown>;
 
-  return (
-    code === "42P01" ||
-    code === "PGRST205" ||
-    message.includes("does not exist") ||
-    message.includes("could not find the table")
+function requestFingerprint(request: AcademicWorkspaceRequest) {
+  return JSON.stringify(request);
+}
+
+function isDensityError(value: unknown): value is AcademicDensityError {
+  return Boolean(
+    value && typeof value === "object" && (value as { ok?: boolean }).ok === false
+      && ["visible_range_too_dense", "timetable_collection_too_dense"].includes(
+        String((value as { code?: string }).code || ""),
+      ),
   );
 }
 
-async function readTable(table: string, optional = false) {
-  const { data, error } = await supabase!
-    .from(table)
-    .select("*")
-    .abortSignal(AbortSignal.timeout(ACADEMIC_TABLE_TIMEOUT_MS))
-    .retry(false);
-
-  if (error) {
-    if (optional && isMissingRelationError(error)) {
-      return [];
-    }
-
-    throw error;
-  }
-
-  return data || [];
-}
-
-export function useAcademicWorkspaceData() {
-  const [data, setData] = useState<AcademicWorkspaceData>(EMPTY_DATA);
+export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
+  const { session, user, loading: authLoading } = useAuth();
+  const [data, setData] = useState<AcademicResult | null>(null);
+  const [densityError, setDensityError] = useState<AcademicDensityError | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestRevisionRef = useRef(0);
+  const fingerprint = requestFingerprint(request);
+  const fingerprintRef = useRef(fingerprint);
+  fingerprintRef.current = fingerprint;
+  const stableRequest = useMemo(
+    () => JSON.parse(fingerprint) as AcademicWorkspaceRequest,
+    [fingerprint],
+  );
+  const actorScope = `${String(user?.id || "anonymous")}:${String(user?.app_metadata?.role || "authenticated")}`;
+  const service = useMemo(
+    () => (supabase && user ? createAcademicReadService({ supabase, actorScope }) : null),
+    [actorScope, user],
+  );
 
   const load = useCallback(async () => {
-    if (!supabase) {
-      setData(EMPTY_DATA);
-      setError("Supabase is not configured.");
+    const revision = requestRevisionRef.current + 1;
+    requestRevisionRef.current = revision;
+    if (!service) {
+      if (!supabase) setError("Supabase is not configured.");
+      else if (!authLoading) setError("관리자 세션을 확인할 수 없습니다. 다시 로그인해 주세요.");
       setLoading(false);
       return;
     }
+    if (authLoading) return;
 
     setLoading(true);
     setError(null);
-
     try {
-      const [
-        classes,
-        classTerms,
-        classGroups,
-        classGroupMembers,
-        textbooks,
-        progressLogs,
-        teacherCatalogs,
-        classroomCatalogs,
-      ] = await Promise.all([
-        readTable("classes"),
-        readTable("class_terms", true),
-        readTable("class_schedule_sync_groups", true),
-        readTable("class_schedule_sync_group_members", true),
-        readTable("textbooks"),
-        readTable("progress_logs"),
-        readTable("teacher_catalogs", true),
-        readTable("classroom_catalogs", true),
-      ]);
-
-      setData({
-        classes,
-        classTerms,
-        classGroups,
-        classGroupMembers,
-        textbooks,
-        progressLogs,
-        teacherCatalogs,
-        classroomCatalogs,
-      });
-      setError(null);
+      const next = await service.load(stableRequest) as AcademicResult;
+      if (requestRevisionRef.current !== revision) return;
+      if (isDensityError(next)) {
+        setDensityError(next);
+        return;
+      }
+      setData(next);
+      setDensityError(null);
     } catch (fetchError) {
-      setData(EMPTY_DATA);
-      setError(
-        fetchError instanceof Error ? fetchError.message : "Unknown error",
-      );
+      if (requestRevisionRef.current !== revision) return;
+      setError(fetchError instanceof Error ? fetchError.message : "Unknown error");
     } finally {
-      setLoading(false);
+      if (requestRevisionRef.current === revision) setLoading(false);
     }
-  }, []);
+  }, [authLoading, service, stableRequest]);
+
+  const loadMore = useCallback(async () => {
+    if (!service || stableRequest.mode !== "curriculum" || loadingMore) return;
+    const currentPage = data?.page as {
+      rows?: unknown[];
+      nextCursor?: AcademicKeysetCursor | null;
+      hasMore?: boolean;
+    } | undefined;
+    if (!currentPage?.hasMore || !currentPage.nextCursor) return;
+    const expectedRevision = requestRevisionRef.current;
+    const expectedFingerprint = fingerprint;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const next = await service.load({
+        ...stableRequest,
+        cursor: currentPage.nextCursor,
+      }) as AcademicResult;
+      setData((current) => appendAcademicCurriculumPageIfCurrent({
+        current,
+        next,
+        expectedRevision,
+        currentRevision: requestRevisionRef.current,
+        expectedFingerprint,
+        currentFingerprint: fingerprintRef.current,
+      }));
+    } catch (fetchError) {
+      if (requestRevisionRef.current === expectedRevision
+        && fingerprintRef.current === expectedFingerprint) {
+        setError(fetchError instanceof Error ? fetchError.message : "Unknown error");
+      }
+    } finally {
+      if (requestRevisionRef.current === expectedRevision
+        && fingerprintRef.current === expectedFingerprint) {
+        setLoadingMore(false);
+      }
+    }
+  }, [data?.page, fingerprint, loadingMore, service, stableRequest]);
 
   useEffect(() => {
+    if (authLoading) return;
     void load();
-  }, [load]);
+  }, [authLoading, fingerprint, load, session?.access_token, user?.id]);
+
+  const loadCurriculumDetail = useCallback(
+    (classId: string) => service?.loadCurriculumDetail(classId)
+      ?? Promise.reject(new Error("academic_client_missing")),
+    [service],
+  );
 
   return {
     data,
+    densityError,
     loading,
+    loadingMore,
     error,
     refresh: load,
+    loadMore,
+    loadCurriculumDetail,
   };
 }
