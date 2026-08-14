@@ -442,6 +442,23 @@ as $function$
             select 1
             from public.ops_registration_subject_track_summaries search_track
             where search_track.task_id = common.id
+              and case p_filters ->> 'view'
+                when 'inquiry' then search_track.workflow_status = 'inquiry'
+                when 'level_test' then search_track.workflow_status = 'level_test_requested'
+                when 'consultation_requested' then search_track.workflow_status = 'consultation_requested'
+                when 'consultation_completed' then search_track.workflow_status = 'consultation_completed'
+                when 'waiting' then search_track.workflow_status in ('waiting_current_class','waiting_new_class','waiting_next_opening')
+                when 'observation' then search_track.workflow_status in ('observation_requested','observation_feedback_pending','observation_completed')
+                when 'enrollment' then search_track.workflow_status = 'enrollment_requested'
+                when 'payment' then search_track.workflow_status = 'payment_in_progress'
+                when 'completed' then search_track.workflow_status in ('registered','not_registered','inquiry_only')
+                else false
+              end
+              and (
+                p_filters ->> 'view' not in ('consultation_requested','consultation_completed')
+                or nullif(p_filters ->> 'consultationOwnerId','') is null
+                or search_track.director_profile_id::text = p_filters ->> 'consultationOwnerId'
+              )
               and pg_catalog.regexp_replace(pg_catalog.lower(search_track.subject), '[[:space:]-]+', '', 'g') like '%' ||
                 pg_catalog.regexp_replace(pg_catalog.lower(pg_catalog.btrim(p_filters ->> 'search')), '[[:space:]-]+', '', 'g') || '%'
           )
@@ -727,12 +744,28 @@ as $function$
       and (
         nullif(p_filters ->> 'teacherId','') is null
         or detail.teacher_catalog_id::text = p_filters ->> 'teacherId'
-        or (p_filters ->> 'teacherId' = '__unassigned__' and detail.teacher_catalog_id is null)
+        or (
+          p_filters ->> 'teacherId' like 'teacher_name:%'
+          and nullif(pg_catalog.btrim(detail.teacher_name), '') = pg_catalog.substr(p_filters ->> 'teacherId', 14)
+        )
+        or (
+          p_filters ->> 'teacherId' = '__unassigned__'
+          and detail.teacher_catalog_id is null
+          and nullif(pg_catalog.btrim(detail.teacher_name), '') is null
+        )
       )
       and (
         nullif(p_filters ->> 'classId','') is null
         or common.class_id::text = p_filters ->> 'classId'
-        or (p_filters ->> 'classId' = '__unassigned__' and common.class_id is null)
+        or (
+          p_filters ->> 'classId' like 'class_name:%'
+          and coalesce(nullif(pg_catalog.btrim(common.class_name), ''), nullif(pg_catalog.btrim(detail.class_name), '')) = pg_catalog.substr(p_filters ->> 'classId', 12)
+        )
+        or (
+          p_filters ->> 'classId' = '__unassigned__'
+          and common.class_id is null
+          and nullif(pg_catalog.btrim(coalesce(common.class_name, detail.class_name)), '') is null
+        )
       )
       and ((p_filters ->> 'includeClosed')::boolean or common.status not in ('done','canceled'))
       and (
@@ -1021,12 +1054,37 @@ begin
       'assignee', coalesce((
         select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('value', value, 'label', label, 'count', count_value) order by label collate dashboard_private.ko_numeric)
         from (
-          select
-            coalesce(nullif(source.row_data ->> 'assigneeId', ''), '__unassigned__') as value,
-            coalesce(nullif(source.row_data ->> 'assigneeLabel', ''), '미지정') as label,
-            pg_catalog.count(*) as count_value
-          from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{assigneeId}', 'null'::jsonb)) source
-          group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100
+          select candidate.value, candidate.label, pg_catalog.count(distinct candidate.task_id) as count_value
+          from (
+            with assignee_source as materialized (
+              select source.id, source.row_data
+              from dashboard_private.ops_task_page_source_v1(
+                p_type,
+                pg_catalog.jsonb_set(p_filters, '{assigneeId}', 'null'::jsonb)
+              ) source
+            )
+            select
+              source.id as task_id,
+              source.row_data ->> 'assigneeId' as value,
+              coalesce(nullif(source.row_data ->> 'assigneeLabel', ''), '미지정') as label
+            from assignee_source source
+            where nullif(source.row_data ->> 'assigneeId', '') is not null
+            union all
+            select
+              source.id,
+              source.row_data ->> 'secondaryAssigneeId',
+              coalesce(nullif(source.row_data ->> 'secondaryAssigneeLabel', ''), '미지정')
+            from assignee_source source
+            where nullif(source.row_data ->> 'secondaryAssigneeId', '') is not null
+            union all
+            select source.id, '__unassigned__', '미지정'
+            from assignee_source source
+            where nullif(source.row_data ->> 'assigneeId', '') is null
+              and nullif(source.row_data ->> 'secondaryAssigneeId', '') is null
+          ) candidate
+          group by candidate.value, candidate.label
+          order by candidate.label collate dashboard_private.ko_numeric
+          limit 100
         ) bounded
       ), '[]'::jsonb),
       'assigneeTeam', coalesce((
@@ -1137,8 +1195,16 @@ begin
         select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('value', value, 'label', label, 'count', count_value) order by label collate dashboard_private.ko_numeric)
         from (
           select
-            coalesce(nullif(source.row_data #>> '{inlineState,teacherId}', ''), '__unassigned__') as value,
-            coalesce(nullif(source.row_data #>> '{displayValues,teacher}', ''), '미지정') as label,
+            case
+              when nullif(source.row_data #>> '{inlineState,teacherId}', '') is not null then source.row_data #>> '{inlineState,teacherId}'
+              when nullif(source.row_data #>> '{inlineState,teacherName}', '') is not null then 'teacher_name:' || pg_catalog.btrim(source.row_data #>> '{inlineState,teacherName}')
+              else '__unassigned__'
+            end as value,
+            case
+              when nullif(source.row_data #>> '{inlineState,teacherId}', '') is not null then coalesce(nullif(source.row_data #>> '{displayValues,teacher}', ''), '미지정')
+              when nullif(source.row_data #>> '{inlineState,teacherName}', '') is not null then pg_catalog.btrim(source.row_data #>> '{inlineState,teacherName}')
+              else '미지정'
+            end as label,
             pg_catalog.count(*) as count_value
           from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{teacherId}', 'null'::jsonb)) source
           group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100
@@ -1148,8 +1214,28 @@ begin
         select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('value', value, 'label', label, 'count', count_value) order by label collate dashboard_private.ko_numeric)
         from (
           select
-            coalesce(nullif(source.row_data ->> 'classId', ''), '__unassigned__') as value,
-            coalesce(nullif(source.row_data #>> '{displayValues,class}', ''), '미지정') as label,
+            case
+              when nullif(source.row_data ->> 'classId', '') is not null then source.row_data ->> 'classId'
+              when coalesce(
+                nullif(pg_catalog.btrim(source.row_data ->> 'className'), ''),
+                nullif(pg_catalog.btrim(source.row_data #>> '{inlineState,className}'), '')
+              ) is not null then 'class_name:' || coalesce(
+                nullif(pg_catalog.btrim(source.row_data ->> 'className'), ''),
+                nullif(pg_catalog.btrim(source.row_data #>> '{inlineState,className}'), '')
+              )
+              else '__unassigned__'
+            end as value,
+            case
+              when nullif(source.row_data ->> 'classId', '') is not null then coalesce(nullif(source.row_data #>> '{displayValues,class}', ''), '미지정')
+              when coalesce(
+                nullif(pg_catalog.btrim(source.row_data ->> 'className'), ''),
+                nullif(pg_catalog.btrim(source.row_data #>> '{inlineState,className}'), '')
+              ) is not null then coalesce(
+                nullif(pg_catalog.btrim(source.row_data ->> 'className'), ''),
+                nullif(pg_catalog.btrim(source.row_data #>> '{inlineState,className}'), '')
+              )
+              else '미지정'
+            end as label,
             pg_catalog.count(*) as count_value
           from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{classId}', 'null'::jsonb)) source
           group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100

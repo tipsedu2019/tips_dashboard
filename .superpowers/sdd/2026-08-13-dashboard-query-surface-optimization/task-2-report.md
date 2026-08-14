@@ -88,3 +88,31 @@ Five reviewer regressions were encoded before the fix: lazy non-registration opt
 - `git diff --check`: exit 0.
 - Updated migration candidate SHA-256: `f4efe37189ad885a10d54dc4a979db6f92c62545f6969ab4d98be2b637b54a87`.
 - pgTAP source now asserts authoritative aggregate object shapes and the 100-option facet cap. The reviewed-baseline gate remains unchanged, so runtime pgTAP/EXPLAIN is still not claimed and the manifest remains `candidate`.
+
+## Adversarial review fix round 2
+
+### RED evidence
+
+The second review round encoded five production regressions before implementation. The exact service/workspace run finished **141 pass, 6 fail**: page replacement lost already-loaded non-registration catalogs, create and withdrawal deep-link defaults raced those catalogs, continuation pages repeated stats reads and overwrote prior stats, registration subject search escaped the selected workflow/owner, and facet values did not represent secondary/manual assignments correctly.
+
+### Fixes
+
+- Non-registration option data now has a viewer/type-owned ref. Every page-one replacement remerges the already-loaded catalogs, while viewer changes invalidate the key, generation, and data together.
+- Non-registration create waits for option data before deriving current-user team and word-retest teacher defaults. The management withdrawal handoff waits for the same catalog before resolving the exact student/class prefill and only then consumes the URL parameters.
+- Continuation pages issue only `list_ops_task_page_v1`; stats are optional/tolerant on the first page. `loadMore()` keeps the authoritative stats already associated with the canonical filter scope instead of overwriting them with a continuation payload.
+- Registration `search_track` subject matching repeats the same workflow-view and consultation-owner predicates as the representative matching track.
+- General assignee facets combine primary and secondary assignees and count distinct tasks. Word-retest manual teachers/classes use exact `teacher_name:` / `class_name:` values supported by SQL filters; only truly blank assignments use `__unassigned__`.
+- The secondary-assignee facet projection uses one materialized source inside that facet rather than repeating the same source call for its primary, secondary, and unassigned branches.
+
+### Verification
+
+- RED: **141 pass, 6 fail**.
+- Exact service/workspace GREEN: **147 pass, 0 fail**.
+- Exact five-suite focused GREEN: **430 pass, 0 fail**.
+- TypeScript: exit 0.
+- Task query-surface guard: exit 0.
+- ESLint: exit 0 with four existing unused-symbol warnings and no errors.
+- Supabase local schema lint: `No schema errors found`; this still does not replay the candidate migration.
+- `git diff --check`: exit 0.
+- Updated migration candidate SHA-256: `afa89fe970b5c367f05e67e5b76e38dafa96a7f233001fce019db940cb7082a1`.
+- The isolated runner again stopped before allocation with `isolated_supabase_db_baseline_review_required`; pgTAP/EXPLAIN runtime remains unclaimed and the manifest remains `candidate`.

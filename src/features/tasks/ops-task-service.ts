@@ -395,7 +395,7 @@ export type OpsTaskPageStats = {
 
 export type OpsTaskPageResponse = {
   page: { rows: OpsTask[]; nextCursor: KeysetCursor | null; hasMore: boolean }
-  stats: OpsTaskPageStats
+  stats?: OpsTaskPageStats
   registrationRuntime: RegistrationRuntimeState | null
 }
 
@@ -1750,6 +1750,16 @@ export async function loadOpsTaskPage(options: OpsTaskPageLoadOptions): Promise<
     throw new Error("cursor_scope_mismatch")
   }
 
+  const statsRequest = options.cursor
+    ? Promise.resolve(null)
+    : Promise.resolve(supabase
+        .rpc("get_ops_task_list_stats_v1", {
+          p_type: options.filters.taskType,
+          p_filters: options.filters,
+        })
+        .abortSignal(AbortSignal.timeout(8_000))
+        .retry(false))
+        .catch(() => null)
   const [pageResult, statsResult, registrationRuntime] = await Promise.all([
     supabase
       .rpc("list_ops_task_page_v1", {
@@ -1761,19 +1771,12 @@ export async function loadOpsTaskPage(options: OpsTaskPageLoadOptions): Promise<
       })
       .abortSignal(AbortSignal.timeout(8_000))
       .retry(false),
-    supabase
-      .rpc("get_ops_task_list_stats_v1", {
-        p_type: options.filters.taskType,
-        p_filters: options.filters,
-      })
-      .abortSignal(AbortSignal.timeout(8_000))
-      .retry(false),
+    statsRequest,
     options.filters.taskType === "registration"
       ? probeRegistrationSubjectTrackRuntime()
       : Promise.resolve(null),
   ])
   if (pageResult.error) throw pageResult.error
-  if (statsResult.error) throw statsResult.error
 
   const rawRows = ((pageResult.data || []) as unknown as Row[])
   const hasMore = rawRows.length > OPS_TASK_PAGE_SIZE
@@ -1787,7 +1790,9 @@ export async function loadOpsTaskPage(options: OpsTaskPageLoadOptions): Promise<
   const nextCursor = boundary && boundarySortValues
     ? { sortValues: boundarySortValues, id: text(boundary.id || (boundary.row_data as Row | undefined)?.id), scopeHash }
     : null
-  const statsData = (Array.isArray(statsResult.data) ? statsResult.data[0] : statsResult.data) as Row | null
+  const statsData = statsResult && !statsResult.error
+    ? (Array.isArray(statsResult.data) ? statsResult.data[0] : statsResult.data) as Row | null
+    : null
   const byStatus = statsData?.byStatus || statsData?.by_status
   const byView = statsData?.byView || statsData?.by_view
   const metrics = statsData?.metrics
@@ -1812,13 +1817,15 @@ export async function loadOpsTaskPage(options: OpsTaskPageLoadOptions): Promise<
 
   return {
     page: { rows, nextCursor, hasMore },
-    stats: {
-      total: Number(statsData?.total || 0),
-      byStatus: numberRecord(byStatus),
-      byView: numberRecord(byView),
-      metrics: numberRecord(metrics),
-      facets: facetRecord(facets),
-    },
+    ...(statsData ? {
+      stats: {
+        total: Number(statsData.total || 0),
+        byStatus: numberRecord(byStatus),
+        byView: numberRecord(byView),
+        metrics: numberRecord(metrics),
+        facets: facetRecord(facets),
+      },
+    } : {}),
     registrationRuntime,
   }
 }
@@ -1964,7 +1971,7 @@ async function readOpsTaskWorkspaceData(
       viewerId: text(options.viewerId),
       force: options.force,
     })
-    metrics.queryCount += 2
+    metrics.queryCount += options.cursor ? 1 : 2
     return {
       ...emptyOpsTaskWorkspaceData,
       tasks: response.page.rows,

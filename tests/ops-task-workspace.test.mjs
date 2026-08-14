@@ -52,7 +52,7 @@ test("student management withdrawal handoff opens a prefilled withdrawal request
 
   assert.match(source, /function buildWithdrawalCreatePrefill/);
   assert.match(source, /const requestedWithdrawalStudentId = isWithdrawalWorkspace && searchParams\.get\("create"\) === "withdrawal"/);
-  assert.match(source, /openCreateRef\.current\?\.\("withdrawal", buildWithdrawalCreatePrefill/);
+  assert.match(source, /await openCreateRef\.current\?\.\([\s\S]*?"withdrawal",[\s\S]*?buildWithdrawalCreatePrefill/);
   assert.match(source, /params\.delete\("create"\)/);
   assert.match(source, /params\.delete\("studentId"\)/);
   assert.match(source, /router\.replace\(nextQuery \? `\$\{pathname\}\?\$\{nextQuery\}` : pathname, \{ scroll: false \}\)/);
@@ -1581,7 +1581,7 @@ test("registration option enrichment survives a slower core revalidation", async
 
   assert.match(workspaceSource, /const registrationOptionsDataRef = useRef<OpsTaskWorkspaceOptionData \| null>\(null\)/);
   assert.match(workspaceSource, /const registrationOptionsLoadGenerationRef = useRef\(0\)/);
-  assert.match(reloadSource, /const enrichmentData = registrationOptionsDataRef\.current/);
+  assert.match(reloadSource, /const enrichmentData = isRegistrationWorkspace[\s\S]*?registrationOptionsDataRef\.current[\s\S]*?taskOptionsDataRef\.current/);
   assert.match(reloadSource, /mergeOpsTaskWorkspaceOptionData\(nextData, enrichmentData\)/);
   assert.doesNotMatch(
     reloadSource.slice(reloadSource.indexOf("const nextData = await")),
@@ -5408,10 +5408,49 @@ test("non-registration catalogs load only when an editor or filter is opened", a
   const openEdit = source.slice(openEditStart, openEditEnd);
 
   assert.match(source, /const ensureTaskOptions = useCallback/);
-  assert.match(openCreate, /type === "registration"[\s\S]*?ensureRegistrationOptions[\s\S]*?else void ensureTaskOptions/);
+  assert.match(openCreate, /await ensureTaskOptions\(\)[\s\S]*?type === "registration"[\s\S]*?ensureRegistrationOptions/);
   assert.match(openEdit, /task\.type === "registration"[\s\S]*?ensureRegistrationOptions[\s\S]*?else void ensureTaskOptions/);
   assert.match(source, /onFilterOpen=\{\(\) => void ensureTaskOptions\(\)\}/);
   assert.doesNotMatch(initialReload, /loadOpsTaskWorkspaceOptionData|ensureTaskOptions/);
+});
+
+test("loaded non-registration catalogs survive page-one replacements", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const reloadStart = source.indexOf("const reload = useCallback");
+  const reloadEnd = source.indexOf("const loadMore = useCallback", reloadStart);
+  const reloadSource = source.slice(reloadStart, reloadEnd);
+  const optionsStart = source.indexOf("const ensureTaskOptions = useCallback");
+  const optionsEnd = source.indexOf("useEffect(() =>", optionsStart);
+  const optionsSource = source.slice(optionsStart, optionsEnd);
+
+  assert.match(source, /const taskOptionsDataRef = useRef<OpsTaskWorkspaceOptionData \| null>\(null\)/);
+  assert.match(optionsSource, /taskOptionsDataRef\.current = enrichmentData/);
+  assert.match(reloadSource, /taskOptionsDataRef\.current/);
+  assert.match(reloadSource, /mergeOpsTaskWorkspaceOptionData\(nextData, enrichmentData\)/);
+});
+
+test("create defaults and withdrawal handoffs wait for non-registration option catalogs", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const openCreateStart = source.indexOf("function openCreate(");
+  const openCreateEnd = source.indexOf("openCreateRef.current", openCreateStart);
+  const openCreate = source.slice(openCreateStart, openCreateEnd);
+  const handoffStart = source.indexOf("if (!requestedWithdrawalStudentId");
+  const handoffEnd = source.indexOf("}, [", handoffStart);
+  const handoff = source.slice(handoffStart, handoffEnd);
+
+  assert.match(source, /async function openCreate/);
+  assert.match(openCreate, /await ensureTaskOptions\(\)[\s\S]*?defaultAssigneeTeam[\s\S]*?defaultWordRetestTeacher/);
+  assert.match(handoff, /await ensureTaskOptions\(\)[\s\S]*?buildWithdrawalCreatePrefill/);
+});
+
+test("load-more preserves first-page authoritative stats", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const loadMoreStart = source.indexOf("const loadMore = useCallback");
+  const loadMoreEnd = source.indexOf("const refreshFirstTaskPageAfterMutation", loadMoreStart);
+  const loadMore = source.slice(loadMoreStart, loadMoreEnd);
+
+  assert.match(loadMore, /stats: current\.stats/);
+  assert.doesNotMatch(loadMore, /stats: nextData\.stats/);
 });
 
 test("paged badges counts and filter options consume server stats instead of the selected rows", async () => {

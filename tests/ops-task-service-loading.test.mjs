@@ -162,6 +162,74 @@ function loadDashboardConflictTaskLinkReader(mocks) {
   ).listDashboardConflictTaskLinks;
 }
 
+function loadOpsTaskPageWithMocks(mocks) {
+  const source = sourceBetween(
+    "export async function loadOpsTaskPage",
+    "export async function loadOpsTaskWorkspaceData",
+  );
+  return transpileAndLoad(
+    source,
+    ["loadOpsTaskPage"],
+    {
+      OPS_TASK_PAGE_SIZE: 30,
+      assertOpsTaskPageFilters: () => {},
+      getOpsTaskPageScope: async () => "scope-a",
+      mapOpsTaskPageRow: (row) => row.row_data,
+      probeRegistrationSubjectTrackRuntime: async () => null,
+      text: (value) => String(value || "").trim(),
+      AbortSignal: { timeout: (milliseconds) => ({ milliseconds }) },
+      ...mocks,
+    },
+  ).loadOpsTaskPage;
+}
+
+function taskPageRpcResult(data, error = null) {
+  const result = {
+    data,
+    error,
+    abortSignal() { return result; },
+    retry() { return result; },
+    then(resolve, reject) { return Promise.resolve({ data, error }).then(resolve, reject); },
+  };
+  return result;
+}
+
+test("task continuation pages skip aggregate RPCs and a stats failure does not discard page rows", async () => {
+  const calls = [];
+  const loadPage = loadOpsTaskPageWithMocks({
+    supabase: {
+      rpc(name) {
+        calls.push(name);
+        if (name === "list_ops_task_page_v1") {
+          return taskPageRpcResult([{ id: "task-a", row_data: { id: "task-a" }, sort_values: ["2026-08-14T00:00:00Z"] }]);
+        }
+        return taskPageRpcResult(null, new Error("stats unavailable"));
+      },
+    },
+  });
+
+  const firstPage = await loadPage({
+    filters: { taskType: "general" },
+    cursor: null,
+    limit: 30,
+    viewerId: "viewer-a",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(firstPage.page.rows)), [{ id: "task-a" }]);
+  assert.equal(firstPage.stats, undefined);
+  assert.deepEqual([...calls].sort(), ["get_ops_task_list_stats_v1", "list_ops_task_page_v1"]);
+
+  calls.length = 0;
+  const continuation = await loadPage({
+    filters: { taskType: "general" },
+    cursor: { id: "task-a", sortValues: ["2026-08-14T00:00:00Z"], scopeHash: "scope-a" },
+    limit: 30,
+    viewerId: "viewer-a",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(continuation.page.rows)), [{ id: "task-a" }]);
+  assert.equal(continuation.stats, undefined);
+  assert.deepEqual(calls, ["list_ops_task_page_v1"]);
+});
+
 test("dashboard conflict task link lookup aborts after eight seconds without automatic retry", async () => {
   const calls = [];
   const signal = { kind: "dashboard-conflict-timeout" };
@@ -1408,4 +1476,25 @@ test("registration page membership owner search and representative order come fr
   assert.match(registrationBranch, /pg_catalog\.regexp_replace/);
   assert.doesNotMatch(registrationBranch, /detail\.pipeline_status[^\n]*~/);
   assert.doesNotMatch(registrationBranch, /common\.assignee_id::text = p_filters ->> 'consultationOwnerId'/);
+});
+
+test("registration all-track search stays inside the selected workflow and consultation owner", () => {
+  const searchTrackStart = taskPageMigrationSource.indexOf("from public.ops_registration_subject_track_summaries search_track");
+  const searchTrackEnd = taskPageMigrationSource.indexOf("\n          )", searchTrackStart);
+  const searchTrack = taskPageMigrationSource.slice(searchTrackStart, searchTrackEnd);
+
+  assert.match(searchTrack, /search_track\.workflow_status/);
+  assert.match(searchTrack, /search_track\.director_profile_id::text = p_filters ->> 'consultationOwnerId'/);
+});
+
+test("task facets emit filterable manual word-retest values and include secondary assignees", () => {
+  const statsSource = taskPageMigrationSource.slice(
+    taskPageMigrationSource.indexOf("create or replace function public.get_ops_task_list_stats_v1"),
+  );
+  assert.match(statsSource, /secondaryAssigneeId/);
+  assert.match(statsSource, /secondaryAssigneeLabel/);
+  assert.match(statsSource, /'teacher_name:' \|\| pg_catalog\.btrim/);
+  assert.match(statsSource, /'class_name:' \|\| coalesce/);
+  assert.match(taskPageMigrationSource, /p_filters ->> 'teacherId' like 'teacher_name:%'/);
+  assert.match(taskPageMigrationSource, /p_filters ->> 'classId' like 'class_name:%'/);
 });

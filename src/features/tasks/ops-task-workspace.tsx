@@ -8485,12 +8485,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setRetryingRegistrationVisitNotifications(false)
   }, [registrationFixtureRequested])
   const withdrawalCreateHandledRef = useRef("")
-  const openCreateRef = useRef<((type: OpsTaskType, initialValues?: Partial<OpsTaskInput>) => void) | null>(null)
+  const openCreateRef = useRef<((type: OpsTaskType, initialValues?: Partial<OpsTaskInput>) => Promise<void>) | null>(null)
   const registrationOptionsLoadedRef = useRef(false)
   const registrationOptionsLoadGenerationRef = useRef(0)
   const registrationOptionsDataRef = useRef<OpsTaskWorkspaceOptionData | null>(null)
   const taskOptionsLoadedKeyRef = useRef("")
   const taskOptionsLoadGenerationRef = useRef(0)
+  const taskOptionsDataRef = useRef<OpsTaskWorkspaceOptionData | null>(null)
   const [notice, setNotice] = useState("")
   const [commentBody, setCommentBody] = useState("")
   const [attachmentName, setAttachmentName] = useState("")
@@ -8735,6 +8736,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       registrationOptionsLoadedRef.current = false
       registrationOptionsLoadGenerationRef.current += 1
       registrationOptionsDataRef.current = null
+      taskOptionsLoadedKeyRef.current = ""
+      taskOptionsLoadGenerationRef.current += 1
+      taskOptionsDataRef.current = null
       setRegistrationOptionsLoading(false)
       setRegistrationOptionsError("")
       const resetForm = cloneForm()
@@ -8816,10 +8820,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       latestWorkspaceViewerIdRef.current !== currentUserId
       || workspaceLoadGenerationRef.current !== loadGeneration
     ) return
-    const enrichmentData = registrationOptionsDataRef.current
+    const enrichmentData = isRegistrationWorkspace
+      ? registrationOptionsDataRef.current
+      : taskOptionsDataRef.current
     workspaceDataViewerIdRef.current = currentUserId
     setData(
-      isRegistrationWorkspace && enrichmentData
+      enrichmentData
         ? mergeOpsTaskWorkspaceOptionData(nextData, enrichmentData)
         : nextData,
     )
@@ -8852,7 +8858,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           ...current,
           tasks: [...rowsById.values()],
           page: nextData.page,
-          stats: nextData.stats,
+          stats: current.stats,
           registrationRuntime: nextData.registrationRuntime,
         }
       })
@@ -8961,9 +8967,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }, [ensureRegistrationOptions])
 
   const ensureTaskOptions = useCallback(async (force = false) => {
-    if (isRegistrationWorkspace || !currentUserId) return false
+    if (isRegistrationWorkspace || !currentUserId) return null
     const optionsKey = `${scopedTaskType}:${currentUserId}`
-    if (!force && taskOptionsLoadedKeyRef.current === optionsKey) return true
+    if (!force && taskOptionsLoadedKeyRef.current === optionsKey) return taskOptionsDataRef.current
     const loadGeneration = ++taskOptionsLoadGenerationRef.current
     const enrichmentData = await loadOpsTaskWorkspaceOptionData({
       taskType: scopedTaskType,
@@ -8973,14 +8979,15 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     if (
       latestWorkspaceViewerIdRef.current !== currentUserId
       || taskOptionsLoadGenerationRef.current !== loadGeneration
-    ) return false
+    ) return null
     if (!enrichmentData.schemaReady) {
       setMessage(enrichmentData.error || "선택 정보를 불러오지 못했습니다.")
-      return false
+      return null
     }
     taskOptionsLoadedKeyRef.current = optionsKey
+    taskOptionsDataRef.current = enrichmentData
     setData((current) => current ? mergeOpsTaskWorkspaceOptionData(current, enrichmentData) : current)
-    return true
+    return enrichmentData
   }, [currentUserId, isRegistrationWorkspace, scopedTaskType])
 
   useEffect(() => {
@@ -9990,15 +9997,19 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const formCloseLabel = "닫기"
   const formActionBarClassName = "-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:items-center sm:justify-end"
 
-  function openCreate(type: OpsTaskType = scopedTaskType, initialValues: Partial<OpsTaskInput> = {}) {
+  async function openCreate(type: OpsTaskType = scopedTaskType, initialValues: Partial<OpsTaskInput> = {}) {
     if (!canOpenCreate) return
+    const taskOptions = type === "registration" ? null : await ensureTaskOptions()
     if (type === "registration") void ensureRegistrationOptions(true)
-    else void ensureTaskOptions()
+    else if (!taskOptions) return
+    const createProfiles = taskOptions?.profiles || profiles
+    const createTeachers = taskOptions?.teachers || teachers
+    const createProfileTeamById = buildTaskProfileTeamLookup(createProfiles, createTeachers)
     const defaultAssigneeId = currentUserId || ""
-    const defaultAssigneeTeam = profileTeamById.get(defaultAssigneeId) || ""
+    const defaultAssigneeTeam = createProfileTeamById.get(defaultAssigneeId) || ""
     const defaultDueAt = taskFocus === "today" ? dueTodayValue : ""
     const defaultWordRetestTeacher = findCurrentUserTeacherOption(
-      teachers,
+      createTeachers,
       currentUserId,
       user?.email,
       user?.loginId,
@@ -10060,18 +10071,26 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const signature = `${currentUserId}:${requestedWithdrawalStudentId}`
     if (withdrawalCreateHandledRef.current === signature) return
 
-    withdrawalCreateHandledRef.current = signature
-    openCreateRef.current?.("withdrawal", buildWithdrawalCreatePrefill(requestedWithdrawalStudentId, data.students, data.classes))
+    void (async () => {
+      const taskOptions = await ensureTaskOptions()
+      if (!taskOptions || withdrawalCreateHandledRef.current === signature) return
+      withdrawalCreateHandledRef.current = signature
+      await openCreateRef.current?.(
+        "withdrawal",
+        buildWithdrawalCreatePrefill(requestedWithdrawalStudentId, taskOptions.students, taskOptions.classes),
+      )
 
-    const params = new URLSearchParams(searchParams.toString())
-    params.delete("create")
-    params.delete("studentId")
-    const nextQuery = params.toString()
-    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false })
+      const params = new URLSearchParams(searchParams.toString())
+      params.delete("create")
+      params.delete("studentId")
+      const nextQuery = params.toString()
+      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false })
+    })()
   }, [
     canOpenCreate,
     currentUserId,
     data,
+    ensureTaskOptions,
     formOpen,
     loading,
     pathname,
