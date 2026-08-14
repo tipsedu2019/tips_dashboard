@@ -51,3 +51,11 @@ Round 3 RED added direct-builder and moved-occurrence regressions. Final GREEN: 
 - The Next fixture build explicitly selects webpack. This avoids the local unsigned-SWC-to-WASM fallback path where Turbopack cannot create its project, and restores the cross-process Data Cache proof.
 
 Round 4 RED covered the missing default occurrence record, optional-chain compatibility bypass, VM factory import failure, and a hung invalidation request. Final GREEN: exact Task 6 suite **21/21**, full query-budget suite **68/68**, registration/cache suite **73/73**, public worktree guard, bundled-node TypeScript, and `git diff --check` all pass. No DB, migration, deployment, provider, or production action ran.
+
+## Round 5 P1 remediation
+
+- The cache-invalidation deadline now covers both delivery and `response.json()` parsing. A stuck body aborts and returns the existing nonfatal `pending` receipt within the same bounded deadline.
+- Legacy debt occurrence identity now includes the normalized predecessor statement plus the exact query chain. A moved chain between same-kind statements is rejected; a harmless insertion before an unchanged chain remains permitted because its own source line is not changed.
+- Regenerated every default occurrence fingerprint from the dispatch baseline and kept the baseline-validation regression.
+
+Round 5 RED was a hung successful-response body plus same-kind statement move/insertion regressions. Final GREEN: exact Task 6 suite **22/22**, full query-budget suite **76/76**, registration/cache **74/74**, public and all-surface worktree guards, bundled-node TypeScript, and `git diff --check`. No DB, migration, deployment, provider, or production action ran.

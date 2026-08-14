@@ -73,3 +73,19 @@ test("a hung cache refresh is aborted and returns a pending receipt", { timeout:
   assert.deepEqual(result, { status: "pending", reason: "class", requestId: REQUEST_ID });
   assert.equal(signal?.aborted, true);
 });
+
+test("a hung cache refresh body shares the fetch deadline and returns pending", { timeout: 100 }, async () => {
+  let signal;
+  const result = await requestPublicClassesCacheInvalidation({
+    reason: "class",
+    requestId: REQUEST_ID,
+    timeoutMs: 5,
+    fetcher: async (_url, options) => {
+      signal = options.signal;
+      return { ok: true, json: () => new Promise(() => {}) };
+    },
+  });
+
+  assert.deepEqual(result, { status: "pending", reason: "class", requestId: REQUEST_ID });
+  assert.equal(signal?.aborted, true);
+});

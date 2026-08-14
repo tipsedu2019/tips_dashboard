@@ -1037,7 +1037,10 @@ test("a stale manifest fingerprint cannot grandfather a reintroduced query debt"
 test("an occurrence-bound manifest debt rejects the same query moved within its symbol", async () => {
   const file = "src/features/tasks/list-tasks.ts"
   const baselineSource = `async function load(client) {
-  return client.from("ops_tasks").select("*")
+  const before = 1
+  const result = client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  const after = 2
+  return result
 }
 `
   const baselineViolation = inspectQuerySurfaceSource({ surface: "tasks", file, source: baselineSource })
@@ -1046,9 +1049,10 @@ test("an occurrence-bound manifest debt rejects the same query moved within its 
     file,
     baselineSource,
     source: `async function load(client) {
-  const moved = true
-  if (!moved) return []
-  return client.from("ops_tasks").select("*")
+  const before = 1
+  const after = 2
+  const result = client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return result
 }
 `,
     debtManifest: (baselineSha) => [{
@@ -1067,6 +1071,39 @@ test("an occurrence-bound manifest debt rejects the same query moved within its 
     && violation.surface === "tasks"
     && violation.reason === "list_select_star"
   )))
+})
+
+test("an occurrence-bound manifest debt permits a harmless predecessor insertion", async () => {
+  const file = "src/features/tasks/list-tasks.ts"
+  const baselineSource = `async function load(client) {
+  const marker = 1
+  const result = client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return result
+}
+`
+  const baselineViolation = inspectQuerySurfaceSource({ surface: "tasks", file, source: baselineSource })
+    .find((violation) => violation.reason === "list_select_star")
+  const result = await verifyFixture({
+    file,
+    baselineSource,
+    source: `async function load(client) {
+  const marker = 1
+  const harmless = true
+  const result = client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return result
+}
+`,
+    debtManifest: (baselineSha) => [{
+      surface: "tasks",
+      file,
+      symbol: "load",
+      violation: "list_select_star",
+      baselineSha,
+      fingerprint: baselineViolation.fingerprint,
+      occurrenceFingerprint: baselineViolation.occurrenceFingerprint,
+    }],
+  })
+  assert.deepEqual(result, { ok: true, violations: [] })
 })
 
 test("root controls fail closed for spread, shorthand, and aliased relation options", async () => {

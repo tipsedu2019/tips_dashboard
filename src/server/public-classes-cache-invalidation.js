@@ -55,33 +55,32 @@ export async function requestPublicClassesCacheInvalidation({
   const boundedTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0
     ? timeoutMs
     : CACHE_INVALIDATION_TIMEOUT_MS;
+  let timeout;
+  const deadline = new Promise((_, reject) => {
+    timeout = setTimeout(() => {
+      controller?.abort();
+      reject(new Error("public_classes_cache_invalidation_timeout"));
+    }, boundedTimeoutMs);
+  });
   try {
-    const response = await new Promise((resolve, reject) => {
-      let settled = false;
-      const settle = (callback, value) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        callback(value);
-      };
-      const timeout = setTimeout(() => {
-        controller?.abort();
-        settle(reject, new Error("public_classes_cache_invalidation_timeout"));
-      }, boundedTimeoutMs);
+    const response = await Promise.race([
       Promise.resolve(fetcher("/api/public-classes/cache/invalidate", {
         method: "POST",
         headers,
         body: JSON.stringify({ reason, requestId }),
         signal: controller?.signal,
-      })).then(
-        (value) => settle(resolve, value),
-        (error) => settle(reject, error),
-      );
-    });
-    const body = await response.json().catch(() => null);
+      })),
+      deadline,
+    ]);
+    const body = await Promise.race([
+      Promise.resolve().then(() => response.json()).catch(() => null),
+      deadline,
+    ]);
     if (response.ok && body?.ok) return { status: "refreshed", reason, requestId };
   } catch {
     // A successful business mutation must not be rolled back for cache delivery.
+  } finally {
+    clearTimeout(timeout);
   }
   return { status: "pending", reason, requestId };
 }
