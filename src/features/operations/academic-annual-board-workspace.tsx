@@ -49,7 +49,10 @@ import {
   type AcademicAnnualBoardType,
 } from "./academic-calendar-models.js";
 import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
-import { resolveAnnualBoardEntryParentId } from "./operations-read-service.js";
+import {
+  resolveAnnualBoardEntryParentId,
+  resolveAnnualBoardStructuredScopes,
+} from "./operations-read-service.js";
 
 const FIXED_EXAM_TERM_ROWS = ["1학기 중간", "1학기 기말", "2학기 중간", "2학기 기말"] as const;
 const BOARD_TYPES: AcademicAnnualBoardType[] = ["시험기간", "영어시험일", "수학시험일", "과학시험일", "체험학습", "방학·휴일·기타", "팁스"];
@@ -441,22 +444,7 @@ function getEventCellLabel(entries: AcademicAnnualBoardEntry[], options: { compa
 }
 
 function getStructuredScopeItems(entry: AcademicAnnualBoardEntry | null, key: "textbookScopes" | "subtextbookScopes") {
-  const directItems = normalizeScopeItems(entry?.[key]);
-  if (directItems.length > 0) {
-    return directItems;
-  }
-
-  const scopeSection = (entry?.displaySections || []).find((section) => text(section.label) === "시험범위");
-  const fallbackItems = Array.isArray(scopeSection?.items)
-    ? scopeSection.items
-        .map((item) => {
-          const raw = text(item);
-          return raw ? { name: "", publisher: "", scope: raw } : null;
-        })
-        .filter((item): item is TextbookScopeItem => Boolean(item))
-    : [];
-
-  return key === "textbookScopes" ? fallbackItems : [];
+  return resolveAnnualBoardStructuredScopes(entry || {})[key] as TextbookScopeItem[];
 }
 
 function formatScopeItem(item: TextbookScopeItem) {

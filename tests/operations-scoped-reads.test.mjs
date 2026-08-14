@@ -16,6 +16,9 @@ const appendOperationsPageIfCurrent = serviceModule.appendOperationsPageIfCurren
 const buildSevenDayRangeKeys = serviceModule.buildSevenDayRangeKeys;
 const inferAcademicExamTerm = serviceModule.inferAcademicExamTerm;
 const isCurrentClassMutationRefresh = serviceModule.isCurrentClassMutationRefresh;
+const captureClassMutationLifecycleToken = serviceModule.captureClassMutationLifecycleToken;
+const refreshClassMutationIfCurrent = serviceModule.refreshClassMutationIfCurrent;
+const resolveAnnualBoardStructuredScopes = serviceModule.resolveAnnualBoardStructuredScopes;
 
 const academicEventUtils = await import(
   new URL("../src/features/operations/academic-event-utils.js", import.meta.url),
@@ -615,6 +618,55 @@ test("annual RPC matches normalized exam periods and projects every renderer mat
   assert.match(annualBody, /bounded_entries\.display_sections\s*\|\|\s*material_sections\.sections/i);
 });
 
+test("annual RPC retains explicit curriculum links and resolves exactly one linked source", async () => {
+  const sql = await readFile(new URL("supabase/migrations/20260814035710_operations_scoped_reads.sql", root), "utf8");
+  const annualBody = sql.match(/create function public\.get_operations_annual_board_v1[\s\S]*?\n\$function\$;/i)?.[0] || "";
+
+  assert.match(annualBody, /detail\.academy_curriculum_plan_id/i);
+  assert.match(annualBody, /detail\.curriculum_profile_id/i);
+  assert.match(annualBody, /selected_curriculum/i);
+  assert.match(annualBody, /order by curriculum_candidate\.match_priority[\s\S]*?limit 1/i);
+  assert.match(annualBody, /curriculum_plan\.id\s*=\s*selected_curriculum\.plan_id/i);
+  assert.match(annualBody, /curriculum_profile\.id\s*=\s*selected_curriculum\.profile_id/i);
+  assert.doesNotMatch(
+    annualBody,
+    /from public\.academy_curriculum_plans as curriculum_plan[\s\S]*?where curriculum_plan\.academic_year = p_academic_year[\s\S]*?union all[\s\S]*?from public\.academic_curriculum_profiles as curriculum_profile[\s\S]*?where curriculum_profile\.academic_year = p_academic_year/i,
+  );
+});
+
+test("derived annual scopes keep textbook and supplement buckets separate", () => {
+  assert.equal(typeof resolveAnnualBoardStructuredScopes, "function");
+  assert.deepEqual(resolveAnnualBoardStructuredScopes({
+    textbookScopes: [{ name: "본교재", publisher: "A", scope: "10~20쪽" }],
+    subtextbookScopes: [{ name: "부교재", publisher: "B", scope: "3단원" }],
+    displaySections: [{ label: "시험범위", items: ["합쳐지면 안 됨"] }],
+  }), {
+    textbookScopes: [{ name: "본교재", publisher: "A", scope: "10~20쪽" }],
+    subtextbookScopes: [{ name: "부교재", publisher: "B", scope: "3단원" }],
+  });
+  assert.deepEqual(resolveAnnualBoardStructuredScopes({
+    textbookScope: "교과서 직접 범위",
+    subtextbookScope: "부교재 직접 범위",
+    displaySections: [
+      { label: "교과서", items: ["교과서 이름 · 출판사 · 10쪽"] },
+      { label: "부교재", items: ["부교재 이름 · 출판사 · 2단원"] },
+      { label: "시험범위", items: ["기타 시험범위"] },
+    ],
+  }), {
+    textbookScopes: [{ name: "", publisher: "", scope: "교과서 직접 범위" }],
+    subtextbookScopes: [{ name: "", publisher: "", scope: "부교재 직접 범위" }],
+  });
+  assert.deepEqual(resolveAnnualBoardStructuredScopes({
+    displaySections: [
+      { label: "부교재", items: ["부교재만 있음"] },
+      { label: "시험범위", items: ["교재로 간주하면 안 됨"] },
+    ],
+  }), {
+    textbookScopes: [],
+    subtextbookScopes: [{ name: "", publisher: "", scope: "부교재만 있음" }],
+  });
+});
+
 test("annual empty-year UI offers a first-event draft from the bounded school catalog", async () => {
   const source = await readFile(new URL("src/features/operations/academic-annual-board-workspace.tsx", root), "utf8");
 
@@ -655,6 +707,70 @@ test("class mutation refresh guard rejects an older revision or a newly selected
   assert.match(source, /isCurrentClassMutationRefresh/);
 });
 
+test("closing the lesson editor revokes a mutation token before late refresh work can commit", async () => {
+  assert.equal(typeof captureClassMutationLifecycleToken, "function");
+  assert.equal(typeof refreshClassMutationIfCurrent, "function");
+  let revision = 7;
+  let requestedClassId = "class-a";
+  const token = captureClassMutationLifecycleToken({ currentRevision: revision, classId: requestedClassId });
+  let loadCount = 0;
+  let commitCount = 0;
+
+  revision += 1;
+  requestedClassId = "";
+  const afterClose = await refreshClassMutationIfCurrent({
+    token,
+    getCurrentRevision: () => revision,
+    getCurrentRequestedClassId: () => requestedClassId,
+    loadDetail: async () => {
+      loadCount += 1;
+      return { classItem: { id: "class-a" } };
+    },
+    commitDetail: async () => {
+      commitCount += 1;
+    },
+  });
+
+  assert.deepEqual(afterClose, { status: "stale" });
+  assert.equal(loadCount, 0);
+  assert.equal(commitCount, 0);
+
+  revision = 9;
+  requestedClassId = "class-a";
+  const inFlightToken = captureClassMutationLifecycleToken({ currentRevision: revision, classId: requestedClassId });
+  let resolveDetail;
+  const pendingDetail = new Promise((resolve) => {
+    resolveDetail = resolve;
+  });
+  const refreshPromise = refreshClassMutationIfCurrent({
+    token: inFlightToken,
+    getCurrentRevision: () => revision,
+    getCurrentRequestedClassId: () => requestedClassId,
+    loadDetail: async () => await pendingDetail,
+    commitDetail: async () => {
+      commitCount += 1;
+    },
+  });
+  revision += 1;
+  requestedClassId = "";
+  resolveDetail({ classItem: { id: "class-a" } });
+
+  assert.deepEqual(await refreshPromise, { status: "stale" });
+  assert.equal(commitCount, 0);
+});
+
+test("class mutations capture lifecycle before writes and editor close revokes it", async () => {
+  const source = await readFile(new URL("src/features/operations/class-schedule-workspace.tsx", root), "utf8");
+
+  assert.match(source, /const mutationToken = captureClassMutationLifecycleToken\([\s\S]*?await action\.saveSession/);
+  assert.match(source, /const mutationToken = captureClassMutationLifecycleToken\([\s\S]*?await action\.saveContent/);
+  assert.match(source, /const mutationToken = captureClassMutationLifecycleToken\([\s\S]*?await action\.generateSessions/);
+  assert.match(source, /requestLessonDesignClose[\s\S]*?lessonMutationRefreshRevisionRef\.current \+= 1/);
+  const refreshBody = source.match(/const refreshSelectedLessonDetail = useCallback[\s\S]*?\n\s*\}, \[/)?.[0] || "";
+  assert.doesNotMatch(refreshBody, /lessonMutationRefreshRevisionRef\.current\s*\+\s*1/);
+  assert.match(refreshBody, /refreshClassMutationIfCurrent/);
+});
+
 test("class detail mutations re-read the selected detail and visible range before conditional list invalidation", async () => {
   const source = await readFile(new URL("src/features/operations/class-schedule-workspace.tsx", root), "utf8");
 
@@ -663,7 +779,7 @@ test("class detail mutations re-read the selected detail and visible range befor
   assert.match(source, /setLessonDesignDetail\(detail as Record<string, unknown>\)/);
   assert.match(source, /const hasClassScheduleListSummaryChange/);
   assert.match(source, /if \(currentDetail && hasClassScheduleListSummaryChange\(currentDetail, detail\)\) \{\s*await refresh\(\)/);
-  assert.match(source, /await refreshSelectedLessonDetail\(\)/);
+  assert.match(source, /await refreshSelectedLessonDetail\(mutationToken\)/);
 });
 
 test("operations workspaces issue mode requests and expose dense-range recovery without the legacy fan-out", async () => {

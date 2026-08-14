@@ -95,6 +95,53 @@ export function resolveAnnualBoardEntryParentId(entry) {
   return text(entry?.parentEventId || entry?.parent_event_id || entry?.id);
 }
 
+function normalizeAnnualScopeItems(items) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      name: text(item?.name),
+      publisher: text(item?.publisher),
+      scope: text(item?.scope),
+    }))
+    .filter((item) => item.name || item.publisher || item.scope)
+    .slice(0, 4);
+}
+
+function annualScopeItemsFromSection(entry, label) {
+  const sections = Array.isArray(entry?.materialSections)
+    ? entry.materialSections
+    : Array.isArray(entry?.displaySections) ? entry.displaySections : [];
+  const section = sections.find((candidate) => text(candidate?.label) === label);
+  return (Array.isArray(section?.items) ? section.items : [])
+    .map((item) => text(item))
+    .filter(Boolean)
+    .slice(0, 4)
+    .map((scope) => ({ name: "", publisher: "", scope }));
+}
+
+export function resolveAnnualBoardStructuredScopes(entry) {
+  const directTextbookScopes = normalizeAnnualScopeItems(entry?.textbookScopes);
+  const directSubtextbookScopes = normalizeAnnualScopeItems(entry?.subtextbookScopes);
+  const textbookScope = text(entry?.textbookScope || entry?.textbook_scope);
+  const subtextbookScope = text(
+    entry?.subtextbookScope
+    || entry?.subtextbook_scope
+    || entry?.supplementScope
+    || entry?.supplement_scope,
+  );
+  return {
+    textbookScopes: directTextbookScopes.length > 0
+      ? directTextbookScopes
+      : textbookScope
+        ? [{ name: "", publisher: "", scope: textbookScope }]
+        : annualScopeItemsFromSection(entry, "교과서"),
+    subtextbookScopes: directSubtextbookScopes.length > 0
+      ? directSubtextbookScopes
+      : subtextbookScope
+        ? [{ name: "", publisher: "", scope: subtextbookScope }]
+        : annualScopeItemsFromSection(entry, "부교재"),
+  };
+}
+
 export function buildClassLessonDesignRow(detail) {
   const source = detail && typeof detail === "object" ? detail : {};
   const rawClass = source.classItem && typeof source.classItem === "object" ? source.classItem : {};
@@ -150,6 +197,38 @@ export function isCurrentClassMutationRefresh({
     && Boolean(expectedClassId)
     && expectedClassId === text(currentRequestedClassId)
     && expectedClassId === text(detailClassId);
+}
+
+export function captureClassMutationLifecycleToken({ currentRevision, classId } = {}) {
+  const normalizedClassId = text(classId);
+  if (!Number.isInteger(currentRevision) || currentRevision <= 0 || !normalizedClassId) return null;
+  return { revision: currentRevision, classId: normalizedClassId };
+}
+
+export async function refreshClassMutationIfCurrent({
+  token,
+  getCurrentRevision,
+  getCurrentRequestedClassId,
+  loadDetail,
+  commitDetail,
+} = {}) {
+  const tokenRevision = token?.revision;
+  const tokenClassId = text(token?.classId);
+  const isCurrent = (detailClassId = tokenClassId) => isCurrentClassMutationRefresh({
+    expectedRevision: tokenRevision,
+    currentRevision: getCurrentRevision?.(),
+    requestedClassId: tokenClassId,
+    currentRequestedClassId: getCurrentRequestedClassId?.(),
+    detailClassId,
+  });
+  if (!isCurrent() || typeof loadDetail !== "function" || typeof commitDetail !== "function") {
+    return { status: "stale" };
+  }
+  const detail = await loadDetail(tokenClassId);
+  const detailClassId = text(detail?.classItem?.id || detail?.classId || detail?.id);
+  if (!isCurrent(detailClassId)) return { status: "stale" };
+  await commitDetail(detail);
+  return { status: "committed" };
 }
 
 export function appendOperationsPageIfCurrent({

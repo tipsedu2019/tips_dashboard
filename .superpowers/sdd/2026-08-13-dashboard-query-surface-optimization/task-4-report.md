@@ -208,3 +208,24 @@ Final source evidence:
 - The combined query-budget suite is non-GREEN only in two concurrent Task 6 worktree expectations involving `ops-task-service.ts`; Task 4's exact operations suite is GREEN. The repository migration-layout suite remains non-GREEN in unrelated pre-existing/shared notification cutover fixtures.
 
 No DB runtime command was run. The new pgTAP fixtures specify period isolation, main/profile/supplement renderer parity, and scope retention, but migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, worker, webhook, provider request, and recipient receipt remain unclaimed; the manifest stays `candidate`.
+
+## Final Task 4 P1 remediation round 2
+
+The latest review run was **48 pass / 4 fail**: the annual RPC still discarded explicit `academy_curriculum_plan_id` / `curriculum_profile_id`, the annual hover fallback merged every generic `시험범위` item into the textbook bucket, and class mutations created their UI refresh revision only after the mutation completed. The legacy annual model characterization for explicit links was already GREEN and served as the parity oracle.
+
+This round closes the three P1 boundaries:
+
+- Subject-detail rows retain both explicit curriculum identifiers and their separate textbook, supplement, and other scopes through the bounded annual CTE. A deterministic `selected_curriculum` lateral chooses exactly one source in legacy priority order: explicit academy plan, explicit school profile, first generic academy plan, then first generic school profile. Material and structured-scope projections join only that chosen plan/profile, so same-year/grade/subject rows cannot mix unrelated curricula.
+- Annual output emits distinct scalar `textbookScope` / `subtextbookScope` values and capped structured `textbookScopes` / `subtextbookScopes` objects. Main books, plan materials, profile supplements, and categorized exam materials keep their own name, publisher, and scope fields. The UI fallback reads only labeled `교과서` or `부교재` sections and never treats the generic `시험범위` or `자료` bucket as a textbook.
+- Each lesson session/content/generation mutation captures an immutable lifecycle token before its first write. Closing the editor increments the lifecycle revision. The post-mutation refresh checks the token before starting the exact detail read and again before committing; a late completion therefore cannot load or write detail, increment the visible-range nonce, or trigger conditional list refresh.
+
+Source evidence:
+
+- New behavior/source regressions: the four failing contracts are GREEN; the legacy explicit-link parity characterization remains GREEN.
+- Two exact annual/operations files: **52/52 GREEN**.
+- Task 4 focused calendar/annual/class/continuous-schedule suite: **72/72 GREEN**.
+- TypeScript, targeted ESLint, operations worktree query guard, candidate hash, and `git diff --check`: GREEN.
+- Candidate migration SHA-256: `5cf05b41ec9a5e0bf7fbbfd1fd2f3ad1442aa2ad13cb0353a29abdd77f167bf9`, equal to the manifest and on-disk SQL.
+- The combined query-budget run is non-GREEN only in the pre-existing Task 6 real-legacy-task baseline expectation (`ops-task-service.ts`). Migration layout remains non-GREEN only for the separate Task 3 and Task 5 candidates; the Task 4 migration passes its lexical gate.
+
+No DB runtime command was run. The expanded pgTAP fixture specifies explicit plan/profile priority and separated scalar/structured scope behavior, but migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, worker, webhook, provider request, and recipient receipt remain unclaimed; the manifest stays `candidate`.

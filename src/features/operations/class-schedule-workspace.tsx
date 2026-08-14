@@ -58,7 +58,9 @@ import {
 import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
 import {
   buildClassLessonDesignRow,
+  captureClassMutationLifecycleToken,
   isCurrentClassMutationRefresh,
+  refreshClassMutationIfCurrent,
   resolveRequestedClassRow,
 } from "./operations-read-service.js";
 
@@ -3042,31 +3044,30 @@ export function ClassScheduleWorkspace() {
       ? { classId: selectedRow.id, ...activeLessonMonthRange, refreshKey: normalizedScheduleRefreshNonce }
       : null,
   );
-  const refreshSelectedLessonDetail = useCallback(async () => {
-    const classId = text(selectedRow?.id);
-    if (!classId) return;
-    const expectedRevision = lessonMutationRefreshRevisionRef.current + 1;
-    lessonMutationRefreshRevisionRef.current = expectedRevision;
-    const currentDetail = lessonDesignDetail;
-    const detail = await loadClassLessonDesignDetail(classId) as Record<string, unknown>;
-    const detailClassId = text((detail.classItem as Record<string, unknown> | undefined)?.id);
-    if (detailClassId !== classId) {
-      throw new Error("수업 상세를 다시 확인해 주세요.");
-    }
-    const currentRequestedClassId = text(requestedClassIdRef.current);
+  const refreshSelectedLessonDetail = useCallback(async (mutationToken: { revision: number; classId: string } | null) => {
+    if (!mutationToken) return;
     if (!isCurrentClassMutationRefresh({
-      expectedRevision,
+      expectedRevision: mutationToken.revision,
       currentRevision: lessonMutationRefreshRevisionRef.current,
-      requestedClassId: classId,
-      currentRequestedClassId,
-      detailClassId,
+      requestedClassId: mutationToken.classId,
+      currentRequestedClassId: requestedClassIdRef.current,
+      detailClassId: mutationToken.classId,
     })) return;
-    setLessonDesignDetail(detail as Record<string, unknown>);
-    setNormalizedScheduleRefreshNonce((current) => current + 1);
-    if (currentDetail && hasClassScheduleListSummaryChange(currentDetail, detail)) {
-      await refresh();
-    }
-  }, [lessonDesignDetail, loadClassLessonDesignDetail, refresh, selectedRow?.id]);
+    const currentDetail = lessonDesignDetail;
+    await refreshClassMutationIfCurrent({
+      token: mutationToken,
+      getCurrentRevision: () => lessonMutationRefreshRevisionRef.current,
+      getCurrentRequestedClassId: () => requestedClassIdRef.current,
+      loadDetail: async (classId: string) => await loadClassLessonDesignDetail(classId) as Record<string, unknown>,
+      commitDetail: async (detail: Record<string, unknown>) => {
+        setLessonDesignDetail(detail);
+        setNormalizedScheduleRefreshNonce((current) => current + 1);
+        if (currentDetail && hasClassScheduleListSummaryChange(currentDetail, detail)) {
+          await refresh();
+        }
+      },
+    });
+  }, [lessonDesignDetail, loadClassLessonDesignDetail, refresh]);
   const normalizedGenerationContext = useMemo(() => (
     normalizedScheduleRead.status === "ready" && normalizedScheduleRead.value.source === "normalized" && activeLessonMonthRange
       ? { classId: selectedRow?.id || "", expectedScheduleRevision: Number(normalizedScheduleRead.value.data.scheduleRevision || 0), ...activeLessonMonthRange }
@@ -3860,6 +3861,11 @@ export function ClassScheduleWorkspace() {
     const client = supabase;
     const input = buildNormalizedLessonSessionSaveInput(normalizedLessonSessionDraft) as SaveClassLessonSessionInput;
     if (!input.sessionId || !input.sessionDate) return;
+    const mutationToken = captureClassMutationLifecycleToken({
+      currentRevision: lessonMutationRefreshRevisionRef.current,
+      classId: selectedRow?.id,
+    });
+    if (!mutationToken) return;
     setIsNormalizedLessonSessionSaving(true);
     setLessonDesignSaveError("");
     try {
@@ -3872,13 +3878,13 @@ export function ClassScheduleWorkspace() {
         return next;
       });
       setLessonDesignSaveNotice(refresh.status === "pending" ? "일정 변경을 저장했습니다. 공개 수업 캐시 갱신 대기 중입니다." : "일정 변경을 저장했습니다.");
-      await refreshSelectedLessonDetail();
+      await refreshSelectedLessonDetail(mutationToken);
     } catch (error) {
       setLessonDesignSaveError(error instanceof Error ? error.message : "일정 저장에 실패했습니다.");
     } finally {
       setIsNormalizedLessonSessionSaving(false);
     }
-  }, [normalizedLessonSessionDraft, refreshSelectedLessonDetail]);
+  }, [normalizedLessonSessionDraft, refreshSelectedLessonDetail, selectedRow?.id]);
   const handleLessonSessionStateChange = useCallback(
     (session: (typeof selectedLessonSession), nextState: "active" | "exception" | "makeup" | "tbd") => {
       const sessionDate = resolveLessonSessionDraftDate(session);
@@ -4228,6 +4234,11 @@ export function ClassScheduleWorkspace() {
       return;
     }
     const client = supabase;
+    const mutationToken = captureClassMutationLifecycleToken({
+      currentRevision: lessonMutationRefreshRevisionRef.current,
+      classId: selectedRow.id,
+    });
+    if (!mutationToken) return;
 
     setIsLessonDesignSaving(true);
     setLessonDesignSaveError("");
@@ -4266,7 +4277,7 @@ export function ClassScheduleWorkspace() {
 
       const refresh = await invalidatePublicClassesCacheAfterMutation(client, "schedule");
 
-      await refreshSelectedLessonDetail();
+      await refreshSelectedLessonDetail(mutationToken);
       const saved = normalizedContentContext ? "수업 내용을 저장했습니다." : "수업계획을 저장했습니다.";
       setLessonDesignSaveNotice(refresh.status === "pending" ? `${saved} 공개 수업 캐시 갱신 대기 중입니다.` : saved);
     } catch (saveError) {
@@ -4297,6 +4308,11 @@ export function ClassScheduleWorkspace() {
   const confirmLessonSessionGeneration = useCallback(async () => {
     if (!supabase || !normalizedGenerationContext || !generationPreview) return;
     const client = supabase;
+    const mutationToken = captureClassMutationLifecycleToken({
+      currentRevision: lessonMutationRefreshRevisionRef.current,
+      classId: selectedRow?.id,
+    });
+    if (!mutationToken) return;
     setGenerationSaving(true);
     setLessonDesignSaveError("");
     try {
@@ -4306,14 +4322,14 @@ export function ClassScheduleWorkspace() {
       setGenerationPreview(null);
       const saved = `추가 ${Number((result as Record<string, unknown>)?.generatedCount || 0)} · 기존 ${Number(generationPreview.existingCount || 0)} · 확인 필요 ${Number(generationPreview.resourceConflictCount || 0)}`;
       setLessonDesignSaveNotice(refresh.status === "pending" ? `${saved} · 공개 수업 캐시 갱신 대기 중` : saved);
-      await refreshSelectedLessonDetail();
+      await refreshSelectedLessonDetail(mutationToken);
     } catch (error) {
       setLessonDesignSaveError(error instanceof Error ? error.message : "일정 생성이 실패했습니다. 미리보기를 다시 확인하세요.");
       setGenerationPreview(null);
     } finally {
       setGenerationSaving(false);
     }
-  }, [generationPreview, normalizedGenerationContext, refreshSelectedLessonDetail]);
+  }, [generationPreview, normalizedGenerationContext, refreshSelectedLessonDetail, selectedRow?.id]);
   const openLessonDesignForRow = useCallback(
     (
       row: Record<string, unknown> | null,
@@ -4396,6 +4412,7 @@ export function ClassScheduleWorkspace() {
     }
 
     isLessonDesignClosingRef.current = true;
+    lessonMutationRefreshRevisionRef.current += 1;
     setLessonDesignOpen(false);
     finishLessonDesignClose();
   }, [finishLessonDesignClose]);

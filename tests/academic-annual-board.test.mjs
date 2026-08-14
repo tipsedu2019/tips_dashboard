@@ -141,6 +141,110 @@ test("annual board keeps exam materials term-scoped and renders curriculum sourc
   assert.match(mathItems.join(" "), /수학 부교재/);
 });
 
+test("annual board honors each detail's explicit curriculum link without mixing generic plans or profiles", () => {
+  const model = buildAcademicAnnualBoardModel({
+    selectedYear: "2026",
+    academicSchools: [{ id: "school-high", name: "검증고", category: "high" }],
+    academicEvents: [{
+      id: "exam-period-explicit",
+      title: "검증고 1학기 중간고사",
+      school_id: "school-high",
+      school: "검증고",
+      type: "시험기간",
+      grade: "고1",
+      start: "2026-04-20",
+      end: "2026-04-24",
+      note: '[[TIPS_META]] {"examTerm":"1학기 중간"}',
+    }],
+    academicEventExamDetails: [{
+      id: "english-detail",
+      academic_event_id: "exam-period-explicit",
+      grade: "고1",
+      subject: "영어",
+      exam_date: "2026-04-21",
+      academy_curriculum_plan_id: "english-explicit-plan",
+      textbook_scope: "3단원",
+      supplement_scope: "워크북 2단원",
+    }, {
+      id: "math-detail",
+      academic_event_id: "exam-period-explicit",
+      school_id: "school-high",
+      grade: "고1",
+      subject: "수학",
+      exam_date: "2026-04-22",
+      curriculum_profile_id: "math-explicit-profile",
+      textbook_scope: "함수",
+      supplement_scope: "유형 4",
+    }],
+    academyCurriculumPlans: [{
+      id: "english-wrong-generic-plan",
+      academic_year: 2026,
+      academy_grade: "고1",
+      subject: "영어",
+      main_textbook_id: "english-wrong-main",
+    }, {
+      id: "english-explicit-plan",
+      academic_year: 2026,
+      academy_grade: "고1",
+      subject: "영어",
+      main_textbook_id: "english-explicit-main",
+    }, {
+      id: "math-wrong-generic-plan",
+      academic_year: 2026,
+      academy_grade: "고1",
+      subject: "수학",
+      main_textbook_id: "math-wrong-main",
+    }],
+    academyCurriculumMaterials: [{
+      id: "english-wrong-child",
+      plan_id: "english-wrong-generic-plan",
+      title: "섞이면 안 되는 영어 부교재",
+    }, {
+      id: "english-explicit-child",
+      plan_id: "english-explicit-plan",
+      title: "명시 연결 영어 부교재",
+    }],
+    textbooks: [{ id: "english-wrong-main", title: "섞이면 안 되는 영어 교재" },
+      { id: "english-explicit-main", title: "명시 연결 영어 교재" },
+      { id: "math-wrong-main", title: "섞이면 안 되는 수학 교재" }],
+    academicCurriculumProfiles: [{
+      id: "math-wrong-profile",
+      academic_year: 2026,
+      school_id: "school-high",
+      grade: "고1",
+      subject: "수학",
+      main_textbook_title: "섞이면 안 되는 수학 프로필",
+    }, {
+      id: "math-explicit-profile",
+      academic_year: 2026,
+      school_id: "school-high",
+      grade: "고1",
+      subject: "수학",
+      main_textbook_title: "명시 연결 수학 교재",
+    }],
+    academicSupplementMaterials: [{
+      id: "math-wrong-supplement",
+      profile_id: "math-wrong-profile",
+      title: "섞이면 안 되는 수학 부교재",
+    }, {
+      id: "math-explicit-supplement",
+      profile_id: "math-explicit-profile",
+      title: "명시 연결 수학 부교재",
+    }],
+  });
+
+  const row = model.rows[0];
+  const englishItems = row.typeBuckets["영어시험일"][0].materialSections.flatMap((section) => section.items).join(" ");
+  const mathItems = row.typeBuckets["수학시험일"][0].materialSections.flatMap((section) => section.items).join(" ");
+
+  assert.match(englishItems, /명시 연결 영어 교재/);
+  assert.match(englishItems, /명시 연결 영어 부교재/);
+  assert.doesNotMatch(englishItems, /섞이면 안 되는 영어/);
+  assert.match(mathItems, /명시 연결 수학 교재/);
+  assert.match(mathItems, /명시 연결 수학 부교재/);
+  assert.doesNotMatch(mathItems, /섞이면 안 되는 수학/);
+});
+
 test("calendar and annual board display the current active label for a stable science area key", () => {
   const input = {
     academicSchools: [{ id: "school-high", name: "대기고", category: "high" }],

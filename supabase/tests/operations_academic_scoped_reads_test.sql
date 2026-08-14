@@ -139,6 +139,18 @@ values (
   '92023000-0000-4000-8000-000000000001','영어 본교재','영어 본교재',
   '영어','high','고1',array['high']::text[],array['고1']::text[],
   '영어','본교재 출판',10000,'{}'::text[],'[]'::jsonb,'active'
+), (
+  '92023000-0000-4000-8000-000000000002','섞이면 안 되는 고1 수학 교재','섞이면 안 되는 고1 수학 교재',
+  '수학','high','고1',array['high']::text[],array['고1']::text[],
+  '수학','오연결 출판',10000,'{}'::text[],'[]'::jsonb,'active'
+), (
+  '92023000-0000-4000-8000-000000000003','섞이면 안 되는 고3 수학 교재','섞이면 안 되는 고3 수학 교재',
+  '수학','high','고3',array['high']::text[],array['고3']::text[],
+  '수학','오연결 출판',10000,'{}'::text[],'[]'::jsonb,'active'
+), (
+  '92023000-0000-4000-8000-000000000004','명시 연결 고3 수학 교재','명시 연결 고3 수학 교재',
+  '수학','high','고3',array['high']::text[],array['고3']::text[],
+  '수학','정확한 출판',10000,'{}'::text[],'[]'::jsonb,'active'
 );
 
 insert into public.academy_curriculum_plans(
@@ -147,6 +159,15 @@ insert into public.academy_curriculum_plans(
 values (
   '92024000-0000-4000-8000-000000000001',2197,'고1','영어',
   '92023000-0000-4000-8000-000000000001','본교재 계획 범위',0
+), (
+  '92024000-0000-4000-8000-000000000002',2197,'고1','수학',
+  '92023000-0000-4000-8000-000000000002','섞이면 안 되는 고1 계획',0
+), (
+  '92024000-0000-4000-8000-000000000003',2197,'고3','수학',
+  '92023000-0000-4000-8000-000000000003','섞이면 안 되는 고3 계획',0
+), (
+  '92024000-0000-4000-8000-000000000004',2197,'고3','수학',
+  '92023000-0000-4000-8000-000000000004','명시 연결 고3 계획',1
 );
 
 insert into public.academic_curriculum_profiles(
@@ -164,6 +185,16 @@ values (
   '92026000-0000-4000-8000-000000000001',
   '92025000-0000-4000-8000-000000000001','수학 프로필 부교재','부교재 출판','부교재 범위',0
 );
+
+update public.academic_event_exam_details
+set curriculum_profile_id = '92025000-0000-4000-8000-000000000001',
+    supplement_scope = '부교재 3단원'
+where id = '92022000-0000-4000-8000-000000000001';
+
+update public.academic_event_exam_details
+set academy_curriculum_plan_id = '92024000-0000-4000-8000-000000000004',
+    supplement_scope = '부교재 5단원'
+where id = '92022000-0000-4000-8000-000000000002';
 
 insert into public.academic_exam_material_plans(
   id,academic_year,subject,school_id,grade,exam_period_code,note,sort_order
@@ -242,12 +273,33 @@ select ok(
   (select (entry -> 'materialSections')::text like '%수학 프로필 본교재%'
       and (entry -> 'materialSections')::text like '%수학 프로필 부교재%'
       and (entry -> 'materialSections')::text like '%10~30쪽%'
+      and (entry -> 'materialSections')::text not like '%섞이면 안 되는 고1 수학 교재%'
+      and entry ->> 'curriculumProfileId' = '92025000-0000-4000-8000-000000000001'
+      and entry ->> 'textbookScope' = '10~30쪽'
+      and entry ->> 'subtextbookScope' = '부교재 3단원'
+      and entry #>> '{textbookScopes,0,name}' = '수학 프로필 본교재'
+      and entry #>> '{textbookScopes,0,scope}' = '10~30쪽'
+      and entry #>> '{subtextbookScopes,0,name}' = '수학 프로필 부교재'
+      and entry #>> '{subtextbookScopes,0,scope}' = '부교재 3단원'
    from operations_annual_meta_entries
    where entry ->> 'parentEventId' = '92021000-0000-4000-8000-000000000001'
      and entry ->> 'type' = '수학시험일'
      and entry ->> 'grade' = '고1'
    limit 1),
   'annual subject rows preserve detail scopes plus profile textbook and supplement renderer sources'
+);
+select ok(
+  (select (entry -> 'materialSections')::text like '%명시 연결 고3 수학 교재%'
+      and (entry -> 'materialSections')::text not like '%섞이면 안 되는 고3 수학 교재%'
+      and entry ->> 'academyCurriculumPlanId' = '92024000-0000-4000-8000-000000000004'
+      and entry #>> '{textbookScopes,0,name}' = '명시 연결 고3 수학 교재'
+      and entry #>> '{textbookScopes,0,scope}' = '40~60쪽'
+   from operations_annual_meta_entries
+   where entry ->> 'parentEventId' = '92021000-0000-4000-8000-000000000002'
+     and entry ->> 'type' = '수학시험일'
+     and entry ->> 'grade' = '고3'
+   limit 1),
+  'annual subject rows prefer an explicit academy plan over the first generic grade-subject plan'
 );
 select is(
   public.get_academic_event_detail_v1('92021000-0000-4000-8000-000000000001') ->> 'storedNote',
