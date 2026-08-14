@@ -15,7 +15,6 @@ const resolveRequestedClassRow = serviceModule.resolveRequestedClassRow;
 const appendOperationsPageIfCurrent = serviceModule.appendOperationsPageIfCurrent;
 const buildSevenDayRangeKeys = serviceModule.buildSevenDayRangeKeys;
 const inferAcademicExamTerm = serviceModule.inferAcademicExamTerm;
-const isCurrentClassMutationRefresh = serviceModule.isCurrentClassMutationRefresh;
 
 const academicEventUtils = await import(
   new URL("../src/features/operations/academic-event-utils.js", import.meta.url),
@@ -600,59 +599,6 @@ test("annual RPC keeps bounded material sections and fallback subject rows group
   assert.match(annualBody, /fallback_subject_entries/i);
   assert.match(annualBody, /parent_event_id[\s\S]*grade[\s\S]*entry_type/i);
   assert.match(annualBody, /'materialSections'/);
-});
-
-test("annual RPC matches normalized exam periods and projects every renderer material source", async () => {
-  const sql = await readFile(new URL("supabase/migrations/20260814035710_operations_scoped_reads.sql", root), "utf8");
-  const annualBody = sql.match(/create function public\.get_operations_annual_board_v1[\s\S]*?\n\$function\$;/i)?.[0] || "";
-
-  assert.match(annualBody, /exam_period_key/i);
-  assert.match(annualBody, /exam_period_code/i);
-  assert.match(annualBody, /academic_curriculum_profiles/i);
-  assert.match(annualBody, /academic_supplement_materials/i);
-  assert.match(annualBody, /main_textbook_id/i);
-  assert.match(annualBody, /left join public\.textbooks/i);
-  assert.match(annualBody, /bounded_entries\.display_sections\s*\|\|\s*material_sections\.sections/i);
-});
-
-test("annual empty-year UI offers a first-event draft from the bounded school catalog", async () => {
-  const source = await readFile(new URL("src/features/operations/academic-annual-board-workspace.tsx", root), "utf8");
-
-  assert.match(source, /handleFirstBoardEventCreate/);
-  assert.match(source, /allSchoolOptions\.filter/);
-  assert.match(source, /첫 일정 추가/);
-  assert.match(source, /model\.summary\.eventCount === 0/);
-});
-
-test("class mutation refresh guard rejects an older revision or a newly selected class", async () => {
-  assert.equal(typeof isCurrentClassMutationRefresh, "function");
-  assert.equal(isCurrentClassMutationRefresh({
-    expectedRevision: 7,
-    currentRevision: 7,
-    requestedClassId: "class-b",
-    currentRequestedClassId: "class-b",
-    detailClassId: "class-b",
-  }), true);
-  assert.equal(isCurrentClassMutationRefresh({
-    expectedRevision: 6,
-    currentRevision: 7,
-    requestedClassId: "class-a",
-    currentRequestedClassId: "class-b",
-    detailClassId: "class-a",
-  }), false);
-  assert.equal(isCurrentClassMutationRefresh({
-    expectedRevision: 7,
-    currentRevision: 7,
-    requestedClassId: "class-a",
-    currentRequestedClassId: "class-b",
-    detailClassId: "class-a",
-  }), false);
-
-  const source = await readFile(new URL("src/features/operations/class-schedule-workspace.tsx", root), "utf8");
-  assert.match(source, /lessonMutationRefreshRevisionRef/);
-  assert.match(source, /selectedClassIdRef/);
-  assert.match(source, /requestedClassIdRef\.current/);
-  assert.match(source, /isCurrentClassMutationRefresh/);
 });
 
 test("class detail mutations re-read the selected detail and visible range before conditional list invalidation", async () => {

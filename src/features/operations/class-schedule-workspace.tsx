@@ -58,7 +58,6 @@ import {
 import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
 import {
   buildClassLessonDesignRow,
-  isCurrentClassMutationRefresh,
   resolveRequestedClassRow,
 } from "./operations-read-service.js";
 
@@ -2587,9 +2586,6 @@ export function ClassScheduleWorkspace() {
   const [teacher, setTeacher] = useState(() => text(searchParams.get("teacher")));
   const [selectedSyncGroupId, setSelectedSyncGroupId] = useState(() => text(searchParams.get("syncGroup")));
   const [selectedClassId, setSelectedClassId] = useState("");
-  const selectedClassIdRef = useRef("");
-  const requestedClassIdRef = useRef(requestedClassId);
-  requestedClassIdRef.current = requestedClassId || selectedClassId;
   const [lessonDesignOpen, setLessonDesignOpen] = useState(false);
   const [selectedLessonMonthKeys, setSelectedLessonMonthKeys] = useState<string[]>([]);
   const [focusedLessonMonthKey, setFocusedLessonMonthKey] = useState("");
@@ -2628,7 +2624,6 @@ export function ClassScheduleWorkspace() {
   const [lessonTextbookCandidateLoading, setLessonTextbookCandidateLoading] = useState(false);
   const [lessonTextbookCandidateError, setLessonTextbookCandidateError] = useState("");
   const lessonDesignDetailRevisionRef = useRef(0);
-  const lessonMutationRefreshRevisionRef = useRef(0);
   const lessonTextbookCandidateRevisionRef = useRef(0);
   const lessonPlanDraftRef = useRef<Record<string, unknown> | null>(null);
   const lessonPlanSourceKeyRef = useRef("");
@@ -2637,7 +2632,6 @@ export function ClassScheduleWorkspace() {
   const pendingLessonDesignPairSessionIdRef = useRef("");
   const deferredSearch = useDeferredValue(search);
   const deferredLessonTextbookSearch = useDeferredValue(lessonTextbookSearch);
-  selectedClassIdRef.current = selectedClassId;
   const operationsRequest = useMemo(
     () => ({
       mode: "class_schedule" as const,
@@ -2715,7 +2709,6 @@ export function ClassScheduleWorkspace() {
   }, [scopedData]);
 
   useEffect(() => {
-    lessonMutationRefreshRevisionRef.current += 1;
     const revision = lessonDesignDetailRevisionRef.current + 1;
     lessonDesignDetailRevisionRef.current = revision;
     if (!isLessonDesignRouteActive || !requestedClassId) {
@@ -2878,9 +2871,6 @@ export function ClassScheduleWorkspace() {
   const openClassScheduleOfficialDetail = useCallback(
     (row: Record<string, unknown>) => {
       rememberClassScheduleListPosition();
-      selectedClassIdRef.current = text(row.id);
-      requestedClassIdRef.current = text(row.id);
-      lessonMutationRefreshRevisionRef.current += 1;
       setSelectedClassId(text(row.id));
       router.push(buildOfficialClassScheduleDetailHref(row, classScheduleReturnPath));
     },
@@ -2927,12 +2917,9 @@ export function ClassScheduleWorkspace() {
     if (model.rows.length === 0) {
       setSelectedClassId((current) => {
         if (current && allRowsModel.rows.some((row) => row.id === current)) {
-          selectedClassIdRef.current = current;
           return current;
         }
-        const next = allRowsModel.rows[0]?.id || "";
-        selectedClassIdRef.current = next;
-        return next;
+        return allRowsModel.rows[0]?.id || "";
       });
       return;
     }
@@ -2943,12 +2930,9 @@ export function ClassScheduleWorkspace() {
         (model.rows.some((row) => row.id === current) ||
           allRowsModel.rows.some((row) => row.id === current))
       ) {
-        selectedClassIdRef.current = current;
         return current;
       }
-      const next = model.rows.find((row) => row.warningText)?.id || model.rows[0]?.id || "";
-      selectedClassIdRef.current = next;
-      return next;
+      return model.rows.find((row) => row.warningText)?.id || model.rows[0]?.id || "";
     });
   }, [allRowsModel.rows, model.rows]);
 
@@ -3045,22 +3029,11 @@ export function ClassScheduleWorkspace() {
   const refreshSelectedLessonDetail = useCallback(async () => {
     const classId = text(selectedRow?.id);
     if (!classId) return;
-    const expectedRevision = lessonMutationRefreshRevisionRef.current + 1;
-    lessonMutationRefreshRevisionRef.current = expectedRevision;
     const currentDetail = lessonDesignDetail;
     const detail = await loadClassLessonDesignDetail(classId) as Record<string, unknown>;
-    const detailClassId = text((detail.classItem as Record<string, unknown> | undefined)?.id);
-    if (detailClassId !== classId) {
+    if (text((detail.classItem as Record<string, unknown> | undefined)?.id) !== classId) {
       throw new Error("수업 상세를 다시 확인해 주세요.");
     }
-    const currentRequestedClassId = text(requestedClassIdRef.current);
-    if (!isCurrentClassMutationRefresh({
-      expectedRevision,
-      currentRevision: lessonMutationRefreshRevisionRef.current,
-      requestedClassId: classId,
-      currentRequestedClassId,
-      detailClassId,
-    })) return;
     setLessonDesignDetail(detail as Record<string, unknown>);
     setNormalizedScheduleRefreshNonce((current) => current + 1);
     if (currentDetail && hasClassScheduleListSummaryChange(currentDetail, detail)) {
@@ -4328,9 +4301,6 @@ export function ClassScheduleWorkspace() {
         return;
       }
 
-      selectedClassIdRef.current = text(row.id);
-      requestedClassIdRef.current = text(row.id);
-      lessonMutationRefreshRevisionRef.current += 1;
       setSelectedClassId(text(row.id));
       const targetSession =
         nextLessonDesignSnapshot.sessions.find((session) => session.id === options.sessionId) || null;
@@ -6321,12 +6291,8 @@ export function ClassScheduleWorkspace() {
                     )}
                     onClick={() => {
                       const nextGroupId = isSelected ? "" : group.id;
-                      const nextClassId = group.members[0]?.classId || "";
                       setSelectedSyncGroupId(nextGroupId);
-                      selectedClassIdRef.current = nextClassId;
-                      requestedClassIdRef.current = nextClassId;
-                      lessonMutationRefreshRevisionRef.current += 1;
-                      setSelectedClassId(nextClassId);
+                      setSelectedClassId(group.members[0]?.classId || "");
                     }}
                   >
                     <span className="truncate">{group.name || group.id}</span>

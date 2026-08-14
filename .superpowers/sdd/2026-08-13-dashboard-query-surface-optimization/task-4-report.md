@@ -187,24 +187,3 @@ Final-review source evidence:
 - Candidate migration SHA-256: `0fadb63a8733b8a44c1940c20af553a0f2874b854250d0a05c9203a51a85d623`.
 
 No DB runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, worker, webhook, provider request, and recipient receipt remain unclaimed; the manifest stays `candidate`.
-
-## Final Task 4 P1 remediation
-
-The fresh review RED was **44 pass / 3 fail** for the server material projection, empty-year creation path, and post-mutation class refresh guard. A follow-up stale-route regression independently ran **0 pass / 1 fail** before the live requested-class identity ref was added.
-
-This round closes the four P1 boundaries:
-
-- Annual exam-material plans normalize both stored `exam_period_code` and each renderer entry's `examTerm` to the same four-value key. Fallback eligibility and material projection both require that exact key, so midterm and final materials cannot merge.
-- Annual renderer projection now includes main academy-plan textbooks without requiring child `academy_curriculum_materials`, resolved child textbook labels, school curriculum profiles, supplement materials, and detail scope sections.
-- An empty selected year exposes `첫 일정 추가`; it builds the first draft from the authenticated catalog's bounded academic-school list and the selected school/category instead of requiring an existing event row.
-- Post-mutation lesson detail and visible-range refreshes capture a mutation revision and requested class ID. A newer request, route, or selected class revokes the prior refresh before it can replace detail or increment the range refresh nonce.
-
-Final source evidence:
-
-- Task 4 focused calendar/annual/class suite: **67/67 GREEN**.
-- Operations worktree query-surface guard: GREEN.
-- TypeScript and targeted ESLint: GREEN.
-- Candidate migration SHA-256: `7f1f3a8a5f2b6224c15caf3e0888b9d999e00e74f597a3b1aa0ab442d8b44ee4`, equal to the manifest and on-disk SQL.
-- The combined query-budget suite is non-GREEN only in two concurrent Task 6 worktree expectations involving `ops-task-service.ts`; Task 4's exact operations suite is GREEN. The repository migration-layout suite remains non-GREEN in unrelated pre-existing/shared notification cutover fixtures.
-
-No DB runtime command was run. The new pgTAP fixtures specify period isolation, main/profile/supplement renderer parity, and scope retention, but migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, worker, webhook, provider request, and recipient receipt remain unclaimed; the manifest stays `candidate`.

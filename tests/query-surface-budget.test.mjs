@@ -582,42 +582,6 @@ test("legacy query debt is an exact literal manifest and not a wildcard exceptio
   }
 })
 
-test("only the three named legacy public compatibility projections are unpaged", () => {
-  const source = `async function buildPublicClassesPayload(client) {
-  const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "id"
-  const summary = client.from("classes").select(PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION)
-  const full = [
-    client.from("classes").select("id,name"),
-    client.from("textbooks").select("id,title"),
-    client.from("progress_logs").select("id,class_id"),
-  ]
-  const accidentalList = client.from("students").select("id")
-  const accidentalWildcard = client.from("teachers").select("*")
-  return { summary, full, accidentalList, accidentalWildcard }
-}`
-  const violations = inspectQuerySurfaceSource({
-    surface: "public",
-    file: "src/server/public-classes-payload.js",
-    source,
-  })
-
-  assert.equal(violations.some((violation) => violation.reason === "list_limit_missing" && violation.startLine < 8), false)
-  assert.ok(violations.some((violation) => violation.reason === "list_limit_missing" && violation.startLine === 9))
-  assert.ok(violations.some((violation) => violation.reason === "list_order_missing" && violation.startLine === 9))
-  assert.ok(violations.some((violation) => violation.reason === "list_select_star" && violation.startLine === 10))
-})
-
-test("the cache invalidation role RPC is an exact scalar RPC, not a pageable list", () => {
-  const violations = inspectQuerySurfaceSource({
-    surface: "public",
-    file: "src/app/api/public-classes/cache/invalidate/route.ts",
-    source: `async function authenticate(client) {
-  return client.rpc("current_dashboard_role").abortSignal(AbortSignal.timeout(8000)).retry(false)
-}`,
-  })
-  assert.equal(violations.some((violation) => violation.reason === "rpc_page_limit_missing"), false)
-})
-
 test("query budget verifier fails closed for an unknown surface", async () => {
   await assert.rejects(
     verifyQuerySurfaceBudget({ surface: "everything", baseSha: "HEAD", root: process.cwd() }),

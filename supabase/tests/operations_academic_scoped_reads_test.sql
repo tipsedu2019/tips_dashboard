@@ -12,18 +12,6 @@ select has_function('public','get_academic_event_detail_v1',array['uuid'],'opera
 select has_function('public','get_operations_class_lesson_design_detail_v1',array['uuid'],'operations class lesson design detail RPC exists');
 select has_function('public','get_operations_lesson_textbook_candidate_page_v1',array['uuid','text','text','uuid','integer'],'operations textbook candidate page RPC exists');
 select has_function('public','list_operations_catalogs_v1',array[]::text[],'operations catalog RPC exists');
-select has_function('dashboard_private','normalize_academic_exam_period_key_v1',array['text'],'operations exam-period normalizer exists');
-
-select is(
-  dashboard_private.normalize_academic_exam_period_key_v1('semester_1_midterm'),
-  '1mid',
-  'exam-period normalizer maps the stored first-semester midterm code'
-);
-select is(
-  dashboard_private.normalize_academic_exam_period_key_v1('1학기 기말'),
-  '1final',
-  'exam-period normalizer maps the renderer first-semester final label'
-);
 
 with expected(signature) as (
   values
@@ -131,66 +119,6 @@ values (
   '92000000-0000-4000-8000-000000000002','고3','수학','2197-09-20','exact','40~60쪽',0
 );
 
-insert into public.textbooks(
-  id,title,name,subject,school_level,grade_level,school_levels,grade_levels,
-  sub_subject,publisher,price,tags,lessons,status
-)
-values (
-  '92023000-0000-4000-8000-000000000001','영어 본교재','영어 본교재',
-  '영어','high','고1',array['high']::text[],array['고1']::text[],
-  '영어','본교재 출판',10000,'{}'::text[],'[]'::jsonb,'active'
-);
-
-insert into public.academy_curriculum_plans(
-  id,academic_year,academy_grade,subject,main_textbook_id,note,sort_order
-)
-values (
-  '92024000-0000-4000-8000-000000000001',2197,'고1','영어',
-  '92023000-0000-4000-8000-000000000001','본교재 계획 범위',0
-);
-
-insert into public.academic_curriculum_profiles(
-  id,academic_year,school_id,grade,subject,main_textbook_title,main_textbook_publisher,note
-)
-values (
-  '92025000-0000-4000-8000-000000000001',2197,
-  '92000000-0000-4000-8000-000000000002','고1','수학','수학 프로필 본교재','프로필 출판','프로필 범위'
-);
-
-insert into public.academic_supplement_materials(
-  id,profile_id,title,publisher,note,sort_order
-)
-values (
-  '92026000-0000-4000-8000-000000000001',
-  '92025000-0000-4000-8000-000000000001','수학 프로필 부교재','부교재 출판','부교재 범위',0
-);
-
-insert into public.academic_exam_material_plans(
-  id,academic_year,subject,school_id,grade,exam_period_code,note,sort_order
-)
-values
-  (
-    '92027000-0000-4000-8000-000000000001',2197,'영어',
-    '92000000-0000-4000-8000-000000000002','고1','semester_1_midterm','중간 계획',0
-  ),
-  (
-    '92027000-0000-4000-8000-000000000002',2197,'영어',
-    '92000000-0000-4000-8000-000000000002','고1','semester_1_final','기말 계획',0
-  );
-
-insert into public.academic_exam_material_items(
-  id,plan_id,material_category,title,publisher,scope_detail,note,sort_order
-)
-values
-  (
-    '92028000-0000-4000-8000-000000000001','92027000-0000-4000-8000-000000000001',
-    'supplement','중간 전용 자료','기간 출판','1~20쪽','중간만',0
-  ),
-  (
-    '92028000-0000-4000-8000-000000000002','92027000-0000-4000-8000-000000000002',
-    'supplement','기말 전용 자료','기간 출판','21~40쪽','기말만',0
-  );
-
 create temporary table operations_annual_meta_entries on commit drop as
 select entry
 from pg_catalog.jsonb_array_elements(public.get_operations_annual_board_v1(2197) #> '{data,rows}') as grade_row(value)
@@ -226,28 +154,6 @@ select is(
   (select entry ->> 'examTerm' from operations_annual_meta_entries where entry ->> 'id' = 'exam-detail:92022000-0000-4000-8000-000000000002' limit 1),
   '2학기 기말',
   'derived subject rows infer renderer-ready term from the original parent event title'
-);
-select ok(
-  (select (entry -> 'materialSections')::text like '%중간 전용 자료%'
-      and (entry -> 'materialSections')::text not like '%기말 전용 자료%'
-      and (entry -> 'materialSections')::text like '%영어 본교재%'
-   from operations_annual_meta_entries
-   where entry ->> 'parentEventId' = '92021000-0000-4000-8000-000000000001'
-     and entry ->> 'type' = '영어시험일'
-     and entry ->> 'grade' = '고1'
-   limit 1),
-  'annual fallback maps only the matching exam period and includes a main textbook without child materials'
-);
-select ok(
-  (select (entry -> 'materialSections')::text like '%수학 프로필 본교재%'
-      and (entry -> 'materialSections')::text like '%수학 프로필 부교재%'
-      and (entry -> 'materialSections')::text like '%10~30쪽%'
-   from operations_annual_meta_entries
-   where entry ->> 'parentEventId' = '92021000-0000-4000-8000-000000000001'
-     and entry ->> 'type' = '수학시험일'
-     and entry ->> 'grade' = '고1'
-   limit 1),
-  'annual subject rows preserve detail scopes plus profile textbook and supplement renderer sources'
 );
 select is(
   public.get_academic_event_detail_v1('92021000-0000-4000-8000-000000000001') ->> 'storedNote',

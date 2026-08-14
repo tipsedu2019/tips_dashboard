@@ -12,14 +12,9 @@
 
 - RED: the new cache and invalidation tests initially failed with `ERR_MODULE_NOT_FOUND` for the new production modules, and the existing API test failed because its old `s-maxage=60` header did not meet the 600-second contract.
 - GREEN: `node --test --experimental-strip-types tests/public-classes-cache.test.mjs tests/public-classes-cache.integration.test.mjs tests/public-classes-cache-invalidation.test.mjs tests/public-classes-summary-loading.test.mjs tests/dashboard-snapshot-cache.test.mjs` completed **20/20**.
-- GREEN: the two targeted query-surface regressions completed **2/2**; the public verifier passed against the dispatch base and the exact worktree command.
 - The integration test builds one minimal Next fixture, proves a single loader call across process A and a restarted process B sharing the same `.next` Data Cache, verifies tag invalidation raises the counter to 2, and verifies failed tag revalidation still serves the last-good HTTP payload.
 - `node node_modules/typescript/bin/tsc --noEmit` completed successfully and `git diff --check` completed successfully.
 
-## Query-surface gate
+## Concern gate
 
-- GREEN: the public-surface verifier passes against the dispatch base and the exact `--base HEAD --worktree` command.
-- The guard keeps list limits, ordering, timeout, and no-retry requirements for every ordinary public list. Its only non-list exception is tied to `buildPublicClassesPayload` in the exact public payload file: the named summary compatibility selector and the three full compatibility query ordinals, each still requiring an explicit non-wildcard projection. The role lookup is listed as the established zero-argument scalar RPC, rather than a pageable RPC.
-- Regression coverage proves an accidental fourth list in the same function still fails for both missing limit and ordering, and that the role RPC is not forced to accept a fictitious page argument.
-
-No database migration, database runtime, deployment, provider call, or production mutation was performed.
+`node scripts/verify-query-surface-budget.mjs --surface public --base HEAD --worktree` remains red. Its guard applies list pagination/order requirements to the legacy full public compatibility projections and to the small authenticated role RPC added by the invalidation route. Applying a list limit would change the required full API compatibility contract, so this task does not mask the failure by truncating that API. No database migration, database runtime, deployment, provider call, or production mutation was performed.

@@ -19,26 +19,6 @@ exception when others then
 end
 $function$;
 
-create function dashboard_private.normalize_academic_exam_period_key_v1(p_value text)
-returns text
-language sql
-immutable
-security invoker
-set search_path = ''
-as $function$
-  with normalized as (
-    select pg_catalog.lower(pg_catalog.regexp_replace(pg_catalog.coalesce(p_value, ''), E'[\\s_-]+', '', 'g')) as value
-  )
-  select case
-    when (value like '%1학기%' and value like '%중간%') or (value like '%1%' and (value like '%mid%' or value like '%middle%')) then '1mid'
-    when (value like '%1학기%' and value like '%기말%') or (value like '%1%' and value like '%final%') then '1final'
-    when (value like '%2학기%' and value like '%중간%') or (value like '%2%' and (value like '%mid%' or value like '%middle%')) then '2mid'
-    when (value like '%2학기%' and value like '%기말%') or (value like '%2%' and value like '%final%') then '2final'
-    else value
-  end
-  from normalized
-$function$;
-
 create function public.get_operations_calendar_range_v1(
   p_date_from date,
   p_date_to date
@@ -189,8 +169,6 @@ begin
       grade_token.grade,
       pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(event.type), ''), '팁스') as entry_type,
       pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(event.title), ''), '제목 없는 일정') as title,
-      exam_term.value as exam_term,
-      dashboard_private.normalize_academic_exam_period_key_v1(exam_term.value) as exam_period_key,
       event.title as term_source_title,
       event.start as start_date,
       pg_catalog.coalesce(event.end, event.start) as end_date,
@@ -202,26 +180,6 @@ begin
     from public.academic_events as event
     left join public.academic_schools as school on school.id = event.school_id
     cross join lateral (select dashboard_private.extract_academic_event_meta_v1(event.note) as event_meta) as metadata
-    cross join lateral (
-      select pg_catalog.coalesce(
-        pg_catalog.nullif(pg_catalog.btrim(metadata.event_meta ->> 'examTerm'), ''),
-        case
-          when event.title ilike '%중간%' then case
-            when event.title ilike '%2학기%' then '2학기 중간'
-            when event.title ilike '%1학기%' then '1학기 중간'
-            when pg_catalog.extract(month from event.start) >= 8 then '2학기 중간'
-            else '1학기 중간'
-          end
-          when event.title ilike '%기말%' then case
-            when event.title ilike '%2학기%' then '2학기 기말'
-            when event.title ilike '%1학기%' then '1학기 기말'
-            when pg_catalog.extract(month from event.start) >= 8 then '2학기 기말'
-            else '1학기 기말'
-          end
-          else null
-        end
-      ) as value
-    ) as exam_term
     left join public.list_active_science_subject_areas_v1() as science_area
       on science_area.area_key = metadata.event_meta ->> 'scienceAreaKey'
       and science_area.subject = '과학'
@@ -254,8 +212,6 @@ begin
         when detail.subject = '과학' or pg_catalog.lower(detail.subject) = 'science' then '과학 시험일 및 시험범위'
         else pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(event.title), ''), '시험기간')
       end as title,
-      exam_term.value as exam_term,
-      dashboard_private.normalize_academic_exam_period_key_v1(exam_term.value) as exam_period_key,
       event.title as term_source_title,
       pg_catalog.coalesce(detail.exam_date, event.start) as start_date,
       pg_catalog.coalesce(detail.exam_date, event.start) as end_date,
@@ -279,26 +235,6 @@ begin
     join public.academic_events as event on event.id = detail.academic_event_id
     left join public.academic_schools as school on school.id = pg_catalog.coalesce(detail.school_id, event.school_id)
     cross join lateral (select dashboard_private.extract_academic_event_meta_v1(event.note) as event_meta) as metadata
-    cross join lateral (
-      select pg_catalog.coalesce(
-        pg_catalog.nullif(pg_catalog.btrim(metadata.event_meta ->> 'examTerm'), ''),
-        case
-          when event.title ilike '%중간%' then case
-            when event.title ilike '%2학기%' then '2학기 중간'
-            when event.title ilike '%1학기%' then '1학기 중간'
-            when pg_catalog.extract(month from event.start) >= 8 then '2학기 중간'
-            else '1학기 중간'
-          end
-          when event.title ilike '%기말%' then case
-            when event.title ilike '%2학기%' then '2학기 기말'
-            when event.title ilike '%1학기%' then '1학기 기말'
-            when pg_catalog.extract(month from event.start) >= 8 then '2학기 기말'
-            else '1학기 기말'
-          end
-          else null
-        end
-      ) as value
-    ) as exam_term
     left join public.list_active_science_subject_areas_v1() as science_area
       on science_area.area_key = metadata.event_meta ->> 'scienceAreaKey'
       and science_area.subject = '과학'
@@ -324,8 +260,6 @@ begin
       base.grade,
       subject_entry.entry_type,
       subject_entry.title,
-      base.exam_term,
-      base.exam_period_key,
       base.term_source_title,
       base.start_date,
       base.end_date,
@@ -342,7 +276,11 @@ begin
         ('과학시험일'::text, '과학'::text, '과학 시험일 및 시험범위'::text)
     ) as subject_entry(entry_type, subject, title)
     where base.entry_type = '시험기간'
-      and base.exam_period_key <> ''
+      and (
+        pg_catalog.nullif(pg_catalog.btrim(base.event_meta ->> 'examTerm'), '') is not null
+        or base.term_source_title ilike '%중간%'
+        or base.term_source_title ilike '%기말%'
+      )
       and (
       exists (
         select 1
@@ -352,32 +290,15 @@ begin
           and material_plan.school_id = base.school_id
           and material_plan.grade = base.grade
           and material_plan.subject = subject_entry.subject
-          and dashboard_private.normalize_academic_exam_period_key_v1(material_plan.exam_period_code) = base.exam_period_key
         limit 1
       )
       or exists (
         select 1
         from public.academy_curriculum_plans as curriculum_plan
+        join public.academy_curriculum_materials as curriculum_material on curriculum_material.plan_id = curriculum_plan.id
         where curriculum_plan.academic_year = p_academic_year
           and curriculum_plan.academy_grade = base.grade
           and curriculum_plan.subject = subject_entry.subject
-          and (
-            curriculum_plan.main_textbook_id is not null
-            or exists (select 1 from public.academy_curriculum_materials as curriculum_material where curriculum_material.plan_id = curriculum_plan.id)
-          )
-        limit 1
-      )
-      or exists (
-        select 1
-        from public.academic_curriculum_profiles as curriculum_profile
-        where curriculum_profile.academic_year = p_academic_year
-          and curriculum_profile.school_id = base.school_id
-          and curriculum_profile.grade = base.grade
-          and curriculum_profile.subject = subject_entry.subject
-          and (
-            pg_catalog.nullif(pg_catalog.btrim(curriculum_profile.main_textbook_title), '') is not null
-            or exists (select 1 from public.academic_supplement_materials as supplement where supplement.profile_id = curriculum_profile.id)
-          )
         limit 1
       )
       )
@@ -419,7 +340,24 @@ begin
         'schoolName', bounded_entries.school_name,
         'grade', bounded_entries.grade,
         'gradeBadges', case when bounded_entries.grade = 'all' then '[]'::jsonb else pg_catalog.to_jsonb(pg_catalog.regexp_split_to_array(bounded_entries.grade, '\\s*,\\s*')) end,
-        'examTerm', bounded_entries.exam_term,
+        'examTerm', pg_catalog.coalesce(
+          pg_catalog.nullif(pg_catalog.btrim(bounded_entries.event_meta ->> 'examTerm'), ''),
+          case
+            when bounded_entries.term_source_title ilike '%중간%' then case
+              when bounded_entries.term_source_title ilike '%2학기%' then '2학기 중간'
+              when bounded_entries.term_source_title ilike '%1학기%' then '1학기 중간'
+              when pg_catalog.extract(month from bounded_entries.start_date) >= 8 then '2학기 중간'
+              else '1학기 중간'
+            end
+            when bounded_entries.term_source_title ilike '%기말%' then case
+              when bounded_entries.term_source_title ilike '%2학기%' then '2학기 기말'
+              when bounded_entries.term_source_title ilike '%1학기%' then '1학기 기말'
+              when pg_catalog.extract(month from bounded_entries.start_date) >= 8 then '2학기 기말'
+              else '1학기 기말'
+            end
+            else null
+          end
+        ),
         'examDateLabel', bounded_entries.start_date,
         'linkedScheduleLabel', null,
         'scopeSummary', bounded_entries.scope_summary,
@@ -435,7 +373,7 @@ begin
           'scienceAreaLabel', bounded_entries.science_area_label
         )),
         'metaBadges', case when bounded_entries.scope_summary is null then '[]'::jsonb else pg_catalog.jsonb_build_array(bounded_entries.scope_summary) end,
-        'materialSections', bounded_entries.display_sections || material_sections.sections,
+        'materialSections', material_sections.sections,
         'displaySections', bounded_entries.display_sections || material_sections.sections,
         'notePreview', bounded_entries.note_preview,
         'color', case
@@ -464,67 +402,16 @@ begin
           and material_plan.school_id = bounded_entries.school_id
           and material_plan.grade = bounded_entries.grade
           and material_plan.subject = case bounded_entries.entry_type when '영어시험일' then '영어' when '수학시험일' then '수학' when '과학시험일' then '과학' else null end
-          and dashboard_private.normalize_academic_exam_period_key_v1(material_plan.exam_period_code) = bounded_entries.exam_period_key
-        union all
-        select
-          '교과서' as label,
-          pg_catalog.concat_ws(' · ',
-            pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(main_textbook.title), ''), pg_catalog.nullif(pg_catalog.btrim(main_textbook.name), '')),
-            pg_catalog.nullif(pg_catalog.btrim(main_textbook.publisher), ''),
-            pg_catalog.nullif(pg_catalog.btrim(curriculum_plan.note), '')
-          ) as value,
-          curriculum_plan.sort_order
-        from public.academy_curriculum_plans as curriculum_plan
-        left join public.textbooks as main_textbook on main_textbook.id = curriculum_plan.main_textbook_id
-        where curriculum_plan.academic_year = p_academic_year
-          and curriculum_plan.academy_grade = bounded_entries.grade
-          and curriculum_plan.subject = case bounded_entries.entry_type when '영어시험일' then '영어' when '수학시험일' then '수학' when '과학시험일' then '과학' else null end
-          and curriculum_plan.main_textbook_id is not null
         union all
         select
           '부교재' as label,
-          pg_catalog.concat_ws(' · ',
-            pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(curriculum_material.title), ''), pg_catalog.nullif(pg_catalog.btrim(material_textbook.title), ''), pg_catalog.nullif(pg_catalog.btrim(material_textbook.name), '')),
-            pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(curriculum_material.publisher), ''), pg_catalog.nullif(pg_catalog.btrim(material_textbook.publisher), '')),
-            pg_catalog.nullif(pg_catalog.btrim(curriculum_material.note), '')
-          ) as value,
+          pg_catalog.concat_ws(' · ', pg_catalog.nullif(pg_catalog.btrim(curriculum_material.title), ''), pg_catalog.nullif(pg_catalog.btrim(curriculum_material.publisher), ''), pg_catalog.nullif(pg_catalog.btrim(curriculum_material.note), '')) as value,
           curriculum_material.sort_order
         from public.academy_curriculum_plans as curriculum_plan
         join public.academy_curriculum_materials as curriculum_material on curriculum_material.plan_id = curriculum_plan.id
-        left join public.textbooks as material_textbook on material_textbook.id = curriculum_material.textbook_id
         where curriculum_plan.academic_year = p_academic_year
           and curriculum_plan.academy_grade = bounded_entries.grade
           and curriculum_plan.subject = case bounded_entries.entry_type when '영어시험일' then '영어' when '수학시험일' then '수학' when '과학시험일' then '과학' else null end
-        union all
-        select
-          '교과서' as label,
-          pg_catalog.concat_ws(' · ',
-            pg_catalog.nullif(pg_catalog.btrim(curriculum_profile.main_textbook_title), ''),
-            pg_catalog.nullif(pg_catalog.btrim(curriculum_profile.main_textbook_publisher), ''),
-            pg_catalog.nullif(pg_catalog.btrim(curriculum_profile.note), '')
-          ) as value,
-          0 as sort_order
-        from public.academic_curriculum_profiles as curriculum_profile
-        where curriculum_profile.academic_year = p_academic_year
-          and curriculum_profile.school_id = bounded_entries.school_id
-          and curriculum_profile.grade = bounded_entries.grade
-          and curriculum_profile.subject = case bounded_entries.entry_type when '영어시험일' then '영어' when '수학시험일' then '수학' when '과학시험일' then '과학' else null end
-          and pg_catalog.nullif(pg_catalog.btrim(curriculum_profile.main_textbook_title), '') is not null
-        union all
-        select
-          '부교재' as label,
-          pg_catalog.concat_ws(' · ',
-            pg_catalog.nullif(pg_catalog.btrim(supplement.title), ''),
-            pg_catalog.nullif(pg_catalog.btrim(supplement.publisher), ''),
-            pg_catalog.nullif(pg_catalog.btrim(supplement.note), '')
-          ) as value,
-          supplement.sort_order
-        from public.academic_curriculum_profiles as curriculum_profile
-        join public.academic_supplement_materials as supplement on supplement.profile_id = curriculum_profile.id
-        where curriculum_profile.academic_year = p_academic_year
-          and curriculum_profile.school_id = bounded_entries.school_id
-          and curriculum_profile.grade = bounded_entries.grade
-          and curriculum_profile.subject = case bounded_entries.entry_type when '영어시험일' then '영어' when '수학시험일' then '수학' when '과학시험일' then '과학' else null end
         order by sort_order asc, value asc
         limit 24
       ) as material
@@ -989,7 +876,6 @@ revoke all on function public.get_operations_class_lesson_design_detail_v1(uuid)
 revoke all on function public.get_operations_lesson_textbook_candidate_page_v1(uuid, text, text, uuid, integer) from public, anon, authenticated;
 revoke all on function public.list_operations_catalogs_v1() from public, anon, authenticated;
 revoke all on function dashboard_private.extract_academic_event_meta_v1(text) from public, anon, authenticated;
-revoke all on function dashboard_private.normalize_academic_exam_period_key_v1(text) from public, anon, authenticated;
 
 grant execute on function public.get_operations_calendar_range_v1(date, date) to authenticated;
 grant execute on function public.get_operations_annual_board_v1(integer) to authenticated;
@@ -999,4 +885,3 @@ grant execute on function public.get_operations_class_lesson_design_detail_v1(uu
 grant execute on function public.get_operations_lesson_textbook_candidate_page_v1(uuid, text, text, uuid, integer) to authenticated;
 grant execute on function public.list_operations_catalogs_v1() to authenticated;
 grant execute on function dashboard_private.extract_academic_event_meta_v1(text) to authenticated;
-grant execute on function dashboard_private.normalize_academic_exam_period_key_v1(text) to authenticated;

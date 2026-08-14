@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ImageDown, Loader2, Pencil, Plus } from "lucide-react";
+import { ImageDown, Loader2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/providers/auth-provider";
@@ -1205,10 +1205,6 @@ export function AcademicAnnualBoardWorkspace() {
   }, [catalogs?.academicSchools, model.rows]);
 
   const typeOptions = useMemo(() => DEFAULT_ACADEMIC_EVENT_TYPES, []);
-  const catalogSchoolsForSelectedCategory = useMemo(
-    () => allSchoolOptions.filter((school) => school.category === selectedCategory),
-    [allSchoolOptions, selectedCategory],
-  );
   const activeGradeColumnLabels = useMemo(
     () => (selectedCategory === "middle" ? [...MIDDLE_GRADE_COLUMN_LABELS] : [...HIGH_GRADE_COLUMN_LABELS]),
     [selectedCategory],
@@ -1225,15 +1221,16 @@ export function AcademicAnnualBoardWorkspace() {
 
   const schoolOptions = useMemo(() => {
     const bySchool = new Map<string, { value: string; label: string }>();
-    catalogSchoolsForSelectedCategory
-      .forEach((school) => {
-        const schoolId = text(school.id);
+    model.rows
+      .filter((row) => row.category === selectedCategory)
+      .forEach((row) => {
+        const schoolId = buildSchoolFilterValue(row);
         if (!schoolId || bySchool.has(schoolId)) {
           return;
         }
         bySchool.set(schoolId, {
           value: schoolId,
-          label: text(school.name) || schoolId,
+          label: text(row.schoolName) || schoolId,
         });
       });
 
@@ -1241,7 +1238,7 @@ export function AcademicAnnualBoardWorkspace() {
       { value: "all", label: "전체 학교" },
       ...[...bySchool.values()].sort((left, right) => left.label.localeCompare(right.label, "ko")),
     ];
-  }, [catalogSchoolsForSelectedCategory]);
+  }, [model.rows, selectedCategory]);
 
   const groupedSchoolRows = useMemo(() => buildGroupedSchoolRows(filteredRows), [filteredRows]);
   const printSummary = `${model.selectedYear}년 · ${selectedCategory === "middle" ? "중등" : "고등"} · ${schoolOptions.find((school) => school.value === selectedSchoolId)?.label || "전체 학교"} · 학교 연간 일정표`;
@@ -1467,33 +1464,6 @@ export function AcademicAnnualBoardWorkspace() {
     setEditingBoardEvent(null);
     setBoardDraft(draft);
     setShowBoardEventForm(true);
-  };
-
-  const handleFirstBoardEventCreate = () => {
-    const school = catalogSchoolsForSelectedCategory.find((option) => option.id === selectedSchoolId)
-      || catalogSchoolsForSelectedCategory[0];
-    if (!school) {
-      toast.error("등록할 학교를 먼저 확인해 주세요.");
-      return;
-    }
-
-    const grade = activeGradeColumnLabels[0];
-    handleBoardCellCreate({
-      id: `${school.id}:${grade}:first-event`,
-      schoolId: school.id,
-      schoolName: school.name,
-      category: school.category,
-      grade,
-      gradeLabel: grade,
-      gradeValues: [grade],
-      gradeBadges: [grade],
-      totalEvents: 0,
-      searchText: `${school.name} ${grade}`,
-      typeBuckets: BOARD_TYPES.reduce((buckets, type) => {
-        buckets[type] = [];
-        return buckets;
-      }, {} as Record<AcademicAnnualBoardType, AcademicAnnualBoardEntry[]>),
-    }, "시험기간", "1학기 중간");
   };
 
   const handleSaveBoardEvent = async (eventData: Partial<CalendarEvent>) => {
@@ -1754,19 +1724,6 @@ export function AcademicAnnualBoardWorkspace() {
               {hasActiveFilters ? (
                 <Button type="button" variant="ghost" className="h-9 rounded-sm px-3 text-[12px] font-medium text-muted-foreground" onClick={handleResetFilters}>
                   필터 초기화
-                </Button>
-              ) : null}
-              {model.summary.eventCount === 0 && !readOnly ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-9 rounded-sm px-4 text-[12px] font-medium active:scale-[0.98]"
-                  disabled={loading || catalogSchoolsForSelectedCategory.length === 0}
-                  onClick={handleFirstBoardEventCreate}
-                >
-                  <Plus data-icon="inline-start" />
-                  첫 일정 추가
                 </Button>
               ) : null}
               <Button
