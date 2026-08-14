@@ -56,10 +56,12 @@ function isLegacyPublicFullCompatibilityQuery({ surface, file, symbol, query, co
   const value = projectionArgument && argumentValue(projectionArgument, constants)
   const table = query.entry.arguments[0] && argumentValue(query.entry.arguments[0], constants)
   const entry = accessParts(query.entry)
+  const projectionAccess = projection ? accessParts(projection) : null
   const hasExactLiteralChain = query.operations.length === 2
     && fromOperation === query.entry
     && callMethod(fromOperation) === "from"
     && callMethod(projection) === "select"
+    && projectionAccess?.receiver === query.entry
     && rootIdentifier(entry?.receiver) === "supabase"
     && !query.entry.questionDotToken
   const namedSummaryCompatibilityProjection = expected?.selector
@@ -524,6 +526,24 @@ function queryLineSpan(scope, query) {
   }
 }
 
+function queryOccurrenceFingerprint(scope, query) {
+  const source = scope.getSourceFile().text
+  const start = query.entry.getStart(scope.getSourceFile())
+  const end = query.operations.at(-1)?.getEnd() ?? query.entry.getEnd()
+  // A small lexical neighborhood binds an approved debt to its source
+  // occurrence without treating unrelated edits elsewhere in the file as debt.
+  return createHash("sha256")
+    .update(source.slice(Math.max(0, start - 96), Math.min(source.length, end + 96)).replace(/\s+/gu, " "))
+    .digest("hex")
+}
+
+function withQueryOccurrence(violations, occurrenceFingerprint) {
+  return violations.map((violation) => Object.defineProperty(violation, "occurrenceFingerprint", {
+    value: occurrenceFingerprint,
+    enumerable: false,
+  }))
+}
+
 function scopeLineSpan(scope) {
   const sourceFile = scope.getSourceFile()
   return {
@@ -543,7 +563,10 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
   if (query.receiverUnresolved || query.directMethod === null) {
     const fingerprint = createQueryChainFingerprint({ symbol, ordinal: query.ordinal, operations: query.operations })
     const { startLine, endLine } = queryLineSpan(scope, query)
-    return reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint, startLine, endLine, ...scopeLineSpan(scope) }))
+    return withQueryOccurrence(
+      reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint, startLine, endLine, ...scopeLineSpan(scope) })),
+      queryOccurrenceFingerprint(scope, query),
+    )
   }
   if (query.directMethod === "from") {
     const projections = query.operations.filter((operation) => callMethod(operation) === "select")
@@ -604,7 +627,10 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
   }
   const fingerprint = createQueryChainFingerprint({ symbol, ordinal: query.ordinal, operations: query.operations })
   const { startLine, endLine } = queryLineSpan(scope, query)
-  return reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint, startLine, endLine, ...scopeLineSpan(scope) }))
+  return withQueryOccurrence(
+    reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint, startLine, endLine, ...scopeLineSpan(scope) })),
+    queryOccurrenceFingerprint(scope, query),
+  )
 }
 
 function analyzeScope({ surface, file, scope, symbol }) {
@@ -735,6 +761,14 @@ function countedViolations(source, surface, file) {
   return counts
 }
 
+function occurrenceKeys(source, surface, file) {
+  const keys = new Set()
+  for (const violation of inspectQuerySurfaceSource({ surface, file, source })) {
+    keys.add(`${exactDebtKey(violation)}\u0000${violation.occurrenceFingerprint}`)
+  }
+  return keys
+}
+
 function exactDebtKey({ surface, file, symbol, reason }) {
   return `${surface}\u0000${file}\u0000${symbol}\u0000${reason}\u0000${arguments[0].fingerprint ?? ""}`
 }
@@ -798,7 +832,7 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
   const surfaces = selectedSurfaces(surface)
   const files = changedFiles({ root, baseSha, headSha, includeWorktree })
   if (!Array.isArray(debtManifest)) throw queryBudgetError("query_surface_debt_manifest_invalid")
-  const manifestDebt = new Set()
+  const manifestDebt = new Map()
   for (const entry of debtManifest.filter((candidate) => surfaces.includes(candidate.surface))) {
     if (!entry || typeof entry.file !== "string" || typeof entry.symbol !== "string" || typeof entry.violation !== "string"
       || typeof entry.baselineSha !== "string" || typeof entry.fingerprint !== "string" || !/^[0-9a-f]{40}$/u.test(entry.baselineSha)
@@ -811,7 +845,10 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
     if (!countedViolations(manifestBaseline, entry.surface, entry.file).has(baselineKey)) {
       throw queryBudgetError("query_surface_debt_manifest_invalid")
     }
-    manifestDebt.add(baselineKey)
+    if (entry.occurrenceFingerprint !== undefined && !/^[0-9a-f]{64}$/u.test(entry.occurrenceFingerprint)) {
+      throw queryBudgetError("query_surface_debt_manifest_invalid")
+    }
+    manifestDebt.set(baselineKey, entry.occurrenceFingerprint ?? null)
   }
   const violations = []
   for (const file of files) {
@@ -822,9 +859,19 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
     const baselineSource = await sourceAt({ root, file, revision: baseSha, includeWorktree: false })
     const ranges = changedLineRanges({ root, baseSha, headSha, includeWorktree, file, baselineExists: baselineSource !== null })
     const baseDebt = baselineSource === null ? new Map() : countedViolations(baselineSource, owner, file)
-    for (const violation of inspectQuerySurfaceSource({ surface: owner, file, source })) {
+    const baseOccurrences = baselineSource === null ? new Set() : occurrenceKeys(baselineSource, owner, file)
+    const sourceViolations = inspectQuerySurfaceSource({ surface: owner, file, source })
+    const sourceDebt = countedViolations(source, owner, file)
+    for (const violation of sourceViolations) {
         const key = exactDebtKey(violation)
+        const expectedOccurrence = manifestDebt.get(key)
         const allowedDebt = manifestDebt.has(key) && baseDebt.has(key)
+          && (expectedOccurrence === null
+            ? sourceDebt.get(key) <= baseDebt.get(key)
+            : (
+            expectedOccurrence === violation.occurrenceFingerprint
+            && baseOccurrences.has(`${key}\u0000${expectedOccurrence}`)
+            ))
         if (overlapsChangedRange(violation, ranges) && !allowedDebt) violations.push(violation)
     }
   }

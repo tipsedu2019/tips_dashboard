@@ -12588,7 +12588,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         ...receipt.sourceEventIds,
         ...registrationSourceEventIds,
       ], registrationNotificationSessionToken)
-      setNotice(refreshWarning ? `등록 단계를 변경했습니다. ${refreshWarning}` : "등록 단계를 변경했습니다.")
+      setNotice(receipt.publicClassesCacheRefresh?.status === "pending"
+        ? `등록 단계를 변경했습니다. 공개 수업 캐시 갱신 대기 중${refreshWarning ? ` ${refreshWarning}` : ""}`
+        : refreshWarning ? `등록 단계를 변경했습니다. ${refreshWarning}` : "등록 단계를 변경했습니다.")
     } catch (error) {
       setMessage(getOpsTaskActionErrorMessage(error, "등록 단계를 변경하지 못했습니다."))
     } finally {

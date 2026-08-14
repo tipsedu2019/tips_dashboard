@@ -652,6 +652,27 @@ test("public compatibility exemptions reject aliases and appended predicates", (
   }
 })
 
+test("public compatibility exemptions reject a stored query builder", () => {
+  const source = `async function buildPublicClassesPayload(supabase) {
+  const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date"
+  const classes = supabase.from("classes")
+  const summary = classes.select(PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION)
+  const full = [
+    supabase.from("classes").select("id,name,subject,grade,teacher,room,schedule,status,fee,tuition,capacity,student_ids,waitlist_ids,textbook_ids,textbook_info,lessons,schedule_plan,start_date,end_date"),
+    supabase.from("textbooks").select("id,title,name,publisher,price,tags,lessons,updated_at"),
+    supabase.from("progress_logs").select("id,class_id,textbook_id,progress_key,session_id,session_order,status,range_start,range_end,range_label,public_note,teacher_note,updated_at,date,completed_lesson_ids"),
+  ]
+  return { summary, full }
+}`
+  const violations = inspectQuerySurfaceSource({
+    surface: "public",
+    file: "src/server/public-classes-payload.js",
+    source,
+  })
+
+  assert.ok(violations.some((violation) => violation.reason === "list_limit_missing"))
+})
+
 test("the cache invalidation role RPC is an exact scalar RPC, not a pageable list", () => {
   const violations = inspectQuerySurfaceSource({
     surface: "public",
@@ -963,6 +984,41 @@ test("a stale manifest fingerprint cannot grandfather a reintroduced query debt"
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test("an occurrence-bound manifest debt rejects the same query moved within its symbol", async () => {
+  const file = "src/features/tasks/list-tasks.ts"
+  const baselineSource = `async function load(client) {
+  return client.from("ops_tasks").select("*")
+}
+`
+  const baselineViolation = inspectQuerySurfaceSource({ surface: "tasks", file, source: baselineSource })
+    .find((violation) => violation.reason === "list_select_star")
+  const result = await verifyFixture({
+    file,
+    baselineSource,
+    source: `async function load(client) {
+  const moved = true
+  if (!moved) return []
+  return client.from("ops_tasks").select("*")
+}
+`,
+    debtManifest: (baselineSha) => [{
+      surface: "tasks",
+      file,
+      symbol: "load",
+      violation: "list_select_star",
+      baselineSha,
+      fingerprint: baselineViolation.fingerprint,
+      occurrenceFingerprint: baselineViolation.occurrenceFingerprint,
+    }],
+  })
+  assert.ok(result.violations.some((violation) => (
+    violation.file === file
+    && violation.symbol === "load"
+    && violation.surface === "tasks"
+    && violation.reason === "list_select_star"
+  )))
 })
 
 test("root controls fail closed for spread, shorthand, and aliased relation options", async () => {

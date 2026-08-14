@@ -748,7 +748,7 @@ export function RegistrationEnrollmentEditor({
     const requestKey = submissionKeys.getOrCreate("cancel-enrollment", logicalId)
     setSaving(true)
     try {
-      await cancelRegistrationEnrollment({
+      const receipt = await cancelRegistrationEnrollment({
         enrollmentId: enrollment.id,
         destination,
         waitingKind: destination === "waiting" ? cancelWaitingKind : "",
@@ -763,6 +763,9 @@ export function RegistrationEnrollmentEditor({
       setCancelReason("")
       setCancellationValidationError("")
       if (await reloadCommitted(cancellationScope)) setCancelEnrollmentId("")
+      if (receipt.publicClassesCacheRefresh?.status === "pending") {
+        onWarning("수강 취소는 완료되었습니다. 공개 수업 캐시 갱신 대기 중")
+      }
     } catch (error) {
       onWarning(errorMessage(error, "수강을 취소하지 못했습니다."))
     } finally {
@@ -1175,9 +1178,12 @@ export function RegistrationAdmissionPanel({
     const requestKey = submissionKeys.getOrCreate("batch-complete", openBatch.id)
     setBusyAction("batch-complete")
     try {
-      await completeRegistrationAdmissionBatch({ batchId: openBatch.id, requestKey })
+      const receipt = await completeRegistrationAdmissionBatch({ batchId: openBatch.id, requestKey })
       submissionKeys.clear("batch-complete", openBatch.id)
       await afterCommitted()
+      if (receipt.publicClassesCacheRefresh?.status === "pending") {
+        onWarning("등록은 완료되었습니다. 공개 수업 캐시 갱신 대기 중")
+      }
     } catch (error) {
       onWarning(errorMessage(error, "등록을 완료하지 못했습니다."))
     } finally {

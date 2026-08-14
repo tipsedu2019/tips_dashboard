@@ -49,3 +49,17 @@ test("ops roster receipts carry post-commit cache refresh state without invalida
   assert.match(workspace, /publicClassesCacheRefresh.*pending/);
   assert.match(workspace, /공개 수업 캐시 갱신 대기 중/);
 });
+
+test("canonical registration enrollment mutations return and render nonfatal public cache refresh receipts", async () => {
+  const [service, editor, workspace] = await Promise.all([
+    source("../src/features/tasks/registration-track-service.ts"),
+    source("../src/features/tasks/registration-enrollment-editor.tsx"),
+    source("../src/features/tasks/ops-task-workspace.tsx"),
+  ]);
+  assert.match(service, /completeRegistrationAdmissionBatch[\s\S]*?invalidatePublicClassesCacheAfterMutation/);
+  assert.match(service, /cancelRegistrationEnrollment[\s\S]*?invalidatePublicClassesCacheAfterMutation/);
+  assert.match(service, /publicClassesCacheRefresh\?:/);
+  assert.match(editor, /receipt\.publicClassesCacheRefresh\?\.status === "pending"/);
+  assert.match(editor, /공개 수업 캐시 갱신 대기 중/);
+  assert.match(workspace, /등록 단계를 변경했습니다\. 공개 수업 캐시 갱신 대기 중/);
+});

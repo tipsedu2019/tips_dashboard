@@ -33,3 +33,11 @@ This guard correction is recorded as a separate follow-up after the non-destruct
 - Made management textbook deletion return an explicit `deletedIds` receipt before cache invalidation, so an empty/failed delete cannot report a cache refresh as a successful mutation.
 
 Round 2 RED was the query-budget baseline-delta regression (38 findings). Final GREEN: `tests/query-surface-budget.test.mjs` and `tests/public-classes-cache-mutation-boundaries.test.mjs` completed **63/63**; task and public worktree query guards passed; raw `tsc --noEmit` with the bundled Node and `git diff --check` passed. `pnpm exec` was not used for TypeScript because the user-owned untracked `pnpm-workspace.yaml` makes pnpm's dependency policy try an install and fail on ignored builds. No DB, migration, deployment, provider, or production action ran.
+
+## Round 3 P1 remediation
+
+- The four public compatibility exceptions now require a syntactically direct `supabase.from(...).select(...)` AST chain. Receiver aliases, stored query builders, and appended predicates are rejected.
+- Query debt verification supports an occurrence-bound manifest fingerprint: a baseline-approved chain moved within the same symbol no longer inherits the allowance. Existing dispatch debt remains exact-chain and count-bound.
+- Canonical admission completion and enrollment cancellation call invalidation only after their RPC succeeds, return the nonfatal refresh receipt, and the enrollment editor renders a pending-cache warning. Legacy registration stage transitions now render their returned pending receipt too.
+
+Round 3 RED added direct-builder and moved-occurrence regressions. Final GREEN: query-budget/cache boundary suites are **66/66**, task and public worktree guards pass, bundled-node TypeScript and diff check pass. No DB, migration, deployment, provider, or production action ran.

@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase"
+import { invalidatePublicClassesCacheAfterMutation } from "@/server/public-classes-cache-invalidation.js"
 import {
   parseAcademicSubject,
   type AcademicSubjectValue,
@@ -640,12 +641,14 @@ export type RegistrationAdmissionBatchMutationResponse = {
 export type RegistrationAdmissionBatchCompletionResponse = {
   batch: OpsRegistrationAdmissionBatch
   enrollments: OpsRegistrationEnrollment[]
+  publicClassesCacheRefresh?: Awaited<ReturnType<typeof invalidatePublicClassesCacheAfterMutation>>
 }
 
 export type RegistrationEnrollmentMutationResponse = {
   applied?: boolean
   enrollment: OpsRegistrationEnrollment
   track?: OpsRegistrationTrackSummary
+  publicClassesCacheRefresh?: Awaited<ReturnType<typeof invalidatePublicClassesCacheAfterMutation>>
 }
 
 export type RegistrationMigrationReviewResponse = {
@@ -3345,9 +3348,11 @@ export function createRegistrationTrackService(
       p_batch_id: input.batchId,
       p_request_key: requireRequestKey(input.requestKey),
     })
+    const publicClassesCacheRefresh = await invalidatePublicClassesCacheAfterMutation(supabase, "class")
     return {
       batch: mapBatch(value(result as unknown as Row, "batch") as Row),
       enrollments: rows(value(result as unknown as Row, "enrollments")).map(mapEnrollment),
+      publicClassesCacheRefresh,
     }
   }
 
@@ -3367,12 +3372,14 @@ export function createRegistrationTrackService(
       p_reason: input.reason,
       p_request_key: requireRequestKey(input.requestKey),
     })
+    const publicClassesCacheRefresh = await invalidatePublicClassesCacheAfterMutation(supabase, "class")
     return {
       ...result,
       enrollment: mapEnrollment(value(result as unknown as Row, "enrollment") as Row),
       track: value(result as unknown as Row, "track")
         ? mapTrack(value(result as unknown as Row, "track") as Row)
         : undefined,
+      publicClassesCacheRefresh,
     }
   }
 
