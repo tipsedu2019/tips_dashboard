@@ -722,6 +722,12 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
         }
         return json(assertRegistrationCustomerMessagePublicPayload(payload))
       } catch (error) {
+        if (
+          error instanceof RegistrationCustomerMessageHttpError
+          && error.status === 404
+        ) {
+          console.error("registration_customer_message_preview_not_found", error.code)
+        }
         return errorResponse(error)
       }
     },
