@@ -12,6 +12,7 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "get_management_stats_v1",
   "list_management_filter_options_v1",
   "get_management_detail_v1",
+  "get_management_default_class_period_v1",
 ])
 
 // These are deliberately literal records, not path patterns. Each one binds a

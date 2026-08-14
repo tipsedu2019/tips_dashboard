@@ -19,6 +19,19 @@ begin
 end
 $migration$;
 
+create function public.get_management_default_class_period_v1()
+returns jsonb
+language sql
+stable
+security invoker
+set search_path = ''
+as $function$
+  select pg_catalog.jsonb_build_object('periodId',group_row.id,'label',group_row.name)
+  from public.class_schedule_sync_groups group_row
+  order by group_row.is_default desc,group_row.sort_order asc,group_row.name collate dashboard_private.ko_numeric asc,group_row.id asc
+  limit 1
+$function$;
+
 create function public.list_management_page_v1(
   p_kind text,
   p_filters jsonb,
@@ -332,6 +345,69 @@ begin
 end
 $function$;
 
+create function public.list_management_class_textbook_candidates_v1(
+  p_class_id uuid,
+  p_search text,
+  p_filters jsonb,
+  p_cursor_sort_key text,
+  p_cursor_id uuid,
+  p_limit integer
+)
+returns table(row_data jsonb, sort_key text, id uuid)
+language sql
+stable
+security invoker
+set search_path = ''
+as $function$
+  with valid_input as (
+    select 1
+    where pg_catalog.jsonb_typeof(p_filters) = 'object'
+      and p_filters ?& array['subject','schoolLevel','gradeLevel','subSubject']
+      and not exists (select 1 from pg_catalog.jsonb_object_keys(p_filters) key where key not in ('subject','schoolLevel','gradeLevel','subSubject'))
+      and not exists (select 1 from pg_catalog.jsonb_each(p_filters) entry where pg_catalog.jsonb_typeof(entry.value) <> 'string')
+  ), selected_class as (
+    select class.id
+    from public.classes class
+    where class.id = p_class_id
+  ), textbook_source as (
+    select textbook.id,pg_catalog.to_jsonb(textbook) raw
+    from public.textbooks textbook
+  ), candidate as (
+    select textbook.id,textbook.raw,
+      pg_catalog.coalesce(
+        pg_catalog.nullif(pg_catalog.regexp_replace(pg_catalog.btrim(pg_catalog.coalesce(textbook.raw ->> 'title',textbook.raw ->> 'name')), '[[:space:]]+', ' ', 'g'), ''),
+        U&'\FFFF'
+      ) collate dashboard_private.ko_numeric normalized_sort
+    from textbook_source textbook
+    cross join selected_class
+    cross join valid_input
+    where p_search is not null
+      and (p_search = '' or pg_catalog.concat_ws(' ',textbook.raw ->> 'title',textbook.raw ->> 'name',textbook.raw ->> 'subject',textbook.raw ->> 'publisher',textbook.raw ->> 'school_levels',textbook.raw ->> 'grade_levels',textbook.raw ->> 'sub_subject') ilike '%' || p_search || '%')
+      and (p_filters ->> 'subject' = '' or textbook.raw ->> 'subject' = p_filters ->> 'subject')
+      and (p_filters ->> 'schoolLevel' = '' or textbook.raw ->> 'school_level' = p_filters ->> 'schoolLevel' or pg_catalog.coalesce(textbook.raw -> 'school_levels','[]'::jsonb) ? (p_filters ->> 'schoolLevel'))
+      and (p_filters ->> 'gradeLevel' = '' or textbook.raw ->> 'grade_level' = p_filters ->> 'gradeLevel' or pg_catalog.coalesce(textbook.raw -> 'grade_levels','[]'::jsonb) ? (p_filters ->> 'gradeLevel'))
+      and (p_filters ->> 'subSubject' = '' or textbook.raw ->> 'sub_subject' = p_filters ->> 'subSubject')
+  )
+  select pg_catalog.jsonb_build_object(
+      'id',candidate.id,
+      'title',pg_catalog.coalesce(candidate.raw ->> 'title',candidate.raw ->> 'name',''),
+      'subject',candidate.raw ->> 'subject',
+      'publisher',candidate.raw ->> 'publisher',
+      'school_levels',pg_catalog.coalesce(candidate.raw -> 'school_levels','[]'::jsonb),
+      'grade_levels',pg_catalog.coalesce(candidate.raw -> 'grade_levels','[]'::jsonb),
+      'sub_subject',candidate.raw ->> 'sub_subject',
+      'subject_area_key',candidate.raw ->> 'subject_area_key'
+    ),candidate.normalized_sort::text,candidate.id
+  from candidate
+  where p_class_id is not null
+    and p_limit between 1 and 30
+    and ((p_cursor_sort_key is null and p_cursor_id is null)
+      or candidate.normalized_sort > p_cursor_sort_key collate dashboard_private.ko_numeric
+      or (candidate.normalized_sort = p_cursor_sort_key collate dashboard_private.ko_numeric and candidate.id > p_cursor_id))
+  order by candidate.normalized_sort asc,candidate.id asc
+  limit p_limit + 1
+$function$;
+
 create function public.list_management_detail_relation_page_v1(
   p_kind text,
   p_id uuid,
@@ -498,7 +574,8 @@ begin
     v_detail := pg_catalog.jsonb_build_object('kind','classes','record',pg_catalog.jsonb_build_object(
       'id',p_id,'name',v_raw ->> 'name','status',v_raw ->> 'status','classType',pg_catalog.coalesce(v_raw -> 'class_type',v_raw -> 'classType'),
       'subject',v_raw ->> 'subject','subjectAreaKey',pg_catalog.coalesce(v_raw -> 'subject_area_key',v_raw -> 'subjectAreaKey'),'grade',v_raw ->> 'grade',
-      'teacher',v_raw ->> 'teacher','schedule',v_raw ->> 'schedule','classroom',pg_catalog.coalesce(v_raw ->> 'classroom',v_raw ->> 'room'),'capacity',v_raw -> 'capacity','fee',v_raw -> 'fee','updatedAt',v_raw -> 'updated_at'),
+      'teacher',v_raw ->> 'teacher','schedule',v_raw ->> 'schedule','classroom',pg_catalog.coalesce(v_raw ->> 'classroom',v_raw ->> 'room'),'capacity',v_raw -> 'capacity','fee',v_raw -> 'fee',
+      'textbookIds',pg_catalog.coalesce(v_raw -> 'textbook_ids','[]'::jsonb),'updatedAt',v_raw -> 'updated_at'),
       'schedule',pg_catalog.jsonb_build_object(
         'plan',pg_catalog.coalesce(v_raw -> 'schedule_plan','{}'::jsonb),
         'slots',case
@@ -521,7 +598,7 @@ begin
       'formReferences',pg_catalog.jsonb_build_object(
         'teacherCatalogs',(select pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('id',catalog.id,'name',catalog.name,'subjects',catalog.subjects,'isVisible',catalog.is_visible,'sortOrder',catalog.sort_order) order by catalog.sort_order,catalog.name collate dashboard_private.ko_numeric,catalog.id),'[]'::jsonb) from public.teacher_catalogs catalog where catalog.is_visible),
         'classroomCatalogs',(select pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('id',catalog.id,'name',catalog.name,'subjects',catalog.subjects,'isVisible',catalog.is_visible,'sortOrder',catalog.sort_order) order by catalog.sort_order,catalog.name collate dashboard_private.ko_numeric,catalog.id),'[]'::jsonb) from public.classroom_catalogs catalog where catalog.is_visible),
-        'scienceSubjectAreas',(select pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('subject',area.subject,'areaKey',area.area_key,'label',area.label,'sortOrder',area.sort_order) order by area.sort_order,area.area_key),'[]'::jsonb) from public.academic_subject_areas area where area.subject='과학' and area.is_active)
+        'scienceSubjectAreas',(select pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('subject',area.subject,'areaKey',area.area_key,'label',area.label,'sortOrder',area.sort_order) order by area.sort_order,area.area_key),'[]'::jsonb) from public.list_active_science_subject_areas_v1() area)
       ));
   else
     select pg_catalog.to_jsonb(textbook) into v_raw from public.textbooks textbook where textbook.id = p_id;
@@ -544,12 +621,16 @@ end
 $function$;
 
 revoke all on function public.list_management_page_v1(text,jsonb,text,uuid,integer) from public, anon;
+revoke all on function public.get_management_default_class_period_v1() from public, anon;
 revoke all on function public.get_management_stats_v1(text,jsonb) from public, anon;
 revoke all on function public.list_management_filter_options_v1(text,jsonb) from public, anon;
 revoke all on function public.get_management_detail_v1(text,uuid) from public, anon;
 revoke all on function public.list_management_detail_relation_page_v1(text,uuid,text,text,uuid,integer) from public, anon;
+revoke all on function public.list_management_class_textbook_candidates_v1(uuid,text,jsonb,text,uuid,integer) from public, anon;
 grant execute on function public.list_management_page_v1(text,jsonb,text,uuid,integer) to authenticated;
+grant execute on function public.get_management_default_class_period_v1() to authenticated;
 grant execute on function public.get_management_stats_v1(text,jsonb) to authenticated;
 grant execute on function public.list_management_filter_options_v1(text,jsonb) to authenticated;
 grant execute on function public.get_management_detail_v1(text,uuid) to authenticated;
 grant execute on function public.list_management_detail_relation_page_v1(text,uuid,text,text,uuid,integer) to authenticated;
+grant execute on function public.list_management_class_textbook_candidates_v1(uuid,text,jsonb,text,uuid,integer) to authenticated;

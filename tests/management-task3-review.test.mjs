@@ -7,13 +7,25 @@ import {
   normalizeStudentManagementRecord,
   normalizeTextbookManagementRecord,
 } from "../src/features/management/records.js";
+import { getAssignedClassTextbookIds } from "../src/features/management/management-service.js";
 
 const root = new URL("../", import.meta.url);
 
 test("selected class detail preserves assigned textbook IDs before an ordinary save", async () => {
   const hookSource = await readFile(new URL("src/features/management/use-management-records.ts", root), "utf8");
-  assert.match(hookSource, /const textbooks = Array\.isArray\(source\.textbooks\)[\s\S]*?textbook_ids: textbooks\.map\(\(textbook\) => textbook\.id\)/);
-  assert.match(hookSource, /textbookIds: textbooks\.map\(\(textbook\) => textbook\.id\)/);
+  const assignedIds = getAssignedClassTextbookIds({
+    record: { textbookIds: ["existing-row", "legacy-without-row"] },
+    textbooks: [{ id: "existing-row", title: "현재 교재" }],
+  });
+
+  assert.deepEqual(assignedIds, ["existing-row", "legacy-without-row"]);
+  assert.deepEqual(
+    getAssignedClassTextbookIds({ record: { textbookIds: [] }, textbooks: [{ id: "stale-row" }] }),
+    [],
+  );
+  assert.match(hookSource, /const assignedTextbookIds = getAssignedClassTextbookIds\(source\)/);
+  assert.match(hookSource, /textbook_ids: assignedTextbookIds/);
+  assert.match(hookSource, /textbookIds: assignedTextbookIds/);
 });
 
 test("management invoker RPCs inline exact filter validation and authenticated pgTAP executes them", async () => {

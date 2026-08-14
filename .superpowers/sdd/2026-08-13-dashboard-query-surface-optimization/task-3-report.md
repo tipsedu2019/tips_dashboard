@@ -77,3 +77,14 @@ Source implementation and source verification are complete. Runtime SQL behavior
 - Replaced legacy roster full-collection reads and whole-row upserts with exact-ID projections and roster-array-only updates/rollback.
 - RED evidence: the new review suite first ran **0 pass / 11 fail**. Final review suite: **11/11 GREEN**. Final `tests/management-*.test.mjs`: **137/137 GREEN**. Combined focused management/query/textbook suite: **185/185 GREEN**. TypeScript, relevant ESLint (zero warnings), management query guard, migration hash, and diff check are GREEN.
 - The authorized isolated gate was retried with request ID `96b7fd52-e799-49ba-ab68-6bfc669fe7a8`; it again stopped at `isolated_supabase_db_baseline_review_required`. No DB allocation, migration replay, pgTAP runtime, or EXPLAIN GREEN is claimed, and the manifest remains `candidate`.
+
+## Adversarial fix round 2
+
+- The first class page now resolves the server default period before any list, stats, or filter-option RPC. The resolved ID is the request scope for all three reads, the continuation scope, and the canonical URL; there is no initial null-period scan.
+- Class detail calls the approved `list_active_science_subject_areas_v1()` boundary instead of selecting `academic_subject_areas` directly. The pgTAP source contract executes student, class, and textbook detail as an authenticated admin fixture, including the class science-reference branch.
+- Assigned textbook IDs are independent from joined display rows. Existing IDs that have no current textbook row remain in `textbook_ids` during an ordinary save.
+- The class textbook picker uses a dedicated 30+1 server search with server-applied visible taxonomy filters, Korean-numeric title ordering, UUID tie-break, query-and-filter-bound opaque continuation, eight-second abort, and retries disabled. Candidate pages append without duplicates, selection stays open for first and additional choices, and stale search/detail-close responses cannot replace the current picker state.
+- Candidate list projections contain only picker scalars and never inspect `textbooks.lessons`; selected assigned rows remain a separate exact-detail payload.
+- RED evidence: the new behavior suite first ran **8 pass / 2 fail** because default-period initialization and candidate search did not exist. Final progressive-loading suite is **10/10 GREEN**; full `tests/management*.test.mjs` is **139/139 GREEN**; combined management/query-budget/textbook-picker/schema verification is **205/205 GREEN**.
+- TypeScript, relevant ESLint (zero warnings), management query-surface guard, migration hash equality, and diff check are GREEN. Candidate SHA-256 is `e5d5f408be3de36e11be6616bfcb66049e264247d959131d87651fe26de4aacf`.
+- Per round-2 instruction, no isolated database command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, and provider activity remain unexecuted and unclaimed; the migration remains `candidate`.

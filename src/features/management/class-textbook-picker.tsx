@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,11 @@ type ClassTextbookPickerProps = {
   textbooks: ClassTextbookRecord[];
   selectedIds: string[];
   disabled: boolean;
+  loading: boolean;
+  hasMore: boolean;
+  onQueryChange: (query: string) => void;
+  onFiltersChange: (filters: ClassTextbookPickerFilters) => void;
+  onLoadMore: () => Promise<void> | void;
   onSelectedIdsChange: (ids: string[]) => void;
 };
 
@@ -47,6 +52,11 @@ export function ClassTextbookPicker({
   textbooks,
   selectedIds,
   disabled,
+  loading,
+  hasMore,
+  onQueryChange,
+  onFiltersChange,
+  onLoadMore,
   onSelectedIdsChange,
 }: ClassTextbookPickerProps) {
   const [open, setOpen] = useState(false);
@@ -71,6 +81,10 @@ export function ClassTextbookPicker({
     [filters.subject, textbooks],
   );
 
+  useEffect(() => {
+    onFiltersChange(filters);
+  }, [filters, onFiltersChange]);
+
   function updateFilter(name: keyof ClassTextbookPickerFilters, value: string) {
     setFilters((current) => {
       if (name === "subject") {
@@ -88,6 +102,8 @@ export function ClassTextbookPicker({
 
   function showAll() {
     setFilters({ subject: "", schoolLevel: "", gradeLevel: "", subSubject: "" });
+    setQuery("");
+    onQueryChange("");
   }
 
   return (
@@ -97,7 +113,7 @@ export function ClassTextbookPicker({
           type="button"
           variant="outline"
           className="h-10 w-full justify-between px-3 font-normal"
-          disabled={disabled || textbooks.length === 0}
+          disabled={disabled}
         >
           <span className="truncate text-muted-foreground">교재 검색 또는 선택</span>
           <ChevronDown className="ml-2 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -110,7 +126,11 @@ export function ClassTextbookPicker({
               value={query}
               placeholder="교재명, 출판사 검색"
               aria-label="교재 검색"
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => {
+                const nextQuery = event.target.value;
+                setQuery(nextQuery);
+                onQueryChange(nextQuery);
+              }}
             />
             <Button type="button" size="sm" variant="ghost" className="shrink-0" onClick={showAll}>
               전체 보기
@@ -155,7 +175,9 @@ export function ClassTextbookPicker({
             </PickerFilterField>
           </PickerFilterSurface>
           <div className="max-h-72 overscroll-contain overflow-y-auto">
-            {candidates.length === 0 ? (
+            {loading && candidates.length === 0 ? (
+              <div className="px-2 py-3 text-sm text-muted-foreground">교재 불러오는 중</div>
+            ) : candidates.length === 0 ? (
               <div className="grid justify-items-start gap-2 px-2 py-3 text-sm text-muted-foreground">
                 <span>조건에 맞는 교재 없음</span>
                 <Button type="button" size="sm" variant="outline" onClick={showAll}>전체 보기</Button>
@@ -168,7 +190,6 @@ export function ClassTextbookPicker({
                   className="grid w-full gap-1.5 rounded-md px-2 py-2 text-left text-sm hover:bg-muted"
                   onClick={() => {
                     onSelectedIdsChange(selectedIds.includes(textbook.id) ? selectedIds : [...selectedIds, textbook.id]);
-                    setOpen(false);
                   }}
                 >
                   <span className="truncate font-medium">{textbook.title}</span>
@@ -183,6 +204,18 @@ export function ClassTextbookPicker({
                 </button>
               );
             })}
+            {hasMore ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="mt-1 w-full"
+                disabled={loading}
+                onClick={() => void onLoadMore()}
+              >
+                {loading ? "더 불러오는 중" : "다음 30건"}
+              </Button>
+            ) : null}
           </div>
         </div>
       </PopoverContent>

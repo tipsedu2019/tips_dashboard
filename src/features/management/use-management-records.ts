@@ -12,7 +12,7 @@ import {
   normalizeTextbookManagementRecord,
 } from "./records.js";
 import { buildCurriculumWorkspaceModel } from "../academic/records.js";
-import { createManagementReadService } from "./management-service.js";
+import { createManagementReadService, getAssignedClassTextbookIds } from "./management-service.js";
 
 export type ManagementKind = "students" | "classes" | "textbooks";
 
@@ -717,6 +717,7 @@ function detailToSourceRow(kind: ManagementKind, detail: unknown): Record<string
     const textbooks = Array.isArray(source.textbooks)
       ? source.textbooks.filter((textbook): textbook is Record<string, unknown> => Boolean(textbook && typeof textbook === "object" && !Array.isArray(textbook)))
       : [];
+    const assignedTextbookIds = getAssignedClassTextbookIds(source);
     const schedule = source.schedule && typeof source.schedule === "object" && !Array.isArray(source.schedule)
       ? source.schedule as Record<string, unknown>
       : {};
@@ -730,8 +731,8 @@ function detailToSourceRow(kind: ManagementKind, detail: unknown): Record<string
       updated_at: record.updatedAt,
       student_ids: registeredStudents.map((row) => row.id),
       waitlist_ids: waitlistedStudents.map((row) => row.id),
-      textbook_ids: textbooks.map((textbook) => textbook.id).filter(Boolean),
-      textbookIds: textbooks.map((textbook) => textbook.id).filter(Boolean),
+      textbook_ids: assignedTextbookIds,
+      textbookIds: assignedTextbookIds,
       registered_students: registeredStudents,
       registeredStudents,
       waitlist_students: waitlistedStudents,
@@ -778,8 +779,10 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
   const [nextCursor, setNextCursor] = useState<ManagementPageCursor | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [filterOptions, setFilterOptions] = useState<Record<string, unknown>>({});
+  const [effectiveClassPeriodId, setEffectiveClassPeriodId] = useState("");
   const loadGenerationRef = useRef(0);
   const filters = useMemo(() => requestedFilters || defaultManagementFilters(kind), [kind, requestedFilters]);
+  const effectiveFiltersRef = useRef<ManagementListFilters>(filters);
   const readService = useMemo(() => supabase ? createManagementReadService({ supabase }) : null, []);
 
   const load = useCallback(async () => {
@@ -798,8 +801,10 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
     setLoading(true);
     setError(null);
     try {
-      const result = await readService.loadPage({ kind, filters, cursor: null, limit: 30 });
+      const result = await readService.loadInitialPage({ kind, filters, cursor: null, limit: 30 });
       if (!isCurrent()) return;
+      effectiveFiltersRef.current = result.effectiveFilters as ManagementListFilters;
+      setEffectiveClassPeriodId(kind === "classes" ? textValue(result.effectiveFilters.periodId) : "");
       const sourceRows = result.page.rows.map((row: Record<string, unknown>) => listRowToSource(kind, row));
       setRows(normalizeManagementRows(kind, sourceRows));
       setStats(aggregateToStats(kind, result.stats));
@@ -834,7 +839,7 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
     if (!readService || !nextCursor || !hasMore || loadingMore) return;
     setLoadingMore(true);
     try {
-      const page = await readService.loadNextPage({ kind, filters, cursor: nextCursor, limit: 30 });
+      const page = await readService.loadNextPage({ kind, filters: effectiveFiltersRef.current, cursor: nextCursor, limit: 30 });
       const incoming = normalizeManagementRows(kind, page.rows.map((row: Record<string, unknown>) => listRowToSource(kind, row)));
       setRows((current) => {
         const byId = new Map(current.map((row) => [row.id, row]));
@@ -848,7 +853,7 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
     } finally {
       setLoadingMore(false);
     }
-  }, [filters, hasMore, kind, loadingMore, nextCursor, readService]);
+  }, [hasMore, kind, loadingMore, nextCursor, readService]);
 
   const loadDetail = useCallback(async (id: string) => {
     if (!readService) return null;
@@ -878,6 +883,21 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
     return readService.loadRelationPage({ kind, id, relationKind, cursor, limit: 30 });
   }, [kind, readService]);
 
+  const loadClassTextbookCandidatePage = useCallback(async ({
+    classId,
+    search,
+    filters,
+    cursor,
+  }: {
+    classId: string;
+    search: string;
+    filters: { subject: string; schoolLevel: string; gradeLevel: string; subSubject: string };
+    cursor: ManagementPageCursor | null;
+  }) => {
+    if (!readService) return null;
+    return readService.searchClassTextbookCandidates({ classId, search, filters, cursor, limit: 30 });
+  }, [readService]);
+
   const reloadRow = useCallback(async (id: string) => {
     const detailRow = await loadDetail(id);
     if (!detailRow) return null;
@@ -899,11 +919,13 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
     error,
     classFormReferences,
     filterOptions,
+    effectiveClassPeriodId,
     hasMore,
     loadingMore,
     loadMore,
     loadDetail,
     loadRelationPage,
+    loadClassTextbookCandidatePage,
     reloadRow,
     removeRows,
     refresh: load,

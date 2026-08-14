@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { createManagementReadService } from "../src/features/management/management-service.js";
+import {
+  createManagementReadService,
+  getAssignedClassTextbookIds,
+} from "../src/features/management/management-service.js";
 
 const loaderModule = await import(
   new URL("../src/features/management/management-progressive-loader.js", import.meta.url)
@@ -182,6 +185,82 @@ test("management list uses bounded page, authoritative stats, and filter options
   assert.equal(calls.find(([name]) => name === "list_management_page_v1")[1].p_limit, 30);
 });
 
+test("the first class management bundle resolves and applies the default period before list stats or options", async () => {
+  const calls = [];
+  const defaultPeriodId = "30000000-0000-4000-8000-000000000001";
+  const client = {
+    rpc(name, args) {
+      calls.push([name, args]);
+      if (name === "get_management_default_class_period_v1") {
+        return makeRpcBuilder({ data: { periodId: defaultPeriodId }, error: null }, calls);
+      }
+      if (name === "list_management_page_v1") return makeRpcBuilder({ data: [], error: null }, calls);
+      if (name === "get_management_stats_v1") return makeRpcBuilder({ data: { total: 0, byStatus: {} }, error: null }, calls);
+      if (name === "list_management_filter_options_v1") return makeRpcBuilder({ data: { periods: [] }, error: null }, calls);
+      throw new Error(`unexpected rpc ${name}`);
+    },
+  };
+  const service = createManagementReadService({ supabase: client });
+  const filters = {
+    kind: "classes", search: "", periodId: null, status: "수강",
+    subject: null, grade: null, teacher: null, classroom: null,
+  };
+
+  const result = await service.loadInitialPage({ kind: "classes", filters, cursor: null, limit: 30 });
+
+  assert.equal(calls[0][0], "get_management_default_class_period_v1");
+  for (const name of ["list_management_page_v1", "get_management_stats_v1", "list_management_filter_options_v1"]) {
+    const call = calls.find(([calledName]) => calledName === name);
+    assert.equal(call[1].p_filters.periodId, defaultPeriodId);
+  }
+  assert.equal(result.effectiveFilters.periodId, defaultPeriodId);
+});
+
+test("class textbook candidates use bounded query-scoped continuation and retain unmatched assigned IDs", async () => {
+  const calls = [];
+  const classId = "40000000-0000-4000-8000-000000000001";
+  const client = {
+    rpc(name, args) {
+      calls.push([name, args]);
+      if (name !== "list_management_class_textbook_candidates_v1") throw new Error(`unexpected rpc ${name}`);
+      return makeRpcBuilder({
+        data: Array.from({ length: 31 }, (_, index) => ({
+          id: `50000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+          sort_key: `교재 ${index + 1}`,
+          row_data: { id: `50000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, title: `교재 ${index + 1}` },
+        })),
+        error: null,
+      }, calls);
+    },
+  };
+  const service = createManagementReadService({ supabase: client });
+  const filters = { subject: "math", schoolLevel: "middle", gradeLevel: "m2", subSubject: "" };
+  const first = await service.searchClassTextbookCandidates({ classId, search: "수학", filters, cursor: null, limit: 30 });
+  assert.equal(first.rows.length, 30);
+  assert.equal(first.hasMore, true);
+  assert.equal(calls[0][1].p_search, "수학");
+  assert.deepEqual(calls[0][1].p_filters, filters);
+  const second = await service.searchClassTextbookCandidates({ classId, search: "수학", filters, cursor: first.nextCursor, limit: 30 });
+  assert.equal(second.rows.length, 30);
+  const candidateCalls = calls.filter(([name]) => name === "list_management_class_textbook_candidates_v1");
+  assert.equal(candidateCalls.length, 2);
+  assert.equal(candidateCalls[1][1].p_cursor_sort_key, first.nextCursor.sortKey);
+  assert.equal(candidateCalls[1][1].p_cursor_id, first.nextCursor.id);
+  await assert.rejects(
+    service.searchClassTextbookCandidates({ classId, search: "영어", filters, cursor: first.nextCursor, limit: 30 }),
+    (error) => error?.code === "management_cursor_mismatch",
+  );
+  assert.equal(calls.filter(([name]) => name === "list_management_class_textbook_candidates_v1").length, 2);
+
+  assert.deepEqual(
+    getAssignedClassTextbookIds({
+      record: { textbookIds: ["legacy-without-row", "matched-row"] },
+      textbooks: [{ id: "matched-row", title: "현재 교재" }],
+    }),
+    ["legacy-without-row", "matched-row"],
+  );
+});
+
 test("management detail and relation cursors are selection driven and scope bound before the DB call", async () => {
   const calls = [];
   const client = {
@@ -264,8 +343,9 @@ test("management hook and UI keep list reads bounded while details and relation 
   const tableSource = await readFile(new URL("../src/features/management/management-data-table.tsx", import.meta.url), "utf8");
 
   const activeHook = hookSource.slice(hookSource.indexOf("export function useManagementRecords"));
-  assert.match(activeHook, /readService\.loadPage\(\{ kind, filters, cursor: null, limit: 30 \}\)/);
-  assert.match(activeHook, /readService\.loadNextPage\(\{ kind, filters, cursor: nextCursor, limit: 30 \}\)/);
+  assert.match(activeHook, /readService\.loadInitialPage\(\{ kind, filters, cursor: null, limit: 30 \}\)/);
+  assert.match(activeHook, /readService\.loadNextPage\(\{ kind, filters: effectiveFiltersRef\.current, cursor: nextCursor, limit: 30 \}\)/);
+  assert.match(activeHook, /readService\.searchClassTextbookCandidates\(\{ classId, search, filters, cursor, limit: 30 \}\)/);
   assert.match(activeHook, /const byId = new Map\(current\.map/);
   assert.match(activeHook, /readService\.loadDetail\(\{ kind, id \}\)/);
   assert.doesNotMatch(activeHook, /readOptionalTable|enrichManagementRows|\.select\("\*"\)/);

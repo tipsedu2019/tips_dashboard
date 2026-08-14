@@ -6,18 +6,22 @@ set local statement_timeout = '30s';
 set local lock_timeout = '5s';
 
 select has_function('public','list_management_page_v1',array['text','jsonb','text','uuid','integer'],'management page RPC exists');
+select has_function('public','get_management_default_class_period_v1',array[]::text[],'management default class period RPC exists');
 select has_function('public','get_management_stats_v1',array['text','jsonb'],'management stats RPC exists');
 select has_function('public','list_management_filter_options_v1',array['text','jsonb'],'management filter option RPC exists');
 select has_function('public','get_management_detail_v1',array['text','uuid'],'management detail RPC exists');
 select has_function('public','list_management_detail_relation_page_v1',array['text','uuid','text','text','uuid','integer'],'management relation page RPC exists');
+select has_function('public','list_management_class_textbook_candidates_v1',array['uuid','text','jsonb','text','uuid','integer'],'management class textbook candidate RPC exists');
 
 with expected(signature) as (
   values
     ('public.list_management_page_v1(text,jsonb,text,uuid,integer)'::text),
+    ('public.get_management_default_class_period_v1()'::text),
     ('public.get_management_stats_v1(text,jsonb)'::text),
     ('public.list_management_filter_options_v1(text,jsonb)'::text),
     ('public.get_management_detail_v1(text,uuid)'::text),
-    ('public.list_management_detail_relation_page_v1(text,uuid,text,text,uuid,integer)'::text)
+    ('public.list_management_detail_relation_page_v1(text,uuid,text,text,uuid,integer)'::text),
+    ('public.list_management_class_textbook_candidates_v1(uuid,text,jsonb,text,uuid,integer)'::text)
 )
 select ok(
   not (select proc.prosecdef from pg_catalog.pg_proc proc where proc.oid = signature::pg_catalog.regprocedure)
@@ -38,6 +42,19 @@ select lives_ok(
   'authenticated invoker can execute inline-validated management list RPC'
 );
 reset role;
+
+insert into auth.users(
+  id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,
+  raw_app_meta_data,raw_user_meta_data,created_at,updated_at
+)
+values (
+  '91000000-0000-4000-8000-000000000900','00000000-0000-0000-0000-000000000000',
+  'authenticated','authenticated','management-page-authenticated@example.invalid',crypt('local-only',gen_salt('bf')),now(),
+  '{"provider":"email","providers":["email"]}'::jsonb,'{}'::jsonb,now(),now()
+);
+insert into public.profiles(id,role,name,email,created_at,updated_at)
+values ('91000000-0000-4000-8000-000000000900','admin','관리 페이지 검증자','management-page-authenticated@example.invalid',now(),now())
+on conflict (id) do update set role='admin',updated_at=now();
 
 select throws_ok(
   $$select public.list_management_page_v1('students','{}'::jsonb,null,null,30)$$,
@@ -87,6 +104,39 @@ select
   '[]'::jsonb,
   '[]'::jsonb
 from pg_catalog.generate_series(1,32) ordinal;
+
+insert into public.textbooks(
+  id,title,name,subject,school_level,grade_level,school_levels,grade_levels,
+  sub_subject,publisher,price,tags,lessons,status
+)
+values (
+  '91000000-0000-4000-8000-000000000801','__management_detail_textbook__','__management_detail_textbook__',
+  'english','middle','m2',array['middle']::text[],array['m2']::text[],'기타','검증 출판사',10000,'{}'::text[],'[]'::jsonb,'active'
+);
+insert into public.classes(
+  id,name,class_type,subject,grade,teacher,schedule,room,capacity,fee,status,
+  student_ids,waitlist_ids,textbook_ids,lessons,schedule_plan
+)
+values (
+  '91000000-0000-4000-8000-000000000701','__management_detail_class__','정규','영어','중2','검증 교사','월 18:00','검증실',12,320000,'수강',
+  '[]'::jsonb,'[]'::jsonb,jsonb_build_array('91000000-0000-4000-8000-000000000801','91000000-0000-4000-8000-000000000899'),'[]'::jsonb,'{}'::jsonb
+);
+
+set local role authenticated;
+select pg_catalog.set_config('request.jwt.claim.sub','91000000-0000-4000-8000-000000000900',true);
+select lives_ok(
+  $$select public.get_management_detail_v1('students','91000000-0000-4000-8000-000000000032')$$,
+  'authenticated invoker can read selected student detail'
+);
+select lives_ok(
+  $$select public.get_management_detail_v1('classes','91000000-0000-4000-8000-000000000701')$$,
+  'authenticated invoker class detail uses approved science-area interface'
+);
+select lives_ok(
+  $$select public.get_management_detail_v1('textbooks','91000000-0000-4000-8000-000000000801')$$,
+  'authenticated invoker can read selected textbook detail'
+);
+reset role;
 
 create temporary table management_first_page on commit drop as
 select * from public.list_management_page_v1(

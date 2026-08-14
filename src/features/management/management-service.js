@@ -147,6 +147,24 @@ function unwrapRpcObject(value) {
   return Array.isArray(value) && value.length === 1 ? value[0] : value;
 }
 
+export function getAssignedClassTextbookIds(detail) {
+  const record = detail?.record && typeof detail.record === "object" && !Array.isArray(detail.record)
+    ? detail.record
+    : {};
+  const explicitSources = [
+    [record, "textbookIds"],
+    [record, "textbook_ids"],
+    [detail, "assignedTextbookIds"],
+    [detail, "assigned_textbook_ids"],
+  ];
+  for (const [source, key] of explicitSources) {
+    if (source && typeof source === "object" && Object.prototype.hasOwnProperty.call(source, key)) {
+      return normalizeIdList(source[key]);
+    }
+  }
+  return normalizeIdList((Array.isArray(detail?.textbooks) ? detail.textbooks : []).map((textbook) => textbook?.id));
+}
+
 function withOpaqueRelationCursor(page, context) {
   if (!page || typeof page !== "object" || Array.isArray(page)) return page;
   const rawCursor = page.nextCursor;
@@ -214,24 +232,40 @@ export function createManagementReadService(options = {}) {
     };
   };
 
+  const loadPageBundle = async ({ kind, filters, cursor = null, limit = MANAGEMENT_PAGE_SIZE }) => {
+    assertManagementFilters(kind, filters);
+    const [page, statsResult, filterOptionsResult] = await Promise.all([
+      readListPage({ kind, filters, cursor, limit }),
+      client.rpc("get_management_stats_v1", { p_kind: kind, p_filters: filters })
+        .abortSignal(AbortSignal.timeout(8_000)).retry(false),
+      client.rpc("list_management_filter_options_v1", { p_kind: kind, p_filters: filters })
+        .abortSignal(AbortSignal.timeout(8_000)).retry(false),
+    ]);
+    if (statsResult.error) throw statsResult.error;
+    if (filterOptionsResult.error) throw filterOptionsResult.error;
+    return {
+      page,
+      stats: unwrapRpcObject(statsResult.data) || {},
+      filterOptions: unwrapRpcObject(filterOptionsResult.data) || {},
+      effectiveFilters: filters,
+    };
+  };
+
   return {
     encodeRelationCursor: encodeManagementRelationCursor,
-    async loadPage({ kind, filters, cursor = null, limit = MANAGEMENT_PAGE_SIZE }) {
+    loadPage: loadPageBundle,
+    async loadInitialPage({ kind, filters, cursor = null, limit = MANAGEMENT_PAGE_SIZE }) {
       assertManagementFilters(kind, filters);
-      const [page, statsResult, filterOptionsResult] = await Promise.all([
-        readListPage({ kind, filters, cursor, limit }),
-        client.rpc("get_management_stats_v1", { p_kind: kind, p_filters: filters })
-          .abortSignal(AbortSignal.timeout(8_000)).retry(false),
-        client.rpc("list_management_filter_options_v1", { p_kind: kind, p_filters: filters })
-          .abortSignal(AbortSignal.timeout(8_000)).retry(false),
-      ]);
-      if (statsResult.error) throw statsResult.error;
-      if (filterOptionsResult.error) throw filterOptionsResult.error;
-      return {
-        page,
-        stats: unwrapRpcObject(statsResult.data) || {},
-        filterOptions: unwrapRpcObject(filterOptionsResult.data) || {},
-      };
+      let effectiveFilters = filters;
+      if (kind === "classes" && !trimText(filters.periodId)) {
+        const { data, error } = await client.rpc("get_management_default_class_period_v1")
+          .abortSignal(AbortSignal.timeout(8_000)).retry(false);
+        if (error) throw error;
+        const periodId = trimText(unwrapRpcObject(data)?.periodId);
+        if (!periodId) throw managementReadError("management_default_period_unavailable");
+        effectiveFilters = { ...filters, periodId };
+      }
+      return loadPageBundle({ kind, filters: effectiveFilters, cursor, limit });
     },
     loadNextPage: readListPage,
     async loadDetail({ kind, id }) {
@@ -276,6 +310,61 @@ export function createManagementReadService(options = {}) {
       return {
         ...response,
         page: withOpaqueRelationCursor(response?.page, { kind, entityId: id, relationKind }),
+      };
+    },
+    /**
+     * @param {{
+     *   classId: string,
+     *   search?: string,
+     *   filters?: { subject: string, schoolLevel: string, gradeLevel: string, subSubject: string },
+     *   cursor?: null | { sortKey: string, id: string, scopeHash: string },
+     *   limit?: number
+     * }} request
+     */
+    async searchClassTextbookCandidates({
+      classId,
+      search = "",
+      filters = { subject: "", schoolLevel: "", gradeLevel: "", subSubject: "" },
+      cursor = null,
+      limit = MANAGEMENT_PAGE_SIZE,
+    }) {
+      const safeClassId = trimText(classId);
+      const safeSearch = trimText(search);
+      const expectedFilterKeys = ["gradeLevel", "schoolLevel", "subSubject", "subject"];
+      if (!safeClassId || limit !== MANAGEMENT_PAGE_SIZE || !filters || typeof filters !== "object" || Array.isArray(filters)
+        || JSON.stringify(Object.keys(filters).sort()) !== JSON.stringify(expectedFilterKeys)
+        || Object.values(filters).some((value) => typeof value !== "string")) {
+        throw managementReadError("management_textbook_picker_invalid");
+      }
+      const safeFilters = Object.fromEntries(Object.entries(filters).map(([key, value]) => [key, trimText(value)]));
+      const scopeHash = await managementScopeHash("textbooks", {
+        surface: "class_textbook_picker",
+        classId: safeClassId,
+        search: safeSearch,
+        filters: safeFilters,
+      });
+      if (cursor !== null && (!cursor || typeof cursor !== "object" || cursor.scopeHash !== scopeHash
+        || typeof cursor.sortKey !== "string" || typeof cursor.id !== "string")) {
+        throw managementReadError("management_cursor_mismatch");
+      }
+      const { data, error } = await client.rpc("list_management_class_textbook_candidates_v1", {
+          p_class_id: safeClassId,
+          p_search: safeSearch,
+          p_filters: safeFilters,
+          p_cursor_sort_key: cursor?.sortKey || null,
+          p_cursor_id: cursor?.id || null,
+          p_limit: 30,
+        })
+        .abortSignal(AbortSignal.timeout(8_000))
+        .retry(false);
+      if (error) throw error;
+      const received = Array.isArray(data) ? data : [];
+      const rows = received.slice(0, limit).map((row) => row?.row_data || row);
+      const boundary = received.length > limit ? received[limit - 1] : null;
+      return {
+        rows,
+        hasMore: received.length > limit,
+        nextCursor: boundary ? { sortKey: trimText(boundary.sort_key), id: trimText(boundary.id), scopeHash } : null,
       };
     },
   };

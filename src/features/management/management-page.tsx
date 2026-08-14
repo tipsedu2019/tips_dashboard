@@ -43,7 +43,11 @@ import { useAuth } from "@/providers/auth-provider";
 
 import { ManagementDataTable } from "./management-data-table";
 import { ClassTextbookPicker } from "./class-textbook-picker";
-import type { ClassTextbookRecord } from "./class-textbook-picker-model";
+import {
+  getDefaultClassTextbookFilters,
+  type ClassTextbookPickerFilters,
+  type ClassTextbookRecord,
+} from "./class-textbook-picker-model";
 import {
   buildClassSubjectOptions,
   isClassroomCatalogForClassSubject,
@@ -125,6 +129,7 @@ const PAGE_CONFIG = {
 
 type FormState = Record<string, string>;
 type RelatedRecord = Record<string, unknown>;
+type ManagementPageCursor = { sortKey: string; id: string; scopeHash: string };
 type Field = {
   name: string;
   label: string;
@@ -1465,11 +1470,13 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     error,
     classFormReferences,
     filterOptions,
+    effectiveClassPeriodId,
     hasMore,
     loadingMore,
     loadMore,
     loadDetail,
     loadRelationPage,
+    loadClassTextbookCandidatePage,
     removeRows,
     refresh,
   } = useManagementRecords(kind, managementListFilters);
@@ -1497,6 +1504,25 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const [relationQuery, setRelationQuery] = useState("");
   const [loadingRelationKind, setLoadingRelationKind] = useState<ManagementRelationKind | null>(null);
   const [relationPageState, setRelationPageState] = useState<Partial<Record<ManagementRelationKind, Record<string, unknown>>>>({});
+  const [textbookCandidateQuery, setTextbookCandidateQuery] = useState("");
+  const [textbookCandidateFilters, setTextbookCandidateFilters] = useState<ClassTextbookPickerFilters>({
+    subject: "", schoolLevel: "", gradeLevel: "", subSubject: "",
+  });
+  const [textbookCandidateRows, setTextbookCandidateRows] = useState<ClassTextbookRecord[]>([]);
+  const [textbookCandidateCursor, setTextbookCandidateCursor] = useState<ManagementPageCursor | null>(null);
+  const [textbookCandidatesHaveMore, setTextbookCandidatesHaveMore] = useState(false);
+  const [textbookCandidatesLoading, setTextbookCandidatesLoading] = useState(false);
+  const textbookCandidateRequestRef = useRef(0);
+  const handleTextbookCandidateFiltersChange = useCallback((next: ClassTextbookPickerFilters) => {
+    setTextbookCandidateFilters((current) => (
+      current.subject === next.subject
+      && current.schoolLevel === next.schoolLevel
+      && current.gradeLevel === next.gradeLevel
+      && current.subSubject === next.subSubject
+        ? current
+        : next
+    ));
+  }, []);
   const classDetailRouteClearPendingRef = useRef(false);
   const studentDetailRouteClearPendingRef = useRef(false);
   const requestedClassId = kind === "classes" ? text(searchParams.get("classId")) : "";
@@ -1508,6 +1534,45 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const requestedClassDetailSessionId = kind === "classes" ? text(searchParams.get("sessionId")) : "";
   const requestedClassDetailStudentId = kind === "classes" ? text(searchParams.get("studentId")) : "";
   const requestedClassReturnPath = kind === "classes" ? normalizeReturnToPath(searchParams.get("returnTo")) : "";
+  const selectedTextbookClassId = kind === "classes" && dialogMode === "detail" ? text(selectedRow?.id) : "";
+
+  useEffect(() => {
+    if (kind !== "classes" || searchParams.get("period") || !effectiveClassPeriodId) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("period", effectiveClassPeriodId);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [effectiveClassPeriodId, kind, pathname, router, searchParams]);
+
+  useEffect(() => {
+    const requestId = textbookCandidateRequestRef.current + 1;
+    textbookCandidateRequestRef.current = requestId;
+    if (!selectedTextbookClassId) {
+      setTextbookCandidateRows([]);
+      setTextbookCandidateCursor(null);
+      setTextbookCandidatesHaveMore(false);
+      setTextbookCandidatesLoading(false);
+      return undefined;
+    }
+    setTextbookCandidatesLoading(true);
+    const timer = window.setTimeout(() => {
+      void loadClassTextbookCandidatePage({
+        classId: selectedTextbookClassId,
+        search: textbookCandidateQuery,
+        filters: textbookCandidateFilters,
+        cursor: null,
+      }).then((page) => {
+        if (requestId !== textbookCandidateRequestRef.current || !page) return;
+        setTextbookCandidateRows(normalizeClassTextbookRecords(page.rows));
+        setTextbookCandidateCursor(page.nextCursor as ManagementPageCursor | null);
+        setTextbookCandidatesHaveMore(page.hasMore);
+      }).catch((candidateError: unknown) => {
+        if (requestId === textbookCandidateRequestRef.current) setOperationError(getSaveErrorMessage(candidateError));
+      }).finally(() => {
+        if (requestId === textbookCandidateRequestRef.current) setTextbookCandidatesLoading(false);
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [loadClassTextbookCandidatePage, selectedTextbookClassId, textbookCandidateFilters, textbookCandidateQuery]);
 
   const reconcileManagementPage = useCallback(async (selectedId?: string) => {
     await refresh();
@@ -2578,6 +2643,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     setRelatedRows(getEmbeddedRelatedRecords(kind, activeRow));
     setDetailRowQuery("");
     setRelationQuery("");
+    setTextbookCandidateQuery("");
+    setTextbookCandidateFilters(getDefaultClassTextbookFilters(row.raw || {}));
     setRelationPageState({});
     setOperationError(null);
     setSaveNotice("");
@@ -3253,7 +3320,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const renderClassTextbookManagement = () => {
     if (!selectedRow || kind !== "classes") return null;
     const raw = (selectedRow.raw || {}) as Record<string, unknown>;
-    const catalog = normalizeClassTextbookRecords(raw.available_textbooks || raw.availableTextbooks);
+    const assignedTextbooks = normalizeClassTextbookRecords(raw.available_textbooks || raw.availableTextbooks);
+    const catalog = [...new Map([...assignedTextbooks, ...textbookCandidateRows].map((textbook) => [textbook.id, textbook])).values()];
     const selectedIds = parseTextbookIds(form.textbookIds);
     const catalogById = new Map(catalog.map((textbook) => [textbook.id, textbook]));
     const updateSelectedIds = (nextIds: string[]) => {
@@ -3268,9 +3336,36 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           <ClassTextbookPicker
             key={`${selectedRow.id}:${form.subject}:${form.grade}`}
             classRecord={{ ...raw, subject: form.subject, grade: form.grade }}
-            textbooks={catalog}
+            textbooks={textbookCandidateRows}
             selectedIds={selectedIds}
             disabled={!canMutateRows}
+            loading={textbookCandidatesLoading}
+            hasMore={textbookCandidatesHaveMore}
+            onQueryChange={setTextbookCandidateQuery}
+            onFiltersChange={handleTextbookCandidateFiltersChange}
+            onLoadMore={async () => {
+              if (!textbookCandidateCursor || textbookCandidatesLoading) return;
+              const requestId = textbookCandidateRequestRef.current;
+              setTextbookCandidatesLoading(true);
+              try {
+                const page = await loadClassTextbookCandidatePage({
+                  classId: selectedRow.id,
+                  search: textbookCandidateQuery,
+                  filters: textbookCandidateFilters,
+                  cursor: textbookCandidateCursor,
+                });
+                if (!page || requestId !== textbookCandidateRequestRef.current) return;
+                setTextbookCandidateRows((current) => [...new Map(
+                  normalizeClassTextbookRecords([...current, ...page.rows]).map((textbook) => [textbook.id, textbook]),
+                ).values()]);
+                setTextbookCandidateCursor(page.nextCursor as ManagementPageCursor | null);
+                setTextbookCandidatesHaveMore(page.hasMore);
+              } catch (candidateError) {
+                if (requestId === textbookCandidateRequestRef.current) setOperationError(getSaveErrorMessage(candidateError));
+              } finally {
+                if (requestId === textbookCandidateRequestRef.current) setTextbookCandidatesLoading(false);
+              }
+            }}
             onSelectedIdsChange={updateSelectedIds}
           />
         </div>
