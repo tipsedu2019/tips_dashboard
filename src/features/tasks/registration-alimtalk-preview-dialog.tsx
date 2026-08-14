@@ -148,6 +148,10 @@ export function RegistrationAlimtalkPreviewDialog({
       })
       .catch((cause: unknown) => {
         if (generation !== generationRef.current) return
+        console.error(
+          "registration_customer_message_preview_client_failed",
+          cause instanceof Error ? cause.message : String(cause),
+        )
         setError(getRegistrationCustomerMessageErrorMessage(cause, "미리보기를 불러오지 못했습니다."))
       })
       .finally(() => {
