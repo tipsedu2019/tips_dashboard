@@ -703,6 +703,9 @@ test("query budget compares a changed real legacy task source against its baseli
     file,
     baselineSource,
     source: `${currentSource}\n// Task 2 changes this legacy source without adding a request.\n`,
+    debtManifest: (fixtureBaseSha) => QUERY_SURFACE_DEBT_MANIFEST
+      .filter((entry) => entry.surface === "tasks" && entry.file === file)
+      .map((entry) => ({ ...entry, baselineSha: fixtureBaseSha })),
   })
   assert.deepEqual(unchangedDebt, { ok: true, violations: [] })
 
@@ -710,6 +713,9 @@ test("query budget compares a changed real legacy task source against its baseli
     file,
     baselineSource,
     source: `${currentSource}\nexport const queryBudgetInjected = (client) => client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)\n`,
+    debtManifest: (fixtureBaseSha) => QUERY_SURFACE_DEBT_MANIFEST
+      .filter((entry) => entry.surface === "tasks" && entry.file === file)
+      .map((entry) => ({ ...entry, baselineSha: fixtureBaseSha })),
   })
   assert.deepEqual(addedViolation.violations, [{
     file,
