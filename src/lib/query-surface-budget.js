@@ -7,7 +7,12 @@ import ts from "typescript"
 export const QUERY_SURFACES = Object.freeze(["tasks", "management", "operations", "academic", "public"])
 const BASELINE_SHA = "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101"
 const BOUND_OPERATION_METHODS = new WeakMap()
-const EXACT_SCALAR_RPC_NAMES = new Set(["get_ops_task_list_stats_v1"])
+const EXACT_SCALAR_RPC_NAMES = new Set([
+  "get_ops_task_list_stats_v1",
+  "get_management_stats_v1",
+  "list_management_filter_options_v1",
+  "get_management_detail_v1",
+])
 
 // These are deliberately literal records, not path patterns. Each one binds a
 // specific baseline query chain, so moving or duplicating legacy debt is a new

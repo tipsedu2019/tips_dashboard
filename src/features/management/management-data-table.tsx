@@ -183,8 +183,29 @@ const EMPTY_STUDENT_LIST_QUERY_STATE: StudentListQueryState = {
   grade: "",
 };
 
-const PAGE_SIZE_OPTIONS = [10, 20, 30, 40, 50, 100, 200, 300, 400, 500] as const;
-const DEFAULT_PAGE_SIZE = 20;
+const TEXTBOOK_LIST_QUERY_PARAM_KEYS = {
+  q: "q",
+  status: "status",
+  subject: "subject",
+  publisher: "publisher",
+} as const;
+
+type TextbookListQueryState = {
+  q: string;
+  status: string;
+  subject: string;
+  publisher: string;
+};
+
+const EMPTY_TEXTBOOK_LIST_QUERY_STATE: TextbookListQueryState = {
+  q: "",
+  status: "",
+  subject: "",
+  publisher: "",
+};
+
+const PAGE_SIZE_OPTIONS = [30] as const;
+const DEFAULT_PAGE_SIZE = 30;
 const MANAGEMENT_SCROLL_STORAGE_PREFIX = "tips:management-table-scroll:";
 
 const TEXTBOOK_TABLE_COLUMN_IDS = [
@@ -495,6 +516,25 @@ function buildStudentListHref(pathname: string, searchParamString: string, state
   return nextQuery ? `${pathname}?${nextQuery}` : pathname;
 }
 
+function getTextbookListQueryState(params: URLSearchParams): TextbookListQueryState {
+  return {
+    q: normalizeScalar(params.get(TEXTBOOK_LIST_QUERY_PARAM_KEYS.q)),
+    status: normalizeScalar(params.get(TEXTBOOK_LIST_QUERY_PARAM_KEYS.status)),
+    subject: normalizeScalar(params.get(TEXTBOOK_LIST_QUERY_PARAM_KEYS.subject)),
+    publisher: normalizeScalar(params.get(TEXTBOOK_LIST_QUERY_PARAM_KEYS.publisher)),
+  };
+}
+
+function buildTextbookListHref(pathname: string, searchParamString: string, state: TextbookListQueryState) {
+  const params = new URLSearchParams(searchParamString);
+  setClassListQueryParam(params, TEXTBOOK_LIST_QUERY_PARAM_KEYS.q, state.q);
+  setClassListQueryParam(params, TEXTBOOK_LIST_QUERY_PARAM_KEYS.status, state.status);
+  setClassListQueryParam(params, TEXTBOOK_LIST_QUERY_PARAM_KEYS.subject, state.subject);
+  setClassListQueryParam(params, TEXTBOOK_LIST_QUERY_PARAM_KEYS.publisher, state.publisher);
+  const nextQuery = params.toString();
+  return nextQuery ? `${pathname}?${nextQuery}` : pathname;
+}
+
 function getManagementListScrollStorageKey(kind: ManagementKind, pathname: string, searchParamString: string) {
   const params = new URLSearchParams(searchParamString);
   params.delete("classId");
@@ -653,46 +693,6 @@ function sortClassFilterOptions(columnId: ClassFilterColumnId, values: string[])
   });
 }
 
-function normalizeStudentSchoolCategory(value: unknown) {
-  const normalized = normalizeScalar(value);
-  if (!normalized) {
-    return "";
-  }
-
-  if (normalized.includes("고")) return "고등";
-  if (normalized.includes("중")) return "중등";
-  if (normalized.includes("초")) return "초등";
-  return normalized;
-}
-
-function getStudentSchool(row: ManagementRow) {
-  return normalizeScalar((row.raw || {}).school);
-}
-
-function getStudentGrade(row: ManagementRow) {
-  return normalizeScalar((row.raw || {}).grade);
-}
-
-function getStudentSchoolCategory(row: ManagementRow) {
-  const raw = row.raw || {};
-  const explicitCategory = normalizeStudentSchoolCategory(
-    raw.school_category ||
-      raw.schoolCategory ||
-      raw.school_level ||
-      raw.schoolLevel ||
-      raw.category,
-  );
-  if (explicitCategory) {
-    return explicitCategory;
-  }
-
-  const grade = getStudentGrade(row);
-  if (grade.startsWith("고")) return "고등";
-  if (grade.startsWith("중")) return "중등";
-  if (grade.startsWith("초")) return "초등";
-  return "";
-}
-
 function sortStudentSchoolCategories(values: string[]) {
   return [...values].sort((a, b) => {
     const aIndex = STUDENT_SCHOOL_CATEGORY_OPTIONS.indexOf(a as (typeof STUDENT_SCHOOL_CATEGORY_OPTIONS)[number]);
@@ -710,166 +710,28 @@ function sortStudentGradeOptions(values: string[]) {
   return [...values].sort((a, b) => a.localeCompare(b, "ko", { numeric: true }));
 }
 
-function getClassAcademicYear(row: ManagementRow) {
-  const raw = row.raw || {};
-  const explicitYear = normalizeScalar(
-    raw.academic_year ||
-      raw.academicYear ||
-      raw.year ||
-      raw.term_year ||
-      raw.termYear,
-  );
-  if (explicitYear) {
-    return explicitYear;
-  }
-
-  const dateText = normalizeScalar(
-    raw.start_date ||
-      raw.startDate ||
-      raw.end_date ||
-      raw.endDate ||
-      raw.created_at ||
-      raw.createdAt,
-  );
-  const yearMatch = dateText.match(/\d{4}/);
-  return yearMatch?.[0] || "";
-}
-
-function getClassTerm(row: ManagementRow) {
-  const raw = row.raw || {};
-  return normalizeScalar(
-    raw.term ||
-      raw.term_name ||
-      raw.termName ||
-      raw.semester ||
-      raw.academic_term ||
-      raw.academicTerm ||
-      raw.period,
-  );
-}
-
-function normalizePeriodLabel(value: unknown) {
-  return normalizeScalar(value)
-    .replace(/\b(20\d{2})\s+\1(?=\s|$)/g, "$1")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function buildPeriodLabel(year: string, term: string) {
-  const normalizedYear = normalizePeriodLabel(year);
-  const normalizedTerm = normalizePeriodLabel(term);
-  if (!normalizedTerm) {
-    return normalizedYear;
-  }
-
-  if (normalizedYear && normalizedTerm.includes(normalizedYear)) {
-    return normalizedTerm;
-  }
-
-  return normalizePeriodLabel([normalizedYear, normalizedTerm].filter(Boolean).join(" "));
-}
-
-function getLegacyClassPeriodLabel(row: ManagementRow) {
-  return buildPeriodLabel(getClassAcademicYear(row), getClassTerm(row));
-}
-
-function getClassGroupValues(row: ManagementRow) {
-  const raw = row.raw || {};
-  const directIds = Array.isArray(raw.classGroupIds)
-    ? raw.classGroupIds
-    : Array.isArray(raw.class_group_ids)
-      ? raw.class_group_ids
+function getAvailableClassGroupOptions(value: unknown): PeriodOption[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+    const record = candidate as Record<string, unknown>;
+    const optionValue = normalizeScalar(record.value);
+    const label = normalizeScalar(record.label) || optionValue;
+    if (!optionValue || !label) return [];
+    const aliases = Array.isArray(record.aliases)
+      ? record.aliases.map(normalizeScalar).filter(Boolean)
       : [];
-  const directNames = Array.isArray(raw.classGroupNames)
-    ? raw.classGroupNames
-    : Array.isArray(raw.class_group_names)
-      ? raw.class_group_names
-      : [];
-  const directGroups = Array.isArray(raw.classGroups)
-    ? raw.classGroups
-    : Array.isArray(raw.class_groups)
-      ? raw.class_groups
-      : [];
-  const metricNames = Array.isArray(row.metrics.classGroupNames) ? row.metrics.classGroupNames : [];
-
-  const assignedGroups = [
-    ...directIds.map(normalizeScalar),
-    ...directNames.map(normalizePeriodLabel),
-    ...metricNames.map(normalizePeriodLabel),
-    ...directGroups.map((group) => {
-      if (group && typeof group === "object") {
-        const record = group as Record<string, unknown>;
-        return [normalizeScalar(record.id), normalizePeriodLabel(record.name)].filter(Boolean).join("\n");
-      }
-      return normalizePeriodLabel(group);
-    }),
-  ]
-    .flatMap((value) => value.split("\n"))
-    .filter(Boolean);
-
-  if (assignedGroups.length > 0) {
-    return [...new Set(assignedGroups)];
-  }
-
-  return [...new Set([getLegacyClassPeriodLabel(row)].filter(Boolean))];
-}
-
-function getAvailableClassGroupOptions(rows: ManagementRow[]): PeriodOption[] {
-  const byLabel = new Map<string, PeriodOption>();
-  const upsertOption = (labelValue: string, optionValue: string, aliases: string[], isDefault = false) => {
-    const rawLabel = normalizeScalar(labelValue);
-    const label = normalizePeriodLabel(rawLabel);
-    const value = normalizeScalar(optionValue) || label;
-    if (!label || !value) {
-      return;
-    }
-
-    const key = label.replace(/\s+/g, " ");
-    const existing = byLabel.get(key);
-    if (existing) {
-      existing.aliases = [...new Set([...existing.aliases, ...aliases.map(normalizeScalar), rawLabel, value, label].filter(Boolean))];
-      existing.isDefault = existing.isDefault || isDefault;
-      return;
-    }
-
-    byLabel.set(key, {
-      value,
+    return [{
+      value: optionValue,
       label,
-      aliases: [...new Set([...aliases.map(normalizeScalar), rawLabel, value, label].filter(Boolean))],
-      isDefault,
-    });
-  };
+      aliases: [...new Set([optionValue, label, ...aliases])],
+      isDefault: record.isDefault === true,
+    }];
+  }).sort((left, right) => left.label.localeCompare(right.label, "ko", { numeric: true }));
+}
 
-  for (const row of rows) {
-    const raw = row.raw || {};
-    const availableGroups = Array.isArray(raw.availableClassGroups)
-      ? raw.availableClassGroups
-      : Array.isArray(raw.available_class_groups)
-        ? raw.available_class_groups
-        : [];
-
-    for (const group of availableGroups) {
-      if (!group || typeof group !== "object") {
-        const label = normalizeScalar(group);
-        upsertOption(label, label, [label]);
-        continue;
-      }
-
-      const record = group as Record<string, unknown>;
-      const id = normalizeScalar(record.id);
-      const label = normalizeScalar(record.name) || id;
-      const value = id || label;
-      const option = {
-        value,
-        label,
-        aliases: [value, label],
-        isDefault: record.is_default === true || record.isDefault === true,
-      };
-      upsertOption(option.label, option.value, option.aliases, option.isDefault);
-    }
-  }
-
-  return [...byLabel.values()].sort((a, b) => a.label.localeCompare(b.label, "ko", { numeric: true }));
+function getServerPeriodOptions(value: unknown) {
+  return getAvailableClassGroupOptions(value);
 }
 
 function getPeriodFilterLabel(options: PeriodOption[], value: string) {
@@ -912,51 +774,10 @@ function getClassStatusFilterValue(row: ManagementRow) {
   return "수강";
 }
 
-function getClassCount(row: ManagementRow, key: "registered" | "waitlist") {
-  const raw = row.raw || {};
-  const value = key === "registered"
-    ? raw.registeredCount || raw.registered_count || row.metrics.studentCount
-    : raw.waitlistCount || raw.waitlist_count || row.metrics.waitlistCount;
-  const count = Number(value || 0);
-  return Number.isFinite(count) ? count : 0;
-}
-
 function getClassCapacity(row: ManagementRow) {
   const raw = row.raw || {};
   const capacity = Number(raw.capacity || row.metrics.capacity || 0);
   return Number.isFinite(capacity) && capacity > 0 ? capacity : 0;
-}
-
-function parseWeeklyMinutes(value: unknown) {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? Math.round(value * 60) : 0;
-  }
-
-  const text = normalizeScalar(value);
-  if (!text) {
-    return 0;
-  }
-
-  const hourMatch = text.match(/(\d+(?:\.\d+)?)\s*시간/);
-  const minuteMatch = text.match(/(\d+)\s*분/);
-  if (hourMatch || minuteMatch) {
-    const hours = hourMatch ? Number(hourMatch[1]) : 0;
-    const minutes = minuteMatch ? Number(minuteMatch[1]) : 0;
-    return Math.round(hours * 60 + minutes);
-  }
-
-  const numeric = Number(text);
-  return Number.isFinite(numeric) ? Math.round(numeric * 60) : 0;
-}
-
-function formatWeeklyMinutes(totalMinutes: number) {
-  const safeMinutes = Math.max(0, Math.round(totalMinutes));
-  const hours = Math.floor(safeMinutes / 60);
-  const minutes = safeMinutes % 60;
-  if (hours <= 0) {
-    return `${minutes}분`;
-  }
-  return minutes > 0 ? `${hours}시간 ${minutes}분` : `${hours}시간`;
 }
 
 function formatManagementCurrency(value: unknown) {
@@ -1530,6 +1351,7 @@ export function ManagementDataTable({
   rows,
   stats,
   loading,
+  filterOptions = {},
   badgeLabel,
   statusLabel,
   emptyLabel,
@@ -1539,6 +1361,7 @@ export function ManagementDataTable({
   rows: ManagementRow[];
   stats: ManagementStat[];
   loading: boolean;
+  filterOptions?: Record<string, unknown>;
   onRefresh: () => void;
   badgeLabel: string;
   statusLabel: string;
@@ -1562,6 +1385,10 @@ export function ManagementDataTable({
     () => (kind === "students" ? getStudentListQueryState(new URLSearchParams(searchParamString)) : EMPTY_STUDENT_LIST_QUERY_STATE),
     [kind, searchParamString],
   );
+  const requestedTextbookListQueryState = useMemo(
+    () => (kind === "textbooks" ? getTextbookListQueryState(new URLSearchParams(searchParamString)) : EMPTY_TEXTBOOK_LIST_QUERY_STATE),
+    [kind, searchParamString],
+  );
   const storageKey = `tips-management-table:${kind}:v${STORAGE_VERSION}`;
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -1570,7 +1397,11 @@ export function ManagementDataTable({
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
   const [rowSelection, setRowSelection] = useState({});
   const [globalFilter, setGlobalFilter] = useState(() => (
-    kind === "classes" ? requestedClassListQueryState.q : kind === "students" ? requestedStudentListQueryState.q : ""
+    kind === "classes"
+      ? requestedClassListQueryState.q
+      : kind === "students"
+        ? requestedStudentListQueryState.q
+        : requestedTextbookListQueryState.q
   ));
   const globalFilterCompositionRef = useRef(false);
   const deferredGlobalFilter = useDeferredValue(globalFilter);
@@ -1586,6 +1417,10 @@ export function ManagementDataTable({
   const [bulkEditField, setBulkEditField] = useState(BULK_EDIT_FIELDS[kind][0]?.id || "");
   const [bulkEditValue, setBulkEditValue] = useState("");
   const [bulkActionPending, setBulkActionPending] = useState(false);
+  const serverOptions = useCallback((key: string) => {
+    const value = filterOptions[key];
+    return Array.isArray(value) ? value.map(normalizeScalar).filter(Boolean) : [];
+  }, [filterOptions]);
   const rememberManagementScrollPosition = useCallback(() => {
     if (typeof window === "undefined") {
       return;
@@ -1893,8 +1728,10 @@ export function ManagementDataTable({
   }, [columnOrder, columnSizing, columnVisibility, grouping, hydratedStorageKey, sorting, storageKey]);
 
   const periodOptions = useMemo(
-    () => (kind === "classes" ? getAvailableClassGroupOptions(rows) : []),
-    [kind, rows],
+    () => kind === "classes"
+      ? getServerPeriodOptions(filterOptions.periods)
+      : [],
+    [filterOptions.periods, kind],
   );
   const defaultPeriodFilter = useMemo(() => pickDefaultPeriodValue(periodOptions), [periodOptions]);
   const effectiveClassGroupFilter = useMemo(
@@ -1907,60 +1744,25 @@ export function ManagementDataTable({
   const studentSchoolCategoryOptions = useMemo(
     () =>
       kind === "students"
-        ? sortStudentSchoolCategories([...new Set(rows.map(getStudentSchoolCategory).filter(Boolean))])
+        ? sortStudentSchoolCategories(serverOptions("schoolCategory"))
         : [],
-    [kind, rows],
+    [kind, serverOptions],
   );
   const studentSchoolOptions = useMemo(() => {
     if (kind !== "students") {
       return [];
     }
 
-    return [...new Set(
-      rows
-        .filter((row) => !studentSchoolCategoryFilter || getStudentSchoolCategory(row) === studentSchoolCategoryFilter)
-        .map(getStudentSchool)
-        .filter(Boolean),
-    )].sort((a, b) => a.localeCompare(b, "ko", { numeric: true }));
-  }, [kind, rows, studentSchoolCategoryFilter]);
+    return serverOptions("school").sort((a, b) => a.localeCompare(b, "ko", { numeric: true }));
+  }, [kind, serverOptions]);
   const studentGradeOptions = useMemo(() => {
     if (kind !== "students") {
       return [];
     }
 
-    return sortStudentGradeOptions([
-      ...new Set(
-        rows
-          .filter((row) => !studentSchoolCategoryFilter || getStudentSchoolCategory(row) === studentSchoolCategoryFilter)
-          .filter((row) => !studentSchoolFilter || getStudentSchool(row) === studentSchoolFilter)
-          .map(getStudentGrade)
-          .filter(Boolean),
-      ),
-    ]);
-  }, [kind, rows, studentSchoolCategoryFilter, studentSchoolFilter]);
-  const tableSourceRows = useMemo(
-    () => {
-      if (kind === "classes") {
-        return rows.filter((row) => {
-          const selectedValue = effectiveClassGroupFilter;
-          const selectedOption = findPeriodOption(periodOptions, selectedValue);
-          const filterValues = selectedOption?.aliases || [selectedValue].filter(Boolean);
-          const groups = getClassGroupValues(row);
-          return filterValues.length === 0 || filterValues.some((value) => groups.includes(value));
-        });
-      }
-
-      if (kind === "students") {
-        return rows
-          .filter((row) => !studentSchoolCategoryFilter || getStudentSchoolCategory(row) === studentSchoolCategoryFilter)
-          .filter((row) => !studentSchoolFilter || getStudentSchool(row) === studentSchoolFilter)
-          .filter((row) => !studentGradeFilter || getStudentGrade(row) === studentGradeFilter);
-      }
-
-      return rows;
-    },
-    [effectiveClassGroupFilter, kind, periodOptions, rows, studentGradeFilter, studentSchoolCategoryFilter, studentSchoolFilter],
-  );
+    return sortStudentGradeOptions(serverOptions("grade"));
+  }, [kind, serverOptions]);
+  const tableSourceRows = rows;
 
   useEffect(() => {
     if (kind !== "classes") {
@@ -2034,6 +1836,7 @@ export function ManagementDataTable({
       grouping,
       expanded,
     },
+    manualFiltering: true,
     globalFilterFn: (row, _, value) => {
       const normalized = String(value || "").trim().toLowerCase();
       if (!normalized) {
@@ -2065,8 +1868,9 @@ export function ManagementDataTable({
 
   const badgeOptions = useMemo(
     () =>
-      [...new Set(tableSourceRows.map((row) => row.badge).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko")),
-    [tableSourceRows],
+      serverOptions(kind === "textbooks" ? "publisher" : kind === "classes" ? "subject" : "grade")
+        .sort((a, b) => a.localeCompare(b, "ko", { numeric: true })),
+    [kind, serverOptions],
   );
 
   const statusOptions = useMemo(
@@ -2075,8 +1879,8 @@ export function ManagementDataTable({
         ? [...CLASS_STATUS_FILTER_OPTIONS]
         : kind === "students"
           ? [...STUDENT_STATUS_OPTIONS]
-        : [...new Set(rows.map((row) => row.status).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko")),
-    [kind, rows],
+        : serverOptions("status").sort((a, b) => a.localeCompare(b, "ko")),
+    [kind, serverOptions],
   );
 
   const subjectColumn =
@@ -2098,19 +1902,16 @@ export function ManagementDataTable({
     }
 
     return CLASS_FILTERS.reduce<Record<ClassFilterColumnId, string[]>>((current, filter) => {
-      const sourceRows = selectedSubjectFilter && (filter.id === "teacher" || filter.id === "classroom")
-        ? tableSourceRows.filter((row) => getClassFilterValues(row, "subject").includes(selectedSubjectFilter))
-        : tableSourceRows;
       const catalogOptions = filter.id === "teacher"
         ? getManagementTeacherCatalogOptions(tableSourceRows, selectedSubjectFilter)
         : [];
       current[filter.id] = sortClassFilterOptions(
         filter.id,
-        [...new Set([...catalogOptions, ...sourceRows.flatMap((row) => getClassFilterValues(row, filter.id))])],
+        [...new Set([...catalogOptions, ...serverOptions(filter.id)])],
       );
       return current;
     }, emptyOptions);
-  }, [kind, tableSourceRows, selectedSubjectFilter]);
+  }, [kind, serverOptions, tableSourceRows, selectedSubjectFilter]);
 
   const columnOptions = useMemo<ColumnOption[]>(
     () =>
@@ -2154,19 +1955,11 @@ export function ManagementDataTable({
       hasActiveStudentFilters,
   );
   const filteredRowCount = table.getFilteredRowModel().rows.length;
-  const filteredClassRows = kind === "classes"
-    ? table.getFilteredRowModel().flatRows.map((row) => row.original)
-    : [];
-  const classRegisteredTotal = filteredClassRows.reduce((total, row) => total + getClassCount(row, "registered"), 0);
-  const classWaitlistTotal = filteredClassRows.reduce((total, row) => total + getClassCount(row, "waitlist"), 0);
-  const classWeeklyMinutesTotal = filteredClassRows.reduce((total, row) => {
-    const raw = row.raw || {};
-    return total + parseWeeklyMinutes(raw.weeklyHoursLabel || raw.weekly_hours_label || row.metrics.weeklyHoursLabel);
-  }, 0);
+  const authoritativeTotal = stats[0]?.value || "0";
   const summaryLabel = loading
     ? `${emptyLabel} 불러오는 중`
     : kind === "classes"
-      ? `수업 ${filteredClassRows.length}개, 등록 ${classRegisteredTotal}명, 대기 ${classWaitlistTotal}명, 주간 수업시수 ${formatWeeklyMinutes(classWeeklyMinutesTotal)}`
+      ? `전체 수업 ${authoritativeTotal}개 · 서버 집계`
       : `표시 ${filteredRowCount}건`;
   const selectedRowCount = table.getFilteredSelectedRowModel().rows.length;
   const selectedRows = table.getFilteredSelectedRowModel().rows.map((row) => row.original);
@@ -2297,6 +2090,22 @@ export function ManagementDataTable({
     },
     [currentStudentListQueryState, kind, pathname, router, searchParamString],
   );
+  const currentTextbookListQueryState = useMemo<TextbookListQueryState>(() => ({
+    q: normalizedGlobalFilter,
+    status: kind === "textbooks" ? statusFilter : "",
+    subject: requestedTextbookListQueryState.subject,
+    publisher: kind === "textbooks" ? badgeFilter : "",
+  }), [badgeFilter, kind, normalizedGlobalFilter, requestedTextbookListQueryState.subject, statusFilter]);
+  const syncTextbookListQueryState = useCallback((nextState: Partial<TextbookListQueryState>) => {
+    if (kind !== "textbooks") return;
+    const nextHref = buildTextbookListHref(
+      pathname,
+      searchParamString,
+      { ...currentTextbookListQueryState, ...nextState },
+    );
+    const currentHref = searchParamString ? `${pathname}?${searchParamString}` : pathname;
+    if (nextHref !== currentHref) router.replace(nextHref, { scroll: false });
+  }, [currentTextbookListQueryState, kind, pathname, router, searchParamString]);
 
   useEffect(() => {
     if (kind !== "classes" || !statusColumn) {
@@ -2386,6 +2195,19 @@ export function ManagementDataTable({
     studentSchoolFilter,
   ]);
 
+  useEffect(() => {
+    if (kind !== "textbooks") return;
+    if (!globalFilterCompositionRef.current && globalFilter !== requestedTextbookListQueryState.q) {
+      setGlobalFilter(requestedTextbookListQueryState.q);
+    }
+    if (badgeColumn && badgeFilter !== requestedTextbookListQueryState.publisher) {
+      badgeColumn.setFilterValue(requestedTextbookListQueryState.publisher);
+    }
+    if (statusColumn && statusFilter !== requestedTextbookListQueryState.status) {
+      statusColumn.setFilterValue(requestedTextbookListQueryState.status);
+    }
+  }, [badgeColumn, badgeFilter, globalFilter, kind, requestedTextbookListQueryState, statusColumn, statusFilter]);
+
   const resetPreferences = () => {
     setColumnVisibility(defaultVisibility);
     setColumnOrder(buildDefaultColumnOrder(kind, allColumnIds));
@@ -2437,6 +2259,9 @@ export function ManagementDataTable({
         grade: "",
       });
     }
+    if (kind === "textbooks") {
+      syncTextbookListQueryState({ q: "", status: "", subject: "", publisher: "" });
+    }
     table.resetPagination();
   };
 
@@ -2448,6 +2273,7 @@ export function ManagementDataTable({
     if (options.syncUrl !== false && !globalFilterCompositionRef.current) {
       syncClassListQueryState({ q: value });
       syncStudentListQueryState({ q: value });
+      syncTextbookListQueryState({ q: value });
     }
   };
 
@@ -3341,7 +3167,9 @@ export function ManagementDataTable({
                     <Select
                       value={badgeFilter || "all"}
                       onValueChange={(value) => {
-                        badgeColumn.setFilterValue(value === "all" ? "" : value);
+                        const nextValue = value === "all" ? "" : value;
+                        badgeColumn.setFilterValue(nextValue);
+                        syncTextbookListQueryState({ publisher: nextValue });
                         setRowSelection({});
                         table.resetPagination();
                       }}
@@ -3368,7 +3196,9 @@ export function ManagementDataTable({
                   <Select
                     value={statusFilter || "all"}
                     onValueChange={(value) => {
-                      statusColumn?.setFilterValue(value === "all" ? "" : value);
+                      const nextValue = value === "all" ? "" : value;
+                      statusColumn?.setFilterValue(nextValue);
+                      syncTextbookListQueryState({ status: nextValue });
                       setRowSelection({});
                       table.resetPagination();
                     }}

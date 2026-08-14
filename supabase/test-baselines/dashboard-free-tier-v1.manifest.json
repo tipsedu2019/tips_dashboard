@@ -24,6 +24,11 @@
       "fileName": "20260813234824_ops_task_page_reads.sql",
       "status": "candidate",
       "sha256": "afa89fe970b5c367f05e67e5b76e38dafa96a7f233001fce019db940cb7082a1"
+    },
+    {
+      "fileName": "20260814011752_management_page_reads.sql",
+      "status": "candidate",
+      "sha256": "a0609d3e4299a347fe25067bfd5674a7b38b49b192b9936fd1ecb437b41d12a1"
     }
   ]
 }

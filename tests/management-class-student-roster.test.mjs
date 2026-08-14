@@ -959,7 +959,7 @@ test("class teacher choices are narrowed by the selected subject", async () => {
   assert.match(pageSource, /next\.teacher = ""/);
   assert.match(tableSource, /function getManagementTeacherCatalogOptions/);
   assert.match(tableSource, /getManagementTeacherCatalogOptions\(tableSourceRows, selectedSubjectFilter\)/);
-  assert.match(tableSource, /\[\.\.\.new Set\(\[\.\.\.catalogOptions, \.\.\.sourceRows\.flatMap\(\(row\) => getClassFilterValues\(row, filter\.id\)\)\]\)\]/);
+  assert.match(tableSource, /\[\.\.\.new Set\(\[\.\.\.catalogOptions, \.\.\.serverOptions\(filter\.id\)\]\)\]/);
 });
 
 test("student recent issues stay out of dashboard class counseling surfaces", async () => {

@@ -232,14 +232,13 @@ test("class enrollment status cell does not repeat capacity text", async () => {
   assert.doesNotMatch(cellSource, />정원 \{/);
 });
 
-test("class table caption announces operational totals instead of status counts", async () => {
+test("class table caption uses the authoritative server aggregate instead of the loaded page", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
   assert.match(source, /const captionSuffix = kind === "classes"\s*\?\s*summaryLabel/);
-  assert.match(source, /classRegisteredTotal/);
-  assert.match(source, /classWeeklyMinutesTotal/);
-  assert.match(source, /return minutes > 0 \? `\$\{hours\}시간 \$\{minutes\}분` : `\$\{hours\}시간`/);
-  assert.doesNotMatch(source, /padStart\(2, "0"\).*시간/);
+  assert.match(source, /const authoritativeTotal = stats\[0\]\?\.value/);
+  assert.match(source, /`전체 수업 \$\{authoritativeTotal\}개 · 서버 집계`/);
+  assert.doesNotMatch(source, /filteredClassRows\.reduce/);
 });
 
 test("class management uses mobile cards instead of a clipped wide table", async () => {
@@ -331,7 +330,7 @@ test("management table keeps filter and search actions visible and reversible", 
   assert.match(panelSource, /primaryLabel\?: string/);
   assert.match(panelSource, /aria-label=\{`\$\{searchPlaceholder\} 지우기`\}/);
   assert.match(panelSource, /필터 \$\{String\(primaryLabel\)\}|필터 \$\{primaryLabel\}/);
-  assert.match(tableSource, /const DEFAULT_PAGE_SIZE = 20/);
+  assert.match(tableSource, /const DEFAULT_PAGE_SIZE = 30/);
   assert.match(tableSource, /onSearchChange=\{updateGlobalFilter\}/);
   assert.match(tableSource, /primaryLabel=\{activePeriodLabel\}/);
   assert.match(tableSource, /setRowSelection\(\{\}\);[\s\S]*table\.resetPagination\(\);/);

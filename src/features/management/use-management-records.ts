@@ -12,8 +12,7 @@ import {
   normalizeTextbookManagementRecord,
 } from "./records.js";
 import { buildCurriculumWorkspaceModel } from "../academic/records.js";
-import { loadManagementRowsProgressively } from "./management-progressive-loader.js";
-import { managementPrimaryRowsCache } from "./management-primary-cache.js";
+import { createManagementReadService } from "./management-service.js";
 
 export type ManagementKind = "students" | "classes" | "textbooks";
 
@@ -510,6 +509,8 @@ function normalizeManagementRows(
     .sort((left, right) => left.title.localeCompare(right.title, "ko"));
 }
 
+// Kept for the legacy enrichment compatibility helpers exercised by older callers.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function enrichManagementRows(
   kind: ManagementKind,
   initialRows: Record<string, unknown>[],
@@ -629,20 +630,132 @@ async function enrichManagementRows(
   return { sourceRows, classFormReferences };
 }
 
-export function useManagementRecords(kind: ManagementKind) {
+export type ManagementListFilters =
+  | { kind: "students"; search: string; status: string | null; schoolCategory: string | null; school: string | null; grade: string | null }
+  | { kind: "classes"; search: string; periodId: string | null; status: string | null; subject: string | null; grade: string | null; teacher: string | null; classroom: string | null }
+  | { kind: "textbooks"; search: string; status: string | null; subject: string | null; publisher: string | null };
+
+type ManagementPageCursor = { sortKey: string; id: string; scopeHash: string };
+
+function defaultManagementFilters(kind: ManagementKind): ManagementListFilters {
+  if (kind === "students") return { kind, search: "", status: null, schoolCategory: null, school: null, grade: null };
+  if (kind === "classes") return { kind, search: "", periodId: null, status: "수강", subject: null, grade: null, teacher: null, classroom: null };
+  return { kind, search: "", status: null, subject: null, publisher: null };
+}
+
+function aggregateToStats(kind: ManagementKind, aggregate: Record<string, unknown>): ManagementStat[] {
+  const total = Number(aggregate.total || 0);
+  const byStatus = aggregate.byStatus && typeof aggregate.byStatus === "object" && !Array.isArray(aggregate.byStatus)
+    ? aggregate.byStatus as Record<string, unknown>
+    : {};
+  const primaryLabel = kind === "students" ? "전체 학생" : kind === "classes" ? "전체 수업" : "전체 교재";
+  return [
+    { label: primaryLabel, value: total.toLocaleString("ko-KR"), hint: "현재 필터 전체" },
+    ...Object.entries(byStatus).slice(0, 3).map(([label, value]) => ({
+      label,
+      value: Number(value || 0).toLocaleString("ko-KR"),
+      hint: "서버 집계",
+    })),
+  ];
+}
+
+function relationRows(value: unknown): Record<string, unknown>[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const source = value as Record<string, unknown>;
+  const page = source.page && typeof source.page === "object" && !Array.isArray(source.page)
+    ? source.page as Record<string, unknown>
+    : source;
+  return Array.isArray(page.rows) ? page.rows as Record<string, unknown>[] : [];
+}
+
+function detailToSourceRow(kind: ManagementKind, detail: unknown): Record<string, unknown> | null {
+  if (!detail || typeof detail !== "object" || Array.isArray(detail)) return null;
+  const source = detail as Record<string, unknown>;
+  if (source.kind !== kind || !source.record || typeof source.record !== "object" || Array.isArray(source.record)) return null;
+  const record = source.record as Record<string, unknown>;
+  if (kind === "students") {
+    const enrollments = relationRows(source.enrollments);
+    return {
+      ...record,
+      school_category: record.schoolCategory,
+      parent_contact: record.parentContact,
+      enroll_date: record.enrollDate,
+      counseling_note: record.counselingNote,
+      recent_issue: record.recentIssue,
+      updated_at: record.updatedAt,
+      class_ids: enrollments.filter((row) => row.status === "enrolled").map((row) => row.classId),
+      waitlist_class_ids: enrollments.filter((row) => row.status === "waitlisted").map((row) => row.classId),
+      class_history: relationRows(source.lifecycleHistory),
+      classHistory: relationRows(source.lifecycleHistory),
+    };
+  }
+  if (kind === "classes") {
+    const registeredStudents = relationRows(source.registeredStudents);
+    const waitlistedStudents = relationRows(source.waitlistedStudents);
+    const schedule = source.schedule && typeof source.schedule === "object" && !Array.isArray(source.schedule)
+      ? source.schedule as Record<string, unknown>
+      : {};
+    const formReferences = source.formReferences && typeof source.formReferences === "object" && !Array.isArray(source.formReferences)
+      ? source.formReferences as Record<string, unknown>
+      : {};
+    return {
+      ...record,
+      class_type: record.classType,
+      subject_area_key: record.subjectAreaKey,
+      updated_at: record.updatedAt,
+      student_ids: registeredStudents.map((row) => row.id),
+      waitlist_ids: waitlistedStudents.map((row) => row.id),
+      registered_students: registeredStudents,
+      registeredStudents,
+      waitlist_students: waitlistedStudents,
+      waitlistStudents: waitlistedStudents,
+      schedule_plan: schedule.plan || null,
+      schedule_slots: Array.isArray(schedule.slots) ? schedule.slots : [],
+      textbooks: Array.isArray(source.textbooks) ? source.textbooks : [],
+      class_groups: Array.isArray(source.groups) ? source.groups : [],
+      available_teacher_catalogs: Array.isArray(formReferences.teacherCatalogs) ? formReferences.teacherCatalogs : [],
+      available_classroom_catalogs: Array.isArray(formReferences.classroomCatalogs) ? formReferences.classroomCatalogs : [],
+      available_science_subject_areas: Array.isArray(formReferences.scienceSubjectAreas) ? formReferences.scienceSubjectAreas : [],
+    };
+  }
+  return {
+    ...record,
+    updated_at: record.updatedAt,
+    school_levels: (source.taxonomy as Record<string, unknown> | undefined)?.schoolLevels || [],
+    grade_levels: (source.taxonomy as Record<string, unknown> | undefined)?.gradeLevels || [],
+    sub_subject: (source.taxonomy as Record<string, unknown> | undefined)?.subSubject || null,
+    active_classes: relationRows(source.activeClasses),
+    purchase_history: relationRows(source.purchaseHistory),
+    progress_summary: source.progressSummary || {},
+  };
+}
+
+function listRowToSource(kind: ManagementKind, row: Record<string, unknown>) {
+  if (kind === "students") return { ...row, updated_at: row.updatedAt };
+  if (kind === "classes") return { ...row, teacher_name: row.teacherName, student_count: row.studentCount, updated_at: row.updatedAt };
+  return { ...row, name: row.title, active_class_count: row.activeClassCount, updated_at: row.updatedAt };
+}
+
+export function useManagementRecords(kind: ManagementKind, requestedFilters?: ManagementListFilters) {
   const [rows, setRows] = useState<ManagementRow[]>([]);
+  const [stats, setStats] = useState<ManagementStat[]>([]);
   const [classFormReferences, setClassFormReferences] = useState<ClassFormReferences>(EMPTY_CLASS_FORM_REFERENCES);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<ManagementPageCursor | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [filterOptions, setFilterOptions] = useState<Record<string, unknown>>({});
   const loadGenerationRef = useRef(0);
+  const filters = useMemo(() => requestedFilters || defaultManagementFilters(kind), [kind, requestedFilters]);
+  const readService = useMemo(() => supabase ? createManagementReadService({ supabase }) : null, []);
 
   const load = useCallback(async () => {
-    const config = CONFIG[kind];
     const loadGeneration = loadGenerationRef.current + 1;
     loadGenerationRef.current = loadGeneration;
     const isCurrent = () => loadGenerationRef.current === loadGeneration;
 
-    if (!supabase) {
+    if (!readService) {
       setRows([]);
       setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
       setError("Supabase 연결 설정을 확인해 주세요.");
@@ -652,59 +765,21 @@ export function useManagementRecords(kind: ManagementKind) {
 
     setLoading(true);
     setError(null);
-    const cachedPrimaryRows = managementPrimaryRowsCache.read(kind) as Record<string, unknown>[] | null;
-
     try {
-      if (kind !== "classes") {
-        setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
-      }
-      await loadManagementRowsProgressively({
-        cachedPrimaryRows,
-        loadPrimaryRows: async () => {
-          const { data, error: queryError } = await withTableTimeout(
-            supabase!.from(config.table).select("*"),
-            config.table,
-            false,
-          );
-
-          if (queryError) {
-            throw queryError;
-          }
-
-          return (data || []) as Record<string, unknown>[];
-        },
-        cachePrimaryRows: (sourceRows: Record<string, unknown>[]) => {
-          managementPrimaryRowsCache.write(kind, sourceRows);
-        },
-        enrichRows: kind === "students" || kind === "classes"
-          ? (sourceRows: Record<string, unknown>[]) => enrichManagementRows(kind, sourceRows)
-          : undefined,
-        onPrimaryRows: (sourceRows: Record<string, unknown>[]) => {
-          setRows(normalizeManagementRows(kind, sourceRows));
-          setError(null);
-          setLoading(false);
-        },
-        onEnrichedRows: ({ sourceRows, classFormReferences: nextClassFormReferences }: Awaited<ReturnType<typeof enrichManagementRows>>) => {
-          setRows(normalizeManagementRows(kind, sourceRows));
-          if (kind === "classes") {
-            setClassFormReferences(nextClassFormReferences);
-          }
-          setError(null);
-        },
-        onEnrichmentError: (fetchError: unknown) => {
-          setError(
-            fetchError instanceof Error
-              ? `부가 데이터를 불러오지 못했습니다. ${fetchError.message}`
-              : "부가 데이터를 불러오지 못했습니다.",
-          );
-        },
-        isCurrent,
-      });
+      const result = await readService.loadPage({ kind, filters, cursor: null, limit: 30 });
+      if (!isCurrent()) return;
+      const sourceRows = result.page.rows.map((row: Record<string, unknown>) => listRowToSource(kind, row));
+      setRows(normalizeManagementRows(kind, sourceRows));
+      setStats(aggregateToStats(kind, result.stats));
+      setFilterOptions(result.filterOptions);
+      setNextCursor(result.page.nextCursor);
+      setHasMore(result.page.hasMore);
+      setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
+      setError(null);
+      setLoading(false);
     } catch (fetchError) {
       if (isCurrent()) {
-        if (cachedPrimaryRows === null) {
-          setRows([]);
-        }
+        setRows([]);
         if (kind === "classes") {
           setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
         }
@@ -714,7 +789,7 @@ export function useManagementRecords(kind: ManagementKind) {
         setLoading(false);
       }
     }
-  }, [kind]);
+  }, [filters, kind, readService]);
 
   useEffect(() => {
     void load();
@@ -723,7 +798,54 @@ export function useManagementRecords(kind: ManagementKind) {
     };
   }, [load]);
 
-  const stats = useMemo(() => CONFIG[kind].buildStats(rows), [kind, rows]);
+  const loadMore = useCallback(async () => {
+    if (!readService || !nextCursor || !hasMore || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await readService.loadNextPage({ kind, filters, cursor: nextCursor, limit: 30 });
+      const incoming = normalizeManagementRows(kind, page.rows.map((row: Record<string, unknown>) => listRowToSource(kind, row)));
+      setRows((current) => {
+        const byId = new Map(current.map((row) => [row.id, row]));
+        for (const row of incoming) byId.set(row.id, row);
+        return [...byId.values()];
+      });
+      setNextCursor(page.nextCursor);
+      setHasMore(page.hasMore);
+    } catch (fetchError) {
+      setError(fetchError instanceof Error ? fetchError.message : "다음 목록을 불러오지 못했습니다.");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [filters, hasMore, kind, loadingMore, nextCursor, readService]);
+
+  const loadDetail = useCallback(async (id: string) => {
+    if (!readService) return null;
+    const detail = await readService.loadDetail({ kind, id });
+    const sourceRow = detailToSourceRow(kind, detail);
+    if (!sourceRow) return null;
+    if (kind === "classes") {
+      setClassFormReferences({
+        teacherCatalogs: Array.isArray(sourceRow.available_teacher_catalogs) ? sourceRow.available_teacher_catalogs as Record<string, unknown>[] : [],
+        classroomCatalogs: Array.isArray(sourceRow.available_classroom_catalogs) ? sourceRow.available_classroom_catalogs as Record<string, unknown>[] : [],
+        scienceSubjectAreas: Array.isArray(sourceRow.available_science_subject_areas) ? sourceRow.available_science_subject_areas as Record<string, unknown>[] : [],
+      });
+    }
+    return normalizeManagementRows(kind, [sourceRow])[0] || null;
+  }, [kind, readService]);
+
+  const reloadRow = useCallback(async (id: string) => {
+    const detailRow = await loadDetail(id);
+    if (!detailRow) return null;
+    setRows((current) => current.some((row) => row.id === id)
+      ? current.map((row) => row.id === id ? detailRow : row)
+      : [detailRow, ...current]);
+    return detailRow;
+  }, [loadDetail]);
+
+  const removeRows = useCallback((ids: string[]) => {
+    const removed = new Set(ids);
+    setRows((current) => current.filter((row) => !removed.has(row.id)));
+  }, []);
 
   return {
     rows,
@@ -731,6 +853,13 @@ export function useManagementRecords(kind: ManagementKind) {
     loading,
     error,
     classFormReferences,
+    filterOptions,
+    hasMore,
+    loadingMore,
+    loadMore,
+    loadDetail,
+    reloadRow,
+    removeRows,
     refresh: load,
   };
 }

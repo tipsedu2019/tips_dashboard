@@ -4,26 +4,24 @@ import { readFile } from "node:fs/promises";
 
 const root = new URL("../", import.meta.url);
 
-test("class period filter is built from configured periods only", async () => {
+test("class period filter is built from server-configured periods only", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
   const groupSource = await readFile(new URL("src/features/management/class-group-master-workspace.tsx", root), "utf8");
 
   assert.match(source, /function getAvailableClassGroupOptions/);
-  assert.match(source, /raw\.availableClassGroups/);
-  assert.doesNotMatch(source, /rows\.flatMap\(getClassGroupValues\)/);
+  assert.match(source, /getServerPeriodOptions\(filterOptions\.periods\)/);
+  assert.doesNotMatch(source, /getAvailableClassGroupOptions\(rows\)/);
   assert.match(groupSource, /data-testid="class-group-settings-mobile-list"/);
   assert.match(groupSource, /data-testid=\{`class-group-settings-mobile-card-\$\{row\.id\}`\}/);
   assert.match(groupSource, /<div className="hidden md:block">[\s\S]*<SettingsTableFrame>/);
 });
 
-test("explicit class group membership wins over legacy year term labels", async () => {
+test("class period filtering does not re-filter the bounded list in the browser", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
-  assert.match(source, /if \(assignedGroups\.length > 0\) \{\s*return \[\.\.\.new Set\(assignedGroups\)\];\s*\}/);
-  assert.doesNotMatch(
-    source,
-    /return \[\.\.\.new Set\(\[\.\.\.assignedGroups,\s*getLegacyClassPeriodLabel\(row\)\]\.filter\(Boolean\)\)\]/,
-  );
+  assert.match(source, /const tableSourceRows = rows/);
+  assert.match(source, /manualFiltering: true/);
+  assert.doesNotMatch(source, /rows\.filter\(\(row\)[\s\S]*?getClassGroupValues/);
 });
 
 test("class detail preselects matching legacy period only when no group is assigned", async () => {
@@ -60,6 +58,6 @@ test("default period preference uses the server-configured period before stored 
   assert.match(preferenceSource, /isDefault\?: boolean/);
   assert.match(preferenceSource, /const configuredDefault = options\.find\(\(option\) => option\.isDefault === true\)/);
   assert.match(preferenceSource, /if \(configuredDefault\) \{\s*return configuredDefault\.value;\s*\}/);
-  assert.match(tableSource, /isDefault: record\.is_default === true \|\| record\.isDefault === true/);
+  assert.match(tableSource, /isDefault: record\.isDefault === true/);
   assert.match(recordsSource, /readOptionalTable\("class_schedule_sync_groups"\)/);
 });

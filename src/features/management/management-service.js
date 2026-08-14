@@ -18,6 +18,18 @@ const CONTINUOUS_CLASS_SCHEDULE_RPC = {
 };
 const CLASS_CREATE_WITH_GROUPS_RPC = "create_class_with_group_memberships_v1";
 const CLASS_REPLACE_GROUPS_RPC = "replace_class_group_memberships_v1";
+const MANAGEMENT_PAGE_SIZE = 30;
+const MANAGEMENT_KINDS = new Set(["students", "classes", "textbooks"]);
+const MANAGEMENT_FILTER_KEYS = Object.freeze({
+  students: ["kind", "search", "status", "schoolCategory", "school", "grade"],
+  classes: ["kind", "search", "periodId", "status", "subject", "grade", "teacher", "classroom"],
+  textbooks: ["kind", "search", "status", "subject", "publisher"],
+});
+const MANAGEMENT_RELATIONS = Object.freeze({
+  students: new Set(["enrollments", "lifecycle_history", "class_picker"]),
+  classes: new Set(["registered_students", "waitlisted_students"]),
+  textbooks: new Set(["active_classes", "purchase_history"]),
+});
 const CLASSROOM_ALIAS_MAP = new Map([
   ["별3", "별관 3강"],
   ["별3강", "별관 3강"],
@@ -38,6 +50,226 @@ const CLASSROOM_ALIAS_MAP = new Map([
 
 function trimText(value) {
   return typeof value === "string" ? value.trim() : String(value || "").trim();
+}
+
+function managementReadError(code) {
+  return Object.assign(new Error(code), { code });
+}
+
+function assertManagementKind(kind) {
+  if (!MANAGEMENT_KINDS.has(kind)) throw managementReadError("management_kind_invalid");
+}
+
+function assertManagementFilters(kind, filters) {
+  assertManagementKind(kind);
+  if (!filters || typeof filters !== "object" || Array.isArray(filters) || filters.kind !== kind) {
+    throw managementReadError("management_filters_invalid");
+  }
+  const expected = MANAGEMENT_FILTER_KEYS[kind];
+  const actual = Object.keys(filters).sort();
+  if (actual.length !== expected.length || actual.some((key, index) => key !== [...expected].sort()[index])) {
+    throw managementReadError("management_filters_invalid");
+  }
+  if (typeof filters.search !== "string") throw managementReadError("management_filters_invalid");
+  for (const key of expected.filter((key) => key !== "kind" && key !== "search")) {
+    if (filters[key] !== null && typeof filters[key] !== "string") {
+      throw managementReadError("management_filters_invalid");
+    }
+  }
+}
+
+function canonicalManagementJson(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalManagementJson).join(",")}]`;
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalManagementJson(value[key])}`).join(",")}}`;
+}
+
+async function managementScopeHash(kind, filters) {
+  const bytes = new TextEncoder().encode(canonicalManagementJson({ surface: "management", kind, filters }));
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function encodeBase64Url(value) {
+  const json = JSON.stringify(value);
+  const bytes = new TextEncoder().encode(json);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return globalThis.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/u, "");
+}
+
+function decodeBase64Url(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 1024 || !/^[A-Za-z0-9_-]+$/u.test(value)) {
+    throw managementReadError("relation_cursor_mismatch");
+  }
+  try {
+    const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+    const binary = globalThis.atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    const json = new TextDecoder().decode(bytes);
+    return JSON.parse(json);
+  } catch {
+    throw managementReadError("relation_cursor_mismatch");
+  }
+}
+
+function encodeManagementRelationCursor(envelope) {
+  assertManagementKind(envelope?.kind);
+  if (!MANAGEMENT_RELATIONS[envelope.kind].has(envelope.relationKind)
+    || !trimText(envelope.entityId) || !trimText(envelope.sortValue) || !trimText(envelope.id)) {
+    throw managementReadError("relation_cursor_mismatch");
+  }
+  return encodeBase64Url({
+    v: 1,
+    kind: envelope.kind,
+    entityId: envelope.entityId,
+    relationKind: envelope.relationKind,
+    sortValue: envelope.sortValue,
+    id: envelope.id,
+  });
+}
+
+function decodeManagementRelationCursor(cursor, expected) {
+  const envelope = decodeBase64Url(cursor);
+  if (!envelope || envelope.v !== 1
+    || envelope.kind !== expected.kind
+    || envelope.entityId !== expected.entityId
+    || envelope.relationKind !== expected.relationKind
+    || typeof envelope.sortValue !== "string"
+    || typeof envelope.id !== "string") {
+    throw managementReadError("relation_cursor_mismatch");
+  }
+  return { sortValue: envelope.sortValue, id: envelope.id };
+}
+
+function unwrapRpcObject(value) {
+  return Array.isArray(value) && value.length === 1 ? value[0] : value;
+}
+
+function withOpaqueRelationCursor(page, context) {
+  if (!page || typeof page !== "object" || Array.isArray(page)) return page;
+  const rawCursor = page.nextCursor;
+  return {
+    ...page,
+    nextCursor: rawCursor && typeof rawCursor === "object"
+      ? encodeManagementRelationCursor({
+          ...context,
+          sortValue: rawCursor.sortValue,
+          id: rawCursor.id,
+        })
+      : null,
+  };
+}
+
+function withOpaqueDetailRelationCursors(detail, kind, entityId) {
+  if (!detail || typeof detail !== "object" || Array.isArray(detail)) return detail;
+  const fields = kind === "students"
+    ? [["enrollments", "enrollments"], ["lifecycleHistory", "lifecycle_history"], ["classPicker", "class_picker"]]
+    : kind === "classes"
+      ? [["registeredStudents", "registered_students"], ["waitlistedStudents", "waitlisted_students"]]
+      : [["activeClasses", "active_classes"], ["purchaseHistory", "purchase_history"]];
+  return fields.reduce((result, [field, relationKind]) => ({
+    ...result,
+    [field]: withOpaqueRelationCursor(result[field], { kind, entityId, relationKind }),
+  }), { ...detail });
+}
+
+export function createManagementReadService(options = {}) {
+  const client = ensureClient(options.supabase);
+
+  /**
+   * @param {{
+   *   kind: "students" | "classes" | "textbooks",
+   *   filters: Record<string, unknown>,
+   *   cursor?: null | { sortKey: string, id: string, scopeHash: string },
+   *   limit?: number
+   * }} request
+   */
+  const readListPage = async ({ kind, filters, cursor = null, limit = MANAGEMENT_PAGE_SIZE }) => {
+    assertManagementFilters(kind, filters);
+    if (limit !== MANAGEMENT_PAGE_SIZE) throw managementReadError("management_page_limit_invalid");
+    const scopeHash = await managementScopeHash(kind, filters);
+    if (cursor !== null && (!cursor || typeof cursor !== "object" || cursor.scopeHash !== scopeHash
+      || typeof cursor.sortKey !== "string" || typeof cursor.id !== "string")) {
+      throw managementReadError("management_cursor_mismatch");
+    }
+    const { data, error } = await client.rpc("list_management_page_v1", {
+        p_kind: kind,
+        p_filters: filters,
+        p_cursor_sort_key: cursor?.sortKey || null,
+        p_cursor_id: cursor?.id || null,
+        p_limit: 30,
+      })
+      .abortSignal(AbortSignal.timeout(8_000))
+      .retry(false);
+    if (error) throw error;
+    const received = Array.isArray(data) ? data : [];
+    const rows = received.slice(0, limit).map((row) => row?.row_data || row);
+    const boundary = received.length > limit ? received[limit - 1] : null;
+    return {
+      rows,
+      hasMore: received.length > limit,
+      nextCursor: boundary ? { sortKey: trimText(boundary.sort_key), id: trimText(boundary.id), scopeHash } : null,
+    };
+  };
+
+  return {
+    encodeRelationCursor: encodeManagementRelationCursor,
+    async loadPage({ kind, filters, cursor = null, limit = MANAGEMENT_PAGE_SIZE }) {
+      assertManagementFilters(kind, filters);
+      const [page, statsResult, filterOptionsResult] = await Promise.all([
+        readListPage({ kind, filters, cursor, limit }),
+        client.rpc("get_management_stats_v1", { p_kind: kind, p_filters: filters })
+          .abortSignal(AbortSignal.timeout(8_000)).retry(false),
+        client.rpc("list_management_filter_options_v1", { p_kind: kind, p_filters: filters })
+          .abortSignal(AbortSignal.timeout(8_000)).retry(false),
+      ]);
+      if (statsResult.error) throw statsResult.error;
+      if (filterOptionsResult.error) throw filterOptionsResult.error;
+      return {
+        page,
+        stats: unwrapRpcObject(statsResult.data) || {},
+        filterOptions: unwrapRpcObject(filterOptionsResult.data) || {},
+      };
+    },
+    loadNextPage: readListPage,
+    async loadDetail({ kind, id }) {
+      assertManagementKind(kind);
+      if (!trimText(id)) throw managementReadError("management_detail_id_invalid");
+      const { data, error } = await client.rpc("get_management_detail_v1", { p_kind: kind, p_id: id })
+        .abortSignal(AbortSignal.timeout(8_000)).retry(false);
+      if (error) throw error;
+      return withOpaqueDetailRelationCursors(unwrapRpcObject(data), kind, id);
+    },
+    async loadRelationPage({ kind, id, relationKind, cursor = null, limit = MANAGEMENT_PAGE_SIZE }) {
+      assertManagementKind(kind);
+      if (!MANAGEMENT_RELATIONS[kind].has(relationKind) || !trimText(id) || limit !== MANAGEMENT_PAGE_SIZE) {
+        throw managementReadError("management_relation_invalid");
+      }
+      const decoded = cursor === null ? { sortValue: null, id: null } : decodeManagementRelationCursor(cursor, {
+        kind,
+        entityId: id,
+        relationKind,
+      });
+      const { data, error } = await client.rpc("list_management_detail_relation_page_v1", {
+          p_kind: kind,
+          p_id: id,
+          p_relation_kind: relationKind,
+          p_cursor_sort_key: decoded.sortValue,
+          p_cursor_id: decoded.id,
+          p_limit: 30,
+        })
+        .abortSignal(AbortSignal.timeout(8_000))
+        .retry(false);
+      if (error) throw error;
+      const response = unwrapRpcObject(data);
+      return {
+        ...response,
+        page: withOpaqueRelationCursor(response?.page, { kind, entityId: id, relationKind }),
+      };
+    },
+  };
 }
 
 function isMissingContinuousScheduleRpc(error) {
@@ -1327,6 +1559,38 @@ export function createManagementService(options = {}) {
     async listClasses() {
       const client = ensureClient(supabase);
       return selectRows(client, "classes");
+    },
+
+    async searchRelationPicker({ kind, search = "" } = {}) {
+      const client = ensureClient(supabase);
+      const normalizedSearch = trimText(search);
+      if (kind === "students") {
+        const { data, error } = await client
+          .from("classes")
+          .select("id,name,subject,grade,status,teacher,classroom")
+          .ilike("name", `%${normalizedSearch}%`)
+          .order("name", { ascending: true })
+          .order("id", { ascending: true })
+          .limit(30)
+          .abortSignal(AbortSignal.timeout(8_000))
+          .retry(false);
+        if (error) throw error;
+        return data || [];
+      }
+      if (kind === "classes") {
+        const { data, error } = await client
+          .from("students")
+          .select("id,name,school,grade,status,recent_issue")
+          .ilike("name", `%${normalizedSearch}%`)
+          .order("name", { ascending: true })
+          .order("id", { ascending: true })
+          .limit(30)
+          .abortSignal(AbortSignal.timeout(8_000))
+          .retry(false);
+        if (error) throw error;
+        return data || [];
+      }
+      return [];
     },
 
     async assignStudentToClass({ studentId, classId, mode = "enrolled" } = {}) {

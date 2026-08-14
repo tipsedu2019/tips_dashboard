@@ -90,6 +90,7 @@ type ManagementServiceClient = {
   deleteTextbook: (id: string) => Promise<unknown>;
   listStudents: () => Promise<RelatedRecord[]>;
   listClasses: () => Promise<RelatedRecord[]>;
+  searchRelationPicker: (args: { kind: "students" | "classes"; search: string }) => Promise<RelatedRecord[]>;
   assignStudentToClass: (args: { studentId: string; classId: string; mode: "enrolled" | "waitlist" }) => Promise<unknown>;
   removeStudentFromClass: (args: { studentId: string; classId: string }) => Promise<unknown>;
   replaceClassGroupMemberships: (args: { classId: string; groupIds: string[] }) => Promise<unknown>;
@@ -1331,7 +1332,53 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const searchParams = useSearchParams();
   const { canManageAll } = useAuth();
   const config = PAGE_CONFIG[kind];
-  const { rows, stats, loading, error, classFormReferences, refresh } = useManagementRecords(kind);
+  const managementListFilters = useMemo(() => {
+    const nullable = (value: string | null) => text(value) || null;
+    if (kind === "students") {
+      return {
+        kind,
+        search: text(searchParams.get("q")),
+        status: nullable(searchParams.get("status")),
+        schoolCategory: nullable(searchParams.get("schoolCategory")),
+        school: nullable(searchParams.get("school")),
+        grade: nullable(searchParams.get("grade")),
+      } as const;
+    }
+    if (kind === "classes") {
+      return {
+        kind,
+        search: text(searchParams.get("q")),
+        periodId: nullable(searchParams.get("period")),
+        status: nullable(searchParams.get("status")) || "수강",
+        subject: nullable(searchParams.get("subject")),
+        grade: nullable(searchParams.get("grade")),
+        teacher: nullable(searchParams.get("teacher")),
+        classroom: nullable(searchParams.get("classroom")),
+      } as const;
+    }
+    return {
+      kind,
+      search: text(searchParams.get("q")),
+      status: nullable(searchParams.get("status")),
+      subject: nullable(searchParams.get("subject")),
+      publisher: nullable(searchParams.get("publisher")),
+    } as const;
+  }, [kind, searchParams]);
+  const {
+    rows,
+    stats,
+    loading,
+    error,
+    classFormReferences,
+    filterOptions,
+    hasMore,
+    loadingMore,
+    loadMore,
+    loadDetail,
+    reloadRow,
+    removeRows,
+    refresh,
+  } = useManagementRecords(kind, managementListFilters);
   const canMutateRows = canManageAll;
   const [dialogMode, setDialogMode] = useState<"create" | "detail" | null>(null);
   const [selectedRow, setSelectedRow] = useState<ManagementRow | null>(null);
@@ -1417,6 +1464,32 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     }),
     [relatedRows, selectedRelationIdSet],
   );
+
+  useEffect(() => {
+    if (!relationPickerOpen || kind === "textbooks" || !selectedRow) return undefined;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void service.searchRelationPicker({ kind, search: relationQuery }).then((records: RelatedRecord[]) => {
+        if (!active) return;
+        const merged = new Map<string, RelatedRecord>();
+        for (const record of getEmbeddedRelatedRecords(kind, selectedRow)) {
+          const id = text(record.id);
+          if (id) merged.set(id, record);
+        }
+        for (const record of records) {
+          const id = text(record.id);
+          if (id) merged.set(id, { ...(merged.get(id) || {}), ...record });
+        }
+        setRelatedRows([...merged.values()]);
+      }).catch((pickerError: unknown) => {
+        if (active) setOperationError(getSaveErrorMessage(pickerError));
+      });
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [kind, relationPickerOpen, relationQuery, selectedRow]);
   const studentClassSubjectOptions = useMemo(
     () => kind === "students" ? getStudentClassSubjectOptions(availableRelatedRows) : [],
     [availableRelatedRows, kind],
@@ -2333,14 +2406,17 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     options: {
       tab?: ClassDetailTab;
       syncRoute?: boolean;
+      detailLoaded?: boolean;
     } = {},
   ) => {
+    const detailRow = options.detailLoaded ? row : await loadDetail(row.id);
+    const activeRow = detailRow || row;
     const nextTab = kind === "classes" ? normalizeClassDetailTab(options.tab) : "basic";
-    const nextForm = initialForm(kind, row);
-    const defaultsRequest = kind === "classes" && isNormalizedClassRow(row)
-      ? service.getClassScheduleDefaults(row.id)
+    const nextForm = initialForm(kind, activeRow);
+    const defaultsRequest = kind === "classes" && isNormalizedClassRow(activeRow)
+      ? service.getClassScheduleDefaults(activeRow.id)
       : Promise.resolve(null);
-    setSelectedRow(row);
+    setSelectedRow(activeRow);
     setForm(nextForm);
     setClassScheduleSlots(kind === "classes" ? parseClassScheduleSlots(nextForm.schedule, nextForm.teacher, nextForm.classroom) : []);
     setNormalizedScheduleDefaults(null);
@@ -2349,26 +2425,25 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     setPendingRelationMode(null);
     setPendingClassStudentDetailId("");
     setRelationPickerOpen(false);
-    setStudentClassFilters(getDefaultStudentClassPickerFilters(kind === "students" ? row.raw || {} : {}));
-    setClassStudentFilters(getDefaultClassStudentPickerFilters(kind === "classes" ? row.raw || {} : {}));
+    setStudentClassFilters(getDefaultStudentClassPickerFilters(kind === "students" ? activeRow.raw || {} : {}));
+    setClassStudentFilters(getDefaultClassStudentPickerFilters(kind === "classes" ? activeRow.raw || {} : {}));
+    setRelatedRows(getEmbeddedRelatedRecords(kind, activeRow));
     setDetailRowQuery("");
     setRelationQuery("");
     setOperationError(null);
     setSaveNotice("");
     setDialogMode("detail");
     if (kind === "classes" && options.syncRoute !== false) {
-      writeClassDetailRoute(row.id, nextTab);
+      writeClassDetailRoute(activeRow.id, nextTab);
     }
     if (kind === "students" && options.syncRoute !== false) {
-      writeStudentDetailRoute(row.id);
+      writeStudentDetailRoute(activeRow.id);
     }
-    if (kind === "students") setRelatedRows(await service.listClasses());
     if (kind === "classes") {
-      const [students, defaults] = await Promise.all([service.listStudents(), defaultsRequest.catch((error) => {
+      const defaults = await defaultsRequest.catch((error) => {
         setOperationError(getSaveErrorMessage(error));
         return null;
-      })]);
-      setRelatedRows(students);
+      });
       const normalizedDefaults = readNormalizedClassScheduleDefaults(defaults);
       if (normalizedDefaults) {
         const formatted = formatClassScheduleSlots(normalizedDefaults.slots);
@@ -2377,7 +2452,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         setNormalizedScheduleDefaults(normalizedDefaults);
       }
     }
-  }, [kind, writeClassDetailRoute, writeStudentDetailRoute]);
+  }, [kind, loadDetail, writeClassDetailRoute, writeStudentDetailRoute]);
 
   useEffect(() => {
     if (kind !== "classes" || loading || !requestedClassId) {
@@ -2398,6 +2473,10 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         tab: requestedClassDetailTab,
         syncRoute: false,
       });
+    } else {
+      void loadDetail(requestedClassId).then((detailRow) => {
+        if (detailRow) void openRow(detailRow, { tab: requestedClassDetailTab, syncRoute: false, detailLoaded: true });
+      });
     }
   }, [
     dialogMode,
@@ -2406,6 +2485,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     openRow,
     requestedClassDetailTab,
     requestedClassId,
+    loadDetail,
     rows,
     selectedRow?.id,
   ]);
@@ -2426,6 +2506,10 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     const targetRow = rows.find((row) => row.id === requestedStudentId);
     if (targetRow) {
       void openRow(targetRow, { syncRoute: false });
+    } else {
+      void loadDetail(requestedStudentId).then((detailRow) => {
+        if (detailRow) void openRow(detailRow, { syncRoute: false, detailLoaded: true });
+      });
     }
   }, [
     dialogMode,
@@ -2433,6 +2517,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     loading,
     openRow,
     requestedStudentId,
+    loadDetail,
     rows,
     selectedRow?.id,
   ]);
@@ -2480,13 +2565,13 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         if (kind === "classes") return service.updateClass(payload, { candidateMembershipContext: classFormReferences });
         return service.updateTextbook(payload);
       }));
-      await refresh();
+      await Promise.all(rows.map((row) => reloadRow(row.id)));
     } catch (bulkError) {
       setOperationError(getSaveErrorMessage(bulkError));
     } finally {
       setSaving(false);
     }
-  }, [canMutateRows, classFormReferences, kind, refresh]);
+  }, [canMutateRows, classFormReferences, kind, reloadRow]);
 
   const deleteRows = useCallback(async (rows: ManagementRow[]) => {
     if (rows.length === 0) {
@@ -2505,13 +2590,13 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     setOperationError(null);
     try {
       await Promise.all(rows.map((row) => service.deleteTextbook(row.id)));
-      await refresh();
+      removeRows(rows.map((row) => row.id));
     } catch (bulkError) {
       setOperationError(bulkError instanceof Error ? bulkError.message : "일괄 처리 중 오류가 발생했습니다.");
     } finally {
       setSaving(false);
     }
-  }, [canMutateRows, kind, refresh]);
+  }, [canMutateRows, kind, removeRows]);
 
   const handleBulkDeleteRows = useCallback((rows: ManagementRow[]) => {
     if (rows.length === 0) {
@@ -2583,10 +2668,10 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     setOperationError(null);
     try {
       await service.initializeClassSchedule(pendingClassScheduleInitialization);
+      await reloadRow(pendingClassScheduleInitialization.classId);
       setPendingClassScheduleInitialization(null);
       setDialogMode(null);
       setSelectedRow(null);
-      await refresh();
     } catch (error) {
       setOperationError(`수업은 생성됐습니다. 기본 시간표 초기화는 다시 시도해 주세요: ${getSaveErrorMessage(error)}`);
     } finally {
@@ -2609,14 +2694,17 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     setSaving(true);
     try {
       const payload = compact(form, kind, selectedRow);
+      let createdId = text(payload.id);
       if (kind === "students") {
-        await service.createStudent(payload);
+        const created = await service.createStudent(payload);
+        createdId = text((created as Record<string, unknown> | null)?.id) || createdId;
       } else if (kind === "classes") {
         const created = await service.createClass(payload, {
           candidateMembershipContext: classFormReferences,
           groupIds: parseClassGroupIds(form.classGroupIds),
         });
         const classId = getSavedClassId(created, payload.id);
+        createdId = classId;
         const defaults = await service.getClassScheduleDefaults(classId);
         if (defaults && typeof defaults === "object" && !Array.isArray(defaults)) {
           const source = defaults as Record<string, unknown>;
@@ -2638,11 +2726,12 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           }
         }
       } else {
-        await service.createTextbook(payload);
+        const created = await service.createTextbook(payload);
+        createdId = text((created as Record<string, unknown> | null)?.id) || createdId;
       }
+      if (createdId) await reloadRow(createdId);
       setDialogMode(null);
       setSelectedRow(null);
-      await refresh();
     } catch (saveError) {
       setOperationError(getSaveErrorMessage(saveError));
     } finally {
@@ -2716,7 +2805,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
             }
           : current,
       );
-      await refresh();
+      const refreshed = await reloadRow(selectedRow.id);
+      if (refreshed) setSelectedRow(refreshed);
       setSaveNotice("저장 완료");
     } catch (saveError) {
       setOperationError(getSaveErrorMessage(saveError));
@@ -2745,7 +2835,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       setTargetId("");
       setRelationQuery("");
       setSelectedRow((current) => current && current.id === selectedRow.id ? updateRelationOnRow(current, kind, relatedId, mode) : current);
-      await refresh();
+      const refreshed = await reloadRow(selectedRow.id);
+      if (refreshed) setSelectedRow(refreshed);
       setSaveNotice(mode === "enrolled" ? "등록 학생 추가 완료" : "대기 학생 추가 완료");
     } catch (relationError) {
       setOperationError(relationError instanceof Error ? relationError.message : "수강/대기 등록 중 오류가 발생했습니다.");
@@ -2781,7 +2872,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         await service.assignStudentToClass({ studentId: id, classId: selectedRow.id, mode });
       }
       setSelectedRow((current) => current && current.id === selectedRow.id ? updateRelationOnRow(current, kind, id, mode) : current);
-      await refresh();
+      const refreshed = await reloadRow(selectedRow.id);
+      if (refreshed) setSelectedRow(refreshed);
       setSaveNotice(mode === "enrolled" ? "등록 전환 완료" : "대기 전환 완료");
     } catch (relationError) {
       setOperationError(relationError instanceof Error ? relationError.message : "등록 상태 변경 중 오류가 발생했습니다.");
@@ -2802,7 +2894,10 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     try {
       await service.removeStudentFromClass({ studentId, classId });
       setSelectedRow((current) => current && selectedRow && current.id === selectedRow.id ? updateRelationOnRow(current, kind, relatedId, "removed") : current);
-      await refresh();
+      if (selectedRow) {
+        const refreshed = await reloadRow(selectedRow.id);
+        if (refreshed) setSelectedRow(refreshed);
+      }
       setSaveNotice("연결 해제 완료");
     } catch (relationError) {
       setOperationError(relationError instanceof Error ? relationError.message : "수강 연결 해제 중 오류가 발생했습니다.");
@@ -3286,12 +3381,22 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           rows={rows}
           stats={stats}
           loading={loading}
+          filterOptions={filterOptions}
           onRefresh={refresh}
           badgeLabel={config.badgeLabel}
           statusLabel={config.statusLabel}
           emptyLabel={config.emptyLabel}
           actions={actions}
         />
+        <div className="flex justify-center py-4" data-testid="management-list-continuation">
+          {hasMore ? (
+            <Button type="button" variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>
+              {loadingMore ? "불러오는 중" : "다음 30건"}
+            </Button>
+          ) : rows.length > 0 && !loading ? (
+            <span className="text-xs text-muted-foreground">목록의 끝입니다.</span>
+          ) : null}
+        </div>
       </div>
 
       <Dialog open={dialogMode !== null} onOpenChange={handleDialogOpenChange}>

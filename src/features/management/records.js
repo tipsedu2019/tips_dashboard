@@ -305,6 +305,7 @@ export function normalizeClassManagementRecord(row = {}) {
 
 export function normalizeTextbookManagementRecord(row = {}) {
   const lessons = toArray(row.lessons);
+  const lessonCount = lessons.length || Math.max(0, Number(row.lessonCount || row.lesson_count || 0));
   const tags = toArray(row.tags);
   const title = text(row.title || row.name) || "제목 없는 교재";
   const publisher = text(row.publisher) || "출판사 미정";
@@ -316,8 +317,10 @@ export function normalizeTextbookManagementRecord(row = {}) {
     subtitle: publisher,
     badge: publisher,
     badgeValue: publisher,
-    status: `단원 ${lessons.length}개`,
-    statusValue: lessons.length > 0 ? "has-lessons" : "no-lessons",
+    status: `단원 ${lessonCount}개`,
+    statusValue: row.status === "has-lessons" || row.status === "no-lessons"
+      ? row.status
+      : lessonCount > 0 ? "has-lessons" : "no-lessons",
     metaSummary: buildMetaSummary([
       formatCurrency(row.price),
       tags.length ? tags.join(", ") : "태그 없음",
@@ -328,7 +331,7 @@ export function normalizeTextbookManagementRecord(row = {}) {
       .join(" "),
     raw: row,
     metrics: {
-      lessonCount: lessons.length,
+      lessonCount,
       tagCount: tags.length,
       publisher,
     },
