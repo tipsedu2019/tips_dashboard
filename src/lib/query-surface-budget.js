@@ -369,8 +369,25 @@ function rootIdentifier(expression) {
 function isTrustedReceiver(expression, aliases) {
   const identifier = rootIdentifier(expression)
   if (identifier === "Array") return false
-  if (identifier && (aliases.has(identifier) || ["client", "supabase", "db"].includes(identifier))) return true
+  if (identifier && aliases.has(identifier)) return true
   return null
+}
+
+function receiverOrigin(expression, aliases) {
+  const identifier = rootIdentifier(expression)
+  return identifier ? aliases.get(identifier) ?? null : null
+}
+
+function sameTrustedReceiver(left, right, aliases) {
+  const leftReceiver = receiverOrigin(left, aliases)
+  const rightReceiver = receiverOrigin(right, aliases)
+  return Boolean(leftReceiver && rightReceiver && !leftReceiver.unresolved && !rightReceiver.unresolved
+    && leftReceiver.origin === rightReceiver.origin)
+}
+
+function sameReceiverOrigin(receiver, expression, aliases) {
+  const other = receiverOrigin(expression, aliases)
+  return Boolean(receiver && other && !receiver.unresolved && !other.unresolved && receiver.origin === other.origin)
 }
 
 function outerQueryCall(call) {
@@ -406,129 +423,213 @@ function callMethod(call) {
   return call ? accessParts(call)?.method ?? BOUND_OPERATION_METHODS.get(call) ?? null : null
 }
 
-function receiverAliases(scope) {
-  const aliases = new Set(["client", "supabase", "db"])
-  const declarations = []
-  const visit = (node) => {
-    if (node !== scope && ts.isFunctionLike(node)) return
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) declarations.push(node)
-    ts.forEachChild(node, visit)
-  }
-  ts.forEachChild(scope, visit)
-  for (const declaration of declarations.sort((left, right) => left.pos - right.pos)) {
-    if (isTrustedReceiver(declaration.initializer, aliases)) aliases.add(declaration.name.text)
-  }
-  return aliases
-}
-
-function boundQueryMethods(scope, aliases) {
-  const methods = new Map()
-  const assignments = []
-  const visit = (node) => {
-    if (node !== scope && ts.isFunctionLike(node)) return
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
-      assignments.push({ name: node.name.text, initializer: node.initializer, pos: node.end })
-    }
-    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
-      && ts.isIdentifier(unwrap(node.left))) {
-      assignments.push({ name: unwrap(node.left).text, initializer: node.right, pos: node.end })
-    }
-    ts.forEachChild(node, visit)
-  }
-  ts.forEachChild(scope, visit)
-  for (const assignment of assignments.sort((left, right) => left.pos - right.pos)) {
-    const initializer = unwrap(assignment.initializer)
-    const bind = ts.isCallExpression(initializer) && callMethod(initializer) === "bind" ? accessParts(initializer) : null
-    const target = bind && (ts.isPropertyAccessExpression(bind.receiver) || ts.isElementAccessExpression(bind.receiver)) ? bind.receiver : null
-    const targetMethod = target && (ts.isPropertyAccessExpression(target) ? target.name.text : (ts.isStringLiteral(target.argumentExpression) ? target.argumentExpression.text : null))
-    const receiver = target && unwrap(target.expression)
-    const receiverName = receiver && rootIdentifier(receiver)
-    const boundTo = ts.isCallExpression(initializer) && initializer.arguments[0] && rootIdentifier(initializer.arguments[0])
-    if (["from", "rpc"].includes(targetMethod) && isTrustedReceiver(receiver, aliases) && receiverName === boundTo) {
-      methods.set(assignment.name, { method: targetMethod, entryArguments: [...initializer.arguments].slice(1) })
-    } else if (ts.isIdentifier(initializer) && methods.has(initializer.text)) {
-      methods.set(assignment.name, methods.get(initializer.text))
-    }
-  }
-  return methods
-}
-
-function detachedQueryMethods(scope, aliases) {
-  const methods = new Map()
+function aliasProvenanceAssignments(scope) {
   const assignments = []
   const visit = (node) => {
     if (node !== scope && ts.isFunctionLike(node)) return
     if (ts.isVariableDeclaration(node) && node.initializer
       && (ts.isIdentifier(node.name) || ts.isObjectBindingPattern(node.name))) {
-      assignments.push({ name: node.name, initializer: node.initializer, pos: node.end })
+      assignments.push({ target: node.name, initializer: node.initializer, node, pos: node.end })
     }
-    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
-      && ts.isIdentifier(unwrap(node.left))) {
-      assignments.push({ name: unwrap(node.left), initializer: node.right, pos: node.end })
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      const target = unwrap(node.left)
+      if (ts.isIdentifier(target) || ts.isObjectLiteralExpression(target)) {
+        assignments.push({ target, initializer: node.right, node, pos: node.end })
+      }
     }
     ts.forEachChild(node, visit)
   }
   ts.forEachChild(scope, visit)
-  for (const assignment of assignments.sort((left, right) => left.pos - right.pos)) {
+  return assignments.sort((left, right) => left.pos - right.pos)
+}
+
+function computedPropertyText(name) {
+  if (name && ts.isComputedPropertyName(name)) {
+    const property = unwrap(name.expression)
+    return property && (ts.isStringLiteral(property) || ts.isNoSubstitutionTemplateLiteral(property)) ? property.text : null
+  }
+  return name && (ts.isIdentifier(name) || ts.isStringLiteral(name)
+    || ts.isNoSubstitutionTemplateLiteral(name)) ? name.text : null
+}
+
+function destructuredAliasTargets(target) {
+  if (ts.isObjectBindingPattern(target)) {
+    return target.elements.flatMap((element) => {
+      if (!ts.isIdentifier(element.name)) return []
+      return [{
+        name: element.name.text,
+        property: element.propertyName ? computedPropertyText(element.propertyName) : element.name.text,
+        computed: Boolean(element.propertyName && ts.isComputedPropertyName(element.propertyName)),
+      }]
+    })
+  }
+  if (ts.isObjectLiteralExpression(target)) {
+    return target.properties.flatMap((property) => {
+      if (ts.isShorthandPropertyAssignment(property)) {
+        return [{ name: property.name.text, property: property.name.text, computed: false }]
+      }
+      if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(unwrap(property.initializer))) return []
+      return [{
+        name: unwrap(property.initializer).text,
+        property: computedPropertyText(property.name),
+        computed: ts.isComputedPropertyName(property.name),
+      }]
+    })
+  }
+  return []
+}
+
+function methodTarget(expression) {
+  const target = ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression) ? expression : null
+  if (!target) return null
+  return {
+    method: ts.isPropertyAccessExpression(target)
+      ? target.name.text
+      : (target.argumentExpression && (ts.isStringLiteral(unwrap(target.argumentExpression))
+        || ts.isNoSubstitutionTemplateLiteral(unwrap(target.argumentExpression)))
+          ? unwrap(target.argumentExpression).text
+          : null),
+    receiver: unwrap(target.expression),
+    computed: ts.isElementAccessExpression(target),
+  }
+}
+
+function queryFunctionMethod(expression, aliases) {
+  const invocation = methodTarget(expression)
+  if (!invocation || !["call", "apply"].includes(invocation.method)) return null
+  const target = methodTarget(invocation.receiver)
+  if (!target || (!target.computed && !["from", "rpc"].includes(target.method))
+    || (target.method !== null && !["from", "rpc"].includes(target.method))
+    || !isTrustedReceiver(target.receiver, aliases)) return null
+  return {
+    invocation: invocation.method,
+    method: target.method,
+    receiver: receiverOrigin(target.receiver, aliases),
+  }
+}
+
+function sameQueryMethodReference(expression, descriptor, aliases) {
+  const target = methodTarget(unwrap(expression))
+  return Boolean(target && target.method === descriptor.method
+    && sameReceiverOrigin(descriptor.receiver, target.receiver, aliases))
+}
+
+function sameMethodAlias(left, right) {
+  return Boolean(left && right && left.method === right.method && left.receiver?.origin === right.receiver?.origin
+    && Boolean(left.receiver?.unresolved) === Boolean(right.receiver?.unresolved)
+    && left.invocation === right.invocation && left.bound === right.bound && left.unresolved === right.unresolved
+    && (left.entryArguments?.length ?? 0) === (right.entryArguments?.length ?? 0))
+}
+
+function assignOrderedAlias(map, name, next, conditional) {
+  if (!conditional) {
+    if (next) map.set(name, next)
+    else map.delete(name)
+    return
+  }
+  const previous = map.get(name)
+  if (!previous && !next) return
+  if (sameMethodAlias(previous, next)) return
+  const candidate = next ?? previous
+  map.set(name, {
+    ...candidate,
+    receiver: { origin: null, unresolved: true },
+    unresolved: true,
+  })
+}
+
+function assignReceiverAlias(aliases, name, next, conditional) {
+  if (!conditional) {
+    if (next) aliases.set(name, next)
+    else if (["client", "supabase", "db"].includes(name)) aliases.set(name, { origin: null, unresolved: true })
+    else aliases.delete(name)
+    return
+  }
+  const previous = aliases.get(name)
+  if (!previous && !next) return
+  if (previous && next && previous.origin === next.origin && previous.unresolved === next.unresolved) return
+  aliases.set(name, { origin: null, unresolved: true })
+}
+
+function aliasProvenanceAt(assignments, use, scope) {
+  const aliases = new Map([
+    ["client", { origin: "client", unresolved: false }],
+    ["supabase", { origin: "supabase", unresolved: false }],
+    ["db", { origin: "db", unresolved: false }],
+  ])
+  const boundMethods = new Map()
+  const detachedMethods = new Map()
+  const applyAliases = new Map()
+  const invocationMethods = new Map()
+  for (const assignment of assignments) {
+    if (assignment.pos > use.pos) break
     const initializer = unwrap(assignment.initializer)
-    if (ts.isObjectBindingPattern(assignment.name) && isTrustedReceiver(initializer, aliases)) {
-      for (const element of assignment.name.elements) {
-        const propertyName = element.propertyName && ts.isComputedPropertyName(element.propertyName)
-          ? unwrap(element.propertyName.expression)
-          : element.propertyName
-        const importedName = propertyName && (ts.isIdentifier(propertyName) || ts.isStringLiteral(propertyName)
-          || ts.isNoSubstitutionTemplateLiteral(propertyName))
-          ? propertyName.text
-          : (ts.isIdentifier(element.name) ? element.name.text : null)
-        if (["from", "rpc"].includes(importedName) && ts.isIdentifier(element.name)) {
-          methods.set(element.name.text, { method: importedName, receiver: rootIdentifier(initializer) })
-        }
+    const conditional = isConditionalExecution(assignment.node, scope)
+    const destructured = destructuredAliasTargets(assignment.target)
+    if (destructured.length > 0) {
+      const receiver = receiverOrigin(initializer, aliases)
+      for (const target of destructured) {
+        const detached = receiver && (["from", "rpc"].includes(target.property) || (target.computed && target.property === null))
+          ? { method: target.property, receiver }
+          : null
+        assignOrderedAlias(detachedMethods, target.name, detached, conditional)
+        assignOrderedAlias(boundMethods, target.name, null, conditional)
+        assignOrderedAlias(applyAliases, target.name, null, conditional)
+        assignOrderedAlias(invocationMethods, target.name, null, conditional)
       }
       continue
     }
-    const target = ts.isPropertyAccessExpression(initializer) || ts.isElementAccessExpression(initializer) ? initializer : null
-    const targetMethod = target && (ts.isPropertyAccessExpression(target)
-      ? target.name.text
-      : (target.argumentExpression && (ts.isStringLiteral(target.argumentExpression) || ts.isNoSubstitutionTemplateLiteral(target.argumentExpression))
-        ? target.argumentExpression.text
-        : null))
-    const receiver = target && unwrap(target.expression)
-    if (["from", "rpc"].includes(targetMethod) && isTrustedReceiver(receiver, aliases)) {
-      methods.set(assignment.name.text, { method: targetMethod, receiver: rootIdentifier(receiver) })
-    } else if (ts.isIdentifier(initializer) && methods.has(initializer.text)) {
-      methods.set(assignment.name.text, methods.get(initializer.text))
-    }
-  }
-  return methods
-}
+    if (!ts.isIdentifier(assignment.target)) continue
+    const name = assignment.target.text
+    const copiedReceiver = ts.isIdentifier(initializer) ? aliases.get(initializer.text) ?? null : null
+    assignReceiverAlias(aliases, name, copiedReceiver, conditional)
 
-function reflectApplyAliases(scope) {
-  const aliases = new Set()
-  const declarations = []
-  const visit = (node) => {
-    if (node !== scope && ts.isFunctionLike(node)) return
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) declarations.push(node)
-    ts.forEachChild(node, visit)
+    const bindAccess = ts.isCallExpression(initializer) && callMethod(initializer) === "bind" ? accessParts(initializer) : null
+    const bindTarget = bindAccess ? methodTarget(bindAccess.receiver) : null
+    const bound = bindTarget && (["from", "rpc"].includes(bindTarget.method) || (bindTarget.computed && bindTarget.method === null))
+      && isTrustedReceiver(bindTarget.receiver, aliases)
+      ? {
+          method: bindTarget.method,
+          receiver: sameTrustedReceiver(bindTarget.receiver, initializer.arguments[0], aliases)
+            ? receiverOrigin(bindTarget.receiver, aliases)
+            : { origin: null, unresolved: true },
+          entryArguments: [...initializer.arguments].slice(1),
+        }
+      : (ts.isIdentifier(initializer) ? boundMethods.get(initializer.text) ?? null : null)
+    assignOrderedAlias(boundMethods, name, bound, conditional)
+
+    const target = methodTarget(initializer)
+    const detached = target && (["from", "rpc"].includes(target.method) || (target.computed && target.method === null))
+      && isTrustedReceiver(target.receiver, aliases)
+      ? { method: target.method, receiver: receiverOrigin(target.receiver, aliases) }
+      : (ts.isIdentifier(initializer) ? detachedMethods.get(initializer.text) ?? null : null)
+    assignOrderedAlias(detachedMethods, name, detached, conditional)
+
+    const directInvocation = queryFunctionMethod(initializer, aliases)
+    const boundInvocation = bindAccess && queryFunctionMethod(bindAccess.receiver, aliases)
+    const invocation = directInvocation
+      ? { ...directInvocation, bound: false }
+      : (boundInvocation && sameQueryMethodReference(initializer.arguments[0], boundInvocation, aliases)
+          ? { ...boundInvocation, bound: true }
+          : (ts.isIdentifier(initializer) ? invocationMethods.get(initializer.text) ?? null : null))
+    assignOrderedAlias(invocationMethods, name, invocation, conditional)
+
+    const directApply = target && target.method === "apply" && rootIdentifier(target.receiver) === "Reflect"
+    const boundReflectApply = bindAccess && methodTarget(bindAccess.receiver)?.method === "apply"
+      && rootIdentifier(methodTarget(bindAccess.receiver)?.receiver) === "Reflect"
+      && rootIdentifier(initializer.arguments[0]) === "Reflect"
+    const apply = directApply || boundReflectApply ? { unresolved: false }
+      : (ts.isIdentifier(initializer) ? applyAliases.get(initializer.text) ?? null : null)
+    assignOrderedAlias(applyAliases, name, apply, conditional)
   }
-  ts.forEachChild(scope, visit)
-  for (const node of declarations.sort((left, right) => left.pos - right.pos)) {
-    const initializer = unwrap(node.initializer)
-    const directApply = (ts.isPropertyAccessExpression(initializer) || ts.isElementAccessExpression(initializer))
-      && rootIdentifier(initializer.expression) === "Reflect"
-      && (ts.isPropertyAccessExpression(initializer)
-        ? initializer.name.text === "apply"
-        : Boolean(initializer.argumentExpression
-          && (ts.isStringLiteral(initializer.argumentExpression) || ts.isNoSubstitutionTemplateLiteral(initializer.argumentExpression))
-          && initializer.argumentExpression.text === "apply"))
-    if (directApply || (ts.isIdentifier(initializer) && aliases.has(initializer.text))) aliases.add(node.name.text)
-  }
-  return aliases
+  return { aliases, boundMethods, detachedMethods, applyAliases, invocationMethods }
 }
 
 function reflectedQueryEntry(call, aliases, boundMethods, detachedMethods, applyAliases) {
   const access = accessParts(call)
   const directApply = access?.method === "apply" && rootIdentifier(access.receiver) === "Reflect"
-  const aliasedApply = ts.isIdentifier(call.expression) && applyAliases.has(call.expression.text)
+  const applyAlias = ts.isIdentifier(call.expression) ? applyAliases.get(call.expression.text) : null
+  const aliasedApply = Boolean(applyAlias)
   if ((!directApply && !aliasedApply) || call.arguments.length !== 3) return null
   const target = unwrap(call.arguments[0])
   const argumentList = unwrap(call.arguments[2])
@@ -537,13 +638,13 @@ function reflectedQueryEntry(call, aliases, boundMethods, detachedMethods, apply
     : []
   if (ts.isIdentifier(target) && boundMethods.has(target.text)) {
     const bound = boundMethods.get(target.text)
-    return { directMethod: bound.method, receiverUnresolved: false, entryArguments: [...bound.entryArguments, ...entryArguments] }
+    return { directMethod: bound.method, receiverUnresolved: Boolean(bound.receiver?.unresolved || applyAlias?.unresolved), entryArguments: [...bound.entryArguments, ...entryArguments] }
   }
   if (ts.isIdentifier(target) && detachedMethods.has(target.text)) {
     const detached = detachedMethods.get(target.text)
     return {
       directMethod: detached.method,
-      receiverUnresolved: detached.receiver !== rootIdentifier(call.arguments[1]),
+      receiverUnresolved: Boolean(applyAlias?.unresolved || !sameReceiverOrigin(detached.receiver, call.arguments[1], aliases)),
       entryArguments,
     }
   }
@@ -555,10 +656,9 @@ function reflectedQueryEntry(call, aliases, boundMethods, detachedMethods, apply
       : null)
   if (!["from", "rpc"].includes(targetMethod)) return null
   const receiver = unwrap(target.expression)
-  const receiverName = rootIdentifier(receiver)
-  const thisName = rootIdentifier(call.arguments[1])
   if (!isTrustedReceiver(receiver, aliases)) return null
-  return { directMethod: targetMethod, receiverUnresolved: receiverName !== thisName, entryArguments }
+  return { directMethod: targetMethod, receiverUnresolved: Boolean(applyAlias?.unresolved
+    || !sameTrustedReceiver(receiver, call.arguments[1], aliases)), entryArguments }
 }
 
 function functionInvocationQueryEntry(call, aliases, boundMethods, detachedMethods) {
@@ -574,6 +674,7 @@ function functionInvocationQueryEntry(call, aliases, boundMethods, detachedMetho
     method = bound.method
     isBound = true
     preboundArguments = bound.entryArguments
+    receiver = bound.receiver
   } else if (ts.isIdentifier(target) && detachedMethods.has(target.text)) {
     const detached = detachedMethods.get(target.text)
     method = detached.method
@@ -586,7 +687,7 @@ function functionInvocationQueryEntry(call, aliases, boundMethods, detachedMetho
         : null)
     const targetReceiver = unwrap(target.expression)
     if (!isTrustedReceiver(targetReceiver, aliases) || (method !== null && !["from", "rpc"].includes(method))) return null
-    receiver = rootIdentifier(targetReceiver)
+    receiver = receiverOrigin(targetReceiver, aliases)
   } else {
     return null
   }
@@ -601,8 +702,28 @@ function functionInvocationQueryEntry(call, aliases, boundMethods, detachedMetho
       })()
   return {
     directMethod: method,
-    receiverUnresolved: !isBound && receiver !== rootIdentifier(call.arguments[0]),
+    receiverUnresolved: isBound ? Boolean(receiver?.unresolved) : !sameReceiverOrigin(receiver, call.arguments[0], aliases),
     entryArguments: [...preboundArguments, ...invocationArguments],
+  }
+}
+
+function aliasedFunctionInvocationEntry(call, aliases, invocationMethods) {
+  if (!ts.isIdentifier(call.expression)) return null
+  const invocation = invocationMethods.get(call.expression.text)
+  if (!invocation) return null
+  const thisArgument = call.arguments[0]
+  const entryArguments = invocation.invocation === "call"
+    ? [...call.arguments].slice(1)
+    : (() => {
+        const argumentList = call.arguments[1] && unwrap(call.arguments[1])
+        return argumentList && ts.isArrayLiteralExpression(argumentList) && !argumentList.elements.some(ts.isSpreadElement)
+          ? [...argumentList.elements]
+          : []
+      })()
+  return {
+    directMethod: invocation.method,
+    receiverUnresolved: Boolean(invocation.unresolved || !sameReceiverOrigin(invocation.receiver, thisArgument, aliases)),
+    entryArguments,
   }
 }
 
@@ -623,7 +744,7 @@ function inlineBoundQueryEntry(call, aliases) {
   if (!isTrustedReceiver(receiver, aliases)) return null
   return {
     directMethod: targetMethod,
-    receiverUnresolved: rootIdentifier(receiver) !== rootIdentifier(bind.arguments[0]),
+    receiverUnresolved: !sameTrustedReceiver(receiver, bind.arguments[0], aliases),
     entryArguments: [...bind.arguments].slice(1).concat([...call.arguments]),
   }
 }
@@ -755,6 +876,16 @@ function queryLineSpan(scope, query) {
 }
 
 function queryOccurrenceFingerprint(scope, query) {
+  const context = queryOccurrenceContext(scope, query)
+  return createHash("sha256")
+    .update([
+      context.previousStatement ?? "<scope-start>",
+      context.query,
+    ].join("\u0000").replace(/\s+/gu, " "))
+    .digest("hex")
+}
+
+function queryOccurrenceContext(scope, query) {
   const sourceFile = scope.getSourceFile()
   let statement = query.entry
   while (statement.parent && !ts.isStatement(statement)) statement = statement.parent
@@ -766,21 +897,45 @@ function queryOccurrenceFingerprint(scope, query) {
   const previousStatement = index > 0 ? siblings[index - 1] : null
   const start = query.entry.getStart(sourceFile)
   const end = query.operations.at(-1)?.getEnd() ?? query.entry.getEnd()
-  // The request and its direct predecessor bind a source occurrence, including
-  // moves between statements of the same syntax kind.
-  return createHash("sha256")
-    .update([
-      previousStatement?.getText(sourceFile) ?? "<scope-start>",
-      sourceFile.text.slice(start, end),
-    ].join("\u0000").replace(/\s+/gu, " "))
-    .digest("hex")
+  const normalize = (value) => value.replace(/\s+/gu, " ")
+  return {
+    previousStatement: previousStatement ? normalize(previousStatement.getText(sourceFile)) : null,
+    query: normalize(sourceFile.text.slice(start, end)),
+    before: [...siblings].slice(0, index).map((candidate) => normalize(candidate.getText(sourceFile))),
+    after: [...siblings].slice(index + 1).map((candidate) => normalize(candidate.getText(sourceFile))),
+  }
 }
 
-function withQueryOccurrence(violations, occurrenceFingerprint) {
-  return violations.map((violation) => Object.defineProperty(violation, "occurrenceFingerprint", {
-    value: occurrenceFingerprint,
-    enumerable: false,
-  }))
+function withQueryOccurrence(violations, occurrenceFingerprint, occurrenceContext) {
+  return violations.map((violation) => {
+    Object.defineProperties(violation, {
+      occurrenceFingerprint: { value: occurrenceFingerprint, enumerable: false },
+      occurrenceContext: { value: occurrenceContext, enumerable: false },
+    })
+    return violation
+  })
+}
+
+function statementCounts(statements) {
+  const counts = new Map()
+  for (const statement of statements) counts.set(statement, (counts.get(statement) ?? 0) + 1)
+  return counts
+}
+
+function queryOccurrenceRelocated(baseline, candidate) {
+  if (!baseline || !candidate || baseline.query !== candidate.query) return true
+  const baselineBefore = statementCounts(baseline.before)
+  const baselineAfter = statementCounts(baseline.after)
+  const candidateBefore = statementCounts(candidate.before)
+  const candidateAfter = statementCounts(candidate.after)
+  const statements = new Set([...baselineBefore.keys(), ...baselineAfter.keys(), ...candidateBefore.keys(), ...candidateAfter.keys()])
+  return [...statements].some((statement) => (
+    (candidateBefore.get(statement) ?? 0) < (baselineBefore.get(statement) ?? 0)
+      && (candidateAfter.get(statement) ?? 0) > (baselineAfter.get(statement) ?? 0)
+  ) || (
+    (candidateAfter.get(statement) ?? 0) < (baselineAfter.get(statement) ?? 0)
+      && (candidateBefore.get(statement) ?? 0) > (baselineBefore.get(statement) ?? 0)
+  ))
 }
 
 function scopeLineSpan(scope) {
@@ -805,6 +960,7 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
     return withQueryOccurrence(
       reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint, startLine, endLine, ...scopeLineSpan(scope) })),
       queryOccurrenceFingerprint(scope, query),
+      queryOccurrenceContext(scope, query),
     )
   }
   if (query.directMethod === "from") {
@@ -871,14 +1027,12 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
   return withQueryOccurrence(
     reasons.map((reason) => ({ file, symbol, surface, reason, fingerprint, startLine, endLine, ...scopeLineSpan(scope) })),
     queryOccurrenceFingerprint(scope, query),
+    queryOccurrenceContext(scope, query),
   )
 }
 
 function analyzeScope({ surface, file, scope, symbol }) {
-  const aliases = receiverAliases(scope)
-  const boundMethods = boundQueryMethods(scope, aliases)
-  const detachedMethods = detachedQueryMethods(scope, aliases)
-  const applyAliases = reflectApplyAliases(scope)
+  const provenanceAssignments = aliasProvenanceAssignments(scope)
   const queryAliases = new Map()
   const operationAliases = new Map()
   const aliasesToAssign = aliasAssignments(scope)
@@ -894,6 +1048,7 @@ function analyzeScope({ surface, file, scope, symbol }) {
   }
   ts.forEachChild(scope, visit)
   for (const call of calls.sort((left, right) => left.pos - right.pos)) {
+    const { aliases, boundMethods, detachedMethods, applyAliases, invocationMethods } = aliasProvenanceAt(provenanceAssignments, call, scope)
     while (operationIndex < operationsToAssign.length && operationsToAssign[operationIndex].pos <= call.pos) {
       const assignment = operationsToAssign[operationIndex]
       const parent = queryAliases.get(assignment.source)
@@ -953,6 +1108,19 @@ function analyzeScope({ surface, file, scope, symbol }) {
         directMethod: functionInvocationEntry.directMethod,
         receiverUnresolved: functionInvocationEntry.receiverUnresolved,
         entryArguments: functionInvocationEntry.entryArguments,
+        ordinal: records.length,
+        operations: queryOperations(call),
+      })
+      continue
+    }
+    const aliasedFunctionEntry = aliasedFunctionInvocationEntry(call, aliases, invocationMethods)
+    if (aliasedFunctionEntry) {
+      BOUND_OPERATION_METHODS.set(call, aliasedFunctionEntry.directMethod)
+      records.push({
+        entry: call,
+        directMethod: aliasedFunctionEntry.directMethod,
+        receiverUnresolved: aliasedFunctionEntry.receiverUnresolved,
+        entryArguments: aliasedFunctionEntry.entryArguments,
         ordinal: records.length,
         operations: queryOperations(call),
       })
@@ -1115,10 +1283,6 @@ function overlapsChangedRange(violation, ranges) {
     || (violation.scopeStartLine <= range.end && violation.scopeEndLine >= range.start))
 }
 
-function overlapsQueryRange(violation, ranges) {
-  return ranges.some((range) => violation.startLine <= range.end && violation.endLine >= range.start)
-}
-
 function publicViolation({ file, symbol, surface, reason }) {
   return { file, symbol, surface, reason }
 }
@@ -1148,10 +1312,16 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
       throw queryBudgetError("query_surface_debt_manifest_invalid")
     }
     const baselineKey = exactDebtKey({ surface: entry.surface, file: entry.file, symbol: entry.symbol, reason: entry.violation, fingerprint: entry.fingerprint })
-    if (!countedViolations(manifestBaseline, entry.surface, entry.file).has(baselineKey)) {
+    const manifestViolation = inspectQuerySurfaceSource({ surface: entry.surface, file: entry.file, source: manifestBaseline })
+      .find((violation) => exactDebtKey(violation) === baselineKey
+        && violation.occurrenceFingerprint === entry.occurrenceFingerprint)
+    if (!manifestViolation) {
       throw queryBudgetError("query_surface_debt_manifest_invalid")
     }
-    manifestDebt.set(baselineKey, entry.occurrenceFingerprint)
+    manifestDebt.set(baselineKey, {
+      occurrenceFingerprint: entry.occurrenceFingerprint,
+      occurrenceContext: manifestViolation.occurrenceContext,
+    })
   }
   const violations = []
   for (const file of files) {
@@ -1167,12 +1337,11 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
     const sourceDebt = countedViolations(source, owner, file)
     for (const violation of sourceViolations) {
         const key = exactDebtKey(violation)
-        const expectedOccurrence = manifestDebt.get(key)
-        const queryChanged = overlapsQueryRange(violation, ranges)
+        const expected = manifestDebt.get(key)
         const allowedDebt = manifestDebt.has(key) && baseDebt.has(key)
           && sourceDebt.get(key) <= baseDebt.get(key)
-          && baseOccurrences.has(`${key}\u0000${expectedOccurrence}`)
-          && (!queryChanged || expectedOccurrence === violation.occurrenceFingerprint)
+          && baseOccurrences.has(`${key}\u0000${expected.occurrenceFingerprint}`)
+          && !queryOccurrenceRelocated(expected.occurrenceContext, violation.occurrenceContext)
         if (overlapsChangedRange(violation, ranges) && !allowedDebt) violations.push(violation)
     }
   }

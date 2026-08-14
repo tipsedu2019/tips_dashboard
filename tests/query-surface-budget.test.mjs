@@ -278,6 +278,37 @@ test("an unchanged legacy chain is outside the diff candidate set when a safe ne
   assert.deepEqual(result, { ok: true, violations: [] })
 })
 
+test("manifest occurrence fingerprints must match their own baseline source", async () => {
+  const baselineSource = `async function selectRows(client, table) {
+  return client.from(table).select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`
+  const baselineViolation = inspectQuerySurfaceSource({
+    surface: "management",
+    file: "src/features/management/management-service.js",
+    source: baselineSource,
+  }).find((violation) => violation.reason === "list_select_star")
+
+  await assert.rejects(
+    verifyFixture({
+      surface: "management",
+      file: "src/features/management/management-service.js",
+      baselineSource,
+      source: `${baselineSource}\nexport const changed = true\n`,
+      debtManifest: (baseSha) => [{
+        surface: "management",
+        file: "src/features/management/management-service.js",
+        symbol: "selectRows",
+        violation: "list_select_star",
+        baselineSha: baseSha,
+        fingerprint: baselineViolation.fingerprint,
+        occurrenceFingerprint: "0".repeat(64),
+      }],
+    }),
+    { code: "query_surface_debt_manifest_invalid" },
+  )
+})
+
 test("all direct owned-surface query chains are inspected even without a list marker", async () => {
   const result = await verifyFixture({
     source: `async function opaque(client) {
@@ -1073,6 +1104,44 @@ test("an occurrence-bound manifest debt rejects the same query moved within its 
   )))
 })
 
+test("an occurrence-bound manifest debt rejects the same query moved before its predecessor", async () => {
+  const file = "src/features/tasks/list-tasks.ts"
+  const baselineSource = `async function load(client) {
+  const before = 1
+  const result = client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  const after = 2
+  return result
+}
+`
+  const baselineViolation = inspectQuerySurfaceSource({ surface: "tasks", file, source: baselineSource })
+    .find((violation) => violation.reason === "list_select_star")
+  const result = await verifyFixture({
+    file,
+    baselineSource,
+    source: `async function load(client) {
+  const result = client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  const before = 1
+  const after = 2
+  return result
+}
+`,
+    debtManifest: (baselineSha) => [{
+      surface: "tasks",
+      file,
+      symbol: "load",
+      violation: "list_select_star",
+      baselineSha,
+      fingerprint: baselineViolation.fingerprint,
+      occurrenceFingerprint: baselineViolation.occurrenceFingerprint,
+    }],
+  })
+
+  assert.ok(result.violations.some((violation) => (
+    violation.symbol === "load"
+    && violation.reason === "list_select_star"
+  )))
+})
+
 test("an occurrence-bound manifest debt permits a harmless predecessor insertion", async () => {
   const file = "src/features/tasks/list-tasks.ts"
   const baselineSource = `async function load(client) {
@@ -1379,6 +1448,183 @@ test("direct literal mutation RPCs with exact request controls remain allowed", 
   })
 
   assert.deepEqual(result, { ok: true, violations: [] })
+})
+
+test("destructuring assignment RPC aliases cannot bypass mutation safety", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  let rpc
+  ;({ rpc } = client)
+  return rpc("save_class_lesson_session_v1", parameters)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations.map((violation) => violation.reason), [
+    "list_query_receiver_unresolved",
+  ])
+})
+
+test("computed destructuring assignment RPC aliases cannot bypass mutation safety", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  let rpc
+  ;({ ["rpc"]: rpc } = client)
+  return rpc("save_class_lesson_session_v1", parameters)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations.map((violation) => violation.reason), [
+    "list_query_receiver_unresolved",
+  ])
+})
+
+test("dynamic computed assignment aliases fail closed", async () => {
+  const member = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, method, parameters) {
+  let rpc
+  rpc = client[method]
+  return rpc("save_class_lesson_session_v1", parameters)
+}
+`,
+  })
+  assert.ok(member.violations.some((violation) => violation.reason === "list_query_receiver_unresolved"))
+
+  const destructured = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, method, parameters) {
+  let rpc
+  ;({ [method]: rpc } = client)
+  return rpc("save_class_lesson_session_v1", parameters)
+}
+`,
+  })
+  assert.ok(destructured.violations.some((violation) => violation.reason === "list_query_receiver_unresolved"))
+})
+
+test("Reflect.apply aliases assigned after declaration cannot bypass mutation safety", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  let apply
+  apply = Reflect.apply
+  return apply(client.rpc, client, ["save_class_lesson_session_v1", parameters])
+}
+`,
+  })
+
+  assert.deepEqual(result.violations.map((violation) => violation.reason), [
+    "list_abort_signal_missing",
+    "list_retry_false_missing",
+  ])
+})
+
+test("equivalent trusted receiver aliases preserve bound RPC provenance", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  const db = client
+  const rpc = client.rpc.bind(db)
+  return rpc("save_class_lesson_session_v1", parameters)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations.map((violation) => violation.reason), [
+    "list_abort_signal_missing",
+    "list_retry_false_missing",
+  ])
+})
+
+test("a definite non-query overwrite clears earlier RPC alias provenance", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, helper, parameters) {
+  let rpc = client.rpc
+  rpc = helper
+  return rpc("save_class_lesson_session_v1", parameters)
+}
+`,
+  })
+
+  assert.deepEqual(result, { ok: true, violations: [] })
+})
+
+test("alias provenance is use-position ordered and conditional assignment fails closed", async () => {
+  const earlierHelper = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, helper, parameters) {
+  helper("save_class_lesson_session_v1", parameters)
+  helper = client.rpc
+  return null
+}
+`,
+  })
+  assert.deepEqual(earlierHelper, { ok: true, violations: [] })
+
+  const conditional = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, helper, parameters, enabled) {
+  let rpc = helper
+  if (enabled) rpc = client.rpc
+  return rpc("save_class_lesson_session_v1", parameters)
+}
+`,
+  })
+  assert.ok(conditional.violations.some((violation) => violation.reason === "list_query_receiver_unresolved"))
+})
+
+test("direct bounded list and mutation RPC calls remain accepted", async () => {
+  const list = await verifyFixture({
+    source: `async function load(client) {
+  return client.from("ops_tasks").select("id").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+  assert.deepEqual(list, { ok: true, violations: [] })
+
+  const rpc = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  return client.rpc("save_class_lesson_session_v1", parameters).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+  assert.deepEqual(rpc, { ok: true, violations: [] })
+})
+
+test("Function method aliases cannot bypass mutation request controls", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  const name = "save_class_lesson_session_v1"
+  const call = client.rpc.call
+  const apply = client.rpc.apply.bind(client.rpc)
+  const reflectApply = Reflect.apply.bind(Reflect)
+  await call(client, name, parameters)
+  await apply(client, [name, parameters])
+  return reflectApply(client.rpc, client, [name, parameters])
+}
+`,
+  })
+
+  assert.equal(result.violations.filter((violation) => violation.reason === "list_abort_signal_missing").length, 3)
+  assert.equal(result.violations.filter((violation) => violation.reason === "list_retry_false_missing").length, 3)
 })
 
 test("detached RPC aliases, Reflect.apply aliases, and inline binding cannot bypass mutation safety", async () => {
