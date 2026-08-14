@@ -32,6 +32,8 @@
 작업 27: 완료. 2026-07-19 승인 범위에 따라 Supabase에 canonical bridge `191000`~`194500`을 설치하고 로컬 SQL 바이트·MD5 5/5 일치를 확인했습니다. 적용 전 rollback dry-run에서 `191000` CASE, `192000` event_key·동일인 rejected 규칙, `194000` CASE·composite INTO 세 곳, `194500` schema-qualified EXTRACT 오류를 수정·재검증했습니다. 휴보강 93건은 canonical 이벤트 23건·전달 93건·폐쇄 소유권 93건으로 누락·위험 상태·금지 fanout 0건, 체크섬 일치입니다.
 작업 28: bridge 출고 검증 완료. 전체 Node `1507/1507`, TypeScript, ESLint, 변경 공백 검사를 통과했습니다. 설정 UI 외 런타임 플래그 11개, shadow, worker 일정, 소유권 전환, `195000` 이후 마이그레이션, Google Chat·Web Push·SOLAPI 실제 발송은 모두 꺼져 있습니다. 같은 안전 코드의 `main`·Vercel 배포와 5분 간격 배포 영수증 관측 시작은 다음 즉시 단계이며 아직 완료로 기록하지 않습니다.
 
+Supabase free-tier operations Task 3: 완료. 계획 모드에서 SQL 원문 없이 9개 evidence section ID/checksum/budget만 공개하고, explicit authorization·환경 전용 read token·bracket timestamp·0600 atomic output을 요구하는 read-only collector/comparator를 구현했습니다. focused 22/22 및 plan/syntax/diff 검증을 통과했으며, reviewed credential/pointer 부재로 execute capture·DB runtime·배포·provider 작업은 실행하지 않았습니다.
+
 등록 양식 개선 작업 1: 완료. 학년별 학교 후보 카탈로그, 기존 학교 값 보존, 선택 조회 실패 격리 구현과 독립 검토를 완료했습니다 (`89e1bee..d859915`, CLEAN).
 등록 양식 개선 작업 2: 완료. 생성·상세 공통 과목/문의 입력 컴포넌트, 승인된 4행 배치, 학년별 학교 선택 연결 구현과 독립 검토를 완료했습니다 (`d859915..0b31d88`, CLEAN).
 등록 양식 개선 작업 3: 완료. 본문 자동 이력을 제거하고 상세 헤더의 닫기 버튼 왼쪽 시계 Popover로 이동했으며, 내부 읽기 전용 이력 모델과 필터를 보존한 구현·독립 검토를 완료했습니다 (`0b31d88..3b5848d`, CLEAN).

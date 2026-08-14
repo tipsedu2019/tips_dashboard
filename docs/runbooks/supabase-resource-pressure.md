@@ -169,3 +169,26 @@ order by seq_tup_read desc;
 - `/api/public-classes`
 
 최소 30분 동안 Supabase API/Auth/Postgres 5xx, statement timeout, cron 오실행, Disk I/O 상태를 확인한다. 코드 개선 뒤에도 피크 시간에 Disk I/O 버스트가 반복 소진되면 Supabase 공식 compute/disk 기준을 다시 확인하고, 예상 월 비용을 사용자에게 제시한 뒤 유료 컴퓨트 상향 승인을 별도로 받는다.
+
+## 7. 변경 전후 read-only resource evidence
+
+운영 DB에는 아래 collector가 허용하는 Management API read-only 요청만 사용한다. 토큰, DB URL, 비밀번호는 인자·로그·evidence 파일에 넣지 않는다. `plan`은 section ID·checksum·row/payload budget만 보여 준다.
+
+```bash
+"$TASK_NODE" scripts/collect-supabase-resource-evidence.mjs --mode plan
+"$TASK_NODE" scripts/collect-supabase-resource-evidence.mjs \
+  --mode execute --authorized --request-id "$TASK_REQUEST_ID" \
+  --output "$TASK_EVIDENCE_OUTPUT"
+```
+
+`execute`에는 absolute output path, `SUPABASE_DATABASE_READ_TOKEN` (`database_read`, 필요하면 `advisors_read`)과 `SUPABASE_PROJECT_REF`가 필요하다. output은 기존 파일을 덮어쓰지 않고 0600 temporary file을 fsync한 뒤 atomic rename한다. DB bracket start/end 중 하나라도 실패하면 `evidence_bracket_incomplete`로 실패하며 파일은 쓰지 않는다.
+
+source release 전 10분 이내 baseline capture, deployment completed 뒤 30±5분 capture를 수집한다. 다음 업무 피크에는 KST 기준 60분 시작/끝 capture 쌍을 별도로 수집한다. 다음 비교는 동일 project, Postgres version, database/statements reset marker, extension availability일 때만 delta를 의미 있게 취급한다.
+
+```bash
+"$TASK_NODE" scripts/compare-supabase-resource-evidence.mjs \
+  --before "$TASK_EVIDENCE_BEFORE" --after "$TASK_EVIDENCE_AFTER" \
+  --output "$TASK_EVIDENCE_COMPARISON_OUTPUT"
+```
+
+capture interval이 겹치거나 bracket/wall-clock ordering이 어긋나면 결과는 `unknown`이다. restart 직후의 단일 누적 counter만으로 index 제거 또는 리소스 회복을 결론 내리지 않는다.
