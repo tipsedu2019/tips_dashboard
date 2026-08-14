@@ -39,6 +39,7 @@ import {
   getPersistedAcademicEventId,
   isSubjectExamType,
   parseActiveScienceSubjectAreas,
+  prepareAcademicEventMetadataForWrite,
   runAcademicEventMutation,
 } from "./academic-event-utils.js";
 import {
@@ -47,6 +48,7 @@ import {
   type AcademicAnnualBoardType,
 } from "./academic-calendar-models.js";
 import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
+import { resolveAnnualBoardEntryParentId } from "./operations-read-service.js";
 
 const FIXED_EXAM_TERM_ROWS = ["1학기 중간", "1학기 기말", "2학기 중간", "2학기 기말"] as const;
 const BOARD_TYPES: AcademicAnnualBoardType[] = ["시험기간", "영어시험일", "수학시험일", "과학시험일", "체험학습", "방학·휴일·기타", "팁스"];
@@ -66,6 +68,8 @@ type ScienceBoardCalendarEvent = CalendarEvent & {
   scienceAreaKey?: string;
   scienceAreaLabel?: string;
   embeddedNoteMeta?: Record<string, unknown>;
+  textbookScope?: string;
+  subtextbookScope?: string;
 };
 type ScienceBoardDraft = Partial<ScienceBoardCalendarEvent>;
 
@@ -1292,31 +1296,36 @@ export function AcademicAnnualBoardWorkspace() {
     },
     entry: AcademicAnnualBoardEntry,
   ) => {
-    const persistedId = getPersistedAcademicEventId(entry.id);
+    const persistedId = getPersistedAcademicEventId(resolveAnnualBoardEntryParentId(entry));
 
     const detail = persistedId ? await loadEventDetail(persistedId).catch(() => null) as Record<string, unknown> | null : null;
+    const detailType = text(detail?.typeLabel) || entry.type;
+    const detailStart = text(detail?.startsAt) || entry.start;
+    const detailEnd = text(detail?.endsAt) || entry.end || detailStart;
     const editingEvent: ScienceBoardCalendarEvent = {
       id: persistedId,
       sourceId: persistedId,
-      title: entry.title,
-      date: parseLocalDate(entry.start),
-      endDate: parseLocalDate(entry.end || entry.start),
-      time: entry.schoolName || row.schoolName,
-      duration: entry.start === entry.end ? "하루 일정" : `${entry.start} ~ ${entry.end}`,
-      type: entry.type === "체험학습" ? "event" : entry.type === "방학·휴일·기타" ? "reminder" : "task",
-      typeLabel: entry.type,
-      attendees: Array.isArray(entry.gradeBadges) ? entry.gradeBadges : [],
-      location: entry.schoolName || row.schoolName,
-      color: entry.type === "체험학습" ? "bg-emerald-500" : entry.type === "방학·휴일·기타" ? "bg-amber-500" : "bg-rose-500",
+      title: text(detail?.title) || entry.title,
+      date: parseLocalDate(detailStart),
+      endDate: parseLocalDate(detailEnd),
+      time: text(detail?.timeLabel) || entry.schoolName || row.schoolName,
+      duration: text(detail?.durationLabel) || (detailStart === detailEnd ? "하루 일정" : `${detailStart} ~ ${detailEnd}`),
+      type: detailType === "체험학습" ? "event" : detailType === "방학·휴일·기타" ? "reminder" : detailType === "팁스" ? "meeting" : "task",
+      typeLabel: detailType,
+      attendees: Array.isArray(detail?.attendees) ? detail.attendees.map(text) : Array.isArray(entry.gradeBadges) ? entry.gradeBadges : [],
+      location: text(detail?.place) || entry.schoolName || row.schoolName,
+      color: text(detail?.color) || (detailType === "체험학습" ? "bg-emerald-500" : detailType === "방학·휴일·기타" ? "bg-amber-500" : "bg-rose-500"),
       description: text(detail?.note) || entry.note || entry.scopeSummary || "",
-      schoolId: entry.schoolId || row.schoolId,
-      schoolName: entry.schoolName || row.schoolName,
-      category: row.category,
-      grade: entry.grade || row.grade,
-      examTerm: entry.examTerm || "",
-      scienceAreaKey: entry.scienceAreaKey || "",
-      scienceAreaLabel: entry.scienceAreaLabel || "",
+      schoolId: text(detail?.schoolId) || entry.schoolId || row.schoolId,
+      schoolName: text(detail?.schoolName) || entry.schoolName || row.schoolName,
+      category: text(detail?.category) || row.category,
+      grade: text(detail?.grade) || entry.grade || row.grade,
+      examTerm: text(detail?.examTerm) || entry.examTerm || "",
+      scienceAreaKey: text(detail?.scienceAreaKey) || entry.scienceAreaKey || "",
+      scienceAreaLabel: text(detail?.scienceAreaLabel) || entry.scienceAreaLabel || "",
       embeddedNoteMeta: (detail?.embeddedNoteMeta as Record<string, unknown> | null) || entry.embeddedNoteMeta || {},
+      textbookScope: text(detail?.textbookScope) || entry.textbookScope || "",
+      subtextbookScope: text(detail?.subtextbookScope) || entry.subtextbookScope || "",
       textbookScopes: normalizeScopeItems(detail?.textbookScopes || entry.textbookScopes),
       subtextbookScopes: normalizeScopeItems(detail?.subtextbookScopes || entry.subtextbookScopes),
       note: text(detail?.note) || entry.note || "",
@@ -1387,6 +1396,13 @@ export function AcademicAnnualBoardWorkspace() {
     }
 
     const existingId = getPersistedAcademicEventId(eventData.id);
+    const metadataResult = prepareAcademicEventMetadataForWrite(eventData, activeScienceAreas);
+    if (!metadataResult.isValid) {
+      const message = Object.values(metadataResult.errors)[0] || "과학 시험일 입력값을 확인해 주세요.";
+      setMutationError(message);
+      toast.error(message);
+      return false;
+    }
     const result = buildAcademicEventMutationPayload(
       {
         id: existingId,
@@ -1396,11 +1412,11 @@ export function AcademicAnnualBoardWorkspace() {
         start: toDateKey(eventData.date),
         end: toDateKey(eventData.endDate || eventData.date),
         grade: eventData.grade,
-        note: eventData.note || eventData.description,
+        note: metadataResult.note,
         examTerm: eventData.examTerm,
         scienceAreaKey: eventData.scienceAreaKey,
-        textbookScope: "",
-        subtextbookScope: "",
+        textbookScope: eventData.textbookScope,
+        subtextbookScope: eventData.subtextbookScope,
         textbookScopes: eventData.textbookScopes,
         subtextbookScopes: eventData.subtextbookScopes,
       },

@@ -35,6 +35,120 @@ function unwrap(value) {
   return Array.isArray(value) && value.length === 1 ? value[0] : value;
 }
 
+function embeddedNoteParts(value) {
+  const marker = "[[TIPS_META]]";
+  const raw = typeof value === "string" ? value : "";
+  const markerIndex = raw.indexOf(marker);
+  if (markerIndex < 0) return { note: raw.trim(), meta: {} };
+  let meta = {};
+  try {
+    const parsed = JSON.parse(raw.slice(markerIndex + marker.length).trim());
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) meta = parsed;
+  } catch {
+    meta = {};
+  }
+  return { note: raw.slice(0, markerIndex).trim(), meta };
+}
+
+export function normalizeAcademicEventDetail(value) {
+  const detail = value && typeof value === "object" ? value : {};
+  const stored = embeddedNoteParts(detail.storedNote ?? detail.note);
+  const suppliedMeta = detail.embeddedNoteMeta && typeof detail.embeddedNoteMeta === "object"
+    && !Array.isArray(detail.embeddedNoteMeta) ? detail.embeddedNoteMeta : {};
+  const embeddedNoteMeta = { ...suppliedMeta, ...stored.meta };
+  return {
+    ...detail,
+    note: stored.note,
+    embeddedNoteMeta,
+    examTerm: text(detail.examTerm || embeddedNoteMeta.examTerm),
+    scienceAreaKey: text(detail.scienceAreaKey || embeddedNoteMeta.scienceAreaKey),
+    textbookScope: text(detail.textbookScope || embeddedNoteMeta.textbookScope),
+    subtextbookScope: text(detail.subtextbookScope || embeddedNoteMeta.subtextbookScope),
+    textbookScopes: Array.isArray(embeddedNoteMeta.textbookScopes)
+      ? embeddedNoteMeta.textbookScopes
+      : Array.isArray(detail.textbookScopes) ? detail.textbookScopes : [],
+    subtextbookScopes: Array.isArray(embeddedNoteMeta.subtextbookScopes)
+      ? embeddedNoteMeta.subtextbookScopes
+      : Array.isArray(detail.subtextbookScopes) ? detail.subtextbookScopes : [],
+  };
+}
+
+export function resolveAnnualBoardEntryParentId(entry) {
+  return text(entry?.parentEventId || entry?.parent_event_id || entry?.id);
+}
+
+export function buildClassLessonDesignRow(detail) {
+  const source = detail && typeof detail === "object" ? detail : {};
+  const rawClass = source.classItem && typeof source.classItem === "object" ? source.classItem : {};
+  const classItem = {
+    ...rawClass,
+    className: text(rawClass.className || rawClass.name),
+    teacher: text(rawClass.teacherName || rawClass.teacher),
+    term_id: rawClass.termId || rawClass.term_id || null,
+    textbook_ids: Array.isArray(rawClass.textbookIds) ? rawClass.textbookIds : rawClass.textbook_ids || [],
+    schedulePlan: rawClass.schedulePlan || rawClass.schedule_plan || {},
+  };
+  const id = text(classItem.id);
+  if (!id) return null;
+  return {
+    id,
+    title: text(classItem.className || classItem.name),
+    subject: text(classItem.subject),
+    grade: text(classItem.grade),
+    teacher: text(classItem.teacher),
+    termName: text(classItem.termName),
+    scheduleLabel: text(classItem.schedule),
+    sessionCount: 0,
+    completedSessions: 0,
+    raw: {
+      classItem,
+      term: classItem.termId ? { id: classItem.termId, name: classItem.termName } : null,
+      sessions: [],
+      syncGroupId: text(classItem.syncGroupId),
+      syncGroup: classItem.syncGroupId ? { id: classItem.syncGroupId, name: classItem.syncGroupName } : null,
+      warningSummary: { planDrift: null, syncGap: null },
+    },
+  };
+}
+
+export function resolveRequestedClassRow({ requestedClassId, pageRows, exactRow }) {
+  const id = text(requestedClassId);
+  if (!id) return null;
+  if (exactRow && text(exactRow.id) === id) return exactRow;
+  return (Array.isArray(pageRows) ? pageRows : []).find((row) => text(row?.id) === id) || null;
+}
+
+export function appendOperationsPageIfCurrent({
+  current,
+  next,
+  expectedRevision,
+  currentRevision,
+  expectedFingerprint,
+  currentFingerprint,
+}) {
+  if (expectedRevision !== currentRevision || expectedFingerprint !== currentFingerprint || !current) return current;
+  const currentPage = current.page && typeof current.page === "object" ? current.page : {};
+  const nextPage = next?.page && typeof next.page === "object" ? next.page : {};
+  const existingRows = Array.isArray(currentPage.rows) ? currentPage.rows : [];
+  const seen = new Set(existingRows.map((row) => text(row?.id)).filter(Boolean));
+  const appended = (Array.isArray(nextPage.rows) ? nextPage.rows : []).filter((row) => {
+    const id = text(row?.id);
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  return { ...current, page: { ...nextPage, rows: [...existingRows, ...appended] } };
+}
+
+export function buildSevenDayRangeKeys(dateFrom) {
+  const start = parseDateKey(dateFrom).date;
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(start);
+    date.setUTCDate(date.getUTCDate() + index);
+    return date.toISOString().slice(0, 10);
+  });
+}
+
 function canonicalJson(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
@@ -173,7 +287,7 @@ export function createOperationsReadService(options = {}) {
           .retry(false),
       );
       if (!detail || text(detail.id) !== id) throw operationsError("operations_event_detail_invalid");
-      return detail;
+      return normalizeAcademicEventDetail(detail);
     },
     async loadClassScheduleDetail({ classId, dateFrom, dateTo }) {
       const id = text(classId);
@@ -188,6 +302,17 @@ export function createOperationsReadService(options = {}) {
           .abortSignal(AbortSignal.timeout(8_000))
           .retry(false),
       );
+    },
+    async loadClassLessonDesignDetail(classId) {
+      const id = text(classId);
+      if (!UUID.test(id)) throw operationsError("operations_class_id_invalid");
+      const detail = await unwrapRpc(
+        client.rpc("get_operations_class_lesson_design_detail_v1", { p_class_id: id })
+          .abortSignal(AbortSignal.timeout(8_000))
+          .retry(false),
+      );
+      if (!detail || text(detail.classItem?.id) !== id) throw operationsError("operations_class_detail_invalid");
+      return detail;
     },
     async loadCatalogs() {
       const timestamp = Number(now());

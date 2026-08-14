@@ -40,6 +40,8 @@ export type AcademicAnnualBoardType =
 
 export type AcademicAnnualBoardEntry = {
   id: string;
+  parentEventId?: string;
+  sourceKind?: "academic_event" | "academic_event_exam_detail";
   title: string;
   type: AcademicAnnualBoardType;
   dateLabel: string;

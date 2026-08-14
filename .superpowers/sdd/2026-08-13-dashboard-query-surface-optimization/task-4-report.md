@@ -66,3 +66,26 @@ It stopped before allocation with `isolated_supabase_db_baseline_review_required
 ## Boundary
 
 Source implementation and source verification are complete. Runtime SQL behavior is specified in `supabase/tests/operations_academic_scoped_reads_test.sql` but remains empirically unverified until the reviewed isolated baseline gate opens. The pre-existing untracked `pnpm-workspace.yaml` was preserved and excluded from staging.
+
+## Adversarial fix round 1
+
+Review RED was **6 pass / 8 fail**. A second exact-wire-shape RED reproduced the stored metadata array loss as **0 pass / 1 fail**, and an annual-board read-save regression reproduced the missing metadata envelope as **0 pass / 1 fail**.
+
+The round closes these source contracts:
+
+- Exact event detail now returns the untouched stored note, parses `[[TIPS_META]]`, and preserves unknown metadata plus exam term, science area, scalar scopes, and structured scope arrays through both calendar and annual-board read-save paths.
+- Annual RPC rows now carry renderer-ready `examTerm`, stable synthetic derived IDs, `parentEventId`, `sourceKind`, and one row per comma-delimited grade. Derived subject rows edit the parent academic event instead of masquerading as it.
+- Lesson-design deep links hydrate the exact class ID even outside page one. The editor opens only after the exact legacy `schedule_plan`, connected textbooks, and subject-scoped teacher/classroom catalogs arrive; the initial class list still does not read `schedule_plan`.
+- Continuation append captures both request revision and fingerprint and rejects stale rows or stale errors after a scope change.
+- Dense calendar recovery retains the last successful monthly grid while loading and then renders an actual seven-day agenda. Returning to month mode cannot cache the seven-day response as a month.
+- The exact lesson-design RPC and all other Task 4 reads remain eight-second/no-retry, authenticated-only, fixed-search-path `security invoker` boundaries. No new definer or service-role client was introduced.
+
+Final source evidence:
+
+- Task 4 focused UI/service/read-safety/query suite: **112 pass / 0 fail**.
+- Exact operations plus query-budget suite: **70 pass / 0 fail**.
+- TypeScript, targeted ESLint, operations worktree query guard, and `git diff --check`: GREEN.
+- Candidate migration SHA-256: `b45e5a2d49ebe42780f08ced9d8a5094581c7f8cbef30538040607d5cde21940`, equal to the manifest and on-disk SQL.
+- The repository-wide source run remains non-GREEN for unrelated notification fixture/golden drift already present in the shared branch. Migration-layout verification remains separately blocked by pre-existing Task 3 `20260814011752_management_page_reads.sql` lexical normalization. Task 4 focused verification is GREEN.
+
+No DB runtime command was run in this fix round. The manifest remains `candidate`; migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, worker, webhook, and provider effects are all unclaimed.

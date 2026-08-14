@@ -8,6 +8,12 @@ const serviceModule = await import(
 ).catch(() => ({}));
 
 const createOperationsReadService = serviceModule.createOperationsReadService;
+const normalizeAcademicEventDetail = serviceModule.normalizeAcademicEventDetail;
+const resolveAnnualBoardEntryParentId = serviceModule.resolveAnnualBoardEntryParentId;
+const buildClassLessonDesignRow = serviceModule.buildClassLessonDesignRow;
+const resolveRequestedClassRow = serviceModule.resolveRequestedClassRow;
+const appendOperationsPageIfCurrent = serviceModule.appendOperationsPageIfCurrent;
+const buildSevenDayRangeKeys = serviceModule.buildSevenDayRangeKeys;
 
 function makeRpcBuilder(result, calls) {
   return {
@@ -170,6 +176,130 @@ test("event and class full details are selection-driven exact RPCs", async () =>
   assert.deepEqual(calls.filter(([name]) => name === "retry").map(([, value]) => value), [false, false]);
 });
 
+test("event exact detail preserves every embedded metadata field through the edit payload", async () => {
+  assert.equal(typeof normalizeAcademicEventDetail, "function");
+  const eventId = "40000000-0000-4000-8000-000000000002";
+  const storedNote = `보이는 메모\n\n[[TIPS_META]] ${JSON.stringify({
+    examTerm: "1학기 중간",
+    scienceAreaKey: "physics",
+    textbookScope: "10~30쪽",
+    subtextbookScope: "워크북 2단원",
+    textbookScopes: [{ name: "기본서", publisher: "팁스", scope: "10~30쪽" }],
+    subtextbookScopes: [{ name: "워크북", publisher: "팁스", scope: "2단원" }],
+    legacyFlag: "keep",
+  })}`;
+  const calls = [];
+  const service = createOperationsReadService({
+    supabase: makeClient({
+      get_academic_event_detail_v1: {
+        data: {
+          id: eventId,
+          storedNote,
+          embeddedNoteMeta: null,
+          textbookScopes: [],
+          subtextbookScopes: [],
+          materialSections: [],
+        },
+        error: null,
+      },
+    }, calls),
+    actorScope: "user-meta:admin",
+  });
+
+  const detail = await service.loadEventDetail(eventId);
+  assert.equal(detail.note, "보이는 메모");
+  assert.equal(detail.examTerm, "1학기 중간");
+  assert.equal(detail.scienceAreaKey, "physics");
+  assert.equal(detail.textbookScope, "10~30쪽");
+  assert.equal(detail.subtextbookScope, "워크북 2단원");
+  assert.deepEqual(detail.textbookScopes, [{ name: "기본서", publisher: "팁스", scope: "10~30쪽" }]);
+  assert.deepEqual(detail.subtextbookScopes, [{ name: "워크북", publisher: "팁스", scope: "2단원" }]);
+  assert.equal(detail.embeddedNoteMeta.legacyFlag, "keep");
+});
+
+test("derived annual entries resolve and edit their parent event instead of the detail row id", () => {
+  assert.equal(typeof resolveAnnualBoardEntryParentId, "function");
+  assert.equal(resolveAnnualBoardEntryParentId({
+    id: "exam-detail:41000000-0000-4000-8000-000000000001",
+    parentEventId: "42000000-0000-4000-8000-000000000001",
+    sourceKind: "academic_event_exam_detail",
+  }), "42000000-0000-4000-8000-000000000001");
+});
+
+test("selected class lesson design hydrates exact legacy plan, textbooks, and catalogs", async () => {
+  assert.equal(typeof buildClassLessonDesignRow, "function");
+  const calls = [];
+  const classId = "50000000-0000-4000-8000-000000000002";
+  const legacyPlan = { revision: 7, sessions: [{ id: "legacy-session", date: "2026-08-20" }] };
+  const exact = {
+    classItem: {
+      id: classId,
+      name: "오프페이지 수업",
+      subject: "수학",
+      schedulePlan: legacyPlan,
+      textbookIds: ["51000000-0000-4000-8000-000000000001"],
+    },
+    textbooks: [{ id: "51000000-0000-4000-8000-000000000001", title: "정확한 교재" }],
+    teacherCatalogs: [{ id: "52000000-0000-4000-8000-000000000001", name: "김교사" }],
+    classroomCatalogs: [{ id: "53000000-0000-4000-8000-000000000001", name: "1강의실" }],
+  };
+  const service = createOperationsReadService({
+    supabase: makeClient({ get_operations_class_lesson_design_detail_v1: { data: exact, error: null } }, calls),
+    actorScope: "user-class:admin",
+  });
+
+  const detail = await service.loadClassLessonDesignDetail(classId);
+  const row = buildClassLessonDesignRow(detail);
+  assert.deepEqual(row.raw.classItem.schedulePlan, legacyPlan);
+  assert.deepEqual(detail.textbooks, exact.textbooks);
+  assert.deepEqual(detail.teacherCatalogs, exact.teacherCatalogs);
+  assert.deepEqual(detail.classroomCatalogs, exact.classroomCatalogs);
+  assert.deepEqual(calls.filter(([name]) => name.startsWith("get_")), [[
+    "get_operations_class_lesson_design_detail_v1",
+    { p_class_id: classId },
+  ]]);
+});
+
+test("class lesson-design deep links use exact detail even when the class is outside page one", () => {
+  assert.equal(typeof resolveRequestedClassRow, "function");
+  const requestedId = "50000000-0000-4000-8000-000000000099";
+  const exactRow = { id: requestedId, title: "정확한 오프페이지 수업", raw: { classItem: { id: requestedId } } };
+  assert.equal(resolveRequestedClassRow({
+    requestedClassId: requestedId,
+    pageRows: [{ id: "50000000-0000-4000-8000-000000000001" }],
+    exactRow,
+  }), exactRow);
+});
+
+test("a stale continuation response cannot append after the request scope changes", () => {
+  assert.equal(typeof appendOperationsPageIfCurrent, "function");
+  const current = { page: { rows: [{ id: "class-1" }], hasMore: true } };
+  const next = { page: { rows: [{ id: "class-2" }], hasMore: false } };
+  assert.equal(appendOperationsPageIfCurrent({
+    current,
+    next,
+    expectedRevision: 3,
+    currentRevision: 4,
+    expectedFingerprint: "scope-a",
+    currentFingerprint: "scope-b",
+  }), current);
+  assert.deepEqual(appendOperationsPageIfCurrent({
+    current,
+    next,
+    expectedRevision: 4,
+    currentRevision: 4,
+    expectedFingerprint: "scope-b",
+    currentFingerprint: "scope-b",
+  }).page.rows, [{ id: "class-1" }, { id: "class-2" }]);
+});
+
+test("dense calendar recovery produces exactly seven rendered day keys", () => {
+  assert.equal(typeof buildSevenDayRangeKeys, "function");
+  assert.deepEqual(buildSevenDayRangeKeys("2026-08-10"), [
+    "2026-08-10", "2026-08-11", "2026-08-12", "2026-08-13", "2026-08-14", "2026-08-15", "2026-08-16",
+  ]);
+});
+
 test("small operations catalogs are cached for thirty minutes within actor role scope", async () => {
   const calls = [];
   let now = 1_000;
@@ -213,7 +343,16 @@ test("operations migration enforces invoker ACLs, range density, annual density,
   assert.match(sql, /400\s*\*\s*1024/i);
   assert.match(sql, /p_limit\s*\+\s*1/i);
   assert.match(sql, /p_limit\s*=\s*30/i);
-  assert.doesNotMatch(sql, /schedule_plan/i);
+  assert.match(sql, /extract_academic_event_meta_v1/i);
+  assert.match(sql, /parentEventId/i);
+  assert.match(sql, /exam-detail:/i);
+  assert.match(sql, /'examTerm'/i);
+  assert.match(sql, /regexp_split_to_table[\s\S]*grade/i);
+  assert.match(sql, /pg_catalog\.coalesce\(grouped\.school_id::text, pg_catalog\.md5\(grouped\.school_name\)\) \|\| ':' \|\| grouped\.grade/);
+  assert.match(sql, /storedNote/i);
+  assert.match(sql, /get_operations_class_lesson_design_detail_v1/i);
+  const classListBody = sql.match(/create function public\.get_operations_class_schedule_page_v1[\s\S]*?\n\$function\$;/i)?.[0] || "";
+  assert.doesNotMatch(classListBody, /schedule_plan/i);
 });
 
 test("operations workspaces issue mode requests and expose dense-range recovery without the legacy fan-out", async () => {
@@ -229,9 +368,13 @@ test("operations workspaces issue mode requests and expose dense-range recovery 
   assert.match(calendar, /mode:\s*"calendar"/);
   assert.match(calendar, /visible_range_too_dense/);
   assert.match(calendar, /한 주 보기/);
+  assert.match(calendar, /operations-seven-day-agenda/);
   assert.match(annual, /mode:\s*"annual"/);
   assert.match(annual, /annual_board_too_dense/);
+  assert.match(annual, /resolveAnnualBoardEntryParentId/);
   assert.match(schedule, /mode:\s*"class_schedule"/);
   assert.match(schedule, /다음 30건/);
+  assert.match(schedule, /loadClassLessonDesignDetail/);
+  assert.match(schedule, /isLessonDesignRouteActive\s*&&/);
   assert.doesNotMatch(schedule, /data\.classes\.filter/);
 });

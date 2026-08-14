@@ -55,6 +55,10 @@ import {
   type LessonProgressDraftEntry,
 } from "./lesson-progress-draft";
 import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
+import {
+  buildClassLessonDesignRow,
+  resolveRequestedClassRow,
+} from "./operations-read-service.js";
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -2562,6 +2566,7 @@ export function ClassScheduleWorkspace() {
   const isLessonDesignPage = pathname.endsWith("/lesson-design");
   const isLessonDesignRouteActive = isLessonDesignPage || searchParams.get("lessonDesign") === "1";
   const isLessonDesignModalRoute = searchParams.get("lessonDesign") === "1" && !isLessonDesignPage;
+  const requestedClassId = text(searchParams.get("classId"));
   const classScheduleListRef = useRef<HTMLDivElement | null>(null);
   const [search, setSearch] = useState(() => text(searchParams.get("q")));
   const [termId, setTermId] = useState(() => text(searchParams.get("term")));
@@ -2597,6 +2602,10 @@ export function ClassScheduleWorkspace() {
   const [selectedLessonCalendarDate, setSelectedLessonCalendarDate] = useState("");
   const [lessonCalendarDragSource, setLessonCalendarDragSource] = useState("");
   const [lessonCalendarDropTarget, setLessonCalendarDropTarget] = useState("");
+  const [lessonDesignDetail, setLessonDesignDetail] = useState<Record<string, unknown> | null>(null);
+  const [lessonDesignDetailLoading, setLessonDesignDetailLoading] = useState(false);
+  const [lessonDesignDetailError, setLessonDesignDetailError] = useState("");
+  const lessonDesignDetailRevisionRef = useRef(0);
   const lessonPlanDraftRef = useRef<Record<string, unknown> | null>(null);
   const lessonPlanSourceKeyRef = useRef("");
   const pendingLessonDesignDialogScrollTopRef = useRef<number | null>(null);
@@ -2625,6 +2634,7 @@ export function ClassScheduleWorkspace() {
     refresh,
     loadMore,
     loadClassScheduleDetail,
+    loadClassLessonDesignDetail,
   } = useOperationsWorkspaceData(operationsRequest);
   const data = useMemo(() => {
     const page = (scopedData?.page || {}) as { rows?: Record<string, unknown>[]; hasMore?: boolean };
@@ -2677,6 +2687,36 @@ export function ClassScheduleWorkspace() {
       filterOptions,
     };
   }, [scopedData]);
+
+  useEffect(() => {
+    const revision = lessonDesignDetailRevisionRef.current + 1;
+    lessonDesignDetailRevisionRef.current = revision;
+    if (!isLessonDesignRouteActive || !requestedClassId) {
+      setLessonDesignDetail(null);
+      setLessonDesignDetailError("");
+      setLessonDesignDetailLoading(false);
+      return;
+    }
+
+    setLessonDesignDetail((current) =>
+      text((current?.classItem as Record<string, unknown> | undefined)?.id) === requestedClassId ? current : null,
+    );
+    setLessonDesignDetailError("");
+    setLessonDesignDetailLoading(true);
+    void loadClassLessonDesignDetail(requestedClassId)
+      .then((detail) => {
+        if (lessonDesignDetailRevisionRef.current !== revision) return;
+        setLessonDesignDetail(detail as Record<string, unknown>);
+      })
+      .catch((detailError) => {
+        if (lessonDesignDetailRevisionRef.current !== revision) return;
+        setLessonDesignDetail(null);
+        setLessonDesignDetailError(detailError instanceof Error ? detailError.message : "수업 상세를 불러오지 못했습니다.");
+      })
+      .finally(() => {
+        if (lessonDesignDetailRevisionRef.current === revision) setLessonDesignDetailLoading(false);
+      });
+  }, [isLessonDesignRouteActive, loadClassLessonDesignDetail, requestedClassId]);
 
   useLayoutEffect(() => {
     const scrollTop = pendingLessonDesignDialogScrollTopRef.current;
@@ -2895,12 +2935,40 @@ export function ClassScheduleWorkspace() {
     [data.textbooks, model.rows],
   );
 
+  const exactLessonDesignRow = useMemo(
+    () => buildClassLessonDesignRow(lessonDesignDetail) as Record<string, unknown> | null,
+    [lessonDesignDetail],
+  );
+  const lessonDesignTextbooks = useMemo(
+    () => Array.isArray(lessonDesignDetail?.textbooks)
+      ? lessonDesignDetail.textbooks as Record<string, unknown>[]
+      : [],
+    [lessonDesignDetail],
+  );
+  const lessonDesignTeacherCatalogs = useMemo(
+    () => Array.isArray(lessonDesignDetail?.teacherCatalogs)
+      ? lessonDesignDetail.teacherCatalogs as Record<string, unknown>[]
+      : [],
+    [lessonDesignDetail],
+  );
+  const lessonDesignClassroomCatalogs = useMemo(
+    () => Array.isArray(lessonDesignDetail?.classroomCatalogs)
+      ? lessonDesignDetail.classroomCatalogs as Record<string, unknown>[]
+      : [],
+    [lessonDesignDetail],
+  );
+
   const selectedRow = useMemo(
-    () =>
-      model.rows.find((row) => row.id === selectedClassId) ||
-      allRowsModel.rows.find((row) => row.id === selectedClassId) ||
-      null,
-    [allRowsModel.rows, model.rows, selectedClassId],
+    () => isLessonDesignRouteActive
+      ? exactLessonDesignRow && resolveRequestedClassRow({
+          requestedClassId,
+          pageRows: [],
+          exactRow: exactLessonDesignRow,
+        })
+      : model.rows.find((row) => row.id === selectedClassId) ||
+        allRowsModel.rows.find((row) => row.id === selectedClassId) ||
+        null,
+    [allRowsModel.rows, exactLessonDesignRow, isLessonDesignRouteActive, model.rows, requestedClassId, selectedClassId],
   );
 
   const normalizedScheduleReader = useMemo(() => {
@@ -2922,7 +2990,7 @@ export function ClassScheduleWorkspace() {
   const activeLessonMonthRange = useMemo(() => getLessonMonthRange(normalizedReadMonthKey), [normalizedReadMonthKey]);
   const normalizedScheduleRead = useContinuousClassSchedule(
     normalizedScheduleReader,
-    selectedRow && activeLessonMonthRange
+    isLessonDesignRouteActive && selectedRow && activeLessonMonthRange
       ? { classId: selectedRow.id, ...activeLessonMonthRange, refreshKey: normalizedScheduleRefreshNonce }
       : null,
   );
@@ -2981,12 +3049,12 @@ export function ClassScheduleWorkspace() {
       schedule: text(savedPlan?.schedule || selectedRowClassItem?.schedule || selectedRow?.scheduleLabel) || "",
       startDate: text(selectedRowClassItem?.start_date || selectedRowClassItem?.startDate),
       endDate: text(selectedRowClassItem?.end_date || selectedRowClassItem?.endDate),
-      textbooks: data.textbooks,
+      textbooks: lessonDesignTextbooks,
       textbookIds: Array.isArray(rawTextbookIds)
         ? rawTextbookIds.map((value) => text(value)).filter(Boolean)
         : [],
     };
-  }, [data.textbooks, selectedRow, selectedRowClassItem]);
+  }, [lessonDesignTextbooks, selectedRow, selectedRowClassItem]);
   const normalizedLessonPlan = useMemo(
     () => (lessonPlanDraft ? normalizeSchedulePlan(lessonPlanDraft, lessonPlanDefaults) : null),
     [lessonPlanDefaults, lessonPlanDraft],
@@ -2999,8 +3067,8 @@ export function ClassScheduleWorkspace() {
     [lessonPlanDefaults, normalizedLessonPlan],
   );
   const lessonDesignSnapshot = useMemo(
-    () => buildLessonDesignSnapshot(selectedRow, data.textbooks, lessonPlanForSave),
-    [data.textbooks, lessonPlanForSave, selectedRow],
+    () => buildLessonDesignSnapshot(selectedRow, lessonDesignTextbooks, lessonPlanForSave),
+    [lessonDesignTextbooks, lessonPlanForSave, selectedRow],
   );
   const connectedLessonTextbookIds = useMemo(
     () =>
@@ -3021,11 +3089,11 @@ export function ClassScheduleWorkspace() {
   const lessonTextbookSubjectBooks = useMemo(
     () =>
       lessonPlannerSubjectKey
-        ? data.textbooks.filter(
+        ? lessonDesignTextbooks.filter(
             (book) => normalizeLessonSubjectKey(getTextbookSubject(book)) === lessonPlannerSubjectKey,
           )
         : [],
-    [data.textbooks, lessonPlannerSubjectKey],
+    [lessonDesignTextbooks, lessonPlannerSubjectKey],
   );
   const lessonTextbookFilterOptions = useMemo(
     () => ({
@@ -3419,7 +3487,7 @@ export function ClassScheduleWorkspace() {
     if (!textbookId) {
       return;
     }
-    const textbook = data.textbooks.find((book) => text(book.id) === textbookId);
+    const textbook = lessonDesignTextbooks.find((book) => text(book.id) === textbookId);
     const firstSessionId = text(filteredLessonSessions[0]?.id);
     const selectedSessionId = text(selectedLessonSession?.id);
     const endSessionId = text(filteredLessonSessions[filteredLessonSessions.length - 1]?.id);
@@ -3451,7 +3519,7 @@ export function ClassScheduleWorkspace() {
     });
     setLessonTextbookSearch("");
     setIsLessonTextbookFinderOpen(false);
-  }, [data.textbooks, filteredLessonSessions, selectedLessonSession, updateLessonPlanDraft]);
+  }, [filteredLessonSessions, lessonDesignTextbooks, selectedLessonSession, updateLessonPlanDraft]);
   const handleRemoveLessonTextbook = useCallback(
     (textbookId: string) => {
       const targetTextbookId = text(textbookId);
@@ -3530,7 +3598,7 @@ export function ClassScheduleWorkspace() {
       setLessonDesignSaveNotice("");
 
       const nextPlanForSave = buildSchedulePlanForSave(nextDraft, lessonPlanDefaults) as Record<string, unknown>;
-      const nextLessonDesignSnapshot = buildLessonDesignSnapshot(selectedRow, data.textbooks, nextPlanForSave);
+      const nextLessonDesignSnapshot = buildLessonDesignSnapshot(selectedRow, lessonDesignTextbooks, nextPlanForSave);
       const focusTargetDate = text(options.targetDate);
       const focusSourceDate = text(options.sourceDate);
       const nextFocusedSession =
@@ -3558,7 +3626,7 @@ export function ClassScheduleWorkspace() {
 
       return text(nextFocusedSession?.id);
     },
-    [data.textbooks, lessonPlanDefaults, markPendingLessonSessionSelection, selectedRow],
+    [lessonDesignTextbooks, lessonPlanDefaults, markPendingLessonSessionSelection, selectedRow],
   );
   const selectedLessonSessionDraftDate = resolveLessonSessionDraftDate(selectedLessonSession);
   const selectedLessonSessionDraftStateEntry = useMemo(() => {
@@ -3591,20 +3659,20 @@ export function ClassScheduleWorkspace() {
     };
   }, [normalizedGenerationContext, normalizedLessonSessionDrafts, selectedLessonSession]);
   const teacherCatalogOptions = useMemo(
-    () => data.teacherCatalogs
+    () => lessonDesignTeacherCatalogs
       .filter((catalog) => catalog.is_visible !== false)
       .map((catalog) => ({ id: text(catalog.id), name: text(catalog.name) }))
       .filter((catalog) => catalog.id && catalog.name)
       .sort((left, right) => left.name.localeCompare(right.name, "ko")),
-    [data.teacherCatalogs],
+    [lessonDesignTeacherCatalogs],
   );
   const classroomCatalogOptions = useMemo(
-    () => data.classroomCatalogs
+    () => lessonDesignClassroomCatalogs
       .filter((catalog) => catalog.is_visible !== false)
       .map((catalog) => ({ id: text(catalog.id), name: text(catalog.name) }))
       .filter((catalog) => catalog.id && catalog.name)
       .sort((left, right) => left.name.localeCompare(right.name, "ko")),
-    [data.classroomCatalogs],
+    [lessonDesignClassroomCatalogs],
   );
   const updateNormalizedLessonSessionDraft = useCallback(
     (patch: Partial<SaveClassLessonSessionInput>) => {
@@ -4079,7 +4147,7 @@ export function ClassScheduleWorkspace() {
         return;
       }
 
-      const nextLessonDesignSnapshot = buildLessonDesignSnapshot(row, data.textbooks);
+      const nextLessonDesignSnapshot = buildLessonDesignSnapshot(row, lessonDesignTextbooks);
       if (!nextLessonDesignSnapshot) {
         return;
       }
@@ -4110,10 +4178,8 @@ export function ClassScheduleWorkspace() {
       );
       setLessonDesignOpen(true);
     },
-    [data.textbooks],
+    [lessonDesignTextbooks],
   );
-
-  const requestedClassId = text(searchParams.get("classId"));
   const requestedSessionId = text(searchParams.get("sessionId"));
   const requestedLessonDesignSectionId = resolveLessonDesignSectionId(text(searchParams.get("section")));
   const lessonDesignDefaultSectionId = isLessonDesignModalRoute ? LESSON_DESIGN_SECTION_IDS.periods : isLessonDesignPage && selectedLessonSessionId ? LESSON_DESIGN_SECTION_IDS.board : "";
@@ -4371,7 +4437,7 @@ export function ClassScheduleWorkspace() {
 
   useEffect(() => {
   
-  if (loading) {
+  if (loading || lessonDesignDetailLoading) {
       return;
     }
 
@@ -4402,7 +4468,11 @@ export function ClassScheduleWorkspace() {
       return;
     }
 
-    const targetRow = allRowsModel.rows.find((row) => row.id === requestedClassId) || null;
+    const targetRow = exactLessonDesignRow && resolveRequestedClassRow({
+      requestedClassId,
+      pageRows: [],
+      exactRow: exactLessonDesignRow,
+    });
     if (!targetRow) {
       router.replace(
         isLessonDesignPage
@@ -4434,7 +4504,9 @@ export function ClassScheduleWorkspace() {
     });
   }, [
     allRowsModel.rows,
+    exactLessonDesignRow,
     lessonDesignOpen,
+    lessonDesignDetailLoading,
     loading,
     openLessonDesignForRow,
     isLessonDesignPage,
@@ -6403,7 +6475,16 @@ export function ClassScheduleWorkspace() {
               {lessonDesignReturnActionLabel}
             </Button>
           </div>
-          {lessonDesignSnapshot ? (
+          {lessonDesignDetailError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{lessonDesignDetailError}</AlertDescription>
+            </Alert>
+          ) : lessonDesignDetailLoading ? (
+            <div className="space-y-3 py-6">
+              <Skeleton className="h-8 w-56" />
+              <Skeleton className="h-64 w-full" />
+            </div>
+          ) : lessonDesignSnapshot ? (
             <div className="bg-background">
               {lessonDesignWorkspaceContent}
             </div>

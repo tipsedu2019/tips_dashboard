@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/providers/auth-provider";
@@ -24,6 +24,7 @@ import {
   runAcademicEventMutation,
 } from "./academic-event-utils.js";
 import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
+import { buildSevenDayRangeKeys } from "./operations-read-service.js";
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -116,12 +117,40 @@ export function AcademicCalendarWorkspace() {
     last.setDate(last.getDate() + (6 - last.getDay()));
     return { dateFrom: toDateKey(first), dateTo: toDateKey(last) };
   });
-  const request = useMemo(() => ({ mode: "calendar" as const, ...visibleRange }), [visibleRange]);
+  const [recoveryRange, setRecoveryRange] = useState<{ dateFrom: string; dateTo: string } | null>(null);
+  const requestRange = recoveryRange || visibleRange;
+  const request = useMemo(() => ({ mode: "calendar" as const, ...requestRange }), [requestRange]);
   const { data, densityError, error, refresh, loadEventDetail } = useOperationsWorkspaceData(request);
   const isSeedCalendar = false;
+  const lastMonthRowsRef = useRef<Array<Record<string, unknown>>>([]);
+  const responseRange = (data?.range || {}) as { dateFrom?: string; dateTo?: string };
+  const isConfirmedSevenDayRange = Boolean(
+    recoveryRange &&
+      data?.ok === true &&
+      responseRange.dateFrom === recoveryRange.dateFrom &&
+      responseRange.dateTo === recoveryRange.dateTo,
+  );
+  const isConfirmedMonthRange = Boolean(
+    data?.ok === true &&
+      responseRange.dateFrom === visibleRange.dateFrom &&
+      responseRange.dateTo === visibleRange.dateTo,
+  );
+  useEffect(() => {
+    if (!isConfirmedMonthRange || data?.ok !== true || !Array.isArray(data.rows)) return;
+    lastMonthRowsRef.current = data.rows as Array<Record<string, unknown>>;
+  }, [data, isConfirmedMonthRange]);
   const calendarRows = useMemo(
-    () => data?.ok === true && Array.isArray(data.rows) ? data.rows as Array<Record<string, unknown>> : [],
-    [data],
+    () => {
+      if (isConfirmedSevenDayRange && data?.ok === true && Array.isArray(data.rows)) {
+        return data.rows as Array<Record<string, unknown>>;
+      }
+      if (isConfirmedMonthRange && data?.ok === true && Array.isArray(data.rows)) {
+        return data.rows as Array<Record<string, unknown>>;
+      }
+      if (lastMonthRowsRef.current.length > 0) return lastMonthRowsRef.current;
+      return [];
+    },
+    [data, isConfirmedMonthRange, isConfirmedSevenDayRange],
   );
 
   useEffect(() => {
@@ -199,16 +228,20 @@ export function AcademicCalendarWorkspace() {
 
   const handleVisibleRangeChange = useCallback((range: { start: Date; end: Date }) => {
     const next = { dateFrom: toDateKey(range.start), dateTo: toDateKey(range.end) };
+    setRecoveryRange(null);
     setVisibleRange((current) => current.dateFrom === next.dateFrom && current.dateTo === next.dateTo ? current : next);
   }, []);
 
   const handleOneWeekView = useCallback(() => {
     if (densityError?.code !== "visible_range_too_dense") return;
-    const start = new Date(`${densityError.range.dateFrom}T12:00:00`);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 6);
-    setVisibleRange({ dateFrom: toDateKey(start), dateTo: toDateKey(end) });
+    const dateKeys = buildSevenDayRangeKeys(densityError.range.dateFrom);
+    setRecoveryRange({ dateFrom: dateKeys[0], dateTo: dateKeys[dateKeys.length - 1] });
   }, [densityError]);
+
+  const sevenDayKeys = useMemo(
+    () => recoveryRange ? buildSevenDayRangeKeys(recoveryRange.dateFrom) : [],
+    [recoveryRange],
+  );
 
   const handleLoadEventDetail = useCallback(async (eventId: string) => {
     const detail = await loadEventDetail(eventId) as Record<string, unknown>;
@@ -424,6 +457,37 @@ export function AcademicCalendarWorkspace() {
       ) : null}
 
       <div className="px-4 lg:px-6">
+        {isConfirmedSevenDayRange ? (
+          <section data-testid="operations-seven-day-agenda" className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold">한 주 일정</h2>
+              <Button type="button" variant="outline" size="sm" onClick={() => setRecoveryRange(null)}>월간 보기</Button>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-7">
+              {sevenDayKeys.map((dateKey) => {
+                const dayEvents = calendarModel.events.filter((event) => {
+                  const startsAt = toDateKey(event.date);
+                  const endsAt = toDateKey(event.endDate || event.date);
+                  return startsAt <= dateKey && dateKey <= endsAt;
+                });
+                return (
+                  <article key={dateKey} className="min-h-32 rounded-lg border border-border/70 bg-background p-3">
+                    <h3 className="text-sm font-medium">{dateKey}</h3>
+                    <div className="mt-3 space-y-2">
+                      {dayEvents.length === 0 ? <p className="text-xs text-muted-foreground">일정 없음</p> : null}
+                      {dayEvents.map((event) => (
+                        <div key={`${dateKey}:${event.id}`} className="rounded-md bg-muted/50 px-2 py-1.5 text-xs">
+                          <p className="font-medium">{event.title}</p>
+                          {event.schoolName ? <p className="mt-0.5 text-muted-foreground">{event.schoolName}</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        ) : (
         <Calendar
           events={calendarModel.events}
           eventDates={calendarModel.eventDates}
@@ -441,6 +505,7 @@ export function AcademicCalendarWorkspace() {
           onVisibleRangeChange={handleVisibleRangeChange}
           onLoadEventDetail={handleLoadEventDetail}
         />
+        )}
       </div>
     </div>
   );

@@ -606,7 +606,8 @@ test("class schedule list heading avoids explanatory copy", async () => {
   const navigationSource = await readSource("src/lib/navigation.ts");
 
   assert.match(source, />수업 목록<\/p>/);
-  assert.match(source, /<Badge variant="outline">\{model\.rows\.length\}개<\/Badge>/);
+  assert.match(source, /<Badge variant="outline">전체 \{Number\(data\.stats\.total \|\| 0\)\}개<\/Badge>/);
+  assert.match(source, /<Badge variant="outline">표시 \{model\.rows\.length\}개<\/Badge>/);
   assert.doesNotMatch(source, /스프레드시트형 보기/);
   assert.doesNotMatch(source, />행 \{model\.rows\.length\}<\/div>/);
   assert.match(navigationSource, /match: "\/admin\/class-schedule"/);

@@ -235,7 +235,7 @@ test("annual board saves empty-cell drafts through the resilient academic event 
   assert.doesNotMatch(source, /\.insert\(\[result\.payload\]\)/);
 });
 
-test("annual board treats synthetic subject exam entry ids as new academic events", async () => {
+test("annual board edits renderer-derived subject rows through their exact parent event", async () => {
   const [source, eventFormSource] = await Promise.all([
     readSource("src/features/operations/academic-annual-board-workspace.tsx"),
     readSource("src/app/admin/calendar/components/event-form.tsx"),
@@ -249,12 +249,24 @@ test("annual board treats synthetic subject exam entry ids as new academic event
     getPersistedAcademicEventId("ebc14155-43d9-4a76-8ee2-a555e389c787"),
     "ebc14155-43d9-4a76-8ee2-a555e389c787",
   );
-  assert.match(source, /const persistedId = getPersistedAcademicEventId\(entry\.id\)/);
+  assert.match(source, /const persistedId = getPersistedAcademicEventId\(resolveAnnualBoardEntryParentId\(entry\)\)/);
+  assert.match(source, /const detail = persistedId \? await loadEventDetail\(persistedId\)/);
   assert.match(source, /sourceId: persistedId/);
   assert.match(source, /const existingId = getPersistedAcademicEventId\(eventData\.id\)/);
   assert.doesNotMatch(source, /const existingId = text\(eventData\.id\)/);
   assert.match(eventFormSource, /const persistedEventId = getPersistedAcademicEventId\(event\?\.sourceId \|\| event\?\.id\)/);
   assert.match(eventFormSource, /id: persistedEventId/);
+});
+
+test("annual board read-save preserves the exact event embedded metadata envelope", async () => {
+  const source = await readSource("src/features/operations/academic-annual-board-workspace.tsx");
+
+  assert.match(source, /prepareAcademicEventMetadataForWrite\(eventData, activeScienceAreas\)/);
+  assert.match(source, /note: metadataResult\.note/);
+  assert.match(source, /embeddedNoteMeta: \(detail\?\.embeddedNoteMeta/);
+  assert.match(source, /textbookScope: text\(detail\?\.textbookScope\) \|\| entry\.textbookScope \|\| ""/);
+  assert.match(source, /subtextbookScope: text\(detail\?\.subtextbookScope\) \|\| entry\.subtextbookScope \|\| ""/);
+  assert.doesNotMatch(source, /textbookScope: "",\s*subtextbookScope: ""/);
 });
 
 test("annual board strips internal metadata from displayed note sections", async () => {

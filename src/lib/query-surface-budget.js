@@ -17,6 +17,7 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "get_operations_annual_board_v1",
   "get_academic_event_detail_v1",
   "get_class_schedule_v1",
+  "get_operations_class_lesson_design_detail_v1",
   "list_operations_catalogs_v1",
   "list_active_science_subject_areas_v1",
 ])

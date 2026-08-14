@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
-import { createOperationsReadService } from "./operations-read-service.js";
+import { appendOperationsPageIfCurrent, createOperationsReadService } from "./operations-read-service.js";
 
 export type OperationsKeysetCursor = {
   sortValues: [string];
@@ -61,6 +61,8 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
   const [error, setError] = useState<string | null>(null);
   const requestRevisionRef = useRef(0);
   const fingerprint = requestFingerprint(request);
+  const fingerprintRef = useRef(fingerprint);
+  fingerprintRef.current = fingerprint;
   const stableRequest = useMemo(
     () => JSON.parse(fingerprint) as OperationsWorkspaceRequest,
     [fingerprint],
@@ -113,32 +115,31 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
     if (!service || stableRequest.mode !== "class_schedule" || loadingMore) return;
     const currentPage = data?.page as { rows?: unknown[]; nextCursor?: OperationsKeysetCursor | null; hasMore?: boolean } | undefined;
     if (!currentPage?.hasMore || !currentPage.nextCursor) return;
+    const expectedRevision = requestRevisionRef.current;
+    const expectedFingerprint = fingerprint;
     setLoadingMore(true);
     setError(null);
     try {
       const next = await service.load({ ...stableRequest, cursor: currentPage.nextCursor }) as OperationsResult;
-      const nextPage = next.page as { rows?: Array<{ id?: string }>; nextCursor?: OperationsKeysetCursor | null; hasMore?: boolean };
-      const existingRows = Array.isArray(currentPage.rows) ? currentPage.rows as Array<{ id?: string }> : [];
-      const seen = new Set(existingRows.map((row) => String(row?.id || "")));
-      const appended = (Array.isArray(nextPage?.rows) ? nextPage.rows : []).filter((row) => {
-        const id = String(row?.id || "");
-        if (!id || seen.has(id)) return false;
-        seen.add(id);
-        return true;
-      });
-      setData((current) => current ? {
-        ...current,
-        page: {
-          ...nextPage,
-          rows: [...existingRows, ...appended],
-        },
-      } : current);
+      setData((current) => appendOperationsPageIfCurrent({
+        current,
+        next,
+        expectedRevision,
+        currentRevision: requestRevisionRef.current,
+        expectedFingerprint,
+        currentFingerprint: fingerprintRef.current,
+      }));
     } catch (fetchError) {
-      setError(fetchError instanceof Error ? fetchError.message : "Unknown error");
+      if (
+        requestRevisionRef.current === expectedRevision &&
+        fingerprintRef.current === expectedFingerprint
+      ) {
+        setError(fetchError instanceof Error ? fetchError.message : "Unknown error");
+      }
     } finally {
       setLoadingMore(false);
     }
-  }, [data?.page, loadingMore, service, stableRequest]);
+  }, [data?.page, fingerprint, loadingMore, service, stableRequest]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -153,6 +154,10 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
     (input: { classId: string; dateFrom: string; dateTo: string }) => service?.loadClassScheduleDetail(input) ?? Promise.reject(new Error("operations_client_missing")),
     [service],
   );
+  const loadClassLessonDesignDetail = useCallback(
+    (classId: string) => service?.loadClassLessonDesignDetail(classId) ?? Promise.reject(new Error("operations_client_missing")),
+    [service],
+  );
 
   return {
     data,
@@ -164,5 +169,6 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
     loadMore,
     loadEventDetail,
     loadClassScheduleDetail,
+    loadClassLessonDesignDetail,
   };
 }
