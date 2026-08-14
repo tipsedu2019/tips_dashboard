@@ -64,6 +64,16 @@ function text(value: unknown) {
   return String(value || "").trim();
 }
 
+const hasClassScheduleListSummaryChange = (
+  currentDetail: Record<string, unknown> | null,
+  nextDetail: Record<string, unknown> | null,
+) => {
+  const currentClass = (currentDetail?.classItem || currentDetail || {}) as Record<string, unknown>;
+  const nextClass = (nextDetail?.classItem || nextDetail || {}) as Record<string, unknown>;
+  return ["name", "title", "subject", "grade", "teacher", "teacherName", "classroom", "classroomName", "status", "termId", "termName", "scheduleLabel", "syncGroupId"]
+    .some((key) => text(currentClass[key]) !== text(nextClass[key]));
+};
+
 function getLessonMonthRange(monthKey: string) {
   if (!/^\d{4}-\d{2}$/.test(monthKey)) return null;
   const [year, month] = monthKey.split("-").map(Number);
@@ -3015,6 +3025,20 @@ export function ClassScheduleWorkspace() {
       ? { classId: selectedRow.id, ...activeLessonMonthRange, refreshKey: normalizedScheduleRefreshNonce }
       : null,
   );
+  const refreshSelectedLessonDetail = useCallback(async () => {
+    const classId = text(selectedRow?.id);
+    if (!classId) return;
+    const currentDetail = lessonDesignDetail;
+    const detail = await loadClassLessonDesignDetail(classId) as Record<string, unknown>;
+    if (text((detail.classItem as Record<string, unknown> | undefined)?.id) !== classId) {
+      throw new Error("수업 상세를 다시 확인해 주세요.");
+    }
+    setLessonDesignDetail(detail as Record<string, unknown>);
+    setNormalizedScheduleRefreshNonce((current) => current + 1);
+    if (currentDetail && hasClassScheduleListSummaryChange(currentDetail, detail)) {
+      await refresh();
+    }
+  }, [lessonDesignDetail, loadClassLessonDesignDetail, refresh, selectedRow?.id]);
   const normalizedGenerationContext = useMemo(() => (
     normalizedScheduleRead.status === "ready" && normalizedScheduleRead.value.source === "normalized" && activeLessonMonthRange
       ? { classId: selectedRow?.id || "", expectedScheduleRevision: Number(normalizedScheduleRead.value.data.scheduleRevision || 0), ...activeLessonMonthRange }
@@ -3819,14 +3843,13 @@ export function ClassScheduleWorkspace() {
         return next;
       });
       setLessonDesignSaveNotice("일정 변경을 저장했습니다.");
-      setNormalizedScheduleRefreshNonce((current) => current + 1);
-      await refresh();
+      await refreshSelectedLessonDetail();
     } catch (error) {
       setLessonDesignSaveError(error instanceof Error ? error.message : "일정 저장에 실패했습니다.");
     } finally {
       setIsNormalizedLessonSessionSaving(false);
     }
-  }, [normalizedLessonSessionDraft, refresh]);
+  }, [normalizedLessonSessionDraft, refreshSelectedLessonDetail]);
   const handleLessonSessionStateChange = useCallback(
     (session: (typeof selectedLessonSession), nextState: "active" | "exception" | "makeup" | "tbd") => {
       const sessionDate = resolveLessonSessionDraftDate(session);
@@ -4196,19 +4219,23 @@ export function ClassScheduleWorkspace() {
             sessionKeys: normalizedContentContext.sessionKeys,
           }),
         });
-        setNormalizedScheduleRefreshNonce((current) => current + 1);
       } else {
         const { error: updateError } = await client
           .from("classes")
           .update({ schedule_plan: lessonPlanForSave })
-          .eq("id", text(selectedRow.id));
+          .select("id")
+          .eq("id", text(selectedRow.id))
+          .order("id")
+          .limit(1)
+          .abortSignal(AbortSignal.timeout(8_000))
+          .retry(false);
 
         if (updateError) {
           throw updateError;
         }
       }
 
-      await refresh();
+      await refreshSelectedLessonDetail();
       setLessonDesignSaveNotice(normalizedContentContext ? "수업 내용을 저장했습니다." : "수업계획을 저장했습니다.");
     } catch (saveError) {
       setLessonDesignSaveError(
@@ -4217,7 +4244,7 @@ export function ClassScheduleWorkspace() {
     } finally {
       setIsLessonDesignSaving(false);
     }
-  }, [lessonPlanForSave, normalizedContentContext, refresh, selectedRow]);
+  }, [lessonPlanForSave, normalizedContentContext, refreshSelectedLessonDetail, selectedRow]);
 
   const previewLessonSessionGeneration = useCallback(async () => {
     if (!supabase || !normalizedGenerationContext) return;
@@ -4245,15 +4272,14 @@ export function ClassScheduleWorkspace() {
       const result = await action.generateSessions({ ...normalizedGenerationContext, reason: null });
       setGenerationPreview(null);
       setLessonDesignSaveNotice(`추가 ${Number((result as Record<string, unknown>)?.generatedCount || 0)} · 기존 ${Number(generationPreview.existingCount || 0)} · 확인 필요 ${Number(generationPreview.resourceConflictCount || 0)}`);
-      setNormalizedScheduleRefreshNonce((current) => current + 1);
-      await refresh();
+      await refreshSelectedLessonDetail();
     } catch (error) {
       setLessonDesignSaveError(error instanceof Error ? error.message : "일정 생성이 실패했습니다. 미리보기를 다시 확인하세요.");
       setGenerationPreview(null);
     } finally {
       setGenerationSaving(false);
     }
-  }, [generationPreview, normalizedGenerationContext, refresh]);
+  }, [generationPreview, normalizedGenerationContext, refreshSelectedLessonDetail]);
   const openLessonDesignForRow = useCallback(
     (
       row: Record<string, unknown> | null,

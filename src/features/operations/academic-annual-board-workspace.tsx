@@ -1184,18 +1184,25 @@ export function AcademicAnnualBoardWorkspace() {
     [activeScienceAreas, data, selectedSemester, selectedYear],
   );
 
-  const allSchoolOptions = useMemo(
-    () =>
-      [...new Map(model.rows.map((row) => [text(row.schoolId), row])).values()]
-        .map((school) => ({
-          id: text(school.schoolId),
-          name: text(school.schoolName),
-          category: text(school.category) || "all",
-        }))
-        .filter((school) => school.id && school.name)
-        .sort((left, right) => left.name.localeCompare(right.name, "ko")),
-    [model.rows],
-  );
+  const catalogs = data?.catalogs as { academicSchools?: Array<Record<string, unknown>> } | undefined;
+  const allSchoolOptions = useMemo(() => {
+    const catalogSchools = Array.isArray(catalogs?.academicSchools) ? catalogs.academicSchools : [];
+    const rows = [
+      ...catalogSchools,
+      ...model.rows.map((row) => ({
+        id: text(row.schoolId),
+        name: text(row.schoolName),
+        category: text(row.category) || "all",
+      })),
+    ];
+    return [...new Map(rows.map((school) => [text(school.id), {
+      id: text(school.id),
+      name: text(school.name),
+      category: text(school.category) || "all",
+    }])).values()]
+      .filter((school) => school.id && school.name)
+      .sort((left, right) => left.name.localeCompare(right.name, "ko"));
+  }, [catalogs?.academicSchools, model.rows]);
 
   const typeOptions = useMemo(() => DEFAULT_ACADEMIC_EVENT_TYPES, []);
   const activeGradeColumnLabels = useMemo(

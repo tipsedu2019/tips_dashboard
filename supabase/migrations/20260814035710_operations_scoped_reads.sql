@@ -248,18 +248,82 @@ begin
     ) as grade_token
     where pg_catalog.coalesce(detail.exam_date, event.start) >= pg_catalog.make_date(p_academic_year, 1, 1)
       and pg_catalog.coalesce(detail.exam_date, event.start) < pg_catalog.make_date(p_academic_year + 1, 1, 1)
+  ), fallback_subject_entries as (
+    select
+      base.id,
+      'material-fallback:' || base.id::text || ':' || subject_entry.entry_type as entry_id,
+      base.parent_event_id,
+      'academic_event_material_fallback'::text as source_kind,
+      base.school_id,
+      base.school_name,
+      base.category,
+      base.grade,
+      subject_entry.entry_type,
+      subject_entry.title,
+      base.term_source_title,
+      base.start_date,
+      base.end_date,
+      base.note_preview,
+      base.event_meta,
+      base.science_area_label,
+      null::text as scope_summary,
+      '[]'::jsonb as display_sections
+    from base_events as base
+    cross join lateral (
+      values
+        ('영어시험일'::text, '영어'::text, '영어 시험일 및 시험범위'::text),
+        ('수학시험일'::text, '수학'::text, '수학 시험일 및 시험범위'::text),
+        ('과학시험일'::text, '과학'::text, '과학 시험일 및 시험범위'::text)
+    ) as subject_entry(entry_type, subject, title)
+    where base.entry_type = '시험기간'
+      and (
+        pg_catalog.nullif(pg_catalog.btrim(base.event_meta ->> 'examTerm'), '') is not null
+        or base.term_source_title ilike '%중간%'
+        or base.term_source_title ilike '%기말%'
+      )
+      and (
+      exists (
+        select 1
+        from public.academic_exam_material_plans as material_plan
+        join public.academic_exam_material_items as material_item on material_item.plan_id = material_plan.id
+        where material_plan.academic_year = p_academic_year
+          and material_plan.school_id = base.school_id
+          and material_plan.grade = base.grade
+          and material_plan.subject = subject_entry.subject
+        limit 1
+      )
+      or exists (
+        select 1
+        from public.academy_curriculum_plans as curriculum_plan
+        join public.academy_curriculum_materials as curriculum_material on curriculum_material.plan_id = curriculum_plan.id
+        where curriculum_plan.academic_year = p_academic_year
+          and curriculum_plan.academy_grade = base.grade
+          and curriculum_plan.subject = subject_entry.subject
+        limit 1
+      )
+      )
+      and not exists (
+        select 1
+        from subject_events as subject_event
+        where subject_event.parent_event_id = base.parent_event_id
+          and subject_event.grade = base.grade
+          and subject_event.entry_type = subject_entry.entry_type
+      )
   ), bounded_entries as (
     select entry.*
     from (
       select * from base_events
       union all
       select * from subject_events
+      union all
+      select * from fallback_subject_entries
     ) as entry
     order by entry.start_date asc, entry.id asc
     limit 4001
   ), projected as (
     select
       bounded_entries.*,
+      material_sections.sections as material_sections,
       pg_catalog.jsonb_build_object(
         'id', bounded_entries.entry_id,
         'parentEventId', bounded_entries.parent_event_id,
@@ -301,11 +365,16 @@ begin
         'scienceAreaLabel', bounded_entries.science_area_label,
         'textbookScope', bounded_entries.event_meta ->> 'textbookScope',
         'subtextbookScope', bounded_entries.event_meta ->> 'subtextbookScope',
-        'textbookScopes', case when pg_catalog.jsonb_typeof(bounded_entries.event_meta -> 'textbookScopes') = 'array' then bounded_entries.event_meta -> 'textbookScopes' else '[]'::jsonb end,
-        'subtextbookScopes', case when pg_catalog.jsonb_typeof(bounded_entries.event_meta -> 'subtextbookScopes') = 'array' then bounded_entries.event_meta -> 'subtextbookScopes' else '[]'::jsonb end,
-        'embeddedNoteMeta', bounded_entries.event_meta,
+        'textbookScopes', pg_catalog.coalesce((select pg_catalog.jsonb_agg(scope_item.value) from (select value from pg_catalog.jsonb_array_elements(case when pg_catalog.jsonb_typeof(bounded_entries.event_meta -> 'textbookScopes') = 'array' then bounded_entries.event_meta -> 'textbookScopes' else '[]'::jsonb end) as value limit 4) as scope_item), '[]'::jsonb),
+        'subtextbookScopes', pg_catalog.coalesce((select pg_catalog.jsonb_agg(scope_item.value) from (select value from pg_catalog.jsonb_array_elements(case when pg_catalog.jsonb_typeof(bounded_entries.event_meta -> 'subtextbookScopes') = 'array' then bounded_entries.event_meta -> 'subtextbookScopes' else '[]'::jsonb end) as value limit 4) as scope_item), '[]'::jsonb),
+        'displayMeta', pg_catalog.jsonb_strip_nulls(pg_catalog.jsonb_build_object(
+          'examTerm', bounded_entries.event_meta ->> 'examTerm',
+          'scienceAreaKey', bounded_entries.event_meta ->> 'scienceAreaKey',
+          'scienceAreaLabel', bounded_entries.science_area_label
+        )),
         'metaBadges', case when bounded_entries.scope_summary is null then '[]'::jsonb else pg_catalog.jsonb_build_array(bounded_entries.scope_summary) end,
-        'displaySections', bounded_entries.display_sections,
+        'materialSections', material_sections.sections,
+        'displaySections', bounded_entries.display_sections || material_sections.sections,
         'notePreview', bounded_entries.note_preview,
         'color', case
           when bounded_entries.entry_type in ('시험기간', '영어시험일', '수학시험일', '과학시험일') then 'bg-rose-500'
@@ -316,6 +385,37 @@ begin
         'revision', 0
       ) as entry_data
     from bounded_entries
+    cross join lateral (
+      select pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('label', material.label, 'items', pg_catalog.jsonb_build_array(material.value)) order by material.sort_order, material.value), '[]'::jsonb) as sections
+      from (
+        select
+          case
+            when pg_catalog.lower(material_item.material_category) like any (array['%textbook%', '%main%', '%교과서%']) then '교과서'
+            when pg_catalog.lower(material_item.material_category) like any (array['%supplement%', '%sub%', '%부교재%']) then '부교재'
+            else '자료'
+          end as label,
+          pg_catalog.concat_ws(' · ', pg_catalog.nullif(pg_catalog.btrim(material_item.title), ''), pg_catalog.nullif(pg_catalog.btrim(material_item.publisher), ''), pg_catalog.nullif(pg_catalog.btrim(material_item.scope_detail), '')) as value,
+          material_item.sort_order
+        from public.academic_exam_material_plans as material_plan
+        join public.academic_exam_material_items as material_item on material_item.plan_id = material_plan.id
+        where material_plan.academic_year = p_academic_year
+          and material_plan.school_id = bounded_entries.school_id
+          and material_plan.grade = bounded_entries.grade
+          and material_plan.subject = case bounded_entries.entry_type when '영어시험일' then '영어' when '수학시험일' then '수학' when '과학시험일' then '과학' else null end
+        union all
+        select
+          '부교재' as label,
+          pg_catalog.concat_ws(' · ', pg_catalog.nullif(pg_catalog.btrim(curriculum_material.title), ''), pg_catalog.nullif(pg_catalog.btrim(curriculum_material.publisher), ''), pg_catalog.nullif(pg_catalog.btrim(curriculum_material.note), '')) as value,
+          curriculum_material.sort_order
+        from public.academy_curriculum_plans as curriculum_plan
+        join public.academy_curriculum_materials as curriculum_material on curriculum_material.plan_id = curriculum_plan.id
+        where curriculum_plan.academic_year = p_academic_year
+          and curriculum_plan.academy_grade = bounded_entries.grade
+          and curriculum_plan.subject = case bounded_entries.entry_type when '영어시험일' then '영어' when '수학시험일' then '수학' when '과학시험일' then '과학' else null end
+        order by sort_order asc, value asc
+        limit 24
+      ) as material
+    ) as material_sections
   ), grouped as (
     select
       projected.school_id,
@@ -761,6 +861,7 @@ security invoker
 set search_path = ''
 as $function$
   select pg_catalog.jsonb_build_object(
+    'academicSchools', (select pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('id', catalog.id, 'name', catalog.name, 'category', catalog.category) order by catalog.name collate dashboard_private.ko_numeric, catalog.id), '[]'::jsonb) from (select school.id, school.name, school.category from public.academic_schools as school where pg_catalog.nullif(pg_catalog.btrim(school.name), '') is not null order by school.name collate dashboard_private.ko_numeric, school.id limit 200) as catalog),
     'teachers', (select pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('id', catalog.id, 'name', catalog.name, 'subjects', catalog.subjects, 'isVisible', catalog.is_visible) order by catalog.sort_order, catalog.name collate dashboard_private.ko_numeric, catalog.id), '[]'::jsonb) from (select teacher.id, teacher.name, teacher.subjects, teacher.is_visible, teacher.sort_order from public.teacher_catalogs as teacher where teacher.is_visible order by teacher.sort_order, teacher.name collate dashboard_private.ko_numeric, teacher.id limit 200) as catalog),
     'classrooms', (select pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('id', catalog.id, 'name', catalog.name, 'subjects', catalog.subjects, 'isVisible', catalog.is_visible) order by catalog.sort_order, catalog.name collate dashboard_private.ko_numeric, catalog.id), '[]'::jsonb) from (select classroom.id, classroom.name, classroom.subjects, classroom.is_visible, classroom.sort_order from public.classroom_catalogs as classroom where classroom.is_visible order by classroom.sort_order, classroom.name collate dashboard_private.ko_numeric, classroom.id limit 200) as catalog),
     'subjects', (select pg_catalog.coalesce(pg_catalog.jsonb_agg(value order by value collate dashboard_private.ko_numeric), '[]'::jsonb) from (select distinct class.subject as value from public.classes as class where pg_catalog.nullif(pg_catalog.btrim(class.subject), '') is not null order by value collate dashboard_private.ko_numeric limit 200) as subject)

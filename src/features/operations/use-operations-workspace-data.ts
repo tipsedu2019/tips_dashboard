@@ -94,13 +94,9 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
         setDensityError(next);
         return;
       }
-      if (stableRequest.mode === "class_schedule") {
-        const catalogs = await service.loadCatalogs();
-        if (requestRevisionRef.current !== revision) return;
-        setData({ ...next, catalogs });
-      } else {
-        setData(next);
-      }
+      const catalogs = await service.loadCatalogs();
+      if (requestRevisionRef.current !== revision) return;
+      setData({ ...next, catalogs });
       setDensityError(null);
     } catch (fetchError) {
       if (requestRevisionRef.current !== revision) return;

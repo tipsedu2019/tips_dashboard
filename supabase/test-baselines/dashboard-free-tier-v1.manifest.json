@@ -33,7 +33,7 @@
     {
       "fileName": "20260814035710_operations_scoped_reads.sql",
       "status": "candidate",
-      "sha256": "47d6af4718be42c95d402fe183a229d9709bc50e3523466d34a7b19b4a2cf67c"
+      "sha256": "0fadb63a8733b8a44c1940c20af553a0f2874b854250d0a05c9203a51a85d623"
     },
     {
       "fileName": "20260814062437_academic_scoped_reads.sql",

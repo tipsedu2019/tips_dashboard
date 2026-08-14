@@ -173,18 +173,25 @@ export function AcademicCalendarWorkspace() {
       cancelled = true;
     };
   }, []);
-  const schoolOptions = useMemo(
-    () =>
-      [...new Map(calendarRows.map((row) => [text(row.schoolId), row])).values()]
-        .map((row) => ({
-          id: text(row.schoolId),
-          name: text(row.schoolName),
-          category: text(row.category) || "all",
-        }))
-        .filter((school) => school.id && school.name)
-        .sort((left, right) => left.name.localeCompare(right.name, "ko")),
-    [calendarRows],
-  );
+  const catalogs = data?.catalogs as { academicSchools?: Array<Record<string, unknown>> } | undefined;
+  const schoolOptions = useMemo(() => {
+    const availableSchools = Array.isArray(catalogs?.academicSchools) ? catalogs.academicSchools : [];
+    const rows = [
+      ...availableSchools,
+      ...calendarRows.map((row) => ({
+        id: text(row.schoolId),
+        name: text(row.schoolName),
+        category: text(row.category) || "all",
+      })),
+    ];
+    return [...new Map(rows.map((school) => [text(school.id), {
+      id: text(school.id),
+      name: text(school.name),
+      category: text(school.category) || "all",
+    }])).values()]
+      .filter((school) => school.id && school.name)
+      .sort((left, right) => left.name.localeCompare(right.name, "ko"));
+  }, [calendarRows, catalogs?.academicSchools]);
 
   const calendarModel = useMemo(
     () => {

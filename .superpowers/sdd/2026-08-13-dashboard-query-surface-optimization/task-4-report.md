@@ -168,3 +168,22 @@ Round-5 source evidence:
 - No SQL changed. Candidate migration and manifest remain byte-identical at SHA-256 `47d6af4718be42c95d402fe183a229d9709bc50e3523466d34a7b19b4a2cf67c`.
 
 No round-5 DB runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, worker, webhook, provider request, and recipient receipt remain unclaimed; the manifest stays `candidate`.
+
+## Final review remediation
+
+Final-review RED was **0 pass / 4 fail** for the annual embedded-metadata projection, empty-scope school catalog, annual material/fallback renderer rows, and class-detail mutation refresh boundary.
+
+- The annual list now emits bounded display scalars, scope badges, and capped material sections only. Full `embeddedNoteMeta` remains available exclusively from the exact event-detail RPC.
+- The authenticated, invoker-scoped catalog now returns up to 200 academic schools and calendar/annual editors merge it with visible rows, so a first event can select a school even when the current range or year is empty.
+- Annual renderer entries now include bounded exam-material/curriculum sections and synthesise missing subject date entries only when matching material exists, retaining parent event ID, split grade, and board entry type for exact-detail routing.
+- Lesson-detail saves re-read and patch the selected exact detail plus visible schedule range. The 30+1 list refresh runs only if a displayed list-summary field changed; the legacy direct write is exact-key, bounded, timed out at eight seconds, and non-retrying.
+
+Final-review source evidence:
+
+- New regressions: **4/4 GREEN** after the recorded **0/4 RED**.
+- Task 4 focused calendar/annual/class suite: **63/63 GREEN**.
+- Exact operations plus query-budget verification: **80/80 GREEN**.
+- TypeScript, targeted ESLint, operations worktree query guard, candidate hash, and `git diff --check`: GREEN.
+- Candidate migration SHA-256: `0fadb63a8733b8a44c1940c20af553a0f2874b854250d0a05c9203a51a85d623`.
+
+No DB runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, worker, webhook, provider request, and recipient receipt remain unclaimed; the manifest stays `candidate`.

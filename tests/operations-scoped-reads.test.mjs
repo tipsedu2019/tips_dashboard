@@ -562,6 +562,56 @@ test("operations migration enforces invoker ACLs, range density, annual density,
   assert.doesNotMatch(classListBody, /schedule_plan/i);
 });
 
+test("annual list projects only bounded display metadata while exact detail retains the full envelope", async () => {
+  const sql = await readFile(new URL("supabase/migrations/20260814035710_operations_scoped_reads.sql", root), "utf8");
+  const annualBody = sql.match(/create function public\.get_operations_annual_board_v1[\s\S]*?\n\$function\$;/i)?.[0] || "";
+  const detailBody = sql.match(/create function public\.get_academic_event_detail_v1[\s\S]*?\n\$function\$;/i)?.[0] || "";
+
+  assert.equal(annualBody.includes("'embeddedNoteMeta'"), false);
+  assert.match(annualBody, /'displayMeta'/);
+  assert.match(annualBody, /'displaySections'/);
+  assert.match(detailBody, /'embeddedNoteMeta'/);
+});
+
+test("calendar and annual editors use the bounded authenticated academic-school catalog", async () => {
+  const [sql, hook, calendar, annual] = await Promise.all([
+    readFile(new URL("supabase/migrations/20260814035710_operations_scoped_reads.sql", root), "utf8"),
+    readFile(new URL("src/features/operations/use-operations-workspace-data.ts", root), "utf8"),
+    readFile(new URL("src/features/operations/academic-calendar-workspace.tsx", root), "utf8"),
+    readFile(new URL("src/features/operations/academic-annual-board-workspace.tsx", root), "utf8"),
+  ]);
+
+  assert.match(sql, /'academicSchools'/);
+  assert.match(sql, /from public\.academic_schools as school/i);
+  assert.match(sql, /academic_schools[\s\S]*?limit 200/i);
+  assert.match(hook, /const catalogs = await service\.loadCatalogs\(\)/);
+  assert.match(calendar, /catalogs\?\.academicSchools/);
+  assert.match(annual, /catalogs\?\.academicSchools/);
+});
+
+test("annual RPC keeps bounded material sections and fallback subject rows grouped by parent grade and board type", async () => {
+  const sql = await readFile(new URL("supabase/migrations/20260814035710_operations_scoped_reads.sql", root), "utf8");
+  const annualBody = sql.match(/create function public\.get_operations_annual_board_v1[\s\S]*?\n\$function\$;/i)?.[0] || "";
+
+  assert.match(annualBody, /material_sections/i);
+  assert.match(annualBody, /academic_exam_material_plans/i);
+  assert.match(annualBody, /academic_exam_material_items/i);
+  assert.match(annualBody, /fallback_subject_entries/i);
+  assert.match(annualBody, /parent_event_id[\s\S]*grade[\s\S]*entry_type/i);
+  assert.match(annualBody, /'materialSections'/);
+});
+
+test("class detail mutations re-read the selected detail and visible range before conditional list invalidation", async () => {
+  const source = await readFile(new URL("src/features/operations/class-schedule-workspace.tsx", root), "utf8");
+
+  assert.match(source, /const refreshSelectedLessonDetail = useCallback/);
+  assert.match(source, /await loadClassLessonDesignDetail\(classId\)/);
+  assert.match(source, /setLessonDesignDetail\(detail as Record<string, unknown>\)/);
+  assert.match(source, /const hasClassScheduleListSummaryChange/);
+  assert.match(source, /if \(currentDetail && hasClassScheduleListSummaryChange\(currentDetail, detail\)\) \{\s*await refresh\(\)/);
+  assert.match(source, /await refreshSelectedLessonDetail\(\)/);
+});
+
 test("operations workspaces issue mode requests and expose dense-range recovery without the legacy fan-out", async () => {
   const [hook, calendar, annual, schedule] = await Promise.all([
     readFile(new URL("src/features/operations/use-operations-workspace-data.ts", root), "utf8"),
