@@ -26,7 +26,7 @@ test("audit diff migration is additive, bounded, and replaces all audit triggers
   for (const table of ["teacher_catalogs", "profiles", "students", "classes", "textbooks", "class_schedule_slots", "class_lesson_sessions"]) assert.match(sql, new RegExp(`dashboard_audit_${table}`));
 });
 
-test("audit patch helpers are private immutable invoker functions and manifest binds the candidate bytes", async () => {
+test("audit patch helpers are private immutable invoker functions and manifest binds the final bytes", async () => {
   const [source, manifestSource] = await Promise.all([readFile(migrationUrl, "utf8"), readFile(manifestUrl, "utf8")]);
   const sql = normalized(source); const manifest = JSON.parse(manifestSource);
   for (const helper of ["dashboard_audit_forward_patch_v2", "dashboard_audit_reverse_patch_v2"]) {
@@ -34,8 +34,13 @@ test("audit patch helpers are private immutable invoker functions and manifest b
     assert.match(sql, new RegExp(`revoke all on function dashboard_private\\.${helper}\\(jsonb, jsonb\\) from public, anon, authenticated, service_role`));
   }
   assert.match(sql, /create role dashboard_audit_writer_v2 nologin nosuperuser nocreatedb nocreaterole noinherit noreplication nobypassrls/u);
+  assert.match(sql, /grant dashboard_audit_writer_v2 to postgres;[\s\S]*alter function dashboard_private\.log_dashboard_audit_event_v2\(\) owner to dashboard_audit_writer_v2/u);
+  assert.match(sql, /grant create on schema dashboard_private to dashboard_audit_writer_v2[\s\S]*alter sequence dashboard_private\.dashboard_audit_event_sequence_v2 owner to dashboard_audit_writer_v2[\s\S]*revoke create on schema dashboard_private from dashboard_audit_writer_v2/u);
+  assert.doesNotMatch(sql, /auth\.(?:uid|jwt)\(\)/u);
+  assert.match(sql, /current_setting\('request\.jwt\.claims', true\)/u);
+  assert.doesNotMatch(sql, /grant dashboard_audit_writer_v2 to (?:anon|authenticated|service_role)/u);
   assert.match(sql, /create policy dashboard_audit_logs_writer_select on public\.dashboard_audit_logs for select to dashboard_audit_writer_v2 using \(true\)/u);
   assert.match(sql, /revoke all on function dashboard_private\.log_dashboard_audit_event_v2\(\) from public, anon, authenticated, service_role/u);
   const row = manifest.orderedNewMigrations.find(({ fileName }) => fileName === "20260814115116_dashboard_audit_diff_format.sql");
-  assert.deepEqual(row, { fileName: "20260814115116_dashboard_audit_diff_format.sql", status: "candidate", sha256: createHash("sha256").update(source).digest("hex") });
+  assert.deepEqual(row, { fileName: "20260814115116_dashboard_audit_diff_format.sql", status: "final", sha256: createHash("sha256").update(source).digest("hex") });
 });

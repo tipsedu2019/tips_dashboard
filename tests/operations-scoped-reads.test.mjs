@@ -560,13 +560,23 @@ test("operations migration enforces invoker ACLs, range density, annual density,
   assert.match(sql, /exam-detail:/i);
   assert.match(sql, /'examTerm'/i);
   assert.match(sql, /regexp_split_to_table[\s\S]*grade/i);
-  assert.match(sql, /pg_catalog\.coalesce\(grouped\.school_id::text, pg_catalog\.md5\(grouped\.school_name\)\) \|\| ':' \|\| grouped\.grade/);
+  assert.match(sql, /coalesce\(grouped\.school_id::text, pg_catalog\.md5\(grouped\.school_name\)\) \|\| ':' \|\| grouped\.grade/);
   assert.match(sql, /storedNote/i);
   assert.match(sql, /get_operations_class_lesson_design_detail_v1/i);
   assert.match(sql, /get_operations_lesson_textbook_candidate_page_v1/i);
   assert.match(sql, /term_source_title/i);
   const classListBody = sql.match(/create function public\.get_operations_class_schedule_page_v1[\s\S]*?\n\$function\$;/i)?.[0] || "";
   assert.doesNotMatch(classListBody, /schedule_plan/i);
+});
+
+test("operations academic-event reads use the production single-date schema", async () => {
+  const sql = await readFile(new URL("supabase/migrations/20260814035710_operations_scoped_reads.sql", root), "utf8");
+
+  assert.doesNotMatch(sql, /\bevent\.(?:start|end)\b/i);
+  assert.doesNotMatch(sql, /\bevent\.school\b/i);
+  assert.doesNotMatch(sql, /jsonb_agg\(value\s+order\s+by\s+value/i);
+  assert.match(sql, /\bevent\.date\b/i);
+  assert.match(sql, /\bschool\.name\b/i);
 });
 
 test("annual list projects only bounded display metadata while exact detail retains the full envelope", async () => {

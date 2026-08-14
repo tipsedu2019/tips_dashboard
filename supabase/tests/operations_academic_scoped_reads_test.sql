@@ -5,6 +5,15 @@ set local timezone = 'Asia/Seoul';
 set local statement_timeout = '45s';
 set local lock_timeout = '5s';
 
+create function pg_temp.dashboard_explain_v1(p_sql text)
+returns jsonb language plpgsql as $probe$
+declare v_plan jsonb;
+begin
+  execute 'explain (analyze, buffers, format json) ' || p_sql into v_plan;
+  return v_plan;
+end
+$probe$;
+
 select has_function('public','get_operations_calendar_range_v1',array['date','date'],'operations calendar range RPC exists');
 select has_function('public','get_operations_annual_board_v1',array['integer'],'operations annual board RPC exists');
 select has_function('public','get_operations_class_schedule_page_v1',array['jsonb','text','uuid','integer'],'operations class page RPC exists');
@@ -37,7 +46,7 @@ with expected(signature) as (
 )
 select ok(
   not (select proc.prosecdef from pg_catalog.pg_proc proc where proc.oid = signature::pg_catalog.regprocedure)
-  and (select proc.proconfig = array['search_path=']::text[] from pg_catalog.pg_proc proc where proc.oid = signature::pg_catalog.regprocedure)
+  and (select proc.proconfig in (array['search_path=']::text[], array['search_path=""']::text[]) from pg_catalog.pg_proc proc where proc.oid = signature::pg_catalog.regprocedure)
   and pg_catalog.has_function_privilege('authenticated',signature,'EXECUTE')
   and not pg_catalog.has_function_privilege('anon',signature,'EXECUTE')
   and not pg_catalog.has_function_privilege('public',signature,'EXECUTE'),
@@ -65,17 +74,29 @@ select throws_ok(
   '22023','operations_textbook_candidate_request_invalid','textbook candidate page requires a 30-row client page'
 );
 
+insert into auth.users(
+  id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,
+  raw_app_meta_data,raw_user_meta_data,created_at,updated_at
+)
+values (
+  '92000000-0000-4000-8000-000000000900','00000000-0000-0000-0000-000000000000',
+  'authenticated','authenticated','operations-scoped-reads@example.invalid',crypt('local-only',gen_salt('bf')),now(),
+  '{"provider":"email","providers":["email"]}'::jsonb,'{}'::jsonb,now(),now()
+);
+update public.profiles set role = 'admin' where id = '92000000-0000-4000-8000-000000000900';
+select pg_catalog.set_config('request.jwt.claim.sub','92000000-0000-4000-8000-000000000900',true);
+
 insert into public.academic_schools(id,name,category)
 values
   ('92000000-0000-4000-8000-000000000001','__operations_dense_school__','high'),
   ('92000000-0000-4000-8000-000000000002','__operations_annual_school__','middle');
 
-insert into public.academic_events(id,title,school_id,school,type,start,"end",grade,note)
+insert into public.academic_events(id,title,school_id,type,date,grade,note)
 select
   ('92010000-0000-4000-8000-' || pg_catalog.lpad(ordinal::text,12,'0'))::uuid,
   '__operations_calendar_dense__ ' || ordinal,
   '92000000-0000-4000-8000-000000000001',
-  '__operations_dense_school__','팁스','2199-01-15','2199-01-15','고1','bounded fixture'
+  '팁스','2199-01-15','고1','bounded fixture'
 from pg_catalog.generate_series(1,2001) ordinal;
 
 select is(
@@ -94,12 +115,12 @@ select is(
   'calendar density error suggests a seven-day range'
 );
 
-insert into public.academic_events(id,title,school_id,school,type,start,"end",grade,note)
+insert into public.academic_events(id,title,school_id,type,date,grade,note)
 select
   ('92020000-0000-4000-8000-' || pg_catalog.lpad(ordinal::text,12,'0'))::uuid,
   '__operations_annual_dense__ ' || ordinal,
   '92000000-0000-4000-8000-000000000002',
-  '__operations_annual_school__','방학·휴일·기타','2198-06-01','2198-06-01','중2','bounded fixture'
+  '방학·휴일·기타','2198-06-01','중2','bounded fixture'
 from pg_catalog.generate_series(1,4001) ordinal;
 
 select is(
@@ -108,16 +129,16 @@ select is(
   'annual board returns no partial board above 4000 entries'
 );
 
-insert into public.academic_events(id,title,school_id,school,type,start,"end",grade,note)
+insert into public.academic_events(id,title,school_id,type,date,grade,note)
 values (
   '92021000-0000-4000-8000-000000000001','__operations_annual_meta__ 중간',
-  '92000000-0000-4000-8000-000000000002','__operations_annual_school__',
-  '시험기간','2197-04-10','2197-04-10','고1, 고2',
+  '92000000-0000-4000-8000-000000000002',
+  '시험기간','2197-04-10','고1, 고2',
   E'보이는 메모\n\n[[TIPS_META]] {"examTerm":"1학기 중간","scienceAreaKey":"physics","legacyFlag":"keep"}'
 ), (
   '92021000-0000-4000-8000-000000000002','2학기 기말고사',
-  '92000000-0000-4000-8000-000000000002','__operations_annual_school__',
-  '시험기간','2197-09-20','2197-09-20','고3','legacy title only'
+  '92000000-0000-4000-8000-000000000002',
+  '시험기간','2197-09-20','고3','legacy title only'
 );
 
 insert into public.academic_event_exam_details(
@@ -137,20 +158,20 @@ insert into public.textbooks(
 )
 values (
   '92023000-0000-4000-8000-000000000001','영어 본교재','영어 본교재',
-  '영어','high','고1',array['high']::text[],array['고1']::text[],
-  '영어','본교재 출판',10000,'{}'::text[],'[]'::jsonb,'active'
+  'english','high','h1',array['high']::text[],array['h1']::text[],
+  'english','본교재 출판',10000,'{}'::jsonb,'[]'::jsonb,'active'
 ), (
   '92023000-0000-4000-8000-000000000002','섞이면 안 되는 고1 수학 교재','섞이면 안 되는 고1 수학 교재',
-  '수학','high','고1',array['high']::text[],array['고1']::text[],
-  '수학','오연결 출판',10000,'{}'::text[],'[]'::jsonb,'active'
+  'math','high','h1',array['high']::text[],array['h1']::text[],
+  'math','오연결 출판',10000,'{}'::jsonb,'[]'::jsonb,'active'
 ), (
   '92023000-0000-4000-8000-000000000003','섞이면 안 되는 고3 수학 교재','섞이면 안 되는 고3 수학 교재',
-  '수학','high','고3',array['high']::text[],array['고3']::text[],
-  '수학','오연결 출판',10000,'{}'::text[],'[]'::jsonb,'active'
+  'math','high','h3',array['high']::text[],array['h3']::text[],
+  'math','오연결 출판',10000,'{}'::jsonb,'[]'::jsonb,'active'
 ), (
   '92023000-0000-4000-8000-000000000004','명시 연결 고3 수학 교재','명시 연결 고3 수학 교재',
-  '수학','high','고3',array['high']::text[],array['고3']::text[],
-  '수학','정확한 출판',10000,'{}'::text[],'[]'::jsonb,'active'
+  'math','high','h3',array['high']::text[],array['h3']::text[],
+  'math','정확한 출판',10000,'{}'::jsonb,'[]'::jsonb,'active'
 );
 
 insert into public.academy_curriculum_plans(
@@ -307,8 +328,15 @@ select is(
   'event exact detail returns the lossless stored note payload'
 );
 
+insert into public.academic_subject_settings(subject,is_active,registration_create_enabled,grade_levels,sort_order)
+values ('과학',true,true,array['고1','고2','고3'],30)
+on conflict (subject) do update set is_active=true;
+insert into public.academic_subject_areas(subject,area_key,label,sort_order,is_active)
+values ('과학','physics','물리학',20,true)
+on conflict (subject,area_key) do update set is_active=true,label=excluded.label,sort_order=excluded.sort_order;
+
 insert into public.classes(
-  id,name,class_type,subject,grade,teacher,schedule,room,capacity,fee,status,
+  id,name,class_type,subject,subject_area_key,grade,teacher,schedule,room,capacity,fee,status,
   student_ids,waitlist_ids,textbook_ids,lessons,schedule_plan
 )
 select
@@ -316,6 +344,7 @@ select
   '__operations_class__ ' || pg_catalog.lpad(ordinal::text,2,'0'),
   '정규',
   case when ordinal = 31 then '과학' else '수학' end,
+  case when ordinal = 31 then 'physics' else null end,
   '고2','검증 교사','월 18:00','검증실',12,320000,
   case when ordinal <= 20 then '수강' else '개강 예정' end,
   '[]'::jsonb,'[]'::jsonb,'[]'::jsonb,'[]'::jsonb,'{}'::jsonb
@@ -349,8 +378,10 @@ select is(
 );
 
 select ok(
-  (select pg_catalog.count(*) from pg_catalog.pg_get_functiondef('public.get_operations_class_schedule_page_v1(jsonb,text,uuid,integer)'::pg_catalog.regprocedure)::text source
-   where source !~* 'schedule_plan') = 1,
+  pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef('public.get_operations_class_schedule_page_v1(jsonb,text,uuid,integer)'::pg_catalog.regprocedure),
+    'schedule_plan'
+  ) = 0,
   'class list function does not read the schedule plan detail payload'
 );
 
@@ -359,6 +390,38 @@ select is(
   '{}',
   'class lesson design exact detail hydrates the stored legacy schedule plan'
 );
+
+with evidence as (
+  select
+    pg_temp.dashboard_explain_v1($sql$
+      select public.get_operations_class_schedule_page_v1(
+        jsonb_build_object('termId',null,'search','__operations_class__','subject',null,'grade','고2','teacher','검증 교사','syncGroupId',null),null,null,30
+      )
+    $sql$) as first_plan,
+    pg_temp.dashboard_explain_v1($sql$
+      with boundary as (
+        select row ->> 'sort_key' sort_key,(row ->> 'id')::uuid id
+        from operations_class_first_page
+        order by row ->> 'sort_key' collate dashboard_private.ko_numeric,(row ->> 'id')::uuid offset 29 limit 1
+      )
+      select public.get_operations_class_schedule_page_v1(
+        jsonb_build_object('termId',null,'search','__operations_class__','subject',null,'grade','고2','teacher','검증 교사','syncGroupId',null),boundary.sort_key,boundary.id,30
+      ) from boundary
+    $sql$) as next_plan,
+    pg_temp.dashboard_explain_v1($sql$
+      select public.get_operations_class_lesson_design_detail_v1('92030000-0000-4000-8000-000000000001'::uuid)
+    $sql$) as detail_plan,
+    pg_catalog.octet_length(public.get_operations_class_schedule_page_v1(
+      pg_catalog.jsonb_build_object('termId',null,'search','__operations_class__','subject',null,'grade','고2','teacher','검증 교사','syncGroupId',null),null,null,30
+    )::text) as first_bytes
+)
+select ok(
+  first_plan #>> '{0,Execution Time}' is not null
+  and next_plan #>> '{0,Execution Time}' is not null
+  and detail_plan #>> '{0,Execution Time}' is not null
+  and first_bytes between 1 and 262144,
+  'operations first page, continuation, and exact detail emit ANALYZE/BUFFERS plans with a bounded response'
+) from evidence;
 
 select finish();
 rollback;

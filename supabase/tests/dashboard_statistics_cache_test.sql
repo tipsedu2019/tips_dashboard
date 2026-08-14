@@ -61,7 +61,7 @@ with signatures(signature) as (
 select ok(
   (
     select function_row.prosecdef
-      and function_row.proconfig = array['search_path=']::text[]
+      and function_row.proconfig in (array['search_path=']::text[], array['search_path=""']::text[])
     from pg_catalog.pg_proc function_row
     where function_row.oid = signature::pg_catalog.regprocedure
   ),

@@ -11,6 +11,12 @@ const runnerUrl = new URL("../scripts/run-isolated-supabase-db-tests.mjs", impor
 const docker = "/usr/local/bin/docker";
 const postgres17Image = "public.ecr.aws/supabase/postgres:17.6.1.156";
 
+function canonical(value) {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
+  return JSON.stringify(value === undefined ? null : value);
+}
+
 function captureScopeFixture(functions = ["public.get_dashboard_summary_sources_v1()"]) {
   return {
     version: 1, schemas: ["public"], relations: ["public.classes"], types: ["public.class_status"], sequences: ["public.classes_id_seq"],
@@ -79,16 +85,23 @@ async function writeCaptureScope(root) {
   await writeFile(join(root, "scripts/fixtures/dashboard-free-tier-baseline-scope.json"), JSON.stringify(captureScopeFixture()));
 }
 
-async function activateCanonicalBaseline(root, captureId = "f".repeat(16)) {
+async function activateCanonicalBaseline(root) {
   const base = join(root, "supabase/test-baselines");
+  const [manifestSource, baseline, catalog, parity] = await Promise.all([
+    readFile(join(base, "dashboard-free-tier-v1.manifest.json"), "utf8"),
+    readFile(join(base, "dashboard-free-tier-v1.sql"), "utf8"),
+    readFile(join(base, "dashboard-free-tier-origin-main-catalog.json"), "utf8"),
+    readFile(join(root, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"), "utf8"),
+  ]);
+  const captureId = createHash("sha256").update(canonical({ baseline, catalog, manifest: JSON.parse(manifestSource), parity })).digest("hex").slice(0, 16);
   const capture = join(base, "dashboard-free-tier-v1-captures", captureId);
   await mkdir(capture, { recursive: true });
-  for (const [source, target] of [
-    [join(base, "dashboard-free-tier-v1.manifest.json"), join(capture, "manifest.json")],
-    [join(base, "dashboard-free-tier-v1.sql"), join(capture, "baseline.sql")],
-    [join(base, "dashboard-free-tier-origin-main-catalog.json"), join(capture, "catalog.json")],
-    [join(root, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"), join(capture, "parity.sql")],
-  ]) await writeFile(target, await readFile(source));
+  for (const [contents, target] of [
+    [manifestSource, join(capture, "manifest.json")],
+    [baseline, join(capture, "baseline.sql")],
+    [catalog, join(capture, "catalog.json")],
+    [parity, join(capture, "parity.sql")],
+  ]) await writeFile(target, contents);
   await writeFile(join(base, "dashboard-free-tier-v1.active.json"), JSON.stringify({ captureSetVersion: 1, captureId, artifactPaths: { catalog: "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", baseline: "supabase/test-baselines/dashboard-free-tier-v1.sql", parityTest: "supabase/tests/dashboard_free_tier_catalog_parity_test.sql" } }));
 }
 
@@ -178,16 +191,53 @@ test("isolated DB runner only plans without the explicit local authorization con
   const plan = parseIsolatedDbArguments(["--test", "supabase/tests/dashboard_daily_brief_test.sql"]);
   assert.deepEqual(plan.tests, ["supabase/tests/dashboard_daily_brief_test.sql"]);
   assert.equal(plan.execute, false);
+  const probePlan = parseIsolatedDbArguments(["--probe", "scripts/probe-dashboard-audit-chain-concurrency.mjs"]);
+  assert.deepEqual(probePlan.probes, ["scripts/probe-dashboard-audit-chain-concurrency.mjs"]);
   assert.throws(
     () => parseIsolatedDbArguments(["--execute", "--authorized", "--request-id", "x", "--test", "../bad.sql"]),
     /isolated_supabase_db_target_invalid/,
   );
 });
 
+test("isolated DB runner exposes an explicit final-only lifecycle gate", async () => {
+  const { parseIsolatedDbArguments } = await import(runnerUrl.href);
+  const plan = parseIsolatedDbArguments(["--require-final"]);
+  assert.equal(plan.requireFinal, true);
+});
+
+test("isolated DB runner allocates four distinct loopback ports by default", async () => {
+  const { allocateLoopbackPorts } = await import(runnerUrl.href);
+  const ports = await allocateLoopbackPorts(4);
+  assert.equal(ports.length, 4);
+  assert.equal(new Set(ports).size, 4);
+  assert.ok(ports.every((port) => Number.isInteger(port) && port >= 1024 && port <= 65535));
+});
+
+test("isolated DB config keeps project_id at the top level", async () => {
+  const { buildIsolatedSupabaseConfig } = await import(runnerUrl.href);
+  const config = buildIsolatedSupabaseConfig("tips_isolated_fixture", { api: 54321, db: 54322, studio: 54323, inbucket: 54324 });
+  assert.match(config, /^project_id = "tips_isolated_fixture"\n/u);
+  assert.ok(config.indexOf("project_id") < config.indexOf("[api]"));
+  assert.doesNotMatch(config, /\[analytics\][\s\S]*project_id/u);
+});
+
 test("isolated DB runner refuses canonical files when no active capture-set pointer exists", async (t) => {
   const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
   const root = await makeRepo(t);
   await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: [] }), /isolated_supabase_db_baseline_review_required/);
+});
+
+test("isolated DB runner rejects parity drift inside the active immutable capture", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const root = await makeRepo(t);
+  await activateCanonicalBaseline(root);
+  const pointer = JSON.parse(await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.active.json"), "utf8"));
+  const parity = join(root, "supabase/test-baselines/dashboard-free-tier-v1-captures", pointer.captureId, "parity.sql");
+  await writeFile(parity, "-- drift\n");
+  await assert.rejects(
+    runIsolatedSupabaseDbTests({ root, argv: [] }),
+    /isolated_supabase_db_capture_identity_drift/,
+  );
 });
 
 test("isolated DB runner refuses draft or hash-drift migrations before a local process", async () => {
@@ -205,6 +255,24 @@ test("isolated DB runner refuses draft or hash-drift migrations before a local p
   );
 });
 
+test("isolated DB final gate rejects candidate lifecycle and accepts the same exact final bytes", async (t) => {
+  const { runIsolatedSupabaseDbTests, sha256 } = await import(runnerUrl.href);
+  const root = await makeRepo(t);
+  const manifestPath = join(root, "supabase/test-baselines/dashboard-free-tier-v1.manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.orderedNewMigrations = [{ fileName: "20260814000000_fixture.sql", status: "candidate", sha256: sha256("select 1;\n") }];
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await activateCanonicalBaseline(root);
+  await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--require-final"] }), /isolated_supabase_db_final_manifest_required/);
+
+  manifest.orderedNewMigrations[0].status = "final";
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await activateCanonicalBaseline(root);
+  const plan = await runIsolatedSupabaseDbTests({ root, argv: ["--require-final"] });
+  assert.equal(plan.status, "plan");
+  assert.equal(plan.manifest.orderedNewMigrations[0].status, "final");
+});
+
 test("isolated DB runner binds the source-controlled baseline and catalog to manifest hashes", async (t) => {
   const { validateBaselineArtifactHashes } = await import(runnerUrl.href);
   const root = await makeRepo(t);
@@ -216,6 +284,41 @@ test("isolated DB runner binds the source-controlled baseline and catalog to man
     validateBaselineArtifactHashes({ root, manifest }),
     /isolated_supabase_db_baseline_hash_drift/,
   );
+});
+
+test("isolated DB runner rejects an unlisted migration absent from the reviewed production ledger", async (t) => {
+  const { validateManifestMigrations } = await import(runnerUrl.href);
+  const root = await mkdtemp(join(tmpdir(), "tips-dashboard-manifest-completeness-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, "supabase/migrations"), { recursive: true });
+  const listedFile = "20260814000001_listed.sql";
+  const omittedFile = "20260814000002_omitted.sql";
+  const appliedLaterFile = "20260814000003_already_applied.sql";
+  const listedSql = "select 1;\n";
+  const omittedSql = "select 2;\n";
+  const appliedLaterSql = "select 3;\n";
+  await writeFile(join(root, "supabase/migrations", listedFile), listedSql);
+  await writeFile(join(root, "supabase/migrations", omittedFile), omittedSql);
+  await writeFile(join(root, "supabase/migrations", appliedLaterFile), appliedLaterSql);
+  const manifest = {
+    orderedNewMigrations: [{
+      fileName: listedFile,
+      status: "candidate",
+      sha256: createHash("sha256").update(listedSql).digest("hex"),
+    }],
+  };
+
+  await assert.rejects(
+    validateManifestMigrations({ root, manifest, baselineVersions: ["20260814000003"] }),
+    /isolated_supabase_db_migration_manifest_incomplete/,
+  );
+
+  manifest.orderedNewMigrations.push({
+    fileName: omittedFile,
+    status: "candidate",
+    sha256: createHash("sha256").update(omittedSql).digest("hex"),
+  });
+  await assert.doesNotReject(validateManifestMigrations({ root, manifest, baselineVersions: ["20260814000003"] }));
 });
 
 test("reviewed catalog capture activates an immutable set and publishes canonical copies", async (t) => {
@@ -236,7 +339,10 @@ test("reviewed catalog capture activates an immutable set and publishes canonica
     fetch: async () => new Response(JSON.stringify({
       serverMajor: 17,
       migrationLedger: [{ version: "20260813093446", statements: ["select 1;"], name: "registration_observation_legacy_schedule_slot_catalogs" }],
-      catalog: completeCatalogFixture(),
+      catalog: completeCatalogFixture().map((entry) => entry.objectKind === "table" ? {
+        ...entry,
+        fingerprint: JSON.stringify({ columns: [{ name: "id", type: "text", notNull: true }], acl: null }),
+      } : entry),
     }), { status: 201 }),
   });
   const pointer = JSON.parse(await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.active.json"), "utf8"));
@@ -249,10 +355,10 @@ test("reviewed catalog capture activates an immutable set and publishes canonica
   const canonicalParity = await readFile(join(root, output[2]), "utf8");
   assert.equal(result.captureStatus, "reviewed");
   assert.equal(catalog.catalog[0].definition, undefined);
-  assert.equal(catalog.catalog.find((entry) => entry.objectKind === "table" && entry.identity === "classes").definitionSha256, createHash("sha256").update("create table public.classes (id text primary key)").digest("hex"));
+  assert.equal(catalog.catalog.find((entry) => entry.objectKind === "table" && entry.identity === "classes").definitionSha256, createHash("sha256").update('{"acl": null, "columns": [{"name": "id", "type": "text", "notNull": true}]}').digest("hex"));
   assert.equal(catalog.migrationLedgerSha256, createHash("sha256").update(JSON.stringify([{ name: "registration_observation_legacy_schedule_slot_catalogs", statementsSha256: createHash("sha256").update('["select 1;"]').digest("hex"), version: "20260813093446" }])).digest("hex"));
   assert.equal(JSON.stringify(catalog).includes("select 1;"), false);
-  assert.match(baseline, /create table public\.classes/u);
+  assert.match(baseline, /create table if not exists public\."classes"/u);
   assert.match(parity, /pg_get_functiondef/u);
   assert.match(parity, /catalog trigger public\.classes\.before\.insert\.01\.normalize fingerprint/u);
   assert.equal(canonicalCatalog, JSON.stringify(catalog, null, 2) + "\n");
@@ -260,6 +366,37 @@ test("reviewed catalog capture activates an immutable set and publishes canonica
   assert.equal(canonicalParity, parity);
   assert.deepEqual(pointer.artifactPaths, { catalog: output[0], baseline: output[1], parityTest: output[2] });
   assert.equal(pointer.captureSetVersion, 1);
+});
+
+test("reviewed capture identity changes when the approved migration manifest changes", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const root = await makeRepo(t);
+  await writeCaptureScope(root);
+  const originMainSha = "e".repeat(40);
+  const argv = ["--mode", "execute", "--authorized", "--request-id", "manifest-capture-identity", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"];
+  const options = {
+    root,
+    argv,
+    env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+    gitOriginMainSha: async () => originMainSha,
+    fetch: async () => new Response(JSON.stringify({
+      serverMajor: 17,
+      migrationLedger: [{ version: "20260813000000", statements: ["select 1;"], name: "baseline" }],
+      catalog: completeCatalogFixture(),
+    }), { status: 201 }),
+  };
+
+  await captureDashboardFreeTierCatalog(options);
+  const pointerPath = join(root, "supabase/test-baselines/dashboard-free-tier-v1.active.json");
+  const first = JSON.parse(await readFile(pointerPath, "utf8"));
+  const manifestPath = join(root, "supabase/test-baselines/dashboard-free-tier-v1.manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.orderedNewMigrations.push({ fileName: "20260814000000_added.sql", status: "candidate", sha256: "a".repeat(64) });
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  await captureDashboardFreeTierCatalog(options);
+  const second = JSON.parse(await readFile(pointerPath, "utf8"));
+  assert.notEqual(second.captureId, first.captureId);
 });
 
 test("capture leaves all target artifacts unchanged for redirect, 405, and malformed JSON", async (t) => {
@@ -284,7 +421,7 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   const { runIsolatedSupabaseDbTests, sha256 } = await import(runnerUrl.href);
   const root = await makeRepo(t);
   const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"));
-  const reviewedCatalog = JSON.stringify({ captureStatus: "reviewed", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101", catalog: [] });
+  const reviewedCatalog = JSON.stringify({ captureStatus: "reviewed", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101", migrationLedger: [], catalog: [] });
   await writeFile(join(root, "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json"), reviewedCatalog);
   await mkdir(join(root, "supabase/migrations"), { recursive: true });
   await mkdir(join(root, "tests"), { recursive: true });
@@ -296,7 +433,13 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
     orderedNewMigrations: [{ fileName: "20260814000000_candidate.sql", status: "candidate", sha256: sha256("select 1;\n") }],
   }));
   await activateCanonicalBaseline(root);
+  const pointer = JSON.parse(await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.active.json"), "utf8"));
+  const capture = join(root, "supabase/test-baselines/dashboard-free-tier-v1-captures", pointer.captureId);
+  const originalParity = await readFile(join(capture, "parity.sql"));
+  const originalSmoke = await readFile(join(root, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"));
+  const originalProbe = await readFile(join(root, "tests/probe.mjs"));
   const calls = [];
+  const staged = { baseline: false, parity: false, smoke: false, migration: false, probe: false };
   const result = await runIsolatedSupabaseDbTests({
     root,
     argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f", "--test", "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql", "--probe", "tests/probe.mjs"],
@@ -308,6 +451,20 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
     })(),
     executeProcess: async (invocation) => {
       calls.push(invocation);
+      if (invocation.args[0] === "init") {
+        await writeFile(join(capture, "baseline.sql"), "-- mutated after verification\n");
+        await writeFile(join(capture, "parity.sql"), "-- mutated after verification\n");
+        await writeFile(join(root, "supabase/migrations/20260814000000_candidate.sql"), "select 2;\n");
+        await writeFile(join(root, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"), "-- mutated after verification\n");
+        await writeFile(join(root, "tests/probe.mjs"), "process.exit(9);\n");
+      }
+      if (invocation.args[0] === "db") staged.baseline = (await readFile(join(invocation.cwd, "supabase/migrations/00000000000000_dashboard_free_tier_test_baseline.sql"))).equals(baseline);
+      if (invocation.args[0] === "test" && invocation.args.includes("supabase/tests/dashboard_free_tier_catalog_parity_test.sql")) {
+        staged.parity = (await readFile(join(invocation.cwd, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"))).equals(originalParity);
+        staged.smoke = (await readFile(join(invocation.cwd, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"))).equals(originalSmoke);
+      }
+      if (invocation.args[0] === "migration") staged.migration = (await readFile(join(invocation.cwd, "supabase/migrations/20260814000000_candidate.sql"), "utf8")) === "select 1;\n";
+      if (invocation.command === process.execPath) staged.probe = (await readFile(invocation.args[0])).equals(originalProbe);
       if (invocation.args[0] === "status") return { code: 0, stdout: JSON.stringify({ DB_URL: "postgresql://postgres:postgres@127.0.0.1:55433/postgres" }), stderr: "" };
       return { code: 0, stdout: "", stderr: "" };
     },
@@ -317,8 +474,13 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   assert.equal(calls.filter((call) => call.args[0] === "stop").length, 1);
   assert.equal(calls.find((call) => call.command === process.execPath).env.TASK_LOCAL_DB_URL.includes("127.0.0.1"), true);
   assert.equal(calls.find((call) => call.command === process.execPath).env.SUPABASE_DATABASE_READ_TOKEN, undefined);
+  assert.deepEqual(staged, { baseline: true, parity: true, smoke: true, migration: true, probe: true });
   assert.match(await readFile(result.runtime.configPath, "utf8"), /project_id = "tips_supabase_db_qa_a1b2c3d4e5f6"/u);
   t.after(() => rm(result.runtime.tempRoot, { recursive: true, force: true }));
+  await writeFile(join(capture, "baseline.sql"), baseline);
+  await writeFile(join(capture, "parity.sql"), originalParity);
+  await writeFile(join(root, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"), originalSmoke);
+  await writeFile(join(root, "tests/probe.mjs"), originalProbe);
   await writeFile(join(root, "supabase/migrations/20260814000000_candidate.sql"), "select 2;\n");
   await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_migration_hash_drift/);
 });
@@ -327,8 +489,9 @@ test("runner stages each requested SQL file after init and before target pgtap",
   const { runIsolatedSupabaseDbTests, sha256 } = await import(runnerUrl.href);
   const root = await makeRepo(t);
   const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"));
-  const catalog = JSON.stringify({ captureStatus: "reviewed", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101", catalog: [] });
+  const catalog = JSON.stringify({ captureStatus: "reviewed", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101", migrationLedger: [], catalog: [] });
   await writeFile(join(root, "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json"), catalog);
+  await mkdir(join(root, "supabase/migrations"), { recursive: true });
   await mkdir(join(root, "supabase/tests"), { recursive: true });
   await writeFile(join(root, "supabase/tests/target_test.sql"), "select 1;\n");
   await writeFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.manifest.json"), JSON.stringify({ baselineVersion: "dashboard-free-tier-v1", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101", baselineSha256: sha256(baseline), catalogSha256: sha256(catalog), requiredObjectSignatures: [], orderedNewMigrations: [] }));
@@ -491,6 +654,453 @@ test("function identities canonicalize named and unnamed arguments but reject di
   );
 });
 
+test("catalog normalization hashes schema fingerprints without treating ordinary type and column names as leaked values", async () => {
+  const { normalizeDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const scope = captureScopeFixture();
+  const fingerprint = JSON.stringify({
+    columns: [
+      { name: "phone", type: "text", notNull: false },
+      { name: "token_hash", type: "uuid", notNull: true },
+    ],
+    acl: null,
+  });
+  const fixture = completeCatalogFixture().map((entry) => (
+    entry.objectKind === "table"
+      ? { objectKind: entry.objectKind, schema: entry.schema, identity: entry.identity, fingerprint }
+      : entry
+  ));
+
+  const normalized = normalizeDashboardFreeTierCatalog(fixture, scope);
+  const table = normalized.find((entry) => entry.objectKind === "table" && entry.identity === "classes");
+  assert.equal(table.definition, null);
+  assert.equal(table.definitionSha256, createHash("sha256").update(fingerprint).digest("hex"));
+
+  assert.throws(
+    () => normalizeDashboardFreeTierCatalog(
+      completeCatalogFixture().map((entry) => (
+        entry.objectKind === "table" ? { ...entry, definition: "create table public.classes(secret_token text)" } : entry
+      )),
+      scope,
+    ),
+    /dashboard_free_tier_catalog_scope_drift/,
+  );
+});
+
+test("catalog normalization scopes view fingerprints separately from tables", async () => {
+  const { normalizeDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const scope = {
+    version: 1,
+    schemas: [],
+    relations: [],
+    views: ["public.ops_registration_appointment_calendar"],
+    types: [],
+    sequences: [],
+    collations: [],
+    functions: [],
+    roles: [],
+    triggerTables: [],
+    requiredKinds: ["view"],
+    forbiddenTerms: ["secret"],
+  };
+  const fingerprint = JSON.stringify({ definition: " SELECT 1 AS id;", options: ["security_invoker=true"], acl: null });
+
+  const normalized = normalizeDashboardFreeTierCatalog([{
+    objectKind: "view",
+    schema: "public",
+    identity: "ops_registration_appointment_calendar",
+    fingerprint,
+  }], scope);
+  assert.equal(normalized[0].definition, null);
+  assert.equal(normalized[0].definitionSha256, createHash("sha256").update(fingerprint).digest("hex"));
+
+  assert.throws(
+    () => normalizeDashboardFreeTierCatalog([{
+      objectKind: "view",
+      schema: "public",
+      identity: "unreviewed_view",
+      fingerprint,
+    }], scope),
+    /dashboard_free_tier_catalog_scope_drift/,
+  );
+});
+
+test("reviewed capture builds the replay baseline from exact production migration ledger statements", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const root = await makeRepo(t);
+  await writeCaptureScope(root);
+  const originMainSha = "d".repeat(40);
+  await captureDashboardFreeTierCatalog({
+    root,
+    argv: ["--mode", "execute", "--authorized", "--request-id", "ledger-baseline-capture", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
+    env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+    gitOriginMainSha: async () => originMainSha,
+    fetch: async () => new Response(JSON.stringify({
+      serverMajor: 17,
+      migrationLedger: [
+        { version: "20260813000000", statements: ["create table public.from_ledger(id bigint)"], name: "from_ledger" },
+        { version: "20260813000001", statements: ["alter table public.from_ledger add column note text"], name: "from_ledger_note" },
+      ],
+      catalog: completeCatalogFixture(),
+    }), { status: 201 }),
+  });
+
+  const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"), "utf8");
+  assert.equal(baseline, "create table public.from_ledger(id bigint);\nalter table public.from_ledger add column note text;\n");
+  assert.doesNotMatch(baseline, /create table public\.classes/u);
+});
+
+test("reviewed capture compares policy roles semantically and omits redundant OID-keyed grant rows", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const root = await makeRepo(t);
+  await writeCaptureScope(root);
+  const originMainSha = "7".repeat(40);
+  const catalog = completeCatalogFixture().map((entry) => {
+    if (entry.objectKind === "policy") return { ...entry, definition: undefined, fingerprint: JSON.stringify({ command: "r", roles: ["16485"], using: "true", check: null }) };
+    if (entry.objectKind === "grant") return { ...entry, identity: "classes.16485", definition: undefined, fingerprint: JSON.stringify({ acl: ["authenticated=r/postgres"], expanded: [{ grantee: "16485", privilege: "SELECT" }] }) };
+    return entry;
+  });
+  await captureDashboardFreeTierCatalog({
+    root,
+    argv: ["--mode", "execute", "--authorized", "--request-id", "stable-policy-role-capture", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
+    env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+    gitOriginMainSha: async () => originMainSha,
+    fetch: async () => new Response(JSON.stringify({ serverMajor: 17, migrationLedger: [], catalog }), { status: 201 }),
+  });
+  const published = JSON.parse(await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json"), "utf8"));
+  assert.equal(published.catalog.some((entry) => entry.objectKind === "grant"), false);
+  const policy = published.catalog.find((entry) => entry.objectKind === "policy");
+  assert.equal(policy.definitionSha256, createHash("sha256").update('{"check": null, "roles": ["authenticated"], "using": "true", "command": "r"}').digest("hex"));
+});
+
+test("final schema reconciliation restores current columns, policies, RLS, and triggers", async () => {
+  const { buildFinalSchemaReconciliation } = await import(captureUrl.href);
+  const definitions = [
+    { objectKind: "table", schema: "public", identity: "classes", replayFingerprint: JSON.stringify({ columns: [{ name: "current_note", type: "text", notNull: true }], acl: ["authenticated=r/postgres"] }) },
+    { objectKind: "default", schema: "public", identity: "classes.current_note", replayFingerprint: JSON.stringify({ expression: "''::text", generated: "" }) },
+    { objectKind: "constraint", schema: "public", identity: "classes.classes_note_check", replayFingerprint: JSON.stringify({ definition: "CHECK ((current_note <> ''::text))" }) },
+    { objectKind: "rls", schema: "public", identity: "classes", replayFingerprint: JSON.stringify({ enabled: true, forced: false }) },
+    { objectKind: "policy", schema: "public", identity: "classes.classes_read", replayFingerprint: JSON.stringify({ check: null, roles: ["authenticated"], using: "is_admin_or_staff()", command: "r" }) },
+    { objectKind: "trigger", schema: "public", identity: "classes.before.update.01.classes_touch", replayFingerprint: JSON.stringify({ definition: "CREATE TRIGGER classes_touch BEFORE UPDATE ON public.classes FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at()" }) },
+  ];
+  const sql = buildFinalSchemaReconciliation(definitions);
+  assert.match(sql, /add column if not exists "current_note" text/u);
+  assert.match(sql, /alter column "current_note" set not null/u);
+  assert.match(sql, /add constraint "classes_note_check" CHECK/u);
+  assert.match(sql, /enable row level security/u);
+  assert.match(sql, /create or replace function public\.is_admin_or_staff\(\)/u);
+  assert.match(sql, /create policy "classes_read".*to "authenticated" using \(is_admin_or_staff\(\)\)/u);
+  assert.match(sql, /CREATE TRIGGER classes_touch BEFORE UPDATE/u);
+  assert.match(sql, /grant select on table "public"\."classes" to "authenticated"/u);
+});
+
+test("candidate migrations do not schema-qualify PostgreSQL special SQL forms", async () => {
+  const root = new URL("..", import.meta.url);
+  const manifest = JSON.parse(await readFile(new URL("../supabase/test-baselines/dashboard-free-tier-v1.manifest.json", import.meta.url), "utf8"));
+  for (const migration of manifest.orderedNewMigrations) {
+    const sql = await readFile(new URL(`../supabase/migrations/${migration.fileName}`, import.meta.url), "utf8");
+    assert.doesNotMatch(sql, /\bpg_catalog\.(?:(?:coalesce|nullif|greatest|least|position|extract)\s*\(|(?:current_date|current_time|current_timestamp|localtime|localtimestamp|current_user|session_user|current_role)\b)/iu, migration.fileName);
+  }
+  assert.ok(root);
+});
+
+test("reviewed capture omits production data mutations while retaining schema statements", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const root = await makeRepo(t);
+  await writeCaptureScope(root);
+  const originMainSha = "6".repeat(40);
+  await captureDashboardFreeTierCatalog({
+    root,
+    argv: ["--mode", "execute", "--authorized", "--request-id", "schema-only-ledger", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
+    env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+    gitOriginMainSha: async () => originMainSha,
+    fetch: async () => new Response(JSON.stringify({
+      serverMajor: 17,
+      migrationLedger: [{
+        version: "20260813000000",
+        name: "mixed_schema_and_data",
+        statements: [
+          "create table public.fixture(id uuid primary key)",
+          "insert into public.fixture(id) values (gen_random_uuid())",
+          "update public.fixture set id = id",
+          "do $$ begin update public.fixture set id = id; if not found then raise exception 'fixture_missing'; end if; end $$",
+          "do $$ begin execute 'alter table public.fixture drop constraint if exists fixture_guard'; end $$",
+          "-- readiness check\ndo $$ begin create temporary table fixture_gate(id uuid) on commit drop; if not exists (select 1 from public.fixture) then raise exception 'fixture_missing_commented'; end if; end $$",
+          "select public.seed_fixture()",
+          "repository migration supabase/migrations/fixture.sql; sha256=deadbeef",
+          "begin; set local lock_timeout = '5s'; do $data$ begin update public.fixture set id = id; if not found then raise exception 'fixture_missing_compound'; end if; end $data$; create table public.fixture_companion(id uuid); commit",
+          "create function public.fixture_write() returns void language sql as $$ update public.fixture set id = id $$",
+        ],
+      }],
+      catalog: completeCatalogFixture(),
+    }), { status: 201 }),
+  });
+
+  const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"), "utf8");
+  assert.match(baseline, /create table public\.fixture/u);
+  assert.match(baseline, /create table public\.fixture_companion/u);
+  assert.match(baseline, /create function public\.fixture_write/u);
+  assert.match(baseline, /execute 'alter table public\.fixture drop constraint if exists fixture_guard'/u);
+  assert.doesNotMatch(baseline, /^insert into|^update public\.fixture/gmu);
+  assert.doesNotMatch(baseline, /fixture_missing_compound/u);
+  assert.doesNotMatch(baseline, /fixture_missing_commented/u);
+  assert.doesNotMatch(baseline, /select public\.seed_fixture/u);
+  assert.doesNotMatch(baseline, /repository migration|sha256=deadbeef/u);
+});
+
+test("reviewed capture bootstraps a legacy public table that is absent from the production migration ledger", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const root = await makeRepo(t);
+  await writeCaptureScope(root);
+  const originMainSha = "f".repeat(40);
+  const tableFingerprint = JSON.stringify({
+    columns: [
+      { name: "id", type: "uuid", notNull: true },
+      { name: "name", type: "text", notNull: false },
+    ],
+    acl: null,
+  });
+  const catalog = completeCatalogFixture().map((entry) => (
+    entry.objectKind === "table"
+      ? { objectKind: entry.objectKind, schema: entry.schema, identity: entry.identity, fingerprint: tableFingerprint }
+      : entry.objectKind === "constraint" && entry.identity === "classes.classes_pkey"
+        ? { objectKind: entry.objectKind, schema: entry.schema, identity: entry.identity, fingerprint: JSON.stringify({ definition: "PRIMARY KEY (id)" }) }
+      : entry
+  ));
+  await captureDashboardFreeTierCatalog({
+    root,
+    argv: ["--mode", "execute", "--authorized", "--request-id", "legacy-table-bootstrap", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
+    env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+    gitOriginMainSha: async () => originMainSha,
+    fetch: async () => new Response(JSON.stringify({
+      serverMajor: 17,
+      migrationLedger: [{ version: "20260813000000", statements: ["alter table public.classes add column if not exists status text"], name: "legacy_classes" }],
+      catalog,
+    }), { status: 201 }),
+  });
+
+  const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"), "utf8");
+  assert.match(baseline, /^create table if not exists public\."classes"/u);
+  assert.ok(baseline.indexOf('alter table public."classes" add constraint "classes_pkey" PRIMARY KEY (id);') < baseline.indexOf("alter table public.classes add column if not exists status text;"));
+  assert.match(baseline, /alter table public\."classes" add column if not exists "id" uuid;/u);
+});
+
+test("reviewed capture bootstraps public enum dependencies before legacy tables", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const root = await makeRepo(t);
+  const scope = captureScopeFixture();
+  scope.relations.push("public.generation_runs");
+  scope.types.push("public.subject_type");
+  await writeFile(join(root, "scripts/fixtures/dashboard-free-tier-baseline-scope.json"), JSON.stringify(scope));
+  const originMainSha = "e".repeat(40);
+  const catalog = [
+    ...completeCatalogFixture(),
+    {
+      objectKind: "type",
+      schema: "public",
+      identity: "subject_type",
+      fingerprint: JSON.stringify({ type: "subject_type", labels: ["english", "math"] }),
+    },
+    {
+      objectKind: "table",
+      schema: "public",
+      identity: "generation_runs",
+      fingerprint: JSON.stringify({
+        columns: [
+          { name: "id", type: "uuid", notNull: true },
+          { name: "subject", type: "subject_type", notNull: true },
+        ],
+        acl: null,
+      }),
+    },
+  ];
+  await captureDashboardFreeTierCatalog({
+    root,
+    argv: ["--mode", "execute", "--authorized", "--request-id", "legacy-enum-bootstrap", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
+    env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+    gitOriginMainSha: async () => originMainSha,
+    fetch: async () => new Response(JSON.stringify({
+      serverMajor: 17,
+      migrationLedger: [{ version: "20260813000000", statements: ["alter table public.generation_runs add column if not exists note text"], name: "legacy_generation_runs" }],
+      catalog,
+    }), { status: 201 }),
+  });
+
+  const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"), "utf8");
+  assert.match(baseline, /^create type public\."subject_type" as enum \('english', 'math'\);\n/u);
+  assert.ok(baseline.indexOf('create type public."subject_type"') < baseline.indexOf('create table if not exists public."generation_runs"'));
+});
+
+test("reviewed capture bootstraps a legacy table referenced before its later ledger create", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const root = await makeRepo(t);
+  const scope = captureScopeFixture();
+  scope.relations.push("public.academic_curriculum_profiles");
+  await writeFile(join(root, "scripts/fixtures/dashboard-free-tier-baseline-scope.json"), JSON.stringify(scope));
+  const originMainSha = "9".repeat(40);
+  const catalog = [
+    ...completeCatalogFixture(),
+    {
+      objectKind: "table",
+      schema: "public",
+      identity: "academic_curriculum_profiles",
+      fingerprint: JSON.stringify({ columns: [{ name: "id", type: "uuid", notNull: true }], acl: null }),
+    },
+  ];
+  await captureDashboardFreeTierCatalog({
+    root,
+    argv: ["--mode", "execute", "--authorized", "--request-id", "legacy-forward-reference", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
+    env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+    gitOriginMainSha: async () => originMainSha,
+    fetch: async () => new Response(JSON.stringify({
+      serverMajor: 17,
+      migrationLedger: [
+        { version: "20260813000000", statements: ["create table public.child(profile_id uuid references public.academic_curriculum_profiles(id))"], name: "child_first" },
+        { version: "20260813000001", statements: ["create table if not exists public.academic_curriculum_profiles(id uuid primary key)"], name: "profile_later" },
+      ],
+      catalog,
+    }), { status: 201 }),
+  });
+
+  const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"), "utf8");
+  assert.match(baseline, /^create table if not exists public\."academic_curriculum_profiles"/u);
+});
+
+test("reviewed capture restores legacy column defaults before ledger seed inserts", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const root = await makeRepo(t);
+  const scope = captureScopeFixture();
+  scope.relations.push("public.textbooks");
+  await writeFile(join(root, "scripts/fixtures/dashboard-free-tier-baseline-scope.json"), JSON.stringify(scope));
+  const originMainSha = "8".repeat(40);
+  const catalog = [
+    ...completeCatalogFixture(),
+    {
+      objectKind: "table",
+      schema: "public",
+      identity: "textbooks",
+      fingerprint: JSON.stringify({
+        columns: [
+          { name: "id", type: "uuid", notNull: true },
+          { name: "lessons", type: "jsonb", notNull: true },
+        ],
+        acl: null,
+      }),
+    },
+    {
+      objectKind: "default",
+      schema: "public",
+      identity: "textbooks.lessons",
+      fingerprint: JSON.stringify({ expression: "'[]'::jsonb" }),
+    },
+  ];
+  await captureDashboardFreeTierCatalog({
+    root,
+    argv: ["--mode", "execute", "--authorized", "--request-id", "legacy-default-bootstrap", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
+    env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+    gitOriginMainSha: async () => originMainSha,
+    fetch: async () => new Response(JSON.stringify({
+      serverMajor: 17,
+      migrationLedger: [{ version: "20260813000000", statements: ["insert into public.textbooks(id) values (gen_random_uuid())"], name: "legacy_seed" }],
+      catalog,
+    }), { status: 201 }),
+  });
+
+  const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"), "utf8");
+  assert.match(baseline, /alter table public\."textbooks" alter column "lessons" set default '\[\]'::jsonb;/u);
+  assert.doesNotMatch(baseline, /insert into public\.textbooks/u);
+});
+
+test("reviewed capture restores legacy stored generated columns without treating them as defaults", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const root = await makeRepo(t);
+  const scope = captureScopeFixture();
+  scope.relations.push("public.textbooks");
+  await writeFile(join(root, "scripts/fixtures/dashboard-free-tier-baseline-scope.json"), JSON.stringify(scope));
+  const originMainSha = "7".repeat(40);
+  const catalog = [
+    ...completeCatalogFixture(),
+    {
+      objectKind: "table", schema: "public", identity: "textbooks",
+      fingerprint: JSON.stringify({ columns: [
+        { name: "subject", type: "text", notNull: false },
+        { name: "subject_area_subject", type: "text", notNull: false },
+      ], acl: null }),
+    },
+    {
+      objectKind: "default", schema: "public", identity: "textbooks.subject_area_subject",
+      fingerprint: JSON.stringify({ expression: "CASE WHEN subject = 'science'::text THEN '과학'::text ELSE NULL::text END", generated: "s" }),
+    },
+  ];
+  await captureDashboardFreeTierCatalog({
+    root,
+    argv: ["--mode", "execute", "--authorized", "--request-id", "legacy-generated-bootstrap", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
+    env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+    gitOriginMainSha: async () => originMainSha,
+    fetch: async () => new Response(JSON.stringify({ serverMajor: 17, migrationLedger: [], catalog }), { status: 201 }),
+  });
+
+  const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"), "utf8");
+  assert.match(baseline, /"subject_area_subject" text generated always as \(CASE WHEN subject = 'science'::text THEN '과학'::text ELSE NULL::text END\) stored/u);
+  assert.doesNotMatch(baseline, /alter column "subject_area_subject" set default/u);
+});
+
+test("fixed catalog statement distinguishes stored generated expressions from defaults", async (t) => {
+  const { dashboardFreeTierCatalogStatement } = await import(captureUrl.href);
+  await withPostgres17(t, ({ psql }) => {
+    const created = psql("create table public.textbooks(subject text, subject_area_subject text generated always as (case when subject = 'science' then '과학' else null end) stored);");
+    assert.equal(created.status, 0, created.stderr);
+    const result = psql(dashboardFreeTierCatalogStatement());
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim());
+    const generated = payload.catalog.find((entry) => entry.objectKind === "default" && entry.identity === "textbooks.subject_area_subject");
+    assert.equal(JSON.parse(generated.fingerprint).generated, "s");
+  });
+});
+
+test("fixed catalog statement captures every public enum dependency", async (t) => {
+  const { dashboardFreeTierCatalogStatement } = await import(captureUrl.href);
+  await withPostgres17(t, ({ psql }) => {
+    const created = psql("create type public.subject_type as enum ('english', 'math');");
+    assert.equal(created.status, 0, created.stderr);
+    const result = psql(dashboardFreeTierCatalogStatement());
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim());
+    const type = payload.catalog.find((entry) => entry.objectKind === "type" && entry.identity === "subject_type");
+    assert.ok(type);
+    assert.deepEqual(JSON.parse(type.fingerprint).labels, ["english", "math"]);
+  });
+});
+
+test("fixed catalog statement captures the appointment calendar view fingerprint", async (t) => {
+  const { dashboardFreeTierCatalogStatement } = await import(captureUrl.href);
+  await withPostgres17(t, ({ psql }) => {
+    const created = psql("create view public.ops_registration_appointment_calendar with (security_invoker = true) as select 1::bigint as id;");
+    assert.equal(created.status, 0, created.stderr);
+    const result = psql(dashboardFreeTierCatalogStatement());
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim());
+    const view = payload.catalog.find((entry) => entry.objectKind === "view" && entry.identity === "ops_registration_appointment_calendar");
+    assert.ok(view);
+    const fingerprint = JSON.parse(view.fingerprint);
+    assert.match(fingerprint.definition, /select 1::bigint as id/iu);
+    assert.deepEqual(fingerprint.options, ["security_invoker=true"]);
+  });
+});
+
+test("fixed catalog statement gives duplicate constraint names stable distinct identities", async (t) => {
+  const { dashboardFreeTierCatalogStatement } = await import(captureUrl.href);
+  await withPostgres17(t, ({ psql }) => {
+    const created = psql("create table public.duplicate_constraint_identity_fixture_long(id bigint, left_value text, right_value text, constraint duplicate_constraint_name_for_left_value check (left_value is not null), constraint duplicate_constraint_name_for_right_value check (right_value is not null));");
+    assert.equal(created.status, 0, created.stderr);
+    const result = psql(dashboardFreeTierCatalogStatement());
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim());
+    const constraints = payload.catalog.filter((entry) => entry.objectKind === "constraint" && entry.identity.startsWith("duplicate_constraint_identity_fixture_long.duplicate_constraint_name_for_"));
+    assert.equal(constraints.length, 2);
+    assert.equal(new Set(constraints.map((entry) => entry.identity)).size, 2);
+  });
+});
+
 test("capture rejects non-canonical documented artifact paths before HTTP", async () => {
   const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
   const originMainSha = "a".repeat(40);
@@ -519,7 +1129,7 @@ test("generated parity uses pg catalog definitions and detects representative ob
   });
   const pointer = JSON.parse(await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.active.json"), "utf8"));
   const parity = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1-captures", pointer.captureId, "parity.sql"), "utf8");
-  for (const expression of ["pg_get_functiondef", "pg_get_constraintdef", "pg_get_indexdef", "pg_get_triggerdef", "pg_policy", "pg_roles", "aclexplode"]) assert.match(parity, new RegExp(expression));
+  for (const expression of ["pg_get_functiondef", "pg_get_constraintdef", "pg_get_indexdef", "pg_get_triggerdef", "pg_policy", "pg_roles", "relacl"]) assert.match(parity, new RegExp(expression));
   assert.doesNotMatch(parity, /is\(encode\(digest\(\$\$[a-f0-9]{64}:/u);
   await withPostgres17(t, ({ psql }) => {
     const roleFingerprint = '{"login": false, "inherit": true, "superuser": false}';

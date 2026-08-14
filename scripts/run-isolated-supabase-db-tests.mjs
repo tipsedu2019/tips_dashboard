@@ -1,26 +1,32 @@
 import { spawn } from "node:child_process";
 import { createHash, randomBytes as secureRandomBytes } from "node:crypto";
-import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createServer } from "node:net";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const SHA40 = /^[a-f0-9]{40}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
 const REQUEST_ID = /^[a-z0-9][a-z0-9-]{7,127}$/u;
 const SQL_TEST = /^supabase\/tests\/[a-z0-9_]+\.sql$/u;
-const PROBE = /^tests\/[a-z0-9_./-]+\.mjs$/u;
+const PROBE = /^(?:tests\/[a-z0-9_./-]+\.mjs|scripts\/probe-dashboard-audit-chain-concurrency\.mjs)$/u;
 const MIGRATION = /^(\d{14})_([a-z0-9_]+)\.sql$/u;
 const SUPABASE = "/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supabase/cli-darwin-arm64/bin/supabase";
 
 function fail(code) { throw new Error(code); }
 export function sha256(value) { return createHash("sha256").update(value).digest("hex"); }
+function canonical(value) {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
+  return JSON.stringify(value === undefined ? null : value);
+}
 function safeRepoPath(root, path) {
   if (typeof path !== "string" || path.includes("..") || relative(root, resolve(root, path)).startsWith("..")) fail("isolated_supabase_db_target_invalid");
   return resolve(root, path);
 }
-function safeConfig(projectId, ports) {
-  return `[api]\nenabled = true\nport = ${ports.api}\n[db]\nport = ${ports.db}\n[studio]\nenabled = false\n[inbucket]\nenabled = false\n[analytics]\nenabled = false\nproject_id = "${projectId}"\n`;
+export function buildIsolatedSupabaseConfig(projectId, ports) {
+  return `project_id = "${projectId}"\n[api]\nenabled = true\nport = ${ports.api}\n[db]\nport = ${ports.db}\n[studio]\nenabled = false\n[inbucket]\nenabled = false\n[analytics]\nenabled = false\n`;
 }
 function processResult(command, args, options = {}) {
   return new Promise((resolvePromise, rejectPromise) => {
@@ -34,11 +40,12 @@ function processResult(command, args, options = {}) {
 }
 
 export function parseIsolatedDbArguments(argv) {
-  const result = { execute: false, authorized: false, requestId: null, tests: [], probes: [] };
+  const result = { execute: false, authorized: false, requireFinal: false, requestId: null, tests: [], probes: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--execute") result.execute = true;
     else if (value === "--authorized") result.authorized = true;
+    else if (value === "--require-final") result.requireFinal = true;
     else if (value === "--request-id") result.requestId = argv[++index] || null;
     else if (value === "--test") result.tests.push(argv[++index] || "");
     else if (value === "--probe") result.probes.push(argv[++index] || "");
@@ -71,7 +78,7 @@ async function loadBaselineState(root) {
     const pointer = JSON.parse(await readFile(join(base, "dashboard-free-tier-v1.active.json"), "utf8"));
     if (!exactActivePointer(pointer, expectedArtifactPaths)) fail("isolated_supabase_db_baseline_review_required");
     const capture = join(base, "dashboard-free-tier-v1-captures", pointer.captureId);
-    return { manifestPath: join(capture, "manifest.json"), baselinePath: join(capture, "baseline.sql"), catalogPath: join(capture, "catalog.json"), parityPath: join(capture, "parity.sql") };
+    return { captureId: pointer.captureId, manifestPath: join(capture, "manifest.json"), baselinePath: join(capture, "baseline.sql"), catalogPath: join(capture, "catalog.json"), parityPath: join(capture, "parity.sql") };
   } catch (error) {
     if (error?.code === "ENOENT" || error instanceof SyntaxError) fail("isolated_supabase_db_baseline_review_required");
     throw error;
@@ -86,19 +93,34 @@ function exactActivePointer(pointer, expectedArtifactPaths) {
 }
 
 async function validateArtifactPaths({ paths, manifest }) {
-  const [baseline, catalog] = await Promise.all([readFile(paths.baselinePath), readFile(paths.catalogPath)]);
+  const [baseline, catalog, parity] = await Promise.all([readFile(paths.baselinePath), readFile(paths.catalogPath), readFile(paths.parityPath)]);
   if (sha256(baseline) !== manifest.baselineSha256) fail("isolated_supabase_db_baseline_hash_drift");
   if (sha256(catalog) !== manifest.catalogSha256) fail("isolated_supabase_db_catalog_hash_drift");
+  const captureId = sha256(canonical({ baseline: baseline.toString("utf8"), catalog: catalog.toString("utf8"), manifest, parity: parity.toString("utf8") })).slice(0, 16);
+  if (captureId !== paths.captureId) fail("isolated_supabase_db_capture_identity_drift");
+  return { baseline, catalog, parity };
 }
 
-export async function validateManifestMigrations({ root = ROOT, manifest }) {
+export async function validateManifestMigrations({ root = ROOT, manifest, baselineVersions }) {
+  if (!Array.isArray(baselineVersions) || !baselineVersions.every((version) => /^\d{14}$/u.test(version)) || new Set(baselineVersions).size !== baselineVersions.length) fail("isolated_supabase_db_manifest_invalid");
+  const appliedVersions = new Set(baselineVersions);
+  const pendingFiles = (await readdir(join(root, "supabase/migrations")))
+    .filter((fileName) => {
+      const match = fileName.match(MIGRATION);
+      return match && !appliedVersions.has(match[1]);
+    })
+    .sort();
+  const manifestFiles = manifest.orderedNewMigrations.map((migration) => migration.fileName);
+  if (JSON.stringify(manifestFiles) !== JSON.stringify(pendingFiles)) fail("isolated_supabase_db_migration_manifest_incomplete");
+  const verified = [];
   for (const migration of manifest.orderedNewMigrations) {
     const path = join(root, "supabase/migrations", migration.fileName);
     let contents;
     try { contents = await readFile(path); } catch { fail("isolated_supabase_db_migration_hash_drift"); }
     if (sha256(contents) !== migration.sha256) fail("isolated_supabase_db_migration_hash_drift");
+    verified.push({ ...migration, contents });
   }
-  return manifest.orderedNewMigrations;
+  return verified;
 }
 
 function parseLocalDbUrl(stdout, port) {
@@ -111,35 +133,64 @@ function parseLocalDbUrl(stdout, port) {
   return value.DB_URL;
 }
 
-async function prepareRuntime({ requestId, randomBytes = secureRandomBytes, allocatePort = async () => 54321 }) {
+export async function allocateLoopbackPorts(count) {
+  if (!Number.isInteger(count) || count < 1 || count > 16) fail("isolated_supabase_db_port_invalid");
+  const servers = [];
+  try {
+    for (let index = 0; index < count; index += 1) {
+      const server = createServer();
+      await new Promise((resolvePromise, rejectPromise) => {
+        const onError = (error) => rejectPromise(error);
+        server.once("error", onError);
+        server.listen({ host: "127.0.0.1", port: 0, exclusive: true }, () => {
+          server.off("error", onError);
+          resolvePromise();
+        });
+      });
+      servers.push(server);
+    }
+    return servers.map((server) => server.address().port);
+  } finally {
+    await Promise.all(servers.map((server) => new Promise((resolvePromise) => server.close(resolvePromise))));
+  }
+}
+
+async function prepareRuntime({ requestId, randomBytes = secureRandomBytes, allocatePort }) {
   const suffix = randomBytes(6).toString("hex");
   const projectId = `tips_supabase_db_qa_${suffix}`;
   const tempRoot = join("/private/tmp", `tips-supabase-db-qa-${requestId}`);
   try { await mkdir(tempRoot, { recursive: false, mode: 0o700 }); } catch { fail("isolated_supabase_db_temp_root_invalid"); }
-  const ports = { api: await allocatePort(), db: await allocatePort(), studio: await allocatePort(), inbucket: await allocatePort() };
+  const values = allocatePort
+    ? [await allocatePort(), await allocatePort(), await allocatePort(), await allocatePort()]
+    : await allocateLoopbackPorts(4);
+  const ports = { api: values[0], db: values[1], studio: values[2], inbucket: values[3] };
   if (new Set(Object.values(ports)).size !== 4 || !Object.values(ports).every((port) => Number.isInteger(port) && port >= 1024 && port <= 65535)) fail("isolated_supabase_db_port_invalid");
   const configPath = join(tempRoot, "supabase/config.toml");
   return { tempRoot, projectId, ports, configPath };
 }
 
-async function stageFile(source, target) { await mkdir(dirname(target), { recursive: true, mode: 0o700 }); await copyFile(source, target); }
-async function stageRequestedTests(root, runtime, paths) {
+async function stageContents(contents, target) { await mkdir(dirname(target), { recursive: true, mode: 0o700 }); await writeFile(target, contents, { mode: 0o600 }); }
+async function snapshotRequestedFiles(root, paths) {
+  const snapshots = [];
   for (const path of paths) {
-    const source = safeRepoPath(root, path);
-    try { await readFile(source); } catch { fail("isolated_supabase_db_target_missing"); }
-    await stageFile(source, join(runtime.tempRoot, path));
+    try { snapshots.push({ path, contents: await readFile(safeRepoPath(root, path)) }); } catch { fail("isolated_supabase_db_target_missing"); }
   }
+  return snapshots;
 }
 
 export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2), root = ROOT, log = () => {}, randomBytes, allocatePort, retainTempRoot = false, executeProcess = (invocation) => processResult(invocation.command, invocation.args, invocation) } = {}) {
   const args = parseIsolatedDbArguments(argv);
   const artifactPaths = await loadBaselineState(root);
   const manifest = validateBaselineManifest(JSON.parse(await readFile(artifactPaths.manifestPath, "utf8")));
-  await validateArtifactPaths({ paths: artifactPaths, manifest });
+  const artifacts = await validateArtifactPaths({ paths: artifactPaths, manifest });
+  if (args.requireFinal && (!manifest.orderedNewMigrations.length || manifest.orderedNewMigrations.some((migration) => migration.status !== "final"))) fail("isolated_supabase_db_final_manifest_required");
   if (!args.execute) return { status: "plan", tests: args.tests, probes: args.probes, manifest };
-  const catalog = JSON.parse(await readFile(artifactPaths.catalogPath, "utf8"));
-  if (catalog.captureStatus !== "reviewed" || catalog.originMainSha !== manifest.originMainSha) fail("isolated_supabase_db_baseline_review_required");
-  const migrations = await validateManifestMigrations({ root, manifest });
+  const catalog = JSON.parse(artifacts.catalog.toString("utf8"));
+  if (catalog.captureStatus !== "reviewed" || catalog.originMainSha !== manifest.originMainSha || !Array.isArray(catalog.migrationLedger)) fail("isolated_supabase_db_baseline_review_required");
+  const migrations = await validateManifestMigrations({ root, manifest, baselineVersions: catalog.migrationLedger.map((row) => row.version) });
+  const smokeTest = await readFile(join(root, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"));
+  const requestedTests = await snapshotRequestedFiles(root, args.tests);
+  const probes = await snapshotRequestedFiles(root, args.probes);
   const runtime = await prepareRuntime({ requestId: args.requestId, randomBytes, allocatePort });
   const cleanEnvironment = { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" };
   const invoke = async (argsForCli, { env = cleanEnvironment } = {}) => {
@@ -152,23 +203,25 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     await invoke(["init", "--workdir", runtime.tempRoot, "--yes"]);
     await mkdir(dirname(runtime.configPath), { recursive: true, mode: 0o700 });
     const temporaryConfig = `${runtime.configPath}.tmp-${process.pid}`;
-    await writeFile(temporaryConfig, safeConfig(runtime.projectId, runtime.ports), { mode: 0o600 });
+    await writeFile(temporaryConfig, buildIsolatedSupabaseConfig(runtime.projectId, runtime.ports), { mode: 0o600 });
     await rename(temporaryConfig, runtime.configPath);
-    await stageFile(artifactPaths.baselinePath, join(runtime.tempRoot, "supabase/migrations/00000000000000_dashboard_free_tier_test_baseline.sql"));
-    await stageFile(artifactPaths.parityPath, join(runtime.tempRoot, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"));
-    await stageFile(join(root, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"), join(runtime.tempRoot, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"));
+    await stageContents(artifacts.baseline, join(runtime.tempRoot, "supabase/migrations/00000000000000_dashboard_free_tier_test_baseline.sql"));
+    await stageContents(artifacts.parity, join(runtime.tempRoot, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"));
+    await stageContents(smokeTest, join(runtime.tempRoot, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"));
     startAttempted = true;
     await invoke(["db", "start", "--workdir", runtime.tempRoot, "--yes"]);
     await invoke(["test", "db", "--local", "--workdir", runtime.tempRoot, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql", "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"]);
-    for (const migration of migrations) await stageFile(join(root, "supabase/migrations", migration.fileName), join(runtime.tempRoot, "supabase/migrations", migration.fileName));
+    for (const migration of migrations) await stageContents(migration.contents, join(runtime.tempRoot, "supabase/migrations", migration.fileName));
     await invoke(["migration", "up", "--local", "--workdir", runtime.tempRoot, "--include-all"]);
-    await stageRequestedTests(root, runtime, args.tests);
+    for (const test of requestedTests) await stageContents(test.contents, join(runtime.tempRoot, test.path));
     if (args.tests.length) await invoke(["test", "db", "--local", "--workdir", runtime.tempRoot, ...args.tests]);
     const status = await invoke(["status", "--workdir", runtime.tempRoot, "--output", "json"]);
     const localDbUrl = parseLocalDbUrl(status.stdout, runtime.ports.db);
-    for (const probe of args.probes) {
+    for (const probe of probes) {
       const nonce = secureRandomBytes(16).toString("hex");
-      const probeResult = await executeProcess({ command: process.execPath, args: [safeRepoPath(root, probe)], cwd: runtime.tempRoot, env: { ...cleanEnvironment, TASK_LOCAL_DB_URL: localDbUrl, TASK_LOCAL_DB_NONCE: nonce } });
+      const stagedProbe = join(runtime.tempRoot, probe.path);
+      await stageContents(probe.contents, stagedProbe);
+      const probeResult = await executeProcess({ command: process.execPath, args: [stagedProbe], cwd: runtime.tempRoot, env: { ...cleanEnvironment, TASK_LOCAL_DB_URL: localDbUrl, TASK_LOCAL_DB_NONCE: nonce } });
       if (probeResult.code !== 0) fail("isolated_supabase_db_probe_failed");
     }
     return { status: "passed", runtime: { ...runtime, configPath: runtime.configPath } };

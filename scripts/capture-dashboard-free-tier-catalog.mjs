@@ -8,7 +8,7 @@ const SHA40 = /^[a-f0-9]{40}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
 const REQUEST_ID = /^[a-z0-9][a-z0-9-]{7,127}$/u;
 const PROJECT_REF = /^[a-z0-9]{20}$/u;
-const OBJECT_ORDER = ["role", "schema", "type", "collation", "sequence", "table", "default", "constraint", "index", "function", "rls", "policy", "grant", "trigger"];
+const OBJECT_ORDER = ["role", "schema", "type", "collation", "sequence", "table", "view", "default", "constraint", "index", "function", "rls", "policy", "grant", "trigger"];
 
 // `digest` belongs to pgcrypto's extension schema, which differs by project. The
 // server statement therefore only reads a single MVCC snapshot; SHA-256 is
@@ -21,11 +21,13 @@ with migration_ledger as (
   ) order by migration_row.version), '[]'::jsonb) as entries
   from supabase_migrations.schema_migrations as migration_row
 ), allowed_relations(schema_name, relation_name) as (
-  values
-    ('auth', 'users'),
-    ('public', 'academic_event_exam_details'), ('public', 'academic_events'), ('public', 'academic_schools'),
-    ('public', 'class_groups'), ('public', 'class_group_members'), ('public', 'class_lesson_sessions'), ('public', 'class_terms'), ('public', 'classes'),
-    ('public', 'ops_registration_appointment_calendar'), ('public', 'ops_tasks'), ('public', 'progress_logs'), ('public', 'profiles'), ('public', 'students'), ('public', 'textbooks')
+  select 'auth'::text, 'users'::text
+  union all
+  select namespace.nspname, relation_row.relname
+  from pg_catalog.pg_class relation_row
+  join pg_catalog.pg_namespace namespace on namespace.oid = relation_row.relnamespace
+  where namespace.nspname = 'public'
+    and relation_row.relkind in ('r', 'p', 'v')
 ), trigger_catalog as (
   select namespace.nspname schema_name, relation_row.relname relation_name, trigger_row.*,
     case when trigger_row.tgtype & 2 = 2 then 'before' else 'after' end timing_name,
@@ -44,7 +46,7 @@ with migration_ledger as (
   where not trigger_row.tgisinternal
     and trigger_row.tgtype & trigger_event.event_bit = trigger_event.event_bit
 ), scoped_catalog as (
-  select 'role'::text object_kind, ''::text schema_name, role_row.rolname identity,
+  select 'role'::text object_kind, ''::text schema_name, role_row.rolname::text identity,
     pg_catalog.jsonb_build_object('login', role_row.rolcanlogin, 'inherit', role_row.rolinherit, 'superuser', role_row.rolsuper) fingerprint
   from pg_catalog.pg_roles role_row where role_row.rolname in ('anon', 'authenticated', 'postgres', 'service_role')
   union all select 'schema', '', namespace.nspname, pg_catalog.jsonb_build_object('acl', namespace.nspacl)
@@ -52,15 +54,25 @@ with migration_ledger as (
   union all select 'type', namespace.nspname, type_row.typname, pg_catalog.jsonb_build_object('type', pg_catalog.format_type(type_row.oid, null), 'labels', labels.labels)
   from pg_catalog.pg_type type_row join pg_catalog.pg_namespace namespace on namespace.oid = type_row.typnamespace
   left join lateral (select pg_catalog.jsonb_agg(enum.enumlabel order by enum.enumsortorder) labels from pg_catalog.pg_enum enum where enum.enumtypid = type_row.oid) labels on true
-  where (namespace.nspname, type_row.typname) in (('public','academic_event_type'),('public','class_status'),('public','user_role'))
+  where namespace.nspname = 'public'
+    and type_row.typtype = 'e'
   union all select 'sequence', namespace.nspname, relation_row.relname, pg_catalog.jsonb_build_object('acl', relation_row.relacl)
   from pg_catalog.pg_class relation_row join pg_catalog.pg_namespace namespace on namespace.oid = relation_row.relnamespace
   where relation_row.relkind = 'S' and (namespace.nspname, relation_row.relname) in (('public', 'classes_id_seq'))
   union all select 'table', namespace.nspname, relation_row.relname, pg_catalog.jsonb_build_object('columns', columns.columns, 'acl', relation_row.relacl)
   from pg_catalog.pg_class relation_row join pg_catalog.pg_namespace namespace on namespace.oid = relation_row.relnamespace join allowed_relations allowed on (allowed.schema_name, allowed.relation_name) = (namespace.nspname, relation_row.relname)
-  join lateral (select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('name', attribute.attname, 'type', pg_catalog.format_type(attribute.atttypid, attribute.atttypmod), 'notNull', attribute.attnotnull) order by attribute.attnum) columns from pg_catalog.pg_attribute attribute where attribute.attrelid = relation_row.oid and attribute.attnum > 0 and not attribute.attisdropped) columns on true
+  join lateral (select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('name', attribute.attname, 'type', pg_catalog.format_type(attribute.atttypid, attribute.atttypmod), 'notNull', attribute.attnotnull) order by attribute.attname) columns from pg_catalog.pg_attribute attribute where attribute.attrelid = relation_row.oid and attribute.attnum > 0 and not attribute.attisdropped) columns on true
   where relation_row.relkind in ('r','p')
-  union all select 'default', namespace.nspname, relation_row.relname || '.' || attribute.attname, pg_catalog.jsonb_build_object('expression', pg_catalog.pg_get_expr(default_row.adbin, default_row.adrelid))
+  union all select 'view', namespace.nspname, relation_row.relname, pg_catalog.jsonb_build_object(
+    'definition', pg_catalog.pg_get_viewdef(relation_row.oid, true),
+    'options', relation_row.reloptions,
+    'acl', relation_row.relacl
+  )
+  from pg_catalog.pg_class relation_row
+  join pg_catalog.pg_namespace namespace on namespace.oid = relation_row.relnamespace
+  join allowed_relations allowed on (allowed.schema_name, allowed.relation_name) = (namespace.nspname, relation_row.relname)
+  where relation_row.relkind = 'v'
+  union all select 'default', namespace.nspname, relation_row.relname || '.' || attribute.attname, pg_catalog.jsonb_build_object('expression', pg_catalog.pg_get_expr(default_row.adbin, default_row.adrelid), 'generated', attribute.attgenerated)
   from pg_catalog.pg_attrdef default_row join pg_catalog.pg_attribute attribute on attribute.attrelid = default_row.adrelid and attribute.attnum = default_row.adnum join pg_catalog.pg_class relation_row on relation_row.oid = default_row.adrelid join pg_catalog.pg_namespace namespace on namespace.oid = relation_row.relnamespace join allowed_relations allowed on (allowed.schema_name, allowed.relation_name) = (namespace.nspname, relation_row.relname)
   union all select 'constraint', namespace.nspname, relation_row.relname || '.' || constraint_row.conname, pg_catalog.jsonb_build_object('definition', pg_catalog.pg_get_constraintdef(constraint_row.oid, true))
   from pg_catalog.pg_constraint constraint_row join pg_catalog.pg_class relation_row on relation_row.oid = constraint_row.conrelid join pg_catalog.pg_namespace namespace on namespace.oid = relation_row.relnamespace join allowed_relations allowed on (allowed.schema_name, allowed.relation_name) = (namespace.nspname, relation_row.relname)
@@ -72,7 +84,7 @@ with migration_ledger as (
   where (namespace.nspname, procedure.proname || '(' || arguments.signature || ')') in (('public', 'get_dashboard_conflict_sources_v1(date,date)'), ('public', 'get_dashboard_summary_sources_v1()'), ('public', 'list_dashboard_class_session_dates_v1(date,date)'))
   union all select 'rls', namespace.nspname, relation_row.relname, pg_catalog.jsonb_build_object('enabled', relation_row.relrowsecurity, 'forced', relation_row.relforcerowsecurity)
   from pg_catalog.pg_class relation_row join pg_catalog.pg_namespace namespace on namespace.oid = relation_row.relnamespace join allowed_relations allowed on (allowed.schema_name, allowed.relation_name) = (namespace.nspname, relation_row.relname) where relation_row.relkind in ('r','p')
-  union all select 'policy', namespace.nspname, relation_row.relname || '.' || policy.polname, pg_catalog.jsonb_build_object('command', policy.polcmd, 'roles', policy.polroles, 'using', pg_catalog.pg_get_expr(policy.polqual, policy.polrelid), 'check', pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid))
+  union all select 'policy', namespace.nspname, relation_row.relname || '.' || policy.polname, pg_catalog.jsonb_build_object('command', policy.polcmd, 'roles', (select pg_catalog.jsonb_agg(case when role_entry.role_oid = 0 then 'public' else pg_catalog.pg_get_userbyid(role_entry.role_oid) end order by role_entry.ordinality) from unnest(policy.polroles) with ordinality role_entry(role_oid, ordinality)), 'using', pg_catalog.pg_get_expr(policy.polqual, policy.polrelid), 'check', pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid))
   from pg_catalog.pg_policy policy join pg_catalog.pg_class relation_row on relation_row.oid = policy.polrelid join pg_catalog.pg_namespace namespace on namespace.oid = relation_row.relnamespace join allowed_relations allowed on (allowed.schema_name, allowed.relation_name) = (namespace.nspname, relation_row.relname)
   union all select 'grant', namespace.nspname, relation_row.relname || '.' || grant_row.grantee::text, pg_catalog.jsonb_build_object('acl', relation_row.relacl, 'expanded', (select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('grantee', acl.grantee, 'privilege', acl.privilege_type) order by acl.grantee, acl.privilege_type) from pg_catalog.aclexplode(relation_row.relacl) acl))
   from pg_catalog.pg_class relation_row join pg_catalog.pg_namespace namespace on namespace.oid = relation_row.relnamespace join allowed_relations allowed on (allowed.schema_name, allowed.relation_name) = (namespace.nspname, relation_row.relname) join lateral (select distinct acl.grantee from pg_catalog.aclexplode(relation_row.relacl) acl) grant_row on true
@@ -144,15 +156,336 @@ function assertCanonicalArtifactPaths(args) {
   }
 }
 
-function normalizeLedger(value) {
+function normalizeLedgerRows(value) {
   if (!Array.isArray(value)) fail("management_api_contract_drift");
-  const ledger = value.map((row) => {
+  const rows = value.map((row) => {
     if (!exactKeys(row, ["name", "statements", "version"]) || !/^\d{14}$/u.test(row.version) || !(row.name === null || /^[a-z0-9_]+$/u.test(row.name)) || !Array.isArray(row.statements) || !row.statements.every((statement) => typeof statement === "string")) fail("management_api_contract_drift");
     const statements = row.statements.map((statement) => statement.normalize("NFC"));
-    return { version: row.version, name: row.name, statementsSha256: sha256(canonical(statements)) };
+    return { version: row.version, name: row.name, statements };
   }).sort((left, right) => left.version.localeCompare(right.version));
-  if (new Set(ledger.map((row) => row.version)).size !== ledger.length) fail("management_api_contract_drift");
-  return ledger;
+  if (new Set(rows.map((row) => row.version)).size !== rows.length) fail("management_api_contract_drift");
+  return rows;
+}
+
+function normalizeLedger(value) {
+  return normalizeLedgerRows(value).map((row) => ({
+    version: row.version,
+    name: row.name,
+    statementsSha256: sha256(canonical(row.statements)),
+  }));
+}
+
+function stabilizeCatalogRoleFingerprints(value) {
+  const roleByOid = new Map([["0", "public"]]);
+  for (const row of value) {
+    if (row?.objectKind !== "grant" || typeof row.fingerprint !== "string") continue;
+    let fingerprint;
+    try { fingerprint = JSON.parse(row.fingerprint); } catch { fail("management_api_contract_drift"); }
+    const names = Array.isArray(fingerprint?.acl)
+      ? fingerprint.acl.map((acl) => typeof acl === "string" ? acl.slice(0, acl.indexOf("=")) : null).filter(Boolean)
+      : [];
+    const oids = Array.isArray(fingerprint?.expanded)
+      ? [...new Set(fingerprint.expanded.map((entry) => String(entry?.grantee || "")).filter((oid) => /^\d+$/u.test(oid)))]
+      : [];
+    if (names.length === oids.length) for (let index = 0; index < names.length; index += 1) roleByOid.set(oids[index], names[index]);
+  }
+  return value.map((row) => {
+    if (row?.objectKind === "table" && typeof row.fingerprint === "string") {
+      let fingerprint;
+      try { fingerprint = JSON.parse(row.fingerprint); } catch { fail("management_api_contract_drift"); }
+      if (!Array.isArray(fingerprint?.columns) || !(fingerprint.acl === null || Array.isArray(fingerprint.acl))) fail("management_api_contract_drift");
+      const columns = [...fingerprint.columns].sort((left, right) => String(left?.name).localeCompare(String(right?.name))).map((column) => `{"name": ${JSON.stringify(column.name)}, "type": ${JSON.stringify(column.type)}, "notNull": ${JSON.stringify(column.notNull)}}`).join(", ");
+      const acl = fingerprint.acl === null ? "null" : `[${fingerprint.acl.map((item) => JSON.stringify(item)).join(", ")}]`;
+      return { ...row, fingerprint: `{"acl": ${acl}, "columns": [${columns}]}` };
+    }
+    if (row?.objectKind !== "policy" || typeof row.fingerprint !== "string") return row;
+    let fingerprint;
+    try { fingerprint = JSON.parse(row.fingerprint); } catch { fail("management_api_contract_drift"); }
+    if (!Array.isArray(fingerprint?.roles)) fail("management_api_contract_drift");
+    const roles = fingerprint.roles.map((role) => roleByOid.get(String(role)) || (/^[a-z_][a-z0-9_]*$/u.test(String(role)) ? String(role) : fail("management_api_contract_drift")));
+    const check = fingerprint.check ?? null;
+    const using = fingerprint.using ?? null;
+    const roleJson = `[${roles.map((role) => JSON.stringify(role)).join(", ")}]`;
+    return { ...row, fingerprint: `{"check": ${JSON.stringify(check)}, "roles": ${roleJson}, "using": ${JSON.stringify(using)}, "command": ${JSON.stringify(fingerprint.command)}}` };
+  });
+}
+
+function isSchemaReplayStatement(statement) {
+  let normalized = statement.trimStart().toLowerCase();
+  while (normalized.startsWith("--") || normalized.startsWith("/*")) {
+    if (normalized.startsWith("--")) {
+      const lineEnd = normalized.indexOf("\n");
+      normalized = lineEnd < 0 ? "" : normalized.slice(lineEnd + 1).trimStart();
+    } else {
+      const blockEnd = normalized.indexOf("*/", 2);
+      if (blockEnd < 0) fail("management_api_contract_drift");
+      normalized = normalized.slice(blockEnd + 2).trimStart();
+    }
+  }
+  if (/^(?:insert|update|delete|merge|copy|truncate|select|with|notify|lock|repository|sha256\s*=)\b/u.test(normalized)) return false;
+  if (/^do\s+\$(?:[a-z_][a-z0-9_]*)?\$/u.test(normalized)) {
+    const dynamicDdl = [...normalized.matchAll(/\bexecute\s+(?:format\s*\(\s*)?'((?:''|[^'])*)'/gu)]
+      .some(([, sql]) => /\b(?:create|alter|drop|grant|revoke|comment|security\s+label)\b/u.test(sql));
+    if (dynamicDdl) return true;
+    const withoutStringLiterals = normalized.replaceAll(/'(?:''|[^'])*'/gu, "''");
+    return /\b(?:create\s+(?!(?:temp|temporary)\s+table\b)|alter\s+(?:table|function|procedure|schema|type|domain|sequence|view|policy|role)\b|drop\s+(?:table|function|procedure|schema|type|domain|sequence|view|policy|role)\b|grant\s+|revoke\s+|comment\s+on\b|security\s+label\b)/u.test(withoutStringLiterals);
+  }
+  return true;
+}
+
+function splitSqlStatements(source) {
+  const statements = [];
+  let start = 0;
+  let index = 0;
+  let singleQuoted = false;
+  let doubleQuoted = false;
+  let lineComment = false;
+  let blockCommentDepth = 0;
+  let dollarTag = null;
+  while (index < source.length) {
+    const character = source[index];
+    const next = source[index + 1];
+    if (lineComment) {
+      if (character === "\n") lineComment = false;
+      index += 1;
+      continue;
+    }
+    if (blockCommentDepth > 0) {
+      if (character === "/" && next === "*") { blockCommentDepth += 1; index += 2; continue; }
+      if (character === "*" && next === "/") { blockCommentDepth -= 1; index += 2; continue; }
+      index += 1;
+      continue;
+    }
+    if (dollarTag) {
+      if (source.startsWith(dollarTag, index)) { index += dollarTag.length; dollarTag = null; continue; }
+      index += 1;
+      continue;
+    }
+    if (singleQuoted) {
+      if (character === "'" && next === "'") { index += 2; continue; }
+      if (character === "'") singleQuoted = false;
+      index += 1;
+      continue;
+    }
+    if (doubleQuoted) {
+      if (character === '"' && next === '"') { index += 2; continue; }
+      if (character === '"') doubleQuoted = false;
+      index += 1;
+      continue;
+    }
+    if (character === "-" && next === "-") { lineComment = true; index += 2; continue; }
+    if (character === "/" && next === "*") { blockCommentDepth = 1; index += 2; continue; }
+    if (character === "'") { singleQuoted = true; index += 1; continue; }
+    if (character === '"') { doubleQuoted = true; index += 1; continue; }
+    if (character === "$") {
+      const match = source.slice(index).match(/^\$(?:[a-z_][a-z0-9_]*)?\$/iu);
+      if (match) { dollarTag = match[0]; index += dollarTag.length; continue; }
+    }
+    if (character === ";") {
+      const statement = source.slice(start, index).trim();
+      if (statement) statements.push(statement);
+      start = index + 1;
+    }
+    index += 1;
+  }
+  if (singleQuoted || doubleQuoted || dollarTag || blockCommentDepth > 0) fail("management_api_contract_drift");
+  const trailing = source.slice(start).trim();
+  if (trailing) statements.push(trailing);
+  return statements;
+}
+
+function replayBaseline(value) {
+  return normalizeLedgerRows(value).flatMap((row) => row.statements.flatMap(splitSqlStatements)).filter(isSchemaReplayStatement).map((statement) => {
+    const trimmed = statement.trimEnd();
+    if (!trimmed) fail("management_api_contract_drift");
+    return `${trimmed}${trimmed.endsWith(";") ? "" : ";"}\n`;
+  }).join("");
+}
+
+function quoteIdentifier(value) {
+  if (typeof value !== "string" || !value || /[\u0000-\u001f\u007f]/u.test(value)) fail("management_api_contract_drift");
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function quoteStringLiteral(value) {
+  if (typeof value !== "string" || value.includes("\0")) fail("management_api_contract_drift");
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function legacyTableBootstrap(definitions, migrationLedger) {
+  const ledgerSql = normalizeLedgerRows(migrationLedger).flatMap((row) => row.statements).join("\n");
+  const typeSql = definitions
+    .filter((entry) => entry.objectKind === "type" && entry.schema === "public" && entry.replayFingerprint)
+    .filter((entry) => {
+      const escaped = entry.identity.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+      const createPattern = new RegExp(String.raw`\bcreate\s+type\s+(?:"?public"?\s*\.\s*)?"?${escaped}"?\b`, "iu");
+      return !createPattern.test(ledgerSql);
+    })
+    .map((entry) => {
+      let fingerprint;
+      try { fingerprint = JSON.parse(entry.replayFingerprint); } catch { fail("management_api_contract_drift"); }
+      if (!fingerprint || !Array.isArray(fingerprint.labels) || !fingerprint.labels.length || !fingerprint.labels.every((label) => typeof label === "string")) fail("management_api_contract_drift");
+      return `create type public.${quoteIdentifier(entry.identity)} as enum (${fingerprint.labels.map(quoteStringLiteral).join(", ")});\n`;
+    })
+    .join("");
+  const legacyTables = definitions
+    .filter((entry) => entry.objectKind === "table" && entry.schema === "public" && entry.replayFingerprint)
+    .filter((entry) => {
+      const escaped = entry.identity.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+      const createPattern = new RegExp(String.raw`\bcreate\s+(?:unlogged\s+)?table\s+(?:if\s+not\s+exists\s+)?(?:"?public"?\s*\.\s*)?"?${escaped}"?\b`, "iu");
+      const createMatch = createPattern.exec(ledgerSql);
+      if (!createMatch) return true;
+      const referencePattern = new RegExp(String.raw`(?:"?public"?\s*\.\s*)"?${escaped}"?\b`, "iu");
+      const firstReference = referencePattern.exec(ledgerSql);
+      return Boolean(firstReference && firstReference.index < createMatch.index);
+    })
+  const tableNames = new Set(legacyTables.map((entry) => entry.identity));
+  const legacyDefaults = definitions
+    .filter((entry) => entry.objectKind === "default" && entry.schema === "public" && entry.replayFingerprint)
+    .map((entry) => ({ entry, separator: entry.identity.indexOf(".") }))
+    .filter(({ entry, separator }) => separator > 0 && tableNames.has(entry.identity.slice(0, separator)))
+    .map(({ entry, separator }) => {
+      let fingerprint;
+      try { fingerprint = JSON.parse(entry.replayFingerprint); } catch { fail("management_api_contract_drift"); }
+      const expression = fingerprint?.expression;
+      const generated = fingerprint?.generated || "";
+      if (typeof expression !== "string" || !expression.trim() || !["", "s"].includes(generated) || /(?:;|--|\/\*)/u.test(expression)) fail("management_api_contract_drift");
+      return { tableName: entry.identity.slice(0, separator), columnName: entry.identity.slice(separator + 1), expression, generated };
+    });
+  const defaultByColumn = new Map(legacyDefaults.map((entry) => [`${entry.tableName}.${entry.columnName}`, entry]));
+  const tableSql = legacyTables.map((entry) => {
+      let fingerprint;
+      try { fingerprint = JSON.parse(entry.replayFingerprint); } catch { fail("management_api_contract_drift"); }
+      if (!fingerprint || !Array.isArray(fingerprint.columns) || !fingerprint.columns.length) fail("management_api_contract_drift");
+      const columns = fingerprint.columns.map((column) => {
+        if (!column || typeof column.type !== "string" || typeof column.notNull !== "boolean" || !/^[a-z0-9_ .,"()\[\]]+$/iu.test(column.type) || /(?:;|--|\/\*)/u.test(column.type)) fail("management_api_contract_drift");
+        const defaultEntry = defaultByColumn.get(`${entry.identity}.${column.name}`);
+        const generatedClause = defaultEntry?.generated === "s" ? ` generated always as (${defaultEntry.expression}) stored` : "";
+        return `  ${quoteIdentifier(column.name)} ${column.type}${generatedClause}${column.notNull ? " not null" : ""}`;
+      });
+      return `create table if not exists public.${quoteIdentifier(entry.identity)} (\n${columns.join(",\n")}\n);\n`;
+    })
+    .join("");
+  const defaultSql = legacyDefaults
+    .filter((entry) => entry.generated !== "s")
+    .map((entry) => `alter table public.${quoteIdentifier(entry.tableName)} alter column ${quoteIdentifier(entry.columnName)} set default ${entry.expression};\n`)
+    .join("");
+  const constraintSql = definitions
+    .filter((entry) => entry.objectKind === "constraint" && entry.schema === "public" && entry.replayFingerprint)
+    .map((entry) => ({ entry, separator: entry.identity.indexOf(".") }))
+    .filter(({ entry, separator }) => separator > 0 && tableNames.has(entry.identity.slice(0, separator)))
+    .map(({ entry, separator }) => {
+      let fingerprint;
+      try { fingerprint = JSON.parse(entry.replayFingerprint); } catch { fail("management_api_contract_drift"); }
+      const definition = fingerprint?.definition;
+      if (typeof definition !== "string" || !/^(?:PRIMARY KEY|UNIQUE)\b/iu.test(definition) || /(?:;|--|\/\*)/u.test(definition)) return "";
+      const tableName = entry.identity.slice(0, separator);
+      const constraintName = entry.identity.slice(separator + 1);
+      return `alter table public.${quoteIdentifier(tableName)} add constraint ${quoteIdentifier(constraintName)} ${definition};\n`;
+    })
+    .join("");
+  return `${typeSql}${tableSql}${defaultSql}${constraintSql}`;
+}
+
+function parsedReplayFingerprint(entry) {
+  try { return JSON.parse(entry.replayFingerprint); } catch { fail("management_api_contract_drift"); }
+}
+
+function relationIdentity(entry) {
+  const separator = entry.identity.indexOf(".");
+  if (separator < 1) fail("management_api_contract_drift");
+  return { relation: entry.identity.slice(0, separator), object: entry.identity.slice(separator + 1) };
+}
+
+function aclGrantSql(schema, relation, acl) {
+  if (!(acl === null || Array.isArray(acl))) fail("management_api_contract_drift");
+  const target = `${quoteIdentifier(schema)}.${quoteIdentifier(relation)}`;
+  const allowedRoles = new Set(["anon", "authenticated", "service_role", "postgres", "public"]);
+  const privilegeByCode = new Map([["a", "insert"], ["r", "select"], ["w", "update"], ["d", "delete"], ["D", "truncate"], ["x", "references"], ["t", "trigger"], ["m", "maintain"]]);
+  const statements = [`revoke all privileges on table ${target} from anon, authenticated, service_role;`];
+  for (const item of acl || []) {
+    if (typeof item !== "string") fail("management_api_contract_drift");
+    const match = item.match(/^([^=]*)=([^/]*)\/[a-z_][a-z0-9_]*$/iu);
+    if (!match) fail("management_api_contract_drift");
+    const role = match[1] || "public";
+    if (!allowedRoles.has(role)) continue;
+    const privileges = [];
+    for (const code of match[2].replaceAll("*", "")) {
+      const privilege = privilegeByCode.get(code);
+      if (privilege && !privileges.includes(privilege)) privileges.push(privilege);
+    }
+    if (privileges.length) statements.push(`grant ${privileges.join(", ")} on table ${target} to ${quoteIdentifier(role)};`);
+  }
+  return statements.join("\n");
+}
+
+export function buildFinalSchemaReconciliation(definitions) {
+  const publicTables = definitions.filter((entry) => entry.objectKind === "table" && entry.schema === "public" && entry.replayFingerprint);
+  const defaults = new Map(definitions.filter((entry) => entry.objectKind === "default" && entry.schema === "public" && entry.replayFingerprint).map((entry) => [entry.identity, parsedReplayFingerprint(entry)]));
+  const columnSql = publicTables.flatMap((entry) => {
+    const fingerprint = parsedReplayFingerprint(entry);
+    if (!Array.isArray(fingerprint?.columns)) fail("management_api_contract_drift");
+    return fingerprint.columns.flatMap((column) => {
+      if (!column || typeof column.name !== "string" || typeof column.type !== "string" || typeof column.notNull !== "boolean" || !/^[a-z0-9_ .,"()\[\]]+$/iu.test(column.type)) fail("management_api_contract_drift");
+      const defaultEntry = defaults.get(`${entry.identity}.${column.name}`);
+      const generatedClause = defaultEntry?.generated === "s" ? ` generated always as (${defaultEntry.expression}) stored` : "";
+      return [
+        `alter table public.${quoteIdentifier(entry.identity)} add column if not exists ${quoteIdentifier(column.name)} ${column.type}${generatedClause};`,
+        `alter table public.${quoteIdentifier(entry.identity)} alter column ${quoteIdentifier(column.name)} ${column.notNull ? "set" : "drop"} not null;`,
+      ];
+    });
+  });
+  const defaultSql = [...defaults].flatMap(([identity, fingerprint]) => {
+    const separator = identity.indexOf(".");
+    if (separator < 1 || typeof fingerprint?.expression !== "string" || !["", "s"].includes(fingerprint.generated || "")) fail("management_api_contract_drift");
+    if (fingerprint.generated === "s") return [];
+    return [`alter table public.${quoteIdentifier(identity.slice(0, separator))} alter column ${quoteIdentifier(identity.slice(separator + 1))} set default ${fingerprint.expression};`];
+  });
+  const constraintSql = definitions.filter((entry) => entry.objectKind === "constraint" && entry.schema === "public" && entry.replayFingerprint).map((entry) => {
+    const { relation, object } = relationIdentity(entry);
+    const definition = parsedReplayFingerprint(entry)?.definition;
+    if (typeof definition !== "string" || /(?:;|--|\/\*)/u.test(definition)) fail("management_api_contract_drift");
+    if (/^TRIGGER\b/iu.test(definition)) return "";
+    return `do $reconcile$ begin if not exists (select 1 from pg_catalog.pg_constraint constraint_row join pg_catalog.pg_class relation_row on relation_row.oid = constraint_row.conrelid join pg_catalog.pg_namespace namespace on namespace.oid = relation_row.relnamespace where namespace.nspname = 'public' and relation_row.relname = ${sqlLiteral(relation)} and constraint_row.conname = ${sqlLiteral(object)}) then alter table public.${quoteIdentifier(relation)} add constraint ${quoteIdentifier(object)} ${definition}; end if; end $reconcile$;`;
+  });
+  const constraintNames = new Set(definitions.filter((entry) => entry.objectKind === "constraint" && entry.schema === "public").map((entry) => relationIdentity(entry).object));
+  const indexSql = definitions.filter((entry) => entry.objectKind === "index" && entry.schema === "public" && entry.replayFingerprint && !constraintNames.has(entry.identity)).map((entry) => {
+    const definition = parsedReplayFingerprint(entry)?.definition;
+    if (typeof definition !== "string" || !/^create (?:unique )?index /iu.test(definition) || /(?:;|--|\/\*)/u.test(definition)) fail("management_api_contract_drift");
+    return `do $reconcile$ begin if pg_catalog.to_regclass(${sqlLiteral(`public.${entry.identity}`)}) is null then ${definition}; elsif pg_catalog.pg_get_indexdef(pg_catalog.to_regclass(${sqlLiteral(`public.${entry.identity}`)})) <> ${sqlLiteral(definition)} then drop index public.${quoteIdentifier(entry.identity)}; ${definition}; end if; end $reconcile$;`;
+  });
+  const rlsSql = definitions.filter((entry) => entry.objectKind === "rls" && entry.schema === "public" && entry.replayFingerprint).flatMap((entry) => {
+    const fingerprint = parsedReplayFingerprint(entry);
+    if (typeof fingerprint?.enabled !== "boolean" || typeof fingerprint?.forced !== "boolean") fail("management_api_contract_drift");
+    return [
+      `alter table public.${quoteIdentifier(entry.identity)} ${fingerprint.enabled ? "enable" : "disable"} row level security;`,
+      `alter table public.${quoteIdentifier(entry.identity)} ${fingerprint.forced ? "force" : "no force"} row level security;`,
+    ];
+  });
+  const commandName = new Map([["r", "select"], ["a", "insert"], ["w", "update"], ["d", "delete"], ["*", "all"]]);
+  const needsLegacyStaffHelper = definitions.some((entry) => entry.objectKind === "policy" && entry.replayFingerprint && /\bis_admin_or_staff\s*\(\s*\)/iu.test(entry.replayFingerprint));
+  const helperSql = needsLegacyStaffHelper ? ["create or replace function public.is_admin_or_staff() returns boolean language sql stable security invoker set search_path = '' as $$ select public.current_dashboard_role() = any (array['admin'::text, 'staff'::text]) $$;"] : [];
+  const policySql = definitions.filter((entry) => entry.objectKind === "policy" && entry.schema === "public" && entry.replayFingerprint).flatMap((entry) => {
+    const { relation, object } = relationIdentity(entry);
+    const fingerprint = parsedReplayFingerprint(entry);
+    const command = commandName.get(fingerprint?.command);
+    if (!command || !Array.isArray(fingerprint.roles) || !fingerprint.roles.every((role) => /^(?:public|anon|authenticated|service_role)$/u.test(role)) || !(fingerprint.using === null || typeof fingerprint.using === "string") || !(fingerprint.check === null || typeof fingerprint.check === "string")) fail("management_api_contract_drift");
+    const clauses = [`create policy ${quoteIdentifier(object)} on public.${quoteIdentifier(relation)} for ${command} to ${fingerprint.roles.map(quoteIdentifier).join(", ")}`];
+    if (fingerprint.using !== null) clauses.push(`using (${fingerprint.using})`);
+    if (fingerprint.check !== null) clauses.push(`with check (${fingerprint.check})`);
+    return [`drop policy if exists ${quoteIdentifier(object)} on public.${quoteIdentifier(relation)};`, `${clauses.join(" ")};`];
+  });
+  const triggerSql = definitions.filter((entry) => entry.objectKind === "trigger" && entry.schema === "public" && entry.replayFingerprint).flatMap((entry) => {
+    const relation = entry.identity.slice(0, entry.identity.indexOf("."));
+    const fingerprint = parsedReplayFingerprint(entry);
+    if (typeof fingerprint?.definition !== "string" || !/^create (?:constraint )?trigger /iu.test(fingerprint.definition) || /(?:;|--|\/\*)/u.test(fingerprint.definition)) fail("management_api_contract_drift");
+    const name = fingerprint.definition.match(/^create (?:constraint )?trigger ("(?:[^"]|"")+"|[a-z_][a-z0-9_$]*)\s/iu)?.[1];
+    if (!name) fail("management_api_contract_drift");
+    return [`drop trigger if exists ${name} on public.${quoteIdentifier(relation)};`, `${fingerprint.definition};`];
+  });
+  const aclSql = publicTables.map((entry) => aclGrantSql("public", entry.identity, parsedReplayFingerprint(entry)?.acl));
+  const statements = [...columnSql, ...defaultSql, ...constraintSql, ...indexSql, ...rlsSql, ...helperSql, ...policySql, ...triggerSql, ...aclSql].filter(Boolean);
+  return statements.length ? `${statements.join("\n")}\n` : "";
 }
 
 export function normalizeDashboardFunctionIdentity(value) {
@@ -197,6 +530,7 @@ function normalizeScopedFunction(value) {
 export function normalizeDashboardFreeTierCatalog(value, scope) {
   if (!Array.isArray(value)) fail("management_api_contract_drift");
   const allowed = new Set(scope.relations || []);
+  const allowedViews = new Set(scope.views || []);
   const allowedFunctions = new Set((scope.functions || []).map(normalizeScopedFunction));
   const allowedSchemas = new Set(scope.schemas || []);
   const allowedRoles = new Set(scope.roles || []);
@@ -210,14 +544,15 @@ export function normalizeDashboardFreeTierCatalog(value, scope) {
     const identity = row.objectKind === "function" ? normalizeDashboardFunctionIdentity(row.identity) : row.identity;
     const qualified = `${row.schema}.${identity}`;
     if (row.objectKind === "table" && !allowed.has(qualified)) fail("dashboard_free_tier_catalog_scope_drift");
+    if (row.objectKind === "view" && !allowedViews.has(qualified)) fail("dashboard_free_tier_catalog_scope_drift");
     if (row.objectKind === "function" && !allowedFunctions.has(qualified)) fail("dashboard_free_tier_catalog_scope_drift");
     if (row.objectKind === "schema" && !allowedSchemas.has(row.identity)) fail("dashboard_free_tier_catalog_scope_drift");
     if (row.objectKind === "role" && !allowedRoles.has(row.identity)) fail("dashboard_free_tier_catalog_scope_drift");
-    if (!OBJECT_ORDER.includes(row.objectKind) || ([rawDefinition, fingerprint].some((source) => source && forbidden.some((term) => source.toLowerCase().includes(term))))) fail("dashboard_free_tier_catalog_scope_drift");
+    if (!OBJECT_ORDER.includes(row.objectKind) || (rawDefinition && forbidden.some((term) => rawDefinition.toLowerCase().includes(term)))) fail("dashboard_free_tier_catalog_scope_drift");
     const key = `${row.objectKind}|${row.schema}|${identity}`;
     if (seen.has(key)) fail("management_api_contract_drift");
     seen.add(key);
-    return { objectKind: row.objectKind, schema: row.schema, identity, definition: rawDefinition?.normalize("NFC") || null, definitionSha256: hash, metadata: row.metadata || null };
+    return { objectKind: row.objectKind, schema: row.schema, identity, definition: rawDefinition?.normalize("NFC") || null, definitionSha256: hash, metadata: row.metadata || null, replayFingerprint: fingerprint };
   }).sort((left, right) => (
     left.objectKind.localeCompare(right.objectKind) || left.schema.localeCompare(right.schema) || left.identity.localeCompare(right.identity)
   ));
@@ -232,6 +567,7 @@ export function normalizeDashboardFreeTierCatalog(value, scope) {
     }
   };
   requireIdentity("table", scope.relations || []);
+  requireIdentity("view", scope.views || []);
   requireIdentity("sequence", scope.sequences || []);
   requireIdentity("type", scope.types || []);
   requireIdentity("function", (scope.functions || []).map(normalizeScopedFunction));
@@ -252,15 +588,16 @@ export function dashboardFreeTierCatalogFingerprintSql(entry) {
   if (entry.objectKind === "constraint") return `(select pg_catalog.jsonb_build_object('definition', pg_catalog.pg_get_constraintdef(con.oid, true)) from pg_catalog.pg_constraint con join pg_catalog.pg_class rel on rel.oid = con.conrelid join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace where ns.nspname = ${schema} and (rel.relname || '.' || con.conname) = ${identity})`;
   if (entry.objectKind === "index") return `(select pg_catalog.jsonb_build_object('definition', pg_catalog.pg_get_indexdef(rel.oid)) from pg_catalog.pg_class rel join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace where ns.nspname = ${schema} and rel.relname = ${identity})`;
   if (entry.objectKind === "trigger") return `(select pg_catalog.jsonb_build_object('definition', ranked.definition, 'function', ranked.function_identity, 'order', ranked.fire_order) from (select ns.nspname schema_name, rel.relname relation_name, trg.tgname, pg_catalog.pg_get_triggerdef(trg.oid, true) definition, trg.tgfoid::regprocedure::text function_identity, case when trg.tgtype & 2 = 2 then 'before' else 'after' end timing_name, trigger_event.event_name, row_number() over (partition by trg.tgrelid, case when trg.tgtype & 2 = 2 then 'before' else 'after' end, trigger_event.event_name order by trg.tgname) fire_order from pg_catalog.pg_trigger trg join pg_catalog.pg_class rel on rel.oid = trg.tgrelid join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace cross join lateral (values (4, 'insert'), (8, 'delete'), (16, 'update'), (32, 'truncate')) trigger_event(event_bit, event_name) where not trg.tgisinternal and trg.tgtype & trigger_event.event_bit = trigger_event.event_bit) ranked where ranked.schema_name = ${schema} and (ranked.relation_name || '.' || ranked.timing_name || '.' || ranked.event_name || '.' || pg_catalog.lpad(ranked.fire_order::text, 2, '0') || '.' || ranked.tgname) = ${identity})`;
-  if (entry.objectKind === "policy") return `(select pg_catalog.jsonb_build_object('command', pol.polcmd, 'roles', pol.polroles, 'using', pg_catalog.pg_get_expr(pol.polqual, pol.polrelid), 'check', pg_catalog.pg_get_expr(pol.polwithcheck, pol.polrelid)) from pg_catalog.pg_policy pol join pg_catalog.pg_class rel on rel.oid = pol.polrelid join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace where ns.nspname = ${schema} and (rel.relname || '.' || pol.polname) = ${identity})`;
+  if (entry.objectKind === "policy") return `(select pg_catalog.jsonb_build_object('command', pol.polcmd, 'roles', (select pg_catalog.jsonb_agg(case when role_entry.role_oid = 0 then 'public' else pg_catalog.pg_get_userbyid(role_entry.role_oid) end order by role_entry.ordinality) from unnest(pol.polroles) with ordinality role_entry(role_oid, ordinality)), 'using', pg_catalog.pg_get_expr(pol.polqual, pol.polrelid), 'check', pg_catalog.pg_get_expr(pol.polwithcheck, pol.polrelid)) from pg_catalog.pg_policy pol join pg_catalog.pg_class rel on rel.oid = pol.polrelid join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace where ns.nspname = ${schema} and (rel.relname || '.' || pol.polname) = ${identity})`;
   if (entry.objectKind === "role") return `(select pg_catalog.jsonb_build_object('login', rolcanlogin, 'inherit', rolinherit, 'superuser', rolsuper) from pg_catalog.pg_roles where rolname = ${identity})`;
   if (entry.objectKind === "grant" && entry.identity.startsWith("default.")) return `(select pg_catalog.jsonb_build_object('acl', default_acl.defaclacl, 'owner', owner.rolname, 'schema', ns.nspname, 'objectType', default_acl.defaclobjtype) from pg_catalog.pg_default_acl default_acl join pg_catalog.pg_roles owner on owner.oid = default_acl.defaclrole left join pg_catalog.pg_namespace ns on ns.oid = default_acl.defaclnamespace where ('default.' || owner.rolname || '.' || coalesce(ns.nspname, '') || '.' || default_acl.defaclobjtype::text) = ${identity})`;
   if (entry.objectKind === "grant") return `(select pg_catalog.jsonb_build_object('acl', rel.relacl, 'expanded', (select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('grantee', acl.grantee, 'privilege', acl.privilege_type) order by acl.grantee, acl.privilege_type) from pg_catalog.aclexplode(rel.relacl) acl)) from pg_catalog.pg_class rel join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace where ns.nspname = ${schema} and (rel.relname || '.' || (split_part(${identity}, '.', 2))) = ${identity})`;
   if (entry.objectKind === "rls") return `(select pg_catalog.jsonb_build_object('enabled', rel.relrowsecurity, 'forced', rel.relforcerowsecurity) from pg_catalog.pg_class rel join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace where ns.nspname = ${schema} and rel.relname = ${identity})`;
   if (entry.objectKind === "schema") return `(select pg_catalog.jsonb_build_object('acl', nspacl) from pg_catalog.pg_namespace where nspname = ${identity})`;
   if (entry.objectKind === "type") return `(select pg_catalog.jsonb_build_object('type', pg_catalog.format_type(type_row.oid, null), 'labels', labels.labels) from pg_catalog.pg_type type_row join pg_catalog.pg_namespace ns on ns.oid = type_row.typnamespace left join lateral (select pg_catalog.jsonb_agg(enum.enumlabel order by enum.enumsortorder) labels from pg_catalog.pg_enum enum where enum.enumtypid = type_row.oid) labels on true where ns.nspname = ${schema} and type_row.typname = ${identity})`;
-  if (entry.objectKind === "default") return `(select pg_catalog.jsonb_build_object('expression', pg_catalog.pg_get_expr(def.adbin, def.adrelid)) from pg_catalog.pg_attrdef def join pg_catalog.pg_class rel on rel.oid = def.adrelid join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace join pg_catalog.pg_attribute attr on attr.attrelid = rel.oid and attr.attnum = def.adnum where ns.nspname = ${schema} and (rel.relname || '.' || attr.attname) = ${identity})`;
-  if (entry.objectKind === "table") return `(select pg_catalog.jsonb_build_object('columns', columns.columns, 'acl', rel.relacl) from pg_catalog.pg_class rel join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace join lateral (select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('name', attr.attname, 'type', pg_catalog.format_type(attr.atttypid, attr.atttypmod), 'notNull', attr.attnotnull) order by attr.attnum) columns from pg_catalog.pg_attribute attr where attr.attrelid = rel.oid and attr.attnum > 0 and not attr.attisdropped) columns on true where ns.nspname = ${schema} and rel.relname = ${identity} and rel.relkind in ('r','p'))`;
+  if (entry.objectKind === "default") return `(select pg_catalog.jsonb_build_object('expression', pg_catalog.pg_get_expr(def.adbin, def.adrelid), 'generated', attr.attgenerated) from pg_catalog.pg_attrdef def join pg_catalog.pg_class rel on rel.oid = def.adrelid join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace join pg_catalog.pg_attribute attr on attr.attrelid = rel.oid and attr.attnum = def.adnum where ns.nspname = ${schema} and (rel.relname || '.' || attr.attname) = ${identity})`;
+  if (entry.objectKind === "table") return `(select pg_catalog.jsonb_build_object('columns', columns.columns, 'acl', rel.relacl) from pg_catalog.pg_class rel join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace join lateral (select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('name', attr.attname, 'type', pg_catalog.format_type(attr.atttypid, attr.atttypmod), 'notNull', attr.attnotnull) order by attr.attname) columns from pg_catalog.pg_attribute attr where attr.attrelid = rel.oid and attr.attnum > 0 and not attr.attisdropped) columns on true where ns.nspname = ${schema} and rel.relname = ${identity} and rel.relkind in ('r','p'))`;
+  if (entry.objectKind === "view") return `(select pg_catalog.jsonb_build_object('definition', pg_catalog.pg_get_viewdef(rel.oid, true), 'options', rel.reloptions, 'acl', rel.relacl) from pg_catalog.pg_class rel join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace where ns.nspname = ${schema} and rel.relname = ${identity} and rel.relkind = 'v')`;
   if (entry.objectKind === "sequence") return `(select pg_catalog.jsonb_build_object('acl', rel.relacl) from pg_catalog.pg_class rel join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace where ns.nspname = ${schema} and rel.relname = ${identity} and rel.relkind = 'S')`;
   return `(select pg_catalog.to_jsonb(${schema} || '.' || ${identity}))`;
 }
@@ -271,20 +608,26 @@ export function buildDashboardFreeTierParitySql(catalog) {
 
 function artifactSet({ payload, originMainSha, definitions }) {
   const ledger = normalizeLedger(payload.migrationLedger);
-  const catalog = definitions.map((entry) => ({ objectKind: entry.objectKind, schema: entry.schema, identity: entry.identity, definitionSha256: entry.definitionSha256 }));
+  const constraintIndexNames = new Set(definitions.filter((entry) => entry.objectKind === "constraint").map((entry) => relationIdentity(entry).object));
+  const catalog = definitions.filter((entry) => entry.objectKind !== "grant" && !(entry.objectKind === "index" && constraintIndexNames.has(entry.identity))).map((entry) => ({ objectKind: entry.objectKind, schema: entry.schema, identity: entry.identity, definitionSha256: entry.definitionSha256 }));
   const normalized = {
     captureStatus: "reviewed", originMainSha, serverMajor: payload.serverMajor,
     migrationLedgerCount: ledger.length, migrationLedgerMaxVersion: ledger.at(-1)?.version || null,
-    migrationLedgerSha256: sha256(canonical(ledger)), catalog,
+    migrationLedgerSha256: sha256(canonical(ledger)), migrationLedger: ledger, catalog,
   };
-  const baseline = `${definitions.filter((entry) => entry.definition).slice().sort((left, right) => OBJECT_ORDER.indexOf(left.objectKind) - OBJECT_ORDER.indexOf(right.objectKind) || left.schema.localeCompare(right.schema) || left.identity.localeCompare(right.identity)).map((entry) => `${entry.definition.trim()};`).join("\n")}\n`;
+  const baseline = `${legacyTableBootstrap(definitions, payload.migrationLedger)}${replayBaseline(payload.migrationLedger)}${buildFinalSchemaReconciliation(definitions)}`;
   const parity = buildDashboardFreeTierParitySql(catalog);
   return { catalog: `${JSON.stringify(normalized, null, 2)}\n`, baseline, parity, normalized };
 }
 
 async function publishCapture({ root, artifacts, manifest, artifactPaths, publish }) {
   const captures = resolve(root, "supabase/test-baselines/dashboard-free-tier-v1-captures");
-  const captureId = sha256(artifacts.catalog).slice(0, 16);
+  const captureId = sha256(canonical({
+    baseline: artifacts.baseline,
+    catalog: artifacts.catalog,
+    manifest,
+    parity: artifacts.parity,
+  })).slice(0, 16);
   const stage = join(captures, `.stage-${captureId}-${process.pid}`);
   const active = resolve(root, "supabase/test-baselines/dashboard-free-tier-v1.active.json");
   const final = join(captures, captureId);
@@ -376,7 +719,7 @@ export async function captureDashboardFreeTierCatalog({ argv = process.argv.slic
   let payload;
   try { payload = await response.json(); } catch { fail("management_api_contract_drift"); }
   if (!exactKeys(payload, ["catalog", "migrationLedger", "serverMajor"]) || !Number.isInteger(payload.serverMajor)) fail("management_api_contract_drift");
-  const definitions = normalizeDashboardFreeTierCatalog(payload.catalog, scope);
+  const definitions = normalizeDashboardFreeTierCatalog(stabilizeCatalogRoleFingerprints(payload.catalog), scope);
   const artifacts = artifactSet({ payload, originMainSha: args.originMainSha, definitions });
   const manifestPath = resolve(root, "supabase/test-baselines/dashboard-free-tier-v1.manifest.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));

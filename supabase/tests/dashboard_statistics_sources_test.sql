@@ -28,14 +28,13 @@ select ok(
   ),
   'statistics aggregate RPC is security invoker'
 );
-select is(
+select ok(
   (
-    select function_row.proconfig
+    select function_row.proconfig in (array['search_path=']::text[], array['search_path=""']::text[])
     from pg_catalog.pg_proc function_row
     where function_row.oid =
       'public.get_dashboard_statistics_sources_v1(text,text,text,date,date)'::pg_catalog.regprocedure
   ),
-  array['search_path=']::text[],
   'statistics aggregate RPC has an empty search_path'
 );
 
@@ -77,7 +76,7 @@ select is(
         pg_catalog.to_jsonb(collation_row) ->> 'colllocale',
         pg_catalog.to_jsonb(collation_row) ->> 'colliculocale',
         pg_catalog.to_jsonb(collation_row) ->> 'collcollate'
-      ) = 'ko-u-kn-true'
+      ) in ('ko-u-kn', 'ko-u-kn-true')
   ),
   'dashboard_private.ko_numeric',
   'Korean numeric collation is deterministic and exact'
@@ -118,8 +117,8 @@ select throws_ok(
 -- weekly overlaps, two exam rules, and one class hidden by an authenticated RLS policy.
 insert into public.academic_schools(id, name, category)
 values
-  ('86200000-0000-4000-8000-000000000601', '통계검증고', '고등학교'),
-  ('86200000-0000-4000-8000-000000000602', '통계검증중', '중학교');
+  ('86200000-0000-4000-8000-000000000601', '통계검증고', 'high'),
+  ('86200000-0000-4000-8000-000000000602', '통계검증중', 'middle');
 
 insert into public.students(
   id, name, uid, school, grade, contact, parent_contact, status,
@@ -168,14 +167,26 @@ values
     pg_catalog.jsonb_build_array('86200000-0000-4000-8000-000000000305'), '[]'::jsonb
   );
 
+insert into public.academic_subject_settings(subject,is_active,registration_create_enabled,grade_levels,sort_order)
+values ('과학',true,true,array['고1','고2','고3'],30)
+on conflict (subject) do update set is_active=true;
+insert into public.academic_subject_areas(subject,area_key,label,sort_order,is_active)
+values ('과학','physics','물리학',20,true)
+on conflict (subject,area_key) do update set is_active=true,label=excluded.label,sort_order=excluded.sort_order;
+
+-- Production can contain legacy science rows created before the taxonomy check
+-- was added NOT VALID; drop it only inside this rolled-back fixture to preserve
+-- that parity case without weakening the candidate migration.
+alter table public.classes drop constraint classes_science_taxonomy_check;
+
 insert into public.classes(
-  id, name, class_type, subject, grade, teacher, schedule, room,
+  id, name, class_type, subject, subject_area_key, grade, teacher, schedule, room,
   capacity, fee, status, student_ids, waitlist_ids, textbook_ids,
   lessons, schedule_plan
 )
 select
-  '86200000-0000-4000-8000-000000000301', '통계검증 고3', '정규',
-  '과학', '고3', '통계검증 선생님', '월수 10:00-11:00', '통계 1강',
+  '86200000-0000-4000-8000-000000000301'::uuid, '통계검증 고3', '정규',
+  '과학', 'physics', '고3', '통계검증 선생님', '월수 10:00-11:00', '통계 1강',
   40, 100000, '수업 진행 중',
   (select pg_catalog.jsonb_agg(student.id::text order by student.id)
    from public.students student where student.uid like 'statistics-fixture-%')
@@ -188,24 +199,24 @@ select
 union all
 select
   '86200000-0000-4000-8000-000000000302', '통계 RLS 숨김', '정규',
-  '과학', '고3', '통계검증 선생님', '화 10:00-11:00', '통계 2강',
+  '과학', 'physics', '고3', '통계검증 선생님', '화 10:00-11:00', '통계 2강',
   10, 100000, '수업 진행 중',
   pg_catalog.jsonb_build_array('86200000-0000-4000-8000-000000000001'),
   '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, '{}'::jsonb
 union all
 select
   '86200000-0000-4000-8000-000000000303', '주간 충돌 A', '정규',
-  '수학', '고3', '충돌 선생님', '월 09:00-11:00', '충돌강의실',
+  '수학', null, '고3', '충돌 선생님', '월 09:00-11:00', '충돌강의실',
   10, 100000, '수업 진행 중', '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, '{}'::jsonb
 union all
 select
   '86200000-0000-4000-8000-000000000304', '주간 충돌 B', '정규',
-  '수학', '고3', '충돌 선생님', '월 10:00-12:00', '충돌강의실',
+  '수학', null, '고3', '충돌 선생님', '월 10:00-12:00', '충돌강의실',
   10, 100000, '수업 진행 중', '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, '{}'::jsonb
 union all
 select
   '86200000-0000-4000-8000-000000000305', '시험 충돌 영어', '정규',
-  '영어', null, '시험 선생님', '화 18:00-20:00', '시험강의실',
+  '영어', null, null, '시험 선생님', '화 18:00-20:00', '시험강의실',
   10, 100000, '수업 진행 중',
   pg_catalog.jsonb_build_array(
     '86200000-0000-4000-8000-000000000001',
@@ -235,7 +246,7 @@ select
 union all
 select
   '86200000-0000-4000-8000-000000000306', '통계 추론 중2', '정규',
-  '과학', null, '추론 선생님', '목 17:00-18:00', '통계 3강',
+  '과학', 'physics', null, '추론 선생님', '목 17:00-18:00', '통계 3강',
   10, 100000, '수업 진행 중',
   pg_catalog.jsonb_build_array(
     '86200000-0000-4000-8000-000000000041',
@@ -245,7 +256,7 @@ select
 union all
 select
   '86200000-0000-4000-8000-000000000307', '직접 학사 과학', '정규',
-  '과학', '중3', '학사 선생님', '금 17:00-18:00', '통계 4강',
+  '과학', 'physics', '중3', '학사 선생님', '금 17:00-18:00', '통계 4강',
   10, 100000, '수업 진행 중',
   pg_catalog.jsonb_build_array('86200000-0000-4000-8000-000000000042'),
   '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
@@ -352,20 +363,22 @@ select is(
   'student grade is the final inference source'
 );
 
-select unlike(
-  pg_catalog.pg_get_functiondef(
-    'public.get_dashboard_statistics_sources_v1(text,text,text,date,date)'::pg_catalog.regprocedure
-  ),
-  '%list_dashboard_statistics_student_roster_v1%',
+select ok(
+  pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef('public.get_dashboard_statistics_sources_v1(text,text,text,date,date)'::pg_catalog.regprocedure),
+    'list_dashboard_statistics_student_roster_v1'
+  ) = 0,
   'aggregate does not execute drilldown RPCs'
 );
-select unlike(
-  pg_catalog.pg_get_functiondef(
-    'public.get_dashboard_statistics_sources_v1(text,text,text,date,date)'::pg_catalog.regprocedure
-  ),
-  '%list_dashboard_statistics_class_group_v1%',
+select ok(
+  pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef('public.get_dashboard_statistics_sources_v1(text,text,text,date,date)'::pg_catalog.regprocedure),
+    'list_dashboard_statistics_class_group_v1'
+  ) = 0,
   'aggregate does not execute class drilldown RPCs'
 );
+
+set constraints all immediate;
 
 do $fixture_policy$
 declare
@@ -422,6 +435,7 @@ with first_page as (
 ), second_page as (
   select public.list_dashboard_statistics_student_roster_v1(
     'science', 'high', 'grade', '고3',
+    null,
     first_page.payload #>> '{nextCursor,sortValue}',
     (first_page.payload #>> '{nextCursor,id}')::uuid,
     30

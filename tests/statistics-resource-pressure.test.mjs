@@ -200,6 +200,7 @@ test("statistics source owns the deterministic Korean numeric collation and fail
   assert.match(sql, /collisdeterministic/iu)
   assert.match(sql, /ko-u-kn-true/iu)
   assert.match(sql, /dashboard_ko_numeric_collation_invalid/iu)
+  assert.match(sql, /collation_locale not in \('ko-u-kn', 'ko-u-kn-true'\)/iu)
 })
 
 test("statistics drilldowns are bounded keyset pages with one shared normalized-name expression", async () => {

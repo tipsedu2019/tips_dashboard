@@ -49,6 +49,24 @@ set enabled = true,
     updated_at = statement_timestamp()
 where singleton;
 
+create or replace function dashboard_private.lightweight_registration_alert_now_v1()
+returns timestamptz
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select (((statement_timestamp() at time zone 'Asia/Seoul')::date + time '10:01') at time zone 'Asia/Seoul')
+$$;
+
+insert into public.ops_tasks(id, title, type, status)
+select
+  ('b1000000-0000-4000-8000-' || pg_catalog.lpad(ordinal::text, 12, '0'))::uuid,
+  'lightweight alert fixture ' || ordinal,
+  'registration',
+  'requested'
+from pg_catalog.generate_series(1, 5) ordinal;
+
 insert into public.ops_registration_appointments(
   id,
   task_id,

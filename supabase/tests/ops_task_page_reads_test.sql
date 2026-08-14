@@ -5,6 +5,15 @@ set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
 set local lock_timeout = '5s';
 
+create function pg_temp.dashboard_explain_v1(p_sql text)
+returns jsonb language plpgsql as $probe$
+declare v_plan jsonb;
+begin
+  execute 'explain (analyze, buffers, format json) ' || p_sql into v_plan;
+  return v_plan;
+end
+$probe$;
+
 select has_function(
   'public',
   'list_ops_task_page_v1',
@@ -30,7 +39,7 @@ select ok(
     where proc.oid = signature::pg_catalog.regprocedure
   )
   and (
-    select proc.proconfig = array['search_path=']::text[]
+    select proc.proconfig in (array['search_path=']::text[], array['search_path=""']::text[])
     from pg_catalog.pg_proc proc
     where proc.oid = signature::pg_catalog.regprocedure
   )
@@ -157,7 +166,7 @@ select is(
       'taskType','general','search','__task2_page_fixture__','statuses',jsonb_build_array(),
       'queue','completed','requestedById',null,'requestedTeam',null,
       'assigneeId',null,'assigneeTeam',null,'focus','none','sort','due'
-    ) ->> 'total')::integer,
+    )) ->> 'total')::integer,
   32,
   'stats uses the same filter semantics as the page'
 );
@@ -198,6 +207,44 @@ select ok(
   'general filter facet catalogs stay bounded to 100 options each'
 )
 from stats;
+
+with evidence as (
+  select
+    pg_temp.dashboard_explain_v1($sql$
+      select * from public.list_ops_task_page_v1(
+        'general',
+        jsonb_build_object('taskType','general','search','__task2_page_fixture__','statuses',jsonb_build_array(),'queue','completed','requestedById',null,'requestedTeam',null,'assigneeId',null,'assigneeTeam',null,'focus','none','sort','due'),
+        null,null,30
+      )
+    $sql$) as first_plan,
+    pg_temp.dashboard_explain_v1($sql$
+      with boundary as (
+        select id,sort_values from task2_first_page
+        order by (sort_values ->> 0)::timestamptz desc,id asc offset 29 limit 1
+      )
+      select page.* from boundary cross join lateral public.list_ops_task_page_v1(
+        'general',
+        jsonb_build_object('taskType','general','search','__task2_page_fixture__','statuses',jsonb_build_array(),'queue','completed','requestedById',null,'requestedTeam',null,'assigneeId',null,'assigneeTeam',null,'focus','none','sort','due'),
+        boundary.sort_values,boundary.id,30
+      ) page
+    $sql$) as next_plan,
+    pg_temp.dashboard_explain_v1($sql$
+      select id,title,status,priority,updated_at from public.ops_tasks
+      where id='e2000000-0000-0000-0000-000000000032'::uuid
+    $sql$) as detail_plan,
+    pg_catalog.octet_length((select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(page)) from public.list_ops_task_page_v1(
+      'general',
+      jsonb_build_object('taskType','general','search','__task2_page_fixture__','statuses',jsonb_build_array(),'queue','completed','requestedById',null,'requestedTeam',null,'assigneeId',null,'assigneeTeam',null,'focus','none','sort','due'),
+      null,null,30
+    ) page)::text) as first_bytes
+)
+select ok(
+  first_plan #>> '{0,Execution Time}' is not null
+  and next_plan #>> '{0,Execution Time}' is not null
+  and detail_plan #>> '{0,Execution Time}' is not null
+  and first_bytes between 1 and 262144,
+  'task first page, continuation, and exact detail emit ANALYZE/BUFFERS plans with a bounded response'
+) from evidence;
 
 select finish();
 rollback;

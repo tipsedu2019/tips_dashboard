@@ -37,9 +37,11 @@ begin
 end
 $$;
 
+grant dashboard_audit_writer_v2 to postgres;
+
 grant usage on schema dashboard_private to dashboard_audit_writer_v2;
+grant create on schema dashboard_private to dashboard_audit_writer_v2;
 grant usage on schema extensions to dashboard_audit_writer_v2;
-grant usage on schema auth to dashboard_audit_writer_v2;
 grant usage, select on sequence dashboard_private.dashboard_audit_event_sequence_v2 to dashboard_audit_writer_v2;
 grant select, insert on table public.dashboard_audit_logs to dashboard_audit_writer_v2;
 grant execute on function extensions.digest(text, text) to dashboard_audit_writer_v2;
@@ -99,7 +101,22 @@ declare
   audit_ordinal bigint;
   audit_start_kind text;
   audit_sequence bigint;
+  audit_claims jsonb;
+  audit_actor_profile_id uuid;
+  audit_actor_email text;
 begin
+  begin
+    audit_claims := coalesce(nullif(pg_catalog.current_setting('request.jwt.claims', true), '')::jsonb, '{}'::jsonb);
+    audit_actor_profile_id := nullif(coalesce(
+      pg_catalog.current_setting('request.jwt.claim.sub', true),
+      audit_claims ->> 'sub'
+    ), '')::uuid;
+  exception when invalid_text_representation then
+    audit_claims := '{}'::jsonb;
+    audit_actor_profile_id := null;
+  end;
+  audit_actor_email := pg_catalog.lower(coalesce(audit_claims ->> 'email', ''));
+
   if tg_op = 'DELETE' then
     audit_before := pg_catalog.to_jsonb(old);
     audit_after := null;
@@ -167,7 +184,7 @@ begin
     record_format, change_patch, before_hash, after_hash, event_sequence, audit_chain_id,
     chain_ordinal, chain_start_kind, predecessor_event_id, predecessor_after_hash
   ) values (
-    auth.uid(), pg_catalog.lower(coalesce(auth.jwt() ->> 'email', '')), public.current_dashboard_role(), tg_op,
+    audit_actor_profile_id, audit_actor_email, public.current_dashboard_role(), tg_op,
     tg_table_name, audit_entity_id, audit_entity_label,
     case when tg_op = 'DELETE' then audit_before else null end,
     case when tg_op = 'INSERT' then audit_after else null end,
@@ -187,6 +204,7 @@ alter function dashboard_private.log_dashboard_audit_event_v2() owner to dashboa
 alter function dashboard_private.dashboard_audit_forward_patch_v2(jsonb, jsonb) owner to dashboard_audit_writer_v2;
 alter function dashboard_private.dashboard_audit_reverse_patch_v2(jsonb, jsonb) owner to dashboard_audit_writer_v2;
 alter sequence dashboard_private.dashboard_audit_event_sequence_v2 owner to dashboard_audit_writer_v2;
+revoke create on schema dashboard_private from dashboard_audit_writer_v2;
 revoke all on function dashboard_private.log_dashboard_audit_event_v2() from public, anon, authenticated, service_role;
 
 alter table public.dashboard_audit_logs

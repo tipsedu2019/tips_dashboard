@@ -241,8 +241,8 @@ as $function$
       coalesce(task.due_at, task.start_at) as primary_date,
       case
         when coalesce(task.due_at, task.start_at) is null then 3
-        when coalesce(task.due_at, task.start_at) < pg_catalog.current_date then 0
-        when coalesce(task.due_at, task.start_at) < pg_catalog.current_date + interval '1 day' then 1
+        when coalesce(task.due_at, task.start_at) < current_date then 0
+        when coalesce(task.due_at, task.start_at) < current_date + interval '1 day' then 1
         else 2
       end as date_bucket
     from public.ops_tasks task
@@ -346,8 +346,8 @@ as $function$
         ))
       )
       and case p_filters ->> 'focus'
-        when 'today' then common.primary_date >= pg_catalog.current_date and common.primary_date < pg_catalog.current_date + interval '1 day'
-        when 'overdue' then common.primary_date < pg_catalog.current_date and common.status not in ('done','canceled')
+        when 'today' then common.primary_date >= current_date and common.primary_date < current_date + interval '1 day'
+        when 'overdue' then common.primary_date < current_date and common.status not in ('done','canceled')
         when 'mine' then common.assignee_id = (select auth.uid()) or common.secondary_assignee_id = (select auth.uid())
         when 'unassigned' then common.assignee_id is null or common.primary_date is null
         when 'confirmation' then common.status = 'review_requested'
@@ -562,7 +562,7 @@ as $function$
         'withdrawalSession', dashboard_private.ops_task_page_text_v1(detail.withdrawal_session, '-'),
         'completedLessonHours', dashboard_private.ops_task_page_decimal_v1(detail.completed_lesson_hours, '-'),
         'fourWeekLessonHours', dashboard_private.ops_task_page_decimal_v1(detail.four_week_lesson_hours, '-'),
-        'progress', case when detail.four_week_lesson_hours > 0 then pg_catalog.least(100, pg_catalog.round(100 * detail.completed_lesson_hours / detail.four_week_lesson_hours))::text || '%' else '-' end,
+        'progress', case when detail.four_week_lesson_hours > 0 then least(100, pg_catalog.round(100 * detail.completed_lesson_hours / detail.four_week_lesson_hours))::text || '%' else '-' end,
         'customerReason', dashboard_private.ops_task_page_text_v1(detail.customer_reason, '-'),
         'teacherOpinion', dashboard_private.ops_task_page_text_v1(detail.teacher_opinion, '-'),
         'undistributedTextbooks', dashboard_private.ops_task_page_text_v1(detail.undistributed_textbooks, '-'),
@@ -585,9 +585,9 @@ as $function$
         else common.status in ('done','canceled')
       end
       and case p_filters ->> 'period'
-        when 'today' then pg_catalog.current_date = any(array[detail.withdrawal_date, common.due_at::date, common.start_at::date, common.created_at::date])
-        when 'week' then exists (select 1 from pg_catalog.unnest(array[detail.withdrawal_date, common.due_at::date, common.start_at::date, common.created_at::date]) value where value between pg_catalog.current_date - extract(isodow from pg_catalog.current_date)::integer + 1 and pg_catalog.current_date - extract(isodow from pg_catalog.current_date)::integer + 7)
-        when 'month' then exists (select 1 from pg_catalog.unnest(array[detail.withdrawal_date, common.due_at::date, common.start_at::date, common.created_at::date]) value where value >= pg_catalog.date_trunc('month', pg_catalog.current_date)::date and value < (pg_catalog.date_trunc('month', pg_catalog.current_date) + interval '1 month')::date)
+        when 'today' then current_date = any(array[detail.withdrawal_date, common.due_at::date, common.start_at::date, common.created_at::date])
+        when 'week' then exists (select 1 from pg_catalog.unnest(array[detail.withdrawal_date, common.due_at::date, common.start_at::date, common.created_at::date]) value where value between current_date - extract(isodow from current_date)::integer + 1 and current_date - extract(isodow from current_date)::integer + 7)
+        when 'month' then exists (select 1 from pg_catalog.unnest(array[detail.withdrawal_date, common.due_at::date, common.start_at::date, common.created_at::date]) value where value >= pg_catalog.date_trunc('month', current_date)::date and value < (pg_catalog.date_trunc('month', current_date) + interval '1 month')::date)
         when 'custom' then exists (select 1 from pg_catalog.unnest(array[detail.withdrawal_date, common.due_at::date, common.start_at::date, common.created_at::date]) value where value between (p_filters ->> 'dateFrom')::date and (p_filters ->> 'dateTo')::date)
         else true
       end
@@ -660,9 +660,9 @@ as $function$
         else common.status in ('done','canceled')
       end
       and case p_filters ->> 'period'
-        when 'today' then pg_catalog.current_date = any(array[detail.from_class_end_date, detail.to_class_start_date, common.due_at::date, common.start_at::date, common.created_at::date])
-        when 'week' then exists (select 1 from pg_catalog.unnest(array[detail.from_class_end_date, detail.to_class_start_date, common.due_at::date, common.start_at::date, common.created_at::date]) value where value between pg_catalog.current_date - extract(isodow from pg_catalog.current_date)::integer + 1 and pg_catalog.current_date - extract(isodow from pg_catalog.current_date)::integer + 7)
-        when 'month' then exists (select 1 from pg_catalog.unnest(array[detail.from_class_end_date, detail.to_class_start_date, common.due_at::date, common.start_at::date, common.created_at::date]) value where value >= pg_catalog.date_trunc('month', pg_catalog.current_date)::date and value < (pg_catalog.date_trunc('month', pg_catalog.current_date) + interval '1 month')::date)
+        when 'today' then current_date = any(array[detail.from_class_end_date, detail.to_class_start_date, common.due_at::date, common.start_at::date, common.created_at::date])
+        when 'week' then exists (select 1 from pg_catalog.unnest(array[detail.from_class_end_date, detail.to_class_start_date, common.due_at::date, common.start_at::date, common.created_at::date]) value where value between current_date - extract(isodow from current_date)::integer + 1 and current_date - extract(isodow from current_date)::integer + 7)
+        when 'month' then exists (select 1 from pg_catalog.unnest(array[detail.from_class_end_date, detail.to_class_start_date, common.due_at::date, common.start_at::date, common.created_at::date]) value where value >= pg_catalog.date_trunc('month', current_date)::date and value < (pg_catalog.date_trunc('month', current_date) + interval '1 month')::date)
         when 'custom' then exists (select 1 from pg_catalog.unnest(array[detail.from_class_end_date, detail.to_class_start_date, common.due_at::date, common.start_at::date, common.created_at::date]) value where value between (p_filters ->> 'dateFrom')::date and (p_filters ->> 'dateTo')::date)
         else true
       end
@@ -774,9 +774,9 @@ as $function$
         or (p_filters ->> 'queue' = 'teacher' and common.status = 'review_requested')
       )
       and case p_filters ->> 'period'
-        when 'today' then coalesce(detail.test_at, common.due_at, common.start_at)::date = pg_catalog.current_date
-        when 'week' then coalesce(detail.test_at, common.due_at, common.start_at)::date between pg_catalog.current_date - extract(isodow from pg_catalog.current_date)::integer + 1 and pg_catalog.current_date - extract(isodow from pg_catalog.current_date)::integer + 7
-        when 'month' then coalesce(detail.test_at, common.due_at, common.start_at)::date >= pg_catalog.date_trunc('month', pg_catalog.current_date)::date and coalesce(detail.test_at, common.due_at, common.start_at)::date < (pg_catalog.date_trunc('month', pg_catalog.current_date) + interval '1 month')::date
+        when 'today' then coalesce(detail.test_at, common.due_at, common.start_at)::date = current_date
+        when 'week' then coalesce(detail.test_at, common.due_at, common.start_at)::date between current_date - extract(isodow from current_date)::integer + 1 and current_date - extract(isodow from current_date)::integer + 7
+        when 'month' then coalesce(detail.test_at, common.due_at, common.start_at)::date >= pg_catalog.date_trunc('month', current_date)::date and coalesce(detail.test_at, common.due_at, common.start_at)::date < (pg_catalog.date_trunc('month', current_date) + interval '1 month')::date
         when 'custom' then coalesce(detail.test_at, common.due_at, common.start_at)::date between (p_filters ->> 'dateFrom')::date and (p_filters ->> 'dateTo')::date
         else true
       end
@@ -1037,7 +1037,9 @@ begin
             coalesce(nullif(source.row_data ->> 'requestedByLabel', ''), '미지정') as label,
             pg_catalog.count(*) as count_value
           from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{requestedById}', 'null'::jsonb)) source
-          group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100
+          group by 1,2
+          order by coalesce(nullif(source.row_data ->> 'requestedByLabel', ''), '미지정') collate dashboard_private.ko_numeric
+          limit 100
         ) bounded
       ), '[]'::jsonb),
       'requestedTeam', coalesce((
@@ -1048,7 +1050,9 @@ begin
             coalesce(nullif(source.row_data ->> 'requestedTeam', ''), '미지정') as label,
             pg_catalog.count(*) as count_value
           from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{requestedTeam}', 'null'::jsonb)) source
-          group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100
+          group by 1,2
+          order by coalesce(nullif(source.row_data ->> 'requestedTeam', ''), '미지정') collate dashboard_private.ko_numeric
+          limit 100
         ) bounded
       ), '[]'::jsonb),
       'assignee', coalesce((
@@ -1095,7 +1099,9 @@ begin
             coalesce(nullif(source.row_data ->> 'assigneeTeam', ''), '미지정') as label,
             pg_catalog.count(*) as count_value
           from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{assigneeTeam}', 'null'::jsonb)) source
-          group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100
+          group by 1,2
+          order by coalesce(nullif(source.row_data ->> 'assigneeTeam', ''), '미지정') collate dashboard_private.ko_numeric
+          limit 100
         ) bounded
       ), '[]'::jsonb)
     ) into facets;
@@ -1157,7 +1163,9 @@ begin
             coalesce(nullif(source.row_data ->> 'subject', ''), '-') as label,
             pg_catalog.count(*) as count_value
           from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{subject}', 'null'::jsonb)) source
-          group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100
+          group by 1,2
+          order by coalesce(nullif(source.row_data ->> 'subject', ''), '-') collate dashboard_private.ko_numeric
+          limit 100
         ) bounded
       ), '[]'::jsonb),
       'teacher', coalesce((
@@ -1168,7 +1176,9 @@ begin
             coalesce(nullif(source.row_data #>> '{displayValues,teacher}', ''), nullif(source.row_data #>> '{displayValues,fromTeacher}', ''), '미지정') as label,
             pg_catalog.count(*) as count_value
           from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{teacher}', 'null'::jsonb)) source
-          group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100
+          group by 1,2
+          order by coalesce(nullif(source.row_data #>> '{displayValues,teacher}', ''), nullif(source.row_data #>> '{displayValues,fromTeacher}', ''), '미지정') collate dashboard_private.ko_numeric
+          limit 100
         ) bounded
       ), '[]'::jsonb)
     ) into facets;
@@ -1207,7 +1217,15 @@ begin
             end as label,
             pg_catalog.count(*) as count_value
           from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{teacherId}', 'null'::jsonb)) source
-          group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100
+          group by 1,2
+          order by (
+            case
+              when nullif(source.row_data #>> '{inlineState,teacherId}', '') is not null then coalesce(nullif(source.row_data #>> '{displayValues,teacher}', ''), '미지정')
+              when nullif(source.row_data #>> '{inlineState,teacherName}', '') is not null then pg_catalog.btrim(source.row_data #>> '{inlineState,teacherName}')
+              else '미지정'
+            end
+          ) collate dashboard_private.ko_numeric
+          limit 100
         ) bounded
       ), '[]'::jsonb),
       'class', coalesce((
@@ -1238,7 +1256,21 @@ begin
             end as label,
             pg_catalog.count(*) as count_value
           from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{classId}', 'null'::jsonb)) source
-          group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100
+          group by 1,2
+          order by (
+            case
+              when nullif(source.row_data ->> 'classId', '') is not null then coalesce(nullif(source.row_data #>> '{displayValues,class}', ''), '미지정')
+              when coalesce(
+                nullif(pg_catalog.btrim(source.row_data ->> 'className'), ''),
+                nullif(pg_catalog.btrim(source.row_data #>> '{inlineState,className}'), '')
+              ) is not null then coalesce(
+                nullif(pg_catalog.btrim(source.row_data ->> 'className'), ''),
+                nullif(pg_catalog.btrim(source.row_data #>> '{inlineState,className}'), '')
+              )
+              else '미지정'
+            end
+          ) collate dashboard_private.ko_numeric
+          limit 100
         ) bounded
       ), '[]'::jsonb)
     ) into facets;

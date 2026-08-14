@@ -254,6 +254,19 @@ after insert on public.ops_registration_appointments
 for each row
 execute function dashboard_private.capture_lightweight_registration_booking_alerts_v1();
 
+create or replace function dashboard_private.lightweight_registration_alert_now_v1()
+returns timestamptz
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select statement_timestamp()
+$$;
+
+revoke all on function dashboard_private.lightweight_registration_alert_now_v1()
+  from public, anon, authenticated, service_role;
+
 create or replace function public.enqueue_due_lightweight_registration_reminders_v1()
 returns jsonb
 language plpgsql
@@ -261,7 +274,7 @@ security definer
 set search_path = ''
 as $$
 declare
-  v_now timestamptz := statement_timestamp();
+  v_now timestamptz := dashboard_private.lightweight_registration_alert_now_v1();
   v_kst_date date := (v_now at time zone 'Asia/Seoul')::date;
   v_cutoff timestamptz := ((v_now at time zone 'Asia/Seoul')::date + time '10:00')
     at time zone 'Asia/Seoul';

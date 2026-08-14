@@ -26,13 +26,12 @@ select ok(
   ),
   'daily brief RPC is security invoker'
 );
-select is(
+select ok(
   (
-    select function_row.proconfig
+    select function_row.proconfig in (array['search_path=']::text[], array['search_path=""']::text[])
     from pg_catalog.pg_proc function_row
     where function_row.oid = 'public.get_dashboard_daily_brief_v1()'::pg_catalog.regprocedure
   ),
-  array['search_path=']::text[],
   'daily brief RPC has an empty search_path'
 );
 select ok(

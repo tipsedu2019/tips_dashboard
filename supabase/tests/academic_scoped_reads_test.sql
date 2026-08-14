@@ -5,6 +5,15 @@ set local timezone = 'Asia/Seoul';
 set local statement_timeout = '45s';
 set local lock_timeout = '5s';
 
+create function pg_temp.dashboard_explain_v1(p_sql text)
+returns jsonb language plpgsql as $probe$
+declare v_plan jsonb;
+begin
+  execute 'explain (analyze, buffers, format json) ' || p_sql into v_plan;
+  return v_plan;
+end
+$probe$;
+
 select has_function('public','get_academic_timetable_range_v1',array['date','date','text','text','text'],'academic timetable range RPC exists');
 select has_function('public','get_academic_curriculum_page_v1',array['jsonb','text','uuid','integer','boolean'],'academic curriculum page RPC exists');
 select has_function('public','get_academic_curriculum_detail_v1',array['uuid'],'academic curriculum detail RPC exists');
@@ -17,7 +26,7 @@ with expected(signature) as (
 )
 select ok(
   not (select proc.prosecdef from pg_catalog.pg_proc proc where proc.oid = signature::pg_catalog.regprocedure)
-  and (select proc.proconfig = array['search_path=']::text[] from pg_catalog.pg_proc proc where proc.oid = signature::pg_catalog.regprocedure)
+  and (select proc.proconfig in (array['search_path=']::text[], array['search_path=""']::text[]) from pg_catalog.pg_proc proc where proc.oid = signature::pg_catalog.regprocedure)
   and pg_catalog.has_function_privilege('authenticated',signature,'EXECUTE')
   and not pg_catalog.has_function_privilege('anon',signature,'EXECUTE')
   and not pg_catalog.has_function_privilege('public',signature,'EXECUTE'),
@@ -118,14 +127,22 @@ select is(
   'support-collection density reports its own 501-item bound'
 );
 
+insert into public.academic_subject_settings(subject,is_active,registration_create_enabled,grade_levels,sort_order)
+values ('과학',true,true,array['고1','고2','고3'],30)
+on conflict (subject) do update set is_active=true;
+insert into public.academic_subject_areas(subject,area_key,label,sort_order,is_active)
+values ('과학','physics','물리학',20,true)
+on conflict (subject,area_key) do update set is_active=true,label=excluded.label,sort_order=excluded.sort_order;
+
 insert into public.classes(
-  id,name,class_type,subject,grade,teacher,schedule,room,capacity,fee,status,
+  id,name,class_type,subject,subject_area_key,grade,teacher,schedule,room,capacity,fee,status,
   student_ids,waitlist_ids,textbook_ids,lessons,schedule_plan
 )
 select
   ('93030000-0000-4000-8000-' || pg_catalog.lpad(ordinal::text,12,'0'))::uuid,
   '__academic_curriculum__ ' || pg_catalog.lpad(ordinal::text,2,'0'),'정규',
   case when ordinal = 31 then '과학' else '수학' end,
+  case when ordinal = 31 then 'physics' else null end,
   '고2','검증 교사','월 18:00-19:00',case when ordinal = 31 then '본3' else '검증실' end,12,320000,
   case when ordinal <= 20 then '수강' else '개강 예정' end,
   '[]'::jsonb,'[]'::jsonb,'[]'::jsonb,'[]'::jsonb,'{}'::jsonb
@@ -134,6 +151,7 @@ insert into public.class_schedule_sync_group_members(group_id,class_id,sort_orde
 select '93000000-0000-4000-8000-000000000950',id,0
 from public.classes where name like '__academic_curriculum__%';
 
+select pg_catalog.set_config('app.class_schedule_mutation','release2-rpc',true);
 insert into public.class_lesson_sessions(
   id,class_id,session_key,session_date,schedule_state,start_time,end_time,
   teacher_name_snapshot,classroom_name_snapshot,origin,revision
@@ -141,8 +159,9 @@ insert into public.class_lesson_sessions(
 values
   ('93040000-0000-4000-8000-000000000001','93030000-0000-4000-8000-000000000031','__academic_planned__','2199-01-05','active','18:00','19:00','검증 교사','검증실','manual',1),
   ('93040000-0000-4000-8000-000000000002','93030000-0000-4000-8000-000000000031','__academic_unplanned__','2199-01-06','active','18:00','19:00','검증 교사','검증실','manual',1);
-insert into public.progress_logs(id,class_id,textbook_id,session_id,progress_key,status,content,updated_at)
-values ('93040000-0000-4000-8000-000000000010','93030000-0000-4000-8000-000000000031',null,null,'__academic_planned__','done','완료',now());
+select pg_catalog.set_config('app.class_schedule_mutation','',true);
+insert into public.progress_logs(id,class_id,textbook_id,session_id,progress_key,status,content,date,updated_at)
+values ('93040000-0000-4000-8000-000000000010','93030000-0000-4000-8000-000000000031',null,null,'__academic_planned__','done','완료','2199-01-05',now());
 
 create temporary table academic_curriculum_first_page on commit drop as
 select value as row
@@ -243,6 +262,38 @@ select ok(
   pg_catalog.pg_get_functiondef('public.get_academic_curriculum_page_v1(jsonb,text,uuid,integer,boolean)'::pg_catalog.regprocedure) !~* '(schedule_plan|lessons)',
   'curriculum list never reads large class detail payloads'
 );
+
+with evidence as (
+  select
+    pg_temp.dashboard_explain_v1($sql$
+      select public.get_academic_curriculum_page_v1(
+        jsonb_build_object('periodId','93000000-0000-4000-8000-000000000950','search','__academic_curriculum__','status',null,'subject',null,'grade','고2','teacher','검증 교사','classroom',null,'viewMode','all'),null,null,30,true
+      )
+    $sql$) as first_plan,
+    pg_temp.dashboard_explain_v1($sql$
+      with boundary as (
+        select row ->> 'sort_key' sort_key,(row ->> 'id')::uuid id
+        from academic_curriculum_first_page
+        order by row ->> 'sort_key' collate dashboard_private.ko_numeric,(row ->> 'id')::uuid offset 29 limit 1
+      )
+      select public.get_academic_curriculum_page_v1(
+        jsonb_build_object('periodId','93000000-0000-4000-8000-000000000950','search','__academic_curriculum__','status',null,'subject',null,'grade','고2','teacher','검증 교사','classroom',null,'viewMode','all'),boundary.sort_key,boundary.id,30,false
+      ) from boundary
+    $sql$) as next_plan,
+    pg_temp.dashboard_explain_v1($sql$
+      select public.get_academic_curriculum_detail_v1('93030000-0000-4000-8000-000000000031'::uuid)
+    $sql$) as detail_plan,
+    pg_catalog.octet_length(public.get_academic_curriculum_page_v1(
+      pg_catalog.jsonb_build_object('periodId','93000000-0000-4000-8000-000000000950','search','__academic_curriculum__','status',null,'subject',null,'grade','고2','teacher','검증 교사','classroom',null,'viewMode','all'),null,null,30,true
+    )::text) as first_bytes
+)
+select ok(
+  first_plan #>> '{0,Execution Time}' is not null
+  and next_plan #>> '{0,Execution Time}' is not null
+  and detail_plan #>> '{0,Execution Time}' is not null
+  and first_bytes between 1 and 262144,
+  'academic first page, continuation, and exact detail emit ANALYZE/BUFFERS plans with a bounded response'
+) from evidence;
 
 select finish();
 rollback;

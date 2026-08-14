@@ -30,7 +30,7 @@ begin
   if not found
     or collation_row.collprovider <> 'i'
     or not collation_row.collisdeterministic
-    or collation_locale <> 'ko-u-kn-true' then
+    or collation_locale not in ('ko-u-kn', 'ko-u-kn-true') then
     raise exception 'dashboard_ko_numeric_collation_invalid'
       using errcode = '55000';
   end if;
@@ -179,7 +179,7 @@ as $function$
   ), parsed_total as (
     select coalesce(pg_catalog.sum(
       dashboard_private.dashboard_statistics_schedule_day_count_v1(slot_match[1])
-        * pg_catalog.greatest(
+        * greatest(
           0,
           pg_catalog.split_part(slot_match[3], ':', 1)::integer * 60
             + pg_catalog.split_part(slot_match[3], ':', 2)::integer
@@ -190,7 +190,7 @@ as $function$
     pg_catalog.count(*) as slot_count
     from parsed_slots
   ), fallback_total as (
-    select coalesce(pg_catalog.sum(pg_catalog.greatest(
+    select coalesce(pg_catalog.sum(greatest(
       0,
       pg_catalog.split_part(time_match[2], ':', 1)::integer * 60
         + pg_catalog.split_part(time_match[2], ':', 2)::integer
@@ -238,15 +238,15 @@ security invoker
 set search_path = ''
 as $function$
   select case
-    when pg_catalog.greatest(coalesce(p_minutes, 0), 0) >= 60
-      and pg_catalog.mod(pg_catalog.greatest(coalesce(p_minutes, 0), 0), 60) > 0
-      then (pg_catalog.greatest(coalesce(p_minutes, 0), 0) / 60)::text
+    when greatest(coalesce(p_minutes, 0), 0) >= 60
+      and pg_catalog.mod(greatest(coalesce(p_minutes, 0), 0), 60) > 0
+      then (greatest(coalesce(p_minutes, 0), 0) / 60)::text
         || '시간 '
-        || pg_catalog.mod(pg_catalog.greatest(coalesce(p_minutes, 0), 0), 60)::text
+        || pg_catalog.mod(greatest(coalesce(p_minutes, 0), 0), 60)::text
         || '분'
-    when pg_catalog.greatest(coalesce(p_minutes, 0), 0) >= 60
-      then (pg_catalog.greatest(coalesce(p_minutes, 0), 0) / 60)::text || '시간'
-    else pg_catalog.greatest(coalesce(p_minutes, 0), 0)::text || '분'
+    when greatest(coalesce(p_minutes, 0), 0) >= 60
+      then (greatest(coalesce(p_minutes, 0), 0) / 60)::text || '시간'
+    else greatest(coalesce(p_minutes, 0), 0)::text || '분'
   end;
 $function$;
 
@@ -777,8 +777,8 @@ begin
         left_slot.student_ids as left_student_ids,
         right_slot.student_ids as right_student_ids,
         left_slot.weekday,
-        pg_catalog.greatest(left_slot.slot_start, right_slot.slot_start) as overlap_start,
-        pg_catalog.least(left_slot.slot_end, right_slot.slot_end) as overlap_end,
+        greatest(left_slot.slot_start, right_slot.slot_start) as overlap_start,
+        least(left_slot.slot_end, right_slot.slot_end) as overlap_end,
         nullif(left_slot.teacher_name, '') as left_teacher_name,
         nullif(right_slot.teacher_name, '') as right_teacher_name,
         nullif(left_slot.classroom_name, '') as left_classroom_name,
@@ -786,8 +786,8 @@ begin
       from slots left_slot
       join slots right_slot on left_slot.id < right_slot.id
         and left_slot.weekday = right_slot.weekday
-        and pg_catalog.greatest(left_slot.slot_start, right_slot.slot_start)
-          < pg_catalog.least(left_slot.slot_end, right_slot.slot_end)
+        and greatest(left_slot.slot_start, right_slot.slot_start)
+          < least(left_slot.slot_end, right_slot.slot_end)
     ),
     teacher_rows as (
       select distinct pg_catalog.jsonb_build_object(
@@ -1197,7 +1197,7 @@ begin
       student.name,
       coalesce(student.school, '') as school,
       coalesce(student.grade, '') as grade,
-      dashboard_private.dashboard_statistics_normalized_name_v1(student.name) as normalized_name
+      dashboard_private.dashboard_statistics_normalized_name_v1(student.name) collate dashboard_private.ko_numeric as normalized_name
     from visible_classes class
     cross join lateral (
       select distinct element.value as student_id
@@ -1223,23 +1223,23 @@ begin
           p_cursor_id
         )
       )
-    order by normalized_name collate dashboard_private.ko_numeric, student.id
+    order by normalized_name, student.id
     limit 31
   ),
   page_rows as materialized (
     select matched.*
     from matched
-    order by normalized_name collate dashboard_private.ko_numeric, id
+    order by normalized_name, id
     limit 30
   )
   select pg_catalog.jsonb_build_object(
     'rows', coalesce((select pg_catalog.jsonb_agg(
       pg_catalog.jsonb_build_object('id', id, 'name', name, 'school', school, 'grade', grade)
-      order by normalized_name collate dashboard_private.ko_numeric, id
+      order by normalized_name, id
     ) from page_rows), '[]'::jsonb),
     'nextCursor', case when (select pg_catalog.count(*) from matched) > 30 then (
       select pg_catalog.jsonb_build_object('sortValue', normalized_name, 'id', id)
-      from page_rows order by normalized_name collate dashboard_private.ko_numeric desc, id desc limit 1
+      from page_rows order by normalized_name desc, id desc limit 1
     ) else null end,
     'hasMore', (select pg_catalog.count(*) from matched) > 30
   ) into result;
@@ -1296,7 +1296,7 @@ begin
           where coalesce(class.student_ids, '[]'::jsonb) ? student.id::text
         )
       ) as grade_labels,
-      dashboard_private.dashboard_statistics_normalized_name_v1(class.name) as normalized_name
+      dashboard_private.dashboard_statistics_normalized_name_v1(class.name) collate dashboard_private.ko_numeric as normalized_name
     from public.classes class
     where dashboard_private.dashboard_statistics_class_active_v1(
       class.status,
@@ -1330,19 +1330,19 @@ begin
       and (
         p_cursor_name is null
         or (
-          class.normalized_name collate dashboard_private.ko_numeric,
+          class.normalized_name,
           class.id
         ) > (
           dashboard_private.dashboard_statistics_normalized_name_v1(p_cursor_name) collate dashboard_private.ko_numeric,
           p_cursor_id
         )
       )
-    order by normalized_name collate dashboard_private.ko_numeric, class.id
+    order by normalized_name, class.id
     limit 31
   ),
   page_rows as materialized (
     select matching.* from matching_classes matching
-    order by normalized_name collate dashboard_private.ko_numeric, id limit 30
+    order by normalized_name, id limit 30
   )
   select pg_catalog.jsonb_build_object(
     'rows', coalesce((select pg_catalog.jsonb_agg(
@@ -1359,11 +1359,11 @@ begin
         'weeklyHoursLabel', dashboard_private.dashboard_statistics_hours_label_v1(
           dashboard_private.dashboard_statistics_weekly_minutes_v1(schedule)
         )
-      ) order by normalized_name collate dashboard_private.ko_numeric, id
+      ) order by normalized_name, id
     ) from page_rows), '[]'::jsonb),
     'nextCursor', case when (select pg_catalog.count(*) from matching_classes) > 30 then (
       select pg_catalog.jsonb_build_object('sortValue', normalized_name, 'id', id)
-      from page_rows order by normalized_name collate dashboard_private.ko_numeric desc, id desc limit 1
+      from page_rows order by normalized_name desc, id desc limit 1
     ) else null end,
     'hasMore', (select pg_catalog.count(*) from matching_classes) > 30
   ) into result;
@@ -1398,7 +1398,7 @@ begin
       student.name,
       coalesce(student.school, '') as school,
       coalesce(student.grade, '') as grade,
-      dashboard_private.dashboard_statistics_normalized_name_v1(student.name) as normalized_name
+      dashboard_private.dashboard_statistics_normalized_name_v1(student.name) collate dashboard_private.ko_numeric as normalized_name
     from public.classes class
     cross join lateral (
       select distinct element.value as student_id
@@ -1421,21 +1421,21 @@ begin
           p_cursor_id
         )
       )
-    order by normalized_name collate dashboard_private.ko_numeric, student.id
+    order by normalized_name, student.id
     limit 31
   ),
   page_rows as materialized (
     select matching.* from matching_students matching
-    order by normalized_name collate dashboard_private.ko_numeric, id limit 30
+    order by normalized_name, id limit 30
   )
   select pg_catalog.jsonb_build_object(
     'rows', coalesce((select pg_catalog.jsonb_agg(
       pg_catalog.jsonb_build_object('id', id, 'name', name, 'school', school, 'grade', grade)
-      order by normalized_name collate dashboard_private.ko_numeric, id
+      order by normalized_name, id
     ) from page_rows), '[]'::jsonb),
     'nextCursor', case when (select pg_catalog.count(*) from matching_students) > 30 then (
       select pg_catalog.jsonb_build_object('sortValue', normalized_name, 'id', id)
-      from page_rows order by normalized_name collate dashboard_private.ko_numeric desc, id desc limit 1
+      from page_rows order by normalized_name desc, id desc limit 1
     ) else null end,
     'hasMore', (select pg_catalog.count(*) from matching_students) > 30
   ) into result;
@@ -1468,6 +1468,24 @@ grant execute on function public.list_dashboard_statistics_student_roster_v1(tex
 grant execute on function public.list_dashboard_statistics_class_group_v1(text, text, text, text, text, uuid, integer)
   to authenticated;
 grant execute on function public.list_dashboard_statistics_class_roster_v1(uuid, text, uuid, integer)
+  to authenticated;
+
+-- The aggregate RPC stays SECURITY INVOKER. These legacy helpers are pure
+-- immutable JSON/text parsers, so authenticated callers need only EXECUTE on
+-- the narrow parsing chain rather than elevated table privileges.
+grant execute on function dashboard_private.dashboard_conflict_class_slots_v1(jsonb)
+  to authenticated;
+grant execute on function dashboard_private.dashboard_conflict_normalize_classroom_v1(text)
+  to authenticated;
+grant execute on function dashboard_private.dashboard_conflict_is_classroom_token_v1(text)
+  to authenticated;
+grant execute on function dashboard_private.dashboard_conflict_normalize_time_v1(text)
+  to authenticated;
+grant execute on function dashboard_private.dashboard_conflict_subject_from_event_v1(jsonb)
+  to authenticated;
+grant execute on function dashboard_private.dashboard_conflict_event_type_v1(jsonb)
+  to authenticated;
+grant execute on function dashboard_private.dashboard_conflict_normalize_subject_v1(text)
   to authenticated;
 
 comment on function public.get_dashboard_statistics_sources_v1(text, text, text, date, date) is
