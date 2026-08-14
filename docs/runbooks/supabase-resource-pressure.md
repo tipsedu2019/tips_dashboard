@@ -203,3 +203,7 @@ capture interval이 겹치거나 bracket/wall-clock ordering이 어긋나면 결
 ```
 
 실행 preview도 explicit authorization·request ID·새 absolute output path와 read-only credential을 요구한다. 결과의 `candidateOnly=true`, `archiveVerified=false`, `deleteAuthorized=false`는 어떤 옵션으로도 변경되지 않는다. archive format, encryption, destination, retention owner, full restore verification이 별도로 승인되기 전에는 `dashboard_audit_logs` 삭제를 진행하지 않는다.
+
+## 9. Index/RLS tuning은 evidence manifest가 있어야 한다
+
+`docs/operations/free-tier-performance-migration-scopes.json`은 performance migration마다 literal path, category, table, reason, evidence ID를 잠근다. verifier는 index DDL 4개, policy DDL 6개, user table 3개를 초과하거나 manifest 외 table을 즉시 거부한다. RLS initplan/policy 통합은 admin·staff·assistant·teacher·viewer allowed/denied fixture parity와 전후 EXPLAIN 없이는 승인하지 않는다. advisor 결과만으로 `fix all`을 실행하지 않는다.

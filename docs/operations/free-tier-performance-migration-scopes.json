@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "limits": { "userTablesPerMigration": 3, "indexDdlsPerMigration": 4, "policyDdlsPerMigration": 6 },
+  "entries": [
+    { "file": "supabase/migrations/20260813234824_ops_task_page_reads.sql", "category": "index", "tables": ["public.ops_tasks"], "reason": "30+1 task keyset pages", "evidenceIds": ["ops_task_page_reads_source_contract"] },
+    { "file": "supabase/migrations/20260814105829_lightweight_registration_external_alerts.sql", "category": "index", "tables": ["dashboard_private.lightweight_registration_alert_deliveries"], "reason": "bounded pending and retention coordinator reads", "evidenceIds": ["lightweight_registration_alerts_pgtap"] },
+    { "file": "supabase/migrations/20260814115116_dashboard_audit_diff_format.sql", "category": "index", "tables": ["public.dashboard_audit_logs"], "reason": "entity predecessor lookup", "evidenceIds": ["dashboard_audit_diff_source_contract"] },
+    { "file": "supabase/migrations/20260814115116_dashboard_audit_diff_format.sql", "category": "rls", "tables": ["public.dashboard_audit_logs"], "reason": "writer-only audit transition", "evidenceIds": ["dashboard_audit_diff_source_contract"] }
+  ]
+}
