@@ -81,7 +81,7 @@ test("Next Data Cache reuses a successful public class summary across processes 
 
   try {
     await rm(path.join(fixture, ".next"), { recursive: true, force: true });
-    await run(node, [path.join(root, "node_modules/next/dist/bin/next"), "build", fixture], { cwd: root, env });
+    await run(node, [path.join(root, "node_modules/next/dist/bin/next"), "build", fixture, "--webpack"], { cwd: root, env });
     const portA = await reservePort();
     const first = await start(portA, env);
     try {

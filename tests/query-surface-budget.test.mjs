@@ -211,6 +211,11 @@ test("query budget rejects a second occurrence of the same legacy violation", as
   return []
 }
 `
+  const baselineViolation = inspectQuerySurfaceSource({
+    surface: "management",
+    file: "src/features/management/management-service.js",
+    source: baselineSource,
+  }).find((violation) => violation.reason === "list_select_star")
   const result = await verifyFixture({
     surface: "management",
     file: "src/features/management/management-service.js",
@@ -226,11 +231,8 @@ test("query budget rejects a second occurrence of the same legacy violation", as
       symbol: "selectRows",
       violation: "list_select_star",
       baselineSha: baseSha,
-      fingerprint: inspectQuerySurfaceSource({
-        surface: "management",
-        file: "src/features/management/management-service.js",
-        source: baselineSource,
-      }).find((violation) => violation.reason === "list_select_star").fingerprint,
+      fingerprint: baselineViolation.fingerprint,
+      occurrenceFingerprint: baselineViolation.occurrenceFingerprint,
     }],
   })
 
@@ -247,6 +249,11 @@ test("an unchanged legacy chain is outside the diff candidate set when a safe ne
   return client.from(table).select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 `
+  const baselineViolation = inspectQuerySurfaceSource({
+    surface: "management",
+    file: "src/features/management/management-service.js",
+    source: baselineSource,
+  }).find((violation) => violation.reason === "list_select_star")
   const result = await verifyFixture({
     surface: "management",
     file: "src/features/management/management-service.js",
@@ -263,11 +270,8 @@ test("an unchanged legacy chain is outside the diff candidate set when a safe ne
       symbol: "selectRows",
       violation: "list_select_star",
       baselineSha: baseSha,
-      fingerprint: inspectQuerySurfaceSource({
-        surface: "management",
-        file: "src/features/management/management-service.js",
-        source: baselineSource,
-      }).find((violation) => violation.reason === "list_select_star").fingerprint,
+      fingerprint: baselineViolation.fingerprint,
+      occurrenceFingerprint: baselineViolation.occurrenceFingerprint,
     }],
   })
 
@@ -572,13 +576,33 @@ test("query budget worktree mode includes unstaged source additions", async () =
 test("legacy query debt is an exact literal manifest and not a wildcard exception", () => {
   assert.ok(QUERY_SURFACE_DEBT_MANIFEST.length > 0)
   for (const entry of QUERY_SURFACE_DEBT_MANIFEST) {
-    assert.deepEqual(Object.keys(entry).sort(), ["baselineSha", "file", "fingerprint", "surface", "symbol", "violation"].sort())
+    assert.deepEqual(Object.keys(entry).sort(), ["baselineSha", "file", "fingerprint", "occurrenceFingerprint", "surface", "symbol", "violation"].sort())
     assert.match(entry.file, /^src\/[\w./-]+\.(?:ts|tsx|js)$/u)
     assert.doesNotMatch(entry.file, /[*?]/u)
     assert.match(entry.symbol, /^[A-Za-z_$][\w$]*$/u)
     assert.match(entry.baselineSha, /^[0-9a-f]{40}$/u)
     assert.match(entry.fingerprint, /^[0-9a-f]{64}$/u)
+    assert.match(entry.occurrenceFingerprint, /^[0-9a-f]{64}$/u)
     assert.ok(["tasks", "management", "operations", "academic", "public"].includes(entry.surface))
+  }
+})
+
+test("default legacy query debt fingerprints bind their baseline source occurrences", () => {
+  for (const entry of QUERY_SURFACE_DEBT_MANIFEST) {
+    const source = execFileSync("git", ["show", `${entry.baselineSha}:${entry.file}`], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+    })
+    const violation = inspectQuerySurfaceSource({
+      surface: entry.surface,
+      file: entry.file,
+      source,
+    }).find((candidate) => (
+      candidate.symbol === entry.symbol
+      && candidate.reason === entry.violation
+      && candidate.fingerprint === entry.fingerprint
+    ))
+    assert.equal(violation?.occurrenceFingerprint, entry.occurrenceFingerprint)
   }
 })
 
@@ -671,6 +695,28 @@ test("public compatibility exemptions reject a stored query builder", () => {
   })
 
   assert.ok(violations.some((violation) => violation.reason === "list_limit_missing"))
+})
+
+test("public compatibility exemptions reject optional chaining anywhere in a direct chain", () => {
+  const source = `async function buildPublicClassesPayload(supabase) {
+  const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date"
+  const summary = supabase?.from("classes").select(PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION)
+  const full = [
+    supabase.from?.("classes").select("id,name,subject,grade,teacher,room,schedule,status,fee,tuition,capacity,student_ids,waitlist_ids,textbook_ids,textbook_info,lessons,schedule_plan,start_date,end_date"),
+    supabase.from("textbooks")?.select("id,title,name,publisher,price,tags,lessons,updated_at"),
+    supabase.from("progress_logs").select?.("id,class_id,textbook_id,progress_key,session_id,session_order,status,range_start,range_end,range_label,public_note,teacher_note,updated_at,date,completed_lesson_ids"),
+  ]
+  return { summary, full }
+}`
+  const violations = inspectQuerySurfaceSource({
+    surface: "public",
+    file: "src/server/public-classes-payload.js",
+    source,
+  })
+
+  for (const line of [3, 5, 6, 7]) {
+    assert.ok(violations.some((violation) => violation.reason === "list_limit_missing" && violation.startLine === line))
+  }
 })
 
 test("the cache invalidation role RPC is an exact scalar RPC, not a pageable list", () => {
@@ -816,6 +862,7 @@ test("manifest is the sole legacy-debt allowance for a touched query chain", asy
     violation: "list_select_star",
     baselineSha: baseSha,
     fingerprint: baseDebt.fingerprint,
+    occurrenceFingerprint: baseDebt.occurrenceFingerprint,
   }]
   const candidate = baselineSource.replace("retry(false)", "retry(false) // touched")
 
@@ -968,7 +1015,8 @@ test("a stale manifest fingerprint cannot grandfather a reintroduced query debt"
   const root = await createFixtureRepository({ [file]: original })
   try {
     const historicalSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim()
-    const fingerprint = inspectQuerySurfaceSource({ surface: "tasks", file, source: original }).find((violation) => violation.reason === "list_select_star").fingerprint
+    const originalViolation = inspectQuerySurfaceSource({ surface: "tasks", file, source: original })
+      .find((violation) => violation.reason === "list_select_star")
     await writeFile(join(root, file), fixed)
     const baseSha = commitFixture(root)
     await writeFile(join(root, file), original)
@@ -978,7 +1026,7 @@ test("a stale manifest fingerprint cannot grandfather a reintroduced query debt"
       baseSha,
       headSha,
       root,
-      debtManifest: [{ surface: "tasks", file, symbol: "load", violation: "list_select_star", baselineSha: historicalSha, fingerprint }],
+      debtManifest: [{ surface: "tasks", file, symbol: "load", violation: "list_select_star", baselineSha: historicalSha, fingerprint: originalViolation.fingerprint, occurrenceFingerprint: originalViolation.occurrenceFingerprint }],
     })
     assert.deepEqual(result.violations, [{ file, symbol: "load", surface: "tasks", reason: "list_select_star" }])
   } finally {

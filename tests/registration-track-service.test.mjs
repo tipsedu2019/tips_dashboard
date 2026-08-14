@@ -544,6 +544,11 @@ function readyOptions(overrides = {}) {
     },
     now: () => 1,
     randomUUID: () => "uuid-from-options",
+    invalidatePublicClassesCacheAfterMutation: async (_client, reason) => ({
+      status: "refreshed",
+      reason,
+      requestId: "public-cache-refresh",
+    }),
     ...overrides,
   };
 }
@@ -2825,6 +2830,47 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
   assert.equal(completed.enrollments[0].makeeduRegistered, true);
   assert.equal(createRegistrationMutationRequestKey("save", "track-1"), "save:track-1:uuid-from-crypto");
   assert.equal(mutationInvalidations, 27, "every successful registration RPC must invalidate parent consumers");
+});
+
+test("admission completion uses the injected post-commit public cache invalidator", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const enrollment = {
+    id: "enrollment-1", track_id: "track-1", student_id: null,
+    admission_batch_id: "batch-1", class_id: "class-1", textbook_id: null,
+    class_start_date: null, class_start_session_key: null, class_start_session: null,
+    status: "enrolled", makeedu_registered: true, roster_active: true,
+    roster_released_at: null, roster_release_reason: null,
+    roster_release_source_task_id: null, roster_release_kind: null, sort_order: 0,
+  };
+  const harness = createClient({
+    rpcHandler(name) {
+      assert.equal(name, "complete_registration_admission_batch");
+      return {
+        data: {
+          batch: { id: "batch-1", task_id: "task-1", revision_number: 1, status: "completed", invoice_sent_at: "i", payment_confirmed_at: "p", created_at: "c", updated_at: "u" },
+          enrollments: [enrollment],
+        },
+        error: null,
+      };
+    },
+  });
+  const calls = [];
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    invalidatePublicClassesCacheAfterMutation: async (client, reason) => {
+      calls.push([client, reason]);
+      return { status: "pending", reason, requestId: "refresh-1" };
+    },
+  }));
+
+  const result = await service.completeRegistrationAdmissionBatch({
+    batchId: "batch-1",
+    requestKey: "complete-batch",
+  });
+
+  assert.deepEqual(calls, [[harness.client, "class"]]);
+  assert.deepEqual(result.publicClassesCacheRefresh, {
+    status: "pending", reason: "class", requestId: "refresh-1",
+  });
 });
 
 test("first lesson source serialization sends regular sentinel as null and maps the exact response key", async () => {

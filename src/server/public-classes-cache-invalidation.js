@@ -4,6 +4,7 @@ export { PUBLIC_CLASSES_SUMMARY_CACHE_TAG };
 
 const REASONS = new Set(["class", "textbook", "progress", "schedule"]);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const CACHE_INVALIDATION_TIMEOUT_MS = 3_000;
 
 function validRequest(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) return false;
@@ -46,14 +47,36 @@ export async function requestPublicClassesCacheInvalidation({
   requestId,
   accessToken = "",
   fetcher = fetch,
+  timeoutMs = CACHE_INVALIDATION_TIMEOUT_MS,
 } = {}) {
   const headers = { "Content-Type": "application/json" };
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  const controller = typeof AbortController === "undefined" ? null : new AbortController();
+  const boundedTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? timeoutMs
+    : CACHE_INVALIDATION_TIMEOUT_MS;
   try {
-    const response = await fetcher("/api/public-classes/cache/invalidate", {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ reason, requestId }),
+    const response = await new Promise((resolve, reject) => {
+      let settled = false;
+      const settle = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        callback(value);
+      };
+      const timeout = setTimeout(() => {
+        controller?.abort();
+        settle(reject, new Error("public_classes_cache_invalidation_timeout"));
+      }, boundedTimeoutMs);
+      Promise.resolve(fetcher("/api/public-classes/cache/invalidate", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ reason, requestId }),
+        signal: controller?.signal,
+      })).then(
+        (value) => settle(resolve, value),
+        (error) => settle(reject, error),
+      );
     });
     const body = await response.json().catch(() => null);
     if (response.ok && body?.ok) return { status: "refreshed", reason, requestId };

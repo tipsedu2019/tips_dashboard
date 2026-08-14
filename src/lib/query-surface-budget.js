@@ -70,7 +70,8 @@ function isLegacyPublicFullCompatibilityQuery({ surface, file, symbol, query, co
     && callMethod(projection) === "select"
     && projectionAccess?.receiver === query.entry
     && rootIdentifier(entry?.receiver) === "supabase"
-    && !query.entry.questionDotToken
+    && !hasOptionalChain(query.entry)
+    && !hasOptionalChain(projection)
   const namedSummaryCompatibilityProjection = expected?.selector
     ? Boolean(projectionArgument && ts.isIdentifier(projectionArgument))
       && projectionArgument.text === expected.selector
@@ -85,11 +86,45 @@ function isLegacyPublicFullCompatibilityQuery({ surface, file, symbol, query, co
     && value === expected.projection
 }
 
+function hasOptionalChain(expression) {
+  let current = expression && unwrap(expression)
+  while (current && (ts.isCallExpression(current) || ts.isPropertyAccessExpression(current)
+    || ts.isElementAccessExpression(current))) {
+    if (current.questionDotToken) return true
+    current = unwrap(current.expression)
+  }
+  return false
+}
+
 // These are deliberately literal records, not path patterns. Each one binds a
 // specific baseline query chain, so moving or duplicating legacy debt is a new
 // violation rather than an interchangeable allowance.
+const LEGACY_DEBT_OCCURRENCE_FINGERPRINTS = new Map([
+  ["9c925ec82011b4d50c8761e57ec33f2c0fd13b8af7c9e20cabd22122c05b5cfd", "b1b645a598aefe241a84b6feb9b5536de36aac6a6af7c23da9e4d5aad923dd96"],
+  ["f634c3bdbd371fe0badf43b9b774dc13d73ecb9e4151061aeea6bd93f2e47510", "36155799ed2b16b75931485780ba9a97b4d7dbae505f671a8124b302cf90afdf"],
+  ["19a4d722ed35299a88bf06fb3164ebec2081d2ce16a53835c398624485ef48b1", "5926e1fbec0cfbf5a40f1c5368eef83f0b68d70a16d4e233591b46a93de84e90"],
+  ["ce8eacaf5a088c1bd6a02532bd8a974e8b87bb56ee6fa929abee23f550046ca9", "224271e7c36097b0436fdad47d8197cc25a910b35c782ce8ef7829514456611d"],
+  ["c298131d70d0b561467e5dcdfe3196f8be304ea1de9e8d2e91bbbd82f9019965", "661ffe54d7b667bc98ca5d83eb1f765c7344a558dff7ff71e25963ce7a6c5b86"],
+  ["1d10c6da117bcc226bd4b3a2b1511de9dc10cf22fb8655b6c6a439934543485b", "88eb22ad0c6baac6d5423935d95be226781f03f668702f2297cbd1608f103d83"],
+  ["d31238040cb5ecb0b1979fa01fe8a784c8377466de1a5a4bb41a273d4a0832f8", "661ffe54d7b667bc98ca5d83eb1f765c7344a558dff7ff71e25963ce7a6c5b86"],
+  ["53187d67160e2b5f8abb237db5414df034bc01b78a8baf35611506a2c25a49da", "88eb22ad0c6baac6d5423935d95be226781f03f668702f2297cbd1608f103d83"],
+  ["bb47c9d77c189079d6544f15850441de3880742fae7d5891c44cc04c01a278c4", "54614d10a5b739c8c3df3fc0c6f821f4b5a013899aaab0b99a587d3dfce951aa"],
+  ["1d6333930b09982ad59d086dae3e203f55e2577fa266904b7cc729acf5c2240c", "209c094c9f2ddfcc0d6102747d58176d5c1e76cf55aff49ba613afaaa43ce7f2"],
+  ["2c96a45dbc1c66b7e71a5870ff26b2f5385c3937705c5ac6cc886b4f3c355401", "036b518140220d304a1fe019d20e351d471d56e80322c87e008197196a53914a"],
+  ["eb75288993a7bbd901544dd155cdc276764ab97a28b7d75622d069ebdaadb2d7", "286e771d24013ad50398d8f59830a7c7a3ba7f54946abcd994bafbf696ae682b"],
+  ["9ec60a4049e9d6defd81e44652e6d11f70d14aff2e41b13a22e023346618802d", "f19f1c18babb1667f17c5ab1f14e33073033c07f9b52c7c0e45896b509e8c942"],
+  ["91089c83905a97981897078f1f116d88f17314217f4a04d1958b91c83ff2cb58", "a2f9f135cdd93ddd4775e7ffb03c4398570ed5c7130dcd269c12af0b361b5279"],
+  ["7ad267651103e94ecda0049485e915e7c577351c85c5693bc4d87c4e6c17cbbb", "3d83353476698d6cb9d3ad0a3d4d9c99ca2e298e303d88c361d103d74ae9fa96"],
+  ["65280cf9e7670073ed6c2af811fba866f2a819a0e814dc736bc30e85325a9f76", "1e3845596f624ee5188636ccada26807925f24670a2ff7c1be43a8cc59fc0f8b"],
+  ["8eb0d3f8f2d72a47ab438bb9f74a837ca9a23162cc611b6b2d02f5150b2c5790", "4dfaeb8e844e584cda21e5381b8aeb432b9602aa636ba0a7e90f04b4ed02e326"],
+  ["193816049298234fe788de7b9aec7bbab89eebaab8aadb18da74705673611b94", "6f50c2f7aff6ea99850c33ea159ac16d0e2af0b6fbc1e13f8346ea07f82592c9"],
+  ["bddeb9462f15759b516eed0505dfbb8961248ba29c8cdb16189d6738ab15142d", "1cd961f6b9793fbbf6078fdbb549dc16a1f2d8d73739864de8f328cbbb20de83"],
+])
+
 function legacyDebt(surface, file, symbol, violation, fingerprint) {
-  return Object.freeze({ surface, file, symbol, violation, baselineSha: BASELINE_SHA, fingerprint })
+  const occurrenceFingerprint = LEGACY_DEBT_OCCURRENCE_FINGERPRINTS.get(fingerprint)
+  if (!occurrenceFingerprint) throw new Error("legacy_query_debt_occurrence_missing")
+  return Object.freeze({ surface, file, symbol, violation, baselineSha: BASELINE_SHA, fingerprint, occurrenceFingerprint })
 }
 
 export const QUERY_SURFACE_DEBT_MANIFEST = Object.freeze([
@@ -653,13 +688,25 @@ function queryLineSpan(scope, query) {
 }
 
 function queryOccurrenceFingerprint(scope, query) {
-  const source = scope.getSourceFile().text
-  const start = query.entry.getStart(scope.getSourceFile())
+  const sourceFile = scope.getSourceFile()
+  let statement = query.entry
+  while (statement.parent && !ts.isStatement(statement)) statement = statement.parent
+  const parent = statement.parent
+  const siblings = parent && (ts.isBlock(parent) || ts.isSourceFile(parent))
+    ? parent.statements
+    : []
+  const index = [...siblings].findIndex((candidate) => candidate === statement)
+  const previousStatement = index > 0 ? siblings[index - 1] : null
+  const start = query.entry.getStart(sourceFile)
   const end = query.operations.at(-1)?.getEnd() ?? query.entry.getEnd()
-  // A small lexical neighborhood binds an approved debt to its source
-  // occurrence without treating unrelated edits elsewhere in the file as debt.
+  // The request and its direct predecessor are a stable source anchor: unrelated
+  // edits elsewhere in the scope do not invalidate debt, while moving it within
+  // the same symbol changes this occurrence binding.
   return createHash("sha256")
-    .update(source.slice(Math.max(0, start - 96), Math.min(source.length, end + 96)).replace(/\s+/gu, " "))
+    .update([
+      String(previousStatement?.kind ?? "<scope-start>"),
+      sourceFile.text.slice(start, end),
+    ].join("\u0000").replace(/\s+/gu, " "))
     .digest("hex")
 }
 
@@ -992,7 +1039,8 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
   for (const entry of debtManifest.filter((candidate) => surfaces.includes(candidate.surface))) {
     if (!entry || typeof entry.file !== "string" || typeof entry.symbol !== "string" || typeof entry.violation !== "string"
       || typeof entry.baselineSha !== "string" || typeof entry.fingerprint !== "string" || !/^[0-9a-f]{40}$/u.test(entry.baselineSha)
-      || !/^[0-9a-f]{64}$/u.test(entry.fingerprint)) throw queryBudgetError("query_surface_debt_manifest_invalid")
+      || !/^[0-9a-f]{64}$/u.test(entry.fingerprint) || typeof entry.occurrenceFingerprint !== "string"
+      || !/^[0-9a-f]{64}$/u.test(entry.occurrenceFingerprint)) throw queryBudgetError("query_surface_debt_manifest_invalid")
     const manifestBaseline = await sourceAt({ root, file: entry.file, revision: entry.baselineSha, includeWorktree: false })
     if (manifestBaseline === null) {
       throw queryBudgetError("query_surface_debt_manifest_invalid")
@@ -1001,10 +1049,7 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
     if (!countedViolations(manifestBaseline, entry.surface, entry.file).has(baselineKey)) {
       throw queryBudgetError("query_surface_debt_manifest_invalid")
     }
-    if (entry.occurrenceFingerprint !== undefined && !/^[0-9a-f]{64}$/u.test(entry.occurrenceFingerprint)) {
-      throw queryBudgetError("query_surface_debt_manifest_invalid")
-    }
-    manifestDebt.set(baselineKey, entry.occurrenceFingerprint ?? null)
+    manifestDebt.set(baselineKey, entry.occurrenceFingerprint)
   }
   const violations = []
   for (const file of files) {
@@ -1022,12 +1067,9 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
         const key = exactDebtKey(violation)
         const expectedOccurrence = manifestDebt.get(key)
         const allowedDebt = manifestDebt.has(key) && baseDebt.has(key)
-          && (expectedOccurrence === null
-            ? sourceDebt.get(key) <= baseDebt.get(key)
-            : (
-            expectedOccurrence === violation.occurrenceFingerprint
-            && baseOccurrences.has(`${key}\u0000${expectedOccurrence}`)
-            ))
+          && sourceDebt.get(key) <= baseDebt.get(key)
+          && baseOccurrences.has(`${key}\u0000${expectedOccurrence}`)
+          && expectedOccurrence === violation.occurrenceFingerprint
         if (overlapsChangedRange(violation, ranges) && !allowedDebt) violations.push(violation)
     }
   }

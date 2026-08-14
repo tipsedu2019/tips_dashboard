@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   PUBLIC_CLASSES_SUMMARY_CACHE_TAG,
   createPublicClassesCacheInvalidationResponder,
+  requestPublicClassesCacheInvalidation,
 } from "../src/server/public-classes-cache-invalidation.js";
 
 const REQUEST_ID = "10000000-0000-4000-8000-000000000001";
@@ -49,11 +50,26 @@ test("public classes cache invalidation rejects unauthenticated, unauthorized, m
 });
 
 test("a cache refresh delivery failure is nonfatal and remains visible as pending", async () => {
-  const { requestPublicClassesCacheInvalidation } = await import("../src/server/public-classes-cache-invalidation.js");
   const result = await requestPublicClassesCacheInvalidation({
     reason: "textbook",
     requestId: REQUEST_ID,
     fetcher: async () => { throw new Error("network unavailable"); },
   });
   assert.deepEqual(result, { status: "pending", reason: "textbook", requestId: REQUEST_ID });
+});
+
+test("a hung cache refresh is aborted and returns a pending receipt", { timeout: 100 }, async () => {
+  let signal;
+  const result = await requestPublicClassesCacheInvalidation({
+    reason: "class",
+    requestId: REQUEST_ID,
+    timeoutMs: 5,
+    fetcher: async (_url, options) => {
+      signal = options.signal;
+      return new Promise(() => {});
+    },
+  });
+
+  assert.deepEqual(result, { status: "pending", reason: "class", requestId: REQUEST_ID });
+  assert.equal(signal?.aborted, true);
 });

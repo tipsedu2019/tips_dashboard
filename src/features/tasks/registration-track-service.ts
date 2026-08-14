@@ -818,6 +818,10 @@ export type RegistrationTrackServiceOptions = {
   randomUUID?: () => string
   onMutationSuccess?: () => void
   requestTimeoutMs?: number
+  invalidatePublicClassesCacheAfterMutation?: (
+    client: RegistrationTrackClient,
+    reason: "class",
+  ) => Promise<Awaited<ReturnType<typeof invalidatePublicClassesCacheAfterMutation>>>
 }
 
 const PRE_OBSERVATION_TRACK_SUMMARY_COLUMNS = [
@@ -1828,6 +1832,8 @@ export function createRegistrationTrackService(
   if (typeof options.probeIntakeRuntime !== "function") {
     throw new Error("probeIntakeRuntime is required.")
   }
+  const invalidatePublicClassesAfterMutation = options.invalidatePublicClassesCacheAfterMutation
+    || invalidatePublicClassesCacheAfterMutation
   type TrackSummaryMode = "generic" | "observation"
   type TrackSummarySelectionResult =
     | RegistrationTrackSummaryLoadResult
@@ -3348,7 +3354,7 @@ export function createRegistrationTrackService(
       p_batch_id: input.batchId,
       p_request_key: requireRequestKey(input.requestKey),
     })
-    const publicClassesCacheRefresh = await invalidatePublicClassesCacheAfterMutation(supabase, "class")
+    const publicClassesCacheRefresh = await invalidatePublicClassesAfterMutation(client, "class")
     return {
       batch: mapBatch(value(result as unknown as Row, "batch") as Row),
       enrollments: rows(value(result as unknown as Row, "enrollments")).map(mapEnrollment),
@@ -3372,7 +3378,7 @@ export function createRegistrationTrackService(
       p_reason: input.reason,
       p_request_key: requireRequestKey(input.requestKey),
     })
-    const publicClassesCacheRefresh = await invalidatePublicClassesCacheAfterMutation(supabase, "class")
+    const publicClassesCacheRefresh = await invalidatePublicClassesAfterMutation(client, "class")
     return {
       ...result,
       enrollment: mapEnrollment(value(result as unknown as Row, "enrollment") as Row),
@@ -3543,6 +3549,7 @@ const defaultRegistrationTrackService = createRegistrationTrackService(
     probeIntakeRuntime: probeRegistrationIntakeWorkflowRuntime,
     probeObservationRuntime: probeRegistrationObservationRuntime,
     invalidateRuntimeAfterReadyFailure: invalidateRegistrationSubjectTrackRuntimeAfterReadyFailure,
+    invalidatePublicClassesCacheAfterMutation,
     onMutationSuccess: () => registrationTrackMutationCacheInvalidator?.(),
     performance: typeof performance === "undefined"
       ? undefined

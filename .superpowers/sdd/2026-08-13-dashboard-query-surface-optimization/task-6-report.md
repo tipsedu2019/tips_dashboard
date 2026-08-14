@@ -41,3 +41,13 @@ Round 2 RED was the query-budget baseline-delta regression (38 findings). Final 
 - Canonical admission completion and enrollment cancellation call invalidation only after their RPC succeeds, return the nonfatal refresh receipt, and the enrollment editor renders a pending-cache warning. Legacy registration stage transitions now render their returned pending receipt too.
 
 Round 3 RED added direct-builder and moved-occurrence regressions. Final GREEN: query-budget/cache boundary suites are **66/66**, task and public worktree guards pass, bundled-node TypeScript and diff check pass. No DB, migration, deployment, provider, or production action ran.
+
+## Round 4 P1 remediation
+
+- Default legacy-debt records now carry a required occurrence fingerprint and the verifier validates it against the recorded baseline. The stable anchor combines the exact chain with its direct predecessor statement kind, so a same-symbol move is rejected without treating unrelated predecessor-body edits as new debt.
+- Public compatibility chains reject optional chaining at every `supabase`/`from`/`select` link while retaining the legacy full `/api/public-classes` response contract.
+- Registration admission completion and enrollment cancellation accept an injected post-commit cache invalidator, use the committed mutation client, and retain the nonfatal pending receipt for the caller/UI.
+- Cache-invalidation delivery is bounded by an abortable 3-second timeout; a hung network request resolves to the existing `pending` receipt rather than delaying a completed mutation.
+- The Next fixture build explicitly selects webpack. This avoids the local unsigned-SWC-to-WASM fallback path where Turbopack cannot create its project, and restores the cross-process Data Cache proof.
+
+Round 4 RED covered the missing default occurrence record, optional-chain compatibility bypass, VM factory import failure, and a hung invalidation request. Final GREEN: exact Task 6 suite **21/21**, full query-budget suite **68/68**, registration/cache suite **73/73**, public worktree guard, bundled-node TypeScript, and `git diff --check` all pass. No DB, migration, deployment, provider, or production action ran.
