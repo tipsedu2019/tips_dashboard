@@ -56,5 +56,5 @@ test("student detail uses student-specific labels without redundant badges", asy
   assert.match(source, /kind === "students" \? "수강 추가" : "등록 추가"/);
   assert.match(source, /\{modeLabel === "수강" \? "대기 전환" : "수강 전환"\}/);
   assert.match(source, /\{modeLabel === "수강" \? "수강 해제" : "대기 해제"\}/);
-  assert.match(source, /renderRelationList\("수강 수업", getStudentEnrolledClassIds\(selectedRow\), "수강"\)/);
+  assert.match(source, /renderRelationList\("수강 수업", getStudentEnrolledClassIds\(selectedRow\), "수강", "enrollments"\)/);
 });

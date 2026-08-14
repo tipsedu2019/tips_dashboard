@@ -33,8 +33,8 @@ test("class relation removal can clear orphaned student references", async () =>
   assert.match(removeSource, /const safeClassId = trimText\(classId\)/);
   assert.match(removeSource, /if \(!student && !classItem\)/);
   assert.match(removeSource, /getStudentClassMode\(student, safeClassId\) \|\| getClassStudentMode\(classItem, safeStudentId\)/);
-  assert.match(removeSource, /if \(nextStudent\) \{\s*await upsertStudentRows/);
-  assert.match(removeSource, /if \(nextClass\) \{\s*await upsertClassRows/);
+  assert.match(removeSource, /if \(nextStudent\) \{\s*await updateStudentRosterRecord/);
+  assert.match(removeSource, /if \(nextClass\) \{\s*await updateClassRosterRecord/);
   assert.match(removeSource, /if \(previousMode && student && classItem\)/);
 });
 

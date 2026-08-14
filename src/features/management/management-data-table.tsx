@@ -478,11 +478,11 @@ function setClassListQueryParam(params: URLSearchParams, key: string, value: str
   params.set(key, normalized);
 }
 
-function buildClassListHref(pathname: string, searchParamString: string, state: ClassListQueryState, defaultPeriodFilter = "") {
+function buildClassListHref(pathname: string, searchParamString: string, state: ClassListQueryState) {
   const params = new URLSearchParams(searchParamString);
 
   setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.q, state.q);
-  setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.period, state.period, defaultPeriodFilter);
+  setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.period, state.period);
   setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.status, state.status, DEFAULT_CLASS_STATUS_FILTER);
   setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.subject, state.subject);
   setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.grade, state.grade);
@@ -570,6 +570,15 @@ function parseStoredManagementScroll(rawValue: string | null): StoredManagementS
   } catch {
     return null;
   }
+}
+
+function useDebouncedValue<T>(value: T, delayMs: number) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedValue(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [delayMs, value]);
+  return debouncedValue;
 }
 
 function compareStudentStatusForTable(left: unknown, right: unknown) {
@@ -1404,7 +1413,9 @@ export function ManagementDataTable({
         : requestedTextbookListQueryState.q
   ));
   const globalFilterCompositionRef = useRef(false);
+  const searchInputPendingRef = useRef(false);
   const deferredGlobalFilter = useDeferredValue(globalFilter);
+  const debouncedGlobalFilter = useDebouncedValue(globalFilter, 300).trim();
   const [classGroupFilter, setClassGroupFilter] = useState(() => requestedClassListQueryState.period);
   const [studentSchoolCategoryFilter, setStudentSchoolCategoryFilter] = useState(() => requestedStudentListQueryState.schoolCategory);
   const [studentSchoolFilter, setStudentSchoolFilter] = useState(() => requestedStudentListQueryState.school);
@@ -2032,7 +2043,7 @@ export function ManagementDataTable({
   }, [filteredRowCount, loading, managementScrollStorageKey, searchParamString]);
   const currentClassListQueryState = useMemo<ClassListQueryState>(
     () => ({
-      q: normalizedGlobalFilter,
+      q: debouncedGlobalFilter,
       period: normalizedClassGroupFilter,
       status: normalizedClassStatusFilter,
       subject: selectedSubjectFilter,
@@ -2043,7 +2054,7 @@ export function ManagementDataTable({
     [
       normalizedClassGroupFilter,
       normalizedClassStatusFilter,
-      normalizedGlobalFilter,
+      debouncedGlobalFilter,
       selectedClassroomFilter,
       selectedGradeFilter,
       selectedSubjectFilter,
@@ -2057,23 +2068,23 @@ export function ManagementDataTable({
       }
 
       const mergedState = { ...currentClassListQueryState, ...nextState };
-      const nextHref = buildClassListHref(pathname, searchParamString, mergedState, defaultPeriodFilter);
+      const nextHref = buildClassListHref(pathname, searchParamString, mergedState);
       const currentHref = searchParamString ? `${pathname}?${searchParamString}` : pathname;
       if (nextHref !== currentHref) {
         router.replace(nextHref, { scroll: false });
       }
     },
-    [currentClassListQueryState, defaultPeriodFilter, kind, pathname, router, searchParamString],
+    [currentClassListQueryState, kind, pathname, router, searchParamString],
   );
   const currentStudentListQueryState = useMemo<StudentListQueryState>(
     () => ({
-      q: normalizedGlobalFilter,
+      q: debouncedGlobalFilter,
       status: kind === "students" ? statusFilter : "",
       schoolCategory: studentSchoolCategoryFilter,
       school: studentSchoolFilter,
       grade: studentGradeFilter,
     }),
-    [kind, normalizedGlobalFilter, statusFilter, studentGradeFilter, studentSchoolCategoryFilter, studentSchoolFilter],
+    [debouncedGlobalFilter, kind, statusFilter, studentGradeFilter, studentSchoolCategoryFilter, studentSchoolFilter],
   );
   const syncStudentListQueryState = useCallback(
     (nextState: Partial<StudentListQueryState>) => {
@@ -2091,11 +2102,11 @@ export function ManagementDataTable({
     [currentStudentListQueryState, kind, pathname, router, searchParamString],
   );
   const currentTextbookListQueryState = useMemo<TextbookListQueryState>(() => ({
-    q: normalizedGlobalFilter,
+    q: debouncedGlobalFilter,
     status: kind === "textbooks" ? statusFilter : "",
     subject: requestedTextbookListQueryState.subject,
     publisher: kind === "textbooks" ? badgeFilter : "",
-  }), [badgeFilter, kind, normalizedGlobalFilter, requestedTextbookListQueryState.subject, statusFilter]);
+  }), [badgeFilter, debouncedGlobalFilter, kind, requestedTextbookListQueryState.subject, statusFilter]);
   const syncTextbookListQueryState = useCallback((nextState: Partial<TextbookListQueryState>) => {
     if (kind !== "textbooks") return;
     const nextHref = buildTextbookListHref(
@@ -2106,6 +2117,33 @@ export function ManagementDataTable({
     const currentHref = searchParamString ? `${pathname}?${searchParamString}` : pathname;
     if (nextHref !== currentHref) router.replace(nextHref, { scroll: false });
   }, [currentTextbookListQueryState, kind, pathname, router, searchParamString]);
+
+  useEffect(() => {
+    if (globalFilterCompositionRef.current) return;
+    syncClassListQueryState({ q: debouncedGlobalFilter });
+    syncStudentListQueryState({ q: debouncedGlobalFilter });
+    syncTextbookListQueryState({ q: debouncedGlobalFilter });
+  }, [debouncedGlobalFilter, syncClassListQueryState, syncStudentListQueryState, syncTextbookListQueryState]);
+
+  useEffect(() => {
+    if (kind === "classes" && !requestedClassListQueryState.period && defaultPeriodFilter) {
+      syncClassListQueryState({ period: defaultPeriodFilter });
+    }
+  }, [defaultPeriodFilter, kind, requestedClassListQueryState.period, syncClassListQueryState]);
+
+  useEffect(() => {
+    const requestedSearch = kind === "classes"
+      ? requestedClassListQueryState.q
+      : kind === "students"
+        ? requestedStudentListQueryState.q
+        : requestedTextbookListQueryState.q;
+    if (searchInputPendingRef.current && requestedSearch === debouncedGlobalFilter) {
+      searchInputPendingRef.current = false;
+    }
+    if (!searchInputPendingRef.current && !globalFilterCompositionRef.current && globalFilter !== requestedSearch) {
+      setGlobalFilter(requestedSearch);
+    }
+  }, [debouncedGlobalFilter, globalFilter, kind, requestedClassListQueryState.q, requestedStudentListQueryState.q, requestedTextbookListQueryState.q]);
 
   useEffect(() => {
     if (kind !== "classes" || !statusColumn) {
@@ -2125,10 +2163,6 @@ export function ManagementDataTable({
   useEffect(() => {
     if (kind !== "classes") {
       return;
-    }
-
-    if (!globalFilterCompositionRef.current && globalFilter !== requestedClassListQueryState.q) {
-      setGlobalFilter(requestedClassListQueryState.q);
     }
 
     const requestedPeriodFilter = requestedClassListQueryState.period || defaultPeriodFilter;
@@ -2151,7 +2185,6 @@ export function ManagementDataTable({
   }, [
     classGroupFilter,
     defaultPeriodFilter,
-    globalFilter,
     kind,
     requestedClassListQueryState,
     statusColumn,
@@ -2162,10 +2195,6 @@ export function ManagementDataTable({
   useEffect(() => {
     if (kind !== "students") {
       return;
-    }
-
-    if (!globalFilterCompositionRef.current && globalFilter !== requestedStudentListQueryState.q) {
-      setGlobalFilter(requestedStudentListQueryState.q);
     }
 
     const requestedStatusFilter = requestedStudentListQueryState.status || "";
@@ -2185,7 +2214,6 @@ export function ManagementDataTable({
       setStudentGradeFilter(requestedStudentListQueryState.grade);
     }
   }, [
-    globalFilter,
     kind,
     requestedStudentListQueryState,
     statusColumn,
@@ -2197,16 +2225,13 @@ export function ManagementDataTable({
 
   useEffect(() => {
     if (kind !== "textbooks") return;
-    if (!globalFilterCompositionRef.current && globalFilter !== requestedTextbookListQueryState.q) {
-      setGlobalFilter(requestedTextbookListQueryState.q);
-    }
     if (badgeColumn && badgeFilter !== requestedTextbookListQueryState.publisher) {
       badgeColumn.setFilterValue(requestedTextbookListQueryState.publisher);
     }
     if (statusColumn && statusFilter !== requestedTextbookListQueryState.status) {
       statusColumn.setFilterValue(requestedTextbookListQueryState.status);
     }
-  }, [badgeColumn, badgeFilter, globalFilter, kind, requestedTextbookListQueryState, statusColumn, statusFilter]);
+  }, [badgeColumn, badgeFilter, kind, requestedTextbookListQueryState.publisher, requestedTextbookListQueryState.status, statusColumn, statusFilter]);
 
   const resetPreferences = () => {
     setColumnVisibility(defaultVisibility);
@@ -2222,6 +2247,7 @@ export function ManagementDataTable({
   };
 
   const resetFilters = () => {
+    searchInputPendingRef.current = true;
     setGlobalFilter("");
     setClassGroupFilter(defaultPeriodFilter);
     setStudentSchoolCategoryFilter("");
@@ -2266,15 +2292,12 @@ export function ManagementDataTable({
   };
 
   const updateGlobalFilter = (value: string, options: { syncUrl?: boolean } = {}) => {
+    searchInputPendingRef.current = true;
     setGlobalFilter(value);
     setRowSelection({});
     setBulkEditValue("");
     table.resetPagination();
-    if (options.syncUrl !== false && !globalFilterCompositionRef.current) {
-      syncClassListQueryState({ q: value });
-      syncStudentListQueryState({ q: value });
-      syncTextbookListQueryState({ q: value });
-    }
+    if (options.syncUrl === false) return;
   };
 
   const isComposingSearchInput = (event: ChangeEvent<HTMLInputElement>) => (

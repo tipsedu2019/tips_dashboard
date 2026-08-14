@@ -28,6 +28,17 @@ select ok(
   signature || ' is fixed-search-path security-invoker and authenticated-only'
 ) from expected;
 
+set local role authenticated;
+select lives_ok(
+  $$select * from public.list_management_page_v1(
+    'students',
+    jsonb_build_object('kind','students','search','__authenticated_invoker_probe__','status',null,'schoolCategory',null,'school',null,'grade',null),
+    null,null,30
+  )$$,
+  'authenticated invoker can execute inline-validated management list RPC'
+);
+reset role;
+
 select throws_ok(
   $$select public.list_management_page_v1('students','{}'::jsonb,null,null,30)$$,
   '22023','management_filters_invalid','missing filter keys are rejected'

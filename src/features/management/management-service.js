@@ -242,6 +242,15 @@ export function createManagementReadService(options = {}) {
       if (error) throw error;
       return withOpaqueDetailRelationCursors(unwrapRpcObject(data), kind, id);
     },
+    /**
+     * @param {{
+     *   kind: "students" | "classes" | "textbooks",
+     *   id: string,
+     *   relationKind: string,
+     *   cursor?: string | null,
+     *   limit?: number
+     * }} request
+     */
     async loadRelationPage({ kind, id, relationKind, cursor = null, limit = MANAGEMENT_PAGE_SIZE }) {
       assertManagementKind(kind);
       if (!MANAGEMENT_RELATIONS[kind].has(relationKind) || !trimText(id) || limit !== MANAGEMENT_PAGE_SIZE) {
@@ -864,6 +873,64 @@ async function selectRows(client, table) {
   return data || [];
 }
 
+async function selectStudentRosterRecord(client, studentId) {
+  const { data, error } = await client
+    .from("students")
+    .select("id,name,status,class_ids,waitlist_class_ids")
+    .eq("id", studentId)
+    .maybeSingle()
+    .abortSignal(AbortSignal.timeout(8_000))
+    .retry(false);
+  if (error) throw error;
+  return data || null;
+}
+
+async function selectClassRosterRecord(client, classId) {
+  const { data, error } = await client
+    .from("classes")
+    .select("id,name,status,student_ids,waitlist_ids,waitlist_student_ids")
+    .eq("id", classId)
+    .maybeSingle()
+    .abortSignal(AbortSignal.timeout(8_000))
+    .retry(false);
+  if (error) throw error;
+  return data || null;
+}
+
+async function updateStudentRosterRecord(client, studentId, record) {
+  const { data, error } = await client
+    .from("students")
+    .update({
+      class_ids: normalizeIdList(record?.class_ids || record?.classIds),
+      waitlist_class_ids: normalizeIdList(record?.waitlist_class_ids || record?.waitlistClassIds),
+    })
+    .eq("id", studentId)
+    .select("id,name,status,class_ids,waitlist_class_ids")
+    .maybeSingle()
+    .abortSignal(AbortSignal.timeout(8_000))
+    .retry(false);
+  if (error) throw error;
+  return data || null;
+}
+
+async function updateClassRosterRecord(client, classId, record) {
+  const waitlistIds = getClassWaitlistIds(record);
+  const { data, error } = await client
+    .from("classes")
+    .update({
+      student_ids: normalizeIdList(record?.student_ids || record?.studentIds),
+      waitlist_ids: waitlistIds,
+      waitlist_student_ids: waitlistIds,
+    })
+    .eq("id", classId)
+    .select("id,name,status,student_ids,waitlist_ids,waitlist_student_ids")
+    .maybeSingle()
+    .abortSignal(AbortSignal.timeout(8_000))
+    .retry(false);
+  if (error) throw error;
+  return data || null;
+}
+
 async function selectOptionalRows(client, table) {
   try {
     return await selectRows(client, table);
@@ -937,14 +1004,14 @@ async function upsertClassRows(client, payload) {
 
 async function restoreRelationRowsAfterFailure(
   client,
-  { student, classItem, studentSaved = false, classSaved = false, generateId = createId } = {},
+  { student, classItem, studentSaved = false, classSaved = false } = {},
 ) {
   const restores = [];
   if (studentSaved && student) {
-    restores.push(upsertStudentRows(client, buildStudentPayload(student, { generateId })));
+    restores.push(updateStudentRosterRecord(client, student.id, student));
   }
   if (classSaved && classItem) {
-    restores.push(upsertClassRows(client, buildClassPayload(classItem, { generateId })));
+    restores.push(updateClassRosterRecord(client, classItem.id, classItem));
   }
   await Promise.allSettled(restores);
 }
@@ -1601,12 +1668,10 @@ export function createManagementService(options = {}) {
       if (registrationRuntime.mode === "maintenance") {
         throw new Error("데이터 전환 중에는 학생 명단을 변경할 수 없습니다.");
       }
-      const [students, classes] = await Promise.all([
-        selectRows(client, "students"),
-        selectRows(client, "classes"),
+      const [student, classItem] = await Promise.all([
+        selectStudentRosterRecord(client, safeStudentId),
+        selectClassRosterRecord(client, safeClassId),
       ]);
-      const student = findById(students, safeStudentId);
-      const classItem = findById(classes, safeClassId);
       if (!student || !classItem) {
         throw new Error("학생 또는 수업 데이터를 찾을 수 없습니다.");
       }
@@ -1668,9 +1733,9 @@ export function createManagementService(options = {}) {
       let studentSaved = false;
       let classSaved = false;
       try {
-        await upsertStudentRows(client, buildStudentPayload(nextStudent, { generateId }));
+        await updateStudentRosterRecord(client, safeStudentId, nextStudent);
         studentSaved = true;
-        await upsertClassRows(client, buildClassPayload(nextClass, { generateId }));
+        await updateClassRosterRecord(client, safeClassId, nextClass);
         classSaved = true;
       } catch (writeError) {
         await restoreRelationRowsAfterFailure(client, {
@@ -1678,7 +1743,6 @@ export function createManagementService(options = {}) {
           classItem,
           studentSaved,
           classSaved,
-          generateId,
         });
         throw writeError;
       }
@@ -1702,12 +1766,10 @@ export function createManagementService(options = {}) {
       if (registrationRuntime.mode === "maintenance") {
         throw new Error("데이터 전환 중에는 학생 명단을 변경할 수 없습니다.");
       }
-      const [students, classes] = await Promise.all([
-        selectRows(client, "students"),
-        selectRows(client, "classes"),
+      const [student, classItem] = await Promise.all([
+        selectStudentRosterRecord(client, safeStudentId),
+        selectClassRosterRecord(client, safeClassId),
       ]);
-      const student = findById(students, safeStudentId);
-      const classItem = findById(classes, safeClassId);
       if (!student && !classItem) {
         throw new Error("학생 또는 수업 데이터를 찾을 수 없습니다.");
       }
@@ -1765,11 +1827,11 @@ export function createManagementService(options = {}) {
       let classSaved = false;
       try {
         if (nextStudent) {
-          await upsertStudentRows(client, buildStudentPayload(nextStudent, { generateId }));
+          await updateStudentRosterRecord(client, safeStudentId, nextStudent);
           studentSaved = true;
         }
         if (nextClass) {
-          await upsertClassRows(client, buildClassPayload(nextClass, { generateId }));
+          await updateClassRosterRecord(client, safeClassId, nextClass);
           classSaved = true;
         }
       } catch (writeError) {
@@ -1778,7 +1840,6 @@ export function createManagementService(options = {}) {
           classItem,
           studentSaved,
           classSaved,
-          generateId,
         });
         throw writeError;
       }

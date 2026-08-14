@@ -12,12 +12,14 @@ function makeReadyRosterRpcClient() {
     students: [{
       id: "student-1",
       name: "김학생",
+      status: "재원",
       class_ids: [],
       waitlist_class_ids: ["class-1"],
     }],
     classes: [{
       id: "class-1",
       name: "영어 A",
+      status: "수강",
       student_ids: [],
       waitlist_ids: ["student-1"],
     }],
@@ -28,8 +30,24 @@ function makeReadyRosterRpcClient() {
     from(table) {
       calls.tables.push(table);
       return {
-        async select() {
-          return { data: rows[table] || [], error: null };
+        select() {
+          let selectedId = "";
+          const builder = {
+            eq(_column, id) {
+              selectedId = id;
+              return builder;
+            },
+            maybeSingle() {
+              return builder;
+            },
+            abortSignal() {
+              return builder;
+            },
+            async retry() {
+              return { data: (rows[table] || []).find((row) => row.id === selectedId) || null, error: null };
+            },
+          };
+          return builder;
         },
       };
     },
@@ -355,7 +373,7 @@ function makeClassUpsertClient(errorColumn) {
   };
 }
 
-function makeRelationClient(errorColumn) {
+function makeRelationClient() {
   const calls = {
     studentUpserts: [],
     classUpserts: [],
@@ -387,26 +405,29 @@ function makeRelationClient(errorColumn) {
     calls,
     from(table) {
       return {
-        async select() {
-          return { data: fixtures[table] || [], error: null };
-        },
-        upsert(payload) {
-          if (table === "students") calls.studentUpserts.push(payload);
-          if (table === "classes") calls.classUpserts.push(payload);
-          return {
-            async select() {
-              if (table === "classes" && Object.prototype.hasOwnProperty.call(payload, errorColumn)) {
-                return {
-                  data: null,
-                  error: {
-                    message: `Could not find the '${errorColumn}' column of 'classes' in the schema cache`,
-                  },
-                };
-              }
-
-              return { data: [{ ...payload, saved: true }], error: null };
+        select() {
+          let selectedId = "";
+          const builder = {
+            eq(_column, id) { selectedId = id; return builder; },
+            maybeSingle() { return builder; },
+            abortSignal() { return builder; },
+            async retry() {
+              return { data: (fixtures[table] || []).find((row) => row.id === selectedId) || null, error: null };
             },
           };
+          return builder;
+        },
+        update(payload) {
+          if (table === "students") calls.studentUpserts.push(payload);
+          if (table === "classes") calls.classUpserts.push(payload);
+          const builder = {
+            eq() { return builder; },
+            select() { return builder; },
+            maybeSingle() { return builder; },
+            abortSignal() { return builder; },
+            async retry() { return { data: { ...payload, saved: true }, error: null }; },
+          };
+          return builder;
         },
         insert(payload) {
           calls.historyInserts.push(payload);
@@ -453,21 +474,32 @@ function makeRelationPartialFailureClient() {
     calls,
     from(table) {
       return {
-        async select() {
-          return { data: fixtures[table] || [], error: null };
-        },
-        upsert(payload) {
-          if (table === "students") calls.studentUpserts.push(payload);
-          if (table === "classes") calls.classUpserts.push(payload);
-          return {
-            async select() {
-              if (table === "classes") {
-                return { data: null, error: { message: "class write failed" } };
-              }
-
-              return { data: [{ ...payload, saved: true }], error: null };
+        select() {
+          let selectedId = "";
+          const builder = {
+            eq(_column, id) { selectedId = id; return builder; },
+            maybeSingle() { return builder; },
+            abortSignal() { return builder; },
+            async retry() {
+              return { data: (fixtures[table] || []).find((row) => row.id === selectedId) || null, error: null };
             },
           };
+          return builder;
+        },
+        update(payload) {
+          if (table === "students") calls.studentUpserts.push(payload);
+          if (table === "classes") calls.classUpserts.push(payload);
+          const builder = {
+            eq() { return builder; },
+            select() { return builder; },
+            maybeSingle() { return builder; },
+            abortSignal() { return builder; },
+            async retry() {
+              if (table === "classes") return { data: null, error: { message: "class write failed" } };
+              return { data: { ...payload, saved: true }, error: null };
+            },
+          };
+          return builder;
         },
         insert(payload) {
           calls.historyInserts.push(payload);
@@ -683,8 +715,8 @@ test("class upserts retry without the class type field when the live schema is s
   assert.equal(client.calls[1].name, "고1 공통수학");
 });
 
-test("student class relation changes use the same stale schema fallback for class writes", async () => {
-  const client = makeRelationClient("class_type");
+test("student class relation changes update only canonical roster arrays", async () => {
+  const client = makeRelationClient();
   const service = createManagementService({
     supabase: client,
     generateId: () => "generated",
@@ -697,11 +729,10 @@ test("student class relation changes use the same stale schema fallback for clas
   });
 
   assert.equal(client.calls.studentUpserts.length, 1);
-  assert.equal(client.calls.classUpserts.length, 2);
-  assert.equal(client.calls.classUpserts[0].class_type, "선행");
-  assert.ok(!Object.prototype.hasOwnProperty.call(client.calls.classUpserts[1], "class_type"));
-  assert.deepEqual(client.calls.classUpserts[1].student_ids, ["student-1"]);
-  assert.deepEqual(client.calls.classUpserts[1].waitlist_ids, []);
+  assert.equal(client.calls.classUpserts.length, 1);
+  assert.ok(!Object.prototype.hasOwnProperty.call(client.calls.classUpserts[0], "class_type"));
+  assert.deepEqual(client.calls.classUpserts[0].student_ids, ["student-1"]);
+  assert.deepEqual(client.calls.classUpserts[0].waitlist_ids, []);
   assert.equal(client.calls.historyInserts.length, 1);
 });
 

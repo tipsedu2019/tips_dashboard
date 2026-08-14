@@ -563,7 +563,7 @@ test("class management database keeps list filters in the URL for cross-view ret
   assert.doesNotMatch(tableSource, /classType: normalizeScalar\(params\.get\(CLASS_LIST_QUERY_PARAM_KEYS\.classType\)\)/);
   assert.match(tableSource, /function buildClassListHref/);
   assert.match(tableSource, /router\.replace\(nextHref, \{ scroll: false \}\)/);
-  assert.match(tableSource, /syncClassListQueryState\(\{ q: value \}\)/);
+  assert.match(tableSource, /syncClassListQueryState\(\{ q: debouncedGlobalFilter \}\)/);
   assert.match(tableSource, /syncClassListQueryState\(\{ period: value \}\)/);
   assert.match(tableSource, /syncClassListQueryState\(\{ status: value \}\)/);
   assert.match(tableSource, /syncClassListQueryState\(\{ \[filter\.id\]: nextFilterValue \}\)/);
@@ -711,7 +711,7 @@ test("class capacity uses the same compact stepper pattern as tuition", async ()
 test("class roster uses explicit enrollment labels", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
 
-  assert.match(pageSource, /renderRelationList\("수강 학생", classEnrolledStudentIds, "수강"\)/);
+  assert.match(pageSource, /renderRelationList\("수강 학생", classEnrolledStudentIds, "수강", "registered_students"\)/);
   assert.match(pageSource, /\{modeLabel === "수강" \? "수강 해제" : "대기 해제"\}/);
   assert.doesNotMatch(pageSource, /renderRelationList\("등록 학생", classEnrolledStudentIds/);
 });

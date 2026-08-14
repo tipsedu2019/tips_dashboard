@@ -19,47 +19,6 @@ begin
 end
 $migration$;
 
-create function dashboard_private.management_filters_valid(p_kind text, p_filters jsonb)
-returns boolean
-language plpgsql
-immutable
-set search_path = ''
-as $function$
-declare
-  v_keys text[];
-  v_expected text[];
-  v_key text;
-begin
-  if pg_catalog.jsonb_typeof(p_filters) <> 'object' or p_filters ->> 'kind' is distinct from p_kind then
-    return false;
-  end if;
-  if p_kind = 'students' then
-    v_expected := array['grade','kind','school','schoolCategory','search','status'];
-  elsif p_kind = 'classes' then
-    v_expected := array['classroom','grade','kind','periodId','search','status','subject','teacher'];
-  elsif p_kind = 'textbooks' then
-    v_expected := array['kind','publisher','search','status','subject'];
-  else
-    return false;
-  end if;
-  select pg_catalog.array_agg(key order by key) into v_keys
-  from pg_catalog.jsonb_object_keys(p_filters) key;
-  if v_keys is distinct from v_expected or pg_catalog.jsonb_typeof(p_filters -> 'search') <> 'string' then
-    return false;
-  end if;
-  foreach v_key in array v_expected loop
-    if v_key not in ('kind','search')
-      and pg_catalog.jsonb_typeof(p_filters -> v_key) not in ('string','null')
-    then
-      return false;
-    end if;
-  end loop;
-  return true;
-end
-$function$;
-
-revoke all on function dashboard_private.management_filters_valid(text,jsonb) from public, anon, authenticated;
-
 create function public.list_management_page_v1(
   p_kind text,
   p_filters jsonb,
@@ -73,10 +32,33 @@ stable
 security invoker
 set search_path = ''
 as $function$
+declare
+  v_keys text[];
+  v_expected text[];
+  v_key text;
 begin
-  if not dashboard_private.management_filters_valid(p_kind, p_filters) then
+  if p_kind = 'students' then
+    v_expected := array['grade','kind','school','schoolCategory','search','status'];
+  elsif p_kind = 'classes' then
+    v_expected := array['classroom','grade','kind','periodId','search','status','subject','teacher'];
+  elsif p_kind = 'textbooks' then
+    v_expected := array['kind','publisher','search','status','subject'];
+  else
     raise exception 'management_filters_invalid' using errcode = '22023';
   end if;
+  if pg_catalog.jsonb_typeof(p_filters) <> 'object' or p_filters ->> 'kind' is distinct from p_kind then
+    raise exception 'management_filters_invalid' using errcode = '22023';
+  end if;
+  select pg_catalog.array_agg(object_key.key order by object_key.key) into v_keys
+  from pg_catalog.jsonb_object_keys(p_filters) as object_key(key);
+  if v_keys is distinct from v_expected or pg_catalog.jsonb_typeof(p_filters -> 'search') <> 'string' then
+    raise exception 'management_filters_invalid' using errcode = '22023';
+  end if;
+  foreach v_key in array v_expected loop
+    if v_key not in ('kind','search') and pg_catalog.jsonb_typeof(p_filters -> v_key) not in ('string','null') then
+      raise exception 'management_filters_invalid' using errcode = '22023';
+    end if;
+  end loop;
   if p_limit is null or p_limit < 1 or p_limit > 30 then
     raise exception 'management_page_limit_invalid' using errcode = '22023';
   end if;
@@ -105,6 +87,7 @@ begin
     select pg_catalog.jsonb_build_object(
         'kind','students','id',filtered.id,'name',pg_catalog.coalesce(filtered.raw ->> 'name',''),
         'grade',filtered.raw -> 'grade','school',filtered.raw -> 'school',
+        'contact',filtered.raw -> 'contact','parentContact',pg_catalog.coalesce(filtered.raw -> 'parent_contact',filtered.raw -> 'parentContact'),
         'status',pg_catalog.coalesce(filtered.raw ->> 'status',''),
         'sortKey',filtered.normalized_sort::text,
         'updatedAt',pg_catalog.coalesce(filtered.raw ->> 'updated_at','')
@@ -141,9 +124,18 @@ begin
     select pg_catalog.jsonb_build_object(
         'kind','classes','id',filtered.id,'name',pg_catalog.coalesce(filtered.raw ->> 'name',filtered.raw ->> 'class_name',''),
         'subject',pg_catalog.coalesce(filtered.raw ->> 'subject',''),
+        'grade',filtered.raw -> 'grade','schedule',filtered.raw -> 'schedule',
         'teacherName',pg_catalog.coalesce(filtered.raw ->> 'teacher_name',filtered.raw ->> 'teacher'),
+        'classroom',pg_catalog.coalesce(filtered.raw -> 'classroom',filtered.raw -> 'room'),
+        'capacity',filtered.raw -> 'capacity','weeklyMinutes',pg_catalog.coalesce(filtered.raw -> 'weekly_minutes',filtered.raw -> 'weeklyMinutes'),
+        'fee',pg_catalog.coalesce(filtered.raw -> 'fee',filtered.raw -> 'tuition'),
         'status',pg_catalog.coalesce(filtered.raw ->> 'status',''),
-        'studentCount',pg_catalog.jsonb_array_length(pg_catalog.coalesce(filtered.raw -> 'student_ids','[]'::jsonb)),
+        'studentCount',(select pg_catalog.count(distinct roster.student_id) from (
+          select roster_id.student_id from pg_catalog.jsonb_array_elements_text(pg_catalog.coalesce(filtered.raw -> 'student_ids','[]'::jsonb)) as roster_id(student_id)
+          union all select enrollment.student_id::text from public.ops_registration_enrollments enrollment
+          where enrollment.class_id=filtered.id and pg_catalog.coalesce(pg_catalog.to_jsonb(enrollment) ->> 'roster_active','false')::boolean
+          union all select student.id::text from public.students student where pg_catalog.coalesce(pg_catalog.to_jsonb(student) -> 'class_ids','[]'::jsonb) ? filtered.id::text
+        ) roster),
         'sortKey',filtered.normalized_sort::text,
         'updatedAt',pg_catalog.coalesce(filtered.raw ->> 'updated_at','')
       ), filtered.normalized_sort::text, filtered.id
@@ -156,10 +148,7 @@ begin
   else
     return query
     with source as (
-      select textbook.id, pg_catalog.to_jsonb(textbook) as raw,
-        case when pg_catalog.jsonb_typeof(pg_catalog.to_jsonb(textbook) -> 'lessons')='array'
-          then case when pg_catalog.jsonb_array_length(pg_catalog.to_jsonb(textbook) -> 'lessons') > 0 then 'has-lessons' else 'no-lessons' end
-          else 'no-lessons' end as composition_status
+      select textbook.id, pg_catalog.to_jsonb(textbook) as raw
       from public.textbooks textbook
     ), filtered as (
       select source.*,
@@ -169,15 +158,15 @@ begin
         ) collate dashboard_private.ko_numeric as normalized_sort
       from source
       where (p_filters ->> 'search' = '' or pg_catalog.concat_ws(' ', source.raw ->> 'title', source.raw ->> 'name', source.raw ->> 'subject', source.raw ->> 'publisher') ilike '%' || p_filters ->> 'search' || '%')
-        and ((p_filters ->> 'status') is null or source.composition_status = p_filters ->> 'status')
+        and ((p_filters ->> 'status') is null or source.raw ->> 'status' = p_filters ->> 'status')
         and ((p_filters ->> 'subject') is null or source.raw ->> 'subject' = p_filters ->> 'subject')
         and ((p_filters ->> 'publisher') is null or source.raw ->> 'publisher' = p_filters ->> 'publisher')
     )
     select pg_catalog.jsonb_build_object(
         'kind','textbooks','id',filtered.id,'title',pg_catalog.coalesce(filtered.raw ->> 'title',filtered.raw ->> 'name',''),
         'subject',pg_catalog.coalesce(filtered.raw ->> 'subject',''),'publisher',filtered.raw -> 'publisher',
-        'status',filtered.composition_status,
-        'lessonCount',case when pg_catalog.jsonb_typeof(filtered.raw -> 'lessons')='array' then pg_catalog.jsonb_array_length(filtered.raw -> 'lessons') else 0 end,
+        'status',pg_catalog.coalesce(filtered.raw ->> 'status',''),
+        'price',pg_catalog.coalesce(filtered.raw -> 'price',filtered.raw -> 'sale_price',filtered.raw -> 'list_price'),
         'activeClassCount',(select pg_catalog.count(*) from public.classes class where pg_catalog.coalesce(pg_catalog.to_jsonb(class) -> 'textbook_ids','[]'::jsonb) ? filtered.id::text),
         'sortKey',filtered.normalized_sort::text,
         'updatedAt',pg_catalog.coalesce(filtered.raw ->> 'updated_at','')
@@ -201,10 +190,32 @@ set search_path = ''
 as $function$
 declare
   v_result jsonb;
+  v_keys text[];
+  v_expected text[];
+  v_key text;
 begin
-  if not dashboard_private.management_filters_valid(p_kind, p_filters) then
+  if p_kind = 'students' then
+    v_expected := array['grade','kind','school','schoolCategory','search','status'];
+  elsif p_kind = 'classes' then
+    v_expected := array['classroom','grade','kind','periodId','search','status','subject','teacher'];
+  elsif p_kind = 'textbooks' then
+    v_expected := array['kind','publisher','search','status','subject'];
+  else
     raise exception 'management_filters_invalid' using errcode = '22023';
   end if;
+  if pg_catalog.jsonb_typeof(p_filters) <> 'object' or p_filters ->> 'kind' is distinct from p_kind then
+    raise exception 'management_filters_invalid' using errcode = '22023';
+  end if;
+  select pg_catalog.array_agg(object_key.key order by object_key.key) into v_keys
+  from pg_catalog.jsonb_object_keys(p_filters) as object_key(key);
+  if v_keys is distinct from v_expected or pg_catalog.jsonb_typeof(p_filters -> 'search') <> 'string' then
+    raise exception 'management_filters_invalid' using errcode = '22023';
+  end if;
+  foreach v_key in array v_expected loop
+    if v_key not in ('kind','search') and pg_catalog.jsonb_typeof(p_filters -> v_key) not in ('string','null') then
+      raise exception 'management_filters_invalid' using errcode = '22023';
+    end if;
+  end loop;
   if p_kind = 'students' then
     with filtered as (
       select pg_catalog.to_jsonb(student) raw from public.students student
@@ -230,21 +241,15 @@ begin
     select pg_catalog.jsonb_build_object('total',pg_catalog.coalesce(pg_catalog.sum(count_value),0),'byStatus',pg_catalog.coalesce(pg_catalog.jsonb_object_agg(status,count_value),'{}'::jsonb))
     into v_result from (select pg_catalog.coalesce(raw ->> 'status','') status, pg_catalog.count(*) count_value from filtered group by 1) grouped;
   else
-    with source as (
-      select pg_catalog.to_jsonb(textbook) raw,
-        case when pg_catalog.jsonb_typeof(pg_catalog.to_jsonb(textbook) -> 'lessons')='array'
-          then case when pg_catalog.jsonb_array_length(pg_catalog.to_jsonb(textbook) -> 'lessons') > 0 then 'has-lessons' else 'no-lessons' end
-          else 'no-lessons' end as composition_status
-      from public.textbooks textbook
-    ), filtered as (
-      select * from source
+    with source as (select pg_catalog.to_jsonb(textbook) raw from public.textbooks textbook), filtered as (
+      select source.raw from source
       where (p_filters ->> 'search' = '' or pg_catalog.concat_ws(' ', source.raw ->> 'title', source.raw ->> 'name', source.raw ->> 'subject', source.raw ->> 'publisher') ilike '%' || p_filters ->> 'search' || '%')
-        and ((p_filters ->> 'status') is null or source.composition_status = p_filters ->> 'status')
+        and ((p_filters ->> 'status') is null or source.raw ->> 'status' = p_filters ->> 'status')
         and ((p_filters ->> 'subject') is null or source.raw ->> 'subject' = p_filters ->> 'subject')
         and ((p_filters ->> 'publisher') is null or source.raw ->> 'publisher' = p_filters ->> 'publisher')
     )
     select pg_catalog.jsonb_build_object('total',pg_catalog.coalesce(pg_catalog.sum(count_value),0),'byStatus',pg_catalog.coalesce(pg_catalog.jsonb_object_agg(status,count_value),'{}'::jsonb))
-    into v_result from (select composition_status status, pg_catalog.count(*) count_value from filtered group by 1) grouped;
+    into v_result from (select pg_catalog.coalesce(raw ->> 'status','') status, pg_catalog.count(*) count_value from filtered group by 1) grouped;
   end if;
   return pg_catalog.coalesce(v_result, pg_catalog.jsonb_build_object('total',0,'byStatus','{}'::jsonb));
 end
@@ -259,10 +264,32 @@ set search_path = ''
 as $function$
 declare
   v_result jsonb;
+  v_keys text[];
+  v_expected text[];
+  v_key text;
 begin
-  if not dashboard_private.management_filters_valid(p_kind, p_filters) then
+  if p_kind = 'students' then
+    v_expected := array['grade','kind','school','schoolCategory','search','status'];
+  elsif p_kind = 'classes' then
+    v_expected := array['classroom','grade','kind','periodId','search','status','subject','teacher'];
+  elsif p_kind = 'textbooks' then
+    v_expected := array['kind','publisher','search','status','subject'];
+  else
     raise exception 'management_filters_invalid' using errcode = '22023';
   end if;
+  if pg_catalog.jsonb_typeof(p_filters) <> 'object' or p_filters ->> 'kind' is distinct from p_kind then
+    raise exception 'management_filters_invalid' using errcode = '22023';
+  end if;
+  select pg_catalog.array_agg(object_key.key order by object_key.key) into v_keys
+  from pg_catalog.jsonb_object_keys(p_filters) as object_key(key);
+  if v_keys is distinct from v_expected or pg_catalog.jsonb_typeof(p_filters -> 'search') <> 'string' then
+    raise exception 'management_filters_invalid' using errcode = '22023';
+  end if;
+  foreach v_key in array v_expected loop
+    if v_key not in ('kind','search') and pg_catalog.jsonb_typeof(p_filters -> v_key) not in ('string','null') then
+      raise exception 'management_filters_invalid' using errcode = '22023';
+    end if;
+  end loop;
   if p_kind = 'students' then
     with source as (
       select pg_catalog.to_jsonb(student) raw
@@ -291,17 +318,14 @@ begin
     ) into v_result;
   else
     with source as (
-      select pg_catalog.to_jsonb(textbook) raw,
-        case when pg_catalog.jsonb_typeof(pg_catalog.to_jsonb(textbook) -> 'lessons')='array'
-          then case when pg_catalog.jsonb_array_length(pg_catalog.to_jsonb(textbook) -> 'lessons') > 0 then 'has-lessons' else 'no-lessons' end
-          else 'no-lessons' end as composition_status
+      select pg_catalog.to_jsonb(textbook) raw
       from public.textbooks textbook
       where p_filters ->> 'search' = '' or pg_catalog.concat_ws(' ',textbook.title,textbook.subject,textbook.publisher) ilike '%' || p_filters ->> 'search' || '%'
     )
     select pg_catalog.jsonb_build_object(
-      'status',(select pg_catalog.coalesce(pg_catalog.jsonb_agg(value order by value collate dashboard_private.ko_numeric),'[]'::jsonb) from (select distinct composition_status value from source where ((p_filters ->> 'subject') is null or raw ->> 'subject'=p_filters ->> 'subject') and ((p_filters ->> 'publisher') is null or raw ->> 'publisher'=p_filters ->> 'publisher') order by value collate dashboard_private.ko_numeric limit 500) option),
-      'subject',(select pg_catalog.coalesce(pg_catalog.jsonb_agg(value order by value collate dashboard_private.ko_numeric),'[]'::jsonb) from (select distinct raw ->> 'subject' value from source where nullif(raw ->> 'subject','') is not null and ((p_filters ->> 'status') is null or composition_status=p_filters ->> 'status') and ((p_filters ->> 'publisher') is null or raw ->> 'publisher'=p_filters ->> 'publisher') order by value collate dashboard_private.ko_numeric limit 500) option),
-      'publisher',(select pg_catalog.coalesce(pg_catalog.jsonb_agg(value order by value collate dashboard_private.ko_numeric),'[]'::jsonb) from (select distinct raw ->> 'publisher' value from source where nullif(raw ->> 'publisher','') is not null and ((p_filters ->> 'status') is null or composition_status=p_filters ->> 'status') and ((p_filters ->> 'subject') is null or raw ->> 'subject'=p_filters ->> 'subject') order by value collate dashboard_private.ko_numeric limit 500) option)
+      'status',(select pg_catalog.coalesce(pg_catalog.jsonb_agg(value order by value collate dashboard_private.ko_numeric),'[]'::jsonb) from (select distinct raw ->> 'status' value from source where nullif(raw ->> 'status','') is not null and ((p_filters ->> 'subject') is null or raw ->> 'subject'=p_filters ->> 'subject') and ((p_filters ->> 'publisher') is null or raw ->> 'publisher'=p_filters ->> 'publisher') order by value collate dashboard_private.ko_numeric limit 500) option),
+      'subject',(select pg_catalog.coalesce(pg_catalog.jsonb_agg(value order by value collate dashboard_private.ko_numeric),'[]'::jsonb) from (select distinct raw ->> 'subject' value from source where nullif(raw ->> 'subject','') is not null and ((p_filters ->> 'status') is null or raw ->> 'status'=p_filters ->> 'status') and ((p_filters ->> 'publisher') is null or raw ->> 'publisher'=p_filters ->> 'publisher') order by value collate dashboard_private.ko_numeric limit 500) option),
+      'publisher',(select pg_catalog.coalesce(pg_catalog.jsonb_agg(value order by value collate dashboard_private.ko_numeric),'[]'::jsonb) from (select distinct raw ->> 'publisher' value from source where nullif(raw ->> 'publisher','') is not null and ((p_filters ->> 'status') is null or raw ->> 'status'=p_filters ->> 'status') and ((p_filters ->> 'subject') is null or raw ->> 'subject'=p_filters ->> 'subject') order by value collate dashboard_private.ko_numeric limit 500) option)
     ) into v_result;
   end if;
   return v_result;
@@ -339,8 +363,14 @@ begin
   if p_kind = 'students' and p_relation_kind = 'lifecycle_history' then
     with page as (
       select history.id, history.changed_at::text sort_value,
-        pg_catalog.jsonb_build_object('id',history.id,'eventType',history.action,'occurredAt',history.changed_at,'safeSummary',pg_catalog.coalesce(history.memo,'')) row_data
+        pg_catalog.jsonb_build_object(
+          'id',history.id,'classId',history.class_id,'className',class.name,'subject',class.subject,
+          'teacher',pg_catalog.coalesce(pg_catalog.to_jsonb(class) ->> 'teacher_name',class.teacher),
+          'eventType',history.action,'action',history.action,
+          'label',case history.action when 'enrolled' then '수강 등록' when 'waitlist' then '대기 등록' when 'removed' then '수강 해제' else history.action end,
+          'occurredAt',history.changed_at,'changedAt',history.changed_at,'safeSummary',pg_catalog.coalesce(history.memo,'')) row_data
       from public.student_class_enrollment_history history
+      left join public.classes class on class.id=history.class_id
       where history.student_id = p_id and (p_cursor_sort_key is null or history.changed_at < p_cursor_sort_key::timestamptz or (history.changed_at = p_cursor_sort_key::timestamptz and history.id > p_cursor_id))
       order by history.changed_at desc, history.id asc limit p_limit + 1
     ) select pg_catalog.coalesce(pg_catalog.jsonb_agg(row_data order by sort_value desc,id asc) filter (where ordinal <= p_limit),'[]'::jsonb),pg_catalog.count(*),(pg_catalog.array_agg(sort_value) filter (where ordinal=p_limit))[1],(pg_catalog.array_agg(id) filter (where ordinal=p_limit))[1]
@@ -356,18 +386,53 @@ begin
     ) select pg_catalog.coalesce(pg_catalog.jsonb_agg(row_data order by sort_value,id) filter (where ordinal <= p_limit),'[]'::jsonb),pg_catalog.count(*),(pg_catalog.array_agg(sort_value) filter (where ordinal=p_limit))[1],(pg_catalog.array_agg(id) filter (where ordinal=p_limit))[1]
       into v_rows,v_count,v_next_sort_key,v_next_id from (select page.*,pg_catalog.row_number() over (order by sort_value,id) ordinal from page) bounded;
   elsif p_kind = 'students' then
-    with page as (
-      select enrollment.id, enrollment.updated_at::text sort_value,
-        pg_catalog.jsonb_build_object('classId',enrollment.class_id,'status',enrollment.status,'startedOn',null,'endedOn',null) row_data
+    with selected_student as (
+      select pg_catalog.to_jsonb(student) raw from public.students student where student.id=p_id
+    ), candidates as (
+      select enrollment.class_id,
+        case when pg_catalog.coalesce(pg_catalog.to_jsonb(enrollment) ->> 'roster_active','false')::boolean then 'enrolled' else 'waitlisted' end status,
+        enrollment.updated_at sort_at,enrollment.id event_id,1 priority
       from public.ops_registration_enrollments enrollment
-      where enrollment.student_id = p_id and (p_cursor_sort_key is null or enrollment.updated_at < p_cursor_sort_key::timestamptz or (enrollment.updated_at = p_cursor_sort_key::timestamptz and enrollment.id > p_cursor_id))
-      order by enrollment.updated_at desc,enrollment.id asc limit p_limit + 1
+      where enrollment.student_id=p_id and enrollment.class_id is not null
+        and (pg_catalog.coalesce(pg_catalog.to_jsonb(enrollment) ->> 'roster_active','false')::boolean or enrollment.status in ('enrolled','waitlist','waitlisted'))
+      union all
+      select class.id,'enrolled',pg_catalog.coalesce(class.updated_at,'epoch'::timestamptz),class.id,2
+      from selected_student cross join lateral pg_catalog.jsonb_array_elements_text(pg_catalog.coalesce(selected_student.raw -> 'class_ids','[]'::jsonb)) direct(class_id)
+      join public.classes class on class.id::text=direct.class_id
+      union all
+      select class.id,'waitlisted',pg_catalog.coalesce(class.updated_at,'epoch'::timestamptz),class.id,3
+      from selected_student cross join lateral pg_catalog.jsonb_array_elements_text(pg_catalog.coalesce(selected_student.raw -> 'waitlist_class_ids','[]'::jsonb)) direct(class_id)
+      join public.classes class on class.id::text=direct.class_id
+      union all
+      select class.id,'enrolled',pg_catalog.coalesce(class.updated_at,'epoch'::timestamptz),class.id,4
+      from public.classes class where pg_catalog.coalesce(pg_catalog.to_jsonb(class) -> 'student_ids','[]'::jsonb) ? p_id::text
+      union all
+      select class.id,'waitlisted',pg_catalog.coalesce(class.updated_at,'epoch'::timestamptz),class.id,5
+      from public.classes class where pg_catalog.coalesce(pg_catalog.to_jsonb(class) -> 'waitlist_ids','[]'::jsonb) ? p_id::text
+        or pg_catalog.coalesce(pg_catalog.to_jsonb(class) -> 'waitlist_student_ids','[]'::jsonb) ? p_id::text
+    ), canonical as (
+      select distinct on (class_id) class_id,status,sort_at,event_id
+      from candidates
+      order by class_id,case when status='enrolled' then 0 else 1 end,priority,sort_at desc,event_id
+    ), page as (
+      select canonical.event_id id,canonical.sort_at::text sort_value,
+        pg_catalog.jsonb_build_object(
+          'classId',class.id,'className',class.name,'name',class.name,'subject',class.subject,
+          'teacher',pg_catalog.coalesce(pg_catalog.to_jsonb(class) ->> 'teacher_name',class.teacher),
+          'classroom',pg_catalog.coalesce(pg_catalog.to_jsonb(class) ->> 'classroom',pg_catalog.to_jsonb(class) ->> 'room'),
+          'schedule',class.schedule,'status',canonical.status,'startedOn',null,'endedOn',null) row_data
+      from canonical join public.classes class on class.id=canonical.class_id
+      where p_cursor_sort_key is null or canonical.sort_at < p_cursor_sort_key::timestamptz or (canonical.sort_at=p_cursor_sort_key::timestamptz and canonical.event_id > p_cursor_id)
+      order by canonical.sort_at desc,canonical.event_id asc limit p_limit + 1
     ) select pg_catalog.coalesce(pg_catalog.jsonb_agg(row_data order by sort_value desc,id) filter (where ordinal <= p_limit),'[]'::jsonb),pg_catalog.count(*),(pg_catalog.array_agg(sort_value) filter (where ordinal=p_limit))[1],(pg_catalog.array_agg(id) filter (where ordinal=p_limit))[1]
       into v_rows,v_count,v_next_sort_key,v_next_id from (select page.*,pg_catalog.row_number() over (order by sort_value desc,id) ordinal from page) bounded;
   elsif p_kind = 'classes' then
     with selected_class as (select pg_catalog.to_jsonb(class) raw from public.classes class where class.id = p_id), page as (
       select student.id, pg_catalog.coalesce(nullif(pg_catalog.btrim(student.name),''),U&'\FFFF') collate dashboard_private.ko_numeric sort_value,
-        pg_catalog.jsonb_build_object('id',student.id,'name',student.name,'school',student.school,'grade',student.grade,'status',student.status,'recentIssue',pg_catalog.to_jsonb(student) -> 'recent_issue') row_data
+        pg_catalog.jsonb_build_object(
+          'id',student.id,'name',student.name,'school',student.school,'grade',student.grade,'status',student.status,
+          'contact',student.contact,'parentContact',student.parent_contact,
+          'recentIssue',pg_catalog.to_jsonb(student) -> 'recent_issue') row_data
       from public.students student cross join selected_class
       where pg_catalog.coalesce(selected_class.raw -> (case when p_relation_kind='registered_students' then 'student_ids' else 'waitlist_ids' end),'[]'::jsonb) ? student.id::text
         and (p_cursor_sort_key is null or pg_catalog.coalesce(nullif(pg_catalog.btrim(student.name),''),U&'\FFFF') collate dashboard_private.ko_numeric > p_cursor_sort_key collate dashboard_private.ko_numeric
@@ -463,9 +528,8 @@ begin
     if v_raw is null then return null; end if;
     v_detail := pg_catalog.jsonb_build_object('kind','textbooks','record',pg_catalog.jsonb_build_object(
       'id',p_id,'title',pg_catalog.coalesce(v_raw ->> 'title',v_raw ->> 'name'),'subject',v_raw ->> 'subject','publisher',v_raw -> 'publisher',
-      'price',v_raw -> 'price','tags',pg_catalog.coalesce(v_raw -> 'tags','[]'::jsonb),
-      'status',case when pg_catalog.jsonb_typeof(v_raw -> 'lessons')='array' then case when pg_catalog.jsonb_array_length(v_raw -> 'lessons') > 0 then 'has-lessons' else 'no-lessons' end else 'no-lessons' end,
-      'lessonCount',case when pg_catalog.jsonb_typeof(v_raw -> 'lessons')='array' then pg_catalog.jsonb_array_length(v_raw -> 'lessons') else 0 end,
+      'price',pg_catalog.coalesce(v_raw -> 'price',v_raw -> 'sale_price',v_raw -> 'list_price'),'tags',pg_catalog.coalesce(v_raw -> 'tags','[]'::jsonb),
+      'status',pg_catalog.coalesce(v_raw ->> 'status',''),
       'updatedAt',v_raw -> 'updated_at'),
       'taxonomy',pg_catalog.jsonb_build_object('schoolLevels',pg_catalog.coalesce(v_raw -> 'school_levels','[]'::jsonb),'gradeLevels',pg_catalog.coalesce(v_raw -> 'grade_levels','[]'::jsonb),'subSubject',v_raw -> 'sub_subject'),
       'activeClasses',public.list_management_detail_relation_page_v1('textbooks',p_id,'active_classes') -> 'page',

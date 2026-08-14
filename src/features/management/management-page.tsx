@@ -970,9 +970,103 @@ function normalizeRelatedRecordList(value: unknown): RelatedRecord[] {
     .filter((item): item is RelatedRecord => Boolean(item && text(item.id)));
 }
 
+type ManagementRelationKind =
+  | "enrollments"
+  | "lifecycle_history"
+  | "class_picker"
+  | "registered_students"
+  | "waitlisted_students"
+  | "active_classes"
+  | "purchase_history";
+
+const RELATION_PAGE_FIELDS: Record<ManagementRelationKind, string> = {
+  enrollments: "enrollments_relation_page",
+  lifecycle_history: "lifecycle_history_relation_page",
+  class_picker: "class_picker_relation_page",
+  registered_students: "registered_students_relation_page",
+  waitlisted_students: "waitlisted_students_relation_page",
+  active_classes: "active_classes_relation_page",
+  purchase_history: "purchase_history_relation_page",
+};
+
+function getRelationPage(row: ManagementRow | null, relationKind: ManagementRelationKind) {
+  const raw = (row?.raw || {}) as Record<string, unknown>;
+  const value = raw[RELATION_PAGE_FIELDS[relationKind]];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function mergeRelatedRecords(current: RelatedRecord[], incoming: RelatedRecord[]) {
+  const byId = new Map(current.map((record) => [text(record.id), record]));
+  for (const record of incoming) {
+    const id = text(record.id);
+    if (id) byId.set(id, { ...(byId.get(id) || {}), ...record });
+  }
+  return [...byId.values()];
+}
+
+function appendRelationPageToRow(
+  row: ManagementRow,
+  relationKind: ManagementRelationKind,
+  incoming: RelatedRecord[],
+  page: Record<string, unknown>,
+) {
+  const raw = { ...(row.raw || {}) } as Record<string, unknown>;
+  raw[RELATION_PAGE_FIELDS[relationKind]] = page;
+
+  if (relationKind === "enrollments") {
+    const canonical: RelatedRecord[] = incoming.map((record) => ({
+      ...record,
+      id: text(record.id || record.classId),
+      name: text(record.name || record.className),
+    }));
+    const enrolled = canonical.filter((record) => text(record.status) === "enrolled");
+    const waitlisted = canonical.filter((record) => ["waitlist", "waitlisted"].includes(text(record.status)));
+    raw.enrolled_classes = mergeRelatedRecords(normalizeRelatedRecordList(raw.enrolled_classes || raw.enrolledClasses), enrolled);
+    raw.enrolledClasses = raw.enrolled_classes;
+    raw.waitlist_classes = mergeRelatedRecords(normalizeRelatedRecordList(raw.waitlist_classes || raw.waitlistClasses), waitlisted);
+    raw.waitlistClasses = raw.waitlist_classes;
+    raw.class_ids = idList(raw.class_ids || raw.classIds).concat(enrolled.map((record) => text(record.id))).filter((id, index, all) => all.indexOf(id) === index);
+    raw.classIds = raw.class_ids;
+    raw.waitlist_class_ids = idList(raw.waitlist_class_ids || raw.waitlistClassIds).concat(waitlisted.map((record) => text(record.id))).filter((id, index, all) => all.indexOf(id) === index);
+    raw.waitlistClassIds = raw.waitlist_class_ids;
+  } else if (relationKind === "registered_students" || relationKind === "waitlisted_students") {
+    const recordField = relationKind === "registered_students" ? "registered_students" : "waitlist_students";
+    const camelRecordField = relationKind === "registered_students" ? "registeredStudents" : "waitlistStudents";
+    const idField = relationKind === "registered_students" ? "student_ids" : "waitlist_ids";
+    const camelIdField = relationKind === "registered_students" ? "studentIds" : "waitlistIds";
+    raw[recordField] = mergeRelatedRecords(normalizeRelatedRecordList(raw[recordField] || raw[camelRecordField]), incoming);
+    raw[camelRecordField] = raw[recordField];
+    raw[idField] = idList(raw[idField] || raw[camelIdField]).concat(incoming.map((record) => text(record.id))).filter((id, index, all) => all.indexOf(id) === index);
+    raw[camelIdField] = raw[idField];
+    if (relationKind === "waitlisted_students") {
+      raw.waitlist_student_ids = raw[idField];
+      raw.waitlistStudentIds = raw[idField];
+    }
+  } else if (relationKind === "lifecycle_history") {
+    raw.class_history = mergeRelatedRecords(normalizeRelatedRecordList(raw.class_history || raw.classHistory), incoming);
+    raw.classHistory = raw.class_history;
+  } else if (relationKind === "active_classes") {
+    raw.active_classes = mergeRelatedRecords(normalizeRelatedRecordList(raw.active_classes), incoming);
+  } else if (relationKind === "purchase_history") {
+    raw.purchase_history = mergeRelatedRecords(normalizeRelatedRecordList(raw.purchase_history), incoming);
+  }
+
+  return { ...row, raw };
+}
+
 function getEmbeddedRelatedRecords(kind: ManagementKind, row?: ManagementRow | null) {
-  if (!row || kind !== "classes") return [];
-  return getClassStudentSummaries(row);
+  if (!row) return [];
+  if (kind === "classes") return getClassStudentSummaries(row);
+  if (kind === "students") {
+    const raw = (row.raw || {}) as Record<string, unknown>;
+    return [
+      ...normalizeRelatedRecordList(raw.enrolled_classes || raw.enrolledClasses),
+      ...normalizeRelatedRecordList(raw.waitlist_classes || raw.waitlistClasses),
+    ];
+  }
+  return [];
 }
 
 function getClassStudentSummaries(row: ManagementRow) {
@@ -1375,7 +1469,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     loadingMore,
     loadMore,
     loadDetail,
-    reloadRow,
+    loadRelationPage,
     removeRows,
     refresh,
   } = useManagementRecords(kind, managementListFilters);
@@ -1401,6 +1495,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const [classStudentFilters, setClassStudentFilters] = useState<ClassStudentPickerFilters>({ grade: "", school: "" });
   const [detailRowQuery, setDetailRowQuery] = useState("");
   const [relationQuery, setRelationQuery] = useState("");
+  const [loadingRelationKind, setLoadingRelationKind] = useState<ManagementRelationKind | null>(null);
+  const [relationPageState, setRelationPageState] = useState<Partial<Record<ManagementRelationKind, Record<string, unknown>>>>({});
   const classDetailRouteClearPendingRef = useRef(false);
   const studentDetailRouteClearPendingRef = useRef(false);
   const requestedClassId = kind === "classes" ? text(searchParams.get("classId")) : "";
@@ -1412,6 +1508,12 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const requestedClassDetailSessionId = kind === "classes" ? text(searchParams.get("sessionId")) : "";
   const requestedClassDetailStudentId = kind === "classes" ? text(searchParams.get("studentId")) : "";
   const requestedClassReturnPath = kind === "classes" ? normalizeReturnToPath(searchParams.get("returnTo")) : "";
+
+  const reconcileManagementPage = useCallback(async (selectedId?: string) => {
+    await refresh();
+    if (!selectedId) return null;
+    return loadDetail(selectedId);
+  }, [loadDetail, refresh]);
 
   useEffect(() => {
     if (kind !== "students") return;
@@ -1726,7 +1828,40 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     params.set("returnTo", buildStudentDetailReturnPath());
     router.push(`/admin/classes?${params.toString()}`);
   };
-  const renderRelationList = (label: string, ids: string[], modeLabel: "수강" | "대기") => (
+  const handleRelationLoadMore = async (relationKind: ManagementRelationKind) => {
+    if (!selectedRow || loadingRelationKind) return;
+    const currentPage = relationPageState[relationKind] || getRelationPage(selectedRow, relationKind);
+    const cursor = text(currentPage.nextCursor);
+    if (currentPage.hasMore !== true || !cursor) return;
+    setLoadingRelationKind(relationKind);
+    setOperationError(null);
+    try {
+      const result = await loadRelationPage({ id: selectedRow.id, relationKind, cursor });
+      const page = result?.page && typeof result.page === "object" && !Array.isArray(result.page)
+        ? result.page as Record<string, unknown>
+        : {};
+      const incoming = normalizeRelatedRecordList(page.rows);
+      setRelationPageState((current) => ({ ...current, [relationKind]: page }));
+      setSelectedRow((current) => current && current.id === selectedRow.id
+        ? appendRelationPageToRow(current, relationKind, incoming, page)
+        : current);
+      setRelatedRows((current) => mergeRelatedRecords(current, incoming.map((record) => ({
+        ...record,
+        id: text(record.id || record.classId),
+        name: text(record.name || record.className),
+      }))));
+    } catch (loadError) {
+      setOperationError(loadError instanceof Error ? loadError.message : "관계 목록을 더 불러오지 못했습니다.");
+    } finally {
+      setLoadingRelationKind(null);
+    }
+  };
+  const renderRelationList = (
+    label: string,
+    ids: string[],
+    modeLabel: "수강" | "대기",
+    relationKind: ManagementRelationKind,
+  ) => (
     <section
       data-testid={kind === "classes" ? (modeLabel === "수강" ? "class-enrolled-student-roster" : "class-waitlist-student-roster") : undefined}
       className="overflow-hidden rounded-md border bg-background"
@@ -1872,6 +2007,19 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           {label} 없음
         </div>
       )}
+      {getRelationPage(selectedRow, relationKind).hasMore === true ? (
+        <div className="border-t p-2 text-center">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => void handleRelationLoadMore(relationKind)}
+            disabled={loadingRelationKind !== null}
+          >
+            {loadingRelationKind === relationKind ? "더 불러오는 중" : "다음 30건"}
+          </Button>
+        </div>
+      ) : null}
     </section>
   );
   const getEditableFieldOptions = (fieldName: string, value: string) => {
@@ -2430,6 +2578,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     setRelatedRows(getEmbeddedRelatedRecords(kind, activeRow));
     setDetailRowQuery("");
     setRelationQuery("");
+    setRelationPageState({});
     setOperationError(null);
     setSaveNotice("");
     setDialogMode("detail");
@@ -2565,13 +2714,13 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         if (kind === "classes") return service.updateClass(payload, { candidateMembershipContext: classFormReferences });
         return service.updateTextbook(payload);
       }));
-      await Promise.all(rows.map((row) => reloadRow(row.id)));
+      await reconcileManagementPage();
     } catch (bulkError) {
       setOperationError(getSaveErrorMessage(bulkError));
     } finally {
       setSaving(false);
     }
-  }, [canMutateRows, classFormReferences, kind, reloadRow]);
+  }, [canMutateRows, classFormReferences, kind, reconcileManagementPage]);
 
   const deleteRows = useCallback(async (rows: ManagementRow[]) => {
     if (rows.length === 0) {
@@ -2591,12 +2740,13 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     try {
       await Promise.all(rows.map((row) => service.deleteTextbook(row.id)));
       removeRows(rows.map((row) => row.id));
+      await reconcileManagementPage();
     } catch (bulkError) {
       setOperationError(bulkError instanceof Error ? bulkError.message : "일괄 처리 중 오류가 발생했습니다.");
     } finally {
       setSaving(false);
     }
-  }, [canMutateRows, kind, removeRows]);
+  }, [canMutateRows, kind, reconcileManagementPage, removeRows]);
 
   const handleBulkDeleteRows = useCallback((rows: ManagementRow[]) => {
     if (rows.length === 0) {
@@ -2668,7 +2818,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     setOperationError(null);
     try {
       await service.initializeClassSchedule(pendingClassScheduleInitialization);
-      await reloadRow(pendingClassScheduleInitialization.classId);
+      await reconcileManagementPage(pendingClassScheduleInitialization.classId);
       setPendingClassScheduleInitialization(null);
       setDialogMode(null);
       setSelectedRow(null);
@@ -2729,7 +2879,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         const created = await service.createTextbook(payload);
         createdId = text((created as Record<string, unknown> | null)?.id) || createdId;
       }
-      if (createdId) await reloadRow(createdId);
+      if (createdId) await reconcileManagementPage(createdId);
+      else await reconcileManagementPage();
       setDialogMode(null);
       setSelectedRow(null);
     } catch (saveError) {
@@ -2805,7 +2956,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
             }
           : current,
       );
-      const refreshed = await reloadRow(selectedRow.id);
+      const refreshed = await reconcileManagementPage(selectedRow.id);
       if (refreshed) setSelectedRow(refreshed);
       setSaveNotice("저장 완료");
     } catch (saveError) {
@@ -2835,7 +2986,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       setTargetId("");
       setRelationQuery("");
       setSelectedRow((current) => current && current.id === selectedRow.id ? updateRelationOnRow(current, kind, relatedId, mode) : current);
-      const refreshed = await reloadRow(selectedRow.id);
+      const refreshed = await reconcileManagementPage(selectedRow.id);
       if (refreshed) setSelectedRow(refreshed);
       setSaveNotice(mode === "enrolled" ? "등록 학생 추가 완료" : "대기 학생 추가 완료");
     } catch (relationError) {
@@ -2872,7 +3023,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         await service.assignStudentToClass({ studentId: id, classId: selectedRow.id, mode });
       }
       setSelectedRow((current) => current && current.id === selectedRow.id ? updateRelationOnRow(current, kind, id, mode) : current);
-      const refreshed = await reloadRow(selectedRow.id);
+      const refreshed = await reconcileManagementPage(selectedRow.id);
       if (refreshed) setSelectedRow(refreshed);
       setSaveNotice(mode === "enrolled" ? "등록 전환 완료" : "대기 전환 완료");
     } catch (relationError) {
@@ -2895,7 +3046,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       await service.removeStudentFromClass({ studentId, classId });
       setSelectedRow((current) => current && selectedRow && current.id === selectedRow.id ? updateRelationOnRow(current, kind, relatedId, "removed") : current);
       if (selectedRow) {
-        const refreshed = await reloadRow(selectedRow.id);
+        const refreshed = await reconcileManagementPage(selectedRow.id);
         if (refreshed) setSelectedRow(refreshed);
       }
       setSaveNotice("연결 해제 완료");
@@ -3339,13 +3490,13 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         <div className={cn("grid gap-3 text-sm", kind === "students" && "sm:grid-cols-2")}>
           {kind === "students" ? (
             <>
-              {renderRelationList("수강 수업", getStudentEnrolledClassIds(selectedRow), "수강")}
-              {renderRelationList("대기 수업", getStudentWaitlistClassIds(selectedRow), "대기")}
+              {renderRelationList("수강 수업", getStudentEnrolledClassIds(selectedRow), "수강", "enrollments")}
+              {renderRelationList("대기 수업", getStudentWaitlistClassIds(selectedRow), "대기", "enrollments")}
             </>
           ) : (
             <>
-              {renderRelationList("수강 학생", classEnrolledStudentIds, "수강")}
-              {renderRelationList("대기 학생", classWaitlistStudentIds, "대기")}
+              {renderRelationList("수강 학생", classEnrolledStudentIds, "수강", "registered_students")}
+              {renderRelationList("대기 학생", classWaitlistStudentIds, "대기", "waitlisted_students")}
             </>
           )}
         </div>

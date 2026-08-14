@@ -275,13 +275,13 @@ test("management hook and UI keep list reads bounded while details and relation 
   assert.match(pageSource, /loadDetail\(requestedStudentId\)/);
   assert.match(pageSource, /service\.searchRelationPicker\(\{ kind, search: relationQuery \}\)/);
   assert.match(pageSource, /다음 30건/);
-  assert.doesNotMatch(pageSource, /await refresh\(\)/);
+  assert.match(pageSource, /const reconcileManagementPage = useCallback\(async[\s\S]*?await refresh\(\)/);
 
   assert.match(tableSource, /const periodOptions = useMemo\([\s\S]*?getServerPeriodOptions\(filterOptions\.periods\)/);
   assert.match(tableSource, /manualFiltering: true/);
   assert.match(tableSource, /const tableSourceRows = rows/);
   assert.match(tableSource, /function buildTextbookListHref/);
-  assert.match(tableSource, /syncTextbookListQueryState\(\{ q: value \}\)/);
+  assert.match(tableSource, /syncTextbookListQueryState\(\{ q: debouncedGlobalFilter \}\)/);
   assert.match(tableSource, /syncTextbookListQueryState\(\{ publisher: nextValue \}\)/);
   assert.match(tableSource, /syncTextbookListQueryState\(\{ status: nextValue \}\)/);
 

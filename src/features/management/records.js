@@ -211,7 +211,7 @@ export function normalizeClassManagementRecord(row = {}) {
   const scheduleLines = normalizeScheduleLines(schedule);
   const teacher = text(row.teacher || row.teacher_name || row.teacherName) || "담당 미정";
   const classroom = text(row.classroom || row.room) || "강의실 미정";
-  const registeredCount = studentIds.length;
+  const registeredCount = studentIds.length || Number(row.student_count || row.studentCount || 0);
   const waitlistCount = waitlistStudentIds.length || Number(row.waitlist_count || row.waitlistCount || 0);
   const weeklyMinutes = computeWeeklyClassMinutes(schedule);
   const weeklyHoursLabel = formatDurationLabel(weeklyMinutes);
@@ -309,6 +309,12 @@ export function normalizeTextbookManagementRecord(row = {}) {
   const tags = toArray(row.tags);
   const title = text(row.title || row.name) || "제목 없는 교재";
   const publisher = text(row.publisher) || "출판사 미정";
+  const storedStatus = text(row.status);
+  const statusLabel = storedStatus === "active"
+    ? "사용 중"
+    : storedStatus === "inactive"
+      ? "미사용"
+      : storedStatus || `단원 ${lessonCount}개`;
 
   return {
     kind: "textbooks",
@@ -317,10 +323,8 @@ export function normalizeTextbookManagementRecord(row = {}) {
     subtitle: publisher,
     badge: publisher,
     badgeValue: publisher,
-    status: `단원 ${lessonCount}개`,
-    statusValue: row.status === "has-lessons" || row.status === "no-lessons"
-      ? row.status
-      : lessonCount > 0 ? "has-lessons" : "no-lessons",
+    status: statusLabel,
+    statusValue: storedStatus || (lessonCount > 0 ? "has-lessons" : "no-lessons"),
     metaSummary: buildMetaSummary([
       formatCurrency(row.price),
       tags.length ? tags.join(", ") : "태그 없음",

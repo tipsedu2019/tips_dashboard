@@ -668,6 +668,14 @@ function relationRows(value: unknown): Record<string, unknown>[] {
   return Array.isArray(page.rows) ? page.rows as Record<string, unknown>[] : [];
 }
 
+function relationPage(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const source = value as Record<string, unknown>;
+  return source.page && typeof source.page === "object" && !Array.isArray(source.page)
+    ? source.page as Record<string, unknown>
+    : source;
+}
+
 function detailToSourceRow(kind: ManagementKind, detail: unknown): Record<string, unknown> | null {
   if (!detail || typeof detail !== "object" || Array.isArray(detail)) return null;
   const source = detail as Record<string, unknown>;
@@ -675,6 +683,13 @@ function detailToSourceRow(kind: ManagementKind, detail: unknown): Record<string
   const record = source.record as Record<string, unknown>;
   if (kind === "students") {
     const enrollments = relationRows(source.enrollments);
+    const enrollmentClasses: Record<string, unknown>[] = enrollments.map((row) => ({
+      ...row,
+      id: row.classId,
+      name: row.className,
+    }));
+    const enrolledClasses = enrollmentClasses.filter((row) => row.status === "enrolled");
+    const waitlistClasses = enrollmentClasses.filter((row) => ["waitlist", "waitlisted"].includes(textValue(row.status)));
     return {
       ...record,
       school_category: record.schoolCategory,
@@ -683,15 +698,25 @@ function detailToSourceRow(kind: ManagementKind, detail: unknown): Record<string
       counseling_note: record.counselingNote,
       recent_issue: record.recentIssue,
       updated_at: record.updatedAt,
-      class_ids: enrollments.filter((row) => row.status === "enrolled").map((row) => row.classId),
-      waitlist_class_ids: enrollments.filter((row) => row.status === "waitlisted").map((row) => row.classId),
+      class_ids: enrolledClasses.map((row) => row.id),
+      waitlist_class_ids: waitlistClasses.map((row) => row.id),
+      enrolled_classes: enrolledClasses,
+      enrolledClasses,
+      waitlist_classes: waitlistClasses,
+      waitlistClasses,
       class_history: relationRows(source.lifecycleHistory),
       classHistory: relationRows(source.lifecycleHistory),
+      enrollments_relation_page: relationPage(source.enrollments),
+      lifecycle_history_relation_page: relationPage(source.lifecycleHistory),
+      class_picker_relation_page: relationPage(source.classPicker),
     };
   }
   if (kind === "classes") {
     const registeredStudents = relationRows(source.registeredStudents);
     const waitlistedStudents = relationRows(source.waitlistedStudents);
+    const textbooks = Array.isArray(source.textbooks)
+      ? source.textbooks.filter((textbook): textbook is Record<string, unknown> => Boolean(textbook && typeof textbook === "object" && !Array.isArray(textbook)))
+      : [];
     const schedule = source.schedule && typeof source.schedule === "object" && !Array.isArray(source.schedule)
       ? source.schedule as Record<string, unknown>
       : {};
@@ -705,13 +730,18 @@ function detailToSourceRow(kind: ManagementKind, detail: unknown): Record<string
       updated_at: record.updatedAt,
       student_ids: registeredStudents.map((row) => row.id),
       waitlist_ids: waitlistedStudents.map((row) => row.id),
+      textbook_ids: textbooks.map((textbook) => textbook.id).filter(Boolean),
+      textbookIds: textbooks.map((textbook) => textbook.id).filter(Boolean),
       registered_students: registeredStudents,
       registeredStudents,
       waitlist_students: waitlistedStudents,
       waitlistStudents: waitlistedStudents,
+      registered_students_relation_page: relationPage(source.registeredStudents),
+      waitlisted_students_relation_page: relationPage(source.waitlistedStudents),
       schedule_plan: schedule.plan || null,
       schedule_slots: Array.isArray(schedule.slots) ? schedule.slots : [],
-      textbooks: Array.isArray(source.textbooks) ? source.textbooks : [],
+      textbooks,
+      available_textbooks: textbooks,
       class_groups: Array.isArray(source.groups) ? source.groups : [],
       available_teacher_catalogs: Array.isArray(formReferences.teacherCatalogs) ? formReferences.teacherCatalogs : [],
       available_classroom_catalogs: Array.isArray(formReferences.classroomCatalogs) ? formReferences.classroomCatalogs : [],
@@ -726,6 +756,8 @@ function detailToSourceRow(kind: ManagementKind, detail: unknown): Record<string
     sub_subject: (source.taxonomy as Record<string, unknown> | undefined)?.subSubject || null,
     active_classes: relationRows(source.activeClasses),
     purchase_history: relationRows(source.purchaseHistory),
+    active_classes_relation_page: relationPage(source.activeClasses),
+    purchase_history_relation_page: relationPage(source.purchaseHistory),
     progress_summary: source.progressSummary || {},
   };
 }
@@ -833,6 +865,19 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
     return normalizeManagementRows(kind, [sourceRow])[0] || null;
   }, [kind, readService]);
 
+  const loadRelationPage = useCallback(async ({
+    id,
+    relationKind,
+    cursor,
+  }: {
+    id: string;
+    relationKind: string;
+    cursor: string;
+  }) => {
+    if (!readService) return null;
+    return readService.loadRelationPage({ kind, id, relationKind, cursor, limit: 30 });
+  }, [kind, readService]);
+
   const reloadRow = useCallback(async (id: string) => {
     const detailRow = await loadDetail(id);
     if (!detailRow) return null;
@@ -858,6 +903,7 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
     loadingMore,
     loadMore,
     loadDetail,
+    loadRelationPage,
     reloadRow,
     removeRows,
     refresh: load,

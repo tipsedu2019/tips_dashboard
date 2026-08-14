@@ -3,7 +3,7 @@
 ## Migration lifecycle
 
 - `draft`: Supabase CLI v2.103.0 created `supabase/migrations/20260814011752_management_page_reads.sql` via `migration new management_page_reads`; the manifest began with a null hash.
-- `candidate`: source-complete SHA-256 `a0609d3e4299a347fe25067bfd5674a7b38b49b192b9936fd1ecb437b41d12a1` is recorded and equals the on-disk migration.
+- `candidate`: adversarial-review source-complete SHA-256 `cf7b8c6ca321bcb0104315e8a8f949c961e0288907ccb99c0863e7adef476e12` is recorded and equals the on-disk migration.
 - `final`: not promoted. The isolated harness stopped before database allocation with `isolated_supabase_db_baseline_review_required`; pgTAP and EXPLAIN runtime GREEN are not claimed.
 
 ## RED evidence
@@ -65,3 +65,15 @@ It stopped before allocation with `isolated_supabase_db_baseline_review_required
 ## Boundary
 
 Source implementation and source verification are complete. Runtime SQL behavior is specified in `supabase/tests/management_page_reads_test.sql` but remains empirically unverified until the reviewed isolated baseline gate opens. The pre-existing untracked `pnpm-workspace.yaml` was preserved and excluded from staging.
+
+## Adversarial fix round 1
+
+- Preserved assigned class textbook IDs through the exact-detail adapter so ordinary saves cannot erase assignments.
+- Removed the inaccessible private filter helper from all invoker RPC paths, inlined exact filter validation, and added an authenticated-role pgTAP invocation contract.
+- Canonicalized student enrollment relations across registration rows, student forward arrays, and class reverse roster arrays; roster payloads now carry contacts and lifecycle payloads carry renderer-ready Korean labels.
+- Completed bounded list projections for every visible scalar, corrected class roster counts, and removed `textbooks.lessons` JSONB inspection from list/stat/option paths.
+- Debounced canonical search URL/RPC scope changes by 300 ms, persisted the effective class period into the URL, and refetched page one, stats, and options after create/update/delete/roster mutations.
+- Exposed opaque relation continuation through the hook and wired selected-detail `다음 30건` append/deduplication for student/class rosters.
+- Replaced legacy roster full-collection reads and whole-row upserts with exact-ID projections and roster-array-only updates/rollback.
+- RED evidence: the new review suite first ran **0 pass / 11 fail**. Final review suite: **11/11 GREEN**. Final `tests/management-*.test.mjs`: **137/137 GREEN**. Combined focused management/query/textbook suite: **185/185 GREEN**. TypeScript, relevant ESLint (zero warnings), management query guard, migration hash, and diff check are GREEN.
+- The authorized isolated gate was retried with request ID `96b7fd52-e799-49ba-ab68-6bfc669fe7a8`; it again stopped at `isolated_supabase_db_baseline_review_required`. No DB allocation, migration replay, pgTAP runtime, or EXPLAIN GREEN is claimed, and the manifest remains `candidate`.
