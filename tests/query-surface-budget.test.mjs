@@ -1775,3 +1775,155 @@ test("bound operation aliases propagate through immutable assignments", async ()
   })
   assert.ok(result.violations.some((violation) => violation.reason === "task_id_batch_in_list"))
 })
+
+test("conditional bound RPC aliases compare prebound argument values", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters, enabled) {
+  let rpc = client.rpc.bind(client, "save_class_lesson_session_v1")
+  if (enabled) rpc = client.rpc.bind(client, "save_class_lesson_content_v1")
+  return rpc(parameters)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations.map((violation) => violation.reason), [
+    "list_query_receiver_unresolved",
+  ])
+})
+
+test("semantically identical conditional bound RPC aliases remain resolvable", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters, enabled) {
+  let rpc = client.rpc.bind(client, "save_class_lesson_session_v1")
+  if (enabled) rpc = client.rpc.bind(client, "save_class_lesson_session_v1")
+  return rpc(parameters).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result, { ok: true, violations: [] })
+})
+
+test("occurrence-bound debt rejects a query moved across control-flow branches", async () => {
+  const file = "src/features/tasks/list-tasks.ts"
+  const baselineSource = `async function load(client, enabled) {
+  if (enabled) {
+    const marker = 1
+    const result = client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+    return result
+  } else {
+    return null
+  }
+}
+`
+  const baselineViolation = inspectQuerySurfaceSource({ surface: "tasks", file, source: baselineSource })
+    .find((violation) => violation.reason === "list_select_star")
+  const result = await verifyFixture({
+    file,
+    baselineSource,
+    source: `async function load(client, enabled) {
+  if (enabled) {
+    return null
+  } else {
+    const marker = 1
+    const result = client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+    return result
+  }
+}
+`,
+    debtManifest: (baselineSha) => [{
+      surface: "tasks",
+      file,
+      symbol: "load",
+      violation: "list_select_star",
+      baselineSha,
+      fingerprint: baselineViolation.fingerprint,
+      occurrenceFingerprint: baselineViolation.occurrenceFingerprint,
+    }],
+  })
+
+  assert.ok(result.violations.some((violation) => (
+    violation.file === file
+    && violation.symbol === "load"
+    && violation.surface === "tasks"
+    && violation.reason === "list_select_star"
+  )))
+})
+
+test("Function prototype call and apply bindings cannot bypass RPC request controls", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  const call = Function.prototype.call.bind(client.rpc)
+  const apply = Function.prototype.apply.bind(client.rpc)
+  await call(client, "save_class_lesson_session_v1", parameters)
+  return apply(client, ["save_class_lesson_content_v1", parameters])
+}
+`,
+  })
+
+  assert.equal(result.violations.filter((violation) => violation.reason === "list_abort_signal_missing").length, 2)
+  assert.equal(result.violations.filter((violation) => violation.reason === "list_retry_false_missing").length, 2)
+})
+
+test("shadowed RPC aliases keep provenance attached to their declarations", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, helper, parameters) {
+  const rpc = client.rpc.bind(client)
+  {
+    const rpc = helper
+    rpc("save_class_lesson_content_v1", parameters)
+  }
+  return rpc("save_class_lesson_session_v1", parameters)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations.map((violation) => violation.reason), [
+    "list_abort_signal_missing",
+    "list_retry_false_missing",
+  ])
+})
+
+test("block-local RPC provenance does not escape its lexical declaration", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, rpc, parameters) {
+  {
+    const rpc = client.rpc.bind(client)
+    await rpc("save_class_lesson_content_v1", parameters)
+  }
+  return rpc("save_class_lesson_session_v1", parameters)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations.map((violation) => violation.reason), [
+    "list_abort_signal_missing",
+    "list_retry_false_missing",
+  ])
+})
+
+test("a bound RPC with an unresolved receiver fails closed at invocation", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, other, parameters) {
+  const rpc = client.rpc.bind(other)
+  return rpc("save_class_lesson_session_v1", parameters)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations.map((violation) => violation.reason), [
+    "list_query_receiver_unresolved",
+  ])
+})

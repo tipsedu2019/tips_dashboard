@@ -7,6 +7,7 @@ import ts from "typescript"
 export const QUERY_SURFACES = Object.freeze(["tasks", "management", "operations", "academic", "public"])
 const BASELINE_SHA = "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101"
 const BOUND_OPERATION_METHODS = new WeakMap()
+const SCOPE_BINDINGS = new WeakMap()
 const EXACT_SCALAR_RPC_NAMES = new Set([
   "get_ops_task_list_stats_v1",
   "get_management_stats_v1",
@@ -101,24 +102,24 @@ function hasOptionalChain(expression) {
 // violation rather than an interchangeable allowance.
 const LEGACY_DEBT_OCCURRENCE_FINGERPRINTS = new Map([
   ["9c925ec82011b4d50c8761e57ec33f2c0fd13b8af7c9e20cabd22122c05b5cfd", "fd867d5885a2fb5e52d6653685ec9636acd2dc455ac8d6f3d45213ebd5fdebd4"],
-  ["f634c3bdbd371fe0badf43b9b774dc13d73ecb9e4151061aeea6bd93f2e47510", "36155799ed2b16b75931485780ba9a97b4d7dbae505f671a8124b302cf90afdf"],
+  ["f634c3bdbd371fe0badf43b9b774dc13d73ecb9e4151061aeea6bd93f2e47510", "986dc220fa183ef8267853bb0a7b1db18451d9a038186887cd5bffdff37ea31b"],
   ["19a4d722ed35299a88bf06fb3164ebec2081d2ce16a53835c398624485ef48b1", "38fc4f6997e9edf0412ad389699ac36a13f1da1394f38710a68731beaf685e46"],
   ["ce8eacaf5a088c1bd6a02532bd8a974e8b87bb56ee6fa929abee23f550046ca9", "d82e248868a699b522c0b9bd5ea203aedd075ffe8d5bb3c9e2aaea0b40d132fb"],
-  ["c298131d70d0b561467e5dcdfe3196f8be304ea1de9e8d2e91bbbd82f9019965", "661ffe54d7b667bc98ca5d83eb1f765c7344a558dff7ff71e25963ce7a6c5b86"],
-  ["1d10c6da117bcc226bd4b3a2b1511de9dc10cf22fb8655b6c6a439934543485b", "88eb22ad0c6baac6d5423935d95be226781f03f668702f2297cbd1608f103d83"],
-  ["d31238040cb5ecb0b1979fa01fe8a784c8377466de1a5a4bb41a273d4a0832f8", "661ffe54d7b667bc98ca5d83eb1f765c7344a558dff7ff71e25963ce7a6c5b86"],
-  ["53187d67160e2b5f8abb237db5414df034bc01b78a8baf35611506a2c25a49da", "88eb22ad0c6baac6d5423935d95be226781f03f668702f2297cbd1608f103d83"],
-  ["bb47c9d77c189079d6544f15850441de3880742fae7d5891c44cc04c01a278c4", "54614d10a5b739c8c3df3fc0c6f821f4b5a013899aaab0b99a587d3dfce951aa"],
-  ["1d6333930b09982ad59d086dae3e203f55e2577fa266904b7cc729acf5c2240c", "209c094c9f2ddfcc0d6102747d58176d5c1e76cf55aff49ba613afaaa43ce7f2"],
-  ["2c96a45dbc1c66b7e71a5870ff26b2f5385c3937705c5ac6cc886b4f3c355401", "036b518140220d304a1fe019d20e351d471d56e80322c87e008197196a53914a"],
+  ["c298131d70d0b561467e5dcdfe3196f8be304ea1de9e8d2e91bbbd82f9019965", "86b739cb298a9b284e78223dd0e219aa6df29ecf1dda864bdfc6ab7c5e772564"],
+  ["1d10c6da117bcc226bd4b3a2b1511de9dc10cf22fb8655b6c6a439934543485b", "f206f74d1417bb46d3b3b91d3024d2f954a90b18a008c12132f385e3c9a760f2"],
+  ["d31238040cb5ecb0b1979fa01fe8a784c8377466de1a5a4bb41a273d4a0832f8", "86b739cb298a9b284e78223dd0e219aa6df29ecf1dda864bdfc6ab7c5e772564"],
+  ["53187d67160e2b5f8abb237db5414df034bc01b78a8baf35611506a2c25a49da", "f206f74d1417bb46d3b3b91d3024d2f954a90b18a008c12132f385e3c9a760f2"],
+  ["bb47c9d77c189079d6544f15850441de3880742fae7d5891c44cc04c01a278c4", "a587828d5e7c3b44d8ee0de1cf93262068e00ba41dd57a596dc7e73716a3defd"],
+  ["1d6333930b09982ad59d086dae3e203f55e2577fa266904b7cc729acf5c2240c", "93e0e8939868c947ee0abce3c9ebe06088a898d3c0ce12eca8a8da5560a35d54"],
+  ["2c96a45dbc1c66b7e71a5870ff26b2f5385c3937705c5ac6cc886b4f3c355401", "54fc7cbcda4808761a490471b9eb195658793268d8f8aee40b3abd7abdf1b6ad"],
   ["eb75288993a7bbd901544dd155cdc276764ab97a28b7d75622d069ebdaadb2d7", "f4361f26cb7a2e6fa1b14123d2decd850b6d0c0da610cffb97ab8a80d0dbf2e5"],
   ["9ec60a4049e9d6defd81e44652e6d11f70d14aff2e41b13a22e023346618802d", "f19f1c18babb1667f17c5ab1f14e33073033c07f9b52c7c0e45896b509e8c942"],
   ["91089c83905a97981897078f1f116d88f17314217f4a04d1958b91c83ff2cb58", "a2f9f135cdd93ddd4775e7ffb03c4398570ed5c7130dcd269c12af0b361b5279"],
   ["7ad267651103e94ecda0049485e915e7c577351c85c5693bc4d87c4e6c17cbbb", "3d83353476698d6cb9d3ad0a3d4d9c99ca2e298e303d88c361d103d74ae9fa96"],
-  ["65280cf9e7670073ed6c2af811fba866f2a819a0e814dc736bc30e85325a9f76", "7397ba41378948785a89414a4bcc260c549ddb90e36397aa7b37e761e31190e1"],
-  ["8eb0d3f8f2d72a47ab438bb9f74a837ca9a23162cc611b6b2d02f5150b2c5790", "1f0f3f0640b2f0ec709385a1a1a4d760f45152aabcf5fb4daa2345a46b2e7553"],
-  ["193816049298234fe788de7b9aec7bbab89eebaab8aadb18da74705673611b94", "dc87aa145b10d137d7f181c87d1a01725a2eeb7dcccf94a40e5b212778dd1a2d"],
-  ["bddeb9462f15759b516eed0505dfbb8961248ba29c8cdb16189d6738ab15142d", "1cd961f6b9793fbbf6078fdbb549dc16a1f2d8d73739864de8f328cbbb20de83"],
+  ["65280cf9e7670073ed6c2af811fba866f2a819a0e814dc736bc30e85325a9f76", "33c82b5cbd6e5d3bc5732017d865c8b029b963bf7041f55ef2e193799dc49ff1"],
+  ["8eb0d3f8f2d72a47ab438bb9f74a837ca9a23162cc611b6b2d02f5150b2c5790", "2a87e41d8f3896856c8fdee3d70686782a7afa6dc53dd20445474d5c31986f2d"],
+  ["193816049298234fe788de7b9aec7bbab89eebaab8aadb18da74705673611b94", "8b0649f89bb7509b01a63d50f4b7aaabf25e64c055ed63167f13bd5ec4b784da"],
+  ["bddeb9462f15759b516eed0505dfbb8961248ba29c8cdb16189d6738ab15142d", "19a9a424c68d4620afc1e744ecdf72eb9a09916406794029391231b0e1e56940"],
 ])
 
 function legacyDebt(surface, file, symbol, violation, fingerprint) {
@@ -458,6 +459,7 @@ function destructuredAliasTargets(target) {
       if (!ts.isIdentifier(element.name)) return []
       return [{
         name: element.name.text,
+        identifier: element.name,
         property: element.propertyName ? computedPropertyText(element.propertyName) : element.name.text,
         computed: Boolean(element.propertyName && ts.isComputedPropertyName(element.propertyName)),
       }]
@@ -466,11 +468,12 @@ function destructuredAliasTargets(target) {
   if (ts.isObjectLiteralExpression(target)) {
     return target.properties.flatMap((property) => {
       if (ts.isShorthandPropertyAssignment(property)) {
-        return [{ name: property.name.text, property: property.name.text, computed: false }]
+        return [{ name: property.name.text, identifier: property.name, property: property.name.text, computed: false }]
       }
       if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(unwrap(property.initializer))) return []
       return [{
         name: unwrap(property.initializer).text,
+        identifier: unwrap(property.initializer),
         property: computedPropertyText(property.name),
         computed: ts.isComputedPropertyName(property.name),
       }]
@@ -508,6 +511,15 @@ function queryFunctionMethod(expression, aliases) {
   }
 }
 
+function functionPrototypeInvocation(expression) {
+  const invocation = methodTarget(expression)
+  if (!invocation || !["call", "apply"].includes(invocation.method)) return null
+  const prototype = methodTarget(invocation.receiver)
+  return prototype?.method === "prototype" && rootIdentifier(prototype.receiver) === "Function"
+    ? invocation.method
+    : null
+}
+
 function sameQueryMethodReference(expression, descriptor, aliases) {
   const target = methodTarget(unwrap(expression))
   return Boolean(target && target.method === descriptor.method
@@ -515,10 +527,62 @@ function sameQueryMethodReference(expression, descriptor, aliases) {
 }
 
 function sameMethodAlias(left, right) {
+  const leftArguments = left?.entryArgumentKeys ?? []
+  const rightArguments = right?.entryArgumentKeys ?? []
   return Boolean(left && right && left.method === right.method && left.receiver?.origin === right.receiver?.origin
     && Boolean(left.receiver?.unresolved) === Boolean(right.receiver?.unresolved)
     && left.invocation === right.invocation && left.bound === right.bound && left.unresolved === right.unresolved
-    && (left.entryArguments?.length ?? 0) === (right.entryArguments?.length ?? 0))
+    && leftArguments.length === rightArguments.length
+    && leftArguments.every((value, index) => value !== null && value === rightArguments[index]))
+}
+
+function bindingIdentifiers(name) {
+  if (ts.isIdentifier(name)) return [name]
+  if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+    return name.elements.flatMap((element) => ts.isBindingElement(element) ? bindingIdentifiers(element.name) : [])
+  }
+  return []
+}
+
+function scopeBindings(scope) {
+  const cached = SCOPE_BINDINGS.get(scope)
+  if (cached) return cached
+  const bindings = new Map()
+  const add = (identifier) => {
+    const candidates = bindings.get(identifier.text) ?? []
+    candidates.push(identifier)
+    bindings.set(identifier.text, candidates)
+  }
+  const visit = (node) => {
+    if (node !== scope && ts.isFunctionLike(node)) return
+    if (ts.isVariableDeclaration(node)) bindingIdentifiers(node.name).forEach(add)
+    if (ts.isParameter(node)) bindingIdentifiers(node.name).forEach(add)
+    if (ts.isCatchClause(node) && node.variableDeclaration) bindingIdentifiers(node.variableDeclaration.name).forEach(add)
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(scope, visit)
+  SCOPE_BINDINGS.set(scope, bindings)
+  return bindings
+}
+
+function nearestBindingIdentifier(scope, name, use) {
+  let nearest = null
+  for (const identifier of scopeBindings(scope).get(name) ?? []) {
+    if (isVisibleBindingAt(identifier, use, scope) && (!nearest || identifier.pos > nearest.pos)) nearest = identifier
+  }
+  return nearest
+}
+
+function assignmentTargetsBindingAtUse(assignment, target, use, scope) {
+  const declaredTarget = ts.isVariableDeclaration(assignment.node)
+    ? target
+    : nearestBindingIdentifier(scope, target.text, target)
+  return declaredTarget === nearestBindingIdentifier(scope, target.text, use)
+}
+
+function boundArgumentKey(argument, scope, use) {
+  const value = argumentValue(argument, primitiveConstants(scope, use))
+  return value === undefined ? null : `${typeof value}:${JSON.stringify(value)}`
 }
 
 function assignOrderedAlias(map, name, next, conditional) {
@@ -569,6 +633,7 @@ function aliasProvenanceAt(assignments, use, scope) {
     if (destructured.length > 0) {
       const receiver = receiverOrigin(initializer, aliases)
       for (const target of destructured) {
+        if (!assignmentTargetsBindingAtUse(assignment, target.identifier, use, scope)) continue
         const detached = receiver && (["from", "rpc"].includes(target.property) || (target.computed && target.property === null))
           ? { method: target.property, receiver }
           : null
@@ -580,6 +645,7 @@ function aliasProvenanceAt(assignments, use, scope) {
       continue
     }
     if (!ts.isIdentifier(assignment.target)) continue
+    if (!assignmentTargetsBindingAtUse(assignment, assignment.target, use, scope)) continue
     const name = assignment.target.text
     const copiedReceiver = ts.isIdentifier(initializer) ? aliases.get(initializer.text) ?? null : null
     assignReceiverAlias(aliases, name, copiedReceiver, conditional)
@@ -594,6 +660,7 @@ function aliasProvenanceAt(assignments, use, scope) {
             ? receiverOrigin(bindTarget.receiver, aliases)
             : { origin: null, unresolved: true },
           entryArguments: [...initializer.arguments].slice(1),
+          entryArgumentKeys: [...initializer.arguments].slice(1).map((argument) => boundArgumentKey(argument, scope, assignment.node)),
         }
       : (ts.isIdentifier(initializer) ? boundMethods.get(initializer.text) ?? null : null)
     assignOrderedAlias(boundMethods, name, bound, conditional)
@@ -607,11 +674,26 @@ function aliasProvenanceAt(assignments, use, scope) {
 
     const directInvocation = queryFunctionMethod(initializer, aliases)
     const boundInvocation = bindAccess && queryFunctionMethod(bindAccess.receiver, aliases)
+    const prototypeInvocation = bindAccess && functionPrototypeInvocation(bindAccess.receiver)
+    const prototypeTarget = prototypeInvocation && initializer.arguments[0]
+      ? methodTarget(unwrap(initializer.arguments[0]))
+      : null
+    const prototypeBoundInvocation = prototypeTarget
+      && (prototypeTarget.method === null || ["from", "rpc"].includes(prototypeTarget.method))
+      && isTrustedReceiver(prototypeTarget.receiver, aliases)
+      ? {
+          invocation: prototypeInvocation,
+          method: prototypeTarget.method,
+          receiver: receiverOrigin(prototypeTarget.receiver, aliases),
+          bound: true,
+        }
+      : null
     const invocation = directInvocation
       ? { ...directInvocation, bound: false }
       : (boundInvocation && sameQueryMethodReference(initializer.arguments[0], boundInvocation, aliases)
           ? { ...boundInvocation, bound: true }
-          : (ts.isIdentifier(initializer) ? invocationMethods.get(initializer.text) ?? null : null))
+          : (prototypeBoundInvocation
+              ?? (ts.isIdentifier(initializer) ? invocationMethods.get(initializer.text) ?? null : null)))
     assignOrderedAlias(invocationMethods, name, invocation, conditional)
 
     const directApply = target && target.method === "apply" && rootIdentifier(target.receiver) === "Reflect"
@@ -877,12 +959,47 @@ function queryLineSpan(scope, query) {
 
 function queryOccurrenceFingerprint(scope, query) {
   const context = queryOccurrenceContext(scope, query)
+  const ancestry = context.controlFlowAncestry.length > 0
+    ? ["<control-flow>", ...context.controlFlowAncestry]
+    : []
   return createHash("sha256")
     .update([
       context.previousStatement ?? "<scope-start>",
       context.query,
+      ...ancestry,
     ].join("\u0000").replace(/\s+/gu, " "))
     .digest("hex")
+}
+
+function queryControlFlowAncestry(query, scope, sourceFile) {
+  const ancestry = []
+  const normalize = (value) => value.getText(sourceFile).replace(/\s+/gu, " ")
+  let child = query.entry
+  for (let parent = child.parent; parent && parent !== scope; child = parent, parent = parent.parent) {
+    if (ts.isIfStatement(parent)) {
+      const branch = child === parent.thenStatement ? "then" : child === parent.elseStatement ? "else" : "condition"
+      ancestry.push(`if:${branch}:${normalize(parent.expression)}`)
+    } else if (ts.isConditionalExpression(parent)) {
+      const branch = child === parent.whenTrue ? "true" : child === parent.whenFalse ? "false" : "condition"
+      ancestry.push(`conditional:${branch}:${normalize(parent.condition)}`)
+    } else if (ts.isForStatement(parent)) {
+      ancestry.push(`for:${parent.condition ? normalize(parent.condition) : "<none>"}`)
+    } else if (ts.isForInStatement(parent) || ts.isForOfStatement(parent)) {
+      ancestry.push(`${ts.isForInStatement(parent) ? "for-in" : "for-of"}:${normalize(parent.expression)}`)
+    } else if (ts.isWhileStatement(parent) || ts.isDoStatement(parent)) {
+      ancestry.push(`${ts.isWhileStatement(parent) ? "while" : "do"}:${normalize(parent.expression)}`)
+    } else if (ts.isCaseClause(parent)) {
+      ancestry.push(`switch-case:${normalize(parent.expression)}`)
+    } else if (ts.isDefaultClause(parent)) {
+      ancestry.push("switch-default")
+    } else if (ts.isTryStatement(parent)) {
+      const branch = child === parent.tryBlock ? "try" : child === parent.catchClause ? "catch" : "finally"
+      ancestry.push(`try:${branch}`)
+    } else if (ts.isCatchClause(parent)) {
+      ancestry.push("catch")
+    }
+  }
+  return ancestry.reverse()
 }
 
 function queryOccurrenceContext(scope, query) {
@@ -901,6 +1018,7 @@ function queryOccurrenceContext(scope, query) {
   return {
     previousStatement: previousStatement ? normalize(previousStatement.getText(sourceFile)) : null,
     query: normalize(sourceFile.text.slice(start, end)),
+    controlFlowAncestry: queryControlFlowAncestry(query, scope, sourceFile),
     before: [...siblings].slice(0, index).map((candidate) => normalize(candidate.getText(sourceFile))),
     after: [...siblings].slice(index + 1).map((candidate) => normalize(candidate.getText(sourceFile))),
   }
@@ -924,6 +1042,8 @@ function statementCounts(statements) {
 
 function queryOccurrenceRelocated(baseline, candidate) {
   if (!baseline || !candidate || baseline.query !== candidate.query) return true
+  if (baseline.controlFlowAncestry.length !== candidate.controlFlowAncestry.length
+    || baseline.controlFlowAncestry.some((ancestor, index) => ancestor !== candidate.controlFlowAncestry[index])) return true
   const baselineBefore = statementCounts(baseline.before)
   const baselineAfter = statementCounts(baseline.after)
   const candidateBefore = statementCounts(candidate.before)
@@ -1144,7 +1264,7 @@ function analyzeScope({ surface, file, scope, symbol }) {
       const record = {
         entry: call,
         directMethod: boundMethod.method,
-        receiverUnresolved: false,
+        receiverUnresolved: Boolean(boundMethod.receiver?.unresolved || boundMethod.unresolved),
         entryArguments: [...boundMethod.entryArguments, ...call.arguments],
         ordinal: records.length,
         operations: queryOperations(call),
