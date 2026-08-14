@@ -195,7 +195,9 @@ function withOpaqueDetailRelationCursors(detail, kind, entityId) {
 
 export function createManagementReadService(options = {}) {
   const client = ensureClient(options.supabase);
-  let pendingCanonicalClassBundle = null;
+  const inFlightInitialClassBundles = new Map();
+  const canonicalReplayBundles = new Map();
+  let canonicalReplaySequence = 0;
 
   const filterFingerprint = (filters) => JSON.stringify(
     Object.keys(filters).sort().map((key) => [key, filters[key]]),
@@ -259,40 +261,62 @@ export function createManagementReadService(options = {}) {
   return {
     encodeRelationCursor: encodeManagementRelationCursor,
     loadPage: loadPageBundle,
-    async loadInitialPage({ kind, filters, cursor = null, limit = MANAGEMENT_PAGE_SIZE }) {
+    discardCanonicalReplay(token) {
+      canonicalReplayBundles.delete(trimText(token));
+    },
+    async loadInitialPage({
+      kind,
+      filters,
+      cursor = null,
+      limit = MANAGEMENT_PAGE_SIZE,
+      canonicalReplayToken = "",
+    }) {
       assertManagementFilters(kind, filters);
       const requestedFingerprint = filterFingerprint(filters);
-      if (pendingCanonicalClassBundle
-        && kind === "classes"
-        && cursor === null
-        && limit === MANAGEMENT_PAGE_SIZE
-        && pendingCanonicalClassBundle.expiresAt >= Date.now()
-        && pendingCanonicalClassBundle.fingerprint === requestedFingerprint) {
-        const replay = pendingCanonicalClassBundle.result;
-        pendingCanonicalClassBundle = null;
-        return replay;
+      const safeReplayToken = trimText(canonicalReplayToken);
+      if (safeReplayToken) {
+        const replay = canonicalReplayBundles.get(safeReplayToken);
+        canonicalReplayBundles.delete(safeReplayToken);
+        if (replay
+          && kind === "classes"
+          && cursor === null
+          && limit === MANAGEMENT_PAGE_SIZE
+          && replay.effectiveFingerprint === requestedFingerprint) {
+          return replay.result;
+        }
       }
-      pendingCanonicalClassBundle = null;
-      let effectiveFilters = filters;
-      let resolvedDefaultPeriod = false;
+
       if (kind === "classes" && !trimText(filters.periodId)) {
-        const { data, error } = await client.rpc("get_management_default_class_period_v1")
-          .abortSignal(AbortSignal.timeout(8_000)).retry(false);
-        if (error) throw error;
-        const periodId = trimText(unwrapRpcObject(data)?.periodId);
-        if (!periodId) throw managementReadError("management_default_period_unavailable");
-        effectiveFilters = { ...filters, periodId };
-        resolvedDefaultPeriod = true;
+        const initialFingerprint = filterFingerprint({ kind, filters, cursor, limit });
+        const inFlight = inFlightInitialClassBundles.get(initialFingerprint);
+        if (inFlight) return inFlight;
+        const initialPromise = (async () => {
+          const { data, error } = await client.rpc("get_management_default_class_period_v1")
+            .abortSignal(AbortSignal.timeout(8_000)).retry(false);
+          if (error) throw error;
+          const periodId = trimText(unwrapRpcObject(data)?.periodId);
+          if (!periodId) throw managementReadError("management_default_period_unavailable");
+          const effectiveFilters = { ...filters, periodId };
+          const result = await loadPageBundle({ kind, filters: effectiveFilters, cursor, limit });
+          const replayToken = `management-canonical-${canonicalReplaySequence += 1}`;
+          canonicalReplayBundles.set(replayToken, {
+            initialFingerprint,
+            effectiveFingerprint: filterFingerprint(effectiveFilters),
+            result: { ...result, canonicalReplayToken: null },
+          });
+          return { ...result, canonicalReplayToken: replayToken };
+        })();
+        inFlightInitialClassBundles.set(initialFingerprint, initialPromise);
+        try {
+          return await initialPromise;
+        } finally {
+          if (inFlightInitialClassBundles.get(initialFingerprint) === initialPromise) {
+            inFlightInitialClassBundles.delete(initialFingerprint);
+          }
+        }
       }
-      const result = await loadPageBundle({ kind, filters: effectiveFilters, cursor, limit });
-      if (resolvedDefaultPeriod) {
-        pendingCanonicalClassBundle = {
-          fingerprint: filterFingerprint(effectiveFilters),
-          result,
-          expiresAt: Date.now() + 5_000,
-        };
-      }
-      return result;
+      const result = await loadPageBundle({ kind, filters, cursor, limit });
+      return { ...result, canonicalReplayToken: null };
     },
     loadNextPage: readListPage,
     async loadDetail({ kind, id }) {

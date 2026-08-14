@@ -781,11 +781,12 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
   const [filterOptions, setFilterOptions] = useState<Record<string, unknown>>({});
   const [effectiveClassPeriodId, setEffectiveClassPeriodId] = useState("");
   const loadGenerationRef = useRef(0);
+  const canonicalReplayTokenRef = useRef("");
   const filters = useMemo(() => requestedFilters || defaultManagementFilters(kind), [kind, requestedFilters]);
   const effectiveFiltersRef = useRef<ManagementListFilters>(filters);
   const readService = useMemo(() => supabase ? createManagementReadService({ supabase }) : null, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ allowCanonicalReplay = false }: { allowCanonicalReplay?: boolean } = {}) => {
     const loadGeneration = loadGenerationRef.current + 1;
     loadGenerationRef.current = loadGeneration;
     const isCurrent = () => loadGenerationRef.current === loadGeneration;
@@ -801,8 +802,20 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
     setLoading(true);
     setError(null);
     try {
-      const result = await readService.loadInitialPage({ kind, filters, cursor: null, limit: 30 });
+      const canonicalReplayToken = allowCanonicalReplay ? canonicalReplayTokenRef.current : "";
+      if (!allowCanonicalReplay && canonicalReplayTokenRef.current) {
+        readService.discardCanonicalReplay(canonicalReplayTokenRef.current);
+      }
+      canonicalReplayTokenRef.current = "";
+      const result = await readService.loadInitialPage({
+        kind,
+        filters,
+        cursor: null,
+        limit: 30,
+        canonicalReplayToken,
+      });
       if (!isCurrent()) return;
+      canonicalReplayTokenRef.current = textValue(result.canonicalReplayToken);
       effectiveFiltersRef.current = result.effectiveFilters as ManagementListFilters;
       setEffectiveClassPeriodId(kind === "classes" ? textValue(result.effectiveFilters.periodId) : "");
       const sourceRows = result.page.rows.map((row: Record<string, unknown>) => listRowToSource(kind, row));
@@ -829,7 +842,7 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
   }, [filters, kind, readService]);
 
   useEffect(() => {
-    void load();
+    void load({ allowCanonicalReplay: true });
     return () => {
       loadGenerationRef.current += 1;
     };
@@ -912,6 +925,8 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
     setRows((current) => current.filter((row) => !removed.has(row.id)));
   }, []);
 
+  const refresh = useCallback(() => load({ allowCanonicalReplay: false }), [load]);
+
   return {
     rows,
     stats,
@@ -928,6 +943,6 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
     loadClassTextbookCandidatePage,
     reloadRow,
     removeRows,
-    refresh: load,
+    refresh,
   };
 }

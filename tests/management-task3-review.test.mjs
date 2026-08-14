@@ -115,7 +115,7 @@ test("bounded textbook reads never inspect the lessons JSONB payload", async () 
   const migration = await readFile(new URL("supabase/migrations/20260814011752_management_page_reads.sql", root), "utf8");
   const listAndAggregates = migration.slice(0, migration.indexOf("create function public.list_management_detail_relation_page_v1"));
   assert.doesNotMatch(listAndAggregates, /->\s*'lessons'|jsonb_array_length\([^)]*lessons/i);
-  assert.doesNotMatch(listAndAggregates, /to_jsonb\((?:class|textbook)\)/i);
+  assert.doesNotMatch(listAndAggregates, /to_jsonb\((?:student|enrollment|class|textbook)\)/i);
   assert.doesNotMatch(listAndAggregates, /\bschedule_plan\b|\blessons\b/i);
   assert.match(listAndAggregates, /textbook\.status|raw\s*->>\s*'status'/);
 });
@@ -126,7 +126,13 @@ test("class textbook picker keeps one controlled query for input results and cur
   assert.match(pickerSource, /query: string/);
   assert.doesNotMatch(pickerSource, /const \[query, setQuery\] = useState/);
   assert.match(pageSource, /query=\{textbookCandidateQuery\}/);
-  assert.match(pageSource, /search: textbookCandidateQuery,[\s\S]*?filters: textbookCandidateFilters,[\s\S]*?cursor: textbookCandidateCursor/);
+  assert.match(pageSource, /search: requestedScope\.search,[\s\S]*?filters: requestedScope\.filters,[\s\S]*?cursor: null/);
+  assert.match(pageSource, /const textbookCandidateScopeMatches = textbookCandidateCommittedScope\?\.key === textbookCandidateScopeKey/);
+  assert.match(pageSource, /const textbookCandidateScopeKey = JSON\.stringify\(\[[\s\S]*?form\.subject,[\s\S]*?form\.grade,[\s\S]*?textbookCandidateQuery/);
+  assert.match(pageSource, /textbooks=\{textbookCandidateScopeMatches \? textbookCandidateRows : \[\]\}/);
+  assert.match(pageSource, /hasMore=\{textbookCandidateScopeMatches && textbookCandidatesHaveMore\}/);
+  assert.match(pageSource, /if \(!committedScope[\s\S]*?committedScope\.key !== textbookCandidateScopeKey[\s\S]*?return/);
+  assert.match(pageSource, /search: committedScope\.search,[\s\S]*?filters: committedScope\.filters,[\s\S]*?cursor: textbookCandidateCursor/);
 });
 
 test("relation payloads match roster contacts and student history renderer labels", async () => {

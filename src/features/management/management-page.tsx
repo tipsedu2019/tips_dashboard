@@ -130,6 +130,12 @@ const PAGE_CONFIG = {
 type FormState = Record<string, string>;
 type RelatedRecord = Record<string, unknown>;
 type ManagementPageCursor = { sortKey: string; id: string; scopeHash: string };
+type TextbookCandidateScope = {
+  key: string;
+  classId: string;
+  search: string;
+  filters: ClassTextbookPickerFilters;
+};
 type Field = {
   name: string;
   label: string;
@@ -1512,6 +1518,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const [textbookCandidateCursor, setTextbookCandidateCursor] = useState<ManagementPageCursor | null>(null);
   const [textbookCandidatesHaveMore, setTextbookCandidatesHaveMore] = useState(false);
   const [textbookCandidatesLoading, setTextbookCandidatesLoading] = useState(false);
+  const [textbookCandidateCommittedScope, setTextbookCandidateCommittedScope] = useState<TextbookCandidateScope | null>(null);
   const textbookCandidateRequestRef = useRef(0);
   const handleTextbookCandidateFiltersChange = useCallback((next: ClassTextbookPickerFilters) => {
     setTextbookCandidateFilters((current) => (
@@ -1535,6 +1542,17 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const requestedClassDetailStudentId = kind === "classes" ? text(searchParams.get("studentId")) : "";
   const requestedClassReturnPath = kind === "classes" ? normalizeReturnToPath(searchParams.get("returnTo")) : "";
   const selectedTextbookClassId = kind === "classes" && dialogMode === "detail" ? text(selectedRow?.id) : "";
+  const textbookCandidateScopeKey = JSON.stringify([
+    selectedTextbookClassId,
+    form.subject,
+    form.grade,
+    textbookCandidateQuery,
+    textbookCandidateFilters.subject,
+    textbookCandidateFilters.schoolLevel,
+    textbookCandidateFilters.gradeLevel,
+    textbookCandidateFilters.subSubject,
+  ]);
+  const textbookCandidateScopeMatches = textbookCandidateCommittedScope?.key === textbookCandidateScopeKey;
 
   useEffect(() => {
     if (kind !== "classes" || searchParams.get("period") || !effectiveClassPeriodId) return;
@@ -1551,20 +1569,32 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       setTextbookCandidateCursor(null);
       setTextbookCandidatesHaveMore(false);
       setTextbookCandidatesLoading(false);
+      setTextbookCandidateCommittedScope(null);
       return undefined;
     }
+    const requestedScope: TextbookCandidateScope = {
+      key: textbookCandidateScopeKey,
+      classId: selectedTextbookClassId,
+      search: textbookCandidateQuery,
+      filters: { ...textbookCandidateFilters },
+    };
+    setTextbookCandidateRows([]);
+    setTextbookCandidateCursor(null);
+    setTextbookCandidatesHaveMore(false);
+    setTextbookCandidateCommittedScope(null);
     setTextbookCandidatesLoading(true);
     const timer = window.setTimeout(() => {
       void loadClassTextbookCandidatePage({
-        classId: selectedTextbookClassId,
-        search: textbookCandidateQuery,
-        filters: textbookCandidateFilters,
+        classId: requestedScope.classId,
+        search: requestedScope.search,
+        filters: requestedScope.filters,
         cursor: null,
       }).then((page) => {
         if (requestId !== textbookCandidateRequestRef.current || !page) return;
         setTextbookCandidateRows(normalizeClassTextbookRecords(page.rows));
         setTextbookCandidateCursor(page.nextCursor as ManagementPageCursor | null);
         setTextbookCandidatesHaveMore(page.hasMore);
+        setTextbookCandidateCommittedScope(requestedScope);
       }).catch((candidateError: unknown) => {
         if (requestId === textbookCandidateRequestRef.current) setOperationError(getSaveErrorMessage(candidateError));
       }).finally(() => {
@@ -1572,7 +1602,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       });
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [loadClassTextbookCandidatePage, selectedTextbookClassId, textbookCandidateFilters, textbookCandidateQuery]);
+  }, [loadClassTextbookCandidatePage, selectedTextbookClassId, textbookCandidateFilters, textbookCandidateQuery, textbookCandidateScopeKey]);
 
   const reconcileManagementPage = useCallback(async (selectedId?: string) => {
     await refresh();
@@ -3321,7 +3351,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     if (!selectedRow || kind !== "classes") return null;
     const raw = (selectedRow.raw || {}) as Record<string, unknown>;
     const assignedTextbooks = normalizeClassTextbookRecords(raw.available_textbooks || raw.availableTextbooks);
-    const catalog = [...new Map([...assignedTextbooks, ...textbookCandidateRows].map((textbook) => [textbook.id, textbook])).values()];
+    const visibleCandidateRows = textbookCandidateScopeMatches ? textbookCandidateRows : [];
+    const catalog = [...new Map([...assignedTextbooks, ...visibleCandidateRows].map((textbook) => [textbook.id, textbook])).values()];
     const selectedIds = parseTextbookIds(form.textbookIds);
     const catalogById = new Map(catalog.map((textbook) => [textbook.id, textbook]));
     const updateSelectedIds = (nextIds: string[]) => {
@@ -3336,23 +3367,27 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           <ClassTextbookPicker
             key={`${selectedRow.id}:${form.subject}:${form.grade}`}
             classRecord={{ ...raw, subject: form.subject, grade: form.grade }}
-            textbooks={textbookCandidateRows}
+            textbooks={textbookCandidateScopeMatches ? textbookCandidateRows : []}
             selectedIds={selectedIds}
             disabled={!canMutateRows}
-            loading={textbookCandidatesLoading}
-            hasMore={textbookCandidatesHaveMore}
+            loading={!textbookCandidateScopeMatches || textbookCandidatesLoading}
+            hasMore={textbookCandidateScopeMatches && textbookCandidatesHaveMore}
             query={textbookCandidateQuery}
             onQueryChange={setTextbookCandidateQuery}
             onFiltersChange={handleTextbookCandidateFiltersChange}
             onLoadMore={async () => {
-              if (!textbookCandidateCursor || textbookCandidatesLoading) return;
+              const committedScope = textbookCandidateCommittedScope;
+              if (!committedScope
+                || committedScope.key !== textbookCandidateScopeKey
+                || !textbookCandidateCursor
+                || textbookCandidatesLoading) return;
               const requestId = textbookCandidateRequestRef.current;
               setTextbookCandidatesLoading(true);
               try {
                 const page = await loadClassTextbookCandidatePage({
-                  classId: selectedRow.id,
-                  search: textbookCandidateQuery,
-                  filters: textbookCandidateFilters,
+                  classId: committedScope.classId,
+                  search: committedScope.search,
+                  filters: committedScope.filters,
                   cursor: textbookCandidateCursor,
                 });
                 if (!page || requestId !== textbookCandidateRequestRef.current) return;

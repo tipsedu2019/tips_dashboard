@@ -82,7 +82,11 @@ begin
   if p_kind = 'students' then
     return query
     with source as (
-      select student.id, pg_catalog.to_jsonb(student) as raw
+      select student.id,pg_catalog.jsonb_build_object(
+        'name',student.name,'grade',student.grade,'school',student.school,
+        'contact',student.contact,'parent_contact',student.parent_contact,'status',student.status,
+        'school_category',student.school_category,'updated_at',student.updated_at
+      ) as raw
       from public.students student
     ), filtered as (
       select source.*,
@@ -150,8 +154,8 @@ begin
         'studentCount',(select pg_catalog.count(distinct roster.student_id) from (
           select roster_id.student_id from pg_catalog.jsonb_array_elements_text(pg_catalog.coalesce(filtered.raw -> 'student_ids','[]'::jsonb)) as roster_id(student_id)
           union all select enrollment.student_id::text from public.ops_registration_enrollments enrollment
-          where enrollment.class_id=filtered.id and pg_catalog.coalesce(pg_catalog.to_jsonb(enrollment) ->> 'roster_active','false')::boolean
-          union all select student.id::text from public.students student where pg_catalog.coalesce(pg_catalog.to_jsonb(student) -> 'class_ids','[]'::jsonb) ? filtered.id::text
+          where enrollment.class_id=filtered.id and enrollment.roster_active
+          union all select student.id::text from public.students student where pg_catalog.coalesce(student.class_ids,'[]'::jsonb) ? filtered.id::text
         ) roster),
         'sortKey',filtered.normalized_sort::text,
         'updatedAt',pg_catalog.coalesce(filtered.raw ->> 'updated_at','')
@@ -239,10 +243,10 @@ begin
   end loop;
   if p_kind = 'students' then
     with filtered as (
-      select pg_catalog.to_jsonb(student) raw from public.students student
+      select pg_catalog.jsonb_build_object('status',student.status) raw from public.students student
       where (p_filters ->> 'search' = '' or pg_catalog.concat_ws(' ', student.name, student.school, student.grade) ilike '%' || p_filters ->> 'search' || '%')
         and ((p_filters ->> 'status') is null or student.status = p_filters ->> 'status')
-        and ((p_filters ->> 'schoolCategory') is null or pg_catalog.coalesce(pg_catalog.to_jsonb(student) ->> 'school_category',pg_catalog.to_jsonb(student) ->> 'schoolCategory') = p_filters ->> 'schoolCategory')
+        and ((p_filters ->> 'schoolCategory') is null or student.school_category = p_filters ->> 'schoolCategory')
         and ((p_filters ->> 'school') is null or student.school = p_filters ->> 'school')
         and ((p_filters ->> 'grade') is null or student.grade = p_filters ->> 'grade')
     )
@@ -325,7 +329,10 @@ begin
   end loop;
   if p_kind = 'students' then
     with source as (
-      select pg_catalog.to_jsonb(student) raw
+      select pg_catalog.jsonb_build_object(
+        'status',student.status,'school_category',student.school_category,
+        'school',student.school,'grade',student.grade
+      ) raw
       from public.students student
       where p_filters ->> 'search' = '' or pg_catalog.concat_ws(' ',student.name,student.school,student.grade) ilike '%' || p_filters ->> 'search' || '%'
     )

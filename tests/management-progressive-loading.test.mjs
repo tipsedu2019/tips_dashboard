@@ -188,6 +188,7 @@ test("management list uses bounded page, authoritative stats, and filter options
 test("the first class management bundle resolves and applies the default period before list stats or options", async () => {
   const calls = [];
   const defaultPeriodId = "30000000-0000-4000-8000-000000000001";
+  let statsRevision = 0;
   const client = {
     rpc(name, args) {
       calls.push([name, args]);
@@ -195,7 +196,10 @@ test("the first class management bundle resolves and applies the default period 
         return makeRpcBuilder({ data: { periodId: defaultPeriodId }, error: null }, calls);
       }
       if (name === "list_management_page_v1") return makeRpcBuilder({ data: [], error: null }, calls);
-      if (name === "get_management_stats_v1") return makeRpcBuilder({ data: { total: 0, byStatus: {} }, error: null }, calls);
+      if (name === "get_management_stats_v1") {
+        statsRevision += 1;
+        return makeRpcBuilder({ data: { total: statsRevision, byStatus: {} }, error: null }, calls);
+      }
       if (name === "list_management_filter_options_v1") return makeRpcBuilder({ data: { periods: [] }, error: null }, calls);
       throw new Error(`unexpected rpc ${name}`);
     },
@@ -206,12 +210,16 @@ test("the first class management bundle resolves and applies the default period 
     subject: null, grade: null, teacher: null, classroom: null,
   };
 
-  const result = await service.loadInitialPage({ kind: "classes", filters, cursor: null, limit: 30 });
+  const [result, concurrentResult] = await Promise.all([
+    service.loadInitialPage({ kind: "classes", filters, cursor: null, limit: 30 }),
+    service.loadInitialPage({ kind: "classes", filters, cursor: null, limit: 30 }),
+  ]);
   const canonicalReplay = await service.loadInitialPage({
     kind: "classes",
     filters: { ...filters, periodId: defaultPeriodId },
     cursor: null,
     limit: 30,
+    canonicalReplayToken: result.canonicalReplayToken,
   });
 
   assert.equal(calls[0][0], "get_management_default_class_period_v1");
@@ -222,7 +230,20 @@ test("the first class management bundle resolves and applies the default period 
     assert.equal(call[1].p_filters.periodId, defaultPeriodId);
   }
   assert.equal(result.effectiveFilters.periodId, defaultPeriodId);
-  assert.equal(canonicalReplay, result);
+  assert.equal(concurrentResult, result);
+  assert.equal(canonicalReplay.stats.total, 1);
+  assert.equal(canonicalReplay.canonicalReplayToken, null);
+
+  const refreshed = await service.loadInitialPage({
+    kind: "classes",
+    filters: { ...filters, periodId: defaultPeriodId },
+    cursor: null,
+    limit: 30,
+  });
+  assert.equal(refreshed.stats.total, 2);
+  for (const name of ["list_management_page_v1", "get_management_stats_v1", "list_management_filter_options_v1"]) {
+    assert.equal(calls.filter(([calledName]) => calledName === name).length, 2);
+  }
 });
 
 test("class textbook candidates use bounded query-scoped continuation and retain unmatched assigned IDs", async () => {
@@ -352,7 +373,9 @@ test("management hook and UI keep list reads bounded while details and relation 
   const tableSource = await readFile(new URL("../src/features/management/management-data-table.tsx", import.meta.url), "utf8");
 
   const activeHook = hookSource.slice(hookSource.indexOf("export function useManagementRecords"));
-  assert.match(activeHook, /readService\.loadInitialPage\(\{ kind, filters, cursor: null, limit: 30 \}\)/);
+  assert.match(activeHook, /readService\.loadInitialPage\(\{[\s\S]*?kind,[\s\S]*?filters,[\s\S]*?cursor: null,[\s\S]*?limit: 30,[\s\S]*?canonicalReplayToken,/);
+  assert.match(activeHook, /void load\(\{ allowCanonicalReplay: true \}\)/);
+  assert.match(activeHook, /const refresh = useCallback\(\(\) => load\(\{ allowCanonicalReplay: false \}\)/);
   assert.match(activeHook, /readService\.loadNextPage\(\{ kind, filters: effectiveFiltersRef\.current, cursor: nextCursor, limit: 30 \}\)/);
   assert.match(activeHook, /readService\.searchClassTextbookCandidates\(\{ classId, search, filters, cursor, limit: 30 \}\)/);
   assert.match(activeHook, /const byId = new Map\(current\.map/);

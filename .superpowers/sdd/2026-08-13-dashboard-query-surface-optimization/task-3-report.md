@@ -98,3 +98,12 @@ Source implementation and source verification are complete. Runtime SQL behavior
 - RED evidence: the focused round-3 contracts first ran **19 pass / 3 fail**. Final focused result is **22/22 GREEN**; full management is **140/140 GREEN**; combined management/query-budget/textbook-picker/schema verification is **206/206 GREEN**.
 - TypeScript, relevant ESLint (zero warnings), management query-surface guard, migration hash equality, and diff check are GREEN. Candidate SHA-256 is `f3e3ff36b6d0ae0de232910f91fe07b7441eff86d3af4f5e4189358286265c81`.
 - No database runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, and provider activity remain unexecuted and unclaimed; the migration remains `candidate`.
+
+## Adversarial fix round 4
+
+- Removed the remaining whole-row student and registration-enrollment conversions from bounded list, stats, filter-option, and class roster-count branches. Student display/filter scalars, enrollment `roster_active`, and student `class_ids` are now read directly; the bounded region has no whole-row `to_jsonb(student|enrollment|class|textbook)` and no heavyweight fields.
+- Replaced the time-based general bundle cache with an opaque URL-canonicalization replay token. Only the exact effective filters produced by the corresponding no-period request can consume that token once. Explicit refresh discards an unused token and always executes list, stats, and options again, while truly concurrent identical no-period calls share one in-flight Promise.
+- Candidate query, class subject/grade, and taxonomy filter changes immediately make the committed picker scope mismatch: old rows are hidden, continuation disappears, and loading is shown before the 250 ms request starts. Continuation reads only the committed class/query/filter snapshot and cannot use mutable in-progress scope.
+- RED evidence: the focused round-4 contracts first ran **19 pass / 3 fail**. Final focused result is **22/22 GREEN**; full management is **140/140 GREEN**; combined management/query-budget/textbook-picker/schema verification is **206/206 GREEN**.
+- TypeScript, relevant ESLint (zero warnings), management query-surface guard, migration hash equality, and diff check are GREEN. Candidate SHA-256 is `1508a71f54472893935e0921a656ec80d6fac5429cae5800b8ce2396dbd04fac`.
+- No database runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, and provider activity remain unexecuted and unclaimed; the migration remains `candidate`.
