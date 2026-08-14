@@ -277,6 +277,16 @@ export function buildAcademicEventNote(baseNote, extraMeta = {}) {
   return `${cleanedNote}${cleanedNote ? "\n\n" : ""}${marker} ${JSON.stringify(mergedMeta)}`;
 }
 
+export function buildAcademicEventFormScopeFields(event, initialDraft = {}) {
+  const source = event && typeof event === "object" ? event : initialDraft || {};
+  return {
+    textbookScope: text(source.textbookScope),
+    subtextbookScope: text(source.subtextbookScope),
+    textbookScopes: Array.isArray(source.textbookScopes) ? source.textbookScopes : [],
+    subtextbookScopes: Array.isArray(source.subtextbookScopes) ? source.subtextbookScopes : [],
+  };
+}
+
 export function prepareAcademicEventMetadataForWrite(eventData = {}, activeScienceAreas = []) {
   const embeddedNoteMeta = eventData.embeddedNoteMeta
     && typeof eventData.embeddedNoteMeta === "object"

@@ -102,6 +102,16 @@ type GroupedSchoolRow = {
   gradeMap: Map<string, AcademicAnnualBoardRow>;
 };
 
+type PendingBoardEntryEdit = {
+  row: {
+    schoolId?: string;
+    schoolName: string;
+    category: string;
+    grade: string;
+  };
+  entry: AcademicAnnualBoardEntry;
+};
+
 const ANNUAL_BOARD_TERM_ROWS: AnnualBoardTermRow[] = [
   { key: "1-mid", label: "1중", kind: "exam", semester: "1학기", examTerm: "1학기 중간" },
   { key: "1-final", label: "1기", kind: "exam", semester: "1학기", examTerm: "1학기 기말" },
@@ -1046,6 +1056,8 @@ export function AcademicAnnualBoardWorkspace() {
   const [editingBoardEvent, setEditingBoardEvent] = useState<CalendarEvent | null>(null);
   const [boardDraft, setBoardDraft] = useState<Partial<CalendarEvent> | null>(null);
   const [showBoardEventForm, setShowBoardEventForm] = useState(false);
+  const [pendingBoardEntryEdit, setPendingBoardEntryEdit] = useState<PendingBoardEntryEdit | null>(null);
+  const [boardDetailLoading, setBoardDetailLoading] = useState(false);
   const [isSavingBoardImage, setIsSavingBoardImage] = useState(false);
   const annualBoardExportRef = useRef<HTMLDivElement | null>(null);
   const annualRequest = useMemo(() => ({
@@ -1296,9 +1308,27 @@ export function AcademicAnnualBoardWorkspace() {
     },
     entry: AcademicAnnualBoardEntry,
   ) => {
+    setPendingBoardEntryEdit({ row, entry });
+    setMutationError(null);
+    setBoardDetailLoading(true);
     const persistedId = getPersistedAcademicEventId(resolveAnnualBoardEntryParentId(entry));
-
-    const detail = persistedId ? await loadEventDetail(persistedId).catch(() => null) as Record<string, unknown> | null : null;
+    let detail: Record<string, unknown>;
+    try {
+      if (!persistedId) {
+        throw new Error("operations_event_id_invalid");
+      }
+      const loadedDetail = await loadEventDetail(persistedId) as Record<string, unknown> | null;
+      if (!loadedDetail) {
+        throw new Error("operations_event_detail_invalid");
+      }
+      detail = loadedDetail;
+    } catch {
+      setEditingBoardEvent(null);
+      setShowBoardEventForm(false);
+      setMutationError("학사 일정 상세를 불러오지 못했습니다.");
+      setBoardDetailLoading(false);
+      return;
+    }
     const detailType = text(detail?.typeLabel) || entry.type;
     const detailStart = text(detail?.startsAt) || entry.start;
     const detailEnd = text(detail?.endsAt) || entry.end || detailStart;
@@ -1333,6 +1363,13 @@ export function AcademicAnnualBoardWorkspace() {
     setBoardDraft(null);
     setEditingBoardEvent(editingEvent);
     setShowBoardEventForm(true);
+    setPendingBoardEntryEdit(null);
+    setBoardDetailLoading(false);
+  };
+
+  const retryPendingBoardEntryEdit = () => {
+    if (!pendingBoardEntryEdit) return;
+    void handleBoardEntryEdit(pendingBoardEntryEdit.row, pendingBoardEntryEdit.entry);
   };
 
   const handleBoardCellCreate = (
@@ -1370,6 +1407,8 @@ export function AcademicAnnualBoardWorkspace() {
       scienceAreaLabel: "",
       embeddedNoteMeta: {},
     };
+    setPendingBoardEntryEdit(null);
+    setMutationError(null);
     setEditingBoardEvent(null);
     setBoardDraft(draft);
     setShowBoardEventForm(true);
@@ -1523,7 +1562,14 @@ export function AcademicAnnualBoardWorkspace() {
       {error || mutationError ? (
         <div className="annual-board-non-print px-4 lg:px-6">
           <Alert variant="destructive">
-            <AlertDescription>{error || mutationError}</AlertDescription>
+            <AlertDescription className="flex items-center justify-between gap-3">
+              <span>{error || mutationError}</span>
+              {pendingBoardEntryEdit ? (
+                <Button type="button" variant="outline" size="sm" disabled={boardDetailLoading} onClick={retryPendingBoardEntryEdit}>
+                  상세 다시 불러오기
+                </Button>
+              ) : null}
+            </AlertDescription>
           </Alert>
         </div>
       ) : null}

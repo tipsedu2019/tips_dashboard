@@ -45,6 +45,21 @@ test("academic calendar reports each complete visible month grid to its scoped l
   assert.match(mainSource, /\[calendarRange, onVisibleRangeChange\]/);
 });
 
+test("calendar exact-detail failures never open a summary fallback editor", async () => {
+  const source = await readFile(
+    new URL("src/app/admin/calendar/components/calendar.tsx", root),
+    "utf8",
+  );
+
+  assert.match(source, /detailLoadError/);
+  assert.match(source, /상세 정보를 불러오지 못했습니다/);
+  assert.match(source, /상세 다시 불러오기/);
+  assert.match(source, /retryPendingDetailLoad/);
+  assert.doesNotMatch(source, /setEditingEvent\(detail \|\| matchedInitialEvent\)/);
+  assert.doesNotMatch(source, /setEditingEvent\(detail \|\| event\)/);
+  assert.doesNotMatch(source, /\.catch\(\(\) => null\)/);
+});
+
 test("academic calendar month view switches to readable mobile agenda cards", async () => {
   const source = await readFile(
     new URL("src/app/admin/calendar/components/calendar-main.tsx", root),

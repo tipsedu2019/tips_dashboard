@@ -250,7 +250,7 @@ test("annual board edits renderer-derived subject rows through their exact paren
     "ebc14155-43d9-4a76-8ee2-a555e389c787",
   );
   assert.match(source, /const persistedId = getPersistedAcademicEventId\(resolveAnnualBoardEntryParentId\(entry\)\)/);
-  assert.match(source, /const detail = persistedId \? await loadEventDetail\(persistedId\)/);
+  assert.match(source, /const loadedDetail = await loadEventDetail\(persistedId\)/);
   assert.match(source, /sourceId: persistedId/);
   assert.match(source, /const existingId = getPersistedAcademicEventId\(eventData\.id\)/);
   assert.doesNotMatch(source, /const existingId = text\(eventData\.id\)/);
@@ -267,6 +267,16 @@ test("annual board read-save preserves the exact event embedded metadata envelop
   assert.match(source, /textbookScope: text\(detail\?\.textbookScope\) \|\| entry\.textbookScope \|\| ""/);
   assert.match(source, /subtextbookScope: text\(detail\?\.subtextbookScope\) \|\| entry\.subtextbookScope \|\| ""/);
   assert.doesNotMatch(source, /textbookScope: "",\s*subtextbookScope: ""/);
+});
+
+test("annual board exact-detail failures stay closed and offer an explicit retry", async () => {
+  const source = await readSource("src/features/operations/academic-annual-board-workspace.tsx");
+
+  assert.match(source, /pendingBoardEntryEdit/);
+  assert.match(source, /retryPendingBoardEntryEdit/);
+  assert.match(source, /상세 다시 불러오기/);
+  assert.match(source, /학사 일정 상세를 불러오지 못했습니다/);
+  assert.doesNotMatch(source, /await loadEventDetail\(persistedId\)\.catch\(\(\) => null\)/);
 });
 
 test("annual board strips internal metadata from displayed note sections", async () => {

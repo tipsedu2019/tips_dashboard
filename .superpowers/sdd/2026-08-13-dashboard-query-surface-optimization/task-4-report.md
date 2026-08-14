@@ -89,3 +89,25 @@ Final source evidence:
 - The repository-wide source run remains non-GREEN for unrelated notification fixture/golden drift already present in the shared branch. Migration-layout verification remains separately blocked by pre-existing Task 3 `20260814011752_management_page_reads.sql` lexical normalization. Task 4 focused verification is GREEN.
 
 No DB runtime command was run in this fix round. The manifest remains `candidate`; migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, worker, webhook, and provider effects are all unclaimed.
+
+## Adversarial fix round 2
+
+Round-2 RED was **0 pass / 5 fail** for the exact scalar/structured scope roundtrip, legacy title term inference, separate textbook candidate page, and calendar/annual fail-closed detail loading.
+
+The round closes these source contracts:
+
+- `EventFormData` and both calendar/annual save payloads retain legacy scalar `textbookScope` and `subtextbookScope` alongside structured scope arrays, including unknown embedded metadata.
+- Calendar and annual deep-link/edit flows never open a summary-backed editor after an exact-detail failure. They remain closed, show the Korean failure state, and expose an explicit retry.
+- Exact calendar normalization and annual derived subject rows infer renderer-ready exam terms from the original parent title, honoring explicit semester text before the date fallback.
+- Lesson-design uses a separate subject-scoped, searchable 30+1 textbook candidate RPC. Connected legacy textbooks remain hydrated from exact class detail; candidate pages only extend the editor catalog and use stale-response revision guards.
+- The initial class list still does not read `schedule_plan`; all new read functions remain eight-second/no-retry, authenticated-only, fixed-search-path `security invoker` boundaries.
+
+Round-2 source evidence:
+
+- New RED regressions after implementation: **5/5 GREEN**.
+- Task 4 service/UI/continuous-schedule focused verification: **50/50 GREEN**.
+- TypeScript, targeted ESLint, operations worktree query guard, and `git diff --check`: GREEN.
+- Candidate migration SHA-256: `47d6af4718be42c95d402fe183a229d9709bc50e3523466d34a7b19b4a2cf67c`, equal to the manifest and on-disk SQL.
+- The whole-repository glob is non-GREEN with 18 unrelated pre-existing/shared-branch failures: notification fixture/golden drift, the Task 3 management migration normalization gate, one notification worker contract, and one concurrent isolated PostgreSQL termination. Task 4 focused verification is GREEN.
+
+No round-2 DB runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, worker, webhook, provider request, and recipient receipt remain unclaimed; the manifest stays `candidate`.

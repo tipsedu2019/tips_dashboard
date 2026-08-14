@@ -1,8 +1,10 @@
 "use client"
 
 import { isSameDay } from "date-fns"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { getAcademicEventFilterTypeKey } from "@/features/operations/academic-event-utils.js"
 import { CalendarMain } from "./calendar-main"
@@ -103,6 +105,9 @@ export function Calendar({
   const [filterOverrides, setFilterOverrides] = useState<Record<string, boolean>>({})
   const [appliedInitialDateKey, setAppliedInitialDateKey] = useState(() => toCalendarDayKey(initialDate))
   const [appliedInitialEventId, setAppliedInitialEventId] = useState("")
+  const [pendingDetailEvent, setPendingDetailEvent] = useState<CalendarEvent | null>(null)
+  const [detailLoadError, setDetailLoadError] = useState("")
+  const [detailLoading, setDetailLoading] = useState(false)
 
   const defaultFilters = useMemo(() => buildDefaultCalendarFilters(calendars), [calendars])
   const activeFilters = useMemo(
@@ -162,29 +167,62 @@ export function Calendar({
     return events.find((event) => String(event.sourceId || event.id) === initialEventId) || null
   }, [appliedInitialEventId, events, initialEventId])
 
+  const openExactEventDetail = useCallback(async (event: CalendarEvent) => {
+    const eventId = String(event.sourceId || event.id)
+    setPendingDetailEvent(event)
+    setDetailLoadError("")
+    setDetailLoading(true)
+    try {
+      if (!onLoadEventDetail || !eventId) {
+        throw new Error("operations_event_detail_unavailable")
+      }
+      const detail = await onLoadEventDetail(eventId)
+      if (!detail) {
+        throw new Error("operations_event_detail_invalid")
+      }
+      setEditingEvent(detail)
+      setShowEventForm(true)
+      setPendingDetailEvent(null)
+      return true
+    } catch {
+      setEditingEvent(null)
+      setShowEventForm(false)
+      setDetailLoadError("학사 일정 상세 정보를 불러오지 못했습니다.")
+      return false
+    } finally {
+      setDetailLoading(false)
+    }
+  }, [onLoadEventDetail])
+
   useEffect(() => {
     if (!initialEventId || !matchedInitialEvent) return undefined
     let cancelled = false
-    const eventId = String(matchedInitialEvent.sourceId || matchedInitialEvent.id)
-    void Promise.resolve(onLoadEventDetail && eventId ? onLoadEventDetail(eventId) : null)
-      .catch(() => null)
-      .then((detail) => {
-        if (cancelled) return
+    void openExactEventDetail(matchedInitialEvent).then((opened) => {
+        if (cancelled || !opened) return
         setAppliedInitialEventId(initialEventId)
         if (!isSameDay(selectedDate, matchedInitialEvent.date)) {
           setSelectedDate(matchedInitialEvent.date)
         }
-        setEditingEvent(detail || matchedInitialEvent)
-        setShowEventForm(true)
       })
     return () => {
       cancelled = true
     }
-  }, [initialEventId, matchedInitialEvent, onLoadEventDetail, selectedDate])
+  }, [initialEventId, matchedInitialEvent, openExactEventDetail, selectedDate])
+
+  const retryPendingDetailLoad = async () => {
+    if (!pendingDetailEvent) return
+    const opened = await openExactEventDetail(pendingDetailEvent)
+    if (opened && initialEventId === String(pendingDetailEvent.sourceId || pendingDetailEvent.id)) {
+      setAppliedInitialEventId(initialEventId)
+      setSelectedDate(pendingDetailEvent.date)
+    }
+  }
 
   const handleDateSelect = (date: Date) => {
     setSelectedDate(date)
     setShowCalendarSheet(false)
+    setPendingDetailEvent(null)
+    setDetailLoadError("")
   }
 
   const handleNewEvent = (date?: Date) => {
@@ -193,6 +231,8 @@ export function Calendar({
     }
 
     setShowCalendarSheet(false)
+    setPendingDetailEvent(null)
+    setDetailLoadError("")
 
     if (date instanceof Date && !Number.isNaN(date.getTime())) {
       setSelectedDate(date)
@@ -216,11 +256,8 @@ export function Calendar({
     setShowEventForm(true)
   }
 
-  const handleEditEvent = async (event: CalendarEvent) => {
-    const eventId = String(event.sourceId || event.id)
-    const detail = onLoadEventDetail && eventId ? await onLoadEventDetail(eventId) : null
-    setEditingEvent(detail || event)
-    setShowEventForm(true)
+  const handleEditEvent = (event: CalendarEvent) => {
+    void openExactEventDetail(event)
   }
 
   const handleSaveEvent = async (eventData: Partial<CalendarEvent>) => {
@@ -249,6 +286,16 @@ export function Calendar({
 
   return (
     <>
+      {detailLoadError ? (
+        <Alert variant="destructive" className="mb-3">
+          <AlertDescription className="flex items-center justify-between gap-3">
+            <span>{detailLoadError}</span>
+            <Button type="button" variant="outline" size="sm" disabled={detailLoading} onClick={retryPendingDetailLoad}>
+              상세 다시 불러오기
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
       <div className="relative rounded-lg border bg-background">
         <div className="flex min-h-[800px]">
           <div className="hidden w-80 shrink-0 border-r xl:block">

@@ -10,6 +10,7 @@ select has_function('public','get_operations_annual_board_v1',array['integer'],'
 select has_function('public','get_operations_class_schedule_page_v1',array['jsonb','text','uuid','integer'],'operations class page RPC exists');
 select has_function('public','get_academic_event_detail_v1',array['uuid'],'operations event detail RPC exists');
 select has_function('public','get_operations_class_lesson_design_detail_v1',array['uuid'],'operations class lesson design detail RPC exists');
+select has_function('public','get_operations_lesson_textbook_candidate_page_v1',array['uuid','text','text','uuid','integer'],'operations textbook candidate page RPC exists');
 select has_function('public','list_operations_catalogs_v1',array[]::text[],'operations catalog RPC exists');
 
 with expected(signature) as (
@@ -19,6 +20,7 @@ with expected(signature) as (
     ('public.get_operations_class_schedule_page_v1(jsonb,text,uuid,integer)'::text),
     ('public.get_academic_event_detail_v1(uuid)'::text),
     ('public.get_operations_class_lesson_design_detail_v1(uuid)'::text),
+    ('public.get_operations_lesson_textbook_candidate_page_v1(uuid,text,text,uuid,integer)'::text),
     ('public.list_operations_catalogs_v1()'::text)
 )
 select ok(
@@ -45,6 +47,10 @@ select throws_ok(
 select throws_ok(
   $$select public.get_operations_class_schedule_page_v1(jsonb_build_object('termId',null,'search','','subject',null,'grade',null,'teacher',null,'syncGroupId',null),null,null,31)$$,
   '22023','operations_class_schedule_limit_invalid','class list requires a 30-row client page'
+);
+select throws_ok(
+  $$select public.get_operations_lesson_textbook_candidate_page_v1('92030000-0000-4000-8000-000000000001','','',null,31)$$,
+  '22023','operations_textbook_candidate_request_invalid','textbook candidate page requires a 30-row client page'
 );
 
 insert into public.academic_schools(id,name,category)
@@ -96,6 +102,10 @@ values (
   '92000000-0000-4000-8000-000000000002','__operations_annual_school__',
   '시험기간','2197-04-10','2197-04-10','고1, 고2',
   E'보이는 메모\n\n[[TIPS_META]] {"examTerm":"1학기 중간","scienceAreaKey":"physics","legacyFlag":"keep"}'
+), (
+  '92021000-0000-4000-8000-000000000002','2학기 기말고사',
+  '92000000-0000-4000-8000-000000000002','__operations_annual_school__',
+  '시험기간','2197-09-20','2197-09-20','고3','legacy title only'
 );
 
 insert into public.academic_event_exam_details(
@@ -104,6 +114,9 @@ insert into public.academic_event_exam_details(
 values (
   '92022000-0000-4000-8000-000000000001','92021000-0000-4000-8000-000000000001',
   '92000000-0000-4000-8000-000000000002','고1, 고2','수학','2197-04-10','exact','10~30쪽',0
+), (
+  '92022000-0000-4000-8000-000000000002','92021000-0000-4000-8000-000000000002',
+  '92000000-0000-4000-8000-000000000002','고3','수학','2197-09-20','exact','40~60쪽',0
 );
 
 create temporary table operations_annual_meta_entries on commit drop as
@@ -119,7 +132,7 @@ select is(
 );
 select is(
   pg_catalog.jsonb_array_length(public.get_operations_annual_board_v1(2197) #> '{data,rows}'),
-  2,
+  3,
   'annual comma-grade rows keep distinct renderer row identities'
 );
 select is(
@@ -136,6 +149,11 @@ select is(
   (select entry ->> 'examTerm' from operations_annual_meta_entries limit 1),
   '1학기 중간',
   'annual entries include renderer-ready exam term metadata'
+);
+select is(
+  (select entry ->> 'examTerm' from operations_annual_meta_entries where entry ->> 'id' = 'exam-detail:92022000-0000-4000-8000-000000000002' limit 1),
+  '2학기 기말',
+  'derived subject rows infer renderer-ready term from the original parent event title'
 );
 select is(
   public.get_academic_event_detail_v1('92021000-0000-4000-8000-000000000001') ->> 'storedNote',

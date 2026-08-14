@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import {
+  buildAcademicEventFormScopeFields,
   buildAcademicEventNote,
   DEFAULT_ACADEMIC_EVENT_TYPES,
   getAcademicEventTypeLabel,
@@ -197,6 +198,8 @@ type EventFormData = {
   typeLabel: string
   grade: string
   examTerm: string
+  textbookScope: string
+  subtextbookScope: string
   textbookScopes: TextbookScopeItem[]
   subtextbookScopes: TextbookScopeItem[]
   scienceAreaKey: string
@@ -213,6 +216,7 @@ function buildEventFormData({
   typeOptions,
 }: Pick<EventFormProps, "defaultDate" | "defaultEndDate" | "event" | "initialDraft" | "typeOptions">): EventFormData {
   const sourceEvent = (event || initialDraft || {}) as ScienceCalendarEvent
+  const scopeFields = buildAcademicEventFormScopeFields(event, initialDraft || undefined)
   return {
     title: event?.title || initialDraft?.title || "",
     schoolId: event?.schoolId || initialDraft?.schoolId || "",
@@ -227,8 +231,10 @@ function buildEventFormData({
     typeLabel: event?.typeLabel || initialDraft?.typeLabel || typeOptions?.[0] || fallbackTypeOptions[0],
     grade: serializeGradeSelection(event?.grade || initialDraft?.grade || "all"),
     examTerm: event?.examTerm || initialDraft?.examTerm || examTermOptions[0],
-    textbookScopes: normalizeTextbookScopeItems(event?.textbookScopes || initialDraft?.textbookScopes),
-    subtextbookScopes: normalizeTextbookScopeItems(event?.subtextbookScopes || initialDraft?.subtextbookScopes),
+    textbookScope: scopeFields.textbookScope,
+    subtextbookScope: scopeFields.subtextbookScope,
+    textbookScopes: normalizeTextbookScopeItems(scopeFields.textbookScopes),
+    subtextbookScopes: normalizeTextbookScopeItems(scopeFields.subtextbookScopes),
     scienceAreaKey: sourceEvent.scienceAreaKey || "",
     scienceAreaLabel: sourceEvent.scienceAreaLabel || "",
     embeddedNoteMeta: { ...(sourceEvent.embeddedNoteMeta || {}) },
@@ -524,6 +530,8 @@ export function EventForm({
       category: selectedSchool?.category || "all",
       grade: serializeGradeSelection(selectedGrades),
       examTerm: showExamTermField ? formData.examTerm : "",
+      textbookScope: showScopeFields ? formData.textbookScope : "",
+      subtextbookScope: showScopeFields ? formData.subtextbookScope : "",
       textbookScopes: showScopeFields ? formData.textbookScopes : [],
       subtextbookScopes: showScopeFields ? formData.subtextbookScopes : [],
       note: noteWithMetadata || "",

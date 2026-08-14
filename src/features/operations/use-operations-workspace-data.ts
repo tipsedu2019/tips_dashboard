@@ -158,6 +158,10 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
     (classId: string) => service?.loadClassLessonDesignDetail(classId) ?? Promise.reject(new Error("operations_client_missing")),
     [service],
   );
+  const loadLessonTextbookCandidates = useCallback(
+    (input: { classId: string; search?: string; cursor?: { title: string; id: string } | null }) => service?.loadLessonTextbookCandidates(input) ?? Promise.reject(new Error("operations_client_missing")),
+    [service],
+  );
 
   return {
     data,
@@ -170,5 +174,6 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
     loadEventDetail,
     loadClassScheduleDetail,
     loadClassLessonDesignDetail,
+    loadLessonTextbookCandidates,
   };
 }

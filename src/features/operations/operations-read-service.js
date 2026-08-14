@@ -50,6 +50,20 @@ function embeddedNoteParts(value) {
   return { note: raw.slice(0, markerIndex).trim(), meta };
 }
 
+export function inferAcademicExamTerm(title, startsAt) {
+  const normalizedTitle = text(title);
+  const kind = normalizedTitle.includes("기말")
+    ? "기말"
+    : normalizedTitle.includes("중간") ? "중간" : "";
+  if (!kind) return "";
+  const explicitSemester = normalizedTitle.includes("2학기")
+    ? 2
+    : normalizedTitle.includes("1학기") ? 1 : 0;
+  const monthMatch = text(startsAt).match(/^\d{4}-(\d{2})-\d{2}/u);
+  const inferredSemester = Number(monthMatch?.[1] || 0) >= 8 ? 2 : 1;
+  return `${explicitSemester || inferredSemester}학기 ${kind}`;
+}
+
 export function normalizeAcademicEventDetail(value) {
   const detail = value && typeof value === "object" ? value : {};
   const stored = embeddedNoteParts(detail.storedNote ?? detail.note);
@@ -60,7 +74,11 @@ export function normalizeAcademicEventDetail(value) {
     ...detail,
     note: stored.note,
     embeddedNoteMeta,
-    examTerm: text(detail.examTerm || embeddedNoteMeta.examTerm),
+    examTerm: text(
+      detail.examTerm
+      || embeddedNoteMeta.examTerm
+      || inferAcademicExamTerm(detail.title, detail.startsAt || detail.start),
+    ),
     scienceAreaKey: text(detail.scienceAreaKey || embeddedNoteMeta.scienceAreaKey),
     textbookScope: text(detail.textbookScope || embeddedNoteMeta.textbookScope),
     subtextbookScope: text(detail.subtextbookScope || embeddedNoteMeta.subtextbookScope),
@@ -313,6 +331,36 @@ export function createOperationsReadService(options = {}) {
       );
       if (!detail || text(detail.classItem?.id) !== id) throw operationsError("operations_class_detail_invalid");
       return detail;
+    },
+    /** @param {{ classId: string, search?: string, cursor?: { title: string, id: string } | null }} request */
+    async loadLessonTextbookCandidates({ classId, search = "", cursor = null }) {
+      const id = text(classId);
+      if (!UUID.test(id)) throw operationsError("operations_class_id_invalid");
+      if (cursor !== null && (!cursor || !text(cursor.title) || !UUID.test(text(cursor.id)))) {
+        throw operationsError("operations_textbook_cursor_invalid");
+      }
+      const response = await unwrapRpc(
+        client.rpc("get_operations_lesson_textbook_candidate_page_v1", {
+          p_class_id: id,
+          p_search: text(search).slice(0, 100),
+          p_cursor_title: cursor?.title || null,
+          p_cursor_id: cursor?.id || null,
+          p_limit: 30,
+        })
+          .abortSignal(AbortSignal.timeout(8_000))
+          .retry(false),
+      );
+      const rows = Array.isArray(response?.rows) ? response.rows.slice(0, PAGE_SIZE) : [];
+      const hasMore = response?.hasMore === true;
+      const boundary = hasMore ? rows.at(-1) : null;
+      return {
+        rows,
+        hasMore,
+        nextCursor: boundary ? {
+          title: text(boundary.sortTitle || boundary.title || boundary.name),
+          id: text(boundary.id),
+        } : null,
+      };
     },
     async loadCatalogs() {
       const timestamp = Number(now());

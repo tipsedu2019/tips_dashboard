@@ -14,6 +14,15 @@ const buildClassLessonDesignRow = serviceModule.buildClassLessonDesignRow;
 const resolveRequestedClassRow = serviceModule.resolveRequestedClassRow;
 const appendOperationsPageIfCurrent = serviceModule.appendOperationsPageIfCurrent;
 const buildSevenDayRangeKeys = serviceModule.buildSevenDayRangeKeys;
+const inferAcademicExamTerm = serviceModule.inferAcademicExamTerm;
+
+const academicEventUtils = await import(
+  new URL("../src/features/operations/academic-event-utils.js", import.meta.url),
+).catch(() => ({}));
+const buildAcademicEventFormScopeFields = academicEventUtils.buildAcademicEventFormScopeFields;
+const buildAcademicEventNote = academicEventUtils.buildAcademicEventNote;
+const buildAcademicEventMutationPayload = academicEventUtils.buildAcademicEventMutationPayload;
+const extractAcademicEventNoteMetadata = academicEventUtils.extractAcademicEventNoteMetadata;
 
 function makeRpcBuilder(result, calls) {
   return {
@@ -217,6 +226,59 @@ test("event exact detail preserves every embedded metadata field through the edi
   assert.equal(detail.embeddedNoteMeta.legacyFlag, "keep");
 });
 
+test("event form scalar and structured textbook scopes survive a direct read-form-save roundtrip", async () => {
+  assert.equal(typeof buildAcademicEventFormScopeFields, "function");
+  const detail = normalizeAcademicEventDetail({
+    storedNote: `메모\n\n[[TIPS_META]] ${JSON.stringify({
+      textbookScope: "기본서 12~34쪽",
+      subtextbookScope: "워크북 3단원",
+      textbookScopes: [{ name: "기본서", publisher: "A", scope: "12~34쪽" }],
+      subtextbookScopes: [{ name: "워크북", publisher: "B", scope: "3단원" }],
+      legacyFlag: "keep",
+    })}`,
+    textbookScopes: [],
+    subtextbookScopes: [],
+  });
+  const formScopes = buildAcademicEventFormScopeFields(detail, {});
+  assert.deepEqual(formScopes, {
+    textbookScope: "기본서 12~34쪽",
+    subtextbookScope: "워크북 3단원",
+    textbookScopes: [{ name: "기본서", publisher: "A", scope: "12~34쪽" }],
+    subtextbookScopes: [{ name: "워크북", publisher: "B", scope: "3단원" }],
+  });
+  const note = buildAcademicEventNote(detail.note, detail.embeddedNoteMeta);
+  const result = buildAcademicEventMutationPayload({
+    title: "시험",
+    type: "팁스",
+    start: "2026-08-20",
+    end: "2026-08-20",
+    grade: "고1",
+    note,
+    ...formScopes,
+  }, []);
+  assert.equal(result.isValid, true);
+  assert.deepEqual(extractAcademicEventNoteMetadata(result.payload.note), {
+    textbookScope: "기본서 12~34쪽",
+    subtextbookScope: "워크북 3단원",
+    textbookScopes: [{ name: "기본서", publisher: "A", scope: "12~34쪽" }],
+    subtextbookScopes: [{ name: "워크북", publisher: "B", scope: "3단원" }],
+    legacyFlag: "keep",
+  });
+  const eventFormSource = await readFile(
+    new URL("src/app/admin/calendar/components/event-form.tsx", root),
+    "utf8",
+  );
+  assert.match(eventFormSource, /textbookScope: showScopeFields \? formData\.textbookScope : ""/);
+  assert.match(eventFormSource, /subtextbookScope: showScopeFields \? formData\.subtextbookScope : ""/);
+});
+
+test("legacy exact event detail infers its renderer exam term from the parent title", () => {
+  assert.equal(typeof inferAcademicExamTerm, "function");
+  assert.equal(inferAcademicExamTerm("1학기 기말고사", "2026-06-20"), "1학기 기말");
+  assert.equal(inferAcademicExamTerm("2학기 중간평가", "2026-10-05"), "2학기 중간");
+  assert.equal(normalizeAcademicEventDetail({ title: "중간고사", startsAt: "2026-09-20", storedNote: "메모" }).examTerm, "2학기 중간");
+});
+
 test("derived annual entries resolve and edit their parent event instead of the detail row id", () => {
   assert.equal(typeof resolveAnnualBoardEntryParentId, "function");
   assert.equal(resolveAnnualBoardEntryParentId({
@@ -258,6 +320,28 @@ test("selected class lesson design hydrates exact legacy plan, textbooks, and ca
     "get_operations_class_lesson_design_detail_v1",
     { p_class_id: classId },
   ]]);
+});
+
+test("lesson textbook picker searches a separate bounded candidate page without replacing connected legacy books", async () => {
+  const calls = [];
+  const classId = "50000000-0000-4000-8000-000000000002";
+  const candidateId = "51000000-0000-4000-8000-000000000099";
+  const service = createOperationsReadService({
+    supabase: makeClient({
+      get_operations_lesson_textbook_candidate_page_v1: {
+        data: { rows: [{ id: candidateId, title: "검색 후보", subject: "수학" }], hasMore: false },
+        error: null,
+      },
+    }, calls),
+    actorScope: "user-candidate:admin",
+  });
+  const page = await service.loadLessonTextbookCandidates({ classId, search: "검색", cursor: null });
+  assert.equal(page.rows[0].id, candidateId);
+  assert.deepEqual(calls.filter(([name]) => name.startsWith("get_")), [[
+    "get_operations_lesson_textbook_candidate_page_v1",
+    { p_class_id: classId, p_search: "검색", p_cursor_title: null, p_cursor_id: null, p_limit: 30 },
+  ]]);
+  assert.deepEqual(calls.filter(([name]) => name === "retry").map(([, value]) => value), [false]);
 });
 
 test("class lesson-design deep links use exact detail even when the class is outside page one", () => {
@@ -328,6 +412,8 @@ test("operations migration enforces invoker ACLs, range density, annual density,
     "get_operations_annual_board_v1",
     "get_operations_class_schedule_page_v1",
     "get_academic_event_detail_v1",
+    "get_operations_class_lesson_design_detail_v1",
+    "get_operations_lesson_textbook_candidate_page_v1",
     "list_operations_catalogs_v1",
   ]) {
     assert.match(sql, new RegExp(`create function public\\.${name}\\s*\\(`, "i"));
@@ -351,6 +437,8 @@ test("operations migration enforces invoker ACLs, range density, annual density,
   assert.match(sql, /pg_catalog\.coalesce\(grouped\.school_id::text, pg_catalog\.md5\(grouped\.school_name\)\) \|\| ':' \|\| grouped\.grade/);
   assert.match(sql, /storedNote/i);
   assert.match(sql, /get_operations_class_lesson_design_detail_v1/i);
+  assert.match(sql, /get_operations_lesson_textbook_candidate_page_v1/i);
+  assert.match(sql, /term_source_title/i);
   const classListBody = sql.match(/create function public\.get_operations_class_schedule_page_v1[\s\S]*?\n\$function\$;/i)?.[0] || "";
   assert.doesNotMatch(classListBody, /schedule_plan/i);
 });
@@ -375,6 +463,8 @@ test("operations workspaces issue mode requests and expose dense-range recovery 
   assert.match(schedule, /mode:\s*"class_schedule"/);
   assert.match(schedule, /다음 30건/);
   assert.match(schedule, /loadClassLessonDesignDetail/);
+  assert.match(schedule, /loadLessonTextbookCandidates/);
+  assert.match(schedule, /lessonTextbookCandidatePage/);
   assert.match(schedule, /isLessonDesignRouteActive\s*&&/);
   assert.doesNotMatch(schedule, /data\.classes\.filter/);
 });

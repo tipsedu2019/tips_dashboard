@@ -2605,7 +2605,15 @@ export function ClassScheduleWorkspace() {
   const [lessonDesignDetail, setLessonDesignDetail] = useState<Record<string, unknown> | null>(null);
   const [lessonDesignDetailLoading, setLessonDesignDetailLoading] = useState(false);
   const [lessonDesignDetailError, setLessonDesignDetailError] = useState("");
+  const [lessonTextbookCandidatePage, setLessonTextbookCandidatePage] = useState<{
+    rows: Record<string, unknown>[];
+    hasMore: boolean;
+    nextCursor: { title: string; id: string } | null;
+  }>({ rows: [], hasMore: false, nextCursor: null });
+  const [lessonTextbookCandidateLoading, setLessonTextbookCandidateLoading] = useState(false);
+  const [lessonTextbookCandidateError, setLessonTextbookCandidateError] = useState("");
   const lessonDesignDetailRevisionRef = useRef(0);
+  const lessonTextbookCandidateRevisionRef = useRef(0);
   const lessonPlanDraftRef = useRef<Record<string, unknown> | null>(null);
   const lessonPlanSourceKeyRef = useRef("");
   const pendingLessonDesignDialogScrollTopRef = useRef<number | null>(null);
@@ -2635,6 +2643,7 @@ export function ClassScheduleWorkspace() {
     loadMore,
     loadClassScheduleDetail,
     loadClassLessonDesignDetail,
+    loadLessonTextbookCandidates,
   } = useOperationsWorkspaceData(operationsRequest);
   const data = useMemo(() => {
     const page = (scopedData?.page || {}) as { rows?: Record<string, unknown>[]; hasMore?: boolean };
@@ -2945,6 +2954,18 @@ export function ClassScheduleWorkspace() {
       : [],
     [lessonDesignDetail],
   );
+  const lessonDesignEditorTextbooks = useMemo(() => {
+    const merged = new Map<string, Record<string, unknown>>();
+    lessonDesignTextbooks.forEach((book) => {
+      const id = text(book.id);
+      if (id) merged.set(id, book);
+    });
+    lessonTextbookCandidatePage.rows.forEach((book) => {
+      const id = text(book.id);
+      if (id && !merged.has(id)) merged.set(id, book);
+    });
+    return [...merged.values()];
+  }, [lessonDesignTextbooks, lessonTextbookCandidatePage.rows]);
   const lessonDesignTeacherCatalogs = useMemo(
     () => Array.isArray(lessonDesignDetail?.teacherCatalogs)
       ? lessonDesignDetail.teacherCatalogs as Record<string, unknown>[]
@@ -3049,12 +3070,12 @@ export function ClassScheduleWorkspace() {
       schedule: text(savedPlan?.schedule || selectedRowClassItem?.schedule || selectedRow?.scheduleLabel) || "",
       startDate: text(selectedRowClassItem?.start_date || selectedRowClassItem?.startDate),
       endDate: text(selectedRowClassItem?.end_date || selectedRowClassItem?.endDate),
-      textbooks: lessonDesignTextbooks,
+      textbooks: lessonDesignEditorTextbooks,
       textbookIds: Array.isArray(rawTextbookIds)
         ? rawTextbookIds.map((value) => text(value)).filter(Boolean)
         : [],
     };
-  }, [lessonDesignTextbooks, selectedRow, selectedRowClassItem]);
+  }, [lessonDesignEditorTextbooks, selectedRow, selectedRowClassItem]);
   const normalizedLessonPlan = useMemo(
     () => (lessonPlanDraft ? normalizeSchedulePlan(lessonPlanDraft, lessonPlanDefaults) : null),
     [lessonPlanDefaults, lessonPlanDraft],
@@ -3067,8 +3088,8 @@ export function ClassScheduleWorkspace() {
     [lessonPlanDefaults, normalizedLessonPlan],
   );
   const lessonDesignSnapshot = useMemo(
-    () => buildLessonDesignSnapshot(selectedRow, lessonDesignTextbooks, lessonPlanForSave),
-    [lessonDesignTextbooks, lessonPlanForSave, selectedRow],
+    () => buildLessonDesignSnapshot(selectedRow, lessonDesignEditorTextbooks, lessonPlanForSave),
+    [lessonDesignEditorTextbooks, lessonPlanForSave, selectedRow],
   );
   const connectedLessonTextbookIds = useMemo(
     () =>
@@ -3089,11 +3110,11 @@ export function ClassScheduleWorkspace() {
   const lessonTextbookSubjectBooks = useMemo(
     () =>
       lessonPlannerSubjectKey
-        ? lessonDesignTextbooks.filter(
+        ? lessonTextbookCandidatePage.rows.filter(
             (book) => normalizeLessonSubjectKey(getTextbookSubject(book)) === lessonPlannerSubjectKey,
           )
         : [],
-    [lessonDesignTextbooks, lessonPlannerSubjectKey],
+    [lessonPlannerSubjectKey, lessonTextbookCandidatePage.rows],
   );
   const lessonTextbookFilterOptions = useMemo(
     () => ({
@@ -3458,6 +3479,101 @@ export function ClassScheduleWorkspace() {
   const hasLessonTextbooks = lessonTextbookSelectedCount > 0;
   const lessonTextbookPendingSessionCount =
     lessonTextbookProgressSessions.length - lessonTextbookCompletedSessionCount;
+  useEffect(() => {
+    const revision = lessonTextbookCandidateRevisionRef.current + 1;
+    lessonTextbookCandidateRevisionRef.current = revision;
+    const classId = text(selectedRow?.id);
+    const shouldLoad = Boolean(
+      isLessonDesignRouteActive
+      && classId
+      && (!hasLessonTextbooks || isLessonTextbookFinderOpen || text(deferredLessonTextbookSearch)),
+    );
+    if (!shouldLoad) {
+      setLessonTextbookCandidatePage({ rows: [], hasMore: false, nextCursor: null });
+      setLessonTextbookCandidateError("");
+      setLessonTextbookCandidateLoading(false);
+      return;
+    }
+
+    setLessonTextbookCandidateLoading(true);
+    setLessonTextbookCandidateError("");
+    void loadLessonTextbookCandidates({
+      classId,
+      search: deferredLessonTextbookSearch,
+      cursor: null,
+    })
+      .then((page) => {
+        if (lessonTextbookCandidateRevisionRef.current !== revision) return;
+        setLessonTextbookCandidatePage(page as {
+          rows: Record<string, unknown>[];
+          hasMore: boolean;
+          nextCursor: { title: string; id: string } | null;
+        });
+      })
+      .catch((candidateError) => {
+        if (lessonTextbookCandidateRevisionRef.current !== revision) return;
+        setLessonTextbookCandidatePage({ rows: [], hasMore: false, nextCursor: null });
+        setLessonTextbookCandidateError(
+          candidateError instanceof Error ? candidateError.message : "교재 후보를 불러오지 못했습니다.",
+        );
+      })
+      .finally(() => {
+        if (lessonTextbookCandidateRevisionRef.current === revision) {
+          setLessonTextbookCandidateLoading(false);
+        }
+      });
+  }, [
+    deferredLessonTextbookSearch,
+    hasLessonTextbooks,
+    isLessonDesignRouteActive,
+    isLessonTextbookFinderOpen,
+    loadLessonTextbookCandidates,
+    selectedRow?.id,
+  ]);
+  const loadMoreLessonTextbookCandidates = useCallback(async () => {
+    const classId = text(selectedRow?.id);
+    const cursor = lessonTextbookCandidatePage.nextCursor;
+    if (!classId || !cursor || lessonTextbookCandidateLoading) return;
+    const expectedRevision = lessonTextbookCandidateRevisionRef.current;
+    setLessonTextbookCandidateLoading(true);
+    setLessonTextbookCandidateError("");
+    try {
+      const nextPage = await loadLessonTextbookCandidates({
+        classId,
+        search: deferredLessonTextbookSearch,
+        cursor,
+      }) as {
+        rows: Record<string, unknown>[];
+        hasMore: boolean;
+        nextCursor: { title: string; id: string } | null;
+      };
+      if (lessonTextbookCandidateRevisionRef.current !== expectedRevision || text(selectedRow?.id) !== classId) return;
+      setLessonTextbookCandidatePage((current) => {
+        const merged = new Map(current.rows.map((book) => [text(book.id), book]));
+        nextPage.rows.forEach((book) => {
+          const id = text(book.id);
+          if (id) merged.set(id, book);
+        });
+        return { ...nextPage, rows: [...merged.values()] };
+      });
+    } catch (candidateError) {
+      if (lessonTextbookCandidateRevisionRef.current === expectedRevision) {
+        setLessonTextbookCandidateError(
+          candidateError instanceof Error ? candidateError.message : "교재 후보를 불러오지 못했습니다.",
+        );
+      }
+    } finally {
+      if (lessonTextbookCandidateRevisionRef.current === expectedRevision) {
+        setLessonTextbookCandidateLoading(false);
+      }
+    }
+  }, [
+    deferredLessonTextbookSearch,
+    lessonTextbookCandidateLoading,
+    lessonTextbookCandidatePage.nextCursor,
+    loadLessonTextbookCandidates,
+    selectedRow?.id,
+  ]);
   const progressDialogSession = useMemo(
     () => lessonDesignSnapshot?.sessions.find((session) => session.id === progressDialogSessionId) || null,
     [lessonDesignSnapshot, progressDialogSessionId],
@@ -3487,7 +3603,7 @@ export function ClassScheduleWorkspace() {
     if (!textbookId) {
       return;
     }
-    const textbook = lessonDesignTextbooks.find((book) => text(book.id) === textbookId);
+    const textbook = lessonDesignEditorTextbooks.find((book) => text(book.id) === textbookId);
     const firstSessionId = text(filteredLessonSessions[0]?.id);
     const selectedSessionId = text(selectedLessonSession?.id);
     const endSessionId = text(filteredLessonSessions[filteredLessonSessions.length - 1]?.id);
@@ -3519,7 +3635,7 @@ export function ClassScheduleWorkspace() {
     });
     setLessonTextbookSearch("");
     setIsLessonTextbookFinderOpen(false);
-  }, [filteredLessonSessions, lessonDesignTextbooks, selectedLessonSession, updateLessonPlanDraft]);
+  }, [filteredLessonSessions, lessonDesignEditorTextbooks, selectedLessonSession, updateLessonPlanDraft]);
   const handleRemoveLessonTextbook = useCallback(
     (textbookId: string) => {
       const targetTextbookId = text(textbookId);
@@ -3598,7 +3714,7 @@ export function ClassScheduleWorkspace() {
       setLessonDesignSaveNotice("");
 
       const nextPlanForSave = buildSchedulePlanForSave(nextDraft, lessonPlanDefaults) as Record<string, unknown>;
-      const nextLessonDesignSnapshot = buildLessonDesignSnapshot(selectedRow, lessonDesignTextbooks, nextPlanForSave);
+      const nextLessonDesignSnapshot = buildLessonDesignSnapshot(selectedRow, lessonDesignEditorTextbooks, nextPlanForSave);
       const focusTargetDate = text(options.targetDate);
       const focusSourceDate = text(options.sourceDate);
       const nextFocusedSession =
@@ -3626,7 +3742,7 @@ export function ClassScheduleWorkspace() {
 
       return text(nextFocusedSession?.id);
     },
-    [lessonDesignTextbooks, lessonPlanDefaults, markPendingLessonSessionSelection, selectedRow],
+    [lessonDesignEditorTextbooks, lessonPlanDefaults, markPendingLessonSessionSelection, selectedRow],
   );
   const selectedLessonSessionDraftDate = resolveLessonSessionDraftDate(selectedLessonSession);
   const selectedLessonSessionDraftStateEntry = useMemo(() => {
@@ -4147,7 +4263,7 @@ export function ClassScheduleWorkspace() {
         return;
       }
 
-      const nextLessonDesignSnapshot = buildLessonDesignSnapshot(row, lessonDesignTextbooks);
+      const nextLessonDesignSnapshot = buildLessonDesignSnapshot(row, lessonDesignEditorTextbooks);
       if (!nextLessonDesignSnapshot) {
         return;
       }
@@ -4178,7 +4294,7 @@ export function ClassScheduleWorkspace() {
       );
       setLessonDesignOpen(true);
     },
-    [lessonDesignTextbooks],
+    [lessonDesignEditorTextbooks],
   );
   const requestedSessionId = text(searchParams.get("sessionId"));
   const requestedLessonDesignSectionId = resolveLessonDesignSectionId(text(searchParams.get("section")));
@@ -5243,9 +5359,24 @@ export function ClassScheduleWorkspace() {
               </div>
             ) : (
               <div className="rounded-md border border-dashed px-3 py-3 text-sm font-medium text-muted-foreground">
-                후보 없음
+                {lessonTextbookCandidateLoading ? "교재 후보를 불러오는 중입니다." : "후보 없음"}
               </div>
             )}
+            {lessonTextbookCandidateError ? (
+              <p className="mt-2 text-xs font-medium text-destructive">{lessonTextbookCandidateError}</p>
+            ) : null}
+            {lessonTextbookCandidatePage.hasMore ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-2 w-full rounded-md"
+                disabled={lessonTextbookCandidateLoading}
+                onClick={() => void loadMoreLessonTextbookCandidates()}
+              >
+                다음 30건
+              </Button>
+            ) : null}
                 </div>
               </div>
               ) : null}

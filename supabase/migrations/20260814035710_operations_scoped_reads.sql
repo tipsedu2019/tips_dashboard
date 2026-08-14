@@ -169,6 +169,7 @@ begin
       grade_token.grade,
       pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(event.type), ''), '팁스') as entry_type,
       pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(event.title), ''), '제목 없는 일정') as title,
+      event.title as term_source_title,
       event.start as start_date,
       pg_catalog.coalesce(event.end, event.start) as end_date,
       pg_catalog.nullif(pg_catalog.left(pg_catalog.btrim(pg_catalog.split_part(pg_catalog.coalesce(event.note, ''), '[[TIPS_META]]', 1)), 160), '') as note_preview,
@@ -211,6 +212,7 @@ begin
         when detail.subject = '과학' or pg_catalog.lower(detail.subject) = 'science' then '과학 시험일 및 시험범위'
         else pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(event.title), ''), '시험기간')
       end as title,
+      event.title as term_source_title,
       pg_catalog.coalesce(detail.exam_date, event.start) as start_date,
       pg_catalog.coalesce(detail.exam_date, event.start) as end_date,
       pg_catalog.nullif(pg_catalog.left(pg_catalog.btrim(pg_catalog.coalesce(detail.note, '')), 160), '') as note_preview,
@@ -277,8 +279,18 @@ begin
         'examTerm', pg_catalog.coalesce(
           pg_catalog.nullif(pg_catalog.btrim(bounded_entries.event_meta ->> 'examTerm'), ''),
           case
-            when bounded_entries.title ilike '%중간%' then case when pg_catalog.extract(month from bounded_entries.start_date) >= 8 then '2학기 중간' else '1학기 중간' end
-            when bounded_entries.title ilike '%기말%' then case when pg_catalog.extract(month from bounded_entries.start_date) >= 8 then '2학기 기말' else '1학기 기말' end
+            when bounded_entries.term_source_title ilike '%중간%' then case
+              when bounded_entries.term_source_title ilike '%2학기%' then '2학기 중간'
+              when bounded_entries.term_source_title ilike '%1학기%' then '1학기 중간'
+              when pg_catalog.extract(month from bounded_entries.start_date) >= 8 then '2학기 중간'
+              else '1학기 중간'
+            end
+            when bounded_entries.term_source_title ilike '%기말%' then case
+              when bounded_entries.term_source_title ilike '%2학기%' then '2학기 기말'
+              when bounded_entries.term_source_title ilike '%1학기%' then '1학기 기말'
+              when pg_catalog.extract(month from bounded_entries.start_date) >= 8 then '2학기 기말'
+              else '1학기 기말'
+            end
             else null
           end
         ),
@@ -664,6 +676,83 @@ as $function$
   where class.id = p_class_id
 $function$;
 
+create function public.get_operations_lesson_textbook_candidate_page_v1(
+  p_class_id uuid,
+  p_search text,
+  p_cursor_title text,
+  p_cursor_id uuid,
+  p_limit integer
+)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = ''
+as $function$
+declare
+  v_search text := pg_catalog.left(pg_catalog.btrim(pg_catalog.coalesce(p_search, '')), 100);
+  v_rows jsonb;
+  v_has_more boolean;
+begin
+  if p_class_id is null or p_limit <> 30 then
+    raise exception 'operations_textbook_candidate_request_invalid' using errcode = '22023';
+  end if;
+  if (p_cursor_title is null) <> (p_cursor_id is null) then
+    raise exception 'operations_textbook_candidate_cursor_invalid' using errcode = '22023';
+  end if;
+
+  with class_context as (
+    select class.subject
+    from public.classes as class
+    where class.id = p_class_id
+  ), matching as (
+    select
+      textbook.id,
+      pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(textbook.title), ''), pg_catalog.nullif(pg_catalog.btrim(textbook.name), ''), '교재') as sort_title,
+      pg_catalog.jsonb_build_object(
+        'id', textbook.id,
+        'title', textbook.title,
+        'name', textbook.name,
+        'subject', textbook.subject,
+        'publisher', textbook.publisher,
+        'category', textbook.category,
+        'subSubject', textbook.sub_subject,
+        'status', textbook.status
+      ) as row_data
+    from public.textbooks as textbook
+    join class_context on class_context.subject = textbook.subject
+    where (
+      v_search = ''
+      or pg_catalog.coalesce(textbook.title, textbook.name, '') ilike '%' || v_search || '%'
+      or pg_catalog.coalesce(textbook.publisher, '') ilike '%' || v_search || '%'
+    )
+  ), bounded as (
+    select matching.*
+    from matching
+    where p_cursor_title is null
+      or (matching.sort_title collate dashboard_private.ko_numeric, matching.id)
+        > (p_cursor_title collate dashboard_private.ko_numeric, p_cursor_id)
+    order by matching.sort_title collate dashboard_private.ko_numeric, matching.id
+    limit 31
+  ), visible as (
+    select bounded.*
+    from bounded
+    order by bounded.sort_title collate dashboard_private.ko_numeric, bounded.id
+    limit 30
+  )
+  select
+    pg_catalog.coalesce(pg_catalog.jsonb_agg(
+      visible.row_data || pg_catalog.jsonb_build_object('sortTitle', visible.sort_title)
+      order by visible.sort_title collate dashboard_private.ko_numeric, visible.id
+    ), '[]'::jsonb),
+    (select pg_catalog.count(*) > 30 from bounded)
+  into v_rows, v_has_more
+  from visible;
+
+  return pg_catalog.jsonb_build_object('rows', v_rows, 'hasMore', pg_catalog.coalesce(v_has_more, false));
+end
+$function$;
+
 create function public.list_operations_catalogs_v1()
 returns jsonb
 language sql
@@ -683,6 +772,7 @@ revoke all on function public.get_operations_annual_board_v1(integer) from publi
 revoke all on function public.get_operations_class_schedule_page_v1(jsonb, text, uuid, integer) from public, anon, authenticated;
 revoke all on function public.get_academic_event_detail_v1(uuid) from public, anon, authenticated;
 revoke all on function public.get_operations_class_lesson_design_detail_v1(uuid) from public, anon, authenticated;
+revoke all on function public.get_operations_lesson_textbook_candidate_page_v1(uuid, text, text, uuid, integer) from public, anon, authenticated;
 revoke all on function public.list_operations_catalogs_v1() from public, anon, authenticated;
 revoke all on function dashboard_private.extract_academic_event_meta_v1(text) from public, anon, authenticated;
 
@@ -691,5 +781,6 @@ grant execute on function public.get_operations_annual_board_v1(integer) to auth
 grant execute on function public.get_operations_class_schedule_page_v1(jsonb, text, uuid, integer) to authenticated;
 grant execute on function public.get_academic_event_detail_v1(uuid) to authenticated;
 grant execute on function public.get_operations_class_lesson_design_detail_v1(uuid) to authenticated;
+grant execute on function public.get_operations_lesson_textbook_candidate_page_v1(uuid, text, text, uuid, integer) to authenticated;
 grant execute on function public.list_operations_catalogs_v1() to authenticated;
 grant execute on function dashboard_private.extract_academic_event_meta_v1(text) to authenticated;
