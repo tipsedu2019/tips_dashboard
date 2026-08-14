@@ -189,6 +189,10 @@ test("send normalizes explicit rejection, failed list, 5xx, malformed JSON, and 
   const cases = [
     [async () => response({ errorCode: "InvalidRequest", errorMessage: "거부" }, 400), "failed_hold", "provider_rejected"],
     [async () => new Response("not-json", { status: 400 }), "failed_hold", "provider_rejected"],
+    [async () => response({
+      messageList: [{ messageId: MESSAGE_ID, statusCode: "1048", statusMessage: "버튼 URL 값은 최대 100자까지 사용 가능합니다." }],
+      failedMessageList: [],
+    }), "failed_hold", "1048"],
     [async () => response({ failedMessageList: [{ statusCode: "3001", statusMessage: "실패" }] }), "failed_hold", "3001"],
     [async () => response({ errorMessage: "upstream raw detail" }, 503), "unknown", "provider_unavailable"],
     [async () => new Response("not-json", { status: 200 }), "unknown", "provider_response_invalid"],
