@@ -89,6 +89,19 @@ test("calendar view-context navigation invalidates the pending exact-detail iden
   assert.match(source, /const handleCalendarToggle[\s\S]*?invalidateDetailRequest\(\)/);
 });
 
+test("calendar URL context and successful event drops revoke stale exact-detail requests", async () => {
+  const source = await readFile(
+    new URL("src/app/admin/calendar/components/calendar.tsx", root),
+    "utf8",
+  );
+
+  assert.match(source, /useEffect\(\(\) => \{\s*if \(appliedInitialDateKey === nextInitialDateKey\) return\s*invalidateDetailRequest\(\)/);
+  assert.match(source, /setAppliedInitialDateKey\(nextInitialDateKey\)/);
+  assert.match(source, /useEffect\(\(\) => \{\s*invalidateDetailRequest\(\)\s*if \(!initialEventId\) \{\s*setAppliedInitialEventId\(""\)/);
+  assert.match(source, /return \(\) => \{\s*cancelled = true\s*invalidateDetailRequest\(\)/);
+  assert.match(source, /if \(moved !== false\) \{\s*invalidateDetailRequest\(\)\s*setSelectedDate\(nextEvent\.date\)/);
+});
+
 test("academic calendar month view switches to readable mobile agenda cards", async () => {
   const source = await readFile(
     new URL("src/app/admin/calendar/components/calendar-main.tsx", root),

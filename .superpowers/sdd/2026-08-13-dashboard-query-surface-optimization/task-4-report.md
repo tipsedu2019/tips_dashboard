@@ -153,3 +153,18 @@ Round-4 source evidence:
 - The repository-wide source glob was attempted twice but did not terminate: the first run remained in the unrelated registration-observation Google Chat provider-zero test for more than four minutes; a second run excluding that file remained in the unrelated notification adapters forward-install test. Both were stopped without changing source or external state. No Task 4 focused test failed.
 
 No round-4 DB runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, worker, webhook, provider request, and recipient receipt remain unclaimed; the manifest stays `candidate`.
+
+## Adversarial fix round 5
+
+Round-5 RED was **0 pass / 1 fail** for URL date/event context changes and successful calendar event drops leaving an older exact-detail request current.
+
+The calendar now revokes the pending exact-detail revision and identity before applying a changed or removed URL date, before processing a changed or removed URL event, during the URL-event effect cleanup, and before updating the selected date after a successful event drop. Removing the URL event also clears the applied deep-link identity so the same event can be opened again later. Older detail success, failure, and loading completion cannot reopen or overwrite the new context.
+
+Round-5 source evidence:
+
+- New regression: **1/1 GREEN** after the recorded **0/1 RED**.
+- Task 4 focused service/UI/continuous-schedule verification: **58/58 GREEN**.
+- TypeScript, targeted ESLint, operations worktree query guard, and `git diff --check`: GREEN.
+- No SQL changed. Candidate migration and manifest remain byte-identical at SHA-256 `47d6af4718be42c95d402fe183a229d9709bc50e3523466d34a7b19b4a2cf67c`.
+
+No round-5 DB runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, worker, webhook, provider request, and recipient receipt remain unclaimed; the manifest stays `candidate`.

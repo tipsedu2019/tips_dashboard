@@ -160,17 +160,18 @@ export function Calendar({
   }, [visibleEvents])
 
   const nextInitialDateKey = toCalendarDayKey(initialDate)
-  if (
-    nextInitialDateKey &&
-    initialDate instanceof Date &&
-    !Number.isNaN(initialDate.getTime()) &&
-    appliedInitialDateKey !== nextInitialDateKey
-  ) {
+  useEffect(() => {
+    if (appliedInitialDateKey === nextInitialDateKey) return
+    invalidateDetailRequest()
     setAppliedInitialDateKey(nextInitialDateKey)
-    if (!isSameDay(selectedDate, initialDate)) {
-      setSelectedDate(initialDate)
+    if (
+      nextInitialDateKey &&
+      initialDate instanceof Date &&
+      !Number.isNaN(initialDate.getTime())
+    ) {
+      setSelectedDate((current) => isSameDay(current, initialDate) ? current : initialDate)
     }
-  }
+  }, [appliedInitialDateKey, initialDate, invalidateDetailRequest, nextInitialDateKey])
 
   const matchedInitialEvent = useMemo(() => {
     if (!initialEventId || appliedInitialEventId === initialEventId) {
@@ -222,7 +223,12 @@ export function Calendar({
   }, [onLoadEventDetail])
 
   useEffect(() => {
-    if (!initialEventId || !matchedInitialEvent) return undefined
+    invalidateDetailRequest()
+    if (!initialEventId) {
+      setAppliedInitialEventId("")
+      return undefined
+    }
+    if (!matchedInitialEvent) return undefined
     let cancelled = false
     void openExactEventDetail(matchedInitialEvent).then((opened) => {
         if (cancelled || !opened) return
@@ -231,8 +237,9 @@ export function Calendar({
       })
     return () => {
       cancelled = true
+      invalidateDetailRequest()
     }
-  }, [initialEventId, matchedInitialEvent, openExactEventDetail])
+  }, [initialEventId, invalidateDetailRequest, matchedInitialEvent, openExactEventDetail])
 
   const retryPendingDetailLoad = async () => {
     if (!pendingDetailEvent) return
@@ -361,6 +368,7 @@ export function Calendar({
               onEventDrop={readOnly ? undefined : async (_, nextEvent) => {
                 const moved = await onMoveEvent?.(nextEvent)
                 if (moved !== false) {
+                  invalidateDetailRequest()
                   setSelectedDate(nextEvent.date)
                 }
                 return moved
