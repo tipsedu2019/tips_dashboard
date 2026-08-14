@@ -1231,6 +1231,119 @@ test("Reflect.apply and bound RPC entry points cannot bypass continuous-schedule
   assert.deepEqual(bound.violations, reflected.violations)
 })
 
+test("RPC aliases assigned after declaration remain inspected", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  let rpc
+  rpc = client.rpc
+  return rpc("save_class_lesson_session_v1", parameters)
+}
+`,
+  })
+
+  assert.ok(result.violations.some((violation) => violation.reason === "list_query_receiver_unresolved"))
+})
+
+test("bound RPC aliases assigned after declaration remain inspected", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  let rpc
+  rpc = client.rpc.bind(client)
+  return rpc("save_class_lesson_session_v1", parameters)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations.map((violation) => violation.reason), [
+    "list_abort_signal_missing",
+    "list_retry_false_missing",
+  ])
+})
+
+test("Function.call RPC entry points cannot bypass request controls", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  return client.rpc.call(client, "save_class_lesson_session_v1", parameters)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations.map((violation) => violation.reason), [
+    "list_abort_signal_missing",
+    "list_retry_false_missing",
+  ])
+})
+
+test("Function.apply RPC entry points cannot bypass request controls", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  return client.rpc.apply(client, ["save_class_lesson_session_v1", parameters])
+}
+`,
+  })
+
+  assert.deepEqual(result.violations.map((violation) => violation.reason), [
+    "list_abort_signal_missing",
+    "list_retry_false_missing",
+  ])
+})
+
+test("RPC names prebound with Function.bind cannot bypass request controls", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  return client.rpc.bind(client, "save_class_lesson_session_v1")(parameters)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations.map((violation) => violation.reason), [
+    "list_abort_signal_missing",
+    "list_retry_false_missing",
+  ])
+})
+
+test("computed and destructured RPC aliases remain inspected", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  const computedRpc = client["rpc"]
+  const { ["rpc"]: destructuredRpc } = client
+  await computedRpc.call(client, "save_class_lesson_session_v1", parameters)
+  return destructuredRpc.apply(client, ["save_class_lesson_content_v1", parameters])
+}
+`,
+  })
+
+  assert.equal(result.violations.filter((violation) => violation.reason === "list_abort_signal_missing").length, 2)
+  assert.equal(result.violations.filter((violation) => violation.reason === "list_retry_false_missing").length, 2)
+})
+
+test("direct literal mutation RPCs with exact request controls remain allowed", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  return client.rpc("save_class_lesson_session_v1", parameters)
+    .abortSignal(AbortSignal.timeout(8_000))
+    .retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result, { ok: true, violations: [] })
+})
+
 test("detached RPC aliases, Reflect.apply aliases, and inline binding cannot bypass mutation safety", async () => {
   const result = await verifyFixture({
     surface: "operations",
