@@ -4,8 +4,8 @@ import test from "node:test";
 import {
   PUBLIC_CLASSES_SUMMARY_CACHE_TAG,
   createPublicClassesCacheInvalidationResponder,
-  requestPublicClassesCacheInvalidation,
 } from "../src/server/public-classes-cache-invalidation.js";
+import { requestPublicClassesCacheInvalidation } from "../src/lib/public-classes-cache-invalidation.js";
 
 const REQUEST_ID = "10000000-0000-4000-8000-000000000001";
 

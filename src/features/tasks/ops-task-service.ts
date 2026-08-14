@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase"
-import { invalidatePublicClassesCacheAfterMutation } from "@/server/public-classes-cache-invalidation.js"
+import { invalidatePublicClassesCacheAfterMutation } from "@/lib/public-classes-cache-invalidation.js"
 import { ACTIVE_STUDENT_STATUS, WITHDRAWN_STUDENT_STATUS } from "@/lib/student-status.js"
 import type {
   DashboardConflictRpcInput,

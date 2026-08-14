@@ -6,7 +6,7 @@ import {
   sortAcademicSubjects,
 } from "../../lib/academic-subject-registry.ts";
 import { normalizeStudentStatus } from "../../lib/student-status.js";
-import { invalidatePublicClassesCacheAfterMutation } from "../../server/public-classes-cache-invalidation.js";
+import { invalidatePublicClassesCacheAfterMutation } from "../../lib/public-classes-cache-invalidation.js";
 
 const DEFAULT_CLASS_STATUS = "수강";
 const DEFAULT_CLASS_TYPE = "정규";
