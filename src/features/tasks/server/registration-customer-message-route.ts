@@ -634,6 +634,13 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
           : null
         const taskId = source?.taskId
           ?? await dependencies.resolveTaskId({ ...target, context })
+        if (!taskId) {
+          console.error("registration_customer_message_preview_task_missing", {
+            messageKind: target.messageKind,
+            sourceId: target.sourceId,
+            sourceResolved: Boolean(source),
+          })
+        }
         if (
           !taskId
           || (!observationTarget && !await dependencies.authorizeTask(context, taskId))
