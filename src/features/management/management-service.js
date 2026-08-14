@@ -6,6 +6,7 @@ import {
   sortAcademicSubjects,
 } from "../../lib/academic-subject-registry.ts";
 import { normalizeStudentStatus } from "../../lib/student-status.js";
+import { invalidatePublicClassesCacheAfterMutation } from "../../server/public-classes-cache-invalidation.js";
 
 const DEFAULT_CLASS_STATUS = "수강";
 const DEFAULT_CLASS_TYPE = "정규";
@@ -1456,6 +1457,8 @@ export function createManagementService(options = {}) {
     if (registrationRuntimeProbe) return registrationRuntimeProbe.invalidateAfterReadyFailure(cause);
     throw cause;
   });
+  const refreshPublicClassesCache = options.refreshPublicClassesCache || ((reason) =>
+    invalidatePublicClassesCacheAfterMutation(supabase, reason));
 
   return {
     get configError() {
@@ -1660,6 +1663,7 @@ export function createManagementService(options = {}) {
       if (error) {
         throw error;
       }
+      await refreshPublicClassesCache("class");
       return Array.isArray(data) ? data[0] || null : data || null;
     },
 
@@ -1677,6 +1681,7 @@ export function createManagementService(options = {}) {
         client,
         runtime.mode === "legacy" ? payload : stripReadyClassWriteFields(payload),
       );
+      await refreshPublicClassesCache("class");
       return Array.isArray(updated) ? updated[0] || null : updated || null;
     },
 
@@ -1708,6 +1713,7 @@ export function createManagementService(options = {}) {
         p_reason: reason,
       });
       if (error) throw error;
+      await refreshPublicClassesCache("schedule");
       return data || null;
     },
 
@@ -1727,6 +1733,7 @@ export function createManagementService(options = {}) {
         p_request_key: trimText(requestKey),
       });
       if (error) throw error;
+      await refreshPublicClassesCache("schedule");
       return data || null;
     },
 
@@ -1748,6 +1755,7 @@ export function createManagementService(options = {}) {
       if (error) {
         throw error;
       }
+      await refreshPublicClassesCache("schedule");
       return data || null;
     },
 
@@ -1765,6 +1773,7 @@ export function createManagementService(options = {}) {
       if (error) {
         throw error;
       }
+      await refreshPublicClassesCache("class");
       return data || [];
     },
 

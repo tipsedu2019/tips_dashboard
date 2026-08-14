@@ -38,6 +38,10 @@ test("public classes API preserves class plans and their supporting catalogs", a
   const payload = JSON.parse(response.body);
 
   assert.equal(response.status, 200);
+  assert.equal(
+    response.headers["Cache-Control"],
+    "public, max-age=0, s-maxage=600, stale-while-revalidate=3600",
+  );
   assert.deepEqual(payload.classes[0].schedulePlan, {
     sessions: [{ id: "session-1" }],
   });
@@ -45,6 +49,21 @@ test("public classes API preserves class plans and their supporting catalogs", a
   assert.deepEqual(payload.progressLogs, [
     { id: "progress-1", classId: "class-1" },
   ]);
+});
+
+test("public classes API marks fallback responses no-store", async () => {
+  const respond = createPublicClassesApiResponder(async () => ({
+    generatedAt: "2026-08-09T00:00:00.000Z",
+    source: "fallback-empty",
+    reason: "Public class data is temporarily unavailable.",
+    classes: [],
+    textbooks: [],
+    progressLogs: [],
+  }));
+
+  const response = await respond();
+  assert.equal(response.status, 503);
+  assert.equal(response.headers["Cache-Control"], "no-store");
 });
 
 test("public classes failures do not expose gateway HTML or request details", () => {

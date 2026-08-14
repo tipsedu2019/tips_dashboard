@@ -16,7 +16,7 @@ export function createPublicClassesApiResponder(
         "Content-Type": "application/json; charset=utf-8",
         "Cache-Control": isFallback
           ? "no-store"
-          : "public, max-age=0, s-maxage=60, stale-while-revalidate=300",
+          : "public, max-age=0, s-maxage=600, stale-while-revalidate=3600",
       },
       body: JSON.stringify(payload),
     };

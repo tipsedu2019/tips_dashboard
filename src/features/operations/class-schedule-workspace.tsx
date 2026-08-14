@@ -36,6 +36,7 @@ import {
   normalizeSchedulePlan,
 } from "@/lib/class-schedule-planner";
 import { supabase } from "@/lib/supabase";
+import { invalidatePublicClassesCacheAfterMutation } from "@/server/public-classes-cache-invalidation.js";
 import { cn } from "@/lib/utils";
 
 import {
@@ -3837,12 +3838,13 @@ export function ClassScheduleWorkspace() {
     try {
       const action = createContinuousScheduleMutationAction({ rpc: async (name, parameters) => await client.rpc(name, parameters) });
       await action.saveSession(input);
+      const refresh = await invalidatePublicClassesCacheAfterMutation(client, "schedule");
       setNormalizedLessonSessionDrafts((current) => {
         const next = { ...current };
         delete next[input.sessionId];
         return next;
       });
-      setLessonDesignSaveNotice("일정 변경을 저장했습니다.");
+      setLessonDesignSaveNotice(refresh.status === "pending" ? "일정 변경을 저장했습니다. 공개 수업 캐시 갱신 대기 중입니다." : "일정 변경을 저장했습니다.");
       await refreshSelectedLessonDetail();
     } catch (error) {
       setLessonDesignSaveError(error instanceof Error ? error.message : "일정 저장에 실패했습니다.");
@@ -4235,8 +4237,11 @@ export function ClassScheduleWorkspace() {
         }
       }
 
+      const refresh = await invalidatePublicClassesCacheAfterMutation(client, "schedule");
+
       await refreshSelectedLessonDetail();
-      setLessonDesignSaveNotice(normalizedContentContext ? "수업 내용을 저장했습니다." : "수업계획을 저장했습니다.");
+      const saved = normalizedContentContext ? "수업 내용을 저장했습니다." : "수업계획을 저장했습니다.";
+      setLessonDesignSaveNotice(refresh.status === "pending" ? `${saved} 공개 수업 캐시 갱신 대기 중입니다.` : saved);
     } catch (saveError) {
       setLessonDesignSaveError(
         saveError instanceof Error ? saveError.message : "수업계획 저장에 실패했습니다.",
@@ -4270,8 +4275,10 @@ export function ClassScheduleWorkspace() {
     try {
       const action = createContinuousScheduleMutationAction({ rpc: async (name, parameters) => await client.rpc(name, parameters) });
       const result = await action.generateSessions({ ...normalizedGenerationContext, reason: null });
+      const refresh = await invalidatePublicClassesCacheAfterMutation(client, "schedule");
       setGenerationPreview(null);
-      setLessonDesignSaveNotice(`추가 ${Number((result as Record<string, unknown>)?.generatedCount || 0)} · 기존 ${Number(generationPreview.existingCount || 0)} · 확인 필요 ${Number(generationPreview.resourceConflictCount || 0)}`);
+      const saved = `추가 ${Number((result as Record<string, unknown>)?.generatedCount || 0)} · 기존 ${Number(generationPreview.existingCount || 0)} · 확인 필요 ${Number(generationPreview.resourceConflictCount || 0)}`;
+      setLessonDesignSaveNotice(refresh.status === "pending" ? `${saved} · 공개 수업 캐시 갱신 대기 중` : saved);
       await refreshSelectedLessonDetail();
     } catch (error) {
       setLessonDesignSaveError(error instanceof Error ? error.message : "일정 생성이 실패했습니다. 미리보기를 다시 확인하세요.");

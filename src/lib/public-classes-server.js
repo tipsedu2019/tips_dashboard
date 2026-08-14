@@ -1,10 +1,12 @@
 import fs from "node:fs/promises";
 
 import {
-  buildPublicClassesPayload,
+  buildFallbackPublicClassesPayload,
   isFallbackPublicClassesPayload,
+  normalizePublicClassesSummaryPayload,
   publicClassesOutputPath,
 } from "../server/public-classes-payload.js";
+import { loadCachedPublicClassesSummary } from "../server/public-classes-cache.js";
 
 export async function readPublicClassesSnapshot(
   outputPath = publicClassesOutputPath,
@@ -18,14 +20,18 @@ export async function readPublicClassesSnapshot(
 }
 
 export async function loadPublicClassesPagePayload(
-  buildPayload = () => buildPublicClassesPayload({ mode: "summary" }),
+  buildPayload = null,
   readSnapshot = readPublicClassesSnapshot,
 ) {
-  const livePayload = await buildPayload();
-  if (!isFallbackPublicClassesPayload(livePayload)) {
+  const livePayload = buildPayload
+    ? await buildPayload()
+    : await loadCachedPublicClassesSummary();
+  if (livePayload && !isFallbackPublicClassesPayload(livePayload)) {
     return livePayload;
   }
 
   const snapshotPayload = await readSnapshot();
-  return snapshotPayload || livePayload;
+  return normalizePublicClassesSummaryPayload(snapshotPayload)
+    || livePayload
+    || buildFallbackPublicClassesPayload("Public class data is temporarily unavailable.");
 }

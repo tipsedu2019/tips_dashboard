@@ -167,6 +167,25 @@ function mapPublicClassSummary(row) {
   };
 }
 
+export function normalizePublicClassesSummaryPayload(payload) {
+  if (!payload || typeof payload !== "object" || isFallbackPublicClassesPayload(payload)) {
+    return null;
+  }
+  if (!Array.isArray(payload.classes)) return null;
+
+  return {
+    generatedAt: typeof payload.generatedAt === "string"
+      ? payload.generatedAt
+      : new Date().toISOString(),
+    source: payload.source,
+    classes: payload.classes
+      .map(mapPublicClassSummary)
+      .filter((row) => row.status === ACTIVE_CLASS_STATUS),
+    textbooks: [],
+    progressLogs: [],
+  };
+}
+
 function mapPublicTextbook(row) {
   return {
     id: row.id,
@@ -246,9 +265,15 @@ export async function buildPublicClassesPayload({
       { data: textbookRows, error: textbookError },
       { data: progressRows, error: progressError },
     ] = await Promise.all([
-      applyPublicClassesQuerySafety(supabase.from("classes").select("*")),
-      applyPublicClassesQuerySafety(supabase.from("textbooks").select("*")),
-      applyPublicClassesQuerySafety(supabase.from("progress_logs").select("*")),
+      applyPublicClassesQuerySafety(supabase.from("classes").select(
+        "id,name,subject,grade,teacher,room,schedule,status,fee,tuition,capacity,student_ids,waitlist_ids,textbook_ids,textbook_info,lessons,schedule_plan,start_date,end_date",
+      )),
+      applyPublicClassesQuerySafety(supabase.from("textbooks").select(
+        "id,title,name,publisher,price,tags,lessons,updated_at",
+      )),
+      applyPublicClassesQuerySafety(supabase.from("progress_logs").select(
+        "id,class_id,textbook_id,progress_key,session_id,session_order,status,range_start,range_end,range_label,public_note,teacher_note,updated_at,date,completed_lesson_ids",
+      )),
     ]);
 
     if (classError) {

@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase"
+import { invalidatePublicClassesCacheAfterMutation } from "@/server/public-classes-cache-invalidation.js"
 import { ACTIVE_STUDENT_STATUS, WITHDRAWN_STUDENT_STATUS } from "@/lib/student-status.js"
 import type {
   DashboardConflictRpcInput,
@@ -3921,6 +3922,7 @@ async function assignOpsStudentToClass(student: Row | null, classRow: Row | null
   if (previousMode !== "enrolled") {
     await insertOpsStudentClassHistory(studentId, classId, "enrolled", previousMode, "enrolled", memo)
   }
+  await invalidatePublicClassesCacheAfterMutation(supabase, "class")
 }
 
 async function assignOpsStudentToWaitlist(student: Row | null, classRow: Row | null, memo = "ops_task") {
@@ -3968,6 +3970,7 @@ async function assignOpsStudentToWaitlist(student: Row | null, classRow: Row | n
   if (previousMode !== "waitlist") {
     await insertOpsStudentClassHistory(studentId, classId, "waitlist", previousMode, "waitlist", memo)
   }
+  await invalidatePublicClassesCacheAfterMutation(supabase, "class")
 }
 
 async function assignOpsTextbookToClass(classRow: Row | null, textbook: Row | null) {
@@ -3991,6 +3994,7 @@ async function assignOpsTextbookToClass(classRow: Row | null, textbook: Row | nu
     await restoreOpsClassTextbookSnapshot(classId, classRow)
     throw error
   }
+  await invalidatePublicClassesCacheAfterMutation(supabase, "textbook")
 }
 
 async function removeOpsStudentFromClass(student: Row | null, classRow: Row | null, memo = "ops_task") {
@@ -4025,6 +4029,7 @@ async function removeOpsStudentFromClass(student: Row | null, classRow: Row | nu
   if (previousMode) {
     await insertOpsStudentClassHistory(studentId, classId, "removed", previousMode, "", memo)
   }
+  await invalidatePublicClassesCacheAfterMutation(supabase, "class")
 }
 
 async function setOpsStudentStatus(student: Row | null, status: string) {
