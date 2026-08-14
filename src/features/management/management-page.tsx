@@ -3341,6 +3341,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
             disabled={!canMutateRows}
             loading={textbookCandidatesLoading}
             hasMore={textbookCandidatesHaveMore}
+            query={textbookCandidateQuery}
             onQueryChange={setTextbookCandidateQuery}
             onFiltersChange={handleTextbookCandidateFiltersChange}
             onLoadMore={async () => {

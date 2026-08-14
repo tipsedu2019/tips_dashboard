@@ -207,13 +207,22 @@ test("the first class management bundle resolves and applies the default period 
   };
 
   const result = await service.loadInitialPage({ kind: "classes", filters, cursor: null, limit: 30 });
+  const canonicalReplay = await service.loadInitialPage({
+    kind: "classes",
+    filters: { ...filters, periodId: defaultPeriodId },
+    cursor: null,
+    limit: 30,
+  });
 
   assert.equal(calls[0][0], "get_management_default_class_period_v1");
   for (const name of ["list_management_page_v1", "get_management_stats_v1", "list_management_filter_options_v1"]) {
-    const call = calls.find(([calledName]) => calledName === name);
+    const matchingCalls = calls.filter(([calledName]) => calledName === name);
+    assert.equal(matchingCalls.length, 1);
+    const call = matchingCalls[0];
     assert.equal(call[1].p_filters.periodId, defaultPeriodId);
   }
   assert.equal(result.effectiveFilters.periodId, defaultPeriodId);
+  assert.equal(canonicalReplay, result);
 });
 
 test("class textbook candidates use bounded query-scoped continuation and retain unmatched assigned IDs", async () => {

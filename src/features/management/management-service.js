@@ -195,6 +195,11 @@ function withOpaqueDetailRelationCursors(detail, kind, entityId) {
 
 export function createManagementReadService(options = {}) {
   const client = ensureClient(options.supabase);
+  let pendingCanonicalClassBundle = null;
+
+  const filterFingerprint = (filters) => JSON.stringify(
+    Object.keys(filters).sort().map((key) => [key, filters[key]]),
+  );
 
   /**
    * @param {{
@@ -256,7 +261,20 @@ export function createManagementReadService(options = {}) {
     loadPage: loadPageBundle,
     async loadInitialPage({ kind, filters, cursor = null, limit = MANAGEMENT_PAGE_SIZE }) {
       assertManagementFilters(kind, filters);
+      const requestedFingerprint = filterFingerprint(filters);
+      if (pendingCanonicalClassBundle
+        && kind === "classes"
+        && cursor === null
+        && limit === MANAGEMENT_PAGE_SIZE
+        && pendingCanonicalClassBundle.expiresAt >= Date.now()
+        && pendingCanonicalClassBundle.fingerprint === requestedFingerprint) {
+        const replay = pendingCanonicalClassBundle.result;
+        pendingCanonicalClassBundle = null;
+        return replay;
+      }
+      pendingCanonicalClassBundle = null;
       let effectiveFilters = filters;
+      let resolvedDefaultPeriod = false;
       if (kind === "classes" && !trimText(filters.periodId)) {
         const { data, error } = await client.rpc("get_management_default_class_period_v1")
           .abortSignal(AbortSignal.timeout(8_000)).retry(false);
@@ -264,8 +282,17 @@ export function createManagementReadService(options = {}) {
         const periodId = trimText(unwrapRpcObject(data)?.periodId);
         if (!periodId) throw managementReadError("management_default_period_unavailable");
         effectiveFilters = { ...filters, periodId };
+        resolvedDefaultPeriod = true;
       }
-      return loadPageBundle({ kind, filters: effectiveFilters, cursor, limit });
+      const result = await loadPageBundle({ kind, filters: effectiveFilters, cursor, limit });
+      if (resolvedDefaultPeriod) {
+        pendingCanonicalClassBundle = {
+          fingerprint: filterFingerprint(effectiveFilters),
+          result,
+          expiresAt: Date.now() + 5_000,
+        };
+      }
+      return result;
     },
     loadNextPage: readListPage,
     async loadDetail({ kind, id }) {

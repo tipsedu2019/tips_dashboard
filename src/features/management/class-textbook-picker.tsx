@@ -37,6 +37,7 @@ type ClassTextbookPickerProps = {
   disabled: boolean;
   loading: boolean;
   hasMore: boolean;
+  query: string;
   onQueryChange: (query: string) => void;
   onFiltersChange: (filters: ClassTextbookPickerFilters) => void;
   onLoadMore: () => Promise<void> | void;
@@ -54,13 +55,13 @@ export function ClassTextbookPicker({
   disabled,
   loading,
   hasMore,
+  query,
   onQueryChange,
   onFiltersChange,
   onLoadMore,
   onSelectedIdsChange,
 }: ClassTextbookPickerProps) {
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<ClassTextbookPickerFilters>(() =>
     getDefaultClassTextbookFilters(classRecord),
   );
@@ -102,7 +103,6 @@ export function ClassTextbookPicker({
 
   function showAll() {
     setFilters({ subject: "", schoolLevel: "", gradeLevel: "", subSubject: "" });
-    setQuery("");
     onQueryChange("");
   }
 
@@ -127,9 +127,7 @@ export function ClassTextbookPicker({
               placeholder="교재명, 출판사 검색"
               aria-label="교재 검색"
               onChange={(event) => {
-                const nextQuery = event.target.value;
-                setQuery(nextQuery);
-                onQueryChange(nextQuery);
+                onQueryChange(event.target.value);
               }}
             />
             <Button type="button" size="sm" variant="ghost" className="shrink-0" onClick={showAll}>

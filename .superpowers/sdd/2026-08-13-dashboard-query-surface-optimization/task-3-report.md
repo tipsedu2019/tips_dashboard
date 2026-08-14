@@ -88,3 +88,13 @@ Source implementation and source verification are complete. Runtime SQL behavior
 - RED evidence: the new behavior suite first ran **8 pass / 2 fail** because default-period initialization and candidate search did not exist. Final progressive-loading suite is **10/10 GREEN**; full `tests/management*.test.mjs` is **139/139 GREEN**; combined management/query-budget/textbook-picker/schema verification is **205/205 GREEN**.
 - TypeScript, relevant ESLint (zero warnings), management query-surface guard, migration hash equality, and diff check are GREEN. Candidate SHA-256 is `e5d5f408be3de36e11be6616bfcb66049e264247d959131d87651fe26de4aacf`.
 - Per round-2 instruction, no isolated database command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, and provider activity remain unexecuted and unclaimed; the migration remains `candidate`.
+
+## Adversarial fix round 3
+
+- Replaced every whole-row `to_jsonb(class)` and `to_jsonb(textbook)` in bounded management lists, stats, filter options, and class-textbook candidates with explicit scalar projections. Those read paths contain neither `classes.schedule_plan` nor `textbooks.lessons`; selected-detail branches remain outside this bounded-path contract.
+- Preserved list/stat/filter/candidate filter parity while projecting only the names, taxonomy, status, price, roster ID, and display scalars each branch uses. Textbook active-class counts now inspect only `classes.textbook_ids`.
+- The default-period result keeps one short-lived, one-shot canonical bundle. The URL normalization replay consumes that same result, so the equivalent list, stats, and filter-option RPCs remain one call each; later refreshes query normally.
+- The class textbook picker now has one parent-controlled query value for its input, result request, and query/filter-bound continuation cursor. Subject/grade remounts cannot leave an empty local input attached to results from an older parent query.
+- RED evidence: the focused round-3 contracts first ran **19 pass / 3 fail**. Final focused result is **22/22 GREEN**; full management is **140/140 GREEN**; combined management/query-budget/textbook-picker/schema verification is **206/206 GREEN**.
+- TypeScript, relevant ESLint (zero warnings), management query-surface guard, migration hash equality, and diff check are GREEN. Candidate SHA-256 is `f3e3ff36b6d0ae0de232910f91fe07b7441eff86d3af4f5e4189358286265c81`.
+- No database runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, and provider activity remain unexecuted and unclaimed; the migration remains `candidate`.

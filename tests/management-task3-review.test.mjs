@@ -115,7 +115,18 @@ test("bounded textbook reads never inspect the lessons JSONB payload", async () 
   const migration = await readFile(new URL("supabase/migrations/20260814011752_management_page_reads.sql", root), "utf8");
   const listAndAggregates = migration.slice(0, migration.indexOf("create function public.list_management_detail_relation_page_v1"));
   assert.doesNotMatch(listAndAggregates, /->\s*'lessons'|jsonb_array_length\([^)]*lessons/i);
+  assert.doesNotMatch(listAndAggregates, /to_jsonb\((?:class|textbook)\)/i);
+  assert.doesNotMatch(listAndAggregates, /\bschedule_plan\b|\blessons\b/i);
   assert.match(listAndAggregates, /textbook\.status|raw\s*->>\s*'status'/);
+});
+
+test("class textbook picker keeps one controlled query for input results and cursor scope", async () => {
+  const pickerSource = await readFile(new URL("src/features/management/class-textbook-picker.tsx", root), "utf8");
+  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  assert.match(pickerSource, /query: string/);
+  assert.doesNotMatch(pickerSource, /const \[query, setQuery\] = useState/);
+  assert.match(pageSource, /query=\{textbookCandidateQuery\}/);
+  assert.match(pageSource, /search: textbookCandidateQuery,[\s\S]*?filters: textbookCandidateFilters,[\s\S]*?cursor: textbookCandidateCursor/);
 });
 
 test("relation payloads match roster contacts and student history renderer labels", async () => {

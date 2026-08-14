@@ -114,7 +114,11 @@ begin
   elsif p_kind = 'classes' then
     return query
     with source as (
-      select class.id, pg_catalog.to_jsonb(class) as raw
+      select class.id, pg_catalog.jsonb_build_object(
+        'name',class.name,'subject',class.subject,'grade',class.grade,'schedule',class.schedule,
+        'teacher',class.teacher,'room',class.room,'capacity',class.capacity,'fee',class.fee,
+        'status',class.status,'student_ids',class.student_ids,'updated_at',class.updated_at
+      ) as raw
       from public.classes class
     ), filtered as (
       select source.*,
@@ -161,7 +165,11 @@ begin
   else
     return query
     with source as (
-      select textbook.id, pg_catalog.to_jsonb(textbook) as raw
+      select textbook.id, pg_catalog.jsonb_build_object(
+        'title',textbook.title,'name',textbook.name,'subject',textbook.subject,'publisher',textbook.publisher,
+        'status',textbook.status,'price',textbook.price,'sale_price',textbook.sale_price,
+        'list_price',textbook.list_price,'updated_at',textbook.updated_at
+      ) as raw
       from public.textbooks textbook
     ), filtered as (
       select source.*,
@@ -180,7 +188,7 @@ begin
         'subject',pg_catalog.coalesce(filtered.raw ->> 'subject',''),'publisher',filtered.raw -> 'publisher',
         'status',pg_catalog.coalesce(filtered.raw ->> 'status',''),
         'price',pg_catalog.coalesce(filtered.raw -> 'price',filtered.raw -> 'sale_price',filtered.raw -> 'list_price'),
-        'activeClassCount',(select pg_catalog.count(*) from public.classes class where pg_catalog.coalesce(pg_catalog.to_jsonb(class) -> 'textbook_ids','[]'::jsonb) ? filtered.id::text),
+        'activeClassCount',(select pg_catalog.count(*) from public.classes class where pg_catalog.coalesce(class.textbook_ids,'[]'::jsonb) ? filtered.id::text),
         'sortKey',filtered.normalized_sort::text,
         'updatedAt',pg_catalog.coalesce(filtered.raw ->> 'updated_at','')
       ), filtered.normalized_sort::text, filtered.id
@@ -241,7 +249,13 @@ begin
     select pg_catalog.jsonb_build_object('total',pg_catalog.coalesce(pg_catalog.sum(count_value),0),'byStatus',pg_catalog.coalesce(pg_catalog.jsonb_object_agg(status,count_value),'{}'::jsonb))
     into v_result from (select pg_catalog.coalesce(raw ->> 'status','') status, pg_catalog.count(*) count_value from filtered group by 1) grouped;
   elsif p_kind = 'classes' then
-    with source as (select class.id, pg_catalog.to_jsonb(class) raw from public.classes class), filtered as (
+    with source as (
+      select class.id,pg_catalog.jsonb_build_object(
+        'name',class.name,'subject',class.subject,'grade',class.grade,'teacher',class.teacher,
+        'room',class.room,'status',class.status
+      ) raw
+      from public.classes class
+    ), filtered as (
       select source.raw from source
       where (p_filters ->> 'search' = '' or pg_catalog.concat_ws(' ', raw ->> 'name', raw ->> 'subject', raw ->> 'teacher', pg_catalog.coalesce(raw ->> 'classroom',raw ->> 'room')) ilike '%' || p_filters ->> 'search' || '%')
         and ((p_filters ->> 'status') is null or raw ->> 'status' = p_filters ->> 'status')
@@ -254,7 +268,13 @@ begin
     select pg_catalog.jsonb_build_object('total',pg_catalog.coalesce(pg_catalog.sum(count_value),0),'byStatus',pg_catalog.coalesce(pg_catalog.jsonb_object_agg(status,count_value),'{}'::jsonb))
     into v_result from (select pg_catalog.coalesce(raw ->> 'status','') status, pg_catalog.count(*) count_value from filtered group by 1) grouped;
   else
-    with source as (select pg_catalog.to_jsonb(textbook) raw from public.textbooks textbook), filtered as (
+    with source as (
+      select pg_catalog.jsonb_build_object(
+        'title',textbook.title,'name',textbook.name,'subject',textbook.subject,
+        'publisher',textbook.publisher,'status',textbook.status
+      ) raw
+      from public.textbooks textbook
+    ), filtered as (
       select source.raw from source
       where (p_filters ->> 'search' = '' or pg_catalog.concat_ws(' ', source.raw ->> 'title', source.raw ->> 'name', source.raw ->> 'subject', source.raw ->> 'publisher') ilike '%' || p_filters ->> 'search' || '%')
         and ((p_filters ->> 'status') is null or source.raw ->> 'status' = p_filters ->> 'status')
@@ -317,9 +337,12 @@ begin
     ) into v_result;
   elsif p_kind = 'classes' then
     with source as (
-      select class.id, pg_catalog.to_jsonb(class) raw
+      select class.id,pg_catalog.jsonb_build_object(
+        'name',class.name,'subject',class.subject,'grade',class.grade,'teacher',class.teacher,
+        'room',class.room,'status',class.status
+      ) raw
       from public.classes class
-      where p_filters ->> 'search' = '' or pg_catalog.concat_ws(' ',class.name,class.subject,class.teacher,pg_catalog.coalesce(pg_catalog.to_jsonb(class) ->> 'classroom',pg_catalog.to_jsonb(class) ->> 'room')) ilike '%' || p_filters ->> 'search' || '%'
+      where p_filters ->> 'search' = '' or pg_catalog.concat_ws(' ',class.name,class.subject,class.teacher,class.room) ilike '%' || p_filters ->> 'search' || '%'
     )
     select pg_catalog.jsonb_build_object(
       'status',(select pg_catalog.coalesce(pg_catalog.jsonb_agg(value order by value collate dashboard_private.ko_numeric),'[]'::jsonb) from (select distinct raw ->> 'status' value from source where nullif(raw ->> 'status','') is not null and ((p_filters ->> 'subject') is null or raw ->> 'subject' = p_filters ->> 'subject') and ((p_filters ->> 'grade') is null or raw ->> 'grade' = p_filters ->> 'grade') and ((p_filters ->> 'teacher') is null or pg_catalog.coalesce(raw ->> 'teacher_name',raw ->> 'teacher') = p_filters ->> 'teacher') and ((p_filters ->> 'classroom') is null or pg_catalog.coalesce(raw ->> 'classroom',raw ->> 'room') = p_filters ->> 'classroom') and ((p_filters ->> 'periodId') is null or exists (select 1 from public.class_schedule_sync_group_members member where member.class_id=source.id and member.group_id::text=p_filters ->> 'periodId')) order by value collate dashboard_private.ko_numeric limit 500) option),
@@ -331,7 +354,9 @@ begin
     ) into v_result;
   else
     with source as (
-      select pg_catalog.to_jsonb(textbook) raw
+      select pg_catalog.jsonb_build_object(
+        'title',textbook.title,'subject',textbook.subject,'publisher',textbook.publisher,'status',textbook.status
+      ) raw
       from public.textbooks textbook
       where p_filters ->> 'search' = '' or pg_catalog.concat_ws(' ',textbook.title,textbook.subject,textbook.publisher) ilike '%' || p_filters ->> 'search' || '%'
     )
@@ -370,7 +395,12 @@ as $function$
     from public.classes class
     where class.id = p_class_id
   ), textbook_source as (
-    select textbook.id,pg_catalog.to_jsonb(textbook) raw
+    select textbook.id,pg_catalog.jsonb_build_object(
+      'title',textbook.title,'name',textbook.name,'subject',textbook.subject,'publisher',textbook.publisher,
+      'school_level',textbook.school_level,'grade_level',textbook.grade_level,
+      'school_levels',pg_catalog.to_jsonb(textbook.school_levels),'grade_levels',pg_catalog.to_jsonb(textbook.grade_levels),
+      'sub_subject',textbook.sub_subject,'subject_area_key',textbook.subject_area_key
+    ) raw
     from public.textbooks textbook
   ), candidate as (
     select textbook.id,textbook.raw,
