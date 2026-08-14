@@ -813,6 +813,7 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
         cursor: null,
         limit: 30,
         canonicalReplayToken,
+        coalesceInitialRequest: allowCanonicalReplay,
       });
       if (!isCurrent()) return;
       canonicalReplayTokenRef.current = textValue(result.canonicalReplayToken);

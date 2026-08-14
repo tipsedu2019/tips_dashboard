@@ -107,3 +107,11 @@ Source implementation and source verification are complete. Runtime SQL behavior
 - RED evidence: the focused round-4 contracts first ran **19 pass / 3 fail**. Final focused result is **22/22 GREEN**; full management is **140/140 GREEN**; combined management/query-budget/textbook-picker/schema verification is **206/206 GREEN**.
 - TypeScript, relevant ESLint (zero warnings), management query-surface guard, migration hash equality, and diff check are GREEN. Candidate SHA-256 is `1508a71f54472893935e0921a656ec80d6fac5429cae5800b8ce2396dbd04fac`.
 - No database runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, and provider activity remain unexecuted and unclaimed; the migration remains `candidate`.
+
+## Adversarial fix round 5
+
+- Removed whole-row conversions from the bounded 30+1 detail-relation RPC as well. Lifecycle, class roster, recent-issue, and textbook-assignment branches now read only the scalar or bounded JSON fields they use; the invariant covers the complete relation function and rejects whole-row `to_jsonb(student|enrollment|class|textbook)`, `schedule_plan`, and `lessons`.
+- Added revision-aware initial-bundle coordination. An explicit refresh or mutation invalidates the matching passive in-flight no-period request, bypasses coalescing, and executes a fresh list/stats/options bundle. A late passive response cannot install a replay token, while passive concurrent identical initial calls still share one Promise.
+- RED evidence: the focused round-5 contracts first ran **21 pass / 2 fail**. Final focused result is **23/23 GREEN**; full management is **141/141 GREEN**; combined management/query-budget/textbook-picker/schema verification is **207/207 GREEN**.
+- TypeScript, relevant ESLint (zero warnings), management query-surface guard, migration hash equality, and diff check are GREEN. Candidate SHA-256 is `44dff0d605127f5cd4efcd954f9bb324e846b60dc5d956755e6aa63b67f1dcc5`.
+- No database runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, and provider activity remain unexecuted and unclaimed; the migration remains `candidate`.

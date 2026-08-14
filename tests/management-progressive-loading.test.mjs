@@ -246,6 +246,68 @@ test("the first class management bundle resolves and applies the default period 
   }
 });
 
+test("an explicit refresh bypasses and revokes an overlapping passive default-period bundle", async () => {
+  const defaultPeriodId = "30000000-0000-4000-8000-000000000002";
+  const calls = [];
+  const gates = new Map([
+    ["list_management_page_v1", [deferred(), deferred()]],
+    ["get_management_stats_v1", [deferred(), deferred()]],
+    ["list_management_filter_options_v1", [deferred(), deferred()]],
+  ]);
+  const callCounts = new Map();
+  const client = {
+    rpc(name, args) {
+      calls.push([name, args]);
+      if (name === "get_management_default_class_period_v1") {
+        return makeRpcBuilder({ data: { periodId: defaultPeriodId }, error: null }, calls);
+      }
+      const revision = (callCounts.get(name) || 0) + 1;
+      callCounts.set(name, revision);
+      const gate = gates.get(name)?.[revision - 1];
+      if (!gate) throw new Error(`unexpected rpc ${name} revision ${revision}`);
+      const result = name === "list_management_page_v1"
+        ? { data: [{ id: `60000000-0000-4000-8000-${String(revision).padStart(12, "0")}`, row_data: { revision } }], error: null }
+        : name === "get_management_stats_v1"
+          ? { data: { total: revision, byStatus: {} }, error: null }
+          : { data: { revision }, error: null };
+      return {
+        abortSignal() { return this; },
+        retry() { return gate.promise.then(() => result); },
+      };
+    },
+  };
+  const service = createManagementReadService({ supabase: client });
+  const filters = {
+    kind: "classes", search: "", periodId: null, status: "수강",
+    subject: null, grade: null, teacher: null, classroom: null,
+  };
+
+  const passive = service.loadInitialPage({ kind: "classes", filters, cursor: null, limit: 30 });
+  for (let attempt = 0; attempt < 20 && callCounts.get("list_management_page_v1") !== 1; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.equal(callCounts.get("list_management_page_v1"), 1);
+  const refresh = service.loadInitialPage({
+    kind: "classes", filters, cursor: null, limit: 30, coalesceInitialRequest: false,
+  });
+  for (let attempt = 0; attempt < 20 && callCounts.get("list_management_page_v1") !== 2; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  for (const name of ["list_management_page_v1", "get_management_stats_v1", "list_management_filter_options_v1"]) {
+    assert.equal(callCounts.get(name), 2);
+  }
+  for (const entries of gates.values()) entries[1].resolve();
+  const refreshed = await refresh;
+  assert.equal(refreshed.stats.total, 2);
+  assert.equal(refreshed.page.rows[0].revision, 2);
+
+  for (const entries of gates.values()) entries[0].resolve();
+  const stalePassive = await passive;
+  assert.equal(stalePassive.stats.total, 1);
+  assert.equal(stalePassive.canonicalReplayToken, null);
+});
+
 test("class textbook candidates use bounded query-scoped continuation and retain unmatched assigned IDs", async () => {
   const calls = [];
   const classId = "40000000-0000-4000-8000-000000000001";
@@ -373,7 +435,7 @@ test("management hook and UI keep list reads bounded while details and relation 
   const tableSource = await readFile(new URL("../src/features/management/management-data-table.tsx", import.meta.url), "utf8");
 
   const activeHook = hookSource.slice(hookSource.indexOf("export function useManagementRecords"));
-  assert.match(activeHook, /readService\.loadInitialPage\(\{[\s\S]*?kind,[\s\S]*?filters,[\s\S]*?cursor: null,[\s\S]*?limit: 30,[\s\S]*?canonicalReplayToken,/);
+  assert.match(activeHook, /readService\.loadInitialPage\(\{[\s\S]*?kind,[\s\S]*?filters,[\s\S]*?cursor: null,[\s\S]*?limit: 30,[\s\S]*?canonicalReplayToken,[\s\S]*?coalesceInitialRequest: allowCanonicalReplay/);
   assert.match(activeHook, /void load\(\{ allowCanonicalReplay: true \}\)/);
   assert.match(activeHook, /const refresh = useCallback\(\(\) => load\(\{ allowCanonicalReplay: false \}\)/);
   assert.match(activeHook, /readService\.loadNextPage\(\{ kind, filters: effectiveFiltersRef\.current, cursor: nextCursor, limit: 30 \}\)/);

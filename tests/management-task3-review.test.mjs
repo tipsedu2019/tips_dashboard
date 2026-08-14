@@ -113,11 +113,11 @@ test("search query state is debounced before URL and RPC scope changes", async (
 
 test("bounded textbook reads never inspect the lessons JSONB payload", async () => {
   const migration = await readFile(new URL("supabase/migrations/20260814011752_management_page_reads.sql", root), "utf8");
-  const listAndAggregates = migration.slice(0, migration.indexOf("create function public.list_management_detail_relation_page_v1"));
-  assert.doesNotMatch(listAndAggregates, /->\s*'lessons'|jsonb_array_length\([^)]*lessons/i);
-  assert.doesNotMatch(listAndAggregates, /to_jsonb\((?:student|enrollment|class|textbook)\)/i);
-  assert.doesNotMatch(listAndAggregates, /\bschedule_plan\b|\blessons\b/i);
-  assert.match(listAndAggregates, /textbook\.status|raw\s*->>\s*'status'/);
+  const boundedAndRelations = migration.slice(0, migration.indexOf("create function public.get_management_detail_v1"));
+  assert.doesNotMatch(boundedAndRelations, /->\s*'lessons'|jsonb_array_length\([^)]*lessons/i);
+  assert.doesNotMatch(boundedAndRelations, /to_jsonb\((?:student|enrollment|class|textbook)\)/i);
+  assert.doesNotMatch(boundedAndRelations, /\bschedule_plan\b|\blessons\b/i);
+  assert.match(boundedAndRelations, /textbook\.status|raw\s*->>\s*'status'/);
 });
 
 test("class textbook picker keeps one controlled query for input results and cursor scope", async () => {

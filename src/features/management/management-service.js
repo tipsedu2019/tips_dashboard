@@ -196,6 +196,7 @@ function withOpaqueDetailRelationCursors(detail, kind, entityId) {
 export function createManagementReadService(options = {}) {
   const client = ensureClient(options.supabase);
   const inFlightInitialClassBundles = new Map();
+  const initialClassBundleRevisions = new Map();
   const canonicalReplayBundles = new Map();
   let canonicalReplaySequence = 0;
 
@@ -270,11 +271,12 @@ export function createManagementReadService(options = {}) {
       cursor = null,
       limit = MANAGEMENT_PAGE_SIZE,
       canonicalReplayToken = "",
+      coalesceInitialRequest = true,
     }) {
       assertManagementFilters(kind, filters);
       const requestedFingerprint = filterFingerprint(filters);
       const safeReplayToken = trimText(canonicalReplayToken);
-      if (safeReplayToken) {
+      if (safeReplayToken && coalesceInitialRequest) {
         const replay = canonicalReplayBundles.get(safeReplayToken);
         canonicalReplayBundles.delete(safeReplayToken);
         if (replay
@@ -284,12 +286,24 @@ export function createManagementReadService(options = {}) {
           && replay.effectiveFingerprint === requestedFingerprint) {
           return replay.result;
         }
+      } else if (safeReplayToken) {
+        canonicalReplayBundles.delete(safeReplayToken);
       }
 
       if (kind === "classes" && !trimText(filters.periodId)) {
         const initialFingerprint = filterFingerprint({ kind, filters, cursor, limit });
-        const inFlight = inFlightInitialClassBundles.get(initialFingerprint);
-        if (inFlight) return inFlight;
+        let requestRevision = initialClassBundleRevisions.get(initialFingerprint) || 0;
+        if (!coalesceInitialRequest) {
+          requestRevision += 1;
+          initialClassBundleRevisions.set(initialFingerprint, requestRevision);
+          inFlightInitialClassBundles.delete(initialFingerprint);
+          for (const [token, replay] of canonicalReplayBundles) {
+            if (replay.initialFingerprint === initialFingerprint) canonicalReplayBundles.delete(token);
+          }
+        } else {
+          const inFlight = inFlightInitialClassBundles.get(initialFingerprint);
+          if (inFlight) return inFlight;
+        }
         const initialPromise = (async () => {
           const { data, error } = await client.rpc("get_management_default_class_period_v1")
             .abortSignal(AbortSignal.timeout(8_000)).retry(false);
@@ -298,6 +312,9 @@ export function createManagementReadService(options = {}) {
           if (!periodId) throw managementReadError("management_default_period_unavailable");
           const effectiveFilters = { ...filters, periodId };
           const result = await loadPageBundle({ kind, filters: effectiveFilters, cursor, limit });
+          if ((initialClassBundleRevisions.get(initialFingerprint) || 0) !== requestRevision) {
+            return { ...result, canonicalReplayToken: null };
+          }
           const replayToken = `management-canonical-${canonicalReplaySequence += 1}`;
           canonicalReplayBundles.set(replayToken, {
             initialFingerprint,
@@ -306,7 +323,7 @@ export function createManagementReadService(options = {}) {
           });
           return { ...result, canonicalReplayToken: replayToken };
         })();
-        inFlightInitialClassBundles.set(initialFingerprint, initialPromise);
+        if (coalesceInitialRequest) inFlightInitialClassBundles.set(initialFingerprint, initialPromise);
         try {
           return await initialPromise;
         } finally {

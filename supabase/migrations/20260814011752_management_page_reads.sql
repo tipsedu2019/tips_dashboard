@@ -478,7 +478,7 @@ begin
       select history.id, history.changed_at::text sort_value,
         pg_catalog.jsonb_build_object(
           'id',history.id,'classId',history.class_id,'className',class.name,'subject',class.subject,
-          'teacher',pg_catalog.coalesce(pg_catalog.to_jsonb(class) ->> 'teacher_name',class.teacher),
+          'teacher',class.teacher,
           'eventType',history.action,'action',history.action,
           'label',case history.action when 'enrolled' then '수강 등록' when 'waitlist' then '대기 등록' when 'removed' then '수강 해제' else history.action end,
           'occurredAt',history.changed_at,'changedAt',history.changed_at,'safeSummary',pg_catalog.coalesce(history.memo,'')) row_data
@@ -500,29 +500,28 @@ begin
       into v_rows,v_count,v_next_sort_key,v_next_id from (select page.*,pg_catalog.row_number() over (order by sort_value,id) ordinal from page) bounded;
   elsif p_kind = 'students' then
     with selected_student as (
-      select pg_catalog.to_jsonb(student) raw from public.students student where student.id=p_id
+      select student.class_ids,student.waitlist_class_ids from public.students student where student.id=p_id
     ), candidates as (
       select enrollment.class_id,
-        case when pg_catalog.coalesce(pg_catalog.to_jsonb(enrollment) ->> 'roster_active','false')::boolean then 'enrolled' else 'waitlisted' end status,
+        case when enrollment.roster_active then 'enrolled' else 'waitlisted' end status,
         enrollment.updated_at sort_at,enrollment.id event_id,1 priority
       from public.ops_registration_enrollments enrollment
       where enrollment.student_id=p_id and enrollment.class_id is not null
-        and (pg_catalog.coalesce(pg_catalog.to_jsonb(enrollment) ->> 'roster_active','false')::boolean or enrollment.status in ('enrolled','waitlist','waitlisted'))
+        and (enrollment.roster_active or enrollment.status in ('enrolled','waitlist','waitlisted'))
       union all
       select class.id,'enrolled',pg_catalog.coalesce(class.updated_at,'epoch'::timestamptz),class.id,2
-      from selected_student cross join lateral pg_catalog.jsonb_array_elements_text(pg_catalog.coalesce(selected_student.raw -> 'class_ids','[]'::jsonb)) direct(class_id)
+      from selected_student cross join lateral pg_catalog.jsonb_array_elements_text(pg_catalog.coalesce(selected_student.class_ids,'[]'::jsonb)) direct(class_id)
       join public.classes class on class.id::text=direct.class_id
       union all
       select class.id,'waitlisted',pg_catalog.coalesce(class.updated_at,'epoch'::timestamptz),class.id,3
-      from selected_student cross join lateral pg_catalog.jsonb_array_elements_text(pg_catalog.coalesce(selected_student.raw -> 'waitlist_class_ids','[]'::jsonb)) direct(class_id)
+      from selected_student cross join lateral pg_catalog.jsonb_array_elements_text(pg_catalog.coalesce(selected_student.waitlist_class_ids,'[]'::jsonb)) direct(class_id)
       join public.classes class on class.id::text=direct.class_id
       union all
       select class.id,'enrolled',pg_catalog.coalesce(class.updated_at,'epoch'::timestamptz),class.id,4
-      from public.classes class where pg_catalog.coalesce(pg_catalog.to_jsonb(class) -> 'student_ids','[]'::jsonb) ? p_id::text
+      from public.classes class where pg_catalog.coalesce(class.student_ids,'[]'::jsonb) ? p_id::text
       union all
       select class.id,'waitlisted',pg_catalog.coalesce(class.updated_at,'epoch'::timestamptz),class.id,5
-      from public.classes class where pg_catalog.coalesce(pg_catalog.to_jsonb(class) -> 'waitlist_ids','[]'::jsonb) ? p_id::text
-        or pg_catalog.coalesce(pg_catalog.to_jsonb(class) -> 'waitlist_student_ids','[]'::jsonb) ? p_id::text
+      from public.classes class where pg_catalog.coalesce(class.waitlist_ids,'[]'::jsonb) ? p_id::text
     ), canonical as (
       select distinct on (class_id) class_id,status,sort_at,event_id
       from candidates
@@ -531,8 +530,8 @@ begin
       select canonical.event_id id,canonical.sort_at::text sort_value,
         pg_catalog.jsonb_build_object(
           'classId',class.id,'className',class.name,'name',class.name,'subject',class.subject,
-          'teacher',pg_catalog.coalesce(pg_catalog.to_jsonb(class) ->> 'teacher_name',class.teacher),
-          'classroom',pg_catalog.coalesce(pg_catalog.to_jsonb(class) ->> 'classroom',pg_catalog.to_jsonb(class) ->> 'room'),
+          'teacher',class.teacher,
+          'classroom',class.room,
           'schedule',class.schedule,'status',canonical.status,'startedOn',null,'endedOn',null) row_data
       from canonical join public.classes class on class.id=canonical.class_id
       where p_cursor_sort_key is null or canonical.sort_at < p_cursor_sort_key::timestamptz or (canonical.sort_at=p_cursor_sort_key::timestamptz and canonical.event_id > p_cursor_id)
@@ -540,14 +539,20 @@ begin
     ) select pg_catalog.coalesce(pg_catalog.jsonb_agg(row_data order by sort_value desc,id) filter (where ordinal <= p_limit),'[]'::jsonb),pg_catalog.count(*),(pg_catalog.array_agg(sort_value) filter (where ordinal=p_limit))[1],(pg_catalog.array_agg(id) filter (where ordinal=p_limit))[1]
       into v_rows,v_count,v_next_sort_key,v_next_id from (select page.*,pg_catalog.row_number() over (order by sort_value desc,id) ordinal from page) bounded;
   elsif p_kind = 'classes' then
-    with selected_class as (select pg_catalog.to_jsonb(class) raw from public.classes class where class.id = p_id), page as (
+    with selected_class as (
+      select case when p_relation_kind='registered_students'
+        then pg_catalog.coalesce(class.student_ids,'[]'::jsonb)
+        else pg_catalog.coalesce(class.waitlist_ids,'[]'::jsonb)
+      end student_ids
+      from public.classes class where class.id = p_id
+    ), page as (
       select student.id, pg_catalog.coalesce(nullif(pg_catalog.btrim(student.name),''),U&'\FFFF') collate dashboard_private.ko_numeric sort_value,
         pg_catalog.jsonb_build_object(
           'id',student.id,'name',student.name,'school',student.school,'grade',student.grade,'status',student.status,
           'contact',student.contact,'parentContact',student.parent_contact,
-          'recentIssue',pg_catalog.to_jsonb(student) -> 'recent_issue') row_data
+          'recentIssue',student.recent_issue) row_data
       from public.students student cross join selected_class
-      where pg_catalog.coalesce(selected_class.raw -> (case when p_relation_kind='registered_students' then 'student_ids' else 'waitlist_ids' end),'[]'::jsonb) ? student.id::text
+      where selected_class.student_ids ? student.id::text
         and (p_cursor_sort_key is null or pg_catalog.coalesce(nullif(pg_catalog.btrim(student.name),''),U&'\FFFF') collate dashboard_private.ko_numeric > p_cursor_sort_key collate dashboard_private.ko_numeric
           or (pg_catalog.coalesce(nullif(pg_catalog.btrim(student.name),''),U&'\FFFF') collate dashboard_private.ko_numeric = p_cursor_sort_key collate dashboard_private.ko_numeric and student.id > p_cursor_id))
       order by sort_value asc,student.id asc limit p_limit + 1
@@ -557,7 +562,7 @@ begin
     with page as (
       select class.id, pg_catalog.coalesce(nullif(pg_catalog.btrim(class.name),''),U&'\FFFF') collate dashboard_private.ko_numeric sort_value,
         pg_catalog.jsonb_build_object('id',class.id,'name',class.name,'subject',class.subject,'teacherName',class.teacher) row_data
-      from public.classes class where pg_catalog.coalesce(pg_catalog.to_jsonb(class) -> 'textbook_ids','[]'::jsonb) ? p_id::text
+      from public.classes class where pg_catalog.coalesce(class.textbook_ids,'[]'::jsonb) ? p_id::text
         and (p_cursor_sort_key is null or pg_catalog.coalesce(nullif(pg_catalog.btrim(class.name),''),U&'\FFFF') collate dashboard_private.ko_numeric > p_cursor_sort_key collate dashboard_private.ko_numeric
           or (pg_catalog.coalesce(nullif(pg_catalog.btrim(class.name),''),U&'\FFFF') collate dashboard_private.ko_numeric = p_cursor_sort_key collate dashboard_private.ko_numeric and class.id > p_cursor_id))
       order by sort_value asc,class.id asc limit p_limit + 1
