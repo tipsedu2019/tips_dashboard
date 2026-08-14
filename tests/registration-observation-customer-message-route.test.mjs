@@ -124,6 +124,7 @@ function createObservationProductionHarness({
   readinessBlockers = [],
   providerOutcome = "accepted",
   interleavedHistory = false,
+  historyTableDenied = false,
 } = {}) {
   const calls = {
     actorTables: [],
@@ -203,6 +204,9 @@ function createObservationProductionHarness({
               ["id", { ascending: false }],
             ])
             calls.currentHistoryFilters.push(...filters)
+            if (historyTableDenied) {
+              return { data: null, error: { code: "42501" } }
+            }
             if (!interleavedHistory) {
               return {
                 data: [...messages.values()]
@@ -285,6 +289,58 @@ function createObservationProductionHarness({
             ...readinessBlockers,
             ...(duplicateLocked ? ["duplicate_locked"] : []),
           ]),
+          error: null,
+        }
+      }
+      if (name === "list_current_registration_observation_customer_messages_v1") {
+        assert.deepEqual(args, {
+          p_actor_profile_id: IDS.actor,
+          p_task_id: IDS.task,
+          p_message_kind: "observation_booking",
+          p_observation_id: IDS.observation,
+          p_source_revision: currentRawSource.sourceRevision,
+          p_source_fingerprint: currentContractIdentity.sourceFingerprint,
+          p_recipient_hash: currentContractIdentity.recipientHash,
+          p_limit: 1,
+        })
+        calls.currentHistoryFilters.push(
+          args.p_task_id,
+          args.p_observation_id,
+          args.p_message_kind,
+          args.p_source_revision,
+          args.p_source_fingerprint,
+          args.p_recipient_hash,
+        )
+        if (!interleavedHistory) {
+          return {
+            data: [...messages.values()]
+              .filter((state) => state.sourceFingerprint === currentContractIdentity.sourceFingerprint)
+              .slice(-args.p_limit)
+              .reverse()
+              .map((state) => ({
+                messageId: state.messageId,
+                messageKind: "observation_booking",
+                currentStatus: state.status,
+                confirmedByName: "현재 담당자",
+                confirmedAt: "2026-08-12T01:00:00.000Z",
+                updatedAt: "2026-08-12T01:00:01.000Z",
+                recipientLast4: "5678",
+                canCheck: state.status === "unknown",
+              })),
+            error: null,
+          }
+        }
+        return {
+          data: [{
+            messageId: IDS.message,
+            messageKind: "observation_booking",
+            currentStatus: "unknown",
+            confirmedByName: "현재 담당자",
+            confirmedAt: "2026-08-12T02:00:00.000Z",
+            updatedAt: "2026-08-12T02:01:00.000Z",
+            recipientLast4: "5678",
+            canCheck: true,
+          }],
           error: null,
         }
       }
@@ -666,4 +722,20 @@ test("observation preview binds sender, time, and status to the current private 
   })
   assert.equal(harness.calls.currentHistoryFilters.length, 6)
   assert.equal(harness.calls.providerSend, 0)
+})
+
+test("observation preview uses the authorized history RPC when ledger table access is denied", async () => {
+  const harness = createObservationProductionHarness({
+    runtimeVersion: 1,
+    activationMode: "live",
+    historyTableDenied: true,
+  })
+
+  const response = await harness.handlers.preview(operatorRequest("/preview", OBSERVATION_BOOKING_TARGET))
+  const preview = await response.json()
+
+  assert.equal(response.status, 200)
+  assert.equal(preview.ok, true)
+  assert.equal(preview.latestMessage, null)
+  assert.ok(harness.calls.rpcNames.includes("list_current_registration_observation_customer_messages_v1"))
 })
