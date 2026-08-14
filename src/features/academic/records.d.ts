@@ -244,7 +244,7 @@ export function buildTimetableWorkspaceModel(input?: {
   classGroupMembers?: AcademicSourceRow[];
   teacherCatalogs?: AcademicSourceRow[];
   classroomCatalogs?: AcademicSourceRow[];
-  filters?: Record<string, string>;
+  filters?: Record<string, string | null | undefined>;
 }): TimetableWorkspaceModel;
 export function buildTimetableGridPanels(input?: {
   workspace?: TimetableWorkspaceModel;

@@ -25,7 +25,7 @@ import {
   type ClassFilterPanelChip,
   type ClassFilterPanelSelect,
 } from "@/features/management/class-filter-panel";
-import { pickDefaultPeriodValue } from "@/features/management/period-preferences";
+import { pickDefaultPeriodValue, readDefaultPeriodPreference } from "@/features/management/period-preferences";
 import { buildCurriculumWorkspaceModel, type CurriculumRow } from "./records.js";
 import { useAcademicWorkspaceData } from "./use-academic-workspace-data";
 
@@ -231,7 +231,10 @@ export function AcademicCurriculumWorkspace() {
   const searchParamString = searchParams.toString();
   const desktopListRef = useRef<HTMLDivElement | null>(null);
   const [search, setSearch] = useState(() => text(searchParams.get("q")));
-  const [period, setPeriod] = useState(() => text(searchParams.get("period")));
+  const [period, setPeriod] = useState(() => {
+    const preference = readDefaultPeriodPreference();
+    return text(searchParams.get("period")) || preference.id || preference.name || "";
+  });
   const [status, setStatus] = useState(() => text(searchParams.get("status")) || DEFAULT_CURRICULUM_STATUS_FILTER);
   const [subject, setSubject] = useState(() => text(searchParams.get("subject")));
   const [grade, setGrade] = useState(() => text(searchParams.get("grade")));
@@ -245,6 +248,7 @@ export function AcademicCurriculumWorkspace() {
     loadingMore,
     error,
     loadMore,
+    refresh,
   } = useAcademicWorkspaceData({
     mode: "curriculum",
     periodId: period || null,
@@ -307,11 +311,6 @@ export function AcademicCurriculumWorkspace() {
   const normalizedPeriod = period && model.classGroupOptions.some((option) => option.value === period)
     ? period
     : defaultPeriod;
-  useEffect(() => {
-    if (defaultPeriod && period !== normalizedPeriod) {
-      setPeriod(normalizedPeriod);
-    }
-  }, [defaultPeriod, normalizedPeriod, period]);
   const hasNonDefaultPeriodFilter = Boolean(normalizedPeriod && normalizedPeriod !== defaultPeriod);
   const hasNonDefaultStatusFilter = status !== DEFAULT_CURRICULUM_STATUS_FILTER;
   const hasActiveFilters = Boolean(
@@ -548,7 +547,12 @@ export function AcademicCurriculumWorkspace() {
       {error ? (
         <div className="px-4 lg:px-6">
           <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+              <span>{error}</span>
+              <Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>
+                다시 시도
+              </Button>
+            </AlertDescription>
           </Alert>
         </div>
       ) : null}

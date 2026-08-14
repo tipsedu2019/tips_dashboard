@@ -8,6 +8,8 @@ const module = await import(
 
 const createAcademicReadService = module.createAcademicReadService;
 const appendAcademicCurriculumPageIfCurrent = module.appendAcademicCurriculumPageIfCurrent;
+const isAcademicContinuationLoadingForScope = module.isAcademicContinuationLoadingForScope;
+const selectAcademicDisplayRequest = module.selectAcademicDisplayRequest;
 
 function makeRpcBuilder(result, calls) {
   return {
@@ -97,6 +99,7 @@ test("timetable density branches are all-or-nothing and distinguish row from col
           : {
               ok: false,
               code: "timetable_collection_too_dense",
+              range: { dateFrom: "2026-08-03", dateTo: "2026-08-16" },
               collection: "class_group_members",
               observedItemsAtLeast: 501,
               action: "narrow_filters",
@@ -118,6 +121,7 @@ test("timetable density branches are all-or-nothing and distinguish row from col
   assert.deepEqual(await service.load({ ...base, filters: { ...base.filters, subject: "영어" } }), {
     ok: false,
     code: "timetable_collection_too_dense",
+    range: { dateFrom: "2026-08-03", dateTo: "2026-08-16" },
     collection: "class_group_members",
     observedItemsAtLeast: 501,
     action: "narrow_filters",
@@ -127,6 +131,31 @@ test("timetable density branches are all-or-nothing and distinguish row from col
     service.load({ ...base, subject: "수학", dateTo: "2026-08-17" }),
     (error) => error?.code === "academic_range_invalid",
   );
+});
+
+test("every timetable density result is bound to the requested visible range", async () => {
+  const service = createAcademicReadService({
+    supabase: makeClient({
+      get_academic_timetable_range_v1: {
+        data: {
+          ok: false,
+          code: "timetable_collection_too_dense",
+          collection: "class_groups",
+          observedItemsAtLeast: 501,
+          action: "narrow_filters",
+          rows: [],
+        },
+        error: null,
+      },
+    }, []),
+    actorScope: "actor-a:admin",
+  });
+  await assert.rejects(service.load({
+    mode: "timetable",
+    dateFrom: "2026-08-03",
+    dateTo: "2026-08-09",
+    filters: { classGroupId: null, status: null, subject: null },
+  }), (error) => error?.code === "academic_timetable_response_invalid");
 });
 
 test("curriculum mode applies every filter at the server and returns a 30 plus one keyset page", async () => {
@@ -220,6 +249,104 @@ test("curriculum detail is selection-driven and exact while stale continuation i
   }).page.rows.length, 1);
 });
 
+test("curriculum cursor scope is actor-bound before any database continuation", async () => {
+  const calls = [];
+  const row = {
+    id: "41000000-0000-4000-8000-000000000001",
+    sort_key: "수업 1",
+    row_data: { id: "41000000-0000-4000-8000-000000000001" },
+  };
+  const response = { data: { rows: Array.from({ length: 31 }, () => row), stats: {}, filterOptions: {} }, error: null };
+  const client = makeClient({ get_academic_curriculum_page_v1: response }, calls);
+  const request = {
+    mode: "curriculum",
+    periodId: null,
+    search: "",
+    status: null,
+    subject: null,
+    grade: null,
+    teacher: null,
+    classroom: null,
+    viewMode: "all",
+    cursor: null,
+  };
+  const first = await createAcademicReadService({ supabase: client, actorScope: "actor-a:admin" }).load(request);
+
+  await assert.rejects(
+    createAcademicReadService({ supabase: client, actorScope: "actor-b:admin" }).load({
+      ...request,
+      cursor: first.page.nextCursor,
+    }),
+    (error) => error?.code === "academic_cursor_mismatch",
+  );
+  assert.equal(calls.filter(([name]) => name === "get_academic_curriculum_page_v1").length, 1);
+});
+
+test("curriculum continuation reuses first-page stats and facets without requesting recomputation", async () => {
+  const calls = [];
+  const rows = Array.from({ length: 31 }, (_, index) => ({
+    id: `42000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    sort_key: `수업 ${String(index + 1).padStart(2, "0")}`,
+    row_data: { id: `42000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}` },
+  }));
+  const client = makeClient({
+    get_academic_curriculum_page_v1: ({ p_cursor_id: cursorId }) => ({
+      data: cursorId
+        ? { rows: [], stats: null, filterOptions: null }
+        : { rows, stats: { total: 31 }, filterOptions: { subjects: ["수학"] } },
+      error: null,
+    }),
+  }, calls);
+  const service = createAcademicReadService({ supabase: client, actorScope: "actor-a:admin" });
+  const request = {
+    mode: "curriculum",
+    periodId: null,
+    search: "",
+    status: null,
+    subject: null,
+    grade: null,
+    teacher: null,
+    classroom: null,
+    viewMode: "all",
+    cursor: null,
+  };
+  const first = await service.load(request);
+  const next = await service.load({ ...request, cursor: first.page.nextCursor });
+  const rpcCalls = calls.filter(([name]) => name === "get_academic_curriculum_page_v1");
+
+  assert.equal(rpcCalls[0][1].p_include_scope_metadata, true);
+  assert.equal(rpcCalls[1][1].p_include_scope_metadata, false);
+  assert.deepEqual(next.stats, first.stats);
+  assert.deepEqual(next.filterOptions, first.filterOptions);
+  assert.deepEqual(appendAcademicCurriculumPageIfCurrent({
+    current: first,
+    next: { ...next, stats: { total: 999 }, filterOptions: { subjects: ["영어"] } },
+    expectedRevision: 1,
+    currentRevision: 1,
+    expectedFingerprint: "same",
+    currentFingerprint: "same",
+  }).stats, first.stats);
+});
+
+test("continuation loading and last-good display are synchronously bound to the active scope", () => {
+  assert.equal(typeof isAcademicContinuationLoadingForScope, "function");
+  assert.equal(typeof selectAcademicDisplayRequest, "function");
+  assert.equal(isAcademicContinuationLoadingForScope("scope-a", "scope-a"), true);
+  assert.equal(isAcademicContinuationLoadingForScope("scope-a", "scope-b"), false);
+  const successfulRequest = { mode: "timetable", filters: { subject: "수학" } };
+  const failedRequest = { mode: "timetable", filters: { subject: "영어" } };
+  assert.equal(selectAcademicDisplayRequest({
+    data: { rows: [{ id: "old" }] },
+    successfulRequest,
+    currentRequest: failedRequest,
+  }), successfulRequest);
+  assert.equal(selectAcademicDisplayRequest({
+    data: null,
+    successfulRequest,
+    currentRequest: failedRequest,
+  }), failedRequest);
+});
+
 test("academic scoped migration is invoker-only, authenticated-only, bounded and explicit", async () => {
   const sql = await readFile(
     new URL("../supabase/migrations/20260814062437_academic_scoped_reads.sql", import.meta.url),
@@ -240,4 +367,50 @@ test("academic scoped migration is invoker-only, authenticated-only, bounded and
   assert.doesNotMatch(sql, /select\s+\*/i);
   assert.match(sql, /revoke all on function[\s\S]+from public, anon, authenticated/i);
   assert.match(sql, /grant execute on function[\s\S]+to authenticated/i);
+});
+
+test("academic SQL filters candidates before aggregates and keeps continuation metadata optional", async () => {
+  const sql = await readFile(
+    new URL("../supabase/migrations/20260814062437_academic_scoped_reads.sql", import.meta.url),
+    "utf8",
+  );
+  const curriculum = sql.slice(
+    sql.indexOf("create function public.get_academic_curriculum_page_v1"),
+    sql.indexOf("create function public.get_academic_curriculum_detail_v1"),
+  );
+  assert.ok(curriculum.indexOf("eligible_classes as materialized") < curriculum.indexOf("progress_agg as materialized"));
+  assert.match(curriculum, /p_include_scope_metadata boolean default true/i);
+  assert.match(curriculum, /case when p_include_scope_metadata then[\s\S]+from stats/i);
+  assert.match(curriculum, /case when p_include_scope_metadata then[\s\S]+from filter_options/i);
+  assert.doesNotMatch(curriculum, /from public\.progress_logs log group by log\.class_id/i);
+  assert.doesNotMatch(curriculum, /from public\.class_lesson_sessions session group by session\.class_id/i);
+});
+
+test("academic SQL resolves defaults once and uses canonical classroom and work-state semantics", async () => {
+  const sql = await readFile(
+    new URL("../supabase/migrations/20260814062437_academic_scoped_reads.sql", import.meta.url),
+    "utf8",
+  );
+  assert.match(sql, /order by group_row\.is_default desc[\s\S]+limit 1/i);
+  assert.match(sql, /v_class_group_id/i);
+  assert.match(sql, /academic_classroom_name_v1\(pg_catalog\.btrim\(token\)\)[\s\S]+academic_classroom_name_v1\(pg_catalog\.btrim\(v_filters ->> 'classroom'\)\)/i);
+  assert.match(sql, /when base\.session_count = 0 then '회차 미생성'[\s\S]+when base\.textbook_count = 0 then '교재 미연결'/i);
+  assert.match(sql, /when base\.session_count = 0 then 'unscheduled'[\s\S]+when base\.textbook_count = 0 then 'unlinked'/i);
+});
+
+test("academic SQL returns the earliest exact unplanned session and an explicit detail class projection", async () => {
+  const sql = await readFile(
+    new URL("../supabase/migrations/20260814062437_academic_scoped_reads.sql", import.meta.url),
+    "utf8",
+  );
+  const detail = sql.slice(
+    sql.indexOf("create function public.get_academic_curriculum_detail_v1"),
+    sql.indexOf("revoke all on function dashboard_private"),
+  );
+  assert.match(sql, /next_unplanned as materialized/i);
+  assert.match(sql, /'sessionId',\s*next_session_id/i);
+  assert.match(sql, /not exists \([\s\S]+from public\.progress_logs/i);
+  assert.doesNotMatch(detail, /to_jsonb\(class\)/i);
+  assert.match(detail, /jsonb_build_object\([\s\S]+'id',\s*class\.id[\s\S]+'scheduleRevision',\s*class\.schedule_revision/i);
+  assert.doesNotMatch(detail, /student_ids|waitlist_ids|schedule_plan|lessons|fee|capacity/i);
 });

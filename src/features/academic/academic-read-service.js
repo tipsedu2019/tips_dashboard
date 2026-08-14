@@ -64,10 +64,11 @@ function canonicalJson(value) {
   return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
 }
 
-async function scopeHash(filters) {
+async function scopeHash(actorScope, filters) {
   const bytes = new TextEncoder().encode(canonicalJson({
     surface: "academic",
     mode: "curriculum",
+    actorScope,
     filters,
   }));
   const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
@@ -107,6 +108,7 @@ function assertTimetableResponse(value, range) {
     && TIMETABLE_DENSITY_COLLECTIONS.includes(value.collection)
     && value.observedItemsAtLeast === 501
     && value.action === "narrow_filters"
+    && value.range?.dateFrom === range.dateFrom && value.range?.dateTo === range.dateTo
     && Array.isArray(value.rows) && value.rows.length === 0) {
     return value;
   }
@@ -150,14 +152,26 @@ export function appendAcademicCurriculumPageIfCurrent({
   return {
     ...current,
     ...next,
+    stats: current.stats,
+    filterOptions: current.filterOptions,
     page: { ...nextPage, rows: [...existingRows, ...appended] },
   };
+}
+
+export function isAcademicContinuationLoadingForScope(loadingFingerprint, currentFingerprint) {
+  return Boolean(loadingFingerprint && loadingFingerprint === currentFingerprint);
+}
+
+export function selectAcademicDisplayRequest({ data, successfulRequest, currentRequest }) {
+  return data && successfulRequest ? successfulRequest : currentRequest;
 }
 
 export function createAcademicReadService(options = {}) {
   const client = options.supabase;
   if (!client || typeof client.rpc !== "function") throw academicError("academic_client_missing");
-  if (!text(options.actorScope)) throw academicError("academic_actor_scope_missing");
+  const actorScope = text(options.actorScope);
+  if (!actorScope) throw academicError("academic_actor_scope_missing");
+  const scopeMetadataCache = new Map();
 
   async function unwrapRpc(query) {
     const { data, error } = await query;
@@ -168,7 +182,7 @@ export function createAcademicReadService(options = {}) {
   async function loadCurriculum(request) {
     assertCurriculumRequest(request);
     const filters = normalizeCurriculumFilters(request);
-    const expectedScopeHash = await scopeHash(filters);
+    const expectedScopeHash = await scopeHash(actorScope, filters);
     const cursor = request.cursor;
     if (cursor !== null && (!cursor || !Array.isArray(cursor.sortValues)
       || cursor.sortValues.length !== 1 || typeof cursor.sortValues[0] !== "string"
@@ -181,6 +195,7 @@ export function createAcademicReadService(options = {}) {
         p_cursor_sort_key: cursor?.sortValues[0] || null,
         p_cursor_id: cursor?.id || null,
         p_limit: 30,
+        p_include_scope_metadata: cursor === null,
       })
         .abortSignal(AbortSignal.timeout(8_000))
         .retry(false),
@@ -188,6 +203,13 @@ export function createAcademicReadService(options = {}) {
     const received = Array.isArray(response?.rows) ? response.rows : [];
     if (received.length > PAGE_SIZE + 1) throw academicError("academic_curriculum_response_invalid");
     const boundary = received.length > PAGE_SIZE ? received[PAGE_SIZE - 1] : null;
+    const receivedMetadata = response?.stats && typeof response.stats === "object"
+      && response?.filterOptions && typeof response.filterOptions === "object"
+      ? { stats: response.stats, filterOptions: response.filterOptions }
+      : null;
+    if (receivedMetadata) scopeMetadataCache.set(expectedScopeHash, receivedMetadata);
+    const metadata = receivedMetadata || scopeMetadataCache.get(expectedScopeHash);
+    if (!metadata) throw academicError("academic_curriculum_metadata_missing");
     return {
       page: {
         rows: received.slice(0, PAGE_SIZE).map((row) => row?.row_data || row),
@@ -198,10 +220,8 @@ export function createAcademicReadService(options = {}) {
           scopeHash: expectedScopeHash,
         } : null,
       },
-      stats: response?.stats && typeof response.stats === "object" ? response.stats : {},
-      filterOptions: response?.filterOptions && typeof response.filterOptions === "object"
-        ? response.filterOptions
-        : {},
+      stats: metadata.stats,
+      filterOptions: metadata.filterOptions,
     };
   }
 

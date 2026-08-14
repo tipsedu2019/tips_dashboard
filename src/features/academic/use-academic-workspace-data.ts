@@ -8,6 +8,8 @@ import { useAuth } from "@/providers/auth-provider";
 import {
   appendAcademicCurriculumPageIfCurrent,
   createAcademicReadService,
+  isAcademicContinuationLoadingForScope,
+  selectAcademicDisplayRequest,
 } from "./academic-read-service.js";
 
 export type AcademicKeysetCursor = {
@@ -44,6 +46,7 @@ export type AcademicDensityError =
   | {
       ok: false;
       code: "visible_range_too_dense";
+      range: { dateFrom: string; dateTo: string };
       rows: [];
       observedRowsAtLeast: 2001;
       suggestedDays: 7;
@@ -51,6 +54,7 @@ export type AcademicDensityError =
   | {
       ok: false;
       code: "timetable_collection_too_dense";
+      range: { dateFrom: string; dateTo: string };
       collection: "class_summaries" | "class_terms" | "class_groups" | "class_group_members" | "teacher_catalogs" | "classroom_catalogs";
       observedItemsAtLeast: 501;
       action: "narrow_filters";
@@ -75,9 +79,11 @@ function isDensityError(value: unknown): value is AcademicDensityError {
 export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
   const { session, user, loading: authLoading } = useAuth();
   const [data, setData] = useState<AcademicResult | null>(null);
+  const [dataFingerprint, setDataFingerprint] = useState<string | null>(null);
+  const [successfulRequest, setSuccessfulRequest] = useState<AcademicWorkspaceRequest | null>(null);
   const [densityError, setDensityError] = useState<AcademicDensityError | null>(null);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadingMoreFingerprint, setLoadingMoreFingerprint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const requestRevisionRef = useRef(0);
   const fingerprint = requestFingerprint(request);
@@ -87,6 +93,7 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
     () => JSON.parse(fingerprint) as AcademicWorkspaceRequest,
     [fingerprint],
   );
+  const loadingMore = isAcademicContinuationLoadingForScope(loadingMoreFingerprint, fingerprint);
   const actorScope = `${String(user?.id || "anonymous")}:${String(user?.app_metadata?.role || "authenticated")}`;
   const service = useMemo(
     () => (supabase && user ? createAcademicReadService({ supabase, actorScope }) : null),
@@ -114,6 +121,8 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
         return;
       }
       setData(next);
+      setDataFingerprint(fingerprint);
+      setSuccessfulRequest(stableRequest);
       setDensityError(null);
     } catch (fetchError) {
       if (requestRevisionRef.current !== revision) return;
@@ -121,7 +130,7 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
     } finally {
       if (requestRevisionRef.current === revision) setLoading(false);
     }
-  }, [authLoading, service, stableRequest]);
+  }, [authLoading, fingerprint, service, stableRequest]);
 
   const loadMore = useCallback(async () => {
     if (!service || stableRequest.mode !== "curriculum" || loadingMore) return;
@@ -133,7 +142,7 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
     if (!currentPage?.hasMore || !currentPage.nextCursor) return;
     const expectedRevision = requestRevisionRef.current;
     const expectedFingerprint = fingerprint;
-    setLoadingMore(true);
+    setLoadingMoreFingerprint(expectedFingerprint);
     setError(null);
     try {
       const next = await service.load({
@@ -154,10 +163,7 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
         setError(fetchError instanceof Error ? fetchError.message : "Unknown error");
       }
     } finally {
-      if (requestRevisionRef.current === expectedRevision
-        && fingerprintRef.current === expectedFingerprint) {
-        setLoadingMore(false);
-      }
+      setLoadingMoreFingerprint((current) => current === expectedFingerprint ? null : current);
     }
   }, [data?.page, fingerprint, loadingMore, service, stableRequest]);
 
@@ -171,9 +177,17 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
       ?? Promise.reject(new Error("academic_client_missing")),
     [service],
   );
+  const displayRequest = selectAcademicDisplayRequest({
+    data,
+    successfulRequest,
+    currentRequest: stableRequest,
+  }) as AcademicWorkspaceRequest;
 
   return {
     data,
+    dataFingerprint,
+    successfulRequest,
+    displayRequest,
     densityError,
     loading,
     loadingMore,

@@ -115,6 +115,11 @@ test("curriculum workspace delegates all filters and continuation to the scoped 
   assert.match(source, /viewMode,/);
   assert.match(source, /loadingMore/);
   assert.match(hookSource, /loadCurriculumDetail/);
+  assert.match(hookSource, /loadingMoreFingerprint/);
+  assert.match(hookSource, /successfulRequest/);
+  assert.match(source, /onClick=\{\(\) => void refresh\(\)\}/);
+  assert.match(source, /다시 시도/);
+  assert.doesNotMatch(source, /setPeriod\(normalizedPeriod\)/);
   assert.doesNotMatch(source, /\.slice\(0, classListLimit\)/);
 });
 

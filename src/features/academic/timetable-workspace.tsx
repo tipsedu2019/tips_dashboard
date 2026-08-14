@@ -32,7 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { pickDefaultPeriodValue } from "@/features/management/period-preferences";
+import { pickDefaultPeriodValue, readDefaultPeriodPreference } from "@/features/management/period-preferences";
 import { exportElementAsImage } from "@/lib/export-as-image";
 import { cn } from "@/lib/utils";
 
@@ -190,7 +190,10 @@ function getTimetablePanelSummary(blocks: TimetablePanelBlockSummary[] = []) {
 
 export function AcademicTimetableWorkspace() {
   const [view, setView] = useState<TimetableView>("teacher-weekly");
-  const [classGroupId, setClassGroupId] = useState("");
+  const [classGroupId, setClassGroupId] = useState(() => {
+    const preference = readDefaultPeriodPreference();
+    return preference.id || preference.name || "";
+  });
   const [status, setStatus] = useState("수강");
   const [subject, setSubject] = useState("");
   const [rangeDays, setRangeDays] = useState<7 | 14>(14);
@@ -206,6 +209,9 @@ export function AcademicTimetableWorkspace() {
     densityError,
     loading,
     error,
+    refresh,
+    successfulRequest,
+    displayRequest,
   } = useAcademicWorkspaceData({
     mode: "timetable",
     dateFrom: visibleRange.dateFrom,
@@ -216,6 +222,16 @@ export function AcademicTimetableWorkspace() {
       subject: subject || null,
     },
   });
+  const displayTimetableRequest = displayRequest.mode === "timetable"
+    ? displayRequest
+    : successfulRequest?.mode === "timetable"
+      ? successfulRequest
+      : {
+          mode: "timetable" as const,
+          dateFrom: visibleRange.dateFrom,
+          dateTo: visibleRange.dateTo,
+          filters: { classGroupId: classGroupId || null, status: status || null, subject: subject || null },
+        };
   const data = useMemo(() => ({
     rows: Array.isArray(timetableData?.rows) ? timetableData.rows : [],
     classSummaries: Array.isArray(timetableData?.classSummaries) ? timetableData.classSummaries : [],
@@ -236,11 +252,7 @@ export function AcademicTimetableWorkspace() {
         classGroupMembers: data.classGroupMembers,
         teacherCatalogs: data.teacherCatalogs,
         classroomCatalogs: data.classroomCatalogs,
-        filters: {
-          classGroupId,
-          status,
-          subject,
-        },
+        filters: displayTimetableRequest.filters,
       }),
     [
       classGroupId,
@@ -251,6 +263,7 @@ export function AcademicTimetableWorkspace() {
       data.classroomCatalogs,
       data.rows,
       data.teacherCatalogs,
+      displayTimetableRequest,
       status,
       subject,
     ],
@@ -259,18 +272,6 @@ export function AcademicTimetableWorkspace() {
     () => pickDefaultPeriodValue(workspace.classGroupOptions),
     [workspace.classGroupOptions],
   );
-
-  useEffect(() => {
-    if (!classGroupId && workspace.classGroupOptions.length > 0) {
-      setClassGroupId(defaultPeriodId);
-    }
-  }, [classGroupId, defaultPeriodId, workspace.classGroupOptions]);
-
-  useEffect(() => {
-    if (classGroupId && !workspace.classGroupOptions.some((option) => option.value === classGroupId)) {
-      setClassGroupId(defaultPeriodId);
-    }
-  }, [classGroupId, defaultPeriodId, workspace.classGroupOptions]);
 
   useEffect(() => {
     if (status && !workspace.statusOptions.includes(status)) {
@@ -413,16 +414,21 @@ export function AcademicTimetableWorkspace() {
     <div className={`${styles.scope} flex flex-col gap-6 px-4 lg:px-6`}>
       {error ? (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+            <span>{error}</span>
+            <Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>
+              다시 시도
+            </Button>
+          </AlertDescription>
         </Alert>
       ) : null}
 
       {densityError?.code === "visible_range_too_dense" ? (
         <Alert variant="destructive">
           <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
-            <span>선택 범위의 시간표가 너무 많습니다. 기존 시간표를 유지했습니다.</span>
-            <Button type="button" size="sm" variant="outline" onClick={() => setRangeDays(7)}>
-              한 주 보기
+            <span>{densityError.range.dateFrom}~{densityError.range.dateTo} 범위의 시간표가 너무 많습니다. 기존 시간표를 유지했습니다.</span>
+            <Button type="button" size="sm" variant="outline" onClick={() => (rangeDays === 7 ? void refresh() : setRangeDays(7))}>
+              {rangeDays === 7 ? "한 주 다시 조회" : "한 주 보기"}
             </Button>
           </AlertDescription>
         </Alert>

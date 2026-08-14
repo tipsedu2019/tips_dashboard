@@ -158,6 +158,11 @@ test("timetable workspace requests only its active mode and keeps dense recovery
   assert.match(source, /densityError\?\.code === "visible_range_too_dense"/);
   assert.match(source, /한 주 보기/);
   assert.match(source, /densityError\?\.code === "timetable_collection_too_dense"/);
+  assert.match(source, /successfulRequest/);
+  assert.match(source, /filters: displayTimetableRequest\.filters/);
+  assert.match(source, /onClick=\{\(\) => \(rangeDays === 7 \? void refresh\(\) : setRangeDays\(7\)\)\}/);
+  assert.match(source, /다시 시도/);
+  assert.doesNotMatch(source, /if \(!classGroupId && workspace\.classGroupOptions\.length > 0\)[\s\S]{0,120}setClassGroupId/);
   assert.doesNotMatch(source, /data\.textbooks|data\.progressLogs/);
 });
 
