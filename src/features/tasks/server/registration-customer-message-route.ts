@@ -1086,10 +1086,16 @@ async function sourceRpc(context: HandlerAuthContext, args: JsonRecord) {
 
 export function registrationCustomerMessageSourceRpcError(error: unknown) {
   const code = isRecord(error) ? text(error.code) : ""
-  if (code === "42501" || code === "P0002") {
+  if (code === "P0002") {
     return new RegistrationCustomerMessageHttpError(
       404,
       "registration_customer_message_source_not_found",
+    )
+  }
+  if (code === "42501") {
+    return new RegistrationCustomerMessageHttpError(
+      503,
+      "registration_customer_message_runtime_unavailable",
     )
   }
   if (code === "22023" || code === "23505") {
