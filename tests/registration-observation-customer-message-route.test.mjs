@@ -488,7 +488,7 @@ test("production observation preview uses only the observation ID, canonical tas
     teacherLabel: "홍길동",
   })
   assert.deepEqual(preview.buttons, [{ name: "학원 위치 보기", type: "WL", host: "map.naver.com" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }])
-  assert.deepEqual(harness.calls.actorTables, ["ops_registration_observations"])
+  assert.deepEqual(harness.calls.actorTables, [])
   assert.deepEqual(harness.calls.authorizedTaskIds, [IDS.task])
   assert.equal(harness.calls.providerSend, 0)
   const serialized = JSON.stringify(preview)

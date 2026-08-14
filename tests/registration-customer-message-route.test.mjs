@@ -730,6 +730,57 @@ test("preview establishes actor task visibility before the service-only source R
   assert.deepEqual(order, ["actor-task-visibility", "service-source-rpc"])
 })
 
+test("observation preview derives task visibility from the source RPC when its row is not directly actor-readable", async () => {
+  const target = {
+    messageKind: "observation_booking",
+    sourceId: TERMINAL_OBSERVATION_TARGET.sourceId,
+  }
+  const source = { ...SOURCE, ...target }
+  let sourceCalls = 0
+  const { deps, calls } = makeDeps({
+    async resolveTaskId() {
+      throw new Error("observation_preview_must_not_require_direct_observation_select")
+    },
+    async resolveSource(input) {
+      sourceCalls += 1
+      assert.deepEqual({
+        actorProfileId: input.actorProfileId,
+        messageKind: input.messageKind,
+        sourceId: input.sourceId,
+      }, {
+        actorProfileId: IDS.actor,
+        ...target,
+      })
+      return source
+    },
+    readPrivateSource(value) {
+      assert.equal(value, source)
+      return PRIVATE_SOURCE
+    },
+    async listCurrentObservationHistory() {
+      return []
+    },
+    async createPreview() {
+      return {
+        previewId: IDS.preview,
+        expiresAt: "2026-08-05T00:10:00.000Z",
+        messageKind: target.messageKind,
+        recipientLast4: "5678",
+      }
+    },
+  })
+
+  const result = await json(await createRegistrationCustomerMessageRouteHandlers(deps).preview(
+    request("/preview", { method: "POST", body: JSON.stringify(target) }),
+  ))
+
+  assert.equal(result.response.status, 200)
+  assert.equal(result.body.messageKind, target.messageKind)
+  assert.equal(calls.resolveTaskId, 0)
+  assert.equal(sourceCalls, 1)
+  assert.equal(calls.authorize, 1)
+})
+
 test("off and verification-mismatch readiness return a read-only preview without creating a receipt", async () => {
   for (const readiness of [
     { ...ACTIVE_READINESS, activationMode: "off", activationEligible: false, sendAllowed: false, blockers: ["activation_off"] },

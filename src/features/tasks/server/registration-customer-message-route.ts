@@ -623,38 +623,45 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
         const target = await previewTarget(request)
         const context = await dependencies.authenticate(request)
         requireRole(context, OPERATOR_ROLES)
-        const taskId = await dependencies.resolveTaskId({ ...target, context })
+        const observationTarget = target.messageKind === "observation_booking"
+          || target.messageKind === "observation_reminder"
+        const source = observationTarget
+          ? await resolvePreviewSource(dependencies, {
+            actorProfileId: context.actorProfileId,
+            ...target,
+            context,
+          })
+          : null
+        const taskId = source?.taskId
+          ?? await dependencies.resolveTaskId({ ...target, context })
         if (!taskId || !await dependencies.authorizeTask(context, taskId)) {
           httpError(404, "registration_customer_message_source_not_found")
         }
-        const source = await resolvePreviewSource(dependencies, {
+        const resolvedSource = source ?? await resolvePreviewSource(dependencies, {
           actorProfileId: context.actorProfileId,
           ...target,
           context,
         })
-        if (source.taskId !== taskId) {
+        if (resolvedSource.taskId !== taskId) {
           httpError(503, "registration_customer_message_source_unavailable")
         }
-        const privateSource = dependencies.readPrivateSource(source)
+        const privateSource = dependencies.readPrivateSource(resolvedSource)
         const readinessInput = {
           actorProfileId: context.actorProfileId,
-          taskId: source.taskId,
+          taskId: resolvedSource.taskId,
           ...target,
           contract: privateSource.readinessContract,
           context,
         }
         let readinessValue: unknown
         let historyValue: unknown
-        if (
-          target.messageKind === "observation_booking"
-          || target.messageKind === "observation_reminder"
-        ) {
+        if (observationTarget) {
           readinessValue = await dependencies.getReadiness(readinessInput)
           historyValue = await dependencies.listCurrentObservationHistory({
-            taskId: source.taskId,
+            taskId: resolvedSource.taskId,
             messageKind: target.messageKind,
             sourceId: target.sourceId,
-            sourceRevision: source.sourceRevision,
+            sourceRevision: resolvedSource.sourceRevision,
             sourceFingerprint: privateSource.sourceFingerprint,
             recipientHash: privateSource.recipientHash,
             limit: 1,
@@ -688,12 +695,12 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
         if (normalizedReadiness.sendAllowed) {
           receipt = previewReceipt(await dependencies.createPreview({
             actorProfileId: context.actorProfileId,
-            taskId: source.taskId,
+            taskId: resolvedSource.taskId,
             ...target,
             contract: privateSource.previewContract,
             context,
           }), target, now())
-          if (receipt.recipientLast4 !== source.recipientLast4) {
+          if (receipt.recipientLast4 !== resolvedSource.recipientLast4) {
             httpError(503, "registration_customer_message_preview_unavailable")
           }
         }
@@ -701,12 +708,12 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
           ok: true,
           previewId: receipt?.previewId ?? null,
           expiresAt: receipt?.expiresAt ?? null,
-          messageKind: source.messageKind,
-          studentName: source.studentName,
-          recipientLast4: source.recipientLast4,
-          facts: source.facts,
-          body: source.body,
-          buttons: source.buttons,
+          messageKind: resolvedSource.messageKind,
+          studentName: resolvedSource.studentName,
+          recipientLast4: resolvedSource.recipientLast4,
+          facts: resolvedSource.facts,
+          body: resolvedSource.body,
+          buttons: resolvedSource.buttons,
           readiness: normalizedReadiness,
           latestMessage: operatorLatestMessage,
         }
