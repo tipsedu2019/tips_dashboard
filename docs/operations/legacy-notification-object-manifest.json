@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "objects": [
+    {"objectType":"relation","name":"public.dashboard_notifications","ownerMigration":"20260716112000_notification_control_plane_worker_rpc","decision":"retain","evidenceId":"notification_control_plane"},
+    {"objectType":"relation","name":"public.dashboard_notification_read_receipts","ownerMigration":"20260716112000_notification_control_plane_worker_rpc","decision":"retain","evidenceId":"notification_control_plane"},
+    {"objectType":"relation","name":"public.dashboard_push_subscriptions","ownerMigration":"20260716112000_notification_control_plane_worker_rpc","decision":"retain","evidenceId":"notification_control_plane"},
+    {"objectType":"relation","name":"dashboard_private.notification_events","ownerMigration":"20260716112000_notification_control_plane_worker_rpc","decision":"drop_candidate","evidenceId":"legacy_zero_writer_window"},
+    {"objectType":"relation","name":"dashboard_private.notification_deliveries","ownerMigration":"20260716112000_notification_control_plane_worker_rpc","decision":"drop_candidate","evidenceId":"legacy_zero_writer_window"},
+    {"objectType":"relation","name":"dashboard_private.notification_event_fanout_jobs","ownerMigration":"20260716112000_notification_control_plane_worker_rpc","decision":"drop_candidate","evidenceId":"legacy_zero_writer_window"},
+    {"objectType":"relation","name":"dashboard_private.notification_rule_reconciliation_jobs","ownerMigration":"20260716112000_notification_control_plane_worker_rpc","decision":"drop_candidate","evidenceId":"legacy_zero_writer_window"},
+    {"objectType":"relation","name":"dashboard_private.notification_target_reconciliation_jobs","ownerMigration":"20260716112000_notification_control_plane_worker_rpc","decision":"drop_candidate","evidenceId":"legacy_zero_writer_window"},
+    {"objectType":"relation","name":"dashboard_private.notification_worker_heartbeats","ownerMigration":"20260716112000_notification_control_plane_worker_rpc","decision":"drop_candidate","evidenceId":"legacy_zero_writer_window"},
+    {"objectType":"relation","name":"dashboard_private.notification_watchdog_heartbeats","ownerMigration":"20260716112000_notification_control_plane_worker_rpc","decision":"drop_candidate","evidenceId":"legacy_zero_writer_window"},
+    {"objectType":"relation","name":"dashboard_private.registration_customer_reminder_jobs","ownerMigration":"20260716112000_notification_control_plane_worker_rpc","decision":"retain","evidenceId":"registration_reminder_off"},
+    {"objectType":"relation","name":"dashboard_private.registration_customer_reminder_worker_heartbeats","ownerMigration":"20260716112000_notification_control_plane_worker_rpc","decision":"retain","evidenceId":"registration_reminder_off"}
+  ],
+  "legacyCronNames": ["tips-notification-worker-v1","tips-notification-cutover-watchdog-v1","tips-registration-customer-reminder-v1"]
+}
