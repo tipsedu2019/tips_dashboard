@@ -1,7 +1,7 @@
 "use client"
 
 import { isSameDay } from "date-fns"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { getAcademicEventFilterTypeKey } from "@/features/operations/academic-event-utils.js"
@@ -31,6 +31,8 @@ interface CalendarProps {
   onSaveEvent?: (eventData: Partial<CalendarEvent>) => boolean | Promise<boolean>
   onDeleteEvent?: (eventId: number | string) => boolean | Promise<boolean>
   onMoveEvent?: (eventData: Partial<CalendarEvent>) => boolean | Promise<boolean>
+  onVisibleRangeChange?: (range: { start: Date; end: Date }) => void
+  onLoadEventDetail?: (eventId: string) => Promise<CalendarEvent | null>
 }
 
 function toCalendarDayKey(date?: Date | null) {
@@ -90,6 +92,8 @@ export function Calendar({
   onSaveEvent,
   onDeleteEvent,
   onMoveEvent,
+  onVisibleRangeChange,
+  onLoadEventDetail,
 }: CalendarProps) {
   const [selectedDate, setSelectedDate] = useState<Date>(() => resolveInitialCalendarDate(eventDates, initialDate))
   const [selectedEndDate, setSelectedEndDate] = useState<Date | null>(null)
@@ -158,18 +162,25 @@ export function Calendar({
     return events.find((event) => String(event.sourceId || event.id) === initialEventId) || null
   }, [appliedInitialEventId, events, initialEventId])
 
-  if (initialEventId && matchedInitialEvent) {
-    setAppliedInitialEventId(initialEventId)
-    if (!isSameDay(selectedDate, matchedInitialEvent.date)) {
-      setSelectedDate(matchedInitialEvent.date)
+  useEffect(() => {
+    if (!initialEventId || !matchedInitialEvent) return undefined
+    let cancelled = false
+    const eventId = String(matchedInitialEvent.sourceId || matchedInitialEvent.id)
+    void Promise.resolve(onLoadEventDetail && eventId ? onLoadEventDetail(eventId) : null)
+      .catch(() => null)
+      .then((detail) => {
+        if (cancelled) return
+        setAppliedInitialEventId(initialEventId)
+        if (!isSameDay(selectedDate, matchedInitialEvent.date)) {
+          setSelectedDate(matchedInitialEvent.date)
+        }
+        setEditingEvent(detail || matchedInitialEvent)
+        setShowEventForm(true)
+      })
+    return () => {
+      cancelled = true
     }
-    if (editingEvent?.id !== matchedInitialEvent.id) {
-      setEditingEvent(matchedInitialEvent)
-    }
-    if (!showEventForm) {
-      setShowEventForm(true)
-    }
-  }
+  }, [initialEventId, matchedInitialEvent, onLoadEventDetail, selectedDate])
 
   const handleDateSelect = (date: Date) => {
     setSelectedDate(date)
@@ -205,8 +216,10 @@ export function Calendar({
     setShowEventForm(true)
   }
 
-  const handleEditEvent = (event: CalendarEvent) => {
-    setEditingEvent(event)
+  const handleEditEvent = async (event: CalendarEvent) => {
+    const eventId = String(event.sourceId || event.id)
+    const detail = onLoadEventDetail && eventId ? await onLoadEventDetail(eventId) : null
+    setEditingEvent(detail || event)
     setShowEventForm(true)
   }
 
@@ -263,6 +276,7 @@ export function Calendar({
               onEventClick={handleEditEvent}
               onEmptySlotClick={handleNewEvent}
               onRangeSelect={handleNewEventRange}
+              onVisibleRangeChange={onVisibleRangeChange}
               onOverflowClick={(date) => {
                 setSelectedDate(date)
               }}

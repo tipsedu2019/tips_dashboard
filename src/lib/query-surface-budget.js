@@ -13,6 +13,12 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "list_management_filter_options_v1",
   "get_management_detail_v1",
   "get_management_default_class_period_v1",
+  "get_operations_calendar_range_v1",
+  "get_operations_annual_board_v1",
+  "get_academic_event_detail_v1",
+  "get_class_schedule_v1",
+  "list_operations_catalogs_v1",
+  "list_active_science_subject_areas_v1",
 ])
 
 // These are deliberately literal records, not path patterns. Each one binds a

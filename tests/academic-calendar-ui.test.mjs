@@ -33,6 +33,18 @@ test("academic calendar search is named and keyboard ready", async () => {
   assert.match(source, /enterKeyHint="search"/);
 });
 
+test("academic calendar reports each complete visible month grid to its scoped loader", async () => {
+  const [calendarSource, mainSource] = await Promise.all([
+    readFile(new URL("src/app/admin/calendar/components/calendar.tsx", root), "utf8"),
+    readFile(new URL("src/app/admin/calendar/components/calendar-main.tsx", root), "utf8"),
+  ]);
+
+  assert.match(calendarSource, /onVisibleRangeChange\?: \(range: \{ start: Date; end: Date \}\) => void/);
+  assert.match(calendarSource, /onVisibleRangeChange=\{onVisibleRangeChange\}/);
+  assert.match(mainSource, /onVisibleRangeChange\?\.\(calendarRange\)/);
+  assert.match(mainSource, /\[calendarRange, onVisibleRangeChange\]/);
+});
+
 test("academic calendar month view switches to readable mobile agenda cards", async () => {
   const source = await readFile(
     new URL("src/app/admin/calendar/components/calendar-main.tsx", root),

@@ -2555,7 +2555,6 @@ function ClassScheduleSkeleton() {
 }
 
 export function ClassScheduleWorkspace() {
-  const { data, loading, error, refresh } = useOperationsWorkspaceData();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -2605,6 +2604,79 @@ export function ClassScheduleWorkspace() {
   const pendingLessonDesignPairSessionIdRef = useRef("");
   const deferredSearch = useDeferredValue(search);
   const deferredLessonTextbookSearch = useDeferredValue(lessonTextbookSearch);
+  const operationsRequest = useMemo(
+    () => ({
+      mode: "class_schedule" as const,
+      termId: termId || null,
+      search: deferredSearch,
+      subject: subject || null,
+      grade: grade || null,
+      teacher: teacher || null,
+      syncGroupId: selectedSyncGroupId || null,
+      cursor: null,
+    }),
+    [deferredSearch, grade, selectedSyncGroupId, subject, teacher, termId],
+  );
+  const {
+    data: scopedData,
+    loading,
+    loadingMore,
+    error,
+    refresh,
+    loadMore,
+    loadClassScheduleDetail,
+  } = useOperationsWorkspaceData(operationsRequest);
+  const data = useMemo(() => {
+    const page = (scopedData?.page || {}) as { rows?: Record<string, unknown>[]; hasMore?: boolean };
+    const filterOptions = (scopedData?.filterOptions || {}) as {
+      terms?: Array<{ value: string; label: string }>;
+      subjects?: string[];
+      grades?: string[];
+      teachers?: string[];
+      syncGroups?: Array<{ value: string; label: string }>;
+    };
+    const catalogs = (scopedData?.catalogs || {}) as {
+      teachers?: Record<string, unknown>[];
+      classrooms?: Record<string, unknown>[];
+    };
+    const classes = (Array.isArray(page.rows) ? page.rows : []).map((row): Record<string, unknown> => ({
+      ...row,
+      teacher: row.teacherName,
+      term_id: row.termId,
+    }));
+    const classTerms = (Array.isArray(filterOptions.terms) ? filterOptions.terms : []).map((option) => ({
+      id: option.value,
+      name: option.label,
+    }));
+    const syncGroups = (Array.isArray(filterOptions.syncGroups) ? filterOptions.syncGroups : []).map((option) => ({
+      id: option.value,
+      name: option.label,
+    }));
+    const syncGroupMembers = classes
+      .filter((classItem) => text(classItem.syncGroupId))
+      .map((classItem, index) => ({
+        classId: text(classItem.id),
+        groupId: text(classItem.syncGroupId),
+        sortOrder: index,
+      }));
+    return {
+      classes,
+      textbooks: [] as Record<string, unknown>[],
+      progressLogs: [] as Record<string, unknown>[],
+      classTerms,
+      syncGroups,
+      syncGroupMembers,
+      teacherCatalogs: Array.isArray(catalogs.teachers) ? catalogs.teachers : [],
+      classroomCatalogs: Array.isArray(catalogs.classrooms) ? catalogs.classrooms : [],
+      page,
+      stats: (scopedData?.stats || { total: 0, active: 0, draft: 0 }) as {
+        total?: number;
+        active?: number;
+        draft?: number;
+      },
+      filterOptions,
+    };
+  }, [scopedData]);
 
   useLayoutEffect(() => {
     const scrollTop = pendingLessonDesignDialogScrollTopRef.current;
@@ -2668,42 +2740,8 @@ export function ClassScheduleWorkspace() {
     return () => window.cancelAnimationFrame(animationFrameId);
   }, [lessonDesignPairSyncRequest]);
 
-  const model = useMemo(
-    () =>
-      buildClassScheduleRouteModel({
-        classes: data.classes,
-        textbooks: data.textbooks,
-        progressLogs: data.progressLogs,
-        classTerms: data.classTerms,
-        syncGroups: data.syncGroups,
-        syncGroupMembers: data.syncGroupMembers,
-        filters: {
-          search: deferredSearch,
-          termId,
-          subject,
-          grade,
-          teacher,
-          selectedSyncGroupId,
-        },
-      }),
-    [
-      data.classTerms,
-      data.classes,
-      data.progressLogs,
-      data.syncGroupMembers,
-      data.syncGroups,
-      data.textbooks,
-      deferredSearch,
-      grade,
-      selectedSyncGroupId,
-      subject,
-      teacher,
-      termId,
-    ],
-  );
-  const allRowsModel = useMemo(
-    () =>
-      buildClassScheduleRouteModel({
+  const model = useMemo(() => {
+    const routeModel = buildClassScheduleRouteModel({
         classes: data.classes,
         textbooks: data.textbooks,
         progressLogs: data.progressLogs,
@@ -2711,16 +2749,27 @@ export function ClassScheduleWorkspace() {
         syncGroups: data.syncGroups,
         syncGroupMembers: data.syncGroupMembers,
         filters: {},
-      }),
-    [
+      });
+    return {
+      ...routeModel,
+      filterOptions: {
+        terms: Array.isArray(data.filterOptions.terms) ? data.filterOptions.terms : [],
+        subjects: Array.isArray(data.filterOptions.subjects) ? data.filterOptions.subjects : [],
+        grades: Array.isArray(data.filterOptions.grades) ? data.filterOptions.grades : [],
+        teachers: Array.isArray(data.filterOptions.teachers) ? data.filterOptions.teachers : [],
+      },
+    };
+  }, [
       data.classTerms,
       data.classes,
+      data.filterOptions,
       data.progressLogs,
       data.syncGroupMembers,
       data.syncGroups,
       data.textbooks,
     ],
   );
+  const allRowsModel = model;
   const classScheduleQueryState = useMemo(
     () => ({
       search,
@@ -2829,11 +2878,11 @@ export function ClassScheduleWorkspace() {
 
   const syncGroupOptions = useMemo(
     () =>
-      model.syncGroupCards.map((group) => ({
-        value: group.id,
-        label: group.name || group.id,
+      (Array.isArray(data.filterOptions.syncGroups) ? data.filterOptions.syncGroups : []).map((group) => ({
+        value: text(group.value),
+        label: text(group.label) || text(group.value),
       })),
-    [model.syncGroupCards],
+    [data.filterOptions.syncGroups],
   );
   const rowSnapshotById = useMemo(
     () =>
@@ -2855,24 +2904,20 @@ export function ClassScheduleWorkspace() {
   );
 
   const normalizedScheduleReader = useMemo(() => {
-    if (!supabase) return null;
-    const client = supabase;
     return createBoundedContinuousScheduleReader({
       runtimeProbe: { probe: probeContinuousScheduleRuntime, reset: resetContinuousScheduleRuntimeProbe },
       async readSchedule(input) {
-        const { data, error } = await client.rpc("get_class_schedule_v1", {
-          p_class_id: input.classId,
-          p_date_from: input.dateFrom,
-          p_date_to: input.dateTo,
-        });
-        if (error) throw error;
-        return (data || {}) as Record<string, unknown>;
+        return await loadClassScheduleDetail({
+          classId: input.classId,
+          dateFrom: input.dateFrom,
+          dateTo: input.dateTo,
+        }) as Record<string, unknown>;
       },
       async loadLegacy(input) {
         return { source: "legacy", classId: input.classId, sessions: [] };
       },
     });
-  }, []);
+  }, [loadClassScheduleDetail]);
   const normalizedReadMonthKey = focusedLessonMonthKey || new Date().toISOString().slice(0, 7);
   const activeLessonMonthRange = useMemo(() => getLessonMonthRange(normalizedReadMonthKey), [normalizedReadMonthKey]);
   const normalizedScheduleRead = useContinuousClassSchedule(
@@ -5964,7 +6009,8 @@ export function ClassScheduleWorkspace() {
           <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/20 px-4 py-3">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <p className="text-sm font-semibold text-foreground">수업 목록</p>
-              <Badge variant="outline">{model.rows.length}개</Badge>
+              <Badge variant="outline">전체 {Number(data.stats.total || 0)}개</Badge>
+              <Badge variant="outline">표시 {model.rows.length}개</Badge>
               <Badge variant="outline">경고 {model.rows.filter((row) => row.warningText).length}</Badge>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -6315,6 +6361,20 @@ export function ClassScheduleWorkspace() {
               </>
             )}
           </div>
+          {data.page.hasMore ? (
+            <div className="flex justify-center border-t px-4 py-3">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={loadingMore}
+                onClick={() => void loadMore()}
+              >
+                {loadingMore ? "불러오는 중" : "다음 30건"}
+              </Button>
+            </div>
+          ) : model.rows.length > 0 ? (
+            <p className="border-t px-4 py-3 text-center text-xs text-muted-foreground">마지막 수업입니다.</p>
+          ) : null}
         </section>
 
       </div>

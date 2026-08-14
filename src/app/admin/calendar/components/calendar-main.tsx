@@ -73,6 +73,7 @@ interface CalendarMainProps {
   onRangeSelect?: (range: { start: Date; end: Date }) => void
   onOverflowClick?: (date: Date, events: CalendarEvent[]) => void
   onEventDrop?: (event: CalendarEvent, nextEvent: CalendarEvent) => boolean | void | Promise<boolean | void>
+  onVisibleRangeChange?: (range: { start: Date; end: Date }) => void
 }
 
 type MonthEventSegment = {
@@ -276,6 +277,7 @@ export function CalendarMain({
   onRangeSelect,
   onOverflowClick,
   onEventDrop,
+  onVisibleRangeChange,
 }: CalendarMainProps) {
   const [currentDate, setCurrentDate] = useState(selectedDate || new Date())
   const [viewMode, setViewMode] = useState<"month" | "list">("month")
@@ -320,6 +322,10 @@ export function CalendarMain({
     () => eachDayOfInterval(calendarRange),
     [calendarRange],
   )
+
+  useEffect(() => {
+    onVisibleRangeChange?.(calendarRange)
+  }, [calendarRange, onVisibleRangeChange])
 
   const calendarWeeks = useMemo(() => {
     const weeks = []

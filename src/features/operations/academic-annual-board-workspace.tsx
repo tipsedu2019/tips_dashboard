@@ -42,7 +42,6 @@ import {
   runAcademicEventMutation,
 } from "./academic-event-utils.js";
 import {
-  buildAcademicAnnualBoardModel,
   type AcademicAnnualBoardEntry,
   type AcademicAnnualBoardRow,
   type AcademicAnnualBoardType,
@@ -1031,8 +1030,7 @@ function AnnualBoardMapView({
 export function AcademicAnnualBoardWorkspace() {
   const searchParams = useSearchParams();
   const { canManageAll } = useAuth();
-  const { data, loading, error, refresh } = useOperationsWorkspaceData();
-  const [selectedYear, setSelectedYear] = useState("");
+  const [selectedYear, setSelectedYear] = useState(() => text(searchParams.get("year")) || String(new Date().getFullYear()));
   const [selectedCategory, setSelectedCategory] = useState<"high" | "middle">("high");
   const [selectedSemester, setSelectedSemester] = useState<SemesterFilter>("전체");
   const [selectedSchoolId, setSelectedSchoolId] = useState("");
@@ -1046,7 +1044,12 @@ export function AcademicAnnualBoardWorkspace() {
   const [showBoardEventForm, setShowBoardEventForm] = useState(false);
   const [isSavingBoardImage, setIsSavingBoardImage] = useState(false);
   const annualBoardExportRef = useRef<HTMLDivElement | null>(null);
-  const isSeedCalendar = data.academicCalendarSource === "seed";
+  const annualRequest = useMemo(() => ({
+    mode: "annual" as const,
+    academicYear: Number(selectedYear) || new Date().getFullYear(),
+  }), [selectedYear]);
+  const { data, densityError, loading, error, refresh, loadEventDetail } = useOperationsWorkspaceData(annualRequest);
+  const isSeedCalendar = false;
   const readOnly = !canManageAll || isSeedCalendar;
 
   useEffect(() => {
@@ -1055,7 +1058,10 @@ export function AcademicAnnualBoardWorkspace() {
 
     const client = supabase;
     void Promise.resolve().then(async () => {
-      const { data: areaRows, error: areaError } = await client.rpc("list_active_science_subject_areas_v1");
+      const { data: areaRows, error: areaError } = await client.rpc("list_active_science_subject_areas_v1")
+        .limit(200)
+        .abortSignal(AbortSignal.timeout(8_000))
+        .retry(false);
       if (cancelled) return;
       setActiveScienceAreas(areaError ? [] : parseActiveScienceSubjectAreas(areaRows));
     });
@@ -1073,7 +1079,7 @@ export function AcademicAnnualBoardWorkspace() {
     const initialEventId = text(searchParams.get("eventId"));
     const normalizedCategory = initialCategory === "middle" ? "middle" : "high";
 
-    setSelectedYear(initialYear);
+    setSelectedYear(initialYear || String(new Date().getFullYear()));
     setSelectedCategory(normalizedCategory);
     setSelectedSchoolId(initialSchoolId);
     setSelectedSemester(SEMESTER_FILTER_OPTIONS.includes(initialSemester as SemesterFilter) ? (initialSemester as SemesterFilter) : "전체");
@@ -1081,36 +1087,66 @@ export function AcademicAnnualBoardWorkspace() {
   }, [searchParams]);
 
   const model = useMemo(
-    () =>
-      buildAcademicAnnualBoardModel({
-        academicEvents: data.academicEvents,
-        academicSchools: data.academicSchools,
-        scienceSubjectAreas: activeScienceAreas,
-        academicEventExamDetails: data.academicEventExamDetails,
-        academyCurriculumPlans: data.academyCurriculumPlans,
-        academyCurriculumMaterials: data.academyCurriculumMaterials,
-        academicCurriculumProfiles: data.academicCurriculumProfiles,
-        academicSupplementMaterials: data.academicSupplementMaterials,
-        academicExamMaterialPlans: data.academicExamMaterialPlans,
-        academicExamMaterialItems: data.academicExamMaterialItems,
-        textbooks: data.textbooks,
-        selectedYear,
+    () => {
+      const scienceContext = { scienceSubjectAreas: activeScienceAreas };
+      const annualData = data?.ok === true && data.data && typeof data.data === "object"
+        ? data.data as Record<string, unknown>
+        : null;
+      const rows = (Array.isArray(annualData?.rows) ? annualData.rows : []).map((raw) => {
+        const row = raw as AcademicAnnualBoardRow;
+        const typeBuckets = Object.fromEntries(BOARD_TYPES.map((type) => [
+          type,
+          (Array.isArray(row.typeBuckets?.[type]) ? row.typeBuckets[type] : []).map((entry) => {
+            const projectedEntry = entry as AcademicAnnualBoardEntry & {
+              notePreview?: string;
+              displaySections?: string[];
+              scienceAreaKey?: string;
+              scienceAreaLabel?: string;
+            };
+            return {
+              ...projectedEntry,
+              materialSections: projectedEntry.materialSections || projectedEntry.displaySections || [],
+              note: projectedEntry.note || projectedEntry.notePreview || "",
+              scienceAreaLabel: projectedEntry.scienceAreaLabel
+                || scienceContext.scienceSubjectAreas.find((area) => area.areaKey === text(projectedEntry.scienceAreaKey))?.label
+                || "",
+            };
+          }),
+        ])) as Record<AcademicAnnualBoardType, AcademicAnnualBoardEntry[]>;
+        return {
+          ...row,
+          gradeLabel: row.gradeLabel || row.grade,
+          searchText: row.searchText || `${row.schoolName} ${row.grade}`,
+          typeBuckets,
+        };
+      });
+      const summary = annualData?.summary && typeof annualData.summary === "object"
+        ? annualData.summary as { schoolCount: number; eventCount: number; activeTypeCount: number }
+        : { schoolCount: 0, eventCount: 0, activeTypeCount: 0 };
+      return {
+        selectedYear: String(annualData?.academicYear || selectedYear),
         selectedSemester,
-      }),
-    [activeScienceAreas, data.academicEventExamDetails, data.academicEvents, data.academicSchools, data.academicCurriculumProfiles, data.academicExamMaterialItems, data.academicExamMaterialPlans, data.academicSupplementMaterials, data.academyCurriculumMaterials, data.academyCurriculumPlans, data.textbooks, selectedSemester, selectedYear],
+        yearOptions: (Array.isArray(annualData?.yearOptions) ? annualData.yearOptions : [selectedYear]).map(String),
+        semesterOptions: [...SEMESTER_FILTER_OPTIONS],
+        boardTypes: BOARD_TYPES,
+        rows,
+        summary,
+      };
+    },
+    [activeScienceAreas, data, selectedSemester, selectedYear],
   );
 
   const allSchoolOptions = useMemo(
     () =>
-      (data.academicSchools || [])
+      [...new Map(model.rows.map((row) => [text(row.schoolId), row])).values()]
         .map((school) => ({
-          id: text((school as { id?: string }).id),
-          name: text((school as { name?: string }).name),
-          category: text((school as { category?: string }).category) || "all",
+          id: text(school.schoolId),
+          name: text(school.schoolName),
+          category: text(school.category) || "all",
         }))
         .filter((school) => school.id && school.name)
         .sort((left, right) => left.name.localeCompare(right.name, "ko")),
-    [data.academicSchools],
+    [model.rows],
   );
 
   const typeOptions = useMemo(() => DEFAULT_ACADEMIC_EVENT_TYPES, []);
@@ -1247,7 +1283,7 @@ export function AcademicAnnualBoardWorkspace() {
     }
   };
 
-  const handleBoardEntryEdit = (
+  const handleBoardEntryEdit = async (
     row: {
       schoolId?: string;
       schoolName: string;
@@ -1258,6 +1294,7 @@ export function AcademicAnnualBoardWorkspace() {
   ) => {
     const persistedId = getPersistedAcademicEventId(entry.id);
 
+    const detail = persistedId ? await loadEventDetail(persistedId).catch(() => null) as Record<string, unknown> | null : null;
     const editingEvent: ScienceBoardCalendarEvent = {
       id: persistedId,
       sourceId: persistedId,
@@ -1271,7 +1308,7 @@ export function AcademicAnnualBoardWorkspace() {
       attendees: Array.isArray(entry.gradeBadges) ? entry.gradeBadges : [],
       location: entry.schoolName || row.schoolName,
       color: entry.type === "체험학습" ? "bg-emerald-500" : entry.type === "방학·휴일·기타" ? "bg-amber-500" : "bg-rose-500",
-      description: entry.note || entry.scopeSummary || "",
+      description: text(detail?.note) || entry.note || entry.scopeSummary || "",
       schoolId: entry.schoolId || row.schoolId,
       schoolName: entry.schoolName || row.schoolName,
       category: row.category,
@@ -1279,10 +1316,10 @@ export function AcademicAnnualBoardWorkspace() {
       examTerm: entry.examTerm || "",
       scienceAreaKey: entry.scienceAreaKey || "",
       scienceAreaLabel: entry.scienceAreaLabel || "",
-      embeddedNoteMeta: entry.embeddedNoteMeta || {},
-      textbookScopes: normalizeScopeItems(entry.textbookScopes),
-      subtextbookScopes: normalizeScopeItems(entry.subtextbookScopes),
-      note: entry.note || "",
+      embeddedNoteMeta: (detail?.embeddedNoteMeta as Record<string, unknown> | null) || entry.embeddedNoteMeta || {},
+      textbookScopes: normalizeScopeItems(detail?.textbookScopes || entry.textbookScopes),
+      subtextbookScopes: normalizeScopeItems(detail?.subtextbookScopes || entry.subtextbookScopes),
+      note: text(detail?.note) || entry.note || "",
     };
     setBoardDraft(null);
     setEditingBoardEvent(editingEvent);
@@ -1471,6 +1508,14 @@ export function AcademicAnnualBoardWorkspace() {
         <div className="annual-board-non-print px-4 lg:px-6">
           <Alert variant="destructive">
             <AlertDescription>{error || mutationError}</AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
+
+      {densityError?.code === "annual_board_too_dense" ? (
+        <div className="annual-board-non-print px-4 lg:px-6">
+          <Alert>
+            <AlertDescription>선택한 연도의 일정이 너무 많아 이전에 성공한 연간 일정표를 유지합니다.</AlertDescription>
           </Alert>
         </div>
       ) : null}

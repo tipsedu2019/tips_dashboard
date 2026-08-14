@@ -29,6 +29,11 @@
       "fileName": "20260814011752_management_page_reads.sql",
       "status": "candidate",
       "sha256": "39ec7be093a24ee143d57ee4a4f7da5bc1b38630c0899669ad66900526c5cb50"
+    },
+    {
+      "fileName": "20260814035710_operations_scoped_reads.sql",
+      "status": "candidate",
+      "sha256": "266603c7b020c4e2b2681287f0f7bd63bd9ae411451b26778dd22a80a4abd87d"
     }
   ]
 }

@@ -1,13 +1,14 @@
 ﻿"use client";
 
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/providers/auth-provider";
 import { supabase } from "@/lib/supabase";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Calendar } from "@/app/admin/calendar/components/calendar";
 
 import {
@@ -22,7 +23,6 @@ import {
   prepareAcademicEventMetadataForWrite,
   runAcademicEventMutation,
 } from "./academic-event-utils.js";
-import { buildAcademicCalendarTemplateModel } from "./academic-calendar-models.js";
 import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
 
 function text(value: unknown) {
@@ -48,7 +48,7 @@ function parseSearchDate(value: string | null) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function buildSidebarGroups(events: ReturnType<typeof buildAcademicCalendarTemplateModel>["events"]) {
+function buildSidebarGroups(events: Array<Record<string, unknown>>) {
   const typeCounts = new Map<string, { label: string; count: number }>();
   const categoryCounts = new Map<string, { label: string; count: number }>();
 
@@ -103,13 +103,26 @@ function buildSidebarGroups(events: ReturnType<typeof buildAcademicCalendarTempl
 export function AcademicCalendarWorkspace() {
   const searchParams = useSearchParams();
   const { canManageAll } = useAuth();
-  const { data, error, refresh } = useOperationsWorkspaceData();
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [activeScienceAreas, setActiveScienceAreas] = useState<ReturnType<typeof parseActiveScienceSubjectAreas>>([]);
   const initialDate = useMemo(() => parseSearchDate(searchParams.get("date")), [searchParams]);
   const initialEventId = useMemo(() => text(searchParams.get("eventId")), [searchParams]);
   const initialQuery = useMemo(() => text(searchParams.get("q")), [searchParams]);
-  const isSeedCalendar = data.academicCalendarSource === "seed";
+  const [visibleRange, setVisibleRange] = useState(() => {
+    const anchor = initialDate || new Date();
+    const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1, 12);
+    const last = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0, 12);
+    first.setDate(first.getDate() - first.getDay());
+    last.setDate(last.getDate() + (6 - last.getDay()));
+    return { dateFrom: toDateKey(first), dateTo: toDateKey(last) };
+  });
+  const request = useMemo(() => ({ mode: "calendar" as const, ...visibleRange }), [visibleRange]);
+  const { data, densityError, error, refresh, loadEventDetail } = useOperationsWorkspaceData(request);
+  const isSeedCalendar = false;
+  const calendarRows = useMemo(
+    () => data?.ok === true && Array.isArray(data.rows) ? data.rows as Array<Record<string, unknown>> : [],
+    [data],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -117,7 +130,10 @@ export function AcademicCalendarWorkspace() {
 
     const client = supabase;
     void Promise.resolve().then(async () => {
-      const { data: areaRows, error: areaError } = await client.rpc("list_active_science_subject_areas_v1");
+      const { data: areaRows, error: areaError } = await client.rpc("list_active_science_subject_areas_v1")
+        .limit(200)
+        .abortSignal(AbortSignal.timeout(8_000))
+        .retry(false);
       if (cancelled) return;
       setActiveScienceAreas(areaError ? [] : parseActiveScienceSubjectAreas(areaRows));
     });
@@ -128,26 +144,90 @@ export function AcademicCalendarWorkspace() {
   }, []);
   const schoolOptions = useMemo(
     () =>
-      (data.academicSchools || [])
-        .map((school) => ({
-          id: text((school as { id?: string }).id),
-          name: text((school as { name?: string }).name),
-          category: text((school as { category?: string }).category) || "all",
+      [...new Map(calendarRows.map((row) => [text(row.schoolId), row])).values()]
+        .map((row) => ({
+          id: text(row.schoolId),
+          name: text(row.schoolName),
+          category: text(row.category) || "all",
         }))
         .filter((school) => school.id && school.name)
         .sort((left, right) => left.name.localeCompare(right.name, "ko")),
-    [data.academicSchools],
+    [calendarRows],
   );
 
   const calendarModel = useMemo(
-    () =>
-      buildAcademicCalendarTemplateModel({
-        academicEvents: data.academicEvents,
-        academicSchools: data.academicSchools,
-        scienceSubjectAreas: activeScienceAreas,
-      }),
-    [activeScienceAreas, data.academicEvents, data.academicSchools],
+    () => {
+      const scienceContext = { scienceSubjectAreas: activeScienceAreas };
+      const events = calendarRows.map((row) => ({
+        id: text(row.id),
+        sourceId: text(row.sourceId || row.id),
+        title: text(row.title),
+        date: new Date(`${text(row.startsAt).slice(0, 10)}T12:00:00`),
+        endDate: new Date(`${text(row.endsAt || row.startsAt).slice(0, 10)}T12:00:00`),
+        time: text(row.timeLabel),
+        duration: text(row.durationLabel),
+        type: row.eventType as "meeting" | "event" | "personal" | "task" | "reminder",
+        typeLabel: text(row.typeLabel),
+        attendees: Array.isArray(row.attendees) ? row.attendees.map(text).filter(Boolean) : [],
+        location: text(row.place),
+        color: text(row.color),
+        description: text(row.description),
+        note: text(row.notePreview),
+        schoolId: text(row.schoolId),
+        schoolName: text(row.schoolName),
+        category: text(row.category),
+        grade: text(row.grade),
+        examTerm: text(row.examTerm),
+        scienceAreaKey: text(row.scienceAreaKey),
+        scienceAreaLabel: text(row.scienceAreaLabel)
+          || text(scienceContext.scienceSubjectAreas.find((area) => area.areaKey === text(row.scienceAreaKey))?.label),
+        scopeSummary: text(row.scopeSummary),
+      }));
+      const counts = new Map<string, number>();
+      for (const event of events) {
+        const cursor = new Date(event.date);
+        while (cursor <= event.endDate) {
+          const key = toDateKey(cursor);
+          counts.set(key, (counts.get(key) || 0) + 1);
+          cursor.setDate(cursor.getDate() + 1);
+        }
+      }
+      return { events, eventDates: [...counts].map(([key, count]) => ({ date: new Date(`${key}T12:00:00`), count })) };
+    },
+    [activeScienceAreas, calendarRows],
   );
+
+  const handleVisibleRangeChange = useCallback((range: { start: Date; end: Date }) => {
+    const next = { dateFrom: toDateKey(range.start), dateTo: toDateKey(range.end) };
+    setVisibleRange((current) => current.dateFrom === next.dateFrom && current.dateTo === next.dateTo ? current : next);
+  }, []);
+
+  const handleOneWeekView = useCallback(() => {
+    if (densityError?.code !== "visible_range_too_dense") return;
+    const start = new Date(`${densityError.range.dateFrom}T12:00:00`);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    setVisibleRange({ dateFrom: toDateKey(start), dateTo: toDateKey(end) });
+  }, [densityError]);
+
+  const handleLoadEventDetail = useCallback(async (eventId: string) => {
+    const detail = await loadEventDetail(eventId) as Record<string, unknown>;
+    return {
+      id: text(detail.id), sourceId: text(detail.sourceId || detail.id), title: text(detail.title),
+      date: new Date(`${text(detail.startsAt).slice(0, 10)}T12:00:00`),
+      endDate: new Date(`${text(detail.endsAt || detail.startsAt).slice(0, 10)}T12:00:00`),
+      time: text(detail.timeLabel), duration: text(detail.durationLabel),
+      type: detail.eventType as "meeting" | "event" | "personal" | "task" | "reminder",
+      typeLabel: text(detail.typeLabel), attendees: Array.isArray(detail.attendees) ? detail.attendees.map(text) : [],
+      location: text(detail.place), color: text(detail.color), description: text(detail.description),
+      note: text(detail.note), schoolId: text(detail.schoolId), schoolName: text(detail.schoolName),
+      category: text(detail.category), grade: text(detail.grade), examTerm: text(detail.examTerm),
+      scienceAreaKey: text(detail.scienceAreaKey), scienceAreaLabel: text(detail.scienceAreaLabel),
+      embeddedNoteMeta: (detail.embeddedNoteMeta || {}) as Record<string, unknown>,
+      textbookScopes: Array.isArray(detail.textbookScopes) ? detail.textbookScopes : [],
+      subtextbookScopes: Array.isArray(detail.subtextbookScopes) ? detail.subtextbookScopes : [],
+    };
+  }, [loadEventDetail]);
 
   const sidebarGroups = useMemo(
     () => buildSidebarGroups(calendarModel.events),
@@ -316,6 +396,17 @@ export function AcademicCalendarWorkspace() {
         </div>
       ) : null}
 
+      {densityError?.code === "visible_range_too_dense" ? (
+        <div className="px-4 lg:px-6">
+          <Alert>
+            <AlertDescription className="flex items-center justify-between gap-3">
+              <span>선택한 기간의 일정이 너무 많아 이전 달력을 유지합니다.</span>
+              <Button type="button" variant="outline" size="sm" onClick={handleOneWeekView}>한 주 보기</Button>
+            </AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
+
       {isSeedCalendar || !canManageAll ? (
         <div className="px-4 lg:px-6">
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
@@ -347,6 +438,8 @@ export function AcademicCalendarWorkspace() {
           onSaveEvent={handleSaveEvent}
           onDeleteEvent={handleDeleteEvent}
           onMoveEvent={handleSaveEvent}
+          onVisibleRangeChange={handleVisibleRangeChange}
+          onLoadEventDetail={handleLoadEventDetail}
         />
       </div>
     </div>

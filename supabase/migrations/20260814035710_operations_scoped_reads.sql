@@ -1,0 +1,549 @@
+create function public.get_operations_calendar_range_v1(
+  p_date_from date,
+  p_date_to date
+)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = ''
+as $function$
+declare
+  v_count integer;
+  v_rows jsonb;
+begin
+  if p_date_from is null or p_date_to is null or p_date_to < p_date_from
+    or p_date_to - p_date_from > 41
+  then
+    raise exception 'operations_visible_range_invalid' using errcode = '22023';
+  end if;
+
+  with bounded as (
+    select
+      event.id,
+      event.title,
+      event.school_id,
+      event.school,
+      event.type,
+      event.start,
+      event.end,
+      event.grade,
+      event.note,
+      school.name as canonical_school_name,
+      school.category
+    from public.academic_events as event
+    left join public.academic_schools as school on school.id = event.school_id
+    where event.start <= p_date_to
+      and pg_catalog.coalesce(event.end, event.start) >= p_date_from
+    order by event.start asc, event.id asc
+    limit 2001
+  ), numbered as (
+    select bounded.*, pg_catalog.row_number() over (order by bounded.start asc, bounded.id asc) as ordinal
+    from bounded
+  )
+  select
+    pg_catalog.count(*)::integer,
+    pg_catalog.coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_object(
+          'id', numbered.id,
+          'sourceId', numbered.id,
+          'sourceKind', 'academic_event',
+          'title', pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(numbered.title), ''), '제목 없는 일정'),
+          'startsAt', numbered.start,
+          'endsAt', pg_catalog.coalesce(numbered.end, numbered.start),
+          'timeLabel', pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(numbered.school), ''), numbered.canonical_school_name, '학교 미지정'),
+          'durationLabel', case
+            when pg_catalog.coalesce(numbered.end, numbered.start) = numbered.start then '하루 일정'
+            else numbered.start::text || ' ~ ' || pg_catalog.coalesce(numbered.end, numbered.start)::text
+          end,
+          'eventType', case
+            when numbered.type = '체험학습' then 'event'
+            when numbered.type = '방학·휴일·기타' then 'reminder'
+            when numbered.type = '팁스' then 'meeting'
+            when numbered.type in ('시험기간', '영어시험일', '수학시험일', '과학시험일') then 'task'
+            else 'personal'
+          end,
+          'typeLabel', numbered.type,
+          'attendees', case
+            when pg_catalog.nullif(pg_catalog.btrim(numbered.grade), '') is null or numbered.grade = 'all' then '[]'::jsonb
+            else pg_catalog.to_jsonb(pg_catalog.regexp_split_to_array(numbered.grade, '\\s*,\\s*'))
+          end,
+          'subject', null,
+          'place', pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(numbered.school), ''), numbered.canonical_school_name),
+          'color', case
+            when numbered.type in ('시험기간', '영어시험일', '수학시험일', '과학시험일') then 'bg-rose-500'
+            when numbered.type = '체험학습' then 'bg-emerald-500'
+            when numbered.type = '방학·휴일·기타' then 'bg-amber-500'
+            when numbered.type = '팁스' then 'bg-blue-500'
+            else 'bg-violet-500'
+          end,
+          'description', pg_catalog.nullif(pg_catalog.left(pg_catalog.btrim(pg_catalog.split_part(pg_catalog.coalesce(numbered.note, ''), '[[TIPS_META]]', 1)), 160), ''),
+          'schoolId', numbered.school_id,
+          'schoolName', pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(numbered.school), ''), numbered.canonical_school_name),
+          'category', numbered.category,
+          'grade', numbered.grade,
+          'examTerm', null,
+          'scopeSummary', null,
+          'scienceAreaKey', null,
+          'scienceAreaLabel', null,
+          'notePreview', pg_catalog.nullif(pg_catalog.left(pg_catalog.btrim(pg_catalog.split_part(pg_catalog.coalesce(numbered.note, ''), '[[TIPS_META]]', 1)), 160), ''),
+          'status', 'active',
+          'revision', 0
+        ) order by numbered.start asc, numbered.id asc
+      ) filter (where numbered.ordinal <= 2000),
+      '[]'::jsonb
+    )
+  into v_count, v_rows
+  from numbered;
+
+  if v_count > 2000 then
+    return pg_catalog.jsonb_build_object(
+      'ok', false,
+      'code', 'visible_range_too_dense',
+      'range', pg_catalog.jsonb_build_object('dateFrom', p_date_from, 'dateTo', p_date_to),
+      'rows', '[]'::jsonb,
+      'observedRowsAtLeast', 2001,
+      'suggestedDays', 7
+    );
+  end if;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'range', pg_catalog.jsonb_build_object('dateFrom', p_date_from, 'dateTo', p_date_to),
+    'rows', v_rows,
+    'complete', true
+  );
+end
+$function$;
+
+create function public.get_operations_annual_board_v1(p_academic_year integer)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = ''
+as $function$
+declare
+  v_entry_count integer;
+  v_rows jsonb;
+  v_payload_bytes integer;
+  v_year_options jsonb;
+  v_school_count integer;
+  v_active_type_count integer;
+begin
+  if p_academic_year < 2000 or p_academic_year > 2200 then
+    raise exception 'operations_academic_year_invalid' using errcode = '22023';
+  end if;
+
+  with base_events as (
+    select
+      event.id,
+      event.school_id,
+      pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(event.school), ''), school.name, '학교 미지정') as school_name,
+      pg_catalog.coalesce(school.category, 'all') as category,
+      pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(event.grade), ''), 'all') as grade,
+      pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(event.type), ''), '팁스') as entry_type,
+      pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(event.title), ''), '제목 없는 일정') as title,
+      event.start as start_date,
+      pg_catalog.coalesce(event.end, event.start) as end_date,
+      pg_catalog.nullif(pg_catalog.left(pg_catalog.btrim(pg_catalog.split_part(pg_catalog.coalesce(event.note, ''), '[[TIPS_META]]', 1)), 160), '') as note_preview,
+      null::text as scope_summary,
+      '[]'::jsonb as display_sections
+    from public.academic_events as event
+    left join public.academic_schools as school on school.id = event.school_id
+    where event.start >= pg_catalog.make_date(p_academic_year, 1, 1)
+      and event.start < pg_catalog.make_date(p_academic_year + 1, 1, 1)
+  ), subject_events as (
+    select
+      detail.id,
+      pg_catalog.coalesce(detail.school_id, event.school_id) as school_id,
+      pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(event.school), ''), school.name, '학교 미지정') as school_name,
+      pg_catalog.coalesce(school.category, 'all') as category,
+      pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(detail.grade), ''), pg_catalog.nullif(pg_catalog.btrim(event.grade), ''), 'all') as grade,
+      case
+        when detail.subject ilike '%영어%' then '영어시험일'
+        when detail.subject ilike '%수학%' then '수학시험일'
+        when detail.subject = '과학' or pg_catalog.lower(detail.subject) = 'science' then '과학시험일'
+        else '시험기간'
+      end as entry_type,
+      case
+        when detail.subject ilike '%영어%' then '영어 시험일 및 시험범위'
+        when detail.subject ilike '%수학%' then '수학 시험일 및 시험범위'
+        when detail.subject = '과학' or pg_catalog.lower(detail.subject) = 'science' then '과학 시험일 및 시험범위'
+        else pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(event.title), ''), '시험기간')
+      end as title,
+      pg_catalog.coalesce(detail.exam_date, event.start) as start_date,
+      pg_catalog.coalesce(detail.exam_date, event.start) as end_date,
+      pg_catalog.nullif(pg_catalog.left(pg_catalog.btrim(pg_catalog.coalesce(detail.note, '')), 160), '') as note_preview,
+      pg_catalog.nullif(pg_catalog.concat_ws(' · ',
+        pg_catalog.nullif(pg_catalog.btrim(detail.textbook_scope), ''),
+        pg_catalog.nullif(pg_catalog.btrim(detail.supplement_scope), ''),
+        pg_catalog.nullif(pg_catalog.btrim(detail.other_scope), '')
+      ), '') as scope_summary,
+      pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+        'label', '시험범위',
+        'items', pg_catalog.to_jsonb(pg_catalog.array_remove(array[
+          pg_catalog.nullif(pg_catalog.btrim(detail.textbook_scope), ''),
+          pg_catalog.nullif(pg_catalog.btrim(detail.supplement_scope), ''),
+          pg_catalog.nullif(pg_catalog.btrim(detail.other_scope), '')
+        ], null))
+      )) as display_sections
+    from public.academic_event_exam_details as detail
+    join public.academic_events as event on event.id = detail.academic_event_id
+    left join public.academic_schools as school on school.id = pg_catalog.coalesce(detail.school_id, event.school_id)
+    where pg_catalog.coalesce(detail.exam_date, event.start) >= pg_catalog.make_date(p_academic_year, 1, 1)
+      and pg_catalog.coalesce(detail.exam_date, event.start) < pg_catalog.make_date(p_academic_year + 1, 1, 1)
+  ), bounded_entries as (
+    select entry.*
+    from (
+      select * from base_events
+      union all
+      select * from subject_events
+    ) as entry
+    order by entry.start_date asc, entry.id asc
+    limit 4001
+  ), projected as (
+    select
+      bounded_entries.*,
+      pg_catalog.jsonb_build_object(
+        'id', bounded_entries.id,
+        'title', bounded_entries.title,
+        'type', bounded_entries.entry_type,
+        'start', bounded_entries.start_date,
+        'end', bounded_entries.end_date,
+        'dateLabel', case
+          when bounded_entries.start_date = bounded_entries.end_date then bounded_entries.start_date::text
+          else bounded_entries.start_date::text || ' ~ ' || bounded_entries.end_date::text
+        end,
+        'schoolId', bounded_entries.school_id,
+        'schoolName', bounded_entries.school_name,
+        'grade', bounded_entries.grade,
+        'gradeBadges', case when bounded_entries.grade = 'all' then '[]'::jsonb else pg_catalog.to_jsonb(pg_catalog.regexp_split_to_array(bounded_entries.grade, '\\s*,\\s*')) end,
+        'examTerm', null,
+        'examDateLabel', bounded_entries.start_date,
+        'linkedScheduleLabel', null,
+        'scopeSummary', bounded_entries.scope_summary,
+        'scienceAreaKey', null,
+        'scienceAreaLabel', null,
+        'textbookScopes', '[]'::jsonb,
+        'subtextbookScopes', '[]'::jsonb,
+        'metaBadges', case when bounded_entries.scope_summary is null then '[]'::jsonb else pg_catalog.jsonb_build_array(bounded_entries.scope_summary) end,
+        'displaySections', bounded_entries.display_sections,
+        'notePreview', bounded_entries.note_preview,
+        'color', case
+          when bounded_entries.entry_type in ('시험기간', '영어시험일', '수학시험일', '과학시험일') then 'bg-rose-500'
+          when bounded_entries.entry_type = '체험학습' then 'bg-emerald-500'
+          when bounded_entries.entry_type = '방학·휴일·기타' then 'bg-amber-500'
+          else 'bg-blue-500'
+        end,
+        'revision', 0
+      ) as entry_data
+    from bounded_entries
+  ), grouped as (
+    select
+      projected.school_id,
+      projected.school_name,
+      projected.category,
+      projected.grade,
+      pg_catalog.count(*)::integer as total_events,
+      pg_catalog.jsonb_build_object(
+        '시험기간', pg_catalog.coalesce(pg_catalog.jsonb_agg(projected.entry_data order by projected.start_date, projected.id) filter (where projected.entry_type = '시험기간'), '[]'::jsonb),
+        '영어시험일', pg_catalog.coalesce(pg_catalog.jsonb_agg(projected.entry_data order by projected.start_date, projected.id) filter (where projected.entry_type = '영어시험일'), '[]'::jsonb),
+        '수학시험일', pg_catalog.coalesce(pg_catalog.jsonb_agg(projected.entry_data order by projected.start_date, projected.id) filter (where projected.entry_type = '수학시험일'), '[]'::jsonb),
+        '과학시험일', pg_catalog.coalesce(pg_catalog.jsonb_agg(projected.entry_data order by projected.start_date, projected.id) filter (where projected.entry_type = '과학시험일'), '[]'::jsonb),
+        '체험학습', pg_catalog.coalesce(pg_catalog.jsonb_agg(projected.entry_data order by projected.start_date, projected.id) filter (where projected.entry_type = '체험학습'), '[]'::jsonb),
+        '방학·휴일·기타', pg_catalog.coalesce(pg_catalog.jsonb_agg(projected.entry_data order by projected.start_date, projected.id) filter (where projected.entry_type = '방학·휴일·기타'), '[]'::jsonb),
+        '팁스', pg_catalog.coalesce(pg_catalog.jsonb_agg(projected.entry_data order by projected.start_date, projected.id) filter (where projected.entry_type = '팁스'), '[]'::jsonb)
+      ) as type_buckets
+    from projected
+    group by projected.school_id, projected.school_name, projected.category, projected.grade
+  )
+  select
+    (select pg_catalog.count(*)::integer from bounded_entries),
+    pg_catalog.coalesce(pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'id', pg_catalog.coalesce(grouped.school_id::text, pg_catalog.md5(grouped.school_name || ':' || grouped.grade)),
+        'schoolId', grouped.school_id,
+        'schoolName', grouped.school_name,
+        'category', grouped.category,
+        'grade', grouped.grade,
+        'gradeValues', case when grouped.grade = 'all' then '[]'::jsonb else pg_catalog.to_jsonb(pg_catalog.regexp_split_to_array(grouped.grade, '\\s*,\\s*')) end,
+        'gradeBadges', case when grouped.grade = 'all' then '[]'::jsonb else pg_catalog.to_jsonb(pg_catalog.regexp_split_to_array(grouped.grade, '\\s*,\\s*')) end,
+        'totalEvents', grouped.total_events,
+        'typeBuckets', grouped.type_buckets
+      ) order by grouped.school_name asc, grouped.grade asc
+    ), '[]'::jsonb),
+    (select pg_catalog.count(distinct pg_catalog.coalesce(projected.school_id::text, projected.school_name))::integer from projected),
+    (select pg_catalog.count(distinct projected.entry_type)::integer from projected)
+  into v_entry_count, v_rows, v_school_count, v_active_type_count
+  from grouped;
+
+  if v_entry_count > 4000 then
+    return pg_catalog.jsonb_build_object('ok', false, 'code', 'annual_board_too_dense');
+  end if;
+
+  select pg_catalog.coalesce(pg_catalog.jsonb_agg(year_value order by year_value desc), '[]'::jsonb)
+  into v_year_options
+  from (
+    select distinct pg_catalog.extract(year from event.start)::integer as year_value
+    from public.academic_events as event
+    where event.start is not null
+    order by year_value desc
+    limit 50
+  ) as years;
+
+  v_payload_bytes := pg_catalog.octet_length(pg_catalog.convert_to(v_rows::text, 'UTF8'));
+  if v_payload_bytes > 400 * 1024 then
+    return pg_catalog.jsonb_build_object('ok', false, 'code', 'annual_board_too_dense');
+  end if;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'data', pg_catalog.jsonb_build_object(
+      'academicYear', p_academic_year,
+      'selectedSemester', 'all',
+      'yearOptions', case when v_year_options @> pg_catalog.jsonb_build_array(p_academic_year) then v_year_options else pg_catalog.jsonb_build_array(p_academic_year) || v_year_options end,
+      'rows', v_rows,
+      'summary', pg_catalog.jsonb_build_object(
+        'schoolCount', pg_catalog.coalesce(v_school_count, 0),
+        'eventCount', pg_catalog.coalesce(v_entry_count, 0),
+        'activeTypeCount', pg_catalog.coalesce(v_active_type_count, 0)
+      )
+    )
+  );
+end
+$function$;
+
+create function public.get_operations_class_schedule_page_v1(
+  p_filters jsonb,
+  p_cursor_sort_key text,
+  p_cursor_id uuid,
+  p_limit integer
+)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = ''
+as $function$
+declare
+  v_keys text[];
+  v_rows jsonb;
+  v_stats jsonb;
+  v_options jsonb;
+begin
+  select pg_catalog.array_agg(filter_key.key order by filter_key.key)
+  into v_keys
+  from pg_catalog.jsonb_object_keys(p_filters) as filter_key(key);
+
+  if pg_catalog.jsonb_typeof(p_filters) <> 'object'
+    or v_keys is distinct from array['grade','search','subject','syncGroupId','teacher','termId']
+    or pg_catalog.jsonb_typeof(p_filters -> 'search') <> 'string'
+    or exists (
+      select 1
+      from pg_catalog.jsonb_each(p_filters) as filter_value(key, value)
+      where filter_value.key <> 'search'
+        and pg_catalog.jsonb_typeof(filter_value.value) not in ('string', 'null')
+    )
+  then
+    raise exception 'operations_class_schedule_filters_invalid' using errcode = '22023';
+  end if;
+  if p_limit is null or not (p_limit = 30) then
+    raise exception 'operations_class_schedule_limit_invalid' using errcode = '22023';
+  end if;
+  if (p_cursor_sort_key is null) <> (p_cursor_id is null) then
+    raise exception 'operations_class_schedule_cursor_invalid' using errcode = '22023';
+  end if;
+
+  with filtered as (
+    select
+      class.id,
+      class.name,
+      class.subject,
+      class.grade,
+      class.schedule,
+      class.term_id,
+      pg_catalog.nullif(pg_catalog.btrim(class.teacher), '') as teacher_name,
+      term.name as term_name,
+      (
+        select member.group_id
+        from public.class_schedule_sync_group_members as member
+        where member.class_id = class.id
+        order by (member.group_id::text = p_filters ->> 'syncGroupId') desc, member.sort_order asc, member.group_id asc
+        limit 1
+      ) as sync_group_id,
+      (
+        select sync_group.name
+        from public.class_schedule_sync_group_members as member
+        join public.class_schedule_sync_groups as sync_group on sync_group.id = member.group_id
+        where member.class_id = class.id
+        order by (member.group_id::text = p_filters ->> 'syncGroupId') desc, member.sort_order asc, member.group_id asc
+        limit 1
+      ) as sync_group_name,
+      class.status,
+      class.updated_at,
+      pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(class.name), ''), '') collate dashboard_private.ko_numeric as sort_key
+    from public.classes as class
+    left join public.class_terms as term on term.id = class.term_id
+    where (p_filters ->> 'search' = '' or pg_catalog.concat_ws(' ', class.name, class.subject, class.grade, class.teacher, term.name) ilike '%' || p_filters ->> 'search' || '%')
+      and ((p_filters ->> 'termId') is null or class.term_id::text = p_filters ->> 'termId')
+      and ((p_filters ->> 'subject') is null or class.subject = p_filters ->> 'subject')
+      and ((p_filters ->> 'grade') is null or class.grade = p_filters ->> 'grade')
+      and ((p_filters ->> 'teacher') is null or exists (
+        select 1
+        from pg_catalog.regexp_split_to_table(pg_catalog.coalesce(class.teacher, ''), E'[,/&·\\n]+') as teacher_name(value)
+        where pg_catalog.btrim(teacher_name.value) = p_filters ->> 'teacher'
+      ))
+      and ((p_filters ->> 'syncGroupId') is null or exists (
+        select 1 from public.class_schedule_sync_group_members as member
+        where member.class_id = class.id and member.group_id::text = p_filters ->> 'syncGroupId'
+      ))
+  ), page as (
+    select filtered.*
+    from filtered
+    where p_cursor_sort_key is null
+      or filtered.sort_key > p_cursor_sort_key collate dashboard_private.ko_numeric
+      or (filtered.sort_key = p_cursor_sort_key collate dashboard_private.ko_numeric and filtered.id > p_cursor_id)
+    order by filtered.sort_key asc, filtered.id asc
+    limit p_limit + 1
+  )
+  select pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+    'id', page.id,
+    'sort_key', page.sort_key::text,
+    'row_data', pg_catalog.jsonb_build_object(
+      'id', page.id,
+      'name', pg_catalog.coalesce(page.name, ''),
+      'subject', pg_catalog.coalesce(page.subject, ''),
+      'grade', pg_catalog.coalesce(page.grade, ''),
+      'schedule', pg_catalog.coalesce(page.schedule, ''),
+      'termId', page.term_id,
+      'teacherName', page.teacher_name,
+      'termName', page.term_name,
+      'syncGroupId', page.sync_group_id,
+      'syncGroupName', page.sync_group_name,
+      'status', pg_catalog.coalesce(page.status, ''),
+      'updatedAt', page.updated_at
+    )
+  ) order by page.sort_key asc, page.id asc), '[]'::jsonb)
+  into v_rows
+  from page;
+
+  with filtered as (
+    select class.status
+    from public.classes as class
+    left join public.class_terms as term on term.id = class.term_id
+    where (p_filters ->> 'search' = '' or pg_catalog.concat_ws(' ', class.name, class.subject, class.grade, class.teacher, term.name) ilike '%' || p_filters ->> 'search' || '%')
+      and ((p_filters ->> 'termId') is null or class.term_id::text = p_filters ->> 'termId')
+      and ((p_filters ->> 'subject') is null or class.subject = p_filters ->> 'subject')
+      and ((p_filters ->> 'grade') is null or class.grade = p_filters ->> 'grade')
+      and ((p_filters ->> 'teacher') is null or exists (
+        select 1
+        from pg_catalog.regexp_split_to_table(pg_catalog.coalesce(class.teacher, ''), E'[,/&·\\n]+') as teacher_name(value)
+        where pg_catalog.btrim(teacher_name.value) = p_filters ->> 'teacher'
+      ))
+      and ((p_filters ->> 'syncGroupId') is null or exists (
+        select 1 from public.class_schedule_sync_group_members as member
+        where member.class_id = class.id and member.group_id::text = p_filters ->> 'syncGroupId'
+      ))
+  )
+  select pg_catalog.jsonb_build_object(
+    'total', pg_catalog.count(*),
+    'active', pg_catalog.count(*) filter (where filtered.status in ('수강', '수업 진행 중')),
+    'draft', pg_catalog.count(*) filter (where filtered.status in ('개강 예정', '개강 준비 중'))
+  ) into v_stats
+  from filtered;
+
+  select pg_catalog.jsonb_build_object(
+    'terms', (select pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('value', term.id, 'label', term.name) order by term.academic_year desc, term.sort_order asc, term.id asc), '[]'::jsonb) from (select * from public.class_terms order by academic_year desc, sort_order asc, id asc limit 200) as term),
+    'subjects', (select pg_catalog.coalesce(pg_catalog.jsonb_agg(value order by value collate dashboard_private.ko_numeric), '[]'::jsonb) from (select distinct class.subject as value from public.classes as class where pg_catalog.nullif(pg_catalog.btrim(class.subject), '') is not null order by value collate dashboard_private.ko_numeric limit 200) as option),
+    'grades', (select pg_catalog.coalesce(pg_catalog.jsonb_agg(value order by value collate dashboard_private.ko_numeric), '[]'::jsonb) from (select distinct class.grade as value from public.classes as class where pg_catalog.nullif(pg_catalog.btrim(class.grade), '') is not null order by value collate dashboard_private.ko_numeric limit 200) as option),
+    'teachers', (select pg_catalog.coalesce(pg_catalog.jsonb_agg(value order by value collate dashboard_private.ko_numeric), '[]'::jsonb) from (select distinct pg_catalog.btrim(teacher_name.value) as value from public.classes as class cross join lateral pg_catalog.regexp_split_to_table(pg_catalog.coalesce(class.teacher, ''), E'[,/&·\\n]+') as teacher_name(value) where pg_catalog.nullif(pg_catalog.btrim(teacher_name.value), '') is not null order by value collate dashboard_private.ko_numeric limit 200) as option),
+    'syncGroups', (select pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('value', sync_group.id, 'label', sync_group.name) order by sync_group.sort_order asc, sync_group.name collate dashboard_private.ko_numeric asc, sync_group.id asc), '[]'::jsonb) from (select * from public.class_schedule_sync_groups order by sort_order asc, name collate dashboard_private.ko_numeric asc, id asc limit 200) as sync_group)
+  ) into v_options;
+
+  return pg_catalog.jsonb_build_object('rows', v_rows, 'stats', v_stats, 'filterOptions', v_options);
+end
+$function$;
+
+create function public.get_academic_event_detail_v1(p_event_id uuid)
+returns jsonb
+language sql
+stable
+security invoker
+set search_path = ''
+as $function$
+  select pg_catalog.jsonb_build_object(
+    'id', event.id,
+    'sourceId', event.id,
+    'sourceKind', 'academic_event',
+    'title', event.title,
+    'startsAt', event.start,
+    'endsAt', pg_catalog.coalesce(event.end, event.start),
+    'timeLabel', pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(event.school), ''), school.name, '학교 미지정'),
+    'durationLabel', case when pg_catalog.coalesce(event.end, event.start) = event.start then '하루 일정' else event.start::text || ' ~ ' || pg_catalog.coalesce(event.end, event.start)::text end,
+    'eventType', case when event.type = '체험학습' then 'event' when event.type = '방학·휴일·기타' then 'reminder' when event.type = '팁스' then 'meeting' when event.type in ('시험기간','영어시험일','수학시험일','과학시험일') then 'task' else 'personal' end,
+    'typeLabel', event.type,
+    'attendees', case when pg_catalog.nullif(pg_catalog.btrim(event.grade), '') is null or event.grade = 'all' then '[]'::jsonb else pg_catalog.to_jsonb(pg_catalog.regexp_split_to_array(event.grade, '\\s*,\\s*')) end,
+    'subject', null,
+    'place', pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(event.school), ''), school.name),
+    'color', case when event.type in ('시험기간','영어시험일','수학시험일','과학시험일') then 'bg-rose-500' when event.type = '체험학습' then 'bg-emerald-500' when event.type = '방학·휴일·기타' then 'bg-amber-500' when event.type = '팁스' then 'bg-blue-500' else 'bg-violet-500' end,
+    'description', pg_catalog.nullif(pg_catalog.btrim(pg_catalog.split_part(pg_catalog.coalesce(event.note, ''), '[[TIPS_META]]', 1)), ''),
+    'schoolId', event.school_id,
+    'schoolName', pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(event.school), ''), school.name),
+    'category', school.category,
+    'grade', event.grade,
+    'examTerm', null,
+    'scopeSummary', null,
+    'scienceAreaKey', null,
+    'scienceAreaLabel', null,
+    'notePreview', pg_catalog.nullif(pg_catalog.left(pg_catalog.btrim(pg_catalog.split_part(pg_catalog.coalesce(event.note, ''), '[[TIPS_META]]', 1)), 160), ''),
+    'status', 'active',
+    'revision', 0,
+    'note', pg_catalog.nullif(pg_catalog.btrim(pg_catalog.split_part(pg_catalog.coalesce(event.note, ''), '[[TIPS_META]]', 1)), ''),
+    'embeddedNoteMeta', null,
+    'textbookScopes', '[]'::jsonb,
+    'subtextbookScopes', '[]'::jsonb,
+    'materialSections', pg_catalog.coalesce((
+      select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+        'label', pg_catalog.coalesce(detail.subject, '시험범위'),
+        'items', pg_catalog.to_jsonb(pg_catalog.array_remove(array[
+          pg_catalog.nullif(pg_catalog.btrim(detail.textbook_scope), ''),
+          pg_catalog.nullif(pg_catalog.btrim(detail.supplement_scope), ''),
+          pg_catalog.nullif(pg_catalog.btrim(detail.other_scope), '')
+        ], null))
+      ) order by detail.sort_order asc, detail.id asc)
+      from public.academic_event_exam_details as detail
+      where detail.academic_event_id = event.id
+    ), '[]'::jsonb)
+  )
+  from public.academic_events as event
+  left join public.academic_schools as school on school.id = event.school_id
+  where event.id = p_event_id
+$function$;
+
+create function public.list_operations_catalogs_v1()
+returns jsonb
+language sql
+stable
+security invoker
+set search_path = ''
+as $function$
+  select pg_catalog.jsonb_build_object(
+    'teachers', (select pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('id', catalog.id, 'name', catalog.name, 'subjects', catalog.subjects, 'isVisible', catalog.is_visible) order by catalog.sort_order, catalog.name collate dashboard_private.ko_numeric, catalog.id), '[]'::jsonb) from (select teacher.id, teacher.name, teacher.subjects, teacher.is_visible, teacher.sort_order from public.teacher_catalogs as teacher where teacher.is_visible order by teacher.sort_order, teacher.name collate dashboard_private.ko_numeric, teacher.id limit 200) as catalog),
+    'classrooms', (select pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('id', catalog.id, 'name', catalog.name, 'subjects', catalog.subjects, 'isVisible', catalog.is_visible) order by catalog.sort_order, catalog.name collate dashboard_private.ko_numeric, catalog.id), '[]'::jsonb) from (select classroom.id, classroom.name, classroom.subjects, classroom.is_visible, classroom.sort_order from public.classroom_catalogs as classroom where classroom.is_visible order by classroom.sort_order, classroom.name collate dashboard_private.ko_numeric, classroom.id limit 200) as catalog),
+    'subjects', (select pg_catalog.coalesce(pg_catalog.jsonb_agg(value order by value collate dashboard_private.ko_numeric), '[]'::jsonb) from (select distinct class.subject as value from public.classes as class where pg_catalog.nullif(pg_catalog.btrim(class.subject), '') is not null order by value collate dashboard_private.ko_numeric limit 200) as subject)
+  )
+$function$;
+
+revoke all on function public.get_operations_calendar_range_v1(date, date) from public, anon, authenticated;
+revoke all on function public.get_operations_annual_board_v1(integer) from public, anon, authenticated;
+revoke all on function public.get_operations_class_schedule_page_v1(jsonb, text, uuid, integer) from public, anon, authenticated;
+revoke all on function public.get_academic_event_detail_v1(uuid) from public, anon, authenticated;
+revoke all on function public.list_operations_catalogs_v1() from public, anon, authenticated;
+
+grant execute on function public.get_operations_calendar_range_v1(date, date) to authenticated;
+grant execute on function public.get_operations_annual_board_v1(integer) to authenticated;
+grant execute on function public.get_operations_class_schedule_page_v1(jsonb, text, uuid, integer) to authenticated;
+grant execute on function public.get_academic_event_detail_v1(uuid) to authenticated;
+grant execute on function public.list_operations_catalogs_v1() to authenticated;

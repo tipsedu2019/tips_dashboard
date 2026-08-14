@@ -433,6 +433,24 @@ test("query budget allows the exact task stats scalar RPC without a page limit",
   assert.deepEqual(result, { ok: true, violations: [] })
 })
 
+test("query budget allows exact operations scalar and internally bounded catalog RPCs", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/operations-read-service.js",
+    source: `export async function readOperations(client) {
+  await client.rpc("get_operations_calendar_range_v1", { p_date_from: "2026-08-01", p_date_to: "2026-08-31" }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  await client.rpc("get_operations_annual_board_v1", { p_academic_year: 2026 }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  await client.rpc("get_academic_event_detail_v1", { p_event_id: "event-1" }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  await client.rpc("get_class_schedule_v1", { p_class_id: "class-1", p_date_from: "2026-08-01", p_date_to: "2026-08-31" }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  await client.rpc("list_operations_catalogs_v1", {}).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return client.rpc("list_active_science_subject_areas_v1", {}).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result, { ok: true, violations: [] })
+})
+
 test("query budget reports an RPC without an argument envelope instead of throwing", async () => {
   const result = await verifyFixture({
     source: `async function readRows(client) {
