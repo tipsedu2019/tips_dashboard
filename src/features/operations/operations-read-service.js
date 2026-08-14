@@ -95,32 +95,51 @@ export function resolveAnnualBoardEntryParentId(entry) {
   return text(entry?.parentEventId || entry?.parent_event_id || entry?.id);
 }
 
-function normalizeAnnualScopeItems(items) {
+function normalizeAnnualScopeItems(items, fallbackName) {
   return (Array.isArray(items) ? items : [])
-    .map((item) => ({
-      name: text(item?.name),
-      publisher: text(item?.publisher),
-      scope: text(item?.scope),
-    }))
+    .map((item) => {
+      const publisher = text(item?.publisher);
+      const scope = text(item?.scope);
+      return {
+        name: text(item?.name) || ((publisher || scope) ? fallbackName : ""),
+        publisher,
+        scope,
+      };
+    })
     .filter((item) => item.name || item.publisher || item.scope)
     .slice(0, 4);
 }
 
-function annualScopeItemsFromSection(entry, label) {
-  const sections = Array.isArray(entry?.materialSections)
-    ? entry.materialSections
-    : Array.isArray(entry?.displaySections) ? entry.displaySections : [];
-  const section = sections.find((candidate) => text(candidate?.label) === label);
-  return (Array.isArray(section?.items) ? section.items : [])
+function uniqueAnnualScopeItems(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = [item.name, item.publisher, item.scope].join("\u0000");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 4);
+}
+
+function annualScopeItemsFromSections(entry, labels, fallbackName) {
+  const sections = [
+    ...(Array.isArray(entry?.materialSections) ? entry.materialSections : []),
+    ...(Array.isArray(entry?.displaySections) ? entry.displaySections : []),
+  ];
+  const compatibleLabels = new Set(labels);
+  return uniqueAnnualScopeItems(sections
+    .filter((candidate) => compatibleLabels.has(text(candidate?.label)))
+    .flatMap((section) => Array.isArray(section?.items) ? section.items : [])
     .map((item) => text(item))
     .filter(Boolean)
-    .slice(0, 4)
-    .map((scope) => ({ name: "", publisher: "", scope }));
+    .map((scope) => ({ name: fallbackName, publisher: "", scope })));
 }
 
 export function resolveAnnualBoardStructuredScopes(entry) {
-  const directTextbookScopes = normalizeAnnualScopeItems(entry?.textbookScopes);
-  const directSubtextbookScopes = normalizeAnnualScopeItems(entry?.subtextbookScopes);
+  const directTextbookScopes = normalizeAnnualScopeItems(entry?.textbookScopes, "교재");
+  const directSubtextbookScopes = uniqueAnnualScopeItems([
+    ...normalizeAnnualScopeItems(entry?.subtextbookScopes, "부교재"),
+    ...normalizeAnnualScopeItems(entry?.supplementScopes || entry?.supplement_scopes, "부교재"),
+  ]);
   const textbookScope = text(entry?.textbookScope || entry?.textbook_scope);
   const subtextbookScope = text(
     entry?.subtextbookScope
@@ -128,18 +147,42 @@ export function resolveAnnualBoardStructuredScopes(entry) {
     || entry?.supplementScope
     || entry?.supplement_scope,
   );
+  const textbookScopes = uniqueAnnualScopeItems([
+    ...directTextbookScopes,
+    ...(textbookScope ? [{ name: "교재", publisher: "", scope: textbookScope }] : []),
+  ]);
+  const subtextbookScopes = uniqueAnnualScopeItems([
+    ...directSubtextbookScopes,
+    ...(subtextbookScope ? [{ name: "부교재", publisher: "", scope: subtextbookScope }] : []),
+  ]);
   return {
-    textbookScopes: directTextbookScopes.length > 0
-      ? directTextbookScopes
-      : textbookScope
-        ? [{ name: "", publisher: "", scope: textbookScope }]
-        : annualScopeItemsFromSection(entry, "교과서"),
-    subtextbookScopes: directSubtextbookScopes.length > 0
-      ? directSubtextbookScopes
-      : subtextbookScope
-        ? [{ name: "", publisher: "", scope: subtextbookScope }]
-        : annualScopeItemsFromSection(entry, "부교재"),
+    textbookScopes: textbookScopes.length > 0
+      ? textbookScopes
+      : annualScopeItemsFromSections(entry, ["교과서", "본교재", "교재"], "교재"),
+    subtextbookScopes: subtextbookScopes.length > 0
+      ? subtextbookScopes
+      : annualScopeItemsFromSections(entry, ["부교재", "보충교재", "보조교재"], "부교재"),
   };
+}
+
+export function getAnnualBoardEntryMissingItems(entry) {
+  if (!entry || typeof entry !== "object") return [];
+  const isSubjectExam = ["영어시험일", "수학시험일", "과학시험일"].includes(text(entry.type));
+  if (!isSubjectExam) return [];
+  const { textbookScopes, subtextbookScopes } = resolveAnnualBoardStructuredScopes(entry);
+  const scopeItems = [...textbookScopes, ...subtextbookScopes];
+  const hasScope = scopeItems.some((item) => Boolean(text(item?.scope)));
+  const hasPartialScope = scopeItems.some((item) => {
+    const hasAnyValue = text(item?.name) || text(item?.publisher) || text(item?.scope);
+    return Boolean(hasAnyValue) && (!text(item?.name) || !text(item?.scope));
+  });
+
+  return [
+    (!text(entry.examDateLabel) || text(entry.examDateLabel) === "시험일 미입력") ? "시험일 미입력" : null,
+    !hasScope ? "시험범위 미입력" : null,
+    text(entry.type) === "과학시험일" && !text(entry.scienceAreaKey) ? "과학 영역 미입력" : null,
+    hasPartialScope ? "시험범위 일부 미입력" : null,
+  ].filter(Boolean);
 }
 
 export function buildClassLessonDesignRow(detail) {
@@ -203,6 +246,67 @@ export function captureClassMutationLifecycleToken({ currentRevision, classId } 
   const normalizedClassId = text(classId);
   if (!Number.isInteger(currentRevision) || currentRevision <= 0 || !normalizedClassId) return null;
   return { revision: currentRevision, classId: normalizedClassId };
+}
+
+export function createClassMutationLifecycle() {
+  let revision = 0;
+  let requestedClassId = "";
+  return {
+    get revision() {
+      return revision;
+    },
+    get requestedClassId() {
+      return requestedClassId;
+    },
+    enter(classId) {
+      revision += 1;
+      requestedClassId = text(classId);
+      return revision;
+    },
+    revoke() {
+      revision += 1;
+      requestedClassId = "";
+      return revision;
+    },
+    capture(classId = requestedClassId) {
+      const normalizedClassId = text(classId);
+      if (!normalizedClassId || normalizedClassId !== requestedClassId) return null;
+      return captureClassMutationLifecycleToken({ currentRevision: revision, classId: normalizedClassId });
+    },
+    isCurrent(token, detailClassId = token?.classId) {
+      return isCurrentClassMutationRefresh({
+        expectedRevision: token?.revision,
+        currentRevision: revision,
+        requestedClassId: token?.classId,
+        currentRequestedClassId: requestedClassId,
+        detailClassId,
+      });
+    },
+  };
+}
+
+export async function runClassMutationWithLifecycle({
+  token,
+  isCurrent,
+  mutate,
+  afterCommit,
+  onSuccess,
+  onError,
+  onSettled,
+} = {}) {
+  try {
+    const value = await mutate?.();
+    const receipt = await afterCommit?.(value);
+    if (!isCurrent?.(token)) return { status: "stale", phase: "success" };
+    await onSuccess?.(value, receipt);
+    return { status: "success" };
+  } catch (error) {
+    if (!isCurrent?.(token)) return { status: "stale", phase: "error" };
+    await onError?.(error);
+    return { status: "error" };
+  } finally {
+    if (isCurrent?.(token)) await onSettled?.();
+  }
 }
 
 export async function refreshClassMutationIfCurrent({

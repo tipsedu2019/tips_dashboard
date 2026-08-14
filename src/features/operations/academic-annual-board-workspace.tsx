@@ -50,6 +50,7 @@ import {
 } from "./academic-calendar-models.js";
 import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
 import {
+  getAnnualBoardEntryMissingItems,
   resolveAnnualBoardEntryParentId,
   resolveAnnualBoardStructuredScopes,
 } from "./operations-read-service.js";
@@ -352,30 +353,6 @@ function getEntryByTerm(row: AcademicAnnualBoardRow, type: AcademicAnnualBoardTy
   return legacySubjectEntry || null;
 }
 
-function buildBoardEntryMissingItems(entry?: AcademicAnnualBoardEntry | null) {
-  if (!entry) {
-    return [];
-  }
-
-  const sectionMap = new Map((entry.displaySections || []).map((section) => [section.label, Array.isArray(section.items) ? section.items.filter(Boolean) : []]));
-  const scopeItems = sectionMap.get("시험범위") || [];
-  const structuredScopeItems = [
-    ...(Array.isArray(entry.textbookScopes) ? entry.textbookScopes : []),
-    ...(Array.isArray(entry.subtextbookScopes) ? entry.subtextbookScopes : []),
-  ];
-  const hasStructuredPartialScope = structuredScopeItems.some((item) => {
-    const hasAnyValue = text(item?.name) || text(item?.publisher) || text(item?.scope);
-    return Boolean(hasAnyValue) && (!text(item?.name) || !text(item?.scope));
-  });
-
-  return [
-    isSubjectExamType(entry.type) && (!text(entry.examDateLabel) || text(entry.examDateLabel) === "시험일 미입력") ? "시험일 미입력" : null,
-    isSubjectExamType(entry.type) && scopeItems.length === 0 ? "시험범위 미입력" : null,
-    entry.type === "과학시험일" && !text(entry.scienceAreaKey) ? "과학 영역 미입력" : null,
-    hasStructuredPartialScope ? "시험범위 일부 미입력" : null,
-  ].filter((item): item is string => Boolean(item));
-}
-
 function getEntryState(entry: AcademicAnnualBoardEntry | null, type: AcademicAnnualBoardType): EntryState {
   if (!entry) {
     return "empty";
@@ -384,7 +361,7 @@ function getEntryState(entry: AcademicAnnualBoardEntry | null, type: AcademicAnn
     return text(entry.start) && text(entry.end || entry.start) ? "complete" : "warning";
   }
   if (isSubjectExamType(type)) {
-    return buildBoardEntryMissingItems(entry).length > 0 ? "warning" : "complete";
+    return getAnnualBoardEntryMissingItems(entry).length > 0 ? "warning" : "complete";
   }
   return text(entry.dateLabel) || text(entry.start) ? "complete" : "warning";
 }
@@ -577,7 +554,7 @@ function AnnualBoardCellHoverContent({
   onCreate: () => void;
 }) {
   const primaryEntry = entries[0] || null;
-  const missingItems = primaryEntry ? buildBoardEntryMissingItems(primaryEntry) : [];
+  const missingItems = primaryEntry ? getAnnualBoardEntryMissingItems(primaryEntry) : [];
   const textbookScopes = getStructuredScopeItems(primaryEntry, "textbookScopes");
   const subtextbookScopes = getStructuredScopeItems(primaryEntry, "subtextbookScopes");
 

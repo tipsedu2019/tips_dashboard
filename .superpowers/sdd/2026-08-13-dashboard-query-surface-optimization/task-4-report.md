@@ -229,3 +229,22 @@ Source evidence:
 - The combined query-budget run is non-GREEN only in the pre-existing Task 6 real-legacy-task baseline expectation (`ops-task-service.ts`). Migration layout remains non-GREEN only for the separate Task 3 and Task 5 candidates; the Task 4 migration passes its lexical gate.
 
 No DB runtime command was run. The expanded pgTAP fixture specifies explicit plan/profile priority and separated scalar/structured scope behavior, but migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, worker, webhook, provider request, and recipient receipt remain unclaimed; the manifest stays `candidate`.
+
+## Fresh Task 4 P1 remediation after `0559051b`
+
+The behavior-first review ran **30 pass / 5 fail**. The expected failures showed that scalar scope fallbacks had no usable name, annual completeness did not consume the shared normalized scope contract, and the class route/save lifecycle abstraction did not yet exist.
+
+This round closes the three requested P1 boundaries:
+
+- Annual completeness and hover warnings consume the same normalized textbook/subtextbook/supplement scope resolver as rendering. Structured and scalar scopes can coexist, labeled `교과서`/`본교재`/`교재` and `부교재`/`보충교재`/`보조교재` sections are compatible fallbacks, generic `시험범위` remains excluded, and unnamed populated entries receive the meaningful `교재` or `부교재` name.
+- The lesson-design route owns one requested-class lifecycle. Route changes enter only the URL-requested class, effect cleanup revokes and clears the identity on dependency cleanup/unmount, explicit close and external detail navigation revoke immediately, and no selected-row fallback can preserve a removed `classId`.
+- Session, content/plan, generation preview, and generation confirmation capture the lifecycle before their asynchronous work. Success, stale success, error, draft clearing, notice/error/loading, preview clearing/installation, detail/range refresh, and conditional list refresh all pass through the captured identity. After a committed session/content/generation write, public-class cache invalidation still runs before the stale UI gate and is therefore unconditional with respect to navigation.
+
+Fresh source evidence:
+
+- New lifecycle/scope regression run: **35/35 GREEN** after the recorded **30/35 RED**.
+- Task 4 focused calendar/annual/class/continuous-schedule suite: **76/76 GREEN**.
+- TypeScript, targeted ESLint, operations worktree query guard, and `git diff --check`: GREEN.
+- Candidate migration SHA-256 remains `5cf05b41ec9a5e0bf7fbbfd1fd2f3ad1442aa2ad13cb0353a29abdd77f167bf9`, equal to both the candidate ledger manifest and on-disk SQL; no SQL or manifest bytes changed.
+
+No DB runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, migration application, deployment, worker, webhook, provider request, and recipient receipt remain unclaimed; the manifest stays `candidate`.

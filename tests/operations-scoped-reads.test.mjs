@@ -19,6 +19,9 @@ const isCurrentClassMutationRefresh = serviceModule.isCurrentClassMutationRefres
 const captureClassMutationLifecycleToken = serviceModule.captureClassMutationLifecycleToken;
 const refreshClassMutationIfCurrent = serviceModule.refreshClassMutationIfCurrent;
 const resolveAnnualBoardStructuredScopes = serviceModule.resolveAnnualBoardStructuredScopes;
+const getAnnualBoardEntryMissingItems = serviceModule.getAnnualBoardEntryMissingItems;
+const createClassMutationLifecycle = serviceModule.createClassMutationLifecycle;
+const runClassMutationWithLifecycle = serviceModule.runClassMutationWithLifecycle;
 
 const academicEventUtils = await import(
   new URL("../src/features/operations/academic-event-utils.js", import.meta.url),
@@ -653,8 +656,8 @@ test("derived annual scopes keep textbook and supplement buckets separate", () =
       { label: "시험범위", items: ["기타 시험범위"] },
     ],
   }), {
-    textbookScopes: [{ name: "", publisher: "", scope: "교과서 직접 범위" }],
-    subtextbookScopes: [{ name: "", publisher: "", scope: "부교재 직접 범위" }],
+    textbookScopes: [{ name: "교재", publisher: "", scope: "교과서 직접 범위" }],
+    subtextbookScopes: [{ name: "부교재", publisher: "", scope: "부교재 직접 범위" }],
   });
   assert.deepEqual(resolveAnnualBoardStructuredScopes({
     displaySections: [
@@ -663,8 +666,29 @@ test("derived annual scopes keep textbook and supplement buckets separate", () =
     ],
   }), {
     textbookScopes: [],
-    subtextbookScopes: [{ name: "", publisher: "", scope: "부교재만 있음" }],
+    subtextbookScopes: [{ name: "부교재", publisher: "", scope: "부교재만 있음" }],
   });
+});
+
+test("annual completeness uses normalized textbook, subtextbook, supplement, scalar, and compatible-section scopes", () => {
+  assert.equal(typeof getAnnualBoardEntryMissingItems, "function");
+  const base = { type: "영어시험일", examDateLabel: "4/21" };
+
+  for (const entry of [
+    { ...base, textbookScopes: [{ name: "본교재", scope: "10~20쪽" }] },
+    { ...base, subtextbookScopes: [{ name: "부교재", scope: "3단원" }] },
+    { ...base, supplementScopes: [{ name: "워크북", scope: "2단원" }] },
+    { ...base, textbookScope: "5과 전체" },
+    { ...base, supplementScope: "워크북 4과" },
+    { ...base, materialSections: [{ label: "보충교재", items: ["문법 30~35쪽"] }] },
+  ]) {
+    assert.deepEqual(getAnnualBoardEntryMissingItems(entry), []);
+  }
+
+  assert.deepEqual(
+    getAnnualBoardEntryMissingItems({ ...base, textbookScopes: [{ name: "본교재", scope: "" }] }),
+    ["시험범위 미입력", "시험범위 일부 미입력"],
+  );
 });
 
 test("annual empty-year UI offers a first-event draft from the bounded school catalog", async () => {
@@ -701,10 +725,10 @@ test("class mutation refresh guard rejects an older revision or a newly selected
   }), false);
 
   const source = await readFile(new URL("src/features/operations/class-schedule-workspace.tsx", root), "utf8");
-  assert.match(source, /lessonMutationRefreshRevisionRef/);
+  assert.match(source, /lessonMutationLifecycleRef/);
   assert.match(source, /selectedClassIdRef/);
-  assert.match(source, /requestedClassIdRef\.current/);
-  assert.match(source, /isCurrentClassMutationRefresh/);
+  assert.doesNotMatch(source, /requestedClassId\s*\|\|\s*selectedClassId/);
+  assert.match(source, /return \(\) => \{\s*mutationLifecycle\?\.revoke\(\)/);
 });
 
 test("closing the lesson editor revokes a mutation token before late refresh work can commit", async () => {
@@ -759,15 +783,89 @@ test("closing the lesson editor revokes a mutation token before late refresh wor
   assert.equal(commitCount, 0);
 });
 
+test("route navigation and unmount revoke requested class identity without retaining a selected-row fallback", () => {
+  assert.equal(typeof createClassMutationLifecycle, "function");
+  const lifecycle = createClassMutationLifecycle();
+
+  lifecycle.enter("class-a");
+  const beforeNavigation = lifecycle.capture("class-a");
+  assert.equal(lifecycle.isCurrent(beforeNavigation), true);
+
+  lifecycle.enter("class-b");
+  assert.equal(lifecycle.requestedClassId, "class-b");
+  assert.equal(lifecycle.isCurrent(beforeNavigation), false);
+  assert.equal(lifecycle.capture("class-a"), null);
+
+  lifecycle.revoke();
+  assert.equal(lifecycle.requestedClassId, "");
+  assert.equal(lifecycle.capture("class-b"), null);
+});
+
+test("stale class save success still invalidates public cache but cannot continue class-specific UI writes", async () => {
+  assert.equal(typeof runClassMutationWithLifecycle, "function");
+  const lifecycle = createClassMutationLifecycle();
+  lifecycle.enter("class-a");
+  const token = lifecycle.capture("class-a");
+  let resolveSave;
+  const save = new Promise((resolve) => {
+    resolveSave = resolve;
+  });
+  const effects = [];
+
+  const pending = runClassMutationWithLifecycle({
+    token,
+    isCurrent: (candidate) => lifecycle.isCurrent(candidate),
+    mutate: async () => await save,
+    afterCommit: async () => {
+      effects.push("public-cache-invalidation");
+      return { status: "refreshed" };
+    },
+    onSuccess: async () => effects.push("draft-clear-and-notice"),
+    onError: async () => effects.push("error"),
+    onSettled: async () => effects.push("loading-false"),
+  });
+
+  lifecycle.revoke();
+  resolveSave({ saved: true });
+  assert.deepEqual(await pending, { status: "stale", phase: "success" });
+  assert.deepEqual(effects, ["public-cache-invalidation"]);
+});
+
+test("stale class save error cannot publish an error or clear the current route's loading state", async () => {
+  const lifecycle = createClassMutationLifecycle();
+  lifecycle.enter("class-a");
+  const token = lifecycle.capture("class-a");
+  let rejectSave;
+  const save = new Promise((_, reject) => {
+    rejectSave = reject;
+  });
+  const effects = [];
+
+  const pending = runClassMutationWithLifecycle({
+    token,
+    isCurrent: (candidate) => lifecycle.isCurrent(candidate),
+    mutate: async () => await save,
+    afterCommit: async () => effects.push("public-cache-invalidation"),
+    onSuccess: async () => effects.push("success"),
+    onError: async () => effects.push("error"),
+    onSettled: async () => effects.push("loading-false"),
+  });
+
+  lifecycle.enter("class-b");
+  rejectSave(new Error("class-a save failed"));
+  assert.deepEqual(await pending, { status: "stale", phase: "error" });
+  assert.deepEqual(effects, []);
+});
+
 test("class mutations capture lifecycle before writes and editor close revokes it", async () => {
   const source = await readFile(new URL("src/features/operations/class-schedule-workspace.tsx", root), "utf8");
 
-  assert.match(source, /const mutationToken = captureClassMutationLifecycleToken\([\s\S]*?await action\.saveSession/);
-  assert.match(source, /const mutationToken = captureClassMutationLifecycleToken\([\s\S]*?await action\.saveContent/);
-  assert.match(source, /const mutationToken = captureClassMutationLifecycleToken\([\s\S]*?await action\.generateSessions/);
-  assert.match(source, /requestLessonDesignClose[\s\S]*?lessonMutationRefreshRevisionRef\.current \+= 1/);
+  assert.match(source, /const mutationToken = lessonMutationLifecycleRef\.current\?\.capture\(selectedRow\?\.id\)[\s\S]*?mutate: async \(\) => await action\.saveSession/);
+  assert.match(source, /const mutationToken = lessonMutationLifecycleRef\.current\?\.capture\(selectedRow\.id\)[\s\S]*?return await action\.saveContent/);
+  assert.match(source, /const mutationToken = lessonMutationLifecycleRef\.current\?\.capture\(selectedRow\?\.id\)[\s\S]*?mutate: async \(\) => await action\.generateSessions/);
+  assert.match(source, /requestLessonDesignClose[\s\S]*?lessonMutationLifecycleRef\.current\?\.revoke\(\)/);
+  assert.match(source, /runClassMutationWithLifecycle/);
   const refreshBody = source.match(/const refreshSelectedLessonDetail = useCallback[\s\S]*?\n\s*\}, \[/)?.[0] || "";
-  assert.doesNotMatch(refreshBody, /lessonMutationRefreshRevisionRef\.current\s*\+\s*1/);
   assert.match(refreshBody, /refreshClassMutationIfCurrent/);
 });
 

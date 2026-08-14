@@ -58,14 +58,22 @@ import {
 import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
 import {
   buildClassLessonDesignRow,
-  captureClassMutationLifecycleToken,
-  isCurrentClassMutationRefresh,
+  createClassMutationLifecycle,
   refreshClassMutationIfCurrent,
   resolveRequestedClassRow,
+  runClassMutationWithLifecycle,
 } from "./operations-read-service.js";
 
 function text(value: unknown) {
   return String(value || "").trim();
+}
+
+async function invokeContinuousScheduleRpc(
+  client: NonNullable<typeof supabase>,
+  name: string,
+  parameters: Record<string, unknown>,
+) {
+  return await Reflect.apply(client.rpc, client, [name, parameters]) as { data: unknown; error: unknown };
 }
 
 const hasClassScheduleListSummaryChange = (
@@ -2590,8 +2598,10 @@ export function ClassScheduleWorkspace() {
   const [selectedSyncGroupId, setSelectedSyncGroupId] = useState(() => text(searchParams.get("syncGroup")));
   const [selectedClassId, setSelectedClassId] = useState("");
   const selectedClassIdRef = useRef("");
-  const requestedClassIdRef = useRef(requestedClassId);
-  requestedClassIdRef.current = requestedClassId || selectedClassId;
+  const lessonMutationLifecycleRef = useRef<ReturnType<typeof createClassMutationLifecycle> | null>(null);
+  if (!lessonMutationLifecycleRef.current) {
+    lessonMutationLifecycleRef.current = createClassMutationLifecycle();
+  }
   const [lessonDesignOpen, setLessonDesignOpen] = useState(false);
   const [selectedLessonMonthKeys, setSelectedLessonMonthKeys] = useState<string[]>([]);
   const [focusedLessonMonthKey, setFocusedLessonMonthKey] = useState("");
@@ -2630,7 +2640,6 @@ export function ClassScheduleWorkspace() {
   const [lessonTextbookCandidateLoading, setLessonTextbookCandidateLoading] = useState(false);
   const [lessonTextbookCandidateError, setLessonTextbookCandidateError] = useState("");
   const lessonDesignDetailRevisionRef = useRef(0);
-  const lessonMutationRefreshRevisionRef = useRef(0);
   const lessonTextbookCandidateRevisionRef = useRef(0);
   const lessonPlanDraftRef = useRef<Record<string, unknown> | null>(null);
   const lessonPlanSourceKeyRef = useRef("");
@@ -2717,15 +2726,25 @@ export function ClassScheduleWorkspace() {
   }, [scopedData]);
 
   useEffect(() => {
-    lessonMutationRefreshRevisionRef.current += 1;
+    const mutationLifecycle = lessonMutationLifecycleRef.current;
     const revision = lessonDesignDetailRevisionRef.current + 1;
     lessonDesignDetailRevisionRef.current = revision;
+    setIsLessonDesignSaving(false);
+    setIsNormalizedLessonSessionSaving(false);
+    setGenerationSaving(false);
+    setGenerationPreview(null);
+    setLessonDesignSaveError("");
+    setLessonDesignSaveNotice("");
     if (!isLessonDesignRouteActive || !requestedClassId) {
+      mutationLifecycle?.revoke();
       setLessonDesignDetail(null);
       setLessonDesignDetailError("");
       setLessonDesignDetailLoading(false);
-      return;
+      return () => {
+        mutationLifecycle?.revoke();
+      };
     }
+    mutationLifecycle?.enter(requestedClassId);
 
     setLessonDesignDetail((current) =>
       text((current?.classItem as Record<string, unknown> | undefined)?.id) === requestedClassId ? current : null,
@@ -2745,6 +2764,9 @@ export function ClassScheduleWorkspace() {
       .finally(() => {
         if (lessonDesignDetailRevisionRef.current === revision) setLessonDesignDetailLoading(false);
       });
+    return () => {
+      mutationLifecycle?.revoke();
+    };
   }, [isLessonDesignRouteActive, loadClassLessonDesignDetail, requestedClassId]);
 
   useLayoutEffect(() => {
@@ -2881,8 +2903,7 @@ export function ClassScheduleWorkspace() {
     (row: Record<string, unknown>) => {
       rememberClassScheduleListPosition();
       selectedClassIdRef.current = text(row.id);
-      requestedClassIdRef.current = text(row.id);
-      lessonMutationRefreshRevisionRef.current += 1;
+      lessonMutationLifecycleRef.current?.revoke();
       setSelectedClassId(text(row.id));
       router.push(buildOfficialClassScheduleDetailHref(row, classScheduleReturnPath));
     },
@@ -3046,18 +3067,13 @@ export function ClassScheduleWorkspace() {
   );
   const refreshSelectedLessonDetail = useCallback(async (mutationToken: { revision: number; classId: string } | null) => {
     if (!mutationToken) return;
-    if (!isCurrentClassMutationRefresh({
-      expectedRevision: mutationToken.revision,
-      currentRevision: lessonMutationRefreshRevisionRef.current,
-      requestedClassId: mutationToken.classId,
-      currentRequestedClassId: requestedClassIdRef.current,
-      detailClassId: mutationToken.classId,
-    })) return;
+    const mutationLifecycle = lessonMutationLifecycleRef.current;
+    if (!mutationLifecycle?.isCurrent(mutationToken)) return;
     const currentDetail = lessonDesignDetail;
     await refreshClassMutationIfCurrent({
       token: mutationToken,
-      getCurrentRevision: () => lessonMutationRefreshRevisionRef.current,
-      getCurrentRequestedClassId: () => requestedClassIdRef.current,
+      getCurrentRevision: () => mutationLifecycle.revision,
+      getCurrentRequestedClassId: () => mutationLifecycle.requestedClassId,
       loadDetail: async (classId: string) => await loadClassLessonDesignDetail(classId) as Record<string, unknown>,
       commitDetail: async (detail: Record<string, unknown>) => {
         setLessonDesignDetail(detail);
@@ -3861,29 +3877,31 @@ export function ClassScheduleWorkspace() {
     const client = supabase;
     const input = buildNormalizedLessonSessionSaveInput(normalizedLessonSessionDraft) as SaveClassLessonSessionInput;
     if (!input.sessionId || !input.sessionDate) return;
-    const mutationToken = captureClassMutationLifecycleToken({
-      currentRevision: lessonMutationRefreshRevisionRef.current,
-      classId: selectedRow?.id,
-    });
+    const mutationToken = lessonMutationLifecycleRef.current?.capture(selectedRow?.id) || null;
     if (!mutationToken) return;
     setIsNormalizedLessonSessionSaving(true);
     setLessonDesignSaveError("");
-    try {
-      const action = createContinuousScheduleMutationAction({ rpc: async (name, parameters) => await client.rpc(name, parameters) });
-      await action.saveSession(input);
-      const refresh = await invalidatePublicClassesCacheAfterMutation(client, "schedule");
-      setNormalizedLessonSessionDrafts((current) => {
-        const next = { ...current };
-        delete next[input.sessionId];
-        return next;
-      });
-      setLessonDesignSaveNotice(refresh.status === "pending" ? "일정 변경을 저장했습니다. 공개 수업 캐시 갱신 대기 중입니다." : "일정 변경을 저장했습니다.");
-      await refreshSelectedLessonDetail(mutationToken);
-    } catch (error) {
-      setLessonDesignSaveError(error instanceof Error ? error.message : "일정 저장에 실패했습니다.");
-    } finally {
-      setIsNormalizedLessonSessionSaving(false);
-    }
+    const action = createContinuousScheduleMutationAction({ rpc: async (name, parameters) => await invokeContinuousScheduleRpc(client, name, parameters) });
+    await runClassMutationWithLifecycle({
+      token: mutationToken,
+      isCurrent: (token: { revision: number; classId: string }) => lessonMutationLifecycleRef.current?.isCurrent(token) === true,
+      mutate: async () => await action.saveSession(input),
+      afterCommit: async () => await invalidatePublicClassesCacheAfterMutation(client, "schedule"),
+      onSuccess: async (_result: unknown, refreshReceipt: { status?: string } | undefined) => {
+        await refreshSelectedLessonDetail(mutationToken);
+        if (!lessonMutationLifecycleRef.current?.isCurrent(mutationToken)) return;
+        setNormalizedLessonSessionDrafts((current) => {
+          const next = { ...current };
+          delete next[input.sessionId];
+          return next;
+        });
+        setLessonDesignSaveNotice(refreshReceipt?.status === "pending" ? "일정 변경을 저장했습니다. 공개 수업 캐시 갱신 대기 중입니다." : "일정 변경을 저장했습니다.");
+      },
+      onError: async (error: unknown) => {
+        setLessonDesignSaveError(error instanceof Error ? error.message : "일정 저장에 실패했습니다.");
+      },
+      onSettled: async () => setIsNormalizedLessonSessionSaving(false),
+    });
   }, [normalizedLessonSessionDraft, refreshSelectedLessonDetail, selectedRow?.id]);
   const handleLessonSessionStateChange = useCallback(
     (session: (typeof selectedLessonSession), nextState: "active" | "exception" | "makeup" | "tbd") => {
@@ -4234,32 +4252,32 @@ export function ClassScheduleWorkspace() {
       return;
     }
     const client = supabase;
-    const mutationToken = captureClassMutationLifecycleToken({
-      currentRevision: lessonMutationRefreshRevisionRef.current,
-      classId: selectedRow.id,
-    });
+    const mutationToken = lessonMutationLifecycleRef.current?.capture(selectedRow.id) || null;
     if (!mutationToken) return;
 
     setIsLessonDesignSaving(true);
     setLessonDesignSaveError("");
     setLessonDesignSaveNotice("");
 
-    try {
-      if (normalizedContentContext) {
-        if (!normalizedContentContext.expectedContentHash) {
-          throw new Error("최신 일정 내용을 다시 불러온 뒤 저장해 주세요.");
+    await runClassMutationWithLifecycle({
+      token: mutationToken,
+      isCurrent: (token: { revision: number; classId: string }) => lessonMutationLifecycleRef.current?.isCurrent(token) === true,
+      mutate: async () => {
+        if (normalizedContentContext) {
+          if (!normalizedContentContext.expectedContentHash) {
+            throw new Error("최신 일정 내용을 다시 불러온 뒤 저장해 주세요.");
+          }
+          const action = createContinuousScheduleMutationAction({
+            rpc: async (name, parameters) => await invokeContinuousScheduleRpc(client, name, parameters),
+          });
+          return await action.saveContent({
+            classId: normalizedContentContext.classId,
+            expectedContentHash: normalizedContentContext.expectedContentHash,
+            contentPatch: buildLessonContentPatch(lessonPlanForSave, {
+              sessionKeys: normalizedContentContext.sessionKeys,
+            }),
+          });
         }
-        const action = createContinuousScheduleMutationAction({
-          rpc: async (name, parameters) => await client.rpc(name, parameters),
-        });
-        await action.saveContent({
-          classId: normalizedContentContext.classId,
-          expectedContentHash: normalizedContentContext.expectedContentHash,
-          contentPatch: buildLessonContentPatch(lessonPlanForSave, {
-            sessionKeys: normalizedContentContext.sessionKeys,
-          }),
-        });
-      } else {
         const { error: updateError } = await client
           .from("classes")
           .update({ schedule_plan: lessonPlanForSave })
@@ -4269,66 +4287,67 @@ export function ClassScheduleWorkspace() {
           .limit(1)
           .abortSignal(AbortSignal.timeout(8_000))
           .retry(false);
-
-        if (updateError) {
-          throw updateError;
-        }
-      }
-
-      const refresh = await invalidatePublicClassesCacheAfterMutation(client, "schedule");
-
-      await refreshSelectedLessonDetail(mutationToken);
-      const saved = normalizedContentContext ? "수업 내용을 저장했습니다." : "수업계획을 저장했습니다.";
-      setLessonDesignSaveNotice(refresh.status === "pending" ? `${saved} 공개 수업 캐시 갱신 대기 중입니다.` : saved);
-    } catch (saveError) {
-      setLessonDesignSaveError(
-        saveError instanceof Error ? saveError.message : "수업계획 저장에 실패했습니다.",
-      );
-    } finally {
-      setIsLessonDesignSaving(false);
-    }
+        if (updateError) throw updateError;
+        return null;
+      },
+      afterCommit: async () => await invalidatePublicClassesCacheAfterMutation(client, "schedule"),
+      onSuccess: async (_result: unknown, refreshReceipt: { status?: string } | undefined) => {
+        await refreshSelectedLessonDetail(mutationToken);
+        if (!lessonMutationLifecycleRef.current?.isCurrent(mutationToken)) return;
+        const saved = normalizedContentContext ? "수업 내용을 저장했습니다." : "수업계획을 저장했습니다.";
+        setLessonDesignSaveNotice(refreshReceipt?.status === "pending" ? `${saved} 공개 수업 캐시 갱신 대기 중입니다.` : saved);
+      },
+      onError: async (saveError: unknown) => {
+        setLessonDesignSaveError(saveError instanceof Error ? saveError.message : "수업계획 저장에 실패했습니다.");
+      },
+      onSettled: async () => setIsLessonDesignSaving(false),
+    });
   }, [lessonPlanForSave, normalizedContentContext, refreshSelectedLessonDetail, selectedRow]);
 
   const previewLessonSessionGeneration = useCallback(async () => {
     if (!supabase || !normalizedGenerationContext) return;
     const client = supabase;
+    const mutationToken = lessonMutationLifecycleRef.current?.capture(normalizedGenerationContext.classId) || null;
+    if (!mutationToken) return;
     setGenerationSaving(true);
     setLessonDesignSaveError("");
-    try {
-      const action = createContinuousScheduleMutationAction({ rpc: async (name, parameters) => await client.rpc(name, parameters) });
-      const preview = await action.previewGeneration(normalizedGenerationContext);
-      setGenerationPreview((preview || {}) as Record<string, unknown>);
-    } catch (error) {
-      setLessonDesignSaveError(error instanceof Error ? error.message : "일정 생성 미리보기에 실패했습니다.");
-    } finally {
-      setGenerationSaving(false);
-    }
+    const action = createContinuousScheduleMutationAction({ rpc: async (name, parameters) => await invokeContinuousScheduleRpc(client, name, parameters) });
+    await runClassMutationWithLifecycle({
+      token: mutationToken,
+      isCurrent: (token: { revision: number; classId: string }) => lessonMutationLifecycleRef.current?.isCurrent(token) === true,
+      mutate: async () => await action.previewGeneration(normalizedGenerationContext),
+      onSuccess: async (preview: unknown) => setGenerationPreview((preview || {}) as Record<string, unknown>),
+      onError: async (error: unknown) => setLessonDesignSaveError(error instanceof Error ? error.message : "일정 생성 미리보기에 실패했습니다."),
+      onSettled: async () => setGenerationSaving(false),
+    });
   }, [normalizedGenerationContext]);
 
   const confirmLessonSessionGeneration = useCallback(async () => {
     if (!supabase || !normalizedGenerationContext || !generationPreview) return;
     const client = supabase;
-    const mutationToken = captureClassMutationLifecycleToken({
-      currentRevision: lessonMutationRefreshRevisionRef.current,
-      classId: selectedRow?.id,
-    });
+    const mutationToken = lessonMutationLifecycleRef.current?.capture(selectedRow?.id) || null;
     if (!mutationToken) return;
     setGenerationSaving(true);
     setLessonDesignSaveError("");
-    try {
-      const action = createContinuousScheduleMutationAction({ rpc: async (name, parameters) => await client.rpc(name, parameters) });
-      const result = await action.generateSessions({ ...normalizedGenerationContext, reason: null });
-      const refresh = await invalidatePublicClassesCacheAfterMutation(client, "schedule");
-      setGenerationPreview(null);
-      const saved = `추가 ${Number((result as Record<string, unknown>)?.generatedCount || 0)} · 기존 ${Number(generationPreview.existingCount || 0)} · 확인 필요 ${Number(generationPreview.resourceConflictCount || 0)}`;
-      setLessonDesignSaveNotice(refresh.status === "pending" ? `${saved} · 공개 수업 캐시 갱신 대기 중` : saved);
-      await refreshSelectedLessonDetail(mutationToken);
-    } catch (error) {
-      setLessonDesignSaveError(error instanceof Error ? error.message : "일정 생성이 실패했습니다. 미리보기를 다시 확인하세요.");
-      setGenerationPreview(null);
-    } finally {
-      setGenerationSaving(false);
-    }
+    const action = createContinuousScheduleMutationAction({ rpc: async (name, parameters) => await invokeContinuousScheduleRpc(client, name, parameters) });
+    await runClassMutationWithLifecycle({
+      token: mutationToken,
+      isCurrent: (token: { revision: number; classId: string }) => lessonMutationLifecycleRef.current?.isCurrent(token) === true,
+      mutate: async () => await action.generateSessions({ ...normalizedGenerationContext, reason: null }),
+      afterCommit: async () => await invalidatePublicClassesCacheAfterMutation(client, "schedule"),
+      onSuccess: async (result: unknown, refreshReceipt: { status?: string } | undefined) => {
+        await refreshSelectedLessonDetail(mutationToken);
+        if (!lessonMutationLifecycleRef.current?.isCurrent(mutationToken)) return;
+        setGenerationPreview(null);
+        const saved = `추가 ${Number((result as Record<string, unknown>)?.generatedCount || 0)} · 기존 ${Number(generationPreview.existingCount || 0)} · 확인 필요 ${Number(generationPreview.resourceConflictCount || 0)}`;
+        setLessonDesignSaveNotice(refreshReceipt?.status === "pending" ? `${saved} · 공개 수업 캐시 갱신 대기 중` : saved);
+      },
+      onError: async (error: unknown) => {
+        setLessonDesignSaveError(error instanceof Error ? error.message : "일정 생성이 실패했습니다. 미리보기를 다시 확인하세요.");
+        setGenerationPreview(null);
+      },
+      onSettled: async () => setGenerationSaving(false),
+    });
   }, [generationPreview, normalizedGenerationContext, refreshSelectedLessonDetail, selectedRow?.id]);
   const openLessonDesignForRow = useCallback(
     (
@@ -4345,8 +4364,7 @@ export function ClassScheduleWorkspace() {
       }
 
       selectedClassIdRef.current = text(row.id);
-      requestedClassIdRef.current = text(row.id);
-      lessonMutationRefreshRevisionRef.current += 1;
+      lessonMutationLifecycleRef.current?.enter(text(row.id));
       setSelectedClassId(text(row.id));
       const targetSession =
         nextLessonDesignSnapshot.sessions.find((session) => session.id === options.sessionId) || null;
@@ -4412,7 +4430,7 @@ export function ClassScheduleWorkspace() {
     }
 
     isLessonDesignClosingRef.current = true;
-    lessonMutationRefreshRevisionRef.current += 1;
+    lessonMutationLifecycleRef.current?.revoke();
     setLessonDesignOpen(false);
     finishLessonDesignClose();
   }, [finishLessonDesignClose]);
@@ -6341,8 +6359,7 @@ export function ClassScheduleWorkspace() {
                       const nextClassId = group.members[0]?.classId || "";
                       setSelectedSyncGroupId(nextGroupId);
                       selectedClassIdRef.current = nextClassId;
-                      requestedClassIdRef.current = nextClassId;
-                      lessonMutationRefreshRevisionRef.current += 1;
+                      lessonMutationLifecycleRef.current?.enter(nextClassId);
                       setSelectedClassId(nextClassId);
                     }}
                   >
