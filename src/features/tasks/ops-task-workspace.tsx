@@ -12719,14 +12719,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setStatusUndo(null)
     try {
       const taskId = deleteTarget.id
-      await deleteOpsTask(deleteTarget)
+      const receipt = await deleteOpsTask(deleteTarget)
       setDeleteTarget(null)
       setDetailOpen(false)
       syncTaskDeepLink(null)
       removeTaskFromState(taskId)
       await refreshFirstTaskPageAfterMutation()
       const itemLabel = deleteTarget.type === "general" ? "할 일" : getTaskTypeLabel(deleteTarget.type)
-      setNotice(`${itemLabel} 삭제 완료`)
+      setNotice(receipt?.publicClassesCacheRefresh?.status === "pending"
+        ? `${itemLabel} 삭제 완료 · 공개 수업 캐시 갱신 대기 중`
+        : `${itemLabel} 삭제 완료`)
     } catch (error) {
       setMessage(getOpsTaskActionErrorMessage(error, "등록 신청을 삭제하지 못했습니다."))
     } finally {
@@ -12743,7 +12745,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setStatusUndo(null)
     try {
       const deletedTaskIds = new Set(deletableTasks.map((task) => task.id))
-      await Promise.all(deletableTasks.map((task) => deleteOpsTask(task)))
+      const receipts = await Promise.all(deletableTasks.map((task) => deleteOpsTask(task)))
       setBulkDeleteTargets([])
       setWordRetestSelectedTaskIds((current) => {
         const next = new Set(current)
@@ -12758,7 +12760,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       await refreshFirstTaskPageAfterMutation()
       setDetailOpen(false)
       syncTaskDeepLink(null)
-      setNotice(`단어 재시험 ${deletableTasks.length}건 삭제 완료`)
+      setNotice(receipts.some((receipt) => receipt?.publicClassesCacheRefresh?.status === "pending")
+        ? `단어 재시험 ${deletableTasks.length}건 삭제 완료 · 공개 수업 캐시 갱신 대기 중`
+        : `단어 재시험 ${deletableTasks.length}건 삭제 완료`)
     } catch (error) {
       setMessage(getOpsTaskActionErrorMessage(error, "선택한 단어 재시험을 삭제하지 못했습니다."))
     } finally {

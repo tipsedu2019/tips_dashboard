@@ -51,10 +51,17 @@ const LEGACY_PUBLIC_UNPAGED_COMPATIBILITY_CHAINS = new Map([
 
 function isLegacyPublicFullCompatibilityQuery({ surface, file, symbol, query, constants }) {
   const expected = LEGACY_PUBLIC_UNPAGED_COMPATIBILITY_CHAINS.get(query.ordinal)
-  const projection = query.operations.find((operation) => callMethod(operation) === "select")
+  const [fromOperation, projection] = query.operations
   const projectionArgument = projection?.arguments[0]
   const value = projectionArgument && argumentValue(projectionArgument, constants)
   const table = query.entry.arguments[0] && argumentValue(query.entry.arguments[0], constants)
+  const entry = accessParts(query.entry)
+  const hasExactLiteralChain = query.operations.length === 2
+    && fromOperation === query.entry
+    && callMethod(fromOperation) === "from"
+    && callMethod(projection) === "select"
+    && rootIdentifier(entry?.receiver) === "supabase"
+    && !query.entry.questionDotToken
   const namedSummaryCompatibilityProjection = expected?.selector
     ? Boolean(projectionArgument && ts.isIdentifier(projectionArgument))
       && projectionArgument.text === expected.selector
@@ -63,6 +70,7 @@ function isLegacyPublicFullCompatibilityQuery({ surface, file, symbol, query, co
     && file === "src/server/public-classes-payload.js"
     && symbol === "buildPublicClassesPayload"
     && Boolean(expected)
+    && hasExactLiteralChain
     && namedSummaryCompatibilityProjection
     && table === expected.table
     && value === expected.projection
@@ -85,6 +93,44 @@ export const QUERY_SURFACE_DEBT_MANIFEST = Object.freeze([
   legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "readOpsTaskWorkspaceData", "list_abort_signal_missing", "f634c3bdbd371fe0badf43b9b774dc13d73ecb9e4151061aeea6bd93f2e47510"),
   legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "readOpsTaskWorkspaceData", "list_limit_missing", "f634c3bdbd371fe0badf43b9b774dc13d73ecb9e4151061aeea6bd93f2e47510"),
   legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "readOpsTaskWorkspaceData", "list_retry_false_missing", "f634c3bdbd371fe0badf43b9b774dc13d73ecb9e4151061aeea6bd93f2e47510"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "applyReadyOpsRosterMode", "rpc_page_limit_missing", "19a4d722ed35299a88bf06fb3164ebec2081d2ce16a53835c398624485ef48b1"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "applyReadyOpsRosterMode", "list_abort_signal_missing", "19a4d722ed35299a88bf06fb3164ebec2081d2ce16a53835c398624485ef48b1"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "applyReadyOpsRosterMode", "list_retry_false_missing", "19a4d722ed35299a88bf06fb3164ebec2081d2ce16a53835c398624485ef48b1"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "completeReadyOpsRosterTransition", "rpc_page_limit_missing", "ce8eacaf5a088c1bd6a02532bd8a974e8b87bb56ee6fa929abee23f550046ca9"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "completeReadyOpsRosterTransition", "list_abort_signal_missing", "ce8eacaf5a088c1bd6a02532bd8a974e8b87bb56ee6fa929abee23f550046ca9"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "completeReadyOpsRosterTransition", "list_retry_false_missing", "ce8eacaf5a088c1bd6a02532bd8a974e8b87bb56ee6fa929abee23f550046ca9"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsStudentToClass", "list_limit_missing", "c298131d70d0b561467e5dcdfe3196f8be304ea1de9e8d2e91bbbd82f9019965"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsStudentToClass", "list_order_missing", "c298131d70d0b561467e5dcdfe3196f8be304ea1de9e8d2e91bbbd82f9019965"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsStudentToClass", "list_abort_signal_missing", "c298131d70d0b561467e5dcdfe3196f8be304ea1de9e8d2e91bbbd82f9019965"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsStudentToClass", "list_retry_false_missing", "c298131d70d0b561467e5dcdfe3196f8be304ea1de9e8d2e91bbbd82f9019965"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsStudentToClass", "list_limit_missing", "1d10c6da117bcc226bd4b3a2b1511de9dc10cf22fb8655b6c6a439934543485b"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsStudentToClass", "list_order_missing", "1d10c6da117bcc226bd4b3a2b1511de9dc10cf22fb8655b6c6a439934543485b"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsStudentToClass", "list_abort_signal_missing", "1d10c6da117bcc226bd4b3a2b1511de9dc10cf22fb8655b6c6a439934543485b"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsStudentToClass", "list_retry_false_missing", "1d10c6da117bcc226bd4b3a2b1511de9dc10cf22fb8655b6c6a439934543485b"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsStudentToWaitlist", "list_limit_missing", "d31238040cb5ecb0b1979fa01fe8a784c8377466de1a5a4bb41a273d4a0832f8"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsStudentToWaitlist", "list_order_missing", "d31238040cb5ecb0b1979fa01fe8a784c8377466de1a5a4bb41a273d4a0832f8"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsStudentToWaitlist", "list_abort_signal_missing", "d31238040cb5ecb0b1979fa01fe8a784c8377466de1a5a4bb41a273d4a0832f8"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsStudentToWaitlist", "list_retry_false_missing", "d31238040cb5ecb0b1979fa01fe8a784c8377466de1a5a4bb41a273d4a0832f8"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsStudentToWaitlist", "list_limit_missing", "53187d67160e2b5f8abb237db5414df034bc01b78a8baf35611506a2c25a49da"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsStudentToWaitlist", "list_order_missing", "53187d67160e2b5f8abb237db5414df034bc01b78a8baf35611506a2c25a49da"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsStudentToWaitlist", "list_abort_signal_missing", "53187d67160e2b5f8abb237db5414df034bc01b78a8baf35611506a2c25a49da"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsStudentToWaitlist", "list_retry_false_missing", "53187d67160e2b5f8abb237db5414df034bc01b78a8baf35611506a2c25a49da"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsTextbookToClass", "list_limit_missing", "bb47c9d77c189079d6544f15850441de3880742fae7d5891c44cc04c01a278c4"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsTextbookToClass", "list_order_missing", "bb47c9d77c189079d6544f15850441de3880742fae7d5891c44cc04c01a278c4"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsTextbookToClass", "list_abort_signal_missing", "bb47c9d77c189079d6544f15850441de3880742fae7d5891c44cc04c01a278c4"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "assignOpsTextbookToClass", "list_retry_false_missing", "bb47c9d77c189079d6544f15850441de3880742fae7d5891c44cc04c01a278c4"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "removeOpsStudentFromClass", "list_limit_missing", "1d6333930b09982ad59d086dae3e203f55e2577fa266904b7cc729acf5c2240c"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "removeOpsStudentFromClass", "list_order_missing", "1d6333930b09982ad59d086dae3e203f55e2577fa266904b7cc729acf5c2240c"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "removeOpsStudentFromClass", "list_abort_signal_missing", "1d6333930b09982ad59d086dae3e203f55e2577fa266904b7cc729acf5c2240c"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "removeOpsStudentFromClass", "list_retry_false_missing", "1d6333930b09982ad59d086dae3e203f55e2577fa266904b7cc729acf5c2240c"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "removeOpsStudentFromClass", "list_limit_missing", "2c96a45dbc1c66b7e71a5870ff26b2f5385c3937705c5ac6cc886b4f3c355401"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "removeOpsStudentFromClass", "list_order_missing", "2c96a45dbc1c66b7e71a5870ff26b2f5385c3937705c5ac6cc886b4f3c355401"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "removeOpsStudentFromClass", "list_abort_signal_missing", "2c96a45dbc1c66b7e71a5870ff26b2f5385c3937705c5ac6cc886b4f3c355401"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "removeOpsStudentFromClass", "list_retry_false_missing", "2c96a45dbc1c66b7e71a5870ff26b2f5385c3937705c5ac6cc886b4f3c355401"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "updateOpsTaskStatus", "list_limit_missing", "eb75288993a7bbd901544dd155cdc276764ab97a28b7d75622d069ebdaadb2d7"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "updateOpsTaskStatus", "list_order_missing", "eb75288993a7bbd901544dd155cdc276764ab97a28b7d75622d069ebdaadb2d7"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "updateOpsTaskStatus", "list_abort_signal_missing", "eb75288993a7bbd901544dd155cdc276764ab97a28b7d75622d069ebdaadb2d7"),
+  legacyDebt("tasks", "src/features/tasks/ops-task-service.ts", "updateOpsTaskStatus", "list_retry_false_missing", "eb75288993a7bbd901544dd155cdc276764ab97a28b7d75622d069ebdaadb2d7"),
   legacyDebt("management", "src/features/management/management-service.js", "selectRows", "list_select_star", "9ec60a4049e9d6defd81e44652e6d11f70d14aff2e41b13a22e023346618802d"),
   legacyDebt("management", "src/features/management/management-service.js", "selectRows", "list_abort_signal_missing", "9ec60a4049e9d6defd81e44652e6d11f70d14aff2e41b13a22e023346618802d"),
   legacyDebt("management", "src/features/management/management-service.js", "selectRows", "list_limit_missing", "9ec60a4049e9d6defd81e44652e6d11f70d14aff2e41b13a22e023346618802d"),

@@ -583,16 +583,16 @@ test("legacy query debt is an exact literal manifest and not a wildcard exceptio
 })
 
 test("only the three named legacy public compatibility projections are unpaged", () => {
-  const source = `async function buildPublicClassesPayload(client) {
+  const source = `async function buildPublicClassesPayload(supabase) {
   const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date"
-  const summary = client.from("classes").select(PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION)
+  const summary = supabase.from("classes").select(PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION)
   const full = [
-    client.from("classes").select("id,name,subject,grade,teacher,room,schedule,status,fee,tuition,capacity,student_ids,waitlist_ids,textbook_ids,textbook_info,lessons,schedule_plan,start_date,end_date"),
-    client.from("textbooks").select("id,title,name,publisher,price,tags,lessons,updated_at"),
-    client.from("progress_logs").select("id,class_id,textbook_id,progress_key,session_id,session_order,status,range_start,range_end,range_label,public_note,teacher_note,updated_at,date,completed_lesson_ids"),
+    supabase.from("classes").select("id,name,subject,grade,teacher,room,schedule,status,fee,tuition,capacity,student_ids,waitlist_ids,textbook_ids,textbook_info,lessons,schedule_plan,start_date,end_date"),
+    supabase.from("textbooks").select("id,title,name,publisher,price,tags,lessons,updated_at"),
+    supabase.from("progress_logs").select("id,class_id,textbook_id,progress_key,session_id,session_order,status,range_start,range_end,range_label,public_note,teacher_note,updated_at,date,completed_lesson_ids"),
   ]
-  const accidentalList = client.from("students").select("id")
-  const accidentalWildcard = client.from("teachers").select("*")
+  const accidentalList = supabase.from("students").select("id")
+  const accidentalWildcard = supabase.from("teachers").select("*")
   return { summary, full, accidentalList, accidentalWildcard }
 }`
   const violations = inspectQuerySurfaceSource({
@@ -608,13 +608,13 @@ test("only the three named legacy public compatibility projections are unpaged",
 })
 
 test("public compatibility exemptions reject substituted tables and projections", () => {
-  const source = `async function buildPublicClassesPayload(client) {
+  const source = `async function buildPublicClassesPayload(supabase) {
   const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "id,secret"
-  const summary = client.from("students").select(PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION)
+  const summary = supabase.from("students").select(PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION)
   const full = [
-    client.from("classes").select("id,name,secret"),
-    client.from("students").select("id,title"),
-    client.from("progress_logs").select("id,class_id,secret"),
+    supabase.from("classes").select("id,name,secret"),
+    supabase.from("students").select("id,title"),
+    supabase.from("progress_logs").select("id,class_id,secret"),
   ]
   return { summary, full }
 }`
@@ -625,6 +625,29 @@ test("public compatibility exemptions reject substituted tables and projections"
   })
 
   for (const line of [3, 5, 6, 7]) {
+    assert.ok(violations.some((violation) => violation.reason === "list_limit_missing" && violation.startLine === line))
+  }
+})
+
+test("public compatibility exemptions reject aliases and appended predicates", () => {
+  const source = `async function buildPublicClassesPayload(supabase) {
+  const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date"
+  const alias = supabase
+  const summary = alias.from("classes").select(PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION)
+  const full = [
+    supabase.from("classes").select("id,name,subject,grade,teacher,room,schedule,status,fee,tuition,capacity,student_ids,waitlist_ids,textbook_ids,textbook_info,lessons,schedule_plan,start_date,end_date").eq("status", "active"),
+    supabase.from("textbooks").select("id,title,name,publisher,price,tags,lessons,updated_at"),
+    supabase.from("progress_logs").select("id,class_id,textbook_id,progress_key,session_id,session_order,status,range_start,range_end,range_label,public_note,teacher_note,updated_at,date,completed_lesson_ids"),
+  ]
+  return { summary, full }
+}`
+  const violations = inspectQuerySurfaceSource({
+    surface: "public",
+    file: "src/server/public-classes-payload.js",
+    source,
+  })
+
+  for (const line of [4, 6]) {
     assert.ok(violations.some((violation) => violation.reason === "list_limit_missing" && violation.startLine === line))
   }
 })

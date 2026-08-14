@@ -3346,7 +3346,6 @@ async function applyReadyOpsRosterMode(
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     throw new Error("학생 명단 변경 결과를 다시 불러오세요.")
   }
-  await invalidatePublicClassesCacheAfterMutation(supabase, "class")
   return true
 }
 
@@ -3931,7 +3930,6 @@ async function assignOpsStudentToClass(student: Row | null, classRow: Row | null
   if (previousMode !== "enrolled") {
     await insertOpsStudentClassHistory(studentId, classId, "enrolled", previousMode, "enrolled", memo)
   }
-  await invalidatePublicClassesCacheAfterMutation(supabase, "class")
 }
 
 async function assignOpsStudentToWaitlist(student: Row | null, classRow: Row | null, memo = "ops_task") {
@@ -3979,7 +3977,6 @@ async function assignOpsStudentToWaitlist(student: Row | null, classRow: Row | n
   if (previousMode !== "waitlist") {
     await insertOpsStudentClassHistory(studentId, classId, "waitlist", previousMode, "waitlist", memo)
   }
-  await invalidatePublicClassesCacheAfterMutation(supabase, "class")
 }
 
 async function assignOpsTextbookToClass(classRow: Row | null, textbook: Row | null) {
@@ -4003,7 +4000,6 @@ async function assignOpsTextbookToClass(classRow: Row | null, textbook: Row | nu
     await restoreOpsClassTextbookSnapshot(classId, classRow)
     throw error
   }
-  await invalidatePublicClassesCacheAfterMutation(supabase, "textbook")
 }
 
 async function removeOpsStudentFromClass(student: Row | null, classRow: Row | null, memo = "ops_task") {
@@ -4038,7 +4034,6 @@ async function removeOpsStudentFromClass(student: Row | null, classRow: Row | nu
   if (previousMode) {
     await insertOpsStudentClassHistory(studentId, classId, "removed", previousMode, "", memo)
   }
-  await invalidatePublicClassesCacheAfterMutation(supabase, "class")
 }
 
 async function setOpsStudentStatus(student: Row | null, status: string) {
@@ -4124,10 +4119,12 @@ async function syncRegistrationWaitlist(
     text(previousClass?.id) !== text(classRow?.id)
   )
   let previousWaitlistRemoved = false
+  let rosterChanged = false
 
   if (previousWaiting && previousStudent && previousClass && (!waiting || changedRelation)) {
     await removeOpsStudentFromClass(previousStudent, previousClass, "registration_waitlist_removed")
     previousWaitlistRemoved = true
+    rosterChanged = true
     await writeAutoSyncEventOnce(
       taskId,
       "대기명단",
@@ -4135,7 +4132,7 @@ async function syncRegistrationWaitlist(
     )
   }
 
-  if (!waiting) return
+  if (!waiting) return rosterChanged
   assertResolvedManagementRecord(student, "대기 등록 전에 학생 정보를 입력하세요.")
   assertResolvedManagementRecord(classRow, "대기 등록 전에 대기할 수업을 선택하세요.")
   try {
@@ -4155,6 +4152,7 @@ async function syncRegistrationWaitlist(
     "대기명단",
     `${text(classRow.name) || text(input.className)} 대기 등록 · waitlist_registered`,
   )
+  return true
 }
 
 async function syncRegistrationManagementLinks(
@@ -4186,7 +4184,7 @@ async function syncRegistrationManagementLinks(
     subject: text(input.subject) || text(classRow?.subject) || null,
   })
 
-  await syncRegistrationWaitlist(taskId, input, previousTask, student, classRow)
+  let publicClassesChanged = await syncRegistrationWaitlist(taskId, input, previousTask, student, classRow)
 
   if (completed) {
     assertResolvedManagementRecord(student, "등록 완료 전에 학생 정보를 입력하세요.")
@@ -4215,7 +4213,9 @@ async function syncRegistrationManagementLinks(
     if (textbook) {
       await writeAutoSyncEventOnce(taskId, "교재 연결", `${textbookLabel} · ${classLabel}`)
     }
+    publicClassesChanged = true
   }
+  return publicClassesChanged
 }
 
 async function markWithdrawalRosterUpdated(taskId: string) {
@@ -4272,7 +4272,9 @@ async function syncWithdrawalManagementLinks(taskId: string, input: OpsTaskInput
       "학생 상태",
       nextStudentStatus === WITHDRAWN_STUDENT_STATUS ? "퇴원" : "다른 수강 과목 유지 · 재원",
     )
+    return true
   }
+  return false
 }
 
 async function syncTransferManagementLinks(taskId: string, input: OpsTaskInput) {
@@ -4313,7 +4315,9 @@ async function syncTransferManagementLinks(taskId: string, input: OpsTaskInput) 
     }
     await writeAutoSyncEventOnce(taskId, "수업명단", `${fromClassLabel} 제거 · transfer_from_class → ${toClassLabel} 등록 · transfer_to_class`)
     await writeAutoSyncEventOnce(taskId, "학생 상태", "재원")
+    return true
   }
+  return false
 }
 
 async function syncWordRetestManagementLinks(taskId: string, input: OpsTaskInput) {
@@ -4371,16 +4375,22 @@ async function syncOpsTaskManagementLinks(
   previousTask: OpsTask | null = null,
   options: { registrationCreatedStudentId?: string } = {},
 ) {
-  if (!supabase) return
+  if (!supabase) return false
   assertManagementSyncReady(input)
   if (input.type === "registration") {
-    await syncRegistrationManagementLinks(taskId, input, previousTask, {
+    return syncRegistrationManagementLinks(taskId, input, previousTask, {
       createdStudentId: options.registrationCreatedStudentId,
     })
   }
-  if (input.type === "withdrawal") await syncWithdrawalManagementLinks(taskId, input)
-  if (input.type === "transfer") await syncTransferManagementLinks(taskId, input)
+  if (input.type === "withdrawal") return syncWithdrawalManagementLinks(taskId, input)
+  if (input.type === "transfer") return syncTransferManagementLinks(taskId, input)
   if (input.type === "word_retest") await syncWordRetestManagementLinks(taskId, input)
+  return false
+}
+
+async function refreshPublicClassesAfterCommittedOpsChange(changed: boolean) {
+  if (!changed || !supabase) return undefined
+  return invalidatePublicClassesCacheAfterMutation(supabase, "class")
 }
 
 type OpsTaskDetailTable =
@@ -4505,14 +4515,19 @@ export async function createOpsTask(
     const completionMutation = await prepareCreatedOpsCompletionSyncRollback(taskId, input)
     rollbackCompletionSync = completionMutation.rollback
     completionSyncApplied = Boolean(rollbackCompletionSync)
-    await syncOpsTaskManagementLinks(taskId, input, null, {
+    const publicClassesChanged = await syncOpsTaskManagementLinks(taskId, input, null, {
       registrationCreatedStudentId: completionMutation.registrationCreatedStudentId,
     })
     if (stagesTerminalRegistrationParent) {
       await updateRegistrationTaskParent(taskId, input, { preserveManagementLinks: true })
     }
+    const publicClassesCacheRefresh = await refreshPublicClassesAfterCommittedOpsChange(publicClassesChanged)
     clearOpsTaskWorkspaceDataCache()
-    return { taskId, sourceEventIds: [] }
+    return {
+      taskId,
+      sourceEventIds: [],
+      ...(publicClassesCacheRefresh ? { publicClassesCacheRefresh } : {}),
+    }
   } catch (error) {
     await rollbackAppliedCompletionSync(rollbackCompletionSync, completionSyncApplied, error)
     const cleanupError = await deleteCreatedOpsTaskOnFailure(taskId, createdAt)
@@ -4693,19 +4708,21 @@ export async function updateOpsTask(
       throw new Error("과목별 등록 화면에서 변경하세요.")
     }
     await updateRegistrationOpsTask(taskId, input, existingTask)
+    const publicClassesCacheRefresh = await refreshPublicClassesAfterCommittedOpsChange(true)
     clearOpsTaskWorkspaceDataCache()
-    return { sourceEventIds: [] }
+    return { sourceEventIds: [], ...(publicClassesCacheRefresh ? { publicClassesCacheRefresh } : {}) }
   }
 
   if (nextStatus === "done") {
     let rollbackCompletionSync: OpsCompletionRollback | null = null
     let completionSyncApplied = false
+    let publicClassesChanged = false
     rollbackCompletionSync = await prepareOpsCompletionStatusRollback(existingTask, input)
     const completionRollbackArmed = Boolean(rollbackCompletionSync)
     try {
       await writeManualCheckEvents(taskId, input, inputFromTask(existingTask))
       await upsertDetail(taskId, input)
-      await syncOpsTaskManagementLinks(taskId, input, existingTask)
+      publicClassesChanged = await syncOpsTaskManagementLinks(taskId, input, existingTask)
       completionSyncApplied = true
       const { data, error } = await writeOpsTaskWithOptionalTeamWorkflowColumns(
         buildTaskRow(input, { preserveManagementLinks: true, completedAtFallback: new Date().toISOString() }),
@@ -4725,8 +4742,9 @@ export async function updateOpsTask(
       )
       throw error
     }
+    const publicClassesCacheRefresh = await refreshPublicClassesAfterCommittedOpsChange(publicClassesChanged)
     clearOpsTaskWorkspaceDataCache()
-    return { sourceEventIds: [] }
+    return { sourceEventIds: [], ...(publicClassesCacheRefresh ? { publicClassesCacheRefresh } : {}) }
   }
 
   const { data, error } = await writeOpsTaskWithOptionalTeamWorkflowColumns(
@@ -4742,13 +4760,14 @@ export async function updateOpsTask(
   if (!didMutateOpsTask(data)) throw new Error("업무 데이터를 다시 불러오세요.")
   try {
     await upsertDetail(taskId, input)
-    await syncOpsTaskManagementLinks(taskId, input, existingTask)
+    const publicClassesChanged = await syncOpsTaskManagementLinks(taskId, input, existingTask)
     await writeManualCheckEvents(taskId, input, inputFromTask(existingTask))
+    const publicClassesCacheRefresh = await refreshPublicClassesAfterCommittedOpsChange(publicClassesChanged)
+    clearOpsTaskWorkspaceDataCache()
+    return { sourceEventIds: [], ...(publicClassesCacheRefresh ? { publicClassesCacheRefresh } : {}) }
   } catch (syncError) {
     throw syncError
   }
-  clearOpsTaskWorkspaceDataCache()
-  return { sourceEventIds: [] }
 }
 
 export async function retryWordRetest(
@@ -4953,8 +4972,9 @@ export async function updateOpsTaskStatus(
       throw new Error("과목별 등록 화면에서 변경하세요.")
     }
     await updateRegistrationOpsTaskStatus(currentTask, status)
+    const publicClassesCacheRefresh = await refreshPublicClassesAfterCommittedOpsChange(true)
     clearOpsTaskWorkspaceDataCache()
-    return { sourceEventIds: [] }
+    return { sourceEventIds: [], ...(publicClassesCacheRefresh ? { publicClassesCacheRefresh } : {}) }
   }
 
   if (currentTask.type === "withdrawal" || currentTask.type === "transfer") {
@@ -4980,12 +5000,13 @@ export async function updateOpsTaskStatus(
     }
   }
 
+  let publicClassesChanged = false
   if (status === "done") {
     const nextInput = inputFromTask(currentTask, status)
     await assertManagementSyncRecordsReady(nextInput)
     rollbackCompletionSync = await prepareOpsCompletionStatusRollback(currentTask, nextInput)
     try {
-      await syncOpsTaskManagementLinks(currentTask.id, nextInput, currentTask)
+      publicClassesChanged = await syncOpsTaskManagementLinks(currentTask.id, nextInput, currentTask)
       completionSyncApplied = true
     } catch (error) {
       await rollbackAppliedCompletionSync(rollbackCompletionSync, true, error)
@@ -5007,8 +5028,9 @@ export async function updateOpsTaskStatus(
     if (error) throw error
     throw new Error("업무 데이터를 다시 불러오세요.")
   }
+  const publicClassesCacheRefresh = await refreshPublicClassesAfterCommittedOpsChange(publicClassesChanged)
   clearOpsTaskWorkspaceDataCache()
-  return { sourceEventIds: [] }
+  return { sourceEventIds: [], ...(publicClassesCacheRefresh ? { publicClassesCacheRefresh } : {}) }
 }
 
 async function rollbackRegistrationWaitlistRemovalAfterFailure(student: Row, classRow: Row, originalError: unknown) {
@@ -5111,7 +5133,7 @@ export async function deleteOpsTask(task: OpsTask) {
     })
     producerDeletedTask(response, taskId)
     clearOpsTaskWorkspaceDataCache()
-    return
+    return { publicClassesCacheRefresh: undefined }
   }
 
   await assertOpsTaskExists(taskId)
@@ -5129,7 +5151,9 @@ export async function deleteOpsTask(task: OpsTask) {
     if (rollbackWaitlist) await rollbackWaitlist()
     throw error
   }
+  const publicClassesCacheRefresh = await refreshPublicClassesAfterCommittedOpsChange(Boolean(rollbackWaitlist))
   clearOpsTaskWorkspaceDataCache()
+  return { publicClassesCacheRefresh }
 }
 
 export async function addOpsTaskComment(taskId: string, body: string): Promise<OpsTaskCommentReceipt> {

@@ -789,12 +789,17 @@ async function upsertRows(client, table, payload, { onConflict = "id", select = 
 async function deleteRows(client, table, ids = []) {
   const targets = [...new Set((ids || []).filter(Boolean))];
   if (targets.length === 0) {
-    return;
+    return { deletedIds: [] };
   }
-  const { error } = await client.from(table).delete().in("id", targets);
+  const { data, error } = await client.from(table).delete().in("id", targets).select("id");
   if (error) {
     throw error;
   }
+  const deletedIds = (data || []).map((row) => row?.id).filter(Boolean);
+  if (deletedIds.length !== targets.length) {
+    throw new Error("삭제 대상을 다시 불러오세요.");
+  }
+  return { deletedIds };
 }
 
 function stripTeacherAccountFields(row) {
@@ -1800,6 +1805,7 @@ export function createManagementService(options = {}) {
     async deleteTextbook(id) {
       const client = ensureClient(supabase);
       const deleted = await deleteRows(client, "textbooks", id ? [id] : []);
+      if (deleted.deletedIds.length === 0) return deleted;
       const publicClassesCacheRefresh = await refreshPublicClassesCache("textbook");
       return withPublicClassesCacheRefresh(deleted, publicClassesCacheRefresh);
     },

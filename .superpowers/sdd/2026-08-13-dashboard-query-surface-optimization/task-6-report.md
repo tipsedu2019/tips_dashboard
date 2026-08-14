@@ -24,3 +24,12 @@
 - Regression coverage proves an accidental fourth list in the same function still fails for both missing limit and ordering, and that the role RPC is not forced to accept a fictitious page argument.
 
 This guard correction is recorded as a separate follow-up after the non-destructive Task 4 history restoration. No database migration, database runtime, deployment, provider call, or production mutation was performed.
+
+## Round 2 P1 remediation
+
+- Tightened the public compatibility exemption to the four literal `supabase.from(...).select(...)` chains only. It now rejects both receiver aliases and appended predicates, while preserving the legacy full `/api/public-classes` response shape.
+- Bound the 38 pre-existing ops-task mutation findings to their exact dispatch-baseline fingerprints in the debt manifest. The list guard itself was not relaxed; a changed query or a different chain remains unapproved.
+- Moved legacy roster, waitlist, textbook-link, withdrawal, and transfer invalidation out of partial write helpers. Successful outer logical commits now return the nonfatal refresh receipt to the ops workspace; delete and status UI paths display the pending state.
+- Made management textbook deletion return an explicit `deletedIds` receipt before cache invalidation, so an empty/failed delete cannot report a cache refresh as a successful mutation.
+
+Round 2 RED was the query-budget baseline-delta regression (38 findings). Worktree GREEN: task and public query guards passed, and the focused cache/query tests passed except for the fixture test that deliberately reads pre-commit `HEAD`; it is expected to pass once this separate follow-up commit is created. Raw `tsc --noEmit` with the bundled Node and `git diff --check` passed. `pnpm exec` was not used for TypeScript because the user-owned untracked `pnpm-workspace.yaml` makes pnpm's dependency policy try an install and fail on ignored builds. No DB, migration, deployment, provider, or production action ran.
