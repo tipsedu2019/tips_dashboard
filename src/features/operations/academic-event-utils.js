@@ -287,6 +287,10 @@ export function buildAcademicEventFormScopeFields(event, initialDraft = {}) {
   };
 }
 
+export function buildAcademicEventFormOutputScopeFields(formData = {}) {
+  return buildAcademicEventFormScopeFields(formData);
+}
+
 export function adaptAcademicEventDetailToCalendarEvent(detail = {}) {
   const startsAt = text(detail.startsAt).slice(0, 10);
   const endsAt = text(detail.endsAt || detail.startsAt).slice(0, 10);

@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import {
+  buildAcademicEventFormOutputScopeFields,
   buildAcademicEventFormScopeFields,
   buildAcademicEventNote,
   DEFAULT_ACADEMIC_EVENT_TYPES,
@@ -510,6 +511,7 @@ export function EventForm({
       ...formData.embeddedNoteMeta,
       scienceAreaKey: showScienceAreaField ? formData.scienceAreaKey : "",
     })
+    const scopeFieldsForSave = buildAcademicEventFormOutputScopeFields(formData)
 
     const saved = await onSave({
       id: persistedEventId,
@@ -530,10 +532,7 @@ export function EventForm({
       category: selectedSchool?.category || "all",
       grade: serializeGradeSelection(selectedGrades),
       examTerm: showExamTermField ? formData.examTerm : "",
-      textbookScope: showScopeFields ? formData.textbookScope : "",
-      subtextbookScope: showScopeFields ? formData.subtextbookScope : "",
-      textbookScopes: showScopeFields ? formData.textbookScopes : [],
-      subtextbookScopes: showScopeFields ? formData.subtextbookScopes : [],
+      ...scopeFieldsForSave,
       note: noteWithMetadata || "",
       scienceAreaKey: showScienceAreaField ? formData.scienceAreaKey : "",
       scienceAreaLabel: showScienceAreaField

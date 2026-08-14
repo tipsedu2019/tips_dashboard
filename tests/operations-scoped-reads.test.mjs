@@ -25,6 +25,7 @@ const buildAcademicEventMutationPayload = academicEventUtils.buildAcademicEventM
 const extractAcademicEventNoteMetadata = academicEventUtils.extractAcademicEventNoteMetadata;
 const adaptAcademicEventDetailToCalendarEvent = academicEventUtils.adaptAcademicEventDetailToCalendarEvent;
 const isCurrentAcademicDetailRequest = academicEventUtils.isCurrentAcademicDetailRequest;
+const buildAcademicEventFormOutputScopeFields = academicEventUtils.buildAcademicEventFormOutputScopeFields;
 
 function makeRpcBuilder(result, calls) {
   return {
@@ -270,8 +271,8 @@ test("event form scalar and structured textbook scopes survive a direct read-for
     new URL("src/app/admin/calendar/components/event-form.tsx", root),
     "utf8",
   );
-  assert.match(eventFormSource, /textbookScope: showScopeFields \? formData\.textbookScope : ""/);
-  assert.match(eventFormSource, /subtextbookScope: showScopeFields \? formData\.subtextbookScope : ""/);
+  assert.match(eventFormSource, /const scopeFieldsForSave = buildAcademicEventFormOutputScopeFields\(formData\)/);
+  assert.match(eventFormSource, /\.\.\.scopeFieldsForSave/);
 });
 
 test("calendar exact-detail adapter preserves scalar scopes through a direct save roundtrip", () => {
@@ -322,6 +323,50 @@ test("calendar exact-detail adapter preserves scalar scopes through a direct sav
     subtextbookScopes: [{ name: "부교재", publisher: "B", scope: "3단원" }],
     legacyFlag: "keep",
   });
+});
+
+test("actual form output preserves existing scopes when the selected type hides scope inputs", async () => {
+  assert.equal(typeof buildAcademicEventFormOutputScopeFields, "function");
+  const formData = {
+    typeLabel: "시험기간",
+    textbookScope: "숨은 본교재 20~40쪽",
+    subtextbookScope: "숨은 부교재 4단원",
+    textbookScopes: [{ name: "본교재", publisher: "A", scope: "20~40쪽" }],
+    subtextbookScopes: [{ name: "부교재", publisher: "B", scope: "4단원" }],
+  };
+  const outputScopes = buildAcademicEventFormOutputScopeFields(formData);
+  assert.deepEqual(outputScopes, {
+    textbookScope: "숨은 본교재 20~40쪽",
+    subtextbookScope: "숨은 부교재 4단원",
+    textbookScopes: [{ name: "본교재", publisher: "A", scope: "20~40쪽" }],
+    subtextbookScopes: [{ name: "부교재", publisher: "B", scope: "4단원" }],
+  });
+  const payload = buildAcademicEventMutationPayload({
+    title: "시험기간",
+    type: formData.typeLabel,
+    start: "2026-11-20",
+    end: "2026-11-20",
+    grade: "고1",
+    schoolId: "42000000-0000-4000-8000-000000000042",
+    note: buildAcademicEventNote("메모", { legacyFlag: "keep" }),
+    ...outputScopes,
+  }, [{ id: "42000000-0000-4000-8000-000000000042", name: "검증고", category: "high" }]);
+  assert.equal(payload.isValid, true);
+  assert.deepEqual(extractAcademicEventNoteMetadata(payload.payload.note), {
+    legacyFlag: "keep",
+    textbookScope: "숨은 본교재 20~40쪽",
+    subtextbookScope: "숨은 부교재 4단원",
+    textbookScopes: [{ name: "본교재", publisher: "A", scope: "20~40쪽" }],
+    subtextbookScopes: [{ name: "부교재", publisher: "B", scope: "4단원" }],
+  });
+  const eventFormSource = await readFile(
+    new URL("src/app/admin/calendar/components/event-form.tsx", root),
+    "utf8",
+  );
+  assert.match(eventFormSource, /const scopeFieldsForSave = buildAcademicEventFormOutputScopeFields\(formData\)/);
+  assert.match(eventFormSource, /\.\.\.scopeFieldsForSave/);
+  assert.doesNotMatch(eventFormSource, /textbookScope: showScopeFields \?/);
+  assert.doesNotMatch(eventFormSource, /textbookScopes: showScopeFields \?/);
 });
 
 test("academic detail request guard rejects stale revisions and stale identities", () => {

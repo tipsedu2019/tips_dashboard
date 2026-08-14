@@ -114,6 +114,14 @@ export function Calendar({
   const detailRequestRevisionRef = useRef(0)
   const detailRequestIdentityRef = useRef("")
 
+  const invalidateDetailRequest = useCallback(() => {
+    detailRequestRevisionRef.current += 1
+    detailRequestIdentityRef.current = ""
+    setPendingDetailEvent(null)
+    setDetailLoadError("")
+    setDetailLoading(false)
+  }, [])
+
   const defaultFilters = useMemo(() => buildDefaultCalendarFilters(calendars), [calendars])
   const activeFilters = useMemo(
     () => ({ ...defaultFilters, ...filterOverrides }),
@@ -236,13 +244,9 @@ export function Calendar({
   }
 
   const handleDateSelect = (date: Date) => {
-    detailRequestRevisionRef.current += 1
-    detailRequestIdentityRef.current = ""
+    invalidateDetailRequest()
     setSelectedDate(date)
     setShowCalendarSheet(false)
-    setPendingDetailEvent(null)
-    setDetailLoadError("")
-    setDetailLoading(false)
   }
 
   const handleNewEvent = (date?: Date) => {
@@ -250,13 +254,8 @@ export function Calendar({
       return
     }
 
-    detailRequestRevisionRef.current += 1
-    detailRequestIdentityRef.current = ""
-
+    invalidateDetailRequest()
     setShowCalendarSheet(false)
-    setPendingDetailEvent(null)
-    setDetailLoadError("")
-    setDetailLoading(false)
 
     if (date instanceof Date && !Number.isNaN(date.getTime())) {
       setSelectedDate(date)
@@ -273,12 +272,7 @@ export function Calendar({
       return
     }
 
-    detailRequestRevisionRef.current += 1
-    detailRequestIdentityRef.current = ""
-    setPendingDetailEvent(null)
-    setDetailLoadError("")
-    setDetailLoading(false)
-
+    invalidateDetailRequest()
     setShowCalendarSheet(false)
     setSelectedDate(range.start)
     setSelectedEndDate(range.end)
@@ -311,8 +305,14 @@ export function Calendar({
   }
 
   const handleCalendarToggle = (calendarId: string, visible: boolean) => {
+    invalidateDetailRequest()
     setFilterOverrides((prev) => ({ ...prev, [calendarId]: visible }))
   }
+
+  const handleVisibleRangeChange = useCallback((range: { start: Date; end: Date }) => {
+    invalidateDetailRequest()
+    onVisibleRangeChange?.(range)
+  }, [invalidateDetailRequest, onVisibleRangeChange])
 
   return (
     <>
@@ -353,8 +353,9 @@ export function Calendar({
               onEventClick={handleEditEvent}
               onEmptySlotClick={handleNewEvent}
               onRangeSelect={handleNewEventRange}
-              onVisibleRangeChange={onVisibleRangeChange}
+              onVisibleRangeChange={handleVisibleRangeChange}
               onOverflowClick={(date) => {
+                invalidateDetailRequest()
                 setSelectedDate(date)
               }}
               onEventDrop={readOnly ? undefined : async (_, nextEvent) => {

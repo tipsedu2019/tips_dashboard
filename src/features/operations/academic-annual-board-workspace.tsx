@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ImageDown, Loader2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
@@ -1061,6 +1061,34 @@ export function AcademicAnnualBoardWorkspace() {
   const [boardDetailLoading, setBoardDetailLoading] = useState(false);
   const boardDetailRequestRevisionRef = useRef(0);
   const boardDetailRequestIdentityRef = useRef("");
+
+  const invalidateBoardDetailRequest = useCallback(() => {
+    boardDetailRequestRevisionRef.current += 1;
+    boardDetailRequestIdentityRef.current = "";
+    setPendingBoardEntryEdit(null);
+    setBoardDetailLoading(false);
+    setMutationError(null);
+  }, []);
+
+  const handleSelectedYearChange = useCallback((value: string) => {
+    invalidateBoardDetailRequest();
+    setSelectedYear(value);
+  }, [invalidateBoardDetailRequest]);
+
+  const handleSelectedCategoryChange = useCallback((value: "high" | "middle") => {
+    invalidateBoardDetailRequest();
+    setSelectedCategory(value);
+  }, [invalidateBoardDetailRequest]);
+
+  const handleSelectedSemesterChange = useCallback((value: SemesterFilter) => {
+    invalidateBoardDetailRequest();
+    setSelectedSemester(value);
+  }, [invalidateBoardDetailRequest]);
+
+  const handleSelectedSchoolChange = useCallback((value: string) => {
+    invalidateBoardDetailRequest();
+    setSelectedSchoolId(value);
+  }, [invalidateBoardDetailRequest]);
   const [isSavingBoardImage, setIsSavingBoardImage] = useState(false);
   const annualBoardExportRef = useRef<HTMLDivElement | null>(null);
   const annualRequest = useMemo(() => ({
@@ -1091,6 +1119,7 @@ export function AcademicAnnualBoardWorkspace() {
   }, []);
 
   useEffect(() => {
+    invalidateBoardDetailRequest();
     const initialYear = text(searchParams.get("year"));
     const initialCategory = text(searchParams.get("category"));
     const initialSchoolId = text(searchParams.get("schoolId"));
@@ -1103,7 +1132,7 @@ export function AcademicAnnualBoardWorkspace() {
     setSelectedSchoolId(initialSchoolId);
     setSelectedSemester(SEMESTER_FILTER_OPTIONS.includes(initialSemester as SemesterFilter) ? (initialSemester as SemesterFilter) : "전체");
     setHighlightEventId(initialEventId);
-  }, [searchParams]);
+  }, [invalidateBoardDetailRequest, searchParams]);
 
   const model = useMemo(
     () => {
@@ -1214,9 +1243,9 @@ export function AcademicAnnualBoardWorkspace() {
 
   useEffect(() => {
     if (selectedSchoolId && !schoolOptions.some((option) => option.value === selectedSchoolId)) {
-      setSelectedSchoolId("");
+      handleSelectedSchoolChange("");
     }
-  }, [schoolOptions, selectedSchoolId]);
+  }, [handleSelectedSchoolChange, schoolOptions, selectedSchoolId]);
 
   useEffect(() => {
     setHoveredCell(null);
@@ -1244,7 +1273,7 @@ export function AcademicAnnualBoardWorkspace() {
             : ANNUAL_BOARD_TERM_ROWS.find((termRow) => termRow.kind === "event" && termRow.type === type);
           const matchedSemester = getEntrySemester(matchedEntry);
           if (matchedSemester) {
-            setSelectedSemester(matchedSemester);
+            handleSelectedSemesterChange(matchedSemester);
           }
           setHoveredCell({
             schoolKey: schoolRow.schoolKey,
@@ -1257,9 +1286,10 @@ export function AcademicAnnualBoardWorkspace() {
         }
       }
     }
-  }, [activeGradeColumnLabels, appliedHighlightEventId, groupedSchoolRows, highlightEventId]);
+  }, [activeGradeColumnLabels, appliedHighlightEventId, groupedSchoolRows, handleSelectedSemesterChange, highlightEventId]);
 
   const handleResetFilters = () => {
+    invalidateBoardDetailRequest();
     setSelectedCategory("high");
     setSelectedSemester("전체");
     setSelectedSchoolId("");
@@ -1423,11 +1453,7 @@ export function AcademicAnnualBoardWorkspace() {
       scienceAreaLabel: "",
       embeddedNoteMeta: {},
     };
-    boardDetailRequestRevisionRef.current += 1;
-    boardDetailRequestIdentityRef.current = "";
-    setBoardDetailLoading(false);
-    setPendingBoardEntryEdit(null);
-    setMutationError(null);
+    invalidateBoardDetailRequest();
     setEditingBoardEvent(null);
     setBoardDraft(draft);
     setShowBoardEventForm(true);
@@ -1621,7 +1647,7 @@ export function AcademicAnnualBoardWorkspace() {
             <div className="grid min-w-0 flex-1 gap-3 xl:grid-cols-[112px_168px_168px_minmax(168px,1fr)]">
               <div className="grid gap-2">
                 <Label htmlFor="annual-board-year" className="text-[11px] text-muted-foreground">연도</Label>
-                <Select value={model.selectedYear} onValueChange={setSelectedYear}>
+                <Select value={model.selectedYear} onValueChange={handleSelectedYearChange}>
                   <SelectTrigger id="annual-board-year" className="h-9 w-full rounded-sm text-[12px] font-medium">
                     <SelectValue placeholder="연도 선택" />
                   </SelectTrigger>
@@ -1646,7 +1672,7 @@ export function AcademicAnnualBoardWorkspace() {
                       type="button"
                       size="sm"
                       variant={selectedCategory === option.value ? "default" : "ghost"}
-                      onClick={() => setSelectedCategory(option.value as "high" | "middle")}
+                      onClick={() => handleSelectedCategoryChange(option.value as "high" | "middle")}
                       className="h-7 flex-1 rounded-sm px-3 text-[12px] font-medium active:scale-[0.98]"
                     >
                       {option.label}
@@ -1663,7 +1689,7 @@ export function AcademicAnnualBoardWorkspace() {
                       type="button"
                       size="sm"
                       variant={selectedSemester === option ? "default" : "ghost"}
-                      onClick={() => setSelectedSemester(option)}
+                      onClick={() => handleSelectedSemesterChange(option)}
                       className="h-7 flex-1 rounded-sm px-3 text-[12px] font-medium active:scale-[0.98]"
                     >
                       {option}
@@ -1673,7 +1699,7 @@ export function AcademicAnnualBoardWorkspace() {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="annual-board-school" className="text-[11px] text-muted-foreground">학교</Label>
-                <Select value={selectedSchoolId || "all"} onValueChange={(value) => setSelectedSchoolId(value === "all" ? "" : value)}>
+                <Select value={selectedSchoolId || "all"} onValueChange={(value) => handleSelectedSchoolChange(value === "all" ? "" : value)}>
                   <SelectTrigger id="annual-board-school" className="h-9 w-full rounded-sm text-[12px] font-medium">
                     <SelectValue placeholder="학교 선택" />
                   </SelectTrigger>

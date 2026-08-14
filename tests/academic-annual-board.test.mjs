@@ -289,6 +289,26 @@ test("annual board ignores stale exact-detail success, failure, and loading comp
   assert.match(source, /if \(isCurrentDetailRequest\(\)\) \{\s*setBoardDetailLoading\(false\)/);
 });
 
+test("annual board context setters and search-param effects invalidate pending detail identity", async () => {
+  const source = await readSource("src/features/operations/academic-annual-board-workspace.tsx");
+
+  assert.match(source, /const invalidateBoardDetailRequest = useCallback/);
+  assert.match(source, /boardDetailRequestIdentityRef\.current = ""/);
+  for (const handler of [
+    "handleSelectedYearChange",
+    "handleSelectedCategoryChange",
+    "handleSelectedSemesterChange",
+    "handleSelectedSchoolChange",
+  ]) {
+    assert.match(source, new RegExp(`const ${handler} = useCallback\\([\\s\\S]*?invalidateBoardDetailRequest\\(\\)`));
+  }
+  assert.match(source, /useEffect\(\(\) => \{\s*invalidateBoardDetailRequest\(\);\s*const initialYear/);
+  assert.match(source, /onValueChange=\{handleSelectedYearChange\}/);
+  assert.match(source, /onClick=\{\(\) => handleSelectedCategoryChange/);
+  assert.match(source, /onClick=\{\(\) => handleSelectedSemesterChange/);
+  assert.match(source, /onValueChange=\{\(value\) => handleSelectedSchoolChange/);
+});
+
 test("annual board strips internal metadata from displayed note sections", async () => {
   const source = await readSource("src/features/operations/academic-calendar-models.js");
 

@@ -132,3 +132,24 @@ Round-3 source evidence:
 - The repository-wide source glob is non-GREEN with 17 unrelated shared-branch failures: notification fixture/golden drift, one notification worker contract, and the pre-existing Task 3 management migration normalization gate. No Task 4 focused test failed.
 
 No round-3 DB runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, worker, webhook, provider request, and recipient receipt remain unclaimed; the manifest stays `candidate`.
+
+## Adversarial fix round 4
+
+Round-4 RED was **0 pass / 3 fail** for the actual hidden-scope form output, calendar view-context invalidation, and annual-board context invalidation.
+
+The round closes these source contracts:
+
+- `EventForm` no longer deletes existing scalar or structured textbook scope metadata merely because the selected event type hides the scope inputs. The actual form output retains both representations through save; there is still no implicit type-change deletion policy.
+- Calendar date/range navigation, overflow navigation, new-event paths, and calendar visibility changes synchronously revoke the pending exact-detail revision and identity before changing view context. Stale success, failure, and `finally` paths therefore remain inert.
+- Annual year, school category, semester, school, reset, invalid-school correction, highlighted-event semester, cell-create, and search-parameter context changes all revoke the pending exact-detail revision and identity before applying the new context.
+- No SQL changed. The candidate migration and manifest remain byte-identical at SHA-256 `47d6af4718be42c95d402fe183a229d9709bc50e3523466d34a7b19b4a2cf67c`.
+
+Round-4 source evidence:
+
+- New regressions: **3/3 GREEN** after the recorded **0/3 RED**.
+- Task 4 focused service/UI/continuous-schedule verification: **57/57 GREEN**.
+- Exact operations plus query-budget verification: **76/76 GREEN**.
+- TypeScript, targeted ESLint, operations worktree query guard, manifest hash, and `git diff --check`: GREEN.
+- The repository-wide source glob was attempted twice but did not terminate: the first run remained in the unrelated registration-observation Google Chat provider-zero test for more than four minutes; a second run excluding that file remained in the unrelated notification adapters forward-install test. Both were stopped without changing source or external state. No Task 4 focused test failed.
+
+No round-4 DB runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, worker, webhook, provider request, and recipient receipt remain unclaimed; the manifest stays `candidate`.

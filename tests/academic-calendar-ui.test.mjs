@@ -40,7 +40,8 @@ test("academic calendar reports each complete visible month grid to its scoped l
   ]);
 
   assert.match(calendarSource, /onVisibleRangeChange\?: \(range: \{ start: Date; end: Date \}\) => void/);
-  assert.match(calendarSource, /onVisibleRangeChange=\{onVisibleRangeChange\}/);
+  assert.match(calendarSource, /onVisibleRangeChange=\{handleVisibleRangeChange\}/);
+  assert.match(calendarSource, /onVisibleRangeChange\?\.\(range\)/);
   assert.match(mainSource, /onVisibleRangeChange\?\.\(calendarRange\)/);
   assert.match(mainSource, /\[calendarRange, onVisibleRangeChange\]/);
 });
@@ -72,6 +73,20 @@ test("calendar exact-detail responses mutate state only for the latest selected 
   assert.match(source, /expectedRevision/);
   assert.match(source, /expectedIdentity/);
   assert.match(source, /if \(!isCurrentDetailRequest\(\)\) return false/);
+});
+
+test("calendar view-context navigation invalidates the pending exact-detail identity", async () => {
+  const source = await readFile(
+    new URL("src/app/admin/calendar/components/calendar.tsx", root),
+    "utf8",
+  );
+
+  assert.match(source, /const invalidateDetailRequest = useCallback/);
+  assert.match(source, /detailRequestIdentityRef\.current = ""/);
+  assert.match(source, /const handleVisibleRangeChange = useCallback/);
+  assert.match(source, /invalidateDetailRequest\(\)\s*\n\s*onVisibleRangeChange\?\.\(range\)/);
+  assert.match(source, /onOverflowClick=\{\(date\) => \{\s*invalidateDetailRequest\(\)/);
+  assert.match(source, /const handleCalendarToggle[\s\S]*?invalidateDetailRequest\(\)/);
 });
 
 test("academic calendar month view switches to readable mobile agenda cards", async () => {
