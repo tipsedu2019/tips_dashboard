@@ -2,14 +2,16 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const module = await import(
+const academicReadModule = await import(
   new URL("../src/features/academic/academic-read-service.js", import.meta.url),
 ).catch(() => ({}));
 
-const createAcademicReadService = module.createAcademicReadService;
-const appendAcademicCurriculumPageIfCurrent = module.appendAcademicCurriculumPageIfCurrent;
-const isAcademicContinuationLoadingForScope = module.isAcademicContinuationLoadingForScope;
-const selectAcademicDisplayRequest = module.selectAcademicDisplayRequest;
+const createAcademicReadService = academicReadModule.createAcademicReadService;
+const appendAcademicCurriculumPageIfCurrent = academicReadModule.appendAcademicCurriculumPageIfCurrent;
+const isAcademicContinuationLoadingForScope = academicReadModule.isAcademicContinuationLoadingForScope;
+const selectAcademicDisplayRequest = academicReadModule.selectAcademicDisplayRequest;
+const getCurriculumDesignAction = academicReadModule.getCurriculumDesignAction;
+const isAcademicResultCurrentForScope = academicReadModule.isAcademicResultCurrentForScope;
 
 function makeRpcBuilder(result, calls) {
   return {
@@ -328,6 +330,45 @@ test("curriculum continuation reuses first-page stats and facets without request
   }).stats, first.stats);
 });
 
+test("null-period first page canonicalizes the resolved default before continuation", async () => {
+  const calls = [];
+  const resolvedPeriodId = "43000000-0000-4000-8000-000000000001";
+  const rows = Array.from({ length: 31 }, (_, index) => ({
+    id: `43000000-0000-4000-8000-${String(index + 10).padStart(12, "0")}`,
+    sort_key: `수업 ${index}`,
+    row_data: { id: `43000000-0000-4000-8000-${String(index + 10).padStart(12, "0")}` },
+  }));
+  const service = createAcademicReadService({
+    supabase: makeClient({
+      get_academic_curriculum_page_v1: ({ p_cursor_id: cursorId }) => ({
+        data: cursorId
+          ? { rows: [], stats: null, filterOptions: null, resolvedPeriodId }
+          : { rows, stats: { total: 31 }, filterOptions: {}, resolvedPeriodId },
+        error: null,
+      }),
+    }, calls),
+    actorScope: "actor-a:admin",
+  });
+  const request = {
+    mode: "curriculum", periodId: null, search: "", status: null, subject: null,
+    grade: null, teacher: null, classroom: null, viewMode: "all", cursor: null,
+  };
+  const first = await service.load(request);
+  assert.equal(first.page.nextCursor.resolvedPeriodId, resolvedPeriodId);
+  await service.load({ ...request, cursor: first.page.nextCursor });
+  const rpcCalls = calls.filter(([name]) => name === "get_academic_curriculum_page_v1");
+  assert.equal(rpcCalls[1][1].p_filters.periodId, resolvedPeriodId);
+  await assert.rejects(
+    service.load({
+      ...request,
+      periodId: "43000000-0000-4000-8000-000000000002",
+      cursor: first.page.nextCursor,
+    }),
+    (error) => error?.code === "academic_cursor_mismatch",
+  );
+  assert.equal(calls.filter(([name]) => name === "get_academic_curriculum_page_v1").length, 2);
+});
+
 test("continuation loading and last-good display are synchronously bound to the active scope", () => {
   assert.equal(typeof isAcademicContinuationLoadingForScope, "function");
   assert.equal(typeof selectAcademicDisplayRequest, "function");
@@ -345,6 +386,21 @@ test("continuation loading and last-good display are synchronously bound to the 
     successfulRequest,
     currentRequest: failedRequest,
   }), failedRequest);
+});
+
+test("curriculum CTA prioritizes missing sessions while textbook counts remain independent", () => {
+  assert.equal(typeof getCurriculumDesignAction, "function");
+  assert.deepEqual(getCurriculumDesignAction({ textbookCount: 0, totalSessions: 0 }), {
+    label: "일정", tab: "schedule", sectionId: "lesson-design-periods", sessionId: "", reason: "회차 생성 필요",
+  });
+  assert.equal(getCurriculumDesignAction({ textbookCount: 0, totalSessions: 2 }).reason, "교재 연결 필요");
+});
+
+test("current-scope rendering requires data and display fingerprints to both match", () => {
+  assert.equal(typeof isAcademicResultCurrentForScope, "function");
+  assert.equal(isAcademicResultCurrentForScope("scope-a", "scope-a", "scope-a"), true);
+  assert.equal(isAcademicResultCurrentForScope("scope-a", "scope-b", "scope-a"), false);
+  assert.equal(isAcademicResultCurrentForScope("scope-a", "scope-a", "scope-b"), false);
 });
 
 test("academic scoped migration is invoker-only, authenticated-only, bounded and explicit", async () => {
@@ -396,6 +452,7 @@ test("academic SQL resolves defaults once and uses canonical classroom and work-
   assert.match(sql, /academic_classroom_name_v1\(pg_catalog\.btrim\(token\)\)[\s\S]+academic_classroom_name_v1\(pg_catalog\.btrim\(v_filters ->> 'classroom'\)\)/i);
   assert.match(sql, /when base\.session_count = 0 then '회차 미생성'[\s\S]+when base\.textbook_count = 0 then '교재 미연결'/i);
   assert.match(sql, /when base\.session_count = 0 then 'unscheduled'[\s\S]+when base\.textbook_count = 0 then 'unlinked'/i);
+  assert.match(sql, /'unlinkedClassCount', pg_catalog\.count\(\*\) filter \(where textbook_count=0\)/i);
 });
 
 test("academic SQL returns the earliest exact unplanned session and an explicit detail class projection", async () => {
@@ -410,6 +467,7 @@ test("academic SQL returns the earliest exact unplanned session and an explicit 
   assert.match(sql, /next_unplanned as materialized/i);
   assert.match(sql, /'sessionId',\s*next_session_id/i);
   assert.match(sql, /not exists \([\s\S]+from public\.progress_logs/i);
+  assert.match(sql, /log\.progress_key in \(session\.id::text, session\.session_key\)/i);
   assert.doesNotMatch(detail, /to_jsonb\(class\)/i);
   assert.match(detail, /jsonb_build_object\([\s\S]+'id',\s*class\.id[\s\S]+'scheduleRevision',\s*class\.schedule_revision/i);
   assert.doesNotMatch(detail, /student_ids|waitlist_ids|schedule_plan|lessons|fee|capacity/i);

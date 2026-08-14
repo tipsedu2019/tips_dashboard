@@ -437,7 +437,10 @@ begin
         select 1
         from public.progress_logs log
         where log.class_id = session.class_id
-          and log.session_id in (session.id::text, session.session_key)
+          and (
+            log.session_id in (session.id::text, session.session_key)
+            or log.progress_key in (session.id::text, session.session_key)
+          )
           and pg_catalog.coalesce(log.status, '') in ('partial','done')
       )
     order by session.class_id, session.session_date, session.start_time nulls last, session.id
@@ -592,7 +595,7 @@ begin
       'completedSessions', pg_catalog.coalesce(pg_catalog.sum(planned_count),0)::integer,
       'pendingSessions', pg_catalog.coalesce(pg_catalog.sum(pg_catalog.greatest(session_count-planned_count,0)),0)::integer,
       'linkedTextbooks', pg_catalog.coalesce(pg_catalog.sum(textbook_count),0)::integer,
-      'unlinkedClassCount', pg_catalog.count(*) filter (where view_mode='unlinked')::integer,
+      'unlinkedClassCount', pg_catalog.count(*) filter (where textbook_count=0)::integer,
       'noScheduleClassCount', pg_catalog.count(*) filter (where view_mode='unscheduled')::integer,
       'updateNeededClassCount', pg_catalog.count(*) filter (where state_label='진도 미배정')::integer,
       'completedClassCount', pg_catalog.count(*) filter (where state_label='계획 완료')::integer,

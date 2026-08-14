@@ -9,6 +9,7 @@ import {
   appendAcademicCurriculumPageIfCurrent,
   createAcademicReadService,
   isAcademicContinuationLoadingForScope,
+  isAcademicResultCurrentForScope,
   selectAcademicDisplayRequest,
 } from "./academic-read-service.js";
 
@@ -16,6 +17,7 @@ export type AcademicKeysetCursor = {
   sortValues: [string];
   id: string;
   scopeHash: string;
+  resolvedPeriodId?: string | null;
 };
 
 export type AcademicWorkspaceRequest =
@@ -182,12 +184,19 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
     successfulRequest,
     currentRequest: stableRequest,
   }) as AcademicWorkspaceRequest;
+  const displayFingerprint = requestFingerprint(displayRequest);
+  const dataMatchesCurrentScope = isAcademicResultCurrentForScope(
+    dataFingerprint,
+    fingerprint,
+    displayFingerprint,
+  );
 
   return {
     data,
     dataFingerprint,
     successfulRequest,
     displayRequest,
+    dataMatchesCurrentScope,
     densityError,
     loading,
     loadingMore,

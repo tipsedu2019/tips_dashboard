@@ -166,6 +166,60 @@ export function selectAcademicDisplayRequest({ data, successfulRequest, currentR
   return data && successfulRequest ? successfulRequest : currentRequest;
 }
 
+export function isAcademicResultCurrentForScope(
+  dataFingerprint,
+  currentFingerprint,
+  displayFingerprint,
+) {
+  return Boolean(
+    dataFingerprint
+      && dataFingerprint === currentFingerprint
+      && displayFingerprint === currentFingerprint,
+  );
+}
+
+export function getCurriculumDesignAction(row = {}) {
+  const nextSession = row.nextSession && typeof row.nextSession === "object"
+    ? row.nextSession
+    : {};
+  const sessionId = text(nextSession.id || nextSession.sessionId);
+
+  if (Number(row.totalSessions || 0) <= 0) {
+    return {
+      label: "일정",
+      tab: "schedule",
+      sectionId: "lesson-design-periods",
+      sessionId: "",
+      reason: "회차 생성 필요",
+    };
+  }
+  if (Number(row.textbookCount || 0) <= 0) {
+    return {
+      label: "교재",
+      tab: "curriculum",
+      sectionId: "lesson-design-textbooks",
+      sessionId: "",
+      reason: "교재 연결 필요",
+    };
+  }
+  if (Number(row.delayedProgressSessions || 0) > 0) {
+    return {
+      label: "진도",
+      tab: "curriculum",
+      sectionId: "lesson-design-board",
+      sessionId,
+      reason: `미배정 ${Number(row.delayedProgressSessions || 0)}회`,
+    };
+  }
+  return {
+    label: "보기",
+    tab: "basic",
+    sectionId: "",
+    sessionId: "",
+    reason: "기본 정보 확인",
+  };
+}
+
 export function createAcademicReadService(options = {}) {
   const client = options.supabase;
   if (!client || typeof client.rpc !== "function") throw academicError("academic_client_missing");
@@ -181,9 +235,13 @@ export function createAcademicReadService(options = {}) {
 
   async function loadCurriculum(request) {
     assertCurriculumRequest(request);
-    const filters = normalizeCurriculumFilters(request);
-    const expectedScopeHash = await scopeHash(actorScope, filters);
+    const requestedFilters = normalizeCurriculumFilters(request);
     const cursor = request.cursor;
+    const cursorResolvedPeriodId = text(cursor?.resolvedPeriodId) || null;
+    const filters = cursor !== null && requestedFilters.periodId === null && cursorResolvedPeriodId
+      ? { ...requestedFilters, periodId: cursorResolvedPeriodId }
+      : requestedFilters;
+    const expectedScopeHash = cursor === null ? null : await scopeHash(actorScope, filters);
     if (cursor !== null && (!cursor || !Array.isArray(cursor.sortValues)
       || cursor.sortValues.length !== 1 || typeof cursor.sortValues[0] !== "string"
       || !UUID.test(text(cursor.id)) || cursor.scopeHash !== expectedScopeHash)) {
@@ -202,13 +260,25 @@ export function createAcademicReadService(options = {}) {
     );
     const received = Array.isArray(response?.rows) ? response.rows : [];
     if (received.length > PAGE_SIZE + 1) throw academicError("academic_curriculum_response_invalid");
+    const responseResolvedPeriodId = text(response?.resolvedPeriodId) || filters.periodId;
+    if (filters.periodId && responseResolvedPeriodId && responseResolvedPeriodId !== filters.periodId) {
+      throw academicError("academic_curriculum_response_invalid");
+    }
+    const resolvedPeriodId = responseResolvedPeriodId || null;
+    const canonicalFilters = resolvedPeriodId === filters.periodId
+      ? filters
+      : { ...filters, periodId: resolvedPeriodId };
+    const canonicalScopeHash = await scopeHash(actorScope, canonicalFilters);
+    if (cursor !== null && canonicalScopeHash !== expectedScopeHash) {
+      throw academicError("academic_curriculum_response_invalid");
+    }
     const boundary = received.length > PAGE_SIZE ? received[PAGE_SIZE - 1] : null;
     const receivedMetadata = response?.stats && typeof response.stats === "object"
       && response?.filterOptions && typeof response.filterOptions === "object"
       ? { stats: response.stats, filterOptions: response.filterOptions }
       : null;
-    if (receivedMetadata) scopeMetadataCache.set(expectedScopeHash, receivedMetadata);
-    const metadata = receivedMetadata || scopeMetadataCache.get(expectedScopeHash);
+    if (receivedMetadata) scopeMetadataCache.set(canonicalScopeHash, receivedMetadata);
+    const metadata = receivedMetadata || scopeMetadataCache.get(canonicalScopeHash);
     if (!metadata) throw academicError("academic_curriculum_metadata_missing");
     return {
       page: {
@@ -217,7 +287,8 @@ export function createAcademicReadService(options = {}) {
         nextCursor: boundary ? {
           sortValues: [text(boundary.sort_key)],
           id: text(boundary.id),
-          scopeHash: expectedScopeHash,
+          scopeHash: canonicalScopeHash,
+          resolvedPeriodId,
         } : null,
       },
       stats: metadata.stats,

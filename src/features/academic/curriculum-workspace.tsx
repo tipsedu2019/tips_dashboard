@@ -26,6 +26,7 @@ import {
   type ClassFilterPanelSelect,
 } from "@/features/management/class-filter-panel";
 import { pickDefaultPeriodValue, readDefaultPeriodPreference } from "@/features/management/period-preferences";
+import { getCurriculumDesignAction as resolveCurriculumDesignAction } from "./academic-read-service.js";
 import { buildCurriculumWorkspaceModel, type CurriculumRow } from "./records.js";
 import { useAcademicWorkspaceData } from "./use-academic-workspace-data";
 
@@ -156,22 +157,7 @@ function buildLessonDesignHref(classId: string, sectionId = "", sessionId = "", 
 }
 
 function getCurriculumDesignAction(row: Record<string, unknown>) {
-  const nextSession = (row.nextSession || {}) as Record<string, unknown>;
-  const sessionId = text(nextSession.id || nextSession.sessionId);
-
-  if (Number(row.textbookCount || 0) <= 0) {
-    return { label: "교재", tab: "curriculum", sectionId: "lesson-design-textbooks", sessionId: "", reason: "교재 연결 필요" };
-  }
-
-  if (Number(row.totalSessions || 0) <= 0) {
-    return { label: "일정", tab: "schedule", sectionId: "lesson-design-periods", sessionId: "", reason: "회차 생성 필요" };
-  }
-
-  if (Number(row.delayedProgressSessions || 0) > 0) {
-    return { label: "진도", tab: "curriculum", sectionId: "lesson-design-board", sessionId, reason: `미배정 ${Number(row.delayedProgressSessions || 0)}회` };
-  }
-
-  return { label: "보기", tab: "basic", sectionId: "", sessionId: "", reason: "기본 정보 확인" };
+  return resolveCurriculumDesignAction(row);
 }
 
 function formatTextbookCount(count: number) {
@@ -246,6 +232,7 @@ export function AcademicCurriculumWorkspace() {
     data: curriculumData,
     loading,
     loadingMore,
+    dataMatchesCurrentScope,
     error,
     loadMore,
     refresh,
@@ -261,12 +248,19 @@ export function AcademicCurriculumWorkspace() {
     viewMode,
     cursor: null,
   });
-  const page = (curriculumData?.page || {}) as {
+  const renderData = dataMatchesCurrentScope ? curriculumData : null;
+  const page = (renderData?.page || {}) as {
     rows?: CurriculumRow[];
     hasMore?: boolean;
   };
-  const stats = (curriculumData?.stats || {}) as Record<string, unknown>;
-  const filterOptions = (curriculumData?.filterOptions || {}) as Record<string, unknown>;
+  const stats = useMemo(
+    () => (renderData?.stats || {}) as Record<string, unknown>,
+    [renderData?.stats],
+  );
+  const filterOptions = useMemo(
+    () => (renderData?.filterOptions || {}) as Record<string, unknown>,
+    [renderData?.filterOptions],
+  );
   const model = useMemo(() => {
     const derived = buildCurriculumWorkspaceModel({
       precomputedRows: Array.isArray(page.rows) ? page.rows : [],
@@ -538,7 +532,7 @@ export function AcademicCurriculumWorkspace() {
     classroom ? { id: "classroom", label: <>강의실 {classroom}</> } : null,
   ].filter(Boolean) as ClassFilterPanelChip[];
 
-  if (loading && !curriculumData) {
+  if (loading && !dataMatchesCurrentScope) {
     return <CurriculumWorkspaceSkeleton />;
   }
 

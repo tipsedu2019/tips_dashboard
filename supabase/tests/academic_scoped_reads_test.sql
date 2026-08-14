@@ -141,8 +141,8 @@ insert into public.class_lesson_sessions(
 values
   ('93040000-0000-4000-8000-000000000001','93030000-0000-4000-8000-000000000031','__academic_planned__','2199-01-05','active','18:00','19:00','검증 교사','검증실','manual',1),
   ('93040000-0000-4000-8000-000000000002','93030000-0000-4000-8000-000000000031','__academic_unplanned__','2199-01-06','active','18:00','19:00','검증 교사','검증실','manual',1);
-insert into public.progress_logs(id,class_id,textbook_id,session_id,status,content,updated_at)
-values ('93040000-0000-4000-8000-000000000010','93030000-0000-4000-8000-000000000031',null,'__academic_planned__','done','완료',now());
+insert into public.progress_logs(id,class_id,textbook_id,session_id,progress_key,status,content,updated_at)
+values ('93040000-0000-4000-8000-000000000010','93030000-0000-4000-8000-000000000031',null,null,'__academic_planned__','done','완료',now());
 
 create temporary table academic_curriculum_first_page on commit drop as
 select value as row
@@ -202,6 +202,14 @@ select is(
   ) #>> '{rows,0,row_data,stateLabel}',
   '회차 미생성',
   'canonical classification reports no-session before no-textbook'
+);
+select is(
+  (public.get_academic_curriculum_page_v1(
+    pg_catalog.jsonb_build_object('periodId','93000000-0000-4000-8000-000000000950','search','__academic_curriculum__ 32','status',null,'subject',null,'grade','고2','teacher','검증 교사','classroom','검증실','viewMode','all'),
+    null,null,30,true
+  ) #>> '{stats,unlinkedClassCount}')::integer,
+  1,
+  'textbook-unlinked count remains independent when the class also has no sessions'
 );
 
 select ok(
