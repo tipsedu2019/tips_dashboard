@@ -363,7 +363,13 @@ test("management detail and relation cursors are selection driven and scope boun
           kind: "students",
           relationKind: "lifecycle_history",
           page: {
-            rows: [],
+            rows: [{
+              id: "history-1",
+              teacher: "fallback teacher",
+              teacher_name: "legacy teacher",
+              room: "fallback room",
+              classroom: "legacy room",
+            }],
             hasMore: true,
             nextCursor: { sortValue: "2026-08-13T00:00:00Z", id: "20000000-0000-4000-8000-000000000002" },
           },
@@ -398,6 +404,8 @@ test("management detail and relation cursors are selection driven and scope boun
     relationKind: "lifecycle_history",
   });
   assert.equal(typeof firstPage.page.nextCursor, "string");
+  assert.equal(firstPage.page.rows[0].teacher, "legacy teacher");
+  assert.equal(firstPage.page.rows[0].classroom, "legacy room");
   await service.loadRelationPage({
     kind: "students",
     id: "10000000-0000-4000-8000-000000000001",
@@ -459,7 +467,7 @@ test("management hook and UI keep list reads bounded while details and relation 
   assert.match(tableSource, /syncTextbookListQueryState\(\{ publisher: nextValue \}\)/);
   assert.match(tableSource, /syncTextbookListQueryState\(\{ status: nextValue \}\)/);
 
-  assert.match(serviceSource, /\.select\("id,name,subject,grade,status,teacher,classroom"\)/);
+  assert.match(serviceSource, /\.select\("id,name,subject,grade,status,schedule,teacher_name,teacher,classroom,room"\)/);
   assert.match(serviceSource, /\.select\("id,name,school,grade,status,recent_issue"\)/);
   assert.match(serviceSource, /\.limit\(30\)[\s\S]*?\.abortSignal\(AbortSignal\.timeout\(8_000\)\)[\s\S]*?\.retry\(false\)/);
 });

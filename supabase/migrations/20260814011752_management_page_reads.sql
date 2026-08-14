@@ -478,7 +478,7 @@ begin
       select history.id, history.changed_at::text sort_value,
         pg_catalog.jsonb_build_object(
           'id',history.id,'classId',history.class_id,'className',class.name,'subject',class.subject,
-          'teacher',class.teacher,
+          'teacher',pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(class.teacher_name),''),class.teacher),
           'eventType',history.action,'action',history.action,
           'label',case history.action when 'enrolled' then '수강 등록' when 'waitlist' then '대기 등록' when 'removed' then '수강 해제' else history.action end,
           'occurredAt',history.changed_at,'changedAt',history.changed_at,'safeSummary',pg_catalog.coalesce(history.memo,'')) row_data
@@ -491,7 +491,12 @@ begin
   elsif p_kind = 'students' and p_relation_kind = 'class_picker' then
     with page as (
       select class.id, pg_catalog.coalesce(nullif(pg_catalog.btrim(class.name),''),U&'\FFFF') collate dashboard_private.ko_numeric sort_value,
-        pg_catalog.jsonb_build_object('id',class.id,'name',class.name,'subject',class.subject,'grade',class.grade,'status',class.status) row_data
+        pg_catalog.jsonb_build_object(
+          'id',class.id,'name',class.name,'subject',class.subject,'grade',class.grade,'status',class.status,
+          'schedule',class.schedule,
+          'teacher',pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(class.teacher_name),''),class.teacher),
+          'classroom',pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(class.classroom),''),class.room)
+        ) row_data
       from public.classes class
       where p_cursor_sort_key is null or pg_catalog.coalesce(nullif(pg_catalog.btrim(class.name),''),U&'\FFFF') collate dashboard_private.ko_numeric > p_cursor_sort_key collate dashboard_private.ko_numeric
         or (pg_catalog.coalesce(nullif(pg_catalog.btrim(class.name),''),U&'\FFFF') collate dashboard_private.ko_numeric = p_cursor_sort_key collate dashboard_private.ko_numeric and class.id > p_cursor_id)
@@ -521,7 +526,10 @@ begin
       from public.classes class where pg_catalog.coalesce(class.student_ids,'[]'::jsonb) ? p_id::text
       union all
       select class.id,'waitlisted',pg_catalog.coalesce(class.updated_at,'epoch'::timestamptz),class.id,5
-      from public.classes class where pg_catalog.coalesce(class.waitlist_ids,'[]'::jsonb) ? p_id::text
+      from public.classes class where (
+        pg_catalog.coalesce(class.waitlist_ids,'[]'::jsonb)
+        || pg_catalog.coalesce(class.waitlist_student_ids,'[]'::jsonb)
+      ) ? p_id::text
     ), canonical as (
       select distinct on (class_id) class_id,status,sort_at,event_id
       from candidates
@@ -530,8 +538,8 @@ begin
       select canonical.event_id id,canonical.sort_at::text sort_value,
         pg_catalog.jsonb_build_object(
           'classId',class.id,'className',class.name,'name',class.name,'subject',class.subject,
-          'teacher',class.teacher,
-          'classroom',class.room,
+          'teacher',pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(class.teacher_name),''),class.teacher),
+          'classroom',pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(class.classroom),''),class.room),
           'schedule',class.schedule,'status',canonical.status,'startedOn',null,'endedOn',null) row_data
       from canonical join public.classes class on class.id=canonical.class_id
       where p_cursor_sort_key is null or canonical.sort_at < p_cursor_sort_key::timestamptz or (canonical.sort_at=p_cursor_sort_key::timestamptz and canonical.event_id > p_cursor_id)
@@ -543,6 +551,7 @@ begin
       select case when p_relation_kind='registered_students'
         then pg_catalog.coalesce(class.student_ids,'[]'::jsonb)
         else pg_catalog.coalesce(class.waitlist_ids,'[]'::jsonb)
+          || pg_catalog.coalesce(class.waitlist_student_ids,'[]'::jsonb)
       end student_ids
       from public.classes class where class.id = p_id
     ), page as (
@@ -561,7 +570,10 @@ begin
   elsif p_relation_kind = 'active_classes' then
     with page as (
       select class.id, pg_catalog.coalesce(nullif(pg_catalog.btrim(class.name),''),U&'\FFFF') collate dashboard_private.ko_numeric sort_value,
-        pg_catalog.jsonb_build_object('id',class.id,'name',class.name,'subject',class.subject,'teacherName',class.teacher) row_data
+        pg_catalog.jsonb_build_object(
+          'id',class.id,'name',class.name,'subject',class.subject,
+          'teacherName',pg_catalog.coalesce(pg_catalog.nullif(pg_catalog.btrim(class.teacher_name),''),class.teacher)
+        ) row_data
       from public.classes class where pg_catalog.coalesce(class.textbook_ids,'[]'::jsonb) ? p_id::text
         and (p_cursor_sort_key is null or pg_catalog.coalesce(nullif(pg_catalog.btrim(class.name),''),U&'\FFFF') collate dashboard_private.ko_numeric > p_cursor_sort_key collate dashboard_private.ko_numeric
           or (pg_catalog.coalesce(nullif(pg_catalog.btrim(class.name),''),U&'\FFFF') collate dashboard_private.ko_numeric = p_cursor_sort_key collate dashboard_private.ko_numeric and class.id > p_cursor_id))

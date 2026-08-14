@@ -115,3 +115,12 @@ Source implementation and source verification are complete. Runtime SQL behavior
 - RED evidence: the focused round-5 contracts first ran **21 pass / 2 fail**. Final focused result is **23/23 GREEN**; full management is **141/141 GREEN**; combined management/query-budget/textbook-picker/schema verification is **207/207 GREEN**.
 - TypeScript, relevant ESLint (zero warnings), management query-surface guard, migration hash equality, and diff check are GREEN. Candidate SHA-256 is `44dff0d605127f5cd4efcd954f9bb324e846b60dc5d956755e6aa63b67f1dcc5`.
 - No database runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, and provider activity remain unexecuted and unclaimed; the migration remains `candidate`.
+
+## Adversarial fix round 6
+
+- Student enrollment reverse lookup and class waitlist paging now combine the explicit `classes.waitlist_ids` and legacy `classes.waitlist_student_ids` JSON arrays. Membership checks remain bounded by the relation page's 30+1 keyset limit and do not convert whole rows.
+- Class relation SQL projects `teacher_name`, `teacher`, `classroom`, and `room` scalars explicitly, then emits canonical `teacher` and `classroom` values with legacy aliases taking precedence when populated. Lifecycle, enrollment, class picker, and active-textbook class rows share the display contract.
+- Relation-page and direct-picker client paths use the same canonical class-record normalizer. Initial and continued student relation pages therefore render legacy teacher/classroom data identically to the selection picker.
+- RED evidence: the new review suite failed at module load because `normalizeClassRelationRecord` did not exist. Final focused result is **24/24 GREEN**; combined management/query-budget/textbook-picker/schema verification is **208/208 GREEN**.
+- TypeScript, relevant ESLint (zero warnings), management query-surface guard, migration hash equality, and diff check are GREEN. Candidate SHA-256 is `39ec7be093a24ee143d57ee4a4f7da5bc1b38630c0899669ad66900526c5cb50`.
+- No database runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, and provider activity remain unexecuted and unclaimed; the migration remains `candidate`.

@@ -7,7 +7,10 @@ import {
   normalizeStudentManagementRecord,
   normalizeTextbookManagementRecord,
 } from "../src/features/management/records.js";
-import { getAssignedClassTextbookIds } from "../src/features/management/management-service.js";
+import {
+  getAssignedClassTextbookIds,
+  normalizeClassRelationRecord,
+} from "../src/features/management/management-service.js";
 
 const root = new URL("../", import.meta.url);
 
@@ -141,6 +144,41 @@ test("relation payloads match roster contacts and student history renderer label
   assert.match(migration, /'parentContact',student\.parent_contact/);
   assert.match(migration, /'className',class\.name/);
   assert.match(migration, /'label'.*?'changedAt'/s);
+});
+
+test("relation paging preserves legacy waitlists and canonical class display aliases", async () => {
+  const migration = await readFile(new URL("supabase/migrations/20260814011752_management_page_reads.sql", root), "utf8");
+  const relation = migration.slice(
+    migration.indexOf("create function public.list_management_detail_relation_page_v1"),
+    migration.indexOf("create function public.get_management_detail_v1"),
+  );
+  const serviceSource = await readFile(new URL("src/features/management/management-service.js", root), "utf8");
+  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+
+  assert.match(relation, /coalesce\(class\.waitlist_ids,'\[\]'::jsonb\)\s*\|\|\s*pg_catalog\.coalesce\(class\.waitlist_student_ids,'\[\]'::jsonb\)/i);
+  assert.ok((relation.match(/class\.waitlist_student_ids/g) || []).length >= 2);
+  assert.match(relation, /coalesce\(pg_catalog\.nullif\(pg_catalog\.btrim\(class\.teacher_name\),''\),class\.teacher\)/i);
+  assert.match(relation, /coalesce\(pg_catalog\.nullif\(pg_catalog\.btrim\(class\.classroom\),''\),class\.room\)/i);
+  assert.match(relation, /p_relation_kind\s*=\s*'class_picker'[\s\S]*?'teacher'[\s\S]*?'classroom'/i);
+  assert.doesNotMatch(relation, /to_jsonb\(class\)/i);
+
+  assert.deepEqual(normalizeClassRelationRecord({
+    id: "class-legacy",
+    teacher: "fallback teacher",
+    teacher_name: "legacy teacher",
+    room: "fallback room",
+    classroom: "legacy room",
+  }), {
+    id: "class-legacy",
+    teacher: "legacy teacher",
+    teacher_name: "legacy teacher",
+    room: "fallback room",
+    classroom: "legacy room",
+  });
+  assert.match(serviceSource, /\.select\("id,name,subject,grade,status,schedule,teacher_name,teacher,classroom,room"\)/);
+  assert.match(serviceSource, /return \(data \|\| \[\]\)\.map\(normalizeClassRelationRecord\)/);
+  assert.match(pageSource, /record\.teacher \|\| record\.teacher_name \|\| record\.teacherName/);
+  assert.match(pageSource, /record\.classroom \|\| record\.room \|\| record\.class_room/);
 });
 
 test("roster mutations read exact targeted projections and never full collections", async () => {

@@ -147,6 +147,13 @@ function unwrapRpcObject(value) {
   return Array.isArray(value) && value.length === 1 ? value[0] : value;
 }
 
+export function normalizeClassRelationRecord(record = {}) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return record;
+  const teacher = trimText(record.teacher_name || record.teacherName || record.teacher);
+  const classroom = trimText(record.classroom || record.room || record.class_room);
+  return { ...record, teacher, classroom };
+}
+
 export function getAssignedClassTextbookIds(detail) {
   const record = detail?.record && typeof detail.record === "object" && !Array.isArray(detail.record)
     ? detail.record
@@ -170,6 +177,9 @@ function withOpaqueRelationCursor(page, context) {
   const rawCursor = page.nextCursor;
   return {
     ...page,
+    rows: context.kind === "students" && Array.isArray(page.rows)
+      ? page.rows.map(normalizeClassRelationRecord)
+      : page.rows,
     nextCursor: rawCursor && typeof rawCursor === "object"
       ? encodeManagementRelationCursor({
           ...context,
@@ -1791,7 +1801,7 @@ export function createManagementService(options = {}) {
       if (kind === "students") {
         const { data, error } = await client
           .from("classes")
-          .select("id,name,subject,grade,status,teacher,classroom")
+          .select("id,name,subject,grade,status,schedule,teacher_name,teacher,classroom,room")
           .ilike("name", `%${normalizedSearch}%`)
           .order("name", { ascending: true })
           .order("id", { ascending: true })
@@ -1799,7 +1809,7 @@ export function createManagementService(options = {}) {
           .abortSignal(AbortSignal.timeout(8_000))
           .retry(false);
         if (error) throw error;
-        return data || [];
+        return (data || []).map(normalizeClassRelationRecord);
       }
       if (kind === "classes") {
         const { data, error } = await client
