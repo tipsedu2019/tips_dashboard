@@ -1063,6 +1063,13 @@ async function sourceRpc(context: HandlerAuthContext, args: JsonRecord) {
     args,
   )
   if (result.error) {
+    console.error("registration_customer_message_source_rpc_failed", {
+      code: text(result.error.code),
+      message: text(result.error.message),
+      messageKind: args.p_message_kind,
+      sourceId: args.p_source_id,
+      actorProfileId: args.p_actor_profile_id,
+    })
     throw registrationCustomerMessageSourceRpcError(result.error)
   }
   return result.data
