@@ -34,6 +34,7 @@ test("audit patch helpers are private immutable invoker functions and manifest b
     assert.match(sql, new RegExp(`revoke all on function dashboard_private\\.${helper}\\(jsonb, jsonb\\) from public, anon, authenticated, service_role`));
   }
   assert.match(sql, /create role dashboard_audit_writer_v2 nologin nosuperuser nocreatedb nocreaterole noinherit noreplication nobypassrls/u);
+  assert.match(sql, /create policy dashboard_audit_logs_writer_select on public\.dashboard_audit_logs for select to dashboard_audit_writer_v2 using \(true\)/u);
   assert.match(sql, /revoke all on function dashboard_private\.log_dashboard_audit_event_v2\(\) from public, anon, authenticated, service_role/u);
   const row = manifest.orderedNewMigrations.find(({ fileName }) => fileName === "20260814115116_dashboard_audit_diff_format.sql");
   assert.deepEqual(row, { fileName: "20260814115116_dashboard_audit_diff_format.sql", status: "candidate", sha256: createHash("sha256").update(source).digest("hex") });

@@ -201,6 +201,8 @@ revoke insert on table public.dashboard_audit_logs from public, authenticated;
 grant insert, select on table public.dashboard_audit_logs to dashboard_audit_writer_v2;
 drop policy if exists dashboard_audit_logs_writer_insert on public.dashboard_audit_logs;
 create policy dashboard_audit_logs_writer_insert on public.dashboard_audit_logs for insert to dashboard_audit_writer_v2 with check (true);
+drop policy if exists dashboard_audit_logs_writer_select on public.dashboard_audit_logs;
+create policy dashboard_audit_logs_writer_select on public.dashboard_audit_logs for select to dashboard_audit_writer_v2 using (true);
 
 drop trigger if exists dashboard_audit_teacher_catalogs on public.teacher_catalogs;
 create trigger dashboard_audit_teacher_catalogs after insert or update or delete on public.teacher_catalogs

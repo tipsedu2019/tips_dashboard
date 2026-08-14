@@ -19,4 +19,4 @@ The minimal local fixture intentionally did not reproduce the full Supabase `aut
 
 ## Runtime boundary
 
-The manifest is `candidate` with SHA-256 `0c453beba2492d2d85fc4a7b9d8e709f40833e42f384c77c453146b59773e0f5`. The approved isolated harness cannot start until a reviewed baseline pointer exists, so pgTAP, two-client concurrency, EXPLAIN, and final promotion remain unrun. No production database, migration application, cron, deployment, provider request, or recipient receipt was changed.
+The manifest is `candidate` with SHA-256 `3e0a688fce5574c5d8009b7644a5838d58a9e27ef99fbafeaff45820cdc0cc33`. The approved isolated harness cannot start until a reviewed baseline pointer exists, so pgTAP, two-client concurrency, EXPLAIN, and final promotion remain unrun. No production database, migration application, cron, deployment, provider request, or recipient receipt was changed.
