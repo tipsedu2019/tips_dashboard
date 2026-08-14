@@ -22,7 +22,29 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "list_active_science_subject_areas_v1",
   "get_academic_timetable_range_v1",
   "get_academic_curriculum_detail_v1",
+  "current_dashboard_role",
 ])
+
+// The public API keeps three full compatibility projections unpaged for
+// unknown external consumers. This is not a pattern allowance: the exact
+// function, file, surface, and query ordinals are the only non-list chains.
+const LEGACY_PUBLIC_UNPAGED_COMPATIBILITY_QUERY_ORDINALS = new Set([1, 2, 3])
+const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION"
+
+function isLegacyPublicFullCompatibilityQuery({ surface, file, symbol, query, constants }) {
+  const projection = query.operations.find((operation) => callMethod(operation) === "select")
+  const projectionArgument = projection?.arguments[0]
+  const value = projectionArgument && argumentValue(projectionArgument, constants)
+  const namedSummaryCompatibilityProjection = query.ordinal === 0
+    && Boolean(projectionArgument && ts.isIdentifier(projectionArgument))
+    && projectionArgument.text === PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION
+  return surface === "public"
+    && file === "src/server/public-classes-payload.js"
+    && symbol === "buildPublicClassesPayload"
+    && (namedSummaryCompatibilityProjection || LEGACY_PUBLIC_UNPAGED_COMPATIBILITY_QUERY_ORDINALS.has(query.ordinal))
+    && typeof value === "string"
+    && !chainHasWildcardProjection(value)
+}
 
 // These are deliberately literal records, not path patterns. Each one binds a
 // specific baseline query chain, so moving or duplicating legacy debt is a new
@@ -445,6 +467,7 @@ function scopeLineSpan(scope) {
 function analyzeChain({ surface, file, symbol, scope, query }) {
   const constants = primitiveConstants(scope, query.entry)
   const optionBindings = immutableConstInitializers(scope, query.entry)
+  const legacyFullCompatibility = isLegacyPublicFullCompatibilityQuery({ surface, file, symbol, query, constants })
   const reasons = []
   if (query.receiverUnresolved) reasons.push("list_query_receiver_unresolved")
   else if (query.directMethod === null) reasons.push("list_query_method_unresolved")
@@ -468,20 +491,22 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
     const ranges = rootOperations(query.operations, "range", optionBindings, 2)
     const exactDetail = singleResult && hasExactDetailPredicate(query.operations, constants, scope, surface)
     if (singleResult && !exactDetail) reasons.push("list_detail_predicate_missing")
-    if (limits.length === 0 && !exactDetail && ranges.length === 0) reasons.push("list_limit_missing")
-    if (!exactDetail && !hasExplicitOrder(query.operations, optionBindings)) reasons.push("list_order_missing")
-    else if (!exactDetail && !hasIdTieBreak(query.operations, constants, optionBindings)) reasons.push("list_order_tie_break_missing")
-    for (const limit of limits) {
-      const value = limit.arguments[0] && argumentValue(limit.arguments[0], constants)
-      if (value === undefined) reasons.push("list_limit_unresolved")
-      else if (typeof value !== "number" || !Number.isInteger(value) || value < 1) reasons.push("list_limit_invalid")
-      else if (value > 30) reasons.push("list_limit_exceeds_30")
-    }
-    for (const range of ranges) {
-      const first = range.arguments[0] && argumentValue(range.arguments[0], constants)
-      const last = range.arguments[1] && argumentValue(range.arguments[1], constants)
-      if (!Number.isInteger(first) || !Number.isInteger(last)) reasons.push("list_range_unresolved")
-      else if (first < 0 || last < first || last - first + 1 > 30) reasons.push("list_range_invalid")
+    if (!legacyFullCompatibility) {
+      if (limits.length === 0 && !exactDetail && ranges.length === 0) reasons.push("list_limit_missing")
+      if (!exactDetail && !hasExplicitOrder(query.operations, optionBindings)) reasons.push("list_order_missing")
+      else if (!exactDetail && !hasIdTieBreak(query.operations, constants, optionBindings)) reasons.push("list_order_tie_break_missing")
+      for (const limit of limits) {
+        const value = limit.arguments[0] && argumentValue(limit.arguments[0], constants)
+        if (value === undefined) reasons.push("list_limit_unresolved")
+        else if (typeof value !== "number" || !Number.isInteger(value) || value < 1) reasons.push("list_limit_invalid")
+        else if (value > 30) reasons.push("list_limit_exceeds_30")
+      }
+      for (const range of ranges) {
+        const first = range.arguments[0] && argumentValue(range.arguments[0], constants)
+        const last = range.arguments[1] && argumentValue(range.arguments[1], constants)
+        if (!Number.isInteger(first) || !Number.isInteger(last)) reasons.push("list_range_unresolved")
+        else if (first < 0 || last < first || last - first + 1 > 30) reasons.push("list_range_invalid")
+      }
     }
   }
   if (query.directMethod === "rpc") {
@@ -500,9 +525,9 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
       else if (value > 30) reasons.push("rpc_page_limit_exceeds_30")
     }
   }
-  if (query.directMethod && !isExactTimeoutAbortSignal(finalOperation(query.operations, "abortSignal"))) reasons.push("list_abort_signal_missing")
+  if (query.directMethod && !legacyFullCompatibility && !isExactTimeoutAbortSignal(finalOperation(query.operations, "abortSignal"))) reasons.push("list_abort_signal_missing")
   const retry = finalOperation(query.operations, "retry")
-  if (query.directMethod && !(retry && retry.arguments.length === 1 && retry.arguments[0].kind === ts.SyntaxKind.FalseKeyword)) reasons.push("list_retry_false_missing")
+  if (query.directMethod && !legacyFullCompatibility && !(retry && retry.arguments.length === 1 && retry.arguments[0].kind === ts.SyntaxKind.FalseKeyword)) reasons.push("list_retry_false_missing")
   if (surface === "tasks" && query.directMethod === "from") {
     for (const operation of query.operations.filter((candidate) => callMethod(candidate) === "in")) {
       if (argumentValue(operation.arguments[0], constants) === "task_id") reasons.push("task_id_batch_in_list")
