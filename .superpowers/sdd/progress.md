@@ -34,6 +34,8 @@
 
 Supabase free-tier operations Task 3: 완료. 계획 모드에서 SQL 원문 없이 9개 evidence section ID/checksum/budget만 공개하고, explicit authorization·환경 전용 read token·bracket timestamp·0600 atomic output을 요구하는 read-only collector/comparator를 구현했습니다. focused 22/22 및 plan/syntax/diff 검증을 통과했으며, reviewed credential/pointer 부재로 execute capture·DB runtime·배포·provider 작업은 실행하지 않았습니다.
 
+Supabase free-tier operations Task 4: source candidate 완료. audit UPDATE를 reversible diff/chain metadata로 분리하고 seven trigger·private helper·partial predecessor index·ACL/RLS 경계를 forward migration에 고정했습니다. source 15/15은 통과했으나 isolated DB harness는 reviewed baseline pointer 부재로 allocation 전 중단되어 pgTAP/EXPLAIN/two-client probe 및 final 승격은 실행하지 않았습니다.
+
 등록 양식 개선 작업 1: 완료. 학년별 학교 후보 카탈로그, 기존 학교 값 보존, 선택 조회 실패 격리 구현과 독립 검토를 완료했습니다 (`89e1bee..d859915`, CLEAN).
 등록 양식 개선 작업 2: 완료. 생성·상세 공통 과목/문의 입력 컴포넌트, 승인된 4행 배치, 학년별 학교 선택 연결 구현과 독립 검토를 완료했습니다 (`d859915..0b31d88`, CLEAN).
 등록 양식 개선 작업 3: 완료. 본문 자동 이력을 제거하고 상세 헤더의 닫기 버튼 왼쪽 시계 Popover로 이동했으며, 내부 읽기 전용 이력 모델과 필터를 보존한 구현·독립 검토를 완료했습니다 (`0b31d88..3b5848d`, CLEAN).
