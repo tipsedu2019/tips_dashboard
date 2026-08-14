@@ -136,6 +136,22 @@ export function resolveRequestedClassRow({ requestedClassId, pageRows, exactRow 
   return (Array.isArray(pageRows) ? pageRows : []).find((row) => text(row?.id) === id) || null;
 }
 
+export function isCurrentClassMutationRefresh({
+  expectedRevision,
+  currentRevision,
+  requestedClassId,
+  currentRequestedClassId,
+  detailClassId,
+} = {}) {
+  const expectedClassId = text(requestedClassId);
+  return Number.isInteger(expectedRevision)
+    && expectedRevision > 0
+    && expectedRevision === currentRevision
+    && Boolean(expectedClassId)
+    && expectedClassId === text(currentRequestedClassId)
+    && expectedClassId === text(detailClassId);
+}
+
 export function appendOperationsPageIfCurrent({
   current,
   next,
