@@ -192,3 +192,14 @@ source release 전 10분 이내 baseline capture, deployment completed 뒤 30±5
 ```
 
 capture interval이 겹치거나 bracket/wall-clock ordering이 어긋나면 결과는 `unknown`이다. restart 직후의 단일 누적 counter만으로 index 제거 또는 리소스 회복을 결론 내리지 않는다.
+
+## 8. Audit archive는 preview만 허용
+
+180일 archive 후보는 이 저장소에서 삭제·export·restore하지 않는다. 아래 preview는 완료된 KST 월 최대 6개만 확인하며, global `changed_at` leading index와 bounded plan이 없는 현재 상태에서는 `bounded_index_required` 결과만 기록한다.
+
+```bash
+"$TASK_NODE" scripts/preview-dashboard-audit-archive.mjs \
+  --mode plan --as-of "$TASK_ARCHIVE_AS_OF"
+```
+
+실행 preview도 explicit authorization·request ID·새 absolute output path와 read-only credential을 요구한다. 결과의 `candidateOnly=true`, `archiveVerified=false`, `deleteAuthorized=false`는 어떤 옵션으로도 변경되지 않는다. archive format, encryption, destination, retention owner, full restore verification이 별도로 승인되기 전에는 `dashboard_audit_logs` 삭제를 진행하지 않는다.
