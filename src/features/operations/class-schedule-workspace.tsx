@@ -73,7 +73,30 @@ async function invokeContinuousScheduleRpc(
   name: string,
   parameters: Record<string, unknown>,
 ) {
-  return await Reflect.apply(client.rpc, client, [name, parameters]) as { data: unknown; error: unknown };
+  switch (name) {
+    case "save_class_schedule_defaults_v1":
+      return await client.rpc("save_class_schedule_defaults_v1", parameters)
+        .abortSignal(AbortSignal.timeout(8_000))
+        .retry(false) as { data: unknown; error: unknown };
+    case "preview_class_lesson_session_generation_v1":
+      return await client.rpc("preview_class_lesson_session_generation_v1", parameters)
+        .abortSignal(AbortSignal.timeout(8_000))
+        .retry(false) as { data: unknown; error: unknown };
+    case "generate_class_lesson_sessions_v1":
+      return await client.rpc("generate_class_lesson_sessions_v1", parameters)
+        .abortSignal(AbortSignal.timeout(8_000))
+        .retry(false) as { data: unknown; error: unknown };
+    case "save_class_lesson_session_v1":
+      return await client.rpc("save_class_lesson_session_v1", parameters)
+        .abortSignal(AbortSignal.timeout(8_000))
+        .retry(false) as { data: unknown; error: unknown };
+    case "save_class_lesson_content_v1":
+      return await client.rpc("save_class_lesson_content_v1", parameters)
+        .abortSignal(AbortSignal.timeout(8_000))
+        .retry(false) as { data: unknown; error: unknown };
+    default:
+      throw new Error("Unsupported continuous schedule RPC.");
+  }
 }
 
 const hasClassScheduleListSummaryChange = (

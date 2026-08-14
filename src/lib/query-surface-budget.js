@@ -24,6 +24,13 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "get_academic_curriculum_detail_v1",
   "current_dashboard_role",
 ])
+const EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES = new Set([
+  "save_class_schedule_defaults_v1",
+  "preview_class_lesson_session_generation_v1",
+  "generate_class_lesson_sessions_v1",
+  "save_class_lesson_session_v1",
+  "save_class_lesson_content_v1",
+])
 
 const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION"
 // The public API keeps four exact compatibility chains unpaged for unknown
@@ -384,7 +391,7 @@ function boundQueryMethods(scope, aliases) {
   const declarations = []
   const visit = (node) => {
     if (node !== scope && ts.isFunctionLike(node)) return
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && isImmutableConst(node)) declarations.push(node)
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) declarations.push(node)
     ts.forEachChild(node, visit)
   }
   ts.forEachChild(scope, visit)
@@ -398,6 +405,125 @@ function boundQueryMethods(scope, aliases) {
       else if (ts.isIdentifier(initializer) && methods.has(initializer.text)) methods.set(node.name.text, methods.get(initializer.text))
   }
   return methods
+}
+
+function detachedQueryMethods(scope, aliases) {
+  const methods = new Map()
+  const declarations = []
+  const visit = (node) => {
+    if (node !== scope && ts.isFunctionLike(node)) return
+    if (ts.isVariableDeclaration(node) && node.initializer
+      && (ts.isIdentifier(node.name) || ts.isObjectBindingPattern(node.name))) declarations.push(node)
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(scope, visit)
+  for (const node of declarations.sort((left, right) => left.pos - right.pos)) {
+    const initializer = unwrap(node.initializer)
+    if (ts.isObjectBindingPattern(node.name) && isTrustedReceiver(initializer, aliases)) {
+      for (const element of node.name.elements) {
+        const importedName = element.propertyName && (ts.isIdentifier(element.propertyName) || ts.isStringLiteral(element.propertyName))
+          ? element.propertyName.text
+          : (ts.isIdentifier(element.name) ? element.name.text : null)
+        if (["from", "rpc"].includes(importedName) && ts.isIdentifier(element.name)) {
+          methods.set(element.name.text, { method: importedName, receiver: rootIdentifier(initializer) })
+        }
+      }
+      continue
+    }
+    const target = ts.isPropertyAccessExpression(initializer) || ts.isElementAccessExpression(initializer) ? initializer : null
+    const targetMethod = target && (ts.isPropertyAccessExpression(target)
+      ? target.name.text
+      : (target.argumentExpression && (ts.isStringLiteral(target.argumentExpression) || ts.isNoSubstitutionTemplateLiteral(target.argumentExpression))
+        ? target.argumentExpression.text
+        : null))
+    const receiver = target && unwrap(target.expression)
+    if (["from", "rpc"].includes(targetMethod) && isTrustedReceiver(receiver, aliases)) {
+      methods.set(node.name.text, { method: targetMethod, receiver: rootIdentifier(receiver) })
+    } else if (ts.isIdentifier(initializer) && methods.has(initializer.text)) {
+      methods.set(node.name.text, methods.get(initializer.text))
+    }
+  }
+  return methods
+}
+
+function reflectApplyAliases(scope) {
+  const aliases = new Set()
+  const declarations = []
+  const visit = (node) => {
+    if (node !== scope && ts.isFunctionLike(node)) return
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) declarations.push(node)
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(scope, visit)
+  for (const node of declarations.sort((left, right) => left.pos - right.pos)) {
+    const initializer = unwrap(node.initializer)
+    const directApply = (ts.isPropertyAccessExpression(initializer) || ts.isElementAccessExpression(initializer))
+      && rootIdentifier(initializer.expression) === "Reflect"
+      && (ts.isPropertyAccessExpression(initializer)
+        ? initializer.name.text === "apply"
+        : Boolean(initializer.argumentExpression
+          && (ts.isStringLiteral(initializer.argumentExpression) || ts.isNoSubstitutionTemplateLiteral(initializer.argumentExpression))
+          && initializer.argumentExpression.text === "apply"))
+    if (directApply || (ts.isIdentifier(initializer) && aliases.has(initializer.text))) aliases.add(node.name.text)
+  }
+  return aliases
+}
+
+function reflectedQueryEntry(call, aliases, boundMethods, detachedMethods, applyAliases) {
+  const access = accessParts(call)
+  const directApply = access?.method === "apply" && rootIdentifier(access.receiver) === "Reflect"
+  const aliasedApply = ts.isIdentifier(call.expression) && applyAliases.has(call.expression.text)
+  if ((!directApply && !aliasedApply) || call.arguments.length !== 3) return null
+  const target = unwrap(call.arguments[0])
+  const argumentList = unwrap(call.arguments[2])
+  const entryArguments = ts.isArrayLiteralExpression(argumentList) && !argumentList.elements.some(ts.isSpreadElement)
+    ? [...argumentList.elements]
+    : []
+  if (ts.isIdentifier(target) && boundMethods.has(target.text)) {
+    return { directMethod: boundMethods.get(target.text), receiverUnresolved: false, entryArguments }
+  }
+  if (ts.isIdentifier(target) && detachedMethods.has(target.text)) {
+    const detached = detachedMethods.get(target.text)
+    return {
+      directMethod: detached.method,
+      receiverUnresolved: detached.receiver !== rootIdentifier(call.arguments[1]),
+      entryArguments,
+    }
+  }
+  if (!ts.isPropertyAccessExpression(target) && !ts.isElementAccessExpression(target)) return null
+  const targetMethod = ts.isPropertyAccessExpression(target)
+    ? target.name.text
+    : (target.argumentExpression && (ts.isStringLiteral(target.argumentExpression) || ts.isNoSubstitutionTemplateLiteral(target.argumentExpression))
+      ? target.argumentExpression.text
+      : null)
+  if (!["from", "rpc"].includes(targetMethod)) return null
+  const receiver = unwrap(target.expression)
+  const receiverName = rootIdentifier(receiver)
+  const thisName = rootIdentifier(call.arguments[1])
+  if (!isTrustedReceiver(receiver, aliases)) return null
+  return { directMethod: targetMethod, receiverUnresolved: receiverName !== thisName, entryArguments }
+}
+
+function inlineBoundQueryEntry(call, aliases) {
+  const bind = ts.isCallExpression(call.expression) ? call.expression : null
+  const bindAccess = bind && accessParts(bind)
+  const target = bindAccess?.method === "bind"
+    && (ts.isPropertyAccessExpression(bindAccess.receiver) || ts.isElementAccessExpression(bindAccess.receiver))
+    ? bindAccess.receiver
+    : null
+  const targetMethod = target && (ts.isPropertyAccessExpression(target)
+    ? target.name.text
+    : (target.argumentExpression && (ts.isStringLiteral(target.argumentExpression) || ts.isNoSubstitutionTemplateLiteral(target.argumentExpression))
+      ? target.argumentExpression.text
+      : null))
+  if (!["from", "rpc"].includes(targetMethod) || bind.arguments.length !== 1) return null
+  const receiver = unwrap(target.expression)
+  if (!isTrustedReceiver(receiver, aliases)) return null
+  return {
+    directMethod: targetMethod,
+    receiverUnresolved: rootIdentifier(receiver) !== rootIdentifier(bind.arguments[0]),
+    entryArguments: [...call.arguments],
+  }
 }
 
 function isConditionalExecution(node, scope) {
@@ -601,14 +727,16 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
     }
   }
   if (query.directMethod === "rpc") {
-    const rpcName = query.entry.arguments[0] && argumentValue(query.entry.arguments[0], constants)
-    const exactScalarRpc = typeof rpcName === "string" && EXACT_SCALAR_RPC_NAMES.has(rpcName)
-    const argument = query.entry.arguments[1] ? unwrap(query.entry.arguments[1]) : null
+    const entryArguments = query.entryArguments ?? query.entry.arguments
+    const rpcName = entryArguments[0] && argumentValue(entryArguments[0], constants)
+    const exactNonpageableRpc = typeof rpcName === "string"
+      && (EXACT_SCALAR_RPC_NAMES.has(rpcName) || EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES.has(rpcName))
+    const argument = entryArguments[1] ? unwrap(entryArguments[1]) : null
     const hasSpread = argument && ts.isObjectLiteralExpression(argument) && argument.properties.some((property) => ts.isSpreadAssignment(property))
     const limits = argument && ts.isObjectLiteralExpression(argument) ? argument.properties.filter((property) => ts.isPropertyAssignment(property)
       && ((ts.isIdentifier(property.name) && property.name.text === "p_limit") || (ts.isStringLiteral(property.name) && property.name.text === "p_limit"))) : []
     if (hasSpread) reasons.push("rpc_page_limit_unresolved")
-    else if (limits.length === 0 && !exactScalarRpc) reasons.push("rpc_page_limit_missing")
+    else if (limits.length === 0 && !exactNonpageableRpc) reasons.push("rpc_page_limit_missing")
     for (const limit of limits) {
       const value = argumentValue(limit.initializer, constants)
       if (value === undefined) reasons.push("rpc_page_limit_unresolved")
@@ -636,6 +764,8 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
 function analyzeScope({ surface, file, scope, symbol }) {
   const aliases = receiverAliases(scope)
   const boundMethods = boundQueryMethods(scope, aliases)
+  const detachedMethods = detachedQueryMethods(scope, aliases)
+  const applyAliases = reflectApplyAliases(scope)
   const queryAliases = new Map()
   const operationAliases = new Map()
   const aliasesToAssign = aliasAssignments(scope)
@@ -687,6 +817,32 @@ function analyzeScope({ surface, file, scope, symbol }) {
       records.push(record)
       const name = assignmentName(call)
       if (name) queryAliases.set(name, record)
+      continue
+    }
+    const reflectedEntry = reflectedQueryEntry(call, aliases, boundMethods, detachedMethods, applyAliases)
+    if (reflectedEntry) {
+      BOUND_OPERATION_METHODS.set(call, reflectedEntry.directMethod)
+      records.push({
+        entry: call,
+        directMethod: reflectedEntry.directMethod,
+        receiverUnresolved: reflectedEntry.receiverUnresolved,
+        entryArguments: reflectedEntry.entryArguments,
+        ordinal: records.length,
+        operations: queryOperations(call),
+      })
+      continue
+    }
+    const inlineBoundEntry = inlineBoundQueryEntry(call, aliases)
+    if (inlineBoundEntry) {
+      BOUND_OPERATION_METHODS.set(call, inlineBoundEntry.directMethod)
+      records.push({
+        entry: call,
+        directMethod: inlineBoundEntry.directMethod,
+        receiverUnresolved: inlineBoundEntry.receiverUnresolved,
+        entryArguments: inlineBoundEntry.entryArguments,
+        ordinal: records.length,
+        operations: queryOperations(call),
+      })
       continue
     }
     const boundMethod = ts.isIdentifier(call.expression) ? boundMethods.get(call.expression.text) : null

@@ -1147,6 +1147,113 @@ test("bound Supabase from and rpc aliases remain inspected query entry points", 
   assert.ok(result.violations.some((violation) => violation.reason === "rpc_page_limit_missing"))
 })
 
+test("Reflect.apply and bound RPC entry points cannot bypass continuous-schedule mutation safety", async () => {
+  const reflected = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  return Reflect.apply(client.rpc, client, ["save_class_lesson_session_v1", parameters])
+}
+`,
+  })
+  assert.deepEqual(reflected.violations, [
+    {
+      file: "src/features/operations/class-schedule-workspace.tsx",
+      symbol: "mutate",
+      surface: "operations",
+      reason: "list_abort_signal_missing",
+    },
+    {
+      file: "src/features/operations/class-schedule-workspace.tsx",
+      symbol: "mutate",
+      surface: "operations",
+      reason: "list_retry_false_missing",
+    },
+  ])
+
+  const bound = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  const rpc = client.rpc.bind(client)
+  return rpc("save_class_lesson_session_v1", parameters)
+}
+`,
+  })
+  assert.deepEqual(bound.violations, reflected.violations)
+})
+
+test("detached RPC aliases, Reflect.apply aliases, and inline binding cannot bypass mutation safety", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  const rpc = client.rpc
+  const apply = Reflect.apply
+  await Reflect.apply(rpc, client, ["save_class_lesson_session_v1", parameters])
+  await apply(client.rpc, client, ["save_class_lesson_session_v1", parameters])
+  return client.rpc.bind(client)("save_class_lesson_session_v1", parameters)
+}
+`,
+  })
+  assert.equal(result.violations.filter((violation) => violation.reason === "list_abort_signal_missing").length, 3)
+  assert.equal(result.violations.filter((violation) => violation.reason === "list_retry_false_missing").length, 3)
+  assert.equal(result.violations.some((violation) => violation.reason === "rpc_page_limit_missing"), false)
+})
+
+test("mutable, derived, destructured, and computed RPC invocation aliases fail closed", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  let mutableRpc = client.rpc.bind(client)
+  const boundRpc = client.rpc.bind(client)
+  let derivedRpc = boundRpc
+  const { rpc } = client
+  const computedApply = Reflect["apply"]
+  let mutableApply = Reflect.apply
+  await mutableRpc("save_class_lesson_session_v1", parameters)
+  await derivedRpc("save_class_lesson_session_v1", parameters)
+  await Reflect.apply(rpc, client, ["save_class_lesson_session_v1", parameters])
+  await computedApply(client.rpc, client, ["save_class_lesson_session_v1", parameters])
+  return mutableApply(client.rpc, client, ["save_class_lesson_session_v1", parameters])
+}
+`,
+  })
+  assert.equal(result.violations.filter((violation) => violation.reason === "list_abort_signal_missing").length, 5)
+  assert.equal(result.violations.filter((violation) => violation.reason === "list_retry_false_missing").length, 5)
+  assert.equal(result.violations.some((violation) => violation.reason === "rpc_page_limit_missing"), false)
+})
+
+test("exact continuous-schedule mutation RPCs require and accept the bounded request controls", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters) {
+  const rpc = client.rpc
+  const apply = Reflect.apply
+  await client.rpc("save_class_schedule_defaults_v1", parameters).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  await client.rpc("preview_class_lesson_session_generation_v1", parameters).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  await client.rpc("generate_class_lesson_sessions_v1", parameters).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  await client.rpc("save_class_lesson_session_v1", parameters).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  await Reflect.apply(client.rpc, client, ["save_class_lesson_content_v1", parameters])
+    .abortSignal(AbortSignal.timeout(8_000))
+    .retry(false)
+  await Reflect.apply(rpc, client, ["save_class_lesson_session_v1", parameters])
+    .abortSignal(AbortSignal.timeout(8_000))
+    .retry(false)
+  await apply(client.rpc, client, ["save_class_lesson_content_v1", parameters])
+    .abortSignal(AbortSignal.timeout(8_000))
+    .retry(false)
+  return client.rpc.bind(client)("save_class_lesson_session_v1", parameters)
+    .abortSignal(AbortSignal.timeout(8_000))
+    .retry(false)
+}
+`,
+  })
+  assert.deepEqual(result, { ok: true, violations: [] })
+})
+
 test("task_id membership rejects literal arrays while exact task_id details remain allowed", async () => {
   const list = await verifyFixture({
     source: `async function load(client) {
