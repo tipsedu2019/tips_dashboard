@@ -422,6 +422,17 @@ test("query budget rejects direct RPC query chains without an explicit page limi
   }])
 })
 
+test("query budget allows the exact task stats scalar RPC without a page limit", async () => {
+  const result = await verifyFixture({
+    source: `export async function readStats(client) {
+  return client.rpc("get_ops_task_list_stats_v1", { p_type: "general", p_filters: {} })
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+  assert.deepEqual(result, { ok: true, violations: [] })
+})
+
 test("query budget reports an RPC without an argument envelope instead of throwing", async () => {
   const result = await verifyFixture({
     source: `async function readRows(client) {

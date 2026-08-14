@@ -7,6 +7,7 @@ import ts from "typescript"
 export const QUERY_SURFACES = Object.freeze(["tasks", "management", "operations", "academic", "public"])
 const BASELINE_SHA = "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101"
 const BOUND_OPERATION_METHODS = new WeakMap()
+const EXACT_SCALAR_RPC_NAMES = new Set(["get_ops_task_list_stats_v1"])
 
 // These are deliberately literal records, not path patterns. Each one binds a
 // specific baseline query chain, so moving or duplicating legacy debt is a new
@@ -471,12 +472,14 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
     }
   }
   if (query.directMethod === "rpc") {
+    const rpcName = query.entry.arguments[0] && argumentValue(query.entry.arguments[0], constants)
+    const exactScalarRpc = typeof rpcName === "string" && EXACT_SCALAR_RPC_NAMES.has(rpcName)
     const argument = query.entry.arguments[1] ? unwrap(query.entry.arguments[1]) : null
     const hasSpread = argument && ts.isObjectLiteralExpression(argument) && argument.properties.some((property) => ts.isSpreadAssignment(property))
     const limits = argument && ts.isObjectLiteralExpression(argument) ? argument.properties.filter((property) => ts.isPropertyAssignment(property)
       && ((ts.isIdentifier(property.name) && property.name.text === "p_limit") || (ts.isStringLiteral(property.name) && property.name.text === "p_limit"))) : []
     if (hasSpread) reasons.push("rpc_page_limit_unresolved")
-    else if (limits.length === 0) reasons.push("rpc_page_limit_missing")
+    else if (limits.length === 0 && !exactScalarRpc) reasons.push("rpc_page_limit_missing")
     for (const limit of limits) {
       const value = argumentValue(limit.initializer, constants)
       if (value === undefined) reasons.push("rpc_page_limit_unresolved")

@@ -4978,12 +4978,13 @@ test("browser workflow scripts target the operation surfaces", async () => {
     "type OpsTaskWorkspaceLoadOptions",
     "getOpsTaskWorkspaceCacheKey",
     "const opsTaskWorkspaceDataCache = new Map",
-    "if (options.taskType) taskQuery = taskQuery.eq(\"type\", options.taskType)",
-    'return readOpsRegistrationParentWorkspaceData(options, metrics)',
-    "loadRegistrationWorkspaceTrackSummaries(",
-    "registrationTracks: tracksByTaskId.get(task.id) || []",
-    "OPS_REGISTRATION_PARENT_LIST_COLUMNS",
-    '"ops_registration_details(task_id,pipeline_status,school_grade,school_name,parent_phone,student_phone,inquiry_at,level_test_at,level_test_completed_at,level_test_result,level_test_place,level_test_material_link,counselor,phone_consultation_at,visit_consultation_at,consultation_at,class_start_date,class_start_session,textbook_preparation,visit_consultation_place,admission_notice_sent,payment_checked,makeedu_registered,makeedu_invoice_sent,request_note)"',
+    'rpc("list_ops_task_page_v1", {',
+    'rpc("get_ops_task_list_stats_v1", {',
+    "p_limit: 30",
+    "loadOpsTaskPage({",
+    "payload.registrationTracks",
+    ".abortSignal(AbortSignal.timeout(8_000))",
+    ".retry(false)",
   ]);
 
 	  assertIncludesAll(workspaceSource, [
@@ -5380,4 +5381,16 @@ test("generic form and detail dialogs exclude canonical registration application
   assert.doesNotMatch(genericForm, /data-registration-application-host/);
   assert.doesNotMatch(genericDetail, /data-registration-application-host/);
   assert.equal((source.match(/data-registration-application-host/g) || []).length, 1);
+});
+
+test("task workspace appends deduplicated pages and deep links exact-load missing rows", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+
+  assert.match(source, /const \[taskPageCursor, setTaskPageCursor\] = useState/);
+  assert.match(source, /const \[taskPageHasMore, setTaskPageHasMore\] = useState/);
+  assert.match(source, /const loadMore = useCallback/);
+  assert.match(source, /new Map\(current\.tasks\.map\(\(task\) => \[task\.id, task\]\)\)/);
+  assert.match(source, /다음 30건/);
+  assert.match(source, /loadOpsTaskById\(deepLinkedTaskId\)/);
+  assert.doesNotMatch(source, /syncTaskDeepLink\(null\)\s*return\s*}\s*if \(deepLinkedTask\.type/);
 });

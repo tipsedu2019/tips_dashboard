@@ -11,6 +11,10 @@ const serviceSource = await readFile(
   new URL("../src/features/tasks/ops-task-service.ts", import.meta.url),
   "utf8",
 );
+const taskPageMigrationSource = await readFile(
+  new URL("../supabase/migrations/20260813234824_ops_task_page_reads.sql", import.meta.url),
+  "utf8",
+);
 
 function sourceBetween(start, end) {
   const startIndex = serviceSource.indexOf(start);
@@ -113,7 +117,7 @@ function loadSelectedRegistrationClassDetailsWithMocks(mocks) {
 function loadRegistrationTrackParentResolver() {
   const source = sourceBetween(
     "function getLegacyRegistrationTrackStatus",
-    "async function readOpsRegistrationParentWorkspaceData",
+    "async function readOpsTaskWorkspaceData",
   );
   return transpileAndLoad(
     source,
@@ -438,6 +442,27 @@ function createWorkspaceLoaderHarness({
       supabase,
       ...(windowMock ? { window: windowMock } : {}),
       emptyOpsTaskWorkspaceData: emptyWorkspaceData,
+      OPS_TASK_PAGE_SIZE: 30,
+      canonicalJson: (value) => JSON.stringify(value, Object.keys(value || {}).sort()),
+      createDefaultOpsTaskPageFilters: (taskType) => ({ taskType: taskType || "general" }),
+      async loadOpsTaskPage(options) {
+        counts.taskQueries += 1;
+        taskQueryTypes.push(options.filters.taskType);
+        const runtimePromise = options.filters.taskType === "registration"
+          ? (counts.registrationRuntimeProbeCalls += 1, registrationRuntimeProbe())
+          : Promise.resolve(null);
+        const [result, registrationRuntime] = await Promise.all([
+          takeTaskGate(options.filters.taskType).promise,
+          runtimePromise,
+        ]);
+        if (result.error) throw result.error;
+        const rows = result.data || [];
+        return {
+          page: { rows, nextCursor: null, hasMore: false },
+          stats: { total: rows.length, byStatus: {} },
+          registrationRuntime,
+        };
+      },
       readTable: emptyRows,
       readTableWithFallback: emptyRows,
       async readOpsClassRows(taskType) {
@@ -455,18 +480,6 @@ function createWorkspaceLoaderHarness({
           mode: "ready",
           tracks: registrationTrackSummaryFactory(taskIds),
         };
-      },
-      async loadRegistrationWorkspaceTrackSummaries(viewerId, options = {}) {
-        counts.workspaceTrackSummaryCalls.push({
-          viewerId,
-          force: options.force,
-          observationAware: options.observationAware,
-        });
-        return registrationWorkspaceTrackSummaryLoader(viewerId, options);
-      },
-      async probeRegistrationSubjectTrackRuntime() {
-        counts.registrationRuntimeProbeCalls += 1;
-        return registrationRuntimeProbe();
       },
       clearRegistrationTrackServiceCaches() {
         counts.clearedTrackCaches += 1;
@@ -891,7 +904,7 @@ test("same-key concurrent workspace loads share one in-flight query wave", async
   assert.strictEqual(firstData, secondData);
 });
 
-test("registration cold load opts its workspace summaries into observation-aware reads", async () => {
+test("registration cold load keeps track summaries inside the page row", async () => {
   const harness = createWorkspaceLoaderHarness();
   const load = harness.loadOpsTaskWorkspaceData({
     taskType: "registration",
@@ -909,21 +922,13 @@ test("registration cold load opts its workspace summaries into observation-aware
   }]);
   await load;
 
-  assert.match(
-    harness.counts.taskSelects[0],
-    /ops_registration_details\(task_id,pipeline_status,school_grade,school_name,parent_phone,student_phone,inquiry_at,level_test_at,level_test_completed_at,level_test_result,level_test_place,level_test_material_link,counselor,phone_consultation_at,visit_consultation_at,consultation_at,class_start_date,class_start_session,textbook_preparation,visit_consultation_place,admission_notice_sent,payment_checked,makeedu_registered,makeedu_invoice_sent,request_note\)/,
-  );
-  assert.doesNotMatch(harness.counts.taskSelects[0], /ops_registration_details\(\*\)/);
-  assert.doesNotMatch(harness.counts.taskSelects[0], /ops_task_comments/);
-  assert.doesNotMatch(harness.counts.taskSelects[0], /ops_task_attachments/);
-  assert.doesNotMatch(harness.counts.taskSelects[0], /ops_task_events/);
+  assert.equal(harness.counts.taskQueries, 1);
+  assert.deepEqual(harness.counts.taskSelects, []);
   assert.deepEqual(harness.counts.scopedReads, []);
   assert.deepEqual(harness.counts.trackSummaryCalls, []);
-  assert.deepEqual(harness.counts.workspaceTrackSummaryCalls, [{
-    viewerId: "viewer-a",
-    force: true,
-    observationAware: true,
-  }]);
+  assert.deepEqual(harness.counts.workspaceTrackSummaryCalls, []);
+  assert.equal(serviceSource.includes("'registrationTracks', coalesce(track_page.tracks"), false);
+  assert.match(serviceSource, /payload\.registrationTracks/);
 });
 
 test("registration cold load starts the runtime probe while parent rows are still loading", async () => {
@@ -952,11 +957,8 @@ test("registration cold load starts the runtime probe while parent rows are stil
   });
 });
 
-test("registration cold load starts workspace track summaries while parent rows are still loading", async () => {
-  const summaryGate = deferred();
-  const harness = createWorkspaceLoaderHarness({
-    registrationWorkspaceTrackSummaryLoader: () => summaryGate.promise,
-  });
+test("registration cold load does not start a second workspace track-summary read", async () => {
+  const harness = createWorkspaceLoaderHarness();
   const load = harness.loadOpsTaskWorkspaceData({
     taskType: "registration",
     viewerId: "viewer-a",
@@ -964,38 +966,23 @@ test("registration cold load starts workspace track summaries while parent rows 
   });
 
   await Promise.resolve();
-  const workspaceSummaryCallsBeforeParents = harness.counts.workspaceTrackSummaryCalls.length;
   harness.releaseTasks([{
     id: "case-1",
     type: "registration",
     ops_registration_details: { task_id: "case-1" },
+    registrationTracks: [registrationSummaryTrack("case-1", "track-1", "영어", "inquiry")],
   }]);
-  summaryGate.resolve({
-    mode: "ready",
-    tracks: [
-      registrationSummaryTrack("case-1", "track-1", "영어", "inquiry"),
-      registrationSummaryTrack("orphan-case", "track-orphan", "수학", "inquiry"),
-    ],
-  });
   const data = await load;
 
-  assert.equal(workspaceSummaryCallsBeforeParents, 1);
+  assert.equal(harness.counts.workspaceTrackSummaryCalls.length, 0);
   assert.deepEqual(
     JSON.parse(JSON.stringify(data.tasks[0].registrationTracks.map(({ id }) => id))),
     ["track-1"],
   );
 });
 
-test("registration parent loading preserves one task with every subject track", async () => {
-  const harness = createWorkspaceLoaderHarness({
-    registrationWorkspaceTrackSummaryLoader: async () => ({
-      mode: "ready",
-      tracks: [
-        registrationSummaryTrack("case-1", "eng", "영어", "consultation_waiting"),
-        registrationSummaryTrack("case-1", "math", "수학", "level_test_scheduled"),
-      ],
-    }),
-  })
+test("registration parent loading preserves one page row with every embedded subject track", async () => {
+  const harness = createWorkspaceLoaderHarness()
   const load = harness.loadOpsTaskWorkspaceData({
     taskType: "registration",
     viewerId: "viewer-a",
@@ -1005,6 +992,10 @@ test("registration parent loading preserves one task with every subject track", 
     id: "case-1",
     type: "registration",
     ops_registration_details: { task_id: "case-1" },
+    registrationTracks: [
+      registrationSummaryTrack("case-1", "eng", "영어", "consultation_waiting"),
+      registrationSummaryTrack("case-1", "math", "수학", "level_test_scheduled"),
+    ],
   }])
   const data = await load
 
@@ -1067,11 +1058,12 @@ test("registration task shape and selected detail use explicit observation-aware
   assert.match(serviceSource, /function clearOpsTaskWorkspaceDataCache\(\)[\s\S]*clearRegistrationTrackServiceCaches\(\)/);
   assert.match(serviceSource, /setRegistrationTrackMutationCacheInvalidator\(clearOpsTaskWorkspaceDataCache\)/);
   const parentSource = sourceBetween(
-    "async function readOpsRegistrationParentWorkspaceData",
-    "async function readOpsTaskWorkspaceData",
+    "export async function loadOpsTaskPage",
+    "export async function loadOpsTaskWorkspaceData",
   );
-  assert.match(parentSource, /const safeViewerId = text\(options\.viewerId\)/);
-  assert.match(parentSource, /if \(!safeViewerId\)/);
+  assert.match(parentSource, /const viewerId = text\(options\.viewerId\)/);
+  assert.match(parentSource, /if \(!viewerId\)/);
+  assert.doesNotMatch(parentSource, /loadRegistrationWorkspaceTrackSummaries/);
 });
 
 test("different registration and transfer cache keys use independent query waves", async () => {
@@ -1103,9 +1095,9 @@ test("different registration and transfer cache keys use independent query waves
   });
 
   assert.equal(harness.counts.taskQueries, 2);
-  assert.equal(harness.counts.classQueries, 1);
+  assert.equal(harness.counts.classQueries, 0);
   assert.deepEqual(harness.taskQueryTypes, ["registration", "transfer"]);
-  assert.deepEqual(harness.classTaskTypes, ["transfer"]);
+  assert.deepEqual(harness.classTaskTypes, []);
 
   registrationGate.resolve({
     data: [{ id: "registration-task", updatedAt: "2026-07-11T10:00:00.000Z" }],
@@ -1335,4 +1327,53 @@ test("a forced replacement keeps cache ownership after the old promise settles",
   assert.equal(cachedData.tasks[0].id, "forced-replacement-task");
   assert.equal(harness.counts.taskQueries, 2);
   assert.equal(harness.counts.classQueries, 0);
+});
+
+test("task list reads use a bounded RPC page and selected detail stays exact-id scoped", () => {
+  assert.match(serviceSource, /export type OpsTaskPageFilters =/);
+  assert.match(serviceSource, /export type OpsTaskPageResponse =/);
+  assert.match(serviceSource, /export type OpsTaskPageLoadOptions =/);
+  assert.match(serviceSource, /export async function loadOpsTaskPage/);
+
+  const pageReader = sourceBetween(
+    "export async function loadOpsTaskPage",
+    "export async function loadOpsTaskWorkspaceData",
+  );
+  assert.match(pageReader, /rpc\("list_ops_task_page_v1"/);
+  assert.match(pageReader, /rpc\("get_ops_task_list_stats_v1"/);
+  assert.match(pageReader, /p_limit: 30/);
+  assert.match(pageReader, /AbortSignal\.timeout\(8_000\)/);
+  assert.match(pageReader, /\.retry\(false\)/);
+  assert.match(pageReader, /rawRows\.slice\(0, OPS_TASK_PAGE_SIZE\)/);
+  assert.match(pageReader, /rawRows\.length > OPS_TASK_PAGE_SIZE/);
+  assert.match(pageReader, /nextCursor/);
+
+  const workspaceReader = sourceBetween(
+    "async function readOpsTaskWorkspaceData",
+    "export async function loadOpsTaskById",
+  );
+  assert.match(workspaceReader, /loadOpsTaskPage\(/);
+  assert.doesNotMatch(workspaceReader, /readTaskScopedTable|ops_task_comments|ops_task_attachments|ops_task_events/);
+
+  const detailReader = sourceBetween(
+    "export async function loadOpsTaskById",
+    "export function loadOpsRegistrationCaseDetail",
+  );
+  assert.match(detailReader, /\.eq\("id", taskId\)[\s\S]*?\.single\(\)/);
+  assert.match(detailReader, /\.eq\("task_id", taskId\)[\s\S]*?\.single\(\)/);
+  assert.doesNotMatch(detailReader, /\.in\("task_id"|select\("\*"\)|readTable\("profiles"/);
+});
+
+test("task page SQL embeds only the selected subtype and registration track summary", () => {
+  assert.match(taskPageMigrationSource, /security invoker/g);
+  assert.match(taskPageMigrationSource, /limit p_limit \+ 1/);
+  assert.match(taskPageMigrationSource, /projected\.id asc/);
+  assert.match(taskPageMigrationSource, /'registrationTracks', coalesce\(track_page\.tracks/);
+  assert.match(taskPageMigrationSource, /from public\.ops_registration_subject_track_summaries summary/);
+  assert.match(taskPageMigrationSource, /join public\.ops_withdrawal_details detail/);
+  assert.match(taskPageMigrationSource, /join public\.ops_transfer_details detail/);
+  assert.match(taskPageMigrationSource, /join public\.ops_word_retests detail/);
+  assert.doesNotMatch(taskPageMigrationSource, /ops_task_comments|ops_task_attachments|ops_task_events/);
+  assert.match(taskPageMigrationSource, /set timezone = 'Asia\/Seoul'/);
+  assert.match(taskPageMigrationSource, /create index if not exists ops_tasks_general_page_sort_idx/);
 });

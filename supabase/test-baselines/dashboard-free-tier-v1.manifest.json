@@ -19,6 +19,11 @@
       "fileName": "20260813205051_dashboard_statistics_cache.sql",
       "status": "candidate",
       "sha256": "7ce560e6c3b6864f4b99adcf1cbe9271235ca8e0906d1e93ce985f6f22ca5de0"
+    },
+    {
+      "fileName": "20260813234824_ops_task_page_reads.sql",
+      "status": "candidate",
+      "sha256": "937bc111d6c8799845faab09b0f22211e3c9013c92b29ac9543360682ba72257"
     }
   ]
 }

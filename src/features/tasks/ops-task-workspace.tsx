@@ -106,6 +106,8 @@ import {
   type OpsTeacherOption,
   type OpsTextbookOption,
   type OpsTaskPriority,
+  type OpsTaskPageFilters,
+  type KeysetCursor,
   type OpsTask,
   type OpsTaskInput,
   type OpsTaskStatus,
@@ -462,6 +464,17 @@ type FormDetailStepKey =
   | "word_retest_scope"
   | "word_retest_scores"
 type RegistrationFormSectionKey = "inquiry" | "level_test" | "consultation" | "placement" | "admission"
+type OperationTablePageControls = {
+  search: string
+  subject: string | null
+  teacher: string | null
+  period: WithdrawalPeriodFilter
+  dateFrom: string | null
+  dateTo: string | null
+  filterColumn: string | null
+  sortColumn: string | null
+  sortDirection: "asc" | "desc" | null
+}
 
 const EMPTY_TASKS: OpsTask[] = []
 const EMPTY_PROFILE_OPTIONS: OpsProfileOption[] = []
@@ -477,6 +490,17 @@ const EMPTY_OPS_TASK_OPTION_INDEXES: OpsTaskOptionIndexes = {
 }
 const EMPTY_COMPLETION_BLOCKERS: string[] = []
 const EMPTY_COMPLETION_BLOCKERS_BY_TASK_ID: OperationCompletionBlockerMap = new Map()
+const EMPTY_OPERATION_TABLE_PAGE_CONTROLS: OperationTablePageControls = {
+  search: "",
+  subject: null,
+  teacher: null,
+  period: "all",
+  dateFrom: null,
+  dateTo: null,
+  filterColumn: null,
+  sortColumn: null,
+  sortDirection: null,
+}
 const WITHDRAWAL_PERIOD_FILTERS: Array<{ key: WithdrawalPeriodFilter; label: string }> = [
   { key: "all", label: "전체 기간" },
   { key: "today", label: "오늘" },
@@ -1943,6 +1967,9 @@ function matchesWordRetestPeriodFilter(
 }
 
 function getWordRetestTableValue(task: OpsTask, columnKey: WordRetestTableColumnKey) {
+  if (columnKey !== "select" && columnKey !== "action" && task.displayValues?.[columnKey] !== undefined) {
+    return task.displayValues[columnKey]
+  }
   const wordRetest = task.wordRetest || {}
   switch (columnKey) {
     case "status":
@@ -5858,6 +5885,9 @@ function matchesTransferPeriodFilter(
 
 
 function getWithdrawalTableValue(task: OpsTask, columnKey: WithdrawalTableColumnKey) {
+  if (columnKey !== "action" && task.displayValues?.[columnKey] !== undefined) {
+    return task.displayValues[columnKey]
+  }
   const withdrawal = task.withdrawal || {}
   switch (columnKey) {
     case "status":
@@ -5905,6 +5935,9 @@ function getRegistrationVisitConsultationLabel(task: OpsTask) {
 
 
 function getTransferTableValue(task: OpsTask, columnKey: TransferTableColumnKey) {
+  if (columnKey !== "action" && task.displayValues?.[columnKey] !== undefined) {
+    return task.displayValues[columnKey]
+  }
   const transfer = task.transfer || {}
   switch (columnKey) {
     case "status":
@@ -6255,6 +6288,8 @@ function WithdrawalDataTable({
   emptyActionLabel = "퇴원 신청",
   showEmptyAction = true,
   completionBlockersByTaskId = EMPTY_COMPLETION_BLOCKERS_BY_TASK_ID,
+  serverPaged = false,
+  onPageControlsChange,
 }: {
   tasks: OpsTask[]
   todayKey: string
@@ -6270,6 +6305,8 @@ function WithdrawalDataTable({
   emptyActionLabel?: string
   showEmptyAction?: boolean
   completionBlockersByTaskId?: OperationCompletionBlockerMap
+  serverPaged?: boolean
+  onPageControlsChange?: (controls: OperationTablePageControls) => void
 }) {
   const [columnWidths, setColumnWidths] = useState<Record<WithdrawalTableColumnKey, number>>(WITHDRAWAL_TABLE_COLUMN_WIDTHS)
   const [withdrawalTableSort, setWithdrawalTableSort] = useState<WithdrawalTableSort>(null)
@@ -6304,6 +6341,7 @@ function WithdrawalDataTable({
   ), [teacherFilterSourceTasks])
 
   const visibleWithdrawalTasks = useMemo(() => {
+    if (serverPaged) return tasks
     const selectionFilteredTasks = tasks
       .filter((task) => matchesWithdrawalSelectionFilters(task, selectedSubjectFilter, selectedTeacherFilter))
       .filter((task) => matchesWithdrawalPeriodFilter(task, withdrawalPeriodFilter, todayKey, withdrawalPeriodStartDate, withdrawalPeriodEndDate))
@@ -6333,7 +6371,22 @@ function WithdrawalDataTable({
     withdrawalPeriodFilter,
     withdrawalPeriodStartDate,
     withdrawalTableSort,
+    serverPaged,
   ])
+
+  useEffect(() => {
+    onPageControlsChange?.({
+      search: filterValue,
+      subject: selectedSubjectFilter === "all" ? null : selectedSubjectFilter,
+      teacher: selectedTeacherFilter === "all" ? null : selectedTeacherFilter,
+      period: withdrawalPeriodFilter,
+      dateFrom: withdrawalPeriodStartDate || null,
+      dateTo: withdrawalPeriodEndDate || null,
+      filterColumn: filterValue.trim() ? filterColumnKey : null,
+      sortColumn: withdrawalTableSort?.columnKey || null,
+      sortDirection: withdrawalTableSort?.direction || null,
+    })
+  }, [filterColumnKey, filterValue, onPageControlsChange, selectedSubjectFilter, selectedTeacherFilter, withdrawalPeriodEndDate, withdrawalPeriodFilter, withdrawalPeriodStartDate, withdrawalTableSort])
 
   function handleHeaderSelect(columnKey: WithdrawalTableColumnKey) {
     if (columnKey === "action") return
@@ -6700,6 +6753,8 @@ function TransferDataTable({
   emptyActionLabel = "전반 신청",
   showEmptyAction = true,
   completionBlockersByTaskId = EMPTY_COMPLETION_BLOCKERS_BY_TASK_ID,
+  serverPaged = false,
+  onPageControlsChange,
 }: {
   tasks: OpsTask[]
   todayKey: string
@@ -6715,6 +6770,8 @@ function TransferDataTable({
   emptyActionLabel?: string
   showEmptyAction?: boolean
   completionBlockersByTaskId?: OperationCompletionBlockerMap
+  serverPaged?: boolean
+  onPageControlsChange?: (controls: OperationTablePageControls) => void
 }) {
   const [columnWidths, setColumnWidths] = useState<Record<TransferTableColumnKey, number>>(TRANSFER_TABLE_COLUMN_WIDTHS)
   const [transferTableSort, setTransferTableSort] = useState<TransferTableSort>(null)
@@ -6749,6 +6806,7 @@ function TransferDataTable({
   ), [teacherFilterSourceTasks])
 
   const visibleTransferTasks = useMemo(() => {
+    if (serverPaged) return tasks
     const selectionFilteredTasks = tasks
       .filter((task) => {
         if (selectedSubjectFilter !== "all" && getTransferFilterValue(task, "subject") !== selectedSubjectFilter) return false
@@ -6782,7 +6840,22 @@ function TransferDataTable({
     transferPeriodFilter,
     transferPeriodStartDate,
     transferTableSort,
+    serverPaged,
   ])
+
+  useEffect(() => {
+    onPageControlsChange?.({
+      search: filterValue,
+      subject: selectedSubjectFilter === "all" ? null : selectedSubjectFilter,
+      teacher: selectedTeacherFilter === "all" ? null : selectedTeacherFilter,
+      period: transferPeriodFilter,
+      dateFrom: transferPeriodStartDate || null,
+      dateTo: transferPeriodEndDate || null,
+      filterColumn: filterValue.trim() ? filterColumnKey : null,
+      sortColumn: transferTableSort?.columnKey || null,
+      sortDirection: transferTableSort?.direction || null,
+    })
+  }, [filterColumnKey, filterValue, onPageControlsChange, selectedSubjectFilter, selectedTeacherFilter, transferPeriodEndDate, transferPeriodFilter, transferPeriodStartDate, transferTableSort])
 
   function handleHeaderSelect(columnKey: TransferTableColumnKey) {
     if (columnKey === "action") return
@@ -8310,6 +8383,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [wordRetestCustomEndDate, setWordRetestCustomEndDate] = useState("")
   const [wordRetestTeacherFilter, setWordRetestTeacherFilter] = useState<WordRetestSelectFilterKey>("all")
   const [wordRetestClassFilter, setWordRetestClassFilter] = useState<WordRetestSelectFilterKey>("all")
+  const [operationTablePageControls, setOperationTablePageControls] = useState<OperationTablePageControls>(EMPTY_OPERATION_TABLE_PAGE_CONTROLS)
+  const [wordRetestTablePageSort, setWordRetestTablePageSort] = useState<{ column: string | null; direction: "asc" | "desc" | null }>({ column: null, direction: null })
+  const [taskPageCursor, setTaskPageCursor] = useState<KeysetCursor | null>(null)
+  const [taskPageHasMore, setTaskPageHasMore] = useState(false)
+  const [taskPageLoadingMore, setTaskPageLoadingMore] = useState(false)
   const [wordRetestScoreDrafts, setWordRetestScoreDrafts] = useState<Record<string, WordRetestScoreDraft>>({})
   const [wordRetestStudentIds, setWordRetestStudentIds] = useState<string[]>([])
   const [wordRetestSelectedTaskIds, setWordRetestSelectedTaskIds] = useState<Set<string>>(() => new Set())
@@ -8360,6 +8438,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const workspaceViewerGenerationRef = useRef(0)
   const workspaceDataViewerIdRef = useRef(currentUserId)
   const registrationTrackSelectionRef = useRef("")
+  const selectedDetailLoadRef = useRef(0)
+  const deepLinkTaskLoadRef = useRef("")
   const registrationObservationDeepLinkTargetRef = useRef<RegistrationObservationDirectTarget | null>(null)
   const registrationObservationLoadOwnershipRef = useRef(createRegistrationObservationAsyncOwnership())
   const registrationObservationRuntimeVersionRef = useRef(registrationObservationRuntime.runtimeVersion)
@@ -8466,6 +8546,89 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     [canDelete, currentUserId, isAdmin, registrationViewerRole],
   )
   const workspaceLabel = WORKSPACE_LABELS[workspace]
+  const taskPageFilters = useMemo<OpsTaskPageFilters>(() => {
+    if (scopedTaskType === "registration") {
+      return {
+        taskType: "registration",
+        search: deferredQuery,
+        statuses: [],
+        view: registrationView,
+        consultationOwnerId: isRegistrationConsultationViewKey(registrationView)
+          && registrationConsultationOwnerScope === "mine"
+          ? registrationViewerId || null
+          : null,
+      }
+    }
+    if (scopedTaskType === "withdrawal" || scopedTaskType === "transfer") {
+      return {
+        taskType: scopedTaskType,
+        search: operationTablePageControls.search,
+        statuses: [],
+        view: withdrawalView,
+        subject: operationTablePageControls.subject,
+        teacher: operationTablePageControls.teacher,
+        period: operationTablePageControls.period,
+        dateFrom: operationTablePageControls.period === "custom" ? operationTablePageControls.dateFrom : null,
+        dateTo: operationTablePageControls.period === "custom" ? operationTablePageControls.dateTo : null,
+        filterColumn: operationTablePageControls.filterColumn as never,
+        sortColumn: operationTablePageControls.sortColumn as never,
+        sortDirection: operationTablePageControls.sortDirection,
+      } as OpsTaskPageFilters
+    }
+    if (scopedTaskType === "word_retest") {
+      return {
+        taskType: "word_retest",
+        search: deferredQuery,
+        statuses: [],
+        queue: wordRetestMode,
+        branch: wordRetestBranchFilter === "all" ? null : wordRetestBranchFilter,
+        period: wordRetestPeriodFilter,
+        dateFrom: wordRetestPeriodFilter === "custom" ? wordRetestCustomStartDate || null : null,
+        dateTo: wordRetestPeriodFilter === "custom" ? wordRetestCustomEndDate || null : null,
+        teacherId: wordRetestTeacherFilter === "all" ? null : wordRetestTeacherFilter,
+        classId: wordRetestClassFilter === "all" ? null : wordRetestClassFilter,
+        includeClosed: showClosed,
+        tableSortColumn: wordRetestTablePageSort.column as never,
+        tableSortDirection: wordRetestTablePageSort.direction,
+      }
+    }
+    return {
+      taskType: "general",
+      search: deferredQuery,
+      statuses: [],
+      queue: todoView,
+      requestedById: requestedByFilter === "all" ? null : requestedByFilter,
+      requestedTeam: requestedTeamFilter === "all" ? null : requestedTeamFilter,
+      assigneeId: assigneeFilter === "all" ? null : assigneeFilter,
+      assigneeTeam: assigneeTeamFilter === "all" ? null : assigneeTeamFilter,
+      focus: taskFocus,
+      sort: todoSort,
+    }
+  }, [
+    assigneeFilter,
+    assigneeTeamFilter,
+    deferredQuery,
+    operationTablePageControls,
+    registrationConsultationOwnerScope,
+    registrationView,
+    registrationViewerId,
+    requestedByFilter,
+    requestedTeamFilter,
+    scopedTaskType,
+    showClosed,
+    taskFocus,
+    todoSort,
+    todoView,
+    withdrawalView,
+    wordRetestBranchFilter,
+    wordRetestClassFilter,
+    wordRetestCustomEndDate,
+    wordRetestCustomStartDate,
+    wordRetestMode,
+    wordRetestPeriodFilter,
+    wordRetestTablePageSort,
+    wordRetestTeacherFilter,
+  ])
 
   const replaceRegistrationFixtureState = useCallback((nextState: RegistrationSubjectTrackFixtureState) => {
     registrationFixtureStateRef.current = nextState
@@ -8610,6 +8773,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           includeManagementOptions: false,
           includeTeacherOptions: false,
           includeProfileOptions: false,
+          filters: taskPageFilters,
+          cursor: null,
         }
       : {
           taskType: scopedTaskType,
@@ -8617,6 +8782,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           includeManagementOptions: !isTodoWorkspace,
           includeTeacherOptions: true,
           includeProfileOptions: true,
+          filters: taskPageFilters,
+          cursor: null,
         }
     const cachedData = force
       ? null
@@ -8639,8 +8806,43 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         ? mergeOpsTaskWorkspaceOptionData(nextData, enrichmentData)
         : nextData,
     )
+    setTaskPageCursor(nextData.page?.nextCursor || null)
+    setTaskPageHasMore(Boolean(nextData.page?.hasMore))
     setLoading(false)
-  }, [currentUserId, isRegistrationWorkspace, isTodoWorkspace, registrationFixtureEnabled, registrationFixtureRequested, scopedTaskType, wordRetestFixtureRequested, wordRetestFixtureViewer])
+  }, [currentUserId, isRegistrationWorkspace, isTodoWorkspace, registrationFixtureEnabled, registrationFixtureRequested, scopedTaskType, taskPageFilters, wordRetestFixtureRequested, wordRetestFixtureViewer])
+
+  const loadMore = useCallback(async () => {
+    if (!taskPageCursor || !taskPageHasMore || taskPageLoadingMore || !currentUserId) return
+    setTaskPageLoadingMore(true)
+    try {
+      const nextData = await loadOpsTaskWorkspaceData({
+        taskType: scopedTaskType,
+        viewerId: currentUserId,
+        includeManagementOptions: false,
+        includeTeacherOptions: false,
+        includeProfileOptions: false,
+        filters: taskPageFilters,
+        cursor: taskPageCursor,
+        force: true,
+      })
+      setData((current) => {
+        if (!current) return nextData
+        const rowsById = new Map(current.tasks.map((task) => [task.id, task]))
+        nextData.tasks.forEach((task) => rowsById.set(task.id, task))
+        return {
+          ...current,
+          tasks: [...rowsById.values()],
+          page: nextData.page,
+          stats: nextData.stats,
+          registrationRuntime: nextData.registrationRuntime,
+        }
+      })
+      setTaskPageCursor(nextData.page?.nextCursor || null)
+      setTaskPageHasMore(Boolean(nextData.page?.hasMore))
+    } finally {
+      setTaskPageLoadingMore(false)
+    }
+  }, [currentUserId, scopedTaskType, taskPageCursor, taskPageFilters, taskPageHasMore, taskPageLoadingMore])
 
   useEffect(() => {
     workspaceMountedRef.current = true
@@ -9386,13 +9588,15 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     ? registrationViewerId
     : undefined
   const visibleRegistrationCaseItems = useMemo(
-    () => filterRegistrationCaseListItems(
-      registrationCaseItems,
-      registrationView,
-      deferredQuery,
-      { consultationOwnerId },
-    ),
-    [consultationOwnerId, deferredQuery, registrationCaseItems, registrationView],
+    () => data?.page
+      ? filterRegistrationCaseListItems(registrationCaseItems, registrationView)
+      : filterRegistrationCaseListItems(
+        registrationCaseItems,
+        registrationView,
+        deferredQuery,
+        { consultationOwnerId },
+      ),
+    [consultationOwnerId, data?.page, deferredQuery, registrationCaseItems, registrationView],
   )
   const registrationConsultationScopeCounts = useMemo(() => ({
     mine: filterRegistrationCaseListItems(
@@ -9500,6 +9704,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const hasQuery = !isWithdrawalWorkspace && !isTransferWorkspace && query.trim().length > 0
 
   const visibleTasks = useMemo(() => {
+    if (data?.page) return scopedTasks
     const todoTaskSource = scopedTasks
     const nextTasks = todoTaskSource
       .filter((task) => {
@@ -9545,7 +9750,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     if (todoSort === "status") return sortOpsTasksByWorkflowStatus(nextTasks, todayKey)
     if (todoSort === "priority") return sortOpsTasksByPriority(nextTasks, todayKey)
     return sortOpsTasksByWorkDate(nextTasks, todayKey)
-  }, [assigneeFilter, assigneeTeamFilter, confirmationByTaskId, currentUserContext, currentUserId, currentUserLabel, deferredQuery, isRegistrationWorkspace, isTodoWorkspace, isTransferWorkspace, isWithdrawalWorkspace, isWordRetestWorkspace, requestedByFilter, requestedTeamFilter, scopedTasks, showClosed, taskFocus, todayKey, todoSort, todoView, view, withdrawalView, wordRetestBranchFilter, wordRetestClassFilter, wordRetestCustomEndDate, wordRetestCustomStartDate, wordRetestMode, wordRetestPeriodFilter, wordRetestRoleContext, wordRetestTeacherFilter])
+  }, [assigneeFilter, assigneeTeamFilter, confirmationByTaskId, currentUserContext, currentUserId, currentUserLabel, data?.page, deferredQuery, isRegistrationWorkspace, isTodoWorkspace, isTransferWorkspace, isWithdrawalWorkspace, isWordRetestWorkspace, requestedByFilter, requestedTeamFilter, scopedTasks, showClosed, taskFocus, todayKey, todoSort, todoView, view, withdrawalView, wordRetestBranchFilter, wordRetestClassFilter, wordRetestCustomEndDate, wordRetestCustomStartDate, wordRetestMode, wordRetestPeriodFilter, wordRetestRoleContext, wordRetestTeacherFilter])
 
   useEffect(() => {
     if (!isWordRetestWorkspace) return
@@ -9972,6 +10177,18 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setCommentBody("")
     setAttachmentName("")
     setAttachmentLink("")
+    const detailLoad = ++selectedDetailLoadRef.current
+    void loadOpsTaskById(task.id).then((exactTask) => {
+      if (!exactTask || selectedDetailLoadRef.current !== detailLoad) return
+      setSelectedTask(exactTask)
+      setData((current) => {
+        if (!current) return current
+        return {
+          ...current,
+          tasks: current.tasks.map((currentTask) => currentTask.id === exactTask.id ? exactTask : currentTask),
+        }
+      })
+    }).catch(() => undefined)
   }, [syncTaskDeepLink])
 
   const openWordRetestEditor = useCallback((
@@ -10901,7 +11118,25 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     if (!data || !workspaceDataBelongsToCurrentViewer) return
     const deepLinkedTask = taskById.get(deepLinkedTaskId)
     if (!deepLinkedTask) {
-      syncTaskDeepLink(null)
+      if (deepLinkTaskLoadRef.current === deepLinkedTaskId) return
+      deepLinkTaskLoadRef.current = deepLinkedTaskId
+      void loadOpsTaskById(deepLinkedTaskId).then((exactTask) => {
+        if (deepLinkTaskLoadRef.current !== deepLinkedTaskId) return
+        if (!exactTask) {
+          syncTaskDeepLink(null)
+          return
+        }
+        setData((current) => current ? {
+          ...current,
+          tasks: current.tasks.some((task) => task.id === exactTask.id)
+            ? current.tasks.map((task) => task.id === exactTask.id ? exactTask : task)
+            : [exactTask, ...current.tasks],
+        } : current)
+      }).catch(() => {
+        if (deepLinkTaskLoadRef.current === deepLinkedTaskId) syncTaskDeepLink(null)
+      }).finally(() => {
+        if (deepLinkTaskLoadRef.current === deepLinkedTaskId) deepLinkTaskLoadRef.current = ""
+      })
       return
     }
     if (deepLinkedTask.type !== "registration" && (deepLinkedTrackId || deepLinkedAppointmentId)) {
@@ -13127,6 +13362,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            emptyActionLabel={emptyActionLabel}
 	            showEmptyAction={false}
 	            completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
+	            serverPaged={Boolean(data?.page)}
+	            onPageControlsChange={setOperationTablePageControls}
 	          />
 	        ) : isTransferWorkspace ? (
 	          <TransferDataTable
@@ -13144,6 +13381,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            emptyActionLabel={emptyActionLabel}
 	            showEmptyAction={false}
 	            completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
+	            serverPaged={Boolean(data?.page)}
+	            onPageControlsChange={setOperationTablePageControls}
 	          />
 	        ) : isWordRetestWorkspace ? (
 		          <WordRetestTaskList
@@ -13172,6 +13411,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            emptyActionLabel={emptyActionLabel}
 	            showEmptyAction={showEmptyCreate}
 	            completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
+	            serverPaged={Boolean(data?.page)}
+	            onPageSortChange={setWordRetestTablePageSort}
 	          />
 	        ) : !isTodoWorkspace && view === "calendar" ? (
 	          <CalendarList
@@ -13240,6 +13481,23 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
           />
         )}
+        {!loading && data?.page ? (
+          <div className="flex justify-center border-t pt-3">
+            {taskPageHasMore ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void loadMore()}
+                disabled={taskPageLoadingMore}
+              >
+                {taskPageLoadingMore ? "다음 업무 불러오는 중" : "다음 30건"}
+              </Button>
+            ) : (
+              <span className="text-xs text-muted-foreground">마지막 업무입니다.</span>
+            )}
+          </div>
+        ) : null}
       </div>
       {canonicalNotificationEnabled ? (
         <NotificationControlPanel
@@ -16027,6 +16285,8 @@ function WordRetestTaskList({
   emptyActionLabel = "추가",
   showEmptyAction = true,
   completionBlockersByTaskId = EMPTY_COMPLETION_BLOCKERS_BY_TASK_ID,
+  serverPaged = false,
+  onPageSortChange,
 }: {
   tasks: OpsTask[]
   mode: WordRetestMode
@@ -16053,12 +16313,15 @@ function WordRetestTaskList({
   emptyActionLabel?: string
   showEmptyAction?: boolean
   completionBlockersByTaskId?: OperationCompletionBlockerMap
+  serverPaged?: boolean
+  onPageSortChange?: (sort: { column: string | null; direction: "asc" | "desc" | null }) => void
 }) {
   const [columnWidths, setColumnWidths] = useState<Record<WordRetestTableColumnKey, number>>(WORD_RETEST_TABLE_COLUMN_WIDTHS)
   const [wordRetestTableSort, setWordRetestTableSort] = useState<WordRetestTableSort>(null)
   const gridTemplateColumns = getWordRetestTableGridTemplate(columnWidths)
   const gridTemplateStyle = { "--word-retest-grid-template": gridTemplateColumns } as CSSProperties
   const visibleWordRetestTasks = useMemo(() => {
+    if (serverPaged) return tasks
     if (!wordRetestTableSort) return tasks
 
     return [...tasks].sort((left, right) => {
@@ -16067,7 +16330,14 @@ function WordRetestTaskList({
       const result = leftValue.localeCompare(rightValue, "ko", { numeric: true })
       return wordRetestTableSort.direction === "asc" ? result : -result
     })
-  }, [tasks, wordRetestTableSort])
+  }, [serverPaged, tasks, wordRetestTableSort])
+
+  useEffect(() => {
+    onPageSortChange?.({
+      column: wordRetestTableSort?.columnKey || null,
+      direction: wordRetestTableSort?.direction || null,
+    })
+  }, [onPageSortChange, wordRetestTableSort])
   const selectableTasks = useMemo(() => visibleWordRetestTasks.filter(canSelectTask), [canSelectTask, visibleWordRetestTasks])
   const selectedTasks = useMemo(() => visibleWordRetestTasks.filter((task) => selectedTaskIds.has(task.id) && canSelectTask(task)), [canSelectTask, selectedTaskIds, visibleWordRetestTasks])
   const allVisibleSelected = selectableTasks.length > 0 && selectableTasks.every((task) => selectedTaskIds.has(task.id))

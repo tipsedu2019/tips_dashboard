@@ -28,7 +28,6 @@ import {
   clearRegistrationTrackServiceCaches,
   loadOpsRegistrationWorkspaceOptionData as loadRegistrationWorkspaceOptionData,
   loadRegistrationCaseDetail,
-  loadRegistrationWorkspaceTrackSummaries,
   setRegistrationTrackMutationCacheInvalidator,
   type OpsRegistrationObservationCaseDetail,
   type OpsRegistrationObservationTrackSummary,
@@ -36,6 +35,7 @@ import {
   type OpsRegistrationTrackStatus,
   type RegistrationObservationTrackSummaryLoadResult,
   type OpsRegistrationWorkspaceOptionData,
+  type RegistrationRuntimeState,
 } from "./registration-track-service"
 import {
   invalidateRegistrationSubjectTrackRuntimeAfterReadyFailure,
@@ -280,6 +280,8 @@ export type OpsTask = {
   memo: string
   createdAt: string
   updatedAt: string
+  summaryFlags?: string[]
+  displayValues?: Record<string, string>
   registration?: OpsRegistrationDetail
   registrationTracks?: OpsRegistrationTrackSummary[] | OpsRegistrationObservationTrackSummary[]
   withdrawal?: OpsWithdrawalDetail
@@ -288,6 +290,109 @@ export type OpsTask = {
   comments: OpsTaskComment[]
   attachments: OpsTaskAttachment[]
   events: OpsTaskEvent[]
+}
+
+export type WithdrawalSortableColumnKey =
+  | "status" | "subject" | "teacher" | "className" | "student"
+  | "withdrawalDate" | "withdrawalSession" | "completedLessonHours"
+  | "fourWeekLessonHours" | "progress" | "customerReason" | "teacherOpinion"
+  | "undistributedTextbooks" | "operationsChecklist"
+
+export type TransferSortableColumnKey =
+  | "status" | "subject" | "fromTeacher" | "fromClassName" | "student"
+  | "transferReason" | "fromUndistributedTextbooks" | "fromClassEndDate"
+  | "fromClassEndSession" | "toTeacher" | "toClassName" | "toClassStartDate"
+  | "toClassStartSession" | "toUndistributedTextbooks" | "operationsChecklist"
+
+export type WordRetestSortableColumnKey =
+  | "status" | "testAt" | "expectedRetestAt" | "teacher" | "class"
+  | "student" | "textbook" | "unit" | "note" | "total" | "cutoff"
+  | "score" | "result"
+
+export type OpsTaskPageFilters =
+  | {
+      taskType: "general"
+      search: string
+      statuses: string[]
+      queue: "inbox" | "sent" | "completed"
+      requestedById: string | null
+      requestedTeam: string | null
+      assigneeId: string | null
+      assigneeTeam: string | null
+      focus: "none" | "today" | "overdue" | "mine" | "unassigned" | "confirmation"
+      sort: "status" | "priority" | "due"
+    }
+  | {
+      taskType: "registration"
+      search: string
+      statuses: string[]
+      view: "inquiry" | "level_test" | "consultation_requested" | "consultation_completed" | "waiting" | "observation" | "enrollment" | "payment" | "completed"
+      consultationOwnerId: string | null
+    }
+  | {
+      taskType: "withdrawal"
+      search: string
+      statuses: string[]
+      view: "applicant" | "operations" | "closed"
+      subject: string | null
+      teacher: string | null
+      period: "all" | "today" | "week" | "month" | "custom"
+      dateFrom: string | null
+      dateTo: string | null
+      filterColumn: WithdrawalSortableColumnKey | null
+      sortColumn: WithdrawalSortableColumnKey | null
+      sortDirection: "asc" | "desc" | null
+    }
+  | {
+      taskType: "transfer"
+      search: string
+      statuses: string[]
+      view: "applicant" | "operations" | "closed"
+      subject: string | null
+      teacher: string | null
+      period: "all" | "today" | "week" | "month" | "custom"
+      dateFrom: string | null
+      dateTo: string | null
+      filterColumn: TransferSortableColumnKey | null
+      sortColumn: TransferSortableColumnKey | null
+      sortDirection: "asc" | "desc" | null
+    }
+  | {
+      taskType: "word_retest"
+      search: string
+      statuses: string[]
+      queue: "assistant" | "teacher"
+      branch: string | null
+      period: "all" | "today" | "week" | "month" | "custom"
+      dateFrom: string | null
+      dateTo: string | null
+      teacherId: string | null
+      classId: string | null
+      includeClosed: boolean
+      tableSortColumn: WordRetestSortableColumnKey | null
+      tableSortDirection: "asc" | "desc" | null
+    }
+
+export type KeysetCursor = {
+  sortValues: Array<string | number | null>
+  id: string
+  scopeHash: string
+}
+
+export type OpsTaskPageStats = { total: number; byStatus: Record<string, number> }
+
+export type OpsTaskPageResponse = {
+  page: { rows: OpsTask[]; nextCursor: KeysetCursor | null; hasMore: boolean }
+  stats: OpsTaskPageStats
+  registrationRuntime: RegistrationRuntimeState | null
+}
+
+export type OpsTaskPageLoadOptions = {
+  filters: OpsTaskPageFilters
+  cursor: KeysetCursor | null
+  limit: 30
+  viewerId: string
+  force?: boolean
 }
 
 export type OpsTaskWorkspaceData = {
@@ -299,6 +404,9 @@ export type OpsTaskWorkspaceData = {
   teachers: OpsTeacherOption[]
   schemaReady: boolean
   error: string | null
+  page?: OpsTaskPageResponse["page"]
+  stats?: OpsTaskPageStats
+  registrationRuntime?: RegistrationRuntimeState | null
 }
 
 export type OpsTaskWorkspaceOptionData = Pick<
@@ -363,23 +471,6 @@ const emptyOpsTaskWorkspaceOptionData: OpsTaskWorkspaceOptionData = {
 const OPS_TASK_WORKSPACE_CACHE_TTL_MS = 15_000
 const OPS_REGISTRATION_SESSION_CACHE_TTL_MS = 60_000
 const OPS_REGISTRATION_SESSION_CACHE_PREFIX = "tips:registration-workspace:"
-const OPS_REGISTRATION_PARENT_LIST_COLUMNS = [
-  "id",
-  "title",
-  "type",
-  "status",
-  "priority",
-  "requested_by",
-  "assignee_id",
-  "secondary_assignee_id",
-  "student_id",
-  "student_name",
-  "campus",
-  "subject",
-  "created_at",
-  "updated_at",
-  "ops_registration_details(task_id,pipeline_status,school_grade,school_name,parent_phone,student_phone,inquiry_at,level_test_at,level_test_completed_at,level_test_result,level_test_place,level_test_material_link,counselor,phone_consultation_at,visit_consultation_at,consultation_at,class_start_date,class_start_session,textbook_preparation,visit_consultation_place,admission_notice_sent,payment_checked,makeedu_registered,makeedu_invoice_sent,request_note)",
-].join(",")
 const OPS_REGISTRATION_CLASS_COLUMN_CANDIDATES = [
   "id,name,subject,grade,teacher,room,textbook_ids",
   "id,name,subject,grade,teacher,room",
@@ -415,6 +506,8 @@ type OpsTaskWorkspaceLoadOptions = {
   includeManagementOptions?: boolean
   includeTeacherOptions?: boolean
   includeProfileOptions?: boolean
+  filters?: OpsTaskPageFilters
+  cursor?: KeysetCursor | null
 }
 type OpsTaskWorkspaceOptionLoadOptions = {
   force?: boolean
@@ -439,6 +532,8 @@ function getOpsTaskWorkspaceCacheKey(options: OpsTaskWorkspaceLoadOptions = {}) 
     options.includeManagementOptions === false ? "light" : "full",
     shouldIncludeOpsTeacherOptions(options) ? "teachers" : "no-teachers",
     options.includeProfileOptions === false ? "no-profiles" : "profiles",
+    canonicalJson(options.filters || null),
+    canonicalJson(options.cursor || null),
   ].join(":")
 }
 
@@ -616,6 +711,141 @@ const runOpsTaskReadMeasure = createOpsTaskReadMeasureRunner({
 
 function text(value: unknown) {
   return String(value || "").trim()
+}
+
+const OPS_TASK_PAGE_SIZE = 30 as const
+const OPS_TASK_STATUS_VALUES = new Set<OpsTaskStatus>([
+  "requested", "confirmed", "in_progress", "review_requested", "done", "on_hold", "canceled",
+])
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`
+  const record = value as Record<string, unknown>
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`
+}
+
+async function sha256Hex(value: string) {
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
+function assertOpsTaskPageFilters(filters: OpsTaskPageFilters) {
+  if (!filters || typeof filters !== "object" || !Array.isArray(filters.statuses) || typeof filters.search !== "string") {
+    throw new Error("ops_task_filters_invalid")
+  }
+  const exactKeys: Record<OpsTaskPageFilters["taskType"], readonly string[]> = {
+    general: ["assigneeId", "assigneeTeam", "focus", "queue", "requestedById", "requestedTeam", "search", "sort", "statuses", "taskType"],
+    registration: ["consultationOwnerId", "search", "statuses", "taskType", "view"],
+    withdrawal: ["dateFrom", "dateTo", "filterColumn", "period", "search", "sortColumn", "sortDirection", "statuses", "subject", "taskType", "teacher", "view"],
+    transfer: ["dateFrom", "dateTo", "filterColumn", "period", "search", "sortColumn", "sortDirection", "statuses", "subject", "taskType", "teacher", "view"],
+    word_retest: ["branch", "classId", "dateFrom", "dateTo", "includeClosed", "period", "queue", "search", "statuses", "tableSortColumn", "tableSortDirection", "taskType", "teacherId"],
+  }
+  const expectedKeys = exactKeys[filters.taskType]?.slice().sort()
+  if (!expectedKeys || canonicalJson(Object.keys(filters).sort()) !== canonicalJson(expectedKeys)) throw new Error("ops_task_filters_invalid")
+  if (!filters.statuses.every((status) => OPS_TASK_STATUS_VALUES.has(status as OpsTaskStatus))) throw new Error("ops_task_filters_invalid")
+
+  const nullableString = (value: unknown) => value === null || typeof value === "string"
+  const validPeriod = (period: unknown) => ["all", "today", "week", "month", "custom"].includes(String(period))
+  if (filters.taskType === "general" && (
+    ![filters.requestedById, filters.requestedTeam, filters.assigneeId, filters.assigneeTeam].every(nullableString)
+    || !["inbox", "sent", "completed"].includes(filters.queue)
+    || !["none", "today", "overdue", "mine", "unassigned", "confirmation"].includes(filters.focus)
+    || !["status", "priority", "due"].includes(filters.sort)
+  )) throw new Error("ops_task_filters_invalid")
+  if (filters.taskType === "registration" && (
+    !nullableString(filters.consultationOwnerId)
+    || !["inquiry", "level_test", "consultation_requested", "consultation_completed", "waiting", "observation", "enrollment", "payment", "completed"].includes(filters.view)
+  )) throw new Error("ops_task_filters_invalid")
+
+  const withdrawalColumns = new Set<unknown>(["status", "subject", "teacher", "className", "student", "withdrawalDate", "withdrawalSession", "completedLessonHours", "fourWeekLessonHours", "progress", "customerReason", "teacherOpinion", "undistributedTextbooks", "operationsChecklist"])
+  const transferColumns = new Set<unknown>(["status", "subject", "fromTeacher", "fromClassName", "student", "transferReason", "fromUndistributedTextbooks", "fromClassEndDate", "fromClassEndSession", "toTeacher", "toClassName", "toClassStartDate", "toClassStartSession", "toUndistributedTextbooks", "operationsChecklist"])
+  if (filters.taskType === "withdrawal" || filters.taskType === "transfer") {
+    const allowedColumns = filters.taskType === "withdrawal" ? withdrawalColumns : transferColumns
+    if (![filters.subject, filters.teacher, filters.dateFrom, filters.dateTo, filters.filterColumn, filters.sortColumn, filters.sortDirection].every(nullableString)
+      || !["applicant", "operations", "closed"].includes(filters.view)
+      || !validPeriod(filters.period)
+      || (filters.period === "custom") !== Boolean(filters.dateFrom && filters.dateTo)
+      || [filters.filterColumn, filters.sortColumn].some((column) => column !== null && !allowedColumns.has(column))) {
+      throw new Error("ops_task_filters_invalid")
+    }
+  }
+  if (filters.taskType === "word_retest") {
+    const wordRetestColumns = new Set<unknown>(["status", "testAt", "expectedRetestAt", "teacher", "class", "student", "textbook", "unit", "note", "total", "cutoff", "score", "result"])
+    if (![filters.branch, filters.classId, filters.dateFrom, filters.dateTo, filters.teacherId, filters.tableSortColumn, filters.tableSortDirection].every(nullableString)
+      || typeof filters.includeClosed !== "boolean"
+      || !["assistant", "teacher"].includes(filters.queue)
+      || !validPeriod(filters.period)
+      || (filters.period === "custom") !== Boolean(filters.dateFrom && filters.dateTo)
+      || (filters.tableSortColumn !== null && !wordRetestColumns.has(filters.tableSortColumn))) {
+      throw new Error("ops_task_filters_invalid")
+    }
+  }
+
+  const pairedSort = filters.taskType === "withdrawal" || filters.taskType === "transfer"
+    ? [filters.sortColumn, filters.sortDirection]
+    : filters.taskType === "word_retest"
+      ? [filters.tableSortColumn, filters.tableSortDirection]
+      : null
+  if (pairedSort && ((pairedSort[0] === null) !== (pairedSort[1] === null))) throw new Error("ops_task_filters_invalid")
+}
+
+async function getOpsTaskPageScope(filters: OpsTaskPageFilters, viewerId: string) {
+  return sha256Hex(canonicalJson({ surface: "tasks", actor: viewerId, role: "authenticated", filters }))
+}
+
+export function createDefaultOpsTaskPageFilters(
+  taskType: OpsTaskType,
+  viewerId: string,
+): OpsTaskPageFilters {
+  if (taskType === "registration") {
+    return { taskType, search: "", statuses: [], view: "inquiry", consultationOwnerId: viewerId || null }
+  }
+  if (taskType === "withdrawal" || taskType === "transfer") {
+    return {
+      taskType,
+      search: "",
+      statuses: [],
+      view: "applicant",
+      subject: null,
+      teacher: null,
+      period: "all",
+      dateFrom: null,
+      dateTo: null,
+      filterColumn: null,
+      sortColumn: null,
+      sortDirection: null,
+    }
+  }
+  if (taskType === "word_retest") {
+    return {
+      taskType,
+      search: "",
+      statuses: [],
+      queue: "assistant",
+      branch: null,
+      period: "all",
+      dateFrom: null,
+      dateTo: null,
+      teacherId: null,
+      classId: null,
+      includeClosed: false,
+      tableSortColumn: null,
+      tableSortDirection: null,
+    }
+  }
+  return {
+    taskType: "general",
+    search: "",
+    statuses: [],
+    queue: "inbox",
+    requestedById: null,
+    requestedTeam: null,
+    assigneeId: null,
+    assigneeTeam: null,
+    focus: "none",
+    sort: "due",
+  }
 }
 
 function registrationPhoneIdentity(value: unknown) {
@@ -1268,6 +1498,62 @@ function mapTask(
   }
 }
 
+function mapOpsTaskPageRow(row: Row): OpsTask {
+  const payload = (row.row_data && typeof row.row_data === "object" ? row.row_data : row) as Row
+  const base: OpsTask = {
+    id: text(payload.id),
+    title: text(payload.title),
+    type: normalizeType(payload.type),
+    status: normalizeStatus(payload.status),
+    priority: normalizePriority(payload.priority),
+    requestedBy: text(payload.requestedById),
+    requestedByLabel: text(payload.requestedByLabel),
+    requestedTeam: text(payload.requestedTeam),
+    assigneeId: text(payload.assigneeId),
+    assigneeLabel: text(payload.assigneeLabel),
+    assigneeTeam: text(payload.assigneeTeam),
+    secondaryAssigneeId: text(payload.secondaryAssigneeId),
+    secondaryAssigneeLabel: text(payload.secondaryAssigneeLabel),
+    studentId: text(payload.studentId),
+    studentName: text(payload.studentName),
+    classId: text(payload.classId),
+    className: text(payload.className),
+    textbookId: text(payload.textbookId),
+    textbookTitle: text(payload.textbookTitle),
+    campus: text(payload.campus),
+    subject: text(payload.subject),
+    startAt: text(payload.startAt),
+    dueAt: text(payload.dueAt),
+    completedAt: text(payload.completedAt),
+    memo: text(payload.memo),
+    createdAt: text(payload.createdAt),
+    updatedAt: text(payload.updatedAt),
+    summaryFlags: Array.isArray(payload.summaryFlags) ? payload.summaryFlags.map(text).filter(Boolean) : [],
+    displayValues: payload.displayValues && typeof payload.displayValues === "object"
+      ? payload.displayValues as Record<string, string>
+      : undefined,
+    comments: [],
+    attachments: [],
+    events: [],
+  }
+  if (base.type === "registration" && payload.registration && typeof payload.registration === "object") {
+    base.registration = payload.registration as OpsRegistrationDetail
+    base.registrationTracks = Array.isArray(payload.registrationTracks)
+      ? payload.registrationTracks as OpsRegistrationObservationTrackSummary[]
+      : []
+  }
+  if (base.type === "withdrawal" && payload.inlineState && typeof payload.inlineState === "object") {
+    base.withdrawal = payload.inlineState as OpsWithdrawalDetail
+  }
+  if (base.type === "transfer" && payload.inlineState && typeof payload.inlineState === "object") {
+    base.transfer = payload.inlineState as OpsTransferDetail
+  }
+  if (base.type === "word_retest" && payload.inlineState && typeof payload.inlineState === "object") {
+    base.wordRetest = payload.inlineState as OpsWordRetestDetail
+  }
+  return base
+}
+
 function mapOpsClassOption(row: Row): OpsClassOption {
   return {
     id: text(row.id),
@@ -1441,6 +1727,67 @@ export async function loadOpsTaskWorkspaceOptionData(
   }
 }
 
+export async function loadOpsTaskPage(options: OpsTaskPageLoadOptions): Promise<OpsTaskPageResponse> {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const viewerId = text(options.viewerId)
+  if (!viewerId) throw new Error("인증된 사용자 정보를 확인할 수 없습니다.")
+  if (options.limit !== OPS_TASK_PAGE_SIZE) throw new Error("ops_task_page_limit_invalid")
+  assertOpsTaskPageFilters(options.filters)
+  const scopeHash = await getOpsTaskPageScope(options.filters, viewerId)
+  if (options.cursor?.scopeHash && options.cursor.scopeHash !== scopeHash) {
+    throw new Error("cursor_scope_mismatch")
+  }
+
+  const [pageResult, statsResult, registrationRuntime] = await Promise.all([
+    supabase
+      .rpc("list_ops_task_page_v1", {
+        p_type: options.filters.taskType,
+        p_filters: options.filters,
+        p_cursor_sort_values: options.cursor?.sortValues || null,
+        p_cursor_id: options.cursor?.id || null,
+        p_limit: 30,
+      })
+      .abortSignal(AbortSignal.timeout(8_000))
+      .retry(false),
+    supabase
+      .rpc("get_ops_task_list_stats_v1", {
+        p_type: options.filters.taskType,
+        p_filters: options.filters,
+      })
+      .abortSignal(AbortSignal.timeout(8_000))
+      .retry(false),
+    options.filters.taskType === "registration"
+      ? probeRegistrationSubjectTrackRuntime()
+      : Promise.resolve(null),
+  ])
+  if (pageResult.error) throw pageResult.error
+  if (statsResult.error) throw statsResult.error
+
+  const rawRows = ((pageResult.data || []) as unknown as Row[])
+  const hasMore = rawRows.length > OPS_TASK_PAGE_SIZE
+  const pageRows = rawRows.slice(0, OPS_TASK_PAGE_SIZE)
+  const rows = pageRows.map(mapOpsTaskPageRow)
+
+  const boundary = hasMore ? pageRows[OPS_TASK_PAGE_SIZE - 1] : null
+  const boundarySortValues = boundary && Array.isArray(boundary.sort_values)
+    ? boundary.sort_values as Array<string | number | null>
+    : null
+  const nextCursor = boundary && boundarySortValues
+    ? { sortValues: boundarySortValues, id: text(boundary.id || (boundary.row_data as Row | undefined)?.id), scopeHash }
+    : null
+  const statsData = (Array.isArray(statsResult.data) ? statsResult.data[0] : statsResult.data) as Row | null
+  const byStatus = statsData?.byStatus || statsData?.by_status
+
+  return {
+    page: { rows, nextCursor, hasMore },
+    stats: {
+      total: Number(statsData?.total || 0),
+      byStatus: byStatus && typeof byStatus === "object" ? byStatus as Record<string, number> : {},
+    },
+    registrationRuntime,
+  }
+}
+
 export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOptions = {}): Promise<OpsTaskWorkspaceData> {
   const cacheKey = getOpsTaskWorkspaceCacheKey(options)
   const cached = opsTaskWorkspaceDataCache.get(cacheKey)
@@ -1568,218 +1915,30 @@ function resolveRegistrationTrackSummariesForParents(
   })
 }
 
-async function readOpsRegistrationParentWorkspaceData(
-  options: OpsTaskWorkspaceLoadOptions,
-  metrics: { queryCount: number },
-): Promise<OpsTaskWorkspaceData> {
-  const safeViewerId = text(options.viewerId)
-  if (!safeViewerId) {
-    return {
-      ...emptyOpsTaskWorkspaceData,
-      schemaReady: false,
-      error: "인증된 사용자 정보를 확인할 수 없습니다.",
-    }
-  }
-  if (!supabase) {
-    return {
-      ...emptyOpsTaskWorkspaceData,
-      schemaReady: false,
-      error: "Supabase 연결 설정이 필요합니다.",
-    }
-  }
-
-  try {
-    const runtimeProbePromise = probeRegistrationSubjectTrackRuntime()
-    const summaryReadPromise = loadRegistrationWorkspaceTrackSummaries(
-      safeViewerId,
-      { force: options.force, observationAware: true },
-    )
-    metrics.queryCount += 1
-    const taskReadPromise = supabase
-      .from("ops_tasks")
-      .select(OPS_REGISTRATION_PARENT_LIST_COLUMNS)
-      .eq("type", "registration")
-      .then(({ data, error }) => {
-        if (error) throw error
-        return (data || []) as unknown as Row[]
-      })
-    const [taskRows, , summary] = await Promise.all([
-      taskReadPromise,
-      runtimeProbePromise,
-      summaryReadPromise,
-    ])
-    const registrationRows = embeddedTaskRows(taskRows, "ops_registration_details")
-    const registration = singleByTaskId(registrationRows.map((row) => ({
-      taskId: text(row.task_id),
-      ...mapRegistration(row)!,
-    })))
-    const emptyProfiles = new Map<string, Row>()
-    const emptyWithdrawal = new Map<string, OpsWithdrawalDetail>()
-    const emptyTransfer = new Map<string, OpsTransferDetail>()
-    const emptyWordRetest = new Map<string, OpsWordRetestDetail>()
-    const emptyComments = new Map<string, OpsTaskComment[]>()
-    const emptyAttachments = new Map<string, OpsTaskAttachment[]>()
-    const emptyEvents = new Map<string, OpsTaskEvent[]>()
-    const parentTasks = taskRows.map((row) => mapTask(
-      row,
-      emptyProfiles,
-      registration,
-      emptyWithdrawal,
-      emptyTransfer,
-      emptyWordRetest,
-      emptyComments,
-      emptyAttachments,
-      emptyEvents,
-    ))
-    if (summary.mode === "maintenance") {
-      return {
-        ...emptyOpsTaskWorkspaceData,
-        schemaReady: false,
-        error: "등록 데이터 전환 중입니다. 잠시 후 다시 시도하세요.",
-      }
-    }
-
-    const tracks = resolveRegistrationTrackSummariesForParents(parentTasks, summary)
-    const tracksByTaskId = byTaskId(tracks)
-    const tasks = parentTasks
-      .map((task) => ({
-        ...task,
-        registrationTracks: tracksByTaskId.get(task.id) || [],
-      }))
-      .sort((left, right) => (
-        String(right.updatedAt || right.createdAt).localeCompare(String(left.updatedAt || left.createdAt))
-      ))
-
-    return {
-      ...emptyOpsTaskWorkspaceData,
-      tasks,
-      schemaReady: true,
-      error: null,
-    }
-  } catch (error) {
-    if (isMissingRelationError(error)) {
-      return {
-        ...emptyOpsTaskWorkspaceData,
-        schemaReady: false,
-        error: "할 일 DB 마이그레이션을 적용한 뒤 새로고침하세요.",
-      }
-    }
-
-    return {
-      ...emptyOpsTaskWorkspaceData,
-      schemaReady: false,
-      error: error instanceof Error ? error.message : "등록 업무 목록을 불러오지 못했습니다.",
-    }
-  }
-}
-
 async function readOpsTaskWorkspaceData(
   options: OpsTaskWorkspaceLoadOptions,
   metrics: { queryCount: number } = { queryCount: 0 },
 ): Promise<OpsTaskWorkspaceData> {
-  if (options.taskType === "registration") {
-    return readOpsRegistrationParentWorkspaceData(options, metrics)
-  }
-
-  if (!supabase) {
+  try {
+    const taskType = options.taskType || "general"
+    const filters = options.filters || createDefaultOpsTaskPageFilters(taskType, text(options.viewerId))
+    const response = await loadOpsTaskPage({
+      filters,
+      cursor: options.cursor || null,
+      limit: OPS_TASK_PAGE_SIZE,
+      viewerId: text(options.viewerId),
+      force: options.force,
+    })
+    metrics.queryCount += 2
     return {
       ...emptyOpsTaskWorkspaceData,
-      schemaReady: false,
-      error: "Supabase 연결 설정이 필요합니다.",
-    }
-  }
-
-  try {
-    let taskQuery = supabase.from("ops_tasks").select("*")
-    if (options.taskType) taskQuery = taskQuery.eq("type", options.taskType)
-    const taskReadPromise = taskQuery.then(({ data, error }) => {
-      if (error) throw error
-      return (data || []) as unknown as Row[]
-    })
-    const includeManagementOptions = options.includeManagementOptions !== false
-    const includeTeacherOptions = shouldIncludeOpsTeacherOptions(options)
-    const includeProfileOptions = options.includeProfileOptions !== false
-    const [
-      taskRows,
-      profileRows,
-      studentRows,
-      classRows,
-      textbookRows,
-      teacherRows,
-    ] = await Promise.all([
-      taskReadPromise,
-      includeProfileOptions
-        ? readTable("profiles", "id,name,email,role,login_id", true)
-        : Promise.resolve([]),
-      includeManagementOptions
-        ? readTableWithFallback("students", "id,name,grade,school,contact,parent_contact,status,class_ids,waitlist_class_ids", "id,name,grade,school,contact,parent_contact,status", true)
-        : Promise.resolve([]),
-      includeManagementOptions
-        ? readOpsClassRows(options.taskType)
-        : Promise.resolve([]),
-      includeManagementOptions
-        ? readTable("textbooks", "id,title,name,publisher,subject", true)
-        : Promise.resolve([]),
-      includeTeacherOptions
-        ? readTableWithFallback("teacher_catalogs", "id,name,subjects,is_visible,sort_order,profile_id,account_email", "id,name,subjects,is_visible,sort_order", true)
-        : Promise.resolve([]),
-    ])
-
-    const taskIds = taskRows.map((row) => text(row.id)).filter(Boolean)
-    const shouldReadRegistration = !options.taskType
-    const shouldReadWithdrawal = !options.taskType || options.taskType === "withdrawal"
-    const shouldReadTransfer = !options.taskType || options.taskType === "transfer"
-    const shouldReadWordRetest = !options.taskType || options.taskType === "word_retest"
-    const [
-      registrationRows,
-      withdrawalRows,
-      transferRows,
-      wordRetestRows,
-      commentRows,
-      attachmentRows,
-      eventRows,
-    ] = await Promise.all([
-      shouldReadRegistration ? readTaskScopedTable("ops_registration_details", taskIds) : Promise.resolve([]),
-      shouldReadWithdrawal ? readTaskScopedTable("ops_withdrawal_details", taskIds) : Promise.resolve([]),
-      shouldReadTransfer ? readTaskScopedTable("ops_transfer_details", taskIds) : Promise.resolve([]),
-      shouldReadWordRetest ? readTaskScopedTable("ops_word_retests", taskIds) : Promise.resolve([]),
-      readTaskScopedTable("ops_task_comments", taskIds),
-      readTaskScopedTable("ops_task_attachments", taskIds),
-      readTaskScopedTable("ops_task_events", taskIds),
-    ])
-
-    const profiles = buildProfileLookup(profileRows)
-    const comments = byTaskId(commentRows.map((row) => mapComment(row, profiles)))
-    const attachments = byTaskId(attachmentRows.map((row) => mapAttachment(row, profiles)))
-    const events = byTaskId(eventRows.map((row) => mapEvent(row, profiles)))
-    const registration = singleByTaskId(registrationRows.map((row) => ({
-      taskId: text(row.task_id),
-      ...mapRegistration(row)!,
-    })))
-    const withdrawal = singleByTaskId(withdrawalRows.map((row) => ({
-      taskId: text(row.task_id),
-      ...mapWithdrawal(row)!,
-    })))
-    const transfer = singleByTaskId(transferRows.map((row) => ({
-      taskId: text(row.task_id),
-      ...mapTransfer(row)!,
-    })))
-    const wordRetest = singleByTaskId(wordRetestRows.map((row) => ({
-      taskId: text(row.task_id),
-      ...mapWordRetest(row)!,
-    })))
-
-    const data = {
-      tasks: taskRows
-        .map((row) => mapTask(row, profiles, registration, withdrawal, transfer, wordRetest, comments, attachments, events))
-        .sort((left, right) => (
-          String(right.updatedAt || right.createdAt).localeCompare(String(left.updatedAt || left.createdAt))
-        )),
-      ...buildOpsTaskWorkspaceOptionData(profileRows, studentRows, classRows, textbookRows, teacherRows),
+      tasks: response.page.rows,
       schemaReady: true,
       error: null,
+      page: response.page,
+      stats: response.stats,
+      registrationRuntime: response.registrationRuntime,
     }
-    return data
   } catch (error) {
     if (isMissingRelationError(error)) {
       return {
@@ -1800,58 +1959,94 @@ async function readOpsTaskWorkspaceData(
 export async function loadOpsTaskById(taskId: string): Promise<OpsTask | null> {
   if (!supabase || !text(taskId)) return null
 
-  const taskResult = await supabase.from("ops_tasks").select("*").eq("id", taskId).limit(1)
+  const taskResult = await supabase
+    .from("ops_tasks")
+    .select("id,title,type,status,priority,requested_by,requested_team,assignee_id,assignee_team,secondary_assignee_id,student_id,student_name,class_id,class_name,textbook_id,textbook_title,campus,subject,start_at,due_at,completed_at,memo,created_at,updated_at")
+    .abortSignal(AbortSignal.timeout(8_000))
+    .eq("id", taskId)
+    .single()
+    .retry(false)
   if (taskResult.error) {
-    if (isMissingRelationError(taskResult.error)) return null
+    if (isMissingRelationError(taskResult.error) || text(taskResult.error.code) === "PGRST116") return null
     throw taskResult.error
   }
 
-  const taskRows = (taskResult.data || []) as unknown as Row[]
-  if (taskRows.length === 0) return null
-
-  const taskIds = [taskId]
-  const [
-    profileRows,
-    registrationRows,
-    withdrawalRows,
-    transferRows,
-    wordRetestRows,
-    commentRows,
-    attachmentRows,
-    eventRows,
-  ] = await Promise.all([
-    readTable("profiles", "id,name,email,role,login_id", true),
-    readTaskScopedTable("ops_registration_details", taskIds),
-    readTaskScopedTable("ops_withdrawal_details", taskIds),
-    readTaskScopedTable("ops_transfer_details", taskIds),
-    readTaskScopedTable("ops_word_retests", taskIds),
-    readTaskScopedTable("ops_task_comments", taskIds),
-    readTaskScopedTable("ops_task_attachments", taskIds),
-    readTaskScopedTable("ops_task_events", taskIds),
+  const taskRow = taskResult.data as unknown as Row
+  const taskType = normalizeType(taskRow.type)
+  const detailPromise = taskType === "registration"
+    ? supabase.from("ops_registration_details")
+      .select("task_id,pipeline_status,inquiry_at,school_grade,school_name,parent_phone,student_phone,level_test_at,level_test_completed_at,level_test_result,level_test_place,level_test_material_link,counselor,phone_consultation_at,visit_consultation_at,consultation_at,class_start_date,class_start_session,textbook_preparation,visit_consultation_place,textbook_ready,timetable_roster_updated,admission_notice_sent,payment_checked,makeedu_registered,makeedu_invoice_sent,textbook_billing_issued,request_note")
+      .abortSignal(AbortSignal.timeout(8_000)).eq("task_id", taskId).single().retry(false)
+    : taskType === "withdrawal"
+      ? supabase.from("ops_withdrawal_details")
+        .select("task_id,school_grade,teacher_name,withdrawal_date,withdrawal_session,customer_reason,teacher_opinion,undistributed_textbooks,completed_lesson_hours,four_week_lesson_hours,timetable_roster_updated,makeedu_withdrawal_done,fee_processed,textbook_fee_processed")
+        .abortSignal(AbortSignal.timeout(8_000)).eq("task_id", taskId).single().retry(false)
+      : taskType === "transfer"
+        ? supabase.from("ops_transfer_details")
+          .select("task_id,transfer_reason,from_class_id,to_class_id,from_teacher_name,to_teacher_name,from_class_name,to_class_name,from_class_end_date,from_class_end_session,to_class_start_date,to_class_start_session,from_undistributed_textbooks,to_undistributed_textbooks,timetable_roster_updated,makeedu_transfer_done,fee_processed,textbook_fee_processed")
+          .abortSignal(AbortSignal.timeout(8_000)).eq("task_id", taskId).single().retry(false)
+        : taskType === "word_retest"
+          ? supabase.from("ops_word_retests")
+            .select("task_id,retry_of_task_id,retry_task_id,branch,teacher_catalog_id,teacher_name,class_name,student_name,test_at,expected_retest_at,textbook_name,unit,request_note,total_question_count,score_out_of_100,cutoff_question_count,first_score,second_score,third_score,retest_status")
+            .abortSignal(AbortSignal.timeout(8_000)).eq("task_id", taskId).single().retry(false)
+          : Promise.resolve({ data: null, error: null })
+  const [detailResult, commentResult, attachmentResult, eventResult] = await Promise.all([
+    detailPromise,
+    supabase.from("ops_task_comments")
+      .select("id,task_id,author_id,body,created_at").eq("task_id", taskId).order("created_at").order("id").limit(30)
+      .abortSignal(AbortSignal.timeout(8_000)).retry(false),
+    supabase.from("ops_task_attachments")
+      .select("id,task_id,file_name,file_kind,drive_file_id,drive_link,uploaded_by,uploaded_at").eq("task_id", taskId).order("uploaded_at").order("id").limit(30)
+      .abortSignal(AbortSignal.timeout(8_000)).retry(false),
+    supabase.from("ops_task_events")
+      .select("id,task_id,actor_id,event_type,field_name,before_value,after_value,created_at").eq("task_id", taskId).order("created_at", { ascending: false }).order("id").limit(30)
+      .abortSignal(AbortSignal.timeout(8_000)).retry(false),
   ])
+  if (detailResult.error && text(detailResult.error.code) !== "PGRST116") throw detailResult.error
+  if (commentResult.error) throw commentResult.error
+  if (attachmentResult.error) throw attachmentResult.error
+  if (eventResult.error) throw eventResult.error
+
+  const detailRows = detailResult.data ? [detailResult.data as unknown as Row] : []
+  const commentRows = (commentResult.data || []) as unknown as Row[]
+  const attachmentRows = (attachmentResult.data || []) as unknown as Row[]
+  const eventRows = (eventResult.data || []) as unknown as Row[]
+  const profileIds = [...new Set([
+    taskRow.requested_by, taskRow.assignee_id, taskRow.secondary_assignee_id,
+    ...commentRows.map((row) => row.author_id),
+    ...attachmentRows.map((row) => row.uploaded_by),
+    ...eventRows.map((row) => row.actor_id),
+  ].map(text).filter(Boolean))]
+  const profileResult = profileIds.length === 0
+    ? { data: [], error: null }
+    : await supabase.from("profiles")
+      .select("id,name,email,role,login_id").in("id", profileIds).order("id").limit(30)
+      .abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  if (profileResult.error) throw profileResult.error
+  const profileRows = (profileResult.data || []) as unknown as Row[]
 
   const profiles = buildProfileLookup(profileRows)
   const comments = byTaskId(commentRows.map((row) => mapComment(row, profiles)))
   const attachments = byTaskId(attachmentRows.map((row) => mapAttachment(row, profiles)))
   const events = byTaskId(eventRows.map((row) => mapEvent(row, profiles)))
-  const registration = singleByTaskId(registrationRows.map((row) => ({
+  const registration = singleByTaskId((taskType === "registration" ? detailRows : []).map((row) => ({
     taskId: text(row.task_id),
     ...mapRegistration(row)!,
   })))
-  const withdrawal = singleByTaskId(withdrawalRows.map((row) => ({
+  const withdrawal = singleByTaskId((taskType === "withdrawal" ? detailRows : []).map((row) => ({
     taskId: text(row.task_id),
     ...mapWithdrawal(row)!,
   })))
-  const transfer = singleByTaskId(transferRows.map((row) => ({
+  const transfer = singleByTaskId((taskType === "transfer" ? detailRows : []).map((row) => ({
     taskId: text(row.task_id),
     ...mapTransfer(row)!,
   })))
-  const wordRetest = singleByTaskId(wordRetestRows.map((row) => ({
+  const wordRetest = singleByTaskId((taskType === "word_retest" ? detailRows : []).map((row) => ({
     taskId: text(row.task_id),
     ...mapWordRetest(row)!,
   })))
 
-  return mapTask(taskRows[0], profiles, registration, withdrawal, transfer, wordRetest, comments, attachments, events)
+  return mapTask(taskRow, profiles, registration, withdrawal, transfer, wordRetest, comments, attachments, events)
 }
 
 export function loadOpsRegistrationCaseDetail(
