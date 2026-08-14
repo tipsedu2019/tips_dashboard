@@ -613,12 +613,15 @@ function nearestBindingIdentifier(scope, name, use) {
   for (const identifier of scopeBindings(scope).get(name) ?? []) {
     if (isVisibleBindingAt(identifier, use, scope) && (!nearest || identifier.pos > nearest.pos)) nearest = identifier
   }
-  return nearest
+  if (!nearest || !isFunctionScopedBinding(nearest)) return nearest
+  return (scopeBindings(scope).get(name) ?? []).find(isFunctionScopedBinding) ?? nearest
 }
 
 function assignmentBindingKey(assignment, target, scope) {
   return ts.isVariableDeclaration(assignment.node)
-    ? target
+    ? (isFunctionScopedBinding(target)
+        ? (scopeBindings(scope).get(target.text) ?? []).find(isFunctionScopedBinding) ?? target
+        : target)
     : nearestBindingIdentifier(scope, target.text, target) ?? `unbound:${target.text}`
 }
 
@@ -1093,6 +1096,8 @@ function queryControlFlowAncestry(query, scope, sourceFile) {
       ancestry.push(`try:${branch}`)
     } else if (ts.isCatchClause(parent)) {
       ancestry.push("catch")
+    } else if (ts.isBlock(parent) && (ts.isBlock(parent.parent) || ts.isSourceFile(parent.parent))) {
+      ancestry.push("block")
     }
   }
   return ancestry.reverse()
@@ -1103,6 +1108,7 @@ function controlFlowSiblingOrdinal(node, sourceFile) {
   if (!parent || (!ts.isBlock(parent) && !ts.isSourceFile(parent))) return 0
   const normalize = (value) => value.getText(sourceFile).replace(/\s+/gu, " ")
   const identity = (candidate) => {
+    if (ts.isBlock(candidate)) return "block"
     if (ts.isIfStatement(candidate)) return `if:${normalize(candidate.expression)}`
     if (ts.isForStatement(candidate)) return `for:${candidate.condition ? normalize(candidate.condition) : "<none>"}`
     if (ts.isForInStatement(candidate) || ts.isForOfStatement(candidate)) {
@@ -1131,7 +1137,8 @@ function queryControlFlowStructure(query, scope, sourceFile) {
   for (let parent = child.parent; parent && parent !== scope; child = parent, parent = parent.parent) {
     if (ts.isIfStatement(parent) || ts.isForStatement(parent) || ts.isForInStatement(parent)
       || ts.isForOfStatement(parent) || ts.isWhileStatement(parent) || ts.isDoStatement(parent)
-      || ts.isTryStatement(parent) || ts.isSwitchStatement(parent)) {
+      || ts.isTryStatement(parent) || ts.isSwitchStatement(parent)
+      || (ts.isBlock(parent) && (ts.isBlock(parent.parent) || ts.isSourceFile(parent.parent)))) {
       structure.push(controlFlowSiblingOrdinal(parent, sourceFile))
     }
   }

@@ -2009,6 +2009,25 @@ test("var aliases use function scope while receiver provenance uses the assignme
   ])
 })
 
+test("repeated var RPC declarations share one function-scoped provenance binding", async () => {
+  const result = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, helper, parameters, enabled) {
+  var rpc = client.rpc.bind(client)
+  if (enabled) {
+    var rpc = helper
+  }
+  return rpc("save_class_lesson_session_v1", parameters)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations.map((violation) => violation.reason), [
+    "list_query_receiver_unresolved",
+  ])
+})
+
 test("occurrence identity distinguishes identical control-flow siblings and ignores unrelated insertion", async () => {
   const file = "src/features/tasks/list-tasks.ts"
   const query = `client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)`
@@ -2054,6 +2073,67 @@ test("occurrence identity distinguishes identical control-flow siblings and igno
   if (enabled) {
     const marker = 1
     return ${query}
+  }
+}
+`,
+    debtManifest,
+  })
+  assert.ok(moved.violations.some((violation) => violation.reason === "list_select_star"))
+})
+
+test("occurrence identity distinguishes structurally identical standalone block siblings", async () => {
+  const file = "src/features/tasks/list-tasks.ts"
+  const query = `client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)`
+  const baselineSource = `async function load(client, enabled) {
+  {
+    if (enabled) {
+      const marker = 1
+      return ${query}
+    }
+  }
+  {
+    if (enabled) {
+      const marker = 1
+      return null
+    }
+  }
+}
+`
+  const baselineViolation = inspectQuerySurfaceSource({ surface: "tasks", file, source: baselineSource })
+    .find((violation) => violation.reason === "list_select_star")
+  const debtManifest = (baselineSha) => [{
+    surface: "tasks",
+    file,
+    symbol: "load",
+    violation: "list_select_star",
+    baselineSha,
+    fingerprint: baselineViolation.fingerprint,
+    occurrenceFingerprint: baselineViolation.occurrenceFingerprint,
+  }]
+
+  const inserted = await verifyFixture({
+    file,
+    baselineSource,
+    source: baselineSource.replace("  {", "  const harmless = true\n  {"),
+    debtManifest,
+  })
+  assert.deepEqual(inserted, { ok: true, violations: [] })
+
+  const moved = await verifyFixture({
+    file,
+    baselineSource,
+    source: `async function load(client, enabled) {
+  {
+    if (enabled) {
+      const marker = 1
+      return null
+    }
+  }
+  {
+    if (enabled) {
+      const marker = 1
+      return ${query}
+    }
   }
 }
 `,
