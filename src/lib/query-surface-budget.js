@@ -333,10 +333,23 @@ function isWriteTarget(target, name) {
   return false
 }
 
+function isFunctionScopedBinding(declaration) {
+  const node = ts.isIdentifier(declaration) && ts.isVariableDeclaration(declaration.parent)
+    ? declaration.parent
+    : declaration
+  return ts.isParameter(node) || (ts.isVariableDeclaration(node) && ts.isVariableDeclarationList(node.parent)
+    && (node.parent.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0)
+}
+
 function isVisibleBindingAt(declaration, use, scope) {
-  if (!use || declaration.pos >= use.pos) return false
-  for (let parent = declaration.parent; parent && parent !== scope; parent = parent.parent) {
-    if (ts.isBlock(parent) && !(parent.pos <= use.pos && use.end <= parent.end)) return false
+  const binding = ts.isIdentifier(declaration) && ts.isVariableDeclaration(declaration.parent)
+    ? declaration.parent
+    : declaration
+  const functionScoped = isFunctionScopedBinding(declaration)
+  if (!use || (!functionScoped && binding.pos >= use.pos)) return false
+  for (let parent = binding.parent; parent && parent !== scope; parent = parent.parent) {
+    if (!functionScoped && (ts.isBlock(parent) || ts.isCatchClause(parent))
+      && !(parent.pos <= use.pos && use.end <= parent.end)) return false
   }
   return true
 }
@@ -367,27 +380,32 @@ function rootIdentifier(expression) {
   return ts.isIdentifier(value) ? value.text : null
 }
 
-function isTrustedReceiver(expression, aliases) {
+function bindingAlias(map, expression, scope, use = expression) {
+  const value = unwrap(expression)
+  if (!ts.isIdentifier(value)) return null
+  return map.get(nearestBindingIdentifier(scope, value.text, use) ?? `unbound:${value.text}`) ?? null
+}
+
+function isTrustedReceiver(expression, aliases, scope, use = expression) {
   const identifier = rootIdentifier(expression)
   if (identifier === "Array") return false
-  if (identifier && aliases.has(identifier)) return true
+  if (identifier && bindingAlias(aliases, unwrap(expression), scope, use)) return true
   return null
 }
 
-function receiverOrigin(expression, aliases) {
-  const identifier = rootIdentifier(expression)
-  return identifier ? aliases.get(identifier) ?? null : null
+function receiverOrigin(expression, aliases, scope, use = expression) {
+  return bindingAlias(aliases, unwrap(expression), scope, use)
 }
 
-function sameTrustedReceiver(left, right, aliases) {
-  const leftReceiver = receiverOrigin(left, aliases)
-  const rightReceiver = receiverOrigin(right, aliases)
+function sameTrustedReceiver(left, right, aliases, scope, use = left) {
+  const leftReceiver = receiverOrigin(left, aliases, scope, use)
+  const rightReceiver = receiverOrigin(right, aliases, scope, use)
   return Boolean(leftReceiver && rightReceiver && !leftReceiver.unresolved && !rightReceiver.unresolved
     && leftReceiver.origin === rightReceiver.origin)
 }
 
-function sameReceiverOrigin(receiver, expression, aliases) {
-  const other = receiverOrigin(expression, aliases)
+function sameReceiverOrigin(receiver, expression, aliases, scope, use = expression) {
+  const other = receiverOrigin(expression, aliases, scope, use)
   return Boolean(receiver && other && !receiver.unresolved && !other.unresolved && receiver.origin === other.origin)
 }
 
@@ -497,17 +515,17 @@ function methodTarget(expression) {
   }
 }
 
-function queryFunctionMethod(expression, aliases) {
+function queryFunctionMethod(expression, aliases, scope, use = expression) {
   const invocation = methodTarget(expression)
   if (!invocation || !["call", "apply"].includes(invocation.method)) return null
   const target = methodTarget(invocation.receiver)
   if (!target || (!target.computed && !["from", "rpc"].includes(target.method))
     || (target.method !== null && !["from", "rpc"].includes(target.method))
-    || !isTrustedReceiver(target.receiver, aliases)) return null
+    || !isTrustedReceiver(target.receiver, aliases, scope, use)) return null
   return {
     invocation: invocation.method,
     method: target.method,
-    receiver: receiverOrigin(target.receiver, aliases),
+    receiver: receiverOrigin(target.receiver, aliases, scope, use),
   }
 }
 
@@ -520,10 +538,10 @@ function functionPrototypeInvocation(expression) {
     : null
 }
 
-function sameQueryMethodReference(expression, descriptor, aliases) {
+function sameQueryMethodReference(expression, descriptor, aliases, scope, use = expression) {
   const target = methodTarget(unwrap(expression))
   return Boolean(target && target.method === descriptor.method
-    && sameReceiverOrigin(descriptor.receiver, target.receiver, aliases))
+    && sameReceiverOrigin(descriptor.receiver, target.receiver, aliases, scope, use))
 }
 
 function sameMethodAlias(left, right) {
@@ -534,6 +552,31 @@ function sameMethodAlias(left, right) {
     && left.invocation === right.invocation && left.bound === right.bound && left.unresolved === right.unresolved
     && leftArguments.length === rightArguments.length
     && leftArguments.every((value, index) => value !== null && value === rightArguments[index]))
+}
+
+function mergeAliasBranches(left, right, equal, unresolved) {
+  if (!left && !right) return null
+  if (left && right && equal(left, right)) return left
+  return unresolved(left ?? right)
+}
+
+function resolveConditionalAlias(expression, resolve, equal, unresolved) {
+  const value = unwrap(expression)
+  if (!ts.isConditionalExpression(value)) return resolve(value)
+  return mergeAliasBranches(
+    resolveConditionalAlias(value.whenTrue, resolve, equal, unresolved),
+    resolveConditionalAlias(value.whenFalse, resolve, equal, unresolved),
+    equal,
+    unresolved,
+  )
+}
+
+function unresolvedMethodAlias(candidate) {
+  return {
+    ...candidate,
+    receiver: { origin: null, unresolved: true },
+    unresolved: true,
+  }
 }
 
 function bindingIdentifiers(name) {
@@ -573,11 +616,10 @@ function nearestBindingIdentifier(scope, name, use) {
   return nearest
 }
 
-function assignmentTargetsBindingAtUse(assignment, target, use, scope) {
-  const declaredTarget = ts.isVariableDeclaration(assignment.node)
+function assignmentBindingKey(assignment, target, scope) {
+  return ts.isVariableDeclaration(assignment.node)
     ? target
-    : nearestBindingIdentifier(scope, target.text, target)
-  return declaredTarget === nearestBindingIdentifier(scope, target.text, use)
+    : nearestBindingIdentifier(scope, target.text, target) ?? `unbound:${target.text}`
 }
 
 function boundArgumentKey(argument, scope, use) {
@@ -602,115 +644,169 @@ function assignOrderedAlias(map, name, next, conditional) {
   })
 }
 
-function assignReceiverAlias(aliases, name, next, conditional) {
+function assignReceiverAlias(aliases, key, next, conditional, trustedName = false) {
   if (!conditional) {
-    if (next) aliases.set(name, next)
-    else if (["client", "supabase", "db"].includes(name)) aliases.set(name, { origin: null, unresolved: true })
-    else aliases.delete(name)
+    if (next) aliases.set(key, next)
+    else if (trustedName) aliases.set(key, { origin: null, unresolved: true })
+    else aliases.delete(key)
     return
   }
-  const previous = aliases.get(name)
+  const previous = aliases.get(key)
   if (!previous && !next) return
   if (previous && next && previous.origin === next.origin && previous.unresolved === next.unresolved) return
-  aliases.set(name, { origin: null, unresolved: true })
+  aliases.set(key, { origin: null, unresolved: true })
 }
 
 function aliasProvenanceAt(assignments, use, scope) {
   const aliases = new Map([
-    ["client", { origin: "client", unresolved: false }],
-    ["supabase", { origin: "supabase", unresolved: false }],
-    ["db", { origin: "db", unresolved: false }],
+    ["unbound:client", { origin: "client", unresolved: false }],
+    ["unbound:supabase", { origin: "supabase", unresolved: false }],
+    ["unbound:db", { origin: "db", unresolved: false }],
   ])
+  for (const name of ["client", "supabase", "db"]) {
+    for (const identifier of scopeBindings(scope).get(name) ?? []) {
+      if (ts.isParameter(identifier.parent)) aliases.set(identifier, { origin: name, unresolved: false })
+    }
+  }
   const boundMethods = new Map()
   const detachedMethods = new Map()
   const applyAliases = new Map()
   const invocationMethods = new Map()
+  const prototypeInvocations = new Map()
   for (const assignment of assignments) {
     if (assignment.pos > use.pos) break
     const initializer = unwrap(assignment.initializer)
     const conditional = isConditionalExecution(assignment.node, scope)
     const destructured = destructuredAliasTargets(assignment.target)
     if (destructured.length > 0) {
-      const receiver = receiverOrigin(initializer, aliases)
+      const receiver = receiverOrigin(initializer, aliases, scope, assignment.node)
       for (const target of destructured) {
-        if (!assignmentTargetsBindingAtUse(assignment, target.identifier, use, scope)) continue
+        const key = assignmentBindingKey(assignment, target.identifier, scope)
         const detached = receiver && (["from", "rpc"].includes(target.property) || (target.computed && target.property === null))
           ? { method: target.property, receiver }
           : null
-        assignOrderedAlias(detachedMethods, target.name, detached, conditional)
-        assignOrderedAlias(boundMethods, target.name, null, conditional)
-        assignOrderedAlias(applyAliases, target.name, null, conditional)
-        assignOrderedAlias(invocationMethods, target.name, null, conditional)
+        assignOrderedAlias(detachedMethods, key, detached, conditional)
+        assignOrderedAlias(boundMethods, key, null, conditional)
+        assignOrderedAlias(applyAliases, key, null, conditional)
+        assignOrderedAlias(invocationMethods, key, null, conditional)
+        assignOrderedAlias(prototypeInvocations, key, null, conditional)
       }
       continue
     }
     if (!ts.isIdentifier(assignment.target)) continue
-    if (!assignmentTargetsBindingAtUse(assignment, assignment.target, use, scope)) continue
     const name = assignment.target.text
-    const copiedReceiver = ts.isIdentifier(initializer) ? aliases.get(initializer.text) ?? null : null
-    assignReceiverAlias(aliases, name, copiedReceiver, conditional)
+    const key = assignmentBindingKey(assignment, assignment.target, scope)
+    const resolveReceiver = (value) => ts.isIdentifier(value)
+      ? bindingAlias(aliases, value, scope, assignment.node)
+      : null
+    const copiedReceiver = resolveConditionalAlias(initializer, resolveReceiver,
+      (left, right) => left.origin === right.origin && left.unresolved === right.unresolved,
+      () => ({ origin: null, unresolved: true }))
+    assignReceiverAlias(aliases, key, copiedReceiver, conditional, ["client", "supabase", "db"].includes(name))
 
-    const bindAccess = ts.isCallExpression(initializer) && callMethod(initializer) === "bind" ? accessParts(initializer) : null
-    const bindTarget = bindAccess ? methodTarget(bindAccess.receiver) : null
-    const bound = bindTarget && (["from", "rpc"].includes(bindTarget.method) || (bindTarget.computed && bindTarget.method === null))
-      && isTrustedReceiver(bindTarget.receiver, aliases)
-      ? {
+    const resolveBound = (value) => {
+      const bindAccess = ts.isCallExpression(value) && callMethod(value) === "bind" ? accessParts(value) : null
+      const bindTarget = bindAccess ? methodTarget(bindAccess.receiver) : null
+      if (bindTarget && (["from", "rpc"].includes(bindTarget.method) || (bindTarget.computed && bindTarget.method === null))
+        && isTrustedReceiver(bindTarget.receiver, aliases, scope, assignment.node)) {
+        return {
           method: bindTarget.method,
-          receiver: sameTrustedReceiver(bindTarget.receiver, initializer.arguments[0], aliases)
-            ? receiverOrigin(bindTarget.receiver, aliases)
+          receiver: sameTrustedReceiver(bindTarget.receiver, value.arguments[0], aliases, scope, assignment.node)
+            ? receiverOrigin(bindTarget.receiver, aliases, scope, assignment.node)
             : { origin: null, unresolved: true },
-          entryArguments: [...initializer.arguments].slice(1),
-          entryArgumentKeys: [...initializer.arguments].slice(1).map((argument) => boundArgumentKey(argument, scope, assignment.node)),
+          entryArguments: [...value.arguments].slice(1),
+          entryArgumentKeys: [...value.arguments].slice(1).map((argument) => boundArgumentKey(argument, scope, assignment.node)),
         }
-      : (ts.isIdentifier(initializer) ? boundMethods.get(initializer.text) ?? null : null)
-    assignOrderedAlias(boundMethods, name, bound, conditional)
+      }
+      return ts.isIdentifier(value) ? bindingAlias(boundMethods, value, scope, assignment.node) : null
+    }
+    const bound = resolveConditionalAlias(initializer, resolveBound, sameMethodAlias, unresolvedMethodAlias)
+    assignOrderedAlias(boundMethods, key, bound, conditional)
 
-    const target = methodTarget(initializer)
-    const detached = target && (["from", "rpc"].includes(target.method) || (target.computed && target.method === null))
-      && isTrustedReceiver(target.receiver, aliases)
-      ? { method: target.method, receiver: receiverOrigin(target.receiver, aliases) }
-      : (ts.isIdentifier(initializer) ? detachedMethods.get(initializer.text) ?? null : null)
-    assignOrderedAlias(detachedMethods, name, detached, conditional)
+    const resolveDetached = (value) => {
+      const target = methodTarget(value)
+      if (target && (["from", "rpc"].includes(target.method) || (target.computed && target.method === null))
+        && isTrustedReceiver(target.receiver, aliases, scope, assignment.node)) {
+        return { method: target.method, receiver: receiverOrigin(target.receiver, aliases, scope, assignment.node) }
+      }
+      return ts.isIdentifier(value) ? bindingAlias(detachedMethods, value, scope, assignment.node) : null
+    }
+    const detached = resolveConditionalAlias(initializer, resolveDetached, sameMethodAlias, unresolvedMethodAlias)
+    assignOrderedAlias(detachedMethods, key, detached, conditional)
 
-    const directInvocation = queryFunctionMethod(initializer, aliases)
-    const boundInvocation = bindAccess && queryFunctionMethod(bindAccess.receiver, aliases)
-    const prototypeInvocation = bindAccess && functionPrototypeInvocation(bindAccess.receiver)
-    const prototypeTarget = prototypeInvocation && initializer.arguments[0]
-      ? methodTarget(unwrap(initializer.arguments[0]))
-      : null
-    const prototypeBoundInvocation = prototypeTarget
-      && (prototypeTarget.method === null || ["from", "rpc"].includes(prototypeTarget.method))
-      && isTrustedReceiver(prototypeTarget.receiver, aliases)
-      ? {
+    const resolvePrototypeInvocation = (value) => {
+      const invocation = functionPrototypeInvocation(value)
+      if (invocation) return { invocation, unresolved: false }
+      return ts.isIdentifier(value) ? bindingAlias(prototypeInvocations, value, scope, assignment.node) : null
+    }
+    const prototypeAlias = resolveConditionalAlias(initializer, resolvePrototypeInvocation,
+      (left, right) => left.invocation === right.invocation && left.unresolved === right.unresolved,
+      (candidate) => ({ ...candidate, unresolved: true }))
+    assignOrderedAlias(prototypeInvocations, key, prototypeAlias, conditional)
+
+    const resolveInvocation = (value) => {
+      const directInvocation = queryFunctionMethod(value, aliases, scope, assignment.node)
+      if (directInvocation) return { ...directInvocation, bound: false }
+      const bindAccess = ts.isCallExpression(value) && callMethod(value) === "bind" ? accessParts(value) : null
+      const boundInvocation = bindAccess && queryFunctionMethod(bindAccess.receiver, aliases, scope, assignment.node)
+      if (boundInvocation && sameQueryMethodReference(value.arguments[0], boundInvocation, aliases, scope, assignment.node)) {
+        return { ...boundInvocation, bound: true }
+      }
+      const prototypeInvocation = bindAccess && (functionPrototypeInvocation(bindAccess.receiver)
+        ?? (ts.isIdentifier(bindAccess.receiver)
+          ? bindingAlias(prototypeInvocations, bindAccess.receiver, scope, assignment.node)?.invocation
+          : null))
+      const prototypeDescriptor = bindAccess && ts.isIdentifier(bindAccess.receiver)
+        ? bindingAlias(prototypeInvocations, bindAccess.receiver, scope, assignment.node)
+        : null
+      const prototypeTarget = prototypeInvocation && value.arguments[0]
+      const targetDescriptor = prototypeTarget && ts.isIdentifier(unwrap(prototypeTarget))
+        ? bindingAlias(detachedMethods, unwrap(prototypeTarget), scope, assignment.node)
+        : (() => {
+            const target = prototypeTarget ? methodTarget(unwrap(prototypeTarget)) : null
+            return target && (target.method === null || ["from", "rpc"].includes(target.method))
+              && isTrustedReceiver(target.receiver, aliases, scope, assignment.node)
+              ? { method: target.method, receiver: receiverOrigin(target.receiver, aliases, scope, assignment.node) }
+              : null
+          })()
+      if (targetDescriptor) {
+        return {
           invocation: prototypeInvocation,
-          method: prototypeTarget.method,
-          receiver: receiverOrigin(prototypeTarget.receiver, aliases),
+          method: targetDescriptor.method,
+          receiver: prototypeDescriptor?.unresolved
+            ? { origin: null, unresolved: true }
+            : targetDescriptor.receiver,
           bound: true,
+          unresolved: Boolean(prototypeDescriptor?.unresolved),
         }
-      : null
-    const invocation = directInvocation
-      ? { ...directInvocation, bound: false }
-      : (boundInvocation && sameQueryMethodReference(initializer.arguments[0], boundInvocation, aliases)
-          ? { ...boundInvocation, bound: true }
-          : (prototypeBoundInvocation
-              ?? (ts.isIdentifier(initializer) ? invocationMethods.get(initializer.text) ?? null : null)))
-    assignOrderedAlias(invocationMethods, name, invocation, conditional)
+      }
+      return ts.isIdentifier(value) ? bindingAlias(invocationMethods, value, scope, assignment.node) : null
+    }
+    const invocation = resolveConditionalAlias(initializer, resolveInvocation, sameMethodAlias, unresolvedMethodAlias)
+    assignOrderedAlias(invocationMethods, key, invocation, conditional)
 
-    const directApply = target && target.method === "apply" && rootIdentifier(target.receiver) === "Reflect"
-    const boundReflectApply = bindAccess && methodTarget(bindAccess.receiver)?.method === "apply"
-      && rootIdentifier(methodTarget(bindAccess.receiver)?.receiver) === "Reflect"
-      && rootIdentifier(initializer.arguments[0]) === "Reflect"
-    const apply = directApply || boundReflectApply ? { unresolved: false }
-      : (ts.isIdentifier(initializer) ? applyAliases.get(initializer.text) ?? null : null)
-    assignOrderedAlias(applyAliases, name, apply, conditional)
+    const resolveApply = (value) => {
+      const target = methodTarget(value)
+      const bindAccess = ts.isCallExpression(value) && callMethod(value) === "bind" ? accessParts(value) : null
+      const directApply = target && target.method === "apply" && rootIdentifier(target.receiver) === "Reflect"
+      const boundReflectApply = bindAccess && methodTarget(bindAccess.receiver)?.method === "apply"
+        && rootIdentifier(methodTarget(bindAccess.receiver)?.receiver) === "Reflect"
+        && rootIdentifier(value.arguments[0]) === "Reflect"
+      if (directApply || boundReflectApply) return { unresolved: false }
+      return ts.isIdentifier(value) ? bindingAlias(applyAliases, value, scope, assignment.node) : null
+    }
+    const apply = resolveConditionalAlias(initializer, resolveApply,
+      (left, right) => left.unresolved === right.unresolved,
+      () => ({ unresolved: true }))
+    assignOrderedAlias(applyAliases, key, apply, conditional)
   }
   return { aliases, boundMethods, detachedMethods, applyAliases, invocationMethods }
 }
 
-function reflectedQueryEntry(call, aliases, boundMethods, detachedMethods, applyAliases) {
+function reflectedQueryEntry(call, aliases, boundMethods, detachedMethods, applyAliases, scope) {
   const access = accessParts(call)
   const directApply = access?.method === "apply" && rootIdentifier(access.receiver) === "Reflect"
-  const applyAlias = ts.isIdentifier(call.expression) ? applyAliases.get(call.expression.text) : null
+  const applyAlias = ts.isIdentifier(call.expression) ? bindingAlias(applyAliases, call.expression, scope, call) : null
   const aliasedApply = Boolean(applyAlias)
   if ((!directApply && !aliasedApply) || call.arguments.length !== 3) return null
   const target = unwrap(call.arguments[0])
@@ -718,15 +814,15 @@ function reflectedQueryEntry(call, aliases, boundMethods, detachedMethods, apply
   const entryArguments = ts.isArrayLiteralExpression(argumentList) && !argumentList.elements.some(ts.isSpreadElement)
     ? [...argumentList.elements]
     : []
-  if (ts.isIdentifier(target) && boundMethods.has(target.text)) {
-    const bound = boundMethods.get(target.text)
+  if (ts.isIdentifier(target) && bindingAlias(boundMethods, target, scope, call)) {
+    const bound = bindingAlias(boundMethods, target, scope, call)
     return { directMethod: bound.method, receiverUnresolved: Boolean(bound.receiver?.unresolved || applyAlias?.unresolved), entryArguments: [...bound.entryArguments, ...entryArguments] }
   }
-  if (ts.isIdentifier(target) && detachedMethods.has(target.text)) {
-    const detached = detachedMethods.get(target.text)
+  if (ts.isIdentifier(target) && bindingAlias(detachedMethods, target, scope, call)) {
+    const detached = bindingAlias(detachedMethods, target, scope, call)
     return {
       directMethod: detached.method,
-      receiverUnresolved: Boolean(applyAlias?.unresolved || !sameReceiverOrigin(detached.receiver, call.arguments[1], aliases)),
+      receiverUnresolved: Boolean(applyAlias?.unresolved || !sameReceiverOrigin(detached.receiver, call.arguments[1], aliases, scope, call)),
       entryArguments,
     }
   }
@@ -738,12 +834,12 @@ function reflectedQueryEntry(call, aliases, boundMethods, detachedMethods, apply
       : null)
   if (!["from", "rpc"].includes(targetMethod)) return null
   const receiver = unwrap(target.expression)
-  if (!isTrustedReceiver(receiver, aliases)) return null
+  if (!isTrustedReceiver(receiver, aliases, scope, call)) return null
   return { directMethod: targetMethod, receiverUnresolved: Boolean(applyAlias?.unresolved
-    || !sameTrustedReceiver(receiver, call.arguments[1], aliases)), entryArguments }
+    || !sameTrustedReceiver(receiver, call.arguments[1], aliases, scope, call)), entryArguments }
 }
 
-function functionInvocationQueryEntry(call, aliases, boundMethods, detachedMethods) {
+function functionInvocationQueryEntry(call, aliases, boundMethods, detachedMethods, scope) {
   const invocation = accessParts(call)
   if (!["call", "apply"].includes(invocation?.method) || call.arguments.length === 0) return null
   const target = unwrap(invocation.receiver)
@@ -751,14 +847,14 @@ function functionInvocationQueryEntry(call, aliases, boundMethods, detachedMetho
   let receiver = null
   let isBound = false
   let preboundArguments = []
-  if (ts.isIdentifier(target) && boundMethods.has(target.text)) {
-    const bound = boundMethods.get(target.text)
+  if (ts.isIdentifier(target) && bindingAlias(boundMethods, target, scope, call)) {
+    const bound = bindingAlias(boundMethods, target, scope, call)
     method = bound.method
     isBound = true
     preboundArguments = bound.entryArguments
     receiver = bound.receiver
-  } else if (ts.isIdentifier(target) && detachedMethods.has(target.text)) {
-    const detached = detachedMethods.get(target.text)
+  } else if (ts.isIdentifier(target) && bindingAlias(detachedMethods, target, scope, call)) {
+    const detached = bindingAlias(detachedMethods, target, scope, call)
     method = detached.method
     receiver = detached.receiver
   } else if (ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target)) {
@@ -768,8 +864,8 @@ function functionInvocationQueryEntry(call, aliases, boundMethods, detachedMetho
         ? target.argumentExpression.text
         : null)
     const targetReceiver = unwrap(target.expression)
-    if (!isTrustedReceiver(targetReceiver, aliases) || (method !== null && !["from", "rpc"].includes(method))) return null
-    receiver = receiverOrigin(targetReceiver, aliases)
+    if (!isTrustedReceiver(targetReceiver, aliases, scope, call) || (method !== null && !["from", "rpc"].includes(method))) return null
+    receiver = receiverOrigin(targetReceiver, aliases, scope, call)
   } else {
     return null
   }
@@ -784,14 +880,14 @@ function functionInvocationQueryEntry(call, aliases, boundMethods, detachedMetho
       })()
   return {
     directMethod: method,
-    receiverUnresolved: isBound ? Boolean(receiver?.unresolved) : !sameReceiverOrigin(receiver, call.arguments[0], aliases),
+    receiverUnresolved: isBound ? Boolean(receiver?.unresolved) : !sameReceiverOrigin(receiver, call.arguments[0], aliases, scope, call),
     entryArguments: [...preboundArguments, ...invocationArguments],
   }
 }
 
-function aliasedFunctionInvocationEntry(call, aliases, invocationMethods) {
+function aliasedFunctionInvocationEntry(call, aliases, invocationMethods, scope) {
   if (!ts.isIdentifier(call.expression)) return null
-  const invocation = invocationMethods.get(call.expression.text)
+  const invocation = bindingAlias(invocationMethods, call.expression, scope, call)
   if (!invocation) return null
   const thisArgument = call.arguments[0]
   const entryArguments = invocation.invocation === "call"
@@ -804,12 +900,12 @@ function aliasedFunctionInvocationEntry(call, aliases, invocationMethods) {
       })()
   return {
     directMethod: invocation.method,
-    receiverUnresolved: Boolean(invocation.unresolved || !sameReceiverOrigin(invocation.receiver, thisArgument, aliases)),
+    receiverUnresolved: Boolean(invocation.unresolved || !sameReceiverOrigin(invocation.receiver, thisArgument, aliases, scope, call)),
     entryArguments,
   }
 }
 
-function inlineBoundQueryEntry(call, aliases) {
+function inlineBoundQueryEntry(call, aliases, scope) {
   const bind = ts.isCallExpression(call.expression) ? call.expression : null
   const bindAccess = bind && accessParts(bind)
   const target = bindAccess?.method === "bind"
@@ -823,10 +919,10 @@ function inlineBoundQueryEntry(call, aliases) {
       : null))
   if (!["from", "rpc"].includes(targetMethod) || bind.arguments.length === 0) return null
   const receiver = unwrap(target.expression)
-  if (!isTrustedReceiver(receiver, aliases)) return null
+  if (!isTrustedReceiver(receiver, aliases, scope, call)) return null
   return {
     directMethod: targetMethod,
-    receiverUnresolved: !sameTrustedReceiver(receiver, bind.arguments[0], aliases),
+    receiverUnresolved: !sameTrustedReceiver(receiver, bind.arguments[0], aliases, scope, call),
     entryArguments: [...bind.arguments].slice(1).concat([...call.arguments]),
   }
 }
@@ -1002,6 +1098,46 @@ function queryControlFlowAncestry(query, scope, sourceFile) {
   return ancestry.reverse()
 }
 
+function controlFlowSiblingOrdinal(node, sourceFile) {
+  const parent = node.parent
+  if (!parent || (!ts.isBlock(parent) && !ts.isSourceFile(parent))) return 0
+  const normalize = (value) => value.getText(sourceFile).replace(/\s+/gu, " ")
+  const identity = (candidate) => {
+    if (ts.isIfStatement(candidate)) return `if:${normalize(candidate.expression)}`
+    if (ts.isForStatement(candidate)) return `for:${candidate.condition ? normalize(candidate.condition) : "<none>"}`
+    if (ts.isForInStatement(candidate) || ts.isForOfStatement(candidate)) {
+      return `${ts.isForInStatement(candidate) ? "for-in" : "for-of"}:${normalize(candidate.expression)}`
+    }
+    if (ts.isWhileStatement(candidate) || ts.isDoStatement(candidate)) {
+      return `${ts.isWhileStatement(candidate) ? "while" : "do"}:${normalize(candidate.expression)}`
+    }
+    if (ts.isTryStatement(candidate)) return "try"
+    if (ts.isSwitchStatement(candidate)) return `switch:${normalize(candidate.expression)}`
+    return null
+  }
+  const target = identity(node)
+  if (!target) return 0
+  let ordinal = 0
+  for (const sibling of parent.statements) {
+    if (sibling === node) return ordinal
+    if (identity(sibling) === target) ordinal += 1
+  }
+  return ordinal
+}
+
+function queryControlFlowStructure(query, scope, sourceFile) {
+  const structure = []
+  let child = query.entry
+  for (let parent = child.parent; parent && parent !== scope; child = parent, parent = parent.parent) {
+    if (ts.isIfStatement(parent) || ts.isForStatement(parent) || ts.isForInStatement(parent)
+      || ts.isForOfStatement(parent) || ts.isWhileStatement(parent) || ts.isDoStatement(parent)
+      || ts.isTryStatement(parent) || ts.isSwitchStatement(parent)) {
+      structure.push(controlFlowSiblingOrdinal(parent, sourceFile))
+    }
+  }
+  return structure.reverse()
+}
+
 function queryOccurrenceContext(scope, query) {
   const sourceFile = scope.getSourceFile()
   let statement = query.entry
@@ -1019,6 +1155,7 @@ function queryOccurrenceContext(scope, query) {
     previousStatement: previousStatement ? normalize(previousStatement.getText(sourceFile)) : null,
     query: normalize(sourceFile.text.slice(start, end)),
     controlFlowAncestry: queryControlFlowAncestry(query, scope, sourceFile),
+    controlFlowStructure: queryControlFlowStructure(query, scope, sourceFile),
     before: [...siblings].slice(0, index).map((candidate) => normalize(candidate.getText(sourceFile))),
     after: [...siblings].slice(index + 1).map((candidate) => normalize(candidate.getText(sourceFile))),
   }
@@ -1044,6 +1181,8 @@ function queryOccurrenceRelocated(baseline, candidate) {
   if (!baseline || !candidate || baseline.query !== candidate.query) return true
   if (baseline.controlFlowAncestry.length !== candidate.controlFlowAncestry.length
     || baseline.controlFlowAncestry.some((ancestor, index) => ancestor !== candidate.controlFlowAncestry[index])) return true
+  if (baseline.controlFlowStructure.length !== candidate.controlFlowStructure.length
+    || baseline.controlFlowStructure.some((position, index) => position !== candidate.controlFlowStructure[index])) return true
   const baselineBefore = statementCounts(baseline.before)
   const baselineAfter = statementCounts(baseline.after)
   const candidateBefore = statementCounts(candidate.before)
@@ -1207,7 +1346,7 @@ function analyzeScope({ surface, file, scope, symbol }) {
       if (name) queryAliases.set(name, record)
       continue
     }
-    const reflectedEntry = reflectedQueryEntry(call, aliases, boundMethods, detachedMethods, applyAliases)
+    const reflectedEntry = reflectedQueryEntry(call, aliases, boundMethods, detachedMethods, applyAliases, scope)
     if (reflectedEntry) {
       BOUND_OPERATION_METHODS.set(call, reflectedEntry.directMethod)
       records.push({
@@ -1220,7 +1359,7 @@ function analyzeScope({ surface, file, scope, symbol }) {
       })
       continue
     }
-    const functionInvocationEntry = functionInvocationQueryEntry(call, aliases, boundMethods, detachedMethods)
+    const functionInvocationEntry = functionInvocationQueryEntry(call, aliases, boundMethods, detachedMethods, scope)
     if (functionInvocationEntry) {
       BOUND_OPERATION_METHODS.set(call, functionInvocationEntry.directMethod)
       records.push({
@@ -1233,7 +1372,7 @@ function analyzeScope({ surface, file, scope, symbol }) {
       })
       continue
     }
-    const aliasedFunctionEntry = aliasedFunctionInvocationEntry(call, aliases, invocationMethods)
+    const aliasedFunctionEntry = aliasedFunctionInvocationEntry(call, aliases, invocationMethods, scope)
     if (aliasedFunctionEntry) {
       BOUND_OPERATION_METHODS.set(call, aliasedFunctionEntry.directMethod)
       records.push({
@@ -1246,7 +1385,7 @@ function analyzeScope({ surface, file, scope, symbol }) {
       })
       continue
     }
-    const inlineBoundEntry = inlineBoundQueryEntry(call, aliases)
+    const inlineBoundEntry = inlineBoundQueryEntry(call, aliases, scope)
     if (inlineBoundEntry) {
       BOUND_OPERATION_METHODS.set(call, inlineBoundEntry.directMethod)
       records.push({
@@ -1259,7 +1398,7 @@ function analyzeScope({ surface, file, scope, symbol }) {
       })
       continue
     }
-    const boundMethod = ts.isIdentifier(call.expression) ? boundMethods.get(call.expression.text) : null
+    const boundMethod = ts.isIdentifier(call.expression) ? bindingAlias(boundMethods, call.expression, scope, call) : null
     if (boundMethod) {
       const record = {
         entry: call,
@@ -1277,7 +1416,7 @@ function analyzeScope({ surface, file, scope, symbol }) {
       }
       continue
     }
-    const detachedMethod = ts.isIdentifier(call.expression) ? detachedMethods.get(call.expression.text) : null
+    const detachedMethod = ts.isIdentifier(call.expression) ? bindingAlias(detachedMethods, call.expression, scope, call) : null
     if (detachedMethod) {
       records.push({
         entry: call,
@@ -1291,7 +1430,7 @@ function analyzeScope({ surface, file, scope, symbol }) {
     }
     const access = accessParts(call)
     if (!access) continue
-    const trusted = isTrustedReceiver(access.receiver, aliases)
+    const trusted = isTrustedReceiver(access.receiver, aliases, scope, call)
     const entryMethod = access.method === "from" || access.method === "rpc" ? access.method : null
     const dynamicEntry = access.computed && access.method === null && trusted
     const unknownReceiver = entryMethod && trusted === null
