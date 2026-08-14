@@ -741,6 +741,9 @@ test("observation preview derives task visibility from the source RPC when its r
     async resolveTaskId() {
       throw new Error("observation_preview_must_not_require_direct_observation_select")
     },
+    async authorizeTask() {
+      throw new Error("observation_preview_source_rpc_already_authorizes_the_actor")
+    },
     async resolveSource(input) {
       sourceCalls += 1
       assert.deepEqual({
@@ -778,7 +781,7 @@ test("observation preview derives task visibility from the source RPC when its r
   assert.equal(result.body.messageKind, target.messageKind)
   assert.equal(calls.resolveTaskId, 0)
   assert.equal(sourceCalls, 1)
-  assert.equal(calls.authorize, 1)
+  assert.equal(calls.authorize, 0)
 })
 
 test("off and verification-mismatch readiness return a read-only preview without creating a receipt", async () => {

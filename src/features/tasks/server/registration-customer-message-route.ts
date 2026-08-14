@@ -634,7 +634,10 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
           : null
         const taskId = source?.taskId
           ?? await dependencies.resolveTaskId({ ...target, context })
-        if (!taskId || !await dependencies.authorizeTask(context, taskId)) {
+        if (
+          !taskId
+          || (!observationTarget && !await dependencies.authorizeTask(context, taskId))
+        ) {
           httpError(404, "registration_customer_message_source_not_found")
         }
         const resolvedSource = source ?? await resolvePreviewSource(dependencies, {
