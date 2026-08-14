@@ -10,8 +10,10 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/app/admin/calendar/components/calendar";
+import type { CalendarEvent } from "@/app/admin/calendar/types";
 
 import {
+  adaptAcademicEventDetailToCalendarEvent,
   buildAcademicEventMutationPayload,
   DEFAULT_ACADEMIC_EVENT_TYPES,
   getAcademicEventFilterTypeKey,
@@ -245,21 +247,7 @@ export function AcademicCalendarWorkspace() {
 
   const handleLoadEventDetail = useCallback(async (eventId: string) => {
     const detail = await loadEventDetail(eventId) as Record<string, unknown>;
-    return {
-      id: text(detail.id), sourceId: text(detail.sourceId || detail.id), title: text(detail.title),
-      date: new Date(`${text(detail.startsAt).slice(0, 10)}T12:00:00`),
-      endDate: new Date(`${text(detail.endsAt || detail.startsAt).slice(0, 10)}T12:00:00`),
-      time: text(detail.timeLabel), duration: text(detail.durationLabel),
-      type: detail.eventType as "meeting" | "event" | "personal" | "task" | "reminder",
-      typeLabel: text(detail.typeLabel), attendees: Array.isArray(detail.attendees) ? detail.attendees.map(text) : [],
-      location: text(detail.place), color: text(detail.color), description: text(detail.description),
-      note: text(detail.note), schoolId: text(detail.schoolId), schoolName: text(detail.schoolName),
-      category: text(detail.category), grade: text(detail.grade), examTerm: text(detail.examTerm),
-      scienceAreaKey: text(detail.scienceAreaKey), scienceAreaLabel: text(detail.scienceAreaLabel),
-      embeddedNoteMeta: (detail.embeddedNoteMeta || {}) as Record<string, unknown>,
-      textbookScopes: Array.isArray(detail.textbookScopes) ? detail.textbookScopes : [],
-      subtextbookScopes: Array.isArray(detail.subtextbookScopes) ? detail.subtextbookScopes : [],
-    };
+    return adaptAcademicEventDetailToCalendarEvent(detail) as CalendarEvent;
   }, [loadEventDetail]);
 
   const sidebarGroups = useMemo(

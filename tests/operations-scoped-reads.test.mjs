@@ -23,6 +23,8 @@ const buildAcademicEventFormScopeFields = academicEventUtils.buildAcademicEventF
 const buildAcademicEventNote = academicEventUtils.buildAcademicEventNote;
 const buildAcademicEventMutationPayload = academicEventUtils.buildAcademicEventMutationPayload;
 const extractAcademicEventNoteMetadata = academicEventUtils.extractAcademicEventNoteMetadata;
+const adaptAcademicEventDetailToCalendarEvent = academicEventUtils.adaptAcademicEventDetailToCalendarEvent;
+const isCurrentAcademicDetailRequest = academicEventUtils.isCurrentAcademicDetailRequest;
 
 function makeRpcBuilder(result, calls) {
   return {
@@ -270,6 +272,78 @@ test("event form scalar and structured textbook scopes survive a direct read-for
   );
   assert.match(eventFormSource, /textbookScope: showScopeFields \? formData\.textbookScope : ""/);
   assert.match(eventFormSource, /subtextbookScope: showScopeFields \? formData\.subtextbookScope : ""/);
+});
+
+test("calendar exact-detail adapter preserves scalar scopes through a direct save roundtrip", () => {
+  assert.equal(typeof adaptAcademicEventDetailToCalendarEvent, "function");
+  const detail = normalizeAcademicEventDetail({
+    id: "41000000-0000-4000-8000-000000000041",
+    title: "2학기 기말고사",
+    startsAt: "2026-11-20",
+    endsAt: "2026-11-20",
+    typeLabel: "시험기간",
+    grade: "고1",
+    schoolId: "42000000-0000-4000-8000-000000000041",
+    schoolName: "검증고",
+    storedNote: `정확한 메모\n\n[[TIPS_META]] ${JSON.stringify({
+      textbookScope: "본교재 10~20쪽",
+      subtextbookScope: "부교재 3단원",
+      textbookScopes: [{ name: "본교재", publisher: "A", scope: "10~20쪽" }],
+      subtextbookScopes: [{ name: "부교재", publisher: "B", scope: "3단원" }],
+      legacyFlag: "keep",
+    })}`,
+  });
+  const calendarEvent = adaptAcademicEventDetailToCalendarEvent(detail);
+  assert.equal(calendarEvent.textbookScope, "본교재 10~20쪽");
+  assert.equal(calendarEvent.subtextbookScope, "부교재 3단원");
+  const formScopes = buildAcademicEventFormScopeFields(calendarEvent, {});
+  const result = buildAcademicEventMutationPayload({
+    title: calendarEvent.title,
+    type: calendarEvent.typeLabel,
+    start: "2026-11-20",
+    end: "2026-11-20",
+    grade: calendarEvent.grade,
+    schoolId: calendarEvent.schoolId,
+    note: buildAcademicEventNote(calendarEvent.note, calendarEvent.embeddedNoteMeta),
+    ...formScopes,
+  }, [{ id: calendarEvent.schoolId, name: "검증고", category: "high" }]);
+  assert.equal(result.isValid, true);
+  assert.deepEqual(formScopes, {
+    textbookScope: "본교재 10~20쪽",
+    subtextbookScope: "부교재 3단원",
+    textbookScopes: [{ name: "본교재", publisher: "A", scope: "10~20쪽" }],
+    subtextbookScopes: [{ name: "부교재", publisher: "B", scope: "3단원" }],
+  });
+  assert.equal(calendarEvent.embeddedNoteMeta.legacyFlag, "keep");
+  assert.deepEqual(extractAcademicEventNoteMetadata(result.payload.note), {
+    textbookScope: "본교재 10~20쪽",
+    subtextbookScope: "부교재 3단원",
+    textbookScopes: [{ name: "본교재", publisher: "A", scope: "10~20쪽" }],
+    subtextbookScopes: [{ name: "부교재", publisher: "B", scope: "3단원" }],
+    legacyFlag: "keep",
+  });
+});
+
+test("academic detail request guard rejects stale revisions and stale identities", () => {
+  assert.equal(typeof isCurrentAcademicDetailRequest, "function");
+  assert.equal(isCurrentAcademicDetailRequest({
+    expectedRevision: 4,
+    currentRevision: 4,
+    expectedIdentity: "event-b",
+    currentIdentity: "event-b",
+  }), true);
+  assert.equal(isCurrentAcademicDetailRequest({
+    expectedRevision: 3,
+    currentRevision: 4,
+    expectedIdentity: "event-a",
+    currentIdentity: "event-b",
+  }), false);
+  assert.equal(isCurrentAcademicDetailRequest({
+    expectedRevision: 4,
+    currentRevision: 4,
+    expectedIdentity: "event-a",
+    currentIdentity: "event-b",
+  }), false);
 });
 
 test("legacy exact event detail infers its renderer exam term from the parent title", () => {

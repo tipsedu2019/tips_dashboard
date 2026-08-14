@@ -60,6 +60,20 @@ test("calendar exact-detail failures never open a summary fallback editor", asyn
   assert.doesNotMatch(source, /\.catch\(\(\) => null\)/);
 });
 
+test("calendar exact-detail responses mutate state only for the latest selected identity", async () => {
+  const source = await readFile(
+    new URL("src/app/admin/calendar/components/calendar.tsx", root),
+    "utf8",
+  );
+
+  assert.match(source, /detailRequestRevisionRef/);
+  assert.match(source, /detailRequestIdentityRef/);
+  assert.match(source, /isCurrentAcademicDetailRequest/);
+  assert.match(source, /expectedRevision/);
+  assert.match(source, /expectedIdentity/);
+  assert.match(source, /if \(!isCurrentDetailRequest\(\)\) return false/);
+});
+
 test("academic calendar month view switches to readable mobile agenda cards", async () => {
   const source = await readFile(
     new URL("src/app/admin/calendar/components/calendar-main.tsx", root),

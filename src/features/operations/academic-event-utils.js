@@ -287,6 +287,53 @@ export function buildAcademicEventFormScopeFields(event, initialDraft = {}) {
   };
 }
 
+export function adaptAcademicEventDetailToCalendarEvent(detail = {}) {
+  const startsAt = text(detail.startsAt).slice(0, 10);
+  const endsAt = text(detail.endsAt || detail.startsAt).slice(0, 10);
+  return {
+    id: text(detail.id),
+    sourceId: text(detail.sourceId || detail.id),
+    title: text(detail.title),
+    date: new Date(`${startsAt}T12:00:00`),
+    endDate: new Date(`${endsAt}T12:00:00`),
+    time: text(detail.timeLabel),
+    duration: text(detail.durationLabel),
+    type: text(detail.eventType),
+    typeLabel: text(detail.typeLabel),
+    attendees: Array.isArray(detail.attendees) ? detail.attendees.map(text) : [],
+    location: text(detail.place),
+    color: text(detail.color),
+    description: text(detail.description),
+    note: text(detail.note),
+    schoolId: text(detail.schoolId),
+    schoolName: text(detail.schoolName),
+    category: text(detail.category),
+    grade: text(detail.grade),
+    examTerm: text(detail.examTerm),
+    scienceAreaKey: text(detail.scienceAreaKey),
+    scienceAreaLabel: text(detail.scienceAreaLabel),
+    embeddedNoteMeta: detail.embeddedNoteMeta && typeof detail.embeddedNoteMeta === "object"
+      && !Array.isArray(detail.embeddedNoteMeta) ? detail.embeddedNoteMeta : {},
+    textbookScope: text(detail.textbookScope),
+    subtextbookScope: text(detail.subtextbookScope),
+    textbookScopes: Array.isArray(detail.textbookScopes) ? detail.textbookScopes : [],
+    subtextbookScopes: Array.isArray(detail.subtextbookScopes) ? detail.subtextbookScopes : [],
+  };
+}
+
+export function isCurrentAcademicDetailRequest({
+  expectedRevision,
+  currentRevision,
+  expectedIdentity,
+  currentIdentity,
+} = {}) {
+  return Number.isInteger(expectedRevision)
+    && expectedRevision > 0
+    && expectedRevision === currentRevision
+    && Boolean(text(expectedIdentity))
+    && text(expectedIdentity) === text(currentIdentity);
+}
+
 export function prepareAcademicEventMetadataForWrite(eventData = {}, activeScienceAreas = []) {
   const embeddedNoteMeta = eventData.embeddedNoteMeta
     && typeof eventData.embeddedNoteMeta === "object"

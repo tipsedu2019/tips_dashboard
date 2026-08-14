@@ -111,3 +111,24 @@ Round-2 source evidence:
 - The whole-repository glob is non-GREEN with 18 unrelated pre-existing/shared-branch failures: notification fixture/golden drift, the Task 3 management migration normalization gate, one notification worker contract, and one concurrent isolated PostgreSQL termination. Task 4 focused verification is GREEN.
 
 No round-2 DB runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, worker, webhook, provider request, and recipient receipt remain unclaimed; the manifest stays `candidate`.
+
+## Adversarial fix round 3
+
+Round-3 RED was **0 pass / 4 fail** for the calendar scalar-scope adapter roundtrip, the shared request-current predicate, calendar latest-selection wiring, and annual stale-result wiring.
+
+The round closes these source contracts:
+
+- Calendar exact-detail adaptation now forwards legacy scalar `textbookScope` and `subtextbookScope` with the structured arrays and complete embedded metadata. A direct exact-detail → calendar adapter → form scope → mutation payload regression preserves the full metadata envelope.
+- Calendar and annual detail reads assign both a monotonically increasing request revision and an exact selected identity. Older success, failure, and `finally` completion paths cannot mutate editor, error, pending, or loading state.
+- Deep-linked calendar selection uses the same guarded request path. User navigation or new-event creation explicitly invalidates an in-flight detail identity.
+- No SQL changed in this round. The operations migration remains the same source candidate with SHA-256 `47d6af4718be42c95d402fe183a229d9709bc50e3523466d34a7b19b4a2cf67c`.
+
+Round-3 source evidence:
+
+- New regressions: **4/4 GREEN** after the recorded **0/4 RED**.
+- Task 4 focused service/UI/continuous-schedule verification: **54/54 GREEN**.
+- TypeScript and targeted ESLint: GREEN.
+- Operations query-surface guard and `git diff --check`: GREEN.
+- The repository-wide source glob is non-GREEN with 17 unrelated shared-branch failures: notification fixture/golden drift, one notification worker contract, and the pre-existing Task 3 management migration normalization gate. No Task 4 focused test failed.
+
+No round-3 DB runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, worker, webhook, provider request, and recipient receipt remain unclaimed; the manifest stays `candidate`.

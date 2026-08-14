@@ -1,12 +1,15 @@
 "use client"
 
 import { isSameDay } from "date-fns"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { getAcademicEventFilterTypeKey } from "@/features/operations/academic-event-utils.js"
+import {
+  getAcademicEventFilterTypeKey,
+  isCurrentAcademicDetailRequest,
+} from "@/features/operations/academic-event-utils.js"
 import { CalendarMain } from "./calendar-main"
 import { CalendarSidebar } from "./calendar-sidebar"
 import { EventForm } from "./event-form"
@@ -108,6 +111,8 @@ export function Calendar({
   const [pendingDetailEvent, setPendingDetailEvent] = useState<CalendarEvent | null>(null)
   const [detailLoadError, setDetailLoadError] = useState("")
   const [detailLoading, setDetailLoading] = useState(false)
+  const detailRequestRevisionRef = useRef(0)
+  const detailRequestIdentityRef = useRef("")
 
   const defaultFilters = useMemo(() => buildDefaultCalendarFilters(calendars), [calendars])
   const activeFilters = useMemo(
@@ -169,6 +174,16 @@ export function Calendar({
 
   const openExactEventDetail = useCallback(async (event: CalendarEvent) => {
     const eventId = String(event.sourceId || event.id)
+    const expectedRevision = detailRequestRevisionRef.current + 1
+    const expectedIdentity = eventId
+    detailRequestRevisionRef.current = expectedRevision
+    detailRequestIdentityRef.current = expectedIdentity
+    const isCurrentDetailRequest = () => isCurrentAcademicDetailRequest({
+      expectedRevision,
+      currentRevision: detailRequestRevisionRef.current,
+      expectedIdentity,
+      currentIdentity: detailRequestIdentityRef.current,
+    })
     setPendingDetailEvent(event)
     setDetailLoadError("")
     setDetailLoading(true)
@@ -177,6 +192,7 @@ export function Calendar({
         throw new Error("operations_event_detail_unavailable")
       }
       const detail = await onLoadEventDetail(eventId)
+      if (!isCurrentDetailRequest()) return false
       if (!detail) {
         throw new Error("operations_event_detail_invalid")
       }
@@ -185,12 +201,15 @@ export function Calendar({
       setPendingDetailEvent(null)
       return true
     } catch {
+      if (!isCurrentDetailRequest()) return false
       setEditingEvent(null)
       setShowEventForm(false)
       setDetailLoadError("학사 일정 상세 정보를 불러오지 못했습니다.")
       return false
     } finally {
-      setDetailLoading(false)
+      if (isCurrentDetailRequest()) {
+        setDetailLoading(false)
+      }
     }
   }, [onLoadEventDetail])
 
@@ -200,14 +219,12 @@ export function Calendar({
     void openExactEventDetail(matchedInitialEvent).then((opened) => {
         if (cancelled || !opened) return
         setAppliedInitialEventId(initialEventId)
-        if (!isSameDay(selectedDate, matchedInitialEvent.date)) {
-          setSelectedDate(matchedInitialEvent.date)
-        }
+        setSelectedDate((current) => isSameDay(current, matchedInitialEvent.date) ? current : matchedInitialEvent.date)
       })
     return () => {
       cancelled = true
     }
-  }, [initialEventId, matchedInitialEvent, openExactEventDetail, selectedDate])
+  }, [initialEventId, matchedInitialEvent, openExactEventDetail])
 
   const retryPendingDetailLoad = async () => {
     if (!pendingDetailEvent) return
@@ -219,10 +236,13 @@ export function Calendar({
   }
 
   const handleDateSelect = (date: Date) => {
+    detailRequestRevisionRef.current += 1
+    detailRequestIdentityRef.current = ""
     setSelectedDate(date)
     setShowCalendarSheet(false)
     setPendingDetailEvent(null)
     setDetailLoadError("")
+    setDetailLoading(false)
   }
 
   const handleNewEvent = (date?: Date) => {
@@ -230,9 +250,13 @@ export function Calendar({
       return
     }
 
+    detailRequestRevisionRef.current += 1
+    detailRequestIdentityRef.current = ""
+
     setShowCalendarSheet(false)
     setPendingDetailEvent(null)
     setDetailLoadError("")
+    setDetailLoading(false)
 
     if (date instanceof Date && !Number.isNaN(date.getTime())) {
       setSelectedDate(date)
@@ -248,6 +272,12 @@ export function Calendar({
     if (readOnly) {
       return
     }
+
+    detailRequestRevisionRef.current += 1
+    detailRequestIdentityRef.current = ""
+    setPendingDetailEvent(null)
+    setDetailLoadError("")
+    setDetailLoading(false)
 
     setShowCalendarSheet(false)
     setSelectedDate(range.start)

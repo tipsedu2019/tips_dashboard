@@ -263,9 +263,9 @@ test("annual board read-save preserves the exact event embedded metadata envelop
 
   assert.match(source, /prepareAcademicEventMetadataForWrite\(eventData, activeScienceAreas\)/);
   assert.match(source, /note: metadataResult\.note/);
-  assert.match(source, /embeddedNoteMeta: \(detail\?\.embeddedNoteMeta/);
-  assert.match(source, /textbookScope: text\(detail\?\.textbookScope\) \|\| entry\.textbookScope \|\| ""/);
-  assert.match(source, /subtextbookScope: text\(detail\?\.subtextbookScope\) \|\| entry\.subtextbookScope \|\| ""/);
+  assert.match(source, /embeddedNoteMeta: \(detail\.embeddedNoteMeta/);
+  assert.match(source, /textbookScope: text\(detail\.textbookScope\) \|\| entry\.textbookScope \|\| ""/);
+  assert.match(source, /subtextbookScope: text\(detail\.subtextbookScope\) \|\| entry\.subtextbookScope \|\| ""/);
   assert.doesNotMatch(source, /textbookScope: "",\s*subtextbookScope: ""/);
 });
 
@@ -277,6 +277,16 @@ test("annual board exact-detail failures stay closed and offer an explicit retry
   assert.match(source, /상세 다시 불러오기/);
   assert.match(source, /학사 일정 상세를 불러오지 못했습니다/);
   assert.doesNotMatch(source, /await loadEventDetail\(persistedId\)\.catch\(\(\) => null\)/);
+});
+
+test("annual board ignores stale exact-detail success, failure, and loading completion", async () => {
+  const source = await readSource("src/features/operations/academic-annual-board-workspace.tsx");
+
+  assert.match(source, /boardDetailRequestRevisionRef/);
+  assert.match(source, /boardDetailRequestIdentityRef/);
+  assert.match(source, /isCurrentAcademicDetailRequest/);
+  assert.match(source, /if \(!isCurrentDetailRequest\(\)\) return/);
+  assert.match(source, /if \(isCurrentDetailRequest\(\)\) \{\s*setBoardDetailLoading\(false\)/);
 });
 
 test("annual board strips internal metadata from displayed note sections", async () => {

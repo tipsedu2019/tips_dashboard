@@ -37,6 +37,7 @@ import {
   DEFAULT_ACADEMIC_EVENT_TYPES,
   getAcademicEventMutationErrorMessage,
   getPersistedAcademicEventId,
+  isCurrentAcademicDetailRequest,
   isSubjectExamType,
   parseActiveScienceSubjectAreas,
   prepareAcademicEventMetadataForWrite,
@@ -1058,6 +1059,8 @@ export function AcademicAnnualBoardWorkspace() {
   const [showBoardEventForm, setShowBoardEventForm] = useState(false);
   const [pendingBoardEntryEdit, setPendingBoardEntryEdit] = useState<PendingBoardEntryEdit | null>(null);
   const [boardDetailLoading, setBoardDetailLoading] = useState(false);
+  const boardDetailRequestRevisionRef = useRef(0);
+  const boardDetailRequestIdentityRef = useRef("");
   const [isSavingBoardImage, setIsSavingBoardImage] = useState(false);
   const annualBoardExportRef = useRef<HTMLDivElement | null>(null);
   const annualRequest = useMemo(() => ({
@@ -1308,63 +1311,76 @@ export function AcademicAnnualBoardWorkspace() {
     },
     entry: AcademicAnnualBoardEntry,
   ) => {
+    const persistedId = getPersistedAcademicEventId(resolveAnnualBoardEntryParentId(entry));
+    const expectedRevision = boardDetailRequestRevisionRef.current + 1;
+    const expectedIdentity = `${persistedId || "invalid"}:${text(entry.id)}`;
+    boardDetailRequestRevisionRef.current = expectedRevision;
+    boardDetailRequestIdentityRef.current = expectedIdentity;
+    const isCurrentDetailRequest = () => isCurrentAcademicDetailRequest({
+      expectedRevision,
+      currentRevision: boardDetailRequestRevisionRef.current,
+      expectedIdentity,
+      currentIdentity: boardDetailRequestIdentityRef.current,
+    });
     setPendingBoardEntryEdit({ row, entry });
     setMutationError(null);
     setBoardDetailLoading(true);
-    const persistedId = getPersistedAcademicEventId(resolveAnnualBoardEntryParentId(entry));
-    let detail: Record<string, unknown>;
     try {
       if (!persistedId) {
         throw new Error("operations_event_id_invalid");
       }
       const loadedDetail = await loadEventDetail(persistedId) as Record<string, unknown> | null;
+      if (!isCurrentDetailRequest()) return;
       if (!loadedDetail) {
         throw new Error("operations_event_detail_invalid");
       }
-      detail = loadedDetail;
+      const detail = loadedDetail;
+      const detailType = text(detail.typeLabel) || entry.type;
+      const detailStart = text(detail.startsAt) || entry.start;
+      const detailEnd = text(detail.endsAt) || entry.end || detailStart;
+      const editingEvent: ScienceBoardCalendarEvent = {
+        id: persistedId,
+        sourceId: persistedId,
+        title: text(detail.title) || entry.title,
+        date: parseLocalDate(detailStart),
+        endDate: parseLocalDate(detailEnd),
+        time: text(detail.timeLabel) || entry.schoolName || row.schoolName,
+        duration: text(detail.durationLabel) || (detailStart === detailEnd ? "하루 일정" : `${detailStart} ~ ${detailEnd}`),
+        type: detailType === "체험학습" ? "event" : detailType === "방학·휴일·기타" ? "reminder" : detailType === "팁스" ? "meeting" : "task",
+        typeLabel: detailType,
+        attendees: Array.isArray(detail.attendees) ? detail.attendees.map(text) : Array.isArray(entry.gradeBadges) ? entry.gradeBadges : [],
+        location: text(detail.place) || entry.schoolName || row.schoolName,
+        color: text(detail.color) || (detailType === "체험학습" ? "bg-emerald-500" : detailType === "방학·휴일·기타" ? "bg-amber-500" : "bg-rose-500"),
+        description: text(detail.note) || entry.note || entry.scopeSummary || "",
+        schoolId: text(detail.schoolId) || entry.schoolId || row.schoolId,
+        schoolName: text(detail.schoolName) || entry.schoolName || row.schoolName,
+        category: text(detail.category) || row.category,
+        grade: text(detail.grade) || entry.grade || row.grade,
+        examTerm: text(detail.examTerm) || entry.examTerm || "",
+        scienceAreaKey: text(detail.scienceAreaKey) || entry.scienceAreaKey || "",
+        scienceAreaLabel: text(detail.scienceAreaLabel) || entry.scienceAreaLabel || "",
+        embeddedNoteMeta: (detail.embeddedNoteMeta as Record<string, unknown> | null) || entry.embeddedNoteMeta || {},
+        textbookScope: text(detail.textbookScope) || entry.textbookScope || "",
+        subtextbookScope: text(detail.subtextbookScope) || entry.subtextbookScope || "",
+        textbookScopes: normalizeScopeItems(detail.textbookScopes || entry.textbookScopes),
+        subtextbookScopes: normalizeScopeItems(detail.subtextbookScopes || entry.subtextbookScopes),
+        note: text(detail.note) || entry.note || "",
+      };
+      if (!isCurrentDetailRequest()) return;
+      setBoardDraft(null);
+      setEditingBoardEvent(editingEvent);
+      setShowBoardEventForm(true);
+      setPendingBoardEntryEdit(null);
     } catch {
+      if (!isCurrentDetailRequest()) return;
       setEditingBoardEvent(null);
       setShowBoardEventForm(false);
       setMutationError("학사 일정 상세를 불러오지 못했습니다.");
-      setBoardDetailLoading(false);
-      return;
+    } finally {
+      if (isCurrentDetailRequest()) {
+        setBoardDetailLoading(false);
+      }
     }
-    const detailType = text(detail?.typeLabel) || entry.type;
-    const detailStart = text(detail?.startsAt) || entry.start;
-    const detailEnd = text(detail?.endsAt) || entry.end || detailStart;
-    const editingEvent: ScienceBoardCalendarEvent = {
-      id: persistedId,
-      sourceId: persistedId,
-      title: text(detail?.title) || entry.title,
-      date: parseLocalDate(detailStart),
-      endDate: parseLocalDate(detailEnd),
-      time: text(detail?.timeLabel) || entry.schoolName || row.schoolName,
-      duration: text(detail?.durationLabel) || (detailStart === detailEnd ? "하루 일정" : `${detailStart} ~ ${detailEnd}`),
-      type: detailType === "체험학습" ? "event" : detailType === "방학·휴일·기타" ? "reminder" : detailType === "팁스" ? "meeting" : "task",
-      typeLabel: detailType,
-      attendees: Array.isArray(detail?.attendees) ? detail.attendees.map(text) : Array.isArray(entry.gradeBadges) ? entry.gradeBadges : [],
-      location: text(detail?.place) || entry.schoolName || row.schoolName,
-      color: text(detail?.color) || (detailType === "체험학습" ? "bg-emerald-500" : detailType === "방학·휴일·기타" ? "bg-amber-500" : "bg-rose-500"),
-      description: text(detail?.note) || entry.note || entry.scopeSummary || "",
-      schoolId: text(detail?.schoolId) || entry.schoolId || row.schoolId,
-      schoolName: text(detail?.schoolName) || entry.schoolName || row.schoolName,
-      category: text(detail?.category) || row.category,
-      grade: text(detail?.grade) || entry.grade || row.grade,
-      examTerm: text(detail?.examTerm) || entry.examTerm || "",
-      scienceAreaKey: text(detail?.scienceAreaKey) || entry.scienceAreaKey || "",
-      scienceAreaLabel: text(detail?.scienceAreaLabel) || entry.scienceAreaLabel || "",
-      embeddedNoteMeta: (detail?.embeddedNoteMeta as Record<string, unknown> | null) || entry.embeddedNoteMeta || {},
-      textbookScope: text(detail?.textbookScope) || entry.textbookScope || "",
-      subtextbookScope: text(detail?.subtextbookScope) || entry.subtextbookScope || "",
-      textbookScopes: normalizeScopeItems(detail?.textbookScopes || entry.textbookScopes),
-      subtextbookScopes: normalizeScopeItems(detail?.subtextbookScopes || entry.subtextbookScopes),
-      note: text(detail?.note) || entry.note || "",
-    };
-    setBoardDraft(null);
-    setEditingBoardEvent(editingEvent);
-    setShowBoardEventForm(true);
-    setPendingBoardEntryEdit(null);
-    setBoardDetailLoading(false);
   };
 
   const retryPendingBoardEntryEdit = () => {
@@ -1407,6 +1423,9 @@ export function AcademicAnnualBoardWorkspace() {
       scienceAreaLabel: "",
       embeddedNoteMeta: {},
     };
+    boardDetailRequestRevisionRef.current += 1;
+    boardDetailRequestIdentityRef.current = "";
+    setBoardDetailLoading(false);
     setPendingBoardEntryEdit(null);
     setMutationError(null);
     setEditingBoardEvent(null);
