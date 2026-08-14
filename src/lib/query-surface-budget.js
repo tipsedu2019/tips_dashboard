@@ -333,18 +333,25 @@ function isWriteTarget(target, name) {
   return false
 }
 
+function bindingDeclarationNode(declaration) {
+  if (ts.isVariableDeclaration(declaration) || ts.isParameter(declaration)) return declaration
+  let node = declaration
+  while (ts.isIdentifier(node) || ts.isBindingElement(node)
+    || ts.isObjectBindingPattern(node) || ts.isArrayBindingPattern(node)) {
+    node = node.parent
+    if (ts.isVariableDeclaration(node) || ts.isParameter(node)) return node
+  }
+  return declaration
+}
+
 function isFunctionScopedBinding(declaration) {
-  const node = ts.isIdentifier(declaration) && ts.isVariableDeclaration(declaration.parent)
-    ? declaration.parent
-    : declaration
+  const node = bindingDeclarationNode(declaration)
   return ts.isParameter(node) || (ts.isVariableDeclaration(node) && ts.isVariableDeclarationList(node.parent)
     && (node.parent.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0)
 }
 
 function isVisibleBindingAt(declaration, use, scope) {
-  const binding = ts.isIdentifier(declaration) && ts.isVariableDeclaration(declaration.parent)
-    ? declaration.parent
-    : declaration
+  const binding = bindingDeclarationNode(declaration)
   const functionScoped = isFunctionScopedBinding(declaration)
   if (!use || (!functionScoped && binding.pos >= use.pos)) return false
   for (let parent = binding.parent; parent && parent !== scope; parent = parent.parent) {
@@ -1096,7 +1103,7 @@ function queryControlFlowAncestry(query, scope, sourceFile) {
       ancestry.push(`try:${branch}`)
     } else if (ts.isCatchClause(parent)) {
       ancestry.push("catch")
-    } else if (ts.isBlock(parent) && (ts.isBlock(parent.parent) || ts.isSourceFile(parent.parent))) {
+    } else if (isStandaloneStatementBlock(parent)) {
       ancestry.push("block")
     }
   }
@@ -1105,7 +1112,7 @@ function queryControlFlowAncestry(query, scope, sourceFile) {
 
 function controlFlowSiblingOrdinal(node, sourceFile) {
   const parent = node.parent
-  if (!parent || (!ts.isBlock(parent) && !ts.isSourceFile(parent))) return 0
+  if (!parent || !isStatementListContainer(parent)) return 0
   const normalize = (value) => value.getText(sourceFile).replace(/\s+/gu, " ")
   const identity = (candidate) => {
     if (ts.isBlock(candidate)) return "block"
@@ -1131,6 +1138,14 @@ function controlFlowSiblingOrdinal(node, sourceFile) {
   return ordinal
 }
 
+function isStatementListContainer(node) {
+  return ts.isBlock(node) || ts.isSourceFile(node) || ts.isCaseClause(node) || ts.isDefaultClause(node)
+}
+
+function isStandaloneStatementBlock(node) {
+  return ts.isBlock(node) && isStatementListContainer(node.parent)
+}
+
 function queryControlFlowStructure(query, scope, sourceFile) {
   const structure = []
   let child = query.entry
@@ -1138,7 +1153,7 @@ function queryControlFlowStructure(query, scope, sourceFile) {
     if (ts.isIfStatement(parent) || ts.isForStatement(parent) || ts.isForInStatement(parent)
       || ts.isForOfStatement(parent) || ts.isWhileStatement(parent) || ts.isDoStatement(parent)
       || ts.isTryStatement(parent) || ts.isSwitchStatement(parent)
-      || (ts.isBlock(parent) && (ts.isBlock(parent.parent) || ts.isSourceFile(parent.parent)))) {
+      || isStandaloneStatementBlock(parent)) {
       structure.push(controlFlowSiblingOrdinal(parent, sourceFile))
     }
   }

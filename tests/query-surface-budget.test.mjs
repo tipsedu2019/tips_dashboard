@@ -2026,6 +2026,42 @@ test("repeated var RPC declarations share one function-scoped provenance binding
   assert.deepEqual(result.violations.map((violation) => violation.reason), [
     "list_query_receiver_unresolved",
   ])
+
+  const identicalDestructuring = await verifyFixture({
+    surface: "operations",
+    file: "src/features/operations/class-schedule-workspace.tsx",
+    source: `async function mutate(client, parameters, enabled) {
+  var { rpc } = client
+  if (enabled) {
+    var { rpc } = client
+  }
+  return rpc.call(client, "save_class_lesson_session_v1", parameters)
+    .abortSignal(AbortSignal.timeout(8_000))
+    .retry(false)
+}
+`,
+  })
+  assert.deepEqual(identicalDestructuring, { ok: true, violations: [] })
+
+  for (const alternateReceiver of ["supabase", "helper"]) {
+    const divergentDestructuring = await verifyFixture({
+      surface: "operations",
+      file: "src/features/operations/class-schedule-workspace.tsx",
+      source: `async function mutate(client, supabase, helper, parameters, enabled) {
+  var { rpc } = client
+  if (enabled) {
+    var { rpc } = ${alternateReceiver}
+  }
+  return rpc.call(client, "save_class_lesson_session_v1", parameters)
+    .abortSignal(AbortSignal.timeout(8_000))
+    .retry(false)
+}
+`,
+    })
+    assert.deepEqual((divergentDestructuring.violations ?? []).map((violation) => violation.reason), [
+      "list_query_receiver_unresolved",
+    ])
+  }
 })
 
 test("occurrence identity distinguishes identical control-flow siblings and ignores unrelated insertion", async () => {
@@ -2140,4 +2176,95 @@ test("occurrence identity distinguishes structurally identical standalone block 
     debtManifest,
   })
   assert.ok(moved.violations.some((violation) => violation.reason === "list_select_star"))
+
+  const switchArmSources = [
+    {
+      baseline: `async function load(client, key) {
+  switch (key) {
+    case "active":
+      {
+        const marker = 1
+        return ${query}
+      }
+      {
+        const marker = 1
+        return null
+      }
+    default:
+      return null
+  }
+}
+`,
+      moved: `async function load(client, key) {
+  switch (key) {
+    case "active":
+      {
+        const marker = 1
+        return null
+      }
+      {
+        const marker = 1
+        return ${query}
+      }
+    default:
+      return null
+  }
+}
+`,
+    },
+    {
+      baseline: `async function load(client, key) {
+  switch (key) {
+    case "active":
+      return null
+    default:
+      {
+        const marker = 1
+        return ${query}
+      }
+      {
+        const marker = 1
+        return null
+      }
+  }
+}
+`,
+      moved: `async function load(client, key) {
+  switch (key) {
+    case "active":
+      return null
+    default:
+      {
+        const marker = 1
+        return null
+      }
+      {
+        const marker = 1
+        return ${query}
+      }
+  }
+}
+`,
+    },
+  ]
+
+  for (const sources of switchArmSources) {
+    const switchBaselineViolation = inspectQuerySurfaceSource({ surface: "tasks", file, source: sources.baseline })
+      .find((violation) => violation.reason === "list_select_star")
+    const switchMoved = await verifyFixture({
+      file,
+      baselineSource: sources.baseline,
+      source: sources.moved,
+      debtManifest: (baselineSha) => [{
+        surface: "tasks",
+        file,
+        symbol: "load",
+        violation: "list_select_star",
+        baselineSha,
+        fingerprint: switchBaselineViolation.fingerprint,
+        occurrenceFingerprint: switchBaselineViolation.occurrenceFingerprint,
+      }],
+    })
+    assert.ok((switchMoved.violations ?? []).some((violation) => violation.reason === "list_select_star"))
+  }
 })
