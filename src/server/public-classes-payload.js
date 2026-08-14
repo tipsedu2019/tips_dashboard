@@ -227,6 +227,8 @@ export async function buildPublicClassesPayload({
   mode = "full",
 } = {}) {
   await loadPublicClassesEnv(env);
+  const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION =
+    "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date";
 
   const supabase = supabaseClient || createPublicClassesSupabaseClient(env);
   if (!supabase) {
@@ -240,9 +242,7 @@ export async function buildPublicClassesPayload({
       const { data: classRows, error: classError } = await applyPublicClassesQuerySafety(
         supabase
           .from("classes")
-          .select(
-            "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date",
-          ),
+          .select(PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION),
       );
 
       if (classError) {
