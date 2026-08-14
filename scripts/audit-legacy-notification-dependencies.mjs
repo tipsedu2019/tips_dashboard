@@ -1,8 +1,8 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 const ROOT=resolve(fileURLToPath(new URL("..",import.meta.url))); const SCOPES=["src","scripts","supabase/functions","package.json","vercel.json",".github/workflows"];
-export async function auditLegacyNotificationDependencies({root=ROOT,write=writeFile}={}) {
+export async function auditLegacyNotificationDependencies({root=ROOT}={}) {
  const manifest=JSON.parse(await readFile(resolve(root,"docs/operations/legacy-notification-object-manifest.json"),"utf8"));
  if(!Array.isArray(manifest.objects)||!Array.isArray(manifest.legacyCronNames)) throw new Error("legacy_notification_manifest_invalid");
  const active=[]; for(const object of manifest.objects){ let count=0; for(const scope of SCOPES){ try { const text=await readFile(resolve(root,scope),"utf8"); count+=text.includes(object.name.split(".").at(-1))?1:0; } catch{} } active.push({object:object.name,decision:object.decision,source:{available:true,count},relationWrites:{available:false,status:"unknown"},functionCalls:{available:false,status:"unknown"},trigger:{available:false,status:"unknown"}}); }
