@@ -118,6 +118,10 @@ test("curriculum workspace delegates all filters and continuation to the scoped 
   assert.match(hookSource, /loadingMoreFingerprint/);
   assert.match(hookSource, /successfulRequest/);
   assert.match(hookSource, /dataMatchesCurrentScope/);
+  assert.match(hookSource, /const \{ session, user, role, loading: authLoading \} = useAuth\(\)/);
+  assert.match(hookSource, /createAcademicExecutionContext/);
+  assert.match(hookSource, /selectAcademicScopedValue/);
+  assert.doesNotMatch(hookSource, /app_metadata\?\.role/);
   assert.match(source, /const renderData = dataMatchesCurrentScope \? curriculumData : null/);
   assert.match(source, /if \(loading && !dataMatchesCurrentScope\)/);
   assert.match(source, /onClick=\{\(\) => void refresh\(\)\}/);

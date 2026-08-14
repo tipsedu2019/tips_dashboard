@@ -238,36 +238,68 @@ begin
       parsed.parts[2], parsed.id
     limit 2001
   ), class_summary_limited as materialized (
-    select pg_catalog.to_jsonb(class) - 'start_date' - 'end_date' as row_data
+    select pg_catalog.jsonb_build_object(
+      'id', class.id,
+      'subject', class.subject,
+      'grade', class.grade,
+      'term_id', class.term_id,
+      'period', class.period,
+      'academic_year', class.academic_year
+    ) as row_data
     from eligible class order by class.name collate dashboard_private.ko_numeric, class.id limit 501
   ), term_limited as materialized (
     select bounded.row_data
     from (
-      select distinct pg_catalog.to_jsonb(term) as row_data
+      select distinct pg_catalog.jsonb_build_object(
+        'id', term.id,
+        'academic_year', term.academic_year,
+        'name', term.name,
+        'sort_order', term.sort_order
+      ) as row_data
       from public.class_terms term join eligible class on class.term_id = term.id
     ) bounded
     order by bounded.row_data::text limit 501
   ), group_limited as materialized (
     select bounded.row_data
     from (
-      select distinct pg_catalog.to_jsonb(group_row) as row_data
+      select distinct pg_catalog.jsonb_build_object(
+        'id', group_row.id,
+        'name', group_row.name,
+        'subject', group_row.subject,
+        'sort_order', group_row.sort_order,
+        'is_default', group_row.is_default
+      ) as row_data
       from public.class_schedule_sync_groups group_row
       join public.class_schedule_sync_group_members member on member.group_id = group_row.id
       join eligible class on class.id = member.class_id
     ) bounded
     order by bounded.row_data::text limit 501
   ), member_limited as materialized (
-    select pg_catalog.to_jsonb(member) as row_data
+    select pg_catalog.jsonb_build_object(
+      'group_id', member.group_id,
+      'class_id', member.class_id,
+      'sort_order', member.sort_order
+    ) as row_data
     from public.class_schedule_sync_group_members member join eligible class on class.id = member.class_id
     order by member.group_id, member.sort_order, member.class_id limit 501
   ), teacher_limited as materialized (
-    select pg_catalog.to_jsonb(catalog) as row_data
+    select pg_catalog.jsonb_build_object(
+      'name', catalog.name,
+      'subjects', catalog.subjects,
+      'is_visible', catalog.is_visible,
+      'sort_order', catalog.sort_order
+    ) as row_data
     from public.teacher_catalogs catalog
     where catalog.is_visible
       and exists (select 1 from eligible class where pg_catalog.coalesce(class.teacher, '') ilike '%' || catalog.name || '%')
     order by catalog.sort_order, catalog.name collate dashboard_private.ko_numeric, catalog.id limit 501
   ), classroom_limited as materialized (
-    select pg_catalog.to_jsonb(catalog) as row_data
+    select pg_catalog.jsonb_build_object(
+      'name', catalog.name,
+      'subjects', catalog.subjects,
+      'is_visible', catalog.is_visible,
+      'sort_order', catalog.sort_order
+    ) as row_data
     from public.classroom_catalogs catalog
     where catalog.is_visible
       and exists (select 1 from eligible class where pg_catalog.coalesce(class.room, '') ilike '%' || catalog.name || '%')

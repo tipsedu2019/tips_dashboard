@@ -12,6 +12,8 @@ const isAcademicContinuationLoadingForScope = academicReadModule.isAcademicConti
 const selectAcademicDisplayRequest = academicReadModule.selectAcademicDisplayRequest;
 const getCurriculumDesignAction = academicReadModule.getCurriculumDesignAction;
 const isAcademicResultCurrentForScope = academicReadModule.isAcademicResultCurrentForScope;
+const createAcademicExecutionContext = academicReadModule.createAcademicExecutionContext;
+const selectAcademicScopedValue = academicReadModule.selectAcademicScopedValue;
 
 function makeRpcBuilder(result, calls) {
   return {
@@ -403,6 +405,32 @@ test("current-scope rendering requires data and display fingerprints to both mat
   assert.equal(isAcademicResultCurrentForScope("scope-a", "scope-a", "scope-b"), false);
 });
 
+test("authenticated user and resolved dashboard role isolate every academic execution state", () => {
+  assert.equal(typeof createAcademicExecutionContext, "function");
+  assert.equal(typeof selectAcademicScopedValue, "function");
+  const request = {
+    mode: "timetable",
+    dateFrom: "2026-08-03",
+    dateTo: "2026-08-09",
+    filters: { classGroupId: null, status: "수강", subject: null },
+  };
+  const userAAdmin = createAcademicExecutionContext({ userId: "user-a", role: "admin", request });
+  const userAStaff = createAcademicExecutionContext({ userId: "user-a", role: "staff", request });
+  const userBAdmin = createAcademicExecutionContext({ userId: "user-b", role: "admin", request });
+  const previousData = { rows: [{ id: "user-a-row" }] };
+  const previousDensity = { code: "visible_range_too_dense" };
+
+  assert.notEqual(userAAdmin.actorScope, userAStaff.actorScope);
+  assert.notEqual(userAAdmin.actorScope, userBAdmin.actorScope);
+  assert.notEqual(userAAdmin.fingerprint, userAStaff.fingerprint);
+  assert.notEqual(userAAdmin.fingerprint, userBAdmin.fingerprint);
+  assert.equal(selectAcademicScopedValue(previousData, userAAdmin.actorScope, userAAdmin.actorScope), previousData);
+  assert.equal(selectAcademicScopedValue(previousData, userAAdmin.actorScope, userBAdmin.actorScope), null);
+  assert.equal(selectAcademicScopedValue(previousData, userAAdmin.actorScope, userAStaff.actorScope), null);
+  assert.equal(selectAcademicScopedValue(previousDensity, userAAdmin.fingerprint, userBAdmin.fingerprint), null);
+  assert.equal(isAcademicContinuationLoadingForScope(userAAdmin.fingerprint, userAStaff.fingerprint), false);
+});
+
 test("academic scoped migration is invoker-only, authenticated-only, bounded and explicit", async () => {
   const sql = await readFile(
     new URL("../supabase/migrations/20260814062437_academic_scoped_reads.sql", import.meta.url),
@@ -471,4 +499,20 @@ test("academic SQL returns the earliest exact unplanned session and an explicit 
   assert.doesNotMatch(detail, /to_jsonb\(class\)/i);
   assert.match(detail, /jsonb_build_object\([\s\S]+'id',\s*class\.id[\s\S]+'scheduleRevision',\s*class\.schedule_revision/i);
   assert.doesNotMatch(detail, /student_ids|waitlist_ids|schedule_plan|lessons|fee|capacity/i);
+});
+
+test("timetable support collections project only explicit scalar fields", async () => {
+  const sql = await readFile(
+    new URL("../supabase/migrations/20260814062437_academic_scoped_reads.sql", import.meta.url),
+    "utf8",
+  );
+  const timetable = sql.slice(
+    sql.indexOf("create function public.get_academic_timetable_range_v1"),
+    sql.indexOf("create function public.get_academic_curriculum_page_v1"),
+  );
+  assert.doesNotMatch(timetable, /\bto_jsonb\s*\(/i);
+  assert.match(timetable, /class_summary_limited as materialized \([\s\S]*?'id',\s*class\.id[\s\S]*?'subject',\s*class\.subject[\s\S]*?'grade',\s*class\.grade[\s\S]*?'term_id',\s*class\.term_id[\s\S]*?'period',\s*class\.period[\s\S]*?'academic_year',\s*class\.academic_year/i);
+  assert.match(timetable, /'id',\s*group_row\.id[\s\S]*?'name',\s*group_row\.name[\s\S]*?'subject',\s*group_row\.subject[\s\S]*?'sort_order',\s*group_row\.sort_order[\s\S]*?'is_default',\s*group_row\.is_default/i);
+  assert.match(timetable, /'group_id',\s*member\.group_id[\s\S]*?'class_id',\s*member\.class_id[\s\S]*?'sort_order',\s*member\.sort_order/i);
+  assert.match(timetable, /'name',\s*catalog\.name[\s\S]*?'subjects',\s*catalog\.subjects[\s\S]*?'is_visible',\s*catalog\.is_visible[\s\S]*?'sort_order',\s*catalog\.sort_order/i);
 });

@@ -236,6 +236,10 @@ select ok(
   'timetable never reads curriculum progress or textbook sources'
 );
 select ok(
+  pg_catalog.pg_get_functiondef('public.get_academic_timetable_range_v1(date,date,text,text,text)'::pg_catalog.regprocedure) !~* 'to_jsonb\s*\(',
+  'timetable support collections use explicit scalar projections instead of whole-row conversion'
+);
+select ok(
   pg_catalog.pg_get_functiondef('public.get_academic_curriculum_page_v1(jsonb,text,uuid,integer,boolean)'::pg_catalog.regprocedure) !~* '(schedule_plan|lessons)',
   'curriculum list never reads large class detail payloads'
 );

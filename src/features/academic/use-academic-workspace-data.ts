@@ -7,10 +7,12 @@ import { useAuth } from "@/providers/auth-provider";
 
 import {
   appendAcademicCurriculumPageIfCurrent,
+  createAcademicExecutionContext,
   createAcademicReadService,
   isAcademicContinuationLoadingForScope,
   isAcademicResultCurrentForScope,
   selectAcademicDisplayRequest,
+  selectAcademicScopedValue,
 } from "./academic-read-service.js";
 
 export type AcademicKeysetCursor = {
@@ -79,24 +81,41 @@ function isDensityError(value: unknown): value is AcademicDensityError {
 }
 
 export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
-  const { session, user, loading: authLoading } = useAuth();
+  const { session, user, role, loading: authLoading } = useAuth();
   const [data, setData] = useState<AcademicResult | null>(null);
   const [dataFingerprint, setDataFingerprint] = useState<string | null>(null);
+  const [dataActorScope, setDataActorScope] = useState<string | null>(null);
   const [successfulRequest, setSuccessfulRequest] = useState<AcademicWorkspaceRequest | null>(null);
   const [densityError, setDensityError] = useState<AcademicDensityError | null>(null);
+  const [densityErrorFingerprint, setDensityErrorFingerprint] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [settledFingerprint, setSettledFingerprint] = useState<string | null>(null);
   const [loadingMoreFingerprint, setLoadingMoreFingerprint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorFingerprint, setErrorFingerprint] = useState<string | null>(null);
   const requestRevisionRef = useRef(0);
-  const fingerprint = requestFingerprint(request);
+  const requestScopeFingerprint = requestFingerprint(request);
+  const stableRequest = useMemo(
+    () => JSON.parse(requestScopeFingerprint) as AcademicWorkspaceRequest,
+    [requestScopeFingerprint],
+  );
+  const { actorScope, fingerprint } = createAcademicExecutionContext({
+    userId: user?.id,
+    role,
+    request: stableRequest,
+  });
   const fingerprintRef = useRef(fingerprint);
   fingerprintRef.current = fingerprint;
-  const stableRequest = useMemo(
-    () => JSON.parse(fingerprint) as AcademicWorkspaceRequest,
-    [fingerprint],
-  );
   const loadingMore = isAcademicContinuationLoadingForScope(loadingMoreFingerprint, fingerprint);
-  const actorScope = `${String(user?.id || "anonymous")}:${String(user?.app_metadata?.role || "authenticated")}`;
+  const scopedData = selectAcademicScopedValue(data, dataActorScope, actorScope) as AcademicResult | null;
+  const scopedSuccessfulRequest = scopedData ? successfulRequest : null;
+  const scopedDensityError = selectAcademicScopedValue(
+    densityError,
+    densityErrorFingerprint,
+    fingerprint,
+  ) as AcademicDensityError | null;
+  const scopedError = selectAcademicScopedValue(error, errorFingerprint, fingerprint) as string | null;
+  const scopedLoading = loading || settledFingerprint !== fingerprint;
   const service = useMemo(
     () => (supabase && user ? createAcademicReadService({ supabase, actorScope }) : null),
     [actorScope, user],
@@ -108,6 +127,8 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
     if (!service) {
       if (!supabase) setError("Supabase is not configured.");
       else if (!authLoading) setError("관리자 세션을 확인할 수 없습니다. 다시 로그인해 주세요.");
+      setErrorFingerprint(fingerprint);
+      setSettledFingerprint(fingerprint);
       setLoading(false);
       return;
     }
@@ -115,28 +136,36 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
 
     setLoading(true);
     setError(null);
+    setErrorFingerprint(null);
     try {
       const next = await service.load(stableRequest) as AcademicResult;
-      if (requestRevisionRef.current !== revision) return;
+      if (requestRevisionRef.current !== revision || fingerprintRef.current !== fingerprint) return;
       if (isDensityError(next)) {
         setDensityError(next);
+        setDensityErrorFingerprint(fingerprint);
         return;
       }
       setData(next);
       setDataFingerprint(fingerprint);
+      setDataActorScope(actorScope);
       setSuccessfulRequest(stableRequest);
       setDensityError(null);
+      setDensityErrorFingerprint(null);
     } catch (fetchError) {
-      if (requestRevisionRef.current !== revision) return;
+      if (requestRevisionRef.current !== revision || fingerprintRef.current !== fingerprint) return;
       setError(fetchError instanceof Error ? fetchError.message : "Unknown error");
+      setErrorFingerprint(fingerprint);
     } finally {
-      if (requestRevisionRef.current === revision) setLoading(false);
+      if (requestRevisionRef.current === revision && fingerprintRef.current === fingerprint) {
+        setSettledFingerprint(fingerprint);
+        setLoading(false);
+      }
     }
-  }, [authLoading, fingerprint, service, stableRequest]);
+  }, [actorScope, authLoading, fingerprint, service, stableRequest]);
 
   const loadMore = useCallback(async () => {
     if (!service || stableRequest.mode !== "curriculum" || loadingMore) return;
-    const currentPage = data?.page as {
+    const currentPage = scopedData?.page as {
       rows?: unknown[];
       nextCursor?: AcademicKeysetCursor | null;
       hasMore?: boolean;
@@ -146,6 +175,7 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
     const expectedFingerprint = fingerprint;
     setLoadingMoreFingerprint(expectedFingerprint);
     setError(null);
+    setErrorFingerprint(null);
     try {
       const next = await service.load({
         ...stableRequest,
@@ -163,11 +193,12 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
       if (requestRevisionRef.current === expectedRevision
         && fingerprintRef.current === expectedFingerprint) {
         setError(fetchError instanceof Error ? fetchError.message : "Unknown error");
+        setErrorFingerprint(expectedFingerprint);
       }
     } finally {
       setLoadingMoreFingerprint((current) => current === expectedFingerprint ? null : current);
     }
-  }, [data?.page, fingerprint, loadingMore, service, stableRequest]);
+  }, [fingerprint, loadingMore, scopedData?.page, service, stableRequest]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -180,27 +211,32 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
     [service],
   );
   const displayRequest = selectAcademicDisplayRequest({
-    data,
-    successfulRequest,
+    data: scopedData,
+    successfulRequest: scopedSuccessfulRequest,
     currentRequest: stableRequest,
   }) as AcademicWorkspaceRequest;
-  const displayFingerprint = requestFingerprint(displayRequest);
+  const displayFingerprint = createAcademicExecutionContext({
+    userId: user?.id,
+    role,
+    request: displayRequest,
+  }).fingerprint;
+  const scopedDataFingerprint = scopedData ? dataFingerprint : null;
   const dataMatchesCurrentScope = isAcademicResultCurrentForScope(
-    dataFingerprint,
+    scopedDataFingerprint,
     fingerprint,
     displayFingerprint,
   );
 
   return {
-    data,
-    dataFingerprint,
-    successfulRequest,
+    data: scopedData,
+    dataFingerprint: scopedDataFingerprint,
+    successfulRequest: scopedSuccessfulRequest,
     displayRequest,
     dataMatchesCurrentScope,
-    densityError,
-    loading,
+    densityError: scopedDensityError,
+    loading: scopedLoading,
     loadingMore,
-    error,
+    error: scopedError,
     refresh: load,
     loadMore,
     loadCurriculumDetail,

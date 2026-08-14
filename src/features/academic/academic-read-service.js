@@ -64,6 +64,23 @@ function canonicalJson(value) {
   return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
 }
 
+export function createAcademicExecutionContext({ userId, role, request }) {
+  const actorScope = canonicalJson({
+    userId: text(userId) || "anonymous",
+    role: text(role) || "viewer",
+  });
+  return {
+    actorScope,
+    fingerprint: canonicalJson({ actorScope, request }),
+  };
+}
+
+export function selectAcademicScopedValue(value, valueScope, currentScope) {
+  return valueScope !== null && valueScope !== undefined && valueScope === currentScope
+    ? value
+    : null;
+}
+
 async function scopeHash(actorScope, filters) {
   const bytes = new TextEncoder().encode(canonicalJson({
     surface: "academic",
