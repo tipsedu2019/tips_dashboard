@@ -124,3 +124,10 @@ Source implementation and source verification are complete. Runtime SQL behavior
 - RED evidence: the new review suite failed at module load because `normalizeClassRelationRecord` did not exist. Final focused result is **24/24 GREEN**; combined management/query-budget/textbook-picker/schema verification is **208/208 GREEN**.
 - TypeScript, relevant ESLint (zero warnings), management query-surface guard, migration hash equality, and diff check are GREEN. Candidate SHA-256 is `39ec7be093a24ee143d57ee4a4f7da5bc1b38630c0899669ad66900526c5cb50`.
 - No database runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, and provider activity remain unexecuted and unclaimed; the migration remains `candidate`.
+
+## Adversarial fix round 7
+
+- `normalizeClassRelationRecord` now trims each teacher/classroom alias candidate before choosing it. A whitespace-only `teacher_name` or `classroom` no longer masks a populated `teacher` or `room` fallback.
+- RED evidence: the review suite was **12 pass / 1 fail** with both canonical display fields empty for whitespace aliases. Final focused result is **24/24 GREEN**; combined management/query-budget/textbook-picker/schema verification remains **208/208 GREEN**.
+- TypeScript, relevant ESLint (zero warnings), management query-surface guard, migration hash equality, and diff check are GREEN. The unchanged migration candidate SHA-256 remains `39ec7be093a24ee143d57ee4a4f7da5bc1b38630c0899669ad66900526c5cb50`.
+- No database runtime command was run. Migration replay, pgTAP runtime, EXPLAIN, production migration, deployment, and provider activity remain unexecuted and unclaimed; the migration remains `candidate`.

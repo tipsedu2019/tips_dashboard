@@ -149,8 +149,8 @@ function unwrapRpcObject(value) {
 
 export function normalizeClassRelationRecord(record = {}) {
   if (!record || typeof record !== "object" || Array.isArray(record)) return record;
-  const teacher = trimText(record.teacher_name || record.teacherName || record.teacher);
-  const classroom = trimText(record.classroom || record.room || record.class_room);
+  const teacher = trimText(record.teacher_name) || trimText(record.teacherName) || trimText(record.teacher);
+  const classroom = trimText(record.classroom) || trimText(record.room) || trimText(record.class_room);
   return { ...record, teacher, classroom };
 }
 

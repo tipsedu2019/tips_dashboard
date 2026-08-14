@@ -175,6 +175,19 @@ test("relation paging preserves legacy waitlists and canonical class display ali
     room: "fallback room",
     classroom: "legacy room",
   });
+  assert.deepEqual(normalizeClassRelationRecord({
+    id: "class-whitespace-alias",
+    teacher_name: "   ",
+    teacher: "fallback teacher",
+    classroom: "\t",
+    room: "fallback room",
+  }), {
+    id: "class-whitespace-alias",
+    teacher_name: "   ",
+    teacher: "fallback teacher",
+    classroom: "fallback room",
+    room: "fallback room",
+  });
   assert.match(serviceSource, /\.select\("id,name,subject,grade,status,schedule,teacher_name,teacher,classroom,room"\)/);
   assert.match(serviceSource, /return \(data \|\| \[\]\)\.map\(normalizeClassRelationRecord\)/);
   assert.match(pageSource, /record\.teacher \|\| record\.teacher_name \|\| record\.teacherName/);
