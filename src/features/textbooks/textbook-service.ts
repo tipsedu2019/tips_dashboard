@@ -448,8 +448,8 @@ export async function upsertTextbookMaster(
     result = await client.from("textbooks").upsert(fallbackPayload).select().single();
   }
   if (result.error) throw result.error;
-  await invalidatePublicClassesCacheAfterMutation(client, "textbook");
-  return result.data as Row;
+  const publicClassesCacheRefresh = await invalidatePublicClassesCacheAfterMutation(client, "textbook");
+  return { ...(result.data as Row), publicClassesCacheRefresh };
 }
 
 export async function deleteTextbookMasters(idList: string[] | string, clientInput?: SupabaseClientLike | null) {
@@ -479,8 +479,8 @@ export async function deleteTextbookMasters(idList: string[] | string, clientInp
     if (error) throw error;
   }
 
-  await invalidatePublicClassesCacheAfterMutation(client, "textbook");
-  return { ids, deletedIds, archivedIds };
+  const publicClassesCacheRefresh = await invalidatePublicClassesCacheAfterMutation(client, "textbook");
+  return { ids, deletedIds, archivedIds, publicClassesCacheRefresh };
 }
 
 export async function purgeInactiveTextbooks(idList: string[] | string, clientInput?: SupabaseClientLike | null) {
@@ -508,10 +508,11 @@ export async function purgeInactiveTextbooks(idList: string[] | string, clientIn
     .select("id");
   if (error) throw error;
 
-  await invalidatePublicClassesCacheAfterMutation(client, "textbook");
+  const publicClassesCacheRefresh = await invalidatePublicClassesCacheAfterMutation(client, "textbook");
   return {
     ids,
     deletedIds: ((data || []) as Row[]).map((row) => text(row.id)).filter(Boolean),
+    publicClassesCacheRefresh,
   };
 }
 

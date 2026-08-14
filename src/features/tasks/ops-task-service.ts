@@ -2653,11 +2653,13 @@ export type OpsTaskProducerReceipt = Readonly<{
   taskId: string
   sourceEventIds: string[]
   activityEventId?: string
+  publicClassesCacheRefresh?: Awaited<ReturnType<typeof invalidatePublicClassesCacheAfterMutation>>
 }>
 
 export type OpsTaskSourceEventReceipt = Readonly<{
   sourceEventIds: string[]
   activityEventId?: string
+  publicClassesCacheRefresh?: Awaited<ReturnType<typeof invalidatePublicClassesCacheAfterMutation>>
 }>
 
 export type OpsTaskCommentReceipt = Readonly<{
@@ -3344,6 +3346,7 @@ async function applyReadyOpsRosterMode(
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     throw new Error("학생 명단 변경 결과를 다시 불러오세요.")
   }
+  await invalidatePublicClassesCacheAfterMutation(supabase, "class")
   return true
 }
 
@@ -3358,7 +3361,10 @@ async function completeReadyOpsRosterTransition(taskId: string, type: OpsTaskTyp
       const response = await runIdempotentOpsTaskProducerRpc(v2FunctionName, {
         p_task_id: taskId,
       })
-      return producerSourceEventIds(response)
+      return {
+        sourceEventIds: producerSourceEventIds(response),
+        publicClassesCacheRefresh: await invalidatePublicClassesCacheAfterMutation(supabase, "class"),
+      }
     } catch (error) {
       if (!isMissingOpsRosterRpc(error)) throw error
       resetRegistrationSubjectTrackRuntimeProbe()
@@ -3373,7 +3379,10 @@ async function completeReadyOpsRosterTransition(taskId: string, type: OpsTaskTyp
     p_request_key: `ops-${type}-completion-${taskId}`,
   })
   if (error) throw error
-  return producerSourceEventIds(data as OpsTaskProducerResponse)
+  return {
+    sourceEventIds: producerSourceEventIds(data as OpsTaskProducerResponse),
+    publicClassesCacheRefresh: await invalidatePublicClassesCacheAfterMutation(supabase, "class"),
+  }
 }
 
 function getReadyOpsCompletionInput(input: OpsTaskInput): OpsTaskInput {
@@ -4485,9 +4494,13 @@ export async function createOpsTask(
     await writeManualCheckEvents(taskId, readyCompletionInput)
     await upsertDetail(taskId, readyCompletionInput)
     if (stagesReadyOpsRosterCompletion) {
-      const sourceEventIds = await completeReadyOpsRosterTransition(taskId, input.type)
+      const completion = await completeReadyOpsRosterTransition(taskId, input.type)
       clearOpsTaskWorkspaceDataCache()
-      return { taskId, sourceEventIds: sourceEventIds || [] }
+      return {
+        taskId,
+        sourceEventIds: completion?.sourceEventIds || [],
+        ...(completion?.publicClassesCacheRefresh ? { publicClassesCacheRefresh: completion.publicClassesCacheRefresh } : {}),
+      }
     }
     const completionMutation = await prepareCreatedOpsCompletionSyncRollback(taskId, input)
     rollbackCompletionSync = completionMutation.rollback
@@ -4659,9 +4672,12 @@ export async function updateOpsTask(
       })
       const sourceEventIds = producerSourceEventIds(response)
       if (nextStatus === "done") {
-        const completionSourceEventIds = await completeReadyOpsRosterTransition(taskId, input.type)
+        const completion = await completeReadyOpsRosterTransition(taskId, input.type)
         clearOpsTaskWorkspaceDataCache()
-        return { sourceEventIds: [...sourceEventIds, ...(completionSourceEventIds || [])] }
+        return {
+          sourceEventIds: [...sourceEventIds, ...(completion?.sourceEventIds || [])],
+          ...(completion?.publicClassesCacheRefresh ? { publicClassesCacheRefresh: completion.publicClassesCacheRefresh } : {}),
+        }
       }
       clearOpsTaskWorkspaceDataCache()
       return { sourceEventIds }
@@ -4943,9 +4959,12 @@ export async function updateOpsTaskStatus(
 
   if (currentTask.type === "withdrawal" || currentTask.type === "transfer") {
     if (status === "done") {
-      const sourceEventIds = await completeReadyOpsRosterTransition(currentTask.id, currentTask.type)
+      const completion = await completeReadyOpsRosterTransition(currentTask.id, currentTask.type)
       clearOpsTaskWorkspaceDataCache()
-      return { sourceEventIds: sourceEventIds || [] }
+      return {
+        sourceEventIds: completion?.sourceEventIds || [],
+        ...(completion?.publicClassesCacheRefresh ? { publicClassesCacheRefresh: completion.publicClassesCacheRefresh } : {}),
+      }
     }
     try {
       const response = await runIdempotentOpsTaskProducerRpc("transition_ops_task_status_v2", {

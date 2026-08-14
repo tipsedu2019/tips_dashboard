@@ -13,6 +13,7 @@
 - RED: the new cache and invalidation tests initially failed with `ERR_MODULE_NOT_FOUND` for the new production modules, and the existing API test failed because its old `s-maxage=60` header did not meet the 600-second contract.
 - GREEN: `node --test --experimental-strip-types tests/public-classes-cache.test.mjs tests/public-classes-cache.integration.test.mjs tests/public-classes-cache-invalidation.test.mjs tests/public-classes-summary-loading.test.mjs tests/dashboard-snapshot-cache.test.mjs` completed **20/20**.
 - GREEN: the two targeted query-surface regressions completed **2/2**; the public verifier passed against the dispatch base and the exact worktree command.
+- P1 follow-up GREEN: the expanded Task 6 suite completed **23/23**. It proves exact table/projection public-compatibility guards reject substituted chains, active management/textbook CRUD returns pending refresh state to the UI, and ready plus withdrawal/transfer completion paths invalidate only after their roster RPC succeeds.
 - The integration test builds one minimal Next fixture, proves a single loader call across process A and a restarted process B sharing the same `.next` Data Cache, verifies tag invalidation raises the counter to 2, and verifies failed tag revalidation still serves the last-good HTTP payload.
 - `node node_modules/typescript/bin/tsc --noEmit` completed successfully and `git diff --check` completed successfully.
 

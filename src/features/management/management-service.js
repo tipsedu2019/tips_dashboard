@@ -1440,6 +1440,12 @@ export function buildTextbookPayload(record = {}, options = {}) {
   };
 }
 
+function withPublicClassesCacheRefresh(value, publicClassesCacheRefresh) {
+  if (Array.isArray(value)) return Object.assign(value, { publicClassesCacheRefresh });
+  if (value && typeof value === "object") return { ...value, publicClassesCacheRefresh };
+  return value;
+}
+
 export function createManagementService(options = {}) {
   const { supabase = sharedSupabase, generateId = createId } = options;
   let registrationRuntimeProbe = null;
@@ -1780,18 +1786,22 @@ export function createManagementService(options = {}) {
     async createTextbook(record = {}) {
       const client = ensureClient(supabase);
       const created = await upsertRows(client, "textbooks", buildTextbookPayload(record, { generateId }));
-      return Array.isArray(created) ? created[0] || null : created || null;
+      const publicClassesCacheRefresh = await refreshPublicClassesCache("textbook");
+      return withPublicClassesCacheRefresh(Array.isArray(created) ? created[0] || null : created || null, publicClassesCacheRefresh);
     },
 
     async updateTextbook(record = {}) {
       const client = ensureClient(supabase);
       const updated = await upsertRows(client, "textbooks", buildTextbookPayload(record, { generateId }));
-      return Array.isArray(updated) ? updated[0] || null : updated || null;
+      const publicClassesCacheRefresh = await refreshPublicClassesCache("textbook");
+      return withPublicClassesCacheRefresh(Array.isArray(updated) ? updated[0] || null : updated || null, publicClassesCacheRefresh);
     },
 
     async deleteTextbook(id) {
       const client = ensureClient(supabase);
-      return deleteRows(client, "textbooks", id ? [id] : []);
+      const deleted = await deleteRows(client, "textbooks", id ? [id] : []);
+      const publicClassesCacheRefresh = await refreshPublicClassesCache("textbook");
+      return withPublicClassesCacheRefresh(deleted, publicClassesCacheRefresh);
     },
 
     async listStudents() {

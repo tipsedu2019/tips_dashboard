@@ -11968,6 +11968,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         ))
         : [payload]
       const savedTasks: OpsTask[] = []
+      let publicClassesCacheRefreshPending = false
       if (editingTask) {
         const positivelyIdentifiedLegacyRegistrationEdit = payload.type === "registration"
           && Boolean(editingTask.registrationTracks?.length)
@@ -12003,6 +12004,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           }
         } else {
           const receipt = await updateOpsTask(editingTask.id, payload)
+          publicClassesCacheRefreshPending ||= receipt.publicClassesCacheRefresh?.status === "pending"
           legacyOpsTaskSourceEventIds.push(...receipt.sourceEventIds)
           savedTasks.push(await loadSavedTaskOrFallback(editingTask.id, payload, editingTask))
         }
@@ -12148,6 +12150,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             if (createAttempt.writer === "legacy") {
               registrationCreateAttemptRef.current = markRegistrationLegacyCreateStarted(createAttempt)
               const receipt = await createOpsTask(inquiryOnlyPayload)
+              publicClassesCacheRefreshPending ||= receipt.publicClassesCacheRefresh?.status === "pending"
               const taskId = receipt.taskId
               legacyOpsTaskSourceEventIds.push(...receipt.sourceEventIds)
               registrationCreateAttemptRef.current = null
@@ -12163,6 +12166,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             ? await createOpsTransitionTask(createPayload)
             : await createOpsTask(createPayload)
           const taskId = receipt.taskId
+          publicClassesCacheRefreshPending ||= receipt.publicClassesCacheRefresh?.status === "pending"
           legacyOpsTaskSourceEventIds.push(...receipt.sourceEventIds)
           savedTasks.push(await loadSavedTaskOrFallback(taskId, createPayload))
         }
@@ -12194,6 +12198,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           ? `${savedNotice} 방문상담 알림 전달은 접수됐습니다. 감사 이력을 확인하세요.`
           : savedWithNotificationDeliveryFailure
             ? `${savedNotice} 방문상담 알림은 전송하지 못했습니다. 업무는 정상 저장되었습니다.`
+        : publicClassesCacheRefreshPending
+          ? `${savedNotice} 공개 수업 캐시 갱신 대기 중`
         : savedWithRefreshWarning
           ? `${savedNotice} 최신 상세는 새로고침해 확인하세요.`
           : savedNotice)
@@ -12272,7 +12278,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           nextStatus: status,
         })
       }
-      setNotice("진행상태를 변경했습니다.")
+      setNotice(receipt.publicClassesCacheRefresh?.status === "pending"
+        ? "진행상태를 변경했습니다. 공개 수업 캐시 갱신 대기 중"
+        : "진행상태를 변경했습니다.")
     } catch (error) {
       setMessage(getOpsTaskActionErrorMessage(error, "진행상태를 바꾸지 못했습니다."))
     } finally {

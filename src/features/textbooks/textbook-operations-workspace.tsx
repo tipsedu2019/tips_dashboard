@@ -4516,8 +4516,12 @@ export function TextbookOperationsWorkspace() {
     setMessage("");
     setActionErrorMessage("");
     try {
-      await action();
-      setMessage(typeof success === "function" ? success() : success);
+      const result = await action();
+      const publicClassesCacheRefresh = (result as { publicClassesCacheRefresh?: { status?: string } } | null)?.publicClassesCacheRefresh;
+      const savedMessage = typeof success === "function" ? success() : success;
+      setMessage(publicClassesCacheRefresh?.status === "pending"
+        ? `${savedMessage} · 공개 수업 캐시 갱신 대기 중`
+        : savedMessage);
       shouldRefresh = true;
       return true;
     } catch (actionError) {

@@ -25,25 +25,47 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "current_dashboard_role",
 ])
 
-// The public API keeps three full compatibility projections unpaged for
-// unknown external consumers. This is not a pattern allowance: the exact
-// function, file, surface, and query ordinals are the only non-list chains.
-const LEGACY_PUBLIC_UNPAGED_COMPATIBILITY_QUERY_ORDINALS = new Set([1, 2, 3])
 const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION"
+// The public API keeps four exact compatibility chains unpaged for unknown
+// external consumers. This is not a pattern allowance: each chain is bound to
+// its exact ordinal, source table, and projection.
+const LEGACY_PUBLIC_UNPAGED_COMPATIBILITY_CHAINS = new Map([
+  [0, {
+    table: "classes",
+    projection: "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date",
+    selector: PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION,
+  }],
+  [1, {
+    table: "classes",
+    projection: "id,name,subject,grade,teacher,room,schedule,status,fee,tuition,capacity,student_ids,waitlist_ids,textbook_ids,textbook_info,lessons,schedule_plan,start_date,end_date",
+  }],
+  [2, {
+    table: "textbooks",
+    projection: "id,title,name,publisher,price,tags,lessons,updated_at",
+  }],
+  [3, {
+    table: "progress_logs",
+    projection: "id,class_id,textbook_id,progress_key,session_id,session_order,status,range_start,range_end,range_label,public_note,teacher_note,updated_at,date,completed_lesson_ids",
+  }],
+])
 
 function isLegacyPublicFullCompatibilityQuery({ surface, file, symbol, query, constants }) {
+  const expected = LEGACY_PUBLIC_UNPAGED_COMPATIBILITY_CHAINS.get(query.ordinal)
   const projection = query.operations.find((operation) => callMethod(operation) === "select")
   const projectionArgument = projection?.arguments[0]
   const value = projectionArgument && argumentValue(projectionArgument, constants)
-  const namedSummaryCompatibilityProjection = query.ordinal === 0
-    && Boolean(projectionArgument && ts.isIdentifier(projectionArgument))
-    && projectionArgument.text === PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION
+  const table = query.entry.arguments[0] && argumentValue(query.entry.arguments[0], constants)
+  const namedSummaryCompatibilityProjection = expected?.selector
+    ? Boolean(projectionArgument && ts.isIdentifier(projectionArgument))
+      && projectionArgument.text === expected.selector
+    : true
   return surface === "public"
     && file === "src/server/public-classes-payload.js"
     && symbol === "buildPublicClassesPayload"
-    && (namedSummaryCompatibilityProjection || LEGACY_PUBLIC_UNPAGED_COMPATIBILITY_QUERY_ORDINALS.has(query.ordinal))
-    && typeof value === "string"
-    && !chainHasWildcardProjection(value)
+    && Boolean(expected)
+    && namedSummaryCompatibilityProjection
+    && table === expected.table
+    && value === expected.projection
 }
 
 // These are deliberately literal records, not path patterns. Each one binds a

@@ -584,12 +584,12 @@ test("legacy query debt is an exact literal manifest and not a wildcard exceptio
 
 test("only the three named legacy public compatibility projections are unpaged", () => {
   const source = `async function buildPublicClassesPayload(client) {
-  const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "id"
+  const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date"
   const summary = client.from("classes").select(PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION)
   const full = [
-    client.from("classes").select("id,name"),
-    client.from("textbooks").select("id,title"),
-    client.from("progress_logs").select("id,class_id"),
+    client.from("classes").select("id,name,subject,grade,teacher,room,schedule,status,fee,tuition,capacity,student_ids,waitlist_ids,textbook_ids,textbook_info,lessons,schedule_plan,start_date,end_date"),
+    client.from("textbooks").select("id,title,name,publisher,price,tags,lessons,updated_at"),
+    client.from("progress_logs").select("id,class_id,textbook_id,progress_key,session_id,session_order,status,range_start,range_end,range_label,public_note,teacher_note,updated_at,date,completed_lesson_ids"),
   ]
   const accidentalList = client.from("students").select("id")
   const accidentalWildcard = client.from("teachers").select("*")
@@ -605,6 +605,28 @@ test("only the three named legacy public compatibility projections are unpaged",
   assert.ok(violations.some((violation) => violation.reason === "list_limit_missing" && violation.startLine === 9))
   assert.ok(violations.some((violation) => violation.reason === "list_order_missing" && violation.startLine === 9))
   assert.ok(violations.some((violation) => violation.reason === "list_select_star" && violation.startLine === 10))
+})
+
+test("public compatibility exemptions reject substituted tables and projections", () => {
+  const source = `async function buildPublicClassesPayload(client) {
+  const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "id,secret"
+  const summary = client.from("students").select(PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION)
+  const full = [
+    client.from("classes").select("id,name,secret"),
+    client.from("students").select("id,title"),
+    client.from("progress_logs").select("id,class_id,secret"),
+  ]
+  return { summary, full }
+}`
+  const violations = inspectQuerySurfaceSource({
+    surface: "public",
+    file: "src/server/public-classes-payload.js",
+    source,
+  })
+
+  for (const line of [3, 5, 6, 7]) {
+    assert.ok(violations.some((violation) => violation.reason === "list_limit_missing" && violation.startLine === line))
+  }
 })
 
 test("the cache invalidation role RPC is an exact scalar RPC, not a pageable list", () => {

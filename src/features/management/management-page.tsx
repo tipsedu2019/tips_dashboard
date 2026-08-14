@@ -2792,6 +2792,13 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     };
   }, [dialogMode, kind, relatedRows.length, requestedClassDetailStudentId, selectedRow?.id]);
 
+  const reportPublicClassesCacheRefresh = (result: unknown) => {
+    const values = Array.isArray(result) ? result : [result];
+    if (values.some((value) => (value as { publicClassesCacheRefresh?: { status?: string } } | null)?.publicClassesCacheRefresh?.status === "pending")) {
+      setSaveNotice("저장은 완료되었습니다. 공개 수업 캐시 갱신 대기 중");
+    }
+  };
+
   const handleBulkUpdateRows = useCallback(async (rows: ManagementRow[], change: { field: string; value: string }) => {
     const value = text(change.value);
     if (rows.length === 0 || !value) {
@@ -2805,12 +2812,13 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     setSaving(true);
     setOperationError(null);
     try {
-      await Promise.all(rows.map((row) => {
+      const results = await Promise.all(rows.map((row) => {
         const payload = compact({ [change.field]: value }, kind, row);
         if (kind === "students") return service.updateStudent(payload);
         if (kind === "classes") return service.updateClass(payload, { candidateMembershipContext: classFormReferences });
         return service.updateTextbook(payload);
       }));
+      reportPublicClassesCacheRefresh(results);
       await reconcileManagementPage();
     } catch (bulkError) {
       setOperationError(getSaveErrorMessage(bulkError));
@@ -2835,7 +2843,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     setSaving(true);
     setOperationError(null);
     try {
-      await Promise.all(rows.map((row) => service.deleteTextbook(row.id)));
+      const results = await Promise.all(rows.map((row) => service.deleteTextbook(row.id)));
+      reportPublicClassesCacheRefresh(results);
       removeRows(rows.map((row) => row.id));
       await reconcileManagementPage();
     } catch (bulkError) {
@@ -2942,14 +2951,17 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     try {
       const payload = compact(form, kind, selectedRow);
       let createdId = text(payload.id);
+      let savedResult: unknown = null;
       if (kind === "students") {
         const created = await service.createStudent(payload);
+        savedResult = created;
         createdId = text((created as Record<string, unknown> | null)?.id) || createdId;
       } else if (kind === "classes") {
         const created = await service.createClass(payload, {
           candidateMembershipContext: classFormReferences,
           groupIds: parseClassGroupIds(form.classGroupIds),
         });
+        savedResult = created;
         const classId = getSavedClassId(created, payload.id);
         createdId = classId;
         const defaults = await service.getClassScheduleDefaults(classId);
@@ -2974,8 +2986,10 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         }
       } else {
         const created = await service.createTextbook(payload);
+        savedResult = created;
         createdId = text((created as Record<string, unknown> | null)?.id) || createdId;
       }
+      reportPublicClassesCacheRefresh(savedResult);
       if (createdId) await reconcileManagementPage(createdId);
       else await reconcileManagementPage();
       setDialogMode(null);
@@ -3002,21 +3016,24 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     setSaving(true);
     try {
       const payload = compact(form, kind, selectedRow);
+      let savedResult: unknown = null;
       if (kind === "students") {
-        await service.updateStudent(payload);
+        savedResult = await service.updateStudent(payload);
       } else if (kind === "classes") {
         const updated = await service.updateClass(payload, {
           candidateMembershipContext: classFormReferences,
           ...(normalizedScheduleDefaults ? { scheduleOwnership: "normalized" as const } : {}),
         });
+        savedResult = updated;
         const classId = getSavedClassId(updated, payload.id || selectedRow.id);
         await service.replaceClassGroupMemberships({
           classId,
           groupIds: parseClassGroupIds(form.classGroupIds),
         });
       } else {
-        await service.updateTextbook(payload);
+        savedResult = await service.updateTextbook(payload);
       }
+      reportPublicClassesCacheRefresh(savedResult);
 
       const nextTitle =
         text(payload.name || payload.class_name || payload.className || payload.title) || selectedRow.title;
