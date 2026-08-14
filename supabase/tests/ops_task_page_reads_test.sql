@@ -162,5 +162,42 @@ select is(
   'stats uses the same filter semantics as the page'
 );
 
+with stats as (
+  select public.get_ops_task_list_stats_v1(
+    'general',
+    jsonb_build_object(
+      'taskType','general','search','__task2_page_fixture__','statuses',jsonb_build_array(),
+      'queue','completed','requestedById',null,'requestedTeam',null,
+      'assigneeId',null,'assigneeTeam',null,'focus','none','sort','due'
+    )
+  ) as value
+)
+select ok(
+  pg_catalog.jsonb_typeof(value -> 'byView') = 'object'
+  and pg_catalog.jsonb_typeof(value -> 'metrics') = 'object'
+  and pg_catalog.jsonb_typeof(value -> 'facets') = 'object',
+  'stats returns authoritative sibling counts metrics and facet catalogs'
+)
+from stats;
+
+with stats as (
+  select public.get_ops_task_list_stats_v1(
+    'general',
+    jsonb_build_object(
+      'taskType','general','search','__task2_page_fixture__','statuses',jsonb_build_array(),
+      'queue','completed','requestedById',null,'requestedTeam',null,
+      'assigneeId',null,'assigneeTeam',null,'focus','none','sort','due'
+    )
+  ) as value
+)
+select ok(
+  pg_catalog.jsonb_array_length(value #> '{facets,requestedBy}') <= 100
+  and pg_catalog.jsonb_array_length(value #> '{facets,requestedTeam}') <= 100
+  and pg_catalog.jsonb_array_length(value #> '{facets,assignee}') <= 100
+  and pg_catalog.jsonb_array_length(value #> '{facets,assigneeTeam}') <= 100,
+  'general filter facet catalogs stay bounded to 100 options each'
+)
+from stats;
+
 select finish();
 rollback;

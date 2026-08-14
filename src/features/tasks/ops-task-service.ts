@@ -379,7 +379,19 @@ export type KeysetCursor = {
   scopeHash: string
 }
 
-export type OpsTaskPageStats = { total: number; byStatus: Record<string, number> }
+export type OpsTaskFacetOption = {
+  value: string
+  label: string
+  count: number
+}
+
+export type OpsTaskPageStats = {
+  total: number
+  byStatus: Record<string, number>
+  byView: Record<string, number>
+  metrics: Record<string, number>
+  facets: Record<string, OpsTaskFacetOption[]>
+}
 
 export type OpsTaskPageResponse = {
   page: { rows: OpsTask[]; nextCursor: KeysetCursor | null; hasMore: boolean }
@@ -1777,12 +1789,35 @@ export async function loadOpsTaskPage(options: OpsTaskPageLoadOptions): Promise<
     : null
   const statsData = (Array.isArray(statsResult.data) ? statsResult.data[0] : statsResult.data) as Row | null
   const byStatus = statsData?.byStatus || statsData?.by_status
+  const byView = statsData?.byView || statsData?.by_view
+  const metrics = statsData?.metrics
+  const facets = statsData?.facets
+
+  const numberRecord = (value: unknown): Record<string, number> => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, count]) => [key, Number(count || 0)]))
+  }
+  const facetRecord = (value: unknown): Record<string, OpsTaskFacetOption[]> => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, options]) => [
+      key,
+      Array.isArray(options)
+        ? options.slice(0, 100).map((option) => {
+            const row = option && typeof option === "object" ? option as Row : {}
+            return { value: text(row.value), label: text(row.label), count: Number(row.count || 0) }
+          }).filter((option) => option.value)
+        : [],
+    ]))
+  }
 
   return {
     page: { rows, nextCursor, hasMore },
     stats: {
       total: Number(statsData?.total || 0),
-      byStatus: byStatus && typeof byStatus === "object" ? byStatus as Record<string, number> : {},
+      byStatus: numberRecord(byStatus),
+      byView: numberRecord(byView),
+      metrics: numberRecord(metrics),
+      facets: facetRecord(facets),
     },
     registrationRuntime,
   }

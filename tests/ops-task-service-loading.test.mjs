@@ -1377,3 +1377,35 @@ test("task page SQL embeds only the selected subtype and registration track summ
   assert.match(taskPageMigrationSource, /set timezone = 'Asia\/Seoul'/);
   assert.match(taskPageMigrationSource, /create index if not exists ops_tasks_general_page_sort_idx/);
 });
+
+test("task page stats expose authoritative sibling counts metrics and bounded filter facets", () => {
+  assert.match(
+    serviceSource,
+    /export type OpsTaskPageStats = \{[\s\S]*?byView: Record<string, number>[\s\S]*?metrics: Record<string, number>[\s\S]*?facets: Record<string, OpsTaskFacetOption\[]>/,
+  );
+  const pageReader = sourceBetween(
+    "export async function loadOpsTaskPage",
+    "export async function loadOpsTaskWorkspaceData",
+  );
+  assert.match(pageReader, /byView:/);
+  assert.match(pageReader, /metrics:/);
+  assert.match(pageReader, /facets:/);
+  assert.match(taskPageMigrationSource, /'byView'/);
+  assert.match(taskPageMigrationSource, /'metrics'/);
+  assert.match(taskPageMigrationSource, /'facets'/);
+  assert.match(taskPageMigrationSource, /limit 100/);
+});
+
+test("registration page membership owner search and representative order come from matching track summaries", () => {
+  const registrationBranch = taskPageMigrationSource.slice(
+    taskPageMigrationSource.indexOf("'registrationTracks'"),
+    taskPageMigrationSource.indexOf("join public.ops_withdrawal_details detail"),
+  );
+  assert.match(registrationBranch, /summary\.workflow_status/);
+  assert.match(registrationBranch, /summary\.director_profile_id/);
+  assert.match(registrationBranch, /matching_track/);
+  assert.match(registrationBranch, /registration_representative_at/);
+  assert.match(registrationBranch, /pg_catalog\.regexp_replace/);
+  assert.doesNotMatch(registrationBranch, /detail\.pipeline_status[^\n]*~/);
+  assert.doesNotMatch(registrationBranch, /common\.assignee_id::text = p_filters ->> 'consultationOwnerId'/);
+});

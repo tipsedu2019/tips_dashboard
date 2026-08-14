@@ -217,6 +217,8 @@ returns table(
   recency_at timestamptz,
   effective_test_at timestamptz,
   effective_created_at timestamptz,
+  registration_representative_priority integer,
+  registration_representative_at timestamptz,
   display_text text
 )
 language sql
@@ -254,6 +256,7 @@ as $function$
       )
       and (
         nullif(pg_catalog.btrim(p_filters ->> 'search'), '') is null
+        or p_type = 'registration'
         or (p_type in ('withdrawal','transfer') and (p_filters -> 'filterColumn') <> 'null'::jsonb)
         or pg_catalog.concat_ws(' ', task.title, task.student_name, task.class_name, task.textbook_title, task.subject, task.campus)
           ilike '%' || pg_catalog.btrim(p_filters ->> 'search') || '%'
@@ -305,13 +308,32 @@ as $function$
       coalesce(common.created_at, common.updated_at) as recency_at,
       null::timestamptz as effective_test_at,
       common.created_at as effective_created_at,
+      null::integer as registration_representative_priority,
+      null::timestamptz as registration_representative_at,
       ''::text as display_text
     from common
     where p_type = 'general'
-      and (nullif(p_filters ->> 'requestedById','') is null or common.requested_by::text = p_filters ->> 'requestedById')
-      and (nullif(p_filters ->> 'requestedTeam','') is null or common.requested_team = p_filters ->> 'requestedTeam')
-      and (nullif(p_filters ->> 'assigneeId','') is null or common.assignee_id::text = p_filters ->> 'assigneeId' or common.secondary_assignee_id::text = p_filters ->> 'assigneeId')
-      and (nullif(p_filters ->> 'assigneeTeam','') is null or common.assignee_team = p_filters ->> 'assigneeTeam')
+      and (
+        nullif(p_filters ->> 'requestedById','') is null
+        or (p_filters ->> 'requestedById' = '__unassigned__' and common.requested_by is null)
+        or common.requested_by::text = p_filters ->> 'requestedById'
+      )
+      and (
+        nullif(p_filters ->> 'requestedTeam','') is null
+        or (p_filters ->> 'requestedTeam' = '__unassigned__' and nullif(pg_catalog.btrim(common.requested_team), '') is null)
+        or common.requested_team = p_filters ->> 'requestedTeam'
+      )
+      and (
+        nullif(p_filters ->> 'assigneeId','') is null
+        or (p_filters ->> 'assigneeId' = '__unassigned__' and common.assignee_id is null and common.secondary_assignee_id is null)
+        or common.assignee_id::text = p_filters ->> 'assigneeId'
+        or common.secondary_assignee_id::text = p_filters ->> 'assigneeId'
+      )
+      and (
+        nullif(p_filters ->> 'assigneeTeam','') is null
+        or (p_filters ->> 'assigneeTeam' = '__unassigned__' and nullif(pg_catalog.btrim(common.assignee_team), '') is null)
+        or common.assignee_team = p_filters ->> 'assigneeTeam'
+      )
       and (
         (p_filters ->> 'queue' = 'completed' and common.status in ('done','canceled'))
         or (p_filters ->> 'queue' = 'inbox' and common.status not in ('done','canceled') and (
@@ -361,9 +383,75 @@ as $function$
       ),
       common.status, common.priority_rank, common.workflow_status_rank, common.date_bucket,
       common.primary_date, coalesce(common.completed_at, common.updated_at, common.created_at),
-      common.updated_at, null::timestamptz, common.created_at, ''::text
+      common.updated_at, null::timestamptz, common.created_at,
+      matching_track.registration_representative_priority,
+      matching_track.registration_representative_at,
+      ''::text
     from common
     left join public.ops_registration_details detail on detail.task_id = common.id
+    join lateral (
+      select
+        summary.id as matching_track_id,
+        case
+          when p_filters ->> 'view' = 'consultation_requested'
+            and summary.pipeline_status = 'consultation_waiting' then 0
+          when p_filters ->> 'view' = 'consultation_requested' then 1
+          else 0
+        end as registration_representative_priority,
+        case
+          when p_filters ->> 'view' = 'consultation_requested'
+            and summary.pipeline_status = 'consultation_waiting' then summary.phone_ready_at
+          else null
+        end as registration_representative_at
+      from public.ops_registration_subject_track_summaries summary
+      left join public.profiles matching_director on matching_director.id = summary.director_profile_id
+      where summary.task_id = common.id
+        and case p_filters ->> 'view'
+          when 'inquiry' then summary.workflow_status = 'inquiry'
+          when 'level_test' then summary.workflow_status = 'level_test_requested'
+          when 'consultation_requested' then summary.workflow_status = 'consultation_requested'
+          when 'consultation_completed' then summary.workflow_status = 'consultation_completed'
+          when 'waiting' then summary.workflow_status in ('waiting_current_class','waiting_new_class','waiting_next_opening')
+          when 'observation' then summary.workflow_status in ('observation_requested','observation_feedback_pending','observation_completed')
+          when 'enrollment' then summary.workflow_status = 'enrollment_requested'
+          when 'payment' then summary.workflow_status = 'payment_in_progress'
+          when 'completed' then summary.workflow_status in ('registered','not_registered','inquiry_only')
+          else false
+        end
+        and (
+          p_filters ->> 'view' not in ('consultation_requested','consultation_completed')
+          or nullif(p_filters ->> 'consultationOwnerId','') is null
+          or summary.director_profile_id::text = p_filters ->> 'consultationOwnerId'
+        )
+        and (
+          nullif(pg_catalog.regexp_replace(pg_catalog.lower(pg_catalog.btrim(p_filters ->> 'search')), '[[:space:]-]+', '', 'g'), '') is null
+          or pg_catalog.regexp_replace(pg_catalog.lower(pg_catalog.concat_ws(' ',
+            common.student_name,
+            common.title,
+            detail.parent_phone,
+            detail.student_phone,
+            detail.school_grade,
+            detail.school_name,
+            detail.request_note,
+            summary.subject,
+            matching_director.name,
+            summary.visit_place
+          )), '[[:space:]-]+', '', 'g') like '%' ||
+            pg_catalog.regexp_replace(pg_catalog.lower(pg_catalog.btrim(p_filters ->> 'search')), '[[:space:]-]+', '', 'g') || '%'
+          or exists (
+            select 1
+            from public.ops_registration_subject_track_summaries search_track
+            where search_track.task_id = common.id
+              and pg_catalog.regexp_replace(pg_catalog.lower(search_track.subject), '[[:space:]-]+', '', 'g') like '%' ||
+                pg_catalog.regexp_replace(pg_catalog.lower(pg_catalog.btrim(p_filters ->> 'search')), '[[:space:]-]+', '', 'g') || '%'
+          )
+        )
+      order by
+        case when summary.pipeline_status = 'consultation_waiting' then 0 else 1 end,
+        case when summary.pipeline_status = 'consultation_waiting' then summary.phone_ready_at end asc nulls last,
+        summary.id asc
+      limit 1
+    ) matching_track on true
     left join lateral (
       select pg_catalog.jsonb_agg(
         pg_catalog.jsonb_build_object(
@@ -411,26 +499,13 @@ as $function$
             or summary.observation_notification_revision is not null
             or summary.observation_revision is not null
             or summary.observation_feedback_revision is not null
-        ) order by summary.id
+        ) order by case when summary.id = matching_track.matching_track_id then 0 else 1 end, summary.id
       ) as tracks
       from public.ops_registration_subject_track_summaries summary
       left join public.profiles director on director.id = summary.director_profile_id
       where summary.task_id = common.id
     ) track_page on true
     where p_type = 'registration'
-      and (nullif(p_filters ->> 'consultationOwnerId','') is null or common.assignee_id::text = p_filters ->> 'consultationOwnerId')
-      and case p_filters ->> 'view'
-        when 'inquiry' then coalesce(detail.pipeline_status, '') ~ '^(0\.|1\. 문의|문의)'
-        when 'level_test' then coalesce(detail.pipeline_status, '') like '1.%'
-        when 'consultation_requested' then coalesce(detail.pipeline_status, '') like '2.%'
-        when 'consultation_completed' then coalesce(detail.pipeline_status, '') like '3.%'
-        when 'waiting' then coalesce(detail.pipeline_status, '') like '4-%'
-        when 'observation' then exists (select 1 from public.ops_registration_subject_tracks track where track.task_id = common.id and track.workflow_status = 'observation_requested')
-        when 'enrollment' then coalesce(detail.pipeline_status, '') like '5.%'
-        when 'payment' then coalesce(detail.pipeline_status, '') like '6.%'
-        when 'completed' then coalesce(detail.pipeline_status, '') ~ '^(7\.|8\.|9\.)'
-        else false
-      end
 
     union all
 
@@ -455,6 +530,7 @@ as $function$
       common.status, common.priority_rank, common.workflow_status_rank, common.date_bucket,
       common.primary_date, coalesce(common.completed_at, common.updated_at, common.created_at),
       common.updated_at, null::timestamptz, common.created_at,
+      null::integer, null::timestamptz,
       coalesce(values.display_values ->> (p_filters ->> 'sortColumn'), '')
     from common
     join public.ops_withdrawal_details detail on detail.task_id = common.id
@@ -484,8 +560,8 @@ as $function$
       ) as display_values
     ) values
     where p_type = 'withdrawal'
-      and (nullif(p_filters ->> 'subject','') is null or common.subject = p_filters ->> 'subject')
-      and (nullif(p_filters ->> 'teacher','') is null or detail.teacher_name = p_filters ->> 'teacher')
+      and (nullif(p_filters ->> 'subject','') is null or common.subject = p_filters ->> 'subject' or (p_filters ->> 'subject' = '-' and nullif(pg_catalog.btrim(common.subject), '') is null))
+      and (nullif(p_filters ->> 'teacher','') is null or detail.teacher_name = p_filters ->> 'teacher' or (p_filters ->> 'teacher' = '미지정' and nullif(pg_catalog.btrim(detail.teacher_name), '') is null))
       and case p_filters ->> 'view'
         when 'applicant' then common.status = 'requested'
         when 'operations' then common.status in ('confirmed','in_progress','on_hold','review_requested')
@@ -528,6 +604,7 @@ as $function$
       common.status, common.priority_rank, common.workflow_status_rank, common.date_bucket,
       common.primary_date, coalesce(common.completed_at, common.updated_at, common.created_at),
       common.updated_at, null::timestamptz, common.created_at,
+      null::integer, null::timestamptz,
       coalesce(values.display_values ->> (p_filters ->> 'sortColumn'), '')
     from common
     join public.ops_transfer_details detail on detail.task_id = common.id
@@ -558,8 +635,8 @@ as $function$
       ) as display_values
     ) values
     where p_type = 'transfer'
-      and (nullif(p_filters ->> 'subject','') is null or common.subject = p_filters ->> 'subject')
-      and (nullif(p_filters ->> 'teacher','') is null or detail.from_teacher_name = p_filters ->> 'teacher')
+      and (nullif(p_filters ->> 'subject','') is null or common.subject = p_filters ->> 'subject' or (p_filters ->> 'subject' = '-' and nullif(pg_catalog.btrim(common.subject), '') is null))
+      and (nullif(p_filters ->> 'teacher','') is null or detail.from_teacher_name = p_filters ->> 'teacher' or (p_filters ->> 'teacher' = '미지정' and nullif(pg_catalog.btrim(detail.from_teacher_name), '') is null))
       and case p_filters ->> 'view'
         when 'applicant' then common.status = 'requested'
         when 'operations' then common.status in ('confirmed','in_progress','on_hold','review_requested')
@@ -605,6 +682,7 @@ as $function$
       common.primary_date, coalesce(common.completed_at, common.updated_at, common.created_at),
       common.updated_at, coalesce(detail.test_at, common.due_at, common.start_at),
       coalesce(common.created_at, common.updated_at),
+      null::integer, null::timestamptz,
       coalesce(values.display_values ->> (p_filters ->> 'tableSortColumn'), '')
     from common
     join public.ops_word_retests detail on detail.task_id = common.id
@@ -646,8 +724,16 @@ as $function$
     ) values
     where p_type = 'word_retest'
       and (nullif(p_filters ->> 'branch','') is null or detail.branch = p_filters ->> 'branch')
-      and (nullif(p_filters ->> 'teacherId','') is null or detail.teacher_catalog_id::text = p_filters ->> 'teacherId')
-      and (nullif(p_filters ->> 'classId','') is null or common.class_id::text = p_filters ->> 'classId')
+      and (
+        nullif(p_filters ->> 'teacherId','') is null
+        or detail.teacher_catalog_id::text = p_filters ->> 'teacherId'
+        or (p_filters ->> 'teacherId' = '__unassigned__' and detail.teacher_catalog_id is null)
+      )
+      and (
+        nullif(p_filters ->> 'classId','') is null
+        or common.class_id::text = p_filters ->> 'classId'
+        or (p_filters ->> 'classId' = '__unassigned__' and common.class_id is null)
+      )
       and ((p_filters ->> 'includeClosed')::boolean or common.status not in ('done','canceled'))
       and (
         ((p_filters ->> 'includeClosed')::boolean and common.status in ('done','canceled'))
@@ -696,6 +782,7 @@ begin
     when p_type = 'general' and p_filters ->> 'queue' = 'completed' then 1
     when p_type = 'general' and p_filters ->> 'sort' = 'status' then 5
     when p_type = 'general' then 4
+    when p_type = 'registration' and p_filters ->> 'view' = 'consultation_requested' then 2
     when p_type in ('registration','withdrawal','transfer') and not is_header then 1
     when p_type in ('withdrawal','transfer') then 2
     when p_type = 'word_retest' and is_header then 3
@@ -715,6 +802,7 @@ begin
       when p_type = 'general' and p_filters ->> 'sort' = 'status' and position in (1,2,4) then pg_catalog.jsonb_typeof(value) <> 'number'
       when p_type = 'general' and p_filters ->> 'sort' = 'priority' and position in (1,2) then pg_catalog.jsonb_typeof(value) <> 'number'
       when p_type = 'general' and p_filters ->> 'sort' = 'due' and position in (1,3) then pg_catalog.jsonb_typeof(value) <> 'number'
+      when p_type = 'registration' and p_filters ->> 'view' = 'consultation_requested' and position = 1 then pg_catalog.jsonb_typeof(value) <> 'number'
       when p_type in ('withdrawal','transfer') and is_header and position = 1 then pg_catalog.jsonb_typeof(value) <> 'string'
       when p_type = 'word_retest' and is_header and position = 1 then pg_catalog.jsonb_typeof(value) <> 'string'
       else pg_catalog.jsonb_typeof(value) not in ('string','null')
@@ -734,6 +822,7 @@ begin
         when p_type = 'general' and p_filters ->> 'sort' = 'status' then pg_catalog.jsonb_build_array(source.workflow_status_rank, source.date_bucket, source.primary_date, source.priority_rank, source.recency_at)
         when p_type = 'general' and p_filters ->> 'sort' = 'priority' then pg_catalog.jsonb_build_array(source.priority_rank, source.date_bucket, source.primary_date, source.recency_at)
         when p_type = 'general' then pg_catalog.jsonb_build_array(source.date_bucket, source.primary_date, source.priority_rank, source.recency_at)
+        when p_type = 'registration' and p_filters ->> 'view' = 'consultation_requested' then pg_catalog.jsonb_build_array(source.registration_representative_priority, source.registration_representative_at)
         when p_type in ('registration','withdrawal','transfer') and not is_header then pg_catalog.jsonb_build_array(source.recency_at)
         when p_type in ('withdrawal','transfer') then pg_catalog.jsonb_build_array(source.display_text, source.recency_at)
         when p_type = 'word_retest' and is_header then pg_catalog.jsonb_build_array(source.display_text, source.effective_test_at, source.effective_created_at)
@@ -748,6 +837,13 @@ begin
       when p_type = 'general' and p_filters ->> 'queue' = 'completed' then
         projected.completed_sort_at < (p_cursor_sort_values ->> 0)::timestamptz
         or (projected.completed_sort_at = (p_cursor_sort_values ->> 0)::timestamptz and projected.id > p_cursor_id)
+      when p_type = 'registration' and p_filters ->> 'view' = 'consultation_requested' then
+        projected.registration_representative_priority > (p_cursor_sort_values ->> 0)::integer
+        or (projected.registration_representative_priority = (p_cursor_sort_values ->> 0)::integer and (
+          projected.registration_representative_at > (p_cursor_sort_values ->> 1)::timestamptz
+          or (projected.registration_representative_at is null and (p_cursor_sort_values ->> 1) is not null)
+          or (projected.registration_representative_at is not distinct from (p_cursor_sort_values ->> 1)::timestamptz and projected.id > p_cursor_id)
+        ))
       when p_type in ('registration','withdrawal','transfer') and not is_header then
         projected.recency_at < (p_cursor_sort_values ->> 0)::timestamptz
         or (projected.recency_at = (p_cursor_sort_values ->> 0)::timestamptz and projected.id > p_cursor_id)
@@ -830,7 +926,9 @@ begin
     case when p_type = 'general' and p_filters ->> 'queue' <> 'completed' then projected.primary_date end asc nulls last,
     case when p_type = 'general' and p_filters ->> 'sort' <> 'priority' then projected.priority_rank end asc,
     case when p_type = 'general' and p_filters ->> 'queue' <> 'completed' then projected.recency_at end desc,
-    case when p_type in ('registration','withdrawal','transfer') and not is_header then projected.recency_at end desc,
+    case when p_type = 'registration' and p_filters ->> 'view' = 'consultation_requested' then projected.registration_representative_priority end asc,
+    case when p_type = 'registration' and p_filters ->> 'view' = 'consultation_requested' then projected.registration_representative_at end asc nulls last,
+    case when p_type in ('registration','withdrawal','transfer') and not is_header and not (p_type = 'registration' and p_filters ->> 'view' = 'consultation_requested') then projected.recency_at end desc,
     case when is_header and coalesce(p_filters ->> 'sortDirection', p_filters ->> 'tableSortDirection') = 'asc' then projected.display_text end collate dashboard_private.ko_numeric asc,
     case when is_header and coalesce(p_filters ->> 'sortDirection', p_filters ->> 'tableSortDirection') = 'desc' then projected.display_text end collate dashboard_private.ko_numeric desc,
     case when p_type in ('withdrawal','transfer') and is_header then projected.recency_at end desc,
@@ -853,6 +951,9 @@ set search_path = ''
 as $function$
 declare
   result jsonb;
+  by_view jsonb := '{}'::jsonb;
+  metrics jsonb := '{}'::jsonb;
+  facets jsonb := '{}'::jsonb;
 begin
   perform dashboard_private.ops_task_page_assert_filters_v1(p_type, p_filters);
   with status_counts as (
@@ -866,7 +967,202 @@ begin
   )
   into result
   from status_counts;
-  return result;
+
+  if p_type = 'general' then
+    with sibling(view_key) as (
+      values ('inbox'::text), ('sent'::text), ('completed'::text)
+    ), counts as (
+      select sibling.view_key, pg_catalog.count(source.id) as count_value
+      from sibling
+      left join lateral dashboard_private.ops_task_page_source_v1(
+        p_type,
+        pg_catalog.jsonb_set(p_filters, '{queue}', pg_catalog.to_jsonb(sibling.view_key))
+      ) source on true
+      group by sibling.view_key
+    )
+    select pg_catalog.jsonb_object_agg(view_key, count_value) into by_view from counts;
+
+    with focus_keys(metric_key) as (
+      values ('today'::text), ('overdue'::text), ('mine'::text), ('unassigned'::text), ('confirmation'::text)
+    ), counts as (
+      select focus_keys.metric_key, pg_catalog.count(source.id) as count_value
+      from focus_keys
+      left join lateral dashboard_private.ops_task_page_source_v1(
+        p_type,
+        pg_catalog.jsonb_set(p_filters, '{focus}', pg_catalog.to_jsonb(focus_keys.metric_key))
+      ) source on true
+      group by focus_keys.metric_key
+    )
+    select pg_catalog.jsonb_object_agg(metric_key, count_value) into metrics from counts;
+
+    select pg_catalog.jsonb_build_object(
+      'requestedBy', coalesce((
+        select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('value', value, 'label', label, 'count', count_value) order by label collate dashboard_private.ko_numeric)
+        from (
+          select
+            coalesce(nullif(source.row_data ->> 'requestedById', ''), '__unassigned__') as value,
+            coalesce(nullif(source.row_data ->> 'requestedByLabel', ''), '미지정') as label,
+            pg_catalog.count(*) as count_value
+          from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{requestedById}', 'null'::jsonb)) source
+          group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100
+        ) bounded
+      ), '[]'::jsonb),
+      'requestedTeam', coalesce((
+        select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('value', value, 'label', label, 'count', count_value) order by label collate dashboard_private.ko_numeric)
+        from (
+          select
+            coalesce(nullif(source.row_data ->> 'requestedTeam', ''), '__unassigned__') as value,
+            coalesce(nullif(source.row_data ->> 'requestedTeam', ''), '미지정') as label,
+            pg_catalog.count(*) as count_value
+          from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{requestedTeam}', 'null'::jsonb)) source
+          group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100
+        ) bounded
+      ), '[]'::jsonb),
+      'assignee', coalesce((
+        select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('value', value, 'label', label, 'count', count_value) order by label collate dashboard_private.ko_numeric)
+        from (
+          select
+            coalesce(nullif(source.row_data ->> 'assigneeId', ''), '__unassigned__') as value,
+            coalesce(nullif(source.row_data ->> 'assigneeLabel', ''), '미지정') as label,
+            pg_catalog.count(*) as count_value
+          from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{assigneeId}', 'null'::jsonb)) source
+          group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100
+        ) bounded
+      ), '[]'::jsonb),
+      'assigneeTeam', coalesce((
+        select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('value', value, 'label', label, 'count', count_value) order by label collate dashboard_private.ko_numeric)
+        from (
+          select
+            coalesce(nullif(source.row_data ->> 'assigneeTeam', ''), '__unassigned__') as value,
+            coalesce(nullif(source.row_data ->> 'assigneeTeam', ''), '미지정') as label,
+            pg_catalog.count(*) as count_value
+          from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{assigneeTeam}', 'null'::jsonb)) source
+          group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100
+        ) bounded
+      ), '[]'::jsonb)
+    ) into facets;
+  elsif p_type = 'registration' then
+    with sibling(view_key) as (
+      values
+        ('inquiry'::text), ('level_test'::text), ('consultation_requested'::text),
+        ('consultation_completed'::text), ('waiting'::text), ('observation'::text),
+        ('enrollment'::text), ('payment'::text), ('completed'::text)
+    ), counts as (
+      select sibling.view_key, pg_catalog.count(source.id) as count_value
+      from sibling
+      left join lateral dashboard_private.ops_task_page_source_v1(
+        p_type,
+        pg_catalog.jsonb_set(
+          pg_catalog.jsonb_set(p_filters, '{view}', pg_catalog.to_jsonb(sibling.view_key)),
+          '{consultationOwnerId}',
+          'null'::jsonb
+        )
+      ) source on true
+      group by sibling.view_key
+    )
+    select pg_catalog.jsonb_object_agg(view_key, count_value) into by_view from counts;
+
+    select pg_catalog.jsonb_build_object(
+      'consultationMine', case when p_filters ->> 'view' in ('consultation_requested','consultation_completed') then (
+        select pg_catalog.count(*) from dashboard_private.ops_task_page_source_v1(
+          p_type,
+          pg_catalog.jsonb_set(p_filters, '{consultationOwnerId}', pg_catalog.to_jsonb((select auth.uid())::text))
+        )
+      ) else 0 end,
+      'consultationAll', case when p_filters ->> 'view' in ('consultation_requested','consultation_completed') then (
+        select pg_catalog.count(*) from dashboard_private.ops_task_page_source_v1(
+          p_type,
+          pg_catalog.jsonb_set(p_filters, '{consultationOwnerId}', 'null'::jsonb)
+        )
+      ) else 0 end
+    ) into metrics;
+  elsif p_type in ('withdrawal','transfer') then
+    with sibling(view_key) as (
+      values ('applicant'::text), ('operations'::text), ('closed'::text)
+    ), counts as (
+      select sibling.view_key, pg_catalog.count(source.id) as count_value
+      from sibling
+      left join lateral dashboard_private.ops_task_page_source_v1(
+        p_type,
+        pg_catalog.jsonb_set(p_filters, '{view}', pg_catalog.to_jsonb(sibling.view_key))
+      ) source on true
+      group by sibling.view_key
+    )
+    select pg_catalog.jsonb_object_agg(view_key, count_value) into by_view from counts;
+
+    select pg_catalog.jsonb_build_object(
+      'subject', coalesce((
+        select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('value', value, 'label', label, 'count', count_value) order by label collate dashboard_private.ko_numeric)
+        from (
+          select
+            coalesce(nullif(source.row_data ->> 'subject', ''), '-') as value,
+            coalesce(nullif(source.row_data ->> 'subject', ''), '-') as label,
+            pg_catalog.count(*) as count_value
+          from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{subject}', 'null'::jsonb)) source
+          group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100
+        ) bounded
+      ), '[]'::jsonb),
+      'teacher', coalesce((
+        select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('value', value, 'label', label, 'count', count_value) order by label collate dashboard_private.ko_numeric)
+        from (
+          select
+            coalesce(nullif(source.row_data #>> '{displayValues,teacher}', ''), nullif(source.row_data #>> '{displayValues,fromTeacher}', ''), '미지정') as value,
+            coalesce(nullif(source.row_data #>> '{displayValues,teacher}', ''), nullif(source.row_data #>> '{displayValues,fromTeacher}', ''), '미지정') as label,
+            pg_catalog.count(*) as count_value
+          from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{teacher}', 'null'::jsonb)) source
+          group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100
+        ) bounded
+      ), '[]'::jsonb)
+    ) into facets;
+  else
+    with sibling(view_key) as (
+      values ('assistant'::text), ('teacher'::text)
+    ), counts as (
+      select sibling.view_key, pg_catalog.count(source.id) as count_value
+      from sibling
+      left join lateral dashboard_private.ops_task_page_source_v1(
+        p_type,
+        pg_catalog.jsonb_set(
+          pg_catalog.jsonb_set(p_filters, '{queue}', pg_catalog.to_jsonb(sibling.view_key)),
+          '{includeClosed}',
+          'false'::jsonb
+        )
+      ) source on true
+      group by sibling.view_key
+    )
+    select pg_catalog.jsonb_object_agg(view_key, count_value) into by_view from counts;
+
+    select pg_catalog.jsonb_build_object(
+      'teacher', coalesce((
+        select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('value', value, 'label', label, 'count', count_value) order by label collate dashboard_private.ko_numeric)
+        from (
+          select
+            coalesce(nullif(source.row_data #>> '{inlineState,teacherId}', ''), '__unassigned__') as value,
+            coalesce(nullif(source.row_data #>> '{displayValues,teacher}', ''), '미지정') as label,
+            pg_catalog.count(*) as count_value
+          from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{teacherId}', 'null'::jsonb)) source
+          group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100
+        ) bounded
+      ), '[]'::jsonb),
+      'class', coalesce((
+        select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('value', value, 'label', label, 'count', count_value) order by label collate dashboard_private.ko_numeric)
+        from (
+          select
+            coalesce(nullif(source.row_data ->> 'classId', ''), '__unassigned__') as value,
+            coalesce(nullif(source.row_data #>> '{displayValues,class}', ''), '미지정') as label,
+            pg_catalog.count(*) as count_value
+          from dashboard_private.ops_task_page_source_v1(p_type, pg_catalog.jsonb_set(p_filters, '{classId}', 'null'::jsonb)) source
+          group by 1,2 order by 2 collate dashboard_private.ko_numeric limit 100
+        ) bounded
+      ), '[]'::jsonb)
+    ) into facets;
+  end if;
+
+  return result || pg_catalog.jsonb_build_object(
+    'byView', coalesce(by_view, '{}'::jsonb),
+    'metrics', coalesce(metrics, '{}'::jsonb),
+    'facets', coalesce(facets, '{}'::jsonb)
+  );
 end
 $function$;
 

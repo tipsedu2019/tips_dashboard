@@ -3126,13 +3126,6 @@ function sortCompletedTodoTasks(tasks: OpsTask[]) {
   ))
 }
 
-function sortWorkspaceTasks(tasks: OpsTask[]) {
-  return [...tasks].sort((left, right) => (
-    String(right.updatedAt || right.createdAt)
-      .localeCompare(String(left.updatedAt || left.createdAt))
-  ))
-}
-
 type TodoFilterOption = {
   value: string
   label: string
@@ -6024,15 +6017,17 @@ function WithdrawalFilterSelect({
   allLabel,
   options,
   onChange,
+  onOpen,
 }: {
   label: string
   value: string
   allLabel: string
   options: TaskListboxOption[]
   onChange: (value: string) => void
+  onOpen?: () => void
 }) {
   return (
-    <div className="min-w-[8rem] flex-1 sm:max-w-[10rem]">
+    <div className="min-w-[8rem] flex-1 sm:max-w-[10rem]" onPointerDown={onOpen}>
       <TaskListboxField
         label={<span className="sr-only">{label}</span>}
         value={value}
@@ -6289,6 +6284,8 @@ function WithdrawalDataTable({
   showEmptyAction = true,
   completionBlockersByTaskId = EMPTY_COMPLETION_BLOCKERS_BY_TASK_ID,
   serverPaged = false,
+  serverFilterOptions,
+  onFilterOpen,
   onPageControlsChange,
 }: {
   tasks: OpsTask[]
@@ -6306,6 +6303,8 @@ function WithdrawalDataTable({
   showEmptyAction?: boolean
   completionBlockersByTaskId?: OperationCompletionBlockerMap
   serverPaged?: boolean
+  serverFilterOptions?: { subject: TodoFilterOption[]; teacher: TodoFilterOption[] }
+  onFilterOpen?: () => void
   onPageControlsChange?: (controls: OperationTablePageControls) => void
 }) {
   const [columnWidths, setColumnWidths] = useState<Record<WithdrawalTableColumnKey, number>>(WITHDRAWAL_TABLE_COLUMN_WIDTHS)
@@ -6325,20 +6324,24 @@ function WithdrawalDataTable({
   const isFilterInputExpanded = filterInputOpen || Boolean(filterValue)
 
   const subjectFilterOptions = useMemo(() => (
-    buildWithdrawalSelectFilterOptions(tasks, (task) => ({
+    serverPaged && serverFilterOptions
+      ? serverFilterOptions.subject.map((option) => ({ value: option.value, label: `${option.label}${option.count ? ` ${option.count}` : ""}` }))
+      : buildWithdrawalSelectFilterOptions(tasks, (task) => ({
       value: getWithdrawalFilterValue(task, "subject"),
       label: getWithdrawalFilterValue(task, "subject"),
     }))
-  ), [tasks])
+  ), [serverFilterOptions, serverPaged, tasks])
   const teacherFilterSourceTasks = useMemo(() => (
     selectedSubjectFilter === "all" ? tasks : tasks.filter((task) => getWithdrawalFilterValue(task, "subject") === selectedSubjectFilter)
   ), [selectedSubjectFilter, tasks])
   const teacherFilterOptions = useMemo(() => (
-    buildWithdrawalSelectFilterOptions(teacherFilterSourceTasks, (task) => ({
+    serverPaged && serverFilterOptions
+      ? serverFilterOptions.teacher.map((option) => ({ value: option.value, label: `${option.label}${option.count ? ` ${option.count}` : ""}` }))
+      : buildWithdrawalSelectFilterOptions(teacherFilterSourceTasks, (task) => ({
       value: getWithdrawalFilterValue(task, "teacher"),
       label: getWithdrawalFilterValue(task, "teacher"),
     }))
-  ), [teacherFilterSourceTasks])
+  ), [serverFilterOptions, serverPaged, teacherFilterSourceTasks])
 
   const visibleWithdrawalTasks = useMemo(() => {
     if (serverPaged) return tasks
@@ -6430,6 +6433,7 @@ function WithdrawalDataTable({
             value={selectedSubjectFilter}
             allLabel="과목 전체"
             options={subjectFilterOptions}
+            onOpen={onFilterOpen}
             onChange={(value) => {
               setSelectedSubjectFilter(value)
               setSelectedTeacherFilter("all")
@@ -6440,6 +6444,7 @@ function WithdrawalDataTable({
             value={selectedTeacherFilter}
             allLabel="선생님 전체"
             options={teacherFilterOptions}
+            onOpen={onFilterOpen}
             onChange={setSelectedTeacherFilter}
           />
         </div>
@@ -6754,6 +6759,8 @@ function TransferDataTable({
   showEmptyAction = true,
   completionBlockersByTaskId = EMPTY_COMPLETION_BLOCKERS_BY_TASK_ID,
   serverPaged = false,
+  serverFilterOptions,
+  onFilterOpen,
   onPageControlsChange,
 }: {
   tasks: OpsTask[]
@@ -6771,6 +6778,8 @@ function TransferDataTable({
   showEmptyAction?: boolean
   completionBlockersByTaskId?: OperationCompletionBlockerMap
   serverPaged?: boolean
+  serverFilterOptions?: { subject: TodoFilterOption[]; teacher: TodoFilterOption[] }
+  onFilterOpen?: () => void
   onPageControlsChange?: (controls: OperationTablePageControls) => void
 }) {
   const [columnWidths, setColumnWidths] = useState<Record<TransferTableColumnKey, number>>(TRANSFER_TABLE_COLUMN_WIDTHS)
@@ -6790,20 +6799,24 @@ function TransferDataTable({
   const isFilterInputExpanded = filterInputOpen || Boolean(filterValue)
 
   const subjectFilterOptions = useMemo(() => (
-    buildWithdrawalSelectFilterOptions(tasks, (task) => ({
+    serverPaged && serverFilterOptions
+      ? serverFilterOptions.subject.map((option) => ({ value: option.value, label: `${option.label}${option.count ? ` ${option.count}` : ""}` }))
+      : buildWithdrawalSelectFilterOptions(tasks, (task) => ({
       value: getTransferFilterValue(task, "subject"),
       label: getTransferFilterValue(task, "subject"),
     }))
-  ), [tasks])
+  ), [serverFilterOptions, serverPaged, tasks])
   const teacherFilterSourceTasks = useMemo(() => (
     selectedSubjectFilter === "all" ? tasks : tasks.filter((task) => getTransferFilterValue(task, "subject") === selectedSubjectFilter)
   ), [selectedSubjectFilter, tasks])
   const teacherFilterOptions = useMemo(() => (
-    buildWithdrawalSelectFilterOptions(teacherFilterSourceTasks, (task) => ({
+    serverPaged && serverFilterOptions
+      ? serverFilterOptions.teacher.map((option) => ({ value: option.value, label: `${option.label}${option.count ? ` ${option.count}` : ""}` }))
+      : buildWithdrawalSelectFilterOptions(teacherFilterSourceTasks, (task) => ({
       value: getTransferFilterValue(task, "fromTeacher"),
       label: getTransferFilterValue(task, "fromTeacher"),
     }))
-  ), [teacherFilterSourceTasks])
+  ), [serverFilterOptions, serverPaged, teacherFilterSourceTasks])
 
   const visibleTransferTasks = useMemo(() => {
     if (serverPaged) return tasks
@@ -6899,6 +6912,7 @@ function TransferDataTable({
             value={selectedSubjectFilter}
             allLabel="과목 전체"
             options={subjectFilterOptions}
+            onOpen={onFilterOpen}
             onChange={(value) => {
               setSelectedSubjectFilter(value)
               setSelectedTeacherFilter("all")
@@ -6909,6 +6923,7 @@ function TransferDataTable({
             value={selectedTeacherFilter}
             allLabel="선생님 전체"
             options={teacherFilterOptions}
+            onOpen={onFilterOpen}
             onChange={setSelectedTeacherFilter}
           />
         </div>
@@ -8474,6 +8489,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const registrationOptionsLoadedRef = useRef(false)
   const registrationOptionsLoadGenerationRef = useRef(0)
   const registrationOptionsDataRef = useRef<OpsTaskWorkspaceOptionData | null>(null)
+  const taskOptionsLoadedKeyRef = useRef("")
+  const taskOptionsLoadGenerationRef = useRef(0)
   const [notice, setNotice] = useState("")
   const [commentBody, setCommentBody] = useState("")
   const [attachmentName, setAttachmentName] = useState("")
@@ -8813,6 +8830,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
   const loadMore = useCallback(async () => {
     if (!taskPageCursor || !taskPageHasMore || taskPageLoadingMore || !currentUserId) return
+    const loadGeneration = workspaceLoadGenerationRef.current
     setTaskPageLoadingMore(true)
     try {
       const nextData = await loadOpsTaskWorkspaceData({
@@ -8825,6 +8843,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         cursor: taskPageCursor,
         force: true,
       })
+      if (workspaceLoadGenerationRef.current !== loadGeneration) return
       setData((current) => {
         if (!current) return nextData
         const rowsById = new Map(current.tasks.map((task) => [task.id, task]))
@@ -8843,6 +8862,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setTaskPageLoadingMore(false)
     }
   }, [currentUserId, scopedTaskType, taskPageCursor, taskPageFilters, taskPageHasMore, taskPageLoadingMore])
+
+  const refreshFirstTaskPageAfterMutation = useCallback(async () => {
+    await reload(true, false)
+  }, [reload])
 
   useEffect(() => {
     workspaceMountedRef.current = true
@@ -8936,6 +8959,29 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     registrationOptionsDataRef.current = null
     return ensureRegistrationOptions(true)
   }, [ensureRegistrationOptions])
+
+  const ensureTaskOptions = useCallback(async (force = false) => {
+    if (isRegistrationWorkspace || !currentUserId) return false
+    const optionsKey = `${scopedTaskType}:${currentUserId}`
+    if (!force && taskOptionsLoadedKeyRef.current === optionsKey) return true
+    const loadGeneration = ++taskOptionsLoadGenerationRef.current
+    const enrichmentData = await loadOpsTaskWorkspaceOptionData({
+      taskType: scopedTaskType,
+      viewerId: currentUserId,
+      force,
+    })
+    if (
+      latestWorkspaceViewerIdRef.current !== currentUserId
+      || taskOptionsLoadGenerationRef.current !== loadGeneration
+    ) return false
+    if (!enrichmentData.schemaReady) {
+      setMessage(enrichmentData.error || "선택 정보를 불러오지 못했습니다.")
+      return false
+    }
+    taskOptionsLoadedKeyRef.current = optionsKey
+    setData((current) => current ? mergeOpsTaskWorkspaceOptionData(current, enrichmentData) : current)
+    return true
+  }, [currentUserId, isRegistrationWorkspace, scopedTaskType])
 
   useEffect(() => {
     if (
@@ -9534,6 +9580,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     () => tasks.filter((task) => task.type === scopedTaskType),
     [scopedTaskType, tasks],
   )
+  const authoritativeTaskStats = data?.stats
+  const hasAuthoritativeTaskStats = Boolean(data?.page && authoritativeTaskStats)
   const summary = useMemo(
     () => summarizeOpsTasks(scopedTasks, { currentUserId, currentUserLabel }),
     [currentUserId, currentUserLabel, scopedTasks],
@@ -9545,51 +9593,66 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     return scopedTasks.filter((task) => isOpenTask(task) && (!task.assigneeId || !hasTaskSchedule(task)))
   }, [scopedTasks])
   const operationMetrics = useMemo(() => [
-    { key: "today" as const, label: "오늘 예정", value: summary.todayDue, view: "calendar" as ViewKey },
-    { key: "overdue" as const, label: "지연", value: summary.overdue, view: "all" as ViewKey },
-    { key: "mine" as const, label: "내 담당", value: summary.assignedToMe, view: "all" as ViewKey },
-    { key: "unassigned" as const, label: "미정리", value: operationNeedsOrganization.length, view: "all" as ViewKey },
-    { key: "confirmation" as const, label: "확인 필요", value: operationNeedsConfirmation.length, view: "all" as ViewKey },
-  ], [operationNeedsConfirmation.length, operationNeedsOrganization.length, summary.assignedToMe, summary.overdue, summary.todayDue])
+    { key: "today" as const, label: "오늘 예정", value: hasAuthoritativeTaskStats ? authoritativeTaskStats?.metrics.today || 0 : summary.todayDue, view: "calendar" as ViewKey },
+    { key: "overdue" as const, label: "지연", value: hasAuthoritativeTaskStats ? authoritativeTaskStats?.metrics.overdue || 0 : summary.overdue, view: "all" as ViewKey },
+    { key: "mine" as const, label: "내 담당", value: hasAuthoritativeTaskStats ? authoritativeTaskStats?.metrics.mine || 0 : summary.assignedToMe, view: "all" as ViewKey },
+    { key: "unassigned" as const, label: "미정리", value: hasAuthoritativeTaskStats ? authoritativeTaskStats?.metrics.unassigned || 0 : operationNeedsOrganization.length, view: "all" as ViewKey },
+    { key: "confirmation" as const, label: "확인 필요", value: hasAuthoritativeTaskStats ? authoritativeTaskStats?.metrics.confirmation || 0 : operationNeedsConfirmation.length, view: "all" as ViewKey },
+  ], [authoritativeTaskStats?.metrics, hasAuthoritativeTaskStats, operationNeedsConfirmation.length, operationNeedsOrganization.length, summary.assignedToMe, summary.overdue, summary.todayDue])
   const visibleOperationMetrics = useMemo(
     () => operationMetrics.filter((metric) => metric.value > 0 || taskFocus === metric.key),
     [operationMetrics, taskFocus],
   )
   const todayKey = useMemo(() => toDateKey(new Date()), [])
-  const todoFilterOptions = useMemo(() => buildTodoFilterOptions(scopedTasks), [scopedTasks])
+  const todoFilterOptions = useMemo(() => hasAuthoritativeTaskStats ? {
+    requestedBy: authoritativeTaskStats?.facets.requestedBy || [],
+    requestedTeam: authoritativeTaskStats?.facets.requestedTeam || [],
+    assignee: authoritativeTaskStats?.facets.assignee || [],
+    assigneeTeam: authoritativeTaskStats?.facets.assigneeTeam || [],
+  } : buildTodoFilterOptions(scopedTasks), [authoritativeTaskStats?.facets, hasAuthoritativeTaskStats, scopedTasks])
   const todoCounts = useMemo(() => {
+    if (hasAuthoritativeTaskStats) return {
+      inbox: authoritativeTaskStats?.byView.inbox || 0,
+      sent: authoritativeTaskStats?.byView.sent || 0,
+      completed: authoritativeTaskStats?.byView.completed || 0,
+    }
     const openGeneralTasks = scopedTasks.filter((task) => !isClosedOpsTask(task))
     return {
       inbox: openGeneralTasks.filter((task) => isOpsTaskInUserInbox(task, currentUserContext)).length,
       sent: openGeneralTasks.filter((task) => isOpsTaskInUserSent(task, currentUserContext)).length,
       completed: scopedTasks.filter((task) => isClosedOpsTask(task)).length,
     }
-  }, [currentUserContext, scopedTasks])
-  const withdrawalCounts = useMemo(() => ({
+  }, [authoritativeTaskStats?.byView, currentUserContext, hasAuthoritativeTaskStats, scopedTasks])
+  const operationViewCounts = useMemo(() => hasAuthoritativeTaskStats ? {
+    applicant: authoritativeTaskStats?.byView.applicant || 0,
+    operations: authoritativeTaskStats?.byView.operations || 0,
+    closed: authoritativeTaskStats?.byView.closed || 0,
+  } : {
     applicant: getWithdrawalViewTasks(scopedTasks, "applicant").length,
     operations: getWithdrawalViewTasks(scopedTasks, "operations").length,
     closed: getWithdrawalViewTasks(scopedTasks, "closed").length,
-  }), [scopedTasks])
-  const transferCounts = useMemo(() => ({
-    applicant: getWithdrawalViewTasks(scopedTasks, "applicant").length,
-    operations: getWithdrawalViewTasks(scopedTasks, "operations").length,
-    closed: getWithdrawalViewTasks(scopedTasks, "closed").length,
-  }), [scopedTasks])
+  }, [authoritativeTaskStats?.byView, hasAuthoritativeTaskStats, scopedTasks])
+  const withdrawalCounts = operationViewCounts
+  const transferCounts = operationViewCounts
+  const operationFilterOptions = useMemo(() => ({
+    subject: hasAuthoritativeTaskStats ? authoritativeTaskStats?.facets.subject || [] : [],
+    teacher: hasAuthoritativeTaskStats ? authoritativeTaskStats?.facets.teacher || [] : [],
+  }), [authoritativeTaskStats?.facets, hasAuthoritativeTaskStats])
   const registrationCaseItems = useMemo(
     () => buildRegistrationCaseListItems(scopedTasks),
     [scopedTasks],
   )
-  const registrationCounts = useMemo(
-    () => getRegistrationCaseTabCounts(registrationCaseItems),
-    [registrationCaseItems],
-  )
+  const registrationCounts = useMemo(() => hasAuthoritativeTaskStats
+    ? Object.fromEntries(REGISTRATION_VIEW_TABS.map((tab) => [tab.key, authoritativeTaskStats?.byView[tab.key] || 0])) as Record<RegistrationWorkspaceViewKey, number>
+    : getRegistrationCaseTabCounts(registrationCaseItems),
+  [authoritativeTaskStats?.byView, hasAuthoritativeTaskStats, registrationCaseItems])
   const consultationOwnerId = isRegistrationConsultationViewKey(registrationView)
     && registrationConsultationOwnerScope === "mine"
     ? registrationViewerId
     : undefined
   const visibleRegistrationCaseItems = useMemo(
     () => data?.page
-      ? filterRegistrationCaseListItems(registrationCaseItems, registrationView)
+      ? registrationCaseItems.flatMap((item) => filterRegistrationCaseListItems([item], registrationView))
       : filterRegistrationCaseListItems(
         registrationCaseItems,
         registrationView,
@@ -9598,7 +9661,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       ),
     [consultationOwnerId, data?.page, deferredQuery, registrationCaseItems, registrationView],
   )
-  const registrationConsultationScopeCounts = useMemo(() => ({
+  const registrationConsultationScopeCounts = useMemo(() => hasAuthoritativeTaskStats ? ({
+    mine: authoritativeTaskStats?.metrics.consultationMine || 0,
+    all: authoritativeTaskStats?.metrics.consultationAll || 0,
+  }) : ({
     mine: filterRegistrationCaseListItems(
       registrationCaseItems,
       registrationView,
@@ -9606,7 +9672,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       { consultationOwnerId: registrationViewerId },
     ).length,
     all: filterRegistrationCaseListItems(registrationCaseItems, registrationView).length,
-  }), [registrationCaseItems, registrationView, registrationViewerId])
+  }), [authoritativeTaskStats?.metrics, hasAuthoritativeTaskStats, registrationCaseItems, registrationView, registrationViewerId])
   const wordRetestRoleTabs = isAssistant || wordRetestViewerRole === "assistant"
     ? WORD_RETEST_ROLE_TABS.filter((tab) => tab.key === "assistant")
     : WORD_RETEST_ROLE_TABS
@@ -9653,12 +9719,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     ))
   ), [branchScopedWordRetestTasks, todayKey, wordRetestCustomEndDate, wordRetestCustomStartDate, wordRetestPeriodFilter])
   const wordRetestRoleCounts = useMemo(() => {
+    if (hasAuthoritativeTaskStats) return {
+      assistant: authoritativeTaskStats?.byView.assistant || 0,
+      teacher: authoritativeTaskStats?.byView.teacher || 0,
+    }
     const openWordRetests = periodScopedWordRetestTasks.filter((task) => !isClosedOpsTask(task))
     return {
       assistant: openWordRetests.filter((task) => isWordRetestInAssistantQueue(task, wordRetestRoleContext)).length,
       teacher: openWordRetests.filter((task) => isWordRetestInTeacherQueue(task, wordRetestRoleContext)).length,
     }
-  }, [periodScopedWordRetestTasks, wordRetestRoleContext])
+  }, [authoritativeTaskStats?.byView, hasAuthoritativeTaskStats, periodScopedWordRetestTasks, wordRetestRoleContext])
   const wordRetestFilterSourceTasks = useMemo(() => (
     periodScopedWordRetestTasks.filter((task) => {
       if (!showClosed && !isOpenTask(task)) return false
@@ -9668,8 +9738,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     })
   ), [periodScopedWordRetestTasks, showClosed, wordRetestMode, wordRetestRoleContext])
   const wordRetestFilterOptions = useMemo(
-    () => buildWordRetestFilterOptions(wordRetestFilterSourceTasks),
-    [wordRetestFilterSourceTasks],
+    () => hasAuthoritativeTaskStats ? {
+      teacher: authoritativeTaskStats?.facets.teacher || [],
+      class: authoritativeTaskStats?.facets.class || [],
+    } : buildWordRetestFilterOptions(wordRetestFilterSourceTasks),
+    [authoritativeTaskStats?.facets, hasAuthoritativeTaskStats, wordRetestFilterSourceTasks],
   )
   useEffect(() => {
     if (!isWordRetestWorkspace) return
@@ -9920,6 +9993,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   function openCreate(type: OpsTaskType = scopedTaskType, initialValues: Partial<OpsTaskInput> = {}) {
     if (!canOpenCreate) return
     if (type === "registration") void ensureRegistrationOptions(true)
+    else void ensureTaskOptions()
     const defaultAssigneeId = currentUserId || ""
     const defaultAssigneeTeam = profileTeamById.get(defaultAssigneeId) || ""
     const defaultDueAt = taskFocus === "today" ? dueTodayValue : ""
@@ -10008,6 +10082,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
   const openEdit = useCallback((task: OpsTask, blockers: string[] = [], completionIntent: FormCompletionIntent | null = null) => {
     if (task.type === "registration") void ensureRegistrationOptions(true)
+    else void ensureTaskOptions()
     const inferredCompletionIntent = completionIntent || getCompletionIntentForBlockedEdit(task, blockers)
     const shouldDeferWordRetestRetryBlockers = inferredCompletionIntent?.kind === "word_retest_retry"
     const nextForm = applyFormCompletionIntent(formFromTask(task), inferredCompletionIntent)
@@ -10032,7 +10107,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setNotice("")
     setStatusUndo(null)
     setFormOpen(true)
-  }, [ensureRegistrationOptions, syncTaskDeepLink])
+  }, [ensureRegistrationOptions, ensureTaskOptions, syncTaskDeepLink])
 
   const openWordRetestRetryForm = useCallback((task: OpsTask, retryReason: WordRetestRetryReason) => {
     const baseForm = formFromTask(task)
@@ -10125,11 +10200,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         const replaced = current.tasks.some((task) => task.id === exactTask.id)
         return {
           ...current,
-          tasks: sortWorkspaceTasks(replaced
+          tasks: (replaced
             ? current.tasks.map((task) => task.id === exactTask.id ? exactTask : task)
             : [exactTask, ...current.tasks]),
         }
       })
+      await refreshFirstTaskPageAfterMutation()
       setRegistrationCaseDetail(detail)
       setSelectedTask(exactTask)
       setSelectedRegistrationTrackId(focusTrackId)
@@ -10156,7 +10232,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       })
       syncTaskDeepLink(committed.taskId)
     }
-  }, [form, loadRegistrationCaseForWorkspace, syncTaskDeepLink])
+  }, [form, loadRegistrationCaseForWorkspace, refreshFirstTaskPageAfterMutation, syncTaskDeepLink])
 
   const openDetail = useCallback((task: OpsTask, trackId: string | null = null) => {
     const nextTrackId = task.type === "registration" ? trackId : null
@@ -11126,6 +11202,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           syncTaskDeepLink(null)
           return
         }
+        if (exactTask.type === "registration" && !deepLinkedTrackId && !deepLinkedAppointmentId) {
+          void openRegistrationCase(exactTask.id, { allowDirectLoad: true })
+          return
+        }
         setData((current) => current ? {
           ...current,
           tasks: current.tasks.some((task) => task.id === exactTask.id)
@@ -11369,7 +11449,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     if (!invalidatePendingWorkspaceReloads()) return false
     setData((current) => current ? {
       ...current,
-      tasks: sortWorkspaceTasks(current.tasks.map((task) => task.id === taskId ? { ...task, ...patch } : task)),
+      tasks: current.tasks.map((task) => task.id === taskId ? { ...task, ...patch } : task),
     } : current)
     setSelectedTask((current) => current?.id === taskId ? { ...current, ...patch } : current)
     return true
@@ -11382,7 +11462,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
       return {
         ...workspaceData,
-        tasks: sortWorkspaceTasks([task, ...workspaceData.tasks]),
+        tasks: [task, ...workspaceData.tasks],
       }
     })
     return true
@@ -11396,7 +11476,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
       return {
         ...workspaceData,
-        tasks: sortWorkspaceTasks(replaced
+        tasks: (replaced
           ? workspaceData.tasks.map((task) => task.id === nextTask.id ? nextTask : task)
           : [nextTask, ...workspaceData.tasks]),
       }
@@ -11409,7 +11489,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     if (!invalidatePendingWorkspaceReloads()) return false
     setData((current) => current ? {
       ...current,
-      tasks: sortWorkspaceTasks(current.tasks.map((task) => task.id === taskId ? updater(task) : task)),
+      tasks: current.tasks.map((task) => task.id === taskId ? updater(task) : task),
     } : current)
     setSelectedTask((current) => current?.id === taskId ? updater(current) : current)
     return true
@@ -11573,6 +11653,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       const nextTodoView: TodoViewKey = isOpsTaskInUserInbox(createdTask, currentUserContext) ? "inbox" : "sent"
       if (todoView !== nextTodoView) {
         syncTodoView(nextTodoView)
+      } else {
+        await refreshFirstTaskPageAfterMutation()
       }
       await dispatchLegacyOpsTaskSources(receipt.sourceEventIds, notificationSessionToken)
       setQuery("")
@@ -11669,6 +11751,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         }
         replaceTaskInState(updatedTask)
         setSelectedTask((current) => current?.id === updatedTask.id ? updatedTask : current)
+        await refreshFirstTaskPageAfterMutation()
         setFormOpen(false)
         setWordRetestPendingFocus("")
         setExpectedRetestDraft(EMPTY_DATE_TIME_PICKER_DRAFT)
@@ -11836,6 +11919,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         ])
         replaceTaskInState(syncedOriginal)
         prependTask(syncedRetry)
+        await refreshFirstTaskPageAfterMutation()
         setFormOpen(false)
         setFormCompletionBlockers([])
         setFormCompletionIntent(null)
@@ -12076,6 +12160,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         savedTasks.forEach((task) => prependTask(task))
         setQuery("")
       }
+      await refreshFirstTaskPageAfterMutation()
       legacyOpsTaskSourceEventIds.push(...await collectRegistrationLegacySourceIds(savedTasks))
       await dispatchLegacyOpsTaskSources(legacyOpsTaskSourceEventIds, registrationNotificationSessionToken)
       const itemLabel = payload.type === "general" ? "할 일" : getTaskTypeLabel(payload.type)
@@ -12151,6 +12236,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           completedAt: status === "done" ? changedAt : "",
         })
       }
+      await refreshFirstTaskPageAfterMutation()
       const registrationSourceEventIds = task.type === "registration"
         ? await loadRegistrationLegacyNotificationSourceIds(task.id).catch(() => [])
         : []
@@ -12194,6 +12280,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       const receipt = await updateOpsTask(task.id, payload)
       const syncedTask = await loadOpsTaskById(task.id)
       replaceTaskInState(syncedTask || buildLocalTaskFromInput(task.id, payload, task))
+      await refreshFirstTaskPageAfterMutation()
       await dispatchLegacyOpsTaskSources(receipt.sourceEventIds, notificationSessionToken)
       setNotice("처리 확인을 저장했습니다.")
     } catch (error) {
@@ -12221,6 +12308,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       const receipt = await updateOpsTask(task.id, payload)
       const syncedTask = await loadOpsTaskById(task.id)
       replaceTaskInState(syncedTask || buildLocalTaskFromInput(task.id, payload, task))
+      await refreshFirstTaskPageAfterMutation()
       await dispatchLegacyOpsTaskSources(receipt.sourceEventIds, notificationSessionToken)
       setNotice("처리 확인을 저장했습니다.")
     } catch (error) {
@@ -12244,6 +12332,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         : await updateOpsTask(task.id, payload)
       const syncedTask = await loadOpsTaskById(task.id)
       replaceTaskInState(syncedTask || buildLocalTaskFromInput(task.id, payload, task))
+      await refreshFirstTaskPageAfterMutation()
       await dispatchLegacyOpsTaskSources(receipt.sourceEventIds, notificationSessionToken)
       setNotice(successMessage)
     } catch (error) {
@@ -12313,15 +12402,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           const workspaceData = current || emptyOpsTaskWorkspaceData
           return {
             ...workspaceData,
-            tasks: sortWorkspaceTasks(workspaceData.tasks.map((task) => (
+            tasks: workspaceData.tasks.map((task) => (
               syncedTasks.find((syncedTask) => syncedTask.id === task.id) || task
-            ))),
+            )),
           }
         })
         setSelectedTask((current) => {
           if (!current) return current
           return syncedTasks.find((task) => task.id === current.id) || current
         })
+        await refreshFirstTaskPageAfterMutation()
       }
 
       if (autoAbsentError) {
@@ -12349,6 +12439,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     loading,
     notificationSessionToken,
     reload,
+    refreshFirstTaskPageAfterMutation,
     wordRetestFilterSourceTasks,
     wordRetestViewerRole,
   ])
@@ -12464,6 +12555,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         refreshWarning = "최신 상세는 새로고침해 확인하세요."
       }
       replaceTaskInState(notificationTask)
+      await refreshFirstTaskPageAfterMutation()
       const registrationSourceEventIds = await loadRegistrationLegacyNotificationSourceIds(task.id).catch(() => [])
       await dispatchLegacyOpsTaskSources([
         ...receipt.sourceEventIds,
@@ -12499,6 +12591,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           completedAt: statusUndo.previousStatus === "done" ? new Date().toISOString() : "",
         })
       }
+      await refreshFirstTaskPageAfterMutation()
       const registrationSourceEventIds = currentTask.type === "registration"
         ? await loadRegistrationLegacyNotificationSourceIds(currentTask.id).catch(() => [])
         : []
@@ -12528,6 +12621,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         ...comment,
         authorLabel: comment.authorLabel || currentUserLabel,
       })
+      await refreshFirstTaskPageAfterMutation()
       await dispatchLegacyOpsTaskSources(receipt.sourceEventIds, notificationSessionToken)
       setCommentBody("")
       setNotice("댓글을 추가했습니다.")
@@ -12550,6 +12644,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         ...attachment,
         uploadedByLabel: attachment.uploadedByLabel || currentUserLabel,
       })
+      await refreshFirstTaskPageAfterMutation()
       setAttachmentName("")
       setAttachmentLink("")
       setNotice("첨부 링크를 저장했습니다.")
@@ -12602,6 +12697,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setDetailOpen(false)
       syncTaskDeepLink(null)
       removeTaskFromState(taskId)
+      await refreshFirstTaskPageAfterMutation()
       const itemLabel = deleteTarget.type === "general" ? "할 일" : getTaskTypeLabel(deleteTarget.type)
       setNotice(`${itemLabel} 삭제 완료`)
     } catch (error) {
@@ -12632,6 +12728,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         ? { ...current, tasks: current.tasks.filter((task) => !deletedTaskIds.has(task.id)) }
         : current)
       setSelectedTask((current) => current && deletedTaskIds.has(current.id) ? null : current)
+      await refreshFirstTaskPageAfterMutation()
       setDetailOpen(false)
       syncTaskDeepLink(null)
       setNotice(`단어 재시험 ${deletableTasks.length}건 삭제 완료`)
@@ -13243,6 +13340,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                setWordRetestTeacherFilter(value)
 	              }}
 	              onClassChange={setWordRetestClassFilter}
+	              onFilterOpen={() => void ensureTaskOptions()}
 	            />
 	          </div>
 	        )}
@@ -13259,6 +13357,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               onRequestedTeamChange={setRequestedTeamFilter}
               onAssigneeChange={setAssigneeFilter}
               onAssigneeTeamChange={setAssigneeTeamFilter}
+              onFilterOpen={() => void ensureTaskOptions()}
             />
           </div>
         )}
@@ -13363,6 +13462,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            showEmptyAction={false}
 	            completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
 	            serverPaged={Boolean(data?.page)}
+	            serverFilterOptions={operationFilterOptions}
+	            onFilterOpen={() => void ensureTaskOptions()}
 	            onPageControlsChange={setOperationTablePageControls}
 	          />
 	        ) : isTransferWorkspace ? (
@@ -13382,6 +13483,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            showEmptyAction={false}
 	            completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
 	            serverPaged={Boolean(data?.page)}
+	            serverFilterOptions={operationFilterOptions}
+	            onFilterOpen={() => void ensureTaskOptions()}
 	            onPageControlsChange={setOperationTablePageControls}
 	          />
 	        ) : isWordRetestWorkspace ? (
@@ -15699,6 +15802,7 @@ function TodoTeamFilterBar({
   onRequestedTeamChange,
   onAssigneeChange,
   onAssigneeTeamChange,
+  onFilterOpen,
 }: {
   options: TodoFilterOptions
   requestedByFilter: TodoSelectFilterKey
@@ -15709,13 +15813,14 @@ function TodoTeamFilterBar({
   onRequestedTeamChange: (value: TodoSelectFilterKey) => void
   onAssigneeChange: (value: TodoSelectFilterKey) => void
   onAssigneeTeamChange: (value: TodoSelectFilterKey) => void
+  onFilterOpen?: () => void
 }) {
   return (
     <div aria-label="할 일 필터" className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-      <TodoFilterListbox label="요청자" allLabel="요청자 전체" value={requestedByFilter} options={options.requestedBy} onChange={onRequestedByChange} />
-      <TodoFilterListbox label="요청팀" allLabel="요청팀 전체" value={requestedTeamFilter} options={options.requestedTeam} onChange={onRequestedTeamChange} />
-      <TodoFilterListbox label="담당자" allLabel="담당자 전체" value={assigneeFilter} options={options.assignee} onChange={onAssigneeChange} />
-      <TodoFilterListbox label="담당팀" allLabel="담당팀 전체" value={assigneeTeamFilter} options={options.assigneeTeam} onChange={onAssigneeTeamChange} />
+      <TodoFilterListbox label="요청자" allLabel="요청자 전체" value={requestedByFilter} options={options.requestedBy} onChange={onRequestedByChange} onOpen={onFilterOpen} />
+      <TodoFilterListbox label="요청팀" allLabel="요청팀 전체" value={requestedTeamFilter} options={options.requestedTeam} onChange={onRequestedTeamChange} onOpen={onFilterOpen} />
+      <TodoFilterListbox label="담당자" allLabel="담당자 전체" value={assigneeFilter} options={options.assignee} onChange={onAssigneeChange} onOpen={onFilterOpen} />
+      <TodoFilterListbox label="담당팀" allLabel="담당팀 전체" value={assigneeTeamFilter} options={options.assigneeTeam} onChange={onAssigneeTeamChange} onOpen={onFilterOpen} />
     </div>
   )
 }
@@ -15780,19 +15885,21 @@ function WordRetestFilterBar({
   classFilter,
   onTeacherChange,
   onClassChange,
+  onFilterOpen,
 }: {
   options: WordRetestFilterOptions
   teacherFilter: WordRetestSelectFilterKey
   classFilter: WordRetestSelectFilterKey
   onTeacherChange: (value: WordRetestSelectFilterKey) => void
   onClassChange: (value: WordRetestSelectFilterKey) => void
+  onFilterOpen?: () => void
 }) {
   if (options.teacher.length === 0 && options.class.length === 0 && teacherFilter === "all" && classFilter === "all") return null
 
   return (
     <div aria-label="단어 재시험 필터" className="grid gap-2 sm:grid-cols-2">
-      <TodoFilterListbox label="담당선생님" allLabel="담당선생님 전체" value={teacherFilter} options={options.teacher} onChange={onTeacherChange} />
-      <TodoFilterListbox label="수업" allLabel="수업 전체" value={classFilter} options={options.class} onChange={onClassChange} />
+      <TodoFilterListbox label="담당선생님" allLabel="담당선생님 전체" value={teacherFilter} options={options.teacher} onChange={onTeacherChange} onOpen={onFilterOpen} />
+      <TodoFilterListbox label="수업" allLabel="수업 전체" value={classFilter} options={options.class} onChange={onClassChange} onOpen={onFilterOpen} />
     </div>
   )
 }
@@ -15803,12 +15910,14 @@ function TodoFilterListbox({
   value,
   options,
   onChange,
+  onOpen,
 }: {
   label: string
   allLabel: string
   value: string
   options: TodoFilterOption[]
   onChange: (value: string) => void
+  onOpen?: () => void
 }) {
   const fieldId = useId()
   const listId = useId()
@@ -15839,7 +15948,10 @@ function TodoFilterListbox({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listId}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setOpen((current) => {
+          if (!current) onOpen?.()
+          return !current
+        })}
         className={[
           "flex h-9 min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-2.5 text-left text-sm text-foreground shadow-xs outline-none transition",
           open ? "border-ring ring-2 ring-ring/40" : "hover:border-foreground/30",

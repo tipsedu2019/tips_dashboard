@@ -5394,3 +5394,58 @@ test("task workspace appends deduplicated pages and deep links exact-load missin
   assert.match(source, /loadOpsTaskById\(deepLinkedTaskId\)/);
   assert.doesNotMatch(source, /syncTaskDeepLink\(null\)\s*return\s*}\s*if \(deepLinkedTask\.type/);
 });
+
+test("non-registration catalogs load only when an editor or filter is opened", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const reloadStart = source.indexOf("const reload = useCallback");
+  const reloadEnd = source.indexOf("const loadMore = useCallback", reloadStart);
+  const initialReload = source.slice(reloadStart, reloadEnd);
+  const openCreateStart = source.indexOf("function openCreate(");
+  const openCreateEnd = source.indexOf("openCreateRef.current", openCreateStart);
+  const openCreate = source.slice(openCreateStart, openCreateEnd);
+  const openEditStart = source.indexOf("const openEdit = useCallback");
+  const openEditEnd = source.indexOf("const openWordRetestRetryForm", openEditStart);
+  const openEdit = source.slice(openEditStart, openEditEnd);
+
+  assert.match(source, /const ensureTaskOptions = useCallback/);
+  assert.match(openCreate, /type === "registration"[\s\S]*?ensureRegistrationOptions[\s\S]*?else void ensureTaskOptions/);
+  assert.match(openEdit, /task\.type === "registration"[\s\S]*?ensureRegistrationOptions[\s\S]*?else void ensureTaskOptions/);
+  assert.match(source, /onFilterOpen=\{\(\) => void ensureTaskOptions\(\)\}/);
+  assert.doesNotMatch(initialReload, /loadOpsTaskWorkspaceOptionData|ensureTaskOptions/);
+});
+
+test("paged badges counts and filter options consume server stats instead of the selected rows", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  assert.match(source, /const authoritativeTaskStats = data\?\.stats/);
+  assert.match(source, /authoritativeTaskStats\?\.byView/);
+  assert.match(source, /authoritativeTaskStats\?\.metrics/);
+  assert.match(source, /authoritativeTaskStats\?\.facets/);
+  assert.match(source, /serverFilterOptions=\{operationFilterOptions\}/);
+  assert.match(source, /options=\{wordRetestFilterOptions\}/);
+});
+
+test("mutations reconcile page one with active SQL filters instead of locally sorting by updated time", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const mutationHelpers = source.slice(
+    source.indexOf("const invalidatePendingWorkspaceReloads"),
+    source.indexOf("const buildLocalTaskFromInput"),
+  );
+  assert.match(source, /const refreshFirstTaskPageAfterMutation = useCallback/);
+  assert.match(source, /await refreshFirstTaskPageAfterMutation\(\)/);
+  assert.doesNotMatch(mutationHelpers, /sortWorkspaceTasks/);
+  assert.doesNotMatch(source, /function sortWorkspaceTasks/);
+});
+
+test("an off-page task-only registration deep link opens canonical case detail after exact identification", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const deepLinkStart = source.indexOf("useEffect(() => {\n    if (deleteTarget) return");
+  const deepLinkEnd = source.indexOf("\n  function handleDetailOpenChange", deepLinkStart);
+  const deepLink = source.slice(deepLinkStart, deepLinkEnd);
+  const exactLoadStart = deepLink.indexOf("void loadOpsTaskById(deepLinkedTaskId)");
+  const exactLoadEnd = deepLink.indexOf(".catch(() =>", exactLoadStart);
+  const exactLoad = deepLink.slice(exactLoadStart, exactLoadEnd);
+
+  assert.match(exactLoad, /exactTask\.type === "registration"/);
+  assert.match(exactLoad, /openRegistrationCase\(exactTask\.id, \{ allowDirectLoad: true \}\)\s*return/);
+  assert.match(exactLoad, /return[\s\S]*?setData\(\(current\)/);
+});

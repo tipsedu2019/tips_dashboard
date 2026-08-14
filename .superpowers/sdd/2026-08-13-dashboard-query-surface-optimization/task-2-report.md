@@ -64,3 +64,27 @@ It stopped before database allocation with `isolated_supabase_db_baseline_review
 ## Boundary and remaining gate
 
 Source implementation and focused source verification are complete. Runtime SQL behavior remains specified by `supabase/tests/ops_task_page_reads_test.sql` but is not empirically passed. Release, production migration, deployment, provider execution, and production browser verification are outside this task and were not performed. The pre-existing untracked `pnpm-workspace.yaml` was preserved and excluded from staging.
+
+## Adversarial review fix round 1
+
+### RED evidence
+
+Five reviewer regressions were encoded before the fix: lazy non-registration option catalogs, subject-track registration membership/order, authoritative sibling stats/facets, filter-aware mutation reconciliation, and canonical off-page registration detail. The first exact service/workspace run finished **135 pass, 6 fail**.
+
+### Fixes
+
+- Non-registration editor and filter entry points now call `loadOpsTaskWorkspaceOptionData()` lazily; page-one load still performs no option-catalog fan-out.
+- Registration page membership, consultation owner filtering, normalized search, embedded representative track, and consultation ordering now derive from the matching subject-track summary's `workflow_status`, `director_profile_id`, and phone-waiting timestamps. The lateral representative is bounded to one track, preventing duplicate parent rows.
+- The stats RPC now returns server-authoritative `byView`, `metrics`, and bounded `facets` objects. Paged tab counts, operational badges, owner counts, and list filter catalogs consume these aggregates rather than the selected 30 rows.
+- Mutations that can change membership or order reconcile by reloading page one with the active canonical SQL filters. Load-more responses are generation-guarded so a stale cursor response cannot append after reconciliation.
+- A task-only off-page registration deep link uses the exact task read only for identification, then opens `loadOpsRegistrationCaseDetail` through the canonical case host.
+
+### Verification
+
+- Exact five-suite focused run: **424 pass, 0 fail**.
+- Exact service/workspace run: **141 pass, 0 fail**.
+- TypeScript `tsc --noEmit`: exit 0.
+- Task query-surface guard: exit 0.
+- `git diff --check`: exit 0.
+- Updated migration candidate SHA-256: `f4efe37189ad885a10d54dc4a979db6f92c62545f6969ab4d98be2b637b54a87`.
+- pgTAP source now asserts authoritative aggregate object shapes and the 100-option facet cap. The reviewed-baseline gate remains unchanged, so runtime pgTAP/EXPLAIN is still not claimed and the manifest remains `candidate`.
