@@ -16,6 +16,10 @@ const dispatchMigrationUrl = new URL(
   "../supabase/migrations/20260809106200_registration_observation_solapi_dispatch.sql",
   import.meta.url,
 );
+const currentHistoryMigrationUrl = new URL(
+  "../supabase/migrations/20260814102020_registration_observation_current_history.sql",
+  import.meta.url,
+);
 const reminderRouteUrl = new URL(
   "../src/features/tasks/server/registration-customer-reminder-route.ts",
   import.meta.url,
@@ -53,6 +57,38 @@ function uniqueIndexBlock(source, indexName) {
   assert.ok(match, `missing unique index block: ${indexName}`);
   return match[0];
 }
+
+test("observation current-history RPC is service-only and binds the full frozen delivery identity", async () => {
+  const sql = await readFile(currentHistoryMigrationUrl, "utf8");
+  const currentHistory = functionBlock(
+    sql,
+    "public.list_current_registration_observation_customer_messages_v1",
+  );
+  const normalized = normalizeSql(currentHistory);
+  assert.match(normalized, /security definer/);
+  assert.match(normalized, /\(select auth\.role\(\)\) <> 'service_role'/);
+  assert.match(normalized, /registration_customer_message_assert_actor_v1/);
+  for (const predicate of [
+    "outbox.task_id = p_task_id",
+    "outbox.observation_id = p_observation_id",
+    "outbox.message_kind = p_message_kind",
+    "outbox.source_revision = p_source_revision",
+    "outbox.source_fingerprint = p_source_fingerprint",
+    "outbox.recipient_hash = p_recipient_hash",
+  ]) assert.match(normalized, new RegExp(predicate.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")));
+  assert.match(
+    normalized,
+    /from \( select outbox\.\* from public\.ops_registration_customer_messages outbox[\s\S]*?order by outbox\.created_at desc, outbox\.id desc limit p_limit \) message/,
+  );
+  assert.match(
+    sql,
+    /revoke all on function public\.list_current_registration_observation_customer_messages_v1\([\s\S]*?\)\s*from public, anon, authenticated, service_role;/,
+  );
+  assert.match(
+    sql,
+    /grant execute on function public\.list_current_registration_observation_customer_messages_v1\([\s\S]*?\)\s*to service_role;/,
+  );
+});
 
 test("core runner exposes the final cumulative SOLAPI focus", () => {
   const result = spawnSync(process.execPath, [

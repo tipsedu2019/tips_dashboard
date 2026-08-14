@@ -292,11 +292,20 @@ export function createRegistrationCustomerMessageSolapi(dependencies: SolapiDepe
       const failed = rows(payload.failedMessageList)[0] ?? null
       if (response.ok && accepted) {
         const values = sendRecordValues(accepted, groupId)
-        if (text(values.providerMessageId, 200) || text(values.providerGroupId, 200)) {
+        if (
+          values.statusCode === "2000"
+          && (text(values.providerMessageId, 200) || text(values.providerGroupId, 200))
+        ) {
           return providerResult("accepted", observedAt, {
             ...values,
-            statusCode: values.statusCode || "provider_accepted",
+            statusCode: "2000",
             statusMessage: values.statusMessage || "SOLAPI 접수 완료",
+            requestKeyMatched: true,
+          })
+        }
+        if (values.statusCode) {
+          return providerResult("failed_hold", observedAt, {
+            ...values,
             requestKeyMatched: true,
           })
         }

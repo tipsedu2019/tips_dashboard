@@ -110,7 +110,6 @@ type RouteDependencies = Readonly<{
     sourceFingerprint: string
     recipientHash: string
     limit: number
-    now: Date
     context: HandlerAuthContext
   }>): Promise<unknown>
   readPreviewTarget(input: Readonly<{
@@ -623,42 +622,51 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
         const target = await previewTarget(request)
         const context = await dependencies.authenticate(request)
         requireRole(context, OPERATOR_ROLES)
-        const taskId = await dependencies.resolveTaskId({ ...target, context })
-        if (!taskId || !await dependencies.authorizeTask(context, taskId)) {
+        const observationTarget = target.messageKind === "observation_booking"
+          || target.messageKind === "observation_reminder"
+        const source = observationTarget
+          ? await resolvePreviewSource(dependencies, {
+            actorProfileId: context.actorProfileId,
+            ...target,
+            context,
+          })
+          : null
+        const taskId = source?.taskId
+          ?? await dependencies.resolveTaskId({ ...target, context })
+        if (
+          !taskId
+          || (!observationTarget && !await dependencies.authorizeTask(context, taskId))
+        ) {
           httpError(404, "registration_customer_message_source_not_found")
         }
-        const source = await resolvePreviewSource(dependencies, {
+        const resolvedSource = source ?? await resolvePreviewSource(dependencies, {
           actorProfileId: context.actorProfileId,
           ...target,
           context,
         })
-        if (source.taskId !== taskId) {
+        if (resolvedSource.taskId !== taskId) {
           httpError(503, "registration_customer_message_source_unavailable")
         }
-        const privateSource = dependencies.readPrivateSource(source)
+        const privateSource = dependencies.readPrivateSource(resolvedSource)
         const readinessInput = {
           actorProfileId: context.actorProfileId,
-          taskId: source.taskId,
+          taskId: resolvedSource.taskId,
           ...target,
           contract: privateSource.readinessContract,
           context,
         }
         let readinessValue: unknown
         let historyValue: unknown
-        if (
-          target.messageKind === "observation_booking"
-          || target.messageKind === "observation_reminder"
-        ) {
+        if (observationTarget) {
           readinessValue = await dependencies.getReadiness(readinessInput)
           historyValue = await dependencies.listCurrentObservationHistory({
-            taskId: source.taskId,
+            taskId: resolvedSource.taskId,
             messageKind: target.messageKind,
             sourceId: target.sourceId,
-            sourceRevision: source.sourceRevision,
+            sourceRevision: resolvedSource.sourceRevision,
             sourceFingerprint: privateSource.sourceFingerprint,
             recipientHash: privateSource.recipientHash,
             limit: 1,
-            now: now(),
             context,
           })
         } else {
@@ -688,12 +696,12 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
         if (normalizedReadiness.sendAllowed) {
           receipt = previewReceipt(await dependencies.createPreview({
             actorProfileId: context.actorProfileId,
-            taskId: source.taskId,
+            taskId: resolvedSource.taskId,
             ...target,
             contract: privateSource.previewContract,
             context,
           }), target, now())
-          if (receipt.recipientLast4 !== source.recipientLast4) {
+          if (receipt.recipientLast4 !== resolvedSource.recipientLast4) {
             httpError(503, "registration_customer_message_preview_unavailable")
           }
         }
@@ -701,12 +709,12 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
           ok: true,
           previewId: receipt?.previewId ?? null,
           expiresAt: receipt?.expiresAt ?? null,
-          messageKind: source.messageKind,
-          studentName: source.studentName,
-          recipientLast4: source.recipientLast4,
-          facts: source.facts,
-          body: source.body,
-          buttons: source.buttons,
+          messageKind: resolvedSource.messageKind,
+          studentName: resolvedSource.studentName,
+          recipientLast4: resolvedSource.recipientLast4,
+          facts: resolvedSource.facts,
+          body: resolvedSource.body,
+          buttons: resolvedSource.buttons,
           readiness: normalizedReadiness,
           latestMessage: operatorLatestMessage,
         }
@@ -1054,10 +1062,16 @@ async function sourceRpc(context: HandlerAuthContext, args: JsonRecord) {
 
 export function registrationCustomerMessageSourceRpcError(error: unknown) {
   const code = isRecord(error) ? text(error.code) : ""
-  if (code === "42501" || code === "P0002") {
+  if (code === "P0002") {
     return new RegistrationCustomerMessageHttpError(
       404,
       "registration_customer_message_source_not_found",
+    )
+  }
+  if (code === "42501") {
+    return new RegistrationCustomerMessageHttpError(
+      503,
+      "registration_customer_message_runtime_unavailable",
     )
   }
   if (code === "22023" || code === "23505") {
@@ -1107,76 +1121,23 @@ async function currentObservationHistory(
     sourceFingerprint: string
     recipientHash: string
     limit: number
-    now: Date
   }>,
 ) {
-  const messages = await serviceClient(context)
-    .from("ops_registration_customer_messages")
-    .select([
-      "id",
-      "message_kind",
-      "status",
-      "source_fingerprint",
-      "recipient_hash",
-      "confirmed_by",
-      "confirmed_at",
-      "updated_at",
-      "recipient_last4",
-      "provider_attempt_count",
-      "provider_attempt_started_at",
-      "delivery_origin",
-    ].join(","))
-    .eq("task_id", input.taskId)
-    .eq("observation_id", input.sourceId)
-    .eq("message_kind", input.messageKind)
-    .eq("source_revision", input.sourceRevision)
-    .eq("source_fingerprint", input.sourceFingerprint)
-    .eq("recipient_hash", input.recipientHash)
-    .order("created_at", { ascending: false })
-    .order("id", { ascending: false })
-    .limit(input.limit)
-  if (messages.error) throw registrationCustomerMessageHistoryRpcError(messages.error)
-  const rows = Array.isArray(messages.data) ? messages.data : []
-  const profileIds = [...new Set(rows.flatMap((row) => {
-    if (!isRecord(row)) return []
-    const profileId = text(row.confirmed_by).toLowerCase()
-    return UUID_PATTERN.test(profileId) ? [profileId] : []
-  }))]
-  const profileNames = new Map<string, string>()
-  if (profileIds.length > 0) {
-    const profiles = await serviceClient(context)
-      .from("profiles")
-      .select("id,name")
-      .in("id", profileIds)
-    if (profiles.error) throw registrationCustomerMessageHistoryRpcError(profiles.error)
-    for (const profile of Array.isArray(profiles.data) ? profiles.data : []) {
-      if (!isRecord(profile)) continue
-      const profileId = text(profile.id).toLowerCase()
-      const profileName = text(profile.name, 100)
-      if (UUID_PATTERN.test(profileId) && profileName) profileNames.set(profileId, profileName)
-    }
-  }
-  return rows.map((row) => {
-    if (!isRecord(row)) return row
-    const providerAttemptStartedAt = text(row.provider_attempt_started_at)
-    const canCheck = row.delivery_origin === "manual"
-      && row.provider_attempt_count === 1
-      && Number.isFinite(Date.parse(providerAttemptStartedAt))
-      && Date.parse(providerAttemptStartedAt) <= input.now.getTime() - 15 * 60 * 1000
-      && (row.status === "pending" || row.status === "unknown")
-    return {
-      messageId: row.id,
-      messageKind: row.message_kind,
-      currentStatus: row.status,
-      confirmedByName: row.delivery_origin === "scheduled"
-        ? "자동 발송"
-        : profileNames.get(text(row.confirmed_by).toLowerCase()) || "담당자",
-      confirmedAt: row.confirmed_at,
-      updatedAt: row.updated_at,
-      recipientLast4: row.recipient_last4,
-      canCheck,
-    }
-  })
+  const result = await serviceClient(context).rpc(
+    "list_current_registration_observation_customer_messages_v1",
+    {
+      p_actor_profile_id: context.actorProfileId,
+      p_task_id: input.taskId,
+      p_message_kind: input.messageKind,
+      p_observation_id: input.sourceId,
+      p_source_revision: input.sourceRevision,
+      p_source_fingerprint: input.sourceFingerprint,
+      p_recipient_hash: input.recipientHash,
+      p_limit: input.limit,
+    },
+  )
+  if (result.error) throw registrationCustomerMessageHistoryRpcError(result.error)
+  return result.data
 }
 
 type RegistrationCustomerMessageProductionOverrides = Readonly<{

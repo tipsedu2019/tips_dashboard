@@ -17,8 +17,8 @@ const frozenChecksums = JSON.parse(readFileSync(
   "utf8",
 ))
 
-const MAIN_LOCATION_URL = "https://map.naver.com/p/entry/place/1218797840?placePath=%3Fentry%3Dpll%26from%3Dnx%26fromNxList%3Dtrue&placeSearchOption=entry%3Dpll%26fromNxList%3Dtrue&searchType=place&c=15.00,0,0,0,dh"
-const ANNEX_LOCATION_URL = "https://map.naver.com/p/search/%EC%A0%9C%EC%A3%BC%EC%88%98%ED%95%99%ED%95%99%EC%9B%90/place/1962638110?c=10.00,0,0,0,dh&placePath=%3Fentry%253Dbmp"
+const MAIN_LOCATION_URL = "https://map.naver.com/p/entry/place/1218797840"
+const ANNEX_LOCATION_URL = "https://map.naver.com/p/entry/place/1962638110"
 const CONTACT_URL = "https://tipsedu.channel.io"
 const OBSERVATION_BOOKING_BODY = `[팁스영어수학학원] 청강 예약 안내
 
@@ -117,6 +117,9 @@ test("observation templates pin exact copy, body and transport variables, and bu
     본관: MAIN_LOCATION_URL,
     별관: ANNEX_LOCATION_URL,
   })
+  for (const locationUrl of Object.values(OBSERVATION_LOCATION_URLS)) {
+    assert.ok(locationUrl.length <= 100, "SOLAPI buttons accept URLs up to 100 characters")
+  }
 
   const catalog = createRegistrationCustomerMessageCatalog(ENV)
   for (const [kind, content] of [
