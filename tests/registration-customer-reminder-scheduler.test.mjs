@@ -155,11 +155,15 @@ test("Cron은 Vault·HTTPS 고정 host를 검증하고 함수로만 설치하며
   assert.doesNotMatch(sql.slice(managerEnd, commitIndex), /cron\.schedule\(/)
 })
 
-test("OFF 리마인드는 cron·Vault·heartbeat 작업을 만들지 않고 ON 변경만 원자 활성화한다", async () => {
+test("OFF 리마인드는 cron·Vault·heartbeat 작업을 만들지 않고 ON 변경도 오전 10시 하루 1회만 활성화한다", async () => {
   const sql = await migrationSource()
   const scheduleReady = lastFunctionBody(
     sql,
     "dashboard_private.registration_customer_reminder_schedule_ready_v1()",
+  )
+  const scheduleManager = lastFunctionBody(
+    sql,
+    "public.manage_registration_customer_reminder_schedule_v1(",
   )
   const invoke = lastFunctionBody(
     sql,
@@ -175,8 +179,10 @@ test("OFF 리마인드는 cron·Vault·heartbeat 작업을 만들지 않고 ON �
   )
 
   assert.doesNotMatch(scheduleReady, /heartbeat|bool_and\(job\.active\)/)
-  assert.match(scheduleReady, /job\.schedule = '\* \* \* \* \*'/)
+  assert.match(scheduleReady, /job\.schedule = '0 1 \* \* \*'/)
   assert.match(scheduleReady, /invoke_registration_customer_reminder_worker_v1/)
+  assert.match(scheduleManager, /cron\.schedule\([^;]+'0 1 \* \* \*'/)
+  assert.doesNotMatch(scheduleManager, /'\* \* \* \* \*'/)
 
   assert.ok(invoke.indexOf("settings.enabled") < invoke.indexOf("registration_customer_reminder_worker_vault_v1"))
   assert.ok(claim.indexOf("if not v_settings.enabled") < claim.indexOf("registration_customer_reminder_worker_heartbeats"))
