@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises"
 import test from "node:test"
 
 const migrationUrl = new URL("../supabase/migrations/20260815120000_event_driven_notification_worker.sql", import.meta.url)
+const retryIndexMigrationUrl = new URL("../supabase/migrations/20260815123000_notification_manual_retry_indexes.sql", import.meta.url)
 const serviceUrl = new URL("../src/features/notifications/notification-delivery-service.ts", import.meta.url)
 const controlUrl = new URL("../src/features/notifications/notification-delivery-control.tsx", import.meta.url)
 const getRouteUrl = new URL("../src/app/api/notifications/events/[eventId]/route.ts", import.meta.url)
@@ -25,6 +26,12 @@ test("event status and manual retry keep sent targets immutable and unknown expl
   assert.match(sql, /notification_event_fanout_jobs job[\s\S]*set status = 'pending'[\s\S]*job\.status in \('failed', 'pending'\)/i)
   assert.match(sql, /request_notification_worker_wakeup_v1\('manual_retry'\)/i)
   assert.doesNotMatch(sql, /pg_catalog\.greatest/i)
+})
+
+test("manual retry audit foreign keys have bounded lookup indexes", async () => {
+  const sql = await readFile(retryIndexMigrationUrl, "utf8")
+  assert.match(sql, /create index notification_manual_retry_requests_event_idx[\s\S]*\(event_id, created_at desc\)/i)
+  assert.match(sql, /create index notification_manual_retry_requests_actor_idx[\s\S]*\(actor_profile_id, created_at desc\)/i)
 })
 
 test("authenticated routes accept only the closed retry body", async () => {
