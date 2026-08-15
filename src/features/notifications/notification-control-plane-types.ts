@@ -1242,7 +1242,12 @@ function parseRule(
   )
   const template = parseTemplate(input.template, id, activeTemplateId, `${path}.template`, issues)
 
-  if (configurationKind === "fixed_policy_editable_template" && activationLocked !== true) {
+  const retiredInternalPolicy = channelKey === "in_app" && enabled === false
+  if (
+    configurationKind === "fixed_policy_editable_template" &&
+    activationLocked !== true &&
+    !retiredInternalPolicy
+  ) {
     addIssue(
       issues,
       "invalid_field",

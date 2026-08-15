@@ -349,6 +349,21 @@ test("maps the snake_case wire snapshot to one camelCase browser DTO", () => {
   assert.equal("title_template" in snapshot.rules[0].template, false)
 })
 
+test("accepts a retired disabled in-app fixed policy without weakening active channel locks", () => {
+  const wire = createWireSnapshot()
+  wire.rules[0].audience_key = "track_director"
+  wire.rules[0].channel_key = "in_app"
+  wire.rules[0].connection_key = null
+  wire.rules[0].enabled = false
+  wire.rules[0].activation_locked = false
+
+  const snapshot = parseSnapshot(wire)
+  assert.equal(snapshot.rules[0].configurationKind, "fixed_policy_editable_template")
+  assert.equal(snapshot.rules[0].channelKey, "in_app")
+  assert.equal(snapshot.rules[0].enabled, false)
+  assert.equal(snapshot.rules[0].activationLocked, false)
+})
+
 test("parses a disconnected science slot without requiring or exposing a secret", () => {
   const wire = createWireSnapshot()
   wire.connections.push({
