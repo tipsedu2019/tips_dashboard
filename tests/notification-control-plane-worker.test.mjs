@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
-import { readFile } from "node:fs/promises"
+import { readFile, readdir } from "node:fs/promises"
 import test from "node:test"
 import vm from "node:vm"
 
@@ -95,6 +95,52 @@ globalThis.fetch = async () => {
 test.after(() => {
   globalThis.fetch = originalFetch
   assert.equal(unexpectedNetworkCalls, 0, "주입하지 않은 실제 fetch 호출은 0건이어야 한다")
+})
+
+test("retired dashboard channels stay disabled in the database contract", async () => {
+  const migrationDirectory = new URL("../supabase/migrations/", import.meta.url)
+  const migrationName = (await readdir(migrationDirectory)).find((name) =>
+    name.endsWith("_retire_dashboard_notification_channels.sql"),
+  )
+  assert.ok(migrationName, "internal notification retirement migration must exist")
+  const source = await readFile(new URL(migrationName, migrationDirectory), "utf8")
+
+  assert.match(source, /update dashboard_private\.notification_rules[\s\S]*set enabled = false/i)
+  assert.match(source, /where rule\.channel_key = 'in_app'/i)
+  assert.match(source, /update dashboard_private\.notification_deliveries[\s\S]*status = 'canceled'[\s\S]*status_reason = 'cutover_rollback'/i)
+  assert.match(source, /channel_key in \('in_app', 'web_push'\)/i)
+  assert.match(source, /before insert or update[\s\S]*dashboard_private\.notification_rules/i)
+  assert.match(source, /notification_internal_channel_disabled/i)
+})
+
+test("worker cancels retired dashboard channels before adapter or provider work", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  for (const channelKey of ["in_app", "web_push"]) {
+    const claim = createDeliveryClaim({ channel_key: channelKey })
+    const harness = createRpcHarness({ claim_notification_deliveries_v1: [claim] })
+    let adapterCalls = 0
+    let providerCalls = 0
+    const worker = createNotificationWorkerRuntime({
+      getAdapter: () => {
+        adapterCalls += 1
+        return createAdapter()
+      },
+      rpc: harness.rpc,
+      getProvider: () => {
+        providerCalls += 1
+        return null
+      },
+      createRunId: () => RUN_ID,
+    })
+
+    await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+
+    const finalize = harness.calls.find((call) => call.name === "finalize_notification_delivery_v1")
+    assert.equal(finalize.parameters.p_status, "canceled")
+    assert.equal(finalize.parameters.p_status_reason, "cutover_rollback")
+    assert.equal(adapterCalls, 0)
+    assert.equal(providerCalls, 0)
+  }
 })
 
 const WORKER_RPC_SIGNATURES = [
@@ -2023,7 +2069,7 @@ test("worker는 adapter 선검증 취소를 begin-send보다 먼저 확정하고
   assertNoSensitiveValue(finalize.parameters)
 })
 
-test("전자결재의 비활성 수신자 재검증은 실제 승인 adapter 경로에서 provider를 0회 호출한다", async () => {
+test("retired web-push is canceled before the approvals adapter or provider runs", async () => {
   const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
   const { createApprovalsNotificationAdapter } = await import(approvalAdapterModuleUrl)
   const sourceId = "70000000-0000-4000-8000-000000000071"
@@ -2069,17 +2115,12 @@ test("전자결재의 비활성 수신자 재검증은 실제 승인 adapter 경
   const result = await worker.runBatch({ workerId: "worker-fixture", batchSize: 2, leaseSeconds: 30 })
 
   assert.equal(result.deliveries, 1)
-  assert.equal(authoritativeInput.workflowKey, "approvals")
-  assert.equal(authoritativeInput.eventKey, "approval.submitted")
-  assert.equal(authoritativeInput.sourceType, "approval_event")
-  assert.equal(authoritativeInput.sourceId, sourceId)
-  assert.equal(authoritativeInput.sourceRevision, null)
-  assert.equal(authoritativeInput.targetGeneration, "0")
+  assert.equal(authoritativeInput, null)
   assert.equal(providerLookups, 0)
   assert.equal(harness.calls.some((call) => call.name === "begin_notification_delivery_send_v1"), false)
   const finalize = harness.calls.find((call) => call.name === "finalize_notification_delivery_v1")
   assert.equal(finalize.parameters.p_status, "canceled")
-  assert.equal(finalize.parameters.p_status_reason, "recipient_revoked")
+  assert.equal(finalize.parameters.p_status_reason, "cutover_rollback")
   assert.equal(finalize.parameters.p_provider_message_id, null)
   assert.equal(finalize.parameters.p_provider_response_code, null)
   assertNoSensitiveValue(finalize.parameters)
@@ -2185,7 +2226,7 @@ test("worker는 begun payload의 위조 workflow를 덮고 claim workflow contex
   assertNoSensitiveValue(finalize.parameters)
 })
 
-test("worker는 in-app 재검증과 투영을 단일 원자 prepare RPC로 처리한다", async () => {
+test("worker retires in-app before the former atomic projection RPC", async () => {
   const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
   let providerLookups = 0
   const harness = createRpcHarness({
@@ -2220,13 +2261,12 @@ test("worker는 in-app 재검증과 투영을 단일 원자 prepare RPC로 처�
   assert.equal(providerLookups, 0)
   assert.equal(harness.calls.some((call) => call.name === "begin_notification_delivery_send_v1"), false)
   assert.equal(harness.calls.some((call) => call.name === "commit_notification_in_app_delivery_v1"), false)
-  assert.equal(harness.calls.some((call) => call.name === "finalize_notification_delivery_v1"), false)
+  assert.equal(harness.calls.some((call) => call.name === "finalize_notification_delivery_v1"), true)
   assert.equal(harness.calls.some((call) => call.name === "register_notification_external_attempt_v1"), false)
-  const prepare = harness.calls.find((call) => (
-    call.name === "prepare_notification_immediate_delivery_v1"
-  ))
-  assert.equal(prepare.parameters.p_delivery_id, DELIVERY_ID)
-  assert.equal(prepare.parameters.p_claim_token, CLAIM_TOKEN)
+  assert.equal(harness.calls.some((call) => call.name === "prepare_notification_immediate_delivery_v1"), false)
+  const finalize = harness.calls.find((call) => call.name === "finalize_notification_delivery_v1")
+  assert.equal(finalize.parameters.p_status, "canceled")
+  assert.equal(finalize.parameters.p_status_reason, "cutover_rollback")
 })
 
 test("관찰 delivery는 generic prepare 전에 잠긴 frozen state를 읽고 만료되면 provider 없이 닫는다", async () => {
@@ -2504,7 +2544,7 @@ test("feedback_submitted의 in-app은 provider 0이고 빈 mention management Ch
   assert.equal(providerLookups, 1)
   assert.equal(providerSends, 1)
   assert.equal(harness.calls.filter((call) => call.name === "register_notification_external_attempt_v1").length, 1)
-  assert.equal(harness.calls.filter((call) => call.name === "prepare_registration_observation_notification_delivery_v1").length, 2)
+  assert.equal(harness.calls.filter((call) => call.name === "prepare_registration_observation_notification_delivery_v1").length, 1)
   assert.equal(harness.calls.some((call) => JSON.stringify(call.parameters).includes("@all")), false)
   assert.equal(harness.calls.some((call) => JSON.stringify(call.parameters).includes("executive")), false)
 })
@@ -2559,10 +2599,10 @@ test("nullable/inactive feedback director의 in-app cancel은 management Chat을
     await worker.runBatch({ workerId: "worker-fixture", batchSize: 2, leaseSeconds: 30 })
     assert.equal(lookups, 1, directorState)
     assert.equal(sends, 1, directorState)
-    assert.equal(revalidations.length, 2, directorState)
+    assert.equal(revalidations.length, 1, directorState)
     assert.equal(revalidations.filter((entry) => entry.target.connectionKey === "google_chat.management").length, 1, directorState)
-    assert.equal(revalidations.filter((entry) => entry.target.connectionKey === null).length, 1, directorState)
-    assert.equal(harness.calls.filter((call) => call.name === "prepare_registration_observation_notification_delivery_v1").length, 2, directorState)
+    assert.equal(revalidations.filter((entry) => entry.target.connectionKey === null).length, 0, directorState)
+    assert.equal(harness.calls.filter((call) => call.name === "prepare_registration_observation_notification_delivery_v1").length, 1, directorState)
     assert.equal(harness.calls.filter((call) => call.name === "register_notification_external_attempt_v1").length, 1, directorState)
     assert.equal(harness.calls.some((call) => JSON.stringify(call.parameters).includes("google_chat.executive")), false, directorState)
     assert.equal(harness.calls.some((call) => JSON.stringify(call.parameters).includes("@all")), false, directorState)
@@ -3425,12 +3465,6 @@ test("Google Chat worker는 sending/google_chat begun context의 mention_user_na
   const presentEmpty = await sendBegunContext(createBegunGoogleChatContext({ mention_user_names: [] }))
   assert.equal(Object.hasOwn(presentEmpty, "mention_user_names"), true)
   assert.deepEqual(presentEmpty.mention_user_names, [])
-  const unrelatedWebPush = await sendBegunContext(
-    createBegunWebPushContext({ mention_user_names: "not-a-google-chat-resource-name" }),
-    createDeliveryClaim({ channel_key: "web_push" }),
-  )
-  assert.equal(unrelatedWebPush.mention_user_names, "not-a-google-chat-resource-name")
-
   const invalidHarness = createRpcHarness({
     claim_notification_deliveries_v1: [createDeliveryClaim()],
     prepare_notification_immediate_delivery_v1: createBegunGoogleChatContext({

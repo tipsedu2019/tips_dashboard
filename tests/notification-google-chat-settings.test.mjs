@@ -2,8 +2,6 @@ import assert from "node:assert/strict"
 import { access, readFile } from "node:fs/promises"
 import test from "node:test"
 
-const root = new URL("../", import.meta.url)
-
 async function loadSettingsProjection() {
   try {
     return await import(new URL(
@@ -16,8 +14,8 @@ async function loadSettingsProjection() {
 }
 
 test("notification settings expose only Google Chat rules for editing", async () => {
-  const module = await loadSettingsProjection()
-  assert.equal(typeof module?.selectEditableGoogleChatRules, "function")
+  const settingsProjection = await loadSettingsProjection()
+  assert.equal(typeof settingsProjection?.selectEditableGoogleChatRules, "function")
 
   const rules = [
     { id: "in-app", channelKey: "in_app" },
@@ -27,7 +25,7 @@ test("notification settings expose only Google Chat rules for editing", async ()
   ]
 
   assert.deepEqual(
-    module.selectEditableGoogleChatRules(rules).map(({ id, channelKey }) => ({ id, channelKey })),
+    settingsProjection.selectEditableGoogleChatRules(rules).map(({ id, channelKey }) => ({ id, channelKey })),
     [{ id: "chat", channelKey: "google_chat" }],
   )
 })
