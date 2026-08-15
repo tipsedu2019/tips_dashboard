@@ -149,6 +149,7 @@ type RouteDependencies = Readonly<{
     dispatchToken: string
     outcome: "accepted" | "failed_hold" | "unknown"
     evidence: RegistrationCustomerMessageProviderEvidenceInput
+    providerPayloadChecksum: string | null
     context: HandlerAuthContext
   }>): Promise<unknown>
   readCheckContext(input: Readonly<{
@@ -833,6 +834,7 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
         } catch {
           provider = {
             outcome: "unknown",
+            providerPayloadChecksum: null,
             evidence: {
               statusCode: "provider_dispatch_uncertain",
               statusMessage: "SOLAPI 호출 결과를 확인할 수 없습니다.",
@@ -841,12 +843,28 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
             },
           }
         }
+        const providerPayloadChecksum = typeof provider.providerPayloadChecksum === "string"
+          && /^[a-f0-9]{64}$/u.test(provider.providerPayloadChecksum)
+          ? provider.providerPayloadChecksum
+          : null
+        const providerOutcome = provider.outcome === "accepted" && !providerPayloadChecksum
+          ? "unknown"
+          : provider.outcome
+        const providerEvidence = provider.outcome === "accepted" && providerOutcome === "unknown"
+          ? {
+              statusCode: "provider_payload_checksum_missing",
+              statusMessage: "SOLAPI 요청 무결성을 확인할 수 없습니다.",
+              observedAt: now().toISOString(),
+              requestKeyMatched: true,
+            }
+          : provider.evidence
         try {
           const finalized = sendResult(await dependencies.finalizeMessage({
             messageId: claim.messageId,
             dispatchToken,
-            outcome: provider.outcome,
-            evidence: provider.evidence,
+            outcome: providerOutcome,
+            evidence: providerEvidence,
+            providerPayloadChecksum,
             context,
           }))
           return json(assertRegistrationCustomerMessagePublicPayload(publicSendResult(finalized)))
@@ -1298,6 +1316,7 @@ export function createProductionRegistrationCustomerMessageRouteHandlers(
         p_dispatch_token: input.dispatchToken,
         p_result: input.outcome,
         p_provider_result: input.evidence,
+        p_provider_payload_checksum: input.providerPayloadChecksum,
       })
     },
     readCheckContext(input) {

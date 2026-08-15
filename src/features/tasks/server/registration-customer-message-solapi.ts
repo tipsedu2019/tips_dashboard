@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from "node:crypto"
+import { createHash, createHmac, randomBytes } from "node:crypto"
 
 import type {
   RegistrationCustomerMessageProviderEvidenceInput,
@@ -21,6 +21,7 @@ type ProviderOutcome = "accepted" | "failed_hold" | "unknown"
 export type RegistrationCustomerMessageProviderResult = Readonly<{
   outcome: ProviderOutcome
   evidence: RegistrationCustomerMessageProviderEvidenceInput
+  providerPayloadChecksum: string | null
 }>
 
 type SolapiDependencies = Readonly<{
@@ -103,8 +104,59 @@ function providerResult(
   outcome: ProviderOutcome,
   observedAt: string,
   input: Parameters<typeof providerEvidence>[1],
+  providerPayloadChecksum: string | null = null,
 ): RegistrationCustomerMessageProviderResult {
-  return Object.freeze({ outcome, evidence: providerEvidence(observedAt, input) })
+  return Object.freeze({
+    outcome,
+    evidence: providerEvidence(observedAt, input),
+    providerPayloadChecksum,
+  })
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return JSON.stringify(value)
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`
+  if (!isRecord(value)) {
+    throw new Error("registration_customer_message_solapi_payload_invalid")
+  }
+  return `{${Object.keys(value).sort().map((key) => (
+    `${JSON.stringify(key)}:${canonicalJson(value[key])}`
+  )).join(",")}}`
+}
+
+export function buildRegistrationCustomerMessageSolapiPayload(
+  input: SendInput,
+  pfId: string,
+): Readonly<{ payload: JsonRecord; checksum: string }> {
+  const payload = {
+    messages: [{
+      to: input.to,
+      type: "ATA",
+      kakaoOptions: {
+        pfId,
+        templateId: input.templateId,
+        disableSms: true,
+        variables: input.variables,
+        buttons: input.buttons.map((button) => ({
+          buttonName: button.name,
+          buttonType: button.type,
+          linkMo: button.linkMobile,
+          linkPc: button.linkPc,
+        })),
+      },
+      customFields: { registrationRequestKey: input.requestKey },
+    }],
+    strict: true,
+    allowDuplicates: false,
+    showMessageList: true,
+  }
+  return Object.freeze({
+    payload,
+    checksum: createHash("sha256").update(canonicalJson(payload), "utf8").digest("hex"),
+  })
 }
 
 export function createSolapiHmacAuthorization(input: Readonly<{
@@ -227,6 +279,11 @@ export function createRegistrationCustomerMessageSolapi(dependencies: SolapiDepe
   return Object.freeze({
     async send(input: SendInput): Promise<RegistrationCustomerMessageProviderResult> {
       const observedAt = now().toISOString()
+      const request = buildRegistrationCustomerMessageSolapiPayload(input, dependencies.pfId)
+      const sendResult = (
+        outcome: ProviderOutcome,
+        evidence: Parameters<typeof providerEvidence>[1],
+      ) => providerResult(outcome, observedAt, evidence, request.checksum)
       let response: Response
       try {
         response = await providerFetch(SOLAPI_SEND_MANY_URL, {
@@ -235,32 +292,11 @@ export function createRegistrationCustomerMessageSolapi(dependencies: SolapiDepe
             Authorization: authorization(observedAt),
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            messages: [{
-              to: input.to,
-              type: "ATA",
-              kakaoOptions: {
-                pfId: dependencies.pfId,
-                templateId: input.templateId,
-                disableSms: true,
-                variables: input.variables,
-                buttons: input.buttons.map((button) => ({
-                  buttonName: button.name,
-                  buttonType: button.type,
-                  linkMo: button.linkMobile,
-                  linkPc: button.linkPc,
-                })),
-              },
-              customFields: { registrationRequestKey: input.requestKey },
-            }],
-            strict: true,
-            allowDuplicates: false,
-            showMessageList: true,
-          }),
+          body: JSON.stringify(request.payload),
         })
       } catch (error) {
         const timedOut = error instanceof DOMException && error.name === "AbortError"
-        return providerResult("unknown", observedAt, {
+        return sendResult("unknown", {
           statusCode: timedOut ? "provider_timeout" : "provider_network_error",
           statusMessage: timedOut
             ? "SOLAPI 응답 시간이 초과되었습니다."
@@ -271,14 +307,14 @@ export function createRegistrationCustomerMessageSolapi(dependencies: SolapiDepe
 
       const payload = await parseJson(response)
       if (!payload && response.status >= 400 && response.status < 500) {
-        return providerResult("failed_hold", observedAt, {
+        return sendResult("failed_hold", {
           statusCode: "provider_rejected",
           statusMessage: "SOLAPI 요청이 거부되었습니다.",
           requestKeyMatched: true,
         })
       }
       if (!payload) {
-        return providerResult("unknown", observedAt, {
+        return sendResult("unknown", {
           statusCode: "provider_response_invalid",
           statusMessage: "SOLAPI 응답 형식을 확인할 수 없습니다.",
           requestKeyMatched: true,
@@ -296,7 +332,7 @@ export function createRegistrationCustomerMessageSolapi(dependencies: SolapiDepe
           values.statusCode === "2000"
           && (text(values.providerMessageId, 200) || text(values.providerGroupId, 200))
         ) {
-          return providerResult("accepted", observedAt, {
+          return sendResult("accepted", {
             ...values,
             statusCode: "2000",
             statusMessage: values.statusMessage || "SOLAPI 접수 완료",
@@ -304,7 +340,7 @@ export function createRegistrationCustomerMessageSolapi(dependencies: SolapiDepe
           })
         }
         if (values.statusCode) {
-          return providerResult("failed_hold", observedAt, {
+          return sendResult("failed_hold", {
             ...values,
             requestKeyMatched: true,
           })
@@ -312,14 +348,14 @@ export function createRegistrationCustomerMessageSolapi(dependencies: SolapiDepe
       }
       if (failed || (response.status >= 400 && response.status < 500)) {
         const values = sendRecordValues(failed, groupId)
-        return providerResult("failed_hold", observedAt, {
+        return sendResult("failed_hold", {
           ...values,
           statusCode: values.statusCode || "provider_rejected",
           statusMessage: values.statusMessage || "SOLAPI 요청이 거부되었습니다.",
           requestKeyMatched: true,
         })
       }
-      return providerResult("unknown", observedAt, {
+      return sendResult("unknown", {
         statusCode: response.status >= 500 ? "provider_unavailable" : "provider_response_ambiguous",
         statusMessage: "SOLAPI 접수 여부를 확인할 수 없습니다.",
         requestKeyMatched: true,

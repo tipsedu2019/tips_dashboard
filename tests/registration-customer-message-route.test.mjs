@@ -23,6 +23,8 @@ const IDS = Object.freeze({
   dispatch: "00000000-0000-4000-8000-000000000008",
 })
 
+const PROVIDER_PAYLOAD_CHECKSUM = "a".repeat(64)
+
 const TARGET = Object.freeze({
   messageKind: "waiting_notice",
   sourceId: IDS.source,
@@ -386,6 +388,7 @@ function makeDeps(overrides = {}) {
       assert.equal(input.requestKey, IDS.request)
       return {
         outcome: "accepted",
+        providerPayloadChecksum: PROVIDER_PAYLOAD_CHECKSUM,
         evidence: {
           providerMessageId: "provider-message-1",
           statusCode: "2000",
@@ -397,6 +400,7 @@ function makeDeps(overrides = {}) {
     },
     async finalizeMessage(input) {
       calls.finalize += 1
+      assert.equal(input.providerPayloadChecksum, PROVIDER_PAYLOAD_CHECKSUM)
       return {
         ok: input.outcome === "accepted",
         messageId: IDS.message,
@@ -1203,6 +1207,22 @@ test("send claims, re-reads canonical source, commits the marker, then calls SOL
   assert.equal(JSON.stringify(result.body).includes("provider"), false)
 })
 
+test("send binds the provider payload checksum to the finalize RPC boundary", async () => {
+  let finalizedInput = null
+  const { deps } = makeDeps({
+    async finalizeMessage(input) {
+      finalizedInput = input
+      return makeDeps().deps.finalizeMessage(input)
+    },
+  })
+  const result = await json(await createRegistrationCustomerMessageRouteHandlers(deps).send(
+    request("/send", { method: "POST", body: JSON.stringify({ previewId: IDS.preview, requestKey: IDS.request }) }),
+  ))
+
+  assert.equal(result.response.status, 200)
+  assert.equal(finalizedInput.providerPayloadChecksum, PROVIDER_PAYLOAD_CHECKSUM)
+})
+
 test("all five legacy kinds preserve the same preview and provider sequence without an observation-runtime dependency", async () => {
   for (const messageKind of [
     "level_test_booking",
@@ -1274,6 +1294,7 @@ test("all five legacy kinds preserve the same preview and provider sequence with
         order.push("provider")
         return {
           outcome: "accepted",
+          providerPayloadChecksum: PROVIDER_PAYLOAD_CHECKSUM,
           evidence: {
             providerMessageId: "provider-message-1",
             statusCode: "2000",
@@ -1446,10 +1467,26 @@ test("post-marker finalization uncertainty returns unknown and never repeats the
 })
 
 test("a provider exception after the marker is finalized as unknown without a second call", async () => {
+  let finalizedInput = null
   const { deps, calls } = makeDeps({
     sendProvider: async () => {
       calls.providerSend += 1
       throw new Error("raw provider exception with private data")
+    },
+    async finalizeMessage(input) {
+      finalizedInput = input
+      return {
+        ok: false,
+        messageId: IDS.message,
+        messageKind: TARGET.messageKind,
+        currentStatus: "unknown",
+        recipientLast4: "5678",
+        confirmedByName: "김관리",
+        confirmedAt: "2026-08-05T00:05:00.000Z",
+        updatedAt: "2026-08-05T00:06:00.000Z",
+        canCheck: true,
+        idempotent: false,
+      }
     },
   })
   const result = await json(await createRegistrationCustomerMessageRouteHandlers(deps).send(
@@ -1459,7 +1496,8 @@ test("a provider exception after the marker is finalized as unknown without a se
   assert.equal(result.body.currentStatus, "unknown")
   assert.equal(result.body.ok, false)
   assert.equal(calls.providerSend, 1)
-  assert.equal(calls.finalize, 1)
+  assert.equal(calls.finalize, 0, "overridden finalize owns the call counter")
+  assert.equal(finalizedInput.providerPayloadChecksum, null)
   assert.equal(JSON.stringify(result.body).includes("raw provider exception"), false)
 })
 

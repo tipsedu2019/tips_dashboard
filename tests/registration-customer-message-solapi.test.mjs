@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { createHmac } from "node:crypto"
+import { createHash, createHmac } from "node:crypto"
 import test from "node:test"
 
 import {
@@ -49,6 +49,18 @@ function makeAdapter(fetch, overrides = {}) {
     createSalt: () => `0123456789abcdef0123456789abcde${saltIndex++}`,
     ...overrides,
   })
+}
+
+function canonicalJson(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`
+  return `{${Object.keys(value).sort().map((key) => (
+    `${JSON.stringify(key)}:${canonicalJson(value[key])}`
+  )).join(",")}}`
+}
+
+function sha256(value) {
+  return createHash("sha256").update(value, "utf8").digest("hex")
 }
 
 test("HMAC authorization signs exact date+fresh salt without exposing the secret", () => {
@@ -139,6 +151,11 @@ test("send uses the official detailed ATA endpoint and an exact no-SMS-fallback 
     showMessageList: true,
   })
   assert.equal(result.outcome, "accepted")
+  assert.match(result.providerPayloadChecksum, /^[a-f0-9]{64}$/u)
+  assert.equal(
+    result.providerPayloadChecksum,
+    sha256(canonicalJson(JSON.parse(calls[0].init.body))),
+  )
   assert.deepEqual(result.evidence, {
     providerMessageId: MESSAGE_ID,
     providerGroupId: "provider-group-1",
@@ -147,6 +164,43 @@ test("send uses the official detailed ATA endpoint and an exact no-SMS-fallback 
     observedAt: NOW.toISOString(),
     requestKeyMatched: true,
   })
+})
+
+test("send payload checksum changes for every provider-visible input and stays deterministic", async () => {
+  const accepted = async () => response({
+    groupInfo: { groupId: "provider-group-1" },
+    messageList: [{ messageId: MESSAGE_ID, statusCode: "2000", statusMessage: "접수" }],
+    failedMessageList: [],
+  })
+  const base = {
+    to: "01012345678",
+    templateId: "template-level",
+    variables: { "#{학생명}": "김팁스" },
+    buttons: [{
+      name: "문의하기",
+      type: "WL",
+      linkMobile: "https://tipsedu.channel.io",
+      linkPc: "https://tipsedu.channel.io",
+    }],
+    requestKey: REQUEST_KEY,
+  }
+  const checksum = async (input, overrides = {}) => (
+    await makeAdapter(accepted, overrides).send(input)
+  ).providerPayloadChecksum
+  const baseline = await checksum(base)
+
+  assert.match(baseline, /^[a-f0-9]{64}$/u)
+  assert.equal(await checksum(base), baseline)
+  for (const changed of [
+    { ...base, to: "01087654321" },
+    { ...base, templateId: "template-visit" },
+    { ...base, variables: { "#{학생명}": "이팁스" } },
+    { ...base, buttons: [{ ...base.buttons[0], name: "상담하기" }] },
+    { ...base, requestKey: "00000000-0000-4000-8000-000000000012" },
+  ]) {
+    assert.notEqual(await checksum(changed), baseline)
+  }
+  assert.notEqual(await checksum(base, { pfId: "pf-other" }), baseline)
 })
 
 test("send preserves canonical renderer variable tokens exactly once", async () => {
@@ -209,6 +263,7 @@ test("send normalizes explicit rejection, failed list, 5xx, malformed JSON, and 
     })
     assert.equal(result.outcome, outcome)
     assert.equal(result.evidence.statusCode, statusCode)
+    assert.match(result.providerPayloadChecksum, /^[a-f0-9]{64}$/u)
     const serialized = JSON.stringify(result)
     assert.equal(serialized.includes(API_SECRET), false)
     assert.equal(serialized.includes("01012345678"), false)
