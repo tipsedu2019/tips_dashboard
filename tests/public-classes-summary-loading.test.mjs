@@ -45,29 +45,21 @@ function createRecordingSupabaseClient(rowsByTable, queries) {
 }
 
 test("public classes API preserves class plans and their supporting catalogs", async () => {
-  const respond = createPublicClassesApiResponder(async ({ mode }) => {
-    if (mode === "full") {
-      return {
-        generatedAt: "2026-08-09T00:00:00.000Z",
-        source: "supabase",
-        classes: [
-          {
-            id: "class-1",
-            schedulePlan: { sessions: [{ id: "session-1" }] },
-            schedule_plan: { sessions: [{ id: "session-1" }] },
-          },
-        ],
-        textbooks: [{ id: "textbook-1", title: "교재" }],
-        progressLogs: [{ id: "progress-1", classId: "class-1" }],
-      };
-    }
-
+  const calls = [];
+  const respond = createPublicClassesApiResponder(async (...args) => {
+    calls.push(args);
     return {
       generatedAt: "2026-08-09T00:00:00.000Z",
       source: "supabase",
-      classes: [{ id: "class-1" }],
-      textbooks: [],
-      progressLogs: [],
+      classes: [
+        {
+          id: "class-1",
+          schedulePlan: { sessions: [{ id: "session-1" }] },
+          schedule_plan: { sessions: [{ id: "session-1" }] },
+        },
+      ],
+      textbooks: [{ id: "textbook-1", title: "교재" }],
+      progressLogs: [{ id: "progress-1", classId: "class-1" }],
     };
   });
 
@@ -86,6 +78,7 @@ test("public classes API preserves class plans and their supporting catalogs", a
   assert.deepEqual(payload.progressLogs, [
     { id: "progress-1", classId: "class-1" },
   ]);
+  assert.deepEqual(calls, [[]]);
 });
 
 test("public classes API marks fallback responses no-store", async () => {

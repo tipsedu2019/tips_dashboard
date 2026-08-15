@@ -1,6 +1,9 @@
-import { PUBLIC_CLASSES_SUMMARY_CACHE_TAG } from "./public-classes-cache.js";
+import {
+  PUBLIC_CLASSES_FULL_CACHE_TAG,
+  PUBLIC_CLASSES_SUMMARY_CACHE_TAG,
+} from "./public-classes-cache.js";
 
-export { PUBLIC_CLASSES_SUMMARY_CACHE_TAG };
+export { PUBLIC_CLASSES_FULL_CACHE_TAG, PUBLIC_CLASSES_SUMMARY_CACHE_TAG };
 
 const REASONS = new Set(["class", "textbook", "progress", "schedule"]);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -33,6 +36,7 @@ export function createPublicClassesCacheInvalidationResponder({
     }
     try {
       revalidateTag(PUBLIC_CLASSES_SUMMARY_CACHE_TAG, "max");
+      revalidateTag(PUBLIC_CLASSES_FULL_CACHE_TAG, "max");
       revalidatePath("/api/public-classes");
       return { status: 200, body: { ok: true, requestId: input.requestId } };
     } catch {

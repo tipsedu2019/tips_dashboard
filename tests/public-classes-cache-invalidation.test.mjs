@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
+import * as publicClassesCacheInvalidation from "../src/server/public-classes-cache-invalidation.js";
+import { requestPublicClassesCacheInvalidation } from "../src/lib/public-classes-cache-invalidation.js";
+
+const {
   PUBLIC_CLASSES_SUMMARY_CACHE_TAG,
   createPublicClassesCacheInvalidationResponder,
-} from "../src/server/public-classes-cache-invalidation.js";
-import { requestPublicClassesCacheInvalidation } from "../src/lib/public-classes-cache-invalidation.js";
+} = publicClassesCacheInvalidation;
 
 const REQUEST_ID = "10000000-0000-4000-8000-000000000001";
 
@@ -25,6 +27,7 @@ test("public classes cache invalidation accepts only authorized reason-only requ
   assert.deepEqual(response, { status: 200, body: { ok: true, requestId: REQUEST_ID } });
   assert.deepEqual(calls, [
     ["tag", PUBLIC_CLASSES_SUMMARY_CACHE_TAG, "max"],
+    ["tag", "public-classes-full-v1", "max"],
     ["path", "/api/public-classes"],
   ]);
 });

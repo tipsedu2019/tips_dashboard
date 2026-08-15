@@ -195,6 +195,29 @@ export function normalizePublicClassesSummaryPayload(payload) {
   };
 }
 
+export function normalizePublicClassesFullPayload(payload) {
+  if (!payload || typeof payload !== "object" || isFallbackPublicClassesPayload(payload)) {
+    return null;
+  }
+  if (
+    !Array.isArray(payload.classes) ||
+    !Array.isArray(payload.textbooks) ||
+    !Array.isArray(payload.progressLogs)
+  ) {
+    return null;
+  }
+
+  return {
+    generatedAt: typeof payload.generatedAt === "string"
+      ? payload.generatedAt
+      : new Date().toISOString(),
+    source: "supabase",
+    classes: payload.classes,
+    textbooks: payload.textbooks,
+    progressLogs: payload.progressLogs,
+  };
+}
+
 function mapPublicTextbook(row) {
   return {
     id: row.id,

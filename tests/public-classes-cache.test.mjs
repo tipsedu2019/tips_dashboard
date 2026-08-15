@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import * as publicClassesCache from "../src/server/public-classes-cache.js";
 import {
   PUBLIC_CLASSES_SUMMARY_CACHE_TAG,
   PUBLIC_CLASSES_SUMMARY_REVALIDATE_SECONDS,
@@ -85,6 +86,23 @@ function livePayload(call) {
     classes: [{ id: `class-${call}`, name: "중등 영어" }],
     textbooks: [],
     progressLogs: [],
+  };
+}
+
+function fullPayload(call) {
+  return {
+    generatedAt: `2026-08-14T00:01:0${call}.000Z`,
+    source: "supabase",
+    classes: [
+      {
+        id: `class-${call}`,
+        name: "중등 영어",
+        schedulePlan: { sessions: [{ id: `session-${call}` }] },
+        schedule_plan: { sessions: [{ id: `session-${call}` }] },
+      },
+    ],
+    textbooks: [{ id: `book-${call}`, title: "교재" }],
+    progressLogs: [{ id: `progress-${call}`, classId: `class-${call}` }],
   };
 }
 
@@ -198,4 +216,115 @@ test("an invalidated older refresh cannot replace its newer generation", async (
   oldRequest.resolve(livePayload(1));
   assert.deepEqual(await oldConsumer, livePayload(1));
   assert.deepEqual(await cache.load(), livePayload(2));
+});
+
+test("a failed warm full revalidation keeps the prior successful payload", async () => {
+  let now = 0;
+  let calls = 0;
+  const harness = createNextDataCacheHarness({ now: () => now });
+  const cache = publicClassesCache.createPublicClassesFullCache({
+    cache: harness.factory,
+    loadFull: async () => {
+      calls += 1;
+      if (calls === 1) return fullPayload(1);
+      throw new Error("upstream unavailable");
+    },
+  });
+
+  assert.deepEqual(await cache.load(), fullPayload(1));
+  now += 600_001;
+  assert.deepEqual(await cache.load(), fullPayload(1));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls, 2);
+  assert.deepEqual(harness.calls, [
+    {
+      keys: ["public-classes-full-v1"],
+      options: {
+        revalidate: 600,
+        tags: ["public-classes-full-v1"],
+      },
+    },
+  ]);
+});
+
+test("a cold full failure returns a valid static snapshot without caching a fallback", async () => {
+  let shouldFail = true;
+  let calls = 0;
+  const cache = publicClassesCache.createPublicClassesFullCache({
+    cache: createNextDataCacheHarness().factory,
+    loadFull: async () => {
+      calls += 1;
+      if (shouldFail) {
+        return {
+          source: "fallback-empty",
+          classes: [],
+          textbooks: [],
+          progressLogs: [],
+        };
+      }
+      return fullPayload(2);
+    },
+    readSnapshot: async () => fullPayload(1),
+    now: () => Date.parse("2026-08-14T01:00:00.000Z"),
+  });
+
+  assert.deepEqual(await cache.load(), fullPayload(1));
+  shouldFail = false;
+  assert.deepEqual(await cache.load(), fullPayload(2));
+  assert.equal(calls, 2);
+});
+
+test("an invalid full snapshot does not turn an upstream failure into a success", async () => {
+  const cache = publicClassesCache.createPublicClassesFullCache({
+    cache: createNextDataCacheHarness().factory,
+    loadFull: async () => ({
+      source: "fallback-empty",
+      classes: [],
+      textbooks: [],
+      progressLogs: [],
+    }),
+    readSnapshot: async () => ({ source: "supabase", classes: [] }),
+  });
+
+  const payload = await cache.load();
+  assert.equal(payload.source, "fallback-empty");
+});
+
+test("a full snapshot older than 24 hours does not turn an upstream failure into a success", async () => {
+  const cache = publicClassesCache.createPublicClassesFullCache({
+    cache: createNextDataCacheHarness().factory,
+    loadFull: async () => ({
+      source: "fallback-empty",
+      classes: [],
+      textbooks: [],
+      progressLogs: [],
+    }),
+    readSnapshot: async () => fullPayload(1),
+    now: () => Date.parse("2026-08-15T01:02:00.000Z"),
+  });
+
+  const payload = await cache.load();
+  assert.equal(payload.source, "fallback-empty");
+});
+
+test("a full snapshot without its original generation time does not become fresh during normalization", async () => {
+  const cache = publicClassesCache.createPublicClassesFullCache({
+    cache: createNextDataCacheHarness().factory,
+    loadFull: async () => ({
+      source: "fallback-empty",
+      classes: [],
+      textbooks: [],
+      progressLogs: [],
+    }),
+    readSnapshot: async () => ({
+      source: "supabase",
+      classes: [],
+      textbooks: [],
+      progressLogs: [],
+    }),
+    now: () => Date.now() + 3_600_000,
+  });
+
+  const payload = await cache.load();
+  assert.equal(payload.source, "fallback-empty");
 });

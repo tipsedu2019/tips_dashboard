@@ -16,7 +16,7 @@
 
 1. 공개 수업 전체 조회가 운영 DB에 실제로 존재하는 컬럼만 요청하게 한다.
 2. 공개 projection을 명시적으로 유지해 `select("*")`로 인한 I/O 증가와 공개 범위 확대를 막는다.
-3. Supabase가 일시적으로 실패해도 검증된 마지막 정상 정적 snapshot을 제공한다.
+3. Supabase가 일시적으로 실패해도 24시간 이내의 검증된 마지막 정상 정적 snapshot을 제공한다.
 4. 같은 스키마 불일치가 테스트와 배포 전 검증에서 다시 검출되게 한다.
 5. 성공 응답의 10분 캐시, 8초 쿼리 제한, 자동 재시도 금지로 장애 시 요청 폭증을 막는다.
 
@@ -70,16 +70,19 @@
 - live 오류를 즉시 재시도하지 않음
 
 공개 API responder는 직접 Supabase를 호출하지 않고 성공 전용 full cache loader를 사용한다.
+기존 수업·교재·진도·일정 변경 후 cache invalidation은 summary tag와 full tag를 함께 무효화한다.
 
 ### 5.3 Snapshot fallback
 
-live full payload를 얻지 못하면 `public/data/public-classes.json`을 읽는다. 다음 조건을 모두 만족할 때만 사용한다.
+live full payload를 얻지 못하면 `public/data/public-classes.json`을 읽는다. 현재 저장소 snapshot은 2026-04-15 생성본이라 운영 fallback으로 사용하기에는 너무 오래됐다는 구현 중 점검 결과를 반영한다. 다음 조건을 모두 만족할 때만 사용한다.
 
 - 객체이며 `source === "supabase"`
 - `classes`, `textbooks`, `progressLogs`가 배열
 - full payload의 필수 공개 구조를 보존
+- `generatedAt`이 유효한 시각이며 현재보다 오래되지 않음
+- 현재 시각 기준 최대 24시간 이내
 
-검증된 snapshot은 `200`과 성공 cache header로 반환한다. 민감한 내부 오류 원문은 응답에 포함하지 않는다. snapshot이 없거나 유효하지 않을 때만 기존의 일반화된 사유와 `503 no-store`를 반환한다.
+검증된 최신 snapshot은 `200`과 성공 cache header로 반환한다. 민감한 내부 오류 원문은 응답에 포함하지 않는다. snapshot이 없거나 유효하지 않거나 24시간보다 오래됐을 때는 기존의 일반화된 사유와 `503 no-store`를 반환한다. warm Next Data Cache에 이전 성공 payload가 있으면 정적 snapshot보다 먼저 그 값을 유지한다.
 
 ### 5.4 배포 격리
 
@@ -92,8 +95,8 @@ DB migration은 없으며 Vercel 코드 배포만 수행한다.
 TDD 순서를 지킨다.
 
 1. full mode가 정확한 projection 네 개를 사용하는 회귀 테스트를 먼저 추가하고, 현재 `tuition` 및 `completed_lesson_ids` 때문에 실패하는 것을 확인한다.
-2. live full 조회 실패 시 유효한 snapshot을 반환하는 테스트를 추가하고 실패를 확인한다.
-3. fallback payload 또는 잘못된 snapshot이 성공 캐시에 들어가지 않는 테스트를 추가한다.
+2. live full 조회 실패 시 24시간 이내의 유효한 snapshot을 반환하는 테스트를 추가하고 실패를 확인한다.
+3. fallback payload, 잘못된 snapshot, 24시간보다 오래된 snapshot이 성공 캐시에 들어가지 않는 테스트를 추가한다.
 4. 최소 구현 후 대상 테스트, 관련 public classes cache 테스트, 전체 Node 테스트, ESLint, Next webpack build를 실행한다.
 
 테스트는 내부 구현 문자열만 검색하지 않고 주입된 Supabase query builder와 cache/snapshot 경계를 통해 실제 동작을 검증한다.
@@ -114,6 +117,7 @@ TDD 순서를 지킨다.
 
 - 정상 DB 상태에서 `/api/public-classes`가 full payload와 `200`을 반환한다.
 - 스키마에 없는 두 컬럼을 공개 조회가 요청하지 않는다.
-- 짧은 Supabase 장애에서 검증된 snapshot이 있으면 공개 API가 `503` 빈 응답으로 퇴행하지 않는다.
+- 짧은 Supabase 장애에서 warm cache 또는 24시간 이내의 검증된 snapshot이 있으면 공개 API가 `503` 빈 응답으로 퇴행하지 않는다.
+- 24시간보다 오래된 snapshot은 `200` 응답으로 제공하지 않는다.
 - timeout과 retry 금지로 장애 시 요청 증폭을 만들지 않는다.
 - DB, cron, 알림 provider에는 변경이 없다.

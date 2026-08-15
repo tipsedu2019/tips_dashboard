@@ -4,7 +4,7 @@
 
 **Goal:** Restore `/api/public-classes` and keep it available through short Supabase failures without reintroducing broad database reads or retry storms.
 
-**Architecture:** Pin every public Supabase read to an explicit production-compatible projection, then route the full API through a success-only 600-second Next Data Cache. On a cold live failure, validate and return the committed full public snapshot; only return the existing sanitized `503` payload when neither source is usable.
+**Architecture:** Pin every public Supabase read to an explicit production-compatible projection, then route the full API through a success-only 600-second Next Data Cache. On a cold live failure, validate and return the committed full public snapshot only when it is at most 24 hours old; only return the existing sanitized `503` payload when neither source is usable.
 
 **Tech Stack:** Next.js 16 App Router, Node.js test runner, JavaScript ES modules, `@supabase/supabase-js`, Next Data Cache, Vercel Production, Supabase Postgres/Data API
 
@@ -17,6 +17,7 @@
 - Keep `PUBLIC_CLASSES_QUERY_TIMEOUT_MS = 8_000` and `.retry(false)` on every public Supabase query.
 - Keep explicit projections; never replace them with `select("*")`.
 - Cache only payloads whose `source === "supabase"` and whose three collection fields are arrays.
+- Reject a static snapshot whose `generatedAt` is invalid, in the future, or more than 24 hours old.
 - Keep success cache headers at `public, max-age=0, s-maxage=600, stale-while-revalidate=3600`; keep unrecoverable fallback responses at `503` and `no-store`.
 - Use the bundled Node executable `/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node` and bundled pnpm `/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/fallback/pnpm` when PATH does not provide them.
 
@@ -27,6 +28,7 @@
 - Modify `src/server/public-classes-payload.js`: own named public projection constants, full payload validation/normalization, and production-compatible mapping.
 - Modify `src/server/public-classes-cache.js`: own success-only full-payload caching and cold-failure snapshot fallback, alongside the existing summary cache.
 - Modify `src/server/public-classes-api.js`: consume the full cache loader instead of querying Supabase directly.
+- Modify `src/server/public-classes-cache-invalidation.js`: invalidate both summary and full cache tags after committed mutations.
 - Modify `src/server/public-classes-cache.d.ts`: expose the full cache interfaces used by JavaScript consumers and tests.
 - Modify `tests/public-classes-summary-loading.test.mjs`: verify the full query contract and API response contract through injected boundaries.
 - Modify `tests/public-classes-cache.test.mjs`: verify success-only full caching, stale success retention, valid snapshot fallback, and invalid snapshot rejection.
@@ -126,13 +128,14 @@ git commit -m "fix: align public class queries with production schema"
 - Modify: `src/server/public-classes-cache.js:1-81`
 - Modify: `src/server/public-classes-cache.d.ts`
 - Modify: `src/server/public-classes-api.js:1-24`
+- Modify: `src/server/public-classes-cache-invalidation.js:1-40`
 - Test: `tests/public-classes-cache.test.mjs`
 - Test: `tests/public-classes-summary-loading.test.mjs:10-67`
 
 **Interfaces:**
 - Consumes: `readPublicClassesSnapshot() -> Promise<unknown>` from `src/lib/public-classes-server.js` or an injected equivalent.
 - Produces: `normalizePublicClassesFullPayload(payload) -> PublicClassesPayload | null`.
-- Produces: `createPublicClassesFullCache({ loadFull, readSnapshot, cache }).load(...args) -> Promise<PublicClassesPayload>`.
+- Produces: `createPublicClassesFullCache({ loadFull, readSnapshot, cache, now }).load(...args) -> Promise<PublicClassesPayload>`.
 - Produces: `loadCachedPublicClassesFull(...args) -> Promise<PublicClassesPayload>`.
 - Consumes in API: `createPublicClassesApiResponder(loadPayload = loadCachedPublicClassesFull)`.
 
@@ -168,7 +171,8 @@ test("a cold full failure returns a valid static snapshot without caching a fall
     loadFull: async () => fail
       ? { source: "fallback-empty", classes: [], textbooks: [], progressLogs: [] }
       : fullPayload("recovered"),
-    readSnapshot: async () => fullPayload("snapshot"),
+    readSnapshot: async () => fullPayload(1),
+    now: () => Date.parse("2026-08-14T01:00:00.000Z"),
   });
 
   assert.deepEqual(await cache.load(), fullPayload("snapshot"));
@@ -181,6 +185,18 @@ test("an invalid full snapshot does not turn an upstream failure into a 200", as
     cache: createNextDataCacheHarness().factory,
     loadFull: async () => ({ source: "fallback-empty", classes: [], textbooks: [], progressLogs: [] }),
     readSnapshot: async () => ({ source: "supabase", classes: [] }),
+  });
+
+  const payload = await cache.load();
+  assert.equal(payload.source, "fallback-empty");
+});
+
+test("a full snapshot older than 24 hours does not turn an upstream failure into a 200", async () => {
+  const cache = createPublicClassesFullCache({
+    cache: createNextDataCacheHarness().factory,
+    loadFull: async () => ({ source: "fallback-empty", classes: [], textbooks: [], progressLogs: [] }),
+    readSnapshot: async () => fullPayload(1),
+    now: () => Date.parse("2026-08-15T01:02:00.000Z"),
   });
 
   const payload = await cache.load();
@@ -216,11 +232,13 @@ export function normalizePublicClassesFullPayload(payload) {
 }
 ```
 
-In `public-classes-cache.js`, add `PUBLIC_CLASSES_FULL_CACHE_TAG = "public-classes-full-v1"`, reuse the 600-second interval, create `loadSuccessfulPublicClassesFull`, and implement `createPublicClassesFullCache`. The cached loader must throw on fallback payloads; the outer loader catches, validates the injected snapshot, then returns either the snapshot or the sanitized fallback.
+In `public-classes-cache.js`, add `PUBLIC_CLASSES_FULL_CACHE_TAG = "public-classes-full-v1"`, `PUBLIC_CLASSES_SNAPSHOT_MAX_AGE_MS = 86_400_000`, reuse the 600-second interval, create `loadSuccessfulPublicClassesFull`, and implement `createPublicClassesFullCache`. The cached loader must throw on fallback payloads; the outer loader catches, validates the injected snapshot and its `generatedAt` against injected `now`, then returns either the fresh snapshot or the sanitized fallback.
 
 Use a small local `readSnapshot` function in the cache module that reads `publicClassesOutputPath`, avoiding a circular import from `src/lib/public-classes-server.js`.
 
 Update `public-classes-cache.d.ts` with the exact exported constants and callable signatures.
+
+Update `public-classes-cache-invalidation.js` to call `revalidateTag` once for `public-classes-summary-v1` and once for `public-classes-full-v1` before revalidating `/api/public-classes`.
 
 - [ ] **Step 4: Route the API through the full cache and verify response semantics**
 
