@@ -63,13 +63,37 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json().catch(() => ({})) as Record<string, unknown>
-  if (Object.keys(body).some((key) => !["batch_size", "lease_seconds"].includes(key))) {
+  if (Object.keys(body).some((key) => !["batch_size", "lease_seconds", "wakeup_generation"].includes(key))) {
     return response({ ok: false, error: "notification_worker_request_invalid" }, 400)
   }
-  const counts = await worker.runBatch({
-    workerId: "notification-worker-route-v1",
-    batchSize: boundedInteger(body.batch_size, 50, 1, 100),
-    leaseSeconds: boundedInteger(body.lease_seconds, 60, 30, 300),
+  const wakeupGeneration = boundedInteger(body.wakeup_generation, 0, 0, Number.MAX_SAFE_INTEGER)
+  let succeeded = false
+  let counts: Awaited<ReturnType<typeof worker.runBatch>>
+  try {
+    counts = await worker.runBatch({
+      workerId: "notification-worker-route-v1",
+      batchSize: boundedInteger(body.batch_size, 50, 1, 100),
+      leaseSeconds: boundedInteger(body.lease_seconds, 60, 30, 300),
+    })
+    succeeded = true
+  } finally {
+    if (wakeupGeneration > 0) {
+      const { error: completionError } = await client.rpc(
+        "complete_notification_worker_generation_v1",
+        {
+          p_generation: wakeupGeneration,
+          p_succeeded: succeeded,
+        },
+      )
+      if (completionError && succeeded) {
+        throw new Error("notification_worker_generation_completion_failed")
+      }
+    }
+  }
+  return response({
+    ok: true,
+    counts,
+    contractVersion: NOTIFICATION_CONTRACT_VERSION,
+    wakeupGeneration: wakeupGeneration || null,
   })
-  return response({ ok: true, counts, contractVersion: NOTIFICATION_CONTRACT_VERSION })
 }

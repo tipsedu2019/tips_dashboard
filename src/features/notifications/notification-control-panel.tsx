@@ -62,7 +62,7 @@ export type NotificationControlPlaneAvailability = {
   status: "loading" | "enabled" | "disabled" | "unavailable"
 }
 
-type NotificationControlPanelSection = "rules" | "deliveries" | "connections"
+type NotificationControlPanelSection = "rules" | "connections"
 
 export type NotificationControlPanelProps = {
   workflowKey: NotificationWorkflowKey
@@ -894,36 +894,6 @@ function ConnectionsView({
   )
 }
 
-function DeliverySummary({ snapshot }: { snapshot: NotificationControlPlaneSnapshot }) {
-  const summary = snapshot.deliverySummary
-  const items = [
-    ["대기", summary.pendingCount],
-    ["완료", summary.sentCount],
-    ["실패", summary.failedCount],
-    ["결과 확인 필요", summary.unknownCount],
-  ] as const
-  return (
-    <div className="space-y-3">
-      <div>
-        <h2 className="text-base font-semibold">최근 전달 요약</h2>
-        <p className="text-sm text-muted-foreground">
-          마지막 전달 {formatTimestamp(summary.latestDeliveryAt)}
-        </p>
-      </div>
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        {items.map(([label, value]) => (
-          <Card key={label}>
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{label}</p>
-              <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 export function useNotificationControlPlaneAvailability(): NotificationControlPlaneAvailability {
   const [status, setStatus] = React.useState<NotificationControlPlaneAvailability["status"]>(
     "loading",
@@ -1538,11 +1508,10 @@ export function NotificationControlPanel({
         <TabsList
           className={cn(
             "grid h-auto w-full rounded-lg border bg-muted/35 p-1",
-            presentation === "page" ? "grid-cols-3" : "grid-cols-2",
+            presentation === "page" ? "grid-cols-2" : "grid-cols-1",
           )}
         >
           <TabsTrigger value="rules" className="h-9">Google Chat 규칙</TabsTrigger>
-          <TabsTrigger value="deliveries" className="h-9">최근 전달</TabsTrigger>
           {presentation === "page" ? (
             <TabsTrigger value="connections" className="h-9">연결</TabsTrigger>
           ) : null}
@@ -1560,9 +1529,6 @@ export function NotificationControlPanel({
             onMentionChange={updateMentionSetting}
             onEditTemplate={setEditingRuleId}
           />
-        </TabsContent>
-        <TabsContent value="deliveries" className="mt-3">
-          <DeliverySummary snapshot={snapshot} />
         </TabsContent>
         {presentation === "page" ? (
           <TabsContent value="connections" className="mt-3">

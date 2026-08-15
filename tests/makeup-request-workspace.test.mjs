@@ -43,8 +43,6 @@ const serviceWorkerSource = readOptionalSource("public/sw.js");
 const pushClientSource = readOptionalSource("src/lib/dashboard-push-client.ts");
 const pushSubscriptionsRouteSource = readOptionalSource("src/app/api/push-subscriptions/route.ts");
 const webPushRouteSource = readOptionalSource("src/app/api/web-push/route.ts");
-const notificationPopoverSource = readFileSync("src/components/dashboard-notification-popover.tsx", "utf8");
-const notificationContentSource = readFileSync("src/components/dashboard-notification-content.tsx", "utf8");
 const inFlightRequestModule = await import("../src/lib/in-flight-request.js").catch(() => ({}));
 const makeupRequestLoadingModule = await import("../src/features/makeup-requests/makeup-request-loading.ts").catch(() => ({}));
 const allMigrationSource = readdirSync("supabase/migrations")
@@ -115,15 +113,6 @@ function loadMakeupRequestViewHelpers() {
       MAKEUP_REQUEST_CLOSED_STATUSES: ["completed", "rejected", "canceled"],
     },
   );
-}
-
-function loadNotificationBodyFormatter() {
-  const source = sourceBetween(
-    notificationContentSource,
-    "const NOTIFICATION_BODY_ISO_DATE_TIME_PATTERN",
-    "function splitKnownLeadingStatusEmoji",
-  );
-  return transpileAndLoad(source, ["formatNotificationBody"]);
 }
 
 function loadMakeupFilterHelpers() {
@@ -1240,15 +1229,6 @@ test("관리팀은 자신이 참여하지 않은 보강대기 휴보강을 확�
   );
 });
 
-test("알림 본문의 ISO 보강 시간을 한국식 시각으로 표시한다", () => {
-  const { formatNotificationBody } = loadNotificationBodyFormatter();
-
-  assert.equal(
-    formatNotificationBody("보강일시: 2026-08-07T10:00:00+09:00 - 2026-08-07T12:00:00+09:00"),
-    "보강일시: 2026-08-07 10:00 - 2026-08-07 12:00",
-  );
-});
-
 test("makeup workspace avoids browser prompt and fills wide screens", () => {
   assert.doesNotMatch(workspaceSource, /window\.prompt/);
   assert.match(workspaceSource, /className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6"/);
@@ -1785,21 +1765,6 @@ test("dashboard header omits the retired internal notification popover", () => {
   assert.doesNotMatch(headerSource, /aria-label="알림"/);
 });
 
-test("dashboard notifications use the profile-scoped inbox RPCs and lightweight unread count", () => {
-  assert.match(serviceSource, /get_dashboard_notification_inbox_v1/);
-  assert.match(serviceSource, /get_dashboard_notification_unread_count_v1/);
-  assert.match(serviceSource, /mark_dashboard_notification_read_v1/);
-  assert.doesNotMatch(serviceSource, /loadDashboardNotifications\(viewerId:/);
-  assert.doesNotMatch(serviceSource, /loadDashboardUnreadNotificationCount\(viewerId:/);
-  assert.doesNotMatch(serviceSource, /count: "exact", head: true/);
-  assert.match(notificationPopoverSource, /loadDashboardNotifications\(\)/);
-  assert.match(notificationPopoverSource, /loadDashboardUnreadNotificationCount\(\)/);
-  assert.match(notificationPopoverSource, /if \(!viewerId\) return/);
-  assert.match(notificationPopoverSource, /inboxGenerationRef/);
-  assert.match(notificationPopoverSource, /unreadCountTimer = window\.setTimeout/);
-  assert.match(notificationPopoverSource, /if \(open\) \{[\s\S]{0,120}void refresh\(\)/);
-});
-
 test("공용 in-flight 요청 저장소는 key별 공유와 실패 후 재시도를 보존한다", async () => {
   const createStore = inFlightRequestModule.createInFlightRequestStore;
   assert.equal(typeof createStore, "function");
@@ -1840,12 +1805,6 @@ test("dashboard supports installable web push subscriptions", () => {
   assert.match(pushClientSource, /navigator\.serviceWorker\.register\("\/sw\.js"\)/);
   assert.match(pushClientSource, /registration\.pushManager\.subscribe/);
   assert.match(pushClientSource, /applicationServerKey: urlBase64ToUint8Array/);
-  assert.match(notificationPopoverSource, /휴대폰 알림/);
-  assert.match(notificationPopoverSource, /requestDashboardPushPermissionAndBind/);
-  assert.match(notificationPopoverSource, /rebindDashboardPushSubscription/);
-  assert.match(notificationPopoverSource, /sendDashboardPushSelfTest/);
-  assert.match(notificationPopoverSource, /unsubscribeDashboardPush/);
-  assert.match(notificationPopoverSource, /selfTestConfirmationOpen/);
 });
 
 test("dashboard push subscriptions are stored behind authenticated RLS", () => {

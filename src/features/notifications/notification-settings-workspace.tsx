@@ -13,7 +13,7 @@ const WORKFLOW_ORDER_TEXT =
   "할 일 · 영어 단어 재시험 · 등록 · 전반 · 퇴원 · 휴보강 · 전자결재"
 
 type NotificationSettingsWorkspaceProps = {
-  initialSection?: "rules" | "deliveries" | "connections"
+  initialSection?: "rules" | "connections"
 }
 
 export function NotificationSettingsWorkspace({
