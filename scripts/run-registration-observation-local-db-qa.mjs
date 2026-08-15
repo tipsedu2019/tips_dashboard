@@ -291,6 +291,20 @@ const FOCUS_REGISTRY = new Map([
     },
   ],
   [
+    "solapi-evidence",
+    {
+      ceiling: "20260815182919",
+      migrations: [
+        "20260815182919_registration_customer_solapi_activation_evidence.sql",
+      ],
+      tests: [
+        "supabase/tests/registration_customer_solapi_activation_evidence_test.sql",
+      ],
+      fixture: "noop",
+      providerOutboxStage: "solapi-queue",
+    },
+  ],
+  [
     "legacy-schedule",
     {
       ceiling: "20260815040537",
