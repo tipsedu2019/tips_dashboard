@@ -15,6 +15,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "../..");
 
 export const PUBLIC_CLASSES_QUERY_TIMEOUT_MS = 8_000;
+export const PUBLIC_CLASSES_SUMMARY_PROJECTION =
+  "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date";
+export const PUBLIC_CLASSES_FULL_CLASS_PROJECTION =
+  "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,textbook_ids,textbook_info,lessons,schedule_plan,start_date,end_date";
+export const PUBLIC_CLASSES_FULL_TEXTBOOK_PROJECTION =
+  "id,title,name,publisher,price,tags,lessons,updated_at";
+export const PUBLIC_CLASSES_FULL_PROGRESS_PROJECTION =
+  "id,class_id,textbook_id,progress_key,session_id,session_order,status,range_start,range_end,range_label,public_note,teacher_note,updated_at,date";
 
 export function applyPublicClassesQuerySafety(query) {
   return query
@@ -117,6 +125,7 @@ function getClassStatus(row) {
 
 function mapPublicClass(row) {
   const normalizedStatus = getClassStatus(row);
+  const fee = Number(row.fee || 0);
   return {
     id: row.id,
     name: row.name || "",
@@ -128,8 +137,8 @@ function mapPublicClass(row) {
     classroom: row.room || "",
     schedule: row.schedule || "",
     status: normalizedStatus,
-    fee: Number(row.fee || row.tuition || 0),
-    tuition: Number(row.tuition || row.fee || 0),
+    fee,
+    tuition: fee,
     capacity: Number(row.capacity || 0),
     studentIds: Array.isArray(row.student_ids) ? row.student_ids : [],
     waitlistIds: Array.isArray(row.waitlist_ids) ? row.waitlist_ids : [],
@@ -227,8 +236,6 @@ export async function buildPublicClassesPayload({
   mode = "full",
 } = {}) {
   await loadPublicClassesEnv(env);
-  const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION =
-    "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date";
 
   const supabase = supabaseClient || createPublicClassesSupabaseClient(env);
   if (!supabase) {
@@ -242,7 +249,7 @@ export async function buildPublicClassesPayload({
       const { data: classRows, error: classError } = await applyPublicClassesQuerySafety(
         supabase
           .from("classes")
-          .select(PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION),
+          .select(PUBLIC_CLASSES_SUMMARY_PROJECTION),
       );
 
       if (classError) {
@@ -265,15 +272,15 @@ export async function buildPublicClassesPayload({
       { data: textbookRows, error: textbookError },
       { data: progressRows, error: progressError },
     ] = await Promise.all([
-      applyPublicClassesQuerySafety(supabase.from("classes").select(
-        "id,name,subject,grade,teacher,room,schedule,status,fee,tuition,capacity,student_ids,waitlist_ids,textbook_ids,textbook_info,lessons,schedule_plan,start_date,end_date",
-      )),
-      applyPublicClassesQuerySafety(supabase.from("textbooks").select(
-        "id,title,name,publisher,price,tags,lessons,updated_at",
-      )),
-      applyPublicClassesQuerySafety(supabase.from("progress_logs").select(
-        "id,class_id,textbook_id,progress_key,session_id,session_order,status,range_start,range_end,range_label,public_note,teacher_note,updated_at,date,completed_lesson_ids",
-      )),
+      applyPublicClassesQuerySafety(
+        supabase.from("classes").select(PUBLIC_CLASSES_FULL_CLASS_PROJECTION),
+      ),
+      applyPublicClassesQuerySafety(
+        supabase.from("textbooks").select(PUBLIC_CLASSES_FULL_TEXTBOOK_PROJECTION),
+      ),
+      applyPublicClassesQuerySafety(
+        supabase.from("progress_logs").select(PUBLIC_CLASSES_FULL_PROGRESS_PROJECTION),
+      ),
     ]);
 
     if (classError) {
