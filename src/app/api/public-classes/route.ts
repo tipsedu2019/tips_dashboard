@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createPublicClassesApiResponder } from "../../../server/public-classes-api.js";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 600;
 
 const respond = createPublicClassesApiResponder();
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
 import test from "node:test";
 
 import { createPublicClassesApiResponder } from "../src/server/public-classes-api.js";
@@ -6,6 +7,16 @@ import {
   buildPublicClassesPayload,
   normalizePublicClassesFailure,
 } from "../src/server/public-classes-payload.js";
+
+test("public classes route enables Vercel response caching", async () => {
+  const source = await fs.readFile(
+    new URL("../src/app/api/public-classes/route.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /export const revalidate = 600;/);
+  assert.doesNotMatch(source, /force-dynamic/);
+});
 
 function createRecordingSupabaseClient(rowsByTable, queries) {
   return {
