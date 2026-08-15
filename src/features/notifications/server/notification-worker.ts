@@ -1586,7 +1586,7 @@ export async function prepareRegistrationObservationDeliveryForDispatch(
     workerEnvelopeError()
   }
   const frozen = observationFrozenState(await rpc(
-    "read_registration_observation_notification_delivery_frozen_state_v1",
+    "read_registration_observation_delivery_frozen_state_v1",
     { p_delivery_id: asString(claim.delivery_id), p_claim_token: asString(claim.claim_token) },
   ))
   if (frozen.attemptCount !== Number(claim.attempt_count)) workerEnvelopeError()
@@ -1668,7 +1668,7 @@ export async function prepareRegistrationObservationDeliveryForDispatch(
     p_payload_fingerprint: payloadFingerprint, p_render_fingerprint: renderFingerprint,
   })
   const confirmed = observationFrozenState(await rpc(
-    "read_registration_observation_notification_delivery_frozen_state_v1",
+    "read_registration_observation_delivery_frozen_state_v1",
     { p_delivery_id: asString(claim.delivery_id), p_claim_token: asString(claim.claim_token) },
   ))
   if (
