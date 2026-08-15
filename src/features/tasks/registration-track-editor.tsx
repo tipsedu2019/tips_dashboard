@@ -117,6 +117,7 @@ import {
   getRegistrationActiveConsultation,
   getRegistrationAdmissionApplicationState,
   getRegistrationCurrentClassWaitClassId,
+  shouldRenderRegistrationConsultationOutcome,
 } from "./registration-track-model.js"
 import {
   ensureRegistrationWorkflowNotificationSourceIds,
@@ -1389,8 +1390,11 @@ export function RegistrationApplication({
           />
         ) : null}
         {renderTrackActions(context, section, placementMode)}
-        {context.latestConsultation
-          && (context.permissions.canManage || context.permissions.canCompleteConsultation || context.permissions.canEditConsultationResult) ? (
+        {context.latestConsultation && shouldRenderRegistrationConsultationOutcome({
+          section,
+          consultation: context.latestConsultation,
+          canEdit: Boolean(context.permissions.canManage || context.permissions.canCompleteConsultation || context.permissions.canEditConsultationResult),
+        }) ? (
             <RegistrationConsultationOutcomeEditor
               key={`consultation:${context.latestConsultation.id}:${context.latestConsultation.updatedAt}`}
               subject={context.track.subject}

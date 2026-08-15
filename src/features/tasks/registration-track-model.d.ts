@@ -465,6 +465,12 @@ export function getRegistrationConsultationOutcomeSaveState(input?: {
   label: "저장됨" | "상담 결과 저장" | "상담 결과를 선택하세요"
 }
 
+export function shouldRenderRegistrationConsultationOutcome(input?: {
+  section?: string | null
+  consultation?: RegistrationConsultationSummary | null
+  canEdit?: boolean
+}): boolean
+
 export function getRegistrationActiveConsultation<T extends RegistrationConsultationSummary>(input?: {
   trackId?: string | null
   consultations?: readonly T[]

@@ -779,7 +779,7 @@ export function getRegistrationConsultationOutcomeSaveState(input = {}) {
   if (dirty && draftOutcome === "waiting" && savedOutcome !== "waiting") {
     if (!waitingKind) blockers.push("대기 유형")
     else if (waitingKind === "current_class" && !classId) blockers.push("대기 반")
-  } else if (dirty && (waitingKind || classId)) {
+  } else if (dirty && draftOutcome !== "waiting" && (waitingKind || classId)) {
     blockers.push("대기 정보")
   }
   return {
@@ -789,6 +789,12 @@ export function getRegistrationConsultationOutcomeSaveState(input = {}) {
     canSave: editable && dirty && Boolean(draftOutcome) && blockers.length === 0,
     label: dirty ? "상담 결과 저장" : savedOutcome ? "저장됨" : "상담 결과를 선택하세요",
   }
+}
+
+export function shouldRenderRegistrationConsultationOutcome(input = {}) {
+  return input.section === "consultation"
+    && Boolean(input.consultation)
+    && Boolean(input.canEdit)
 }
 
 export function getRegistrationActionPermissions(input = {}) {
