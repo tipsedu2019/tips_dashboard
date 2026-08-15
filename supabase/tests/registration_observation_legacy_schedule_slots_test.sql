@@ -1,5 +1,5 @@
 begin;
-select plan(9);
+select plan(10);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '120s';
@@ -214,6 +214,15 @@ select pg_catalog.set_config(
 select pg_catalog.set_config('request.jwt.claim.role', 'authenticated', true);
 
 set local role authenticated;
+select is(
+  (
+    select summary.observation_return_workflow_status
+    from public.ops_registration_subject_track_summaries summary
+    where summary.id = 'f7000000-0000-4000-8000-000000000031'
+  ),
+  'consultation_completed'::text,
+  'observation summary exposes the authorized return status needed by the first-render selector'
+);
 select is(
   (
     select pg_catalog.jsonb_build_object(

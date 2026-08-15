@@ -223,7 +223,7 @@ test("runner keeps every independent database reviewer gate", async () => {
     "legacy-schedule",
   ]);
   assert.deepEqual(runner.getRegistrationObservationFocusContract("legacy-schedule"), {
-    ceiling: "20260815035229",
+    ceiling: "20260815040537",
     tests: [
       "supabase/tests/registration_observation_legacy_schedule_slots_test.sql",
     ],
