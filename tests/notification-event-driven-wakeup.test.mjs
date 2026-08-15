@@ -15,7 +15,7 @@ test("fanout inserts request one statement-level wakeup and periodic jobs are re
   assert.match(sql, /requested_generation\s*=\s*wakeup\.requested_generation\s*\+\s*1/i)
   assert.match(sql, /tips-notification-worker-v1[\s\S]*cron\.unschedule/i)
   assert.match(sql, /tips-notification-cutover-watchdog-v1[\s\S]*cron\.unschedule/i)
-  assert.match(sql, /notification_periodic_worker_retired/i)
+  assert.doesNotMatch(sql, /create or replace function public\.manage_notification_worker_schedule_v1/i)
   assert.doesNotMatch(sql, /cron\.schedule[\s\S]*(notification-worker|watchdog|recovery)/i)
 })
 

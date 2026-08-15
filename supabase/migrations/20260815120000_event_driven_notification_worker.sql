@@ -214,42 +214,6 @@ begin
 end;
 $$;
 
-create or replace function public.manage_notification_worker_schedule_v1(
-  p_action text,
-  p_request_id uuid
-) returns jsonb
-language plpgsql
-volatile
-security definer
-set search_path = ''
-as $$
-declare
-  v_response jsonb;
-begin
-  if (select auth.role()) <> 'service_role'
-    or p_action is null
-    or p_action not in ('inspect', 'install', 'disable', 'remove')
-    or p_request_id is null
-  then
-    raise exception 'notification_schedule_management_invalid' using errcode = '22023';
-  end if;
-  if p_action = 'install' then
-    raise exception 'notification_periodic_worker_retired' using errcode = '55000';
-  end if;
-  v_response := pg_catalog.jsonb_build_object(
-    'workerCount', 0,
-    'watchdogCount', 0,
-    'workerActiveCount', 0,
-    'watchdogActiveCount', 0,
-    'mode', 'event_driven'
-  );
-  insert into dashboard_private.notification_worker_schedule_requests(request_id, action, response_payload)
-  values (p_request_id, p_action, v_response)
-  on conflict (request_id) do nothing;
-  return v_response;
-end;
-$$;
-
 create table dashboard_private.notification_manual_retry_requests (
   request_id uuid primary key,
   event_id uuid not null references dashboard_private.notification_events(id),
@@ -454,7 +418,6 @@ $$;
 alter function dashboard_private.request_notification_worker_wakeup_v1(text) owner to postgres;
 alter function dashboard_private.request_notification_worker_after_fanout_insert_v1() owner to postgres;
 alter function public.complete_notification_worker_generation_v1(bigint,boolean) owner to postgres;
-alter function public.manage_notification_worker_schedule_v1(text,uuid) owner to postgres;
 alter function dashboard_private.assert_notification_event_actor_v1(uuid) owner to postgres;
 alter function public.get_google_chat_notification_event_status_v1(uuid) owner to postgres;
 alter function public.retry_google_chat_notification_event_v1(uuid,uuid,boolean) owner to postgres;
@@ -465,8 +428,6 @@ revoke all on function dashboard_private.request_notification_worker_after_fanou
   from public, anon, authenticated, service_role;
 revoke all on function public.complete_notification_worker_generation_v1(bigint,boolean)
   from public, anon, authenticated, service_role;
-revoke all on function public.manage_notification_worker_schedule_v1(text,uuid)
-  from public, anon, authenticated, service_role;
 revoke all on function dashboard_private.assert_notification_event_actor_v1(uuid)
   from public, anon, authenticated, service_role;
 revoke all on function public.get_google_chat_notification_event_status_v1(uuid)
@@ -475,8 +436,6 @@ revoke all on function public.retry_google_chat_notification_event_v1(uuid,uuid,
   from public, anon, authenticated, service_role;
 
 grant execute on function public.complete_notification_worker_generation_v1(bigint,boolean)
-  to service_role;
-grant execute on function public.manage_notification_worker_schedule_v1(text,uuid)
   to service_role;
 grant execute on function public.get_google_chat_notification_event_status_v1(uuid)
   to authenticated;
