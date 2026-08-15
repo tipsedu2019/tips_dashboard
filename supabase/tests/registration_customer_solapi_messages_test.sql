@@ -29,6 +29,58 @@ select has_table(
   'private activation table exists'
 );
 
+select has_table(
+  'dashboard_private',
+  'registration_customer_solapi_activation_evidence',
+  'private immutable activation evidence table exists'
+);
+
+select has_column(
+  'public',
+  'ops_registration_customer_messages',
+  'provider_payload_checksum',
+  'outbox stores the exact provider payload checksum until evidence capture'
+);
+
+select is_empty($$
+  with expected(column_name) as (
+    values
+      ('id'),
+      ('message_kind'),
+      ('template_id'),
+      ('pf_id'),
+      ('template_checksum'),
+      ('rendered_variables_checksum'),
+      ('rendered_body_checksum'),
+      ('rendered_buttons_checksum'),
+      ('provider_payload_checksum'),
+      ('recipient_hash'),
+      ('provider_message_id'),
+      ('provider_status_code'),
+      ('verified_at'),
+      ('verified_by'),
+      ('created_at')
+  )
+  select expected.column_name
+  from expected
+  left join information_schema.columns actual
+    on actual.table_schema = 'dashboard_private'
+   and actual.table_name = 'registration_customer_solapi_activation_evidence'
+   and actual.column_name = expected.column_name
+  where actual.column_name is null
+$$, 'activation evidence keeps only checksums and provider receipt identifiers');
+
+select is_empty($$
+  select column_name
+  from information_schema.columns
+  where table_schema = 'dashboard_private'
+    and table_name = 'registration_customer_solapi_activation_evidence'
+    and column_name in (
+      'task_id', 'message_id', 'phone', 'parent_phone', 'student_name',
+      'rendered_body', 'rendered_buttons', 'rendered_variables', 'provider_response'
+    )
+$$, 'activation evidence stores no public row identity or plaintext customer content');
+
 select is_empty($$
   with expected(column_name) as (
     values

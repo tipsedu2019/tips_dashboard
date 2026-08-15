@@ -10,6 +10,8 @@ const RPC_MIGRATION =
   "20260805111000_registration_customer_solapi_message_rpc.sql"
 const ACTIVATION_MIGRATION =
   "20260805112000_registration_customer_solapi_activation.sql"
+const EVIDENCE_MIGRATION =
+  "20260815182919_registration_customer_solapi_activation_evidence.sql"
 const AUDIT_DEDUPE_MIGRATION =
   "20260806130000_registration_customer_message_audit_dedupe.sql"
 const PREVIEW_TARGET_MIGRATION =
@@ -28,6 +30,10 @@ const rpcMigrationUrl = new URL(
 )
 const activationMigrationUrl = new URL(
   "../supabase/migrations/" + ACTIVATION_MIGRATION,
+  import.meta.url,
+)
+const evidenceMigrationUrl = new URL(
+  "../supabase/migrations/" + EVIDENCE_MIGRATION,
   import.meta.url,
 )
 const auditDedupeMigrationUrl = new URL(
@@ -488,6 +494,69 @@ test("private template receipts and activation rows are fail-closed", async () =
     /insert into dashboard_private\.registration_customer_solapi_activation \(message_kind, mode\) values \('level_test_booking', 'off'\), \('visit_consultation_booking', 'off'\), \('appointment_reminder', 'off'\), \('waiting_notice', 'off'\), \('admission_application', 'off'\) on conflict \(message_kind\) do nothing/,
   )
   assert.doesNotMatch(normalized, /mode\) values[^;]+(?:'verification'|'live')/)
+})
+
+test("private activation evidence is non-identifying and decouples live state from public rows", async () => {
+  const source = await readRequired(evidenceMigrationUrl, "activation evidence migration")
+  const normalized = normalizeSql(source)
+  const evidenceBlock = createTableBlock(
+    source,
+    "dashboard_private.registration_customer_solapi_activation_evidence",
+  )
+
+  assertColumnsInOrder(evidenceBlock, [
+    "id",
+    "message_kind",
+    "template_id",
+    "pf_id",
+    "template_checksum",
+    "rendered_variables_checksum",
+    "rendered_body_checksum",
+    "rendered_buttons_checksum",
+    "provider_payload_checksum",
+    "recipient_hash",
+    "provider_message_id",
+    "provider_status_code",
+    "verified_at",
+    "verified_by",
+    "created_at",
+  ], "registration_customer_solapi_activation_evidence")
+  assert.match(
+    normalizeSql(evidenceBlock),
+    /message_kind text not null[^;]+observation_booking[^;]+observation_reminder/,
+  )
+  for (const column of [
+    "template_checksum",
+    "rendered_variables_checksum",
+    "rendered_body_checksum",
+    "rendered_buttons_checksum",
+    "provider_payload_checksum",
+    "recipient_hash",
+  ]) {
+    assert.match(
+      normalizeSql(evidenceBlock),
+      new RegExp(column + " text not null[^,]+\\^\\[a-f0-9\\]\\{64\\}\\$"),
+    )
+  }
+  assert.doesNotMatch(
+    normalizeSql(evidenceBlock),
+    /task_id|message_id uuid|phone|student_name|rendered_body text|rendered_buttons jsonb|rendered_variables jsonb|provider_response/,
+  )
+  assert.match(normalized, /alter table dashboard_private\.registration_customer_solapi_activation_evidence enable row level security/)
+  assert.match(normalized, /revoke all on table dashboard_private\.registration_customer_solapi_activation_evidence from public, anon, authenticated, service_role/)
+  assert.match(normalized, /alter table public\.ops_registration_customer_messages add column provider_payload_checksum text/)
+  assert.match(normalized, /alter table dashboard_private\.registration_customer_solapi_activation[^;]+add column activation_evidence_id uuid/)
+  assert.match(normalized, /contype = 'f'.+verification_task_id.+drop constraint/)
+  assert.match(normalized, /drop column live_test_message_id/)
+  assert.match(normalized, /drop column live_test_confirmed_at/)
+  assert.match(
+    normalized,
+    /mode = 'verification'[^;]+verification_task_id is not null[^;]+verification_recipient_hash is not null[^;]+activation_evidence_id is null/,
+  )
+  assert.match(
+    normalized,
+    /mode = 'live'[^;]+verification_task_id is null[^;]+verification_recipient_hash is null[^;]+activation_evidence_id is not null/,
+  )
 })
 
 test("all four tables are RLS protected with no direct application or service-role access", async () => {
