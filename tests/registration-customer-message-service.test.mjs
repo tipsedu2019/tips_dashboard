@@ -10,6 +10,7 @@ import { getRegistrationCustomerMessageErrorMessage } from "../src/features/task
 const TASK_ID = "96000000-0000-4000-8000-000000000001"
 const MESSAGE_ID = "96000000-0000-4000-8000-000000000002"
 const REQUEST_KEY = "96000000-0000-4000-8000-000000000003"
+const EVIDENCE_ID = "96000000-0000-4000-8000-000000000004"
 
 function response(body) {
   return new Response(JSON.stringify(body), {
@@ -70,6 +71,12 @@ test("admin client authenticates and sends the exact SOLAPI rollout actions", as
     receivedAt: "2026-08-07T00:02:00.000Z",
     requestKey: REQUEST_KEY,
   })
+  await client.setActivation({
+    messageKind: "level_test_booking",
+    mode: "live",
+    activationEvidenceId: EVIDENCE_ID,
+    requestKey: REQUEST_KEY,
+  })
 
   assert.deepEqual(
     requests.map(({ url, init }) => ({
@@ -110,6 +117,19 @@ test("admin client authenticates and sends the exact SOLAPI rollout actions", as
           messageKind: "level_test_booking",
           messageId: MESSAGE_ID,
           receivedAt: "2026-08-07T00:02:00.000Z",
+          requestKey: REQUEST_KEY,
+        },
+      },
+      {
+        url: "/api/solapi/registration/admin",
+        method: "POST",
+        authorization: "Bearer test-session-token",
+        contentType: "application/json",
+        body: {
+          action: "set_activation",
+          messageKind: "level_test_booking",
+          mode: "live",
+          activationEvidenceId: EVIDENCE_ID,
           requestKey: REQUEST_KEY,
         },
       },

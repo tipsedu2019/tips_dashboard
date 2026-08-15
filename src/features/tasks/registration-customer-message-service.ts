@@ -202,6 +202,7 @@ export function createRegistrationCustomerMessageAdminClient(
         messageKind: input.messageKind,
         mode: input.mode,
         ...(input.verificationTaskId ? { verificationTaskId: input.verificationTaskId } : {}),
+        ...(input.activationEvidenceId ? { activationEvidenceId: input.activationEvidenceId } : {}),
         requestKey: input.requestKey,
       }, signal)
     },

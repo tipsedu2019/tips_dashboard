@@ -60,6 +60,7 @@ export type RegistrationCustomerMessageReadiness = Readonly<{
   sourceValid: boolean
   sendAllowed: boolean
   blockers: RegistrationCustomerMessageReadinessCode[]
+  evidenceId?: string
 }>
 
 export type RegistrationCustomerMessageHistoryItem = Readonly<{
@@ -186,6 +187,7 @@ export type RegistrationCustomerMessageAdminAction =
       messageKind: RegistrationCustomerMessageKind
       mode: RegistrationCustomerMessageActivationMode
       verificationTaskId?: string
+      activationEvidenceId?: string
       requestKey: string
     }>
   | Readonly<{
@@ -315,6 +317,7 @@ const REGISTRATION_CUSTOMER_MESSAGE_PUBLIC_RESPONSE_KEYS = new Set([
   "bookingReceipt",
   "contractReady",
   "deliveryUnknown",
+  "evidenceId",
   "heartbeatCurrent",
   "installed",
   "lastSucceededAt",
@@ -574,23 +577,31 @@ export function parseRegistrationCustomerMessageAdminAction(
     if (!hasExactKeys(
       value,
       ["action", "messageKind", "mode", "requestKey"],
-      ["verificationTaskId"],
+      ["verificationTaskId", "activationEvidenceId"],
     )) return null
     const requestKey = normalizedUuid(value.requestKey)
     const verificationTaskId = value.verificationTaskId === undefined
       ? null
       : normalizedUuid(value.verificationTaskId)
+    const activationEvidenceId = value.activationEvidenceId === undefined
+      ? null
+      : normalizedUuid(value.activationEvidenceId)
     if (
       !isRegistrationCustomerMessageKind(value.messageKind)
       || !isRegistrationCustomerMessageActivationMode(value.mode)
       || !requestKey
       || (value.verificationTaskId !== undefined && !verificationTaskId)
+      || (value.activationEvidenceId !== undefined && !activationEvidenceId)
+      || (value.mode === "verification" && (!verificationTaskId || activationEvidenceId !== null))
+      || (value.mode === "live" && (!activationEvidenceId || verificationTaskId !== null))
+      || (value.mode === "off" && (verificationTaskId !== null || activationEvidenceId !== null))
     ) return null
     return {
       action: value.action,
       messageKind: value.messageKind,
       mode: value.mode,
       ...(verificationTaskId ? { verificationTaskId } : {}),
+      ...(activationEvidenceId ? { activationEvidenceId } : {}),
       requestKey,
     }
   }

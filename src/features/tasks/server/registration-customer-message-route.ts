@@ -602,12 +602,14 @@ function adminPublicResult(action: RegistrationCustomerMessageAdminAction, value
     })
   }
   if (action.action === "record_live_test_receipt") {
-    if (value.recorded !== true || !isTimestamp(value.receivedAt)) {
+    const evidenceId = text(value.evidenceId).toLowerCase()
+    if (value.recorded !== true || !UUID_PATTERN.test(evidenceId) || !isTimestamp(value.receivedAt)) {
       httpError(503, "registration_customer_message_admin_result_unavailable")
     }
     return Object.freeze({
       ok: true,
       messageKind: action.messageKind,
+      evidenceId,
       updatedAt: value.receivedAt,
     })
   }
@@ -1414,6 +1416,11 @@ export function createProductionRegistrationCustomerMessageRouteHandlers(
           (result.data as { parent_phone?: unknown }).parent_phone,
           pepper,
         )
+      } else if (action.mode === "live") {
+        if (!action.activationEvidenceId) {
+          httpError(400, "registration_customer_message_admin_input_invalid")
+        }
+        evidence.activationEvidenceId = action.activationEvidenceId
       }
       return exactRpc(input.context, "set_registration_customer_solapi_activation_v1", {
         p_actor_profile_id: input.actorProfileId,

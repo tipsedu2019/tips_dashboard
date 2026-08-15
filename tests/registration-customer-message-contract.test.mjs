@@ -161,6 +161,13 @@ test("admin action parsing is an exact discriminated union with normalized evide
     {
       action: "inspect_observation_readiness",
     },
+    {
+      action: "set_activation",
+      messageKind: "level_test_booking",
+      mode: "live",
+      activationEvidenceId: MESSAGE_ID,
+      requestKey: REQUEST_KEY,
+    },
   ]
 
   for (const action of validActions) {
@@ -207,6 +214,15 @@ test("admin action parsing is an exact discriminated union with normalized evide
       action: "preflight_template",
       messageKind: "level_test_booking",
       templateId: "browser-owned-template",
+    }),
+    null,
+  )
+  assert.equal(
+    contract.parseRegistrationCustomerMessageAdminAction({
+      action: "set_activation",
+      messageKind: "level_test_booking",
+      mode: "live",
+      requestKey: REQUEST_KEY,
     }),
     null,
   )

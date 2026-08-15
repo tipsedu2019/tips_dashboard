@@ -24,6 +24,7 @@ const IDS = Object.freeze({
 })
 
 const PROVIDER_PAYLOAD_CHECKSUM = "a".repeat(64)
+const ACTIVATION_EVIDENCE_ID = "00000000-0000-4000-8000-000000000009"
 
 const TARGET = Object.freeze({
   messageKind: "waiting_notice",
@@ -1599,6 +1600,60 @@ test("admin mutation responses are reduced to action-specific public DTOs", asyn
     updatedAt: "2026-08-05T00:30:00.000Z",
   })
   assert.equal(JSON.stringify(result.body).includes("secret"), false)
+})
+
+test("live receipt returns only its evidence id and live activation forwards it", async () => {
+  const calls = []
+  const { deps } = makeDeps({
+    authenticate: async () => ({ actorProfileId: IDS.actor, role: "admin", actorClient: {} }),
+    performAdminAction: async (input) => {
+      calls.push(input.action)
+      if (input.action.action === "record_live_test_receipt") {
+        return {
+          messageKind: TARGET.messageKind,
+          recorded: true,
+          evidenceId: ACTIVATION_EVIDENCE_ID,
+          receivedAt: "2026-08-05T00:20:00.000Z",
+          providerMessageId: "must-not-escape",
+        }
+      }
+      return {
+        messageKind: TARGET.messageKind,
+        activationMode: "live",
+        updatedAt: "2026-08-05T00:21:00.000Z",
+      }
+    },
+  })
+  const handlers = createRegistrationCustomerMessageRouteHandlers(deps)
+  const receipt = await json(await handlers.admin(request("/admin", {
+    method: "POST",
+    body: JSON.stringify({
+      action: "record_live_test_receipt",
+      messageKind: TARGET.messageKind,
+      messageId: IDS.message,
+      receivedAt: "2026-08-05T00:20:00.000Z",
+      requestKey: IDS.request,
+    }),
+  })))
+  assert.deepEqual(receipt.body, {
+    ok: true,
+    messageKind: TARGET.messageKind,
+    evidenceId: ACTIVATION_EVIDENCE_ID,
+    updatedAt: "2026-08-05T00:20:00.000Z",
+  })
+
+  const activation = await json(await handlers.admin(request("/admin", {
+    method: "POST",
+    body: JSON.stringify({
+      action: "set_activation",
+      messageKind: TARGET.messageKind,
+      mode: "live",
+      activationEvidenceId: ACTIVATION_EVIDENCE_ID,
+      requestKey: IDS.request,
+    }),
+  })))
+  assert.equal(activation.response.status, 200)
+  assert.equal(calls[1].activationEvidenceId, ACTIVATION_EVIDENCE_ID)
 })
 
 test("admin observation readiness refresh is admin-only, parser-strict, and provider-zero", async () => {

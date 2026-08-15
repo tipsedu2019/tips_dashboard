@@ -193,6 +193,7 @@ export function createRegistrationCustomerReminderWorker(
       } catch {
         provider = Object.freeze({
           outcome: "unknown",
+          providerPayloadChecksum: null,
           evidence: Object.freeze({
             statusCode: "provider_dispatch_uncertain",
             statusMessage: "SOLAPI 호출 결과를 확인할 수 없습니다.",
