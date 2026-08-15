@@ -2289,7 +2289,7 @@ test("관찰 delivery는 generic prepare 전에 잠긴 frozen state를 읽고 �
     now: () => new Date("2026-08-17T09:00:00.000Z"),
     async rpc(name, parameters) {
       calls.push({ name, parameters })
-      if (name === "read_registration_observation_notification_delivery_frozen_state_v1") {
+      if (name === "read_registration_observation_delivery_frozen_state_v1") {
         return {
           expiresAt: "2026-08-17T09:00:00.000Z",
           snapshot: {},
@@ -2313,7 +2313,7 @@ test("관찰 delivery는 generic prepare 전에 잠긴 frozen state를 읽고 �
     reason: "notification_window_closed",
   })
   assert.deepEqual(calls.map((call) => call.name), [
-    "read_registration_observation_notification_delivery_frozen_state_v1",
+    "read_registration_observation_delivery_frozen_state_v1",
     "finalize_notification_delivery_v1",
   ])
 })
@@ -2344,7 +2344,7 @@ test("관찰 첫 시도는 fanout의 provisional render를 덮어쓰고 locked s
     now: () => new Date("2026-08-17T08:00:00.000Z"),
     async rpc(name, parameters) {
       calls.push({ name, parameters })
-      if (name === "read_registration_observation_notification_delivery_frozen_state_v1") {
+      if (name === "read_registration_observation_delivery_frozen_state_v1") {
         readCount += 1
         return readCount === 1 ? {
           expiresAt: "2026-08-17T10:00:00.000Z", snapshot: frozenPayload,
@@ -2375,10 +2375,10 @@ test("관찰 첫 시도는 fanout의 provisional render를 덮어쓰고 locked s
     },
   }), /worker DB 응답 형식/)
   assert.deepEqual(calls.map((call) => call.name), [
-    "read_registration_observation_notification_delivery_frozen_state_v1",
+    "read_registration_observation_delivery_frozen_state_v1",
     "get_notification_render_snapshot_v1",
     "refresh_registration_observation_notification_delivery_v1",
-    "read_registration_observation_notification_delivery_frozen_state_v1",
+    "read_registration_observation_delivery_frozen_state_v1",
   ])
 })
 
@@ -2393,7 +2393,7 @@ test("관찰 frozen retry는 fingerprint가 있으면 title/body/href도 모두 
     claim,
     adapter: createAdapter(),
     async rpc(name) {
-      if (name !== "read_registration_observation_notification_delivery_frozen_state_v1") throw new Error(`unexpected ${name}`)
+      if (name !== "read_registration_observation_delivery_frozen_state_v1") throw new Error(`unexpected ${name}`)
       return {
         expiresAt: "2026-08-17T10:00:00.000Z", snapshot: { frozen: "yes" },
         payloadFingerprint: "a".repeat(64), renderFingerprint: "b".repeat(64),
@@ -2415,7 +2415,7 @@ test("관찰 first-attempt generic payload는 locked frozen snapshot과 byte-ide
     claim,
     adapter: createAdapter({ async revalidateBeforeSend() { revalidationCalls += 1; return { ok: true } } }),
     async rpc(name) {
-      if (name === "read_registration_observation_notification_delivery_frozen_state_v1") return {
+      if (name === "read_registration_observation_delivery_frozen_state_v1") return {
         expiresAt: "2026-08-17T10:00:00.000Z", snapshot: { locked: true }, payloadFingerprint: null,
         renderFingerprint: null, title: null, body: null, href: null, lastAttemptStartedAt: null, attemptCount: 0,
       }
@@ -2444,7 +2444,7 @@ test("관찰 booking hash drift는 locked read 뒤 source_schedule_changed로 �
   let providerLookups = 0
   const harness = createRpcHarness({
     claim_notification_deliveries_v1: [claim],
-    read_registration_observation_notification_delivery_frozen_state_v1: {
+    read_registration_observation_delivery_frozen_state_v1: {
       attemptCount: 0, expiresAt: "2026-08-17T10:00:00.000Z", snapshot: frozenPayload,
       payloadFingerprint: null, renderFingerprint: null, title: null, body: null, href: null, lastAttemptStartedAt: null,
     },
@@ -2490,7 +2490,7 @@ test("관찰 final-prepare 결과는 닫힌 union·동일 delivery·in-app provi
     await assert.rejects(prepareRegistrationObservationDeliveryForDispatch({
       claim, adapter: createAdapter(),
       async rpc(name) {
-        if (name === "read_registration_observation_notification_delivery_frozen_state_v1") return frozen
+        if (name === "read_registration_observation_delivery_frozen_state_v1") return frozen
         if (name === "prepare_registration_observation_notification_delivery_v1") return malformed
         throw new Error(`unexpected rpc ${name}`)
       },
@@ -2526,7 +2526,7 @@ test("feedback_submitted의 in-app은 provider 0이고 빈 mention management Ch
   let providerSends = 0
   const harness = createRpcHarness({
     claim_notification_deliveries_v1: claims,
-    read_registration_observation_notification_delivery_frozen_state_v1: (parameters) => frozen(parameters.p_delivery_id),
+    read_registration_observation_delivery_frozen_state_v1: (parameters) => frozen(parameters.p_delivery_id),
     prepare_registration_observation_notification_delivery_v1: (parameters) => parameters.p_delivery_id === inAppDeliveryId
       ? { prepared: true, channel_key: "in_app", delivery_id: inAppDeliveryId, notification_id: "80000000-0000-4000-8000-000000000003", push_children_created: 0, status: "sent" }
       : { prepared: true, delivery_id: managementDeliveryId, claim_token: CLAIM_TOKEN, dispatch_token: DISPATCH_TOKEN,
@@ -2566,7 +2566,7 @@ test("nullable/inactive feedback director의 in-app cancel은 management Chat을
     ]
     const harness = createRpcHarness({
       claim_notification_deliveries_v1: claims,
-      read_registration_observation_notification_delivery_frozen_state_v1: (parameters) => ({
+      read_registration_observation_delivery_frozen_state_v1: (parameters) => ({
         attemptCount: 1, expiresAt: "2026-08-17T10:00:00.000Z", snapshot: {
           event_kind: "registration.observation_feedback_submitted", director_state: directorState,
           verified_director_profile_id: verifiedDirectorProfileId, delivery: parameters.p_delivery_id,
@@ -2637,7 +2637,7 @@ test("관찰 frozen retry의 429/425만 두 번째 send를 허용하고 408·tim
     }
     const harness = createRpcHarness({
       claim_notification_deliveries_v1: () => (++claimCalls <= fixture.sends ? [claim] : []),
-      read_registration_observation_notification_delivery_frozen_state_v1: frozen,
+      read_registration_observation_delivery_frozen_state_v1: frozen,
       prepare_registration_observation_notification_delivery_v1: {
         prepared: true, delivery_id: deliveryId, claim_token: CLAIM_TOKEN, dispatch_token: DISPATCH_TOKEN, status: "sending",
         channel_key: "google_chat", connection_key: "google_chat.management", webhook_url: GOOGLE_CHAT_URL,
@@ -2652,7 +2652,7 @@ test("관찰 frozen retry의 429/425만 두 번째 send를 허용하고 408·tim
     await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
     await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
     assert.equal(sends, fixture.sends, fixture.name)
-    assert.equal(harness.calls.filter((call) => call.name === "read_registration_observation_notification_delivery_frozen_state_v1").length, fixture.sends, fixture.name)
+    assert.equal(harness.calls.filter((call) => call.name === "read_registration_observation_delivery_frozen_state_v1").length, fixture.sends, fixture.name)
     assert.equal(harness.calls.some((call) => ["get_notification_render_snapshot_v1", "refresh_registration_observation_notification_delivery_v1"].includes(call.name)), false, fixture.name)
     if (fixture.sends === 2) assert.deepEqual(contexts[1], contexts[0], `${fixture.name} frozen retry bytes`)
     const finalizations = harness.calls.filter((call) => call.name === "finalize_notification_delivery_v1")
@@ -2712,7 +2712,7 @@ test("실제 registration adapter retry는 mutable observation source reader를 
       if (["claim_registration_observation_chat_jobs_v1", "claim_notification_fanout_jobs_v1", "claim_notification_rule_reconciliation_jobs_v1", "claim_notification_target_reconciliation_jobs_v1"].includes(name)) return []
       if (name === "reap_notification_leases_v1") return { reaped_count: 0 }
       if (name === "claim_notification_deliveries_v1") return state.pending ? [{ ...claim, attempt_count: state.attempt }] : []
-      if (name === "read_registration_observation_notification_delivery_frozen_state_v1") return state.frozen || { attemptCount: 0, expiresAt: job.expires_at, snapshot: payloadA, payloadFingerprint: null, renderFingerprint: null, title: null, body: null, href: null, lastAttemptStartedAt: null }
+      if (name === "read_registration_observation_delivery_frozen_state_v1") return state.frozen || { attemptCount: 0, expiresAt: job.expires_at, snapshot: payloadA, payloadFingerprint: null, renderFingerprint: null, title: null, body: null, href: null, lastAttemptStartedAt: null }
       if (name === "get_notification_render_snapshot_v1") return { event_id: EVENT_ID, workflow_key: "registration", event_key: job.event_key, source_type: "registration_observation", source_id: job.observation_id, source_revision: "1", occurrence_key: "real-adapter", occurred_at: job.due_at, payload_schema_version: 3, payload: payloadA, rule_id: RULE_ID, rule_revision: "1", template_id: TEMPLATE_ID, channel_key: "google_chat", audience_key: "subject_team", rule_variant_key: "immediate", title_template: "T", body_template: "B", allowed_variables: [], template_payload_schema_version: 3 }
       if (name === "refresh_registration_observation_notification_delivery_v1") { state.frozen = { attemptCount: 0, expiresAt: job.expires_at, snapshot: parameters.p_payload, payloadFingerprint: parameters.p_payload_fingerprint, renderFingerprint: parameters.p_render_fingerprint, title: parameters.p_rendered_title, body: parameters.p_rendered_body, href: parameters.p_href, lastAttemptStartedAt: null }; return { outcome: "refreshed" } }
       if (name === "prepare_registration_observation_notification_delivery_v1") return { prepared: true, delivery_id: DELIVERY_ID, claim_token: CLAIM_TOKEN, dispatch_token: DISPATCH_TOKEN, status: "sending", channel_key: "google_chat", connection_key: "google_chat.english", webhook_url: GOOGLE_CHAT_URL, rendered_title: state.frozen.title, rendered_body: state.frozen.body, href: state.frozen.href, mention_user_names: [] }
@@ -2775,7 +2775,7 @@ test("관찰 first-attempt refresh는 canonical Google Chat provider 결과로 d
         state.claims += 1
         return state.status === "pending" ? [{ ...claimBase, attempt_count: state.attempt }] : []
       }
-      if (name === "read_registration_observation_notification_delivery_frozen_state_v1") {
+      if (name === "read_registration_observation_delivery_frozen_state_v1") {
         return state.frozen || { attemptCount: 0, expiresAt: "2026-08-17T10:00:00.000Z", snapshot: initialPayload, payloadFingerprint: null, renderFingerprint: null, title: null, body: null, href: null, lastAttemptStartedAt: null }
       }
       if (name === "get_notification_render_snapshot_v1") return {
