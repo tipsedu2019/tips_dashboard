@@ -889,11 +889,9 @@ test("makeup workspace includes approver queues form fields and room availabilit
     workspaceSource.indexOf('aria-label="휴보강 흐름"'),
     workspaceSource.indexOf("{message ?"),
   );
-  assert.match(headerActionSource, /aria-label="휴보강 알림 설정"/);
-  assert.match(headerActionSource, /<Bell className="size-4"/);
+  assert.doesNotMatch(headerActionSource, /휴보강 알림 설정|<Bell/);
   assert.match(headerActionSource, /<Plus className="size-4"/);
   assert.match(headerActionSource, />\s*휴보강 신청\s*</);
-  assert.ok(headerActionSource.indexOf('aria-label="휴보강 알림 설정"') < headerActionSource.indexOf("onClick={openRequestDialog}"));
   assert.doesNotMatch(headerActionSource, /<Settings className/);
   assert.doesNotMatch(workspaceSource, /새로고침/);
   assert.doesNotMatch(workspaceSource, /RefreshCw/);
@@ -1265,21 +1263,10 @@ test("makeup workspace avoids browser prompt and fills wide screens", () => {
   assert.match(workspaceSource, /className="grid min-w-full border-b last:border-b-0 hover:bg-muted\/30 \[grid-template-columns:var\(--makeup-request-grid-template\)\]"/);
 });
 
-test("makeup settings switches between the legacy dialog and the one canonical server-gated panel", () => {
-  assert.match(
-    workspaceSource,
-    /import \{ NotificationControlPanel, useNotificationControlPlaneAvailability \} from "@\/features\/notifications\/notification-control-panel"/,
-  );
-  assert.match(workspaceSource, /const notificationControlPlaneAvailability = useNotificationControlPlaneAvailability\(\)/);
-  assert.match(workspaceSource, /const canonicalNotificationEnabled = notificationControlPlaneAvailability\.status === "enabled"/);
-  assert.match(workspaceSource, /const legacyNotificationEnabled = notificationControlPlaneAvailability\.status === "disabled"/);
-  assert.match(workspaceSource, /const showNotificationSettingsLauncher = legacyNotificationEnabled \|\| \(canonicalNotificationEnabled && isManager\)/);
-  assert.match(workspaceSource, /\{showNotificationSettingsLauncher \? \([\s\S]*aria-label="휴보강 알림 설정"/);
-  assert.doesNotMatch(workspaceSource, /disabled=\{notificationControlPlaneAvailability\.status === "loading"\}/);
-  assert.match(workspaceSource, /canonicalNotificationEnabled \? \([\s\S]*<NotificationControlPanel[\s\S]*workflowKey="makeup_requests"[\s\S]*presentation="dialog"[\s\S]*open=\{notificationDialogOpen\}[\s\S]*\) : legacyNotificationEnabled \? \([\s\S]*<Dialog open=\{notificationDialogOpen\}/);
-  assert.match(workspaceSource, /legacyNotificationEnabled \? \([\s\S]*<Dialog open=\{Boolean\(selectedNotificationSetting\)\}/);
-  assert.doesNotMatch(workspaceSource, /!canonicalNotificationEnabled \? \(/);
-  assert.doesNotMatch(workspaceSource, /get_notification_runtime_flags_v1|NEXT_PUBLIC_NOTIFICATION_CONTROL_PLANE/);
+test("makeup workspace delegates notification settings to the central page", () => {
+  assert.doesNotMatch(workspaceSource, /NotificationControlPanel/);
+  assert.doesNotMatch(workspaceSource, /useNotificationControlPlaneAvailability/);
+  assert.doesNotMatch(workspaceSource, /aria-label="휴보강 알림 설정"/);
 });
 
 test("makeup workspace exposes notification controls cancellation and fixed subject ordering", () => {
