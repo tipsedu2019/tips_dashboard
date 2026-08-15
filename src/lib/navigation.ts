@@ -1,6 +1,5 @@
 import type { LucideIcon } from "lucide-react"
 import {
-  BellRing,
   BookOpen,
   CalendarDays,
   CalendarClock,
@@ -431,12 +430,8 @@ export function buildAdminNavGroups({
             { title: "강의실 설정", url: "/admin/settings/classrooms" },
             { title: "기간 설정", url: "/admin/settings/class-groups" },
             { title: "교재 설정", url: "/admin/settings/textbook-suppliers" },
+            { title: "알림 설정", url: "/admin/settings/notifications" },
           ],
-        },
-        {
-          title: "알림 설정",
-          url: "/admin/settings/notifications",
-          icon: BellRing,
         },
       ],
     })

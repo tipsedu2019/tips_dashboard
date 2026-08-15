@@ -113,12 +113,23 @@ test("todo navigation exposes direct queues and keeps query links distinct", asy
   assert.match(navMainSource, /router\.prefetch\(target\)/);
 });
 
-test("admin navigation exposes the persistent notification settings workspace", async () => {
-  const navigationSource = await readSource("src/lib/navigation.ts");
+test("admin navigation nests notification settings inside environment settings", async () => {
+  const [navigationSource, headerSource] = await Promise.all([
+    readSource("src/lib/navigation.ts"),
+    readSource("src/components/site-header.tsx"),
+  ]);
+  const groups = buildAdminNavGroups(getRoleCapabilities("admin"));
+  const settingsGroup = groups.find(({ label }) => label === "설정");
+  const environmentSettings = settingsGroup?.items.find(({ title }) => title === "환경 설정");
 
   assert.match(navigationSource, /match:\s*"\/admin\/settings\/notifications"/);
-  assert.match(navigationSource, /title:\s*"알림 설정"/);
-  assert.match(navigationSource, /url:\s*"\/admin\/settings\/notifications"/);
+  assert.deepEqual(
+    environmentSettings?.items?.filter(({ url }) => url === "/admin/settings/notifications"),
+    [{ title: "알림 설정", url: "/admin/settings/notifications" }],
+  );
+  assert.equal(settingsGroup?.items.some(({ title }) => title === "알림 설정"), false);
+  assert.doesNotMatch(headerSource, /DashboardNotificationPopover/);
+  assert.doesNotMatch(headerSource, /aria-label="알림"/);
 });
 
 test("role-based navigation exposes textbook requests to teachers without manager-only links", () => {

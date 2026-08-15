@@ -1793,9 +1793,9 @@ test("휴보강 업무 저장은 고정 RPC를 사용하고 알림 후처리 실
   assert.match(notificationMakeupAdapterMigrationSource, /on conflict \(legacy_delivery_id\) do nothing/);
 });
 
-test("dashboard header exposes a persistent notification popover", () => {
-  assert.match(headerSource, /DashboardNotificationPopover/);
-  assert.match(headerSource, /알림/);
+test("dashboard header omits the retired internal notification popover", () => {
+  assert.doesNotMatch(headerSource, /DashboardNotificationPopover/);
+  assert.doesNotMatch(headerSource, /aria-label="알림"/);
 });
 
 test("dashboard notifications use the profile-scoped inbox RPCs and lightweight unread count", () => {
