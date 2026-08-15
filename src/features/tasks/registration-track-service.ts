@@ -44,6 +44,7 @@ import {
   EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
   normalizeRegistrationObservationSummary,
   type RegistrationObservationFeedbackDetail,
+  type RegistrationObservationManagerDetail,
   type RegistrationObservationRuntimeState,
   type RegistrationObservationSummary,
   type RegistrationObservationTrackWorkflowStatus,
@@ -200,6 +201,9 @@ type OpsRegistrationTrackSummaryFields<
   workflowStatus: TWorkflowStatus
   workflowRevision: number
   workflowStatusEnteredAt: string
+  observationReturnWorkflowStatus?:
+    | RegistrationObservationManagerDetail["track"]["observationReturnWorkflowStatus"]
+    | null
   legacy: boolean
   directorProfileId: string | null
   directorName: string
@@ -855,6 +859,7 @@ const PRE_OBSERVATION_TRACK_SUMMARY_COLUMNS = [
 
 const TRACK_SUMMARY_COLUMNS = [
   PRE_OBSERVATION_TRACK_SUMMARY_COLUMNS,
+  "observation_return_workflow_status",
   "observation_attempt_count",
   "observation_current_id",
   "observation_current_status",
@@ -1252,6 +1257,15 @@ function mapTrackFields<
     workflowStatus: resolvedWorkflowStatus,
     workflowRevision: numberValue(value(row, "workflow_revision", "workflowRevision")) || 1,
     workflowStatusEnteredAt: text(value(row, "workflow_status_entered_at", "workflowStatusEnteredAt")),
+    ...(value(row, "observation_return_workflow_status", "observationReturnWorkflowStatus") === undefined
+      ? {}
+      : {
+          observationReturnWorkflowStatus: nullableText(value(
+            row,
+            "observation_return_workflow_status",
+            "observationReturnWorkflowStatus",
+          )) as RegistrationObservationManagerDetail["track"]["observationReturnWorkflowStatus"],
+        }),
     legacy,
     directorProfileId,
     directorName: directorProfileId

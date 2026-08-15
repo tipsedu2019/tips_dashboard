@@ -1057,14 +1057,20 @@ export function RegistrationApplication({
       ? [{ value: "observation_requested", label: REGISTRATION_WORKFLOW_STATUS_LABELS.observation_requested }]
       : []),
   ]
+  const observationReturnWorkflowStatus = activeObservationDetail?.track.observationReturnWorkflowStatus
+    ?? activeTrack?.observationReturnWorkflowStatus
+    ?? null
+  const observationHasCurrentAttempt = activeObservationDetail
+    ? activeObservationDetail.currentObservation !== null
+    : activeTrack?.observationCurrentId !== null
   const observationWorkflowStatusOptions = activeTrack
     && isRegistrationObservationWorkflowStatus(activeTrack.workflowStatus)
-    && activeObservationDetail?.currentObservation === null
-    && activeObservationDetail.track.observationReturnWorkflowStatus
+    && !observationHasCurrentAttempt
+    && observationReturnWorkflowStatus
     && canManageActiveObservation
     ? [{
-        value: activeObservationDetail.track.observationReturnWorkflowStatus,
-        label: REGISTRATION_WORKFLOW_STATUS_LABELS[activeObservationDetail.track.observationReturnWorkflowStatus],
+        value: observationReturnWorkflowStatus,
+        label: REGISTRATION_WORKFLOW_STATUS_LABELS[observationReturnWorkflowStatus],
       }]
     : []
   async function changeWorkflowStatus(nextStatus: string) {
@@ -1133,7 +1139,6 @@ export function RegistrationApplication({
   async function changeObservationWorkflowStatus(nextStatus: string) {
     if (
       !activeTrack
-      || !activeObservationDetail
       || workflowStatusSaving
       || nextStatus === activeTrack.workflowStatus
     ) return

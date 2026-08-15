@@ -293,10 +293,11 @@ const FOCUS_REGISTRY = new Map([
   [
     "legacy-schedule",
     {
-      ceiling: "20260813093446",
+      ceiling: "20260815035229",
       migrations: [
         "20260813064146_registration_observation_legacy_schedule_slots.sql",
         "20260813093446_registration_observation_legacy_schedule_slot_catalogs.sql",
+        "20260815035229_fix_observation_legacy_session_list.sql",
       ],
       tests: [
         "supabase/tests/registration_observation_legacy_schedule_slots_test.sql",

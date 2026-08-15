@@ -1,5 +1,5 @@
 begin;
-select plan(8);
+select plan(9);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '120s';
@@ -80,6 +80,13 @@ values (
       pg_catalog.jsonb_build_object(
         'sessionKey', 'legacy-slot-session-a',
         'date', (current_date + 21)::text,
+        'scheduleState', 'active',
+        'teacherName', '구형 일정 선생님',
+        'classroomName', '구형 일정 101호'
+      ),
+      pg_catalog.jsonb_build_object(
+        'sessionKey', 'legacy-slot-orphan-day',
+        'date', (current_date + 22)::text,
         'scheduleState', 'active',
         'teacherName', '구형 일정 선생님',
         'classroomName', '구형 일정 101호'
@@ -235,6 +242,25 @@ select is(
     'classroomName', '구형 일정 101호'
   ),
   'slotless legacy class lists one selectable schedule-plan session'
+);
+
+select is(
+  (
+    select pg_catalog.jsonb_build_object(
+      'count', pg_catalog.jsonb_array_length(payload),
+      'sessionKey', payload -> 0 -> 'sessionKey'
+    )
+    from (
+      select public.list_registration_observation_sessions_v1(
+        'f7000000-0000-4000-8000-000000000031',
+        'f7000000-0000-4000-8000-000000000020',
+        current_date + 21,
+        current_date + 22
+      ) payload
+    ) result
+  ),
+  '{"count":1,"sessionKey":"legacy-slot-session-a"}'::jsonb,
+  'legacy session list skips an orphan schedule-plan day without hiding a valid selectable session'
 );
 
 insert into legacy_schedule_slot_results(response)

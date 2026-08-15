@@ -2005,8 +2005,10 @@ test("mounted observation status selector returns an unbooked request through th
         status: "observation_requested",
         workflowStatus: "observation_requested",
         workflowRevision: 5,
+        observationReturnWorkflowStatus: "waiting_current_class",
         directorProfileId: directorId,
         observationAttemptCount: 0,
+        observationCurrentId: null,
         observationSummaryVisible: true,
         migrationReviewRequired: false,
         legacy: false,
@@ -2052,15 +2054,31 @@ test("mounted observation status selector returns an unbooked request through th
 
   try {
     let view = hookHarness.render(mounted.RegistrationApplication, props)
+    let shell = findMountedRegistrationElement(
+      view,
+      (node) => node.type === mounted.RegistrationApplicationShell,
+      "registration application shell before manager detail",
+    )
+    let statusSelect = findMountedRegistrationElement(
+      shell.props.subjectNavigation,
+      (node) => node.type === "select" && node.props["aria-label"] === "영어 진행상태",
+      "observation workflow status select before manager detail",
+    )
+    assert.equal(statusSelect.props.disabled, false)
+    assert.deepEqual(
+      statusSelect.props.children.flat().filter(Boolean).map((option) => option.props.value),
+      ["observation_requested", "waiting_current_class"],
+    )
+
     hookHarness.flushEffects()
     await flushMountedRegistrationWork()
     view = hookHarness.render(mounted.RegistrationApplication, props)
-    const shell = findMountedRegistrationElement(
+    shell = findMountedRegistrationElement(
       view,
       (node) => node.type === mounted.RegistrationApplicationShell,
       "registration application shell",
     )
-    const statusSelect = findMountedRegistrationElement(
+    statusSelect = findMountedRegistrationElement(
       shell.props.subjectNavigation,
       (node) => node.type === "select" && node.props["aria-label"] === "영어 진행상태",
       "observation workflow status select",
