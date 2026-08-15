@@ -16,6 +16,10 @@ const dispatchMigrationUrl = new URL(
   "../supabase/migrations/20260809106200_registration_observation_solapi_dispatch.sql",
   import.meta.url,
 );
+const evidenceMigrationUrl = new URL(
+  "../supabase/migrations/20260815182919_registration_customer_solapi_activation_evidence.sql",
+  import.meta.url,
+);
 const currentHistoryMigrationUrl = new URL(
   "../supabase/migrations/20260814102020_registration_observation_current_history.sql",
   import.meta.url,
@@ -468,6 +472,22 @@ test("automatic dispatch is job locked, bounded, and keeps the legacy raw result
     read,
     /message_kind = 'appointment_reminder'[\s\S]*resolve_registration_customer_message_source_v1_impl\('appointment_reminder', v_job\.appointment_id\)/,
   );
+});
+
+test("evidence migration removes disposable test rows from every live worker gate", async () => {
+  const sql = normalizeSql(await readFile(evidenceMigrationUrl, "utf8"));
+  assert.match(sql, /public\.claim_registration_customer_reminder_job_v1\(\)/);
+  assert.match(sql, /public\.begin_registration_customer_reminder_dispatch_v1\(uuid,uuid,jsonb,jsonb\)/);
+  assert.match(sql, /dashboard_private\.begin_registration_customer_reminder_dispatch_legacy_v1\(uuid,uuid,jsonb,jsonb\)/);
+  assert.match(sql, /registration_customer_solapi_live_evidence_valid_v1/g);
+  assert.match(sql, /registration_customer_solapi_claim_evidence_patch_failed/);
+  assert.match(sql, /registration_customer_solapi_begin_evidence_patch_failed/);
+  assert.match(sql, /registration_customer_solapi_legacy_begin_evidence_patch_failed/);
+  const prior = normalizeSql(await readFile(dispatchMigrationUrl, "utf8"));
+  const priorClaim = functionBlock(prior, "public.claim_registration_customer_reminder_job_v1");
+  assert.match(priorClaim, /automatic_delivery_cutoff_at/);
+  assert.match(priorClaim, /verification_task_id/);
+  assert.match(priorClaim, /verification_recipient_hash/);
 });
 
 test("begin and finalize own marker, refresh, uncertainty, and composite identity", async () => {

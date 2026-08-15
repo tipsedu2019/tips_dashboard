@@ -676,4 +676,288 @@ revoke all on function public.set_registration_customer_solapi_activation_v1(uui
 grant execute on function public.set_registration_customer_solapi_activation_v1(uuid, text, text, jsonb)
   to service_role;
 
+create function dashboard_private.registration_customer_solapi_live_evidence_valid_v1(
+  p_message_kind text,
+  p_template_id text,
+  p_pf_id text,
+  p_template_checksum text
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from dashboard_private.registration_customer_solapi_activation activation
+    join dashboard_private.registration_customer_solapi_activation_evidence evidence
+      on activation.activation_evidence_id = evidence.id
+    where activation.message_kind = p_message_kind
+      and activation.mode = 'live'
+      and evidence.message_kind = p_message_kind
+      and evidence.template_id = p_template_id
+      and evidence.pf_id = p_pf_id
+      and evidence.template_checksum = p_template_checksum
+  );
+$$;
+
+alter function dashboard_private.registration_customer_solapi_live_evidence_valid_v1(
+  text, text, text, text
+) owner to postgres;
+revoke all on function dashboard_private.registration_customer_solapi_live_evidence_valid_v1(
+  text, text, text, text
+) from public, anon, authenticated, service_role;
+
+create or replace function dashboard_private.enforce_registration_customer_solapi_delivery_gate_v1()
+returns trigger
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_must_check boolean := tg_op = 'INSERT';
+  v_activation dashboard_private.registration_customer_solapi_activation%rowtype;
+  v_receipt dashboard_private.registration_customer_solapi_template_receipts%rowtype;
+begin
+  if tg_op = 'UPDATE' then
+    v_must_check := (
+      new.claim_active
+      and (not old.claim_active or new.claim_token is distinct from old.claim_token)
+    ) or (
+      new.provider_attempt_count = 1
+      and old.provider_attempt_count = 0
+    );
+  end if;
+  if not v_must_check then
+    return new;
+  end if;
+
+  select activation.* into v_activation
+  from dashboard_private.registration_customer_solapi_activation activation
+  where activation.message_kind = new.message_kind
+  for share;
+  if not found or v_activation.mode = 'off' then
+    raise exception 'registration_customer_solapi_activation_off' using errcode = '40001';
+  end if;
+
+  select receipt.* into v_receipt
+  from dashboard_private.registration_customer_solapi_template_receipts receipt
+  where receipt.message_kind = new.message_kind
+  for share;
+  if not found
+    or v_receipt.provider_status <> 'sendable'
+    or v_receipt.catalog_checksum is distinct from v_receipt.provider_checksum
+    or v_receipt.catalog_checksum is distinct from new.template_checksum then
+    raise exception 'registration_customer_solapi_template_drift' using errcode = '40001';
+  end if;
+
+  if v_activation.mode = 'verification' then
+    if new.task_id is distinct from v_activation.verification_task_id
+      or new.recipient_hash is distinct from v_activation.verification_recipient_hash then
+      raise exception 'registration_customer_solapi_verification_scope_mismatch'
+        using errcode = '40001';
+    end if;
+  elsif v_activation.mode = 'live' then
+    if not dashboard_private.registration_customer_solapi_live_evidence_valid_v1(
+      new.message_kind,
+      v_receipt.template_id,
+      v_receipt.pf_id,
+      v_receipt.catalog_checksum
+    ) then
+      raise exception 'registration_customer_solapi_live_evidence_missing'
+        using errcode = '40001';
+    end if;
+  else
+    raise exception 'registration_customer_solapi_activation_off' using errcode = '40001';
+  end if;
+  return new;
+end;
+$$;
+
+alter function dashboard_private.enforce_registration_customer_solapi_delivery_gate_v1()
+  owner to postgres;
+revoke all on function dashboard_private.enforce_registration_customer_solapi_delivery_gate_v1()
+  from public, anon, authenticated, service_role;
+
+do $readiness_patch$
+declare
+  v_definition text;
+  v_original text;
+begin
+  select pg_catalog.pg_get_functiondef(
+    'dashboard_private.registration_customer_solapi_readiness_legacy_v1(uuid,text,uuid,jsonb)'::pg_catalog.regprocedure
+  ) into v_definition;
+  v_original := v_definition;
+  v_definition := pg_catalog.regexp_replace(
+    v_definition,
+    $pattern$\n  v_live_message public\.ops_registration_customer_messages%rowtype;$pattern$,
+    '',
+    'g'
+  );
+  v_definition := pg_catalog.regexp_replace(
+    v_definition,
+    $pattern$  elsif v_activation\.mode = 'live' then\n    select message\.\*\n    into v_live_message[\s\S]*?    v_activation_eligible := found\n      and v_activation\.live_test_confirmed_at is not null;$pattern$,
+    $replacement$  elsif v_activation.mode = 'live' then
+    v_activation_eligible := v_template_verified
+      and dashboard_private.registration_customer_solapi_live_evidence_valid_v1(
+        p_message_kind, v_receipt.template_id, v_receipt.pf_id, v_receipt.catalog_checksum
+      );$replacement$,
+    'g'
+  );
+  if v_definition = v_original
+    or v_definition ~ 'live_test_message_id|live_test_confirmed_at|v_live_message' then
+    raise exception 'registration_customer_solapi_readiness_evidence_patch_failed'
+      using errcode = '55000';
+  end if;
+  execute v_definition;
+end;
+  $readiness_patch$;
+
+do $claim_patch$
+declare
+  v_definition text;
+  v_original text;
+begin
+  select pg_catalog.pg_get_functiondef(
+    'public.claim_registration_customer_reminder_job_v1()'::pg_catalog.regprocedure
+  ) into v_definition;
+  v_original := v_definition;
+  v_definition := pg_catalog.regexp_replace(
+    v_definition,
+    $pattern$\n  v_live_message public\.ops_registration_customer_messages%rowtype;$pattern$,
+    '',
+    'g'
+  );
+  v_definition := pg_catalog.regexp_replace(
+    v_definition,
+    $pattern$      select message\.\* into v_live_message[\s\S]*?      if not found or v_activation\.live_test_confirmed_at is null then\n        continue;\n      end if;$pattern$,
+    $replacement$      if not dashboard_private.registration_customer_solapi_live_evidence_valid_v1(
+        v_job.message_kind, v_receipt.template_id, v_receipt.pf_id, v_receipt.catalog_checksum
+      ) then
+        continue;
+      end if;$replacement$,
+    'g'
+  );
+  v_definition := pg_catalog.replace(
+    v_definition,
+    $needle$      if v_activation.mode = 'live' and (
+        v_job.activation_mode_snapshot is distinct from 'live'$needle$,
+    $replacement$      if v_activation.mode = 'live' and (
+        not dashboard_private.registration_customer_solapi_live_evidence_valid_v1(
+          v_job.message_kind, v_receipt.template_id, v_receipt.pf_id, v_receipt.catalog_checksum
+        )
+        or v_job.activation_mode_snapshot is distinct from 'live'$replacement$
+  );
+  if v_definition = v_original
+    or v_definition ~ 'live_test_message_id|live_test_confirmed_at|v_live_message'
+    or v_definition !~ 'registration_customer_solapi_live_evidence_valid_v1' then
+    raise exception 'registration_customer_solapi_claim_evidence_patch_failed'
+      using errcode = '55000';
+  end if;
+  execute v_definition;
+end;
+  $claim_patch$;
+
+do $legacy_begin_patch$
+declare
+  v_definition text;
+  v_original text;
+  v_start integer;
+  v_end integer;
+begin
+  select pg_catalog.pg_get_functiondef(
+    'dashboard_private.begin_registration_customer_reminder_dispatch_legacy_v1(uuid,uuid,jsonb,jsonb)'::pg_catalog.regprocedure
+  ) into v_definition;
+  v_original := v_definition;
+  v_definition := pg_catalog.replace(
+    v_definition,
+    $needle$
+  v_live_message public.ops_registration_customer_messages%rowtype;$needle$,
+    ''
+  );
+  v_start := pg_catalog.strpos(
+    v_definition,
+    $needle$  select message.* into v_live_message$needle$
+  );
+  if v_start = 0 then
+    raise exception 'registration_customer_solapi_legacy_begin_evidence_patch_failed'
+      using errcode = '55000';
+  end if;
+  v_end := pg_catalog.strpos(
+    pg_catalog.substr(v_definition, v_start),
+    $needle$  end if;$needle$
+  );
+  if v_end = 0 then
+    raise exception 'registration_customer_solapi_legacy_begin_evidence_patch_failed'
+      using errcode = '55000';
+  end if;
+  v_end := v_start + v_end + pg_catalog.length($needle$  end if;$needle$) - 2;
+  v_definition := pg_catalog.substr(v_definition, 1, v_start - 1)
+    || $replacement$  if not dashboard_private.registration_customer_solapi_live_evidence_valid_v1(
+    'appointment_reminder', v_receipt.template_id, v_receipt.pf_id, v_receipt.catalog_checksum
+  ) then
+    raise exception 'registration_customer_reminder_not_ready' using errcode = '55000';
+  end if;$replacement$
+    || pg_catalog.substr(v_definition, v_end + 1);
+  if v_definition = v_original
+    or v_definition ~ 'live_test_message_id|live_test_confirmed_at|v_live_message' then
+    raise exception 'registration_customer_solapi_legacy_begin_evidence_patch_failed'
+      using errcode = '55000';
+  end if;
+  execute v_definition;
+end;
+  $legacy_begin_patch$;
+
+do $begin_patch$
+declare
+  v_definition text;
+  v_original text;
+  v_start integer;
+  v_end integer;
+begin
+  select pg_catalog.pg_get_functiondef(
+    'public.begin_registration_customer_reminder_dispatch_v1(uuid,uuid,jsonb,jsonb)'::pg_catalog.regprocedure
+  ) into v_definition;
+  v_original := v_definition;
+  v_definition := pg_catalog.replace(
+    v_definition,
+    $needle$
+  v_live_message public.ops_registration_customer_messages%rowtype;$needle$,
+    ''
+  );
+  v_start := pg_catalog.strpos(
+    v_definition,
+    $needle$    select message.* into v_live_message$needle$
+  );
+  if v_start = 0 then
+    raise exception 'registration_customer_solapi_begin_evidence_patch_failed'
+      using errcode = '55000';
+  end if;
+  v_end := pg_catalog.strpos(
+    pg_catalog.substr(v_definition, v_start),
+    $needle$    end if;$needle$
+  );
+  if v_end = 0 then
+    raise exception 'registration_customer_solapi_begin_evidence_patch_failed'
+      using errcode = '55000';
+  end if;
+  v_end := v_start + v_end + pg_catalog.length($needle$    end if;$needle$) - 2;
+  v_definition := pg_catalog.substr(v_definition, 1, v_start - 1)
+    || $replacement$    if not dashboard_private.registration_customer_solapi_live_evidence_valid_v1(
+      'observation_reminder', v_receipt.template_id, v_receipt.pf_id, v_receipt.catalog_checksum
+    ) then
+      raise exception 'registration_customer_reminder_not_ready' using errcode = '55000';
+    end if;$replacement$
+    || pg_catalog.substr(v_definition, v_end + 1);
+  if v_definition = v_original
+    or v_definition ~ 'live_test_message_id|live_test_confirmed_at|v_live_message' then
+    raise exception 'registration_customer_solapi_begin_evidence_patch_failed'
+      using errcode = '55000';
+  end if;
+  execute v_definition;
+end;
+  $begin_patch$;
+
 commit;

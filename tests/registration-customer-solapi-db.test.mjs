@@ -619,6 +619,39 @@ test("finalize receipt and activation RPCs bind live mode to immutable evidence"
   assert.match(activationBlock, /v_current_mode = 'verification' and p_mode in \('live', 'off'\)/)
 })
 
+test("manual readiness and scheduled delivery gates use private evidence after verification", async () => {
+  const source = await readRequired(evidenceMigrationUrl, "activation evidence migration")
+  const liveEvidenceBlock = normalizeSql(functionBlock(
+    source,
+    "dashboard_private.registration_customer_solapi_live_evidence_valid_v1",
+  ))
+  const deliveryGateBlock = normalizeSql(functionBlock(
+    source,
+    "dashboard_private.enforce_registration_customer_solapi_delivery_gate_v1",
+  ))
+  for (const block of [liveEvidenceBlock, deliveryGateBlock]) {
+    assert.doesNotMatch(block, /live_test_message_id|live_test_confirmed_at/)
+  }
+  assert.match(liveEvidenceBlock, /activation\.activation_evidence_id = evidence\.id/)
+  assert.match(liveEvidenceBlock, /activation\.mode = 'live'/)
+  assert.match(liveEvidenceBlock, /evidence\.message_kind = p_message_kind/)
+  assert.match(liveEvidenceBlock, /evidence\.template_id = p_template_id/)
+  assert.match(liveEvidenceBlock, /evidence\.pf_id = p_pf_id/)
+  assert.match(liveEvidenceBlock, /evidence\.template_checksum = p_template_checksum/)
+
+  assert.match(deliveryGateBlock, /v_activation\.mode = 'verification'/)
+  assert.match(deliveryGateBlock, /new\.task_id is distinct from v_activation\.verification_task_id/)
+  assert.match(deliveryGateBlock, /new\.recipient_hash is distinct from v_activation\.verification_recipient_hash/)
+  assert.match(deliveryGateBlock, /registration_customer_solapi_live_evidence_valid_v1/)
+  assert.match(source, /registration_customer_solapi_readiness_legacy_v1\(uuid,text,uuid,jsonb\)/)
+  assert.match(source, /v_activation_eligible := v_template_verified[\s\S]*registration_customer_solapi_live_evidence_valid_v1/)
+  assert.match(source, /public\.claim_registration_customer_reminder_job_v1\(\)/)
+  assert.match(source, /public\.begin_registration_customer_reminder_dispatch_v1\(uuid,uuid,jsonb,jsonb\)/)
+  assert.match(source, /registration_customer_solapi_claim_evidence_patch_failed/)
+  assert.match(source, /registration_customer_solapi_begin_evidence_patch_failed/)
+  assert.match(source, /registration_customer_solapi_live_evidence_valid_v1/g)
+})
+
 test("all four tables are RLS protected with no direct application or service-role access", async () => {
   const source = await readRequired(storageMigrationUrl, "storage migration")
   const normalized = normalizeSql(source)
