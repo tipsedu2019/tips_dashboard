@@ -111,6 +111,7 @@ test("retired dashboard channels stay disabled in the database contract", async 
   assert.match(source, /channel_key in \('in_app', 'web_push'\)/i)
   assert.match(source, /before insert or update[\s\S]*dashboard_private\.notification_rules/i)
   assert.match(source, /notification_internal_channel_disabled/i)
+  assert.doesNotMatch(source, /pg_catalog\.coalesce/i)
 })
 
 test("worker cancels retired dashboard channels before adapter or provider work", async () => {

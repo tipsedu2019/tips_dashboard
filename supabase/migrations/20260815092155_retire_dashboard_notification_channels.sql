@@ -23,9 +23,9 @@ set status = 'canceled',
     claim_token = null,
     lease_expires_at = null,
     next_attempt_at = null,
-    cancel_requested_at = pg_catalog.coalesce(delivery.cancel_requested_at, pg_catalog.now()),
-    cancel_reason = pg_catalog.coalesce(delivery.cancel_reason, 'dashboard_notification_channels_retired'),
-    resolved_at = pg_catalog.coalesce(delivery.resolved_at, pg_catalog.now()),
+    cancel_requested_at = coalesce(delivery.cancel_requested_at, pg_catalog.now()),
+    cancel_reason = coalesce(delivery.cancel_reason, 'dashboard_notification_channels_retired'),
+    resolved_at = coalesce(delivery.resolved_at, pg_catalog.now()),
     updated_at = pg_catalog.now()
 where delivery.channel_key in ('in_app', 'web_push')
   and delivery.status in ('pending', 'claimed', 'retry_wait');
