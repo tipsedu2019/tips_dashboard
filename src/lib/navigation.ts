@@ -73,8 +73,8 @@ const workspaceMetaEntries: Array<{
     match: "/admin/settings/notifications",
     meta: {
       section: "설정",
-      title: "알림 설정",
-      summary: "일곱 업무의 알림 규칙, 문구, 연결 상태를 한곳에서 관리합니다.",
+      title: "Google Chat 알림",
+      summary: "업무별 Google Chat 규칙과 연결 상태를 관리합니다.",
     },
   },
   {
