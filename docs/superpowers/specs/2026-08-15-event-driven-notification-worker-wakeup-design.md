@@ -15,7 +15,8 @@
 5. 수동 재발송은 기존 event/outbox/delivery를 이어서 처리하며 같은 업무 알림을 새로 중복 생성하지 않는다.
 6. 외부 호출 실패가 업무 저장을 rollback하거나 원본 업무 상태를 되돌리지 않게 한다.
 7. 청강의 시간 기반 Google Chat reminder·feedback request는 담당 선생님의 대시보드 할 일로 대체한다.
-8. SOLAPI 알림톡의 고정 백엔드 규칙과 오전 10시 단일 reminder schedule은 변경하지 않는다.
+8. 등록 완료 시 각 등록 반의 담당 선생님에게 첫 수업 후 학부모 첫 상담 일반 할 일을 자동 배정한다.
+9. SOLAPI 알림톡의 고정 백엔드 규칙과 오전 10시 단일 reminder schedule은 변경하지 않는다.
 
 ## 2. 확인된 현재 구조와 문제
 
@@ -32,7 +33,7 @@
 
 ### 3.1 채택: 이벤트 wake-up + 인라인 수동 재발송 + 담당 교사 할 일
 
-저장 event는 비동기 worker를 즉시 깨우고, 실패는 업무 화면에서 담당자가 재처리한다. 청강의 미래 reminder/feedback request는 attendance 저장 시 생성되는 대시보드 할 일로 대체한다. 유휴 상태의 정기 실행이 없고 기존 업무 권한·할 일 UI를 재사용할 수 있다.
+저장 event는 비동기 worker를 즉시 깨우고, 실패는 업무 화면에서 담당자가 재처리한다. 청강의 미래 reminder/feedback request는 attendance 저장 시 생성되는 대시보드 할 일로 대체한다. 등록 완료 시에는 첫 수업을 맡는 선생님에게 학부모 첫 상담 일반 할 일을 생성한다. 유휴 상태의 정기 실행이 없고 기존 업무 권한·할 일 UI를 재사용할 수 있다.
 
 ### 3.2 기각: 정기 recovery worker 유지
 
@@ -42,9 +43,13 @@
 
 외부 개인 할 일은 대시보드 담당자·권한·피드백 제출 상태와 원자적으로 연결되지 않는다. OAuth와 외부 동기화 실패까지 추가되므로 대시보드 `운영 → 할 일`을 source of truth로 유지한다.
 
-### 3.4 기각: 정기 sweep으로 피드백 할 일 생성
+### 3.4 기각: 정기 sweep으로 담당 교사 할 일 생성
 
-수업 종료 시각을 주기적으로 검색해 task를 만들면 이름만 task worker일 뿐 polling 부하가 다시 생긴다. 이미 존재하는 attendance 기록 transaction이 정확한 업무 생성 경계다.
+수업 종료 시각을 주기적으로 검색해 task를 만들면 이름만 task worker일 뿐 polling 부하가 다시 생긴다. 청강 피드백은 attendance 기록 transaction, 신규 등록 첫 상담은 등록 완료 transaction이 각각 정확한 업무 생성 경계다.
+
+### 3.5 채택: 신규 등록 첫 상담의 일반 완료
+
+첫 상담 task는 기존 일반 할 일의 완료 동작을 그대로 사용한다. 연락 방법과 상담 내용을 구조화하면 사후 확인은 좋아지지만 전용 상세 화면·완료 RPC·기록 원장이 추가된다. 현재 목적은 담당 선생님에게 첫 수업 후 연락을 빠뜨리지 않게 배정하는 것이므로 별도 기록을 요구하지 않는다.
 
 ## 4. 선택한 구조
 
@@ -187,6 +192,29 @@ Google Chat event를 만드는 현재 업무 action에 공통 적용한다.
 
 이 system task 생성은 notification event를 만들지 않는다. 따라서 Google Chat reminder를 할 일로 바꾸면서 다시 `task.created` Google Chat을 보내는 순환을 만들지 않는다.
 
+### 5.4 신규 등록 학부모 첫 상담 할 일
+
+`complete_registration_admission_batch`가 등록 완료를 확정하는 같은 transaction에서 batch의 각 enrollment마다 담당 선생님의 일반 할 일을 하나씩 생성한다. 등록 업무 하나에 여러 과목·반이 포함되면 각 반의 첫 수업 담당 선생님에게 각각 배정한다.
+
+- 제목: `신규 등록 학부모 첫 상담 · {학생명} · {과목}`
+- 유형: 기존 `general` 할 일
+- 주 담당자: enrollment가 가리키는 첫 `class_lesson_sessions.teacher_catalog_id`와 연결된 profile
+- 요청자: 등록 완료를 처리한 사용자
+- 상태: `requested`
+- 우선순위: `normal`
+- 시작: 첫 수업의 `session_date + end_time`을 `Asia/Seoul` 기준으로 조합한 종료 시각
+- 마감: 위 종료 시각 + 24시간
+- 학생·반·과목: enrollment와 첫 수업에서 가져온 기존 task snapshot
+- 메모: `첫 수업 후 학부모님께 문자 또는 전화로 수업 상황을 안내하고, 앞으로 잘 부탁드린다는 인사를 전해주세요.`
+
+완료 동작은 기존 일반 할 일의 `완료`를 그대로 사용한다. 연락 방법 선택, 상담 메모 입력, 전용 상세 화면, 전용 완료 RPC는 만들지 않는다. 담당 선생님이 연락을 마친 뒤 일반 완료 버튼을 누르는 것을 운영 확인으로 본다.
+
+`dashboard_private.registration_first_consultation_task_links`에는 `enrollment_id`와 생성된 `task_id`만 저장하고 각각 unique로 고정한다. 이 최소 연결은 등록 완료 replay·이중 클릭에서 중복 생성을 막고, 첫 수업 전 등록 또는 반 배정이 취소됐을 때 아직 열려 있는 할 일만 `canceled`로 바꾸는 데 사용한다. 별도 상담 기록 원장으로 사용하지 않는다.
+
+등록 완료 시점에는 첫 수업 날짜·회차·종료 시각과 담당 교사가 확정되어야 한다. 첫 수업 session의 `teacher_catalog_id`가 없거나 연결된 profile이 정확히 하나가 아니면 해당 enrollment의 자동 할 일을 만들 수 없으므로 등록 완료를 `registration_first_consultation_assignee_required`로 실패 폐쇄한다. task 생성과 등록 완료는 같은 transaction이므로 부분 task나 부분 등록 완료 상태를 남기지 않는다. 사용자가 첫 수업 담당 교사를 바로잡은 뒤 같은 완료 요청을 재시도한다.
+
+첫 수업 전 session 일정 또는 담당 교사가 수정되면 열린 할 일의 `start_at`, `due_at`, `assignee_id`와 반·과목 snapshot을 현재 첫 수업 기준으로 동기화한다. 이미 `done` 또는 `canceled`인 할 일은 과거 수행 기록으로 보존한다. 이 system task 생성·동기화·취소는 Google Chat notification event를 만들지 않는다.
+
 ## 6. 조회와 수동 재발송 API
 
 ### 6.1 event 단위 상태 조회
@@ -274,12 +302,13 @@ UI에 failed / unknown / delayed 표시
 1. 선택적인 `wakeup_generation`과 완료 callback을 이해하는 Vercel worker route를 먼저 배포한다. 기존 generation 없는 호출은 그대로 처리한다.
 2. 공통 UI는 새 runtime capability가 없으면 렌더하지 않도록 같은 배포에 포함한다.
 3. Production `READY`와 기존 worker 요청 호환성을 확인한다.
-4. DB migration이 singleton, trigger, status/retry RPC, authorization adapter registry, feedback-task link/runtime capability를 설치한다.
-5. migration이 청강 attendance/feedback mutation에 task 생성·자동 완료를 연결하고 미래 Google Chat reminder/feedback job 생성을 중단한다.
+4. DB migration이 singleton, trigger, status/retry RPC, authorization adapter registry, feedback-task link와 first-consultation 최소 link/runtime capability를 설치한다.
+5. migration이 청강 attendance/feedback mutation에 task 생성·자동 완료를 연결하고, 등록 완료 mutation에 과목별 첫 상담 일반 할 일 생성을 연결하며, 미래 Google Chat reminder/feedback job 생성을 중단한다.
 6. migration 마지막에 periodic worker와 watchdog job을 unschedule한다.
 7. 이후 저장 event 한 건으로 trigger, worker, 상태 UI, Google Chat 실제 수신을 확인한다.
 8. 실패 fixture로 담당자 수동 재발송과 실제 수신을 별도 확인한다.
 9. 청강 진행 fixture에서 담당 교사 할 일 생성, deep link, 피드백 제출 자동 완료를 확인한다.
+10. 등록 완료 fixture에서 등록 반별 첫 상담 일반 할 일 생성과 기존 완료 동작을 확인한다.
 
 DB migration이 실패하면 cron 제거도 rollback되어 반쪽 전환을 만들지 않는다. Production migration 전에 운영 cron을 직접 수정하지 않는다.
 
@@ -296,6 +325,7 @@ DB migration이 실패하면 cron 제거도 rollback되어 반쪽 전환을 만�
 - 환경 설정의 `최근 전달` 탭과 delivery 집계 조회를 제거한다.
 - 청강 진행 응답은 연결된 feedback task ID를 반환하고 정확한 observation panel deep link를 만든다.
 - 연결된 feedback task는 일반 완료 동작을 제공하지 않고 피드백 작성 동작을 제공한다.
+- 신규 등록 첫 상담 task는 기존 일반 할 일 상세와 완료 동작만 사용하며 전용 입력 UI를 만들지 않는다.
 - 알림톡 UI, 템플릿, 오전 10시 schedule을 변경하지 않는다.
 
 ### 10.2 pgTAP
@@ -316,6 +346,12 @@ DB migration이 실패하면 cron 제거도 rollback되어 반쪽 전환을 만�
 - feedback task 직접 완료는 거부되고 feedback 제출 transaction만 task를 완료한다.
 - feedback task의 제목·담당자·마감·상태 편집과 삭제·취소는 일반 task RPC에서 거부된다.
 - 피드백 제출 전 teacher 변경은 open task만 재배정한다.
+- 등록 완료 replay와 동시 실행은 enrollment당 첫 상담 task 하나만 만든다.
+- 복수 enrollment는 각 첫 수업 담당 profile에게 별도 일반 task를 만들고 시작·마감은 각각 첫 수업 종료와 종료 24시간 후다.
+- 첫 수업 teacher profile이 유일하게 결정되지 않으면 등록 완료를 실패 폐쇄하며 부분 task나 등록 완료 상태를 남기지 않는다.
+- 첫 수업 전 session 일정·담당자 변경은 열린 task만 동기화하고 완료·취소 task는 변경하지 않는다.
+- 첫 수업 전 등록·배정 취소는 열린 첫 상담 task만 취소한다.
+- 첫 상담 task의 일반 완료는 별도 연락 방법이나 상담 메모를 요구하지 않는다.
 - 신규 attendance/reschedule은 `reminder_due`·`feedback_due` Chat job을 만들지 않는다.
 - migration 전 pending 미래 Chat job은 canceled되지만 이미 sent인 delivery는 보존된다.
 - private table/function ACL과 service-role worker 경계를 지킨다.
@@ -330,6 +366,8 @@ DB migration이 실패하면 cron 제거도 rollback되어 반쪽 전환을 만�
 - `unknown` fixture는 사용자 확인 전 provider request 0, 확인 후 감사 행 1과 provider request 1인지 확인한다.
 - 실제 청강 진행 한 건에서 담당 교사의 받은 할 일에 즉시 나타나고 마감이 종료 24시간 후인지 확인한다.
 - 할 일의 `피드백 작성`으로 exact observation panel을 열고 제출하면 받은 할 일에서 완료로 이동하는지 확인한다.
+- 실제 복수 과목 등록 완료 한 건에서 각 첫 수업 담당 선생님의 받은 할 일에 `신규 등록 학부모 첫 상담`이 나타나고, 시작·마감이 첫 수업 종료와 종료 24시간 후인지 확인한다.
+- 담당 선생님이 기존 일반 할 일 `완료`를 누르면 추가 입력 없이 완료함으로 이동하는지 확인한다.
 - 3시간 전·종료 30분 후 시각이 지나도 해당 Google Chat request가 생성되지 않는지 확인한다.
 - CPU/Disk I/O, cron startup timeout, worker 실행 횟수를 변경 전 관찰값과 비교한다.
 
@@ -355,3 +393,4 @@ periodic worker/watchdog/recovery cron을 자동으로 복원하지 않는다. �
 - provider `unknown` 상태의 무확인 자동 재발송
 - 정기 worker, watchdog, recovery cron 신설
 - Supabase compute tier 변경
+- 첫 상담 전용 유형·상세 화면·연락 방법·상담 메모·전용 완료 RPC
