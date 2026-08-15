@@ -36,7 +36,9 @@ const contentPgTapUrl = new URL(
 
 const expectedPgTapFiles = Object.freeze([
   "supabase/tests/notification_control_plane_schema_test.sql",
+  "supabase/tests/notification_adapters_forward_install_test.sql",
   "supabase/tests/notification_content_contract_test.sql",
+  "supabase/tests/notification_delivery_pending_schedule_test.sql",
   "supabase/tests/notification_makeup_single_writer_test.sql",
   "supabase/tests/notification_control_plane_runtime_test.sql",
   "supabase/tests/notification_ops_task_adapters_test.sql",
@@ -45,6 +47,7 @@ const expectedPgTapFiles = Object.freeze([
   "supabase/tests/notification_makeup_adapter_test.sql",
   "supabase/tests/notification_approval_adapter_test.sql",
   "supabase/tests/notification_system_template_vnext_test.sql",
+  "supabase/tests/notification_worker_production_schedule_test.sql",
 ])
 
 async function loadSubject() {
@@ -136,13 +139,13 @@ test("합성 fixture manifest는 현재 188개 설정 graph와 고정 identity�
   assert.equal(Object.isFrozen(contract.manifest.identities), true)
 })
 
-test("pgTAP 계약은 review된 10개 파일의 순서와 실제 SHA-256만 허용한다", async () => {
+test("pgTAP 계약은 review된 13개 파일의 순서와 실제 SHA-256만 허용한다", async () => {
   const { loadNotificationContentLocalQaContract } = await loadSubject()
   const contract = await loadNotificationContentLocalQaContract()
 
   assert.deepEqual(contract.pgTap.files.map((entry) => entry.relativePath), expectedPgTapFiles)
-  assert.equal(contract.pgTap.fileCount, 10)
-  assert.equal(new Set(contract.pgTap.files.map((entry) => entry.relativePath)).size, 10)
+  assert.equal(contract.pgTap.fileCount, 13)
+  assert.equal(new Set(contract.pgTap.files.map((entry) => entry.relativePath)).size, 13)
   assert.equal(contract.pgTap.files.every((entry) => /^[a-f0-9]{64}$/u.test(entry.sha256)), true)
   assert.match(contract.pgTap.sha256, /^[a-f0-9]{64}$/u)
   assert.equal(Object.isFrozen(contract.pgTap), true)
@@ -150,7 +153,7 @@ test("pgTAP 계약은 review된 10개 파일의 순서와 실제 SHA-256만 허�
   assert.equal(contract.pgTap.files.every(Object.isFrozen), true)
   assert.equal(
     contract.pgTap.files.at(-1).relativePath,
-    "supabase/tests/notification_system_template_vnext_test.sql",
+    "supabase/tests/notification_worker_production_schedule_test.sql",
   )
   assert.equal(contract.pgTap.files.some((entry) => /pending-migrations|quarantine/u.test(entry.relativePath)), false)
 })
@@ -263,7 +266,7 @@ test("allowlist pgTAP은 최신 188 identity와 single-writer/vNext 상태를 �
   )
 })
 
-test("isolated DB runner plan은 fixture count와 exact pgTAP 10개를 출력하지만 실행은 계속 닫힌다", async () => {
+test("isolated DB runner plan은 fixture count와 exact pgTAP 13개를 출력하지만 실행은 계속 닫힌다", async () => {
   const result = spawnSync(process.execPath, ["--experimental-strip-types", runnerUrl.pathname], {
     cwd: new URL("..", import.meta.url),
     encoding: "utf8",
@@ -275,7 +278,7 @@ test("isolated DB runner plan은 fixture count와 exact pgTAP 10개를 출력하
   assert.equal(plan.expectedResources.syntheticFixture.settingsRegistry, 188)
   assert.equal(plan.expectedResources.syntheticFixture.rules, 189)
   assert.equal(plan.expectedResources.syntheticFixture.operationalRows, 0)
-  assert.equal(plan.expectedResources.pgTapFileCount, 10)
+  assert.equal(plan.expectedResources.pgTapFileCount, 13)
   assert.deepEqual(plan.expectedResources.pgTapFiles, expectedPgTapFiles)
   assert.equal(plan.expectedResources.providerEgressBlocked, true)
   assert.equal(plan.expectedResources.productionRowDataCopied, 0)

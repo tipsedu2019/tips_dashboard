@@ -4,6 +4,7 @@ import { Children, useCallback, useEffect, useMemo, useRef, useState, type React
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { GoogleChatDeliveryControl } from "@/features/notifications/notification-delivery-control"
 import { supabase } from "@/lib/supabase"
 
 import { RegistrationApplicationAdmissionSection } from "./registration-application-admission-section"
@@ -350,6 +351,7 @@ export function RegistrationApplication({
   const [migrationDirectorResetVersion, setMigrationDirectorResetVersion] = useState(0)
   const [migrationReviewResetVersion, setMigrationReviewResetVersion] = useState(0)
   const [workflowStatusSaving, setWorkflowStatusSaving] = useState(false)
+  const [latestGoogleChatEventId, setLatestGoogleChatEventId] = useState<string | null>(null)
   const [observationDetail, setObservationDetail] = useState<RegistrationObservationManagerDetail | null>(null)
   const [observationDetailLoading, setObservationDetailLoading] = useState(false)
   const [observationDetailError, setObservationDetailError] = useState("")
@@ -1119,6 +1121,9 @@ export function RegistrationApplication({
             sourceEventIds,
             notificationToken,
           )
+          setLatestGoogleChatEventId(
+            dispatchResult.googleChatEventIds[dispatchResult.googleChatEventIds.length - 1] || null,
+          )
           managementNotificationFailed = sourceEventIds.length === 0
             || dispatchResult.failedSourceEventIds.length > 0
         } catch {
@@ -1529,7 +1534,7 @@ export function RegistrationApplication({
             onValueChange={handleSubjectTabChange}
           />
           {activeGenericTrack ? (
-            <label data-registration-workflow-status="" className="grid min-w-0 gap-1.5">
+            <div data-registration-workflow-status="" className="grid min-w-0 gap-1.5">
               <span className="text-xs font-medium text-muted-foreground">진행상태</span>
               <select
                 aria-label={`${activeGenericTrack.subject} 진행상태`}
@@ -1543,7 +1548,8 @@ export function RegistrationApplication({
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
-            </label>
+              <GoogleChatDeliveryControl eventId={latestGoogleChatEventId} onWarning={onWarning} />
+            </div>
           ) : activeTrack ? (
             <div data-registration-workflow-status="observation" className="grid min-w-0 gap-1.5">
               <span className="text-xs font-medium text-muted-foreground">진행상태</span>

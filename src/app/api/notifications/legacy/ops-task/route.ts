@@ -396,7 +396,13 @@ export async function POST(request: Request) {
     const deduped = outcomes.filter((outcome) => outcome === "deduped").length
     const failed = outcomes.length - sent - deduped
     const status = items.length === 0 || deduped === items.length ? 202 : 200
-    return response({ ok: true, sent, deduped, failed }, status)
+    return response({
+      ok: true,
+      sent,
+      deduped,
+      failed,
+      eventIds: items.map((item) => item.eventId),
+    }, status)
   } catch (error) {
     const code = text((error as { code?: unknown })?.code)
     const status = code === "42501" ? 403 : code === "P0002" ? 404 : 503

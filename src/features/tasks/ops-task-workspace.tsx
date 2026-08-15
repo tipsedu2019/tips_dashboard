@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/date-time-picker"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { GoogleChatDeliveryControl } from "@/features/notifications/notification-delivery-control"
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -7215,7 +7216,7 @@ function TransferDataTable({
 }
 
 async function dispatchLegacyOpsTaskSource(sourceEventId: string, sessionToken: string) {
-  if (!sourceEventId || !sessionToken) return
+  if (!sourceEventId || !sessionToken) return []
   const response = await fetch("/api/notifications/legacy/ops-task", {
     method: "POST",
     headers: {
@@ -7224,15 +7225,20 @@ async function dispatchLegacyOpsTaskSource(sourceEventId: string, sessionToken: 
     },
     body: JSON.stringify({ sourceEventId }),
   })
-  if (!response.ok) throw new Error("업무 알림 후처리에 실패했습니다.")
+  const payload = await response.json().catch(() => null)
+  if (!response.ok || payload?.ok !== true) throw new Error("업무 알림 후처리에 실패했습니다.")
+  return Array.isArray(payload.eventIds)
+    ? payload.eventIds.filter((eventId: unknown): eventId is string => typeof eventId === "string" && Boolean(eventId))
+    : []
 }
 
-async function dispatchLegacyOpsTaskSources(sourceEventIds: string[], sessionToken: string) {
-  await Promise.allSettled(
+async function dispatchLegacyOpsTaskSourcesRequest(sourceEventIds: string[], sessionToken: string) {
+  const results = await Promise.allSettled(
     Array.from(new Set(sourceEventIds)).map((sourceEventId) => (
       dispatchLegacyOpsTaskSource(sourceEventId, sessionToken)
     )),
   )
+  return Array.from(new Set(results.flatMap((result) => result.status === "fulfilled" ? result.value : [])))
 }
 
 async function collectRegistrationLegacySourceIds(tasks: OpsTask[]) {
@@ -7576,7 +7582,23 @@ function TodoPriorityBadge({ priority, showNormal = false }: { priority: OpsTask
   )
 }
 
-function getNextTaskStatusAction(task: Pick<OpsTask, "status" | "type">): { status: OpsTaskStatus; label: string } | null {
+function registrationObservationFeedbackId(
+  task: Pick<OpsTask, "type"> & Partial<Pick<OpsTask, "memo">>,
+) {
+  if (task.type !== "general") return null
+  return (task.memo || "").match(/registration_observation_feedback:([0-9a-f-]{36})/i)?.[1] || null
+}
+
+function isRegistrationObservationFeedbackTask(
+  task: Pick<OpsTask, "type"> & Partial<Pick<OpsTask, "memo">>,
+) {
+  return Boolean(registrationObservationFeedbackId(task))
+}
+
+function getNextTaskStatusAction(
+  task: Pick<OpsTask, "status" | "type"> & Partial<Pick<OpsTask, "memo">>,
+): { status: OpsTaskStatus; label: string } | null {
+  if (isRegistrationObservationFeedbackTask(task)) return null
   if (task.type === "registration") return null
   if (task.type === "withdrawal" && task.status === "done") return null
   if (task.type === "transfer" && task.status === "done") return null
@@ -8478,9 +8500,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const taskOptionsLoadGenerationRef = useRef(0)
   const taskOptionsDataRef = useRef<OpsTaskWorkspaceOptionData | null>(null)
   const [notice, setNotice] = useState("")
+  const [latestGoogleChatEventId, setLatestGoogleChatEventId] = useState<string | null>(null)
   const [commentBody, setCommentBody] = useState("")
   const [attachmentName, setAttachmentName] = useState("")
   const [attachmentLink, setAttachmentLink] = useState("")
+
+  async function dispatchLegacyOpsTaskSources(sourceEventIds: string[], sessionToken: string) {
+    const eventIds = await dispatchLegacyOpsTaskSourcesRequest(sourceEventIds, sessionToken)
+    setLatestGoogleChatEventId(eventIds[eventIds.length - 1] || null)
+    return eventIds
+  }
   const [deleteTarget, setDeleteTarget] = useState<OpsTask | null>(null)
   const [bulkDeleteTargets, setBulkDeleteTargets] = useState<OpsTask[]>([])
   const [statusUndo, setStatusUndo] = useState<StatusUndoState | null>(null)
@@ -14332,6 +14361,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                     </Button>
                   )}
                 </div>}
+                {!isCanonicalRegistrationTrackDetail && (
+                  <GoogleChatDeliveryControl eventId={latestGoogleChatEventId} onWarning={setMessage} />
+                )}
               </div>
 
               {selectedTaskFresh.type !== "registration" && selectedTaskFresh.type !== "word_retest" && !isProcessDetail && (
@@ -17529,6 +17561,8 @@ function DetailInfoTile({ label, value, children }: { label: string; value?: str
 }
 
 function GeneralTaskDetailPanel({ task }: { task: OpsTask }) {
+  const observationId = registrationObservationFeedbackId(task)
+  const visibleMemo = task.memo.replace(/\s*registration_observation_feedback:[0-9a-f-]{36}\s*/i, "").trim()
   return (
     <dl className="grid gap-3">
       <div className="grid gap-3 md:grid-cols-[160px_minmax(0,1fr)]">
@@ -17545,7 +17579,10 @@ function GeneralTaskDetailPanel({ task }: { task: OpsTask }) {
         <DetailInfoTile label="시작일" value={dateLabel(task.startAt) === "-" ? "미지정" : dateLabel(task.startAt)} />
         <DetailInfoTile label="마감일" value={dateLabel(task.dueAt) === "-" ? "미지정" : dateLabel(task.dueAt)} />
       </div>
-      <DetailInfoTile label="메모" value={task.memo || "미입력"} />
+      <DetailInfoTile label="메모" value={visibleMemo || "미입력"} />
+      {observationId ? (
+        <div><Button asChild><a href={`/admin/registration/observations/${observationId}/feedback`}>피드백 작성</a></Button></div>
+      ) : null}
       <div className="grid gap-3 border-t pt-3 md:grid-cols-3">
         <DetailInfoTile label="요청팀" value={task.requestedTeam || "미지정"} />
         <DetailInfoTile label="요청자" value={task.requestedByLabel || "미지정"} />

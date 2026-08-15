@@ -116,7 +116,7 @@ export async function dispatchRegistrationManagementNotificationSources(
     (Array.isArray(sourceEventIds) ? sourceEventIds : []).map(text).filter(Boolean),
   ))
   const token = text(sessionToken)
-  if (!token) return { failedSourceEventIds: normalizedSourceEventIds }
+  if (!token) return { failedSourceEventIds: normalizedSourceEventIds, googleChatEventIds: [] }
 
   const results = await Promise.allSettled(normalizedSourceEventIds.map(async (sourceEventId) => {
     const response = await fetch("/api/notifications/legacy/ops-task", {
@@ -131,23 +131,29 @@ export async function dispatchRegistrationManagementNotificationSources(
     const sent = Number(payload?.sent)
     const deduped = Number(payload?.deduped)
     const failed = Number(payload?.failed)
+    const eventIds = Array.isArray(payload?.eventIds)
+      ? payload.eventIds.map(text).filter(Boolean)
+      : []
     if (
       !response.ok
       || payload?.ok !== true
       || !Number.isInteger(sent)
       || !Number.isInteger(deduped)
       || !Number.isInteger(failed)
-      || failed > 0
       || sent + deduped < 1
     ) {
       throw new Error("registration_management_notification_dispatch_failed")
     }
+    return { eventIds, failed: failed > 0 }
   }))
 
   return {
     failedSourceEventIds: normalizedSourceEventIds.filter((_, index) => (
-      results[index]?.status !== "fulfilled"
+      results[index]?.status !== "fulfilled" || results[index].value.failed
     )),
+    googleChatEventIds: Array.from(new Set(results.flatMap((result) => (
+      result.status === "fulfilled" ? result.value.eventIds : []
+    )))),
   }
 }
 

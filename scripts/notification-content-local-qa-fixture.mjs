@@ -20,7 +20,9 @@ const RULE_GROUPS_JSON_END = "notification_content_local_qa_rule_groups_json_end
 
 export const NOTIFICATION_CONTENT_LOCAL_QA_PGTAP_FILES = Object.freeze([
   "supabase/tests/notification_control_plane_schema_test.sql",
+  "supabase/tests/notification_adapters_forward_install_test.sql",
   "supabase/tests/notification_content_contract_test.sql",
+  "supabase/tests/notification_delivery_pending_schedule_test.sql",
   "supabase/tests/notification_makeup_single_writer_test.sql",
   "supabase/tests/notification_control_plane_runtime_test.sql",
   "supabase/tests/notification_ops_task_adapters_test.sql",
@@ -29,6 +31,7 @@ export const NOTIFICATION_CONTENT_LOCAL_QA_PGTAP_FILES = Object.freeze([
   "supabase/tests/notification_makeup_adapter_test.sql",
   "supabase/tests/notification_approval_adapter_test.sql",
   "supabase/tests/notification_system_template_vnext_test.sql",
+  "supabase/tests/notification_worker_production_schedule_test.sql",
 ])
 
 export const NOTIFICATION_CONTENT_LOCAL_QA_EXPECTED_COUNTS = deepFreeze({
@@ -622,8 +625,8 @@ function assertPgTapSource(value) {
 
 async function loadPgTapContract() {
   if (
-    NOTIFICATION_CONTENT_LOCAL_QA_PGTAP_FILES.length !== 10
-    || new Set(NOTIFICATION_CONTENT_LOCAL_QA_PGTAP_FILES).size !== 10
+    NOTIFICATION_CONTENT_LOCAL_QA_PGTAP_FILES.length !== 13
+    || new Set(NOTIFICATION_CONTENT_LOCAL_QA_PGTAP_FILES).size !== 13
   ) {
     fileRefused()
   }

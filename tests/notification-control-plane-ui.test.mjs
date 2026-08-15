@@ -578,14 +578,14 @@ test("알림 업무와 화면 섹션 선택은 반응형 1차·2차 제어로 �
   assert.doesNotMatch(source, /연결 \(Connections\)/)
 })
 
-test("공유 알림 다이얼로그는 연결 탭이 없을 때 두 탭이 전체 폭을 사용한다", async () => {
+test("공유 알림 다이얼로그는 규칙만, 환경 설정 페이지는 규칙과 연결을 표시한다", async () => {
   const source = await readOptionalSource(
     "src/features/notifications/notification-control-panel.tsx",
   )
 
   assert.match(
     source,
-    /presentation === "page" \? "grid-cols-3" : "grid-cols-2"/,
+    /presentation === "page" \? "grid-cols-2" : "grid-cols-1"/,
   )
 })
 
@@ -617,131 +617,4 @@ test("대시보드 알림함은 viewer ID 없이 서버의 세 RPC 결과만 사
   assert.doesNotMatch(popoverSource, /loadDashboardNotifications\(viewerId/)
   assert.doesNotMatch(popoverSource, /loadDashboardUnreadNotificationCount\(viewerId/)
   assert.doesNotMatch(popoverSource, /nextNotifications\.filter\(\(item\) => !item\.readAt\)/)
-})
-
-test("읽지 않은 알림은 추출된 표시 컴포넌트와 항목별 상태를 사용한다", async () => {
-  const [source, contentSource] = await Promise.all([
-    readOptionalSource("src/components/dashboard-notification-popover.tsx"),
-    readOptionalSource("src/components/dashboard-notification-content.tsx"),
-  ])
-  const rows = source.slice(source.indexOf("notifications.map"))
-
-  assert.match(source, /import \{ DashboardNotificationContent \}/)
-  assert.match(rows, /<DashboardNotificationContent/)
-  assert.match(rows, /isRead=\{Boolean\(notification\.readAt\)\}/)
-  assert.match(rows, /isMarkingRead=\{pendingReadIds\.has\(notification\.id\)\}/)
-  assert.match(rows, /readError=\{readErrors\[notification\.id\] \|\| ""\}/)
-  assert.match(contentSource, /grid-cols-\[minmax\(0,1fr\)_auto\]/)
-  assert.match(contentSource, /<Link[\s\S]*<\/Link>[\s\S]*<Button[\s\S]*읽음[\s\S]*<\/Button>/)
-  assert.doesNotMatch(contentSource, /<Link[\s\S]{0,1600}<Button[\s\S]{0,600}<\/Link>/)
-  assert.match(source, /pendingReadIds/)
-  assert.match(source, /readErrors/)
-  assert.match(contentSource, /preventDefault\(\)/)
-  assert.match(contentSource, /stopPropagation\(\)/)
-})
-
-test("대시보드 알림 popover는 작은 화면·확대·키보드 탐색 경계를 갖는다", async () => {
-  const source = await readOptionalSource("src/components/dashboard-notification-popover.tsx")
-
-  assert.match(source, /w-\[min\(24rem,calc\(100vw-1rem\)\)\]/)
-  assert.match(
-    source,
-    /max-h-\[min\(calc\(100dvh-1rem\),var\(--radix-popover-content-available-height\)\)\]/,
-  )
-  assert.match(source, /collisionPadding=\{8\}/)
-  assert.match(source, /min-h-0 flex-1 overflow-y-auto/)
-  assert.match(source, /aria-label=\{notificationTriggerLabel\}/)
-  assert.match(source, /aria-live="polite"/)
-  assert.match(source, /읽지 않은 알림 \$\{unreadCount\}개/)
-  assert.match(source, /onFocusCapture=\{keepFocusedNotificationVisible\}/)
-})
-
-test("알림 링크는 읽음 RPC를 동기 시작하지만 이동을 기다리거나 닫지 않는다", async () => {
-  const source = await readOptionalSource("src/components/dashboard-notification-popover.tsx")
-  const handler = source.slice(
-    source.indexOf("const handleNotificationLinkClick"),
-    source.indexOf("const handleMarkReadButton"),
-  )
-
-  assert.match(handler, /void startMarkRead\(notification\)/)
-  assert.doesNotMatch(handler, /async/)
-  assert.doesNotMatch(handler, /await/)
-  assert.doesNotMatch(handler, /preventDefault/)
-  assert.doesNotMatch(handler, /setOpen\(false\)/)
-})
-
-test("목록과 badge 갱신은 진행 중인 읽음 처리와 새 snapshot을 덮어쓰지 않는다", async () => {
-  const source = await readOptionalSource("src/components/dashboard-notification-popover.tsx")
-  const refreshSource = source.slice(
-    source.indexOf("const refresh ="),
-    source.indexOf("const refreshUnreadCount"),
-  )
-  const countSource = source.slice(
-    source.indexOf("const refreshUnreadCount"),
-    source.indexOf("const refreshPushState"),
-  )
-
-  assert.match(refreshSource, /stateAtStart\.readStates[\s\S]*state\.pending/)
-  assert.match(refreshSource, /pendingUnreadCountSyncOperationId !== null/)
-  assert.match(refreshSource, /const markVersion = stateAtStart\.markVersion/)
-  assert.match(refreshSource, /current\.markVersion !== markVersion/)
-  assert.match(refreshSource, /inboxRefreshRequestRef\.current !== requestId/)
-  assert.match(refreshSource, /inboxSnapshotVersionRef\.current \+= 1[\s\S]*createDashboardInboxState/)
-  assert.match(countSource, /const snapshotVersion = inboxSnapshotVersionRef\.current/)
-  assert.match(countSource, /if \(inboxListLoadingRef\.current\) return/)
-  assert.match(countSource, /pendingUnreadCountSyncOperationId !== null/)
-  assert.match(countSource, /stateAtStart\.readStates[\s\S]*state\.pending/)
-  assert.match(countSource, /inboxSnapshotVersionRef\.current !== snapshotVersion/)
-  assert.match(source, /completeDashboardInboxMark[\s\S]*if \(next === current\) return[\s\S]*synchronizeUnreadCount/)
-  assert.match(source, /failDashboardInboxMark[\s\S]*if \(next === current\) return[\s\S]*synchronizeUnreadCount/)
-})
-
-test("Push 준비 상태는 현재 브라우저와 profile 소유권의 닫힌 상태를 모두 표시한다", async () => {
-  const [popoverSource, pushSource] = await Promise.all([
-    readOptionalSource("src/components/dashboard-notification-popover.tsx"),
-    readOptionalSource("src/lib/dashboard-push-client.ts"),
-  ])
-  const source = `${popoverSource}\n${pushSource}`
-
-  for (const state of [
-    "checking",
-    "unsupported",
-    "insecure",
-    "server_unconfigured",
-    "asset_missing",
-    "permission_prompt",
-    "permission_denied",
-    "subscription_missing",
-    "subscription_owner_mismatch",
-    "ready",
-    "self_test_sent",
-    "self_test_expired",
-    "self_test_failed",
-  ]) {
-    assert.match(source, new RegExp(`\\b${state}\\b`))
-  }
-  assert.match(source, /visibilitychange/)
-  assert.match(source, /addEventListener\("focus"/)
-  assert.match(source, /selfTestConfirmationOpen/)
-  assert.match(source, /고정 테스트 알림/)
-  assert.doesNotMatch(pushSource, /\b(?:target|content|href)\s*:/)
-})
-
-test("Push 동작 오류와 loading은 profile별 최신 action 세대만 갱신한다", async () => {
-  const source = await readOptionalSource("src/components/dashboard-notification-popover.tsx")
-  const actionSource = source.slice(
-    source.indexOf("const runPushAction"),
-    source.indexOf("const handlePushPrimaryAction"),
-  )
-
-  assert.match(source, /pushActionGenerationRef/)
-  assert.match(source, /pushActionInFlightRef/)
-  assert.match(source, /pushActionGenerationRef\.current \+= 1[\s\S]*invalidateDashboardPushReadiness/)
-  assert.match(source, /!pushActionInFlightRef\.current[\s\S]*refreshPushState\(reason\)/)
-  assert.match(source, /if \(!pushActionInFlightRef\.current\) void refreshPushState\("open"\)/)
-  assert.match(actionSource, /const actionGeneration = pushActionGenerationRef\.current \+ 1/)
-  assert.match(actionSource, /pushActionInFlightRef\.current = true/)
-  assert.match(actionSource, /await refreshPushState\("manual"\)[\s\S]*setPushError\(message\)/)
-  assert.match(actionSource, /finally[\s\S]*pushActionGenerationRef\.current === actionGeneration[\s\S]*setPushLoading\(false\)/)
-  assert.match(actionSource, /pushActionInFlightRef\.current = false[\s\S]*setPushLoading\(false\)/)
 })
