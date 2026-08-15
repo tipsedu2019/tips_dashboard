@@ -258,26 +258,12 @@ test("detail deletion clears the task deep link before opening the shared confir
   assert.match(deepLinkEffectSource, /\[[^\]]*deleteTarget[^\]]*\]\)/s);
 });
 
-test("all five task surfaces use one server-gated notification control panel with exact workflow keys", async () => {
+test("all five task surfaces delegate notification settings to the central page", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
 
-  assert.match(
-    source,
-    /import \{ NotificationControlPanel, useNotificationControlPlaneAvailability \} from "@\/features\/notifications\/notification-control-panel"/,
-  );
-  assert.match(source, /const WORKSPACE_NOTIFICATION_WORKFLOW_KEY = \{[\s\S]*todo: "tasks",[\s\S]*word_retest: "word_retests",[\s\S]*registration: "registration",[\s\S]*transfer: "transfer",[\s\S]*withdrawal: "withdrawal",[\s\S]*satisfies Record<WorkspaceKey, NotificationWorkflowKey>/);
-  assert.match(source, /const notificationControlPlaneAvailability = useNotificationControlPlaneAvailability\(\)/);
-  assert.match(source, /const canonicalNotificationEnabled = notificationControlPlaneAvailability\.status === "enabled"/);
-  assert.match(source, /const legacyNotificationEnabled = notificationControlPlaneAvailability\.status === "disabled"/);
-  assert.match(source, /const showNotificationSettingsLauncher = \(canManageAll \|\| isStaff\)/);
-  assert.match(source, /const showLegacyNotificationSettingsLauncher = legacyNotificationEnabled \|\| \(canonicalNotificationEnabled && showNotificationSettingsLauncher\)/);
-  assert.doesNotMatch(source, /disabled=\{notificationControlPlaneAvailability\.status === "loading"\}/);
-  assert.match(source, /canonicalNotificationEnabled \? \([\s\S]*<NotificationControlPanel[\s\S]*workflowKey=\{notificationWorkflowKey\}[\s\S]*presentation="dialog"[\s\S]*open=\{workspaceDataBelongsToCurrentViewer && canonicalNotificationOpen\}/);
-  assert.match(source, /legacyNotificationEnabled && isWithdrawalWorkspace/);
-  assert.match(source, /legacyNotificationEnabled && isTransferWorkspace/);
-  assert.match(source, /legacyNotificationEnabled && isRegistrationWorkspace/);
-  assert.doesNotMatch(source, /!canonicalNotificationEnabled && is(?:Withdrawal|Transfer|Registration)Workspace/);
-  assert.doesNotMatch(source, /get_notification_runtime_flags_v1|NEXT_PUBLIC_NOTIFICATION_CONTROL_PLANE/);
+  assert.doesNotMatch(source, /NotificationControlPanel|useNotificationControlPlaneAvailability/);
+  assert.doesNotMatch(source, /등록 알림 설정|전반 알림 설정|퇴원 알림 설정/);
+  assert.doesNotMatch(source, /할 일 알림 설정|영어 단어 재시험 알림 설정/);
 });
 
 test("todo form keeps requester metadata readonly and assignee selectors team-aware", async () => {
@@ -882,8 +868,6 @@ test("registration workspace replaces Notion registration management with one ap
     '{ key: "completed", label: "완료" }',
     'isRegistrationWorkspace ? registrationMode === "calendar" ? "등록 예약 종류" : "등록 흐름"',
     "const workspaceSurfaceClassName = isWithdrawalWorkspace || isTransferWorkspace || isRegistrationWorkspace",
-    "setRegistrationNotificationOpen(true)",
-    'isRegistrationWorkspace ? "등록 알림 설정"',
     "registrationCounts",
     "registrationView",
   ]);
@@ -977,8 +961,8 @@ test("fixture registration withholds every provider token even before its runtim
     "sendRegistrationVisitNotificationTarget(target, registrationNotificationSessionToken)",
     "sessionToken={registrationNotificationSessionToken}",
     "notificationToken={registrationNotificationSessionToken}",
-    "!registrationFixtureRequested && showLegacyNotificationSettingsLauncher",
   ]);
+  assert.doesNotMatch(workspaceSource, /showLegacyNotificationSettingsLauncher/);
 });
 
 test("leaving a registration fixture clears provider retry targets before production resumes", async () => {
@@ -2713,11 +2697,7 @@ test("withdrawal workspace follows request processing and completed queues", asy
     /if \(task\.type === "withdrawal" && task\.status === "confirmed"\) return \{ status: "in_progress", label: "처리 시작" \}/,
     "legacy confirmed withdrawal rows should use the same processing action language",
   );
-  assertIncludesAll(withdrawalWorkspaceToolbarSource, [
-    'aria-label={isRegistrationWorkspace ? "등록 알림 설정" : isTransferWorkspace ? "전반 알림 설정" : "퇴원 알림 설정"}',
-    "setWithdrawalNotificationOpen(true)",
-    "<Bell className=\"size-4\"",
-  ]);
+  assert.doesNotMatch(withdrawalWorkspaceToolbarSource, /알림 설정|setWithdrawalNotificationOpen\(true\)|<Bell/);
   assert.match(
     withdrawalWorkspaceToolbarSource,
     /!isWordRetestWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && \(/,
@@ -3322,11 +3302,7 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     /if \(task\.type === "transfer" && task\.status === "in_progress"\) return \{ status: "done", label: "완료" \}/,
     "transfer processing rows should complete without an approval queue",
   );
-  assertIncludesAll(workspaceToolbarSource, [
-    'aria-label={isRegistrationWorkspace ? "등록 알림 설정" : isTransferWorkspace ? "전반 알림 설정" : "퇴원 알림 설정"}',
-    "setTransferNotificationOpen(true)",
-    "setWithdrawalNotificationOpen(true)",
-  ]);
+  assert.doesNotMatch(workspaceToolbarSource, /알림 설정|setTransferNotificationOpen\(true\)|setWithdrawalNotificationOpen\(true\)/);
   assertIncludesAll(detailDialogSource, [
     "TransferDetailPanel",
     'selectedTaskFresh?.type === "withdrawal" || selectedTaskFresh?.type === "transfer" ? "sm:max-w-3xl"',
@@ -4121,13 +4097,13 @@ test("word retest workflow guidance lives in a global manual outside task dialog
     readSource("scripts/verify-ops-task-browser-workflow.mjs"),
   ]);
   const toolbarStart = workspaceSource.indexOf("{showClosedToggle && !isWordRetestWorkspace");
-  const notificationLauncherStart = workspaceSource.indexOf(
-    "{showNotificationSettingsLauncher && canonicalNotificationEnabled",
+  const toolbarControlEnd = workspaceSource.indexOf(
+    "{!isWordRetestWorkspace && !isRegistrationWorkspace",
     toolbarStart,
   );
   const manualLauncherSource = workspaceSource.slice(
     workspaceSource.indexOf("{isWordRetestWorkspace && (", toolbarStart),
-    notificationLauncherStart,
+    toolbarControlEnd,
   );
   const detailSource = workspaceSource.slice(
     workspaceSource.indexOf("function WordRetestDetailPanel"),
@@ -4176,10 +4152,7 @@ test("word retest workflow guidance lives in a global manual outside task dialog
     manualLauncherSource,
     /canManageAll|isStaff|canonicalNotificationEnabled|legacyNotificationEnabled|showNotificationSettingsLauncher/,
   );
-  assert.ok(
-    notificationLauncherStart > workspaceSource.indexOf("<WordRetestManualDialog", toolbarStart),
-    "notification launcher should immediately follow the manual launcher component",
-  );
+  assert.doesNotMatch(manualLauncherSource, /알림 설정|NotificationControlPanel/);
   assert.equal(
     (workspaceSource.match(/<WordRetestManualDialog/g) || []).length,
     1,

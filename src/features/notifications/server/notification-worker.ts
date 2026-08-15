@@ -1690,6 +1690,10 @@ async function processDelivery(
   input: NotificationWorkerRuntimeInput,
 ) {
   validateDeliveryClaim(claim)
+  if (["in_app", "web_push"].includes(requiredString(claim.channel_key))) {
+    await finalizeDelivery(claim, "canceled", "cutover_rollback", input.rpc)
+    return
+  }
   const adapter = input.getAdapter(requiredWorkflowKey(claim.workflow_key))
   if (!adapter) {
     await finalizeDelivery(claim, "failed", "payload_schema_unsupported", input.rpc, {

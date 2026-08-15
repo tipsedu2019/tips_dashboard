@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type TouchEvent, type WheelEvent } from "react"
-import { ArrowDown, ArrowUp, Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, FileText, Filter, Inbox, List, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
+import { ArrowDown, ArrowUp, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, FileText, Filter, Inbox, List, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -30,8 +30,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
-import { NotificationControlPanel, useNotificationControlPlaneAvailability } from "@/features/notifications/notification-control-panel"
-import type { NotificationWorkflowKey } from "@/features/notifications/notification-control-plane-types"
 import {
   ACADEMIC_SUBJECT_VALUES,
   parseAcademicSubject,
@@ -289,13 +287,6 @@ type RegistrationCommittedReceipt = {
 }
 
 type WorkspaceKey = "todo" | "registration" | "transfer" | "withdrawal" | "word_retest"
-const WORKSPACE_NOTIFICATION_WORKFLOW_KEY = {
-  todo: "tasks",
-  word_retest: "word_retests",
-  registration: "registration",
-  transfer: "transfer",
-  withdrawal: "withdrawal",
-} as const satisfies Record<WorkspaceKey, NotificationWorkflowKey>
 type ViewKey = "all" | "status" | "assignee" | "calendar"
 type TodoViewKey = "inbox" | "sent" | "completed"
 type TodoSortKey = "status" | "priority" | "due"
@@ -8257,12 +8248,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     : ""
   const { user, session, canManageAll, isAdmin, isStaff, isTeacher, isAssistant } = useAuth()
   const notificationSessionToken = session?.access_token || ""
-  const notificationControlPlaneAvailability = useNotificationControlPlaneAvailability()
-  const canonicalNotificationEnabled = notificationControlPlaneAvailability.status === "enabled"
-  const legacyNotificationEnabled = notificationControlPlaneAvailability.status === "disabled"
-  const notificationWorkflowKey = WORKSPACE_NOTIFICATION_WORKFLOW_KEY[workspace]
-  const showNotificationSettingsLauncher = (canManageAll || isStaff)
-  const showLegacyNotificationSettingsLauncher = legacyNotificationEnabled || (canonicalNotificationEnabled && showNotificationSettingsLauncher)
+  const legacyNotificationEnabled = false
   const currentUserId = user?.id || ""
   const registrationFixtureValue = searchParams.get("fixture")
   const registrationFixtureActionType = searchParams.get("fixtureActionType")
@@ -8410,7 +8396,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [withdrawalNotificationOpen, setWithdrawalNotificationOpen] = useState(false)
   const [transferNotificationOpen, setTransferNotificationOpen] = useState(false)
   const [registrationNotificationOpen, setRegistrationNotificationOpen] = useState(false)
-  const [canonicalNotificationOpen, setCanonicalNotificationOpen] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
   const [formDetailStep, setFormDetailStep] = useState<FormDetailStepKey>("registration_contact")
   const [wordRetestEditMode, setWordRetestEditMode] = useState<WordRetestEditMode>("full")
@@ -13148,39 +13133,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 onOpenChange={setWordRetestManualOpen}
               />
             )}
-            {showNotificationSettingsLauncher && canonicalNotificationEnabled && (isTodoWorkspace || isWordRetestWorkspace) ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setCanonicalNotificationOpen(true)}
-                aria-label={isTodoWorkspace ? "할 일 알림 설정" : "영어 단어 재시험 알림 설정"}
-                title={isTodoWorkspace ? "할 일 알림 설정" : "영어 단어 재시험 알림 설정"}
-                className="size-8 px-0"
-              >
-                <Bell className="size-4" aria-hidden="true" />
-                <span className="sr-only">{isTodoWorkspace ? "할 일 알림 설정" : "영어 단어 재시험 알림 설정"}</span>
-              </Button>
-            ) : null}
-            {!registrationFixtureRequested && showLegacyNotificationSettingsLauncher && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace) && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  if (canonicalNotificationEnabled) setCanonicalNotificationOpen(true)
-                  else if (isRegistrationWorkspace) setRegistrationNotificationOpen(true)
-                  else if (isTransferWorkspace) setTransferNotificationOpen(true)
-                  else setWithdrawalNotificationOpen(true)
-                }}
-                aria-label={isRegistrationWorkspace ? "등록 알림 설정" : isTransferWorkspace ? "전반 알림 설정" : "퇴원 알림 설정"}
-                title={isRegistrationWorkspace ? "등록 알림 설정" : isTransferWorkspace ? "전반 알림 설정" : "퇴원 알림 설정"}
-                className="size-8 px-0"
-              >
-                <Bell className="size-4" aria-hidden="true" />
-                <span className="sr-only">{isRegistrationWorkspace ? "등록 알림 설정" : isTransferWorkspace ? "전반 알림 설정" : "퇴원 알림 설정"}</span>
-              </Button>
-            )}
             {!isWordRetestWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && (
               <Button type="button" variant="outline" size="sm" onClick={() => void reload(true)} disabled={loading} aria-label="새로고침" className="size-8 px-0">
                 <RefreshCw className="size-4" />
@@ -13635,15 +13587,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           </div>
         ) : null}
       </div>
-      {canonicalNotificationEnabled ? (
-        <NotificationControlPanel
-          workflowKey={notificationWorkflowKey}
-          presentation="dialog"
-          open={workspaceDataBelongsToCurrentViewer && canonicalNotificationOpen}
-          onOpenChange={setCanonicalNotificationOpen}
-        />
-      ) : null}
-
       {legacyNotificationEnabled && isWithdrawalWorkspace && (
         <WithdrawalNotificationSettingsDialog
           open={workspaceDataBelongsToCurrentViewer && withdrawalNotificationOpen}

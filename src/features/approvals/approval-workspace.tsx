@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react"
-import { Bell, Check, ClipboardCheck, FileCheck2, Paperclip, Pencil, RefreshCw, RotateCcw, Save, Send, Trash2, X } from "lucide-react"
+import { Check, ClipboardCheck, FileCheck2, Paperclip, Pencil, RefreshCw, RotateCcw, Save, Send, Trash2, X } from "lucide-react"
 import { useSearchParams } from "next/navigation"
 
 import { Badge } from "@/components/ui/badge"
@@ -23,7 +23,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { NotificationControlPanel, useNotificationControlPlaneAvailability } from "@/features/notifications/notification-control-panel"
 import { useAuth } from "@/providers/auth-provider"
 
 import {
@@ -456,8 +455,6 @@ function approvalLineOptions(
 export function ApprovalWorkspace() {
   const { user, canManageAll, isStaff, isAdmin } = useAuth()
   const searchParams = useSearchParams()
-  const notificationControlPlaneAvailability = useNotificationControlPlaneAvailability()
-  const canonicalNotificationEnabled = notificationControlPlaneAvailability.status === "enabled"
   const [data, setData] = useState<ApprovalWorkspaceData>({ schemaReady: true, requests: [], profiles: [], templates: [] })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -474,7 +471,6 @@ export function ApprovalWorkspace() {
   const [manualApproverTouched, setManualApproverTouched] = useState(false)
   const [editingRequestId, setEditingRequestId] = useState("")
   const [editingRequestStatus, setEditingRequestStatus] = useState<ApprovalStatus>("draft")
-  const [notificationDialogOpen, setNotificationDialogOpen] = useState(false)
   const [deepLinkedApprovalId, setDeepLinkedApprovalId] = useState("")
   const canApprove = canManageAll || isStaff
   const canDeleteClosedApprovals = isAdmin
@@ -1096,20 +1092,6 @@ export function ApprovalWorkspace() {
               ))}
             </div>
             <div className="flex items-center justify-end gap-2">
-              {canApprove && canonicalNotificationEnabled ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="size-8 px-0"
-                  onClick={() => setNotificationDialogOpen(true)}
-                  aria-label="전자결재 알림 설정"
-                  title="전자결재 알림 설정"
-                >
-                  <Bell className="size-4" aria-hidden="true" />
-                  <span className="sr-only">전자결재 알림 설정</span>
-                </Button>
-              ) : null}
               <Button type="button" variant="outline" size="sm" onClick={() => void reload()} disabled={loading}>
                 <RefreshCw />
                 새로고침
@@ -1150,14 +1132,6 @@ export function ApprovalWorkspace() {
           </div>
         </section>
       </div>
-      {canonicalNotificationEnabled ? (
-        <NotificationControlPanel
-          workflowKey="approvals"
-          presentation="dialog"
-          open={notificationDialogOpen}
-          onOpenChange={setNotificationDialogOpen}
-        />
-      ) : null}
     </div>
   )
 }

@@ -249,22 +249,15 @@ test("설정 조회와 저장은 서버가 멈춰도 제한시간 내 종료한�
   assert.equal(signals.every((signal) => signal?.aborted), true)
 })
 
-test("등록 알림 화면은 고객 자동 발송과 예약 N시간 전만 노출하고 내부 reminder rules를 숨긴다", async () => {
-  const [panel, component] = await Promise.all([
-    readFile(new URL("../src/features/notifications/notification-control-panel.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/features/notifications/registration-customer-reminder-settings.tsx", import.meta.url), "utf8").catch(() => ""),
-  ])
+test("등록 알림 화면은 백엔드 고정 알림톡 설정을 노출하지 않는다", async () => {
+  const panel = await readFile(
+    new URL("../src/features/notifications/notification-control-panel.tsx", import.meta.url),
+    "utf8",
+  )
 
-  assert.match(panel, /activeWorkflow === "registration"[\s\S]*RegistrationCustomerReminderSettings/)
-  assert.match(panel, /rule\.eventKey !== "registration\.appointment_reminder_due"/)
-  assert.doesNotMatch(panel, /현재 예약 알림이 발송되지 않습니다/)
-  assert.match(component, />자동 발송 ON\/OFF</)
-  assert.match(component, /예약[\s\S]*시간 전/)
-  assert.match(component, /activeKindsLabel/)
-  assert.match(component, /청강 리마인드/)
-  assert.match(component, /min=\{1\}/)
-  assert.match(component, /max=\{72\}/)
-  assert.doesNotMatch(component, /전날|당일|분 전|대상 선택/)
+  assert.doesNotMatch(panel, /RegistrationCustomerReminderSettings/)
+  assert.doesNotMatch(panel, /자동 발송 ON\/OFF/)
+  assert.match(panel, /selectEditableGoogleChatRules/)
 })
 
 test("발송 감사 문구는 자동은 자동 발송·시각, 수동은 요청 담당자·시각으로 읽힌다", async () => {

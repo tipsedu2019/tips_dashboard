@@ -54,7 +54,7 @@ import {
   type NotificationWorkflowKey,
 } from "./notification-control-plane-types"
 import { GOOGLE_CHAT_CONNECTION_LABELS } from "./notification-google-chat-catalog"
-import { RegistrationCustomerReminderSettings } from "./registration-customer-reminder-settings"
+import { selectEditableGoogleChatRules } from "./notification-google-chat-settings"
 import { buildNotificationTemplatePreview } from "./notification-template-preview"
 import { useNotificationNavigationGuard } from "./use-notification-navigation-guard"
 
@@ -510,13 +510,7 @@ function RulesView({
   onMentionChange,
   onEditTemplate,
 }: RulesViewProps) {
-  const visibleRules = React.useMemo(
-    () => rules.filter((rule) => (
-      rule.eventKey !== "registration.appointment_reminder_due"
-    )),
-    [rules],
-  )
-  const groups = React.useMemo(() => groupServerRules(visibleRules), [visibleRules])
+  const groups = React.useMemo(() => groupServerRules(rules), [rules])
   if (groups.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
@@ -1443,7 +1437,11 @@ export function NotificationControlPanel({
     }
   }, [])
 
-  const editingRule = snapshot?.rules.find(({ id }) => id === editingRuleId) ?? null
+  const editableRules = React.useMemo(
+    () => selectEditableGoogleChatRules(snapshot?.rules ?? []),
+    [snapshot?.rules],
+  )
+  const editingRule = editableRules.find(({ id }) => id === editingRuleId) ?? null
   const statusText = saveStatusLabel(savePhase, savedAt)
   const connectionsEditable = snapshot
     ? snapshot.connections.some((connection) => connection.editable)
@@ -1543,20 +1541,15 @@ export function NotificationControlPanel({
             presentation === "page" ? "grid-cols-3" : "grid-cols-2",
           )}
         >
-          <TabsTrigger value="rules" className="h-9">규칙 및 템플릿</TabsTrigger>
+          <TabsTrigger value="rules" className="h-9">Google Chat 규칙</TabsTrigger>
           <TabsTrigger value="deliveries" className="h-9">최근 전달</TabsTrigger>
           {presentation === "page" ? (
             <TabsTrigger value="connections" className="h-9">연결</TabsTrigger>
           ) : null}
         </TabsList>
         <TabsContent value="rules" className="mt-3">
-          {activeWorkflow === "registration" ? (
-            <div className="mb-3">
-              <RegistrationCustomerReminderSettings />
-            </div>
-          ) : null}
           <RulesView
-            rules={snapshot.rules}
+            rules={editableRules}
             draft={draft}
             connections={snapshot.connections}
             mentionSettings={mentionSettings}

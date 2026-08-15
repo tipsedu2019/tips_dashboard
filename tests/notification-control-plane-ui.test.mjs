@@ -112,7 +112,7 @@ test("멘션 토글은 기존 초안 저장과 별도 행 상태를 사용하고
   assert.doesNotMatch(serviceSource, /mentionEnabled|mention_enabled/)
 })
 
-test("공통 패널은 서버가 반환한 규칙만 데스크톱 표와 모바일 카드에 렌더한다", async () => {
+test("공통 패널은 Google Chat 규칙만 데스크톱 표와 모바일 카드에 렌더한다", async () => {
   const source = await readOptionalSource(
     "src/features/notifications/notification-control-panel.tsx",
   )
@@ -125,7 +125,8 @@ test("공통 패널은 서버가 반환한 규칙만 데스크톱 표와 모바�
   assert.match(source, /<tbody>/)
   assert.match(source, /group\.rules\.map/)
   assert.match(source, /data-notification-draft-source="shared"/)
-  assert.match(source, /규칙 및 템플릿/)
+  assert.match(source, /selectEditableGoogleChatRules/)
+  assert.match(source, /Google Chat 규칙/)
   assert.match(source, /내용 수정/)
   assert.doesNotMatch(source, /NOTIFICATION_EVENT_KEYS_BY_WORKFLOW/)
   assert.doesNotMatch(source, /NOTIFICATION_AUDIENCES_BY_WORKFLOW/)
@@ -205,14 +206,13 @@ test("등록 예약 알림은 세 한국어 시점 라벨을 데스크톱과 모
   assert.doesNotMatch(source, />\{rule\.ruleVariantKey\}</)
 })
 
-test("등록 예약 알림은 내부 규칙 대신 전용 자동 발송 설정을 사용한다", async () => {
+test("등록 예약 알림은 별도 SOLAPI 편집기 없이 Google Chat projection을 따른다", async () => {
   const source = await readOptionalSource(
     "src/features/notifications/notification-control-panel.tsx",
   )
 
-  assert.match(source, /registration\.appointment_reminder_due/)
-  assert.match(source, /rule\.eventKey !== "registration\.appointment_reminder_due"/)
-  assert.match(source, /RegistrationCustomerReminderSettings/)
+  assert.doesNotMatch(source, /rule\.eventKey !== "registration\.appointment_reminder_due"/)
+  assert.doesNotMatch(source, /RegistrationCustomerReminderSettings/)
   assert.doesNotMatch(source, /현재 예약 알림이 발송되지 않습니다/)
 })
 
@@ -528,8 +528,8 @@ test("전역 페이지는 redirect 없이 쿼리 탭과 한글 비활성·확인
   assert.match(pageSource, /NotificationSettingsWorkspace/)
   assert.match(panelSource, /NOTIFICATION_WORKFLOW_OPTIONS/)
   assert.match(workspaceSource, /NotificationControlPanel/)
-  assert.match(workspaceSource, /공통 알림 설정이 아직 준비되지 않았습니다/)
-  assert.match(workspaceSource, /알림 설정 준비 상태를 확인할 수 없습니다/)
+  assert.match(workspaceSource, /Google Chat 알림 설정이 아직 준비되지 않았습니다/)
+  assert.match(workspaceSource, /Google Chat 설정 준비 상태를 확인할 수 없습니다/)
   assert.match(panelSource, /알림 업무 선택/)
   assert.match(pageSource, /searchParams/)
   assert.match(pageSource, /section\s*===\s*"connections"/)
