@@ -716,11 +716,10 @@ export function RegistrationApplication({
         readOnly: !canManageObservation,
       } satisfies RegistrationTrackActionPermissions] as const
     }
-    const activeConsultation = getRegistrationActiveConsultation({
-      trackId: track.id,
-      consultations: detail.consultations,
-    })
-    return [track.id, getRegistrationActionPermissions({ viewerId, viewerRole, track, activeConsultation }) as RegistrationTrackActionPermissions]
+    const latestConsultation = detail.consultations
+      .filter((item) => item.trackId === track.id)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] || null
+    return [track.id, getRegistrationActionPermissions({ viewerId, viewerRole, track, activeConsultation: latestConsultation }) as RegistrationTrackActionPermissions]
   })), [detail.consultations, orderedTracks, viewerId, viewerRole])
   const trackStates = orderedTracks.map((track) => getRegistrationApplicationTrackState({
     track,
@@ -1385,14 +1384,15 @@ export function RegistrationApplication({
           />
         ) : null}
         {renderTrackActions(context, section, placementMode)}
-        {section === "consultation"
-          && context.latestConsultation
-          && (context.permissions.canManage || context.permissions.canCompleteConsultation) ? (
+        {context.latestConsultation
+          && (context.permissions.canManage || context.permissions.canCompleteConsultation || context.permissions.canEditConsultationResult) ? (
             <RegistrationConsultationOutcomeEditor
               key={`consultation:${context.latestConsultation.id}:${context.latestConsultation.updatedAt}`}
               subject={context.track.subject}
               consultation={context.latestConsultation}
-              editable={context.permissions.canCompleteConsultation}
+              track={context.track}
+              classOptions={classOptions}
+              editable={Boolean(context.permissions.canCompleteConsultation || context.permissions.canEditConsultationResult)}
               onReload={onReload}
               onWarning={onWarning}
               onDirtyChange={(dirty) => setDirty(`consultation:track-${context.track.id}`, dirty, `outcome:${context.latestConsultation?.id || context.track.id}`)}

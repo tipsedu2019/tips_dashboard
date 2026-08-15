@@ -738,7 +738,14 @@ export function getRegistrationAdmissionRecoveryDelayMs(updatedAt, now = Date.no
   return Math.max(0, updatedTime + 15 * 60 * 1000 - currentTime)
 }
 
-const REGISTRATION_CONSULTATION_OUTCOMES = new Set(["enrollment", "waiting", "not_registered"])
+export const REGISTRATION_CONSULTATION_OUTCOMES = Object.freeze([
+  "undecided",
+  "waiting",
+  "observation",
+  "enrollment",
+  "not_registered",
+])
+const REGISTRATION_CONSULTATION_OUTCOME_SET = new Set(REGISTRATION_CONSULTATION_OUTCOMES)
 
 export function getRegistrationActiveConsultation(input = {}) {
   const trackId = enrollmentText(input.trackId)
@@ -756,20 +763,30 @@ export function getRegistrationActiveConsultation(input = {}) {
 }
 
 export function getRegistrationConsultationOutcomeSaveState(input = {}) {
-  const savedOutcome = REGISTRATION_CONSULTATION_OUTCOMES.has(String(input.savedOutcome || ""))
+  const savedOutcome = REGISTRATION_CONSULTATION_OUTCOME_SET.has(String(input.savedOutcome || ""))
     ? String(input.savedOutcome)
     : ""
-  const draftOutcome = REGISTRATION_CONSULTATION_OUTCOMES.has(String(input.draftOutcome || ""))
+  const draftOutcome = REGISTRATION_CONSULTATION_OUTCOME_SET.has(String(input.draftOutcome || ""))
     ? String(input.draftOutcome)
     : ""
   const savedNote = enrollmentText(input.savedNote)
   const draftNote = enrollmentText(input.draftNote)
-  const editable = Boolean(input.canCompleteConsultation)
+  const editable = Boolean(input.canEdit ?? input.canCompleteConsultation)
+  const waitingKind = enrollmentText(input.waitingKind)
+  const classId = enrollmentText(input.classId)
+  const blockers = []
   const dirty = draftOutcome !== savedOutcome || draftNote !== savedNote
+  if (dirty && draftOutcome === "waiting" && savedOutcome !== "waiting") {
+    if (!waitingKind) blockers.push("대기 유형")
+    else if (waitingKind === "current_class" && !classId) blockers.push("대기 반")
+  } else if (dirty && (waitingKind || classId)) {
+    blockers.push("대기 정보")
+  }
   return {
     editable,
     dirty,
-    canSave: editable && dirty && Boolean(draftOutcome),
+    ...(blockers.length > 0 ? { blockers } : {}),
+    canSave: editable && dirty && Boolean(draftOutcome) && blockers.length === 0,
     label: dirty ? "상담 결과 저장" : savedOutcome ? "저장됨" : "상담 결과를 선택하세요",
   }
 }
@@ -777,18 +794,22 @@ export function getRegistrationConsultationOutcomeSaveState(input = {}) {
 export function getRegistrationActionPermissions(input = {}) {
   const canManage = ["admin", "staff"].includes(String(input.viewerRole || ""))
   const consultation = input.activeConsultation
-  const canCompleteOwnConsultation = Boolean(
+  const ownsConsultation = Boolean(
     ["admin", "staff", "teacher"].includes(String(input.viewerRole || ""))
     && input.viewerId
     && input.track?.directorProfileId === input.viewerId
     && consultation?.trackId === input.track?.id
     && consultation?.directorProfileId === input.viewerId
+  )
+  const canCompleteOwnConsultation = Boolean(
+    ownsConsultation
     && ((consultation?.mode === "phone" && consultation?.status === "waiting")
       || (consultation?.mode === "visit" && consultation?.status === "scheduled")),
   )
   return {
     canManage,
     canCompleteConsultation: canCompleteOwnConsultation,
+    ...(consultation?.status === "completed" ? { canEditConsultationResult: ownsConsultation } : {}),
     readOnly: !canManage,
   }
 }

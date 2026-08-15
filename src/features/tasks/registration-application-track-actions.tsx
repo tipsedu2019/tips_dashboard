@@ -45,7 +45,7 @@ import {
   reopenRegistrationTrack,
   resolveRegistrationMigrationReview,
   routeRegistrationInquiry,
-  saveRegistrationConsultationDetails,
+  saveRegistrationConsultationResult,
   saveRegistrationWaitingDetails,
   type OpsRegistrationCaseDetail,
   type OpsRegistrationAppointment,
@@ -656,6 +656,7 @@ export type RegistrationMigrationTrackState = {
 export type RegistrationTrackActionPermissions = {
   canManage: boolean
   canCompleteConsultation: boolean
+  canEditConsultationResult?: boolean
   readOnly: boolean
 }
 
@@ -695,6 +696,14 @@ const WAITING_KIND_OPTIONS: Array<{ value: Exclude<RegistrationWaitingKind, "">;
   { value: "current_term_opening", label: "현재 학기 개강반 대기" },
   { value: "next_term_opening", label: "다음 학기 개강반 대기" },
 ]
+
+const CONSULTATION_OUTCOME_OPTIONS = [
+  { value: "undecided", label: "미정" },
+  { value: "waiting", label: "대기" },
+  { value: "observation", label: "청강" },
+  { value: "enrollment", label: "등록" },
+  { value: "not_registered", label: "미등록" },
+] as const
 
 const MIGRATION_GROUPS = [
   {
@@ -1281,6 +1290,8 @@ export function RegistrationEnrollmentTrackEditor({
 export type RegistrationConsultationOutcomeEditorProps = {
   subject: RegistrationSubject
   consultation: OpsRegistrationConsultation
+  track: OpsRegistrationTrackSummary
+  classOptions: OpsClassOption[]
   editable: boolean
   onReload: () => void | Promise<void>
   onWarning: (message: string) => void
@@ -1290,13 +1301,17 @@ export type RegistrationConsultationOutcomeEditorProps = {
 export function RegistrationConsultationOutcomeEditor({
   subject,
   consultation,
+  track,
+  classOptions,
   editable,
   onReload,
   onWarning,
   onDirtyChange,
 }: RegistrationConsultationOutcomeEditorProps): JSX.Element {
-  const [outcome, setOutcome] = useState<"" | "enrollment" | "waiting" | "not_registered">(consultation.outcome || "")
+  const [outcome, setOutcome] = useState<"" | "undecided" | "waiting" | "observation" | "enrollment" | "not_registered">(consultation.outcome || "")
   const [note, setNote] = useState(consultation.note || "")
+  const [waitingKind, setWaitingKind] = useState<RegistrationWaitingKind>(track.waitingDetailKind || track.waitingKind || "")
+  const [classId, setClassId] = useState("")
   const [saving, setSaving] = useState(false)
   const [refreshPending, setRefreshPending] = useState(false)
   const submissionKeys = useSubmissionKeys()
@@ -1305,27 +1320,37 @@ export function RegistrationConsultationOutcomeEditor({
     draftOutcome: outcome,
     savedNote: consultation.note,
     draftNote: note,
-    canCompleteConsultation: editable,
+    waitingKind,
+    classId,
+    canEdit: editable,
   })
   useOwnedDirtyState(!refreshPending && saveState.editable && saveState.dirty, onDirtyChange)
 
   async function submit() {
     if (!outcome || !saveState.canSave || saving || refreshPending) return
-    const normalizedDraft = JSON.stringify({ consultationId: consultation.id, outcome, note })
-    const kind = "consultation-details"
+    const normalizedDraft = JSON.stringify({ consultationId: consultation.id, outcome, note, waitingKind, classId, revision: track.workflowRevision })
+    const kind = "consultation-result-v2"
     const requestKey = submissionKeys.getOrCreate(kind, normalizedDraft)
     setSaving(true)
     try {
-      await saveRegistrationConsultationDetails({
+      await saveRegistrationConsultationResult({
         consultationId: consultation.id,
-        status: "completed",
         outcome,
         note,
+        waitingKind,
+        classId,
+        expectedWorkflowRevision: track.workflowRevision,
         requestKey,
       })
     } catch (error) {
       const message = errorMessage(error, "상담 결과를 저장하지 못했습니다.")
-      onWarning(message.includes("registration_access_denied") ? "상담 결과를 저장할 권한이 없습니다." : message)
+      onWarning(message.includes("registration_access_denied")
+        ? "상담 결과를 저장할 권한이 없습니다."
+        : message.includes("registration_observation_transition_requires_action")
+          ? "청강을 취소 또는 미진행으로 마감한 뒤 상담 결과를 변경해 주세요."
+          : message.includes("registration_consultation_result_refresh_required")
+            ? "상담 결과가 변경되었습니다. 최신 내용을 불러온 뒤 다시 저장해 주세요."
+            : message)
       setSaving(false)
       return
     }
@@ -1371,12 +1396,21 @@ export function RegistrationConsultationOutcomeEditor({
         <>
           <fieldset className="grid gap-2">
             <legend className="text-sm font-medium">상담 결과</legend>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <Button type="button" aria-label={`${subject} 상담 결과 등록`} variant={outcome === "enrollment" ? "default" : "outline"} aria-pressed={outcome === "enrollment"} disabled={saving || !saveState.editable} onClick={() => setOutcome("enrollment")}>등록</Button>
-              <Button type="button" aria-label={`${subject} 상담 결과 대기`} variant={outcome === "waiting" ? "default" : "outline"} aria-pressed={outcome === "waiting"} disabled={saving || !saveState.editable} onClick={() => setOutcome("waiting")}>대기</Button>
-              <Button type="button" aria-label={`${subject} 상담 결과 미등록`} className="col-span-2 sm:col-span-1" variant={outcome === "not_registered" ? "default" : "outline"} aria-pressed={outcome === "not_registered"} disabled={saving || !saveState.editable} onClick={() => setOutcome("not_registered")}>미등록</Button>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+              {CONSULTATION_OUTCOME_OPTIONS.map((option) => (
+                <Button key={option.value} type="button" aria-label={`${subject} 상담 결과 ${option.label}`} variant={outcome === option.value ? "default" : "outline"} aria-pressed={outcome === option.value} disabled={saving || !saveState.editable} onClick={() => {
+                  setOutcome(option.value)
+                  if (option.value !== "waiting") { setWaitingKind(""); setClassId("") }
+                }}>{option.label}</Button>
+              ))}
             </div>
           </fieldset>
+          {outcome === "waiting" ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <RegistrationSelect aria-label={`${subject} 대기 유형`} value={waitingKind} placeholder="대기 유형 선택" onValueChange={(value) => { setWaitingKind(value as RegistrationWaitingKind); if (value !== "current_class") setClassId("") }} options={WAITING_KIND_OPTIONS} disabled={saving || !saveState.editable} />
+              {waitingKind === "current_class" ? <SubjectClassSelect subject={subject} value={classId} onChange={setClassId} classOptions={classOptions} disabled={saving || !saveState.editable} /> : null}
+            </div>
+          ) : null}
           <div className="grid gap-2">
             <Label htmlFor={`${subject}-consultation-note`}>상담 내용</Label>
             <Textarea

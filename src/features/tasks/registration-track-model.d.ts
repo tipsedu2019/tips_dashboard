@@ -439,16 +439,29 @@ export function getRegistrationAdmissionRecoveryDelayMs(
   now?: number,
 ): number | null
 
+export type RegistrationConsultationOutcome =
+  | "undecided"
+  | "waiting"
+  | "observation"
+  | "enrollment"
+  | "not_registered"
+
+export const REGISTRATION_CONSULTATION_OUTCOMES: readonly RegistrationConsultationOutcome[]
+
 export function getRegistrationConsultationOutcomeSaveState(input?: {
-  savedOutcome?: "" | "enrollment" | "waiting" | "not_registered" | null
-  draftOutcome?: "" | "enrollment" | "waiting" | "not_registered" | null
+  savedOutcome?: "" | RegistrationConsultationOutcome | null
+  draftOutcome?: "" | RegistrationConsultationOutcome | null
   savedNote?: string | null
   draftNote?: string | null
+  waitingKind?: "" | "current_class" | "current_term_opening" | "next_term_opening" | null
+  classId?: string | null
+  canEdit?: boolean
   canCompleteConsultation?: boolean
 }): {
   editable: boolean
   dirty: boolean
   canSave: boolean
+  blockers: string[]
   label: "저장됨" | "상담 결과 저장" | "상담 결과를 선택하세요"
 }
 
@@ -469,6 +482,7 @@ export function getRegistrationActionPermissions(
 ): {
   canManage: boolean
   canCompleteConsultation: boolean
+  canEditConsultationResult: boolean
   readOnly: boolean
 }
 

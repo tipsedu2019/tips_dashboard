@@ -295,7 +295,7 @@ export type OpsRegistrationConsultation = {
   readyAt: string | null
   readySource: RegistrationPhoneReadySource | null
   completedAt: string | null
-  outcome: "enrollment" | "waiting" | "not_registered" | null
+  outcome: "undecided" | "waiting" | "observation" | "enrollment" | "not_registered" | null
   note: string | null
   createdAt: string
   updatedAt: string
@@ -565,7 +565,7 @@ export type RegistrationConsultationDetailsSaveResponse = {
   consultationId: string
   trackId: string
   status: "waiting" | "scheduled" | "completed" | "canceled"
-  outcome: "" | "enrollment" | "waiting" | "not_registered"
+  outcome: "" | "undecided" | "waiting" | "observation" | "enrollment" | "not_registered"
   note: string | null
 }
 
@@ -1408,7 +1408,7 @@ function mapConsultation(row: Row): OpsRegistrationConsultation {
     readyAt: nullableText(value(row, "ready_at", "readyAt")),
     readySource: phoneReadySource(value(row, "ready_source", "readySource")),
     completedAt: nullableText(value(row, "completed_at", "completedAt")),
-    outcome: (["enrollment", "waiting", "not_registered"].includes(outcome || "") ? outcome : null) as OpsRegistrationConsultation["outcome"],
+    outcome: (["undecided", "waiting", "observation", "enrollment", "not_registered"].includes(outcome || "") ? outcome : null) as OpsRegistrationConsultation["outcome"],
     note: nullableText(value(row, "note")),
     createdAt: text(value(row, "created_at", "createdAt")),
     updatedAt: text(value(row, "updated_at", "updatedAt")),
@@ -3036,7 +3036,7 @@ export function createRegistrationTrackService(
     const status = text(value(result, "status"))
     const outcome = text(value(result, "outcome"))
     if (!( ["waiting", "scheduled", "completed", "canceled"] as const).includes(status as RegistrationConsultationDetailsSaveResponse["status"])
-      || !( ["", "enrollment", "waiting", "not_registered"] as const).includes(outcome as RegistrationConsultationDetailsSaveResponse["outcome"])) {
+      || !( ["", "enrollment", "waiting", "not_registered"] as const).includes(outcome as "" | "enrollment" | "waiting" | "not_registered")) {
       throw new Error("registration_consultation_details_response_invalid")
     }
     return {
@@ -3045,6 +3045,40 @@ export function createRegistrationTrackService(
       status: status as RegistrationConsultationDetailsSaveResponse["status"],
       outcome: outcome as RegistrationConsultationDetailsSaveResponse["outcome"],
       note: nullableText(value(result, "note")),
+    }
+  }
+
+  async function saveRegistrationConsultationResult(input: {
+    consultationId: string
+    outcome: "undecided" | "waiting" | "observation" | "enrollment" | "not_registered"
+    note: string
+    waitingKind: RegistrationWaitingKind
+    classId: string
+    expectedWorkflowRevision: number
+    requestKey: string
+  }) {
+    const result = await callRpc<Row>("save_registration_consultation_result_v2", {
+      p_consultation_id: input.consultationId,
+      p_outcome: input.outcome,
+      p_note: nullableText(input.note),
+      p_waiting_kind: input.outcome === "waiting" ? input.waitingKind || null : null,
+      p_class_id: input.outcome === "waiting" ? normalizeUuid(input.classId) : null,
+      p_expected_workflow_revision: input.expectedWorkflowRevision,
+      p_request_key: requireRequestKey(input.requestKey),
+    })
+    const outcome = text(value(result, "outcome"))
+    if (!(["undecided", "waiting", "observation", "enrollment", "not_registered"] as const).includes(outcome as never)) {
+      throw new Error("registration_consultation_result_response_invalid")
+    }
+    return {
+      consultationId: text(value(result, "consultation_id", "consultationId")),
+      trackId: text(value(result, "track_id", "trackId")),
+      outcome,
+      note: nullableText(value(result, "note")),
+      workflowStatus: text(value(result, "workflow_status", "workflowStatus")),
+      workflowRevision: numberValue(value(result, "workflow_revision", "workflowRevision")),
+      waitingKind: nullableText(value(result, "waiting_kind", "waitingKind")),
+      preparedEnrollmentId: nullableText(value(result, "prepared_enrollment_id", "preparedEnrollmentId")),
     }
   }
 
@@ -3483,6 +3517,7 @@ export function createRegistrationTrackService(
     closeRegistrationLevelTestTrack,
     completeRegistrationConsultation,
     saveRegistrationConsultationDetails,
+    saveRegistrationConsultationResult,
     saveRegistrationPhoneConsultation,
     setRegistrationWorkflowStatus,
     transitionRegistrationWaiting,
@@ -3863,6 +3898,12 @@ export function saveRegistrationConsultationDetails(
   const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationConsultationDetailsSaveResponse>("saveRegistrationConsultationDetails", input)
   if (fixture) return fixture
   return defaultRegistrationTrackService.saveRegistrationConsultationDetails(input)
+}
+
+export function saveRegistrationConsultationResult(
+  input: Parameters<typeof defaultRegistrationTrackService.saveRegistrationConsultationResult>[0],
+) {
+  return defaultRegistrationTrackService.saveRegistrationConsultationResult(input)
 }
 
 export function saveRegistrationPhoneConsultation(
