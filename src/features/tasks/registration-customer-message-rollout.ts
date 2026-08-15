@@ -37,15 +37,24 @@ export async function runRegistrationCustomerMessageRolloutAction(
   }
 
   if (input.action === "record_receipt_and_live") {
-    await client.recordLiveTestReceipt({
+    const receipt = await client.recordLiveTestReceipt({
       messageKind: input.messageKind,
       messageId: input.messageId,
       receivedAt: input.receivedAt,
       requestKey: createRequestKey(),
     })
+    const activationEvidenceId = "evidenceId" in receipt
+      && typeof receipt.evidenceId === "string"
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(receipt.evidenceId)
+      ? receipt.evidenceId
+      : null
+    if (!activationEvidenceId) {
+      throw new Error("registration_customer_solapi_activation_evidence_missing")
+    }
     return client.setActivation({
       messageKind: input.messageKind,
       mode: "live",
+      activationEvidenceId,
       requestKey: createRequestKey(),
     })
   }

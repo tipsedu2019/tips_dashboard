@@ -12,6 +12,12 @@ select has_table(
 );
 
 select has_table(
+  'dashboard_private',
+  'registration_customer_solapi_admin_mutations',
+  'private task-independent SOLAPI admin idempotency table exists'
+);
+
+select has_table(
   'public',
   'ops_registration_customer_messages',
   'customer message outbox exists'
@@ -272,7 +278,9 @@ select is_empty($$
       ('public', 'ops_registration_customer_message_previews'),
       ('public', 'ops_registration_customer_messages'),
       ('dashboard_private', 'registration_customer_solapi_template_receipts'),
-      ('dashboard_private', 'registration_customer_solapi_activation')
+      ('dashboard_private', 'registration_customer_solapi_activation'),
+      ('dashboard_private', 'registration_customer_solapi_activation_evidence'),
+      ('dashboard_private', 'registration_customer_solapi_admin_mutations')
   )
   select expected.table_schema, expected.table_name
   from expected
@@ -283,7 +291,7 @@ select is_empty($$
    and relation.relname = expected.table_name
   where relation.oid is null
      or not relation.relrowsecurity
-$$, 'all four customer message tables have row level security');
+$$, 'all six customer message tables have row level security');
 
 select is(
   (
@@ -293,7 +301,9 @@ select is(
       'public.ops_registration_customer_message_previews'::regclass,
       'public.ops_registration_customer_messages'::regclass,
       'dashboard_private.registration_customer_solapi_template_receipts'::regclass,
-      'dashboard_private.registration_customer_solapi_activation'::regclass
+      'dashboard_private.registration_customer_solapi_activation'::regclass,
+      'dashboard_private.registration_customer_solapi_activation_evidence'::regclass,
+      'dashboard_private.registration_customer_solapi_admin_mutations'::regclass
     )
   ),
   0::bigint,
@@ -306,7 +316,9 @@ select is_empty($$
       ('public.ops_registration_customer_message_previews'),
       ('public.ops_registration_customer_messages'),
       ('dashboard_private.registration_customer_solapi_template_receipts'),
-      ('dashboard_private.registration_customer_solapi_activation')
+      ('dashboard_private.registration_customer_solapi_activation'),
+      ('dashboard_private.registration_customer_solapi_activation_evidence'),
+      ('dashboard_private.registration_customer_solapi_admin_mutations')
   ), api_roles(role_name) as (
     values ('anon'), ('authenticated'), ('service_role')
   )
@@ -352,10 +364,12 @@ select results_eq(
       ('admission_application'::text, 'off'::text),
       ('appointment_reminder'::text, 'off'::text),
       ('level_test_booking'::text, 'off'::text),
+      ('observation_booking'::text, 'off'::text),
+      ('observation_reminder'::text, 'off'::text),
       ('visit_consultation_booking'::text, 'off'::text),
       ('waiting_notice'::text, 'off'::text)
   $$,
-  'five activation rows default off'
+  'seven activation rows default off'
 );
 
 select is(
@@ -364,8 +378,7 @@ select is(
     from dashboard_private.registration_customer_solapi_activation
     where verification_task_id is not null
        or verification_recipient_hash is not null
-       or live_test_message_id is not null
-       or live_test_confirmed_at is not null
+       or activation_evidence_id is not null
        or updated_by is not null
   ),
   0::bigint,
@@ -699,7 +712,8 @@ select has_function('public', 'claim_registration_customer_message_v1', array['u
 select has_function('public', 'mark_registration_customer_message_attempt_started_v1', array['uuid', 'uuid', 'uuid', 'jsonb']);
 select has_function('public', 'release_registration_customer_message_pre_send_claim_v1', array['uuid', 'uuid', 'text']);
 select has_function('public', 'release_registration_customer_message_pre_send_claim_admin_v1', array['uuid', 'uuid', 'text', 'text']);
-select has_function('public', 'finalize_registration_customer_message_v1', array['uuid', 'uuid', 'text', 'jsonb']);
+select has_function('public', 'finalize_registration_customer_message_v1', array['uuid', 'uuid', 'text', 'jsonb', 'text']);
+select hasnt_function('public', 'finalize_registration_customer_message_v1', array['uuid', 'uuid', 'text', 'jsonb']);
 select has_function('public', 'list_registration_customer_messages_v1', array['uuid', 'text', 'uuid', 'integer']);
 select has_function('public', 'record_registration_customer_message_provider_check_v1', array['uuid', 'uuid', 'text', 'jsonb', 'text']);
 select has_function('public', 'reconcile_registration_customer_message_v1', array['uuid', 'uuid', 'text', 'jsonb', 'text', 'text']);
@@ -710,7 +724,7 @@ select function_privs_are('public', 'claim_registration_customer_message_v1', ar
 select function_privs_are('public', 'mark_registration_customer_message_attempt_started_v1', array['uuid', 'uuid', 'uuid', 'jsonb'], 'service_role', array['EXECUTE']);
 select function_privs_are('public', 'release_registration_customer_message_pre_send_claim_v1', array['uuid', 'uuid', 'text'], 'service_role', array['EXECUTE']);
 select function_privs_are('public', 'release_registration_customer_message_pre_send_claim_admin_v1', array['uuid', 'uuid', 'text', 'text'], 'service_role', array['EXECUTE']);
-select function_privs_are('public', 'finalize_registration_customer_message_v1', array['uuid', 'uuid', 'text', 'jsonb'], 'service_role', array['EXECUTE']);
+select function_privs_are('public', 'finalize_registration_customer_message_v1', array['uuid', 'uuid', 'text', 'jsonb', 'text'], 'service_role', array['EXECUTE']);
 select function_privs_are('public', 'list_registration_customer_messages_v1', array['uuid', 'text', 'uuid', 'integer'], 'service_role', array['EXECUTE']);
 select function_privs_are('public', 'record_registration_customer_message_provider_check_v1', array['uuid', 'uuid', 'text', 'jsonb', 'text'], 'service_role', array['EXECUTE']);
 select function_privs_are('public', 'reconcile_registration_customer_message_v1', array['uuid', 'uuid', 'text', 'jsonb', 'text', 'text'], 'service_role', array['EXECUTE']);
@@ -1983,7 +1997,8 @@ values (
       'statusMessage', 'accepted',
       'observedAt', pg_catalog.clock_timestamp()::text,
       'requestKeyMatched', true
-    )
+    ),
+    repeat('f', 64)
   )
 );
 reset role;
@@ -2091,7 +2106,8 @@ values (
       'statusMessage', 'accepted',
       'observedAt', '2026-08-05T12:00:00+09:00',
       'requestKeyMatched', true
-    )
+    ),
+    repeat('f', 64)
   )
 );
 reset role;
@@ -2112,7 +2128,8 @@ values (
       'statusMessage', 'accepted',
       'observedAt', '2026-08-05T03:00:00+00:00',
       'requestKeyMatched', true
-    )
+    ),
+    repeat('f', 64)
   )
 );
 reset role;
@@ -2178,7 +2195,8 @@ select throws_ok(
         'statusCode', '202', 'statusMessage', 'accepted',
         'observedAt', pg_catalog.clock_timestamp()::text,
         'requestKeyMatched', true, 'rawBody', 'forbidden'
-      )
+      ),
+      repeat('f', 64)
     )$$,
   '22023', 'registration_customer_message_provider_evidence_invalid',
   'provider evidence rejects raw or unexpected keys'
@@ -2250,7 +2268,8 @@ values (
       'statusCode', 'timeout', 'statusMessage', 'lookup required',
       'observedAt', pg_catalog.clock_timestamp()::text,
       'requestKeyMatched', true
-    )
+    ),
+    repeat('f', 64)
   )
 );
 
@@ -2313,7 +2332,8 @@ values (
       'statusCode', '400', 'statusMessage', 'rejected',
       'observedAt', pg_catalog.clock_timestamp()::text,
       'requestKeyMatched', true
-    )
+    ),
+    repeat('f', 64)
   )
 );
 reset role;
@@ -2665,7 +2685,8 @@ values (
       'statusCode', 'timeout', 'statusMessage', 'lookup required',
       'observedAt', pg_catalog.clock_timestamp()::text,
       'requestKeyMatched', true
-    )
+    ),
+    repeat('f', 64)
   )
 );
 select throws_ok(
@@ -2892,8 +2913,7 @@ update dashboard_private.registration_customer_solapi_activation
 set mode = 'off',
     verification_task_id = null,
     verification_recipient_hash = null,
-    live_test_message_id = null,
-    live_test_confirmed_at = null,
+    activation_evidence_id = null,
     updated_by = null;
 delete from dashboard_private.registration_customer_solapi_template_receipts;
 
@@ -3081,6 +3101,7 @@ select throws_ok(
       'waiting_notice', 'live',
       pg_catalog.jsonb_build_object(
         'requestKey', '95000000-0000-4000-8000-000000000801',
+        'activationEvidenceId', '95000000-0000-4000-8000-000000000999',
         'templateId', 'template-waiting', 'pfId', 'pf-waiting',
         'catalogChecksum', repeat('c', 64)
       )
@@ -3227,6 +3248,7 @@ select throws_ok(
       'level_test_booking', 'live',
       pg_catalog.jsonb_build_object(
         'requestKey', '95000000-0000-4000-8000-000000000811',
+        'activationEvidenceId', '95000000-0000-4000-8000-000000000999',
         'templateId', 'template-level', 'pfId', 'pf-level',
         'catalogChecksum', repeat('c', 64)
       )
@@ -3508,6 +3530,7 @@ values (
     '95000000-0000-4000-8000-000000000001', 'waiting_notice', 'live',
     pg_catalog.jsonb_build_object(
       'requestKey', '95000000-0000-4000-8000-000000000840',
+      'activationEvidenceId', (select response ->> 'evidenceId' from registration_solapi_rpc_results where label = 'waiting live receipt'),
       'templateId', 'template-waiting', 'pfId', 'pf-waiting',
       'catalogChecksum', repeat('c', 64)
     )
@@ -3520,6 +3543,7 @@ values (
     '95000000-0000-4000-8000-000000000001', 'waiting_notice', 'live',
     pg_catalog.jsonb_build_object(
       'requestKey', '95000000-0000-4000-8000-000000000840',
+      'activationEvidenceId', (select response ->> 'evidenceId' from registration_solapi_rpc_results where label = 'waiting live receipt'),
       'templateId', 'template-waiting', 'pfId', 'pf-waiting',
       'catalogChecksum', repeat('c', 64)
     )
@@ -3609,7 +3633,7 @@ select is(
 );
 select ok(
   (
-    select live_test_message_id is not null and live_test_confirmed_at is not null
+    select activation_evidence_id is not null
     from dashboard_private.registration_customer_solapi_activation
     where message_kind = 'waiting_notice'
   ),
@@ -3651,6 +3675,7 @@ values (
     '95000000-0000-4000-8000-000000000001', 'waiting_notice', 'live',
     pg_catalog.jsonb_build_object(
       'requestKey', '95000000-0000-4000-8000-000000000844',
+      'activationEvidenceId', (select response ->> 'evidenceId' from registration_solapi_rpc_results where label = 'waiting live receipt'),
       'templateId', 'template-waiting', 'pfId', 'pf-waiting',
       'catalogChecksum', repeat('c', 64)
     )

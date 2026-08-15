@@ -7,6 +7,7 @@ import {
 
 const TASK_ID = "96000000-0000-4000-8000-000000000001"
 const MESSAGE_ID = "96000000-0000-4000-8000-000000000002"
+const EVIDENCE_ID = "96000000-0000-4000-8000-000000000005"
 const REQUEST_KEYS = [
   "96000000-0000-4000-8000-000000000003",
   "96000000-0000-4000-8000-000000000004",
@@ -27,7 +28,7 @@ function clientWithCalls() {
       },
       async recordLiveTestReceipt(input) {
         calls.push({ action: "receipt", ...input })
-        return { updatedAt: input.receivedAt }
+        return { evidenceId: EVIDENCE_ID, updatedAt: input.receivedAt }
       },
     },
   }
@@ -81,9 +82,29 @@ test("live transition records the user-confirmed receipt before activation", asy
       action: "activation",
       messageKind: "admission_application",
       mode: "live",
+      activationEvidenceId: EVIDENCE_ID,
       requestKey: REQUEST_KEYS[1],
     },
   ])
+})
+
+test("live transition stops before activation when the receipt has no evidence identity", async () => {
+  const { client, calls } = clientWithCalls()
+  client.recordLiveTestReceipt = async (input) => {
+    calls.push({ action: "receipt", ...input })
+    return { updatedAt: input.receivedAt }
+  }
+
+  await assert.rejects(
+    runRegistrationCustomerMessageRolloutAction(client, {
+      action: "record_receipt_and_live",
+      messageKind: "waiting_notice",
+      messageId: MESSAGE_ID,
+      receivedAt: "2026-08-07T00:02:00.000Z",
+    }, () => REQUEST_KEYS[0]),
+    { message: "registration_customer_solapi_activation_evidence_missing" },
+  )
+  assert.equal(calls.filter((call) => call.action === "activation").length, 0)
 })
 
 test("turning a kind off performs no provider preflight or receipt mutation", async () => {

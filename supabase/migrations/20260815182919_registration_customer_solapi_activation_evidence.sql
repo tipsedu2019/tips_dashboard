@@ -45,6 +45,21 @@ create index registration_customer_solapi_activation_evidence_kind_verified_idx
     verified_at desc
   );
 
+create unique index registration_customer_solapi_activation_evidence_provider_message_idx
+  on dashboard_private.registration_customer_solapi_activation_evidence(provider_message_id);
+
+create table dashboard_private.registration_customer_solapi_admin_mutations (
+  actor_id uuid not null references public.profiles(id) on delete restrict,
+  request_key text not null check (
+    request_key ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+  ),
+  mutation_type text not null check (nullif(pg_catalog.btrim(mutation_type), '') is not null),
+  target_fingerprint jsonb not null check (pg_catalog.jsonb_typeof(target_fingerprint) = 'object'),
+  response_payload jsonb not null check (pg_catalog.jsonb_typeof(response_payload) = 'object'),
+  created_at timestamptz not null default pg_catalog.clock_timestamp(),
+  primary key (actor_id, request_key)
+);
+
 alter table public.ops_registration_customer_messages
   add column provider_payload_checksum text,
   add constraint ops_registration_customer_messages_provider_payload_checksum_check
@@ -112,9 +127,553 @@ alter table dashboard_private.registration_customer_solapi_activation
 
 alter table dashboard_private.registration_customer_solapi_activation_evidence
   owner to postgres;
+alter table dashboard_private.registration_customer_solapi_admin_mutations
+  owner to postgres;
 alter table dashboard_private.registration_customer_solapi_activation_evidence
+  enable row level security;
+alter table dashboard_private.registration_customer_solapi_admin_mutations
   enable row level security;
 revoke all on table dashboard_private.registration_customer_solapi_activation_evidence
   from public, anon, authenticated, service_role;
+revoke all on table dashboard_private.registration_customer_solapi_admin_mutations
+  from public, anon, authenticated, service_role;
+
+drop function public.finalize_registration_customer_message_v1(uuid, uuid, text, jsonb);
+
+create function public.finalize_registration_customer_message_v1(
+  p_message_id uuid,
+  p_dispatch_token uuid,
+  p_result text,
+  p_provider_result jsonb,
+  p_provider_payload_checksum text
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+set timezone = 'UTC'
+as $$
+declare
+  v_message public.ops_registration_customer_messages%rowtype;
+  v_response jsonb;
+begin
+  if (select auth.role()) <> 'service_role' then
+    raise exception 'registration_customer_message_access_denied' using errcode = '42501';
+  end if;
+  if p_result = 'accepted' and (
+      p_provider_payload_checksum is null
+      or p_provider_payload_checksum !~ '^[a-f0-9]{64}$'
+    ) then
+    raise exception 'registration_customer_message_provider_payload_checksum_invalid'
+      using errcode = '22023';
+  end if;
+  if p_provider_payload_checksum is not null
+    and p_provider_payload_checksum !~ '^[a-f0-9]{64}$' then
+    raise exception 'registration_customer_message_provider_payload_checksum_invalid'
+      using errcode = '22023';
+  end if;
+
+  select message.*
+  into v_message
+  from public.ops_registration_customer_messages message
+  where message.id = p_message_id
+  for update;
+  if not found then
+    raise exception 'registration_customer_message_not_found' using errcode = 'P0002';
+  end if;
+  perform dashboard_private.registration_customer_message_assert_actor_v1(
+    v_message.confirmed_by,
+    v_message.task_id,
+    'send'
+  );
+  if v_message.message_kind in ('observation_booking', 'observation_reminder') then
+    perform dashboard_private.registration_customer_message_assert_stored_observation_v1(v_message);
+  end if;
+  if v_message.provider_payload_checksum is not null
+    and v_message.provider_payload_checksum is distinct from p_provider_payload_checksum then
+    raise exception 'registration_customer_message_finalize_conflict' using errcode = '40001';
+  end if;
+
+  v_response := dashboard_private.finalize_registration_customer_message_pre_observation_v1(
+    p_message_id,
+    p_dispatch_token,
+    p_result,
+    p_provider_result
+  );
+
+  update public.ops_registration_customer_messages message
+  set provider_payload_checksum = p_provider_payload_checksum
+  where message.id = p_message_id
+    and message.provider_payload_checksum is not distinct from v_message.provider_payload_checksum;
+  if not found then
+    raise exception 'registration_customer_message_finalize_conflict' using errcode = '40001';
+  end if;
+  return v_response;
+end;
+$$;
+
+alter function public.finalize_registration_customer_message_v1(uuid, uuid, text, jsonb, text)
+  owner to postgres;
+revoke all on function public.finalize_registration_customer_message_v1(uuid, uuid, text, jsonb, text)
+  from public, anon, authenticated, service_role;
+grant execute on function public.finalize_registration_customer_message_v1(uuid, uuid, text, jsonb, text)
+  to service_role;
+
+create or replace function dashboard_private.registration_customer_solapi_activation_result_v1(
+  p_message_kind text
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_activation dashboard_private.registration_customer_solapi_activation%rowtype;
+begin
+  select activation.*
+  into strict v_activation
+  from dashboard_private.registration_customer_solapi_activation activation
+  where activation.message_kind = p_message_kind;
+  return pg_catalog.jsonb_build_object(
+    'messageKind', v_activation.message_kind,
+    'activationMode', v_activation.mode,
+    'updatedAt', v_activation.updated_at,
+    'liveTestRecorded', v_activation.activation_evidence_id is not null
+  );
+end;
+$$;
+
+alter function dashboard_private.registration_customer_solapi_activation_result_v1(text)
+  owner to postgres;
+revoke all on function dashboard_private.registration_customer_solapi_activation_result_v1(text)
+  from public, anon, authenticated, service_role;
+
+create or replace function public.record_registration_customer_solapi_live_test_receipt_v1(
+  p_actor_profile_id uuid,
+  p_message_kind text,
+  p_message_id uuid,
+  p_received_at timestamptz,
+  p_request_key text
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+set timezone = 'UTC'
+as $$
+declare
+  v_activation dashboard_private.registration_customer_solapi_activation%rowtype;
+  v_receipt dashboard_private.registration_customer_solapi_template_receipts%rowtype;
+  v_message public.ops_registration_customer_messages%rowtype;
+  v_mutation dashboard_private.registration_customer_solapi_admin_mutations%rowtype;
+  v_request_key text := nullif(pg_catalog.btrim(p_request_key), '');
+  v_target_fingerprint jsonb;
+  v_response jsonb;
+  v_evidence_id uuid;
+begin
+  if (select auth.role()) <> 'service_role' then
+    raise exception 'registration_customer_message_access_denied' using errcode = '42501';
+  end if;
+  perform dashboard_private.registration_customer_solapi_assert_kind_v1(p_message_kind);
+  perform dashboard_private.registration_customer_solapi_assert_admin_v1(p_actor_profile_id);
+  if p_message_id is null
+    or p_received_at is null
+    or p_received_at > pg_catalog.clock_timestamp()
+    or v_request_key is null
+    or v_request_key !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then
+    raise exception 'registration_customer_solapi_live_test_receipt_invalid'
+      using errcode = '22023';
+  end if;
+
+  v_target_fingerprint := pg_catalog.jsonb_build_object(
+    'messageKind', p_message_kind,
+    'messageFingerprint', dashboard_private.notification_sha256_hex_v1(p_message_id::text),
+    'receivedAt', p_received_at
+  );
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      'registration-customer-solapi-admin:' || p_actor_profile_id::text || ':' || v_request_key,
+      0
+    )
+  );
+  select mutation.*
+  into v_mutation
+  from dashboard_private.registration_customer_solapi_admin_mutations mutation
+  where mutation.actor_id = p_actor_profile_id
+    and mutation.request_key = v_request_key;
+  if found then
+    if v_mutation.mutation_type = 'registration_customer_solapi_live_test_receipt'
+      and v_mutation.target_fingerprint = v_target_fingerprint then
+      return v_mutation.response_payload;
+    end if;
+    raise exception 'registration_customer_message_mutation_conflict' using errcode = '23505';
+  end if;
+
+  select activation.*
+  into v_activation
+  from dashboard_private.registration_customer_solapi_activation activation
+  where activation.message_kind = p_message_kind
+  for update;
+  if not found then
+    raise exception 'registration_customer_solapi_activation_missing' using errcode = '55000';
+  end if;
+  if v_activation.mode <> 'verification' then
+    raise exception 'registration_customer_solapi_live_test_not_allowed' using errcode = '40001';
+  end if;
+  perform dashboard_private.registration_customer_message_assert_actor_v1(
+    p_actor_profile_id,
+    v_activation.verification_task_id,
+    'admin'
+  );
+
+  select receipt.*
+  into v_receipt
+  from dashboard_private.registration_customer_solapi_template_receipts receipt
+  where receipt.message_kind = p_message_kind
+    and receipt.provider_status = 'sendable'
+    and receipt.catalog_checksum = receipt.provider_checksum
+  for share;
+  if not found then
+    raise exception 'registration_customer_solapi_template_drift' using errcode = '40001';
+  end if;
+
+  select message.*
+  into v_message
+  from public.ops_registration_customer_messages message
+  where message.id = p_message_id
+    and message.status = 'accepted'
+    and message.message_kind = p_message_kind
+    and message.task_id = v_activation.verification_task_id
+    and message.recipient_hash = v_activation.verification_recipient_hash
+    and message.template_checksum = v_receipt.catalog_checksum
+    and message.provider_payload_checksum ~ '^[a-f0-9]{64}$'
+    and nullif(pg_catalog.btrim(message.provider_message_id), '') is not null
+    and nullif(pg_catalog.btrim(message.provider_status_code), '') is not null
+  for share;
+  if not found
+    or p_received_at < coalesce(v_message.resolved_at, v_message.updated_at, v_message.confirmed_at)
+    or p_received_at < v_message.confirmed_at then
+    raise exception 'registration_customer_solapi_live_test_evidence_mismatch'
+      using errcode = '40001';
+  end if;
+  if exists (
+    select 1
+    from dashboard_private.registration_customer_solapi_activation_evidence evidence
+    where evidence.provider_message_id = v_message.provider_message_id
+  ) then
+    raise exception 'registration_customer_solapi_live_test_receipt_conflict'
+      using errcode = '23505';
+  end if;
+
+  insert into dashboard_private.registration_customer_solapi_activation_evidence(
+    message_kind,
+    template_id,
+    pf_id,
+    template_checksum,
+    rendered_variables_checksum,
+    rendered_body_checksum,
+    rendered_buttons_checksum,
+    provider_payload_checksum,
+    recipient_hash,
+    provider_message_id,
+    provider_status_code,
+    verified_at,
+    verified_by
+  ) values (
+    p_message_kind,
+    v_receipt.template_id,
+    v_receipt.pf_id,
+    v_message.template_checksum,
+    v_message.rendered_variables_checksum,
+    v_message.rendered_body_checksum,
+    v_message.rendered_buttons_checksum,
+    v_message.provider_payload_checksum,
+    v_message.recipient_hash,
+    v_message.provider_message_id,
+    v_message.provider_status_code,
+    p_received_at,
+    p_actor_profile_id
+  ) returning id into v_evidence_id;
+
+  v_response := pg_catalog.jsonb_build_object(
+    'messageKind', p_message_kind,
+    'recorded', true,
+    'evidenceId', v_evidence_id,
+    'receivedAt', p_received_at
+  );
+  insert into dashboard_private.registration_customer_solapi_admin_mutations(
+    actor_id,
+    request_key,
+    mutation_type,
+    target_fingerprint,
+    response_payload
+  ) values (
+    p_actor_profile_id,
+    v_request_key,
+    'registration_customer_solapi_live_test_receipt',
+    v_target_fingerprint,
+    v_response
+  );
+  return v_response;
+end;
+$$;
+
+alter function public.record_registration_customer_solapi_live_test_receipt_v1(uuid, text, uuid, timestamptz, text)
+  owner to postgres;
+revoke all on function public.record_registration_customer_solapi_live_test_receipt_v1(uuid, text, uuid, timestamptz, text)
+  from public, anon, authenticated, service_role;
+grant execute on function public.record_registration_customer_solapi_live_test_receipt_v1(uuid, text, uuid, timestamptz, text)
+  to service_role;
+
+create or replace function public.set_registration_customer_solapi_activation_v1(
+  p_actor_profile_id uuid,
+  p_message_kind text,
+  p_mode text,
+  p_evidence jsonb
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+set timezone = 'UTC'
+as $$
+declare
+  v_activation dashboard_private.registration_customer_solapi_activation%rowtype;
+  v_receipt dashboard_private.registration_customer_solapi_template_receipts%rowtype;
+  v_evidence dashboard_private.registration_customer_solapi_activation_evidence%rowtype;
+  v_mutation dashboard_private.registration_customer_solapi_admin_mutations%rowtype;
+  v_current_mode text;
+  v_request_key text;
+  v_verification_task_id uuid;
+  v_verification_recipient_hash text;
+  v_activation_evidence_id uuid;
+  v_template_id text;
+  v_pf_id text;
+  v_catalog_checksum text;
+  v_target_fingerprint jsonb;
+  v_response jsonb;
+begin
+  if (select auth.role()) <> 'service_role' then
+    raise exception 'registration_customer_message_access_denied' using errcode = '42501';
+  end if;
+  perform dashboard_private.registration_customer_solapi_assert_kind_v1(p_message_kind);
+  perform dashboard_private.registration_customer_solapi_assert_admin_v1(p_actor_profile_id);
+  if p_mode is null
+    or p_mode not in ('off', 'verification', 'live')
+    or p_evidence is null
+    or pg_catalog.jsonb_typeof(p_evidence) <> 'object' then
+    raise exception 'registration_customer_solapi_activation_evidence_invalid' using errcode = '22023';
+  end if;
+
+  if p_mode = 'off' then
+    if p_evidence - array['requestKey']::text[] <> '{}'::jsonb
+      or not p_evidence ?& array['requestKey']::text[] then
+      raise exception 'registration_customer_solapi_activation_evidence_invalid' using errcode = '22023';
+    end if;
+  elsif p_mode = 'verification' then
+    if p_evidence - array[
+      'requestKey', 'verificationTaskId', 'verificationRecipientHash',
+      'templateId', 'pfId', 'catalogChecksum'
+    ]::text[] <> '{}'::jsonb
+      or not p_evidence ?& array[
+        'requestKey', 'verificationTaskId', 'verificationRecipientHash',
+        'templateId', 'pfId', 'catalogChecksum'
+      ]::text[] then
+      raise exception 'registration_customer_solapi_activation_evidence_invalid' using errcode = '22023';
+    end if;
+  else
+    if p_evidence - array[
+      'requestKey', 'activationEvidenceId', 'templateId', 'pfId', 'catalogChecksum'
+    ]::text[] <> '{}'::jsonb
+      or not p_evidence ?& array[
+        'requestKey', 'activationEvidenceId', 'templateId', 'pfId', 'catalogChecksum'
+      ]::text[] then
+      raise exception 'registration_customer_solapi_activation_evidence_invalid' using errcode = '22023';
+    end if;
+  end if;
+
+  if pg_catalog.jsonb_typeof(p_evidence -> 'requestKey') <> 'string'
+    or (p_evidence ->> 'requestKey') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then
+    raise exception 'registration_customer_solapi_activation_evidence_invalid' using errcode = '22023';
+  end if;
+  v_request_key := p_evidence ->> 'requestKey';
+
+  if p_mode in ('verification', 'live') then
+    if pg_catalog.jsonb_typeof(p_evidence -> 'templateId') <> 'string'
+      or nullif(pg_catalog.btrim(p_evidence ->> 'templateId'), '') is null
+      or pg_catalog.length(p_evidence ->> 'templateId') > 200
+      or pg_catalog.jsonb_typeof(p_evidence -> 'pfId') <> 'string'
+      or nullif(pg_catalog.btrim(p_evidence ->> 'pfId'), '') is null
+      or pg_catalog.length(p_evidence ->> 'pfId') > 200
+      or pg_catalog.jsonb_typeof(p_evidence -> 'catalogChecksum') <> 'string'
+      or (p_evidence ->> 'catalogChecksum') !~ '^[a-f0-9]{64}$' then
+      raise exception 'registration_customer_solapi_activation_evidence_invalid' using errcode = '22023';
+    end if;
+    v_template_id := pg_catalog.btrim(p_evidence ->> 'templateId');
+    v_pf_id := pg_catalog.btrim(p_evidence ->> 'pfId');
+    v_catalog_checksum := p_evidence ->> 'catalogChecksum';
+  end if;
+
+  if p_mode = 'verification' then
+    if pg_catalog.jsonb_typeof(p_evidence -> 'verificationTaskId') <> 'string'
+      or (p_evidence ->> 'verificationTaskId') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      or pg_catalog.jsonb_typeof(p_evidence -> 'verificationRecipientHash') <> 'string'
+      or (p_evidence ->> 'verificationRecipientHash') !~ '^[a-f0-9]{64}$' then
+      raise exception 'registration_customer_solapi_activation_evidence_invalid' using errcode = '22023';
+    end if;
+    v_verification_task_id := (p_evidence ->> 'verificationTaskId')::uuid;
+    v_verification_recipient_hash := p_evidence ->> 'verificationRecipientHash';
+  elsif p_mode = 'live' then
+    if pg_catalog.jsonb_typeof(p_evidence -> 'activationEvidenceId') <> 'string'
+      or (p_evidence ->> 'activationEvidenceId') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then
+      raise exception 'registration_customer_solapi_activation_evidence_invalid' using errcode = '22023';
+    end if;
+    v_activation_evidence_id := (p_evidence ->> 'activationEvidenceId')::uuid;
+  end if;
+
+  v_target_fingerprint := pg_catalog.jsonb_build_object(
+    'messageKind', p_message_kind,
+    'mode', p_mode,
+    'evidence', p_evidence - 'requestKey'
+  );
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      'registration-customer-solapi-admin:' || p_actor_profile_id::text || ':' || v_request_key,
+      0
+    )
+  );
+  select mutation.*
+  into v_mutation
+  from dashboard_private.registration_customer_solapi_admin_mutations mutation
+  where mutation.actor_id = p_actor_profile_id
+    and mutation.request_key = v_request_key;
+  if found then
+    if v_mutation.mutation_type = 'registration_customer_solapi_activation'
+      and v_mutation.target_fingerprint = v_target_fingerprint then
+      return v_mutation.response_payload;
+    end if;
+    raise exception 'registration_customer_message_mutation_conflict' using errcode = '23505';
+  end if;
+
+  select activation.*
+  into v_activation
+  from dashboard_private.registration_customer_solapi_activation activation
+  where activation.message_kind = p_message_kind
+  for update;
+  if not found then
+    raise exception 'registration_customer_solapi_activation_missing' using errcode = '55000';
+  end if;
+  v_current_mode := v_activation.mode;
+  if not (
+    (v_current_mode = 'off' and p_mode = 'verification')
+    or (v_current_mode = 'verification' and p_mode in ('live', 'off'))
+    or (v_current_mode = 'live' and p_mode = 'off')
+  ) then
+    raise exception 'registration_customer_solapi_activation_transition_invalid' using errcode = '40001';
+  end if;
+
+  if p_mode in ('verification', 'live') then
+    select receipt.*
+    into v_receipt
+    from dashboard_private.registration_customer_solapi_template_receipts receipt
+    where receipt.message_kind = p_message_kind
+    for share;
+    if not found
+      or v_receipt.template_id is distinct from v_template_id
+      or v_receipt.pf_id is distinct from v_pf_id
+      or v_receipt.catalog_checksum is distinct from v_catalog_checksum
+      or v_receipt.provider_checksum is distinct from v_catalog_checksum
+      or v_receipt.provider_status <> 'sendable' then
+      raise exception 'registration_customer_solapi_template_drift' using errcode = '40001';
+    end if;
+  end if;
+
+  if p_mode = 'verification' then
+    perform dashboard_private.registration_customer_message_assert_actor_v1(
+      p_actor_profile_id,
+      v_verification_task_id,
+      'admin'
+    );
+    update dashboard_private.registration_customer_solapi_activation activation
+    set mode = 'verification',
+        verification_task_id = v_verification_task_id,
+        verification_recipient_hash = v_verification_recipient_hash,
+        activation_evidence_id = null,
+        updated_by = p_actor_profile_id
+    where activation.message_kind = p_message_kind;
+  elsif p_mode = 'live' then
+    perform dashboard_private.registration_customer_message_assert_actor_v1(
+      p_actor_profile_id,
+      v_activation.verification_task_id,
+      'admin'
+    );
+    select evidence.*
+    into v_evidence
+    from dashboard_private.registration_customer_solapi_activation_evidence evidence
+    where evidence.id = v_activation_evidence_id
+    for share;
+    if not found
+      or v_evidence.message_kind <> p_message_kind
+      or v_evidence.template_id is distinct from v_template_id
+      or v_evidence.pf_id is distinct from v_pf_id
+      or v_evidence.template_checksum is distinct from v_catalog_checksum
+      or v_evidence.recipient_hash is distinct from v_activation.verification_recipient_hash then
+      raise exception 'registration_customer_solapi_live_evidence_missing' using errcode = '40001';
+    end if;
+    update dashboard_private.registration_customer_solapi_activation activation
+    set mode = 'live',
+        verification_task_id = null,
+        verification_recipient_hash = null,
+        activation_evidence_id = v_activation_evidence_id,
+        updated_by = p_actor_profile_id
+    where activation.message_kind = p_message_kind;
+  else
+    update dashboard_private.registration_customer_solapi_activation activation
+    set mode = 'off',
+        verification_task_id = null,
+        verification_recipient_hash = null,
+        updated_by = p_actor_profile_id
+    where activation.message_kind = p_message_kind;
+  end if;
+
+  if p_message_kind = 'observation_reminder' and p_mode = 'off' then
+    update dashboard_private.registration_customer_reminder_jobs job
+    set status = 'canceled',
+        claim_token = null,
+        claim_expires_at = null,
+        available_at = null,
+        last_error_code = 'activation_off'
+    where job.message_kind = 'observation_reminder'
+      and job.status in ('pending', 'claimed')
+      and job.message_id is null;
+  end if;
+  v_response := dashboard_private.registration_customer_solapi_activation_result_v1(p_message_kind);
+  insert into dashboard_private.registration_customer_solapi_admin_mutations(
+    actor_id,
+    request_key,
+    mutation_type,
+    target_fingerprint,
+    response_payload
+  ) values (
+    p_actor_profile_id,
+    v_request_key,
+    'registration_customer_solapi_activation',
+    v_target_fingerprint,
+    v_response
+  );
+  return v_response;
+end;
+$$;
+
+alter function public.set_registration_customer_solapi_activation_v1(uuid, text, text, jsonb)
+  owner to postgres;
+revoke all on function public.set_registration_customer_solapi_activation_v1(uuid, text, text, jsonb)
+  from public, anon, authenticated, service_role;
+grant execute on function public.set_registration_customer_solapi_activation_v1(uuid, text, text, jsonb)
+  to service_role;
 
 commit;

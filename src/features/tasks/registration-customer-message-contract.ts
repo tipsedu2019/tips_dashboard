@@ -245,6 +245,7 @@ export type RegistrationCustomerMessageAdminClient = Readonly<{
     messageKind: RegistrationCustomerMessageKind
     mode: RegistrationCustomerMessageActivationMode
     verificationTaskId?: string
+    activationEvidenceId?: string
     requestKey: string
   }>, signal?: AbortSignal) => Promise<RegistrationCustomerMessageReadiness>
   recordLiveTestReceipt: (input: Readonly<{
