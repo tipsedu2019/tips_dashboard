@@ -11,6 +11,10 @@ const REQUIRED_DB_PUSH_WORKFLOW = "supabase-db-push.yml"
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand Supabase secret scope before the verifier exits.
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "d2ee5d1a1d55207d78870a7fc5b7ab0fea7e44064f2955a9fb92bda8933bf807"
+const ALLOWED_WORKFLOW_HASHES = Object.freeze([
+  ["free-tier-guardrails.yml", "bb7cf618f180e4f1d90ceefddc67382ba8aee1be725cb8569507d835360cb696"],
+  [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
+])
 const SCIENCE_MIGRATION_FILE = "20260722120000_science_notification_connection.sql"
 const SCIENCE_MIGRATION_SHA256 = "ce0ca95663fe2a7dd5ae54ebad6b09ae315dbed548bbc074185230907441dd46"
 const PREPARE_ACL_MIGRATION_FILE = "20260722130000_notification_prepare_acl_hardening.sql"
@@ -322,6 +326,42 @@ function decodeStandardStringLiteral(raw) {
   return raw.slice(1, -1).replaceAll("''", "'")
 }
 
+function decodeUnicodeEscapeStringLiteral(raw, offset) {
+  const source = raw.slice(1, -1)
+  let decoded = ""
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index]
+    if (character === "'" && source[index + 1] === "'") {
+      decoded += "'"
+      index += 1
+      continue
+    }
+    if (character !== "\\") {
+      decoded += character
+      continue
+    }
+    if (source[index + 1] === "\\") {
+      decoded += "\\"
+      index += 1
+      continue
+    }
+    const expanded = source[index + 1] === "+"
+    const digitStart = index + (expanded ? 2 : 1)
+    const digitCount = expanded ? 6 : 4
+    const digits = source.slice(digitStart, digitStart + digitCount)
+    if (!new RegExp(`^[0-9A-Fa-f]{${digitCount}}$`).test(digits)) {
+      throw sqlNormalizationError("invalid U& string escape", offset + index)
+    }
+    const codePoint = Number.parseInt(digits, 16)
+    if (codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) {
+      throw sqlNormalizationError("invalid U& string code point", offset + index)
+    }
+    decoded += String.fromCodePoint(codePoint)
+    index = digitStart + digitCount - 1
+  }
+  return decoded
+}
+
 function decodeEscapeStringLiteral(raw) {
   const source = raw.slice(1, -1)
   let decoded = ""
@@ -453,8 +493,18 @@ function tokenizeSql(source) {
       continue
     }
 
-    if (/^[uU]&(?=['"])/.test(source.slice(index))) {
+    if (/^[uU]&(?=")/.test(source.slice(index))) {
       throw sqlNormalizationError("unsupported U& escape form", index)
+    }
+
+    if (/^[uU]&(?=')/.test(source.slice(index))) {
+      const literalStart = index + 2
+      const literal = readSingleQuotedToken(source, literalStart)
+      const decoded = decodeUnicodeEscapeStringLiteral(literal.raw, literalStart)
+      const canonicalRaw = `'${decoded.replaceAll("'", "''")}'`
+      push("string", canonicalRaw, decoded)
+      index = literal.end
+      continue
     }
 
     const prefixedStringMatch = source.slice(index).match(/^[eEbBxX](?=')/)
@@ -1263,7 +1313,9 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
     await listWorkflowYamlEntries(workflowsDir)
   const workflowRelativeCandidates = workflowYamlEntries.map(({ path }) =>
     relative(workflowsDir, path))
-  const workflowSetIsExact = equalJson(workflowRelativeCandidates, [REQUIRED_DB_PUSH_WORKFLOW])
+  const allowedWorkflowHashes = new Map(ALLOWED_WORKFLOW_HASHES)
+  const expectedWorkflowFiles = ALLOWED_WORKFLOW_HASHES.map(([fileName]) => fileName).sort()
+  const workflowSetIsExact = equalJson(workflowRelativeCandidates, expectedWorkflowFiles)
     && workflowYamlEntries[0]?.stat?.isFile()
     && workflowNonRegularEntries.length === 0
   if (!workflowSetIsExact) {
@@ -1277,8 +1329,10 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       addError(errors, "workflow_entry_not_regular", workflowRelativePath)
       reportedNonRegularWorkflowPaths.add(workflowPath)
     }
-    if (workflowRelativeToDirectory !== REQUIRED_DB_PUSH_WORKFLOW) {
+    if (!allowedWorkflowHashes.has(workflowRelativeToDirectory)) {
       addError(errors, "unexpected_workflow_file", workflowRelativePath)
+    } else if (stat?.isFile() && sha256(await readFile(workflowPath)) !== allowedWorkflowHashes.get(workflowRelativeToDirectory)) {
+      addError(errors, "allowed_workflow_hash_mismatch", workflowRelativePath)
     }
   }
   for (const workflowPath of workflowNonRegularEntries) {
@@ -1291,6 +1345,7 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
   for (const workflowPath of workflowFiles) {
     const workflow = await readFile(workflowPath, "utf8")
     const workflowRelativePath = relative(resolvedRoot, workflowPath)
+    const workflowRelativeToDirectory = relative(workflowsDir, workflowPath)
     if (
       workflow.includes("supabase/pending-migrations/notification-cutover") ||
       EXPECTED_SQL.some(([file]) => workflow.includes(file))
@@ -1307,6 +1362,7 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       addError(errors, "db_push_line_continuation_present", workflowRelativePath)
     }
     if (
+      (workflowPath === requiredWorkflowPath || !allowedWorkflowHashes.has(workflowRelativeToDirectory)) &&
       lines.some((line) => {
         const command = line.trim().replace(/^run:\s*/, "")
         return /(?:^|\s)(?:node|bun|deno|bash|sh|zsh)?\s*(?:\.\/)?scripts\/[A-Za-z0-9_./-]+/.test(

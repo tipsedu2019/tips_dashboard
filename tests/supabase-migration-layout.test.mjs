@@ -426,15 +426,15 @@ test("SQL lexical normalizer의 six-file fingerprint를 독립 상수로 고정�
       `${upperPrefix} prefix adjacency remains semantic`,
     )
   }
-  for (const unsupportedUnicodeEscape of [
-    "select U&'notification_cutover';",
-    'select U&"notification_contract_closures";',
-  ]) {
-    assert.throws(
-      () => migrationLayoutVerifier.normalizedSqlSha256(unsupportedUnicodeEscape),
-      /unsupported U& escape form/,
-    )
-  }
+  assert.equal(
+    migrationLayoutVerifier.normalizedSqlSha256("select U&'\\FFFF';"),
+    migrationLayoutVerifier.normalizedSqlSha256("select '\uFFFF';"),
+    "default U& string escapes normalize to their semantic string value",
+  )
+  assert.throws(
+    () => migrationLayoutVerifier.normalizedSqlSha256('select U&"notification_contract_closures";'),
+    /unsupported U& escape form/,
+  )
   assert.doesNotThrow(() =>
     migrationLayoutVerifier.normalizedSqlSha256("select E'\\'';"))
   assert.doesNotThrow(() =>
@@ -742,7 +742,7 @@ select 'notification-shadow-scope-evidence-v2';
     ["20990104000006_unterminated_dollar.sql", "do $body$ begin null; end;\n"],
     [
       "20990104000007_nested_unsupported_escape.sql",
-      "do $body$ begin perform U&'unsupported'; end $body$;\n",
+      "do $body$ begin perform U&'\\12G4'; end $body$;\n",
     ],
     [
       "20990104000008_malformed_execute_sql.sql",
@@ -1084,6 +1084,17 @@ test("required DB push workflow의 실파일, exact command, 순서를 강제한
   })
   assertIncludesErrorCode(siblingWorkflowErrors, "workflow_file_set_mismatch")
   assertIncludesErrorForFile(siblingWorkflowErrors, "unexpected_workflow_file", "other.yml")
+
+  const mutatedGuardrailFixture = await createRepoFixture()
+  await appendFile(
+    join(mutatedGuardrailFixture, ".github", "workflows", "free-tier-guardrails.yml"),
+    "\n# unreviewed workflow mutation\n",
+  )
+  assertIncludesErrorForFile(
+    await validateSupabaseMigrationLayout({ repoRoot: mutatedGuardrailFixture }),
+    "allowed_workflow_hash_mismatch",
+    "free-tier-guardrails.yml",
+  )
 
   const nestedWorkflowFixture = await createRepoFixture()
   const nestedWorkflowDir = join(nestedWorkflowFixture, ".github", "workflows", "nested")
