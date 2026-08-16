@@ -3274,7 +3274,9 @@ export function ManagementDataTable({
             {normalizedGlobalFilter ? <Badge variant="outline">검색어 {normalizedGlobalFilter}</Badge> : null}
             {badgeFilter ? <Badge variant="outline">{badgeLabel} {badgeFilter}</Badge> : null}
             {statusFilter ? <Badge variant="outline">{statusLabel} {statusFilter}</Badge> : null}
-            {studentSchoolCategoryFilter ? <Badge variant="outline">학교 구분 {studentSchoolCategoryFilter}</Badge> : null}
+            {studentSchoolCategoryFilter ? (
+              <Badge variant="outline">학교 구분 {formatStudentSchoolCategoryLabel(studentSchoolCategoryFilter)}</Badge>
+            ) : null}
             {studentSchoolFilter ? <Badge variant="outline">학교 {studentSchoolFilter}</Badge> : null}
             {studentGradeFilter ? <Badge variant="outline">학년 {studentGradeFilter}</Badge> : null}
             {resetControl}

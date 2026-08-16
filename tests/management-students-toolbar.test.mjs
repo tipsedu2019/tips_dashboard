@@ -75,6 +75,15 @@ test("student management keeps search and school filters in the URL for cross-vi
   assert.match(source, /syncStudentListQueryState\(\{ grade: nextGradeFilter \}, true\)/);
 });
 
+test("student management renders the active school category summary in Korean", async () => {
+  const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+
+  assert.match(
+    source,
+    /학교 구분 \{formatStudentSchoolCategoryLabel\(studentSchoolCategoryFilter\)\}/,
+  );
+});
+
 test("student management opens with active students before withdrawn records", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
   const studentDefaultConfig = source.match(/students:\s*\{[\s\S]*?\n\s*\},\n\s*classes:/)?.[0] || "";
