@@ -36,6 +36,11 @@ test("class date migration aborts partial production datasets and verifies every
   assert.match(sql, /not dashboard_private\.is_canonical_class_date_v1\(class\.end_date\)/);
   assert.match(sql, /constraint classes_start_date_canonical_check/);
   assert.match(sql, /constraint classes_end_date_canonical_check/);
+  assert.ok(
+    sql.indexOf("set constraints class_active_group_membership_required_on_classes immediate")
+      < sql.indexOf("alter table public.classes"),
+    "deferred class trigger events are drained before ALTER TABLE",
+  );
 });
 
 test("final isolated migration manifest pins the exact migration bytes", async () => {

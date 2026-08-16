@@ -113,6 +113,8 @@ begin
 end
 $normalize_class_dates$;
 
+set constraints class_active_group_membership_required_on_classes immediate;
+
 alter table public.classes
   add constraint classes_start_date_canonical_check
   check (dashboard_private.is_canonical_class_date_v1(start_date));
