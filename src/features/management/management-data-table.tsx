@@ -80,6 +80,13 @@ import {
   formatClassScheduleDisplayLines,
   splitClassResourceDisplayValues,
 } from "./class-schedule-slots";
+import {
+  formatStudentSchoolCategoryLabel,
+  reconcilePendingManagementFilters,
+  replaceManagementListUrl,
+  shouldRenderManagementInitialLoading,
+  sortStudentSchoolCategoryValues,
+} from "./management-filter-transition.js";
 
 const STORAGE_VERSION = 14;
 
@@ -703,16 +710,7 @@ function sortClassFilterOptions(columnId: ClassFilterColumnId, values: string[])
 }
 
 function sortStudentSchoolCategories(values: string[]) {
-  return [...values].sort((a, b) => {
-    const aIndex = STUDENT_SCHOOL_CATEGORY_OPTIONS.indexOf(a as (typeof STUDENT_SCHOOL_CATEGORY_OPTIONS)[number]);
-    const bIndex = STUDENT_SCHOOL_CATEGORY_OPTIONS.indexOf(b as (typeof STUDENT_SCHOOL_CATEGORY_OPTIONS)[number]);
-    if (aIndex !== -1 || bIndex !== -1) {
-      if (aIndex === -1) return 1;
-      if (bIndex === -1) return -1;
-      return aIndex - bIndex;
-    }
-    return a.localeCompare(b, "ko", { numeric: true });
-  });
+  return sortStudentSchoolCategoryValues(values);
 }
 
 function sortStudentGradeOptions(values: string[]) {
@@ -1420,6 +1418,7 @@ export function ManagementDataTable({
   const [studentSchoolCategoryFilter, setStudentSchoolCategoryFilter] = useState(() => requestedStudentListQueryState.schoolCategory);
   const [studentSchoolFilter, setStudentSchoolFilter] = useState(() => requestedStudentListQueryState.school);
   const [studentGradeFilter, setStudentGradeFilter] = useState(() => requestedStudentListQueryState.grade);
+  const pendingStudentListQueryStateRef = useRef<StudentListQueryState | null>(null);
   const [grouping, setGrouping] = useState<GroupingState>([]);
   const [expanded, setExpanded] = useState<ExpandedState>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -2015,6 +2014,7 @@ export function ManagementDataTable({
   const createLabel = kind === "students" ? "학생 등록" : kind === "classes" ? "수업 등록" : "교재 등록";
   const hasCreateAction = typeof actions.onCreate === "function";
   const showSummaryBadge = loading || hasActiveFilters || rows.length !== filteredRowCount;
+  const showInitialLoading = shouldRenderManagementInitialLoading(loading, rows.length);
   useEffect(() => {
     if (typeof window === "undefined" || loading) {
       return undefined;
@@ -2087,7 +2087,7 @@ export function ManagementDataTable({
     [debouncedGlobalFilter, kind, statusFilter, studentGradeFilter, studentSchoolCategoryFilter, studentSchoolFilter],
   );
   const syncStudentListQueryState = useCallback(
-    (nextState: Partial<StudentListQueryState>) => {
+    (nextState: Partial<StudentListQueryState>, preserveLocalUntilUrl = false) => {
       if (kind !== "students") {
         return;
       }
@@ -2096,10 +2096,15 @@ export function ManagementDataTable({
       const nextHref = buildStudentListHref(pathname, searchParamString, mergedState);
       const currentHref = searchParamString ? `${pathname}?${searchParamString}` : pathname;
       if (nextHref !== currentHref) {
-        router.replace(nextHref, { scroll: false });
+        if (preserveLocalUntilUrl) {
+          pendingStudentListQueryStateRef.current = mergedState;
+        }
+        replaceManagementListUrl(window.history, nextHref);
+      } else if (preserveLocalUntilUrl) {
+        pendingStudentListQueryStateRef.current = null;
       }
     },
-    [currentStudentListQueryState, kind, pathname, router, searchParamString],
+    [currentStudentListQueryState, kind, pathname, searchParamString],
   );
   const currentTextbookListQueryState = useMemo<TextbookListQueryState>(() => ({
     q: debouncedGlobalFilter,
@@ -2197,23 +2202,32 @@ export function ManagementDataTable({
       return;
     }
 
-    const requestedStatusFilter = requestedStudentListQueryState.status || "";
+    const reconciliation = reconcilePendingManagementFilters({
+      current: currentStudentListQueryState,
+      requested: requestedStudentListQueryState,
+      pending: pendingStudentListQueryStateRef.current,
+    });
+    pendingStudentListQueryStateRef.current = reconciliation.pending;
+    const nextFilters = reconciliation.filters;
+
+    const requestedStatusFilter = nextFilters.status || "";
     if (statusColumn && statusFilter !== requestedStatusFilter) {
       statusColumn.setFilterValue(requestedStatusFilter);
     }
 
-    if (studentSchoolCategoryFilter !== requestedStudentListQueryState.schoolCategory) {
-      setStudentSchoolCategoryFilter(requestedStudentListQueryState.schoolCategory);
+    if (studentSchoolCategoryFilter !== nextFilters.schoolCategory) {
+      setStudentSchoolCategoryFilter(nextFilters.schoolCategory);
     }
 
-    if (studentSchoolFilter !== requestedStudentListQueryState.school) {
-      setStudentSchoolFilter(requestedStudentListQueryState.school);
+    if (studentSchoolFilter !== nextFilters.school) {
+      setStudentSchoolFilter(nextFilters.school);
     }
 
-    if (studentGradeFilter !== requestedStudentListQueryState.grade) {
-      setStudentGradeFilter(requestedStudentListQueryState.grade);
+    if (studentGradeFilter !== nextFilters.grade) {
+      setStudentGradeFilter(nextFilters.grade);
     }
   }, [
+    currentStudentListQueryState,
     kind,
     requestedStudentListQueryState,
     statusColumn,
@@ -2283,7 +2297,7 @@ export function ManagementDataTable({
         schoolCategory: "",
         school: "",
         grade: "",
-      });
+      }, true);
     }
     if (kind === "textbooks") {
       syncTextbookListQueryState({ q: "", status: "", subject: "", publisher: "" });
@@ -2755,7 +2769,7 @@ export function ManagementDataTable({
         onValueChange={(value) => {
           const nextStatusValue = value === "all" ? "" : value;
           statusColumn?.setFilterValue(nextStatusValue);
-          syncStudentListQueryState({ status: nextStatusValue });
+          syncStudentListQueryState({ status: nextStatusValue }, true);
           setRowSelection({});
           table.resetPagination();
         }}
@@ -2787,7 +2801,7 @@ export function ManagementDataTable({
           setStudentSchoolCategoryFilter(nextSchoolCategoryFilter);
           setStudentSchoolFilter("");
           setStudentGradeFilter("");
-          syncStudentListQueryState({ schoolCategory: nextSchoolCategoryFilter, school: "", grade: "" });
+          syncStudentListQueryState({ schoolCategory: nextSchoolCategoryFilter, school: "", grade: "" }, true);
           setRowSelection({});
           table.resetPagination();
         }}
@@ -2799,7 +2813,7 @@ export function ManagementDataTable({
           <SelectItem value="all">전체 학교 구분</SelectItem>
           {studentSchoolCategoryOptions.map((option) => (
             <SelectItem key={option} value={option}>
-              {option}
+              {formatStudentSchoolCategoryLabel(option)}
             </SelectItem>
           ))}
         </SelectContent>
@@ -2818,7 +2832,7 @@ export function ManagementDataTable({
           const nextSchoolFilter = value === "all" ? "" : value;
           setStudentSchoolFilter(nextSchoolFilter);
           setStudentGradeFilter("");
-          syncStudentListQueryState({ school: nextSchoolFilter, grade: "" });
+          syncStudentListQueryState({ school: nextSchoolFilter, grade: "" }, true);
           setRowSelection({});
           table.resetPagination();
         }}
@@ -2848,7 +2862,7 @@ export function ManagementDataTable({
         onValueChange={(value) => {
           const nextGradeFilter = value === "all" ? "" : value;
           setStudentGradeFilter(nextGradeFilter);
-          syncStudentListQueryState({ grade: nextGradeFilter });
+          syncStudentListQueryState({ grade: nextGradeFilter }, true);
           setRowSelection({});
           table.resetPagination();
         }}
@@ -2928,7 +2942,7 @@ export function ManagementDataTable({
 
   const classMobileList = kind === "classes" ? (
     <div className="grid gap-2 md:hidden" aria-label={`${emptyLabel} 모바일 목록`}>
-      {loading ? (
+      {showInitialLoading ? (
         Array.from({ length: 5 }).map((_, index) => (
           <div key={`class-mobile-loading-${index}`} className="rounded-lg border border-border/70 bg-background p-3">
             <Skeleton className="h-5 w-36" />
@@ -3023,7 +3037,7 @@ export function ManagementDataTable({
 
   const studentMobileList = kind === "students" ? (
     <div className="grid gap-2 md:hidden" aria-label={`${emptyLabel} 모바일 학생 목록`}>
-      {loading ? (
+      {showInitialLoading ? (
         Array.from({ length: 5 }).map((_, index) => (
           <div key={`student-mobile-loading-${index}`} className="rounded-lg border border-border/70 bg-background p-3">
             <Skeleton className="h-5 w-32" />
@@ -3353,7 +3367,7 @@ export function ManagementDataTable({
             ))}
           </TableHeader>
           <TableBody>
-            {loading ? (
+            {showInitialLoading ? (
               <>
                 <TableRow>
                   <TableCell

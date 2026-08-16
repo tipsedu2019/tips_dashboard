@@ -69,10 +69,10 @@ test("student management keeps search and school filters in the URL for cross-vi
   assert.match(source, /function buildStudentListHref/);
   assert.match(source, /const requestedStudentListQueryState = useMemo/);
   assert.match(source, /syncStudentListQueryState\(\{ q: debouncedGlobalFilter \}\)/);
-  assert.match(source, /syncStudentListQueryState\(\{ status: nextStatusValue \}\)/);
-  assert.match(source, /syncStudentListQueryState\(\{ schoolCategory: nextSchoolCategoryFilter, school: "", grade: "" \}\)/);
-  assert.match(source, /syncStudentListQueryState\(\{ school: nextSchoolFilter, grade: "" \}\)/);
-  assert.match(source, /syncStudentListQueryState\(\{ grade: nextGradeFilter \}\)/);
+  assert.match(source, /syncStudentListQueryState\(\{ status: nextStatusValue \}, true\)/);
+  assert.match(source, /syncStudentListQueryState\(\{ schoolCategory: nextSchoolCategoryFilter, school: "", grade: "" \}, true\)/);
+  assert.match(source, /syncStudentListQueryState\(\{ school: nextSchoolFilter, grade: "" \}, true\)/);
+  assert.match(source, /syncStudentListQueryState\(\{ grade: nextGradeFilter \}, true\)/);
 });
 
 test("student management opens with active students before withdrawn records", async () => {
