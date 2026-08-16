@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { supabase } from "@/lib/supabase";
+import { getErrorMessage } from "@/lib/error-message";
 import { useAuth } from "@/providers/auth-provider";
 import { appendOperationsPageIfCurrent, createOperationsReadService } from "./operations-read-service.js";
 
@@ -100,7 +101,7 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
       setDensityError(null);
     } catch (fetchError) {
       if (requestRevisionRef.current !== revision) return;
-      setError(fetchError instanceof Error ? fetchError.message : "Unknown error");
+      setError(getErrorMessage(fetchError, "운영 데이터를 불러오지 못했습니다."));
       if (!options.preserveData) setData(null);
     } finally {
       if (requestRevisionRef.current === revision) setLoading(false);
@@ -130,7 +131,7 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
         requestRevisionRef.current === expectedRevision &&
         fingerprintRef.current === expectedFingerprint
       ) {
-        setError(fetchError instanceof Error ? fetchError.message : "Unknown error");
+        setError(getErrorMessage(fetchError, "수업계획을 더 불러오지 못했습니다."));
       }
     } finally {
       setLoadingMore(false);

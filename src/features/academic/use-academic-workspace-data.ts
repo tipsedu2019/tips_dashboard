@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { supabase } from "@/lib/supabase";
+import { getErrorMessage } from "@/lib/error-message";
 import { useAuth } from "@/providers/auth-provider";
 
 import {
@@ -153,7 +154,7 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
       setDensityErrorFingerprint(null);
     } catch (fetchError) {
       if (requestRevisionRef.current !== revision || fingerprintRef.current !== fingerprint) return;
-      setError(fetchError instanceof Error ? fetchError.message : "Unknown error");
+      setError(getErrorMessage(fetchError, "학사 데이터를 불러오지 못했습니다."));
       setErrorFingerprint(fingerprint);
     } finally {
       if (requestRevisionRef.current === revision && fingerprintRef.current === fingerprint) {
@@ -192,7 +193,7 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
     } catch (fetchError) {
       if (requestRevisionRef.current === expectedRevision
         && fingerprintRef.current === expectedFingerprint) {
-        setError(fetchError instanceof Error ? fetchError.message : "Unknown error");
+        setError(getErrorMessage(fetchError, "수업계획을 더 불러오지 못했습니다."));
         setErrorFingerprint(expectedFingerprint);
       }
     } finally {
