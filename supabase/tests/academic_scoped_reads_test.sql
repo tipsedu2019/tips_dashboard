@@ -17,6 +17,7 @@ $probe$;
 select has_function('public','get_academic_timetable_range_v1',array['date','date','text','text','text'],'academic timetable range RPC exists');
 select has_function('public','get_academic_curriculum_page_v1',array['jsonb','text','uuid','integer','boolean'],'academic curriculum page RPC exists');
 select has_function('public','get_academic_curriculum_detail_v1',array['uuid'],'academic curriculum detail RPC exists');
+select has_function('dashboard_private','is_canonical_class_date_v1',array['text'],'canonical class date validator exists');
 
 with expected(signature) as (
   values
@@ -151,6 +152,42 @@ insert into public.class_schedule_sync_group_members(group_id,class_id,sort_orde
 select '93000000-0000-4000-8000-000000000950',id,0
 from public.classes where name like '__academic_curriculum__%';
 
+select throws_ok(
+  $$update public.classes set start_date='20260101' where id='93030000-0000-4000-8000-000000000032'$$,
+  '23514',
+  'new row for relation "classes" violates check constraint "classes_start_date_canonical_check"',
+  'compact class start dates are rejected'
+);
+select throws_ok(
+  $$update public.classes set start_date='2024년 01월 31일' where id='93030000-0000-4000-8000-000000000032'$$,
+  '23514',
+  'new row for relation "classes" violates check constraint "classes_start_date_canonical_check"',
+  'localized class start dates are rejected'
+);
+select throws_ok(
+  $$update public.classes set end_date='2026/03/01' where id='93030000-0000-4000-8000-000000000032'$$,
+  '23514',
+  'new row for relation "classes" violates check constraint "classes_end_date_canonical_check"',
+  'slash-separated class end dates are rejected'
+);
+select throws_ok(
+  $$update public.classes set end_date='2026-02-30' where id='93030000-0000-4000-8000-000000000032'$$,
+  '23514',
+  'new row for relation "classes" violates check constraint "classes_end_date_canonical_check"',
+  'impossible canonical-looking class end dates are rejected'
+);
+select lives_ok(
+  $$update public.classes set start_date=null,end_date='' where id='93030000-0000-4000-8000-000000000032'$$,
+  'null and blank class dates remain valid empty values'
+);
+select lives_ok(
+  $$update public.classes set start_date='2024-02-29',end_date='2024-03-01' where id='93030000-0000-4000-8000-000000000032'$$,
+  'valid leap-day and canonical class dates are accepted'
+);
+update public.classes
+set start_date='2198-12-31',end_date='2199-12-31'
+where id='93030000-0000-4000-8000-000000000031';
+
 select pg_catalog.set_config('app.class_schedule_mutation','release2-rpc',true);
 insert into public.class_lesson_sessions(
   id,class_id,session_key,session_date,schedule_state,start_time,end_time,
@@ -162,6 +199,28 @@ values
 select pg_catalog.set_config('app.class_schedule_mutation','',true);
 insert into public.progress_logs(id,class_id,textbook_id,session_id,progress_key,status,content,date,updated_at)
 values ('93040000-0000-4000-8000-000000000010','93030000-0000-4000-8000-000000000031',null,null,'__academic_planned__','done','완료','2199-01-05',now());
+
+select ok(
+  exists (
+    select 1
+    from pg_catalog.jsonb_array_elements(public.get_academic_timetable_range_v1(
+      '2199-01-01','2199-01-14','93000000-0000-4000-8000-000000000950',null,'과학'
+    ) -> 'rows') row
+    where row ->> 'classId'='93030000-0000-4000-8000-000000000031'
+  ),
+  'timetable reads a class with canonical historical text dates without cast errors'
+);
+select ok(
+  exists (
+    select 1
+    from pg_catalog.jsonb_array_elements(public.get_academic_curriculum_page_v1(
+      pg_catalog.jsonb_build_object('periodId','93000000-0000-4000-8000-000000000950','search','__academic_curriculum__ 31','status',null,'subject','과학','grade','고2','teacher','검증 교사','classroom','본3','viewMode','all'),
+      null,null,30,true
+    ) -> 'rows') row
+    where row ->> 'id'='93030000-0000-4000-8000-000000000031'
+  ),
+  'curriculum reads a class with canonical historical text dates without cast errors'
+);
 
 create temporary table academic_curriculum_first_page on commit drop as
 select value as row
