@@ -749,6 +749,25 @@ test("reviewed capture builds the replay baseline from exact production migratio
   assert.doesNotMatch(baseline, /create table public\.classes/u);
 });
 
+test("reviewed capture retains schema-qualified dynamic DDL that prepares a later migration", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const root = await makeRepo(t);
+  await writeCaptureScope(root);
+  const originMainSha = "8".repeat(40);
+  const dynamicPreparation = "do $$ begin execute pg_catalog.format('alter table public.classes drop constraint %I', 'classes_outcome_check'); end $$";
+  const temporaryGate = "do $$ begin execute pg_catalog.format('alter table pg_temp.capture_gate add constraint gate_check %s', 'check (value is not null)'); end $$";
+  await captureDashboardFreeTierCatalog({
+    root,
+    argv: ["--mode", "execute", "--authorized", "--request-id", "dynamic-ddl-replay", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
+    env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+    gitOriginMainSha: async () => originMainSha,
+    fetch: async () => new Response(JSON.stringify({ serverMajor: 17, migrationLedger: [{ version: "20260816000000", statements: [dynamicPreparation, temporaryGate], name: "dynamic_ddl_preparation" }], catalog: completeCatalogFixture() }), { status: 201 }),
+  });
+  const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"), "utf8");
+  assert.match(baseline, /execute pg_catalog\.format\('alter table public\.classes drop constraint %I'/u);
+  assert.doesNotMatch(baseline, /alter table pg_temp\.capture_gate/u);
+});
+
 test("reviewed capture compares policy roles semantically and omits redundant OID-keyed grant rows", async (t) => {
   const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
   const root = await makeRepo(t);
@@ -791,6 +810,19 @@ test("final schema reconciliation restores current columns, policies, RLS, and t
   assert.match(sql, /create policy "classes_read".*to "authenticated" using \(is_admin_or_staff\(\)\)/u);
   assert.match(sql, /CREATE TRIGGER classes_touch BEFORE UPDATE/u);
   assert.match(sql, /grant select on table "public"\."classes" to "authenticated"/u);
+});
+
+test("baseline capture preserves the non-login audit writer role used by public policies", async () => {
+  const { dashboardFreeTierCatalogStatement, buildFinalSchemaReconciliation } = await import(captureUrl.href);
+  assert.match(dashboardFreeTierCatalogStatement(), /dashboard_audit_writer_v2/u);
+  const sql = buildFinalSchemaReconciliation([
+    { objectKind: "role", schema: "", identity: "dashboard_audit_writer_v2", replayFingerprint: JSON.stringify({ login: false, inherit: false, superuser: false }) },
+    { objectKind: "table", schema: "public", identity: "dashboard_audit_logs", replayFingerprint: JSON.stringify({ columns: [{ name: "id", type: "uuid", notNull: true }], acl: ["dashboard_audit_writer_v2=ar/postgres"] }) },
+    { objectKind: "policy", schema: "public", identity: "dashboard_audit_logs.dashboard_audit_logs_writer_insert", replayFingerprint: JSON.stringify({ check: "true", roles: ["dashboard_audit_writer_v2"], using: null, command: "a" }) },
+  ]);
+  assert.match(sql, /create role "dashboard_audit_writer_v2" noinherit nologin nosuperuser/u);
+  assert.match(sql, /to "dashboard_audit_writer_v2"/u);
+  assert.match(sql, /grant insert, select on table "public"\."dashboard_audit_logs" to "dashboard_audit_writer_v2"/u);
 });
 
 test("candidate migrations do not schema-qualify PostgreSQL special SQL forms", async () => {

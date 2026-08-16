@@ -1,8 +1,10 @@
 import assert from "node:assert/strict"
+import { createHash } from "node:crypto"
 import { readFile, readdir } from "node:fs/promises"
 import test from "node:test"
 
 const migrationsUrl = new URL("../supabase/migrations/", import.meta.url)
+const baselineManifestUrl = new URL("../supabase/test-baselines/dashboard-free-tier-v1.manifest.json", import.meta.url)
 
 async function latestMigration(name) {
   const fileName = (await readdir(migrationsUrl))
@@ -13,6 +15,15 @@ async function latestMigration(name) {
   return (await readFile(new URL(fileName, migrationsUrl), "utf8"))
     .toLowerCase()
     .replace(/\s+/gu, " ")
+}
+
+async function latestMigrationBytes(name) {
+  const fileName = (await readdir(migrationsUrl))
+    .filter((entry) => entry.endsWith(`_${name}.sql`))
+    .sort()
+    .at(-1)
+  assert.ok(fileName, `${name} migration must exist`)
+  return readFile(new URL(fileName, migrationsUrl))
 }
 
 function functionBody(sql, signature) {
@@ -35,6 +46,24 @@ test("당일 예약 리마인드는 KST 당일·전일 확정 기준을 사용�
   assert.match(sync, /appointment\.kind in \('level_test', 'visit_consultation'\)/)
   assert.match(sync, /appointment\.scheduled_at >= v_day_start/)
   assert.match(sync, /appointment\.scheduled_at < v_day_end/)
+})
+
+test("당일 예약 리마인드 migration은 격리 DB 후보 manifest에 정확한 바이트로 등록된다", async () => {
+  const [migration, manifestSource] = await Promise.all([
+    latestMigrationBytes("registration_same_day_customer_reminders"),
+    readFile(baselineManifestUrl, "utf8"),
+  ])
+  const manifest = JSON.parse(manifestSource)
+  const entry = manifest.orderedNewMigrations.find(
+    ({ fileName }) => fileName === "20260816003407_registration_same_day_customer_reminders.sql",
+  )
+
+  assert.deepEqual(entry, {
+    fileName: "20260816003407_registration_same_day_customer_reminders.sql",
+    status: "final",
+    sha256: createHash("sha256").update(migration).digest("hex"),
+  })
+  assert.deepEqual(manifest.orderedNewMigrations, [entry])
 })
 
 test("등록 상세는 민감 정보 없이 리마인드 상태만 읽는다", async () => {

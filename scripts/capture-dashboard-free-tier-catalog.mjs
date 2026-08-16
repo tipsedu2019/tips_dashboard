@@ -48,7 +48,7 @@ with migration_ledger as (
 ), scoped_catalog as (
   select 'role'::text object_kind, ''::text schema_name, role_row.rolname::text identity,
     pg_catalog.jsonb_build_object('login', role_row.rolcanlogin, 'inherit', role_row.rolinherit, 'superuser', role_row.rolsuper) fingerprint
-  from pg_catalog.pg_roles role_row where role_row.rolname in ('anon', 'authenticated', 'postgres', 'service_role')
+  from pg_catalog.pg_roles role_row where role_row.rolname in ('anon', 'authenticated', 'dashboard_audit_writer_v2', 'postgres', 'service_role')
   union all select 'schema', '', namespace.nspname, pg_catalog.jsonb_build_object('acl', namespace.nspacl)
   from pg_catalog.pg_namespace namespace where namespace.nspname in ('auth', 'dashboard_private', 'extensions', 'public', 'supabase_migrations')
   union all select 'type', namespace.nspname, type_row.typname, pg_catalog.jsonb_build_object('type', pg_catalog.format_type(type_row.oid, null), 'labels', labels.labels)
@@ -224,8 +224,8 @@ function isSchemaReplayStatement(statement) {
   }
   if (/^(?:insert|update|delete|merge|copy|truncate|select|with|notify|lock|repository|sha256\s*=)\b/u.test(normalized)) return false;
   if (/^do\s+\$(?:[a-z_][a-z0-9_]*)?\$/u.test(normalized)) {
-    const dynamicDdl = [...normalized.matchAll(/\bexecute\s+(?:format\s*\(\s*)?'((?:''|[^'])*)'/gu)]
-      .some(([, sql]) => /\b(?:create|alter|drop|grant|revoke|comment|security\s+label)\b/u.test(sql));
+    const dynamicDdl = [...normalized.matchAll(/\bexecute\s+(?:(?:pg_catalog\.)?format\s*\(\s*)?'((?:''|[^'])*)'/gu)]
+      .some(([, sql]) => !/\bpg_temp\b/iu.test(sql) && /\b(?:create|alter|drop|grant|revoke|comment|security\s+label)\b/u.test(sql));
     if (dynamicDdl) return true;
     const withoutStringLiterals = normalized.replaceAll(/'(?:''|[^'])*'/gu, "''");
     return /\b(?:create\s+(?!(?:temp|temporary)\s+table\b)|alter\s+(?:table|function|procedure|schema|type|domain|sequence|view|policy|role)\b|drop\s+(?:table|function|procedure|schema|type|domain|sequence|view|policy|role)\b|grant\s+|revoke\s+|comment\s+on\b|security\s+label\b)/u.test(withoutStringLiterals);
@@ -400,9 +400,9 @@ function relationIdentity(entry) {
 function aclGrantSql(schema, relation, acl) {
   if (!(acl === null || Array.isArray(acl))) fail("management_api_contract_drift");
   const target = `${quoteIdentifier(schema)}.${quoteIdentifier(relation)}`;
-  const allowedRoles = new Set(["anon", "authenticated", "service_role", "postgres", "public"]);
+  const allowedRoles = new Set(["anon", "authenticated", "dashboard_audit_writer_v2", "service_role", "postgres", "public"]);
   const privilegeByCode = new Map([["a", "insert"], ["r", "select"], ["w", "update"], ["d", "delete"], ["D", "truncate"], ["x", "references"], ["t", "trigger"], ["m", "maintain"]]);
-  const statements = [`revoke all privileges on table ${target} from anon, authenticated, service_role;`];
+  const statements = [`revoke all privileges on table ${target} from anon, authenticated, dashboard_audit_writer_v2, service_role;`];
   for (const item of acl || []) {
     if (typeof item !== "string") fail("management_api_contract_drift");
     const match = item.match(/^([^=]*)=([^/]*)\/[a-z_][a-z0-9_]*$/iu);
@@ -465,11 +465,18 @@ export function buildFinalSchemaReconciliation(definitions) {
   const commandName = new Map([["r", "select"], ["a", "insert"], ["w", "update"], ["d", "delete"], ["*", "all"]]);
   const needsLegacyStaffHelper = definitions.some((entry) => entry.objectKind === "policy" && entry.replayFingerprint && /\bis_admin_or_staff\s*\(\s*\)/iu.test(entry.replayFingerprint));
   const helperSql = needsLegacyStaffHelper ? ["create or replace function public.is_admin_or_staff() returns boolean language sql stable security invoker set search_path = '' as $$ select public.current_dashboard_role() = any (array['admin'::text, 'staff'::text]) $$;"] : [];
+  const policyRoles = new Set(["public", "anon", "authenticated", "service_role"]);
+  const managedRoleSql = definitions.filter((entry) => entry.objectKind === "role" && entry.schema === "" && entry.identity === "dashboard_audit_writer_v2" && entry.replayFingerprint).map((entry) => {
+    const fingerprint = parsedReplayFingerprint(entry);
+    if (fingerprint?.login !== false || fingerprint?.inherit !== false || fingerprint?.superuser !== false) fail("management_api_contract_drift");
+    policyRoles.add(entry.identity);
+    return `do $reconcile$ begin if not exists (select 1 from pg_catalog.pg_roles where rolname = ${sqlLiteral(entry.identity)}) then create role ${quoteIdentifier(entry.identity)} noinherit nologin nosuperuser; end if; end $reconcile$;`;
+  });
   const policySql = definitions.filter((entry) => entry.objectKind === "policy" && entry.schema === "public" && entry.replayFingerprint).flatMap((entry) => {
     const { relation, object } = relationIdentity(entry);
     const fingerprint = parsedReplayFingerprint(entry);
     const command = commandName.get(fingerprint?.command);
-    if (!command || !Array.isArray(fingerprint.roles) || !fingerprint.roles.every((role) => /^(?:public|anon|authenticated|service_role)$/u.test(role)) || !(fingerprint.using === null || typeof fingerprint.using === "string") || !(fingerprint.check === null || typeof fingerprint.check === "string")) fail("management_api_contract_drift");
+    if (!command || !Array.isArray(fingerprint.roles) || !fingerprint.roles.every((role) => policyRoles.has(role)) || !(fingerprint.using === null || typeof fingerprint.using === "string") || !(fingerprint.check === null || typeof fingerprint.check === "string")) fail("management_api_contract_drift");
     const clauses = [`create policy ${quoteIdentifier(object)} on public.${quoteIdentifier(relation)} for ${command} to ${fingerprint.roles.map(quoteIdentifier).join(", ")}`];
     if (fingerprint.using !== null) clauses.push(`using (${fingerprint.using})`);
     if (fingerprint.check !== null) clauses.push(`with check (${fingerprint.check})`);
@@ -484,7 +491,7 @@ export function buildFinalSchemaReconciliation(definitions) {
     return [`drop trigger if exists ${name} on public.${quoteIdentifier(relation)};`, `${fingerprint.definition};`];
   });
   const aclSql = publicTables.map((entry) => aclGrantSql("public", entry.identity, parsedReplayFingerprint(entry)?.acl));
-  const statements = [...columnSql, ...defaultSql, ...constraintSql, ...indexSql, ...rlsSql, ...helperSql, ...policySql, ...triggerSql, ...aclSql].filter(Boolean);
+  const statements = [...columnSql, ...defaultSql, ...constraintSql, ...indexSql, ...rlsSql, ...helperSql, ...managedRoleSql, ...policySql, ...triggerSql, ...aclSql].filter(Boolean);
   return statements.length ? `${statements.join("\n")}\n` : "";
 }
 

@@ -21,7 +21,7 @@ const evidenceMigrationUrl = new URL(
   import.meta.url,
 );
 const providerPayloadChecksumMigrationUrl = new URL(
-  "../supabase/migrations/20260816002040_registration_customer_reminder_provider_payload_checksum.sql",
+  "../supabase/migrations/20260816002344_registration_customer_reminder_provider_payload_checksum.sql",
   import.meta.url,
 );
 const currentHistoryMigrationUrl = new URL(

@@ -126,6 +126,7 @@
   "roles": [
     "anon",
     "authenticated",
+    "dashboard_audit_writer_v2",
     "postgres",
     "service_role"
   ],
