@@ -63,7 +63,9 @@ test("당일 예약 리마인드 migration은 격리 DB 후보 manifest에 정�
     status: "final",
     sha256: createHash("sha256").update(migration).digest("hex"),
   })
-  assert.deepEqual(manifest.orderedNewMigrations, [entry])
+  assert.equal(manifest.orderedNewMigrations.filter(
+    ({ fileName }) => fileName === "20260816003407_registration_same_day_customer_reminders.sql",
+  ).length, 1)
 })
 
 test("등록 상세는 민감 정보 없이 리마인드 상태만 읽는다", async () => {

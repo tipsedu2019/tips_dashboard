@@ -18,6 +18,11 @@ select has_function('public','get_academic_timetable_range_v1',array['date','dat
 select has_function('public','get_academic_curriculum_page_v1',array['jsonb','text','uuid','integer','boolean'],'academic curriculum page RPC exists');
 select has_function('public','get_academic_curriculum_detail_v1',array['uuid'],'academic curriculum detail RPC exists');
 select has_function('dashboard_private','is_canonical_class_date_v1',array['text'],'canonical class date validator exists');
+select ok(dashboard_private.is_canonical_class_date_v1(null),'canonical class date validator permits null');
+select ok(dashboard_private.is_canonical_class_date_v1(''),'canonical class date validator permits blank');
+select ok(dashboard_private.is_canonical_class_date_v1('2024-02-29'),'canonical class date validator permits a real leap day');
+select ok(not dashboard_private.is_canonical_class_date_v1('2026-02-30'),'canonical class date validator rejects an impossible date');
+select ok(not dashboard_private.is_canonical_class_date_v1(' 2026-03-01 '),'canonical class date validator rejects padded storage');
 
 with expected(signature) as (
   values

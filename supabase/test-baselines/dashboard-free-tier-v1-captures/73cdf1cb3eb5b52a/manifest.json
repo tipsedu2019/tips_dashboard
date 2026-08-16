@@ -9,6 +9,11 @@
       "fileName": "20260816003407_registration_same_day_customer_reminders.sql",
       "status": "final",
       "sha256": "80b8e4e45b27133ac378cd81e9871422d61e6305f37525cc934ca950acf632a7"
+    },
+    {
+      "fileName": "20260816132509_normalize_class_dates.sql",
+      "status": "final",
+      "sha256": "2d20409dcce3404f8b6813139d56bbe0151bb28a4f3ddf28931dae7eb88ef5d1"
     }
   ]
 }
