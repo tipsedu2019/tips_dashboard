@@ -11,7 +11,7 @@
       "sha256": "80b8e4e45b27133ac378cd81e9871422d61e6305f37525cc934ca950acf632a7"
     },
     {
-      "fileName": "20260816132509_normalize_class_dates.sql",
+      "fileName": "20260816133708_normalize_class_dates.sql",
       "status": "final",
       "sha256": "aa85cd966d716fcc81df1d5e9983812f219b2b0d81492200da45f2f8e3cbc112"
     }

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const migrationUrl = new URL("../supabase/migrations/20260816132509_normalize_class_dates.sql", import.meta.url);
+const migrationUrl = new URL("../supabase/migrations/20260816133708_normalize_class_dates.sql", import.meta.url);
 const manifestUrl = new URL("../supabase/test-baselines/dashboard-free-tier-v1.manifest.json", import.meta.url);
 
 test("class date migration only normalizes the four approved legacy values", async () => {
@@ -50,11 +50,11 @@ test("final isolated migration manifest pins the exact migration bytes", async (
   ]);
   const manifest = JSON.parse(manifestSource);
   const entry = manifest.orderedNewMigrations.find(
-    ({ fileName }) => fileName === "20260816132509_normalize_class_dates.sql",
+    ({ fileName }) => fileName === "20260816133708_normalize_class_dates.sql",
   );
 
   assert.deepEqual(entry, {
-    fileName: "20260816132509_normalize_class_dates.sql",
+    fileName: "20260816133708_normalize_class_dates.sql",
     status: "final",
     sha256: createHash("sha256").update(migration).digest("hex"),
   });
