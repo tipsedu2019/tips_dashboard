@@ -60,7 +60,7 @@
 - Consumes: `public.ops_registration_appointments`, `dashboard_private.registration_customer_reminder_jobs`, existing SOLAPI activation/message tables, and cron `tips-registration-customer-reminder-v1`.
 - Produces: `ops_registration_appointments.schedule_confirmed_at timestamptz`, `dashboard_private.registration_appointment_reminder_state_v1(appointment, now)`, updated `sync_registration_customer_reminder_jobs_v1()`, and exact daily cron readiness.
 
-- [ ] **Step 1: Create the migration using the Supabase CLI**
+- [x] **Step 1: Create the migration using the Supabase CLI**
 
 Run:
 
@@ -70,7 +70,7 @@ supabase migration new registration_same_day_customer_reminders
 
 Expected: one new empty migration ending `_registration_same_day_customer_reminders.sql`. Record that exact generated path in the task report and use it for every later command.
 
-- [ ] **Step 2: Write the failing source-contract test**
+- [x] **Step 2: Write the failing source-contract test**
 
 Create `tests/registration-same-day-customer-reminder.test.mjs` with assertions equivalent to:
 
@@ -87,7 +87,7 @@ test("appointment reminders use KST same-day eligibility instead of lead hours",
 })
 ```
 
-- [ ] **Step 3: Run the source test and verify RED**
+- [x] **Step 3: Run the source test and verify RED**
 
 Run:
 
@@ -97,7 +97,7 @@ node --test tests/registration-same-day-customer-reminder.test.mjs
 
 Expected: FAIL because the CLI-created migration does not yet contain `schedule_confirmed_at` or the KST eligibility function.
 
-- [ ] **Step 4: Write pgTAP cases before production SQL**
+- [x] **Step 4: Write pgTAP cases before production SQL**
 
 Create fixtures in `supabase/tests/registration_same_day_customer_reminders_test.sql` that prove:
 
@@ -115,7 +115,7 @@ select plan(12);
 select * from finish();
 ```
 
-- [ ] **Step 5: Implement the forward migration**
+- [x] **Step 5: Implement the forward migration**
 
 The migration must:
 
@@ -154,7 +154,7 @@ and appointment.schedule_confirmed_at < v_day_start
 
 Set `due_at = v_send_at`. Keep the observation-reminder arm and its `lead_hours` calculation byte-for-byte equivalent in behavior.
 
-- [ ] **Step 6: Run the source tests and scheduler regression tests**
+- [x] **Step 6: Run the source tests and scheduler regression tests**
 
 Run:
 
@@ -195,7 +195,7 @@ git commit -m "fix: schedule registration reminders on appointment day"
 - Consumes: appointment rows, reminder jobs, scheduled customer messages, and existing registration read authorization.
 - Produces: `public.get_registration_customer_reminder_summaries_v1(p_task_id uuid)` and `OpsRegistrationAppointment.customerReminder`.
 
-- [ ] **Step 1: Write failing service parser tests**
+- [x] **Step 1: Write failing service parser tests**
 
 Add strict cases that expect:
 
@@ -218,7 +218,7 @@ type RegistrationCustomerReminderSummary = Readonly<{
 
 Test exact keys, valid timestamps, closed state vocabulary, duplicate appointment IDs, task mismatch, and rejection of recipient/provider fields.
 
-- [ ] **Step 2: Run parser tests and verify RED**
+- [x] **Step 2: Run parser tests and verify RED**
 
 Run:
 
@@ -228,7 +228,7 @@ node --test --test-name-pattern='reminder summary' tests/registration-track-serv
 
 Expected: FAIL because `customerReminder` and the summary RPC read do not exist.
 
-- [ ] **Step 3: Add the authorized summary RPC to the migration**
+- [x] **Step 3: Add the authorized summary RPC to the migration**
 
 The RPC must authenticate with `auth.uid()`, reuse the existing registration detail read-access predicate, accept one `task_id`, and return only:
 
@@ -248,7 +248,7 @@ State precedence must be `sent`, `unknown`, `failed_hold`, `processing`, same-da
 
 Assert authorized admin/staff reads, unrelated actor denial, exact JSON keys, sent/unknown/failed precedence, same-day created versus changed distinction, and absence of secret columns.
 
-- [ ] **Step 5: Map summaries into registration detail**
+- [x] **Step 5: Map summaries into registration detail**
 
 Add one parallel RPC read per task in `loadOpsRegistrationCaseDetail`, parse it strictly into a map keyed by appointment ID, and return:
 
@@ -293,7 +293,7 @@ git commit -m "feat: expose registration reminder status"
 - Consumes: existing safe single-job `runOnce()` and service-role claim/begin/finalize RPCs.
 - Produces: `runBatch({ maxJobs, maxDurationMs })`, `has_registration_customer_reminder_backlog_v1()`, and coalesced continuation dispatch.
 
-- [ ] **Step 1: Write failing worker batch tests**
+- [x] **Step 1: Write failing worker batch tests**
 
 Cover:
 
@@ -303,7 +303,7 @@ await worker.runBatch({ maxJobs: 25, maxDurationMs: 20_000 })
 
 Assert that it processes multiple claims, stops on idle, stops at 25, stops at the duration boundary, counts accepted/held/unknown without retrying, and never makes a second provider attempt for one claim.
 
-- [ ] **Step 2: Run worker tests and verify RED**
+- [x] **Step 2: Run worker tests and verify RED**
 
 ```bash
 node --test tests/registration-customer-reminder-worker.test.mjs
@@ -311,7 +311,7 @@ node --test tests/registration-customer-reminder-worker.test.mjs
 
 Expected: FAIL because `runBatch` is undefined.
 
-- [ ] **Step 3: Implement `runBatch` around `runOnce`**
+- [x] **Step 3: Implement `runBatch` around `runOnce`**
 
 Keep `runOnce` unchanged as the single provider boundary. Add:
 
@@ -330,11 +330,11 @@ async runBatch({ maxJobs, maxDurationMs }: { maxJobs: number; maxDurationMs: num
 
 Validate bounds as constants in production: `maxJobs=25`, `maxDurationMs=20_000`.
 
-- [ ] **Step 4: Write failing continuation route tests**
+- [x] **Step 4: Write failing continuation route tests**
 
 Assert that the route calls the new backlog RPC after a full/non-idle batch, schedules at most one continuation when due jobs remain, does not continue on idle, and returns 503 without provider retry when the continuation RPC fails after a completed batch.
 
-- [ ] **Step 5: Add backlog and continuation SQL**
+- [x] **Step 5: Add backlog and continuation SQL**
 
 Create service-role-only RPCs:
 
@@ -345,11 +345,11 @@ public.continue_registration_customer_reminder_worker_v1() returns bigint
 
 The backlog function must use the due pending index and exact source eligibility. The continuation function must acquire an advisory transaction lock and suppress a second continuation within the same bounded lease window before calling the existing private `pg_net` invocation.
 
-- [ ] **Step 6: Wire route production dependencies**
+- [x] **Step 6: Wire route production dependencies**
 
 The worker route runs one batch, queries backlog, and requests one continuation only when backlog remains. It must not accept batch sizes, URLs, secrets, or provider inputs from the HTTP request.
 
-- [ ] **Step 7: Run worker and route tests**
+- [x] **Step 7: Run worker and route tests**
 
 ```bash
 node --test tests/registration-customer-reminder-worker.test.mjs tests/registration-customer-reminder-route.test.mjs tests/registration-observation-customer-reminder-worker.test.mjs
@@ -377,7 +377,7 @@ git commit -m "fix: drain daily registration reminders safely"
 - Consumes: `appointment.customerReminder` from Task 2.
 - Produces: `RegistrationCustomerReminderStatus` presentation with no send callback.
 
-- [ ] **Step 1: Write the failing focused UI test**
+- [x] **Step 1: Write the failing focused UI test**
 
 Assert:
 
@@ -392,7 +392,7 @@ assert.match(appointmentSource, /리마인드 발송 완료/)
 assert.match(appointmentSource, /리마인드 발송 결과 확인 필요/)
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 ```bash
 node --test tests/registration-reminder-status-ui.test.mjs
@@ -400,13 +400,13 @@ node --test tests/registration-reminder-status-ui.test.mjs
 
 Expected: FAIL because the manual button exists and the status presenter does not.
 
-- [ ] **Step 3: Implement the minimal status presenter**
+- [x] **Step 3: Implement the minimal status presenter**
 
 Add a small pure label function or focused component in `registration-appointment-editor.tsx`. Render it near the booking AlimTalk action only when an appointment exists. Use KST formatting for `scheduledFor` and `sentAt`; do not infer status from browser time when the server already supplies a terminal state.
 
 Keep the `예약 안내 알림톡` button and its dirty/save guard unchanged. Remove only the `appointment_reminder` target and its button.
 
-- [ ] **Step 4: Run focused UI and service tests**
+- [x] **Step 4: Run focused UI and service tests**
 
 ```bash
 node --test tests/registration-reminder-status-ui.test.mjs tests/registration-track-service.test.mjs
@@ -436,13 +436,13 @@ git commit -m "feat: show automatic reminder status"
 - Consumes: existing parsed notification snapshot and Google Chat-only rule projection.
 - Produces: immediate-rule table without timing presentation and a source guard preventing the legacy lead-time component from returning.
 
-- [ ] **Step 1: Replace old positive UI assertions with failing retirement assertions**
+- [x] **Step 1: Replace old positive UI assertions with failing retirement assertions**
 
 In `tests/notification-control-plane-ui.test.mjs`, require the visible rule projection to exclude `registration.appointment_reminder_due`, remove the `시점` table heading, remove `notificationRuleVariantLabel`, and retain event/audience/channel/settings columns plus mobile cards.
 
 In `tests/registration-customer-reminder-settings.test.mjs`, replace service/component behavior tests with source-tree assertions that the deleted files are absent and the canonical notification panel does not import them.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 ```bash
 node --test tests/notification-control-plane-ui.test.mjs tests/registration-customer-reminder-settings.test.mjs
@@ -450,13 +450,13 @@ node --test tests/notification-control-plane-ui.test.mjs tests/registration-cust
 
 Expected: FAIL on the visible scheduled reminder rules, timing column/helper, and existing lead-time component files.
 
-- [ ] **Step 3: Implement the minimal UI retirement**
+- [x] **Step 3: Implement the minimal UI retirement**
 
 Filter `registration.appointment_reminder_due` before `groupServerRules`. Remove the desktop timing column/cells, mobile non-immediate timing suffix, schedule editor controls reachable only from those hidden rows, and orphan imports/helpers. Keep parser vocabulary and historical server event keys intact.
 
 Delete the unmounted `RegistrationCustomerReminderSettings` and its browser service so an editable `예약 N시간 전` control cannot be remounted accidentally. Do not delete the server settings route because observation reminders still use the private compatibility setting.
 
-- [ ] **Step 4: Run UI retirement tests**
+- [x] **Step 4: Run UI retirement tests**
 
 ```bash
 node --test tests/notification-control-plane-ui.test.mjs tests/registration-customer-reminder-settings.test.mjs tests/notification-control-plane-model.test.mjs tests/notification-control-plane-api.test.mjs
@@ -484,7 +484,7 @@ git commit -m "refactor: simplify registration reminder UI"
 - Consumes: all prior task outputs.
 - Produces: verified source commit, applied migration evidence, `main`/Vercel evidence, and authenticated runtime evidence without provider sends.
 
-- [ ] **Step 1: Run the focused regression suite**
+- [x] **Step 1: Run the focused regression suite**
 
 ```bash
 node --test \
@@ -504,7 +504,7 @@ node --test \
 
 Expected: zero failures in the focused suite.
 
-- [ ] **Step 2: Run typecheck and production build**
+- [x] **Step 2: Run typecheck and production build**
 
 ```bash
 node node_modules/typescript/bin/tsc --noEmit

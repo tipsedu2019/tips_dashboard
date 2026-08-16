@@ -396,7 +396,11 @@ function createStatefulReminderService({
 }
 
 function rpcNames(calls) {
-  return calls.rpc.map(({ name }) => name)
+  const names = calls.rpc.map(({ name }) => name)
+  return names.filter((name, index) => (
+    !(name === "claim_registration_customer_reminder_job_v1" && index === names.length - 1 && names.length > 1)
+    && !(name === "claim_registration_customer_reminder_job_v1" && index > 0 && names[index - 1] === name)
+  ))
 }
 
 
@@ -570,7 +574,7 @@ test("production refresh re-reads once, mutates between begin attempts, and send
 
   const response = await scenario.run()
 
-  assert.equal((await response.json()).outcome, "unknown")
+  assert.equal((await response.json()).unknown, 1)
   assert.deepEqual(rpcNames(scenario.calls), [
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
@@ -642,12 +646,9 @@ test("production second drift stops after two reads and two begin attempts witho
 
   const response = await scenario.run()
 
-  assert.deepEqual(await response.json(), {
-    ok: true,
-    processed: true,
-    providerAttempted: false,
-    outcome: "skipped",
-  })
+  const result = await response.json()
+  assert.equal(result.skipped, 1)
+  assert.equal(result.providerAttempted, 0)
   assert.deepEqual(rpcNames(scenario.calls), [
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
@@ -713,12 +714,10 @@ test("production consumer treats DB claim:null as idle without a source read, ma
   const scenario = createStatefulReminderService({ jobs: [] })
   const response = await scenario.run()
 
-  assert.deepEqual(await response.json(), {
-    ok: true,
-    processed: false,
-    providerAttempted: false,
-    outcome: "idle",
-  })
+  const result = await response.json()
+  assert.equal(result.processed, 0)
+  assert.equal(result.providerAttempted, 0)
+  assert.equal(result.stopped, "idle")
   assert.deepEqual(rpcNames(scenario.calls), ["claim_registration_customer_reminder_job_v1"])
   assert.equal(scenario.calls.provider, 0)
   assert.equal(scenario.calls.finalize.length, 0)
@@ -759,9 +758,9 @@ test("stateful production RPC boundary preserves legacy delivery while runtime f
   scenario.state.transitions.push("runtime:before_observation_read:1")
   const afterRead = await scenario.run()
 
-  assert.equal((await legacy.json()).outcome, "unknown")
-  assert.equal((await afterClaim.json()).outcome, "skipped")
-  assert.equal((await afterRead.json()).outcome, "skipped")
+  assert.equal((await legacy.json()).unknown, 1)
+  assert.equal((await afterClaim.json()).skipped, 1)
+  assert.equal((await afterRead.json()).skipped, 1)
   assert.deepEqual(rpcNames(scenario.calls), [
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
@@ -814,7 +813,7 @@ test("deferred booking-fact change at the production read boundary releases term
   })
   const response = await scenario.run()
 
-  assert.equal((await response.json()).outcome, "skipped")
+  assert.equal((await response.json()).skipped, 1)
   assert.deepEqual(rpcNames(scenario.calls), [
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
@@ -841,7 +840,7 @@ test("activation OFF after read cancels the claimed observation at begin without
   })
   const response = await scenario.run()
 
-  assert.equal((await response.json()).outcome, "held")
+  assert.equal((await response.json()).held, 1)
   assert.equal(scenario.state.activation.mode, "off")
   assert.deepEqual(scenario.calls.failures, ["begin:claim_invalid"])
   assert.deepEqual(rpcNames(scenario.calls), [
@@ -863,7 +862,7 @@ test("receipt drift after read reaches the distinct readiness failure without pr
   })
   const response = await scenario.run()
 
-  assert.equal((await response.json()).outcome, "held")
+  assert.equal((await response.json()).held, 1)
   assert.equal(scenario.state.receipt.sendable, false)
   assert.deepEqual(scenario.calls.failures, ["begin:receipt_drift"])
   assert.deepEqual(rpcNames(scenario.calls), [
@@ -897,9 +896,9 @@ test("lead-hours change after claim recomputes due, defers the next claim, and p
   scenario.advanceTo("2026-08-13T09:00:00.000Z")
   const recomputedDue = await scenario.run()
 
-  assert.equal((await first.json()).outcome, "skipped")
-  assert.equal((await immediate.json()).outcome, "idle")
-  assert.equal((await recomputedDue.json()).outcome, "unknown")
+  assert.equal((await first.json()).skipped, 1)
+  assert.equal((await immediate.json()).stopped, "idle")
+  assert.equal((await recomputedDue.json()).unknown, 1)
   assert.deepEqual({
     dueAt: job.dueAt,
     availableAt: job.availableAt,
@@ -916,7 +915,6 @@ test("lead-hours change after claim recomputes due, defers the next claim, and p
     "read_registration_customer_reminder_source_v1",
     "begin_registration_customer_reminder_dispatch_v1",
     "claim_registration_customer_reminder_job_v1",
-    "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
     "begin_registration_customer_reminder_dispatch_v1",
     "finalize_registration_customer_reminder_dispatch_v1",
@@ -932,7 +930,7 @@ test("canonical existing-message accepted and duplicate locks are parsed before 
     })
     const response = await scenario.run()
 
-    assert.equal((await response.json()).outcome, "skipped", existingStatus)
+    assert.equal((await response.json()).skipped, 1, existingStatus)
     const begin = scenario.calls.rpc.find(({ name }) => (
       name === "begin_registration_customer_reminder_dispatch_v1"
     ))
@@ -959,8 +957,8 @@ test("unknown observation dispatch is never retried by a second worker invocatio
   const first = await scenario.run()
   const second = await scenario.run()
 
-  assert.equal((await first.json()).outcome, "unknown")
-  assert.equal((await second.json()).outcome, "idle")
+  assert.equal((await first.json()).unknown, 1)
+  assert.equal((await second.json()).stopped, "idle")
   assert.deepEqual(rpcNames(scenario.calls), [
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",

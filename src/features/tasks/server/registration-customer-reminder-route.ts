@@ -24,9 +24,9 @@ import {
 } from "./registration-customer-reminder-worker.ts"
 import type {
   RegistrationCustomerReminderBegin,
+  RegistrationCustomerReminderWorkerBatchResult,
   RegistrationCustomerReminderClaim,
   RegistrationCustomerReminderPrepared,
-  RegistrationCustomerReminderWorkerResult,
 } from "./registration-customer-reminder-worker.ts"
 
 type JsonRecord = Record<string, unknown>
@@ -66,7 +66,14 @@ type ReminderTemplateContract = LegacyReminderTemplateContract | Readonly<{
 
 type ReminderRouteDependencies = Readonly<{
   workerSecret: string
-  worker: Readonly<{ runOnce(): Promise<RegistrationCustomerReminderWorkerResult> }>
+  worker: Readonly<{
+    runBatch(input: Readonly<{
+      maxJobs: number
+      maxDurationMs: number
+    }>): Promise<RegistrationCustomerReminderWorkerBatchResult>
+  }>
+  hasBacklog(): Promise<boolean>
+  continueWorker(): Promise<number | null>
   authenticate(request: Request): Promise<Readonly<{
     actorProfileId: string
     role: string
@@ -292,7 +299,11 @@ export function createRegistrationCustomerReminderRouteHandlers(
         return json({ ok: false, error: "registration_customer_reminder_worker_unauthorized" }, 401)
       }
       try {
-        return json(await dependencies.worker.runOnce())
+        const batch = await dependencies.worker.runBatch({ maxJobs: 25, maxDurationMs: 20_000 })
+        if (batch.processed > 0 && batch.stopped !== "idle" && await dependencies.hasBacklog()) {
+          await dependencies.continueWorker()
+        }
+        return json(batch)
       } catch {
         return json({ ok: false, error: "registration_customer_reminder_worker_unavailable" }, 503)
       }
@@ -660,6 +671,20 @@ export function createProductionRegistrationCustomerReminderRouteHandlers(
   return createRegistrationCustomerReminderRouteHandlers({
     workerSecret: environmentText(environment.REGISTRATION_CUSTOMER_REMINDER_WORKER_SECRET),
     worker,
+    async hasBacklog() {
+      const value = await serviceRpc(client, "has_registration_customer_reminder_backlog_v1")
+      if (typeof value !== "boolean") {
+        throw new Error("registration_customer_reminder_backlog_contract_invalid")
+      }
+      return value
+    },
+    async continueWorker() {
+      const value = await serviceRpc(client, "continue_registration_customer_reminder_worker_v1")
+      if (value !== null && (!Number.isSafeInteger(value) || value < 1)) {
+        throw new Error("registration_customer_reminder_continuation_contract_invalid")
+      }
+      return value
+    },
     async authenticate(request) {
       try {
         productionAuth ??= createProductionRegistrationCustomerMessageAuth()

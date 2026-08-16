@@ -260,3 +260,60 @@ test("provider 호출 뒤 finalize가 실패해도 unknown을 반환하고 두 �
   assert.equal(calls.send, 1)
   assert.equal(calls.finalize, 1)
 })
+
+test("배치는 여러 리마인드를 처리한 뒤 빈 큐에서 멈춘다", async () => {
+  const claims = [
+    CLAIM,
+    { ...CLAIM, jobId: "00000000-0000-4000-8000-000000000011", requestKey: "00000000-0000-4000-8000-000000000012" },
+    null,
+  ]
+  const { calls, worker } = makeDependencies({
+    async claim() {
+      calls.claim += 1
+      return claims.shift()
+    },
+  })
+
+  const result = await worker.runBatch({ maxJobs: 25, maxDurationMs: 20_000 })
+
+  assert.deepEqual(result, {
+    ok: true,
+    processed: 2,
+    providerAttempted: 2,
+    accepted: 2,
+    held: 0,
+    skipped: 0,
+    failedHold: 0,
+    unknown: 0,
+    stopped: "idle",
+  })
+  assert.equal(calls.send, 2)
+})
+
+test("배치는 최대 작업 수에서 멈춘다", async () => {
+  const { calls, worker } = makeDependencies()
+
+  const result = await worker.runBatch({ maxJobs: 2, maxDurationMs: 20_000 })
+
+  assert.equal(result.processed, 2)
+  assert.equal(result.stopped, "max_jobs")
+  assert.equal(calls.claim, 2)
+  assert.equal(calls.send, 2)
+})
+
+test("배치는 시간 경계에 도달하면 추가 provider 호출 없이 멈춘다", async () => {
+  const times = [
+    new Date("2026-08-10T06:00:00.000Z"),
+    new Date("2026-08-10T06:00:00.000Z"),
+    new Date("2026-08-10T06:00:20.000Z"),
+  ]
+  const { calls, worker } = makeDependencies({
+    now: () => times.shift() ?? new Date("2026-08-10T06:00:20.000Z"),
+  })
+
+  const result = await worker.runBatch({ maxJobs: 25, maxDurationMs: 20_000 })
+
+  assert.equal(result.processed, 1)
+  assert.equal(result.stopped, "duration")
+  assert.equal(calls.send, 1)
+})

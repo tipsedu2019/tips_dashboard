@@ -191,27 +191,23 @@ test("고정 등록 전달 정책은 스위치 없이 잠금 상태와 44px 내�
   assert.match(toggleSource, /min-h-11/)
 })
 
-test("등록 예약 알림은 세 한국어 시점 라벨을 데스크톱과 모바일의 공통 초안에서 표시한다", async () => {
+test("등록 알림 설정은 예약 리마인드 행과 공통 시점 표기를 숨긴다", async () => {
   const source = await readOptionalSource(
     "src/features/notifications/notification-control-panel.tsx",
   )
 
-  assert.match(source, /function notificationRuleVariantLabel/)
-  assert.match(source, /예약 전날 \$\{schedule\.localTime\}/)
-  assert.match(source, /예약 당일 \$\{schedule\.localTime\}/)
-  assert.match(source, /예약 1시간 전/)
-  assert.match(source, /notificationRuleVariantLabel\(rule, draft\)/)
-  assert.match(source, /hidden[^"\n]*md:block/)
-  assert.match(source, /md:hidden/)
-  assert.doesNotMatch(source, />\{rule\.ruleVariantKey\}</)
+  assert.doesNotMatch(source, /function notificationRuleVariantLabel/)
+  assert.doesNotMatch(source, />\s*시점\s*</)
+  assert.match(source, /rule\.eventKey !== "registration\.appointment_reminder_due"/)
+  assert.match(source, /selectEditableGoogleChatRules/)
 })
 
-test("등록 예약 알림은 별도 SOLAPI 편집기 없이 Google Chat projection을 따른다", async () => {
+test("등록 예약 리마인드는 별도 SOLAPI 편집기 없이 목록에서도 제외한다", async () => {
   const source = await readOptionalSource(
     "src/features/notifications/notification-control-panel.tsx",
   )
 
-  assert.doesNotMatch(source, /rule\.eventKey !== "registration\.appointment_reminder_due"/)
+  assert.match(source, /rule\.eventKey !== "registration\.appointment_reminder_due"/)
   assert.doesNotMatch(source, /RegistrationCustomerReminderSettings/)
   assert.doesNotMatch(source, /현재 예약 알림이 발송되지 않습니다/)
 })
@@ -594,7 +590,7 @@ test("알림 규칙 표와 저장바는 조밀한 표 및 화면 안쪽 고정 �
     "src/features/notifications/notification-control-panel.tsx",
   )
 
-  assert.match(source, /<table className="w-full min-w-\[900px\] table-fixed/)
+  assert.match(source, /<table className="w-full min-w-\[760px\] table-fixed/)
   assert.match(source, /compact \? "space-y-2 rounded-lg border bg-background p-3"/)
   assert.match(source, /"flex min-w-\[11rem\] items-center justify-end gap-2"/)
   assert.match(source, /sticky bottom-3 z-20/)

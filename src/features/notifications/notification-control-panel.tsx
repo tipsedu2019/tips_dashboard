@@ -337,28 +337,6 @@ function saveStatusLabel(savePhase: SavePhase, savedAt: string | null) {
   return ""
 }
 
-function notificationRuleVariantLabel(
-  rule: NotificationRuleDto,
-  draft: NotificationDraft,
-) {
-  if (rule.ruleVariantKey === "immediate") return "즉시"
-  const schedule = draft.rules[rule.id]?.scheduleConfig ?? rule.scheduleConfig
-  if (rule.ruleVariantKey === "previous_day_at" && schedule && "localTime" in schedule) {
-    return `예약 전날 ${schedule.localTime}`
-  }
-  if (rule.ruleVariantKey === "same_day_at" && schedule && "localTime" in schedule) {
-    return `예약 당일 ${schedule.localTime}`
-  }
-  if (rule.ruleVariantKey === "offset_before" && schedule && "leadMinutes" in schedule) {
-    if (schedule.leadMinutes === 60) return "예약 1시간 전"
-    if (schedule.leadMinutes > 0 && schedule.leadMinutes % 60 === 0) {
-      return `예약 ${schedule.leadMinutes / 60}시간 전`
-    }
-    return `예약 ${schedule.leadMinutes}분 전`
-  }
-  return "예약 시점 확인 필요"
-}
-
 type RuleToggleProps = {
   rule: NotificationRuleDto
   draft: NotificationDraft
@@ -410,7 +388,6 @@ function RuleToggle({
     })
   )
   const preservesExistingRule = rule.enabled && connectionMissing
-  const variantLabel = notificationRuleVariantLabel(rule, draft)
   const connectionMessage = connectionMissing
     ? preservesExistingRule
       ? "연결 필요 · 기존 설정과 이력은 유지됩니다."
@@ -429,7 +406,6 @@ function RuleToggle({
           </p>
           <p className="text-xs text-muted-foreground">
             {rule.channelLabel ?? rule.channelKey}
-            {rule.ruleVariantKey === "immediate" ? "" : ` · ${variantLabel}`}
           </p>
           {connectionMessage ? (
             <p className="text-xs font-medium text-amber-700">{connectionMessage}</p>
@@ -510,7 +486,11 @@ function RulesView({
   onMentionChange,
   onEditTemplate,
 }: RulesViewProps) {
-  const groups = React.useMemo(() => groupServerRules(rules), [rules])
+  const visibleRules = React.useMemo(
+    () => rules.filter((rule) => rule.eventKey !== "registration.appointment_reminder_due"),
+    [rules],
+  )
+  const groups = React.useMemo(() => groupServerRules(visibleRules), [visibleRules])
   if (groups.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
@@ -522,13 +502,12 @@ function RulesView({
   return (
     <div data-notification-draft-source="shared">
       <div className="hidden overflow-x-auto rounded-lg border border-border/70 bg-background md:block">
-        <table className="w-full min-w-[900px] table-fixed border-collapse text-left text-sm">
+        <table className="w-full min-w-[760px] table-fixed border-collapse text-left text-sm">
           <thead>
             <tr className="h-9 border-b bg-muted/40 text-xs text-muted-foreground">
               <th scope="col" className="w-[24%] px-4 py-2 font-medium">이벤트</th>
               <th scope="col" className="w-[16%] px-3 py-2 font-medium">대상</th>
               <th scope="col" className="w-[15%] px-3 py-2 font-medium">채널</th>
-              <th scope="col" className="w-[13%] px-3 py-2 font-medium">시점</th>
               <th scope="col" className="px-3 py-2 font-medium">설정</th>
             </tr>
           </thead>
@@ -555,9 +534,6 @@ function RulesView({
                 </td>
                 <td className="px-3 py-3 text-muted-foreground">
                   {rule.channelLabel ?? rule.channelKey}
-                </td>
-                <td className="px-3 py-3 text-muted-foreground">
-                  {notificationRuleVariantLabel(rule, draft)}
                 </td>
                 <td className="px-3 py-2">
                   <RuleToggle

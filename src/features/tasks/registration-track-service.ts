@@ -272,7 +272,25 @@ export type OpsRegistrationAppointment = {
   notificationRevision: number
   createdAt: string
   updatedAt: string
+  customerReminder?: RegistrationCustomerReminderSummary
 }
+
+export type RegistrationCustomerReminderState =
+  | "scheduled"
+  | "not_applicable_same_day_created"
+  | "not_applicable_same_day_changed"
+  | "processing"
+  | "sent"
+  | "unknown"
+  | "failed_hold"
+  | "canceled"
+
+export type RegistrationCustomerReminderSummary = Readonly<{
+  state: RegistrationCustomerReminderState
+  scheduledFor: string | null
+  sentAt: string | null
+  updatedAt: string
+}>
 
 export type OpsRegistrationLevelTest = {
   id: string
@@ -1383,6 +1401,51 @@ function mapAppointment(row: Row): OpsRegistrationAppointment {
   }
 }
 
+const REGISTRATION_CUSTOMER_REMINDER_STATES = new Set<RegistrationCustomerReminderState>([
+  "scheduled",
+  "not_applicable_same_day_created",
+  "not_applicable_same_day_changed",
+  "processing",
+  "sent",
+  "unknown",
+  "failed_hold",
+  "canceled",
+])
+
+function reminderTimestamp(input: unknown, field: string, nullable = false): string | null {
+  if (input === null && nullable) return null
+  const timestamp = text(input)
+  if (!timestamp || !Number.isFinite(Date.parse(timestamp))) {
+    throw new Error(`registration_customer_reminder_${field}_invalid`)
+  }
+  return timestamp
+}
+
+function mapRegistrationCustomerReminderSummary(row: Row): {
+  appointmentId: string
+  summary: RegistrationCustomerReminderSummary
+} {
+  const expectedKeys = ["appointment_id", "scheduled_for", "sent_at", "state", "updated_at"]
+  const keys = Object.keys(row).sort()
+  if (keys.length !== expectedKeys.length || keys.some((key, index) => key !== expectedKeys[index])) {
+    throw new Error("registration_customer_reminder_summary_shape_invalid")
+  }
+  const appointmentId = text(row.appointment_id)
+  const state = text(row.state) as RegistrationCustomerReminderState
+  if (!appointmentId || !REGISTRATION_CUSTOMER_REMINDER_STATES.has(state)) {
+    throw new Error("registration_customer_reminder_summary_invalid")
+  }
+  return {
+    appointmentId,
+    summary: Object.freeze({
+      state,
+      scheduledFor: reminderTimestamp(row.scheduled_for, "scheduled_for", true),
+      sentAt: reminderTimestamp(row.sent_at, "sent_at", true),
+      updatedAt: reminderTimestamp(row.updated_at, "updated_at") as string,
+    }),
+  }
+}
+
 function mapLevelTest(row: Row): OpsRegistrationLevelTest {
   return {
     id: text(value(row, "id")),
@@ -1954,6 +2017,27 @@ export function createRegistrationTrackService(
     return row
   }
 
+  async function queryCustomerReminderSummaries(
+    taskId: string,
+    metrics: { queryCount: number },
+  ) {
+    metrics.queryCount += 1
+    const { data, error } = await client.rpc(
+      "get_registration_customer_reminder_summaries_v1",
+      { p_task_id: taskId },
+    )
+    if (error) throw error
+    const byAppointmentId = new Map<string, RegistrationCustomerReminderSummary>()
+    for (const row of rows(data)) {
+      const { appointmentId, summary } = mapRegistrationCustomerReminderSummary(row)
+      if (byAppointmentId.has(appointmentId)) {
+        throw new Error("registration_customer_reminder_summary_duplicate")
+      }
+      byAppointmentId.set(appointmentId, summary)
+    }
+    return byAppointmentId
+  }
+
   function invalidateReadyRuntime(error: unknown): never {
     clearCaches()
     if (options.invalidateRuntimeAfterReadyFailure) {
@@ -2293,6 +2377,7 @@ export function createRegistrationTrackService(
           metrics,
           signal,
         ),
+        queryCustomerReminderSummaries(safeTaskId, metrics),
       ])
         .then(
           (phaseOne) => ({ ok: true as const, phaseOne }),
@@ -2303,8 +2388,8 @@ export function createRegistrationTrackService(
         const phaseOneResult = await phaseOneRequest
         if (!phaseOneResult.ok) throw phaseOneResult.error
         const phaseOne = phaseOneResult.phaseOne
-        const [parentRow, trackRows, appointmentRows, batchRows, eventRows, messageRows] = phaseOne as [
-          Row, Row[], Row[], Row[], Row[], Row[],
+        const [parentRow, trackRows, appointmentRows, batchRows, eventRows, messageRows, reminderSummaries] = phaseOne as [
+          Row, Row[], Row[], Row[], Row[], Row[], Map<string, RegistrationCustomerReminderSummary>,
         ]
         const sharedAppointmentRows = appointmentRows.filter(
           (row) => !isBookingOnlyRegistrationAppointmentRow(row),
@@ -2338,7 +2423,14 @@ export function createRegistrationTrackService(
             comments,
             attachments,
             tracks,
-            appointments: sharedAppointmentRows.map(mapAppointment),
+            appointments: sharedAppointmentRows.map((row) => {
+              const appointment = mapAppointment(row)
+              const customerReminder = reminderSummaries.get(appointment.id)
+              if (!customerReminder) {
+                throw new Error("registration_customer_reminder_summary_missing")
+              }
+              return { ...appointment, customerReminder }
+            }),
             levelTests: levelTestRows.map(mapLevelTest),
             consultations: consultationRows.map(mapConsultation),
             admissionBatches: batchRows.map(mapBatch),

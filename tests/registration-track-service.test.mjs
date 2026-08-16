@@ -525,7 +525,20 @@ function createClient({ queryHandler, rpcHandler } = {}) {
       from: builder,
       async rpc(name, args) {
         rpcCalls.push([name, args]);
-        return rpcHandler?.(name, args) ?? { data: { ok: true }, error: null };
+        if (rpcHandler) return rpcHandler(name, args);
+        if (name === "get_registration_customer_reminder_summaries_v1") {
+          return {
+            data: [{
+              appointment_id: "appointment-1",
+              state: "scheduled",
+              scheduled_for: "2026-07-13T01:00:00.000Z",
+              sent_at: null,
+              updated_at: "2026-07-12T02:00:00.000Z",
+            }],
+            error: null,
+          };
+        }
+        return { data: { ok: true }, error: null };
       },
     },
   };
@@ -2085,6 +2098,40 @@ test("case detail reads overlap a delayed runtime readiness check", async () => 
   assert.deepEqual(detail.tracks.map((track) => track.id), ["track-1"]);
 });
 
+test("reminder summary is merged into the matching registration appointment", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    queryHandler(query) {
+      return detailRows(query.table);
+    },
+    rpcHandler(name, args) {
+      assert.equal(name, "get_registration_customer_reminder_summaries_v1");
+      assert.deepEqual({ ...args }, { p_task_id: "task-1" });
+      return {
+        data: [{
+          appointment_id: "appointment-1",
+          state: "scheduled",
+          scheduled_for: "2026-07-13T01:00:00.000Z",
+          sent_at: null,
+          updated_at: "2026-07-12T02:00:00.000Z",
+        }],
+        error: null,
+      };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const detail = await service.loadCaseDetail("task-1", "viewer-1", { force: true });
+
+  assert.equal(harness.rpcCalls.length, 1);
+  assert.deepEqual({ ...detail.appointments[0].customerReminder }, {
+    state: "scheduled",
+    scheduledFor: "2026-07-13T01:00:00.000Z",
+    sentAt: null,
+    updatedAt: "2026-07-12T02:00:00.000Z",
+  });
+});
+
 test("case detail excludes observation rows at the server query boundary", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient({
@@ -2525,7 +2572,7 @@ test("detail loader embeds track children in six scoped reads, maps rows, and sh
   assert.equal(harness.queries.some((query) => [
     "ops_registration_level_tests", "ops_registration_consultations", "ops_registration_enrollments",
   ].includes(query.table)), false);
-  assert.deepEqual(measures, [{ name: "registration:case-detail", cacheHit: false, queryCount: 6, ok: true }]);
+  assert.deepEqual(measures, [{ name: "registration:case-detail", cacheHit: false, queryCount: 7, ok: true }]);
   assert.ok(performanceCalls.some((entry) => entry[0] === "measure" && entry[1] === "registration:case-detail"));
 
   const cached = await service.loadCaseDetail("task-1", "viewer-1");

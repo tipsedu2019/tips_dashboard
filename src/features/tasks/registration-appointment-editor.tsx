@@ -117,6 +117,22 @@ function toScheduledAt(value: string) {
   return Number.isNaN(date.getTime()) ? value : date.toISOString()
 }
 
+function registrationCustomerReminderLabel(
+  reminder: OpsRegistrationAppointment["customerReminder"] | undefined,
+) {
+  if (!reminder) return null
+  switch (reminder.state) {
+    case "scheduled": return "오전 10시 발송 예정"
+    case "not_applicable_same_day_created": return "리마인드 대상 아님 · 오늘 예약"
+    case "not_applicable_same_day_changed": return "리마인드 대상 아님 · 오늘 변경"
+    case "sent": return "리마인드 발송 완료"
+    case "unknown": return "리마인드 발송 결과 확인 필요"
+    case "processing": return "리마인드 발송 처리 중"
+    case "failed_hold": return "리마인드 발송 보류"
+    case "canceled": return "리마인드 취소"
+  }
+}
+
 function useSubmissionKeys(scopeKey: string): SubmissionKeys {
   return {
     getOrCreate(kind, logicalDraft) {
@@ -984,21 +1000,14 @@ export function RegistrationAppointmentEditor({
               >
                 예약 안내 알림톡
               </Button>
-              <Button
-                type="button"
-                className="min-h-11 min-w-11"
-                variant="outline"
-                disabled={customerMessageBlocked}
-                onClick={() => {
-                  if (!appointment || customerMessageBlocked) return
-                  onOpenCustomerMessage?.({ messageKind: "appointment_reminder", sourceId: appointment.id })
-                }}
-              >
-                리마인드 알림톡
-              </Button>
             </>
           ) : null}
         </div>
+        {appointment?.customerReminder ? (
+          <p className="text-right text-xs text-muted-foreground">
+            {registrationCustomerReminderLabel(appointment.customerReminder)}
+          </p>
+        ) : null}
         {canOpenCustomerMessage && customerMessageBlocked ? <p className="text-right text-xs text-muted-foreground">예약을 저장한 뒤 알림톡을 보낼 수 있습니다.</p> : null}
         {pendingConfirmation ? (
           <div

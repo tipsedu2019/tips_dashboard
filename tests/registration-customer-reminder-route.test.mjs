@@ -44,7 +44,7 @@ function request(path, init = {}) {
 }
 
 function makeDependencies(overrides = {}) {
-  const calls = { worker: 0, auth: 0, get: 0, set: 0 }
+  const calls = { worker: 0, batch: 0, backlog: 0, continuation: 0, auth: 0, get: 0, set: 0 }
   const dependencies = {
     workerSecret: "registration-reminder-worker-secret-value",
     worker: {
@@ -52,6 +52,28 @@ function makeDependencies(overrides = {}) {
         calls.worker += 1
         return { ok: true, processed: false, providerAttempted: false, outcome: "idle" }
       },
+      async runBatch() {
+        calls.batch += 1
+        return {
+          ok: true,
+          processed: 0,
+          providerAttempted: 0,
+          accepted: 0,
+          held: 0,
+          skipped: 0,
+          failedHold: 0,
+          unknown: 0,
+          stopped: "idle",
+        }
+      },
+    },
+    async hasBacklog() {
+      calls.backlog += 1
+      return false
+    },
+    async continueWorker() {
+      calls.continuation += 1
+      return null
     },
     async authenticate() {
       calls.auth += 1
@@ -79,7 +101,7 @@ test("worker route는 비밀키를 DB 접근보다 먼저 검증한다", async (
   assert.equal(calls.worker, 0)
 })
 
-test("worker route는 정확한 비밀키에서만 상태 기계를 한 번 실행한다", async () => {
+test("worker route는 정확한 비밀키에서만 고정된 경계의 배치를 한 번 실행한다", async () => {
   const secret = "registration-reminder-worker-secret-value"
   const { calls, handlers } = makeDependencies()
   const response = await handlers.worker(request("/worker", {
@@ -87,8 +109,94 @@ test("worker route는 정확한 비밀키에서만 상태 기계를 한 번 실�
     headers: { authorization: `Bearer ${secret}` },
   }))
   assert.equal(response.status, 200)
-  assert.equal((await response.json()).outcome, "idle")
-  assert.equal(calls.worker, 1)
+  assert.equal((await response.json()).stopped, "idle")
+  assert.equal(calls.batch, 1)
+  assert.equal(calls.worker, 0)
+  assert.equal(calls.backlog, 0)
+})
+
+test("worker route는 처리 후 backlog가 남은 경우에만 한 번 후속 실행을 요청한다", async () => {
+  const secret = "registration-reminder-worker-secret-value"
+  const { calls, handlers } = makeDependencies({
+    worker: {
+      async runBatch() {
+        calls.batch += 1
+        return {
+          ok: true,
+          processed: 25,
+          providerAttempted: 25,
+          accepted: 25,
+          held: 0,
+          skipped: 0,
+          failedHold: 0,
+          unknown: 0,
+          stopped: "max_jobs",
+        }
+      },
+    },
+    async hasBacklog() {
+      calls.backlog += 1
+      return true
+    },
+    async continueWorker() {
+      calls.continuation += 1
+      return 42
+    },
+  })
+
+  const response = await handlers.worker(request("/worker", {
+    method: "POST",
+    headers: { authorization: `Bearer ${secret}` },
+  }))
+
+  assert.equal(response.status, 200)
+  assert.equal((await response.json()).stopped, "max_jobs")
+  assert.equal(calls.batch, 1)
+  assert.equal(calls.backlog, 1)
+  assert.equal(calls.continuation, 1)
+})
+
+test("후속 실행 요청이 실패하면 배치를 다시 실행하지 않고 503을 반환한다", async () => {
+  const secret = "registration-reminder-worker-secret-value"
+  const { calls, handlers } = makeDependencies({
+    worker: {
+      async runBatch() {
+        calls.batch += 1
+        return {
+          ok: true,
+          processed: 1,
+          providerAttempted: 1,
+          accepted: 1,
+          held: 0,
+          skipped: 0,
+          failedHold: 0,
+          unknown: 0,
+          stopped: "duration",
+        }
+      },
+    },
+    async hasBacklog() {
+      calls.backlog += 1
+      return true
+    },
+    async continueWorker() {
+      calls.continuation += 1
+      throw new Error("database unavailable")
+    },
+  })
+
+  const response = await handlers.worker(request("/worker", {
+    method: "POST",
+    headers: { authorization: `Bearer ${secret}` },
+  }))
+
+  assert.equal(response.status, 503)
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    error: "registration_customer_reminder_worker_unavailable",
+  })
+  assert.equal(calls.batch, 1)
+  assert.equal(calls.continuation, 1)
 })
 
 test("설정 조회는 인증된 운영자에게 안전한 준비 상태만 반환한다", async () => {

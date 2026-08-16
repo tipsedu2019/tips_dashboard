@@ -69,6 +69,18 @@ export type RegistrationCustomerReminderWorkerResult = Readonly<{
   outcome: "idle" | "held" | "skipped" | "accepted" | "failed_hold" | "unknown"
 }>
 
+export type RegistrationCustomerReminderWorkerBatchResult = Readonly<{
+  ok: true
+  processed: number
+  providerAttempted: number
+  accepted: number
+  held: number
+  skipped: number
+  failedHold: number
+  unknown: number
+  stopped: "idle" | "max_jobs" | "duration"
+}>
+
 export class RegistrationCustomerReminderSourceIneligibleError extends Error {
   constructor() {
     super("registration_customer_message_source_ineligible")
@@ -118,8 +130,7 @@ export function createRegistrationCustomerReminderWorker(
 ) {
   const now = dependencies.now ?? (() => new Date())
 
-  return Object.freeze({
-    async runOnce(): Promise<RegistrationCustomerReminderWorkerResult> {
+  const runOnce = async (): Promise<RegistrationCustomerReminderWorkerResult> => {
       const claim = await dependencies.claim()
       if (!claim) return result("idle", false, false)
 
@@ -209,6 +220,58 @@ export function createRegistrationCustomerReminderWorker(
         return result("unknown", true)
       }
       return result(provider.outcome, true)
-    },
+  }
+
+  const runBatch = async (input: Readonly<{
+    maxJobs: number
+    maxDurationMs: number
+  }>): Promise<RegistrationCustomerReminderWorkerBatchResult> => {
+    if (!Number.isSafeInteger(input.maxJobs) || input.maxJobs < 1) {
+      throw new Error("registration_customer_reminder_batch_max_jobs_invalid")
+    }
+    if (!Number.isSafeInteger(input.maxDurationMs) || input.maxDurationMs < 1) {
+      throw new Error("registration_customer_reminder_batch_duration_invalid")
+    }
+
+    const startedAt = now().getTime()
+    let processed = 0
+    let providerAttempted = 0
+    let accepted = 0
+    let held = 0
+    let skipped = 0
+    let failedHold = 0
+    let unknown = 0
+
+    while (processed < input.maxJobs) {
+      if (now().getTime() - startedAt >= input.maxDurationMs) {
+        return Object.freeze({
+          ok: true, processed, providerAttempted, accepted, held, skipped, failedHold, unknown, stopped: "duration",
+        })
+      }
+
+      const current = await runOnce()
+      if (!current.processed) {
+        return Object.freeze({
+          ok: true, processed, providerAttempted, accepted, held, skipped, failedHold, unknown, stopped: "idle",
+        })
+      }
+
+      processed += 1
+      if (current.providerAttempted) providerAttempted += 1
+      if (current.outcome === "accepted") accepted += 1
+      if (current.outcome === "held") held += 1
+      if (current.outcome === "skipped") skipped += 1
+      if (current.outcome === "failed_hold") failedHold += 1
+      if (current.outcome === "unknown") unknown += 1
+    }
+
+    return Object.freeze({
+      ok: true, processed, providerAttempted, accepted, held, skipped, failedHold, unknown, stopped: "max_jobs",
+    })
+  }
+
+  return Object.freeze({
+    runOnce,
+    runBatch,
   })
 }
