@@ -651,6 +651,7 @@ export function createProductionRegistrationCustomerReminderRouteHandlers(
         p_dispatch_token: begin.dispatchToken,
         p_result: providerResult.outcome,
         p_provider_result: providerResult.evidence,
+        p_provider_payload_checksum: providerResult.providerPayloadChecksum,
       })
     },
   })

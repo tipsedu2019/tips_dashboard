@@ -614,6 +614,10 @@ test("one refreshed observation payload crosses the real SOLAPI adapter exactly 
   assert.equal(scenario.calls.fetches[0].url, SOLAPI_SEND_MANY_URL)
   assert.match(scenario.calls.fetches[0].body, /담당 8/)
   assert.doesNotMatch(scenario.calls.fetches[0].body, /담당 7/)
+  const finalize = scenario.calls.rpc.find(({ name }) => (
+    name === "finalize_registration_customer_reminder_dispatch_v1"
+  ))
+  assert.match(finalize.args.p_provider_payload_checksum, /^[a-f0-9]{64}$/u)
   assertExactRpcTransport(scenario)
 })
 

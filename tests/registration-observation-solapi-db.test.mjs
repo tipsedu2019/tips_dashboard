@@ -20,6 +20,10 @@ const evidenceMigrationUrl = new URL(
   "../supabase/migrations/20260815182919_registration_customer_solapi_activation_evidence.sql",
   import.meta.url,
 );
+const providerPayloadChecksumMigrationUrl = new URL(
+  "../supabase/migrations/20260816002040_registration_customer_reminder_provider_payload_checksum.sql",
+  import.meta.url,
+);
 const currentHistoryMigrationUrl = new URL(
   "../supabase/migrations/20260814102020_registration_observation_current_history.sql",
   import.meta.url,
@@ -61,6 +65,16 @@ function uniqueIndexBlock(source, indexName) {
   assert.ok(match, `missing unique index block: ${indexName}`);
   return match[0];
 }
+
+test("scheduled reminder finalization persists the provider payload checksum", async () => {
+  const sql = normalizeSql(await readFile(providerPayloadChecksumMigrationUrl, "utf8"));
+  assert.match(sql, /finalize_registration_customer_reminder_dispatch_v1\(\s*p_message_id uuid,\s*p_dispatch_token uuid,\s*p_result text,\s*p_provider_result jsonb,\s*p_provider_payload_checksum text\s*\)/);
+  assert.match(sql, /p_result = 'accepted'.*p_provider_payload_checksum !~ '\^\[a-f0-9\]\{64\}\$'/s);
+  assert.match(sql, /public\.finalize_registration_customer_reminder_dispatch_v1\(\s*p_message_id,\s*p_dispatch_token,\s*p_result,\s*p_provider_result\s*\)/s);
+  assert.match(sql, /provider_payload_checksum = p_provider_payload_checksum/);
+  assert.match(sql, /revoke execute on function public\.finalize_registration_customer_reminder_dispatch_v1\(\s*uuid, uuid, text, jsonb\s*\).*service_role/s);
+  assert.match(sql, /grant execute on function public\.finalize_registration_customer_reminder_dispatch_v1\(\s*uuid, uuid, text, jsonb, text\s*\).*service_role/s);
+});
 
 test("observation current-history RPC is service-only and binds the full frozen delivery identity", async () => {
   const sql = await readFile(currentHistoryMigrationUrl, "utf8");
