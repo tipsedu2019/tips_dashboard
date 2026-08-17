@@ -146,14 +146,14 @@ export function isRegistrationWaitingMessageSourceComplete(
 
 export function getRegistrationConsultationModeDraft(input: {
   draftMode: RegistrationConsultationMode | null
-  hasVisitAppointment: boolean
+  savedMode: RegistrationConsultationMode
 }): {
   mode: RegistrationConsultationMode
   savedMode: RegistrationConsultationMode
   dirty: boolean
   phoneDisabled: boolean
 } {
-  const savedMode = input.hasVisitAppointment ? "visit" : "phone"
+  const savedMode = input.savedMode
   const mode = input.draftMode || savedMode
   return {
     mode,

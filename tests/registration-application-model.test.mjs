@@ -113,7 +113,7 @@ test("observation booking authority includes only staff management and the exact
 test("consultation mode can switch a saved visit back to phone consultation", () => {
   assert.deepEqual(getRegistrationConsultationModeDraft({
     draftMode: null,
-    hasVisitAppointment: false,
+    savedMode: "phone",
   }), {
     mode: "phone",
     savedMode: "phone",
@@ -122,7 +122,7 @@ test("consultation mode can switch a saved visit back to phone consultation", ()
   })
   assert.deepEqual(getRegistrationConsultationModeDraft({
     draftMode: "visit",
-    hasVisitAppointment: false,
+    savedMode: "phone",
   }), {
     mode: "visit",
     savedMode: "phone",
@@ -131,11 +131,21 @@ test("consultation mode can switch a saved visit back to phone consultation", ()
   })
   assert.deepEqual(getRegistrationConsultationModeDraft({
     draftMode: "phone",
-    hasVisitAppointment: true,
+    savedMode: "visit",
   }), {
     mode: "phone",
     savedMode: "visit",
     dirty: true,
+    phoneDisabled: false,
+  })
+
+  assert.deepEqual(getRegistrationConsultationModeDraft({
+    draftMode: null,
+    savedMode: "visit",
+  }), {
+    mode: "visit",
+    savedMode: "visit",
+    dirty: false,
     phoneDisabled: false,
   })
 })

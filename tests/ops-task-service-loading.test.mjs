@@ -230,6 +230,32 @@ test("task continuation pages skip aggregate RPCs and a stats failure does not d
   assert.deepEqual(calls, ["list_ops_task_page_v1"]);
 });
 
+test("registration list keeps successful page rows when the optional runtime probe fails", async () => {
+  const loadPage = loadOpsTaskPageWithMocks({
+    probeRegistrationSubjectTrackRuntime: async () => {
+      throw new Error("runtime probe unavailable");
+    },
+    supabase: {
+      rpc(name) {
+        if (name === "list_ops_task_page_v1") {
+          return taskPageRpcResult([{ id: "task-a", row_data: { id: "task-a" }, sort_values: ["2026-08-14T00:00:00Z"] }]);
+        }
+        return taskPageRpcResult(null, new Error("stats unavailable"));
+      },
+    },
+  });
+
+  const page = await loadPage({
+    filters: { taskType: "registration" },
+    cursor: null,
+    limit: 30,
+    viewerId: "viewer-a",
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(page.page.rows)), [{ id: "task-a" }]);
+  assert.equal(page.registrationRuntime, null);
+});
+
 test("dashboard conflict task link lookup aborts after eight seconds without automatic retry", async () => {
   const calls = [];
   const signal = { kind: "dashboard-conflict-timeout" };

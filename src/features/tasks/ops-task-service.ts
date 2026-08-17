@@ -1774,7 +1774,7 @@ export async function loadOpsTaskPage(options: OpsTaskPageLoadOptions): Promise<
       .retry(false),
     statsRequest,
     options.filters.taskType === "registration"
-      ? probeRegistrationSubjectTrackRuntime()
+      ? probeRegistrationSubjectTrackRuntime().catch(() => null)
       : Promise.resolve(null),
   ])
   if (pageResult.error) throw pageResult.error

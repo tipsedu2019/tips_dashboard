@@ -40,6 +40,10 @@ async function loadEditorModel() {
         typeof getRegistrationObservationEditorAttemptPlan === "function"
           ? getRegistrationObservationEditorAttemptPlan
           : undefined,
+      isRegistrationObservationBookingDirty:
+        typeof isRegistrationObservationBookingDirty === "function"
+          ? isRegistrationObservationBookingDirty
+          : undefined,
       getRegistrationObservationDisplayStatusLabel:
         typeof getRegistrationObservationDisplayStatusLabel === "function"
           ? getRegistrationObservationDisplayStatusLabel
@@ -174,6 +178,30 @@ function observationAttempt(observationId, overrides = {}) {
     ...overrides,
   }
 }
+
+test("unchanged observation booking stays quiet until its class or session changes", async () => {
+  const { isRegistrationObservationBookingDirty } = await loadEditorModel()
+  const current = observationAttempt("observation-a")
+
+  assert.equal(isRegistrationObservationBookingDirty({
+    current,
+    currentSessionValue: "normalized:session-a",
+    classId: current.classId,
+    sessionId: "normalized:session-a",
+  }), false)
+  assert.equal(isRegistrationObservationBookingDirty({
+    current,
+    currentSessionValue: "normalized:session-a",
+    classId: current.classId,
+    sessionId: "normalized:session-b",
+  }), true)
+  assert.equal(isRegistrationObservationBookingDirty({
+    current,
+    currentSessionValue: "normalized:session-a",
+    classId: "class-b",
+    sessionId: "normalized:session-a",
+  }), true)
+})
 
 test("calendar deep-linked attempt prepends beyond the recent limit and deduplicates exact payloads", async () => {
   // Production break caught: the editor trusts the recent-50 array as

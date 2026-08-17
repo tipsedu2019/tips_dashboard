@@ -2851,6 +2851,7 @@ test("consultation editor restores phone and visit choice with one shared save a
   const source = await readRegistrationApplicationSource()
 
   assert.match(source, /getRegistrationConsultationModeDraft/)
+  assert.match(source, /focusedContext\?\.latestConsultation\?\.mode === "visit" && focusedContext\.latestConsultation\.status !== "canceled"/)
   assert.match(source, /aria-label=\{`\$\{activeGenericTrack\.subject\} 상담 방식`\}/)
   assert.match(source, />전화상담</)
   assert.match(source, />방문상담</)
@@ -2861,6 +2862,22 @@ test("consultation editor restores phone and visit choice with one shared save a
   assert.match(source, /phoneConsultation/)
   assert.match(source, /dirty=\{activeConsultationDirectorDirty \|\| !phoneConsultation\}/)
   assert.doesNotMatch(source, />\s*담당 저장\s*</)
+})
+
+test("registration section state keeps the workflow model's current and upcoming steps", async () => {
+  const source = await readRegistrationApplicationSource()
+  const sectionStateProjection = source.slice(source.indexOf("const openSectionStates"), source.indexOf("const splitPlacementState"))
+
+  assert.match(sectionStateProjection, /current: state\.current/)
+  assert.match(sectionStateProjection, /upcoming: state\.upcoming/)
+  assert.doesNotMatch(sectionStateProjection, /current: section !== "history"/)
+})
+
+test("case managers can correct an existing consultation outcome", async () => {
+  const source = await readRegistrationApplicationSource()
+  const outcomeEditor = source.slice(source.indexOf("<RegistrationConsultationOutcomeEditor"), source.indexOf("/>\n          ) : null", source.indexOf("<RegistrationConsultationOutcomeEditor")))
+
+  assert.match(outcomeEditor, /editable=\{Boolean\(context\.permissions\.canManage \|\| context\.permissions\.canCompleteConsultation \|\| context\.permissions\.canEditConsultationResult\)\}/)
 })
 
 test("레벨테스트 결과는 안전한 URL만 새 탭 링크로 연다", async () => {

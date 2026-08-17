@@ -498,6 +498,17 @@ export function reconcileRegistrationObservationWithdrawalValue(input: {
     ? `return:${input.returnWorkflowStatus}`
     : "director:enrollment_requested"
 }
+
+export function isRegistrationObservationBookingDirty(input: {
+  current: Pick<RegistrationObservationAttempt, "classId"> | null
+  currentSessionValue: string
+  classId: string
+  sessionId: string
+}) {
+  return !input.current
+    || input.current.classId !== input.classId
+    || input.currentSessionValue !== input.sessionId
+}
 // registration-observation-editor-model:end
 
 export type RegistrationObservationActions = Readonly<{
@@ -752,6 +763,12 @@ export function RegistrationObservationEditor({
   }, [detail.track.observationReturnWorkflowStatus, withdrawValueTouched])
 
   const selectedSession = sessions.find((session) => sessionValue(session) === sessionId) || null
+  const bookingDirty = isRegistrationObservationBookingDirty({
+    current,
+    currentSessionValue: current ? sessionValue(current) : "",
+    classId,
+    sessionId,
+  })
   const classOptions = detail.classes.map((classItem) => ({ value: classItem.id, label: classItem.name }))
   const sessionOptions = sessions.map((session) => ({ value: sessionValue(session), label: sessionLabel(session) }))
 
@@ -852,7 +869,7 @@ export function RegistrationObservationEditor({
   }
 
   async function saveBooking() {
-    if (!selectedSession || prerequisiteError) return
+    if (!bookingDirty || !selectedSession || prerequisiteError) return
     const fingerprint = JSON.stringify({
       trackId,
       workflowRevision,
@@ -1047,7 +1064,7 @@ export function RegistrationObservationEditor({
           ) : null}
 
           <div className="flex flex-wrap gap-2">
-            <Button ref={saveDialogTriggerRef} type="button" onClick={() => setSaveConfirmOpen(true)} disabled={saving || mutationCommitted || Boolean(prerequisiteError)}>청강 예약 저장</Button>
+            <Button ref={saveDialogTriggerRef} type="button" onClick={() => setSaveConfirmOpen(true)} disabled={saving || mutationCommitted || !bookingDirty || Boolean(prerequisiteError)}>{bookingDirty ? "청강 예약 저장" : "저장됨"}</Button>
             {onOpenCustomerMessage ? (
               <Button
                 type="button"
@@ -1092,7 +1109,7 @@ export function RegistrationObservationEditor({
           </DialogHeader>
           <DialogFooter>
             <DialogClose asChild><Button type="button" variant="outline" disabled={saving || mutationCommitted}>돌아가기</Button></DialogClose>
-            <Button type="button" onClick={() => void saveBooking()} disabled={saving || mutationCommitted}>{saving ? "저장 중" : "청강 예약 저장"}</Button>
+            <Button type="button" onClick={() => void saveBooking()} disabled={saving || mutationCommitted || !bookingDirty}>{saving ? "저장 중" : "청강 예약 저장"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1030,8 +1030,8 @@ export function RegistrationApplication({
   const openSectionStates = Object.fromEntries(
     Object.entries(sectionStates).map(([section, state]) => [section, {
       ...state,
-      current: section !== "history",
-      upcoming: false,
+      current: state.current,
+      upcoming: state.upcoming,
       editable: section === "history"
         ? false
         : section === "admission"
@@ -1410,7 +1410,7 @@ export function RegistrationApplication({
               consultation={context.latestConsultation}
               track={context.track}
               classOptions={classOptions}
-              editable={Boolean(context.permissions.canCompleteConsultation || context.permissions.canEditConsultationResult)}
+              editable={Boolean(context.permissions.canManage || context.permissions.canCompleteConsultation || context.permissions.canEditConsultationResult)}
               onReload={onReload}
               onWarning={onWarning}
               onDirtyChange={(dirty) => setDirty(`consultation:track-${context.track.id}`, dirty, `outcome:${context.latestConsultation?.id || context.track.id}`)}
@@ -1440,7 +1440,11 @@ export function RegistrationApplication({
     : null
   const activeConsultationMode = activeGenericTrack ? getRegistrationConsultationModeDraft({
     draftMode: consultationModeDrafts[activeGenericTrack.id] || null,
-    hasVisitAppointment: Boolean(activeVisitAppointment),
+    savedMode: activeVisitAppointment
+      ? "visit"
+      : focusedContext?.latestConsultation?.mode === "visit" && focusedContext.latestConsultation.status !== "canceled"
+        ? "visit"
+        : "phone",
   }) : null
   const activeConsultationDirectorDirty = activeGenericTrack
     ? Boolean(consultationDirectorDirtyByTrackId[activeGenericTrack.id])
@@ -1450,7 +1454,7 @@ export function RegistrationApplication({
     if (!activeGenericTrack || !activeConsultationMode) return
     const next = getRegistrationConsultationModeDraft({
       draftMode: mode,
-      hasVisitAppointment: Boolean(activeVisitAppointment),
+      savedMode: activeConsultationMode.savedMode,
     })
     setConsultationModeDrafts((current) => ({ ...current, [activeGenericTrack.id]: next.mode }))
     setDirty(`consultation:mode-${activeGenericTrack.id}`, next.dirty)
