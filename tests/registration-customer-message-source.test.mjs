@@ -338,6 +338,27 @@ test("visit booking, both reminder kinds, and every waiting kind render valid fa
   }
 })
 
+test("an active appointment stays message-eligible after its track advances", async () => {
+  const levelTest = appointmentSource()
+  levelTest.participants = levelTest.participants.map((participant) => ({
+    ...participant,
+    workflowStatus: "consultation_requested",
+  }))
+  const resolvedLevelTest = await resolveSource(levelTest)
+  assert.match(resolvedLevelTest.body, /레벨테스트 예약/u)
+
+  const visit = appointmentSource({
+    messageKind: "visit_consultation_booking",
+    appointmentKind: "visit_consultation",
+  })
+  visit.participants = visit.participants.map((participant) => ({
+    ...participant,
+    workflowStatus: "consultation_completed",
+  }))
+  const resolvedVisit = await resolveSource(visit)
+  assert.match(resolvedVisit.body, /방문상담 예약/u)
+})
+
 test("invalid source variants fail closed with stable source codes", async () => {
   const appointmentSubjectMismatch = appointmentSource({ subjects: ["영어", "수학", "과학"] })
   const appointmentParticipantExtraKey = appointmentSource()

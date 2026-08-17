@@ -334,6 +334,24 @@ const APPOINTMENT_PARTICIPANT_KEYS = Object.freeze([
   "activityStatus",
 ])
 
+const APPOINTMENT_ELIGIBLE_WORKFLOW_STATUSES = new Set([
+  "inquiry",
+  "level_test_requested",
+  "consultation_requested",
+  "consultation_completed",
+  "waiting_current_class",
+  "waiting_new_class",
+  "waiting_next_opening",
+  "enrollment_requested",
+  "payment_in_progress",
+  "registered",
+  "not_registered",
+  "inquiry_only",
+  "observation_requested",
+  "observation_feedback_pending",
+  "observation_completed",
+])
+
 function appointmentParticipants(
   appointmentKind: "level_test" | "visit_consultation",
   rawValue: unknown,
@@ -341,16 +359,14 @@ function appointmentParticipants(
 ) {
   const code = "registration_customer_message_appointment_participants_invalid"
   if (!Array.isArray(rawValue) || rawValue.length === 0) sourceError(code)
-  const workflowStatus = appointmentKind === "level_test"
-    ? "level_test_requested"
-    : "consultation_requested"
   const participants = rawValue.map((value) => {
     if (!isRecord(value) || !hasExactKeys(value, APPOINTMENT_PARTICIPANT_KEYS)) sourceError(code)
     const subject = value.subject
     if (!SUBJECT_ORDER.includes(subject as RegistrationCustomerMessageSubject)) sourceError(code)
     const activityStatus = requiredText(value.activityStatus, code)
+    const workflowStatus = requiredText(value.workflowStatus, code)
     if (
-      value.workflowStatus !== workflowStatus
+      !APPOINTMENT_ELIGIBLE_WORKFLOW_STATUSES.has(workflowStatus)
       || (appointmentKind === "level_test"
         ? activityStatus !== "scheduled" && activityStatus !== "in_progress"
         : activityStatus !== "scheduled")

@@ -3068,8 +3068,25 @@ test("appointment editor keeps one simple level-test result link action per subj
   assert.doesNotMatch(source, /시험 시작|미응시|과목 취소|문의 종료/)
   assert.doesNotMatch(source, /startRegistrationLevelTestAttempt|closeRegistrationLevelTestTrack/)
   assert.doesNotMatch(source, /RegistrationActivityStatusBadge/)
-  assert.doesNotMatch(source, /예약 취소/)
-  assert.doesNotMatch(source, /cancelRegistrationAppointment/)
+  assert.match(source, /예약 취소/)
+  assert.match(source, /cancelRegistrationAppointment/)
+})
+
+test("consultation reservation renders before the consultation result", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const start = source.indexOf("consultation={(" )
+  const end = source.indexOf("waitingState={waitingState}", start)
+  assert.ok(start >= 0 && end > start)
+  const consultation = source.slice(start, end)
+  assert.ok(
+    consultation.indexOf("<RegistrationAppointmentEditor")
+      < consultation.lastIndexOf('renderTrackFrames("consultation")'),
+    "the visit reservation editor must render before consultation outcome content",
+  )
+  assert.match(consultation, /전화상담으로 변경할까요/)
+  assert.match(consultation, /상담 취소/)
+  assert.match(source, /cancelRegistrationAppointment/)
+  assert.match(source, /saveRegistrationConsultationDetails/)
 })
 
 test("all-terminal appointment results keep details editable while preserving participant integrity", async () => {

@@ -23,6 +23,7 @@ const {
   beginRegistrationConflictComparison,
   canManageRegistrationObservationTrack,
   getRegistrationObservationRefreshPlan,
+  resolveRegistrationWorkspaceWorkflowStatus,
   isRegistrationApplicationSectionContentDisabled,
   reconcileRegistrationEnrollmentDraft,
   reconcileRegistrationEditorDraft,
@@ -30,6 +31,21 @@ const {
   settleRegistrationConflictComparison,
   updateRegistrationApplicationDirtyKeys,
 } = application
+
+test("observation keeps the previous registration workflow visible", () => {
+  assert.equal(resolveRegistrationWorkspaceWorkflowStatus({
+    workflowStatus: "observation_requested",
+    observationReturnWorkflowStatus: "consultation_completed",
+  }), "consultation_completed")
+  assert.equal(resolveRegistrationWorkspaceWorkflowStatus({
+    workflowStatus: "observation_feedback_pending",
+    observationReturnWorkflowStatus: "waiting_current_class",
+  }), "waiting_current_class")
+  assert.equal(resolveRegistrationWorkspaceWorkflowStatus({
+    workflowStatus: "level_test_requested",
+    observationReturnWorkflowStatus: null,
+  }), "level_test_requested")
+})
 
 test("observation focus and refresh ownership fail closed across runtime, track switches, and close", () => {
   assert.equal(resolveRegistrationApplicationFocusPanelId({
@@ -94,7 +110,7 @@ test("observation booking authority includes only staff management and the exact
   }), true)
 })
 
-test("consultation mode stays simple before a visit is saved and locks to the saved visit", () => {
+test("consultation mode can switch a saved visit back to phone consultation", () => {
   assert.deepEqual(getRegistrationConsultationModeDraft({
     draftMode: null,
     hasVisitAppointment: false,
@@ -117,10 +133,10 @@ test("consultation mode stays simple before a visit is saved and locks to the sa
     draftMode: "phone",
     hasVisitAppointment: true,
   }), {
-    mode: "visit",
+    mode: "phone",
     savedMode: "visit",
-    dirty: false,
-    phoneDisabled: true,
+    dirty: true,
+    phoneDisabled: false,
   })
 })
 

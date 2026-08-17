@@ -365,13 +365,14 @@ test("route response carries the server-owned revision, changed tracks, and warn
   assert.match(routeSource, /warning/)
 })
 
-test("visit appointment save dispatches only canonical revision targets and keeps cancellation out of the editor", async () => {
+test("visit appointment save dispatches canonical targets and supports explicit cancellation", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
   assert.match(source, /notificationTargets/)
   assert.match(source, /saveRegistrationSharedAppointment/)
   assert.match(source, /replaceRemaining: editMode === "replace_remaining"/)
   assert.match(source, /sendRegistrationVisitNotificationTarget/)
-  assert.doesNotMatch(source, /cancelRegistrationAppointment/)
+  assert.match(source, /cancelRegistrationAppointment/)
+  assert.match(source, /예약 취소/)
 })
 
 test("visit notification helper sends only the authoritative appointment id", async () => {
@@ -924,7 +925,7 @@ test("notification job status rejects another workflow and unknown states", asyn
   }
 });
 
-test("appointment editor preserves conflict drafts, keeps cancellation out, and retains common ownership", async () => {
+test("appointment editor preserves conflict drafts and keeps cancellation explicit", async () => {
   const source = await readFile(appointmentEditorUrl, "utf8");
   const conflictBlock = sourceBlock(source, "async function handleRevisionConflict", "async function compareLatestAppointment");
   const saveBlock = sourceBlock(source, "async function saveAppointment", "async function performSaveAppointment");
@@ -942,8 +943,9 @@ test("appointment editor preserves conflict drafts, keeps cancellation out, and 
   assert.match(source, /submissionKeys\.clear\("registration-appointment", normalizedDraft\)/);
   assert.doesNotMatch(source, /cancelReason/);
   assert.doesNotMatch(source, /예약 취소 사유/);
-  assert.doesNotMatch(source, /cancelRegistrationAppointment/);
-  assert.match(source, /const confirmationPending = Boolean\(pendingConfirmation\)/);
+  assert.match(source, /cancelRegistrationAppointment/);
+  assert.match(source, /예약을 취소할까요/);
+  assert.match(source, /const confirmationPending = Boolean\(pendingConfirmation \|\| pendingCancellation\)/);
   assert.match(saveBlock, /setPendingConfirmation\(true\)/);
   assert.doesNotMatch(saveBlock, /setSaving\(true\)\s*\n\s*await prepareAppointmentConfirmation/);
   assert.doesNotMatch(source, /prepareAppointmentConfirmation|buildRegistrationAppointmentConfirmation/);

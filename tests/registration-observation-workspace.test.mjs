@@ -280,6 +280,11 @@ test("mounted historical observation uses its exact attempt status and exposes n
   }
 })
 
+test("a successful observation mutation clears stale appointment warnings", async () => {
+  const source = await readSource("src/features/tasks/registration-track-editor.tsx")
+  assert.match(source, /const handleObservationSaved = useCallback\(async \(\) => \{\s*onWarning\(""\)/)
+})
+
 test("mounted saved observation exposes one booking AlimTalk action with the canonical observation ID", async () => {
   const RegistrationObservationEditor = await loadMountedObservationEditor()
   const scheduled = observationAttempt(
@@ -1089,7 +1094,8 @@ test("booking editor delegates feedback decisions to one dedicated slot and excl
   assert.doesNotMatch(source, /decide_registration_observation_v1/)
   assert.doesNotMatch(source, /google.chat|webhook|solapi|send.*customer/i)
   assert.match(source, /예약 저장됨/)
-  assert.match(source, /고객 안내: 미발송/)
+  assert.doesNotMatch(source, /고객 안내: 미발송/)
+  assert.match(source, /청강 예약 저장/)
   assert.match(source, /최신 예약 버전을 확인할 수 없습니다\./)
   assert.doesNotMatch(source, /canBook && !canceled/)
   assert.doesNotMatch(source, /setCanceled\(true\)/)

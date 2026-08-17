@@ -3,10 +3,15 @@ import { readFile } from "node:fs/promises"
 import test from "node:test"
 
 const migrationUrl = new URL("../supabase/migrations/20260815121000_registration_teacher_followup_tasks.sql", import.meta.url)
+const bookingMigrationUrl = new URL("../supabase/migrations/20260817111325_registration_observation_booking_followup_tasks.sql", import.meta.url)
 const workspaceUrl = new URL("../src/features/tasks/ops-task-workspace.tsx", import.meta.url)
 
-test("attendance creates one feedback task due 24 hours after the observation", async () => {
-  const sql = await readFile(migrationUrl, "utf8")
+test("feedback task contract keeps one link, a 24-hour due date, and completion guard", async () => {
+  const [originalSql, bookingSql] = await Promise.all([
+    readFile(migrationUrl, "utf8"),
+    readFile(bookingMigrationUrl, "utf8"),
+  ])
+  const sql = `${originalSql}\n${bookingSql}`
   assert.match(sql, /create table dashboard_private\.registration_observation_feedback_tasks/i)
   assert.match(sql, /observation_id uuid not null unique/i)
   assert.match(sql, /'청강 피드백 작성 · '/i)
@@ -14,6 +19,18 @@ test("attendance creates one feedback task due 24 hours after the observation", 
   assert.match(sql, /assignee_id[\s\S]*new\.teacher_profile_id/i)
   assert.match(sql, /registration_observation_feedback_required/i)
   assert.match(sql, /feedback_submitted_at[\s\S]*status = 'done'/i)
+})
+
+test("booking immediately creates and maintains one teacher feedback task", async () => {
+  const sql = await readFile(bookingMigrationUrl, "utf8")
+  assert.match(sql, /after insert or update of status, ends_at, teacher_profile_id/i)
+  assert.match(sql, /new\.status = 'scheduled'/i)
+  assert.match(sql, /not exists[\s\S]*registration_observation_feedback_tasks/i)
+  assert.match(sql, /new\.ends_at \+ interval '24 hours'/i)
+  assert.match(sql, /assignee_id = new\.teacher_profile_id/i)
+  assert.match(sql, /set teacher_profile_id = observation\.teacher_profile_id/i)
+  assert.match(sql, /new\.status = 'canceled'[\s\S]*status = 'canceled'/i)
+  assert.match(sql, /v_feedback_was_missing := old\.feedback_submitted_at is null/i)
 })
 
 test("enrollment creates an ordinary first-parent-consultation task for the first-session teacher", async () => {

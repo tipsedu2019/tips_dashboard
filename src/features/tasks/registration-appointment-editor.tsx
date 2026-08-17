@@ -34,6 +34,7 @@ import {
 } from "./registration-appointment-draft"
 import {
   createRegistrationMutationRequestKey,
+  cancelRegistrationAppointment,
   getRegistrationNotificationProcessingReadiness,
   getRegistrationNotificationJobStatus,
   retryRegistrationNotificationJob,
@@ -259,7 +260,8 @@ export function RegistrationAppointmentEditor({
   const [trackRefreshRetryingId, setTrackRefreshRetryingId] = useState("")
   const [validationError, setValidationError] = useState("")
   const [pendingConfirmation, setPendingConfirmation] = useState(false)
-  const confirmationPending = Boolean(pendingConfirmation)
+  const [pendingCancellation, setPendingCancellation] = useState(false)
+  const confirmationPending = Boolean(pendingConfirmation || pendingCancellation)
   const sectionRef = useRef<HTMLElement | null>(null)
   const confirmationRef = useRef<HTMLDivElement | null>(null)
   const [committedAppointment, setCommittedAppointment] = useState<RegistrationAppointmentMutationResponse | null>(null)
@@ -293,9 +295,9 @@ export function RegistrationAppointmentEditor({
   }, [notificationProcessingReadiness, notificationToken])
 
   useEffect(() => {
-    if (!pendingConfirmation) return
+    if (!pendingConfirmation && !pendingCancellation) return
     window.requestAnimationFrame(() => confirmationRef.current?.focus())
-  }, [pendingConfirmation])
+  }, [pendingCancellation, pendingConfirmation])
 
   useEffect(() => {
     const workerCreatedAt = Date.parse(String(effectiveProcessingReadiness?.workerHeartbeat?.createdAt || ""))
@@ -811,6 +813,33 @@ export function RegistrationAppointmentEditor({
     }
   }
 
+  async function confirmAppointmentCancellation() {
+    if (!pendingCancellation || !appointment || appointment.status !== "scheduled" || saving) return
+    const logicalDraft = JSON.stringify({
+      appointmentId: appointment.id,
+      expectedNotificationRevision: appointment.notificationRevision,
+    })
+    const kindKey = "registration-appointment-cancel"
+    const requestKey = submissionKeys.getOrCreate(kindKey, logicalDraft)
+    setSaving(true)
+    try {
+      const saved = await cancelRegistrationAppointment({
+        appointmentId: appointment.id,
+        expectedNotificationRevision: appointment.notificationRevision,
+        reason: kind === "level_test" ? "레벨테스트 예약 취소" : "방문상담 예약 취소",
+        requestKey,
+      })
+      submissionKeys.clear(kindKey, logicalDraft)
+      onDirtyChange?.(false)
+      await finishAppointmentSave(saved)
+    } catch (error) {
+      onWarning(errorMessage(error, "예약을 취소하지 못했습니다."))
+    } finally {
+      setPendingCancellation(false)
+      setSaving(false)
+    }
+  }
+
   async function completeAttempt(activity: OpsRegistrationLevelTest) {
     if (trackRefreshPendingIds.has(activity.trackId)) return
     const materialLink = (draftLinks[activity.id] || activity.materialLink || "").trim()
@@ -972,6 +1001,17 @@ export function RegistrationAppointmentEditor({
         </div>
 
         <div className="flex flex-wrap justify-end gap-2">
+          {appointment?.status === "scheduled" ? (
+            <Button
+              type="button"
+              className="min-h-11 min-w-11"
+              variant="outline"
+              disabled={saving || mutationLocked || confirmationPending || Boolean(conflict) || appointmentDirty || externalDirty}
+              onClick={() => setPendingCancellation(true)}
+            >
+              예약 취소
+            </Button>
+          ) : null}
           <RegistrationSaveButton
             type="button"
             data-registration-primary-action={`${appointmentParticipantSubjectLabel}:appointment-save`}
@@ -1021,6 +1061,24 @@ export function RegistrationAppointmentEditor({
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <Button type="button" className="min-h-11 min-w-11" variant="outline" onClick={dismissAppointmentConfirmation} disabled={saving}>돌아가기</Button>
               <Button type="button" className="min-h-11 min-w-11" onClick={() => void confirmPreparedAppointmentMutation()} disabled={saving}>저장</Button>
+            </div>
+          </div>
+        ) : null}
+        {pendingCancellation ? (
+          <div
+            ref={confirmationRef}
+            role="alertdialog"
+            aria-labelledby="registration-appointment-cancellation-title"
+            tabIndex={-1}
+            className="grid gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-red-950 outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+          >
+            <h4 id="registration-appointment-cancellation-title" className="font-semibold">
+              {kind === "level_test" ? "레벨테스트 예약을 취소할까요?" : "방문상담 예약을 취소할까요?"}
+            </h4>
+            <p className="text-sm">예약과 예정된 리마인드가 취소됩니다.</p>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button type="button" className="min-h-11 min-w-11" variant="outline" onClick={() => setPendingCancellation(false)} disabled={saving}>돌아가기</Button>
+              <Button type="button" className="min-h-11 min-w-11" variant="destructive" onClick={() => void confirmAppointmentCancellation()} disabled={saving}>예약 취소</Button>
             </div>
           </div>
         ) : null}

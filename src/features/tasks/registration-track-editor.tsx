@@ -27,6 +27,7 @@ import {
   getRegistrationObservationRefreshPlan,
   resolveRegistrationApplicationFocusPanelId,
   resolveRegistrationActiveTrackId,
+  resolveRegistrationWorkspaceWorkflowStatus,
   settleRegistrationConflictComparison,
   updateRegistrationApplicationDirtyKeys,
   type RegistrationApplicationDirtyKey,
@@ -121,7 +122,9 @@ import {
 } from "./registration-track-model.js"
 import {
   ensureRegistrationWorkflowNotificationSourceIds,
+  cancelRegistrationAppointment,
   saveRegistrationCaseInquiry,
+  saveRegistrationConsultationDetails,
   saveRegistrationPhoneConsultation,
   setRegistrationWorkflowStatus,
   isOpsRegistrationWorkflowStatus,
@@ -136,6 +139,7 @@ import { createRegistrationObservationAsyncOwnership } from "./registration-work
 import {
   dispatchRegistrationManagementNotificationSources,
   isRegistrationManagementNotificationWorkflowStatus,
+  sendRegistrationVisitNotificationTarget,
 } from "./registration-consultation-notification.js"
 import {
   REGISTRATION_WORKFLOW_STATUS_LABELS,
@@ -370,6 +374,8 @@ export function RegistrationApplication({
   const [consultationModeDrafts, setConsultationModeDrafts] = useState<Record<string, RegistrationConsultationMode>>({})
   const [consultationDirectorDirtyByTrackId, setConsultationDirectorDirtyByTrackId] = useState<Record<string, boolean>>({})
   const [consultationSharedSaving, setConsultationSharedSaving] = useState(false)
+  const [consultationSwitchPending, setConsultationSwitchPending] = useState(false)
+  const [consultationCancelPending, setConsultationCancelPending] = useState(false)
   const activeConsultationDirectorRef = useRef<RegistrationTrackDirectorSectionHandle | null>(null)
   const dirtyKeysRef = useRef<Set<RegistrationApplicationDirtyKey>>(new Set())
   const dirtyProducersRef = useRef(new Map<RegistrationApplicationDirtyKey, Set<string>>())
@@ -407,8 +413,9 @@ export function RegistrationApplication({
   )), [detail.tracks])
   const genericTracks = useMemo(
     () => orderedTracks.flatMap((track) => {
-      if (!isOpsRegistrationWorkflowStatus(track.workflowStatus)) return []
-      return [{ ...track, workflowStatus: track.workflowStatus }]
+      const workflowStatus = resolveRegistrationWorkspaceWorkflowStatus(track)
+      if (!workflowStatus) return []
+      return [{ ...track, workflowStatus }]
     }),
     [orderedTracks],
   )
@@ -544,6 +551,7 @@ export function RegistrationApplication({
   }, [detail.task.id])
 
   const handleObservationSaved = useCallback(async () => {
+    onWarning("")
     if (
       !activeTrack
       || !activeObservationManagerKey
@@ -616,6 +624,7 @@ export function RegistrationApplication({
     observationRuntime.runtimeVersion,
     observationWorkspaceAvailable,
     onReload,
+    onWarning,
     viewerId,
   ])
 
@@ -1438,7 +1447,7 @@ export function RegistrationApplication({
     : false
 
   function selectConsultationMode(mode: RegistrationConsultationMode) {
-    if (!activeGenericTrack || !activeConsultationMode || (mode === "phone" && activeConsultationMode.phoneDisabled)) return
+    if (!activeGenericTrack || !activeConsultationMode) return
     const next = getRegistrationConsultationModeDraft({
       draftMode: mode,
       hasVisitAppointment: Boolean(activeVisitAppointment),
@@ -1458,6 +1467,10 @@ export function RegistrationApplication({
 
   async function savePhoneConsultation() {
     if (!activeGenericTrack || consultationSharedSaving) return
+    if (activeVisitAppointment) {
+      setConsultationSwitchPending(true)
+      return
+    }
     setConsultationSharedSaving(true)
     try {
       const saved = await saveActiveConsultationDirector()
@@ -1470,6 +1483,59 @@ export function RegistrationApplication({
       await onReload(activeGenericTrack.id)
     } catch (error) {
       onWarning(errorMessage(error, "상담 정보를 저장하지 못했습니다."))
+    } finally {
+      setConsultationSharedSaving(false)
+    }
+  }
+
+  async function confirmVisitToPhoneSwitch() {
+    if (!activeGenericTrack || !activeVisitAppointment || consultationSharedSaving) return
+    setConsultationSharedSaving(true)
+    try {
+      const directorSaved = await saveActiveConsultationDirector()
+      if (!directorSaved) return
+      const saved = await cancelRegistrationAppointment({
+        appointmentId: activeVisitAppointment.id,
+        expectedNotificationRevision: activeVisitAppointment.notificationRevision,
+        reason: "전화상담으로 변경",
+        requestKey: `registration-appointment-switch-to-phone:${activeVisitAppointment.id}:${crypto.randomUUID()}`,
+      })
+      const failedTargets: string[] = []
+      for (const target of saved.notificationTargets) {
+        try {
+          await sendRegistrationVisitNotificationTarget(target, notificationToken)
+        } catch (error) {
+          failedTargets.push(errorMessage(error, "방문상담 변경 알림을 보내지 못했습니다."))
+        }
+      }
+      setDirty(`consultation:mode-${activeGenericTrack.id}`, false)
+      setConsultationSwitchPending(false)
+      await handleAppointmentSaved(saved)
+      if (failedTargets.length > 0) {
+        onWarning(`전화상담 변경은 저장되었습니다. ${failedTargets[0]}`)
+      }
+    } catch (error) {
+      onWarning(errorMessage(error, "전화상담으로 변경하지 못했습니다."))
+    } finally {
+      setConsultationSharedSaving(false)
+    }
+  }
+
+  async function confirmPhoneConsultationCancellation() {
+    if (!phoneConsultation || consultationSharedSaving) return
+    setConsultationSharedSaving(true)
+    try {
+      await saveRegistrationConsultationDetails({
+        consultationId: phoneConsultation.id,
+        status: "canceled",
+        outcome: "",
+        note: phoneConsultation.note || "",
+        requestKey: `registration-phone-consultation-cancel:${phoneConsultation.id}:${crypto.randomUUID()}`,
+      })
+      setConsultationCancelPending(false)
+      await onReload(phoneConsultation.trackId)
+    } catch (error) {
+      onWarning(errorMessage(error, "전화상담을 취소하지 못했습니다."))
     } finally {
       setConsultationSharedSaving(false)
     }
@@ -1643,7 +1709,7 @@ export function RegistrationApplication({
                     variant={activeConsultationMode.mode === "phone" ? "default" : "outline"}
                     className="h-10"
                     onClick={() => selectConsultationMode("phone")}
-                    disabled={activeConsultationMode.phoneDisabled || consultationSharedSaving}
+                    disabled={consultationSharedSaving}
                   >전화상담</Button>
                   <Button
                     type="button"
@@ -1655,8 +1721,6 @@ export function RegistrationApplication({
                   >방문상담</Button>
                 </div>
               </fieldset>
-
-              {renderTrackFrames("consultation")}
 
               {activeConsultationMode.mode === "visit" ? (
                 <RegistrationAppointmentEditor
@@ -1686,7 +1750,15 @@ export function RegistrationApplication({
                   onOpenCustomerMessage={openCustomerMessage}
                 />
               ) : (
-                <div className="flex justify-end">
+                <div className="flex flex-wrap justify-end gap-2">
+                  {phoneConsultation ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={consultationSharedSaving}
+                      onClick={() => setConsultationCancelPending(true)}
+                    >상담 취소</Button>
+                  ) : null}
                   <RegistrationSaveButton
                     type="button"
                     dirty={activeConsultationDirectorDirty || !phoneConsultation}
@@ -1698,6 +1770,29 @@ export function RegistrationApplication({
                   />
                 </div>
               )}
+
+              {consultationSwitchPending ? (
+                <div role="alertdialog" aria-labelledby="registration-consultation-switch-title" className="grid gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-950">
+                  <h4 id="registration-consultation-switch-title" className="font-semibold">전화상담으로 변경할까요?</h4>
+                  <p className="text-sm">기존 방문상담 예약과 예정된 리마인드가 취소됩니다.</p>
+                  <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                    <Button type="button" variant="outline" disabled={consultationSharedSaving} onClick={() => setConsultationSwitchPending(false)}>돌아가기</Button>
+                    <Button type="button" disabled={consultationSharedSaving} onClick={() => void confirmVisitToPhoneSwitch()}>전화상담으로 변경</Button>
+                  </div>
+                </div>
+              ) : null}
+
+              {consultationCancelPending ? (
+                <div role="alertdialog" aria-labelledby="registration-phone-consultation-cancel-title" className="grid gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-red-950">
+                  <h4 id="registration-phone-consultation-cancel-title" className="font-semibold">전화상담을 취소할까요?</h4>
+                  <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                    <Button type="button" variant="outline" disabled={consultationSharedSaving} onClick={() => setConsultationCancelPending(false)}>돌아가기</Button>
+                    <Button type="button" variant="destructive" disabled={consultationSharedSaving} onClick={() => void confirmPhoneConsultationCancellation()}>상담 취소</Button>
+                  </div>
+                </div>
+              ) : null}
+
+              {renderTrackFrames("consultation")}
             </div>
           ) : (
             renderTrackFrames("consultation")

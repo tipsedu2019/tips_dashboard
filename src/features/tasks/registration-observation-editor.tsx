@@ -1047,7 +1047,7 @@ export function RegistrationObservationEditor({
           ) : null}
 
           <div className="flex flex-wrap gap-2">
-            <Button ref={saveDialogTriggerRef} type="button" onClick={() => setSaveConfirmOpen(true)} disabled={saving || mutationCommitted || Boolean(prerequisiteError)}>저장</Button>
+            <Button ref={saveDialogTriggerRef} type="button" onClick={() => setSaveConfirmOpen(true)} disabled={saving || mutationCommitted || Boolean(prerequisiteError)}>청강 예약 저장</Button>
             {onOpenCustomerMessage ? (
               <Button
                 type="button"
@@ -1073,7 +1073,6 @@ export function RegistrationObservationEditor({
       {receipt === "예약 저장됨" ? (
         <div role="status" className="grid gap-1 text-sm">
           <p className="font-medium text-primary">예약 저장됨</p>
-          <p className="text-muted-foreground">고객 안내: 미발송</p>
         </div>
       ) : receipt ? <p role="status" className="text-sm font-medium text-primary">{receipt}</p> : null}
       {mutationError ? <p role="alert" className="text-sm text-destructive">{mutationError}</p> : null}
@@ -1093,7 +1092,7 @@ export function RegistrationObservationEditor({
           </DialogHeader>
           <DialogFooter>
             <DialogClose asChild><Button type="button" variant="outline" disabled={saving || mutationCommitted}>돌아가기</Button></DialogClose>
-            <Button type="button" onClick={() => void saveBooking()} disabled={saving || mutationCommitted}>{saving ? "저장 중" : "저장"}</Button>
+            <Button type="button" onClick={() => void saveBooking()} disabled={saving || mutationCommitted}>{saving ? "저장 중" : "청강 예약 저장"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

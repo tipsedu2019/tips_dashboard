@@ -10,8 +10,37 @@ import type {
   OpsRegistrationConsultation,
   OpsRegistrationLevelTest,
   OpsRegistrationObservationTrackSummary,
+  OpsRegistrationWorkflowStatus,
   RegistrationSubject,
 } from "./registration-track-service"
+
+const REGISTRATION_WORKSPACE_WORKFLOW_STATUS_SET = new Set<string>([
+  "inquiry",
+  "level_test_requested",
+  "consultation_requested",
+  "consultation_completed",
+  "waiting_current_class",
+  "waiting_new_class",
+  "waiting_next_opening",
+  "enrollment_requested",
+  "payment_in_progress",
+  "registered",
+  "not_registered",
+  "inquiry_only",
+] satisfies readonly OpsRegistrationWorkflowStatus[])
+
+export function resolveRegistrationWorkspaceWorkflowStatus(input: Pick<
+  OpsRegistrationObservationTrackSummary,
+  "workflowStatus" | "observationReturnWorkflowStatus"
+>): OpsRegistrationWorkflowStatus | null {
+  if (REGISTRATION_WORKSPACE_WORKFLOW_STATUS_SET.has(input.workflowStatus)) {
+    return input.workflowStatus as OpsRegistrationWorkflowStatus
+  }
+  const returnStatus = input.observationReturnWorkflowStatus || ""
+  return REGISTRATION_WORKSPACE_WORKFLOW_STATUS_SET.has(returnStatus)
+    ? returnStatus as OpsRegistrationWorkflowStatus
+    : null
+}
 
 export function canManageRegistrationObservationTrack(input: {
   viewerId: string | null
@@ -125,12 +154,12 @@ export function getRegistrationConsultationModeDraft(input: {
   phoneDisabled: boolean
 } {
   const savedMode = input.hasVisitAppointment ? "visit" : "phone"
-  const mode = input.hasVisitAppointment ? "visit" : input.draftMode || savedMode
+  const mode = input.draftMode || savedMode
   return {
     mode,
     savedMode,
     dirty: mode !== savedMode,
-    phoneDisabled: input.hasVisitAppointment,
+    phoneDisabled: false,
   }
 }
 

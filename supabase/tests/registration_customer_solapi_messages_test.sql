@@ -958,6 +958,14 @@ where id in (
   '95000000-0000-4000-8000-000000000542'
 );
 set local role service_role;
+select lives_ok(
+  $$select public.resolve_registration_customer_message_source_v1(
+      '95000000-0000-4000-8000-000000000001',
+      'level_test_booking',
+      '95000000-0000-4000-8000-000000000601'
+    )$$,
+  'an active level-test appointment remains eligible after the track advances'
+);
 insert into registration_solapi_rpc_results(label, response)
 values (
   'visit source',
@@ -985,6 +993,14 @@ set workflow_status = 'inquiry',
     waiting_detail_class_id = null
 where id = '95000000-0000-4000-8000-000000000542';
 set local role service_role;
+select lives_ok(
+  $$select public.resolve_registration_customer_message_source_v1(
+      '95000000-0000-4000-8000-000000000011',
+      'visit_consultation_booking',
+      '95000000-0000-4000-8000-000000000602'
+    )$$,
+  'an active visit appointment remains eligible after the track advances'
+);
 insert into registration_solapi_rpc_results(label, response)
 values
   ('waiting source', public.resolve_registration_customer_message_source_v1('95000000-0000-4000-8000-000000000001', 'waiting_notice', '95000000-0000-4000-8000-000000000540')),
