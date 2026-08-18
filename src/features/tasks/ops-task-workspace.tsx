@@ -85,6 +85,7 @@ import {
   loadOpsRegistrationClassDetail,
   loadOpsTaskWorkspaceData,
   loadOpsTaskWorkspaceOptionData,
+  startOpsRegistrationTaskPageSupplementLoad,
   reportWordRetestAbsent,
   reportWordRetestResult,
   retryWordRetest,
@@ -115,6 +116,7 @@ import {
   type OpsTaskWorkspaceOptionData,
   type RegistrationSchoolCatalogStatus,
 } from "./ops-task-service"
+import { mergeOpsTaskPageSupplement } from "./ops-task-page-supplement"
 import {
   ClassScheduleCalendarSurface,
   type ClassScheduleCalendarDay,
@@ -8456,6 +8458,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const latestWorkspaceViewerIdRef = useRef(currentUserId)
   latestWorkspaceViewerIdRef.current = currentUserId
   const workspaceLoadGenerationRef = useRef(0)
+  const workspaceLoadAbortControllerRef = useRef<AbortController | null>(null)
   const workspaceViewerIdRef = useRef(currentUserId)
   const workspaceViewerGenerationRef = useRef(0)
   const workspaceDataViewerIdRef = useRef(currentUserId)
@@ -8741,6 +8744,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setLoading(false)
       return
     }
+    workspaceLoadAbortControllerRef.current?.abort()
+    const loadAbortController = isRegistrationWorkspace ? new AbortController() : null
+    workspaceLoadAbortControllerRef.current = loadAbortController
     const loadGeneration = ++workspaceLoadGenerationRef.current
     const viewerChanged = workspaceViewerIdRef.current !== currentUserId
     if (viewerChanged) {
@@ -8810,6 +8816,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           includeProfileOptions: false,
           filters: taskPageFilters,
           cursor: null,
+          signal: loadAbortController?.signal,
         }
       : {
           taskType: scopedTaskType,
@@ -8819,7 +8826,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           includeProfileOptions: true,
           filters: taskPageFilters,
           cursor: null,
+          signal: loadAbortController?.signal,
         }
+    const supplements = taskPageFilters.taskType === "registration"
+      ? startOpsRegistrationTaskPageSupplementLoad({
+          filters: taskPageFilters,
+          signal: loadAbortController?.signal,
+        })
+      : null
     const cachedData = force
       ? null
       : getCachedOpsTaskWorkspaceData(loadOptions) || getPersistedOpsTaskWorkspaceData(loadOptions)
@@ -8846,6 +8860,28 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setTaskPageCursor(nextData.page?.nextCursor || null)
     setTaskPageHasMore(Boolean(nextData.page?.hasMore))
     setLoading(false)
+    if (supplements) {
+      void supplements.stats.then((stats) => {
+        if (
+          !stats
+          || latestWorkspaceViewerIdRef.current !== currentUserId
+          || workspaceLoadGenerationRef.current !== loadGeneration
+        ) return
+        setData((current) => current
+          ? mergeOpsTaskPageSupplement(current, { stats })
+          : current)
+      })
+      void supplements.registrationRuntime.then((registrationRuntime) => {
+        if (
+          !registrationRuntime
+          || latestWorkspaceViewerIdRef.current !== currentUserId
+          || workspaceLoadGenerationRef.current !== loadGeneration
+        ) return
+        setData((current) => current
+          ? mergeOpsTaskPageSupplement(current, { registrationRuntime })
+          : current)
+      })
+    }
   }, [currentUserId, isRegistrationWorkspace, isTodoWorkspace, registrationFixtureEnabled, registrationFixtureRequested, scopedTaskType, taskPageFilters, wordRetestFixtureRequested, wordRetestFixtureViewer])
 
   const loadMore = useCallback(async () => {
@@ -8873,7 +8909,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           tasks: [...rowsById.values()],
           page: nextData.page,
           stats: current.stats,
-          registrationRuntime: nextData.registrationRuntime,
+          registrationRuntime: current.registrationRuntime,
         }
       })
       setTaskPageCursor(nextData.page?.nextCursor || null)
@@ -8911,6 +8947,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     void reload()
     return () => {
       workspaceLoadGenerationRef.current += 1
+      workspaceLoadAbortControllerRef.current?.abort()
+      workspaceLoadAbortControllerRef.current = null
       registrationOptionsLoadGenerationRef.current += 1
     }
   }, [deferRegistrationWorkspaceLoad, reload])

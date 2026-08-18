@@ -44,6 +44,7 @@ import {
   resetRegistrationSubjectTrackRuntimeProbe,
 } from "./registration-runtime-probe"
 import { loadRegistrationSubjectTrackFixtureClassDetails } from "./registration-track-fixture-runtime"
+import { startOpsTaskPageSupplementLoad } from "./ops-task-page-supplement"
 
 export type OpsTaskType =
   | "registration"
@@ -406,6 +407,7 @@ export type OpsTaskPageLoadOptions = {
   limit: 30
   viewerId: string
   force?: boolean
+  signal?: AbortSignal
 }
 
 export type OpsTaskWorkspaceData = {
@@ -514,6 +516,7 @@ const OPS_REGISTRATION_OPTIONAL_DETAIL_COLUMNS = [
 ] as const
 type OpsTaskWorkspaceLoadOptions = {
   force?: boolean
+  signal?: AbortSignal
   taskType?: OpsTaskType
   viewerId?: string
   includeManagementOptions?: boolean
@@ -1740,64 +1743,16 @@ export async function loadOpsTaskWorkspaceOptionData(
   }
 }
 
-export async function loadOpsTaskPage(options: OpsTaskPageLoadOptions): Promise<OpsTaskPageResponse> {
-  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
-  const viewerId = text(options.viewerId)
-  if (!viewerId) throw new Error("인증된 사용자 정보를 확인할 수 없습니다.")
-  if (options.limit !== OPS_TASK_PAGE_SIZE) throw new Error("ops_task_page_limit_invalid")
-  assertOpsTaskPageFilters(options.filters)
-  const scopeHash = await getOpsTaskPageScope(options.filters, viewerId)
-  if (options.cursor?.scopeHash && options.cursor.scopeHash !== scopeHash) {
-    throw new Error("cursor_scope_mismatch")
-  }
+function opsTaskRequestSignal(signal: AbortSignal | undefined, timeoutMs: number) {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs)
+  return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal
+}
 
-  const statsRequest = options.cursor
-    ? Promise.resolve(null)
-    : Promise.resolve(supabase
-        .rpc("get_ops_task_list_stats_v1", {
-          p_type: options.filters.taskType,
-          p_filters: options.filters,
-        })
-        .abortSignal(AbortSignal.timeout(8_000))
-        .retry(false))
-        .catch(() => null)
-  const [pageResult, statsResult, registrationRuntime] = await Promise.all([
-    supabase
-      .rpc("list_ops_task_page_v1", {
-        p_type: options.filters.taskType,
-        p_filters: options.filters,
-        p_cursor_sort_values: options.cursor?.sortValues || null,
-        p_cursor_id: options.cursor?.id || null,
-        p_limit: 30,
-      })
-      .abortSignal(AbortSignal.timeout(8_000))
-      .retry(false),
-    statsRequest,
-    options.filters.taskType === "registration"
-      ? probeRegistrationSubjectTrackRuntime().catch(() => null)
-      : Promise.resolve(null),
-  ])
-  if (pageResult.error) throw pageResult.error
-
-  const rawRows = ((pageResult.data || []) as unknown as Row[])
-  const hasMore = rawRows.length > OPS_TASK_PAGE_SIZE
-  const pageRows = rawRows.slice(0, OPS_TASK_PAGE_SIZE)
-  const rows = pageRows.map(mapOpsTaskPageRow)
-
-  const boundary = hasMore ? pageRows[OPS_TASK_PAGE_SIZE - 1] : null
-  const boundarySortValues = boundary && Array.isArray(boundary.sort_values)
-    ? boundary.sort_values as Array<string | number | null>
-    : null
-  const nextCursor = boundary && boundarySortValues
-    ? { sortValues: boundarySortValues, id: text(boundary.id || (boundary.row_data as Row | undefined)?.id), scopeHash }
-    : null
+function mapOpsTaskPageStatsResult(statsResult: { data?: unknown; error?: unknown } | null): OpsTaskPageStats | undefined {
   const statsData = statsResult && !statsResult.error
     ? (Array.isArray(statsResult.data) ? statsResult.data[0] : statsResult.data) as Row | null
     : null
-  const byStatus = statsData?.byStatus || statsData?.by_status
-  const byView = statsData?.byView || statsData?.by_view
-  const metrics = statsData?.metrics
-  const facets = statsData?.facets
+  if (!statsData) return undefined
 
   const numberRecord = (value: unknown): Record<string, number> => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return {}
@@ -1817,16 +1772,87 @@ export async function loadOpsTaskPage(options: OpsTaskPageLoadOptions): Promise<
   }
 
   return {
+    total: Number(statsData.total || 0),
+    byStatus: numberRecord(statsData.byStatus || statsData.by_status),
+    byView: numberRecord(statsData.byView || statsData.by_view),
+    metrics: numberRecord(statsData.metrics),
+    facets: facetRecord(statsData.facets),
+  }
+}
+
+async function loadOpsTaskPageStats(
+  filters: OpsTaskPageFilters,
+  signal?: AbortSignal,
+): Promise<OpsTaskPageStats | undefined> {
+  if (!supabase) return undefined
+  const statsResult = await supabase
+    .rpc("get_ops_task_list_stats_v1", {
+      p_type: filters.taskType,
+      p_filters: filters,
+    })
+    .abortSignal(opsTaskRequestSignal(signal, 8_000))
+    .retry(false)
+  return mapOpsTaskPageStatsResult(statsResult)
+}
+
+export function startOpsRegistrationTaskPageSupplementLoad(options: {
+  filters: Extract<OpsTaskPageFilters, { taskType: "registration" }>
+  signal?: AbortSignal
+}) {
+  return startOpsTaskPageSupplementLoad({
+    loadStats: () => loadOpsTaskPageStats(options.filters, options.signal),
+    loadRegistrationRuntime: () => probeRegistrationSubjectTrackRuntime(),
+  })
+}
+
+export async function loadOpsTaskPage(options: OpsTaskPageLoadOptions): Promise<OpsTaskPageResponse> {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const viewerId = text(options.viewerId)
+  if (!viewerId) throw new Error("인증된 사용자 정보를 확인할 수 없습니다.")
+  if (options.limit !== OPS_TASK_PAGE_SIZE) throw new Error("ops_task_page_limit_invalid")
+  assertOpsTaskPageFilters(options.filters)
+  const scopeHash = await getOpsTaskPageScope(options.filters, viewerId)
+  if (options.cursor?.scopeHash && options.cursor.scopeHash !== scopeHash) {
+    throw new Error("cursor_scope_mismatch")
+  }
+
+  const statsRequest = options.cursor || options.filters.taskType === "registration"
+    ? Promise.resolve(undefined)
+    : loadOpsTaskPageStats(options.filters, options.signal).catch(() => undefined)
+  const [pageResult, stats, registrationRuntime] = await Promise.all([
+    supabase
+      .rpc("list_ops_task_page_v1", {
+        p_type: options.filters.taskType,
+        p_filters: options.filters,
+        p_cursor_sort_values: options.cursor?.sortValues || null,
+        p_cursor_id: options.cursor?.id || null,
+        p_limit: 30,
+      })
+      .abortSignal(opsTaskRequestSignal(
+        options.signal,
+        options.filters.taskType === "registration" ? 12_000 : 8_000,
+      ))
+      .retry(false),
+    statsRequest,
+    Promise.resolve(null),
+  ])
+  if (pageResult.error) throw pageResult.error
+
+  const rawRows = ((pageResult.data || []) as unknown as Row[])
+  const hasMore = rawRows.length > OPS_TASK_PAGE_SIZE
+  const pageRows = rawRows.slice(0, OPS_TASK_PAGE_SIZE)
+  const rows = pageRows.map(mapOpsTaskPageRow)
+
+  const boundary = hasMore ? pageRows[OPS_TASK_PAGE_SIZE - 1] : null
+  const boundarySortValues = boundary && Array.isArray(boundary.sort_values)
+    ? boundary.sort_values as Array<string | number | null>
+    : null
+  const nextCursor = boundary && boundarySortValues
+    ? { sortValues: boundarySortValues, id: text(boundary.id || (boundary.row_data as Row | undefined)?.id), scopeHash }
+    : null
+  return {
     page: { rows, nextCursor, hasMore },
-    ...(statsData ? {
-      stats: {
-        total: Number(statsData.total || 0),
-        byStatus: numberRecord(byStatus),
-        byView: numberRecord(byView),
-        metrics: numberRecord(metrics),
-        facets: facetRecord(facets),
-      },
-    } : {}),
+    ...(stats ? { stats } : {}),
     registrationRuntime,
   }
 }
@@ -1841,7 +1867,7 @@ export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOpti
     return cached.data
   }
   const inFlight = opsTaskWorkspaceDataInFlight.get(cacheKey)
-  if (!options.force && inFlight) return inFlight
+  if (!options.force && !options.signal && inFlight) return inFlight
 
   const loadPromise = options.taskType === "registration"
     ? runOpsTaskReadMeasure(
@@ -1971,6 +1997,7 @@ async function readOpsTaskWorkspaceData(
       limit: OPS_TASK_PAGE_SIZE,
       viewerId: text(options.viewerId),
       force: options.force,
+      signal: options.signal,
     })
     metrics.queryCount += options.cursor ? 1 : 2
     return {

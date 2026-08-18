@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const migrationUrl = new URL("../supabase/migrations/20260814115116_dashboard_audit_diff_format.sql", import.meta.url);
-const manifestUrl = new URL("../supabase/test-baselines/dashboard-free-tier-v1.manifest.json", import.meta.url);
+const activeCaptureUrl = new URL("../supabase/test-baselines/dashboard-free-tier-v1.active.json", import.meta.url);
+const capturesUrl = new URL("../supabase/test-baselines/dashboard-free-tier-v1-captures/", import.meta.url);
+
+async function activeMigrationLedger() {
+  const pointer = JSON.parse(await readFile(activeCaptureUrl, "utf8"));
+  const catalog = JSON.parse(await readFile(new URL(`${pointer.captureId}/catalog.json`, capturesUrl), "utf8"));
+  assert.equal(catalog.captureStatus, "reviewed");
+  return catalog.migrationLedger;
+}
 
 function normalized(value) { return value.replace(/--[^\n]*/gu, " ").replace(/\s+/gu, " ").trim().toLowerCase(); }
 
@@ -26,9 +33,9 @@ test("audit diff migration is additive, bounded, and replaces all audit triggers
   for (const table of ["teacher_catalogs", "profiles", "students", "classes", "textbooks", "class_schedule_slots", "class_lesson_sessions"]) assert.match(sql, new RegExp(`dashboard_audit_${table}`));
 });
 
-test("audit patch helpers are private immutable invoker functions and manifest binds the final bytes", async () => {
-  const [source, manifestSource] = await Promise.all([readFile(migrationUrl, "utf8"), readFile(manifestUrl, "utf8")]);
-  const sql = normalized(source); const manifest = JSON.parse(manifestSource);
+test("audit patch helpers are private immutable invoker functions and the reviewed ledger records the migration", async () => {
+  const [source, migrationLedger] = await Promise.all([readFile(migrationUrl, "utf8"), activeMigrationLedger()]);
+  const sql = normalized(source);
   for (const helper of ["dashboard_audit_forward_patch_v2", "dashboard_audit_reverse_patch_v2"]) {
     assert.match(sql, new RegExp(`create or replace function dashboard_private\\.${helper}\\(record_value jsonb, patch jsonb\\)[\\s\\S]*immutable[\\s\\S]*security invoker[\\s\\S]*set search_path = ''`));
     assert.match(sql, new RegExp(`revoke all on function dashboard_private\\.${helper}\\(jsonb, jsonb\\) from public, anon, authenticated, service_role`));
@@ -41,6 +48,12 @@ test("audit patch helpers are private immutable invoker functions and manifest b
   assert.doesNotMatch(sql, /grant dashboard_audit_writer_v2 to (?:anon|authenticated|service_role)/u);
   assert.match(sql, /create policy dashboard_audit_logs_writer_select on public\.dashboard_audit_logs for select to dashboard_audit_writer_v2 using \(true\)/u);
   assert.match(sql, /revoke all on function dashboard_private\.log_dashboard_audit_event_v2\(\) from public, anon, authenticated, service_role/u);
-  const row = manifest.orderedNewMigrations.find(({ fileName }) => fileName === "20260814115116_dashboard_audit_diff_format.sql");
-  assert.deepEqual(row, { fileName: "20260814115116_dashboard_audit_diff_format.sql", status: "final", sha256: createHash("sha256").update(source).digest("hex") });
+  assert.deepEqual(
+    migrationLedger.filter(({ version }) => version === "20260814115116"),
+    [{
+      version: "20260814115116",
+      name: "dashboard_audit_diff_format",
+      statementsSha256: "ebb95d08b263416643fc3b207b2ec4728fd8ab94501700e6845a6b3528c70b04",
+    }],
+  );
 });

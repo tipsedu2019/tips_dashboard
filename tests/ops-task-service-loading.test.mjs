@@ -164,7 +164,7 @@ function loadDashboardConflictTaskLinkReader(mocks) {
 
 function loadOpsTaskPageWithMocks(mocks) {
   const source = sourceBetween(
-    "export async function loadOpsTaskPage",
+    "function opsTaskRequestSignal",
     "export async function loadOpsTaskWorkspaceData",
   );
   return transpileAndLoad(
@@ -254,6 +254,80 @@ test("registration list keeps successful page rows when the optional runtime pro
 
   assert.deepEqual(JSON.parse(JSON.stringify(page.page.rows)), [{ id: "task-a" }]);
   assert.equal(page.registrationRuntime, null);
+});
+
+test("registration list resolves before optional stats and runtime probes settle", async () => {
+  const pendingStats = new Promise(() => {});
+  const pendingRuntime = new Promise(() => {});
+  let runtimeProbeCalls = 0;
+  const pendingStatsResult = {
+    abortSignal() { return pendingStatsResult; },
+    retry() { return pendingStats; },
+  };
+  const loadPage = loadOpsTaskPageWithMocks({
+    probeRegistrationSubjectTrackRuntime: () => {
+      runtimeProbeCalls += 1;
+      return pendingRuntime;
+    },
+    supabase: {
+      rpc(name) {
+        if (name === "list_ops_task_page_v1") {
+          return taskPageRpcResult([{ id: "task-a", row_data: { id: "task-a" }, sort_values: ["2026-08-14T00:00:00Z"] }]);
+        }
+        return pendingStatsResult;
+      },
+    },
+  });
+
+  const result = await Promise.race([
+    loadPage({
+      filters: { taskType: "registration" },
+      cursor: null,
+      limit: 30,
+      viewerId: "viewer-a",
+    }),
+    new Promise((resolve) => setTimeout(() => resolve("optional-reads-blocked-list"), 25)),
+  ]);
+
+  assert.notEqual(result, "optional-reads-blocked-list");
+  assert.deepEqual(JSON.parse(JSON.stringify(result.page.rows)), [{ id: "task-a" }]);
+  assert.equal(result.stats, undefined);
+  assert.equal(result.registrationRuntime, null);
+  assert.equal(runtimeProbeCalls, 0);
+});
+
+test("registration list combines caller cancellation with a twelve-second success buffer", async () => {
+  const callerSignal = { kind: "caller" };
+  let requestSignal = null;
+  const pageResult = taskPageRpcResult([]);
+  pageResult.abortSignal = (signal) => {
+    requestSignal = signal;
+    return pageResult;
+  };
+  const loadPage = loadOpsTaskPageWithMocks({
+    AbortSignal: {
+      timeout: (milliseconds) => ({ kind: "timeout", milliseconds }),
+      any: (signals) => ({ kind: "combined", signals }),
+    },
+    supabase: {
+      rpc(name) {
+        assert.equal(name, "list_ops_task_page_v1");
+        return pageResult;
+      },
+    },
+  });
+
+  await loadPage({
+    filters: { taskType: "registration" },
+    cursor: null,
+    limit: 30,
+    viewerId: "viewer-a",
+    signal: callerSignal,
+  });
+
+  assert.equal(requestSignal.kind, "combined");
+  assert.equal(requestSignal.signals[0], callerSignal);
+  assert.deepEqual(requestSignal.signals[1], { kind: "timeout", milliseconds: 12_000 });
 });
 
 test("dashboard conflict task link lookup aborts after eight seconds without automatic retry", async () => {
@@ -424,7 +498,6 @@ function registrationSummaryTrack(taskId, id, subject, status) {
 function createWorkspaceLoaderHarness({
   taskGatesByType = {},
   windowMock,
-  registrationRuntimeProbe = async () => ({ mode: "ready", version: 1 }),
   registrationTrackSummaryFactory = (taskIds) => taskIds.map((taskId) => (
     registrationSummaryTrack(taskId, `track:${taskId}`, "영어", "inquiry")
   )),
@@ -441,7 +514,6 @@ function createWorkspaceLoaderHarness({
     scopedReads: [],
     trackSummaryCalls: [],
     workspaceTrackSummaryCalls: [],
-    registrationRuntimeProbeCalls: 0,
     clearedTrackCaches: 0,
   };
   const taskQueryTypes = [];
@@ -542,19 +614,13 @@ function createWorkspaceLoaderHarness({
       async loadOpsTaskPage(options) {
         counts.taskQueries += 1;
         taskQueryTypes.push(options.filters.taskType);
-        const runtimePromise = options.filters.taskType === "registration"
-          ? (counts.registrationRuntimeProbeCalls += 1, registrationRuntimeProbe())
-          : Promise.resolve(null);
-        const [result, registrationRuntime] = await Promise.all([
-          takeTaskGate(options.filters.taskType).promise,
-          runtimePromise,
-        ]);
+        const result = await takeTaskGate(options.filters.taskType).promise;
         if (result.error) throw result.error;
         const rows = result.data || [];
         return {
           page: { rows, nextCursor: null, hasMore: false },
           stats: { total: rows.length, byStatus: {} },
-          registrationRuntime,
+          registrationRuntime: null,
         };
       },
       readTable: emptyRows,
@@ -998,6 +1064,35 @@ test("same-key concurrent workspace loads share one in-flight query wave", async
   assert.strictEqual(firstData, secondData);
 });
 
+test("caller-owned registration loads replace an abortable in-flight wave", async () => {
+  const firstGate = deferred();
+  const replacementGate = deferred();
+  const harness = createWorkspaceLoaderHarness({
+    taskGatesByType: {
+      registration: [firstGate, replacementGate],
+    },
+  });
+  const options = {
+    taskType: "registration",
+    viewerId: "viewer-a",
+    includeManagementOptions: false,
+    signal: { aborted: false },
+  };
+
+  const firstLoad = harness.loadOpsTaskWorkspaceData(options);
+  const replacementLoad = harness.loadOpsTaskWorkspaceData({
+    ...options,
+    signal: { aborted: false },
+  });
+
+  assert.equal(harness.counts.taskQueries, 2);
+  firstGate.resolve({ data: [{ id: "old-task" }], error: null });
+  replacementGate.resolve({ data: [{ id: "replacement-task" }], error: null });
+  const [firstData, replacementData] = await Promise.all([firstLoad, replacementLoad]);
+  assert.equal(firstData.tasks[0].id, "old-task");
+  assert.equal(replacementData.tasks[0].id, "replacement-task");
+});
+
 test("registration cold load keeps track summaries inside the page row", async () => {
   const harness = createWorkspaceLoaderHarness();
   const load = harness.loadOpsTaskWorkspaceData({
@@ -1023,32 +1118,6 @@ test("registration cold load keeps track summaries inside the page row", async (
   assert.deepEqual(harness.counts.workspaceTrackSummaryCalls, []);
   assert.equal(serviceSource.includes("'registrationTracks', coalesce(track_page.tracks"), false);
   assert.match(serviceSource, /payload\.registrationTracks/);
-});
-
-test("registration cold load starts the runtime probe while parent rows are still loading", async () => {
-  const runtimeGate = deferred();
-  const harness = createWorkspaceLoaderHarness({
-    registrationRuntimeProbe: () => runtimeGate.promise,
-  });
-  const load = harness.loadOpsTaskWorkspaceData({
-    taskType: "registration",
-    viewerId: "viewer-a",
-    force: true,
-  });
-
-  await Promise.resolve();
-  const startedBeforeEitherResponse = {
-    taskQueries: harness.counts.taskQueries,
-    runtimeProbes: harness.counts.registrationRuntimeProbeCalls,
-  };
-  harness.releaseTasks([]);
-  runtimeGate.resolve({ mode: "ready", version: 1 });
-  await load;
-
-  assert.deepEqual(startedBeforeEitherResponse, {
-    taskQueries: 1,
-    runtimeProbes: 1,
-  });
 });
 
 test("registration cold load does not start a second workspace track-summary read", async () => {
@@ -1430,13 +1499,14 @@ test("task list reads use a bounded RPC page and selected detail stays exact-id 
   assert.match(serviceSource, /export async function loadOpsTaskPage/);
 
   const pageReader = sourceBetween(
-    "export async function loadOpsTaskPage",
+    "function opsTaskRequestSignal",
     "export async function loadOpsTaskWorkspaceData",
   );
   assert.match(pageReader, /rpc\("list_ops_task_page_v1"/);
   assert.match(pageReader, /rpc\("get_ops_task_list_stats_v1"/);
   assert.match(pageReader, /p_limit: 30/);
-  assert.match(pageReader, /AbortSignal\.timeout\(8_000\)/);
+  assert.match(pageReader, /opsTaskRequestSignal\(signal, 8_000\)/);
+  assert.match(pageReader, /taskType === "registration" \? 12_000 : 8_000/);
   assert.match(pageReader, /\.retry\(false\)/);
   assert.match(pageReader, /rawRows\.slice\(0, OPS_TASK_PAGE_SIZE\)/);
   assert.match(pageReader, /rawRows\.length > OPS_TASK_PAGE_SIZE/);
@@ -1478,7 +1548,7 @@ test("task page stats expose authoritative sibling counts metrics and bounded fi
     /export type OpsTaskPageStats = \{[\s\S]*?byView: Record<string, number>[\s\S]*?metrics: Record<string, number>[\s\S]*?facets: Record<string, OpsTaskFacetOption\[]>/,
   );
   const pageReader = sourceBetween(
-    "export async function loadOpsTaskPage",
+    "function opsTaskRequestSignal",
     "export async function loadOpsTaskWorkspaceData",
   );
   assert.match(pageReader, /byView:/);

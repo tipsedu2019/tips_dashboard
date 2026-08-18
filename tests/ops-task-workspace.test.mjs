@@ -2024,7 +2024,8 @@ test("canonical registration application opens one honest read-only timeline fro
   assert.match(editorSource, /import \{ RegistrationApplicationHistoryAction \} from "\.\/registration-application-history-action"/);
   assertIncludesAll(editorSource, [
     "const genericTracks = useMemo(",
-    "if (!isOpsRegistrationWorkflowStatus(track.workflowStatus)) return []",
+    "const workflowStatus = resolveRegistrationWorkspaceWorkflowStatus(track)",
+    "if (!workflowStatus) return []",
     "const genericDetail = useMemo<OpsRegistrationCaseDetail>(() => ({",
     "tracks: genericTracks,",
     "trackContexts: TrackContext[] = genericTracks.map",
@@ -5424,6 +5425,8 @@ test("load-more preserves first-page authoritative stats", async () => {
 
   assert.match(loadMore, /stats: current\.stats/);
   assert.doesNotMatch(loadMore, /stats: nextData\.stats/);
+  assert.match(loadMore, /registrationRuntime: current\.registrationRuntime/);
+  assert.doesNotMatch(loadMore, /registrationRuntime: nextData\.registrationRuntime/);
 });
 
 test("paged badges counts and filter options consume server stats instead of the selected rows", async () => {

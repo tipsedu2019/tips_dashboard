@@ -1,5 +1,4 @@
 import assert from "node:assert/strict"
-import { createHash } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
 
@@ -7,8 +6,12 @@ const migrationPath = new URL(
   "../supabase/migrations/20260813192115_dashboard_daily_brief.sql",
   import.meta.url,
 )
-const manifestPath = new URL(
-  "../supabase/test-baselines/dashboard-free-tier-v1.manifest.json",
+const activeCapturePath = new URL(
+  "../supabase/test-baselines/dashboard-free-tier-v1.active.json",
+  import.meta.url,
+)
+const capturesPath = new URL(
+  "../supabase/test-baselines/dashboard-free-tier-v1-captures/",
   import.meta.url,
 )
 const pgTapPath = new URL(
@@ -17,21 +20,26 @@ const pgTapPath = new URL(
 )
 
 const normalizeSql = (value) => value.replace(/--[^\n]*/gu, " ").replace(/\s+/gu, " ").trim()
-const sha256 = (value) => createHash("sha256").update(value).digest("hex")
+async function activeMigrationLedger() {
+  const pointer = JSON.parse(await readFile(activeCapturePath, "utf8"))
+  const catalog = JSON.parse(await readFile(
+    new URL(`${pointer.captureId}/catalog.json`, capturesPath),
+    "utf8",
+  ))
+  assert.equal(catalog.captureStatus, "reviewed")
+  return catalog.migrationLedger
+}
 
-test("daily brief migration is the CLI-created manifest-owned artifact", async () => {
-  const [migration, manifestSource] = await Promise.all([
-    readFile(migrationPath),
-    readFile(manifestPath, "utf8"),
-  ])
-  const manifest = JSON.parse(manifestSource)
-  const entries = manifest.orderedNewMigrations.filter(
-    (entry) => entry.fileName === "20260813192115_dashboard_daily_brief.sql",
+test("daily brief migration is recorded once in the reviewed baseline ledger", async () => {
+  const entries = (await activeMigrationLedger()).filter(
+    ({ version }) => version === "20260813192115",
   )
 
-  assert.equal(entries.length, 1)
-  assert.ok(["candidate", "final"].includes(entries[0].status))
-  assert.equal(entries[0].sha256, sha256(migration))
+  assert.deepEqual(entries, [{
+    version: "20260813192115",
+    name: "dashboard_daily_brief",
+    statementsSha256: "b6cf1b7a209c11f52348a441f27e836e439182b64a9f55774bdaab2f9d173b82",
+  }])
 })
 
 test("daily brief RPC is a stable invoker with one KST statement snapshot", async () => {

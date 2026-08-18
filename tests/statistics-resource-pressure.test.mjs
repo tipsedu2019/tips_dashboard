@@ -1,5 +1,4 @@
 import assert from "node:assert/strict"
-import { createHash } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
 
@@ -7,8 +6,12 @@ const migrationPath = new URL(
   "../supabase/migrations/20260813194812_dashboard_statistics_sources.sql",
   import.meta.url,
 )
-const manifestPath = new URL(
-  "../supabase/test-baselines/dashboard-free-tier-v1.manifest.json",
+const activeCapturePath = new URL(
+  "../supabase/test-baselines/dashboard-free-tier-v1.active.json",
+  import.meta.url,
+)
+const capturesPath = new URL(
+  "../supabase/test-baselines/dashboard-free-tier-v1-captures/",
   import.meta.url,
 )
 const pgTapPath = new URL(
@@ -25,7 +28,15 @@ const cachePgTapPath = new URL(
 )
 
 const normalizeSql = (value) => value.replace(/--[^\n]*/gu, " ").replace(/\s+/gu, " ").trim()
-const sha256 = (value) => createHash("sha256").update(value).digest("hex")
+async function activeMigrationLedger() {
+  const pointer = JSON.parse(await readFile(activeCapturePath, "utf8"))
+  const catalog = JSON.parse(await readFile(
+    new URL(`${pointer.captureId}/catalog.json`, capturesPath),
+    "utf8",
+  ))
+  assert.equal(catalog.captureStatus, "reviewed")
+  return catalog.migrationLedger
+}
 
 function functionBlock(sql, functionName, nextFunctionName = "") {
   const start = sql.indexOf(`create or replace function ${functionName}`)
@@ -36,19 +47,19 @@ function functionBlock(sql, functionName, nextFunctionName = "") {
   return sql.slice(start, end === -1 ? sql.length : end)
 }
 
-test("statistics private cache is actor scoped, aggregate only, and manifest owned", async () => {
-  const [migration, manifestSource] = await Promise.all([
+test("statistics private cache is actor scoped, aggregate only, and recorded in the reviewed ledger", async () => {
+  const [migration, migrationLedger] = await Promise.all([
     readFile(cacheMigrationPath),
-    readFile(manifestPath, "utf8"),
+    activeMigrationLedger(),
   ])
-  const manifest = JSON.parse(manifestSource)
-  const entry = manifest.orderedNewMigrations.find(
-    (candidate) => candidate.fileName === "20260813205051_dashboard_statistics_cache.sql",
+  assert.deepEqual(
+    migrationLedger.filter(({ version }) => version === "20260813205051"),
+    [{
+      version: "20260813205051",
+      name: "dashboard_statistics_cache",
+      statementsSha256: "8edce27fadce20e06fd24497f8e07277947dddef9ddc53d7485def5c925dfccb",
+    }],
   )
-
-  assert.ok(entry)
-  assert.ok(["candidate", "final"].includes(entry.status))
-  assert.equal(entry.sha256, sha256(migration))
 
   const sql = normalizeSql(migration.toString("utf8"))
   assert.match(sql, /create table dashboard_private\.dashboard_statistics_cache/iu)
@@ -113,19 +124,16 @@ test("statistics cache source specifies takeover, force, invalidation, and stale
   assert.match(normalizedTap, /set local role authenticated/iu)
 })
 
-test("statistics source migration is the CLI-created manifest-owned artifact", async () => {
-  const [migration, manifestSource] = await Promise.all([
-    readFile(migrationPath),
-    readFile(manifestPath, "utf8"),
-  ])
-  const manifest = JSON.parse(manifestSource)
-  const entries = manifest.orderedNewMigrations.filter(
-    (entry) => entry.fileName === "20260813194812_dashboard_statistics_sources.sql",
+test("statistics source migration is recorded once in the reviewed baseline ledger", async () => {
+  const entries = (await activeMigrationLedger()).filter(
+    ({ version }) => version === "20260813194812",
   )
 
-  assert.equal(entries.length, 1)
-  assert.ok(["candidate", "final"].includes(entries[0].status))
-  assert.equal(entries[0].sha256, sha256(migration))
+  assert.deepEqual(entries, [{
+    version: "20260813194812",
+    name: "dashboard_statistics_sources",
+    statementsSha256: "c9272ab88d5283bf9ea66b07fc873c51bebf60becaa10154cafc016b943a8df3",
+  }])
 })
 
 test("statistics source RPC validates the four discriminated tab contracts", async () => {

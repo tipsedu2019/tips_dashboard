@@ -26,11 +26,33 @@ select has_function(
   array['text', 'jsonb'],
   'task stats RPC exists'
 );
+select has_function(
+  'dashboard_private',
+  'ops_registration_task_stats_v1',
+  array['jsonb'],
+  'registration stats use a dedicated count-only function'
+);
+
+select ok(
+  pg_catalog.pg_get_functiondef(
+    'dashboard_private.ops_registration_task_stats_v1(jsonb)'::pg_catalog.regprocedure
+  ) not like '%ops_task_page_source_v1%',
+  'registration stats never rebuild the full page row source'
+);
+
+select ok(
+  pg_catalog.pg_get_functiondef(
+    'public.get_ops_task_list_stats_v1(text,jsonb)'::pg_catalog.regprocedure
+  ) like '%ops_registration_task_stats_v1%',
+  'public stats RPC routes registration reads to the count-only function'
+);
 
 with expected(signature) as (
   values
     ('public.list_ops_task_page_v1(text,jsonb,jsonb,uuid,integer)'::text),
-    ('public.get_ops_task_list_stats_v1(text,jsonb)'::text)
+    ('public.get_ops_task_list_stats_v1(text,jsonb)'::text),
+    ('dashboard_private.ops_registration_task_stats_v1(jsonb)'::text),
+    ('dashboard_private.ops_task_list_stats_legacy_v1(text,jsonb)'::text)
 )
 select ok(
   not (
@@ -39,7 +61,11 @@ select ok(
     where proc.oid = signature::pg_catalog.regprocedure
   )
   and (
-    select proc.proconfig in (array['search_path=']::text[], array['search_path=""']::text[])
+    select coalesce(
+      'search_path=' = any(proc.proconfig)
+      or 'search_path=""' = any(proc.proconfig),
+      false
+    )
     from pg_catalog.pg_proc proc
     where proc.oid = signature::pg_catalog.regprocedure
   )
@@ -170,6 +196,24 @@ select is(
   32,
   'stats uses the same filter semantics as the page'
 );
+
+with stats as (
+  select public.get_ops_task_list_stats_v1(
+    'registration',
+    jsonb_build_object(
+      'taskType','registration','search','','statuses',jsonb_build_array(),
+      'view','inquiry','consultationOwnerId',null
+    )
+  ) as value
+)
+select ok(
+  pg_catalog.jsonb_typeof(value -> 'byStatus') = 'object'
+  and pg_catalog.jsonb_typeof(value -> 'byView') = 'object'
+  and pg_catalog.jsonb_typeof(value -> 'metrics') = 'object'
+  and value ? 'total',
+  'registration count-only stats preserve the public response contract'
+)
+from stats;
 
 with stats as (
   select public.get_ops_task_list_stats_v1(
