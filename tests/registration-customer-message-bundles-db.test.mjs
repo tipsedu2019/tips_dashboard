@@ -33,6 +33,9 @@ test("bundle migration installs private manifests with runtime 0 and no provider
   assert.match(sql, /get_registration_customer_message_bundle_runtime_v1/iu)
   assert.match(sql, /'installedVersion', v_runtime\.installed_version/iu)
   assert.match(sql, /'activeVersion', v_runtime\.active_version/iu)
+  assert.match(sql, /add column bundle_id uuid references dashboard_private\.registration_customer_message_bundles/iu)
+  assert.match(sql, /ops_reg_customer_msg_booking_bundle_once_idx/iu)
+  assert.match(sql, /registration_customer_solapi_template_receipts_kind_check_v3/iu)
 })
 
 test("bundle migration preserves legacy rows and keeps new storage private", async () => {

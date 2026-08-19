@@ -475,4 +475,73 @@ insert into dashboard_private.registration_customer_solapi_activation(message_ki
   ('observation_reminder_bundle', 'off')
 on conflict (message_kind) do nothing;
 
+alter table dashboard_private.registration_customer_solapi_template_receipts
+  drop constraint registration_customer_solapi_template_receipts_kind_check_v2,
+  add constraint registration_customer_solapi_template_receipts_kind_check_v3 check (message_kind in (
+    'level_test_booking', 'visit_consultation_booking', 'appointment_reminder', 'waiting_notice',
+    'admission_application', 'observation_booking', 'observation_reminder',
+    'level_test_booking_bundle', 'visit_consultation_booking_bundle', 'observation_booking_bundle',
+    'level_test_reminder_bundle', 'visit_consultation_reminder_bundle', 'observation_reminder_bundle'
+  ));
+
+create or replace function dashboard_private.registration_customer_solapi_assert_kind_v1(p_message_kind text)
+returns void language plpgsql immutable security invoker set search_path = '' as $$
+begin
+  if p_message_kind is null or p_message_kind not in (
+    'level_test_booking', 'visit_consultation_booking', 'appointment_reminder', 'waiting_notice',
+    'admission_application', 'observation_booking', 'observation_reminder',
+    'level_test_booking_bundle', 'visit_consultation_booking_bundle', 'observation_booking_bundle',
+    'level_test_reminder_bundle', 'visit_consultation_reminder_bundle', 'observation_reminder_bundle'
+  ) then
+    raise exception 'registration_customer_solapi_kind_invalid' using errcode = '22023';
+  end if;
+end;
+$$;
+alter function dashboard_private.registration_customer_solapi_assert_kind_v1(text) owner to postgres;
+revoke all on function dashboard_private.registration_customer_solapi_assert_kind_v1(text)
+  from public, anon, authenticated, service_role;
+
+alter table public.ops_registration_customer_message_previews
+  add column bundle_id uuid references dashboard_private.registration_customer_message_bundles(id) on delete restrict;
+alter table public.ops_registration_customer_messages
+  add column bundle_id uuid references dashboard_private.registration_customer_message_bundles(id) on delete restrict;
+
+alter table public.ops_registration_customer_message_previews
+  drop constraint ops_registration_customer_message_previews_message_kind_check,
+  drop constraint ops_registration_customer_message_previews_source_shape_check,
+  add constraint ops_registration_customer_message_previews_message_kind_check check (message_kind in (
+    'level_test_booking', 'visit_consultation_booking', 'appointment_reminder', 'waiting_notice',
+    'admission_application', 'observation_booking', 'observation_reminder',
+    'level_test_booking_bundle', 'visit_consultation_booking_bundle', 'observation_booking_bundle',
+    'level_test_reminder_bundle', 'visit_consultation_reminder_bundle', 'observation_reminder_bundle'
+  )),
+  add constraint ops_registration_customer_message_previews_source_shape_check check (
+    (message_kind in ('level_test_booking', 'visit_consultation_booking', 'appointment_reminder') and bundle_id is null and observation_id is null and appointment_id is not null and track_id is null)
+    or (message_kind = 'waiting_notice' and bundle_id is null and observation_id is null and track_id is not null and appointment_id is null)
+    or (message_kind = 'admission_application' and bundle_id is null and observation_id is null and track_id is null and appointment_id is null)
+    or (message_kind in ('observation_booking', 'observation_reminder') and bundle_id is null and observation_id is not null and appointment_id is not null and track_id is not null and source_revision is not null)
+    or (message_kind in ('level_test_booking_bundle', 'visit_consultation_booking_bundle', 'observation_booking_bundle', 'level_test_reminder_bundle', 'visit_consultation_reminder_bundle', 'observation_reminder_bundle') and bundle_id is not null and observation_id is null and appointment_id is null and track_id is null)
+  );
+
+alter table public.ops_registration_customer_messages
+  drop constraint ops_registration_customer_messages_message_kind_check,
+  drop constraint ops_registration_customer_messages_source_shape_check,
+  add constraint ops_registration_customer_messages_message_kind_check check (message_kind in (
+    'level_test_booking', 'visit_consultation_booking', 'appointment_reminder', 'waiting_notice',
+    'admission_application', 'observation_booking', 'observation_reminder',
+    'level_test_booking_bundle', 'visit_consultation_booking_bundle', 'observation_booking_bundle',
+    'level_test_reminder_bundle', 'visit_consultation_reminder_bundle', 'observation_reminder_bundle'
+  )),
+  add constraint ops_registration_customer_messages_source_shape_check check (
+    (message_kind in ('level_test_booking', 'visit_consultation_booking', 'appointment_reminder') and bundle_id is null and observation_id is null and appointment_id is not null and track_id is null)
+    or (message_kind = 'waiting_notice' and bundle_id is null and observation_id is null and track_id is not null and appointment_id is null)
+    or (message_kind = 'admission_application' and bundle_id is null and observation_id is null and track_id is null and appointment_id is null)
+    or (message_kind in ('observation_booking', 'observation_reminder') and bundle_id is null and observation_id is not null and appointment_id is not null and track_id is not null and source_revision is not null)
+    or (message_kind in ('level_test_booking_bundle', 'visit_consultation_booking_bundle', 'observation_booking_bundle', 'level_test_reminder_bundle', 'visit_consultation_reminder_bundle', 'observation_reminder_bundle') and bundle_id is not null and observation_id is null and appointment_id is null and track_id is null)
+  );
+
+create unique index ops_reg_customer_msg_booking_bundle_once_idx
+  on public.ops_registration_customer_messages(bundle_id, message_kind, source_fingerprint)
+  where message_kind in ('level_test_booking_bundle', 'visit_consultation_booking_bundle', 'observation_booking_bundle');
+
 commit;
