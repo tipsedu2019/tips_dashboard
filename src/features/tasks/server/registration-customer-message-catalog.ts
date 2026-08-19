@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto"
 
 import {
-  isRegistrationCustomerMessageKind,
-  type RegistrationCustomerMessageKind,
+  isRegistrationCustomerMessageSingleSourceKind,
+  type RegistrationCustomerMessageSingleSourceKind,
 } from "../registration-customer-message-contract.ts"
 
 export const REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION = 6 as const
@@ -17,7 +17,7 @@ export type RegistrationCustomerMessageTemplateEnvKey =
   | "SOLAPI_REGISTRATION_OBSERVATION_REMINDER_TEMPLATE_ID"
 
 export const REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS: Readonly<
-  Record<RegistrationCustomerMessageKind, RegistrationCustomerMessageTemplateEnvKey>
+  Record<RegistrationCustomerMessageSingleSourceKind, RegistrationCustomerMessageTemplateEnvKey>
 > = Object.freeze({
   level_test_booking: "SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID",
   visit_consultation_booking: "SOLAPI_REGISTRATION_VISIT_BOOKING_TEMPLATE_ID",
@@ -29,7 +29,7 @@ export const REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS: Readonly<
 })
 
 export const REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_REVISIONS: Readonly<
-  Record<RegistrationCustomerMessageKind, number>
+  Record<RegistrationCustomerMessageSingleSourceKind, number>
 > = Object.freeze({
   level_test_booking: 3,
   visit_consultation_booking: 3,
@@ -151,7 +151,7 @@ export type RegistrationCustomerMessageTemplateChecksums = Readonly<{
 }>
 
 export type RegistrationCustomerMessageCatalogEntry = RegistrationCustomerMessageTemplate & Readonly<{
-  kind: RegistrationCustomerMessageKind
+  kind: RegistrationCustomerMessageSingleSourceKind
   revision: number
   envKey: RegistrationCustomerMessageTemplateEnvKey
   send: RegistrationCustomerMessageSendDefinition
@@ -166,11 +166,11 @@ export type RegistrationCustomerMessageCatalog = Readonly<{
   pfId: string | null
   pfConfigured: boolean
   recipientHashPepperConfigured: boolean
-  templates: Readonly<Record<RegistrationCustomerMessageKind, RegistrationCustomerMessageCatalogEntry>>
+  templates: Readonly<Record<RegistrationCustomerMessageSingleSourceKind, RegistrationCustomerMessageCatalogEntry>>
 }>
 
 export type RegistrationCustomerMessageRendered = Readonly<{
-  kind: RegistrationCustomerMessageKind
+  kind: RegistrationCustomerMessageSingleSourceKind
   body: string
   variables: Readonly<Record<string, string>>
   buttons: ReadonlyArray<RegistrationCustomerMessageButton>
@@ -191,7 +191,7 @@ export type RegistrationCustomerMessageRendered = Readonly<{
 
 type JsonRecord = Record<string, unknown>
 type TemplateDefinition = RegistrationCustomerMessageTemplate & Readonly<{
-  kind: RegistrationCustomerMessageKind
+  kind: RegistrationCustomerMessageSingleSourceKind
 }>
 
 const SEOUL_TIME_ZONE = "Asia/Seoul"
@@ -253,7 +253,7 @@ const OBSERVATION_BUTTONS = Object.freeze([
 ] as const)
 
 const TEMPLATE_DEFINITIONS: Readonly<
-  Record<RegistrationCustomerMessageKind, TemplateDefinition>
+  Record<RegistrationCustomerMessageSingleSourceKind, TemplateDefinition>
 > = Object.freeze({
   level_test_booking: Object.freeze({
     kind: "level_test_booking",
@@ -822,7 +822,7 @@ function templateChecksums(template: RegistrationCustomerMessageTemplate) {
 }
 
 function catalogEntry(
-  kind: RegistrationCustomerMessageKind,
+  kind: RegistrationCustomerMessageSingleSourceKind,
   env: RegistrationCustomerMessageServerEnv,
 ): RegistrationCustomerMessageCatalogEntry {
   const definition = TEMPLATE_DEFINITIONS[kind]
@@ -843,7 +843,7 @@ export function createRegistrationCustomerMessageCatalog(
   env: RegistrationCustomerMessageServerEnv,
 ): RegistrationCustomerMessageCatalog {
   const templates: Readonly<
-    Record<RegistrationCustomerMessageKind, RegistrationCustomerMessageCatalogEntry>
+    Record<RegistrationCustomerMessageSingleSourceKind, RegistrationCustomerMessageCatalogEntry>
   > = Object.freeze({
     level_test_booking: catalogEntry("level_test_booking", env),
     visit_consultation_booking: catalogEntry("visit_consultation_booking", env),
@@ -872,7 +872,7 @@ function appointmentKindLabel(value: unknown) {
 }
 
 function appointmentVariables(
-  kind: RegistrationCustomerMessageKind,
+  kind: RegistrationCustomerMessageSingleSourceKind,
   facts: RegistrationCustomerMessageCanonicalFacts,
 ) {
   if (kind === "level_test_booking" && facts.appointmentKind !== "level_test") {
@@ -895,7 +895,7 @@ function appointmentVariables(
 }
 
 function renderVariables(
-  kind: RegistrationCustomerMessageKind,
+  kind: RegistrationCustomerMessageSingleSourceKind,
   facts: RegistrationCustomerMessageCanonicalFacts,
 ) {
   const definition = TEMPLATE_DEFINITIONS[kind]
@@ -1000,10 +1000,10 @@ function renderButtons(
 }
 
 export function renderRegistrationCustomerMessage(input: {
-  kind: RegistrationCustomerMessageKind
+  kind: RegistrationCustomerMessageSingleSourceKind
   facts: RegistrationCustomerMessageCanonicalFacts
 }): RegistrationCustomerMessageRendered {
-  if (!isRegistrationCustomerMessageKind(input.kind)) {
+  if (!isRegistrationCustomerMessageSingleSourceKind(input.kind)) {
     catalogError("registration_customer_message_kind_invalid")
   }
   const definition = TEMPLATE_DEFINITIONS[input.kind]

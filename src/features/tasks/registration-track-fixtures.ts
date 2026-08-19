@@ -54,11 +54,13 @@ import type { RegistrationSubjectCapability } from "./registration-subject-capab
 import type {
   RegistrationCustomerMessageClient,
   RegistrationCustomerMessageKind,
+  RegistrationCustomerMessageSingleSourceKind,
   RegistrationCustomerMessagePreviewResponse,
   RegistrationCustomerMessageReadiness,
   RegistrationCustomerMessageSendResult,
   RegistrationCustomerMessageTarget,
 } from "./registration-customer-message-contract"
+import { isRegistrationCustomerMessageSingleSourceKind } from "./registration-customer-message-contract.ts"
 import { ACADEMIC_SUBJECT_VALUES, sortAcademicSubjects } from "../../lib/academic-subject-registry.ts"
 
 const FIXTURE_NOW = "2026-07-13T09:00:00+09:00"
@@ -289,7 +291,7 @@ type FixtureCustomerMessageSource = Readonly<{
   buttons: RegistrationCustomerMessagePreviewResponse["buttons"]
 }>
 
-export const FIXTURE_CUSTOMER_MESSAGE_SOURCES: Record<RegistrationCustomerMessageKind, Record<string, FixtureCustomerMessageSource>> = {
+export const FIXTURE_CUSTOMER_MESSAGE_SOURCES: Record<RegistrationCustomerMessageSingleSourceKind, Record<string, FixtureCustomerMessageSource>> = {
   level_test_booking: {
     "fixture-appointment-dual-test": {
       studentName: "김다미", recipientLast4: "5678", sourceRevision: 1,
@@ -464,7 +466,9 @@ export function createRegistrationSubjectTrackFixtureCustomerMessageClient(
     async preview(target) {
       const observation = target.messageKind === "observation_booking"
         || target.messageKind === "observation_reminder"
-      const source = FIXTURE_CUSTOMER_MESSAGE_SOURCES[target.messageKind]?.[target.sourceId]
+      const source = (isRegistrationCustomerMessageSingleSourceKind(target.messageKind)
+        ? FIXTURE_CUSTOMER_MESSAGE_SOURCES[target.messageKind]?.[target.sourceId]
+        : undefined)
         || (observation ? options.resolveObservationSource?.(target.messageKind, target.sourceId) : null)
       if (!source) throw new Error("registration_customer_message_source_not_found")
       const blockers = dirtySources.has(target.sourceId)

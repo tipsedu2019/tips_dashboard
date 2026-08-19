@@ -1,4 +1,4 @@
-export const REGISTRATION_CUSTOMER_MESSAGE_KINDS = Object.freeze([
+export const REGISTRATION_CUSTOMER_MESSAGE_SINGLE_SOURCE_KINDS = Object.freeze([
   "level_test_booking",
   "visit_consultation_booking",
   "appointment_reminder",
@@ -8,8 +8,66 @@ export const REGISTRATION_CUSTOMER_MESSAGE_KINDS = Object.freeze([
   "observation_reminder",
 ] as const)
 
+export type RegistrationCustomerMessageSingleSourceKind =
+  (typeof REGISTRATION_CUSTOMER_MESSAGE_SINGLE_SOURCE_KINDS)[number]
+
+export const REGISTRATION_CUSTOMER_MESSAGE_BUNDLE_KINDS = Object.freeze([
+  "level_test_booking_bundle",
+  "visit_consultation_booking_bundle",
+  "observation_booking_bundle",
+  "level_test_reminder_bundle",
+  "visit_consultation_reminder_bundle",
+  "observation_reminder_bundle",
+] as const)
+
+export type RegistrationCustomerMessageBundleKind =
+  (typeof REGISTRATION_CUSTOMER_MESSAGE_BUNDLE_KINDS)[number]
+
+export const REGISTRATION_CUSTOMER_MESSAGE_BUNDLE_STATES = Object.freeze([
+  "scheduled",
+  "processing",
+  "sent",
+  "unknown",
+  "failed_hold",
+  "not_sent",
+  "canceled",
+] as const)
+
+export type RegistrationCustomerMessageBundleState =
+  (typeof REGISTRATION_CUSTOMER_MESSAGE_BUNDLE_STATES)[number]
+
+export const REGISTRATION_CUSTOMER_MESSAGE_KINDS = Object.freeze([
+  ...REGISTRATION_CUSTOMER_MESSAGE_SINGLE_SOURCE_KINDS,
+  ...REGISTRATION_CUSTOMER_MESSAGE_BUNDLE_KINDS,
+] as const)
+
 export type RegistrationCustomerMessageKind =
   (typeof REGISTRATION_CUSTOMER_MESSAGE_KINDS)[number]
+
+export type RegistrationCustomerMessageBundleReservationKind =
+  | "level_test"
+  | "visit_consultation"
+  | "observation"
+
+export type RegistrationCustomerMessageBundleDeliveryKind = "booking" | "reminder"
+
+export type RegistrationCustomerMessageBundleItem = Readonly<{
+  subjectLabel: "영어" | "수학" | "과학"
+  scheduleLabel: string
+  placeLabel: string
+  className: string | null
+  teacherLabel: string | null
+}>
+
+export type RegistrationCustomerMessageBundleSummary = Readonly<{
+  reservationKind: RegistrationCustomerMessageBundleReservationKind
+  serviceDate: string
+  state: RegistrationCustomerMessageBundleState
+  scheduledFor: string | null
+  sentAt: string | null
+  updatedAt: string
+  subjects: ReadonlyArray<"영어" | "수학" | "과학">
+}>
 
 export const REGISTRATION_CUSTOMER_MESSAGE_STATUSES = Object.freeze([
   "pending",
@@ -105,6 +163,7 @@ export type RegistrationCustomerMessagePreviewResponse = Readonly<{
     waitingKindLabel?: string
     waitingDetailLabel?: string
     admissionPlans?: ReadonlyArray<RegistrationCustomerMessageAdmissionPreviewPlan>
+    reservations?: ReadonlyArray<RegistrationCustomerMessageBundleItem>
   }>
   body: string
   buttons: ReadonlyArray<Readonly<{ name: string; type: "WL"; host: string }>>
@@ -293,6 +352,7 @@ const REGISTRATION_CUSTOMER_MESSAGE_PUBLIC_RESPONSE_KEYS = new Set([
   "previewId",
   "readiness",
   "recipientLast4",
+  "reservations",
   "reminderCutoffAt",
   "reminderMode",
   "reminderReceipt",
@@ -394,6 +454,13 @@ export function isRegistrationCustomerMessageKind(
 ): value is RegistrationCustomerMessageKind {
   return typeof value === "string"
     && (REGISTRATION_CUSTOMER_MESSAGE_KINDS as readonly string[]).includes(value)
+}
+
+export function isRegistrationCustomerMessageSingleSourceKind(
+  value: unknown,
+): value is RegistrationCustomerMessageSingleSourceKind {
+  return typeof value === "string"
+    && (REGISTRATION_CUSTOMER_MESSAGE_SINGLE_SOURCE_KINDS as readonly string[]).includes(value)
 }
 
 function isRegistrationCustomerMessageActivationMode(

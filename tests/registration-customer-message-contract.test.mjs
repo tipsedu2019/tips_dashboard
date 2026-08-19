@@ -10,8 +10,8 @@ const MESSAGE_ID = "96000000-0000-4000-8000-000000000003"
 const REQUEST_KEY = "96000000-0000-4000-8000-000000000004"
 const TASK_ID = "96000000-0000-4000-8000-000000000005"
 
-test("browser-safe runtime unions expose exactly the approved customer-message values", () => {
-  assert.deepEqual(contract.REGISTRATION_CUSTOMER_MESSAGE_KINDS, [
+test("browser-safe runtime unions preserve the seven legacy kinds alongside bundle kinds", () => {
+  assert.deepEqual(contract.REGISTRATION_CUSTOMER_MESSAGE_SINGLE_SOURCE_KINDS, [
     "level_test_booking",
     "visit_consultation_booking",
     "appointment_reminder",
@@ -19,6 +19,10 @@ test("browser-safe runtime unions expose exactly the approved customer-message v
     "admission_application",
     "observation_booking",
     "observation_reminder",
+  ])
+  assert.deepEqual(contract.REGISTRATION_CUSTOMER_MESSAGE_KINDS, [
+    ...contract.REGISTRATION_CUSTOMER_MESSAGE_SINGLE_SOURCE_KINDS,
+    ...contract.REGISTRATION_CUSTOMER_MESSAGE_BUNDLE_KINDS,
   ])
   assert.deepEqual(contract.REGISTRATION_CUSTOMER_MESSAGE_STATUSES, [
     "pending",

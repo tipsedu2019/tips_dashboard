@@ -1,7 +1,7 @@
 import { createHash, createHmac } from "node:crypto"
 
 import type {
-  RegistrationCustomerMessageKind,
+  RegistrationCustomerMessageSingleSourceKind,
 } from "../registration-customer-message-contract.ts"
 import {
   OBSERVATION_LOCATION_TRANSPORT_VALUES,
@@ -19,7 +19,7 @@ type JsonRecord = Record<string, unknown>
 
 export type RegistrationCustomerMessageSourceRequest = Readonly<{
   actorProfileId: string
-  messageKind: RegistrationCustomerMessageKind
+  messageKind: RegistrationCustomerMessageSingleSourceKind
   sourceId: string
 }>
 
@@ -42,7 +42,7 @@ export type RegistrationObservationCustomerMessagePublicFacts = Readonly<{
 }>
 
 export type RegistrationCustomerMessagePublicSource = Readonly<{
-  messageKind: RegistrationCustomerMessageKind
+  messageKind: RegistrationCustomerMessageSingleSourceKind
   sourceId: string
   taskId: string
   sourceRevision: number
@@ -59,7 +59,7 @@ export type RegistrationCustomerMessagePreviewContract = Readonly<{
   parentPhoneDigits: string
   sourceFingerprint: string
   recipientHash: string
-  templateKey: RegistrationCustomerMessageKind
+  templateKey: RegistrationCustomerMessageSingleSourceKind
   templateRevision: number
   templateChecksum: string
   renderedVariablesChecksum: string
@@ -396,7 +396,7 @@ function appointmentParticipants(
 }
 
 function appointmentFacts(
-  kind: RegistrationCustomerMessageKind,
+  kind: RegistrationCustomerMessageSingleSourceKind,
   raw: JsonRecord,
   inputSourceId: string,
   now: Date,
@@ -836,7 +836,7 @@ function normalizedObservationSource(
 }
 
 function normalizedSource(
-  kind: RegistrationCustomerMessageKind,
+  kind: RegistrationCustomerMessageSingleSourceKind,
   sourceId: string,
   raw: JsonRecord,
   now: Date,

@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
-import { REGISTRATION_CUSTOMER_MESSAGE_KINDS } from "../src/features/tasks/registration-customer-message-contract.ts"
+import { REGISTRATION_CUSTOMER_MESSAGE_SINGLE_SOURCE_KINDS } from "../src/features/tasks/registration-customer-message-contract.ts"
 import {
   OBSERVATION_LOCATION_URLS,
   REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION,
@@ -84,7 +84,7 @@ const ENV = Object.freeze({
 
 test("catalog maps all seven kinds and preserves every legacy checksum receipt", () => {
   assert.equal(REGISTRATION_CUSTOMER_MESSAGE_CATALOG_REVISION, 6)
-  assert.deepEqual(Object.keys(REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS), REGISTRATION_CUSTOMER_MESSAGE_KINDS)
+  assert.deepEqual(Object.keys(REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS), REGISTRATION_CUSTOMER_MESSAGE_SINGLE_SOURCE_KINDS)
   assert.deepEqual(REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_ENV_KEYS, {
     level_test_booking: "SOLAPI_REGISTRATION_LEVEL_TEST_BOOKING_TEMPLATE_ID",
     visit_consultation_booking: "SOLAPI_REGISTRATION_VISIT_BOOKING_TEMPLATE_ID",
@@ -105,8 +105,9 @@ test("catalog maps all seven kinds and preserves every legacy checksum receipt",
   })
 
   const catalog = createRegistrationCustomerMessageCatalog(ENV)
-  assert.deepEqual(Object.keys(catalog.templates), REGISTRATION_CUSTOMER_MESSAGE_KINDS)
+  assert.deepEqual(Object.keys(catalog.templates), REGISTRATION_CUSTOMER_MESSAGE_SINGLE_SOURCE_KINDS)
   for (const [kind, checksums] of Object.entries(frozenChecksums)) {
+    if (kind === "bundles") continue
     assert.deepEqual(catalog.templates[kind].checksums, checksums, `${kind} checksum drift`)
     assert.equal("transportVariables" in catalog.templates[kind], false)
   }

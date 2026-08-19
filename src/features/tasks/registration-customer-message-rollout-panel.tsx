@@ -15,6 +15,7 @@ import { useAuth } from "@/providers/auth-provider"
 import type {
   RegistrationCustomerMessageAdminClient,
   RegistrationCustomerMessageKind,
+  RegistrationCustomerMessageSingleSourceKind,
   RegistrationObservationSolapiReadiness,
 } from "./registration-customer-message-contract"
 import { createRegistrationCustomerMessageAdminClient } from "./registration-customer-message-service"
@@ -22,7 +23,7 @@ import { runRegistrationCustomerMessageRolloutAction } from "./registration-cust
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-export const MESSAGE_KIND_LABELS: Readonly<Record<RegistrationCustomerMessageKind, string>> = Object.freeze({
+export const MESSAGE_KIND_LABELS: Readonly<Record<RegistrationCustomerMessageSingleSourceKind, string>> = Object.freeze({
   level_test_booking: "레벨테스트 예약 안내",
   visit_consultation_booking: "방문상담 예약 안내",
   appointment_reminder: "예약 리마인드",
@@ -31,7 +32,7 @@ export const MESSAGE_KIND_LABELS: Readonly<Record<RegistrationCustomerMessageKin
   observation_booking: "청강 예약 안내",
   observation_reminder: "청강 리마인드",
 })
-const ROLLOUT_PANEL_MESSAGE_KINDS: ReadonlyArray<RegistrationCustomerMessageKind> = Object.freeze([
+const ROLLOUT_PANEL_MESSAGE_KINDS: ReadonlyArray<RegistrationCustomerMessageSingleSourceKind> = Object.freeze([
   "level_test_booking",
   "visit_consultation_booking",
   "appointment_reminder",

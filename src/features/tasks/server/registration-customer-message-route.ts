@@ -6,6 +6,7 @@ import {
   REGISTRATION_CUSTOMER_MESSAGE_READINESS_CODES,
   assertRegistrationCustomerMessagePublicPayload,
   isRegistrationCustomerMessageKind,
+  isRegistrationCustomerMessageSingleSourceKind,
   parseRegistrationCustomerMessageAdminAction,
   parseRegistrationCustomerMessageCheckInput,
   parseRegistrationCustomerMessageSendInput,
@@ -925,6 +926,9 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
             observationSolapiReadiness(await dependencies.inspectObservationReadiness({ context })),
           ))
         }
+        if ("messageKind" in action && !isRegistrationCustomerMessageSingleSourceKind(action.messageKind)) {
+          httpError(409, "registration_customer_message_bundle_runtime_inactive")
+        }
         if (action.action === "preflight_template") {
           const preflight = await dependencies.preflightTemplate({
             messageKind: action.messageKind,
@@ -1216,6 +1220,10 @@ export function createProductionRegistrationCustomerMessageRouteHandlers(
       )
     },
     async resolveSource(input) {
+      if (!isRegistrationCustomerMessageSingleSourceKind(input.messageKind)) {
+        httpError(409, "registration_customer_message_bundle_runtime_inactive")
+      }
+      const messageKind = input.messageKind
       const resolver = createRegistrationCustomerMessageSourceResolver({
         catalog,
         recipientHashPepper: pepper,
@@ -1227,9 +1235,12 @@ export function createProductionRegistrationCustomerMessageRouteHandlers(
           })
         },
       })
-      return resolver.resolve(input)
+      return resolver.resolve({ ...input, messageKind })
     },
     async resolveTaskId(input) {
+      if (!isRegistrationCustomerMessageSingleSourceKind(input.messageKind)) {
+        httpError(409, "registration_customer_message_bundle_runtime_inactive")
+      }
       if (input.messageKind === "admission_application") return input.sourceId
       const table = input.messageKind === "waiting_notice"
         ? "ops_registration_subject_tracks"
@@ -1343,6 +1354,9 @@ export function createProductionRegistrationCustomerMessageRouteHandlers(
       })
     },
     preflightTemplate(input) {
+      if (!isRegistrationCustomerMessageSingleSourceKind(input.messageKind)) {
+        httpError(409, "registration_customer_message_bundle_runtime_inactive")
+      }
       return provider.preflight({ entry: catalog.templates[input.messageKind] })
     },
     recordTemplateReceipt(input) {
@@ -1386,6 +1400,9 @@ export function createProductionRegistrationCustomerMessageRouteHandlers(
       }
       if (action.action !== "set_activation") {
         httpError(400, "registration_customer_message_admin_input_invalid")
+      }
+      if (!isRegistrationCustomerMessageSingleSourceKind(action.messageKind)) {
+        httpError(409, "registration_customer_message_bundle_runtime_inactive")
       }
       const entry = catalog.templates[action.messageKind]
       if (action.mode !== "off" && (!entry.templateId || !catalog.pfId)) {

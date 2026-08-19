@@ -3,5 +3,13 @@
   "visit_consultation_booking": {"template":"c756982402dfef3584bbe6a9073fcd194d932d6f4341c4d22b62ee8e5d2a2d4a","content":"9b563dc0cea1785a919593607c53e375e68d73d08a44cecb74e9fca4d1cdc099","variables":"9a93b1d40c4b8607684e339d5179262c99233b638dd8d78ebbd725073ea1b123","buttons":"4132db4a607e8fb47399736430fe368e88d4b8d62dad33aa222d254815e0ebf8"},
   "appointment_reminder": {"template":"3713cd207605f5c8357639b1cd3074aa7fc67216582df206c051f952ac015570","content":"f6f7e0b738a1cb9d785b740554bb1da6a5dacba32fb02eae59cf3eccb0cbbabe","variables":"d1dd14e70cce5d4e4025f3a3db31c992837fb4a889862080febe178396dd4886","buttons":"4132db4a607e8fb47399736430fe368e88d4b8d62dad33aa222d254815e0ebf8"},
   "waiting_notice": {"template":"a61668ff8904430c68c23cbe3ce0eaf52cfdeb56f822ef987061ebca1d93c8b5","content":"38f2fc84833d3a6865e4bb0915e1bbaf39308db55477443dcd09d4714fb8c477","variables":"f5f806d900cb27fad21389d08cacfde7dd19e4c62bd35b31acef3eac6b151c71","buttons":"30ec5a9057ec5d1a9af267e572a8163ba4dddc02b18eca7c7c7d5c553e2210a0"},
-  "admission_application": {"template":"86001198056534035f96290060112abb5ae92c8ac9e4d95d9f145e69e8e9daa3","content":"83eeb5c4c33ad9e246888fa60ce13722e20d0f14884b4491756f606affaf9a08","variables":"d61e2409097e24b9629fd0593f24c749c9eec0ff5933b34152140b1ff60b99e7","buttons":"678e07dbf3595fd3da9aeacf73dbbf315d12d07b39abc490f9ced230e507156b"}
+  "admission_application": {"template":"86001198056534035f96290060112abb5ae92c8ac9e4d95d9f145e69e8e9daa3","content":"83eeb5c4c33ad9e246888fa60ce13722e20d0f14884b4491756f606affaf9a08","variables":"d61e2409097e24b9629fd0593f24c749c9eec0ff5933b34152140b1ff60b99e7","buttons":"678e07dbf3595fd3da9aeacf73dbbf315d12d07b39abc490f9ced230e507156b"},
+  "bundles": {
+    "level_test_booking_bundle": "b48aabdb8c7c302e9f070efc170b16b9a8b4388b14d83c426576c46e3ad17114",
+    "visit_consultation_booking_bundle": "3db534d9b5a4810ec45dc75fc8e1dd49ee15aae8d23fb48f5cdbc6a18d892920",
+    "observation_booking_bundle": "bdd8400dbbcd294156b787163c878a805c5bc0ce504a691569afb50da5bcb691",
+    "level_test_reminder_bundle": "b13a12854bd4d32219f1f0a7268e40819dbae0ca8b58c1f12569152cad754a79",
+    "visit_consultation_reminder_bundle": "1781d06940a7ffa8e2fb8b58f40b494527cf952325688b5a861b0ef94cc2225d",
+    "observation_reminder_bundle": "d362ffbef5157797ee0506237ff6686a60acacfc765209dee6bbdd7bd97ea8d7"
+  }
 }
