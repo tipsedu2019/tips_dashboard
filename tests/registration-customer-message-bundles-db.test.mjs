@@ -46,3 +46,10 @@ test("bundle migration preserves legacy rows and keeps new storage private", asy
   assert.doesNotMatch(sql, /delete from public\.ops_registration_customer_message_previews/iu)
   assert.doesNotMatch(sql, /update public\.ops_registration_customer_messages[\s\S]+set[\s\S]+message_kind/iu)
 })
+
+test("bundle pgTAP contract is present for the isolated database gate", async () => {
+  const sql = await readFile(new URL("../supabase/tests/registration_customer_message_bundles_test.sql", import.meta.url), "utf8")
+  assert.match(sql, /select plan\(10\)/iu)
+  assert.match(sql, /active_version from dashboard_private\.registration_customer_message_bundle_runtime/iu)
+  assert.match(sql, /registration_customer_message_bundle_service_role_required/iu)
+})
