@@ -1004,11 +1004,16 @@ export function RegistrationWaitingDetailsEditor({
   const customerMessageBlocked = waitingDirty || saving || refreshPending || !savedWaitingComplete
   useOwnedDirtyState(waitingDirty, onDirtyChange)
 
-  async function saveWaitingDetails() {
+  async function saveWaitingDetails(next = {
+    waitingKind,
+    classId,
+    retakeDecision: savedRetakeDecision,
+  }) {
     if (saving || refreshPending || !permissions.canManage) return
-    if (!waitingKind || (waitingKind === "current_class" && !classId)) {
+    const clearing = !next.waitingKind && !next.classId && !next.retakeDecision
+    if (!clearing && (!next.waitingKind || (next.waitingKind === "current_class" && !next.classId))) {
       setValidationError("대기 종류와 필요한 수업을 선택하세요.")
-      focusFirstInvalid(sectionRef.current, waitingKind ? `[aria-label="${track.subject} 수업 선택"]` : `[aria-label="${track.subject} 대기 종류"]`)
+      focusFirstInvalid(sectionRef.current, next.waitingKind ? `[aria-label="${track.subject} 수업 선택"]` : `[aria-label="${track.subject} 대기 종류"]`)
       return
     }
     const kind = "registration-waiting-details"
@@ -1017,9 +1022,9 @@ export function RegistrationWaitingDetailsEditor({
     try {
       await saveRegistrationWaitingDetails({
         trackId: track.id,
-        waitingKind,
-        classId: waitingKind === "current_class" ? classId : "",
-        retakeDecision: savedRetakeDecision,
+        waitingKind: next.waitingKind,
+        classId: next.waitingKind === "current_class" ? next.classId : "",
+        retakeDecision: next.retakeDecision,
         requestKey,
       })
       submissionKeys.clear(kind, track.id)
@@ -1036,6 +1041,13 @@ export function RegistrationWaitingDetailsEditor({
     } finally {
       setSaving(false)
     }
+  }
+
+  async function clearWaitingDetails() {
+    setWaitingKind("")
+    setClassId("")
+    setValidationError("")
+    await saveWaitingDetails({ waitingKind: "", classId: "", retakeDecision: "" })
   }
 
   async function retryRefresh() {
@@ -1079,6 +1091,16 @@ export function RegistrationWaitingDetailsEditor({
               aria-label={`${track.subject} 대기 정보 저장`}
               onClick={() => void saveWaitingDetails()}
             />
+            {savedWaitingPersisted || waitingDirty ? (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={saving || refreshPending}
+                onClick={() => void clearWaitingDetails()}
+              >
+                입력 지우기
+              </Button>
+            ) : null}
             <Button
               type="button"
               className="min-h-11 min-w-11"

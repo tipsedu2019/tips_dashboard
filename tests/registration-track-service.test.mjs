@@ -3770,11 +3770,11 @@ test("unified inquiry save performs one sorted atomic RPC request", async () => 
   assert.deepEqual(result.tracks.map((track) => track.subject), ["영어", "수학"])
 })
 
-test("waiting details use their dedicated data-only RPC", async () => {
+test("waiting details use their dedicated nullable data-only RPC", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient({
     rpcHandler(name, args) {
-      assert.equal(name, "save_registration_waiting_details_v1");
+      assert.equal(name, "save_registration_waiting_details_v2");
       assert.deepEqual({ ...args }, {
         p_track_id: "track-1",
         p_waiting_kind: "current_class",
@@ -3800,6 +3800,39 @@ test("waiting details use their dedicated data-only RPC", async () => {
     waitingKind: "current_class",
     classId: "10000000-0000-4000-8000-000000000010",
     retakeDecision: "required",
+  });
+});
+
+test("waiting details persist an explicit clear as nullable RPC input", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    rpcHandler(name, args) {
+      assert.equal(name, "save_registration_waiting_details_v2");
+      assert.deepEqual({ ...args }, {
+        p_track_id: "track-1",
+        p_waiting_kind: null,
+        p_class_id: null,
+        p_retake_decision: null,
+        p_request_key: "waiting-clear-request",
+      });
+      return { data: { trackId: "track-1", waitingKind: null, classId: null, retakeDecision: null }, error: null };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const result = await service.saveRegistrationWaitingDetails({
+    trackId: "track-1",
+    waitingKind: "",
+    classId: "",
+    retakeDecision: "",
+    requestKey: "waiting-clear-request",
+  });
+
+  assert.deepEqual({ ...result }, {
+    trackId: "track-1",
+    waitingKind: "",
+    classId: "",
+    retakeDecision: "",
   });
 });
 

@@ -498,7 +498,7 @@ export type RegistrationWaitingDetailsSaveResponse = {
   trackId: string
   waitingKind: RegistrationWaitingKind
   classId: string
-  retakeDecision: "required" | "not_required"
+  retakeDecision: "" | "required" | "not_required"
 }
 
 export type RegistrationWorkflowStatusMutationResponse = {
@@ -3245,21 +3245,21 @@ export function createRegistrationTrackService(
     trackId: string
     waitingKind: RegistrationWaitingKind
     classId: string
-    retakeDecision: "required" | "not_required"
+    retakeDecision: "" | "required" | "not_required"
     requestKey: string
   }): Promise<RegistrationWaitingDetailsSaveResponse> {
-    const result = await callRpc<Row>("save_registration_waiting_details_v1", {
+    const result = await callRpc<Row>("save_registration_waiting_details_v2", {
       p_track_id: input.trackId,
-      p_waiting_kind: input.waitingKind,
+      p_waiting_kind: input.waitingKind || null,
       p_class_id: normalizeUuid(input.classId),
-      p_retake_decision: input.retakeDecision,
+      p_retake_decision: input.retakeDecision || null,
       p_request_key: requireRequestKey(input.requestKey),
     })
     return {
       trackId: text(value(result, "track_id", "trackId")),
       waitingKind: waitingKind(value(result, "waiting_kind", "waitingKind")),
       classId: nullableText(value(result, "class_id", "classId")) || "",
-      retakeDecision: retakeDecision(value(result, "retake_decision", "retakeDecision")) || "not_required",
+      retakeDecision: retakeDecision(value(result, "retake_decision", "retakeDecision")),
     }
   }
 

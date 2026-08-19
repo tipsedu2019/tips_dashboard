@@ -108,6 +108,15 @@ test("status-independent placement migration stores waiting details without a pi
   assert.doesNotMatch(sql, /ops_registration_enrollments[\s\S]*?insert into/)
 })
 
+test("notion-style waiting detail saves allow a fully empty persisted state", async () => {
+  const sql = await readMigration("registration_notion_style_editing")
+  assert.match(sql, /create or replace function public\.save_registration_waiting_details_v2\(/i)
+  assert.match(sql, /v_waiting_kind is null[\s\S]*v_class_id is null[\s\S]*v_retake_decision is null/i)
+  assert.match(sql, /waiting_detail_kind = v_waiting_kind[\s\S]*waiting_detail_class_id = v_class_id[\s\S]*waiting_detail_retake_decision = v_retake_decision/i)
+  assert.match(sql, /revoke execute on function public\.save_registration_waiting_details_v2[^;]+ from public, anon;/i)
+  assert.match(sql, /grant execute on function public\.save_registration_waiting_details_v2[^;]+ to authenticated;/i)
+})
+
 test("status-independent enrollment details stay separate from roster enrollment rows", async () => {
   const sql = await readMigration("registration_status_independent_enrollment_details")
   assert.match(sql, /add column if not exists enrollment_detail_rows jsonb/)
