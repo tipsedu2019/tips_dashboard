@@ -218,33 +218,21 @@ test("an invalidated older refresh cannot replace its newer generation", async (
   assert.deepEqual(await cache.load(), livePayload(2));
 });
 
-test("a failed warm full revalidation keeps the prior successful payload", async () => {
-  let now = 0;
+test("the full public API bypasses Next Data Cache payload storage", async () => {
   let calls = 0;
-  const harness = createNextDataCacheHarness({ now: () => now });
+  const harness = createNextDataCacheHarness();
   const cache = publicClassesCache.createPublicClassesFullCache({
     cache: harness.factory,
     loadFull: async () => {
       calls += 1;
-      if (calls === 1) return fullPayload(1);
-      throw new Error("upstream unavailable");
+      return fullPayload(calls);
     },
   });
 
   assert.deepEqual(await cache.load(), fullPayload(1));
-  now += 600_001;
-  assert.deepEqual(await cache.load(), fullPayload(1));
-  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(await cache.load(), fullPayload(2));
   assert.equal(calls, 2);
-  assert.deepEqual(harness.calls, [
-    {
-      keys: ["public-classes-full-v1"],
-      options: {
-        revalidate: 600,
-        tags: ["public-classes-full-v1"],
-      },
-    },
-  ]);
+  assert.deepEqual(harness.calls, []);
 });
 
 test("a cold full failure returns a valid static snapshot without caching a fallback", async () => {

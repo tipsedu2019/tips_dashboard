@@ -119,39 +119,25 @@ export async function loadSuccessfulPublicClassesFull(...sourceArguments) {
   return normalized;
 }
 
-export const loadCachedSuccessfulPublicClassesFull = unstable_cache(
-  loadSuccessfulPublicClassesFull,
-  [PUBLIC_CLASSES_FULL_CACHE_TAG],
-  {
-    revalidate: PUBLIC_CLASSES_FULL_REVALIDATE_SECONDS,
-    tags: [PUBLIC_CLASSES_FULL_CACHE_TAG],
-  },
-);
+// The full compatibility response can exceed Next Data Cache's 2 MB item
+// limit. Its route sends a 10-minute CDN cache header instead, while the
+// smaller summary payload continues to use the tagged Next Data Cache above.
+export async function loadCachedSuccessfulPublicClassesFull(...sourceArguments) {
+  return loadSuccessfulPublicClassesFull(...sourceArguments);
+}
 
 export function createPublicClassesFullCache({
   loadFull = loadSuccessfulPublicClassesFull,
   readSnapshot = readPublicClassesFullSnapshot,
-  cache = unstable_cache,
   now = () => Date.now(),
 } = {}) {
-  const loadCachedFull = cache(
-    async (...sourceArguments) => {
-      const payload = await loadFull(...sourceArguments);
-      const normalized = normalizePublicClassesFullPayload(payload);
-      if (!normalized) throw fullUnavailable();
-      return normalized;
-    },
-    [PUBLIC_CLASSES_FULL_CACHE_TAG],
-    {
-      revalidate: PUBLIC_CLASSES_FULL_REVALIDATE_SECONDS,
-      tags: [PUBLIC_CLASSES_FULL_CACHE_TAG],
-    },
-  );
-
   return {
     async load(...sourceArguments) {
       try {
-        return await loadCachedFull(...sourceArguments);
+        const payload = await loadFull(...sourceArguments);
+        const normalized = normalizePublicClassesFullPayload(payload);
+        if (!normalized) throw fullUnavailable();
+        return normalized;
       } catch {
         const rawSnapshot = await readSnapshot();
         const snapshot = normalizePublicClassesFullPayload(rawSnapshot);

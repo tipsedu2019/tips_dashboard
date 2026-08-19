@@ -85,6 +85,7 @@ import {
   loadOpsRegistrationClassDetail,
   loadOpsTaskWorkspaceData,
   loadOpsTaskWorkspaceOptionData,
+  startOpsTaskPageStatsSupplementLoad,
   startOpsRegistrationTaskPageSupplementLoad,
   reportWordRetestAbsent,
   reportWordRetestResult,
@@ -8828,12 +8829,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           cursor: null,
           signal: loadAbortController?.signal,
         }
-    const supplements = taskPageFilters.taskType === "registration"
-      ? startOpsRegistrationTaskPageSupplementLoad({
-          filters: taskPageFilters,
-          signal: loadAbortController?.signal,
-        })
-      : null
     const cachedData = force
       ? null
       : getCachedOpsTaskWorkspaceData(loadOptions) || getPersistedOpsTaskWorkspaceData(loadOptions)
@@ -8860,18 +8855,32 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setTaskPageCursor(nextData.page?.nextCursor || null)
     setTaskPageHasMore(Boolean(nextData.page?.hasMore))
     setLoading(false)
-    if (supplements) {
-      void supplements.stats.then((stats) => {
-        if (
-          !stats
-          || latestWorkspaceViewerIdRef.current !== currentUserId
-          || workspaceLoadGenerationRef.current !== loadGeneration
-        ) return
-        setData((current) => current
-          ? mergeOpsTaskPageSupplement(current, { stats })
-          : current)
-      })
-      void supplements.registrationRuntime.then((registrationRuntime) => {
+    const registrationSupplements = taskPageFilters.taskType === "registration"
+      ? startOpsRegistrationTaskPageSupplementLoad({
+          filters: taskPageFilters,
+          viewerId: currentUserId,
+          signal: loadAbortController?.signal,
+        })
+      : null
+    const statsSupplement = registrationSupplements
+      ? registrationSupplements.stats
+      : startOpsTaskPageStatsSupplementLoad({
+          filters: taskPageFilters,
+          viewerId: currentUserId,
+          signal: loadAbortController?.signal,
+        })
+    void statsSupplement.then((stats) => {
+      if (
+        !stats
+        || latestWorkspaceViewerIdRef.current !== currentUserId
+        || workspaceLoadGenerationRef.current !== loadGeneration
+      ) return
+      setData((current) => current
+        ? mergeOpsTaskPageSupplement(current, { stats })
+        : current)
+    })
+    if (registrationSupplements) {
+      void registrationSupplements.registrationRuntime.then((registrationRuntime) => {
         if (
           !registrationRuntime
           || latestWorkspaceViewerIdRef.current !== currentUserId

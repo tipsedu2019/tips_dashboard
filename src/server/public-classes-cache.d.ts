@@ -48,18 +48,13 @@ export function loadSuccessfulPublicClassesFull(
   options?: Record<string, unknown>,
 ): Promise<PublicClassesFullPayload>;
 
-export const loadCachedSuccessfulPublicClassesFull: (
+export function loadCachedSuccessfulPublicClassesFull(
   options?: Record<string, unknown>,
-) => Promise<PublicClassesFullPayload>;
+): Promise<PublicClassesFullPayload>;
 
 export function createPublicClassesFullCache(options?: {
   loadFull?: (...sourceArguments: Array<unknown>) => Promise<unknown>;
   readSnapshot?: () => Promise<unknown>;
-  cache?: (
-    loader: (...sourceArguments: Array<unknown>) => Promise<PublicClassesFullPayload>,
-    keys: string[],
-    options: { revalidate: number; tags: string[] },
-  ) => (...sourceArguments: Array<unknown>) => Promise<PublicClassesFullPayload>;
   now?: () => number;
 }): {
   load(...sourceArguments: Array<unknown>): Promise<PublicClassesFullPayload | {

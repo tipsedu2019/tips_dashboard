@@ -45,6 +45,7 @@ import {
 } from "./registration-runtime-probe"
 import { loadRegistrationSubjectTrackFixtureClassDetails } from "./registration-track-fixture-runtime"
 import { startOpsTaskPageSupplementLoad } from "./ops-task-page-supplement"
+import { createOpsTaskPageStatsCache } from "./ops-task-page-stats-cache"
 
 export type OpsTaskType =
   | "registration"
@@ -485,6 +486,7 @@ const emptyOpsTaskWorkspaceOptionData: OpsTaskWorkspaceOptionData = {
 }
 
 const OPS_TASK_WORKSPACE_CACHE_TTL_MS = 15_000
+const OPS_TASK_PAGE_STATS_CACHE_TTL_MS = 60_000
 const OPS_REGISTRATION_SESSION_CACHE_TTL_MS = 60_000
 const OPS_REGISTRATION_SESSION_CACHE_PREFIX = "tips:registration-workspace:"
 const OPS_REGISTRATION_CLASS_COLUMN_CANDIDATES = [
@@ -532,6 +534,9 @@ type OpsTaskWorkspaceOptionLoadOptions = {
   viewerId?: string
 }
 const opsTaskWorkspaceDataCache = new Map<string, { data: OpsTaskWorkspaceData; expiresAt: number }>()
+const opsTaskPageStatsCache = createOpsTaskPageStatsCache<OpsTaskPageStats | undefined>({
+  ttlMs: OPS_TASK_PAGE_STATS_CACHE_TTL_MS,
+})
 const opsTaskWorkspaceDataInFlight = new Map<string, Promise<OpsTaskWorkspaceData>>()
 const opsTaskWorkspaceOptionDataCache = new Map<string, { data: OpsTaskWorkspaceOptionData; expiresAt: number }>()
 const opsTaskWorkspaceOptionDataInFlight = new Map<string, Promise<OpsTaskWorkspaceOptionData>>()
@@ -631,6 +636,7 @@ function persistOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOptions, data:
 
 export function clearOpsTaskWorkspaceDataCache() {
   opsTaskWorkspaceDataCache.clear()
+  opsTaskPageStatsCache.clear()
   opsTaskWorkspaceDataInFlight.clear()
   opsTaskWorkspaceOptionDataCache.clear()
   opsTaskWorkspaceOptionDataInFlight.clear()
@@ -1745,11 +1751,6 @@ export async function loadOpsTaskWorkspaceOptionData(
   }
 }
 
-function opsTaskRequestSignal(signal: AbortSignal | undefined, timeoutMs: number) {
-  const timeoutSignal = AbortSignal.timeout(timeoutMs)
-  return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal
-}
-
 function mapOpsTaskPageStatsResult(statsResult: { data?: unknown; error?: unknown } | null): OpsTaskPageStats | undefined {
   const statsData = statsResult && !statsResult.error
     ? (Array.isArray(statsResult.data) ? statsResult.data[0] : statsResult.data) as Row | null
@@ -1784,25 +1785,41 @@ function mapOpsTaskPageStatsResult(statsResult: { data?: unknown; error?: unknow
 
 async function loadOpsTaskPageStats(
   filters: OpsTaskPageFilters,
+  viewerId: string,
   signal?: AbortSignal,
 ): Promise<OpsTaskPageStats | undefined> {
-  if (!supabase) return undefined
-  const statsResult = await supabase
-    .rpc("get_ops_task_list_stats_v1", {
-      p_type: filters.taskType,
-      p_filters: filters,
-    })
-    .abortSignal(opsTaskRequestSignal(signal, 8_000))
-    .retry(false)
-  return mapOpsTaskPageStatsResult(statsResult)
+  const client = supabase
+  if (!client) return undefined
+  const key = `${viewerId}:${JSON.stringify(filters)}`
+  return opsTaskPageStatsCache.load(key, async () => {
+    const statsResult = await client
+      .rpc("get_ops_task_list_stats_v1", {
+        p_type: filters.taskType,
+        p_filters: filters,
+      })
+      .abortSignal(AbortSignal.timeout(8_000))
+      .retry(false)
+    return mapOpsTaskPageStatsResult(statsResult)
+  })
+}
+
+export function startOpsTaskPageStatsSupplementLoad(options: {
+  filters: OpsTaskPageFilters
+  viewerId: string
+  signal?: AbortSignal
+}) {
+  return Promise.resolve()
+    .then(() => loadOpsTaskPageStats(options.filters, options.viewerId, options.signal))
+    .catch(() => undefined)
 }
 
 export function startOpsRegistrationTaskPageSupplementLoad(options: {
   filters: Extract<OpsTaskPageFilters, { taskType: "registration" }>
+  viewerId: string
   signal?: AbortSignal
 }) {
   return startOpsTaskPageSupplementLoad({
-    loadStats: () => loadOpsTaskPageStats(options.filters, options.signal),
+    loadStats: () => loadOpsTaskPageStats(options.filters, options.viewerId, options.signal),
     loadRegistrationRuntime: () => probeRegistrationSubjectTrackRuntime(),
   })
 }
@@ -1818,26 +1835,16 @@ export async function loadOpsTaskPage(options: OpsTaskPageLoadOptions): Promise<
     throw new Error("cursor_scope_mismatch")
   }
 
-  const statsRequest = options.cursor || options.filters.taskType === "registration"
-    ? Promise.resolve(undefined)
-    : loadOpsTaskPageStats(options.filters, options.signal).catch(() => undefined)
-  const [pageResult, stats, registrationRuntime] = await Promise.all([
-    supabase
-      .rpc("list_ops_task_page_v1", {
-        p_type: options.filters.taskType,
-        p_filters: options.filters,
-        p_cursor_sort_values: options.cursor?.sortValues || null,
-        p_cursor_id: options.cursor?.id || null,
-        p_limit: 30,
-      })
-      .abortSignal(opsTaskRequestSignal(
-        options.signal,
-        options.filters.taskType === "registration" ? 12_000 : 8_000,
-      ))
-      .retry(false),
-    statsRequest,
-    Promise.resolve(null),
-  ])
+  const pageResult = await supabase
+    .rpc("list_ops_task_page_v1", {
+      p_type: options.filters.taskType,
+      p_filters: options.filters,
+      p_cursor_sort_values: options.cursor?.sortValues || null,
+      p_cursor_id: options.cursor?.id || null,
+      p_limit: 30,
+    })
+    .abortSignal(AbortSignal.timeout(8_000))
+    .retry(false)
   if (pageResult.error) throw pageResult.error
 
   const rawRows = ((pageResult.data || []) as unknown as Row[])
@@ -1854,8 +1861,7 @@ export async function loadOpsTaskPage(options: OpsTaskPageLoadOptions): Promise<
     : null
   return {
     page: { rows, nextCursor, hasMore },
-    ...(stats ? { stats } : {}),
-    registrationRuntime,
+    registrationRuntime: null,
   }
 }
 
@@ -2001,7 +2007,7 @@ async function readOpsTaskWorkspaceData(
       force: options.force,
       signal: options.signal,
     })
-    metrics.queryCount += options.cursor ? 1 : 2
+    metrics.queryCount += 1
     return {
       ...emptyOpsTaskWorkspaceData,
       tasks: response.page.rows,
