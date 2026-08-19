@@ -50,7 +50,13 @@ export function createProductionRegistrationCustomerMessageBundlePreviewHandler(
             p_task_id: input.sourceId,
             p_service_date: null,
           })
-          if (result.error) throw new Error("registration_customer_message_bundle_source_invalid")
+          if (result.error) {
+            console.error("registration_customer_message_bundle_source_rpc_failed", {
+              code: result.error.code,
+              hint: result.error.hint,
+            })
+            throw new Error("registration_customer_message_bundle_source_invalid")
+          }
           return result.data
         },
       })
