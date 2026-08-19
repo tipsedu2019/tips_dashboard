@@ -359,6 +359,17 @@ test("an active appointment stays message-eligible after its track advances", as
   assert.match(resolvedVisit.body, /방문상담 예약/u)
 })
 
+test("an admission preview stays eligible after the track advances to payment", async () => {
+  const source = admissionSource()
+  source.tracks[0].workflowStatus = "payment_in_progress"
+  source.enrollmentPlans[0].workflowStatus = "payment_in_progress"
+
+  const resolved = await resolveSource(source)
+
+  assert.match(resolved.body, /중2 영어 A반/u)
+  assert.match(resolved.body, /첫 수업/u)
+})
+
 test("invalid source variants fail closed with stable source codes", async () => {
   const appointmentSubjectMismatch = appointmentSource({ subjects: ["영어", "수학", "과학"] })
   const appointmentParticipantExtraKey = appointmentSource()

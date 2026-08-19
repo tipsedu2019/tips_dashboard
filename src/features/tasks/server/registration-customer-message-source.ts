@@ -524,6 +524,10 @@ const ADMISSION_FIRST_LESSON_KEYS = Object.freeze([
   "revision",
   "updatedAt",
 ])
+const ADMISSION_ELIGIBLE_PIPELINE_STATUSES = new Set([
+  "enrollment_decided",
+  "enrollment_processing",
+])
 
 function admissionSlot(value: unknown, authority: "normalized" | "legacy") {
   const code = "registration_customer_message_admission_schedule_incomplete"
@@ -596,13 +600,15 @@ function admissionFacts(
     if (!SUBJECT_ORDER.includes(subject as RegistrationCustomerMessageSubject)) {
       sourceError(code)
     }
-    if (value.workflowStatus !== "enrollment_requested") sourceError(code)
+    const workflowStatus = requiredText(value.workflowStatus, code)
+    const pipelineStatus = requiredText(value.pipelineStatus, code)
+    if (!ADMISSION_ELIGIBLE_PIPELINE_STATUSES.has(pipelineStatus)) sourceError(code)
     return Object.freeze({
       trackId: requiredUuid(value.trackId, code),
       subject: subject as RegistrationCustomerMessageSubject,
-      workflowStatus: "enrollment_requested" as const,
+      workflowStatus,
       workflowRevision: nonnegativeInteger(value.workflowRevision, code),
-      pipelineStatus: requiredText(value.pipelineStatus, code),
+      pipelineStatus,
     })
   }).sort((left, right) => (
     SUBJECT_ORDER.indexOf(left.subject) - SUBJECT_ORDER.indexOf(right.subject)
@@ -624,7 +630,7 @@ function admissionFacts(
     const subject = value.subject
     if (!track || !SUBJECT_ORDER.includes(subject as RegistrationCustomerMessageSubject)) sourceError(code)
     if (
-      value.workflowStatus !== "enrollment_requested"
+      requiredText(value.workflowStatus, code) !== track.workflowStatus
       || subject !== track.subject
       || value.classSubject !== subject
     ) sourceError(code)
@@ -665,7 +671,7 @@ function admissionFacts(
       trackId,
       subject: subject as RegistrationCustomerMessageSubject,
       sortOrder: nonnegativeInteger(value.sortOrder, code),
-      workflowStatus: "enrollment_requested" as const,
+      workflowStatus: track.workflowStatus,
       workflowRevision,
       enrollmentUpdatedAt: parsedTimestamp(value.enrollmentUpdatedAt, code).epoch,
       classId: requiredUuid(value.classId, code),
