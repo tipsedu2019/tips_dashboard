@@ -103,6 +103,7 @@ export type OpsClassOption = OpsLinkedOption & {
   teacher: string
   room: string
   schedule: string
+  scheduleStorageMode?: string
   fee?: number
   schedulePlan?: Record<string, unknown> | null
   studentIds: string[]
@@ -1580,6 +1581,7 @@ function mapOpsClassOption(row: Row): OpsClassOption {
     teacher: text(row.teacher),
     room: text(row.room),
     schedule: text(row.schedule),
+    scheduleStorageMode: text(row.schedule_storage_mode),
     fee: numberValue(row.fee || row.tuition),
     schedulePlan: recordValue(row.schedule_plan),
     studentIds: normalizeIdList(row.student_ids),

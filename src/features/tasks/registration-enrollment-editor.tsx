@@ -554,7 +554,10 @@ export function RegistrationEnrollmentEditor({
 
   const validScheduleSessionKeysByClassId = useMemo(() => Object.fromEntries(
     selectedClassIds.map((classId) => {
-      const regularSessions = getSelectableRegistrationScheduleSessions(classDetailById[classId]?.schedulePlan)
+      const detail = classDetailById[classId]
+      const regularSessions = getSelectableRegistrationScheduleSessions(detail?.schedulePlan, {
+        normalized: detail?.scheduleStorageMode !== "legacy",
+      })
       const validKeys = getRegistrationEnrollmentStartOptions({
         regularSessions: regularSessions as RegistrationScheduleSession[],
         matchingObservation: currentMatchingObservation,
@@ -786,7 +789,10 @@ export function RegistrationEnrollmentEditor({
       <div data-registration-action-owner={`${track.subject}:enrollment-rows`} className="grid gap-3">
       {draftRows.map((row, index) => {
         const detail = row.classId ? classDetailById[row.classId] : null
-        const regularSessions = getSelectableRegistrationScheduleSessions(detail?.schedulePlan, { afterDateKey: registrationDecisionDateKey })
+        const regularSessions = getSelectableRegistrationScheduleSessions(detail?.schedulePlan, {
+          afterDateKey: registrationDecisionDateKey,
+          normalized: detail?.scheduleStorageMode !== "legacy",
+        })
         const startOptions = getRegistrationEnrollmentStartOptions({
           regularSessions: regularSessions as RegistrationScheduleSession[],
           matchingObservation: currentMatchingObservation,

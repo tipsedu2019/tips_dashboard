@@ -208,7 +208,7 @@ function registrationScheduleDateKey(value) {
 
 /**
  * @param {any} schedulePlan
- * @param {{afterDateKey?: string}} [options]
+ * @param {{afterDateKey?: string, normalized?: boolean}} [options]
  * @returns {RegistrationScheduleSession[]}
  */
 export function getSelectableRegistrationScheduleSessions(schedulePlan, options = {}) {
@@ -227,7 +227,9 @@ export function getSelectableRegistrationScheduleSessions(schedulePlan, options 
     if (options.afterDateKey && dateKey <= options.afterDateKey) return [];
     const rawSessionNumber = Number(entry.sessionNumber ?? entry.session_number);
     const sessionNumber = Number.isInteger(rawSessionNumber) ? rawSessionNumber : 0;
-    const lessonSessionId = text(entry.id || entry.lesson_session_id || entry.lessonSessionId);
+    const lessonSessionId = options.normalized === false
+      ? ""
+      : text(entry.id || entry.lesson_session_id || entry.lessonSessionId);
     const normalizedSessionKey = text(entry.sessionKey || entry.session_key);
     if (!dateKey || (sessionNumber <= 0 && (!lessonSessionId || !normalizedSessionKey))) return [];
     const value = normalizedSessionKey || `${dateKey}:${sessionNumber}`;
