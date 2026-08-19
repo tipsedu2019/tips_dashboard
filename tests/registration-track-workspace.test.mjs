@@ -662,10 +662,10 @@ test("registration progress supports consultation to waiting to registration and
   assert.match(model, /registration: "등록 신청"/)
 })
 
-test("registration start schedule is a calendar filtered after the decision date", async () => {
+test("registration start schedule calendar keeps past lessons available for delayed enrollment notice", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
   assert.match(source, /<Calendar/)
-  assert.match(source, /afterDateKey: registrationDecisionDateKey/)
+  assert.doesNotMatch(source, /afterDateKey: registrationDecisionDateKey/)
   assert.match(source, /수업 시작일 선택/)
   assert.doesNotMatch(source, /<select[\s\S]{0,500}수업일·회차 선택/)
 })
@@ -2824,6 +2824,8 @@ test("ordinary tracks expose compact manual director selection and visit reassig
   const manualSave = sourceBetween(source, "async function saveManualDirector", "async function retryAutomaticRefresh")
   assert.match(source, /RegistrationTrackDirectorSection/)
   assert.match(source, /상담 책임자/)
+  assert.match(source, /REGISTRATION_DIRECTOR_VISIBLE_STATUSES[\s\S]*?"enrollment_decided"/)
+  assert.match(source, /REGISTRATION_DIRECTOR_EDITABLE_STATUSES\.has\(track\.status\)/)
   assert.match(source, /assignmentSource:\s*"manual"/)
   assert.match(source, /ruleKey:\s*null/)
   assert.match(source, /registration_visit_reassign_requires_reschedule/)

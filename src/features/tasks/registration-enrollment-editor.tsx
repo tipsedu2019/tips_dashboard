@@ -777,7 +777,6 @@ export function RegistrationEnrollmentEditor({
   }
 
   const immutableHistory = trackEnrollments.filter((enrollment) => !isMutableDraft(enrollment))
-  const registrationDecisionDateKey = registrationDateKey(track.stageEnteredAt)
 
   return (
     <section ref={sectionRef} className="grid gap-3" aria-label={`${track.subject} 수강 수업`}>
@@ -790,7 +789,6 @@ export function RegistrationEnrollmentEditor({
       {draftRows.map((row, index) => {
         const detail = row.classId ? classDetailById[row.classId] : null
         const regularSessions = getSelectableRegistrationScheduleSessions(detail?.schedulePlan, {
-          afterDateKey: registrationDecisionDateKey,
           normalized: detail?.scheduleStorageMode !== "legacy",
         })
         const startOptions = getRegistrationEnrollmentStartOptions({
