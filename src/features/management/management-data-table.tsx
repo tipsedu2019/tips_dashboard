@@ -1418,6 +1418,7 @@ export function ManagementDataTable({
   const [studentSchoolCategoryFilter, setStudentSchoolCategoryFilter] = useState(() => requestedStudentListQueryState.schoolCategory);
   const [studentSchoolFilter, setStudentSchoolFilter] = useState(() => requestedStudentListQueryState.school);
   const [studentGradeFilter, setStudentGradeFilter] = useState(() => requestedStudentListQueryState.grade);
+  const pendingClassListQueryStateRef = useRef<ClassListQueryState | null>(null);
   const pendingStudentListQueryStateRef = useRef<StudentListQueryState | null>(null);
   const [grouping, setGrouping] = useState<GroupingState>([]);
   const [expanded, setExpanded] = useState<ExpandedState>({});
@@ -2062,7 +2063,7 @@ export function ManagementDataTable({
     ],
   );
   const syncClassListQueryState = useCallback(
-    (nextState: Partial<ClassListQueryState>) => {
+    (nextState: Partial<ClassListQueryState>, preserveLocalUntilUrl = false) => {
       if (kind !== "classes") {
         return;
       }
@@ -2071,10 +2072,15 @@ export function ManagementDataTable({
       const nextHref = buildClassListHref(pathname, searchParamString, mergedState);
       const currentHref = searchParamString ? `${pathname}?${searchParamString}` : pathname;
       if (nextHref !== currentHref) {
-        router.replace(nextHref, { scroll: false });
+        if (preserveLocalUntilUrl) {
+          pendingClassListQueryStateRef.current = mergedState;
+        }
+        replaceManagementListUrl(window.history, nextHref);
+      } else if (preserveLocalUntilUrl) {
+        pendingClassListQueryStateRef.current = null;
       }
     },
-    [currentClassListQueryState, kind, pathname, router, searchParamString],
+    [currentClassListQueryState, kind, pathname, searchParamString],
   );
   const currentStudentListQueryState = useMemo<StudentListQueryState>(
     () => ({
@@ -2170,25 +2176,34 @@ export function ManagementDataTable({
       return;
     }
 
-    const requestedPeriodFilter = requestedClassListQueryState.period || defaultPeriodFilter;
+    const reconciliation = reconcilePendingManagementFilters({
+      current: currentClassListQueryState,
+      requested: requestedClassListQueryState,
+      pending: pendingClassListQueryStateRef.current,
+    });
+    pendingClassListQueryStateRef.current = reconciliation.pending;
+    const nextFilters = reconciliation.filters;
+
+    const requestedPeriodFilter = nextFilters.period || defaultPeriodFilter;
     if (requestedPeriodFilter && classGroupFilter !== requestedPeriodFilter) {
       setClassGroupFilter(requestedPeriodFilter);
     }
 
-    const requestedStatusFilter = requestedClassListQueryState.status || DEFAULT_CLASS_STATUS_FILTER;
+    const requestedStatusFilter = nextFilters.status || DEFAULT_CLASS_STATUS_FILTER;
     if (statusColumn && statusFilter !== requestedStatusFilter) {
       statusColumn.setFilterValue(requestedStatusFilter);
     }
 
     for (const filter of CLASS_FILTERS) {
       const column = table.getColumn(filter.id);
-      const requestedFilterValue = requestedClassListQueryState[filter.id] || "";
+      const requestedFilterValue = nextFilters[filter.id] || "";
       if (column && ((column.getFilterValue() as string) || "") !== requestedFilterValue) {
         column.setFilterValue(requestedFilterValue);
       }
     }
   }, [
     classGroupFilter,
+    currentClassListQueryState,
     defaultPeriodFilter,
     kind,
     requestedClassListQueryState,
@@ -2674,7 +2689,7 @@ export function ManagementDataTable({
                 return;
               }
               setClassGroupFilter(value);
-              syncClassListQueryState({ period: value });
+              syncClassListQueryState({ period: value }, true);
               setRowSelection({});
               table.resetPagination();
             },
@@ -2689,7 +2704,7 @@ export function ManagementDataTable({
             })),
             onChange: (value) => {
               statusColumn?.setFilterValue(value);
-              syncClassListQueryState({ status: value });
+              syncClassListQueryState({ status: value }, true);
               setRowSelection({});
               table.resetPagination();
             },
@@ -2714,9 +2729,9 @@ export function ManagementDataTable({
                 if (filter.id === "subject") {
                   table.getColumn("teacher")?.setFilterValue("");
                   table.getColumn("classroom")?.setFilterValue("");
-                  syncClassListQueryState({ [filter.id]: nextFilterValue, teacher: "", classroom: "" });
+                  syncClassListQueryState({ [filter.id]: nextFilterValue, teacher: "", classroom: "" }, true);
                 } else {
-                  syncClassListQueryState({ [filter.id]: nextFilterValue });
+                  syncClassListQueryState({ [filter.id]: nextFilterValue }, true);
                 }
                 setRowSelection({});
                 table.resetPagination();
