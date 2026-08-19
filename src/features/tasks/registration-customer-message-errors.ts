@@ -19,6 +19,18 @@ const REGISTRATION_CUSTOMER_MESSAGE_ERROR_MESSAGES = Object.freeze([
     "registration_customer_message_body_too_long",
     "등록 수업 정보가 길어 알림톡을 만들 수 없습니다. 수업 정보를 확인해 주세요.",
   ],
+  [
+    "registration_customer_message_bundle_source_ambiguous",
+    "같은 유형에 같은 과목 예약이 둘 이상 있습니다. 예약 내용을 정리한 뒤 다시 시도해 주세요.",
+  ],
+  [
+    "registration_customer_message_bundle_stale",
+    "예약 내용이 변경되었습니다. 새 미리보기를 확인해 주세요.",
+  ],
+  [
+    "registration_customer_message_bundle_runtime_inactive",
+    "묶음 알림톡 기능은 아직 활성화되지 않았습니다.",
+  ],
 ] as const)
 
 export function getRegistrationCustomerMessageErrorMessage(
