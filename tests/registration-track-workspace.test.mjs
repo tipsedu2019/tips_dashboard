@@ -2824,8 +2824,9 @@ test("ordinary tracks expose compact manual director selection and visit reassig
   const manualSave = sourceBetween(source, "async function saveManualDirector", "async function retryAutomaticRefresh")
   assert.match(source, /RegistrationTrackDirectorSection/)
   assert.match(source, /상담 책임자/)
-  assert.match(source, /REGISTRATION_DIRECTOR_VISIBLE_STATUSES[\s\S]*?"enrollment_decided"/)
-  assert.match(source, /REGISTRATION_DIRECTOR_EDITABLE_STATUSES\.has\(track\.status\)/)
+  assert.doesNotMatch(director, /REGISTRATION_DIRECTOR_EDITABLE_STATUSES/)
+  assert.match(director, /const canEdit = permissions\.canManage/)
+  assert.doesNotMatch(source, /REGISTRATION_DIRECTOR_VISIBLE_STATUSES\.has\(context\.track\.status\)/)
   assert.match(source, /assignmentSource:\s*"manual"/)
   assert.match(source, /ruleKey:\s*null/)
   assert.match(source, /registration_visit_reassign_requires_reschedule/)
@@ -3980,8 +3981,8 @@ test("enrollment stages show the real work surface without a redundant placehold
   assert.match(stageEditor, /\["not_registered", "inquiry_closed"\]\.includes\(track\.status\)[\s\S]*?<TerminalStageEditor/)
   assert.match(stageEditor, /\["enrollment_decided", "enrollment_processing", "registered"\]\.includes\(track\.status\)[\s\S]*?return null/)
   assert.doesNotMatch(stageEditor, /전용 입력 화면|현재 상태와 권한/)
-  assert.match(source, /export const REGISTRATION_DIRECTOR_VISIBLE_STATUSES = new Set/)
-  assert.match(source, /REGISTRATION_DIRECTOR_VISIBLE_STATUSES\.has\(context\.track\.status\)/)
+  assert.doesNotMatch(source, /REGISTRATION_DIRECTOR_VISIBLE_STATUSES/)
+  assert.match(source, /section === "consultation" && !context\.track\.migrationReviewRequired/)
 })
 
 test("committed enrollment and admission batch saves recover refresh without resubmitting mutations", async () => {

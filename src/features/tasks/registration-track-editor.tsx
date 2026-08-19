@@ -57,7 +57,6 @@ import {
   type RegistrationObservationFeedbackActions,
 } from "./registration-observation-feedback-panel"
 import {
-  REGISTRATION_DIRECTOR_VISIBLE_STATUSES,
   REGISTRATION_TRACK_STATUS_LABELS,
   RegistrationConsultationOutcomeEditor,
   RegistrationEnrollmentTrackEditor,
@@ -1378,7 +1377,7 @@ export function RegistrationApplication({
             />
           </>
         ) : null}
-        {section === "consultation" && REGISTRATION_DIRECTOR_VISIBLE_STATUSES.has(context.track.status) && !context.track.migrationReviewRequired ? (
+        {section === "consultation" && !context.track.migrationReviewRequired ? (
           <RegistrationTrackDirectorSection
             ref={activeTrackId === context.track.id ? activeConsultationDirectorRef : undefined}
             task={task}

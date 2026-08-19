@@ -416,11 +416,7 @@ export const RegistrationTrackDirectorSection = forwardRef<RegistrationTrackDire
     }
   }, [automaticActions, detail.appointments, detail.commonRevision, detail.consultations, detail.task.id, detail.tracks, onWarning, permissions.canManage, retryVersion])
 
-  const terminal = ["registered", "not_registered", "inquiry_closed"].includes(track.status)
-  const canEdit = permissions.canManage
-    && REGISTRATION_DIRECTOR_EDITABLE_STATUSES.has(track.status)
-    && !terminal
-    && !track.migrationReviewRequired
+  const canEdit = permissions.canManage && !track.migrationReviewRequired
   const currentOptionMissing = Boolean(
     track.directorProfileId && !availableDirectors.some((profile) => profile.id === track.directorProfileId),
   )
@@ -688,28 +684,6 @@ export const REGISTRATION_TRACK_STATUS_LABELS: Record<OpsRegistrationTrackStatus
   inquiry_closed: "문의 완료",
 }
 const STATUS_LABELS = REGISTRATION_TRACK_STATUS_LABELS
-
-export const REGISTRATION_DIRECTOR_VISIBLE_STATUSES = new Set<OpsRegistrationTrackStatus>([
-  "inquiry",
-  "level_test_scheduled",
-  "level_test_in_progress",
-  "consultation_waiting",
-  "visit_consultation_scheduled",
-  "waiting",
-  "enrollment_decided",
-  "enrollment_processing",
-  "registered",
-  "not_registered",
-  "inquiry_closed",
-])
-
-const REGISTRATION_DIRECTOR_EDITABLE_STATUSES = new Set<OpsRegistrationTrackStatus>([
-  "inquiry",
-  "level_test_scheduled",
-  "level_test_in_progress",
-  "consultation_waiting",
-  "visit_consultation_scheduled",
-])
 
 const WAITING_KIND_OPTIONS: Array<{ value: Exclude<RegistrationWaitingKind, "">; label: string }> = [
   { value: "current_class", label: "현재 학기 수강반 대기" },
