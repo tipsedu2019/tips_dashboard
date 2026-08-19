@@ -1758,8 +1758,11 @@ function mapTask(row: Row, detail: Row, comments: OpsTaskComment[], attachments:
   }
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function normalizeUuid(input: unknown) {
-  return nullableText(input)
+  const normalized = nullableText(input)
+  return normalized && UUID_PATTERN.test(normalized) ? normalized : null
 }
 
 function registrationEnrollmentRowPayload(row: RegistrationEnrollmentRowInput) {

@@ -2910,6 +2910,34 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
   assert.equal(mutationInvalidations, 27, "every successful registration RPC must invalidate parent consumers");
 });
 
+test("enrollment save omits a legacy schedule identifier from the normalized lesson-session field", async () => {
+  // Production break caught: a legacy schedule's non-UUID identifier reaches
+  // the enrollment RPC and is rejected as registration_enrollment_rows_invalid.
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    rpcHandler(name) {
+      assert.equal(name, "save_registration_enrollment_rows");
+      return { data: { track_id: "track-1", rows: [] }, error: null };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  await service.saveRegistrationEnrollmentRows({
+    trackId: "track-1",
+    rows: [{
+      classId: "10000000-0000-4000-8000-000000000001",
+      classStartDate: "2026-08-19",
+      classStartSessionKey: "legacy:2026-08-19:1",
+      classStartLessonSessionId: "legacy:2026-08-19:1",
+      classStartSession: "1회차",
+      sortOrder: 0,
+    }],
+    requestKey: "enrollment-legacy-session-id",
+  });
+
+  assert.equal(harness.rpcCalls[0][1].p_rows[0].classStartLessonSessionId, null);
+});
+
 test("admission completion uses the injected post-commit public cache invalidator", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const enrollment = {
