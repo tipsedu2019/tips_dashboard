@@ -117,7 +117,6 @@ import {
   getRegistrationActionPermissions,
   getRegistrationActiveConsultation,
   getRegistrationAdmissionApplicationState,
-  getRegistrationCurrentClassWaitClassId,
   shouldRenderRegistrationConsultationOutcome,
 } from "./registration-track-model.js"
 import {
@@ -1286,7 +1285,6 @@ export function RegistrationApplication({
       return (
         <RegistrationWaitingDetailsEditor
           track={track}
-          currentClassWaitClassId={getRegistrationCurrentClassWaitClassId({ trackId: track.id, waitingKind: track.waitingKind, enrollments: detail.enrollments })}
           permissions={permissions}
           classOptions={classOptions}
           onReload={onReload}

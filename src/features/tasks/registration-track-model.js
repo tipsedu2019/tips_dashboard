@@ -295,6 +295,20 @@ export function getRegistrationCurrentClassWaitClassId({
   ))?.classId)
 }
 
+export function getRegistrationWaitingDetailsDraft(track = {}) {
+  const waitingKind = enrollmentText(track.waitingDetailKind)
+  const classId = waitingKind === "current_class"
+    ? enrollmentText(track.waitingDetailClassId)
+    : ""
+  const retakeDecision = enrollmentText(track.waitingDetailRetakeDecision)
+  return {
+    waitingKind,
+    classId,
+    retakeDecision,
+    persisted: Boolean(waitingKind || classId || retakeDecision),
+  }
+}
+
 export function createRegistrationEnrollmentDraft({
   id = null,
   clientKey,

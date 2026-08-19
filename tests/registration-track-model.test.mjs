@@ -26,6 +26,7 @@ import {
   getRegistrationActionPermissions,
   getAllowedRegistrationTrackActions,
   getRegistrationCurrentClassWaitClassId,
+  getRegistrationWaitingDetailsDraft,
   getRegistrationTrackNextStatus,
   getRegistrationTrackTransitionBlockers,
   getRegistrationTrackViewKey,
@@ -54,6 +55,33 @@ test("waiting message readiness follows the manual workflow source contract", ()
     waitingDetailKind: "next_term_opening",
     waitingDetailClassId: null,
   }), false)
+})
+
+test("waiting details stay empty until an operator stores them", () => {
+  assert.deepEqual(getRegistrationWaitingDetailsDraft({
+    waitingKind: "current_term_opening",
+    waitingDetailKind: "",
+    waitingDetailClassId: null,
+    waitingDetailRetakeDecision: "",
+  }), {
+    waitingKind: "",
+    classId: "",
+    retakeDecision: "",
+    persisted: false,
+  })
+})
+
+test("waiting detail columns restore the operator's saved values", () => {
+  assert.deepEqual(getRegistrationWaitingDetailsDraft({
+    waitingDetailKind: "current_class",
+    waitingDetailClassId: "class-1",
+    waitingDetailRetakeDecision: "required",
+  }), {
+    waitingKind: "current_class",
+    classId: "class-1",
+    retakeDecision: "required",
+    persisted: true,
+  })
 })
 
 test("allowed actions are returned as a fresh view of the authoritative status matrix", () => {

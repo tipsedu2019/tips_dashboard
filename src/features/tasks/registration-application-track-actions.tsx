@@ -57,7 +57,10 @@ import {
   type RegistrationSubject,
   type RegistrationWaitingKind,
 } from "./registration-track-service"
-import { getRegistrationConsultationOutcomeSaveState } from "./registration-track-model.js"
+import {
+  getRegistrationConsultationOutcomeSaveState,
+  getRegistrationWaitingDetailsDraft,
+} from "./registration-track-model.js"
 import { getRegistrationPersistenceErrorMessage } from "./registration-workflow.js"
 import { RegistrationSelect } from "./registration-select"
 import { RegistrationSaveButton } from "./registration-save-button"
@@ -966,7 +969,6 @@ function InquiryStageEditor({
 
 export function RegistrationWaitingDetailsEditor({
   track,
-  currentClassWaitClassId,
   permissions,
   classOptions,
   onReload,
@@ -975,7 +977,6 @@ export function RegistrationWaitingDetailsEditor({
   onOpenCustomerMessage,
 }: {
   track: OpsRegistrationTrackSummary
-  currentClassWaitClassId: string
   permissions: ActionPermissions
   classOptions: OpsClassOption[]
   onReload: () => void | Promise<void>
@@ -983,9 +984,11 @@ export function RegistrationWaitingDetailsEditor({
   onDirtyChange?: (dirty: boolean) => void
   onOpenCustomerMessage?: (target: RegistrationCustomerMessageTarget) => void
 }) {
-  const savedWaitingKind = track.waitingDetailKind || track.waitingKind || "current_term_opening"
-  const savedClassId = track.waitingDetailClassId || currentClassWaitClassId
-  const savedRetakeDecision = track.waitingDetailRetakeDecision || track.levelTestRetakeDecision || "not_required"
+  const savedWaitingDetails = getRegistrationWaitingDetailsDraft(track)
+  const savedWaitingKind = savedWaitingDetails.waitingKind
+  const savedClassId = savedWaitingDetails.classId
+  const savedRetakeDecision = savedWaitingDetails.retakeDecision
+  const savedWaitingPersisted = savedWaitingDetails.persisted
   const [waitingKind, setWaitingKind] = useState<RegistrationWaitingKind>(savedWaitingKind)
   const [classId, setClassId] = useState(savedClassId)
   const [saving, setSaving] = useState(false)
@@ -1072,7 +1075,7 @@ export function RegistrationWaitingDetailsEditor({
               saving={saving}
               blocked={refreshPending}
               actionLabel="대기 정보 저장"
-              cleanLabel="저장됨"
+              cleanLabel={savedWaitingPersisted ? "저장됨" : "입력 없음"}
               aria-label={`${track.subject} 대기 정보 저장`}
               onClick={() => void saveWaitingDetails()}
             />
@@ -1192,7 +1195,6 @@ function TerminalStageEditor({
 
 export function RegistrationTrackStageEditor({
   track,
-  currentClassWaitClassId,
   permissions,
   classOptions,
   onReload,
@@ -1204,7 +1206,6 @@ export function RegistrationTrackStageEditor({
   onDirtyChange,
 }: {
   track: OpsRegistrationTrackSummary
-  currentClassWaitClassId: string
   permissions: ActionPermissions
   classOptions: OpsClassOption[]
   onReload: () => void | Promise<void>
@@ -1219,7 +1220,7 @@ export function RegistrationTrackStageEditor({
     return <InquiryStageEditor track={track} permissions={permissions} classOptions={classOptions} onReload={onReload} onWarning={onWarning} onOpenLevelTest={onOpenLevelTest} onDirtyChange={onDirtyChange} />
   }
   if (track.status === "waiting") {
-    return <RegistrationWaitingDetailsEditor track={track} currentClassWaitClassId={currentClassWaitClassId} permissions={permissions} classOptions={classOptions} onReload={onReload} onWarning={onWarning} onDirtyChange={onDirtyChange} />
+    return <RegistrationWaitingDetailsEditor track={track} permissions={permissions} classOptions={classOptions} onReload={onReload} onWarning={onWarning} onDirtyChange={onDirtyChange} />
   }
   if (track.status === "consultation_waiting") {
     return (

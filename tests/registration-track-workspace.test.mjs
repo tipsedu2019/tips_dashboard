@@ -2899,12 +2899,13 @@ test("operational detail omits the internal subject event log", async () => {
   assert.doesNotMatch(source, /과목별 진행 이력/)
 })
 
-test("대기 상세는 저장된 현재반 claim을 수업 선택값으로 다시 연다", async () => {
+test("대기 상세은 저장한 값이 없으면 비어 있는 입력 상태로 연다", async () => {
   const source = await readRegistrationApplicationSource()
-  assert.match(source, /getRegistrationCurrentClassWaitClassId/)
-  assert.match(source, /currentClassWaitClassId=\{getRegistrationCurrentClassWaitClassId/)
-  assert.match(source, /track\.waitingDetailClassId \|\| currentClassWaitClassId/)
-  assert.match(source, /track\.waitingKind, enrollments: detail\.enrollments/)
+  const waiting = sourceBetween(source, "export function RegistrationWaitingDetailsEditor", "function TerminalStageEditor")
+  assert.match(waiting, /getRegistrationWaitingDetailsDraft\(track\)/)
+  assert.doesNotMatch(waiting, /\|\| "current_term_opening"/)
+  assert.doesNotMatch(waiting, /\|\| "not_required"/)
+  assert.match(waiting, /cleanLabel=\{savedWaitingPersisted \? "저장됨" : "입력 없음"\}/)
 })
 
 test("migration review blocks ordinary actions until explicit attribution", async () => {

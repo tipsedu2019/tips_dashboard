@@ -231,6 +231,17 @@ export function getRegistrationCurrentClassWaitClassId(input?: {
   }[]
 }): string
 
+export function getRegistrationWaitingDetailsDraft(track?: {
+  waitingDetailKind?: "" | "current_class" | "current_term_opening" | "next_term_opening" | null
+  waitingDetailClassId?: string | null
+  waitingDetailRetakeDecision?: "" | "required" | "not_required" | null
+}): {
+  waitingKind: "" | "current_class" | "current_term_opening" | "next_term_opening"
+  classId: string
+  retakeDecision: "" | "required" | "not_required"
+  persisted: boolean
+}
+
 export type RegistrationEnrollmentSerializedRow = {
   id?: string
   classId: string
