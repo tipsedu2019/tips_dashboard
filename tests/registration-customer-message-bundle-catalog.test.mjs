@@ -78,8 +78,10 @@ test("bundle renderer sorts multi-subject reservations by KST schedule and inclu
 
   assert.match(rendered.variables.예약목록, /^1\. 영어 · 2026년 8월 21일 금요일 오후 2:00 · 본관\n수업: 중2 영어 A반 · 담당: 홍길동 선생님\n2\. 수학 · 2026년 8월 23일 일요일 오후 4:00 · 별관\n수업: 중2 수학 B반 · 담당: 김길동 선생님$/u)
   assert.match(rendered.body, /청강 예약 안내/u)
-  assert.equal(rendered.body.includes("#{학생명}"), true)
-  assert.equal(rendered.body.includes("#{예약목록}"), true)
+  assert.match(rendered.body, /김팁스 학생의 청강 예약을 안내드립니다\./u)
+  assert.match(rendered.body, /1\. 영어 · 2026년 8월 21일 금요일 오후 2:00 · 본관/u)
+  assert.equal(rendered.body.includes("#{학생명}"), false)
+  assert.equal(rendered.body.includes("#{예약목록}"), false)
 })
 
 test("bundle renderer rejects unsafe or non-canonical reservation lists", () => {

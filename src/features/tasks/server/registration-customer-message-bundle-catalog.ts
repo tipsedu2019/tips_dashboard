@@ -275,10 +275,13 @@ export function renderRegistrationCustomerMessageBundle(input: Readonly<{
       : `\n수업: ${item.className} · 담당: ${item.teacherLabel}`
     return `${index + 1}. ${item.subjectLabel} · ${item.scheduleLabel} · ${item.placeLabel}${detail}`
   }).join("\n")
+  const variables = Object.freeze({ 학생명: studentName, 예약목록: reservationList })
   return Object.freeze({
     kind: input.kind,
-    body: BUNDLE_TEMPLATE_CONTENT[input.kind],
-    variables: Object.freeze({ 학생명: studentName, 예약목록: reservationList }),
+    body: BUNDLE_TEMPLATE_CONTENT[input.kind]
+      .replace(/#\{학생명\}/gu, variables.학생명)
+      .replace(/#\{예약목록\}/gu, variables.예약목록),
+    variables,
     buttons: BUNDLE_BUTTONS,
     facts: Object.freeze({ reservations }),
   })
