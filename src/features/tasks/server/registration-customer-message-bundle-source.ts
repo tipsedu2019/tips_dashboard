@@ -40,7 +40,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const HASH = /^[a-f0-9]{64}$/u
 const PHONE = /^01(?:0|1|[6-9])[0-9]{7,8}$/u
 const DATE = /^\d{4}-\d{2}-\d{2}$/u
-const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u
+const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})$/u
 const kinds = new Set<RegistrationCustomerMessageBundleKind>([
   "level_test_booking_bundle", "visit_consultation_booking_bundle", "observation_booking_bundle",
   "level_test_reminder_bundle", "visit_consultation_reminder_bundle", "observation_reminder_bundle",
@@ -51,6 +51,11 @@ function record(value: unknown): value is JsonRecord { return typeof value === "
 function exact(value: JsonRecord, keys: readonly string[]) { return Object.keys(value).length === keys.length && keys.every((key) => key in value) }
 function uuid(value: unknown) { return typeof value === "string" && UUID.test(value) ? value.toLowerCase() : invalid() }
 function text(value: unknown) { return typeof value === "string" && value.trim() ? value.trim() : invalid() }
+function timestamp(value: unknown) {
+  if (typeof value !== "string" || !TIMESTAMP.test(value)) invalid()
+  const parsed = new Date(value)
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : invalid()
+}
 
 export function parseRegistrationCustomerMessageBundleSource(value: unknown): RegistrationCustomerMessageBundleSource {
   if (!record(value) || !exact(value, ["messageKind", "sourceId", "bundleId", "bundleRevision", "taskId", "reservationKind", "deliveryKind", "serviceDate", "recipientRevision", "sourceFingerprint", "studentName", "parentPhoneDigits", "items"])) invalid()
@@ -68,9 +73,9 @@ export function parseRegistrationCustomerMessageBundleSource(value: unknown): Re
   const subjects = new Set<string>()
   const items = value.items.map((item) => {
     if (!record(item) || !exact(item, ["sourceKind", "sourceId", "sourceRevision", "trackId", "activityId", "subject", "scheduledAt", "serviceDate", "place", "className", "teacherName", "sourceFactHash"]) || !record(item.sourceRevision)) invalid()
-    if (item.sourceKind !== reservationKind || (item.subject !== "영어" && item.subject !== "수학" && item.subject !== "과학") || subjects.has(item.subject) || typeof item.scheduledAt !== "string" || !TIMESTAMP.test(item.scheduledAt) || typeof item.serviceDate !== "string" || !DATE.test(item.serviceDate) || (item.place !== "본관" && item.place !== "별관") || typeof item.sourceFactHash !== "string" || !HASH.test(item.sourceFactHash) || (item.activityId !== null && typeof item.activityId !== "string") || (item.className === null) !== (item.teacherName === null)) invalid()
+    if (item.sourceKind !== reservationKind || (item.subject !== "영어" && item.subject !== "수학" && item.subject !== "과학") || subjects.has(item.subject) || typeof item.serviceDate !== "string" || !DATE.test(item.serviceDate) || (item.place !== "본관" && item.place !== "별관") || typeof item.sourceFactHash !== "string" || !HASH.test(item.sourceFactHash) || (item.activityId !== null && typeof item.activityId !== "string") || (item.className === null) !== (item.teacherName === null)) invalid()
     subjects.add(item.subject)
-    return Object.freeze({ sourceKind: item.sourceKind as RegistrationCustomerMessageBundleSourceItem["sourceKind"], sourceId: uuid(item.sourceId), sourceRevision: Object.freeze({ ...item.sourceRevision }), trackId: uuid(item.trackId), activityId: item.activityId === null ? null : uuid(item.activityId), subject: item.subject as RegistrationCustomerMessageBundleSourceItem["subject"], scheduledAt: item.scheduledAt, serviceDate: item.serviceDate, place: item.place as RegistrationCustomerMessageBundleSourceItem["place"], className: item.className === null ? null : text(item.className), teacherName: item.teacherName === null ? null : text(item.teacherName), sourceFactHash: item.sourceFactHash })
+    return Object.freeze({ sourceKind: item.sourceKind as RegistrationCustomerMessageBundleSourceItem["sourceKind"], sourceId: uuid(item.sourceId), sourceRevision: Object.freeze({ ...item.sourceRevision }), trackId: uuid(item.trackId), activityId: item.activityId === null ? null : uuid(item.activityId), subject: item.subject as RegistrationCustomerMessageBundleSourceItem["subject"], scheduledAt: timestamp(item.scheduledAt), serviceDate: item.serviceDate, place: item.place as RegistrationCustomerMessageBundleSourceItem["place"], className: item.className === null ? null : text(item.className), teacherName: item.teacherName === null ? null : text(item.teacherName), sourceFactHash: item.sourceFactHash })
   })
   return Object.freeze({ messageKind, taskId, bundleId: uuid(value.bundleId), bundleRevision: value.bundleRevision as number, reservationKind, deliveryKind, serviceDate: value.serviceDate as string | null, recipientRevision: value.recipientRevision as number, sourceFingerprint: value.sourceFingerprint, studentName: text(value.studentName), parentPhoneDigits: value.parentPhoneDigits, items: Object.freeze(items) })
 }
