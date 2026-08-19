@@ -25,7 +25,10 @@ select results_eq(
   'all bundle kinds install off'
 );
 
-select policy_cmd_is('dashboard_private', 'registration_customer_message_bundles', null, null, 'private bundle manifests expose no RLS policy');
+select is_empty(
+  $$ select 1 from pg_catalog.pg_policies where schemaname = 'dashboard_private' and tablename = 'registration_customer_message_bundles' $$,
+  'private bundle manifests expose no RLS policy'
+);
 
 select throws_ok(
   $$ select public.resolve_registration_customer_message_bundle_source_v1('level_test_booking_bundle', gen_random_uuid(), null) $$,
