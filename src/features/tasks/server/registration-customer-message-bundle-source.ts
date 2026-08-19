@@ -1,8 +1,12 @@
-import type { RegistrationCustomerMessageBundleKind } from "../registration-customer-message-contract.ts"
+import type {
+  RegistrationCustomerMessageBundleKind,
+  RegistrationCustomerMessageSingleSourceKind,
+} from "../registration-customer-message-contract.ts"
 import {
-  renderRegistrationCustomerMessageBundle,
-  type RegistrationCustomerMessageBundleCatalog,
-} from "./registration-customer-message-bundle-catalog.ts"
+  formatRegistrationCustomerMessageSchedule,
+  renderRegistrationCustomerMessage,
+  type RegistrationCustomerMessageCatalog,
+} from "./registration-customer-message-catalog.ts"
 
 type JsonRecord = Record<string, unknown>
 
@@ -45,6 +49,7 @@ const kinds = new Set<RegistrationCustomerMessageBundleKind>([
   "level_test_booking_bundle", "visit_consultation_booking_bundle", "observation_booking_bundle",
   "level_test_reminder_bundle", "visit_consultation_reminder_bundle", "observation_reminder_bundle",
 ])
+const SUBJECT_ORDER = ["영어", "수학", "과학"] as const
 
 function invalid(): never { throw new Error("registration_customer_message_bundle_source_invalid") }
 function record(value: unknown): value is JsonRecord { return typeof value === "object" && value !== null && !Array.isArray(value) }
@@ -55,6 +60,32 @@ function timestamp(value: unknown) {
   if (typeof value !== "string" || !TIMESTAMP.test(value)) invalid()
   const parsed = new Date(value)
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : invalid()
+}
+
+function templateKind(source: RegistrationCustomerMessageBundleSource): RegistrationCustomerMessageSingleSourceKind {
+  if (source.reservationKind === "level_test") {
+    return source.deliveryKind === "booking" ? "level_test_booking" : "appointment_reminder"
+  }
+  if (source.reservationKind === "visit_consultation") {
+    return source.deliveryKind === "booking" ? "visit_consultation_booking" : "appointment_reminder"
+  }
+  return source.deliveryKind === "booking" ? "observation_booking" : "observation_reminder"
+}
+
+function orderedItems(items: ReadonlyArray<RegistrationCustomerMessageBundleSourceItem>) {
+  return [...items].sort((left, right) => (
+    left.scheduledAt.localeCompare(right.scheduledAt)
+    || SUBJECT_ORDER.indexOf(left.subject) - SUBJECT_ORDER.indexOf(right.subject)
+  ))
+}
+
+function sharedOrPerSubject(
+  items: ReadonlyArray<RegistrationCustomerMessageBundleSourceItem>,
+  value: (item: RegistrationCustomerMessageBundleSourceItem) => string,
+) {
+  const values = items.map(value)
+  if (values.every((entry) => entry === values[0])) return values[0]
+  return items.map((item) => `${value(item)}(${item.subject})`).join(", ")
 }
 
 export function parseRegistrationCustomerMessageBundleSource(value: unknown): RegistrationCustomerMessageBundleSource {
@@ -81,32 +112,55 @@ export function parseRegistrationCustomerMessageBundleSource(value: unknown): Re
 }
 
 export function createRegistrationCustomerMessageBundleSourceResolver(dependencies: Readonly<{
-  catalog: RegistrationCustomerMessageBundleCatalog
+  catalog: RegistrationCustomerMessageCatalog
   resolveSource(input: Readonly<{ messageKind: RegistrationCustomerMessageBundleKind; sourceId: string }>): Promise<unknown>
 }>) {
   return Object.freeze({
     async resolve(input: Readonly<{ messageKind: RegistrationCustomerMessageBundleKind; sourceId: string }>) {
       const source = parseRegistrationCustomerMessageBundleSource(await dependencies.resolveSource(input))
       if (source.messageKind !== input.messageKind || source.taskId !== input.sourceId) invalid()
-      const rendered = renderRegistrationCustomerMessageBundle({
-        kind: source.messageKind,
-        studentName: source.studentName,
-        items: source.items.map((item) => ({
-          subject: item.subject,
-          scheduledAt: item.scheduledAt,
-          place: item.place,
-          className: item.className,
-          teacherName: item.teacherName,
-        })),
+      const items = orderedItems(source.items)
+      const kind = templateKind(source)
+      const rendered = renderRegistrationCustomerMessage({
+        kind,
+        facts: {
+          studentName: source.studentName,
+          subjects: items.map((item) => item.subject),
+          subjectLabelOverride: [...items]
+            .sort((left, right) => SUBJECT_ORDER.indexOf(left.subject) - SUBJECT_ORDER.indexOf(right.subject))
+            .map((item) => item.subject).join(", "),
+          scheduledAt: items[0].scheduledAt,
+          scheduleLabelOverride: sharedOrPerSubject(items, (item) => formatRegistrationCustomerMessageSchedule(item.scheduledAt)),
+          place: items[0].place,
+          placeLabelOverride: sharedOrPerSubject(items, (item) => item.place),
+          ...(source.reservationKind === "level_test" || source.reservationKind === "visit_consultation"
+            ? { appointmentKind: source.reservationKind }
+            : {
+              campus: items[0].place,
+              className: items[0].className || undefined,
+              teacherName: items[0].teacherName || undefined,
+              classNameOverride: sharedOrPerSubject(items, (item) => item.className || ""),
+              teacherNameOverride: sharedOrPerSubject(items, (item) => item.teacherName || ""),
+            }),
+        },
       })
       return Object.freeze({
         messageKind: source.messageKind,
+        templateKind: kind,
         sourceId: source.taskId,
         taskId: source.taskId,
         studentName: source.studentName,
         facts: Object.freeze({
-          subjectLabel: rendered.facts.reservations.map((item) => item.subjectLabel).join(", "),
-          reservations: rendered.facts.reservations,
+          subjectLabel: rendered.facts.subjectLabel,
+          scheduleLabel: rendered.facts.scheduleLabel,
+          placeLabel: rendered.facts.placeLabel,
+          reservations: items.map((item) => Object.freeze({
+            subjectLabel: item.subject,
+            scheduleLabel: formatRegistrationCustomerMessageSchedule(item.scheduledAt),
+            placeLabel: item.place,
+            className: item.className,
+            teacherLabel: item.teacherName === null ? null : `${item.teacherName} 선생님`,
+          })),
         }),
         body: rendered.body,
         buttons: rendered.buttons.map((button) => Object.freeze({

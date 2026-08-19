@@ -5,9 +5,9 @@ import {
   type RegistrationCustomerMessagePreviewResponse,
 } from "../registration-customer-message-contract.ts"
 import {
-  createRegistrationCustomerMessageBundleCatalog,
-  type RegistrationCustomerMessageBundleServerEnv,
-} from "./registration-customer-message-bundle-catalog.ts"
+  createRegistrationCustomerMessageCatalog,
+  type RegistrationCustomerMessageServerEnv,
+} from "./registration-customer-message-catalog.ts"
 import { createRegistrationCustomerMessageBundleSourceResolver } from "./registration-customer-message-bundle-source.ts"
 import {
   RegistrationCustomerMessageHttpError,
@@ -30,7 +30,7 @@ export function createProductionRegistrationCustomerMessageBundlePreviewHandler(
   environment: NodeJS.ProcessEnv = process.env,
 ) {
   const auth = createProductionRegistrationCustomerMessageAuth()
-  const catalog = createRegistrationCustomerMessageBundleCatalog(environment as RegistrationCustomerMessageBundleServerEnv)
+  const catalog = createRegistrationCustomerMessageCatalog(environment as RegistrationCustomerMessageServerEnv)
   return async function preview(request: Request) {
     try {
       const target = parseRegistrationCustomerMessageTarget(await request.json())
@@ -61,7 +61,7 @@ export function createProductionRegistrationCustomerMessageBundlePreviewHandler(
         },
       })
       const source = await resolver.resolve(bundleTarget)
-      const template = catalog.templates[bundleTarget.messageKind]
+      const template = catalog.templates[source.templateKind]
       const readiness = {
         runtimeReady: true,
         activationMode: "off" as const,

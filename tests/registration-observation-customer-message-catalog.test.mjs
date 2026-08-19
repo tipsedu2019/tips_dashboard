@@ -107,7 +107,6 @@ test("catalog maps all seven kinds and preserves every legacy checksum receipt",
   const catalog = createRegistrationCustomerMessageCatalog(ENV)
   assert.deepEqual(Object.keys(catalog.templates), REGISTRATION_CUSTOMER_MESSAGE_SINGLE_SOURCE_KINDS)
   for (const [kind, checksums] of Object.entries(frozenChecksums)) {
-    if (kind === "bundles") continue
     assert.deepEqual(catalog.templates[kind].checksums, checksums, `${kind} checksum drift`)
     assert.equal("transportVariables" in catalog.templates[kind], false)
   }

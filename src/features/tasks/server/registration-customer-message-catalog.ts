@@ -100,6 +100,9 @@ export type RegistrationCustomerMessageCanonicalFacts = Readonly<{
   subjects: ReadonlyArray<RegistrationCustomerMessageSubject>
   scheduledAt?: string | Date
   place?: string
+  subjectLabelOverride?: string
+  scheduleLabelOverride?: string
+  placeLabelOverride?: string
   appointmentKind?: RegistrationCustomerMessageAppointmentKind
   waitingKind?: RegistrationCustomerMessageWaitingKind
   waitingClassName?: string
@@ -107,6 +110,8 @@ export type RegistrationCustomerMessageCanonicalFacts = Readonly<{
   className?: string
   campus?: "본관" | "별관"
   teacherName?: string
+  classNameOverride?: string
+  teacherNameOverride?: string
 }>
 
 export type RegistrationCustomerMessageVariableName =
@@ -881,11 +886,14 @@ function appointmentVariables(
   if (kind === "visit_consultation_booking" && facts.appointmentKind !== "visit_consultation") {
     catalogError("registration_customer_message_appointment_kind_invalid")
   }
-  const schedule = formatRegistrationCustomerMessageSchedule(
-    facts.scheduledAt as string | Date,
-  )
-  const place = requiredText(facts.place, "registration_customer_message_place_invalid")
-  const placeId = place === "본관" || /^팁스학원(?:\s|$)/u.test(place)
+  const schedule = facts.scheduleLabelOverride
+    ? requiredText(facts.scheduleLabelOverride, "registration_customer_message_schedule_invalid")
+    : formatRegistrationCustomerMessageSchedule(facts.scheduledAt as string | Date)
+  const sourcePlace = requiredText(facts.place, "registration_customer_message_place_invalid")
+  const place = facts.placeLabelOverride
+    ? requiredText(facts.placeLabelOverride, "registration_customer_message_place_invalid")
+    : sourcePlace
+  const placeId = sourcePlace === "본관" || /^팁스학원(?:\s|$)/u.test(sourcePlace)
     ? PLACE_IDS.본관
     : place === "별관" || /^제주수학학원(?:\s|$)/u.test(place)
       ? PLACE_IDS.별관
@@ -900,7 +908,9 @@ function renderVariables(
 ) {
   const definition = TEMPLATE_DEFINITIONS[kind]
   const studentName = studentNameVariable(facts.studentName)
-  const subjectLabel = formatRegistrationCustomerMessageSubjects(facts.subjects)
+  const subjectLabel = facts.subjectLabelOverride
+    ? requiredText(facts.subjectLabelOverride, "registration_customer_message_subject_invalid")
+    : formatRegistrationCustomerMessageSubjects(facts.subjects)
   const values: Partial<Record<
     RegistrationCustomerMessageVariableName | RegistrationCustomerMessageTransportVariableName,
     string
@@ -955,15 +965,20 @@ function renderVariables(
     if (campus !== "본관" && campus !== "별관") {
       catalogError("registration_customer_message_campus_invalid")
     }
-    const schedule = formatRegistrationCustomerMessageSchedule(facts.scheduledAt as string | Date)
-    const place = requiredText(facts.place, "registration_customer_message_place_invalid")
-    values.수업명 = requiredText(facts.className, "registration_customer_message_class_name_invalid")
+    const schedule = facts.scheduleLabelOverride
+      ? requiredText(facts.scheduleLabelOverride, "registration_customer_message_schedule_invalid")
+      : formatRegistrationCustomerMessageSchedule(facts.scheduledAt as string | Date)
+    const place = facts.placeLabelOverride
+      ? requiredText(facts.placeLabelOverride, "registration_customer_message_place_invalid")
+      : requiredText(facts.place, "registration_customer_message_place_invalid")
+    values.수업명 = facts.classNameOverride
+      ? requiredText(facts.classNameOverride, "registration_customer_message_class_name_invalid")
+      : requiredText(facts.className, "registration_customer_message_class_name_invalid")
     values.예약일시 = schedule
     values.장소 = place
-    values.담당선생님 = requiredText(
-      facts.teacherName,
-      "registration_customer_message_teacher_name_invalid",
-    )
+    values.담당선생님 = facts.teacherNameOverride
+      ? requiredText(facts.teacherNameOverride, "registration_customer_message_teacher_name_invalid")
+      : requiredText(facts.teacherName, "registration_customer_message_teacher_name_invalid")
     values.학원위치URL = OBSERVATION_LOCATION_TRANSPORT_VALUES[campus]
     labels.scheduleLabel = schedule
     labels.placeLabel = place
