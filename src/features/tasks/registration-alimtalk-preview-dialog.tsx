@@ -342,6 +342,19 @@ export function RegistrationAlimtalkPreviewDialog({
               {observationFacts?.teacherLabel ? <div><dt className="inline text-muted-foreground">선생님 · </dt><dd className="inline">{observationFacts.teacherLabel}</dd></div> : null}
               {preview.facts.waitingKindLabel ? <div><dt className="inline text-muted-foreground">대기 · </dt><dd className="inline">{preview.facts.waitingKindLabel} {preview.facts.waitingDetailLabel || ""}</dd></div> : null}
             </dl>
+            {preview.facts.reservations?.length ? (
+              <section aria-label="예약 목록" className="rounded-md border p-3">
+                <h3 className="mb-2 font-medium">예약 목록</h3>
+                <ol className="grid gap-3">
+                  {preview.facts.reservations.map((reservation, index) => (
+                    <li key={`${reservation.subjectLabel}:${reservation.scheduleLabel}:${index}`}>
+                      <p>{index + 1}. {reservation.subjectLabel} · {reservation.scheduleLabel} · {reservation.placeLabel}</p>
+                      {reservation.className && reservation.teacherLabel ? <p className="text-muted-foreground">수업: {reservation.className} · 담당: {reservation.teacherLabel}</p> : null}
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            ) : null}
             {preview.facts.admissionPlans?.map((plan, index) => (
               <section key={`${plan.subjectLabel}:${plan.className}:${index}`} className="rounded-md border p-3">
                 <dl className="grid gap-1">
