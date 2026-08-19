@@ -99,7 +99,10 @@ export function createRegistrationCustomerMessageBundleSourceResolver(dependenci
         sourceId: source.taskId,
         taskId: source.taskId,
         studentName: source.studentName,
-        facts: rendered.facts,
+        facts: Object.freeze({
+          subjectLabel: rendered.facts.reservations.map((item) => item.subjectLabel).join(", "),
+          reservations: rendered.facts.reservations,
+        }),
         body: rendered.body,
         buttons: rendered.buttons.map((button) => Object.freeze({
           name: button.name,

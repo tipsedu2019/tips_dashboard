@@ -13,6 +13,7 @@ import type {
 } from "./registration-customer-message-contract.ts"
 import {
   assertRegistrationCustomerMessagePublicPayload,
+  isRegistrationCustomerMessageBundleKind,
   parseRegistrationObservationSolapiReadiness,
 } from "./registration-customer-message-contract.ts"
 
@@ -106,7 +107,9 @@ export function createRegistrationCustomerMessageClient(
 ): RegistrationCustomerMessageClient {
   return Object.freeze({
     preview(target: RegistrationCustomerMessageTarget, signal?: AbortSignal) {
-      return requestJson<RegistrationCustomerMessagePreviewResponse>(options, "/api/solapi/registration/preview", {
+      return requestJson<RegistrationCustomerMessagePreviewResponse>(options, isRegistrationCustomerMessageBundleKind(target.messageKind)
+        ? "/api/solapi/registration/bundles/preview"
+        : "/api/solapi/registration/preview", {
         method: "POST",
         body: JSON.stringify({ messageKind: target.messageKind, sourceId: target.sourceId }),
         signal,

@@ -1033,8 +1033,8 @@ export function RegistrationAppointmentEditor({
                 onClick={() => {
                   if (!appointment || customerMessageBlocked) return
                   onOpenCustomerMessage?.({
-                    messageKind: kind === "level_test" ? "level_test_booking" : "visit_consultation_booking",
-                    sourceId: appointment.id,
+                    messageKind: kind === "level_test" ? "level_test_booking_bundle" : "visit_consultation_booking_bundle",
+                    sourceId: taskId,
                   })
                 }}
               >

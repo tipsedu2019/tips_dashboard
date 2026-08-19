@@ -208,6 +208,33 @@ test("customer message client preserves the server error code", async () => {
   )
 })
 
+test("customer message client requests the bundle preview endpoint for task-scoped reservations", async () => {
+  const requests = []
+  const client = createRegistrationCustomerMessageClient({
+    getAccessToken: async () => "test-session-token",
+    fetch: async (url, init) => {
+      requests.push({ url, init })
+      return response({
+        ok: true,
+        previewId: null,
+        expiresAt: null,
+        messageKind: "level_test_booking_bundle",
+        studentName: "테스트",
+        recipientLast4: "0000",
+        facts: { subjectLabel: "영어, 수학", reservations: [] },
+        body: "묶음 미리보기",
+        buttons: [],
+        readiness: { runtimeReady: true, activationMode: "off", activationEligible: false, credentialsConfigured: false, pfConfigured: false, templateConfigured: false, templateVerified: false, verifiedAt: null, sourceValid: true, sendAllowed: false, blockers: ["activation_off"] },
+        latestMessage: null,
+      })
+    },
+  })
+
+  await client.preview({ messageKind: "level_test_booking_bundle", sourceId: TASK_ID })
+  assert.equal(requests[0].url, "/api/solapi/registration/bundles/preview")
+  assert.deepEqual(JSON.parse(requests[0].init.body), { messageKind: "level_test_booking_bundle", sourceId: TASK_ID })
+})
+
 test("customer message errors use stable operator-facing Korean guidance", () => {
   const cases = [
     [

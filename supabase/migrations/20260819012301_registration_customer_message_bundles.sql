@@ -104,7 +104,7 @@ create table dashboard_private.registration_customer_message_bundle_items (
   subject text not null check (subject in ('영어', '수학', '과학')),
   scheduled_at timestamptz not null,
   service_date date not null,
-  place text not null check (pg_catalog.nullif(pg_catalog.btrim(place), '') is not null),
+  place text not null check (nullif(pg_catalog.btrim(place), '') is not null),
   class_name text,
   teacher_name text,
   source_fact_hash text not null check (source_fact_hash ~ '^[a-f0-9]{64}$'),

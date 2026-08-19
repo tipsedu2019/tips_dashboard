@@ -764,11 +764,12 @@ export function RegistrationApplication({
       ? customerMessageTarget.sourceId === detail.task.id
       : customerMessageTarget.messageKind === "waiting_notice"
         ? orderedTracks.some((track) => track.id === customerMessageTarget.sourceId)
-        : customerMessageTarget.messageKind === "observation_booking"
+        : customerMessageTarget.messageKind === "observation_booking_bundle"
           ? activeObservationDetail?.track.taskId === detail.task.id
-            && activeObservationDetail.currentObservation?.taskId === detail.task.id
-            && activeObservationDetail.currentObservation.trackId === activeObservationDetail.track.trackId
-            && activeObservationDetail.currentObservation.observationId === customerMessageTarget.sourceId
+            && customerMessageTarget.sourceId === detail.task.id
+        : customerMessageTarget.messageKind === "level_test_booking_bundle"
+          || customerMessageTarget.messageKind === "visit_consultation_booking_bundle"
+          ? customerMessageTarget.sourceId === detail.task.id
         : detail.appointments.some((appointment) => appointment.id === customerMessageTarget.sourceId)
   ) ? customerMessageTarget : null
   const admissionApplicationState = getRegistrationAdmissionApplicationState({

@@ -23,6 +23,13 @@ export const REGISTRATION_CUSTOMER_MESSAGE_BUNDLE_KINDS = Object.freeze([
 export type RegistrationCustomerMessageBundleKind =
   (typeof REGISTRATION_CUSTOMER_MESSAGE_BUNDLE_KINDS)[number]
 
+export function isRegistrationCustomerMessageBundleKind(
+  value: unknown,
+): value is RegistrationCustomerMessageBundleKind {
+  return typeof value === "string"
+    && (REGISTRATION_CUSTOMER_MESSAGE_BUNDLE_KINDS as readonly string[]).includes(value)
+}
+
 export const REGISTRATION_CUSTOMER_MESSAGE_BUNDLE_STATES = Object.freeze([
   "scheduled",
   "processing",
