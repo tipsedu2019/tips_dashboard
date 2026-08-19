@@ -3324,7 +3324,7 @@ export function createRegistrationTrackService(
     trackId: string
     rows: RegistrationEnrollmentRowInput[]
     requestKey: string
-  }): Promise<{ trackId: string; rows: RegistrationEnrollmentRowInput[] }> {
+  }): Promise<{ trackId: string; rows: RegistrationEnrollmentRowInput[]; externalReconciliationRequired: boolean }> {
     const payloadRows = input.rows.map(registrationEnrollmentRowPayload)
     const result = await callRpc<Row>("save_registration_enrollment_details_v1", {
       p_track_id: input.trackId,
@@ -3334,6 +3334,7 @@ export function createRegistrationTrackService(
     return {
       trackId: text(value(result, "track_id", "trackId")),
       rows: rows(value(result, "rows")).map(mapRegistrationEnrollmentRowInput),
+      externalReconciliationRequired: Boolean(value(result, "external_reconciliation_required", "externalReconciliationRequired")),
     }
   }
 

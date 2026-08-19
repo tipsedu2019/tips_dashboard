@@ -384,6 +384,7 @@ export function RegistrationEnrollmentEditor({
   const [rowsValidationError, setRowsValidationError] = useState("")
   const [cancellationValidationError, setCancellationValidationError] = useState("")
   const [enrollmentHistoryOpen, setEnrollmentHistoryOpen] = useState(false)
+  const [externalReconciliationRequired, setExternalReconciliationRequired] = useState(false)
   const [matchingObservation, setMatchingObservation] = useState<RegistrationObservationFeedbackDetail | null>(null)
   const currentMatchingObservation = permissions.canManage && matchingObservation?.trackId === track.id
     ? matchingObservation
@@ -406,7 +407,6 @@ export function RegistrationEnrollmentEditor({
   const openBatch = admissionBatches.find((batch) => !["completed", "canceled"].includes(batch.status)) || null
   const trackHasOpenBatch = Boolean(openBatch && trackEnrollments.some((enrollment) => enrollment.admissionBatchId === openBatch.id))
   const canEditRows = permissions.canManage
-    && !trackHasOpenBatch
     && !rowsRefreshPending
   const selectedCancelEnrollment = trackEnrollments.find((item) => item.id === cancelEnrollmentId) || null
   const selectedEnrollmentCancellation = getRegistrationEnrollmentCancellationState({
@@ -708,7 +708,8 @@ export function RegistrationEnrollmentEditor({
     setSaving(true)
     onWarning("")
     try {
-      await saveRegistrationEnrollmentDetails({ trackId: track.id, rows, requestKey })
+      const saved = await saveRegistrationEnrollmentDetails({ trackId: track.id, rows, requestKey })
+      setExternalReconciliationRequired(saved.externalReconciliationRequired)
       initialDraftRowsRef.current = JSON.stringify(draftRows)
       persistedRegistrationEnrollmentDrafts.delete(enrollmentDraftScopeKey)
       submissionKeys.clear("enrollment-rows", logicalId)
@@ -919,6 +920,7 @@ export function RegistrationEnrollmentEditor({
       ) : null}
       </div>
       {rowsValidationError ? <p role="alert" className="text-xs text-destructive">{rowsValidationError}</p> : null}
+      {externalReconciliationRequired || trackHasOpenBatch ? <p className="text-xs text-muted-foreground">외부 반영 정정 필요 · 저장한 수정 내용은 입학 이력을 바꾸지 않습니다.</p> : null}
 
       {rowsRefreshPending ? (
         <RegistrationRefreshAlert>
