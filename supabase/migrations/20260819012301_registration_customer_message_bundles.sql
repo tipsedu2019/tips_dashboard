@@ -23,8 +23,8 @@ security definer
 set search_path = ''
 as $$
 begin
-  if pg_catalog.regexp_replace(pg_catalog.coalesce(new.parent_phone, ''), '[^0-9]', '', 'g')
-    is distinct from pg_catalog.regexp_replace(pg_catalog.coalesce(old.parent_phone, ''), '[^0-9]', '', 'g') then
+  if pg_catalog.regexp_replace(coalesce(new.parent_phone, ''), '[^0-9]', '', 'g')
+    is distinct from pg_catalog.regexp_replace(coalesce(old.parent_phone, ''), '[^0-9]', '', 'g') then
     new.customer_message_recipient_revision := old.customer_message_recipient_revision + 1;
   else
     new.customer_message_recipient_revision := old.customer_message_recipient_revision;
@@ -267,7 +267,7 @@ begin
   into v_items, v_count, v_subject_count
   from ordered;
 
-  if pg_catalog.coalesce(v_count, 0) = 0 or v_count > 3 then
+  if coalesce(v_count, 0) = 0 or v_count > 3 then
     raise exception 'registration_customer_message_bundle_source_ineligible' using errcode = '22023';
   end if;
   if v_subject_count <> v_count then
@@ -295,7 +295,7 @@ begin
     raise exception 'registration_customer_message_bundle_input_invalid' using errcode = '22023';
   end if;
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
-    p_task_id::text || ':' || p_reservation_kind || ':' || p_delivery_kind || ':' || pg_catalog.coalesce(p_service_date::text, ''), 0
+    p_task_id::text || ':' || p_reservation_kind || ':' || p_delivery_kind || ':' || coalesce(p_service_date::text, ''), 0
   ));
   v_items := dashboard_private.collect_registration_customer_message_bundle_items_v1(
     p_task_id, p_reservation_kind, p_delivery_kind, p_service_date, p_now
@@ -399,7 +399,7 @@ begin
     'serviceDate', v_bundle.service_date, 'recipientRevision', v_bundle.recipient_revision,
     'sourceFingerprint', v_bundle.source_fingerprint,
     'studentName', (select task.student_name from public.ops_tasks task where task.id = p_task_id),
-    'parentPhoneDigits', pg_catalog.regexp_replace(pg_catalog.coalesce(v_detail.parent_phone, ''), '[^0-9]', '', 'g'),
+    'parentPhoneDigits', pg_catalog.regexp_replace(coalesce(v_detail.parent_phone, ''), '[^0-9]', '', 'g'),
     'items', (select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
       'sourceKind', item.source_kind, 'sourceId', item.source_id, 'sourceRevision', item.source_revision,
       'trackId', item.track_id, 'activityId', item.activity_id, 'subject', item.subject,
@@ -431,7 +431,7 @@ begin
     select profile.role in ('admin', 'staff') into v_is_staff
     from public.profiles profile where profile.id = auth.uid();
   end if;
-  if pg_catalog.coalesce(v_is_staff, false) is not true then
+  if coalesce(v_is_staff, false) is not true then
     raise exception 'registration_customer_message_bundle_runtime_forbidden' using errcode = '42501';
   end if;
   select * into strict v_runtime from dashboard_private.registration_customer_message_bundle_runtime where singleton;
