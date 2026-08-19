@@ -194,7 +194,7 @@ test("registration schedule choices preserve a normalized lesson-session UUID wi
   }]);
 });
 
-test("registration schedule choices omit a legacy schedule UUID from the normalized lesson-session field", () => {
+test("registration schedule choices canonicalize a legacy UUID key to date and sequence", () => {
   // Production break caught: a legacy schedule's own UUID is sent as a
   // class_lesson_sessions UUID and enrollment saving rejects the start date.
   assert.deepEqual(getSelectableRegistrationScheduleSessions({
@@ -206,7 +206,7 @@ test("registration schedule choices omit a legacy schedule UUID from the normali
       sessionNumber: 1,
     }],
   }, { normalized: false }), [{
-    value: "10000000-0000-4000-8000-000000000011",
+    value: "2026-08-03:1",
     dateKey: "2026-08-03",
     sessionNumber: 1,
     sessionLabel: "1회차",

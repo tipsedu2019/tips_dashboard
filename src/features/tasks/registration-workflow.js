@@ -232,7 +232,9 @@ export function getSelectableRegistrationScheduleSessions(schedulePlan, options 
       : text(entry.id || entry.lesson_session_id || entry.lessonSessionId);
     const normalizedSessionKey = text(entry.sessionKey || entry.session_key);
     if (!dateKey || (sessionNumber <= 0 && (!lessonSessionId || !normalizedSessionKey))) return [];
-    const value = normalizedSessionKey || `${dateKey}:${sessionNumber}`;
+    const value = options.normalized === false
+      ? `${dateKey}:${sessionNumber}`
+      : normalizedSessionKey || `${dateKey}:${sessionNumber}`;
     if (seen.has(value)) return [];
     seen.add(value);
     return [{
