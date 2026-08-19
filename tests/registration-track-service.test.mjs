@@ -2483,6 +2483,36 @@ test("a stalled case-detail read times out and a forced retry can start fresh", 
   assert.equal(harness.queries.length, 12);
 });
 
+test("a stalled appointment cancellation returns control to the editor", async () => {
+  const { createRegistrationTrackService } = await loadFactory({ setTimeout, clearTimeout });
+  const stalledCancellation = deferred();
+  const harness = createClient({
+    rpcHandler(name) {
+      if (name === "cancel_registration_appointment") return stalledCancellation.promise;
+      return { data: { ok: true }, error: null };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({ requestTimeoutMs: 5 }));
+
+  const outcome = await Promise.race([
+    service.cancelRegistrationAppointment({
+      appointmentId: "appointment-1",
+      expectedNotificationRevision: 1,
+      reason: "예약 취소",
+      requestKey: "cancel-request-key",
+    }).then(
+      () => ({ kind: "resolved" }),
+      (error) => ({ kind: "rejected", error }),
+    ),
+    new Promise((resolve) => setTimeout(() => resolve({ kind: "still_pending" }), 30)),
+  ]);
+
+  assert.equal(outcome.kind, "rejected");
+  assert.equal(outcome.error?.code, "REGISTRATION_REQUEST_TIMEOUT");
+  assert.match(outcome.error?.message || "", /registration_mutation_timeout/);
+  assert.deepEqual(harness.rpcCalls.map(([name]) => name), ["cancel_registration_appointment"]);
+});
+
 test("a runtime-probe failure aborts the parallel case-detail reads", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const stalledReads = deferred();

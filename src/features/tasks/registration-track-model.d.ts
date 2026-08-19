@@ -139,6 +139,13 @@ export function canEditRegistrationAppointment(
   activities?: readonly RegistrationAppointmentActivitySummary[],
 ): boolean
 
+export function canCancelRegistrationSharedAppointment(
+  kind: "level_test" | "visit_consultation",
+  appointment: { id?: string | null, status?: "scheduled" | "completed" | "canceled" | null } | null | undefined,
+  tracks?: readonly RegistrationTrackSummary[],
+  activities?: readonly RegistrationAppointmentActivitySummary[],
+): boolean
+
 export function getEligibleSharedAppointmentTracks<T extends RegistrationTrackSummary>(
   kind: "level_test" | "visit_consultation",
   tracks?: readonly T[],

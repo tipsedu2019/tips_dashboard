@@ -1,8 +1,10 @@
 import test from "node:test"
 import assert from "node:assert/strict"
+import { readFile } from "node:fs/promises"
 import {
   applyRegistrationEnrollmentClassSelection,
   canEditRegistrationAppointment,
+  canCancelRegistrationSharedAppointment,
   createRegistrationEnrollmentDraft,
   deriveRegistrationParentState,
   getEligibleSharedAppointmentTracks,
@@ -64,6 +66,33 @@ test("allowed actions are returned as a fresh view of the authoritative status m
     "schedule_visit",
   ])
   assert.deepEqual(getAllowedRegistrationTrackActions("unknown"), [])
+})
+
+test("shared appointment cancellation requires a currently cancellable scheduled participant", async () => {
+  const appointment = { id: "appointment-1", status: "scheduled" }
+  const activities = [{ appointmentId: "appointment-1", trackId: "english", status: "scheduled" }]
+
+  assert.equal(canCancelRegistrationSharedAppointment(
+    "level_test",
+    appointment,
+    [{ id: "english", status: "level_test_scheduled" }],
+    activities,
+  ), true)
+  assert.equal(canCancelRegistrationSharedAppointment(
+    "level_test",
+    appointment,
+    [{ id: "english", status: "inquiry" }],
+    activities,
+  ), false)
+  assert.equal(canCancelRegistrationSharedAppointment(
+    "visit_consultation",
+    appointment,
+    [{ id: "english", status: "consultation_waiting" }],
+    activities,
+  ), false)
+
+  const editor = await readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
+  assert.match(editor, /canCancelRegistrationSharedAppointment/)
 })
 
 test("replace remaining tab scope keeps immutable participants while scheduled draft subjects change", () => {

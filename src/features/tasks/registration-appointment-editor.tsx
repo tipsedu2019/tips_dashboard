@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
 import {
+  canCancelRegistrationSharedAppointment,
   getEligibleSharedAppointmentTracks,
   getLatestRegistrationLevelTestActivityIds,
   getRegistrationAppointmentEditMode,
@@ -207,6 +208,12 @@ export function RegistrationAppointmentEditor({
       ? matchingActivities.filter((activity) => activity.appointmentId === appointment.id)
       : []
   ), [appointment, matchingActivities])
+  const canCancelAppointment = canCancelRegistrationSharedAppointment(
+    kind,
+    appointment,
+    eligibleTracks,
+    currentActivities,
+  )
   const editMode = getRegistrationAppointmentEditMode(currentActivities)
   const selectableTracks = getEligibleSharedAppointmentTracks(
     kind,
@@ -298,6 +305,10 @@ export function RegistrationAppointmentEditor({
     if (!pendingConfirmation && !pendingCancellation) return
     window.requestAnimationFrame(() => confirmationRef.current?.focus())
   }, [pendingCancellation, pendingConfirmation])
+
+  useEffect(() => {
+    if (!canCancelAppointment) setPendingCancellation(false)
+  }, [canCancelAppointment])
 
   useEffect(() => {
     const workerCreatedAt = Date.parse(String(effectiveProcessingReadiness?.workerHeartbeat?.createdAt || ""))
@@ -814,7 +825,7 @@ export function RegistrationAppointmentEditor({
   }
 
   async function confirmAppointmentCancellation() {
-    if (!pendingCancellation || !appointment || appointment.status !== "scheduled" || saving) return
+    if (!pendingCancellation || !appointment || !canCancelAppointment || saving) return
     const logicalDraft = JSON.stringify({
       appointmentId: appointment.id,
       expectedNotificationRevision: appointment.notificationRevision,
@@ -1001,7 +1012,7 @@ export function RegistrationAppointmentEditor({
         </div>
 
         <div className="flex flex-wrap justify-end gap-2">
-          {appointment?.status === "scheduled" ? (
+          {canCancelAppointment ? (
             <Button
               type="button"
               className="min-h-11 min-w-11"

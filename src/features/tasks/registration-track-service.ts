@@ -1881,7 +1881,7 @@ function registrationRequestTimeout(message: string) {
 }
 
 function withRegistrationRequestTimeout<T>(
-  request: Promise<T>,
+  request: PromiseLike<T>,
   timeoutMs: number,
   message: string,
   onTimeout?: () => void,
@@ -1894,7 +1894,7 @@ function withRegistrationRequestTimeout<T>(
     }, timeoutMs)
   })
 
-  return Promise.race([request, timeout]).finally(() => {
+  return Promise.race([Promise.resolve(request), timeout]).finally(() => {
     if (timeoutHandle !== null) clearTimeout(timeoutHandle)
   })
 }
@@ -2728,8 +2728,10 @@ export function createRegistrationTrackService(
   ): Promise<T> {
     if (!callOptions.runtimeChecked) await requireReadyRuntime()
     const request = client.rpc(name, args)
-    const { data, error } = await (
-      typeof request.retry === "function" ? request.retry(false) : request
+    const { data, error } = await withRegistrationRequestTimeout(
+      typeof request.retry === "function" ? request.retry(false) : request,
+      requestTimeoutMs,
+      "registration_mutation_timeout",
     )
     if (error) throw error
     clearCaches()

@@ -126,6 +126,27 @@ export function canEditRegistrationAppointment() {
   return true
 }
 
+export function canCancelRegistrationSharedAppointment(
+  kind,
+  appointment,
+  tracks = [],
+  activities = [],
+) {
+  const appointmentId = String(appointment?.id || "")
+  if (!appointmentId || appointment?.status !== "scheduled") return false
+
+  const requiredTrackStatus = kind === "level_test"
+    ? "level_test_scheduled"
+    : "visit_consultation_scheduled"
+  const trackStatusById = new Map(tracks.map((track) => [String(track?.id || ""), track?.status]))
+
+  return activities.some((activity) => (
+    activity?.appointmentId === appointmentId
+    && activity?.status === "scheduled"
+    && trackStatusById.get(String(activity?.trackId || "")) === requiredTrackStatus
+  ))
+}
+
 export function getEligibleSharedAppointmentTracks(
   kind,
   tracks = [],
