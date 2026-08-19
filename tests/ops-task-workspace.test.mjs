@@ -1170,6 +1170,11 @@ test("등록 예약 달력은 목록 흐름과 분리되고 딥링크 예약을 
   );
   assert.match(
     workspaceSource,
+    /const openRegistrationCalendarItem = useCallback\([\s\S]*?openRegistrationAppointment\(item\.taskId, item\.appointmentId, item\.trackIds\[0\] \|\| null, \{ allowDirectLoad: true \}\)/,
+    "달력이 직접 읽은 예약은 목록 캐시에 없어도 상세를 열어야 합니다.",
+  );
+  assert.match(
+    workspaceSource,
     /catch(?: \(error\))? \{[\s\S]*?selectionKey[\s\S]*?setRegistrationDetailLoadError\("등록 예약 상세를 불러오지 못했습니다\."\)/,
     "예약 상세 실패는 내부 오류 문자열을 사용자에게 그대로 노출하면 안 됩니다.",
   );

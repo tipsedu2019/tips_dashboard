@@ -10870,7 +10870,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
     const queryString = canonicalUrl.searchParams.toString()
     writeTaskHistoryUrl(`${canonicalUrl.pathname}${queryString ? `?${queryString}` : ""}`, "push")
-    void openRegistrationAppointment(item.taskId, item.appointmentId, item.trackIds[0] || null)
+    void openRegistrationAppointment(item.taskId, item.appointmentId, item.trackIds[0] || null, { allowDirectLoad: true })
   }, [openRegistrationAppointment, openRegistrationObservation, writeTaskHistoryUrl])
 
   const handleSelectRegistrationTrack = useCallback((trackId: string) => {
