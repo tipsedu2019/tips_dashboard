@@ -60,6 +60,10 @@ const REMOTE_HISTORY_ALIGNED_SQL = Object.freeze([
   ["20260811142055_science_consultation_requests.sql", "340b7d2c8d53ade12c7a2f9df98669218826d56a8b6e02f920e897788378d547"],
   ["20260811142152_science_consultation_requests_deny_policy.sql", "e5abe58f49fe926eb3e35a4471cd9adb49c052f0d677453ffd0f48d80a88c491"],
   ["20260811142353_science_consultation_rate_limits.sql", "aa177ab5d3151d7f2fa55883f7efc8526999828ee5cbd210693f5ddafc09fc30"],
+  ["20260819122006_registration_notion_style_editing.sql", "ff294e4d901d25d0c866b1045f6abedb5245172799c09d7d622de269a75a22ed"],
+  ["20260819122911_registration_enrollment_external_correction.sql", "ef1885dfe3c8b964e4ca8994a9836ebc43220307c73fa315dface239aa0ce848"],
+  ["20260819151002_registration_admission_preview_status_compatibility.sql", "c292103602b495efe7b6c49c3e92f7b92ebd264cf52d2d781871a3542c306eeb"],
+  ["20260819152417_registration_admission_preview_active_resolver_status_compatibility.sql", "0f2653938f2f5726e7c4ed6c494fa8862230f8cd588208667cd9d9595cb98bd9"],
 ])
 const OBSOLETE_REMOTE_HISTORY_SQL = Object.freeze([
   "20260730143000_notification_google_chat_connection_catalog.sql",
@@ -71,6 +75,10 @@ const OBSOLETE_REMOTE_HISTORY_SQL = Object.freeze([
   "20260808043659_registration_level_test_summary_consultation_chat.sql",
   "20260808051000_registration_director_retry_circuit_breaker.sql",
   "20260808120425_registration_customer_message_subject_admission_details.sql",
+  "20260819121351_registration_notion_style_editing.sql",
+  "20260819122735_registration_enrollment_external_correction.sql",
+  "20260819150944_registration_admission_preview_status_compatibility.sql",
+  "20260819152328_registration_admission_preview_active_resolver_status_compatibility.sql",
 ])
 
 const EXPECTED_SQL = Object.freeze([
@@ -335,8 +343,8 @@ test("원격 이력과 정렬한 migration identity와 바이트를 독립 상�
 })
 
 test("원격 이력 정렬 migration의 누락·변조·구 timestamp 재등장을 거부한다", async () => {
-  const alignedFile = "20260807030434_registration_korean_template_renderer.sql"
-  const obsoleteFile = "20260807025103_registration_korean_template_renderer.sql"
+  const alignedFile = "20260819122006_registration_notion_style_editing.sql"
+  const obsoleteFile = "20260819121351_registration_notion_style_editing.sql"
   assert.ok(
     REMOTE_HISTORY_ALIGNED_SQL.some(([file]) => file === alignedFile),
     `missing task-specific aligned fixture identity: ${alignedFile}`,

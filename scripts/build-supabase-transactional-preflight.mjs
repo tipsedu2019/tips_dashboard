@@ -3,7 +3,7 @@ import { isAbsolute, relative, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 
 const MIGRATION_VERSION_PATTERN = /^(\d{14})_.+\.sql$/
-const TRANSACTION_CONTROL_PATTERN = /^(?:begin\b|start\s+transaction\b|commit\b|end\b|rollback\b|abort\b)/i
+const TRANSACTION_CONTROL_PATTERN = /^(?:begin\b|start\s+transaction\b|commit\b|end\b|rollback\b|abort\b|prepare\s+transaction\b(?!.*\bas\b))/i
 
 function fail(code) {
   throw new Error(code)
@@ -155,7 +155,7 @@ function maskSqlOpaqueRegions(source) {
 
 function sqlStatements(source) {
   const masked = maskSqlOpaqueRegions(source)
-  if (masked.split(/\r?\n/).some((line) => /^\s*\\/.test(line))) {
+  if (masked.includes("\\")) {
     fail("transactional_preflight_migration_escape_forbidden")
   }
 

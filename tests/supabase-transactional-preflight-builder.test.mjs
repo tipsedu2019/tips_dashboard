@@ -257,3 +257,87 @@ test("migration이나 focused test가 transaction 밖으로 탈출하려 하면 
     { message: "transactional_preflight_test_rollback_required" },
   )
 })
+
+test("opaque SQL 밖의 psql meta command와 prepared transaction 우회를 모두 거부한다", async () => {
+  const { buildTransactionalPreflightSql } = await import(builderUrl)
+
+  for (const pendingSource of [
+    [
+      "begin;",
+      "select 'COMMIT' \\gexec",
+      "create table public.escape_probe(id integer);",
+      "commit;",
+      "",
+    ].join("\n"),
+    "begin;\nselect 1 \\connect postgres\ncommit;\n",
+    "begin;\nselect 1 \\i /tmp/escape.sql\ncommit;\n",
+  ]) {
+    const fixture = await createFixture({ pendingSource })
+    await assert.rejects(
+      buildTransactionalPreflightSql({
+        repoRoot: fixture.root,
+        migrationLedger: fixture.ledger,
+        forwardMigrationsPath: "supabase/migrations",
+        focusedTestPath: "supabase/tests/focused.sql",
+      }),
+      { message: "transactional_preflight_migration_escape_forbidden" },
+    )
+  }
+
+  const unsafeFocusedTest = await createFixture({
+    focusedSource: [
+      "begin;",
+      "set local role postgres;",
+      "select 'ROLLBACK' \\gexec",
+      "select no_plan();",
+      "rollback;",
+      "",
+    ].join("\n"),
+  })
+  await assert.rejects(
+    buildTransactionalPreflightSql({
+      repoRoot: unsafeFocusedTest.root,
+      migrationLedger: unsafeFocusedTest.ledger,
+      forwardMigrationsPath: "supabase/migrations",
+      focusedTestPath: "supabase/tests/focused.sql",
+    }),
+    { message: "transactional_preflight_migration_escape_forbidden" },
+  )
+
+  const preparedTransaction = await createFixture({
+    pendingSource: [
+      "begin;",
+      "select 'before_prepare';",
+      "prepare transaction 'transactional_preflight_escape';",
+      "commit;",
+      "",
+    ].join("\n"),
+  })
+  await assert.rejects(
+    buildTransactionalPreflightSql({
+      repoRoot: preparedTransaction.root,
+      migrationLedger: preparedTransaction.ledger,
+      forwardMigrationsPath: "supabase/migrations",
+      focusedTestPath: "supabase/tests/focused.sql",
+    }),
+    { message: "transactional_preflight_migration_escape_forbidden" },
+  )
+
+  const safePreparedStatement = await createFixture({
+    pendingSource: [
+      "begin;",
+      "prepare transaction AS SELECT 1;",
+      "execute transaction;",
+      "deallocate transaction;",
+      "commit;",
+      "",
+    ].join("\n"),
+  })
+  const safePreparedResult = await buildTransactionalPreflightSql({
+    repoRoot: safePreparedStatement.root,
+    migrationLedger: safePreparedStatement.ledger,
+    forwardMigrationsPath: "supabase/migrations",
+    focusedTestPath: "supabase/tests/focused.sql",
+  })
+  assert.match(safePreparedResult.sql, /prepare transaction AS SELECT 1;/i)
+})
