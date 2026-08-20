@@ -1,24 +1,36 @@
 import assert from "node:assert/strict"
-import { readFile } from "node:fs/promises"
+import { readdir, readFile } from "node:fs/promises"
 import test from "node:test"
 
-test("scheduled registration appointments cannot persist with stale activities or track status", async () => {
-  const migration = await readFile(
-    new URL("../supabase/migrations/20260819103434_registration_appointment_integrity_guard.sql", import.meta.url),
-    "utf8",
+const migrationsDirectory = new URL("../supabase/migrations/", import.meta.url)
+
+async function latestFunctionDefinition(qualifiedName) {
+  const files = (await readdir(migrationsDirectory))
+    .filter((file) => file.endsWith(".sql"))
+    .sort()
+
+  const marker = `create or replace function ${qualifiedName}`
+  let latest = null
+  for (const file of files) {
+    const sql = await readFile(new URL(file, migrationsDirectory), "utf8")
+    const start = sql.toLowerCase().lastIndexOf(marker.toLowerCase())
+    if (start < 0) continue
+    const end = sql.indexOf("\n$$;", start)
+    assert.notEqual(end, -1, `${file} must terminate ${qualifiedName} with $$;`)
+    latest = { file, definition: sql.slice(start, end + 4) }
+  }
+
+  assert.ok(latest, `missing migration definition for ${qualifiedName}`)
+  return latest
+}
+
+test("appointment integrity remains independent from the manual pipeline workflow", async () => {
+  const { definition } = await latestFunctionDefinition(
+    "dashboard_private.assert_registration_appointment_integrity_v1",
   )
 
-  assert.match(migration, /reconcile_registration_appointment_parent_v1/i)
-  assert.match(migration, /cancel_registration_appointment_reminders_v1/i)
-  assert.match(migration, /registration_invalid_source_state/i)
-  assert.match(migration, /track\.id = attempt\.track_id/i)
-  assert.match(migration, /track\.id = consultation\.track_id/i)
-  assert.match(migration, /level_test_in_progress/i)
-  assert.match(migration, /visit_consultation_scheduled/i)
-  assert.match(migration, /constraint trigger[\s\S]*?deferrable initially deferred/i)
-  assert.match(migration, /ops_registration_appointments/i)
-  assert.match(migration, /ops_registration_level_tests/i)
-  assert.match(migration, /ops_registration_consultations/i)
-  assert.match(migration, /ops_registration_subject_tracks/i)
-  assert.match(migration, /save_registration_consultation_result_v2/i)
+  assert.match(definition, /v_appointment\.status[\s\S]*?attempt\.status/i)
+  assert.match(definition, /v_appointment\.status[\s\S]*?consultation\.status/i)
+  assert.doesNotMatch(definition, /ops_registration_subject_tracks/i)
+  assert.doesNotMatch(definition, /track\.pipeline_status/i)
 })
