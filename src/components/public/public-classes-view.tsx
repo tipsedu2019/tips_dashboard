@@ -27,8 +27,8 @@ type PublicClassItem = {
   classroom?: string;
   schedule?: string;
   capacity?: number;
-  studentIds?: string[];
-  waitlistIds?: string[];
+  enrollmentCount?: number;
+  waitlistCount?: number;
   fee?: number;
   tuition?: number;
 };
@@ -165,7 +165,7 @@ export function PublicClassesView({
       ) : (
         <div className="grid gap-3">
           {filteredClasses.map((item, index) => {
-            const enrolled = Array.isArray(item.studentIds) ? item.studentIds.length : 0;
+            const enrolled = Number(item.enrollmentCount || 0);
             const capacity = Number(item.capacity || 0);
 
             return (
