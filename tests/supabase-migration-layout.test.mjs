@@ -25,7 +25,13 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = []
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "d2ee5d1a1d55207d78870a7fc5b7ab0fea7e44064f2955a9fb92bda8933bf807"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "e14a8005276824e6b2a8c67330efd476eff111784f2f79cc073b1c6bb30be920"
+const FOCUSED_PGTAP_PATH =
+  "supabase/tests/registration_level_test_result_parent_reconciliation_test.sql"
+const LINKED_MIGRATION_LEDGER_PATH = "\${RUNNER_TEMP}/supabase-migration-list.txt"
+const PINNED_SUPABASE_CLI_VERSION = "2.107.0"
+const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
+  "ea233b337be698cee5bbca0795ee3e63b9dd154948c515c03cb72f191b3d103c"
 const PREPARE_ACL_MIGRATION_FILE = "20260722130000_notification_prepare_acl_hardening.sql"
 const PREPARE_ACL_MIGRATION_SHA256 = "970d203f816736b05ed56d973d415a75e00e2f659f55f84c7831c60db8c261a3"
 const CLAIM_RECONCILE_BASELINE_FILE = "20260716112000_notification_control_plane_worker_rpc.sql"
@@ -182,6 +188,128 @@ function workflowWithEarlySecretScope({
   ].join("\n")
 }
 
+function workflowWithTransactionalPreflight({
+  staticJobEnvLines = [],
+  transactionalNeeds = "db-preflight",
+  transactionalSecretEnvLines = [
+    "          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
+    "          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}",
+  ],
+  linkSecretEnvLines = [
+    "          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
+    "          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}",
+  ],
+  builderCommand = `node scripts/build-supabase-transactional-preflight.mjs --output "\${RUNNER_TEMP}/supabase-transactional-preflight.sql" --migration-ledger "${LINKED_MIGRATION_LEDGER_PATH}" --forward-migrations supabase/migrations --focused-test ${FOCUSED_PGTAP_PATH} --rollback`,
+  pgTapCommand = 'supabase test db --linked "${RUNNER_TEMP}/supabase-transactional-preflight.sql"',
+  pushNeeds = "db-transactional-preflight",
+} = {}) {
+  const secretValidation = [
+    "      - name: Validate required secrets",
+    "        env:",
+    ...transactionalSecretEnvLines,
+    "        shell: bash",
+    "        run: test -n \"${SUPABASE_ACCESS_TOKEN}\" && test -n \"${SUPABASE_DB_PASSWORD}\"",
+    "",
+  ]
+
+  return [
+    "name: Supabase migration preflight",
+    "",
+    "on: workflow_dispatch",
+    "",
+    "jobs:",
+    "  db-preflight:",
+    "    runs-on: ubuntu-latest",
+    ...staticJobEnvLines,
+    "    steps:",
+    "      - name: Checkout",
+    "        uses: actions/checkout@v4",
+    "",
+    "      - name: Test Supabase migration boundary",
+    "        run: node --test tests/supabase-migration-layout.test.mjs",
+    "",
+    "      - name: Verify Supabase migration layout",
+    "        run: node scripts/verify-supabase-migration-layout.mjs",
+    "",
+    "      - name: Verify domain SQLSTATE contract",
+    "        run: node scripts/verify-domain-sqlstate-contract.mjs",
+    "",
+    "  db-transactional-preflight:",
+    "    runs-on: ubuntu-latest",
+    ...(transactionalNeeds ? [`    needs: ${transactionalNeeds}`] : []),
+    "    steps:",
+    "      - name: Checkout",
+    "        uses: actions/checkout@v4",
+    "",
+    "      - name: Setup Supabase CLI",
+    "        shell: bash",
+    "        run: |",
+    "          set -euo pipefail",
+    `          version="${PINNED_SUPABASE_CLI_VERSION}"`,
+    "          archive=\"supabase_${version}_linux_amd64.tar.gz\"",
+    "          archive_path=\"${RUNNER_TEMP}/${archive}\"",
+    "          curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 --output \"${archive_path}\" \"https://github.com/supabase/cli/releases/download/v${version}/${archive}\"",
+    `          echo "${PINNED_SUPABASE_CLI_ARCHIVE_SHA256}  \${archive_path}" | sha256sum --check --strict`,
+    "          mkdir -p \"${RUNNER_TEMP}/supabase-cli\"",
+    "          tar -xzf \"${archive_path}\" -C \"${RUNNER_TEMP}/supabase-cli\"",
+    "          echo \"${RUNNER_TEMP}/supabase-cli\" >> \"${GITHUB_PATH}\"",
+    "",
+    ...secretValidation,
+    "      - name: Resolve Supabase project ref",
+    "        run: project_ref=\"$(sed -n 's/^project_id = \\\"(.*)\\\"$/\\1/p' supabase/config.toml | head -n 1)\" && test -n \"${project_ref}\" && echo \"SUPABASE_PROJECT_REF=${project_ref}\" >> \"${GITHUB_ENV}\"",
+    "",
+    "      - name: Link project",
+    "        env:",
+    ...linkSecretEnvLines,
+    '        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"',
+    "",
+    "      - name: Capture linked migration ledger",
+    `        run: supabase migration list --linked > "${LINKED_MIGRATION_LEDGER_PATH}"`,
+    "",
+    "      - name: Build transactional pgTAP input",
+    `        run: ${builderCommand}`,
+    "",
+    "      - name: Run transactional focused pgTAP",
+    `        run: ${pgTapCommand}`,
+    "",
+    "  db-push:",
+    "    runs-on: ubuntu-latest",
+    ...(pushNeeds ? [`    needs: ${pushNeeds}`] : []),
+    "    steps:",
+    "      - name: Checkout",
+    "        uses: actions/checkout@v4",
+    "",
+    "      - name: Validate required secrets",
+    "        env:",
+    "          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
+    "          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}",
+    "        shell: bash",
+    "        run: test -n \"${SUPABASE_ACCESS_TOKEN}\" && test -n \"${SUPABASE_DB_PASSWORD}\"",
+    "",
+    "      - name: Resolve Supabase project ref",
+    "        run: project_ref=\"$(sed -n 's/^project_id = \\\"(.*)\\\"$/\\1/p' supabase/config.toml | head -n 1)\" && test -n \"${project_ref}\" && echo \"SUPABASE_PROJECT_REF=${project_ref}\" >> \"${GITHUB_ENV}\"",
+    "",
+    "      - name: Link project",
+    "        env:",
+    "          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
+    "          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}",
+    '        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"',
+    "",
+    "      - name: Push migrations",
+    "        env:",
+    "          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
+    "          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}",
+    "        run: supabase db push --linked --include-all",
+    "",
+  ].join("\n")
+}
+
+async function validateWorkflowFixture(source) {
+  const fixtureRoot = await createRepoFixture()
+  await writeFile(join(fixtureRoot, ".github", "workflows", "supabase-db-push.yml"), source)
+  return validateSupabaseMigrationLayout({ repoRoot: fixtureRoot })
+}
+
 after(async () => {
   await Promise.all(fixtureRoots.map((fixtureRoot) => rm(fixtureRoot, { force: true, recursive: true })))
 })
@@ -256,11 +384,17 @@ test("cutover SQL은 active lane 밖의 immutable quarantine에만 존재한다"
         "      - name: Test Supabase migration boundary",
         "        run: node --test tests/supabase-migration-layout.test.mjs",
         "",
+        "      - name: Test transactional safety contracts",
+        "        run: node --test tests/retryable-sqlstate-contract.test.mjs tests/supabase-transactional-preflight-builder.test.mjs",
+        "",
         "      - name: Verify Supabase migration layout",
         "        run: node scripts/verify-supabase-migration-layout.mjs",
+        "",
+        "      - name: Verify domain SQLSTATE contract",
+        "        run: node scripts/verify-domain-sqlstate-contract.mjs",
       ].join("\n"),
     ),
-    "focused boundary test must run secret-free immediately before the verifier",
+    "static migration safety contracts must run secret-free before linked DB work",
   )
   assert.ok(
     requiredWorkflow.includes(
@@ -1373,4 +1507,163 @@ test("required DB push workflow는 verifier 성공 전 Supabase secret scope를 
     assertIncludesErrorCode(errors, "db_push_workflow_secret_scope_mismatch")
     assert.ok(errors.length > 0, `${name} must be rejected`)
   }
+})
+
+test("required DB push workflow의 static preflight는 layout·verifier·SQLSTATE contract를 secret 없이 실행한다", async () => {
+  const cases = [
+    {
+      name: "layout test is missing",
+      source: workflowWithTransactionalPreflight().replace(
+        "        run: node --test tests/supabase-migration-layout.test.mjs",
+        "        run: node --test tests/other-layout.test.mjs",
+      ),
+      code: "db_push_workflow_static_preflight_layout_test_missing",
+    },
+    {
+      name: "layout verifier is missing",
+      source: workflowWithTransactionalPreflight().replace(
+        "        run: node scripts/verify-supabase-migration-layout.mjs",
+        "        run: node scripts/verify-other-layout.mjs",
+      ),
+      code: "db_push_workflow_static_preflight_layout_verifier_missing",
+    },
+    {
+      name: "domain SQLSTATE verifier is missing",
+      source: workflowWithTransactionalPreflight().replace(
+        "        run: node scripts/verify-domain-sqlstate-contract.mjs",
+        "        run: node scripts/verify-other-contract.mjs",
+      ),
+      code: "db_push_workflow_static_preflight_domain_sqlstate_contract_missing",
+    },
+    {
+      name: "static job exposes a Supabase secret",
+      source: workflowWithTransactionalPreflight({
+        staticJobEnvLines: [
+          "    env:",
+          "      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
+        ],
+      }),
+      code: "db_push_workflow_static_preflight_secret_scope_mismatch",
+    },
+  ]
+
+  for (const { name, source, code } of cases) {
+    const errors = await validateWorkflowFixture(source)
+    assertIncludesErrorCode(errors, code)
+    assert.ok(errors.length > 0, `${name} must be rejected`)
+  }
+})
+
+test("required DB push workflow의 transactional preflight는 static preflight 뒤에 pinned CLI·link·단일 SQL builder·focused pgTAP을 실행한다", async () => {
+  const defaultWorkflow = workflowWithTransactionalPreflight()
+  const defaultBuilderCommand = defaultWorkflow.match(
+    /^        run: (node scripts\/build-supabase-transactional-preflight[^\n]+)$/m,
+  )[1]
+  const cases = [
+    {
+      name: "transactional preflight does not depend on static preflight",
+      source: workflowWithTransactionalPreflight({ transactionalNeeds: null }),
+      code: "db_push_workflow_transactional_preflight_dependency_missing",
+    },
+    {
+      name: "Supabase CLI version is not pinned",
+      source: defaultWorkflow.replace(`version="${PINNED_SUPABASE_CLI_VERSION}"`, 'version="latest"'),
+      code: "db_push_workflow_transactional_preflight_cli_pin_mismatch",
+    },
+    {
+      name: "Supabase CLI archive checksum is not pinned",
+      source: defaultWorkflow.replace(PINNED_SUPABASE_CLI_ARCHIVE_SHA256, "0".repeat(64)),
+      code: "db_push_workflow_transactional_preflight_cli_pin_mismatch",
+    },
+    {
+      name: "transactional preflight validates without Supabase secrets",
+      source: workflowWithTransactionalPreflight({ transactionalSecretEnvLines: [] }),
+      code: "db_push_workflow_transactional_preflight_secret_scope_mismatch",
+    },
+    {
+      name: "transactional link does not receive Supabase secrets",
+      source: workflowWithTransactionalPreflight({ linkSecretEnvLines: [] }),
+      code: "db_push_workflow_transactional_preflight_link_secret_scope_mismatch",
+    },
+    {
+      name: "forward migration input marker drifts",
+      source: workflowWithTransactionalPreflight({
+        builderCommand: `node scripts/build-supabase-transactional-preflight.mjs --output "\${RUNNER_TEMP}/supabase-transactional-preflight.sql" --migration-ledger "${LINKED_MIGRATION_LEDGER_PATH}" --forward-migrations supabase/pending-migrations --focused-test ${FOCUSED_PGTAP_PATH} --rollback`,
+      }),
+      code: "db_push_workflow_transactional_preflight_forward_migrations_mismatch",
+    },
+    {
+      name: "linked migration ledger capture is skipped",
+      source: workflowWithTransactionalPreflight().replace(
+        `        run: supabase migration list --linked > "${LINKED_MIGRATION_LEDGER_PATH}"`,
+        "        run: echo migration ledger skipped",
+      ),
+      code: "db_push_workflow_transactional_preflight_migration_ledger_missing",
+    },
+    {
+      name: "builder does not consume linked migration ledger",
+      source: workflowWithTransactionalPreflight({
+        builderCommand: `node scripts/build-supabase-transactional-preflight.mjs --output "\${RUNNER_TEMP}/supabase-transactional-preflight.sql" --migration-ledger "\${LINKED_MIGRATION_LEDGER_PATH}" --forward-migrations supabase/migrations --focused-test ${FOCUSED_PGTAP_PATH} --rollback`,
+      }),
+      code: "db_push_workflow_transactional_preflight_migration_ledger_marker_mismatch",
+    },
+    {
+      name: "builder does not require rollback envelope",
+      source: workflowWithTransactionalPreflight({
+        builderCommand: `node scripts/build-supabase-transactional-preflight.mjs --output "\${RUNNER_TEMP}/supabase-transactional-preflight.sql" --migration-ledger "${LINKED_MIGRATION_LEDGER_PATH}" --forward-migrations supabase/migrations --focused-test ${FOCUSED_PGTAP_PATH}`,
+      }),
+      code: "db_push_workflow_transactional_preflight_rollback_marker_missing",
+    },
+    {
+      name: "builder script is skipped",
+      source: workflowWithTransactionalPreflight({ builderCommand: "echo builder skipped" }),
+      code: "db_push_workflow_transactional_preflight_builder_missing",
+    },
+    {
+      name: "focused pgTAP path drifts in builder",
+      source: workflowWithTransactionalPreflight({
+        builderCommand: `node scripts/build-supabase-transactional-preflight.mjs --output "\${RUNNER_TEMP}/supabase-transactional-preflight.sql" --migration-ledger "${LINKED_MIGRATION_LEDGER_PATH}" --forward-migrations supabase/migrations --focused-test supabase/tests/other_test.sql --rollback`,
+      }),
+      code: "db_push_workflow_transactional_preflight_focus_path_mismatch",
+    },
+    {
+      name: "focused pgTAP command is skipped",
+      source: workflowWithTransactionalPreflight({ pgTapCommand: "echo pgTAP skipped" }),
+      code: "db_push_workflow_transactional_preflight_pgtap_missing",
+    },
+    {
+      name: "linked writer does not depend on transactional preflight",
+      source: workflowWithTransactionalPreflight({ pushNeeds: null }),
+      code: "db_push_workflow_push_dependency_missing",
+    },
+  ]
+
+  for (const { name, source, code } of cases) {
+    const errors = await validateWorkflowFixture(source)
+    assertIncludesErrorCode(errors, code)
+    assert.ok(errors.length > 0, `${name} must be rejected`)
+  }
+
+  const reordered = defaultWorkflow
+    .replace(
+      [
+        "      - name: Build transactional pgTAP input",
+        `        run: ${defaultBuilderCommand}`,
+        "",
+        "      - name: Run transactional focused pgTAP",
+        '        run: supabase test db --linked "${RUNNER_TEMP}/supabase-transactional-preflight.sql"',
+      ].join("\n"),
+      [
+        "      - name: Run transactional focused pgTAP",
+        '        run: supabase test db --linked "${RUNNER_TEMP}/supabase-transactional-preflight.sql"',
+        "",
+        "      - name: Build transactional pgTAP input",
+        `        run: ${defaultBuilderCommand}`,
+      ].join("\n"),
+    )
+  const reorderedErrors = await validateWorkflowFixture(reordered)
+  assertIncludesErrorCode(
+    reorderedErrors,
+    "db_push_workflow_transactional_preflight_order_mismatch",
+  )
 })

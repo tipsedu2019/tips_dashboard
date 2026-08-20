@@ -208,9 +208,13 @@ function invalidPayload(): never {
 function transientSourceError(value: unknown) {
   if (!isRecord(value)) return true
   const code = typeof value.code === "string" ? value.code.toUpperCase() : ""
+  const message = typeof value.message === "string" ? value.message.trim().toLowerCase() : ""
   if (!code) return true
   return code.startsWith("08")
-    || code === "40001"
+    || (code === "40001" && (
+      message === "serialization_failure"
+      || message.startsWith("could not serialize access due to")
+    ))
     || code === "40P01"
     || code === "53300"
     || code === "57014"

@@ -8,9 +8,22 @@ const QUARANTINE_RELATIVE_PATH = join("supabase", "pending-migrations", "notific
 const ACTIVE_RELATIVE_PATH = join("supabase", "migrations")
 const WORKFLOWS_RELATIVE_PATH = join(".github", "workflows")
 const REQUIRED_DB_PUSH_WORKFLOW = "supabase-db-push.yml"
+const FOCUSED_TRANSACTIONAL_PGTAP =
+  "supabase/tests/registration_level_test_result_parent_reconciliation_test.sql"
+const LINKED_MIGRATION_LEDGER = '"${RUNNER_TEMP}/supabase-migration-list.txt"'
+const TRANSACTIONAL_PGTAP_OUTPUT = '"${RUNNER_TEMP}/supabase-transactional-preflight.sql"'
+const PINNED_SUPABASE_CLI_VERSION = "2.107.0"
+const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
+  "ea233b337be698cee5bbca0795ee3e63b9dd154948c515c03cb72f191b3d103c"
+const EXPECTED_LEDGER_COMMAND =
+  `supabase migration list --linked > ${LINKED_MIGRATION_LEDGER}`
+const EXPECTED_TRANSACTIONAL_BUILDER_COMMAND =
+  `node scripts/build-supabase-transactional-preflight.mjs --output ${TRANSACTIONAL_PGTAP_OUTPUT} --migration-ledger ${LINKED_MIGRATION_LEDGER} --forward-migrations supabase/migrations --focused-test ${FOCUSED_TRANSACTIONAL_PGTAP} --rollback`
+const EXPECTED_TRANSACTIONAL_PGTAP_COMMAND =
+  `supabase test db --linked ${TRANSACTIONAL_PGTAP_OUTPUT}`
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand Supabase secret scope before the verifier exits.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "d2ee5d1a1d55207d78870a7fc5b7ab0fea7e44064f2955a9fb92bda8933bf807"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "e14a8005276824e6b2a8c67330efd476eff111784f2f79cc073b1c6bb30be920"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
   ["free-tier-guardrails.yml", "bb7cf618f180e4f1d90ceefddc67382ba8aee1be725cb8569507d835360cb696"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
@@ -917,6 +930,33 @@ function hasJobBoundary(lines, startIndex, endIndex) {
     .some((line) => /^ {2}(?:[A-Za-z0-9_-]+|"[^"]+"|'[^']+'):\s*(?:#.*)?$/.test(line))
 }
 
+function workflowJobLines(lines, jobName) {
+  const start = lines.findIndex((line) => line === `  ${jobName}:`)
+  if (start < 0) return []
+  const next = lines.findIndex(
+    (line, index) => index > start && /^ {2}[A-Za-z0-9_-]+:\s*(?:#.*)?$/.test(line),
+  )
+  return lines.slice(start, next < 0 ? lines.length : next)
+}
+
+function workflowStepLines(jobLines, stepName) {
+  const start = jobLines.findIndex((line) => line === `      - name: ${stepName}`)
+  if (start < 0) return []
+  const next = jobLines.findIndex(
+    (line, index) => index > start && /^ {6}-\s+(?:name|uses|run):/.test(line),
+  )
+  return jobLines.slice(start, next < 0 ? jobLines.length : next)
+}
+
+function hasExactRun(lines, command) {
+  return lines.some((line) => line.trim() === `run: ${command}`)
+}
+
+function exposesSupabaseSecret(lines) {
+  const source = lines.join("\n")
+  return /secrets(?:\.|\[['"])(?:SUPABASE_ACCESS_TOKEN|SUPABASE_DB_PASSWORD)/.test(source)
+}
+
 async function statKind(path) {
   try {
     return await lstat(path)
@@ -1367,7 +1407,11 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
         const command = line.trim().replace(/^run:\s*/, "")
         return /(?:^|\s)(?:node|bun|deno|bash|sh|zsh)?\s*(?:\.\/)?scripts\/[A-Za-z0-9_./-]+/.test(
           command,
-        ) && command !== "node scripts/verify-supabase-migration-layout.mjs"
+        ) && ![
+          "node scripts/verify-supabase-migration-layout.mjs",
+          "node scripts/verify-domain-sqlstate-contract.mjs",
+          EXPECTED_TRANSACTIONAL_BUILDER_COMMAND,
+        ].includes(command)
       })
     ) {
       addError(errors, "db_push_workflow_wrapper_invocation_present", workflowRelativePath)
@@ -1398,6 +1442,165 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       continue
     }
 
+    const staticPreflightLines = workflowJobLines(lines, "db-preflight")
+    const transactionalPreflightLines = workflowJobLines(lines, "db-transactional-preflight")
+    const pushJobLines = workflowJobLines(lines, "db-push")
+
+    if (!hasExactRun(staticPreflightLines, "node --test tests/supabase-migration-layout.test.mjs")) {
+      addError(
+        errors,
+        "db_push_workflow_static_preflight_layout_test_missing",
+        workflowRelativePath,
+      )
+    }
+    if (!hasExactRun(staticPreflightLines, "node scripts/verify-supabase-migration-layout.mjs")) {
+      addError(
+        errors,
+        "db_push_workflow_static_preflight_layout_verifier_missing",
+        workflowRelativePath,
+      )
+    }
+    if (!hasExactRun(staticPreflightLines, "node scripts/verify-domain-sqlstate-contract.mjs")) {
+      addError(
+        errors,
+        "db_push_workflow_static_preflight_domain_sqlstate_contract_missing",
+        workflowRelativePath,
+      )
+    }
+    if (exposesSupabaseSecret(staticPreflightLines)) {
+      addError(
+        errors,
+        "db_push_workflow_static_preflight_secret_scope_mismatch",
+        workflowRelativePath,
+      )
+    }
+
+    if (!transactionalPreflightLines.some((line) => /^ {4}needs:\s*db-preflight\s*$/.test(line))) {
+      addError(
+        errors,
+        "db_push_workflow_transactional_preflight_dependency_missing",
+        workflowRelativePath,
+      )
+    }
+    if (
+      !transactionalPreflightLines.some(
+        (line) => line.trim() === `version="${PINNED_SUPABASE_CLI_VERSION}"`,
+      ) ||
+      !transactionalPreflightLines.some((line) =>
+        line.includes(`${PINNED_SUPABASE_CLI_ARCHIVE_SHA256}  \${archive_path}`),
+      )
+    ) {
+      addError(
+        errors,
+        "db_push_workflow_transactional_preflight_cli_pin_mismatch",
+        workflowRelativePath,
+      )
+    }
+
+    const transactionalSecretValidation = workflowStepLines(
+      transactionalPreflightLines,
+      "Validate required secrets",
+    )
+    if (
+      !exposesSupabaseSecret(transactionalSecretValidation) ||
+      !transactionalSecretValidation.some((line) => line.includes("SUPABASE_ACCESS_TOKEN")) ||
+      !transactionalSecretValidation.some((line) => line.includes("SUPABASE_DB_PASSWORD"))
+    ) {
+      addError(
+        errors,
+        "db_push_workflow_transactional_preflight_secret_scope_mismatch",
+        workflowRelativePath,
+      )
+    }
+    const transactionalLinkStep = workflowStepLines(transactionalPreflightLines, "Link project")
+    if (
+      !exposesSupabaseSecret(transactionalLinkStep) ||
+      !transactionalLinkStep.some((line) => line.includes("SUPABASE_ACCESS_TOKEN")) ||
+      !transactionalLinkStep.some((line) => line.includes("SUPABASE_DB_PASSWORD"))
+    ) {
+      addError(
+        errors,
+        "db_push_workflow_transactional_preflight_link_secret_scope_mismatch",
+        workflowRelativePath,
+      )
+    }
+
+    const builderCommands = transactionalPreflightLines
+      .map((line) => line.trim().replace(/^run:\s*/, ""))
+      .filter((command) => command.startsWith("node scripts/build-supabase-transactional-preflight.mjs"))
+    const builderCommand = builderCommands[0] ?? ""
+    if (builderCommands.length !== 1) {
+      addError(
+        errors,
+        "db_push_workflow_transactional_preflight_builder_missing",
+        workflowRelativePath,
+      )
+    }
+    if (!builderCommand.includes("--forward-migrations supabase/migrations")) {
+      addError(
+        errors,
+        "db_push_workflow_transactional_preflight_forward_migrations_mismatch",
+        workflowRelativePath,
+      )
+    }
+    if (!builderCommand.includes(`--migration-ledger ${LINKED_MIGRATION_LEDGER}`)) {
+      addError(
+        errors,
+        "db_push_workflow_transactional_preflight_migration_ledger_marker_mismatch",
+        workflowRelativePath,
+      )
+    }
+    if (!builderCommand.includes("--rollback")) {
+      addError(
+        errors,
+        "db_push_workflow_transactional_preflight_rollback_marker_missing",
+        workflowRelativePath,
+      )
+    }
+    if (!builderCommand.includes(`--focused-test ${FOCUSED_TRANSACTIONAL_PGTAP}`)) {
+      addError(
+        errors,
+        "db_push_workflow_transactional_preflight_focus_path_mismatch",
+        workflowRelativePath,
+      )
+    }
+    if (!hasExactRun(transactionalPreflightLines, EXPECTED_LEDGER_COMMAND)) {
+      addError(
+        errors,
+        "db_push_workflow_transactional_preflight_migration_ledger_missing",
+        workflowRelativePath,
+      )
+    }
+    if (!hasExactRun(transactionalPreflightLines, EXPECTED_TRANSACTIONAL_PGTAP_COMMAND)) {
+      addError(
+        errors,
+        "db_push_workflow_transactional_preflight_pgtap_missing",
+        workflowRelativePath,
+      )
+    }
+
+    const linkIndex = workflow.indexOf("      - name: Link project", workflow.indexOf("  db-transactional-preflight:"))
+    const ledgerIndex = workflow.indexOf(`run: ${EXPECTED_LEDGER_COMMAND}`)
+    const builderIndex = workflow.indexOf(`run: ${EXPECTED_TRANSACTIONAL_BUILDER_COMMAND}`)
+    const pgTapIndex = workflow.indexOf(`run: ${EXPECTED_TRANSACTIONAL_PGTAP_COMMAND}`)
+    if (
+      linkIndex < 0 ||
+      ledgerIndex < 0 ||
+      builderIndex < 0 ||
+      pgTapIndex < 0 ||
+      !(linkIndex < ledgerIndex && ledgerIndex < builderIndex && builderIndex < pgTapIndex)
+    ) {
+      addError(
+        errors,
+        "db_push_workflow_transactional_preflight_order_mismatch",
+        workflowRelativePath,
+      )
+    }
+
+    if (!pushJobLines.some((line) => /^ {4}needs:\s*db-transactional-preflight\s*$/.test(line))) {
+      addError(errors, "db_push_workflow_push_dependency_missing", workflowRelativePath)
+    }
+
     for (const line of lines) {
       if (!line.includes("supabase db push")) continue
       const command = line.trim().replace(/^run:\s*/, "")
@@ -1416,7 +1619,14 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       exactPushLines.length === 1 &&
       (
         exactVerifierLines[0] >= exactPushLines[0] ||
-        hasJobBoundary(lines, exactVerifierLines[0], exactPushLines[0])
+        (
+          hasJobBoundary(lines, exactVerifierLines[0], exactPushLines[0]) &&
+          !(
+            hasExactRun(staticPreflightLines, "node scripts/verify-supabase-migration-layout.mjs") &&
+            transactionalPreflightLines.some((line) => /^ {4}needs:\s*db-preflight\s*$/.test(line)) &&
+            pushJobLines.some((line) => /^ {4}needs:\s*db-transactional-preflight\s*$/.test(line))
+          )
+        )
       )
     ) {
       addError(errors, "db_push_without_prior_layout_verifier", workflowRelativePath)

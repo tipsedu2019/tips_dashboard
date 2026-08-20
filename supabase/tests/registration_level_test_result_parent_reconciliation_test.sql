@@ -1,0 +1,512 @@
+begin;
+set local role postgres;
+set local search_path = extensions, public;
+create extension if not exists pgtap with schema extensions;
+grant usage on schema extensions to authenticated;
+grant execute on all functions in schema extensions to authenticated;
+select no_plan();
+
+set local timezone = 'Asia/Seoul';
+set local statement_timeout = '60s';
+set local lock_timeout = '5s';
+
+insert into auth.users(
+  id, instance_id, aud, role, email, encrypted_password,
+  email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+  created_at, updated_at
+)
+values (
+  '10000000-0000-4000-8000-000000007251',
+  '00000000-0000-0000-0000-000000000000',
+  'authenticated', 'authenticated',
+  'level-result-parent-admin@registration-runtime.invalid',
+  crypt('registration-level-result-parent-runtime-only', gen_salt('bf')),
+  now(), '{"provider":"email","providers":["email"]}'::jsonb,
+  '{"fixture":"registration-level-result-parent"}'::jsonb, now(), now()
+);
+
+insert into public.profiles(id, role, name, email, created_at, updated_at)
+values (
+  '10000000-0000-4000-8000-000000007251',
+  'admin',
+  '레벨테스트 결과 부모 정합성 관리자',
+  'level-result-parent-admin@registration-runtime.invalid',
+  now(),
+  now()
+)
+on conflict (id) do update
+set role = excluded.role,
+    name = excluded.name,
+    email = excluded.email,
+    updated_at = excluded.updated_at;
+
+create or replace function pg_temp.registration_level_result_set_actor(p_actor uuid)
+returns void
+language plpgsql
+as $$
+begin
+  perform pg_catalog.set_config(
+    'request.jwt.claims',
+    pg_catalog.jsonb_build_object(
+      'sub', p_actor::text,
+      'role', 'authenticated',
+      'email', (
+        select profile.email
+        from public.profiles profile
+        where profile.id = p_actor
+      )
+    )::text,
+    true
+  );
+  perform pg_catalog.set_config('request.jwt.claim.sub', p_actor::text, true);
+  perform pg_catalog.set_config('request.jwt.claim.role', 'authenticated', true);
+end;
+$$;
+
+create or replace function pg_temp.registration_level_result_receipt_count(
+  p_actor_id uuid,
+  p_request_key text
+)
+returns integer
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select pg_catalog.count(*)::integer
+  from dashboard_private.ops_registration_mutations mutation
+  where mutation.actor_id = p_actor_id
+    and mutation.request_key = p_request_key
+    and mutation.mutation_type = 'save_registration_level_test_result';
+$$;
+
+create temporary table registration_level_result_cases(
+  case_key text primary key,
+  payload jsonb not null
+) on commit drop;
+grant select, insert on registration_level_result_cases to authenticated;
+
+set local role authenticated;
+select pg_temp.registration_level_result_set_actor(
+  '10000000-0000-4000-8000-000000007251'
+);
+
+insert into registration_level_result_cases(case_key, payload)
+values
+  (
+    'single_completed',
+    public.create_registration_case_with_initial_workflow_v1(
+      '레벨결과 완료 학생', '중1', '레벨결과중', '01077007251', null,
+      '본관', '2026-08-20 09:30+09'::timestamptz, array['영어'],
+      'parent reconciliation fixture', 'normal', '{"영어":"level_test"}'::jsonb,
+      '{"scheduledAt":"2026-08-25T10:00:00+09:00","place":"본관","subjects":["영어"]}'::jsonb,
+      null, '{}'::jsonb, 'level-result-parent-single-completed'
+    )
+  ),
+  (
+    'single_absent',
+    public.create_registration_case_with_initial_workflow_v1(
+      '레벨결과 결석 학생', '중1', '레벨결과중', '01077007252', null,
+      '본관', '2026-08-20 09:30+09'::timestamptz, array['영어'],
+      'parent reconciliation fixture', 'normal', '{"영어":"level_test"}'::jsonb,
+      '{"scheduledAt":"2026-08-26T10:00:00+09:00","place":"본관","subjects":["영어"]}'::jsonb,
+      null, '{}'::jsonb, 'level-result-parent-single-absent'
+    )
+  ),
+  (
+    'single_canceled',
+    public.create_registration_case_with_initial_workflow_v1(
+      '레벨결과 취소 학생', '중1', '레벨결과중', '01077007253', null,
+      '본관', '2026-08-20 09:30+09'::timestamptz, array['영어'],
+      'parent reconciliation fixture', 'normal', '{"영어":"level_test"}'::jsonb,
+      '{"scheduledAt":"2026-08-27T10:00:00+09:00","place":"본관","subjects":["영어"]}'::jsonb,
+      null, '{}'::jsonb, 'level-result-parent-single-canceled'
+    )
+  ),
+  (
+    'shared_terminal',
+    public.create_registration_case_with_initial_workflow_v1(
+      '레벨결과 공유 학생', '중1', '레벨결과중', '01077007254', null,
+      '본관', '2026-08-20 09:30+09'::timestamptz, array['영어', '수학'],
+      'parent reconciliation fixture', 'normal',
+      '{"영어":"level_test","수학":"level_test"}'::jsonb,
+      '{"scheduledAt":"2026-08-28T10:00:00+09:00","place":"본관","subjects":["영어","수학"]}'::jsonb,
+      null, '{}'::jsonb, 'level-result-parent-shared-terminal'
+    )
+  );
+
+create temporary table registration_level_result_ids on commit drop as
+select
+  fixture.case_key,
+  task.id as task_id,
+  appointment.id as appointment_id,
+  track.id as track_id,
+  attempt.id as attempt_id,
+  track.subject
+from registration_level_result_cases fixture
+join public.ops_tasks task
+  on task.id = (fixture.payload ->> 'taskId')::uuid
+join public.ops_registration_appointments appointment
+  on appointment.task_id = task.id
+ and appointment.kind = 'level_test'
+join public.ops_registration_subject_tracks track
+  on track.task_id = task.id
+join public.ops_registration_level_tests attempt
+  on attempt.track_id = track.id
+ and attempt.appointment_id = appointment.id;
+grant select on registration_level_result_ids to authenticated;
+
+create temporary table registration_level_result_event_baselines on commit drop as
+select
+  ids.case_key,
+  ids.track_id,
+  count(event.id)::integer as result_event_count
+from registration_level_result_ids ids
+left join public.ops_task_events event
+  on event.task_id = ids.task_id
+ and event.event_type = 'registration_track_event'
+ and event.after_value is not null
+ and event.after_value::jsonb ->> 'event_type' = 'registration_level_test_result_saved'
+group by ids.case_key, ids.track_id;
+grant select on registration_level_result_event_baselines to authenticated;
+
+-- The current RPC writes the child first and relies on deferred integrity checks.
+-- Catch the deferred error in a subtransaction so RED remains a normal pgTAP
+-- assertion instead of aborting the entire packet. Every valid call explicitly
+-- forces deferred triggers before returning.
+create or replace function pg_temp.registration_level_result_save(
+  p_attempt_id uuid,
+  p_status text,
+  p_material_link text,
+  p_request_key text
+)
+returns jsonb
+language plpgsql
+volatile
+as $$
+declare
+  v_response jsonb;
+begin
+  v_response := public.save_registration_level_test_result_v1(
+    p_attempt_id,
+    p_status,
+    p_material_link,
+    p_request_key
+  );
+  set constraints all immediate;
+  set constraints all deferred;
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'response', v_response
+  );
+exception
+  when others then
+    return pg_catalog.jsonb_build_object(
+      'ok', false,
+      'sqlstate', sqlstate,
+      'error', sqlerrm
+    );
+end;
+$$;
+
+create temporary table registration_level_result_calls(
+  case_key text not null,
+  invocation text not null,
+  result jsonb not null,
+  primary key (case_key, invocation)
+) on commit drop;
+grant select, insert on registration_level_result_calls to authenticated;
+
+-- Sole completed child: this is RED before the forward wrapper because the
+-- appointment remains scheduled and the deferred integrity trigger rejects it.
+insert into registration_level_result_calls(case_key, invocation, result)
+select
+  ids.case_key,
+  'completed',
+  pg_temp.registration_level_result_save(
+    ids.attempt_id,
+    'completed',
+    'https://drive.invalid/registration-level-result/completed',
+    'level-result-parent-completed'
+  )
+from registration_level_result_ids ids
+where ids.case_key = 'single_completed';
+
+select ok(
+  (select result ->> 'ok' = 'true'
+   from registration_level_result_calls
+   where case_key = 'single_completed'
+     and invocation = 'completed'),
+  'sole completed level-test result commits through deferred appointment integrity'
+);
+
+select is(
+  (
+    select appointment.status || ':' || appointment.notification_revision
+    from registration_level_result_ids ids
+    join public.ops_registration_appointments appointment
+      on appointment.id = ids.appointment_id
+    where ids.case_key = 'single_completed'
+  ),
+  'completed:2',
+  'sole completed child reconciles its appointment parent and increments revision once'
+);
+
+select is(
+  (
+    select track.pipeline_status || ':' || task.status || ':' || detail.pipeline_status
+    from registration_level_result_ids ids
+    join public.ops_registration_subject_tracks track
+      on track.id = ids.track_id
+    join public.ops_tasks task
+      on task.id = ids.task_id
+    join public.ops_registration_details detail
+      on detail.task_id = ids.task_id
+    where ids.case_key = 'single_completed'
+  ),
+  'level_test_scheduled:in_progress:1. 레벨테스트 예약',
+  'data-only result save leaves manual track workflow and registration parent projection unchanged'
+);
+
+-- Sole absent child is a completed appointment (non-canceled terminal child).
+insert into registration_level_result_calls(case_key, invocation, result)
+select
+  ids.case_key,
+  'absent',
+  pg_temp.registration_level_result_save(
+    ids.attempt_id,
+    'absent',
+    null,
+    'level-result-parent-absent'
+  )
+from registration_level_result_ids ids
+where ids.case_key = 'single_absent';
+
+select ok(
+  (select result ->> 'ok' = 'true'
+   from registration_level_result_calls
+   where case_key = 'single_absent'
+     and invocation = 'absent'),
+  'sole absent level-test result commits through deferred appointment integrity'
+);
+
+select is(
+  (
+    select appointment.status || ':' || appointment.notification_revision
+    from registration_level_result_ids ids
+    join public.ops_registration_appointments appointment
+      on appointment.id = ids.appointment_id
+    where ids.case_key = 'single_absent'
+  ),
+  'completed:2',
+  'sole absent child reconciles its appointment parent as completed'
+);
+
+-- Sole canceled child is the only terminal shape that cancels its appointment.
+insert into registration_level_result_calls(case_key, invocation, result)
+select
+  ids.case_key,
+  'canceled',
+  pg_temp.registration_level_result_save(
+    ids.attempt_id,
+    'canceled',
+    null,
+    'level-result-parent-canceled'
+  )
+from registration_level_result_ids ids
+where ids.case_key = 'single_canceled';
+
+select ok(
+  (select result ->> 'ok' = 'true'
+   from registration_level_result_calls
+   where case_key = 'single_canceled'
+     and invocation = 'canceled'),
+  'sole canceled level-test result commits through deferred appointment integrity'
+);
+
+select is(
+  (
+    select appointment.status || ':' || appointment.notification_revision
+    from registration_level_result_ids ids
+    join public.ops_registration_appointments appointment
+      on appointment.id = ids.appointment_id
+    where ids.case_key = 'single_canceled'
+  ),
+  'canceled:2',
+  'sole canceled child reconciles its appointment parent as canceled'
+);
+
+-- Shared appointment: the first terminal child must not close the parent while
+-- the second child is still scheduled.
+insert into registration_level_result_calls(case_key, invocation, result)
+select
+  ids.case_key,
+  'shared_first_completed',
+  pg_temp.registration_level_result_save(
+    ids.attempt_id,
+    'completed',
+    'https://drive.invalid/registration-level-result/shared-english',
+    'level-result-parent-shared-first'
+  )
+from registration_level_result_ids ids
+where ids.case_key = 'shared_terminal'
+  and ids.subject = '영어';
+
+select ok(
+  (select result ->> 'ok' = 'true'
+   from registration_level_result_calls
+   where case_key = 'shared_terminal'
+     and invocation = 'shared_first_completed'),
+  'first terminal child of a shared appointment commits while sibling remains active'
+);
+
+select is(
+  (
+    select appointment.status || ':' || appointment.notification_revision
+    from registration_level_result_ids ids
+    join public.ops_registration_appointments appointment
+      on appointment.id = ids.appointment_id
+    where ids.case_key = 'shared_terminal'
+    limit 1
+  ),
+  'scheduled:1',
+  'first terminal child leaves shared appointment scheduled at the same revision'
+);
+
+-- Same request key must replay without writing a second result event or changing
+-- the appointment revision. Current code writes the event twice, so this is RED.
+insert into registration_level_result_calls(case_key, invocation, result)
+select
+  ids.case_key,
+  'shared_first_duplicate',
+  pg_temp.registration_level_result_save(
+    ids.attempt_id,
+    'completed',
+    'https://drive.invalid/registration-level-result/shared-english',
+    'level-result-parent-shared-first'
+  )
+from registration_level_result_ids ids
+where ids.case_key = 'shared_terminal'
+  and ids.subject = '영어';
+
+select ok(
+  (
+    select first_call.result -> 'response' = duplicate_call.result -> 'response'
+      and duplicate_call.result ->> 'ok' = 'true'
+    from registration_level_result_calls first_call
+    join registration_level_result_calls duplicate_call
+      on duplicate_call.case_key = first_call.case_key
+    join registration_level_result_ids ids
+      on ids.case_key = first_call.case_key
+     and ids.subject = '영어'
+    where first_call.case_key = 'shared_terminal'
+      and first_call.invocation = 'shared_first_completed'
+      and duplicate_call.invocation = 'shared_first_duplicate'
+  ),
+  'same request key replays the same response without a second result event'
+);
+
+select is(
+  (
+    select count(*)::integer
+    from public.ops_task_events event
+    join registration_level_result_ids ids
+      on ids.task_id = event.task_id
+     and event.field_name = 'registration_track:' || ids.track_id::text
+    where ids.case_key = 'shared_terminal'
+      and ids.subject = '영어'
+      and event.event_type = 'registration_track_event'
+      and event.after_value::jsonb ->> 'event_type' = 'registration_level_test_result_saved'
+  ),
+  1,
+  'same request key creates exactly one result event for the shared child'
+);
+
+-- Reusing the request key for a different target must fail closed instead of
+-- silently overwriting a previously acknowledged result.
+insert into registration_level_result_calls(case_key, invocation, result)
+select
+  ids.case_key,
+  'shared_first_conflict',
+  pg_temp.registration_level_result_save(
+    ids.attempt_id,
+    'absent',
+    null,
+    'level-result-parent-shared-first'
+  )
+from registration_level_result_ids ids
+where ids.case_key = 'shared_terminal'
+  and ids.subject = '영어';
+
+select is(
+  (
+    select result ->> 'sqlstate'
+    from registration_level_result_calls
+    where case_key = 'shared_terminal'
+      and invocation = 'shared_first_conflict'
+  ),
+  '22023',
+  'same request key with a different target fails as idempotency_key_reused'
+);
+
+select is(
+  pg_temp.registration_level_result_receipt_count(
+    '10000000-0000-4000-8000-000000007251',
+    'level-result-parent-shared-first'
+  ),
+  1,
+  'level-test result persistence records exactly one durable request receipt'
+);
+
+select is(
+  (
+    select appointment.status || ':' || appointment.notification_revision
+    from registration_level_result_ids ids
+    join public.ops_registration_appointments appointment
+      on appointment.id = ids.appointment_id
+    where ids.case_key = 'shared_terminal'
+    limit 1
+  ),
+  'scheduled:1',
+  'same request key does not duplicate the shared appointment revision'
+);
+
+-- The final canceled sibling closes the shared appointment as completed because
+-- the first child is non-canceled terminal evidence.
+insert into registration_level_result_calls(case_key, invocation, result)
+select
+  ids.case_key,
+  'shared_last_canceled',
+  pg_temp.registration_level_result_save(
+    ids.attempt_id,
+    'canceled',
+    null,
+    'level-result-parent-shared-last'
+  )
+from registration_level_result_ids ids
+where ids.case_key = 'shared_terminal'
+  and ids.subject = '수학';
+
+select ok(
+  (select result ->> 'ok' = 'true'
+   from registration_level_result_calls
+   where case_key = 'shared_terminal'
+     and invocation = 'shared_last_canceled'),
+  'last terminal child of a shared appointment commits through deferred integrity'
+);
+
+select is(
+  (
+    select appointment.status || ':' || appointment.notification_revision
+    from registration_level_result_ids ids
+    join public.ops_registration_appointments appointment
+      on appointment.id = ids.appointment_id
+    where ids.case_key = 'shared_terminal'
+    limit 1
+  ),
+  'completed:2',
+  'last terminal child reconciles a shared appointment exactly once'
+);
+
+select * from finish();
+rollback;
