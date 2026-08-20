@@ -268,6 +268,91 @@ select is(
   'data-only result save leaves manual track workflow and registration parent projection unchanged'
 );
 
+-- A fresh request key is an intentional correction, not an idempotent replay.
+-- Link-only edits keep the derived parent revision stable; terminal status
+-- corrections update the parent in both directions.
+insert into registration_level_result_calls(case_key, invocation, result)
+select
+  ids.case_key,
+  'completed_link_edit',
+  pg_temp.registration_level_result_save(
+    ids.attempt_id,
+    'completed',
+    'https://drive.invalid/registration-level-result/completed-edited',
+    'level-result-parent-completed-link-edit'
+  )
+from registration_level_result_ids ids
+where ids.case_key = 'single_completed';
+
+select is(
+  (
+    select call.result ->> 'ok' || ':' || attempt.material_link || ':'
+      || appointment.status || ':' || appointment.notification_revision
+    from registration_level_result_calls call
+    join registration_level_result_ids ids on ids.case_key = call.case_key
+    join public.ops_registration_level_tests attempt on attempt.id = ids.attempt_id
+    join public.ops_registration_appointments appointment on appointment.id = ids.appointment_id
+    where call.case_key = 'single_completed'
+      and call.invocation = 'completed_link_edit'
+  ),
+  'true:https://drive.invalid/registration-level-result/completed-edited:completed:2',
+  'fresh-key completed link edit commits without changing the derived parent revision'
+);
+
+insert into registration_level_result_calls(case_key, invocation, result)
+select
+  ids.case_key,
+  'completed_to_canceled',
+  pg_temp.registration_level_result_save(
+    ids.attempt_id,
+    'canceled',
+    null,
+    'level-result-parent-completed-to-canceled'
+  )
+from registration_level_result_ids ids
+where ids.case_key = 'single_completed';
+
+select is(
+  (
+    select call.result ->> 'ok' || ':'
+      || appointment.status || ':' || appointment.notification_revision
+    from registration_level_result_calls call
+    join registration_level_result_ids ids on ids.case_key = call.case_key
+    join public.ops_registration_appointments appointment on appointment.id = ids.appointment_id
+    where call.case_key = 'single_completed'
+      and call.invocation = 'completed_to_canceled'
+  ),
+  'true:canceled:3',
+  'fresh-key completed to canceled correction updates the derived parent once'
+);
+
+insert into registration_level_result_calls(case_key, invocation, result)
+select
+  ids.case_key,
+  'canceled_to_completed',
+  pg_temp.registration_level_result_save(
+    ids.attempt_id,
+    'completed',
+    'https://drive.invalid/registration-level-result/completed-corrected',
+    'level-result-parent-canceled-to-completed'
+  )
+from registration_level_result_ids ids
+where ids.case_key = 'single_completed';
+
+select is(
+  (
+    select call.result ->> 'ok' || ':'
+      || appointment.status || ':' || appointment.notification_revision
+    from registration_level_result_calls call
+    join registration_level_result_ids ids on ids.case_key = call.case_key
+    join public.ops_registration_appointments appointment on appointment.id = ids.appointment_id
+    where call.case_key = 'single_completed'
+      and call.invocation = 'canceled_to_completed'
+  ),
+  'true:completed:4',
+  'fresh-key canceled to completed correction updates the derived parent once'
+);
+
 -- Sole absent child is a completed appointment (non-canceled terminal child).
 insert into registration_level_result_calls(case_key, invocation, result)
 select

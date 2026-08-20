@@ -86,6 +86,24 @@ test("new active migrations reject explicit 40001 raises with a stable diagnosti
     violations.map(({ reason }) => reason),
     ["domain_sqlstate_40001_forbidden"],
   )
+
+  const directSqlstateViolations = inspectDomainSqlstateMigration({
+    file: "supabase/migrations/20260821000001_registration_direct_sqlstate.sql",
+    cutoff: "20260820000000",
+    source: [
+      "begin;",
+      "create or replace function public.direct_example() returns void language plpgsql as $$",
+      "begin",
+      "  raise sqlstate '40001' using message = 'registration_invalid_source_state';",
+      "end;",
+      "$$;",
+      "commit;",
+    ].join("\n"),
+  })
+  assert.deepEqual(
+    directSqlstateViolations.map(({ reason }) => reason),
+    ["domain_sqlstate_40001_forbidden"],
+  )
 })
 
 test("pre-cutoff explicit 40001 raises remain grandfathered", async () => {
@@ -145,6 +163,11 @@ test("notification transient classifiers do not retry bare 40001 domain errors",
       classify({ code: "40001", message: "serialization_failure" }),
       true,
       `${name} must preserve the explicit serialization_failure transient condition`,
+    )
+    assert.equal(
+      classify({ code: "40001", message: "could not serialize access due to concurrent update" }),
+      true,
+      `${name} must preserve PostgreSQL serialization failures as transient`,
     )
   }
 })

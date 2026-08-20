@@ -93,8 +93,11 @@ export function inspectDomainSqlstateMigration({
     if (index < sanitized.length && sanitized[index] !== ";") continue
     const statement = sanitized.slice(statementStart, index)
     if (
-      /\braise\s+(?:exception|sqlstate)\b/i.test(statement)
-      && /\berrcode\s*=\s*'40001'/i.test(statement)
+      /\braise\s+sqlstate\s+'40001'/i.test(statement)
+      || (
+        /\braise\s+exception\b/i.test(statement)
+        && /\berrcode\s*=\s*'40001'/i.test(statement)
+      )
     ) {
       const raiseOffset = statement.search(/\braise\s+(?:exception|sqlstate)\b/i)
       const absoluteOffset = statementStart + Math.max(raiseOffset, 0)

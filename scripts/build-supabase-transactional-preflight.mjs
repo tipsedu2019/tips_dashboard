@@ -3,7 +3,7 @@ import { isAbsolute, relative, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 
 const MIGRATION_VERSION_PATTERN = /^(\d{14})_.+\.sql$/
-const TRANSACTION_CONTROL_PATTERN = /^\s*(?:begin|commit|rollback)\s*;\s*$/i
+const TRANSACTION_CONTROL_PATTERN = /^(?:begin\b|start\s+transaction\b|commit\b|end\b|rollback\b|abort\b)/i
 
 function fail(code) {
   throw new Error(code)
@@ -19,53 +19,195 @@ function resolveInsideRepo(repoRoot, candidate) {
   return target
 }
 
-function remoteMaxVersionFromLedger(ledger) {
-  const versions = String(ledger)
+function migrationLedgerState(ledger) {
+  const rows = String(ledger)
     .split(/\r?\n/)
-    .map((line) => line.split("|")[1]?.trim() ?? "")
-    .filter((value) => /^\d{14}$/.test(value))
-    .sort()
+    .map((line) => line.split("|").slice(0, 2).map((value) => value?.trim() ?? ""))
+    .map(([local, remote]) => ({
+      local: /^\d{14}$/.test(local) ? local : null,
+      remote: /^\d{14}$/.test(remote) ? remote : null,
+    }))
+    .filter(({ local, remote }) => local !== null || remote !== null)
 
-  if (versions.length === 0) {
+  const remoteVersions = rows
+    .map(({ remote }) => remote)
+    .filter(Boolean)
+    .sort()
+  if (remoteVersions.length === 0) {
     fail("transactional_preflight_remote_ledger_missing")
   }
-  return versions.at(-1)
+  if (rows.some(({ local, remote }) => remote && (!local || local !== remote))) {
+    fail("transactional_preflight_remote_history_drift")
+  }
+
+  const remoteMaxVersion = remoteVersions.at(-1)
+  if (rows.some(({ local, remote }) => local && !remote && local <= remoteMaxVersion)) {
+    fail("transactional_preflight_unapplied_legacy_migration")
+  }
+
+  const pendingVersions = rows
+    .filter(({ local, remote }) => local && !remote && local > remoteMaxVersion)
+    .map(({ local }) => local)
+    .sort()
+  if (new Set(pendingVersions).size !== pendingVersions.length) {
+    fail("transactional_preflight_pending_ledger_mismatch")
+  }
+  return { pendingVersions, remoteMaxVersion }
+}
+
+function maskSqlOpaqueRegions(source) {
+  const masked = [...String(source)]
+  const blank = (start, end) => {
+    for (let cursor = start; cursor < end; cursor += 1) {
+      if (masked[cursor] !== "\n" && masked[cursor] !== "\r") masked[cursor] = " "
+    }
+  }
+  let index = 0
+
+  while (index < source.length) {
+    if (source.startsWith("--", index)) {
+      const start = index
+      const newline = source.indexOf("\n", index + 2)
+      index = newline < 0 ? source.length : newline
+      blank(start, index)
+      continue
+    }
+    if (source.startsWith("/*", index)) {
+      const start = index
+      let depth = 1
+      index += 2
+      while (index < source.length && depth > 0) {
+        if (source.startsWith("/*", index)) {
+          depth += 1
+          index += 2
+        } else if (source.startsWith("*/", index)) {
+          depth -= 1
+          index += 2
+        } else {
+          index += 1
+        }
+      }
+      if (depth !== 0) fail("transactional_preflight_sql_lexical_invalid")
+      blank(start, index)
+      continue
+    }
+
+    const character = source[index]
+    if (character === "'") {
+      const start = index
+      const prefix = source[index - 1]
+      const prefixBefore = source[index - 2]
+      const escapeString = /[eE]/.test(prefix ?? "") && !/[A-Za-z0-9_$]/.test(prefixBefore ?? "")
+      index += 1
+      let closed = false
+      while (index < source.length) {
+        if (escapeString && source[index] === "\\") {
+          index += 2
+        } else if (source[index] === "'" && source[index + 1] === "'") {
+          index += 2
+        } else if (source[index] === "'") {
+          index += 1
+          closed = true
+          break
+        } else {
+          index += 1
+        }
+      }
+      if (!closed) fail("transactional_preflight_sql_lexical_invalid")
+      blank(start, index)
+      continue
+    }
+    if (character === '"') {
+      const start = index
+      index += 1
+      let closed = false
+      while (index < source.length) {
+        if (source[index] === '"' && source[index + 1] === '"') {
+          index += 2
+        } else if (source[index] === '"') {
+          index += 1
+          closed = true
+          break
+        } else {
+          index += 1
+        }
+      }
+      if (!closed) fail("transactional_preflight_sql_lexical_invalid")
+      blank(start, index)
+      continue
+    }
+    if (character === "$") {
+      const delimiter = source.slice(index).match(/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/)?.[0]
+      if (delimiter) {
+        const start = index
+        const bodyEnd = source.indexOf(delimiter, index + delimiter.length)
+        if (bodyEnd < 0) fail("transactional_preflight_sql_lexical_invalid")
+        index = bodyEnd + delimiter.length
+        blank(start, index)
+        continue
+      }
+    }
+    index += 1
+  }
+
+  return masked.join("")
+}
+
+function sqlStatements(source) {
+  const masked = maskSqlOpaqueRegions(source)
+  if (masked.split(/\r?\n/).some((line) => /^\s*\\/.test(line))) {
+    fail("transactional_preflight_migration_escape_forbidden")
+  }
+
+  const statements = []
+  let start = 0
+  for (let index = 0; index < masked.length; index += 1) {
+    if (masked[index] !== ";") continue
+    const normalized = masked.slice(start, index).trim().replace(/\s+/g, " ").toLowerCase()
+    if (normalized) statements.push({ start, end: index + 1, normalized })
+    start = index + 1
+  }
+  if (masked.slice(start).trim()) {
+    fail("transactional_preflight_sql_statement_unterminated")
+  }
+  return statements
+}
+
+function transactionStatements(statements) {
+  return statements.filter(({ normalized }) => TRANSACTION_CONTROL_PATTERN.test(normalized))
 }
 
 function stripMigrationTransaction(source) {
-  const lines = String(source).split(/\r?\n/)
-  while (lines.length > 0 && lines[0].trim() === "") lines.shift()
-  while (lines.length > 0 && lines.at(-1).trim() === "") lines.pop()
+  const sql = String(source)
+  const statements = sqlStatements(sql)
+  const controls = transactionStatements(statements)
+  const first = statements[0]
+  const last = statements.at(-1)
+  const hasOuterTransaction = first?.normalized === "begin" && last?.normalized === "commit"
 
-  const hasOuterTransaction =
-    /^\s*begin\s*;\s*$/i.test(lines[0] ?? "") &&
-    /^\s*commit\s*;\s*$/i.test(lines.at(-1) ?? "")
-
-  const body = hasOuterTransaction ? lines.slice(1, -1) : lines
-  if (body.some((line) => TRANSACTION_CONTROL_PATTERN.test(line))) {
-    fail("transactional_preflight_migration_escape_forbidden")
+  if (hasOuterTransaction) {
+    if (controls.length !== 2 || controls[0] !== first || controls[1] !== last) {
+      fail("transactional_preflight_migration_escape_forbidden")
+    }
+    return sql.slice(first.end, last.start).trim()
   }
-  if (!hasOuterTransaction && lines.some((line) => TRANSACTION_CONTROL_PATTERN.test(line))) {
-    fail("transactional_preflight_migration_escape_forbidden")
-  }
-  return body.join("\n").trim()
+  if (controls.length > 0) fail("transactional_preflight_migration_escape_forbidden")
+  return sql.trim()
 }
 
 function validateFocusedTest(source) {
+  const statements = sqlStatements(source)
+  const controls = transactionStatements(statements)
   const lines = String(source).split(/\r?\n/)
   while (lines.length > 0 && lines[0].trim() === "") lines.shift()
   while (lines.length > 0 && lines.at(-1).trim() === "") lines.pop()
 
-  const transactionLines = lines
-    .map((line, index) => ({ index, value: line.trim().toLowerCase() }))
-    .filter(({ value }) => /^(?:begin|commit|rollback)\s*;$/.test(value))
-
   if (
-    !/^begin\s*;$/i.test(lines[0] ?? "") ||
-    !/^rollback\s*;$/i.test(lines.at(-1) ?? "") ||
-    transactionLines.length !== 2 ||
-    transactionLines[0]?.index !== 0 ||
-    transactionLines[1]?.index !== lines.length - 1
+    statements[0]?.normalized !== "begin" ||
+    statements.at(-1)?.normalized !== "rollback" ||
+    controls.length !== 2 ||
+    controls[0] !== statements[0] ||
+    controls[1] !== statements.at(-1)
   ) {
     fail("transactional_preflight_test_rollback_required")
   }
@@ -83,14 +225,23 @@ export async function buildTransactionalPreflightSql({
   forwardMigrationsPath,
   focusedTestPath,
 }) {
-  const remoteMaxVersion = remoteMaxVersionFromLedger(migrationLedger)
+  const { pendingVersions: ledgerPendingVersions, remoteMaxVersion } =
+    migrationLedgerState(migrationLedger)
   const migrationDirectory = resolveInsideRepo(repoRoot, forwardMigrationsPath)
   const focusedTestFile = resolveInsideRepo(repoRoot, focusedTestPath)
 
-  const pendingFiles = (await readdir(migrationDirectory))
+  const migrationFiles = (await readdir(migrationDirectory))
     .map((file) => ({ file, version: file.match(MIGRATION_VERSION_PATTERN)?.[1] }))
     .filter(({ version }) => version && version > remoteMaxVersion)
     .sort((left, right) => left.version.localeCompare(right.version) || left.file.localeCompare(right.file))
+  const migrationFileVersions = migrationFiles.map(({ version }) => version)
+  if (
+    new Set(migrationFileVersions).size !== migrationFileVersions.length ||
+    JSON.stringify(migrationFileVersions) !== JSON.stringify(ledgerPendingVersions)
+  ) {
+    fail("transactional_preflight_pending_ledger_mismatch")
+  }
+  const pendingFiles = migrationFiles
 
   const migrationSections = []
   for (const { file, version } of pendingFiles) {

@@ -34,3 +34,27 @@ test("appointment integrity remains independent from the manual pipeline workflo
   assert.doesNotMatch(definition, /ops_registration_subject_tracks/i)
   assert.doesNotMatch(definition, /track\.pipeline_status/i)
 })
+
+test("level-test result persistence follows the canonical registration row-lock order", async () => {
+  const { definition } = await latestFunctionDefinition(
+    "dashboard_private.save_registration_level_test_result_impl",
+  )
+
+  const task = definition.indexOf("-- level_test_result_task_lock")
+  const detail = definition.indexOf("-- level_test_result_detail_lock")
+  const tracks = definition.indexOf("-- level_test_result_track_locks")
+  const appointments = definition.indexOf("-- level_test_result_appointment_locks")
+  const attempts = definition.indexOf("-- level_test_result_attempt_locks")
+  const receipt = definition.indexOf("-- level_test_result_receipt_lookup")
+
+  assert.ok(
+    task !== -1
+      && task < detail
+      && detail < tracks
+      && tracks < appointments
+      && appointments < attempts
+      && attempts < receipt,
+    "result persistence must lock task, detail, tracks, appointments, and attempts before replay/mutation",
+  )
+  assert.doesNotMatch(definition, /for\s+update\s+of\s+attempt\s*,\s*track/i)
+})

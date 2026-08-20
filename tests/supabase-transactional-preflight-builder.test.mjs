@@ -123,6 +123,60 @@ test("remote version이 없는 ledger는 fail closed 한다", async () => {
   )
 })
 
+test("remote-only 또는 과거 local-only ledger drift는 migration 선택 전에 fail closed 한다", async () => {
+  const { buildTransactionalPreflightSql } = await import(builderUrl)
+  const remoteOnly = await createFixture()
+  await assert.rejects(
+    buildTransactionalPreflightSql({
+      repoRoot: remoteOnly.root,
+      migrationLedger: [
+        "Local | Remote | Time",
+        "20260820150057 | 20260820150057 | now",
+        " | 20260820151500 | now",
+        "20260820152710 | | now",
+      ].join("\n"),
+      forwardMigrationsPath: "supabase/migrations",
+      focusedTestPath: "supabase/tests/focused.sql",
+    }),
+    { message: "transactional_preflight_remote_history_drift" },
+  )
+
+  const historicalLocalOnly = await createFixture()
+  await assert.rejects(
+    buildTransactionalPreflightSql({
+      repoRoot: historicalLocalOnly.root,
+      migrationLedger: [
+        "Local | Remote | Time",
+        "20260820140000 | | now",
+        "20260820150057 | 20260820150057 | now",
+        "20260820152710 | | now",
+      ].join("\n"),
+      forwardMigrationsPath: "supabase/migrations",
+      focusedTestPath: "supabase/tests/focused.sql",
+    }),
+    { message: "transactional_preflight_unapplied_legacy_migration" },
+  )
+})
+
+test("forward migration 파일과 linked ledger의 pending 집합이 다르면 fail closed 한다", async () => {
+  const { buildTransactionalPreflightSql } = await import(builderUrl)
+  const { root } = await createFixture()
+
+  await assert.rejects(
+    buildTransactionalPreflightSql({
+      repoRoot: root,
+      migrationLedger: [
+        "Local | Remote | Time",
+        "20260820150057 | 20260820150057 | now",
+        "20260820152710 | | now",
+      ].join("\n"),
+      forwardMigrationsPath: "supabase/migrations",
+      focusedTestPath: "supabase/tests/focused.sql",
+    }),
+    { message: "transactional_preflight_pending_ledger_mismatch" },
+  )
+})
+
 test("migration이나 focused test가 transaction 밖으로 탈출하려 하면 거부한다", async () => {
   const { buildTransactionalPreflightSql } = await import(builderUrl)
   const unsafeMigration = await createFixture({
@@ -143,6 +197,52 @@ test("migration이나 focused test가 transaction 밖으로 탈출하려 하면 
     }),
     { message: "transactional_preflight_migration_escape_forbidden" },
   )
+
+  const inlineEscape = await createFixture({
+    pendingSource: "begin;\nselect 'before'; commit; select 'after';\ncommit;\n",
+  })
+  await assert.rejects(
+    buildTransactionalPreflightSql({
+      repoRoot: inlineEscape.root,
+      migrationLedger: inlineEscape.ledger,
+      forwardMigrationsPath: "supabase/migrations",
+      focusedTestPath: "supabase/tests/focused.sql",
+    }),
+    { message: "transactional_preflight_migration_escape_forbidden" },
+  )
+
+  const commentedEscape = await createFixture({
+    pendingSource: "begin;\nselect 'before'; /* boundary */ rollback;\ncommit;\n",
+  })
+  await assert.rejects(
+    buildTransactionalPreflightSql({
+      repoRoot: commentedEscape.root,
+      migrationLedger: commentedEscape.ledger,
+      forwardMigrationsPath: "supabase/migrations",
+      focusedTestPath: "supabase/tests/focused.sql",
+    }),
+    { message: "transactional_preflight_migration_escape_forbidden" },
+  )
+
+  const safeDollarBody = await createFixture({
+    pendingSource: [
+      "begin;",
+      "create function public.safe_text() returns text language plpgsql as $fn$",
+      "begin",
+      "  return 'commit; rollback;';",
+      "end;",
+      "$fn$;",
+      "commit;",
+      "",
+    ].join("\n"),
+  })
+  const safeResult = await buildTransactionalPreflightSql({
+    repoRoot: safeDollarBody.root,
+    migrationLedger: safeDollarBody.ledger,
+    forwardMigrationsPath: "supabase/migrations",
+    focusedTestPath: "supabase/tests/focused.sql",
+  })
+  assert.match(safeResult.sql, /return 'commit; rollback;'/)
 
   const unsafeTest = await createFixture({
     focusedSource: "begin;\nset local role postgres;\nselect no_plan();\ncommit;\n",
