@@ -1714,6 +1714,8 @@ function mapAttachment(row: Row): OpsTaskAttachment {
 }
 
 function mapTask(row: Row, detail: Row, comments: OpsTaskComment[], attachments: OpsTaskAttachment[]): OpsTask {
+  const completedBy = text(value(row, "completed_by", "completedBy"))
+
   return {
     id: text(value(row, "id")),
     title: text(value(row, "title")),
@@ -1738,6 +1740,8 @@ function mapTask(row: Row, detail: Row, comments: OpsTaskComment[], attachments:
     subject: text(value(row, "subject")),
     startAt: text(value(row, "start_at", "startAt")),
     dueAt: text(value(row, "due_at", "dueAt")),
+    completedBy,
+    completedByLabel: text(value(row, "completed_by_label", "completedByLabel")),
     completedAt: text(value(row, "completed_at", "completedAt")),
     memo: text(value(row, "memo")),
     createdAt: text(value(row, "created_at", "createdAt")),

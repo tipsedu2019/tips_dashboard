@@ -49,6 +49,8 @@ function createTask(
     subject: "영어",
     startAt: "",
     dueAt: "",
+    completedBy: "",
+    completedByLabel: "",
     completedAt: overrides.status === "done" ? "2026-07-22T10:00:00.000Z" : "",
     memo: overrides.memo || "",
     createdAt,

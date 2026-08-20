@@ -280,6 +280,8 @@ export type OpsTask = {
   subject: string
   startAt: string
   dueAt: string
+  completedBy: string
+  completedByLabel: string
   completedAt: string
   memo: string
   createdAt: string
@@ -1035,6 +1037,12 @@ function profileLabel(profile: Row | undefined) {
   return text(profile.name) || text(profile.email) || text(profile.login_id) || text(profile.id)
 }
 
+function isMissingRpcFunctionError(error: unknown) {
+  const code = typeof error === "object" && error ? text((error as { code?: string }).code) : ""
+  const message = error instanceof Error ? error.message : text((error as { message?: string })?.message)
+  return code === "PGRST202" || message.includes("Could not find the function")
+}
+
 function profileSecondaryLabel(profile: Row) {
   return text(profile.email) || text(profile.login_id) || text(profile.role)
 }
@@ -1482,6 +1490,7 @@ function mapTask(
   const requestedBy = text(row.requested_by)
   const assigneeId = text(row.assignee_id)
   const secondaryAssigneeId = text(row.secondary_assignee_id)
+  const completedBy = text(row.completed_by)
 
   return {
     id,
@@ -1507,6 +1516,8 @@ function mapTask(
     subject: text(row.subject),
     startAt: text(row.start_at),
     dueAt: text(row.due_at),
+    completedBy,
+    completedByLabel: text(row.completed_by_label) || profileLabel(profiles.get(completedBy)),
     completedAt: text(row.completed_at),
     memo: text(row.memo),
     createdAt: text(row.created_at),
@@ -1547,6 +1558,8 @@ function mapOpsTaskPageRow(row: Row): OpsTask {
     subject: text(payload.subject),
     startAt: text(payload.startAt),
     dueAt: text(payload.dueAt),
+    completedBy: text(payload.completedById),
+    completedByLabel: text(payload.completedByLabel),
     completedAt: text(payload.completedAt),
     memo: text(payload.memo),
     createdAt: text(payload.createdAt),
@@ -1835,16 +1848,23 @@ export async function loadOpsTaskPage(options: OpsTaskPageLoadOptions): Promise<
     throw new Error("cursor_scope_mismatch")
   }
 
-  const pageResult = await supabase
-    .rpc("list_ops_task_page_v1", {
-      p_type: options.filters.taskType,
-      p_filters: options.filters,
-      p_cursor_sort_values: options.cursor?.sortValues || null,
-      p_cursor_id: options.cursor?.id || null,
-      p_limit: 30,
-    })
+  const pageArgs = {
+    p_type: options.filters.taskType,
+    p_filters: options.filters,
+    p_cursor_sort_values: options.cursor?.sortValues || null,
+    p_cursor_id: options.cursor?.id || null,
+    p_limit: 30,
+  }
+  let pageResult = await supabase
+    .rpc("list_ops_task_page_v2", pageArgs)
     .abortSignal(AbortSignal.timeout(8_000))
     .retry(false)
+  if (pageResult.error && isMissingRpcFunctionError(pageResult.error)) {
+    pageResult = await supabase
+      .rpc("list_ops_task_page_v1", pageArgs)
+      .abortSignal(AbortSignal.timeout(8_000))
+      .retry(false)
+  }
   if (pageResult.error) throw pageResult.error
 
   const rawRows = ((pageResult.data || []) as unknown as Row[])
@@ -2039,7 +2059,7 @@ export async function loadOpsTaskById(taskId: string): Promise<OpsTask | null> {
 
   const taskResult = await supabase
     .from("ops_tasks")
-    .select("id,title,type,status,priority,requested_by,requested_team,assignee_id,assignee_team,secondary_assignee_id,student_id,student_name,class_id,class_name,textbook_id,textbook_title,campus,subject,start_at,due_at,completed_at,memo,created_at,updated_at")
+    .select("id,title,type,status,priority,requested_by,requested_team,assignee_id,assignee_team,secondary_assignee_id,student_id,student_name,class_id,class_name,textbook_id,textbook_title,campus,subject,start_at,due_at,completed_by,completed_by_label,completed_at,memo,created_at,updated_at")
     .abortSignal(AbortSignal.timeout(8_000))
     .eq("id", taskId)
     .single()
@@ -2090,7 +2110,7 @@ export async function loadOpsTaskById(taskId: string): Promise<OpsTask | null> {
   const attachmentRows = (attachmentResult.data || []) as unknown as Row[]
   const eventRows = (eventResult.data || []) as unknown as Row[]
   const profileIds = [...new Set([
-    taskRow.requested_by, taskRow.assignee_id, taskRow.secondary_assignee_id,
+    taskRow.requested_by, taskRow.assignee_id, taskRow.secondary_assignee_id, taskRow.completed_by,
     ...commentRows.map((row) => row.author_id),
     ...attachmentRows.map((row) => row.uploaded_by),
     ...eventRows.map((row) => row.actor_id),
@@ -2098,7 +2118,7 @@ export async function loadOpsTaskById(taskId: string): Promise<OpsTask | null> {
   const profileResult = profileIds.length === 0
     ? { data: [], error: null }
     : await supabase.from("profiles")
-      .select("id,name,email,role,login_id").in("id", profileIds).order("id").limit(30)
+      .select("id,name,email,role,login_id").in("id", profileIds).order("id").limit(100)
       .abortSignal(AbortSignal.timeout(8_000)).retry(false)
   if (profileResult.error) throw profileResult.error
   const profileRows = (profileResult.data || []) as unknown as Row[]

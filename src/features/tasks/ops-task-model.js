@@ -66,6 +66,11 @@ export function isClosedOpsTask(task = {}) {
   return CLOSED_STATUSES.has(String(task.status || ""));
 }
 
+export function getOpsTaskCompletionActorLabel(task = {}) {
+  if (text(task.status) !== "done") return "미정";
+  return text(task.completedByLabel || task.completed_by_label) || "처리자 미기록";
+}
+
 function text(value) {
   return String(value || "").trim();
 }

@@ -34,6 +34,11 @@
       "fileName": "20260818202752_decouple_registration_phone_save_from_retired_in_app.sql",
       "status": "final",
       "sha256": "ac3310879f165b45388115dc5943ac42ac0ea77ca8e493b7fe5545a452809694"
+    },
+    {
+      "fileName": "20260820150057_ops_task_completion_actor.sql",
+      "status": "candidate",
+      "sha256": "2bd12279b8f79757dfbf6e5d84423bf34019d5f172c80e36377166002e89ceba"
     }
   ]
 }

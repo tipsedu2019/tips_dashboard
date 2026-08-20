@@ -47,6 +47,7 @@ import {
   groupOpsTasksByAssignee,
   groupOpsTasksByStatus,
   getOpsTaskCalendarItems,
+  getOpsTaskCompletionActorLabel,
   getOpsTaskHistoryMutation,
   getRegistrationDirtyBackPlan,
   getRegistrationDirtyCloseDecision,
@@ -8228,6 +8229,7 @@ function mergeOpsTaskWorkspaceOptionData(
     requestedByLabel: profileLabels.get(task.requestedBy) || task.requestedByLabel,
     assigneeLabel: profileLabels.get(task.assigneeId) || task.assigneeLabel,
     secondaryAssigneeLabel: profileLabels.get(task.secondaryAssigneeId) || task.secondaryAssigneeLabel,
+    completedByLabel: profileLabels.get(task.completedBy) || task.completedByLabel,
     comments: task.comments.map((comment) => ({
       ...comment,
       authorLabel: profileLabels.get(comment.authorId) || comment.authorLabel,
@@ -11632,6 +11634,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       subject: input.subject || "",
       startAt: input.startAt || "",
       dueAt: input.dueAt || "",
+      completedBy: status === "done" ? existing?.completedBy || "" : "",
+      completedByLabel: status === "done" ? existing?.completedByLabel || "" : "",
       completedAt: pickInputCompletedAt(input, existing),
       memo: input.memo || "",
       createdAt: existing?.createdAt || timestamp,
@@ -11710,6 +11714,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         subject: "",
         startAt: "",
         dueAt: quickDueAt,
+        completedBy: "",
+        completedByLabel: "",
         completedAt: "",
         memo: quickMemo,
         createdAt,
@@ -17819,7 +17825,7 @@ function RegistrationDetailPanel({ task, selectedTrackId }: { task: OpsTask; sel
         <dl className="grid gap-3 border-t px-3 py-3 text-sm md:grid-cols-2">
           <Info label="신청자" value={task.requestedByLabel || "관리팀"} />
           <Info label="신청일시" value={dateLabel(task.createdAt)} />
-          <Info label="담당자" value={task.assigneeLabel || task.assigneeTeam || "관리팀"} />
+          <Info label="처리자" value={getOpsTaskCompletionActorLabel(task)} />
           <Info label="완료일시" value={completedAt === "-" ? "미정" : completedAt} />
           <Info label="진행상태 원문" value={pipelineStatus} />
         </dl>
@@ -17866,7 +17872,7 @@ function WithdrawalDetailPanel({ task }: { task: OpsTask }) {
         <dl className="grid gap-3 border-t px-3 py-3 text-sm md:grid-cols-2">
           <Info label="신청자" value={task.requestedByLabel || "담당선생님"} />
           <Info label="신청일시" value={dateLabel(task.createdAt)} />
-          <Info label="담당자" value={task.assigneeLabel || task.assigneeTeam || "관리팀"} />
+          <Info label="처리자" value={getOpsTaskCompletionActorLabel(task)} />
           <Info label="완료일시" value={completedAt === "-" ? "미정" : completedAt} />
         </dl>
       </details>
@@ -17912,7 +17918,7 @@ function TransferDetailPanel({ task }: { task: OpsTask }) {
         <dl className="grid gap-3 border-t px-3 py-3 text-sm md:grid-cols-2">
           <Info label="신청자" value={task.requestedByLabel || "담당선생님"} />
           <Info label="신청일시" value={dateLabel(task.createdAt)} />
-          <Info label="담당자" value={task.assigneeLabel || task.assigneeTeam || "관리팀"} />
+          <Info label="처리자" value={getOpsTaskCompletionActorLabel(task)} />
           <Info label="완료일시" value={completedAt === "-" ? "미정" : completedAt} />
         </dl>
       </details>

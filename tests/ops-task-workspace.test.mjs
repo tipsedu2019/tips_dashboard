@@ -3039,8 +3039,9 @@ test("withdrawal workspace follows request processing and completed queues", asy
     "신청 · 처리",
     "신청자",
     "신청일시",
-    "담당자",
+    "처리자",
     "완료일시",
+    "getOpsTaskCompletionActorLabel(task)",
   ]);
   assert.doesNotMatch(withdrawalDetailProcessingSource, /label="담당"/);
   assert.doesNotMatch(withdrawalDetailProcessingSource, /처리일시/);
@@ -3331,8 +3332,9 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     "신청 · 처리",
     "신청자",
     "신청일시",
-    "담당자",
+    "처리자",
     "완료일시",
+    "getOpsTaskCompletionActorLabel(task)",
   ]);
   assert.doesNotMatch(transferDetailSource, /시간표 명단 변경/);
   assert.doesNotMatch(transferDetailSource, /AutoSyncResultSummary/);
@@ -4957,7 +4959,7 @@ test("browser workflow scripts target the operation surfaces", async () => {
     "type OpsTaskWorkspaceLoadOptions",
     "getOpsTaskWorkspaceCacheKey",
     "const opsTaskWorkspaceDataCache = new Map",
-    'rpc("list_ops_task_page_v1", {',
+    'rpc("list_ops_task_page_v2", pageArgs)',
     'rpc("get_ops_task_list_stats_v1", {',
     "p_limit: 30",
     "loadOpsTaskPage({",

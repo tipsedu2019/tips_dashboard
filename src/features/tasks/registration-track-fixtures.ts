@@ -1734,6 +1734,8 @@ function taskTemplate(input: {
     subject: input.subject,
     startAt: "",
     dueAt: "",
+    completedBy: "",
+    completedByLabel: "",
     completedAt: "",
     memo: "",
     createdAt: "2026-07-12T09:00:00+09:00",
