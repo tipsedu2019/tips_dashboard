@@ -1459,6 +1459,10 @@ test("SQL review workflow는 PR base/head SHA로 immutable-final boundary를 호
     workflow,
     /node scripts\/run-isolated-supabase-db-tests\.mjs \\\n\s+--review-head --require-final \\\n\s+--review-base-sha "\$\{BASE_SHA\}" --review-head-sha "\$\{HEAD_SHA\}"/u,
   )
+  assert.match(
+    workflow,
+    /--test supabase\/tests\/notification_contract_drain_evidence_schema_repair_test\.sql/u,
+  )
   assert.doesNotMatch(workflow, /secrets\./u)
 })
 

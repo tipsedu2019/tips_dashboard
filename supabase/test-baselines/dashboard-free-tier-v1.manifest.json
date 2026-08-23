@@ -99,6 +99,11 @@
       "fileName": "20260823074406_registration_workflow_stale_revision_nonretryable.sql",
       "status": "final",
       "sha256": "28a5af2540ed20475200e30d410e97b7fd4f7772e89a989f8a0ed64aee29532a"
+    },
+    {
+      "fileName": "20260823212430_fix_notification_contract_drain_evidence.sql",
+      "status": "final",
+      "sha256": "3f280303a759e1be85f7be1988f57239596f9cec2b3cc40d79c5cd263a760663"
     }
   ]
 }

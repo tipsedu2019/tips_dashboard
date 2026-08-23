@@ -132,6 +132,31 @@ function safeRepoPath(root, path) {
   return resolved;
 }
 
+function stripLeadingSqlTrivia(source) {
+  let index = 0;
+  while (index < source.length) {
+    while (/\s/u.test(source[index] || "")) index += 1;
+    if (source.startsWith("--", index)) {
+      const lineEnd = source.indexOf("\n", index + 2);
+      index = lineEnd < 0 ? source.length : lineEnd + 1;
+      continue;
+    }
+    if (source.startsWith("/*", index)) {
+      let depth = 1;
+      index += 2;
+      while (index < source.length && depth > 0) {
+        if (source.startsWith("/*", index)) { depth += 1; index += 2; }
+        else if (source.startsWith("*/", index)) { depth -= 1; index += 2; }
+        else index += 1;
+      }
+      if (depth !== 0) fail("management_api_contract_drift");
+      continue;
+    }
+    break;
+  }
+  return source.slice(index);
+}
+
 export function classifyManagementApiFailure(status) {
   return ({ 401: "credential_invalid", 403: "database_read_permission_missing", 404: "endpoint_contract_drift", 405: "endpoint_contract_drift", 429: "rate_limited_no_output", 500: "provider_unavailable_no_output" })[status] || "management_api_contract_drift";
 }
@@ -160,7 +185,8 @@ function normalizeLedgerRows(value) {
   if (!Array.isArray(value)) fail("management_api_contract_drift");
   const rows = value.map((row) => {
     if (!exactKeys(row, ["name", "statements", "version"]) || !/^\d{14}$/u.test(row.version) || !(row.name === null || /^[a-z0-9_]+$/u.test(row.name)) || !Array.isArray(row.statements) || !row.statements.every((statement) => typeof statement === "string")) fail("management_api_contract_drift");
-    const statements = row.statements.map((statement) => statement.normalize("NFC"));
+    if (row.statements.some((statement) => statement !== statement.normalize("NFC"))) fail("management_api_contract_drift");
+    const statements = [...row.statements];
     return { version: row.version, name: row.name, statements };
   }).sort((left, right) => left.version.localeCompare(right.version));
   if (new Set(rows.map((row) => row.version)).size !== rows.length) fail("management_api_contract_drift");
@@ -172,6 +198,27 @@ function normalizeLedger(value) {
     version: row.version,
     name: row.name,
     statementsSha256: sha256(canonical(row.statements)),
+  }));
+}
+
+async function resolveRepositoryMigrationLedger(value, root) {
+  const markerPattern = /^repository migration (supabase\/migrations\/(\d{14})_([a-z0-9_]+)\.sql); sha256=([a-f0-9]{64})$/u;
+  return Promise.all(normalizeLedgerRows(value).map(async (row) => {
+    const markerStatements = row.statements.filter((statement) => {
+      const firstToken = stripLeadingSqlTrivia(statement).match(/^([a-z_][a-z0-9_]*)/iu)?.[1]?.toLowerCase();
+      return firstToken === "repository" || firstToken === "sha256";
+    });
+    if (markerStatements.length === 0) return row;
+    if (row.statements.length !== 1 || markerStatements.length !== 1) fail("management_api_contract_drift");
+    const match = markerStatements[0].match(markerPattern);
+    if (!match || match[2] !== row.version || match[3] !== row.name) fail("management_api_contract_drift");
+    let bytes;
+    try { bytes = await readFile(safeRepoPath(root, match[1])); } catch { fail("management_api_contract_drift"); }
+    if (sha256(bytes) !== match[4]) fail("management_api_contract_drift");
+    const source = bytes.toString("utf8");
+    if (!Buffer.from(source, "utf8").equals(bytes)) fail("management_api_contract_drift");
+    if (source !== source.normalize("NFC")) fail("management_api_contract_drift");
+    return { ...row, statements: [source] };
   }));
 }
 
@@ -304,18 +351,10 @@ function containsDataMutation(code, { includeRead = false } = {}) {
 }
 
 function isSchemaReplayStatement(statement) {
-  let normalized = statement.trimStart().toLowerCase();
-  while (normalized.startsWith("--") || normalized.startsWith("/*")) {
-    if (normalized.startsWith("--")) {
-      const lineEnd = normalized.indexOf("\n");
-      normalized = lineEnd < 0 ? "" : normalized.slice(lineEnd + 1).trimStart();
-    } else {
-      const blockEnd = normalized.indexOf("*/", 2);
-      if (blockEnd < 0) fail("management_api_contract_drift");
-      normalized = normalized.slice(blockEnd + 2).trimStart();
-    }
-  }
-  if (/^(?:insert|update|delete|merge|copy|truncate|select|with|notify|lock|repository|sha256\s*=)\b/u.test(normalized)) return false;
+  const normalized = stripLeadingSqlTrivia(statement).toLowerCase();
+  if (!normalized) return false;
+  if (/^(?:insert|update|delete|merge|copy|truncate|select|with|notify|lock|call|execute|prepare|deallocate|explain|vacuum|analyze|refresh|cluster|reindex|listen|unlisten)\b/u.test(normalized)) return false;
+  if (/^(?:repository|sha256)\b/u.test(normalized)) fail("management_api_contract_drift");
   if (/^do\s+\$(?:[a-z_][a-z0-9_]*)?\$/u.test(normalized)) {
     const tag = normalized.match(/^do\s+(\$(?:[a-z_][a-z0-9_]*)?\$)/u)?.[1];
     if (!tag) fail("management_api_contract_drift");
@@ -351,7 +390,20 @@ function isSchemaReplayStatement(statement) {
     if (hasDdlIntent && (containsDataMutation(code) || executeStatements.some((entry) => !entry.safeDdl))) fail("management_api_contract_drift");
     return directDdl || dynamicDdl;
   }
-  return true;
+  const code = scanSqlCode(normalized).code.trim();
+  if (/^create\s+(?:temp|temporary)\s+table\b/u.test(code)) return false;
+  if (/^create\s+(?:unlogged\s+)?table\b/u.test(code)) {
+    if (/\bas\s*(?:\(\s*)*(?:select|with|table|values|execute)\b/u.test(code)) return false;
+    return true;
+  }
+  if (/^create\s+materialized\s+view\b/u.test(code)) return /\bwith\s+no\s+data\s*$/u.test(code);
+  if (/^create\s+(?:or\s+replace\s+)?(?:unique\s+)?(?:schema|extension|type|domain|sequence|view|index|function|procedure|constraint\s+trigger|trigger|policy|role|collation|cast|aggregate|operator(?:\s+(?:class|family))?|rule|statistics|publication|event\s+trigger)\b/u.test(code)) return true;
+  if (/^alter\s+(?:table|index|function|procedure|schema|type|domain|sequence|view|materialized\s+view|policy|role|default\s+privileges|operator(?:\s+(?:class|family))?|publication|extension|collation|aggregate)\b/u.test(code)) return true;
+  if (/^drop\s+(?:table|index|function|procedure|schema|type|domain|sequence|view|materialized\s+view|trigger|policy|role|collation|cast|aggregate|operator(?:\s+(?:class|family))?|rule|statistics|publication|extension|event\s+trigger)\b/u.test(code)) return true;
+  if (/^(?:grant|revoke)\b/u.test(code)) return true;
+  if (/^(?:comment\s+on|security\s+label\s+on)\b/u.test(code)) return true;
+  if (/^(?:begin|start\s+transaction|commit|rollback|savepoint|release\s+savepoint|set|reset)\b/u.test(code)) return true;
+  fail("management_api_contract_drift");
 }
 
 function splitSqlStatements(source) {
@@ -767,7 +819,7 @@ export function buildDashboardFreeTierParitySql(catalog) {
   return `begin;\nselect plan(${catalog.length});\n${rows}\nselect * from finish();\nrollback;\n`;
 }
 
-function artifactSet({ payload, originMainSha, definitions }) {
+function artifactSet({ payload, originMainSha, definitions, replayLedger = payload.migrationLedger }) {
   const ledger = normalizeLedger(payload.migrationLedger);
   const constraintIndexNames = new Set(definitions.filter((entry) => entry.objectKind === "constraint").map((entry) => relationIdentity(entry).object));
   const catalog = definitions.filter((entry) => entry.objectKind !== "grant" && !(entry.objectKind === "index" && constraintIndexNames.has(entry.identity))).map((entry) => ({ objectKind: entry.objectKind, schema: entry.schema, identity: entry.identity, definitionSha256: entry.definitionSha256 }));
@@ -776,7 +828,7 @@ function artifactSet({ payload, originMainSha, definitions }) {
     migrationLedgerCount: ledger.length, migrationLedgerMaxVersion: ledger.at(-1)?.version || null,
     migrationLedgerSha256: sha256(canonical(ledger)), migrationLedger: ledger, catalog,
   };
-  const baseline = `${legacyTableBootstrap(definitions, payload.migrationLedger)}${replayBaseline(payload.migrationLedger)}${buildFinalSchemaReconciliation(definitions)}`;
+  const baseline = `${legacyTableBootstrap(definitions, replayLedger)}${replayBaseline(replayLedger)}${buildFinalSchemaReconciliation(definitions)}`;
   const parity = buildDashboardFreeTierParitySql(catalog);
   return { catalog: `${JSON.stringify(normalized, null, 2)}\n`, baseline, parity, normalized };
 }
@@ -881,7 +933,8 @@ export async function captureDashboardFreeTierCatalog({ argv = process.argv.slic
   try { payload = await response.json(); } catch { fail("management_api_contract_drift"); }
   if (!exactKeys(payload, ["catalog", "migrationLedger", "serverMajor"]) || !Number.isInteger(payload.serverMajor)) fail("management_api_contract_drift");
   const definitions = normalizeDashboardFreeTierCatalog(stabilizeCatalogRoleFingerprints(payload.catalog), scope);
-  const artifacts = artifactSet({ payload, originMainSha: args.originMainSha, definitions });
+  const replayLedger = await resolveRepositoryMigrationLedger(payload.migrationLedger, root);
+  const artifacts = artifactSet({ payload, originMainSha: args.originMainSha, definitions, replayLedger });
   const manifestPath = resolve(root, "supabase/test-baselines/dashboard-free-tier-v1.manifest.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   manifest.originMainSha = args.originMainSha;

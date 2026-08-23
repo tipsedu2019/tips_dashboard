@@ -14,6 +14,8 @@ const SQL_TEST = /^supabase\/tests\/[a-z0-9_]+\.sql$/u;
 const PROBE = /^(?:tests\/[a-z0-9_./-]+\.mjs|scripts\/probe-dashboard-audit-chain-concurrency\.mjs)$/u;
 const MIGRATION = /^(\d{14})_([a-z0-9_]+)\.sql$/u;
 const SUPABASE = "/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supabase/cli-darwin-arm64/bin/supabase";
+const ISOLATED_SCHEMA_REPAIR_PATH = "scripts/fixtures/dashboard-free-tier-isolated-schema-repair.sql";
+const ISOLATED_SCHEMA_REPAIR_SHA256 = "00c1a584269816060933bb6d728494aef085592d6c6b08dbc8a715cf6ee2794b";
 const ISOLATED_MIGRATION_PREREQUISITE_PATH = "scripts/fixtures/dashboard-free-tier-migration-prerequisites.sql";
 const ISOLATED_MIGRATION_PREREQUISITE_SHA256 = "051f9a7f82ab02abfb3437c6064782651032e4eded02aa89d8986dc9cf94c5f1";
 const REVIEWED_MANIFEST_BOOTSTRAP = Object.freeze({
@@ -25,6 +27,7 @@ const REVIEWED_MANIFEST_BOOTSTRAP = Object.freeze({
   promotedFileName: "20260820150057_ops_task_completion_actor.sql",
   promotedSha256: "2bd12279b8f79757dfbf6e5d84423bf34019d5f172c80e36377166002e89ceba",
   functionAclBaselineRepair: Object.freeze({
+    headSha: "7865388b134af488bb7be3944e49eceb25e1d649",
     headManifestSha256: "d103e6a1aa6a3be4835783ee122937a54108064e37f3836e4097b9ed7733749b",
     baselineSha256: "75fdc621929dbacf4ba049667feef65977f5996ac8f1cd39675585ecb1136fb7",
     activePointerSha256: "c25411d4a1a1910a7a8b072bdf892ea02499fbdb62341f4ced34c33b111b56d3",
@@ -52,6 +55,10 @@ function canonical(value) {
   if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
   return JSON.stringify(value === undefined ? null : value);
 }
+export function decodeUtf8ProcessChunks(chunks) {
+  if (!Array.isArray(chunks) || !chunks.every((chunk) => Buffer.isBuffer(chunk))) fail("isolated_supabase_db_child_output_invalid");
+  return Buffer.concat(chunks).toString("utf8");
+}
 function safeRepoPath(root, path) {
   if (typeof path !== "string" || path.includes("..") || relative(root, resolve(root, path)).startsWith("..")) fail("isolated_supabase_db_target_invalid");
   return resolve(root, path);
@@ -63,11 +70,15 @@ export function buildIsolatedSupabaseConfig(projectId, ports, databaseMajorVersi
 function processResult(command, args, options = {}) {
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(command, args, { cwd: options.cwd, env: options.env, stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = ""; let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const stdoutChunks = []; const stderrChunks = [];
+    child.stdout.on("data", (chunk) => { stdoutChunks.push(chunk); });
+    child.stderr.on("data", (chunk) => { stderrChunks.push(chunk); });
     child.on("error", rejectPromise);
-    child.on("close", (code) => resolvePromise({ code, stdout, stderr }));
+    child.on("close", (code) => resolvePromise({
+      code,
+      stdout: decodeUtf8ProcessChunks(stdoutChunks),
+      stderr: decodeUtf8ProcessChunks(stderrChunks),
+    }));
   });
 }
 
@@ -99,8 +110,18 @@ export function parseIsolatedDbArguments(argv) {
 
 export function validateBaselineManifest(manifest) {
   if (!manifest || manifest.baselineVersion !== "dashboard-free-tier-v1" || !SHA40.test(manifest.originMainSha || "") || !SHA256.test(manifest.baselineSha256 || "") || !SHA256.test(manifest.catalogSha256 || "") || !Array.isArray(manifest.requiredObjectSignatures) || !Array.isArray(manifest.orderedNewMigrations)) fail("isolated_supabase_db_manifest_invalid");
+  const fileNames = [];
+  const versions = [];
   for (const migration of manifest.orderedNewMigrations) {
-    if (!MIGRATION.test(migration?.fileName || "") || !["candidate", "final"].includes(migration.status) || !SHA256.test(migration.sha256 || "")) fail("isolated_supabase_db_manifest_invalid");
+    const match = migration?.fileName?.match(MIGRATION);
+    if (!match || !["candidate", "final"].includes(migration.status) || !SHA256.test(migration.sha256 || "")) fail("isolated_supabase_db_manifest_invalid");
+    fileNames.push(migration.fileName);
+    versions.push(match[1]);
+  }
+  if (new Set(fileNames).size !== fileNames.length
+    || new Set(versions).size !== versions.length
+    || JSON.stringify(fileNames) !== JSON.stringify([...fileNames].sort())) {
+    fail("isolated_supabase_db_manifest_invalid");
   }
   return manifest;
 }
@@ -141,17 +162,29 @@ function exactActivePointer(pointer, expectedArtifactPaths) {
     && JSON.stringify(pointer.artifactPaths) === JSON.stringify(expectedArtifactPaths);
 }
 
-async function validateReviewedFunctionAclBaselineRepair({ headSha, headManifest, headManifestSource, readRevisionFile }) {
+async function validateReviewedFunctionAclBaselineRepair({ headSha, headManifest, repairManifest, repairManifestSource, readRevisionFile }) {
   const repair = REVIEWED_MANIFEST_BOOTSTRAP.functionAclBaselineRepair;
-  if (sha256(headManifestSource) !== repair.headManifestSha256
-    || headManifest.baselineSha256 !== repair.baselineSha256) {
+  const withoutMigrations = (manifest) => {
+    const metadata = { ...manifest };
+    delete metadata.orderedNewMigrations;
+    return metadata;
+  };
+  const repairEntries = repairManifest.orderedNewMigrations;
+  const headEntries = headManifest.orderedNewMigrations;
+  if (sha256(repairManifestSource) !== repair.headManifestSha256
+    || repairManifest.baselineSha256 !== repair.baselineSha256
+    || canonical(withoutMigrations(headManifest)) !== canonical(withoutMigrations(repairManifest))
+    || headEntries.length < repairEntries.length) {
     fail("isolated_supabase_db_final_migration_history_drift");
   }
-  const historicalManifestSource = `${JSON.stringify({
-    ...headManifest,
-    baselineSha256: REVIEWED_MANIFEST_BOOTSTRAP.baselineSha256,
-  }, null, 2)}\n`;
-  if (sha256(historicalManifestSource) !== REVIEWED_MANIFEST_BOOTSTRAP.headManifestSha256) {
+  for (let index = 0; index < repairEntries.length; index += 1) {
+    if (canonical(headEntries[index]) !== canonical(repairEntries[index])) fail("isolated_supabase_db_final_migration_history_drift");
+  }
+  const appendedEntries = headEntries.slice(repairEntries.length);
+  const fileNames = headEntries.map((entry) => entry.fileName);
+  if (appendedEntries.some((entry) => entry.status !== "final")
+    || new Set(fileNames).size !== fileNames.length
+    || JSON.stringify(fileNames) !== JSON.stringify([...fileNames].sort())) {
     fail("isolated_supabase_db_final_migration_history_drift");
   }
 
@@ -287,14 +320,13 @@ export async function validateImmutableFinalMigrationHistory({
     const headManifestSha256 = sha256(headManifestSource);
     const isOriginalReviewedHead = headSha === REVIEWED_MANIFEST_BOOTSTRAP.headSha
       && headManifestSha256 === REVIEWED_MANIFEST_BOOTSTRAP.headManifestSha256;
-    const isReviewedFunctionAclRepair = headManifestSha256 === REVIEWED_MANIFEST_BOOTSTRAP.functionAclBaselineRepair.headManifestSha256;
-    if (sha256(baseManifestSource) !== REVIEWED_MANIFEST_BOOTSTRAP.baseManifestSha256
-      || (!isOriginalReviewedHead && !isReviewedFunctionAclRepair)) {
-      fail("isolated_supabase_db_final_migration_history_drift");
-    }
-    if (isReviewedFunctionAclRepair) {
+    if (sha256(baseManifestSource) !== REVIEWED_MANIFEST_BOOTSTRAP.baseManifestSha256) fail("isolated_supabase_db_final_migration_history_drift");
+    if (!isOriginalReviewedHead) {
       try {
-        await validateReviewedFunctionAclBaselineRepair({ headSha, headManifest, headManifestSource, readRevisionFile });
+        const repair = REVIEWED_MANIFEST_BOOTSTRAP.functionAclBaselineRepair;
+        const repairManifestSource = await readRevisionFile(repair.headSha, manifestRelativePath);
+        const repairManifest = validateBaselineManifest(JSON.parse(repairManifestSource));
+        await validateReviewedFunctionAclBaselineRepair({ headSha, headManifest, repairManifest, repairManifestSource, readRevisionFile });
       } catch {
         fail("isolated_supabase_db_final_migration_history_drift");
       }
@@ -440,6 +472,9 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   }
   if (!args.execute) return { status: "plan", tests: args.tests, probes: args.probes, manifest, artifactPaths, reviewBoundary };
   const smokeTest = await readFile(join(root, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"));
+  let schemaRepair;
+  try { schemaRepair = await readFile(safeRepoPath(root, ISOLATED_SCHEMA_REPAIR_PATH)); } catch { fail("isolated_supabase_db_schema_repair_drift"); }
+  if (sha256(schemaRepair) !== ISOLATED_SCHEMA_REPAIR_SHA256) fail("isolated_supabase_db_schema_repair_drift");
   let migrationPrerequisite;
   try { migrationPrerequisite = await readFile(safeRepoPath(root, ISOLATED_MIGRATION_PREREQUISITE_PATH)); } catch { fail("isolated_supabase_db_prerequisite_drift"); }
   if (sha256(migrationPrerequisite) !== ISOLATED_MIGRATION_PREREQUISITE_SHA256) fail("isolated_supabase_db_prerequisite_drift");
@@ -472,7 +507,8 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     await writeFile(temporaryConfig, buildIsolatedSupabaseConfig(runtime.projectId, runtime.ports, catalog.serverMajor), { mode: 0o600 });
     await rename(temporaryConfig, runtime.configPath);
     await stageContents(artifacts.baseline, join(runtime.tempRoot, "supabase/migrations/00000000000000_dashboard_free_tier_test_baseline.sql"));
-    await stageContents(migrationPrerequisite, join(runtime.tempRoot, "supabase/migrations/00000000000001_dashboard_free_tier_test_prerequisites.sql"));
+    await stageContents(schemaRepair, join(runtime.tempRoot, "supabase/migrations/00000000000001_dashboard_free_tier_test_schema_repair.sql"));
+    await stageContents(migrationPrerequisite, join(runtime.tempRoot, "supabase/migrations/00000000000002_dashboard_free_tier_test_prerequisites.sql"));
     await stageContents(artifacts.parity, join(runtime.tempRoot, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"));
     await stageContents(smokeTest, join(runtime.tempRoot, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"));
     startAttempted = true;

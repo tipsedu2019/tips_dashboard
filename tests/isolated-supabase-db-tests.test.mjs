@@ -67,6 +67,7 @@ async function makeRepo(t) {
   t.after(() => rm(root, { recursive: true, force: true }));
   for (const path of [
     "scripts/fixtures/dashboard-free-tier-baseline-scope.json",
+    "scripts/fixtures/dashboard-free-tier-isolated-schema-repair.sql",
     "scripts/fixtures/dashboard-free-tier-migration-prerequisites.sql",
     "scripts/fixtures/supabase-management-read-only-query-contract.json",
     "supabase/test-baselines/dashboard-free-tier-v1.manifest.json",
@@ -236,6 +237,36 @@ async function createReviewedManifestRepairFixture({
   return { root, headManifest, pointer, revisionFiles, executeGit };
 }
 
+async function createReviewedManifestRepairExtensionFixture({
+  root = fileURLToPath(new URL("..", runnerUrl)),
+} = {}) {
+  const repair = await createReviewedManifestRepairFixture({ root });
+  const headSha = "9".repeat(40);
+  const headManifest = JSON.parse(JSON.stringify(repair.headManifest));
+  const fileName = "20260824000000_future_append.sql";
+  const source = "select 1;\n";
+  headManifest.orderedNewMigrations.push({
+    fileName,
+    status: "final",
+    sha256: createHash("sha256").update(source).digest("hex"),
+  });
+  const revisionFiles = new Map(repair.revisionFiles);
+  for (const [key, value] of repair.revisionFiles) {
+    const prefix = `${reviewedManifestRepairHeadSha}:`;
+    if (key.startsWith(prefix)) revisionFiles.set(`${headSha}:${key.slice(prefix.length)}`, value);
+  }
+  revisionFiles.set(`${headSha}:${reviewedManifestPath}`, `${JSON.stringify(headManifest, null, 2)}\n`);
+  revisionFiles.set(`${headSha}:supabase/migrations/${fileName}`, source);
+  const executeGit = async ({ args }) => {
+    if (args[0] === "merge-base") return { code: 0, stdout: `${reviewedManifestBootstrapBaseSha}\n`, stderr: "" };
+    const value = revisionFiles.get(args[1]);
+    return value === undefined
+      ? { code: 128, stdout: "", stderr: "fixture revision path missing" }
+      : { code: 0, stdout: value, stderr: "" };
+  };
+  return { root, headSha, headManifest, fileName, source, revisionFiles, executeGit };
+}
+
 async function configureEmptyReviewedRunnerRepo(root) {
   const baselinePath = join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql");
   const catalogPath = join(root, "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json");
@@ -398,6 +429,14 @@ test("isolated DB runner redacts every supported child diagnostic secret and bou
   assert.equal(sanitizeChildDiagnostic(oversized), oversized.slice(-8000));
 });
 
+test("child process output decodes UTF-8 only after split byte chunks are reassembled", async () => {
+  const { decodeUtf8ProcessChunks } = await import(runnerUrl.href);
+  const source = Buffer.from("큰 한글 SQL 파일");
+  const splitInsideFirstKoreanCharacter = [source.subarray(0, 1), source.subarray(1, 2), source.subarray(2, 5), source.subarray(5)];
+  assert.equal(decodeUtf8ProcessChunks(splitInsideFirstKoreanCharacter), "큰 한글 SQL 파일");
+  assert.throws(() => decodeUtf8ProcessChunks(["not-a-buffer"]), /isolated_supabase_db_child_output_invalid/u);
+});
+
 test("review boundary rejects edits, deletions, renames, and reordering of base-final migrations", async (t) => {
   const { validateImmutableFinalMigrationHistory, sha256 } = await import(runnerUrl.href);
   const cases = [
@@ -515,6 +554,73 @@ test("review boundary accepts only the exact reviewed function ACL baseline repa
     baseFinalCount: 6,
     appendedCount: 12,
   });
+});
+
+test("review boundary accepts an append-only final migration after the reviewed baseline repair", async () => {
+  const { validateImmutableFinalMigrationHistory } = await import(runnerUrl.href);
+  const fixture = await createReviewedManifestRepairExtensionFixture();
+
+  const result = await validateImmutableFinalMigrationHistory({
+    root: fixture.root,
+    baseSha: reviewedManifestBootstrapBaseSha,
+    headSha: fixture.headSha,
+    executeGit: fixture.executeGit,
+  });
+
+  assert.deepEqual(result, {
+    mergeBaseSha: reviewedManifestBootstrapBaseSha,
+    baseFinalCount: 6,
+    appendedCount: 13,
+  });
+});
+
+test("reviewed baseline repair extension rejects prefix, metadata, lifecycle, order, and duplicate drift", async (t) => {
+  const { validateImmutableFinalMigrationHistory } = await import(runnerUrl.href);
+  const cases = [
+    {
+      name: "approved prefix",
+      mutate: (manifest) => { manifest.orderedNewMigrations[0].sha256 = "0".repeat(64); },
+    },
+    {
+      name: "baseline metadata",
+      mutate: (manifest) => { manifest.originMainSha = "f".repeat(40); },
+    },
+    {
+      name: "appended lifecycle",
+      mutate: (manifest) => { manifest.orderedNewMigrations.at(-1).status = "candidate"; },
+    },
+    {
+      name: "appended order",
+      mutate: (manifest) => { manifest.orderedNewMigrations.at(-1).fileName = "20260822000000_out_of_order.sql"; },
+    },
+    {
+      name: "duplicate file",
+      mutate: (manifest) => { manifest.orderedNewMigrations.at(-1).fileName = manifest.orderedNewMigrations.at(-2).fileName; },
+    },
+    {
+      name: "duplicate Supabase version with a different suffix",
+      mutate: (manifest) => { manifest.orderedNewMigrations.at(-1).fileName = "20260823074406_zz_duplicate_version.sql"; },
+    },
+  ];
+  for (const fixtureCase of cases) {
+    await t.test(fixtureCase.name, async () => {
+      const fixture = await createReviewedManifestRepairExtensionFixture();
+      fixtureCase.mutate(fixture.headManifest);
+      fixture.revisionFiles.set(
+        `${fixture.headSha}:${reviewedManifestPath}`,
+        `${JSON.stringify(fixture.headManifest, null, 2)}\n`,
+      );
+      await assert.rejects(
+        validateImmutableFinalMigrationHistory({
+          root: fixture.root,
+          baseSha: reviewedManifestBootstrapBaseSha,
+          headSha: fixture.headSha,
+          executeGit: fixture.executeGit,
+        }),
+        /isolated_supabase_db_final_migration_history_drift/u,
+      );
+    });
+  }
 });
 
 test("reviewed function ACL baseline repair rejects every unpinned artifact mutation", async (t) => {
@@ -981,10 +1087,12 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   const originalParity = await readFile(join(capture, "parity.sql"));
   const originalSmoke = await readFile(join(root, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"));
   const originalProbe = await readFile(join(root, "tests/probe.mjs"));
+  const schemaRepairPath = join(root, "scripts/fixtures/dashboard-free-tier-isolated-schema-repair.sql");
+  const originalSchemaRepair = await readFile(schemaRepairPath);
   const prerequisitePath = join(root, "scripts/fixtures/dashboard-free-tier-migration-prerequisites.sql");
   const originalPrerequisite = await readFile(prerequisitePath);
   const calls = [];
-  const staged = { baseline: false, prerequisite: false, parity: false, smoke: false, migration: false, probe: false };
+  const staged = { baseline: false, schemaRepair: false, prerequisite: false, parity: false, smoke: false, migration: false, probe: false };
   const result = await runIsolatedSupabaseDbTests({
     root,
     argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f", "--test", "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql", "--probe", "tests/probe.mjs"],
@@ -1002,11 +1110,13 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
         await writeFile(join(root, "supabase/migrations/20260814000000_candidate.sql"), "select 2;\n");
         await writeFile(join(root, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"), "-- mutated after verification\n");
         await writeFile(join(root, "tests/probe.mjs"), "process.exit(9);\n");
+        await writeFile(schemaRepairPath, "-- mutated after verification\n");
         await writeFile(prerequisitePath, "-- mutated after verification\n");
       }
       if (invocation.args[0] === "db") {
         staged.baseline = (await readFile(join(invocation.cwd, "supabase/migrations/00000000000000_dashboard_free_tier_test_baseline.sql"))).equals(baseline);
-        staged.prerequisite = (await readFile(join(invocation.cwd, "supabase/migrations/00000000000001_dashboard_free_tier_test_prerequisites.sql"))).equals(originalPrerequisite);
+        staged.schemaRepair = (await readFile(join(invocation.cwd, "supabase/migrations/00000000000001_dashboard_free_tier_test_schema_repair.sql"))).equals(originalSchemaRepair);
+        staged.prerequisite = (await readFile(join(invocation.cwd, "supabase/migrations/00000000000002_dashboard_free_tier_test_prerequisites.sql"))).equals(originalPrerequisite);
       }
       if (invocation.args[0] === "test" && invocation.args.includes("supabase/tests/dashboard_free_tier_catalog_parity_test.sql")) {
         staged.parity = (await readFile(join(invocation.cwd, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"))).equals(originalParity);
@@ -1023,7 +1133,7 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   assert.equal(calls.filter((call) => call.args[0] === "stop").length, 1);
   assert.equal(calls.find((call) => call.command === process.execPath).env.TASK_LOCAL_DB_URL.includes("127.0.0.1"), true);
   assert.equal(calls.find((call) => call.command === process.execPath).env.SUPABASE_DATABASE_READ_TOKEN, undefined);
-  assert.deepEqual(staged, { baseline: true, prerequisite: true, parity: true, smoke: true, migration: true, probe: true });
+  assert.deepEqual(staged, { baseline: true, schemaRepair: true, prerequisite: true, parity: true, smoke: true, migration: true, probe: true });
   assert.equal(dirname(result.runtime.tempRoot), process.env.RUNNER_TEMP || tmpdir());
   const runtimeConfig = await readFile(result.runtime.configPath, "utf8");
   assert.match(runtimeConfig, /project_id = "tips_supabase_db_qa_a1b2c3d4e5f6"/u);
@@ -1033,10 +1143,14 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   await writeFile(join(capture, "parity.sql"), originalParity);
   await writeFile(join(root, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"), originalSmoke);
   await writeFile(join(root, "tests/probe.mjs"), originalProbe);
+  await writeFile(schemaRepairPath, originalSchemaRepair);
   await writeFile(prerequisitePath, originalPrerequisite);
   await writeFile(join(root, "supabase/migrations/20260814000000_candidate.sql"), "select 2;\n");
   await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_migration_hash_drift/);
   await writeFile(join(root, "supabase/migrations/20260814000000_candidate.sql"), "select 1;\n");
+  await writeFile(schemaRepairPath, "-- drift\n");
+  await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_schema_repair_drift/);
+  await writeFile(schemaRepairPath, originalSchemaRepair);
   await writeFile(prerequisitePath, "-- drift\n");
   await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_prerequisite_drift/);
 });
@@ -1745,6 +1859,51 @@ test("baseline capture preserves the non-login audit writer role used by public 
   assert.match(sql, /grant insert, select on table "public"\."dashboard_audit_logs" to "dashboard_audit_writer_v2"/u);
 });
 
+test("isolated schema repair pins every copied historical source and only restores empty private tables", async () => {
+  const repair = await readFile(new URL("../scripts/fixtures/dashboard-free-tier-isolated-schema-repair.sql", import.meta.url), "utf8");
+  const sources = [
+    ["20260803140000_notification_content_contracts.sql", "c501226c91e88ac92b4464847f026f4950195d5f8333e66b682e3395fae06280"],
+    ["20260803143000_notification_registration_content_payload.sql", "61373ad01e3d47d1eeb1fadb5d98e6f9b802665148650391b8ca3bc28b3331c8"],
+    ["20260815182919_registration_customer_solapi_activation_evidence.sql", "d8ce2248466c2eb5c755c2de2aed50e08b33950e459278a2e3ce9c77dd767a06"],
+  ];
+  for (const [fileName, expectedSha256] of sources) {
+    const source = await readFile(new URL(`../supabase/migrations/${fileName}`, import.meta.url));
+    assert.equal(createHash("sha256").update(source).digest("hex"), expectedSha256);
+    assert.match(repair, new RegExp(`-- ${fileName}\\n(?:-- source-commit=[a-f0-9]{40}\\n)?-- source-sha256=${expectedSha256}`, "u"));
+  }
+  assert.match(repair, /create table dashboard_private\.notification_rule_content_contracts/u);
+  assert.match(repair, /create table dashboard_private\.notification_template_compliance_audits/u);
+  assert.match(repair, /registration_customer_solapi_live_evidence_valid_v1/u);
+  assert.doesNotMatch(repair, /\b(?:insert|update|delete|merge|copy|truncate)\b/iu);
+});
+
+test("notification drain repair removes only the invalid qualification and dead helper", async () => {
+  const migration = await readFile(
+    new URL("../supabase/migrations/20260823212430_fix_notification_contract_drain_evidence.sql", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(migration, /\bpg_catalog\.coalesce\s*\(/iu);
+  assert.equal(migration.match(/\bcoalesce\s*\(/giu)?.length, 5);
+  assert.match(migration, /set local lock_timeout = '5s';\s+set local statement_timeout = '30s';/u);
+  assert.match(
+    migration,
+    /create or replace function public\.get_notification_contract_drain_evidence_v1\(\s*p_window_start timestamp with time zone,\s*p_window_end timestamp with time zone\s*\) returns jsonb[\s\S]*?security definer\s+set search_path = ''/u,
+  );
+  assert.match(
+    migration,
+    /revoke all on function public\.get_notification_contract_drain_evidence_v1\(\s*timestamp with time zone, timestamp with time zone\s*\) from public, anon, authenticated, service_role;/u,
+  );
+  assert.match(
+    migration,
+    /grant execute on function public\.get_notification_contract_drain_evidence_v1\(\s*timestamp with time zone, timestamp with time zone\s*\) to service_role;/u,
+  );
+  assert.match(
+    migration,
+    /drop function dashboard_private\.set_registration_customer_solapi_activation_pre_observation_v1\(\s*uuid, text, text, jsonb\s*\);/u,
+  );
+  assert.doesNotMatch(migration, /drop function if exists/iu);
+});
+
 test("candidate migrations do not schema-qualify PostgreSQL special SQL forms", async () => {
   const root = new URL("..", import.meta.url);
   const manifest = JSON.parse(await readFile(new URL("../supabase/test-baselines/dashboard-free-tier-v1.manifest.json", import.meta.url), "utf8"));
@@ -1778,7 +1937,16 @@ test("reviewed capture omits production data mutations while retaining schema st
           "do $$ begin execute 'alter table public.fixture drop constraint if exists fixture_guard'; end $$",
           "-- readiness check\ndo $$ begin create temporary table fixture_gate(id uuid) on commit drop; if not exists (select 1 from public.fixture) then raise exception 'fixture_missing_commented'; end if; end $$",
           "select public.seed_fixture()",
-          "repository migration supabase/migrations/fixture.sql; sha256=deadbeef",
+          "call public.seed_fixture()",
+          "create table public.fixture_ctas as select * from public.fixture",
+          "create table public.fixture_ctas_execute as execute prepared_select",
+          "create table public.fixture_ctas_nested as ((select * from public.fixture))",
+          "create table public.fixture_ctas_commented as ( /* query */ ( table public.fixture ) )",
+          "create materialized view public.fixture_materialized as select * from public.fixture",
+          "explain analyze update public.fixture set id = id",
+          "drop index if exists public.fixture_old_idx",
+          "alter index public.fixture_idx rename to fixture_idx_v2",
+          "create constraint trigger fixture_constraint after insert on public.fixture deferrable initially deferred for each row execute function public.fixture_guard()",
           "begin; set local lock_timeout = '5s'; do $data$ begin update public.fixture set id = id; if not found then raise exception 'fixture_missing_compound'; end if; end $data$; create table public.fixture_companion(id uuid); commit",
           "create function public.fixture_write() returns void language sql as $$ update public.fixture set id = id $$",
         ],
@@ -1796,7 +1964,135 @@ test("reviewed capture omits production data mutations while retaining schema st
   assert.doesNotMatch(baseline, /fixture_missing_compound/u);
   assert.doesNotMatch(baseline, /fixture_missing_commented/u);
   assert.doesNotMatch(baseline, /select public\.seed_fixture/u);
+  assert.doesNotMatch(baseline, /call public\.seed_fixture|fixture_ctas|fixture_materialized|explain analyze/u);
+  assert.match(baseline, /drop index if exists public\.fixture_old_idx/u);
+  assert.match(baseline, /alter index public\.fixture_idx rename to fixture_idx_v2/u);
+  assert.match(baseline, /create constraint trigger fixture_constraint/u);
   assert.doesNotMatch(baseline, /repository migration|sha256=deadbeef/u);
+});
+
+test("reviewed capture resolves an exact repository migration marker into schema-only replay", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const root = await makeRepo(t);
+  await writeCaptureScope(root);
+  const originMainSha = "3".repeat(40);
+  const version = "20260813000000";
+  const name = "marker_fixture";
+  const migrationPath = `supabase/migrations/${version}_${name}.sql`;
+  const migration = [
+    "create table public.marker_fixture(id uuid primary key);",
+    "insert into public.marker_fixture(id) values (gen_random_uuid());",
+    "call public.seed_fixture();",
+    "create table public.marker_fixture_ctas as select * from public.marker_fixture;",
+    "create table public.marker_fixture_ctas_execute as execute prepared_select;",
+    "create table public.marker_fixture_ctas_nested as ((select * from public.marker_fixture));",
+    "create table public.marker_fixture_ctas_commented as ( /* query */ ( table public.marker_fixture ) );",
+    "create materialized view public.marker_fixture_materialized as select * from public.marker_fixture;",
+    "explain analyze update public.marker_fixture set id = id;",
+    "drop index if exists public.marker_fixture_old_idx;",
+    "alter index public.marker_fixture_idx rename to marker_fixture_idx_v2;",
+    "create constraint trigger marker_fixture_constraint after insert on public.marker_fixture deferrable initially deferred for each row execute function public.marker_fixture_guard();",
+    "create function public.marker_fixture_write() returns void language sql as $$ update public.marker_fixture set id = id $$;",
+  ].join("\n");
+  await mkdir(dirname(join(root, migrationPath)), { recursive: true });
+  await writeFile(join(root, migrationPath), migration);
+  const marker = `repository migration ${migrationPath}; sha256=${createHash("sha256").update(migration).digest("hex")}`;
+  await captureDashboardFreeTierCatalog({
+    root,
+    argv: ["--mode", "execute", "--authorized", "--request-id", "repository-marker-schema", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
+    env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+    gitOriginMainSha: async () => originMainSha,
+    fetch: async () => new Response(JSON.stringify({ serverMajor: 17, migrationLedger: [{ version, name, statements: [marker] }], catalog: completeCatalogFixture() }), { status: 201 }),
+  });
+  const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"), "utf8");
+  const catalog = JSON.parse(await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json"), "utf8"));
+  assert.match(baseline, /create table public\.marker_fixture/u);
+  assert.match(baseline, /create function public\.marker_fixture_write/u);
+  assert.doesNotMatch(baseline, /insert into public\.marker_fixture|repository migration/u);
+  assert.doesNotMatch(baseline, /call public\.seed_fixture|marker_fixture_ctas|marker_fixture_materialized|explain analyze/u);
+  assert.match(baseline, /drop index if exists public\.marker_fixture_old_idx/u);
+  assert.match(baseline, /alter index public\.marker_fixture_idx rename to marker_fixture_idx_v2/u);
+  assert.match(baseline, /create constraint trigger marker_fixture_constraint/u);
+  assert.equal(catalog.migrationLedger[0].statementsSha256, createHash("sha256").update(JSON.stringify([marker])).digest("hex"));
+});
+
+test("reviewed capture rejects repository marker path, identity, and byte drift before publication", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const cases = [
+    { label: "hash", version: "20260813000000", name: "marker_fixture", marker: "repository migration supabase/migrations/20260813000000_marker_fixture.sql; sha256=" + "0".repeat(64) },
+    { label: "version", version: "20260813000000", name: "marker_fixture", marker: "repository migration supabase/migrations/20260813000001_marker_fixture.sql; sha256=" + "1".repeat(64) },
+    { label: "name", version: "20260813000000", name: "marker_fixture", marker: "repository migration supabase/migrations/20260813000000_other.sql; sha256=" + "1".repeat(64) },
+    { label: "path", version: "20260813000000", name: "marker_fixture", marker: "repository migration supabase/test-baselines/dashboard-free-tier-v1.sql; sha256=" + "1".repeat(64) },
+    { label: "leading-whitespace", version: "20260813000000", name: "marker_fixture", marker: " repository migration supabase/migrations/20260813000000_marker_fixture.sql; sha256=" + "1".repeat(64) },
+    { label: "leading-comment", version: "20260813000000", name: "marker_fixture", marker: "-- receipt\nrepository migration supabase/migrations/20260813000000_marker_fixture.sql; sha256=" + "1".repeat(64) },
+    { label: "case", version: "20260813000000", name: "marker_fixture", marker: "Repository migration supabase/migrations/20260813000000_marker_fixture.sql; sha256=" + "1".repeat(64) },
+    { label: "trailing", version: "20260813000000", name: "marker_fixture", marker: "repository migration supabase/migrations/20260813000000_marker_fixture.sql; sha256=" + "1".repeat(64) + " trailing" },
+    { label: "standalone-sha", version: "20260813000000", name: "marker_fixture", marker: "sha256=" + "1".repeat(64) },
+  ];
+  for (const entry of cases) {
+    await t.test(entry.label, async () => {
+      const root = await makeRepo(t);
+      await writeCaptureScope(root);
+      const migrationPath = "supabase/migrations/20260813000000_marker_fixture.sql";
+      await mkdir(dirname(join(root, migrationPath)), { recursive: true });
+      await writeFile(join(root, migrationPath), "create table public.marker_fixture(id uuid primary key);\n");
+      const originMainSha = "4".repeat(40);
+      let publicationAttempts = 0;
+      await assert.rejects(captureDashboardFreeTierCatalog({
+        root,
+        argv: ["--mode", "execute", "--authorized", "--request-id", `repository-marker-${entry.label}`, "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
+        env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+        gitOriginMainSha: async () => originMainSha,
+        publish: async () => { publicationAttempts += 1; },
+        fetch: async () => new Response(JSON.stringify({ serverMajor: 17, migrationLedger: [{ version: entry.version, name: entry.name, statements: [entry.marker] }], catalog: completeCatalogFixture() }), { status: 201 }),
+      }), /management_api_contract_drift/u);
+      assert.equal(publicationAttempts, 0);
+    });
+  }
+});
+
+test("reviewed capture rejects invalid UTF-8, non-NFC source bytes, and non-NFC ledger SQL", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const version = "20260813000000";
+  const name = "marker_fixture";
+  const originMainSha = "8".repeat(40);
+  const cases = [
+    { label: "invalid-utf8", source: Buffer.from([0x63, 0x72, 0x65, 0x61, 0x74, 0x65, 0x20, 0xff]) },
+    { label: "non-nfc-source", source: Buffer.from("create table public.cafe\u0301(id uuid);", "utf8") },
+  ];
+  for (const entry of cases) {
+    await t.test(entry.label, async () => {
+      const root = await makeRepo(t);
+      await writeCaptureScope(root);
+      const migrationPath = `supabase/migrations/${version}_${name}.sql`;
+      await mkdir(dirname(join(root, migrationPath)), { recursive: true });
+      await writeFile(join(root, migrationPath), entry.source);
+      const marker = `repository migration ${migrationPath}; sha256=${createHash("sha256").update(entry.source).digest("hex")}`;
+      let publicationAttempts = 0;
+      await assert.rejects(captureDashboardFreeTierCatalog({
+        root,
+        argv: ["--mode", "execute", "--authorized", "--request-id", `repository-source-${entry.label}`, "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
+        env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+        gitOriginMainSha: async () => originMainSha,
+        publish: async () => { publicationAttempts += 1; },
+        fetch: async () => new Response(JSON.stringify({ serverMajor: 17, migrationLedger: [{ version, name, statements: [marker] }], catalog: completeCatalogFixture() }), { status: 201 }),
+      }), /management_api_contract_drift/u);
+      assert.equal(publicationAttempts, 0);
+    });
+  }
+
+  const root = await makeRepo(t);
+  await writeCaptureScope(root);
+  let publicationAttempts = 0;
+  await assert.rejects(captureDashboardFreeTierCatalog({
+    root,
+    argv: ["--mode", "execute", "--authorized", "--request-id", "repository-source-non-nfc-ledger", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
+    env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+    gitOriginMainSha: async () => originMainSha,
+    publish: async () => { publicationAttempts += 1; },
+    fetch: async () => new Response(JSON.stringify({ serverMajor: 17, migrationLedger: [{ version, name, statements: ["create table public.cafe\u0301(id uuid)"] }], catalog: completeCatalogFixture() }), { status: 201 }),
+  }), /management_api_contract_drift/u);
+  assert.equal(publicationAttempts, 0);
 });
 
 test("reviewed capture bootstraps a legacy public table that is absent from the production migration ledger", async (t) => {

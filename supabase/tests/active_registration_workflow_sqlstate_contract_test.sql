@@ -55,9 +55,11 @@ select ok(
   'private registration workflow status implementation exists with its exact signature'
 );
 
-select like(
-  pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('public.set_registration_workflow_status_v1(uuid,text,integer,text)')),
-  '%dashboard_private.set_registration_workflow_status_v1_impl%',
+select ok(
+  pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('public.set_registration_workflow_status_v1(uuid,text,integer,text)')),
+    'dashboard_private.set_registration_workflow_status_v1_impl'
+  ) > 0,
   'public wrapper delegates to the private implementation'
 );
 
@@ -123,111 +125,94 @@ select ok(
   'private implementation has exactly one empty search_path setting'
 );
 
-select results_eq(
-  $$
+select ok(
+  (
     select
-      case
-        when acl.grantee = 0 then 'PUBLIC'
-        else pg_catalog.pg_get_userbyid(acl.grantee)::text
-      end as grantee,
-      pg_catalog.pg_get_userbyid(acl.grantor)::text as grantor,
-      acl.privilege_type,
-      acl.is_grantable
+      pg_catalog.count(*) = 2
+      and pg_catalog.count(*) filter (
+        where pg_catalog.pg_get_userbyid(acl.grantee)::text in ('postgres', 'authenticated')
+          and pg_catalog.pg_get_userbyid(acl.grantor)::text = 'postgres'
+          and acl.privilege_type = 'EXECUTE'
+          and not acl.is_grantable
+      ) = 2
     from pg_catalog.pg_proc procedure
     cross join lateral pg_catalog.aclexplode(
-      coalesce(
-        procedure.proacl,
-        pg_catalog.acldefault('f', procedure.proowner)
-      )
+      coalesce(procedure.proacl, pg_catalog.acldefault('f', procedure.proowner))
     ) acl
     where procedure.oid = pg_catalog.to_regprocedure(
       'public.set_registration_workflow_status_v1(uuid,text,integer,text)'
     )
-    order by grantee, grantor, acl.privilege_type, acl.is_grantable
-  $$,
-  $$
-    values
-      ('authenticated'::text, 'postgres'::text, 'EXECUTE'::text, false),
-      ('postgres'::text, 'postgres'::text, 'EXECUTE'::text, false)
-  $$,
+  ),
   'public wrapper has only direct non-grantable postgres and authenticated EXECUTE ACL rows'
 );
 
-select results_eq(
-  $$
+select ok(
+  (
     select
-      case
-        when acl.grantee = 0 then 'PUBLIC'
-        else pg_catalog.pg_get_userbyid(acl.grantee)::text
-      end as grantee,
-      pg_catalog.pg_get_userbyid(acl.grantor)::text as grantor,
-      acl.privilege_type,
-      acl.is_grantable
+      pg_catalog.count(*) = 2
+      and pg_catalog.count(*) filter (
+        where pg_catalog.pg_get_userbyid(acl.grantee)::text in ('postgres', 'authenticated')
+          and pg_catalog.pg_get_userbyid(acl.grantor)::text = 'postgres'
+          and acl.privilege_type = 'EXECUTE'
+          and not acl.is_grantable
+      ) = 2
     from pg_catalog.pg_proc procedure
     cross join lateral pg_catalog.aclexplode(
-      coalesce(
-        procedure.proacl,
-        pg_catalog.acldefault('f', procedure.proowner)
-      )
+      coalesce(procedure.proacl, pg_catalog.acldefault('f', procedure.proowner))
     ) acl
     where procedure.oid = pg_catalog.to_regprocedure(
       'dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)'
     )
-    order by grantee, grantor, acl.privilege_type, acl.is_grantable
-  $$,
-  $$
-    values
-      ('authenticated'::text, 'postgres'::text, 'EXECUTE'::text, false),
-      ('postgres'::text, 'postgres'::text, 'EXECUTE'::text, false)
-  $$,
+  ),
   'private implementation has only direct non-grantable postgres and authenticated EXECUTE ACL rows'
 );
 
-select results_eq(
-  $$
-    select boundary.function_name, boundary.role_name, pg_catalog.has_function_privilege(
+select ok(
+  not exists (
+    select 1
+    from (
+      values
+        ('public.set_registration_workflow_status_v1(uuid,text,integer,text)'::text, 'public'::text),
+        ('public.set_registration_workflow_status_v1(uuid,text,integer,text)'::text, 'anon'::text),
+        ('public.set_registration_workflow_status_v1(uuid,text,integer,text)'::text, 'service_role'::text),
+        ('dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)'::text, 'public'::text),
+        ('dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)'::text, 'anon'::text),
+        ('dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)'::text, 'service_role'::text)
+    ) boundary(function_name, role_name)
+    where pg_catalog.has_function_privilege(
       boundary.role_name::pg_catalog.name,
       pg_catalog.to_regprocedure(boundary.function_name),
       'EXECUTE'
-    ) as can_execute
-    from (
-      values
-        (1, 'public.set_registration_workflow_status_v1(uuid,text,integer,text)'::text, 'public'::text),
-        (2, 'public.set_registration_workflow_status_v1(uuid,text,integer,text)'::text, 'anon'::text),
-        (3, 'public.set_registration_workflow_status_v1(uuid,text,integer,text)'::text, 'service_role'::text),
-        (4, 'dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)'::text, 'public'::text),
-        (5, 'dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)'::text, 'anon'::text),
-        (6, 'dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)'::text, 'service_role'::text)
-    ) boundary(ordering, function_name, role_name)
-    order by boundary.ordering
-  $$,
-  $$
-    values
-      ('public.set_registration_workflow_status_v1(uuid,text,integer,text)'::text, 'public'::text, false),
-      ('public.set_registration_workflow_status_v1(uuid,text,integer,text)'::text, 'anon'::text, false),
-      ('public.set_registration_workflow_status_v1(uuid,text,integer,text)'::text, 'service_role'::text, false),
-      ('dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)'::text, 'public'::text, false),
-      ('dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)'::text, 'anon'::text, false),
-      ('dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)'::text, 'service_role'::text, false)
-  $$,
+    )
+  ),
   'PUBLIC, anon, and service_role cannot execute either registration workflow function'
 );
 
-select unlike(
-  pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('public.set_registration_workflow_status_v1(uuid,text,integer,text)')),
-  '40001',
+select ok(
+  pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('public.set_registration_workflow_status_v1(uuid,text,integer,text)')),
+    '40001'
+  ) = 0,
   'public wrapper does not manually raise SQLSTATE 40001'
 );
 
-select unlike(
-  pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)')),
-  '40001',
+select ok(
+  pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)')),
+    '40001'
+  ) = 0,
   'private implementation does not manually raise SQLSTATE 40001'
 );
 
-select like(
-  pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)')),
-  '%registration_workflow_status_refresh_required%23514%',
+select ok(
+  pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)')),
+    'registration_workflow_status_refresh_required'
+  ) > 0
+  and pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)')),
+    '23514'
+  ) > 0,
   'private implementation maps stale revisions to registration_workflow_status_refresh_required with 23514'
 );
 

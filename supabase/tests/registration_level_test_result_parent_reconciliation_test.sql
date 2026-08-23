@@ -40,6 +40,31 @@ set role = excluded.role,
     email = excluded.email,
     updated_at = excluded.updated_at;
 
+-- The isolated baseline intentionally carries no production rows. Seed only
+-- the subject switches this transactional test needs, then roll them back.
+insert into public.academic_subject_settings(
+  subject,
+  is_active,
+  registration_create_enabled,
+  grade_levels,
+  sort_order
+) values
+  (
+    '영어', true, true,
+    array['초1','초2','초3','초4','초5','초6','중1','중2','중3','고1','고2','고3'],
+    10
+  ),
+  (
+    '수학', true, true,
+    array['초1','초2','초3','초4','초5','초6','중1','중2','중3','고1','고2','고3'],
+    20
+  )
+on conflict (subject) do update
+set is_active = excluded.is_active,
+    registration_create_enabled = excluded.registration_create_enabled,
+    grade_levels = excluded.grade_levels,
+    sort_order = excluded.sort_order;
+
 create or replace function pg_temp.registration_level_result_set_actor(p_actor uuid)
 returns void
 language plpgsql
