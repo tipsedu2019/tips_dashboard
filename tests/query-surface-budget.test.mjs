@@ -794,8 +794,9 @@ test("query budget CLI requires exactly one CI or worktree mode", () => {
 test("query budget compares a changed real legacy task source against its baseline delta", async () => {
   const file = "src/features/tasks/ops-task-service.ts"
   const baselineSha = "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101"
+  const reviewedTaskSourceSha = "0ea57f0a7660c4900103bb432fc13dbac257d6a7"
   const baselineSource = execFileSync("git", ["show", `${baselineSha}:${file}`], { cwd: process.cwd(), encoding: "utf8" })
-  const currentSource = execFileSync("git", ["show", `HEAD:${file}`], { cwd: process.cwd(), encoding: "utf8" })
+  const currentSource = execFileSync("git", ["show", `${reviewedTaskSourceSha}:${file}`], { cwd: process.cwd(), encoding: "utf8" })
 
   const unchangedDebt = await verifyFixture({
     file,

@@ -419,6 +419,36 @@ function aclGrantSql(schema, relation, acl) {
   return statements.join("\n");
 }
 
+function functionAclGrantSql(entry) {
+  const fingerprint = parsedReplayFingerprint(entry);
+  const identity = normalizeDashboardFunctionIdentity(entry.identity);
+  const opening = identity.indexOf("(");
+  const functionName = identity.slice(0, opening);
+  const signature = identity.slice(opening + 1, -1);
+  if (fingerprint?.owner !== "postgres" || fingerprint.signature !== signature || !Array.isArray(fingerprint.acl) || fingerprint.acl.length === 0) fail("management_api_contract_drift");
+  const allowedRoles = new Set(["public", "anon", "authenticated", "service_role", "postgres"]);
+  const seenRoles = new Set();
+  const capturedRoles = [];
+  for (const item of fingerprint.acl) {
+    if (typeof item !== "string") fail("management_api_contract_drift");
+    const match = item.match(/^([^=]*)=([^/]*)\/([a-z_][a-z0-9_]*)$/iu);
+    if (!match) fail("management_api_contract_drift");
+    const role = match[1] || "public";
+    const privileges = match[2];
+    const grantor = match[3];
+    if (!allowedRoles.has(role) || seenRoles.has(role) || privileges !== "X" || grantor !== fingerprint.owner) fail("management_api_contract_drift");
+    seenRoles.add(role);
+    capturedRoles.push(role);
+  }
+  if (capturedRoles[0] !== fingerprint.owner) fail("management_api_contract_drift");
+  const target = `${quoteIdentifier(entry.schema)}.${quoteIdentifier(functionName)}(${signature})`;
+  const roleSql = (role) => role === "public" ? "public" : quoteIdentifier(role);
+  return [
+    `revoke all privileges on function ${target} from public, anon, authenticated, service_role, postgres;`,
+    ...capturedRoles.map((role) => `grant execute on function ${target} to ${roleSql(role)};`),
+  ];
+}
+
 export function buildFinalSchemaReconciliation(definitions) {
   const publicTables = definitions.filter((entry) => entry.objectKind === "table" && entry.schema === "public" && entry.replayFingerprint);
   const defaults = new Map(definitions.filter((entry) => entry.objectKind === "default" && entry.schema === "public" && entry.replayFingerprint).map((entry) => [entry.identity, parsedReplayFingerprint(entry)]));
@@ -491,7 +521,10 @@ export function buildFinalSchemaReconciliation(definitions) {
     return [`drop trigger if exists ${name} on public.${quoteIdentifier(relation)};`, `${fingerprint.definition};`];
   });
   const aclSql = publicTables.map((entry) => aclGrantSql("public", entry.identity, parsedReplayFingerprint(entry)?.acl));
-  const statements = [...columnSql, ...defaultSql, ...constraintSql, ...indexSql, ...rlsSql, ...helperSql, ...managedRoleSql, ...policySql, ...triggerSql, ...aclSql].filter(Boolean);
+  const functionAclSql = definitions
+    .filter((entry) => entry.objectKind === "function" && entry.schema === "public" && entry.replayFingerprint)
+    .flatMap(functionAclGrantSql);
+  const statements = [...columnSql, ...defaultSql, ...constraintSql, ...indexSql, ...rlsSql, ...helperSql, ...managedRoleSql, ...policySql, ...triggerSql, ...aclSql, ...functionAclSql].filter(Boolean);
   return statements.length ? `${statements.join("\n")}\n` : "";
 }
 

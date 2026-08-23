@@ -1,0 +1,39 @@
+{
+  "baselineVersion": "dashboard-free-tier-v1",
+  "originMainSha": "cd6756987963b1102b077fe6d4ccf199787b66c8",
+  "baselineSha256": "75fdc621929dbacf4ba049667feef65977f5996ac8f1cd39675585ecb1136fb7",
+  "catalogSha256": "4d925b43c13bcf4b24cdf69db16d6d648b68fe8661999416118f49357d99ed6d",
+  "requiredObjectSignatures": [],
+  "orderedNewMigrations": [
+    {
+      "fileName": "20260816003407_registration_same_day_customer_reminders.sql",
+      "status": "final",
+      "sha256": "80b8e4e45b27133ac378cd81e9871422d61e6305f37525cc934ca950acf632a7"
+    },
+    {
+      "fileName": "20260816133708_normalize_class_dates.sql",
+      "status": "final",
+      "sha256": "aa85cd966d716fcc81df1d5e9983812f219b2b0d81492200da45f2f8e3cbc112"
+    },
+    {
+      "fileName": "20260817111315_registration_customer_booking_source_eligibility.sql",
+      "status": "final",
+      "sha256": "d913ecb61b58b179fbbf054bd22249380d43c174f00c56c846774a8ad9ea37a2"
+    },
+    {
+      "fileName": "20260817111325_registration_observation_booking_followup_tasks.sql",
+      "status": "final",
+      "sha256": "f931bf0eb3d7aba5fff71d0818b9bcaed4612176363187aaef1f7e64ffb7e2cd"
+    },
+    {
+      "fileName": "20260818083818_optimize_registration_task_stats.sql",
+      "status": "final",
+      "sha256": "c769cb9c63f213b600693b35f8c947ed9af41c4de4cf997498aa1791f174df79"
+    },
+    {
+      "fileName": "20260818202752_decouple_registration_phone_save_from_retired_in_app.sql",
+      "status": "final",
+      "sha256": "ac3310879f165b45388115dc5943ac42ac0ea77ca8e493b7fe5545a452809694"
+    }
+  ]
+}

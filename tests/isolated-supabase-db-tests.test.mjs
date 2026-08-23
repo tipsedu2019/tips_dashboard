@@ -160,6 +160,7 @@ async function createFinalManifestHistory(t) {
 
 const reviewedManifestBootstrapBaseSha = "c7ea76b3dcd94101503305feadc95ce591f68050";
 const reviewedManifestBootstrapHeadSha = "dd7a61557efab0f623e99385630e3f66282e3f18";
+const reviewedManifestRepairHeadSha = "e".repeat(40);
 const reviewedManifestPath = "supabase/test-baselines/dashboard-free-tier-v1.manifest.json";
 
 function readGitFile(root, revision, path) {
@@ -199,13 +200,48 @@ async function createReviewedManifestBootstrapFixture({
   return { root, baseManifest, headManifest, revisionFiles, executeGit };
 }
 
+async function createReviewedManifestRepairFixture({
+  root = fileURLToPath(new URL("..", runnerUrl)),
+} = {}) {
+  const bootstrap = await createReviewedManifestBootstrapFixture({ root });
+  const headManifestSource = await readFile(join(root, reviewedManifestPath), "utf8");
+  const headManifest = JSON.parse(headManifestSource);
+  const pointerPath = "supabase/test-baselines/dashboard-free-tier-v1.active.json";
+  const pointerSource = await readFile(join(root, pointerPath), "utf8");
+  const pointer = JSON.parse(pointerSource);
+  const revisionFiles = new Map([...bootstrap.revisionFiles].filter(([key]) => key.startsWith(`${reviewedManifestBootstrapBaseSha}:`)));
+  revisionFiles.set(`${reviewedManifestRepairHeadSha}:${reviewedManifestPath}`, headManifestSource);
+  revisionFiles.set(`${reviewedManifestRepairHeadSha}:${pointerPath}`, pointerSource);
+  for (const entry of headManifest.orderedNewMigrations) {
+    const path = `supabase/migrations/${entry.fileName}`;
+    revisionFiles.set(`${reviewedManifestRepairHeadSha}:${path}`, await readFile(join(root, path), "utf8"));
+  }
+  for (const fileName of ["manifest.json", "baseline.sql", "catalog.json", "parity.sql"]) {
+    const path = `supabase/test-baselines/dashboard-free-tier-v1-captures/${pointer.captureId}/${fileName}`;
+    revisionFiles.set(`${reviewedManifestRepairHeadSha}:${path}`, await readFile(join(root, path), "utf8"));
+  }
+  for (const path of [
+    "supabase/test-baselines/dashboard-free-tier-v1.sql",
+    "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json",
+    "supabase/tests/dashboard_free_tier_catalog_parity_test.sql",
+  ]) revisionFiles.set(`${reviewedManifestRepairHeadSha}:${path}`, await readFile(join(root, path), "utf8"));
+  const executeGit = async ({ args }) => {
+    if (args[0] === "merge-base") return { code: 0, stdout: `${reviewedManifestBootstrapBaseSha}\n`, stderr: "" };
+    const source = revisionFiles.get(args[1]);
+    return source === undefined
+      ? { code: 128, stdout: "", stderr: "fixture revision path missing" }
+      : { code: 0, stdout: source, stderr: "" };
+  };
+  return { root, headManifest, pointer, revisionFiles, executeGit };
+}
+
 async function configureEmptyReviewedRunnerRepo(root) {
   const baselinePath = join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql");
   const catalogPath = join(root, "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json");
   const manifestPath = join(root, "supabase/test-baselines/dashboard-free-tier-v1.manifest.json");
   const baseline = await readFile(baselinePath);
   const originMainSha = "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101";
-  const catalog = JSON.stringify({ captureStatus: "reviewed", originMainSha, migrationLedger: [], catalog: [] });
+  const catalog = JSON.stringify({ captureStatus: "reviewed", originMainSha, serverMajor: 17, migrationLedger: [], catalog: [] });
   await writeFile(catalogPath, catalog);
   await mkdir(join(root, "supabase/migrations"), { recursive: true });
   await writeFile(manifestPath, JSON.stringify({
@@ -462,6 +498,102 @@ test("review boundary accepts only the pinned one-time reviewed manifest complet
   });
 });
 
+test("review boundary accepts only the exact reviewed function ACL baseline repair", async () => {
+  const { validateImmutableFinalMigrationHistory } = await import(runnerUrl.href);
+  const fixture = await createReviewedManifestRepairFixture();
+
+  const result = await validateImmutableFinalMigrationHistory({
+    root: fixture.root,
+    baseSha: reviewedManifestBootstrapBaseSha,
+    headSha: reviewedManifestRepairHeadSha,
+    executeGit: fixture.executeGit,
+  });
+
+  assert.deepEqual(result, {
+    mergeBaseSha: reviewedManifestBootstrapBaseSha,
+    baseFinalCount: 6,
+    appendedCount: 12,
+  });
+});
+
+test("reviewed function ACL baseline repair rejects every unpinned artifact mutation", async (t) => {
+  const { validateImmutableFinalMigrationHistory } = await import(runnerUrl.href);
+  const pointerPath = "supabase/test-baselines/dashboard-free-tier-v1.active.json";
+  const canonicalBaselinePath = "supabase/test-baselines/dashboard-free-tier-v1.sql";
+  const cases = [
+    {
+      name: "top-level manifest metadata",
+      mutate: (fixture) => {
+        const key = `${reviewedManifestRepairHeadSha}:${reviewedManifestPath}`;
+        const manifest = JSON.parse(fixture.revisionFiles.get(key));
+        manifest.originMainSha = "f".repeat(40);
+        fixture.revisionFiles.set(key, `${JSON.stringify(manifest, null, 2)}\n`);
+      },
+    },
+    {
+      name: "active capture pointer",
+      mutate: (fixture) => {
+        const key = `${reviewedManifestRepairHeadSha}:${pointerPath}`;
+        const pointer = JSON.parse(fixture.revisionFiles.get(key));
+        pointer.captureId = "0".repeat(16);
+        fixture.revisionFiles.set(key, JSON.stringify(pointer));
+      },
+    },
+    {
+      name: "historical manifest fallback with a changed active capture",
+      mutate: (fixture) => {
+        const manifestKey = `${reviewedManifestRepairHeadSha}:${reviewedManifestPath}`;
+        fixture.revisionFiles.set(manifestKey, readGitFile(fixture.root, reviewedManifestBootstrapHeadSha, reviewedManifestPath));
+        const pointerKey = `${reviewedManifestRepairHeadSha}:${pointerPath}`;
+        const pointer = JSON.parse(fixture.revisionFiles.get(pointerKey));
+        pointer.captureId = "0".repeat(16);
+        fixture.revisionFiles.set(pointerKey, JSON.stringify(pointer));
+      },
+    },
+    {
+      name: "canonical baseline bytes",
+      mutate: (fixture) => {
+        const key = `${reviewedManifestRepairHeadSha}:${canonicalBaselinePath}`;
+        fixture.revisionFiles.set(key, `${fixture.revisionFiles.get(key)}-- mutation\n`);
+      },
+    },
+    {
+      name: "capture baseline bytes",
+      mutate: (fixture) => {
+        const path = `supabase/test-baselines/dashboard-free-tier-v1-captures/${fixture.pointer.captureId}/baseline.sql`;
+        const key = `${reviewedManifestRepairHeadSha}:${path}`;
+        fixture.revisionFiles.set(key, `${fixture.revisionFiles.get(key)}-- mutation\n`);
+      },
+    },
+    {
+      name: "capture manifest bytes",
+      mutate: (fixture) => {
+        const path = `supabase/test-baselines/dashboard-free-tier-v1-captures/${fixture.pointer.captureId}/manifest.json`;
+        const key = `${reviewedManifestRepairHeadSha}:${path}`;
+        const manifest = JSON.parse(fixture.revisionFiles.get(key));
+        manifest.requiredObjectSignatures = ["unexpected"];
+        fixture.revisionFiles.set(key, `${JSON.stringify(manifest, null, 2)}\n`);
+      },
+    },
+  ];
+
+  for (const fixtureCase of cases) {
+    await t.test(fixtureCase.name, async () => {
+      const fixture = await createReviewedManifestRepairFixture();
+      fixtureCase.mutate(fixture);
+      await assert.rejects(
+        validateImmutableFinalMigrationHistory({
+          root: fixture.root,
+          baseSha: reviewedManifestBootstrapBaseSha,
+          headSha: reviewedManifestRepairHeadSha,
+          executeGit: fixture.executeGit,
+        }),
+        /isolated_supabase_db_final_migration_history_drift/u,
+      );
+    });
+  }
+});
+
 test("frozen reviewed manifest fixture ignores a simulated future worktree append", async (t) => {
   const { validateImmutableFinalMigrationHistory } = await import(runnerUrl.href);
   const root = fileURLToPath(new URL("..", runnerUrl));
@@ -599,9 +731,10 @@ test("isolated DB runner allocates four distinct loopback ports by default", asy
 
 test("isolated DB config keeps project_id at the top level", async () => {
   const { buildIsolatedSupabaseConfig } = await import(runnerUrl.href);
-  const config = buildIsolatedSupabaseConfig("tips_isolated_fixture", { api: 54321, db: 54322, studio: 54323, inbucket: 54324 });
+  const config = buildIsolatedSupabaseConfig("tips_isolated_fixture", { api: 54321, db: 54322, studio: 54323, inbucket: 54324 }, 17);
   assert.match(config, /^project_id = "tips_isolated_fixture"\n/u);
   assert.ok(config.indexOf("project_id") < config.indexOf("[api]"));
+  assert.match(config, /\[db\]\nport = 54322\nmajor_version = 17\n/u);
   assert.doesNotMatch(config, /\[analytics\][\s\S]*project_id/u);
 });
 
@@ -830,7 +963,7 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   const { runIsolatedSupabaseDbTests, sha256 } = await import(runnerUrl.href);
   const root = await makeRepo(t);
   const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"));
-  const reviewedCatalog = JSON.stringify({ captureStatus: "reviewed", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101", migrationLedger: [], catalog: [] });
+  const reviewedCatalog = JSON.stringify({ captureStatus: "reviewed", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101", serverMajor: 17, migrationLedger: [], catalog: [] });
   await writeFile(join(root, "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json"), reviewedCatalog);
   await mkdir(join(root, "supabase/migrations"), { recursive: true });
   await mkdir(join(root, "tests"), { recursive: true });
@@ -885,7 +1018,9 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   assert.equal(calls.find((call) => call.command === process.execPath).env.SUPABASE_DATABASE_READ_TOKEN, undefined);
   assert.deepEqual(staged, { baseline: true, parity: true, smoke: true, migration: true, probe: true });
   assert.equal(dirname(result.runtime.tempRoot), process.env.RUNNER_TEMP || tmpdir());
-  assert.match(await readFile(result.runtime.configPath, "utf8"), /project_id = "tips_supabase_db_qa_a1b2c3d4e5f6"/u);
+  const runtimeConfig = await readFile(result.runtime.configPath, "utf8");
+  assert.match(runtimeConfig, /project_id = "tips_supabase_db_qa_a1b2c3d4e5f6"/u);
+  assert.match(runtimeConfig, /\[db\]\nport = 55433\nmajor_version = 17\n/u);
   t.after(() => rm(result.runtime.tempRoot, { recursive: true, force: true }));
   await writeFile(join(capture, "baseline.sql"), baseline);
   await writeFile(join(capture, "parity.sql"), originalParity);
@@ -899,7 +1034,7 @@ test("runner stages each requested SQL file after init and before target pgtap",
   const { runIsolatedSupabaseDbTests, sha256 } = await import(runnerUrl.href);
   const root = await makeRepo(t);
   const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"));
-  const catalog = JSON.stringify({ captureStatus: "reviewed", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101", migrationLedger: [], catalog: [] });
+  const catalog = JSON.stringify({ captureStatus: "reviewed", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101", serverMajor: 17, migrationLedger: [], catalog: [] });
   await writeFile(join(root, "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json"), catalog);
   await mkdir(join(root, "supabase/migrations"), { recursive: true });
   await mkdir(join(root, "supabase/tests"), { recursive: true });
@@ -927,7 +1062,7 @@ test("runner lints the reviewed head after migration application with one inject
   const { runIsolatedSupabaseDbTests, sha256 } = await import(runnerUrl.href);
   const root = await makeRepo(t);
   const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"));
-  const catalog = JSON.stringify({ captureStatus: "reviewed", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101", migrationLedger: [], catalog: [] });
+  const catalog = JSON.stringify({ captureStatus: "reviewed", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101", serverMajor: 17, migrationLedger: [], catalog: [] });
   await writeFile(join(root, "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json"), catalog);
   await mkdir(join(root, "supabase/migrations"), { recursive: true });
   await mkdir(join(root, "supabase/tests"), { recursive: true });
@@ -1400,7 +1535,7 @@ test("reviewed capture compares policy roles semantically and omits redundant OI
   assert.equal(policy.definitionSha256, createHash("sha256").update('{"check": null, "roles": ["authenticated"], "using": "true", "command": "r"}').digest("hex"));
 });
 
-test("final schema reconciliation restores current columns, policies, RLS, and triggers", async () => {
+test("final schema reconciliation restores current columns, policies, RLS, triggers, and function ACLs", async () => {
   const { buildFinalSchemaReconciliation } = await import(captureUrl.href);
   const definitions = [
     { objectKind: "table", schema: "public", identity: "classes", replayFingerprint: JSON.stringify({ columns: [{ name: "current_note", type: "text", notNull: true }], acl: ["authenticated=r/postgres"] }) },
@@ -1409,6 +1544,7 @@ test("final schema reconciliation restores current columns, policies, RLS, and t
     { objectKind: "rls", schema: "public", identity: "classes", replayFingerprint: JSON.stringify({ enabled: true, forced: false }) },
     { objectKind: "policy", schema: "public", identity: "classes.classes_read", replayFingerprint: JSON.stringify({ check: null, roles: ["authenticated"], using: "is_admin_or_staff()", command: "r" }) },
     { objectKind: "trigger", schema: "public", identity: "classes.before.update.01.classes_touch", replayFingerprint: JSON.stringify({ definition: "CREATE TRIGGER classes_touch BEFORE UPDATE ON public.classes FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at()" }) },
+    { objectKind: "function", schema: "public", identity: "get_dashboard_summary_sources_v1()", replayFingerprint: JSON.stringify({ signature: "", owner: "postgres", acl: ["postgres=X/postgres", "authenticated=X/postgres", "service_role=X/postgres"] }) },
   ];
   const sql = buildFinalSchemaReconciliation(definitions);
   assert.match(sql, /add column if not exists "current_note" text/u);
@@ -1419,6 +1555,73 @@ test("final schema reconciliation restores current columns, policies, RLS, and t
   assert.match(sql, /create policy "classes_read".*to "authenticated" using \(is_admin_or_staff\(\)\)/u);
   assert.match(sql, /CREATE TRIGGER classes_touch BEFORE UPDATE/u);
   assert.match(sql, /grant select on table "public"\."classes" to "authenticated"/u);
+  assert.match(sql, /revoke all privileges on function "public"\."get_dashboard_summary_sources_v1"\(\) from public, anon, authenticated, service_role, postgres;/u);
+  assert.match(sql, /grant execute on function "public"\."get_dashboard_summary_sources_v1"\(\) to "postgres";/u);
+  assert.match(sql, /grant execute on function "public"\."get_dashboard_summary_sources_v1"\(\) to "authenticated";/u);
+  assert.match(sql, /grant execute on function "public"\."get_dashboard_summary_sources_v1"\(\) to "service_role";/u);
+});
+
+test("function ACL reconciliation rejects unscoped roles and non-execute privileges", async () => {
+  const { buildFinalSchemaReconciliation } = await import(captureUrl.href);
+  const definition = (acl) => [{
+    objectKind: "function",
+    schema: "public",
+    identity: "get_dashboard_summary_sources_v1()",
+    replayFingerprint: JSON.stringify({ signature: "", owner: "postgres", acl }),
+  }];
+  assert.throws(() => buildFinalSchemaReconciliation(definition(["external_role=X/postgres"])), /management_api_contract_drift/u);
+  assert.throws(() => buildFinalSchemaReconciliation(definition(["authenticated=r/postgres"])), /management_api_contract_drift/u);
+  assert.throws(() => buildFinalSchemaReconciliation(definition(["authenticated=X*/postgres"])), /management_api_contract_drift/u);
+});
+
+test("PostgreSQL 17 function ACL reconciliation restores exact parity and detects drift", async (t) => {
+  const {
+    buildDashboardFreeTierParitySql,
+    buildFinalSchemaReconciliation,
+    dashboardFreeTierCatalogFingerprintSql,
+  } = await import(captureUrl.href);
+  await withPostgres17(t, ({ psql }) => {
+    const identity = "function_acl_reconciliation_fixture()";
+    const entry = { objectKind: "function", schema: "public", identity };
+    const definition = {
+      ...entry,
+      replayFingerprint: JSON.stringify({
+        signature: "",
+        owner: "postgres",
+        acl: ["postgres=X/postgres", "authenticated=X/postgres", "service_role=X/postgres"],
+      }),
+    };
+    const prepared = psql(`
+      do $$ begin create role authenticated; exception when duplicate_object then null; end $$;
+      do $$ begin create role service_role; exception when duplicate_object then null; end $$;
+      create or replace function public.function_acl_reconciliation_fixture()
+      returns integer language sql stable security invoker set search_path = '' as $$ select 1 $$;
+      alter function public.function_acl_reconciliation_fixture() owner to postgres;
+      revoke all privileges on function public.function_acl_reconciliation_fixture()
+        from public, anon, authenticated, service_role, postgres;
+      grant execute on function public.function_acl_reconciliation_fixture() to postgres with grant option;
+      grant execute on function public.function_acl_reconciliation_fixture() to authenticated;
+    `);
+    assert.equal(prepared.status, 0, prepared.stderr);
+
+    const reconciled = psql(buildFinalSchemaReconciliation([definition]));
+    assert.equal(reconciled.status, 0, reconciled.stderr);
+    const acl = psql("select proacl::text from pg_catalog.pg_proc where oid = 'public.function_acl_reconciliation_fixture()'::regprocedure;");
+    assert.equal(acl.status, 0, acl.stderr);
+    assert.equal(acl.stdout.trim(), "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}");
+
+    const fingerprint = psql(`select (${dashboardFreeTierCatalogFingerprintSql(entry)})::text;`);
+    assert.equal(fingerprint.status, 0, fingerprint.stderr);
+    const definitionSha256 = createHash("sha256").update(fingerprint.stdout.trim()).digest("hex");
+    const parity = buildDashboardFreeTierParitySql([{ ...entry, definitionSha256 }]);
+    const matching = psql(`set search_path to public, extensions, pg_catalog;\n${parity}`);
+    assert.equal(matching.status, 0, matching.stderr);
+    assert.match(matching.stdout, /(?:^|\n)ok 1 - catalog function public\.function_acl_reconciliation_fixture\(\) fingerprint/u);
+
+    const drifted = psql(`revoke execute on function public.function_acl_reconciliation_fixture() from service_role;\nset search_path to public, extensions, pg_catalog;\n${parity}`);
+    assert.equal(drifted.status, 0, drifted.stderr);
+    assert.match(drifted.stdout, /not ok 1 - catalog function public\.function_acl_reconciliation_fixture\(\) fingerprint/u);
+  });
 });
 
 test("baseline capture preserves the non-login audit writer role used by public policies", async () => {

@@ -17,9 +17,20 @@ const SUPABASE = "/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supaba
 const REVIEWED_MANIFEST_BOOTSTRAP = Object.freeze({
   baseSha: "c7ea76b3dcd94101503305feadc95ce591f68050",
   baseManifestSha256: "0b55a4b7629dc8105fb9df45828db7fa1122651601096e529c8c79c5e801eef1",
+  headSha: "dd7a61557efab0f623e99385630e3f66282e3f18",
   headManifestSha256: "1863b8d3762e3aaa464ef1ec52e0e6883527a44e54412efbc7966975d8de5c30",
+  baselineSha256: "5ff38fdc315d28ba998489d896b8083a1a2ccd223fc8a378d7f92ec74e315269",
   promotedFileName: "20260820150057_ops_task_completion_actor.sql",
   promotedSha256: "2bd12279b8f79757dfbf6e5d84423bf34019d5f172c80e36377166002e89ceba",
+  functionAclBaselineRepair: Object.freeze({
+    headManifestSha256: "d103e6a1aa6a3be4835783ee122937a54108064e37f3836e4097b9ed7733749b",
+    baselineSha256: "75fdc621929dbacf4ba049667feef65977f5996ac8f1cd39675585ecb1136fb7",
+    activePointerSha256: "c25411d4a1a1910a7a8b072bdf892ea02499fbdb62341f4ced34c33b111b56d3",
+    captureId: "47838c718a358344",
+    captureManifestSha256: "be5871f1cbc6b4b304d9aa00b4388bbe9891d574b7d6444064c820ce56efcc14",
+    catalogSha256: "4d925b43c13bcf4b24cdf69db16d6d648b68fe8661999416118f49357d99ed6d",
+    paritySha256: "be49575aff62c800078cf73a21957e0f1ea4a392aee838619de05b409eeaf1ab",
+  }),
 });
 
 function fail(code) { throw new Error(code); }
@@ -43,8 +54,9 @@ function safeRepoPath(root, path) {
   if (typeof path !== "string" || path.includes("..") || relative(root, resolve(root, path)).startsWith("..")) fail("isolated_supabase_db_target_invalid");
   return resolve(root, path);
 }
-export function buildIsolatedSupabaseConfig(projectId, ports) {
-  return `project_id = "${projectId}"\n[api]\nenabled = true\nport = ${ports.api}\n[db]\nport = ${ports.db}\n[studio]\nenabled = false\n[inbucket]\nenabled = false\n[analytics]\nenabled = false\n`;
+export function buildIsolatedSupabaseConfig(projectId, ports, databaseMajorVersion) {
+  if (![15, 17].includes(databaseMajorVersion)) fail("isolated_supabase_db_major_version_invalid");
+  return `project_id = "${projectId}"\n[api]\nenabled = true\nport = ${ports.api}\n[db]\nport = ${ports.db}\nmajor_version = ${databaseMajorVersion}\n[studio]\nenabled = false\n[inbucket]\nenabled = false\n[analytics]\nenabled = false\n`;
 }
 function processResult(command, args, options = {}) {
   return new Promise((resolvePromise, rejectPromise) => {
@@ -127,6 +139,71 @@ function exactActivePointer(pointer, expectedArtifactPaths) {
     && JSON.stringify(pointer.artifactPaths) === JSON.stringify(expectedArtifactPaths);
 }
 
+async function validateReviewedFunctionAclBaselineRepair({ headSha, headManifest, headManifestSource, readRevisionFile }) {
+  const repair = REVIEWED_MANIFEST_BOOTSTRAP.functionAclBaselineRepair;
+  if (sha256(headManifestSource) !== repair.headManifestSha256
+    || headManifest.baselineSha256 !== repair.baselineSha256) {
+    fail("isolated_supabase_db_final_migration_history_drift");
+  }
+  const historicalManifestSource = `${JSON.stringify({
+    ...headManifest,
+    baselineSha256: REVIEWED_MANIFEST_BOOTSTRAP.baselineSha256,
+  }, null, 2)}\n`;
+  if (sha256(historicalManifestSource) !== REVIEWED_MANIFEST_BOOTSTRAP.headManifestSha256) {
+    fail("isolated_supabase_db_final_migration_history_drift");
+  }
+
+  const pointerPath = "supabase/test-baselines/dashboard-free-tier-v1.active.json";
+  const artifactPaths = {
+    catalog: "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json",
+    baseline: "supabase/test-baselines/dashboard-free-tier-v1.sql",
+    parityTest: "supabase/tests/dashboard_free_tier_catalog_parity_test.sql",
+  };
+  const captureBase = `supabase/test-baselines/dashboard-free-tier-v1-captures/${repair.captureId}`;
+  const [
+    pointerSource,
+    captureManifestSource,
+    captureBaselineSource,
+    captureCatalogSource,
+    captureParitySource,
+    canonicalBaselineSource,
+    canonicalCatalogSource,
+    canonicalParitySource,
+  ] = await Promise.all([
+    readRevisionFile(headSha, pointerPath),
+    readRevisionFile(headSha, `${captureBase}/manifest.json`),
+    readRevisionFile(headSha, `${captureBase}/baseline.sql`),
+    readRevisionFile(headSha, `${captureBase}/catalog.json`),
+    readRevisionFile(headSha, `${captureBase}/parity.sql`),
+    readRevisionFile(headSha, artifactPaths.baseline),
+    readRevisionFile(headSha, artifactPaths.catalog),
+    readRevisionFile(headSha, artifactPaths.parityTest),
+  ]);
+  const pointer = JSON.parse(pointerSource);
+  const captureManifest = validateBaselineManifest(JSON.parse(captureManifestSource));
+  if (sha256(pointerSource) !== repair.activePointerSha256
+    || !exactActivePointer(pointer, artifactPaths)
+    || pointer.captureId !== repair.captureId
+    || sha256(captureManifestSource) !== repair.captureManifestSha256
+    || captureManifest.baselineSha256 !== repair.baselineSha256
+    || captureManifest.catalogSha256 !== repair.catalogSha256
+    || sha256(captureBaselineSource) !== repair.baselineSha256
+    || sha256(captureCatalogSource) !== repair.catalogSha256
+    || sha256(captureParitySource) !== repair.paritySha256
+    || canonicalBaselineSource !== captureBaselineSource
+    || canonicalCatalogSource !== captureCatalogSource
+    || canonicalParitySource !== captureParitySource) {
+    fail("isolated_supabase_db_final_migration_history_drift");
+  }
+  const captureId = sha256(canonical({
+    baseline: captureBaselineSource,
+    catalog: captureCatalogSource,
+    manifest: captureManifest,
+    parity: captureParitySource,
+  })).slice(0, 16);
+  if (captureId !== repair.captureId) fail("isolated_supabase_db_final_migration_history_drift");
+}
+
 async function validateArtifactPaths({ paths, manifest }) {
   const [baseline, catalog, parity] = await Promise.all([readFile(paths.baselinePath), readFile(paths.catalogPath), readFile(paths.parityPath)]);
   if (sha256(baseline) !== manifest.baselineSha256) fail("isolated_supabase_db_baseline_hash_drift");
@@ -205,9 +282,20 @@ export async function validateImmutableFinalMigrationHistory({
   const isReviewedManifestBootstrap = baseSha === REVIEWED_MANIFEST_BOOTSTRAP.baseSha
     && mergeBaseSha === REVIEWED_MANIFEST_BOOTSTRAP.baseSha;
   if (isReviewedManifestBootstrap) {
+    const headManifestSha256 = sha256(headManifestSource);
+    const isOriginalReviewedHead = headSha === REVIEWED_MANIFEST_BOOTSTRAP.headSha
+      && headManifestSha256 === REVIEWED_MANIFEST_BOOTSTRAP.headManifestSha256;
+    const isReviewedFunctionAclRepair = headManifestSha256 === REVIEWED_MANIFEST_BOOTSTRAP.functionAclBaselineRepair.headManifestSha256;
     if (sha256(baseManifestSource) !== REVIEWED_MANIFEST_BOOTSTRAP.baseManifestSha256
-      || sha256(headManifestSource) !== REVIEWED_MANIFEST_BOOTSTRAP.headManifestSha256) {
+      || (!isOriginalReviewedHead && !isReviewedFunctionAclRepair)) {
       fail("isolated_supabase_db_final_migration_history_drift");
+    }
+    if (isReviewedFunctionAclRepair) {
+      try {
+        await validateReviewedFunctionAclBaselineRepair({ headSha, headManifest, headManifestSource, readRevisionFile });
+      } catch {
+        fail("isolated_supabase_db_final_migration_history_drift");
+      }
     }
     let nextHeadIndex = 0;
     for (const entry of baseFinalEntries) {
@@ -342,9 +430,10 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   if (args.requireFinal && (!manifest.orderedNewMigrations.length || manifest.orderedNewMigrations.some((migration) => migration.status !== "final"))) fail("isolated_supabase_db_final_manifest_required");
   const reviewBoundary = args.reviewBaseSha ? await validateImmutableFinalMigrationHistory({ root, baseSha: args.reviewBaseSha, headSha: args.reviewHeadSha, executeGit }) : null;
   let migrations;
+  let catalog;
   if (args.execute || reviewBoundary) {
-    const catalog = JSON.parse(artifacts.catalog.toString("utf8"));
-    if (catalog.captureStatus !== "reviewed" || catalog.originMainSha !== manifest.originMainSha || !Array.isArray(catalog.migrationLedger)) fail("isolated_supabase_db_baseline_review_required");
+    catalog = JSON.parse(artifacts.catalog.toString("utf8"));
+    if (catalog.captureStatus !== "reviewed" || catalog.originMainSha !== manifest.originMainSha || !Array.isArray(catalog.migrationLedger) || ![15, 17].includes(catalog.serverMajor)) fail("isolated_supabase_db_baseline_review_required");
     migrations = await validateManifestMigrations({ root, manifest, baselineVersions: catalog.migrationLedger.map((row) => row.version) });
   }
   if (!args.execute) return { status: "plan", tests: args.tests, probes: args.probes, manifest, artifactPaths, reviewBoundary };
@@ -375,7 +464,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     await invoke(["init", "--workdir", runtime.tempRoot, "--yes"]);
     await mkdir(dirname(runtime.configPath), { recursive: true, mode: 0o700 });
     const temporaryConfig = `${runtime.configPath}.tmp-${process.pid}`;
-    await writeFile(temporaryConfig, buildIsolatedSupabaseConfig(runtime.projectId, runtime.ports), { mode: 0o600 });
+    await writeFile(temporaryConfig, buildIsolatedSupabaseConfig(runtime.projectId, runtime.ports, catalog.serverMajor), { mode: 0o600 });
     await rename(temporaryConfig, runtime.configPath);
     await stageContents(artifacts.baseline, join(runtime.tempRoot, "supabase/migrations/00000000000000_dashboard_free_tier_test_baseline.sql"));
     await stageContents(artifacts.parity, join(runtime.tempRoot, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"));
