@@ -160,11 +160,11 @@ async function createFinalManifestHistory(t) {
 
 const reviewedManifestBootstrapBaseSha = "c7ea76b3dcd94101503305feadc95ce591f68050";
 const reviewedManifestBootstrapHeadSha = "dd7a61557efab0f623e99385630e3f66282e3f18";
-const reviewedManifestRepairHeadSha = "e".repeat(40);
+const reviewedManifestRepairHeadSha = "7865388b134af488bb7be3944e49eceb25e1d649";
 const reviewedManifestPath = "supabase/test-baselines/dashboard-free-tier-v1.manifest.json";
 
 function readGitFile(root, revision, path) {
-  const result = spawnSync("git", ["show", `${revision}:${path}`], { cwd: root, encoding: "utf8" });
+  const result = spawnSync("git", ["show", `${revision}:${path}`], { cwd: root, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
   assert.equal(result.status, 0, result.stderr);
   return result.stdout;
 }
@@ -204,27 +204,27 @@ async function createReviewedManifestRepairFixture({
   root = fileURLToPath(new URL("..", runnerUrl)),
 } = {}) {
   const bootstrap = await createReviewedManifestBootstrapFixture({ root });
-  const headManifestSource = await readFile(join(root, reviewedManifestPath), "utf8");
+  const headManifestSource = readGitFile(root, reviewedManifestRepairHeadSha, reviewedManifestPath);
   const headManifest = JSON.parse(headManifestSource);
   const pointerPath = "supabase/test-baselines/dashboard-free-tier-v1.active.json";
-  const pointerSource = await readFile(join(root, pointerPath), "utf8");
+  const pointerSource = readGitFile(root, reviewedManifestRepairHeadSha, pointerPath);
   const pointer = JSON.parse(pointerSource);
   const revisionFiles = new Map([...bootstrap.revisionFiles].filter(([key]) => key.startsWith(`${reviewedManifestBootstrapBaseSha}:`)));
   revisionFiles.set(`${reviewedManifestRepairHeadSha}:${reviewedManifestPath}`, headManifestSource);
   revisionFiles.set(`${reviewedManifestRepairHeadSha}:${pointerPath}`, pointerSource);
   for (const entry of headManifest.orderedNewMigrations) {
     const path = `supabase/migrations/${entry.fileName}`;
-    revisionFiles.set(`${reviewedManifestRepairHeadSha}:${path}`, await readFile(join(root, path), "utf8"));
+    revisionFiles.set(`${reviewedManifestRepairHeadSha}:${path}`, readGitFile(root, reviewedManifestRepairHeadSha, path));
   }
   for (const fileName of ["manifest.json", "baseline.sql", "catalog.json", "parity.sql"]) {
     const path = `supabase/test-baselines/dashboard-free-tier-v1-captures/${pointer.captureId}/${fileName}`;
-    revisionFiles.set(`${reviewedManifestRepairHeadSha}:${path}`, await readFile(join(root, path), "utf8"));
+    revisionFiles.set(`${reviewedManifestRepairHeadSha}:${path}`, readGitFile(root, reviewedManifestRepairHeadSha, path));
   }
   for (const path of [
     "supabase/test-baselines/dashboard-free-tier-v1.sql",
     "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json",
     "supabase/tests/dashboard_free_tier_catalog_parity_test.sql",
-  ]) revisionFiles.set(`${reviewedManifestRepairHeadSha}:${path}`, await readFile(join(root, path), "utf8"));
+  ]) revisionFiles.set(`${reviewedManifestRepairHeadSha}:${path}`, readGitFile(root, reviewedManifestRepairHeadSha, path));
   const executeGit = async ({ args }) => {
     if (args[0] === "merge-base") return { code: 0, stdout: `${reviewedManifestBootstrapBaseSha}\n`, stderr: "" };
     const source = revisionFiles.get(args[1]);
