@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomBytes as secureRandomBytes } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
@@ -291,10 +292,11 @@ export async function allocateLoopbackPorts(count) {
   }
 }
 
-async function prepareRuntime({ requestId, randomBytes = secureRandomBytes, allocatePort, log }) {
+async function prepareRuntime({ requestId, randomBytes = secureRandomBytes, allocatePort, log, tempDirectory }) {
   const suffix = randomBytes(6).toString("hex");
   const projectId = `tips_supabase_db_qa_${suffix}`;
-  const tempRoot = join("/private/tmp", `tips-supabase-db-qa-${requestId}`);
+  if (typeof tempDirectory !== "string" || !tempDirectory) fail("isolated_supabase_db_temp_root_invalid");
+  const tempRoot = join(tempDirectory, `tips-supabase-db-qa-${requestId}`);
   try { await mkdir(tempRoot, { recursive: false, mode: 0o700 }); } catch { fail("isolated_supabase_db_temp_root_invalid"); }
   try {
     const values = allocatePort
@@ -321,7 +323,7 @@ async function snapshotRequestedFiles(root, paths) {
   return snapshots;
 }
 
-export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2), root = ROOT, log = () => {}, randomBytes, allocatePort, retainTempRoot = false, supabasePath: injectedSupabasePath, executeGit = (invocation) => processResult(invocation.command, invocation.args, invocation), executeProcess = (invocation) => processResult(invocation.command, invocation.args, invocation) } = {}) {
+export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2), root = ROOT, log = () => {}, randomBytes, allocatePort, retainTempRoot = false, tempDirectory = process.env.RUNNER_TEMP || tmpdir(), supabasePath: injectedSupabasePath, executeGit = (invocation) => processResult(invocation.command, invocation.args, invocation), executeProcess = (invocation) => processResult(invocation.command, invocation.args, invocation) } = {}) {
   const args = parseIsolatedDbArguments(argv);
   const artifactPaths = await loadBaselineState(root, { reviewHead: args.reviewHead });
   const captureManifest = validateBaselineManifest(JSON.parse(await readFile(artifactPaths.captureManifestPath, "utf8")));
@@ -339,7 +341,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   const smokeTest = await readFile(join(root, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"));
   const requestedTests = await snapshotRequestedFiles(root, args.tests);
   const probes = await snapshotRequestedFiles(root, args.probes);
-  const runtime = await prepareRuntime({ requestId: args.requestId, randomBytes, allocatePort, log });
+  const runtime = await prepareRuntime({ requestId: args.requestId, randomBytes, allocatePort, log, tempDirectory });
   const cleanEnvironment = { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" };
   const supabasePath = injectedSupabasePath || process.env.TASK_SUPABASE_CLI || SUPABASE;
   const invoke = async (argsForCli, { env = cleanEnvironment } = {}) => {

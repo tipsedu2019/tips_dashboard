@@ -82,6 +82,12 @@ async function makeRepo(t) {
   return root;
 }
 
+async function makeRunnerTempDirectory(t) {
+  const directory = await mkdtemp(join(tmpdir(), "tips-isolated-runner-temp-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  return directory;
+}
+
 async function writeCaptureScope(root) {
   await writeFile(join(root, "scripts/fixtures/dashboard-free-tier-baseline-scope.json"), JSON.stringify(captureScopeFixture()));
 }
@@ -866,6 +872,7 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   assert.equal(calls.find((call) => call.command === process.execPath).env.TASK_LOCAL_DB_URL.includes("127.0.0.1"), true);
   assert.equal(calls.find((call) => call.command === process.execPath).env.SUPABASE_DATABASE_READ_TOKEN, undefined);
   assert.deepEqual(staged, { baseline: true, parity: true, smoke: true, migration: true, probe: true });
+  assert.equal(dirname(result.runtime.tempRoot), process.env.RUNNER_TEMP || tmpdir());
   assert.match(await readFile(result.runtime.configPath, "utf8"), /project_id = "tips_supabase_db_qa_a1b2c3d4e5f6"/u);
   t.after(() => rm(result.runtime.tempRoot, { recursive: true, force: true }));
   await writeFile(join(capture, "baseline.sql"), baseline);
@@ -944,14 +951,15 @@ test("runner removes its temp root when port allocation fails before runtime ret
   const root = await makeRepo(t);
   await configureEmptyReviewedRunnerRepo(root);
   const requestId = "allocation-failure-cleanup-fixture";
-  const tempRoot = join("/private/tmp", `tips-supabase-db-qa-${requestId}`);
-  await rm(tempRoot, { recursive: true, force: true });
+  const tempDirectory = await makeRunnerTempDirectory(t);
+  const tempRoot = join(tempDirectory, `tips-supabase-db-qa-${requestId}`);
   const logs = [];
   let allocationCount = 0;
   await assert.rejects(
     runIsolatedSupabaseDbTests({
       root,
       argv: ["--execute", "--authorized", "--request-id", requestId],
+      tempDirectory,
       retainTempRoot: true,
       allocatePort: async () => {
         allocationCount += 1;
@@ -976,13 +984,14 @@ test("runner reports successful temp-root cleanup when Supabase init fails", asy
   const root = await makeRepo(t);
   await configureEmptyReviewedRunnerRepo(root);
   const requestId = "init-failure-cleanup-fixture";
-  const tempRoot = join("/private/tmp", `tips-supabase-db-qa-${requestId}`);
-  await rm(tempRoot, { recursive: true, force: true });
+  const tempDirectory = await makeRunnerTempDirectory(t);
+  const tempRoot = join(tempDirectory, `tips-supabase-db-qa-${requestId}`);
   const logs = [];
   await assert.rejects(
     runIsolatedSupabaseDbTests({
       root,
       argv: ["--execute", "--authorized", "--request-id", requestId],
+      tempDirectory,
       allocatePort: (() => { let port = 55820; return () => ++port; })(),
       executeProcess: async (invocation) => {
         assert.equal(invocation.args[0], "init");
@@ -1005,14 +1014,14 @@ test("runner retains its temp root after Supabase init failure only when request
   const root = await makeRepo(t);
   await configureEmptyReviewedRunnerRepo(root);
   const requestId = "init-failure-retained-fixture";
-  const tempRoot = join("/private/tmp", `tips-supabase-db-qa-${requestId}`);
-  await rm(tempRoot, { recursive: true, force: true });
-  t.after(() => rm(tempRoot, { recursive: true, force: true }));
+  const tempDirectory = await makeRunnerTempDirectory(t);
+  const tempRoot = join(tempDirectory, `tips-supabase-db-qa-${requestId}`);
   const logs = [];
   await assert.rejects(
     runIsolatedSupabaseDbTests({
       root,
       argv: ["--execute", "--authorized", "--request-id", requestId],
+      tempDirectory,
       retainTempRoot: true,
       allocatePort: (() => { let port = 55840; return () => ++port; })(),
       executeProcess: async (invocation) => {
