@@ -67,6 +67,7 @@ async function makeRepo(t) {
   t.after(() => rm(root, { recursive: true, force: true }));
   for (const path of [
     "scripts/fixtures/dashboard-free-tier-baseline-scope.json",
+    "scripts/fixtures/dashboard-free-tier-migration-prerequisites.sql",
     "scripts/fixtures/supabase-management-read-only-query-contract.json",
     "supabase/test-baselines/dashboard-free-tier-v1.manifest.json",
     "supabase/test-baselines/dashboard-free-tier-v1.sql",
@@ -980,8 +981,10 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   const originalParity = await readFile(join(capture, "parity.sql"));
   const originalSmoke = await readFile(join(root, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"));
   const originalProbe = await readFile(join(root, "tests/probe.mjs"));
+  const prerequisitePath = join(root, "scripts/fixtures/dashboard-free-tier-migration-prerequisites.sql");
+  const originalPrerequisite = await readFile(prerequisitePath);
   const calls = [];
-  const staged = { baseline: false, parity: false, smoke: false, migration: false, probe: false };
+  const staged = { baseline: false, prerequisite: false, parity: false, smoke: false, migration: false, probe: false };
   const result = await runIsolatedSupabaseDbTests({
     root,
     argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f", "--test", "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql", "--probe", "tests/probe.mjs"],
@@ -999,8 +1002,12 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
         await writeFile(join(root, "supabase/migrations/20260814000000_candidate.sql"), "select 2;\n");
         await writeFile(join(root, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"), "-- mutated after verification\n");
         await writeFile(join(root, "tests/probe.mjs"), "process.exit(9);\n");
+        await writeFile(prerequisitePath, "-- mutated after verification\n");
       }
-      if (invocation.args[0] === "db") staged.baseline = (await readFile(join(invocation.cwd, "supabase/migrations/00000000000000_dashboard_free_tier_test_baseline.sql"))).equals(baseline);
+      if (invocation.args[0] === "db") {
+        staged.baseline = (await readFile(join(invocation.cwd, "supabase/migrations/00000000000000_dashboard_free_tier_test_baseline.sql"))).equals(baseline);
+        staged.prerequisite = (await readFile(join(invocation.cwd, "supabase/migrations/00000000000001_dashboard_free_tier_test_prerequisites.sql"))).equals(originalPrerequisite);
+      }
       if (invocation.args[0] === "test" && invocation.args.includes("supabase/tests/dashboard_free_tier_catalog_parity_test.sql")) {
         staged.parity = (await readFile(join(invocation.cwd, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"))).equals(originalParity);
         staged.smoke = (await readFile(join(invocation.cwd, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"))).equals(originalSmoke);
@@ -1016,7 +1023,7 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   assert.equal(calls.filter((call) => call.args[0] === "stop").length, 1);
   assert.equal(calls.find((call) => call.command === process.execPath).env.TASK_LOCAL_DB_URL.includes("127.0.0.1"), true);
   assert.equal(calls.find((call) => call.command === process.execPath).env.SUPABASE_DATABASE_READ_TOKEN, undefined);
-  assert.deepEqual(staged, { baseline: true, parity: true, smoke: true, migration: true, probe: true });
+  assert.deepEqual(staged, { baseline: true, prerequisite: true, parity: true, smoke: true, migration: true, probe: true });
   assert.equal(dirname(result.runtime.tempRoot), process.env.RUNNER_TEMP || tmpdir());
   const runtimeConfig = await readFile(result.runtime.configPath, "utf8");
   assert.match(runtimeConfig, /project_id = "tips_supabase_db_qa_a1b2c3d4e5f6"/u);
@@ -1026,8 +1033,12 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   await writeFile(join(capture, "parity.sql"), originalParity);
   await writeFile(join(root, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"), originalSmoke);
   await writeFile(join(root, "tests/probe.mjs"), originalProbe);
+  await writeFile(prerequisitePath, originalPrerequisite);
   await writeFile(join(root, "supabase/migrations/20260814000000_candidate.sql"), "select 2;\n");
   await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_migration_hash_drift/);
+  await writeFile(join(root, "supabase/migrations/20260814000000_candidate.sql"), "select 1;\n");
+  await writeFile(prerequisitePath, "-- drift\n");
+  await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_prerequisite_drift/);
 });
 
 test("runner stages each requested SQL file after init and before target pgtap", async (t) => {
@@ -1512,6 +1523,69 @@ test("reviewed capture retains schema-qualified dynamic DDL that prepares a late
   assert.doesNotMatch(baseline, /alter table pg_temp\.capture_gate/u);
 });
 
+test("reviewed capture rejects a DO block that mixes replayable DDL with data mutation", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const cases = [
+    "do $$ begin execute 'alter table public.classes drop constraint if exists classes_guard'; update public.classes set status = status; end $$",
+    "do $$ declare v_sql text := 'update public.classes set status = status'; begin execute 'alter table public.classes drop constraint if exists classes_guard'; execute v_sql; end $$",
+    "do $$ begin execute 'alter table public.classes drop constraint if exists classes_guard'; execute $data$update public.classes set status = status$data$; end $$",
+    "do $$ begin execute 'alter table public.classes drop constraint if exists classes_guard'; with changed as (select id from public.classes) update public.classes set status = status from changed where classes.id = changed.id; end $$",
+    "do $$ declare changed record; begin execute 'alter table public.classes drop constraint if exists classes_guard'; for changed in execute 'update public.classes set status = status returning id' loop null; end loop; end $$",
+    "do $$ begin execute pg_catalog.format('alter table public.classes %s', public.mutating_fragment()); end $$",
+    "do $$ begin execute 'alter table public.classes drop constraint if exists classes_guard' using public.mutating_fragment(); end $$",
+    "do $$ begin execute 'alter table public.classes drop constraint if exists classes_guard'; execute '-- alter table public.classes add column ignored text\nupdate public.classes set status = status'; end $$",
+  ];
+  for (const [index, mixedDdlAndData] of cases.entries()) {
+    await t.test(`mixed form ${index + 1}`, async () => {
+      const root = await makeRepo(t);
+      await writeCaptureScope(root);
+      const originMainSha = "9".repeat(40);
+      const artifactPaths = [
+        "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json",
+        "supabase/test-baselines/dashboard-free-tier-v1.sql",
+        "supabase/tests/dashboard_free_tier_catalog_parity_test.sql",
+      ];
+      const manifestPath = "supabase/test-baselines/dashboard-free-tier-v1.manifest.json";
+      const before = await Promise.all([...artifactPaths, manifestPath].map((path) => readFile(join(root, path))));
+      let publicationAttempts = 0;
+      await assert.rejects(
+        captureDashboardFreeTierCatalog({
+          root,
+          argv: ["--mode", "execute", "--authorized", "--request-id", `mixed-ddl-data-${index + 1}`, "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", artifactPaths[0], "--baseline", artifactPaths[1], "--parity-test", artifactPaths[2]],
+          env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+          gitOriginMainSha: async () => originMainSha,
+          publish: async () => { publicationAttempts += 1; },
+          fetch: async () => new Response(JSON.stringify({ serverMajor: 17, migrationLedger: [{ version: "20260816000000", statements: [mixedDdlAndData], name: "mixed_ddl_data" }], catalog: completeCatalogFixture() }), { status: 201 }),
+        }),
+        /management_api_contract_drift/u,
+      );
+      assert.equal(publicationAttempts, 0);
+      const after = await Promise.all([...artifactPaths, manifestPath].map((path) => readFile(join(root, path))));
+      assert.deepEqual(after, before);
+      await assert.rejects(lstat(join(root, "supabase/test-baselines/dashboard-free-tier-v1.active.json")), { code: "ENOENT" });
+      await assert.rejects(lstat(join(root, "supabase/test-baselines/dashboard-free-tier-v1-captures")), { code: "ENOENT" });
+    });
+  }
+});
+
+test("reviewed capture ignores DDL words in comments beside a data-only DO block", async (t) => {
+  const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
+  const root = await makeRepo(t);
+  await writeCaptureScope(root);
+  const originMainSha = "b".repeat(40);
+  const dataWithDdlComment = "do $$ begin update public.classes set status = status; -- alter table public.classes add column leaked text\nnull; end $$";
+  const dynamicDataWithDdlComment = "do $$ begin execute '-- alter table public.classes add column ignored text\nupdate public.classes set status = status'; end $$";
+  await captureDashboardFreeTierCatalog({
+    root,
+    argv: ["--mode", "execute", "--authorized", "--request-id", "commented-ddl-data-only", "--origin-main-sha", originMainSha, "--scope", "scripts/fixtures/dashboard-free-tier-baseline-scope.json", "--catalog", "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", "--baseline", "supabase/test-baselines/dashboard-free-tier-v1.sql", "--parity-test", "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"],
+    env: { SUPABASE_DATABASE_READ_TOKEN: "sbp_only-read-secret", SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst", TASK_ORIGIN_MAIN_SHA: originMainSha },
+    gitOriginMainSha: async () => originMainSha,
+    fetch: async () => new Response(JSON.stringify({ serverMajor: 17, migrationLedger: [{ version: "20260816000000", statements: [dataWithDdlComment, dynamicDataWithDdlComment], name: "commented_data_only" }], catalog: completeCatalogFixture() }), { status: 201 }),
+  });
+  const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"), "utf8");
+  assert.doesNotMatch(baseline, /ignored text|leaked text|update public\.classes/u);
+});
+
 test("reviewed capture compares policy roles semantically and omits redundant OID-keyed grant rows", async (t) => {
   const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
   const root = await makeRepo(t);
@@ -1572,6 +1646,40 @@ test("function ACL reconciliation rejects unscoped roles and non-execute privile
   assert.throws(() => buildFinalSchemaReconciliation(definition(["external_role=X/postgres"])), /management_api_contract_drift/u);
   assert.throws(() => buildFinalSchemaReconciliation(definition(["authenticated=r/postgres"])), /management_api_contract_drift/u);
   assert.throws(() => buildFinalSchemaReconciliation(definition(["authenticated=X*/postgres"])), /management_api_contract_drift/u);
+});
+
+test("PostgreSQL 17 isolated migration prerequisite creates one exact row and rejects preexisting state", async (t) => {
+  const prerequisite = await readFile(new URL("../scripts/fixtures/dashboard-free-tier-migration-prerequisites.sql", import.meta.url), "utf8");
+  await withPostgres17(t, ({ psql }) => {
+    const table = psql(`
+      create table public.class_schedule_sync_groups (
+        id uuid primary key,
+        name text not null,
+        sort_order integer not null,
+        is_default boolean not null
+      );
+    `);
+    assert.equal(table.status, 0, table.stderr);
+
+    const applied = psql(prerequisite);
+    assert.equal(applied.status, 0, applied.stderr);
+    const exact = psql("select id::text, name, sort_order, is_default from public.class_schedule_sync_groups;");
+    assert.equal(exact.status, 0, exact.stderr);
+    assert.equal(exact.stdout.trim(), "00000000-0000-4000-8000-000000000001|Isolated schema contract default period|0|t");
+
+    const existing = psql(`
+      truncate public.class_schedule_sync_groups;
+      insert into public.class_schedule_sync_groups (id, name, sort_order, is_default)
+      values ('00000000-0000-4000-8000-000000000002', 'Existing row', 7, false);
+    `);
+    assert.equal(existing.status, 0, existing.stderr);
+    const rejected = psql(prerequisite);
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /isolated_supabase_db_prerequisite_state_not_empty/u);
+    const preserved = psql("select id::text, name, sort_order, is_default from public.class_schedule_sync_groups;");
+    assert.equal(preserved.status, 0, preserved.stderr);
+    assert.equal(preserved.stdout.trim(), "00000000-0000-4000-8000-000000000002|Existing row|7|f");
+  });
 });
 
 test("PostgreSQL 17 function ACL reconciliation restores exact parity and detects drift", async (t) => {

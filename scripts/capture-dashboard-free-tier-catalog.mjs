@@ -210,6 +210,99 @@ function stabilizeCatalogRoleFingerprints(value) {
   });
 }
 
+function scanSqlCode(source) {
+  const code = [...source];
+  const literals = [];
+  const mask = (start, end, marker) => {
+    for (let index = start; index < end; index += 1) code[index] = source[index] === "\n" ? "\n" : " ";
+    for (let index = 0; index < marker.length && start + index < end; index += 1) code[start + index] = marker[index];
+  };
+  let index = 0;
+  while (index < source.length) {
+    if (source.startsWith("--", index)) {
+      const end = source.indexOf("\n", index + 2);
+      const commentEnd = end < 0 ? source.length : end;
+      mask(index, commentEnd, "");
+      index = commentEnd;
+      continue;
+    }
+    if (source.startsWith("/*", index)) {
+      const start = index;
+      let depth = 1;
+      index += 2;
+      while (index < source.length && depth > 0) {
+        if (source.startsWith("/*", index)) { depth += 1; index += 2; }
+        else if (source.startsWith("*/", index)) { depth -= 1; index += 2; }
+        else index += 1;
+      }
+      if (depth !== 0) fail("management_api_contract_drift");
+      mask(start, index, "");
+      continue;
+    }
+    if (source[index] === "'") {
+      const start = index;
+      const escapeString = source[index - 1] === "e" && (index < 2 || !/[a-z0-9_$]/u.test(source[index - 2]));
+      let value = "";
+      let closed = false;
+      index += 1;
+      while (index < source.length) {
+        if (escapeString && source[index] === "\\" && index + 1 < source.length) {
+          value += source[index + 1];
+          index += 2;
+        } else if (source[index] === "'" && source[index + 1] === "'") {
+          value += "'";
+          index += 2;
+        } else if (source[index] === "'") {
+          index += 1;
+          closed = true;
+          break;
+        } else {
+          value += source[index];
+          index += 1;
+        }
+      }
+      if (!closed) fail("management_api_contract_drift");
+      literals.push({ start, end: index, value });
+      mask(start, index, "''");
+      continue;
+    }
+    if (source[index] === '"') {
+      const start = index;
+      let closed = false;
+      index += 1;
+      while (index < source.length) {
+        if (source[index] === '"' && source[index + 1] === '"') index += 2;
+        else if (source[index] === '"') { index += 1; closed = true; break; }
+        else index += 1;
+      }
+      if (!closed) fail("management_api_contract_drift");
+      mask(start, index, '""');
+      continue;
+    }
+    if (source[index] === "$") {
+      const tag = source.slice(index).match(/^\$(?:[a-z_][a-z0-9_]*)?\$/u)?.[0];
+      if (tag) {
+        const start = index;
+        const closing = source.indexOf(tag, index + tag.length);
+        if (closing < 0) fail("management_api_contract_drift");
+        const end = closing + tag.length;
+        literals.push({ start, end, value: source.slice(index + tag.length, closing) });
+        mask(start, end, "''");
+        index = end;
+        continue;
+      }
+    }
+    index += 1;
+  }
+  return { code: code.join(""), literals };
+}
+
+function containsDataMutation(code, { includeRead = false } = {}) {
+  const read = includeRead ? "|select\\s+|with\\b[^;]*\\bselect\\s+" : "";
+  const pattern = new RegExp(`(?:\\bbegin\\b|;|\\bthen\\b|\\belse\\b|\\bloop\\b|^)(?:\\s|\\n)*(?:with\\b[^;]*\\b(?:insert\\s+into|update\\s+|delete\\s+from|merge\\s+into)${read}|insert\\s+into|update\\s+|delete\\s+from|merge\\s+into|copy\\s+|truncate\\s+|notify\\s+|call\\s+|perform\\s+)`, "u");
+  return pattern.test(code);
+}
+
 function isSchemaReplayStatement(statement) {
   let normalized = statement.trimStart().toLowerCase();
   while (normalized.startsWith("--") || normalized.startsWith("/*")) {
@@ -224,11 +317,39 @@ function isSchemaReplayStatement(statement) {
   }
   if (/^(?:insert|update|delete|merge|copy|truncate|select|with|notify|lock|repository|sha256\s*=)\b/u.test(normalized)) return false;
   if (/^do\s+\$(?:[a-z_][a-z0-9_]*)?\$/u.test(normalized)) {
-    const dynamicDdl = [...normalized.matchAll(/\bexecute\s+(?:(?:pg_catalog\.)?format\s*\(\s*)?'((?:''|[^'])*)'/gu)]
-      .some(([, sql]) => !/\bpg_temp\b/iu.test(sql) && /\b(?:create|alter|drop|grant|revoke|comment|security\s+label)\b/u.test(sql));
-    if (dynamicDdl) return true;
-    const withoutStringLiterals = normalized.replaceAll(/'(?:''|[^'])*'/gu, "''");
-    return /\b(?:create\s+(?!(?:temp|temporary)\s+table\b)|alter\s+(?:table|function|procedure|schema|type|domain|sequence|view|policy|role)\b|drop\s+(?:table|function|procedure|schema|type|domain|sequence|view|policy|role)\b|grant\s+|revoke\s+|comment\s+on\b|security\s+label\b)/u.test(withoutStringLiterals);
+    const tag = normalized.match(/^do\s+(\$(?:[a-z_][a-z0-9_]*)?\$)/u)?.[1];
+    if (!tag) fail("management_api_contract_drift");
+    const bodyStart = normalized.indexOf(tag) + tag.length;
+    const bodyEnd = normalized.lastIndexOf(tag);
+    if (bodyEnd < bodyStart) fail("management_api_contract_drift");
+    const { code, literals } = scanSqlCode(normalized.slice(bodyStart, bodyEnd));
+    const directDdl = /\b(?:create\s+(?!(?:temp|temporary)\s+table\b)|alter\s+(?:table|function|procedure|schema|type|domain|sequence|view|policy|role)\b|drop\s+(?:table|function|procedure|schema|type|domain|sequence|view|policy|role)\b|grant\s+|revoke\s+|comment\s+on\b|security\s+label\b)/u.test(code);
+    const executeStatements = [...code.matchAll(/\bexecute\b(?!\s+(?:function|procedure|on)\b)/gu)].map((match) => {
+      const executeIndex = match.index;
+      const expressionStart = executeIndex + "execute".length;
+      const semicolon = code.indexOf(";", expressionStart);
+      const expressionEnd = semicolon < 0 ? code.length : semicolon;
+      const expression = code.slice(expressionStart, expressionEnd);
+      const expressionLiterals = literals.filter((entry) => entry.start >= expressionStart && entry.start < expressionEnd);
+      const literalCode = expressionLiterals.map((entry) => scanSqlCode(entry.value).code);
+      const firstLiteralCode = literalCode[0];
+      const bareLiteral = /^\s*e?''\s*$/u.test(expression);
+      const literalOnlyFormat = /^\s*(?:pg_catalog\.)?format\s*\(\s*e?''(?:\s*,\s*e?'')*\s*\)\s*$/u.test(expression);
+      const knownLiteral = bareLiteral || literalOnlyFormat;
+      const nonTemporaryDdlIntent = literalCode.length > 0
+        && literalCode.every((entry) => !/\bpg_temp\b/u.test(entry))
+        && literalCode.some((entry) => /\b(?:create|alter|drop|grant|revoke|comment|security\s+label)\b/u.test(entry));
+      const safeDdl = Boolean(firstLiteralCode)
+        && knownLiteral
+        && nonTemporaryDdlIntent
+        && /\b(?:create|alter|drop|grant|revoke|comment|security\s+label)\b/u.test(firstLiteralCode)
+        && literalCode.every((entry) => !containsDataMutation(entry, { includeRead: true }));
+      return { nonTemporaryDdlIntent, safeDdl };
+    });
+    const dynamicDdl = executeStatements.some((entry) => entry.safeDdl);
+    const hasDdlIntent = directDdl || executeStatements.some((entry) => entry.nonTemporaryDdlIntent);
+    if (hasDdlIntent && (containsDataMutation(code) || executeStatements.some((entry) => !entry.safeDdl))) fail("management_api_contract_drift");
+    return directDdl || dynamicDdl;
   }
   return true;
 }

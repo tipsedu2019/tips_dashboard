@@ -14,6 +14,8 @@ const SQL_TEST = /^supabase\/tests\/[a-z0-9_]+\.sql$/u;
 const PROBE = /^(?:tests\/[a-z0-9_./-]+\.mjs|scripts\/probe-dashboard-audit-chain-concurrency\.mjs)$/u;
 const MIGRATION = /^(\d{14})_([a-z0-9_]+)\.sql$/u;
 const SUPABASE = "/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supabase/cli-darwin-arm64/bin/supabase";
+const ISOLATED_MIGRATION_PREREQUISITE_PATH = "scripts/fixtures/dashboard-free-tier-migration-prerequisites.sql";
+const ISOLATED_MIGRATION_PREREQUISITE_SHA256 = "051f9a7f82ab02abfb3437c6064782651032e4eded02aa89d8986dc9cf94c5f1";
 const REVIEWED_MANIFEST_BOOTSTRAP = Object.freeze({
   baseSha: "c7ea76b3dcd94101503305feadc95ce591f68050",
   baseManifestSha256: "0b55a4b7629dc8105fb9df45828db7fa1122651601096e529c8c79c5e801eef1",
@@ -438,6 +440,9 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   }
   if (!args.execute) return { status: "plan", tests: args.tests, probes: args.probes, manifest, artifactPaths, reviewBoundary };
   const smokeTest = await readFile(join(root, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"));
+  let migrationPrerequisite;
+  try { migrationPrerequisite = await readFile(safeRepoPath(root, ISOLATED_MIGRATION_PREREQUISITE_PATH)); } catch { fail("isolated_supabase_db_prerequisite_drift"); }
+  if (sha256(migrationPrerequisite) !== ISOLATED_MIGRATION_PREREQUISITE_SHA256) fail("isolated_supabase_db_prerequisite_drift");
   const requestedTests = await snapshotRequestedFiles(root, args.tests);
   const probes = await snapshotRequestedFiles(root, args.probes);
   const runtime = await prepareRuntime({ requestId: args.requestId, randomBytes, allocatePort, log, tempDirectory });
@@ -467,6 +472,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     await writeFile(temporaryConfig, buildIsolatedSupabaseConfig(runtime.projectId, runtime.ports, catalog.serverMajor), { mode: 0o600 });
     await rename(temporaryConfig, runtime.configPath);
     await stageContents(artifacts.baseline, join(runtime.tempRoot, "supabase/migrations/00000000000000_dashboard_free_tier_test_baseline.sql"));
+    await stageContents(migrationPrerequisite, join(runtime.tempRoot, "supabase/migrations/00000000000001_dashboard_free_tier_test_prerequisites.sql"));
     await stageContents(artifacts.parity, join(runtime.tempRoot, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"));
     await stageContents(smokeTest, join(runtime.tempRoot, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"));
     startAttempted = true;
