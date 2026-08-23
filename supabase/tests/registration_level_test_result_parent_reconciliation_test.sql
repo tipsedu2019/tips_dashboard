@@ -170,6 +170,48 @@ left join public.ops_task_events event
 group by ids.case_key, ids.track_id;
 grant select on registration_level_result_event_baselines to authenticated;
 
+create or replace function pg_temp.registration_workflow_stale_revision_error(
+  p_track_id uuid
+)
+returns text
+language plpgsql
+volatile
+as $$
+declare
+  v_workflow_status text;
+  v_workflow_revision integer;
+begin
+  select track.workflow_status, track.workflow_revision
+  into strict v_workflow_status, v_workflow_revision
+  from public.ops_registration_subject_tracks track
+  where track.id = p_track_id;
+
+  begin
+    perform public.set_registration_workflow_status_v1(
+      p_track_id,
+      v_workflow_status,
+      v_workflow_revision + 1,
+      'level-result-parent-stale-workflow-revision'
+    );
+    return 'no_error';
+  exception
+    when others then
+      return sqlstate || ':' || sqlerrm;
+  end;
+end;
+$$;
+
+select is(
+  pg_temp.registration_workflow_stale_revision_error(
+    (select ids.track_id
+     from registration_level_result_ids ids
+     where ids.case_key = 'single_completed'
+     limit 1)
+  ),
+  '23514:registration_workflow_status_refresh_required',
+  'stale workflow revisions use a non-retryable domain SQLSTATE'
+);
+
 -- The current RPC writes the child first and relies on deferred integrity checks.
 -- Catch the deferred error in a subtransaction so RED remains a normal pgTAP
 -- assertion instead of aborting the entire packet. Every valid call explicitly

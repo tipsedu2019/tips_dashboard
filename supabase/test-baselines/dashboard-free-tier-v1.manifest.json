@@ -36,9 +36,69 @@
       "sha256": "ac3310879f165b45388115dc5943ac42ac0ea77ca8e493b7fe5545a452809694"
     },
     {
+      "fileName": "20260819012301_registration_customer_message_bundles.sql",
+      "status": "final",
+      "sha256": "ae876875c6744b1967b5cee04886a4527d501cf3c777e996b018c9d69ba7ff04"
+    },
+    {
+      "fileName": "20260819012401_fix_registration_customer_message_bundle_coalesce.sql",
+      "status": "final",
+      "sha256": "8295101faafb8feb37984a076b27ba93408e9ee22aeb98c7910066c9697e7db6"
+    },
+    {
+      "fileName": "20260819101957_backfill_legacy_active_class_periods.sql",
+      "status": "final",
+      "sha256": "1f63fcfbd12bda0b58e5931adc8176414137729b7d68592f56397d77451967bd"
+    },
+    {
+      "fileName": "20260819103434_registration_appointment_integrity_guard.sql",
+      "status": "final",
+      "sha256": "3e2d4297a472681765c8de302f2082fec797f5ee08258abd90298ccdb1d1c5f9"
+    },
+    {
+      "fileName": "20260819122006_registration_notion_style_editing.sql",
+      "status": "final",
+      "sha256": "ff294e4d901d25d0c866b1045f6abedb5245172799c09d7d622de269a75a22ed"
+    },
+    {
+      "fileName": "20260819122911_registration_enrollment_external_correction.sql",
+      "status": "final",
+      "sha256": "ef1885dfe3c8b964e4ca8994a9836ebc43220307c73fa315dface239aa0ce848"
+    },
+    {
+      "fileName": "20260819151002_registration_admission_preview_status_compatibility.sql",
+      "status": "final",
+      "sha256": "c292103602b495efe7b6c49c3e92f7b92ebd264cf52d2d781871a3542c306eeb"
+    },
+    {
+      "fileName": "20260819152417_registration_admission_preview_active_resolver_status_compatibility.sql",
+      "status": "final",
+      "sha256": "0f2653938f2f5726e7c4ed6c494fa8862230f8cd588208667cd9d9595cb98bd9"
+    },
+    {
+      "fileName": "20260820054534_registration_appointment_workflow_independence.sql",
+      "status": "final",
+      "sha256": "9f5b21c61a1cf2b4809c8941f50fc15e3c7a85a15d41d43770f7d9feac37c915"
+    },
+    {
+      "fileName": "20260820055224_notification_source_registry_prerequisite.sql",
+      "status": "final",
+      "sha256": "e14f69436a3bc79762b4c57990934511491f7925f36dd6f91ca6225fe4b3d344"
+    },
+    {
       "fileName": "20260820150057_ops_task_completion_actor.sql",
-      "status": "candidate",
+      "status": "final",
       "sha256": "2bd12279b8f79757dfbf6e5d84423bf34019d5f172c80e36377166002e89ceba"
+    },
+    {
+      "fileName": "20260820152710_registration_level_test_result_integrity_repair.sql",
+      "status": "final",
+      "sha256": "5cdd8659ba97aaae3efca3341873b8c5bebccb1247f1bd18b68ec3532ce772c4"
+    },
+    {
+      "fileName": "20260823074406_registration_workflow_stale_revision_nonretryable.sql",
+      "status": "final",
+      "sha256": "28a5af2540ed20475200e30d410e97b7fd4f7772e89a989f8a0ed64aee29532a"
     }
   ]
 }

@@ -205,6 +205,13 @@ test("isolated DB runner exposes an explicit final-only lifecycle gate", async (
   assert.equal(plan.requireFinal, true);
 });
 
+test("isolated DB runner parses explicit review-head and lint gates", async () => {
+  const { parseIsolatedDbArguments } = await import(runnerUrl.href);
+  const plan = parseIsolatedDbArguments(["--review-head", "--lint"]);
+  assert.equal(plan.reviewHead, true);
+  assert.equal(plan.lint, true);
+});
+
 test("isolated DB runner allocates four distinct loopback ports by default", async () => {
   const { allocateLoopbackPorts } = await import(runnerUrl.href);
   const ports = await allocateLoopbackPorts(4);
@@ -271,6 +278,31 @@ test("isolated DB final gate rejects candidate lifecycle and accepts the same ex
   const plan = await runIsolatedSupabaseDbTests({ root, argv: ["--require-final"] });
   assert.equal(plan.status, "plan");
   assert.equal(plan.manifest.orderedNewMigrations[0].status, "final");
+});
+
+test("review-head reads the top-level manifest while retaining immutable active-capture artifacts", async (t) => {
+  const { runIsolatedSupabaseDbTests, sha256 } = await import(runnerUrl.href);
+  const root = await makeRepo(t);
+  const manifestPath = join(root, "supabase/test-baselines/dashboard-free-tier-v1.manifest.json");
+  const activeManifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  await activateCanonicalBaseline(root);
+
+  const reviewHeadManifest = {
+    ...activeManifest,
+    orderedNewMigrations: [{
+      fileName: "20260814000000_review_head.sql",
+      status: "final",
+      sha256: sha256("select 1;\n"),
+    }],
+  };
+  await writeFile(manifestPath, `${JSON.stringify(reviewHeadManifest, null, 2)}\n`);
+
+  const plan = await runIsolatedSupabaseDbTests({ root, argv: ["--review-head", "--require-final"] });
+  assert.deepEqual(plan.manifest.orderedNewMigrations, reviewHeadManifest.orderedNewMigrations);
+  assert.equal(plan.artifactPaths.manifestPath.endsWith("dashboard-free-tier-v1.manifest.json"), true);
+  assert.match(plan.artifactPaths.baselinePath, /dashboard-free-tier-v1-captures\/[a-f0-9]{16}\/baseline\.sql$/u);
+  assert.match(plan.artifactPaths.catalogPath, /dashboard-free-tier-v1-captures\/[a-f0-9]{16}\/catalog\.json$/u);
+  assert.match(plan.artifactPaths.parityPath, /dashboard-free-tier-v1-captures\/[a-f0-9]{16}\/parity\.sql$/u);
 });
 
 test("isolated DB runner binds the source-controlled baseline and catalog to manifest hashes", async (t) => {
@@ -511,6 +543,41 @@ test("runner stages each requested SQL file after init and before target pgtap",
   });
   assert.equal(sawTarget, true);
   await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "98f77e69-9f40-49aa-9bc4-0be2321e2c8f", "--test", "supabase/tests/missing_test.sql"], allocatePort: (() => { let port = 55600; return () => ++port; })(), executeProcess: async () => ({ code: 0, stdout: "", stderr: "" }) }), /isolated_supabase_db_target_missing/);
+});
+
+test("runner lints the reviewed head after migration application with one injected Supabase executable", async (t) => {
+  const { runIsolatedSupabaseDbTests, sha256 } = await import(runnerUrl.href);
+  const root = await makeRepo(t);
+  const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"));
+  const catalog = JSON.stringify({ captureStatus: "reviewed", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101", migrationLedger: [], catalog: [] });
+  await writeFile(join(root, "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json"), catalog);
+  await mkdir(join(root, "supabase/migrations"), { recursive: true });
+  await mkdir(join(root, "supabase/tests"), { recursive: true });
+  await writeFile(join(root, "supabase/migrations/20260814000000_review_head.sql"), "select 1;\n");
+  await writeFile(join(root, "supabase/tests/target_test.sql"), "select 1;\n");
+  await writeFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.manifest.json"), JSON.stringify({ baselineVersion: "dashboard-free-tier-v1", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101", baselineSha256: sha256(baseline), catalogSha256: sha256(catalog), requiredObjectSignatures: [], orderedNewMigrations: [{ fileName: "20260814000000_review_head.sql", status: "final", sha256: sha256("select 1;\n") }] }));
+  await activateCanonicalBaseline(root);
+
+  const calls = [];
+  await runIsolatedSupabaseDbTests({
+    root,
+    argv: ["--execute", "--authorized", "--request-id", "97f77e69-9f40-49aa-9bc4-0be2321e2c8f", "--review-head", "--lint", "--test", "supabase/tests/target_test.sql"],
+    supabasePath: "/fixture/bin/supabase",
+    allocatePort: (() => { let port = 55700; return () => ++port; })(),
+    executeProcess: async (invocation) => {
+      calls.push(invocation);
+      if (invocation.args[0] === "status") return { code: 0, stdout: JSON.stringify({ DB_URL: "postgresql://postgres:postgres@127.0.0.1:55702/postgres" }), stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  });
+
+  const supabaseCalls = calls.filter((call) => call.command !== process.execPath);
+  assert.ok(supabaseCalls.every((call) => call.command === "/fixture/bin/supabase"));
+  const migrationIndex = calls.findIndex((call) => call.args[0] === "migration");
+  const lintIndex = calls.findIndex((call) => call.args[0] === "db" && call.args[1] === "lint");
+  const focusedPgTapIndex = calls.findIndex((call) => call.args[0] === "test" && call.args.includes("supabase/tests/target_test.sql"));
+  assert.ok(migrationIndex < lintIndex && lintIndex < focusedPgTapIndex);
+  assert.deepEqual(calls[lintIndex].args.slice(0, 7), ["db", "lint", "--local", "--workdir", calls[lintIndex].cwd, "--fail-on", "error"]);
 });
 
 test("incomplete required catalog kinds and a post-rename publication failure leave active pointer unchanged", async (t) => {

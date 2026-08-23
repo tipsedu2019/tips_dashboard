@@ -40,12 +40,14 @@ function processResult(command, args, options = {}) {
 }
 
 export function parseIsolatedDbArguments(argv) {
-  const result = { execute: false, authorized: false, requireFinal: false, requestId: null, tests: [], probes: [] };
+  const result = { execute: false, authorized: false, requireFinal: false, reviewHead: false, lint: false, requestId: null, tests: [], probes: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--execute") result.execute = true;
     else if (value === "--authorized") result.authorized = true;
     else if (value === "--require-final") result.requireFinal = true;
+    else if (value === "--review-head") result.reviewHead = true;
+    else if (value === "--lint") result.lint = true;
     else if (value === "--request-id") result.requestId = argv[++index] || null;
     else if (value === "--test") result.tests.push(argv[++index] || "");
     else if (value === "--probe") result.probes.push(argv[++index] || "");
@@ -71,14 +73,22 @@ export async function validateBaselineArtifactHashes({ root = ROOT, manifest }) 
   return true;
 }
 
-async function loadBaselineState(root) {
+async function loadBaselineState(root, { reviewHead = false } = {}) {
   const base = join(root, "supabase/test-baselines");
   const expectedArtifactPaths = { catalog: "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", baseline: "supabase/test-baselines/dashboard-free-tier-v1.sql", parityTest: "supabase/tests/dashboard_free_tier_catalog_parity_test.sql" };
   try {
     const pointer = JSON.parse(await readFile(join(base, "dashboard-free-tier-v1.active.json"), "utf8"));
     if (!exactActivePointer(pointer, expectedArtifactPaths)) fail("isolated_supabase_db_baseline_review_required");
     const capture = join(base, "dashboard-free-tier-v1-captures", pointer.captureId);
-    return { captureId: pointer.captureId, manifestPath: join(capture, "manifest.json"), baselinePath: join(capture, "baseline.sql"), catalogPath: join(capture, "catalog.json"), parityPath: join(capture, "parity.sql") };
+    const captureManifestPath = join(capture, "manifest.json");
+    return {
+      captureId: pointer.captureId,
+      captureManifestPath,
+      manifestPath: reviewHead ? join(base, "dashboard-free-tier-v1.manifest.json") : captureManifestPath,
+      baselinePath: join(capture, "baseline.sql"),
+      catalogPath: join(capture, "catalog.json"),
+      parityPath: join(capture, "parity.sql"),
+    };
   } catch (error) {
     if (error?.code === "ENOENT" || error instanceof SyntaxError) fail("isolated_supabase_db_baseline_review_required");
     throw error;
@@ -178,13 +188,14 @@ async function snapshotRequestedFiles(root, paths) {
   return snapshots;
 }
 
-export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2), root = ROOT, log = () => {}, randomBytes, allocatePort, retainTempRoot = false, executeProcess = (invocation) => processResult(invocation.command, invocation.args, invocation) } = {}) {
+export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2), root = ROOT, log = () => {}, randomBytes, allocatePort, retainTempRoot = false, supabasePath: injectedSupabasePath, executeProcess = (invocation) => processResult(invocation.command, invocation.args, invocation) } = {}) {
   const args = parseIsolatedDbArguments(argv);
-  const artifactPaths = await loadBaselineState(root);
+  const artifactPaths = await loadBaselineState(root, { reviewHead: args.reviewHead });
+  const captureManifest = validateBaselineManifest(JSON.parse(await readFile(artifactPaths.captureManifestPath, "utf8")));
   const manifest = validateBaselineManifest(JSON.parse(await readFile(artifactPaths.manifestPath, "utf8")));
-  const artifacts = await validateArtifactPaths({ paths: artifactPaths, manifest });
+  const artifacts = await validateArtifactPaths({ paths: artifactPaths, manifest: captureManifest });
   if (args.requireFinal && (!manifest.orderedNewMigrations.length || manifest.orderedNewMigrations.some((migration) => migration.status !== "final"))) fail("isolated_supabase_db_final_manifest_required");
-  if (!args.execute) return { status: "plan", tests: args.tests, probes: args.probes, manifest };
+  if (!args.execute) return { status: "plan", tests: args.tests, probes: args.probes, manifest, artifactPaths };
   const catalog = JSON.parse(artifacts.catalog.toString("utf8"));
   if (catalog.captureStatus !== "reviewed" || catalog.originMainSha !== manifest.originMainSha || !Array.isArray(catalog.migrationLedger)) fail("isolated_supabase_db_baseline_review_required");
   const migrations = await validateManifestMigrations({ root, manifest, baselineVersions: catalog.migrationLedger.map((row) => row.version) });
@@ -193,8 +204,9 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   const probes = await snapshotRequestedFiles(root, args.probes);
   const runtime = await prepareRuntime({ requestId: args.requestId, randomBytes, allocatePort });
   const cleanEnvironment = { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" };
+  const supabasePath = injectedSupabasePath || process.env.TASK_SUPABASE_CLI || SUPABASE;
   const invoke = async (argsForCli, { env = cleanEnvironment } = {}) => {
-    const result = await executeProcess({ command: SUPABASE, args: argsForCli, cwd: runtime.tempRoot, env });
+    const result = await executeProcess({ command: supabasePath, args: argsForCli, cwd: runtime.tempRoot, env });
     if (result.code !== 0) fail("isolated_supabase_db_child_failed");
     return result;
   };
@@ -213,6 +225,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     await invoke(["test", "db", "--local", "--workdir", runtime.tempRoot, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql", "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"]);
     for (const migration of migrations) await stageContents(migration.contents, join(runtime.tempRoot, "supabase/migrations", migration.fileName));
     await invoke(["migration", "up", "--local", "--workdir", runtime.tempRoot, "--include-all"]);
+    if (args.lint) await invoke(["db", "lint", "--local", "--workdir", runtime.tempRoot, "--fail-on", "error"]);
     for (const test of requestedTests) await stageContents(test.contents, join(runtime.tempRoot, test.path));
     if (args.tests.length) await invoke(["test", "db", "--local", "--workdir", runtime.tempRoot, ...args.tests]);
     const status = await invoke(["status", "--workdir", runtime.tempRoot, "--output", "json"]);
@@ -227,7 +240,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     return { status: "passed", runtime: { ...runtime, configPath: runtime.configPath } };
   } finally {
     if (startAttempted) {
-      try { await executeProcess({ command: SUPABASE, args: ["stop", "--workdir", runtime.tempRoot, "--project-id", runtime.projectId, "--no-backup", "--yes"], cwd: runtime.tempRoot, env: cleanEnvironment }); } catch {}
+      try { await executeProcess({ command: supabasePath, args: ["stop", "--workdir", runtime.tempRoot, "--project-id", runtime.projectId, "--no-backup", "--yes"], cwd: runtime.tempRoot, env: cleanEnvironment }); } catch {}
     }
     if (!retainTempRoot) await rm(runtime.tempRoot, { recursive: true, force: true });
     log(JSON.stringify({ cleanup: startAttempted ? "attempted" : "not_required" }));

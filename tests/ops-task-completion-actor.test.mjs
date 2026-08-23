@@ -127,7 +127,7 @@ test("격리 DB 기준 매니페스트에 새 마이그레이션 후보와 현�
 
   assert.deepEqual(entry, {
     fileName: "20260820150057_ops_task_completion_actor.sql",
-    status: "candidate",
+    status: "final",
     sha256: createHash("sha256").update(sql).digest("hex"),
   });
 });
