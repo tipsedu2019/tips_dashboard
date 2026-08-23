@@ -1425,6 +1425,25 @@ test("required DB push workflow의 실파일, exact command, 순서를 강제한
   )
 })
 
+test("required SQL review workflow의 실파일과 바이트를 fail-closed로 고정한다", async () => {
+  const missingWorkflowFixture = await createRepoFixture()
+  await rm(join(missingWorkflowFixture, ".github", "workflows", "supabase-sql-review.yml"))
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: missingWorkflowFixture }),
+    "required_sql_review_workflow_not_regular",
+  )
+
+  const mutatedWorkflowFixture = await createRepoFixture()
+  await appendFile(
+    join(mutatedWorkflowFixture, ".github", "workflows", "supabase-sql-review.yml"),
+    "\n# unreviewed SQL review workflow mutation\n",
+  )
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: mutatedWorkflowFixture }),
+    "required_sql_review_workflow_hash_mismatch",
+  )
+})
+
 test("required DB push workflow는 verifier 성공 전 Supabase secret scope를 fail-closed로 거부한다", async () => {
   const secretNames = ["SUPABASE_ACCESS_TOKEN", "SUPABASE_DB_PASSWORD"]
   const cases = []

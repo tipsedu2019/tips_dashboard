@@ -27,3 +27,10 @@ Use the default mattpocock/skills triage label vocabulary. See `docs/agents/tria
 ### Domain docs
 
 This is a single-context repo. Read root `CONTEXT.md` and `docs/adr/` when they exist. See `docs/agents/domain.md`.
+
+## Code Review Rules
+
+- Determine the final active PL/pgSQL definition from the ordered migration chain, not an earlier definition alone.
+- Do not manually label business or domain-state conflicts as SQLSTATE `40001`; it is reserved for a real database concurrency collision.
+- Require exact SQLSTATE evidence and a pgTAP assertion against the final function definition.
+- Preserve authentication, RLS/ACL, locks, idempotency, and no-send boundaries.

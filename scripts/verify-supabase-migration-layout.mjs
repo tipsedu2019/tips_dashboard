@@ -8,6 +8,7 @@ const QUARANTINE_RELATIVE_PATH = join("supabase", "pending-migrations", "notific
 const ACTIVE_RELATIVE_PATH = join("supabase", "migrations")
 const WORKFLOWS_RELATIVE_PATH = join(".github", "workflows")
 const REQUIRED_DB_PUSH_WORKFLOW = "supabase-db-push.yml"
+const REQUIRED_SQL_REVIEW_WORKFLOW = "supabase-sql-review.yml"
 const FOCUSED_TRANSACTIONAL_PGTAP =
   "supabase/tests/registration_level_test_result_parent_reconciliation_test.sql"
 const LINKED_MIGRATION_LEDGER = '"${RUNNER_TEMP}/supabase-migration-list.txt"'
@@ -24,9 +25,12 @@ const EXPECTED_TRANSACTIONAL_PGTAP_COMMAND =
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand Supabase secret scope before the verifier exits.
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "e14a8005276824e6b2a8c67330efd476eff111784f2f79cc073b1c6bb30be920"
+const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
+  "aa006ffc79b35cf7a8e2a69a6f0270fb423c41e58b3d015cb227339016cf8b81"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
   ["free-tier-guardrails.yml", "bb7cf618f180e4f1d90ceefddc67382ba8aee1be725cb8569507d835360cb696"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
+  [REQUIRED_SQL_REVIEW_WORKFLOW, REQUIRED_SQL_REVIEW_WORKFLOW_SHA256],
 ])
 const SCIENCE_MIGRATION_FILE = "20260722120000_science_notification_connection.sql"
 const SCIENCE_MIGRATION_SHA256 = "ce0ca95663fe2a7dd5ae54ebad6b09ae315dbed548bbc074185230907441dd46"
@@ -1018,6 +1022,7 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
   const activeDir = join(resolvedRoot, ACTIVE_RELATIVE_PATH)
   const workflowsDir = join(resolvedRoot, WORKFLOWS_RELATIVE_PATH)
   const requiredWorkflowPath = join(workflowsDir, REQUIRED_DB_PUSH_WORKFLOW)
+  const requiredSqlReviewWorkflowPath = join(workflowsDir, REQUIRED_SQL_REVIEW_WORKFLOW)
   const manifestPath = join(quarantineDir, "manifest.json")
   const quarantineReadmePath = join(quarantineDir, "README.md")
   const scienceMigrationPath = join(activeDir, SCIENCE_MIGRATION_FILE)
@@ -1357,6 +1362,22 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
     addError(errors, "required_db_push_workflow_hash_mismatch", workflowRelativePath)
     addError(errors, "db_push_workflow_secret_scope_mismatch", workflowRelativePath)
   }
+  const requiredSqlReviewWorkflowStat = await statKind(requiredSqlReviewWorkflowPath)
+  if (!requiredSqlReviewWorkflowStat?.isFile()) {
+    addError(
+      errors,
+      "required_sql_review_workflow_not_regular",
+      relative(resolvedRoot, requiredSqlReviewWorkflowPath),
+    )
+  } else if (
+    sha256(await readFile(requiredSqlReviewWorkflowPath)) !== REQUIRED_SQL_REVIEW_WORKFLOW_SHA256
+  ) {
+    addError(
+      errors,
+      "required_sql_review_workflow_hash_mismatch",
+      relative(resolvedRoot, requiredSqlReviewWorkflowPath),
+    )
+  }
   const { nonRegularEntries: workflowNonRegularEntries, yamlEntries: workflowYamlEntries } =
     await listWorkflowYamlEntries(workflowsDir)
   const workflowRelativeCandidates = workflowYamlEntries.map(({ path }) =>
@@ -1394,6 +1415,7 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
     const workflow = await readFile(workflowPath, "utf8")
     const workflowRelativePath = relative(resolvedRoot, workflowPath)
     const workflowRelativeToDirectory = relative(workflowsDir, workflowPath)
+    if (workflowRelativeToDirectory === REQUIRED_SQL_REVIEW_WORKFLOW) continue
     if (
       workflow.includes("supabase/pending-migrations/notification-cutover") ||
       EXPECTED_SQL.some(([file]) => workflow.includes(file))

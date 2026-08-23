@@ -1,0 +1,102 @@
+name: Supabase SQL review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  supabase-sql-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.18.0
+
+      - name: Test Supabase migration layout
+        run: node --test tests/supabase-migration-layout.test.mjs
+
+      - name: Test SQLSTATE and transaction contracts
+        run: node --test tests/retryable-sqlstate-contract.test.mjs tests/supabase-transactional-preflight-builder.test.mjs
+
+      - name: Verify Supabase migration layout
+        run: node scripts/verify-supabase-migration-layout.mjs
+
+      - name: Verify domain SQLSTATE contract
+        run: node scripts/verify-domain-sqlstate-contract.mjs
+
+      - name: Setup Squawk
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="2.63.0"
+          squawk_path="${RUNNER_TEMP}/squawk"
+
+          curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 --output "${squawk_path}" "https://github.com/sbdchd/squawk/releases/download/v${version}/squawk-linux-x64"
+          echo "532d217c9c1ff167bbc5d32efd4184285ab1bd1a69882cf66608d2bc5ed81a28  ${squawk_path}" | sha256sum --check --strict
+          chmod 0755 "${squawk_path}"
+          "${squawk_path}" --version
+
+      - name: Lint changed migrations with Squawk
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          merge_base="$(git merge-base "${BASE_SHA}" "${HEAD_SHA}")"
+          mapfile -d '' -t migration_files < <(git diff --name-only --diff-filter=AM -z "${merge_base}" "${HEAD_SHA}" -- ':(glob)supabase/migrations/*.sql')
+          if ((${#migration_files[@]} == 0)); then
+            echo "No added or modified Supabase migrations to lint."
+            exit 0
+          fi
+          "${RUNNER_TEMP}/squawk" --pg-version 17 "${migration_files[@]}"
+
+  supabase-schema-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.18.0
+
+      - name: Setup Supabase CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="2.115.0"
+          archive="supabase_${version}_linux_amd64.tar.gz"
+          cli_dir="${RUNNER_TEMP}/supabase-cli"
+          archive_path="${RUNNER_TEMP}/${archive}"
+
+          curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 --output "${archive_path}" "https://github.com/supabase/cli/releases/download/v${version}/${archive}"
+          echo "ff099608ce758b625532ef03a61f4c9520b995e94ff6cd5480dc0428cad64cb3  ${archive_path}" | sha256sum --check --strict
+
+          mkdir -p "${cli_dir}"
+          tar -xzf "${archive_path}" -C "${cli_dir}"
+          "${cli_dir}/supabase" --version
+
+      - name: Run isolated schema contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs \
+            --review-head --lint --require-final --execute --authorized \
+            --request-id "github-pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --test supabase/tests/active_registration_workflow_sqlstate_contract_test.sql \
+            --test supabase/tests/registration_level_test_result_parent_reconciliation_test.sql
