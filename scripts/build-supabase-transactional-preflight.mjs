@@ -3,6 +3,7 @@ import { isAbsolute, relative, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 
 const MIGRATION_VERSION_PATTERN = /^(\d{14})_.+\.sql$/
+const LEDGER_VERSION_PATTERN = /^\d{14}$/
 const TRANSACTION_CONTROL_PATTERN = /^(?:begin\b|start\s+transaction\b|commit\b|end\b|rollback\b|abort\b|prepare\s+transaction\b(?!.*\bas\b))/i
 
 function fail(code) {
@@ -19,15 +20,57 @@ function resolveInsideRepo(repoRoot, candidate) {
   return target
 }
 
+function isPlainRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function jsonMigrationLedgerRows(source) {
+  let receipt
+  try {
+    receipt = JSON.parse(source)
+  } catch {
+    fail("transactional_preflight_ledger_malformed")
+  }
+
+  if (
+    !isPlainRecord(receipt) ||
+    JSON.stringify(Object.keys(receipt).sort()) !== JSON.stringify(["message", "migrations"]) ||
+    receipt.message !== "Migrations listed" ||
+    !Array.isArray(receipt.migrations)
+  ) {
+    fail("transactional_preflight_ledger_malformed")
+  }
+
+  return receipt.migrations.map((row) => {
+    if (
+      !isPlainRecord(row) ||
+      JSON.stringify(Object.keys(row).sort()) !== JSON.stringify(["local", "remote", "time"]) ||
+      typeof row.local !== "string" ||
+      typeof row.remote !== "string" ||
+      typeof row.time !== "string" ||
+      row.time.length === 0 ||
+      (row.local && !LEDGER_VERSION_PATTERN.test(row.local)) ||
+      (row.remote && !LEDGER_VERSION_PATTERN.test(row.remote)) ||
+      (!row.local && !row.remote)
+    ) {
+      fail("transactional_preflight_ledger_malformed")
+    }
+    return { local: row.local || null, remote: row.remote || null }
+  })
+}
+
 function migrationLedgerState(ledger) {
-  const rows = String(ledger)
-    .split(/\r?\n/)
-    .map((line) => line.split("|").slice(0, 2).map((value) => value?.trim() ?? ""))
-    .map(([local, remote]) => ({
-      local: /^\d{14}$/.test(local) ? local : null,
-      remote: /^\d{14}$/.test(remote) ? remote : null,
-    }))
-    .filter(({ local, remote }) => local !== null || remote !== null)
+  const source = String(ledger).trim()
+  const rows = source.startsWith("{")
+    ? jsonMigrationLedgerRows(source)
+    : source
+      .split(/\r?\n/)
+      .map((line) => line.split("|").slice(0, 2).map((value) => value?.trim() ?? ""))
+      .map(([local, remote]) => ({
+        local: LEDGER_VERSION_PATTERN.test(local) ? local : null,
+        remote: LEDGER_VERSION_PATTERN.test(remote) ? remote : null,
+      }))
+      .filter(({ local, remote }) => local !== null || remote !== null)
 
   const remoteVersions = rows
     .map(({ remote }) => remote)

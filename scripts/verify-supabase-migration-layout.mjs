@@ -17,7 +17,7 @@ const PINNED_SUPABASE_CLI_VERSION = "2.115.0"
 const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
   "ff099608ce758b625532ef03a61f4c9520b995e94ff6cd5480dc0428cad64cb3"
 const EXPECTED_LEDGER_COMMAND =
-  `supabase migration list --linked > ${LINKED_MIGRATION_LEDGER}`
+  `supabase migration list --linked --output-format json > ${LINKED_MIGRATION_LEDGER}`
 const EXPECTED_TRANSACTIONAL_BUILDER_COMMAND =
   `node scripts/build-supabase-transactional-preflight.mjs --output ${TRANSACTIONAL_PGTAP_OUTPUT} --migration-ledger ${LINKED_MIGRATION_LEDGER} --forward-migrations supabase/migrations --focused-test ${FOCUSED_TRANSACTIONAL_PGTAP} --rollback`
 const EXPECTED_TRANSACTIONAL_PGTAP_COMMAND =
@@ -30,14 +30,14 @@ const POSTDEPLOY_VERIFIER = "scripts/verify-supabase-postdeploy-contract.mjs"
 const POSTDEPLOY_LEDGER = '"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"'
 const POSTDEPLOY_RECEIPT = '"${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"'
 const EXPECTED_POSTDEPLOY_LEDGER_COMMAND =
-  `supabase migration list --linked > ${POSTDEPLOY_LEDGER}`
+  `supabase migration list --linked --output-format json > ${POSTDEPLOY_LEDGER}`
 const EXPECTED_POSTDEPLOY_QUERY_COMMAND =
-  `supabase db query --linked --output json --file ${POSTDEPLOY_READONLY_SQL} > ${POSTDEPLOY_RECEIPT}`
+  `supabase db query --linked --output-format json --file ${POSTDEPLOY_READONLY_SQL} > ${POSTDEPLOY_RECEIPT}`
 const EXPECTED_POSTDEPLOY_VERIFIER_COMMAND =
   `node ${POSTDEPLOY_VERIFIER} --migration-ledger ${POSTDEPLOY_LEDGER} --query-receipt ${POSTDEPLOY_RECEIPT}`
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand Supabase secret scope before the verifier exits.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "fcf365e8305c6995ceaec22f49b6d8be2d27d07f667f686159f485e083ad0067"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
   "1e3b7aac9bc49bf283ad5193c41f831f925d13e1b0c6447d647f44d11cfc0c25"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([

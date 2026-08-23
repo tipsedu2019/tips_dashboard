@@ -92,7 +92,7 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase migration list --linked > "${RUNNER_TEMP}/supabase-migration-list.txt"
+        run: supabase migration list --linked --output-format json > "${RUNNER_TEMP}/supabase-migration-list.txt"
 
       - name: Build transactional pgTAP input
         run: node scripts/build-supabase-transactional-preflight.mjs --output "${RUNNER_TEMP}/supabase-transactional-preflight.sql" --migration-ledger "${RUNNER_TEMP}/supabase-migration-list.txt" --forward-migrations supabase/migrations --focused-test supabase/tests/registration_level_test_result_parent_reconciliation_test.sql --rollback
@@ -159,13 +159,13 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase migration list --linked > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"
+        run: supabase migration list --linked --output-format json > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"
 
       - name: Capture active registration workflow contract
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase db query --linked --output json --file supabase/tests/active_registration_workflow_postdeploy_readonly.sql > "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"
+        run: supabase db query --linked --output-format json --file supabase/tests/active_registration_workflow_postdeploy_readonly.sql > "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"
 
       - name: Verify post-push receipt
         run: node scripts/verify-supabase-postdeploy-contract.mjs --migration-ledger "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt" --query-receipt "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"

@@ -15,6 +15,17 @@ const validLedger = [
   "   20260823074406 | 20260823074406 | 2026-08-23 07:44:06",
 ].join("\n")
 
+const validSupabaseCli2115JsonLedger = JSON.stringify({
+  migrations: [
+    { local: "20260823074406", remote: "20260823074406", time: "2026-08-23 07:44:06" },
+  ],
+  message: "Migrations listed",
+})
+
+function supabaseCliJsonLedger(migrations) {
+  return JSON.stringify({ migrations, message: "Migrations listed" })
+}
+
 async function createReceiptFixture({ ledger = validLedger, receipt = { rows: [{ contract_ok: true }] } } = {}) {
   const root = await mkdtemp(join(tmpdir(), "tips-supabase-postdeploy-contract-"))
   fixtureRoots.push(root)
@@ -35,6 +46,44 @@ test("linked ledger accepts only fully matched unique 14-digit migration version
   const { validateLinkedMigrationLedger } = await import(verifierUrl)
 
   assert.deepEqual(validateLinkedMigrationLedger(validLedger), ["20260823074406"])
+  assert.deepEqual(validateLinkedMigrationLedger(validSupabaseCli2115JsonLedger), ["20260823074406"])
+})
+
+test("linked ledger rejects malformed Supabase CLI JSON output", async () => {
+  const { validateLinkedMigrationLedger } = await import(verifierUrl)
+  const malformedLedgers = [
+    "{",
+    JSON.stringify({ migrations: {}, message: "Migrations listed" }),
+    JSON.stringify({ migrations: [], message: "unexpected" }),
+    JSON.stringify({ migrations: [], message: "Migrations listed", extra: true }),
+    JSON.stringify({
+      migrations: [{ local: "20260823074406", remote: "20260823074406" }],
+      message: "Migrations listed",
+    }),
+    JSON.stringify({
+      migrations: [{ local: "2026082307440", remote: "2026082307440", time: "now" }],
+      message: "Migrations listed",
+    }),
+    JSON.stringify({
+      migrations: [{ local: "202608230744066", remote: "202608230744066", time: "now" }],
+      message: "Migrations listed",
+    }),
+    JSON.stringify({
+      migrations: [{ local: 20260823074406, remote: "20260823074406", time: "now" }],
+      message: "Migrations listed",
+    }),
+    JSON.stringify({
+      migrations: [{ local: "", remote: "", time: "now" }],
+      message: "Migrations listed",
+    }),
+  ]
+
+  for (const ledger of malformedLedgers) {
+    assert.throws(
+      () => validateLinkedMigrationLedger(ledger),
+      { message: "postdeploy_ledger_malformed" },
+    )
+  }
 })
 
 test("linked ledger rejects pending, remote-only, mismatched, duplicate, and malformed receipts", async () => {
@@ -54,6 +103,41 @@ test("linked ledger rejects pending, remote-only, mismatched, duplicate, and mal
   for (const [name, row, code] of cases) {
     const ledger = row === "not a migration receipt" ? row : `${validLedger}\n${row}`
     assert.throws(() => validateLinkedMigrationLedger(ledger), { message: code }, name)
+  }
+
+  const jsonCases = [
+    [
+      "pending JSON",
+      [{ local: "20260823074407", remote: "", time: "2026-08-23 07:44:07" }],
+      "postdeploy_ledger_pending_migration",
+    ],
+    [
+      "remote-only JSON",
+      [{ local: "", remote: "20260823074407", time: "2026-08-23 07:44:07" }],
+      "postdeploy_ledger_remote_only",
+    ],
+    [
+      "mismatched JSON",
+      [{ local: "20260823074407", remote: "20260823074408", time: "2026-08-23 07:44:07" }],
+      "postdeploy_ledger_version_mismatch",
+    ],
+    [
+      "duplicate JSON",
+      [
+        { local: "20260823074406", remote: "20260823074406", time: "2026-08-23 07:44:06" },
+        { local: "20260823074406", remote: "20260823074406", time: "2026-08-23 07:44:06" },
+      ],
+      "postdeploy_ledger_duplicate_version",
+    ],
+    ["empty JSON", [], "postdeploy_ledger_no_versions"],
+  ]
+
+  for (const [name, migrations, code] of jsonCases) {
+    assert.throws(
+      () => validateLinkedMigrationLedger(supabaseCliJsonLedger(migrations)),
+      { message: code },
+      name,
+    )
   }
 })
 

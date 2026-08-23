@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import { fileURLToPath, pathToFileURL } from "node:url"
+import { pathToFileURL } from "node:url"
 
 const VERSION_PATTERN = /^\d{14}$/
 
@@ -8,9 +8,46 @@ function fail(code) {
   throw new Error(code)
 }
 
+function jsonLedgerRows(source) {
+  let receipt
+  try {
+    receipt = JSON.parse(source)
+  } catch {
+    fail("postdeploy_ledger_malformed")
+  }
+  if (
+    !isPlainRecord(receipt) ||
+    JSON.stringify(Object.keys(receipt).sort()) !== JSON.stringify(["message", "migrations"]) ||
+    receipt.message !== "Migrations listed" ||
+    !Array.isArray(receipt.migrations)
+  ) {
+    fail("postdeploy_ledger_malformed")
+  }
+
+  return receipt.migrations.map((row) => {
+    if (
+      !isPlainRecord(row) ||
+      JSON.stringify(Object.keys(row).sort()) !== JSON.stringify(["local", "remote", "time"]) ||
+      typeof row.local !== "string" ||
+      typeof row.remote !== "string" ||
+      typeof row.time !== "string" ||
+      row.time.length === 0 ||
+      (row.local && !VERSION_PATTERN.test(row.local)) ||
+      (row.remote && !VERSION_PATTERN.test(row.remote)) ||
+      (!row.local && !row.remote)
+    ) {
+      fail("postdeploy_ledger_malformed")
+    }
+    return { local: row.local || null, remote: row.remote || null }
+  })
+}
+
 function ledgerRows(ledger) {
+  const source = String(ledger).trim()
+  if (source.startsWith("{")) return jsonLedgerRows(source)
+
   const rows = []
-  for (const line of String(ledger).split(/\r?\n/)) {
+  for (const line of source.split(/\r?\n/)) {
     const columns = line.split("|")
     if (columns.length < 2) {
       if (/\d{14}/.test(line)) fail("postdeploy_ledger_malformed")
