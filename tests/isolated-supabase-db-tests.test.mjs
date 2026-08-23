@@ -153,7 +153,7 @@ async function createFinalManifestHistory(t) {
 }
 
 const reviewedManifestBootstrapBaseSha = "c7ea76b3dcd94101503305feadc95ce591f68050";
-const reviewedManifestBootstrapHeadSha = "d".repeat(40);
+const reviewedManifestBootstrapHeadSha = "dd7a61557efab0f623e99385630e3f66282e3f18";
 const reviewedManifestPath = "supabase/test-baselines/dashboard-free-tier-v1.manifest.json";
 
 function readGitFile(root, revision, path) {
@@ -162,10 +162,11 @@ function readGitFile(root, revision, path) {
   return result.stdout;
 }
 
-async function createReviewedManifestBootstrapFixture() {
-  const root = fileURLToPath(new URL("..", runnerUrl));
+async function createReviewedManifestBootstrapFixture({
+  root = fileURLToPath(new URL("..", runnerUrl)),
+} = {}) {
   const baseManifestSource = readGitFile(root, reviewedManifestBootstrapBaseSha, reviewedManifestPath);
-  const headManifestSource = await readFile(join(root, reviewedManifestPath), "utf8");
+  const headManifestSource = readGitFile(root, reviewedManifestBootstrapHeadSha, reviewedManifestPath);
   const baseManifest = JSON.parse(baseManifestSource);
   const headManifest = JSON.parse(headManifestSource);
   const revisionFiles = new Map([
@@ -178,7 +179,7 @@ async function createReviewedManifestBootstrapFixture() {
   }
   for (const entry of headManifest.orderedNewMigrations) {
     const path = `supabase/migrations/${entry.fileName}`;
-    revisionFiles.set(`${reviewedManifestBootstrapHeadSha}:${path}`, await readFile(join(root, path), "utf8"));
+    revisionFiles.set(`${reviewedManifestBootstrapHeadSha}:${path}`, readGitFile(root, reviewedManifestBootstrapHeadSha, path));
   }
   const executeGit = async ({ args }) => {
     if (args[0] === "merge-base") {
@@ -431,6 +432,47 @@ test("review boundary accepts only the pinned one-time reviewed manifest complet
 
   const result = await validateImmutableFinalMigrationHistory({
     root: fixture.root,
+    baseSha: reviewedManifestBootstrapBaseSha,
+    headSha: reviewedManifestBootstrapHeadSha,
+    executeGit: fixture.executeGit,
+  });
+
+  assert.deepEqual(result, {
+    mergeBaseSha: reviewedManifestBootstrapBaseSha,
+    baseFinalCount: 6,
+    appendedCount: 12,
+  });
+});
+
+test("frozen reviewed manifest fixture ignores a simulated future worktree append", async (t) => {
+  const { validateImmutableFinalMigrationHistory } = await import(runnerUrl.href);
+  const root = fileURLToPath(new URL("..", runnerUrl));
+  const worktreeRoot = await mkdtemp(join(tmpdir(), "tips-reviewed-bootstrap-future-worktree-"));
+  t.after(() => rm(worktreeRoot, { recursive: true, force: true }));
+  const gitDirResult = spawnSync("git", ["rev-parse", "--absolute-git-dir"], { cwd: root, encoding: "utf8" });
+  assert.equal(gitDirResult.status, 0, gitDirResult.stderr);
+  await writeFile(join(worktreeRoot, ".git"), `gitdir: ${gitDirResult.stdout.trim()}\n`);
+  const frozenHeadSha = "dd7a61557efab0f623e99385630e3f66282e3f18";
+  const manifest = JSON.parse(readGitFile(root, frozenHeadSha, reviewedManifestPath));
+  const futureFileName = "20260824000000_future_append.sql";
+  const futureSql = "select 1;\n";
+  manifest.orderedNewMigrations.push({
+    fileName: futureFileName,
+    status: "final",
+    sha256: createHash("sha256").update(futureSql).digest("hex"),
+  });
+  await mkdir(dirname(join(worktreeRoot, reviewedManifestPath)), { recursive: true });
+  await writeFile(join(worktreeRoot, reviewedManifestPath), `${JSON.stringify(manifest, null, 2)}\n`);
+  for (const entry of manifest.orderedNewMigrations) {
+    const path = `supabase/migrations/${entry.fileName}`;
+    const source = entry.fileName === futureFileName ? futureSql : readGitFile(root, frozenHeadSha, path);
+    await mkdir(dirname(join(worktreeRoot, path)), { recursive: true });
+    await writeFile(join(worktreeRoot, path), source);
+  }
+
+  const fixture = await createReviewedManifestBootstrapFixture({ root: worktreeRoot });
+  const result = await validateImmutableFinalMigrationHistory({
+    root: worktreeRoot,
     baseSha: reviewedManifestBootstrapBaseSha,
     headSha: reviewedManifestBootstrapHeadSha,
     executeGit: fixture.executeGit,
