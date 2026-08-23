@@ -208,4 +208,3 @@ Use the finishing-development-branch workflow. Push and create a pull request on
 - [ ] **Step 5: After the PR jobs have both succeeded, configure GitHub enforcement.**
 
 Create or update the `main` ruleset to require pull requests, strict/up-to-date `supabase-sql-review` and `supabase-schema-contract` checks, resolved review conversations, and no force pushes. Do not require an impossible self-approval when the repository has only one maintainer. Enable Codex automatic review if the repository is connected and the authenticated account has the required GitHub administration permission.
-

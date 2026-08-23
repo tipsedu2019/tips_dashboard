@@ -41,4 +41,3 @@ Codex automatic review is advisory. `AGENTS.md` tells it to inspect the final fu
 - The existing authentication, owner, security mode, grants, locking, idempotency, and no-send behavior remain unchanged.
 - PR checks run without Supabase production secrets and always report a status, including PRs without SQL changes.
 - Existing `supabase-db-push.yml` behavior and CLI version remain unchanged.
-
