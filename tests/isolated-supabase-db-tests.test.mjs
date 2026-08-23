@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -103,6 +103,72 @@ async function activateCanonicalBaseline(root) {
     [parity, join(capture, "parity.sql")],
   ]) await writeFile(target, contents);
   await writeFile(join(base, "dashboard-free-tier-v1.active.json"), JSON.stringify({ captureSetVersion: 1, captureId, artifactPaths: { catalog: "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json", baseline: "supabase/test-baselines/dashboard-free-tier-v1.sql", parityTest: "supabase/tests/dashboard_free_tier_catalog_parity_test.sql" } }));
+}
+
+function runGit(root, args) {
+  const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
+}
+
+async function createFinalManifestHistory(t) {
+  const root = await mkdtemp(join(tmpdir(), "tips-final-manifest-history-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const manifestPath = join(root, "supabase/test-baselines/dashboard-free-tier-v1.manifest.json");
+  const migrationsPath = join(root, "supabase/migrations");
+  await mkdir(dirname(manifestPath), { recursive: true });
+  await mkdir(migrationsPath, { recursive: true });
+  const migrationSources = new Map([
+    ["20260814000000_alpha.sql", "select 1;\n"],
+    ["20260814000001_beta.sql", "select 2;\n"],
+  ]);
+  const manifest = {
+    baselineVersion: "dashboard-free-tier-v1",
+    originMainSha: "a".repeat(40),
+    baselineSha256: "b".repeat(64),
+    catalogSha256: "c".repeat(64),
+    requiredObjectSignatures: [],
+    orderedNewMigrations: [...migrationSources].map(([fileName, source]) => ({
+      fileName,
+      status: "final",
+      sha256: createHash("sha256").update(source).digest("hex"),
+    })),
+  };
+  const writeManifest = () => writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  for (const [fileName, source] of migrationSources) {
+    await writeFile(join(migrationsPath, fileName), source);
+  }
+  await writeManifest();
+  runGit(root, ["init", "--quiet"]);
+  runGit(root, ["add", "."]);
+  runGit(root, ["-c", "user.name=Codex Test", "-c", "user.email=codex@example.invalid", "commit", "--quiet", "-m", "base"]);
+  const baseSha = runGit(root, ["rev-parse", "HEAD"]);
+  const commitHead = () => {
+    runGit(root, ["add", "--all"]);
+    runGit(root, ["-c", "user.name=Codex Test", "-c", "user.email=codex@example.invalid", "commit", "--quiet", "-m", "head"]);
+    return runGit(root, ["rev-parse", "HEAD"]);
+  };
+  return { root, manifest, manifestPath, migrationsPath, writeManifest, baseSha, commitHead };
+}
+
+async function configureEmptyReviewedRunnerRepo(root) {
+  const baselinePath = join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql");
+  const catalogPath = join(root, "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json");
+  const manifestPath = join(root, "supabase/test-baselines/dashboard-free-tier-v1.manifest.json");
+  const baseline = await readFile(baselinePath);
+  const originMainSha = "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101";
+  const catalog = JSON.stringify({ captureStatus: "reviewed", originMainSha, migrationLedger: [], catalog: [] });
+  await writeFile(catalogPath, catalog);
+  await mkdir(join(root, "supabase/migrations"), { recursive: true });
+  await writeFile(manifestPath, JSON.stringify({
+    baselineVersion: "dashboard-free-tier-v1",
+    originMainSha,
+    baselineSha256: createHash("sha256").update(baseline).digest("hex"),
+    catalogSha256: createHash("sha256").update(catalog).digest("hex"),
+    requiredObjectSignatures: [],
+    orderedNewMigrations: [],
+  }));
+  await activateCanonicalBaseline(root);
 }
 
 test("catalog capture refuses unapproved or incomplete production reads before HTTP", async () => {
@@ -207,9 +273,115 @@ test("isolated DB runner exposes an explicit final-only lifecycle gate", async (
 
 test("isolated DB runner parses explicit review-head and lint gates", async () => {
   const { parseIsolatedDbArguments } = await import(runnerUrl.href);
-  const plan = parseIsolatedDbArguments(["--review-head", "--lint"]);
+  const baseSha = "a".repeat(40);
+  const headSha = "b".repeat(40);
+  const plan = parseIsolatedDbArguments([
+    "--review-head",
+    "--lint",
+    "--review-base-sha",
+    baseSha,
+    "--review-head-sha",
+    headSha,
+  ]);
   assert.equal(plan.reviewHead, true);
   assert.equal(plan.lint, true);
+  assert.equal(plan.reviewBaseSha, baseSha);
+  assert.equal(plan.reviewHeadSha, headSha);
+  for (const invalidSha of ["HEAD", "A".repeat(40), `${"a".repeat(40)};echo injected`]) {
+    assert.throws(
+      () => parseIsolatedDbArguments([
+        "--review-head",
+        "--review-base-sha",
+        invalidSha,
+        "--review-head-sha",
+        headSha,
+      ]),
+      /isolated_supabase_db_review_revision_invalid/,
+    );
+  }
+});
+
+test("review boundary rejects edits, deletions, renames, and reordering of base-final migrations", async (t) => {
+  const { validateImmutableFinalMigrationHistory, sha256 } = await import(runnerUrl.href);
+  const cases = [
+    {
+      name: "SQL and manifest hash mutation",
+      mutate: async ({ manifest, migrationsPath, writeManifest }) => {
+        const source = "select 99;\n";
+        await writeFile(join(migrationsPath, manifest.orderedNewMigrations[0].fileName), source);
+        manifest.orderedNewMigrations[0].sha256 = sha256(source);
+        await writeManifest();
+      },
+    },
+    {
+      name: "SQL deletion",
+      mutate: async ({ manifest, migrationsPath }) => {
+        await rm(join(migrationsPath, manifest.orderedNewMigrations[0].fileName));
+      },
+    },
+    {
+      name: "manifest entry deletion",
+      mutate: async ({ manifest, writeManifest }) => {
+        manifest.orderedNewMigrations.shift();
+        await writeManifest();
+      },
+    },
+    {
+      name: "migration rename",
+      mutate: async ({ manifest, migrationsPath, writeManifest }) => {
+        const priorName = manifest.orderedNewMigrations[0].fileName;
+        const nextName = "20260814000000_alpha_renamed.sql";
+        await rename(join(migrationsPath, priorName), join(migrationsPath, nextName));
+        manifest.orderedNewMigrations[0].fileName = nextName;
+        await writeManifest();
+      },
+    },
+    {
+      name: "manifest reorder",
+      mutate: async ({ manifest, writeManifest }) => {
+        manifest.orderedNewMigrations.reverse();
+        await writeManifest();
+      },
+    },
+  ];
+
+  for (const fixture of cases) {
+    await t.test(fixture.name, async (subtest) => {
+      const history = await createFinalManifestHistory(subtest);
+      await fixture.mutate(history);
+      const headSha = history.commitHead();
+      await assert.rejects(
+        validateImmutableFinalMigrationHistory({
+          root: history.root,
+          baseSha: history.baseSha,
+          headSha,
+        }),
+        /isolated_supabase_db_final_migration_history_drift/,
+      );
+    });
+  }
+});
+
+test("review boundary accepts an exact final prefix with only a valid appended migration", async (t) => {
+  const { validateImmutableFinalMigrationHistory, sha256 } = await import(runnerUrl.href);
+  const history = await createFinalManifestHistory(t);
+  const fileName = "20260814000002_gamma.sql";
+  const source = "select 3;\n";
+  await writeFile(join(history.migrationsPath, fileName), source);
+  history.manifest.orderedNewMigrations.push({ fileName, status: "final", sha256: sha256(source) });
+  await history.writeManifest();
+  const headSha = history.commitHead();
+
+  const result = await validateImmutableFinalMigrationHistory({
+    root: history.root,
+    baseSha: history.baseSha,
+    headSha,
+  });
+  assert.deepEqual(result, {
+    mergeBaseSha: history.baseSha,
+    baseFinalCount: 2,
+    appendedCount: 1,
+  });
 });
 
 test("isolated DB runner allocates four distinct loopback ports by default", async () => {
@@ -578,6 +750,94 @@ test("runner lints the reviewed head after migration application with one inject
   const focusedPgTapIndex = calls.findIndex((call) => call.args[0] === "test" && call.args.includes("supabase/tests/target_test.sql"));
   assert.ok(migrationIndex < lintIndex && lintIndex < focusedPgTapIndex);
   assert.deepEqual(calls[lintIndex].args.slice(0, 7), ["db", "lint", "--local", "--workdir", calls[lintIndex].cwd, "--fail-on", "error"]);
+});
+
+test("runner removes its temp root when port allocation fails before runtime return", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const root = await makeRepo(t);
+  await configureEmptyReviewedRunnerRepo(root);
+  const requestId = "allocation-failure-cleanup-fixture";
+  const tempRoot = join("/private/tmp", `tips-supabase-db-qa-${requestId}`);
+  await rm(tempRoot, { recursive: true, force: true });
+  const logs = [];
+  let allocationCount = 0;
+  await assert.rejects(
+    runIsolatedSupabaseDbTests({
+      root,
+      argv: ["--execute", "--authorized", "--request-id", requestId],
+      retainTempRoot: true,
+      allocatePort: async () => {
+        allocationCount += 1;
+        if (allocationCount === 2) throw new Error("fixture_port_allocation_failed");
+        return 55801;
+      },
+      executeProcess: async () => { throw new Error("process_must_not_run"); },
+      log: (entry) => logs.push(JSON.parse(entry)),
+    }),
+    /fixture_port_allocation_failed/,
+  );
+  await assert.rejects(lstat(tempRoot), (error) => error?.code === "ENOENT");
+  assert.deepEqual(logs.at(-1), {
+    cleanup: "succeeded",
+    stop: "not_required",
+    tempRoot: "removed",
+  });
+});
+
+test("runner reports a nonzero Supabase stop as cleanup failure and cannot return passed", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const root = await makeRepo(t);
+  await configureEmptyReviewedRunnerRepo(root);
+  const logs = [];
+  await assert.rejects(
+    runIsolatedSupabaseDbTests({
+      root,
+      argv: ["--execute", "--authorized", "--request-id", "nonzero-stop-cleanup-fixture"],
+      allocatePort: (() => { let port = 55900; return () => ++port; })(),
+      executeProcess: async (invocation) => {
+        if (invocation.args[0] === "status") {
+          return { code: 0, stdout: JSON.stringify({ DB_URL: "postgresql://postgres:postgres@127.0.0.1:55902/postgres" }), stderr: "" };
+        }
+        if (invocation.args[0] === "stop") return { code: 73, stdout: "", stderr: "fixture stop failed" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+      log: (entry) => logs.push(JSON.parse(entry)),
+    }),
+    /isolated_supabase_db_cleanup_failed/,
+  );
+  assert.deepEqual(logs.at(-1), {
+    cleanup: "failed",
+    stop: "failed",
+    tempRoot: "removed",
+  });
+});
+
+test("cleanup failure is logged without masking an earlier execution failure", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const root = await makeRepo(t);
+  await configureEmptyReviewedRunnerRepo(root);
+  const logs = [];
+  await assert.rejects(
+    runIsolatedSupabaseDbTests({
+      root,
+      argv: ["--execute", "--authorized", "--request-id", "primary-and-cleanup-failure-fixture"],
+      allocatePort: (() => { let port = 56000; return () => ++port; })(),
+      executeProcess: async (invocation) => {
+        if (invocation.args[0] === "db" && invocation.args[1] === "start") {
+          return { code: 66, stdout: "", stderr: "fixture primary failure" };
+        }
+        if (invocation.args[0] === "stop") return { code: 73, stdout: "", stderr: "fixture stop failed" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+      log: (entry) => logs.push(JSON.parse(entry)),
+    }),
+    (error) => error?.message === "isolated_supabase_db_child_failed",
+  );
+  assert.deepEqual(logs.at(-1), {
+    cleanup: "failed",
+    stop: "failed",
+    tempRoot: "removed",
+  });
 });
 
 test("incomplete required catalog kinds and a post-rename publication failure leave active pointer unchanged", async (t) => {

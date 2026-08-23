@@ -22,6 +22,17 @@ jobs:
         with:
           node-version: 22.18.0
 
+      - name: Verify immutable final migrations
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          node scripts/run-isolated-supabase-db-tests.mjs \
+            --review-head --require-final \
+            --review-base-sha "${BASE_SHA}" --review-head-sha "${HEAD_SHA}"
+
       - name: Test Supabase migration layout
         run: node --test tests/supabase-migration-layout.test.mjs
 
@@ -56,7 +67,7 @@ jobs:
           merge_base="$(git merge-base "${BASE_SHA}" "${HEAD_SHA}")"
           diff_file="$(mktemp "${RUNNER_TEMP}/squawk-migrations.XXXXXX")"
           trap 'rm -f "${diff_file}"' EXIT
-          git diff --name-only --diff-filter=AM -z "${merge_base}" "${HEAD_SHA}" -- ':(glob)supabase/migrations/*.sql' > "${diff_file}"
+          git diff --no-renames --diff-filter=AM --name-only -z "${merge_base}" "${HEAD_SHA}" -- ':(glob)supabase/migrations/*.sql' > "${diff_file}"
           mapfile -d '' -t migration_files < "${diff_file}"
           if ((${#migration_files[@]} == 0)); then
             echo "No added or modified Supabase migrations to lint."

@@ -171,3 +171,34 @@ test("notification transient classifiers do not retry bare 40001 domain errors",
     )
   }
 })
+
+test("final-schema pgTAP enforces exact owner, empty search path, ACL rows, and denial mutations", async () => {
+  const source = await readFile(
+    new URL("../supabase/tests/active_registration_workflow_sqlstate_contract_test.sql", import.meta.url),
+    "utf8",
+  )
+  assert.match(source, /select plan\(19\);/u)
+  assert.equal(
+    [...source.matchAll(/^select (?:ok|is|like|unlike|results_eq)\(/gmu)].length,
+    19,
+  )
+  assert.match(source, /pg_catalog\.aclexplode\(\s*coalesce\(\s*procedure\.proacl,\s*pg_catalog\.acldefault\('f', procedure\.proowner\)\s*\)\s*\)/u)
+  assert.match(source, /pg_catalog\.pg_get_userbyid\(acl\.grantee\)/u)
+  assert.match(source, /when acl\.grantee = 0 then 'PUBLIC'/u)
+  assert.match(source, /array\['search_path=', 'search_path=""'\]/u)
+  for (const role of ["public", "anon", "service_role"]) {
+    assert.match(source, new RegExp(`has_function_privilege\\('${role}'`, "u"))
+  }
+  for (const mutation of [
+    "public execute grant",
+    "anon execute grant",
+    "wrapper owner drift",
+    "wrapper search path drift",
+  ]) {
+    assert.match(source, new RegExp(`rejects ${mutation}`, "u"))
+  }
+  assert.match(source, /savepoint public_execute_grant_mutation;/u)
+  assert.match(source, /savepoint anon_execute_grant_mutation;/u)
+  assert.match(source, /savepoint wrapper_owner_mutation;/u)
+  assert.match(source, /savepoint wrapper_search_path_mutation;/u)
+})

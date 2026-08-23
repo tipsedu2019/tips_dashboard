@@ -19,6 +19,7 @@
 - Pin Supabase CLI `2.115.0` Linux amd64 archive SHA-256 to `ff099608ce758b625532ef03a61f4c9520b995e94ff6cd5480dc0428cad64cb3`.
 - Pin Squawk `2.63.0` Linux x64 binary SHA-256 to `532d217c9c1ff167bbc5d32efd4184285ab1bd1a69882cf66608d2bc5ed81a28`.
 - Automated tests and migrations must not send notifications or contact providers.
+- A PR must validate exact lowercase base/head commit SHAs, preserve every merge-base manifest entry as an identical ordered prefix, and preserve the SQL bytes of every merge-base `final` entry; only new entries may be appended.
 
 ---
 
@@ -35,7 +36,7 @@
 
 **Interfaces:**
 - Consumes: the active reviewed baseline capture and the top-level post-baseline migration manifest.
-- Produces: runner flags `--review-head` and `--lint`, plus an isolated final-schema pgTAP file.
+- Produces: runner flags `--review-head`, `--review-base-sha`, `--review-head-sha`, and `--lint`, plus an isolated final-schema pgTAP file.
 
 - [ ] **Step 1: Write failing runner tests.**
 
@@ -90,7 +91,7 @@ public.set_registration_workflow_status_v1(uuid,text,integer,text)
 dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)
 ```
 
-Assert both functions exist, the public wrapper delegates to the private implementation, the wrapper is security-invoker, the implementation is security-definer and owned by `postgres`, authenticated retains its expected execution grants, and neither final `pg_get_functiondef` manually raises SQLSTATE `40001`. Assert the private final definition contains `registration_workflow_status_refresh_required` with `23514`. Finish with `select * from finish(); rollback;`.
+Use exactly `select plan(19)`. Assert both functions exist, the public wrapper delegates to the private implementation, the wrapper is security-invoker, the implementation is security-definer, both are owned by `postgres`, and both have exactly one empty `search_path` setting. Inspect ACLs with `pg_catalog.aclexplode(coalesce(proacl, pg_catalog.acldefault('f', proowner)))`: each function must have only direct non-grantable `EXECUTE` rows for `postgres` and `authenticated`, while PUBLIC, `anon`, and `service_role` cannot execute. Include transaction-local mutations proving that PUBLIC/anon grants and wrapper owner/search-path drift fail the boundary. Preserve the no-`40001` and exact `registration_workflow_status_refresh_required` / `23514` assertions. Finish with `select * from finish(); rollback;`.
 
 - [ ] **Step 6: Verify GREEN for Task 1.**
 
@@ -138,7 +139,7 @@ Expected: FAIL because the required workflow and verifier contract do not exist.
 
 - [ ] **Step 3: Add the PR workflow.**
 
-Trigger on `pull_request` types `opened`, `synchronize`, `reopened`, and `ready_for_review`, without path filters. Set `permissions: contents: read`. The static job must run the existing migration-layout, retry-code, and transactional-builder Node tests and both existing verifiers. Download Squawk `2.63.0`, verify its exact SHA-256, and execute it with `--pg-version 17` only when the merge-base diff contains added or modified `supabase/migrations/*.sql` files.
+Trigger on `pull_request` types `opened`, `synchronize`, `reopened`, and `ready_for_review`, without path filters. Set `permissions: contents: read`. The static job must invoke the immutable-final runner boundary with `github.event.pull_request.base.sha` and `github.event.pull_request.head.sha`, then run the existing migration-layout, retry-code, and transactional-builder Node tests and both existing verifiers. Download Squawk `2.63.0`, verify its exact SHA-256, and execute it with `--pg-version 17` only when `git diff --no-renames --diff-filter=AM` finds added or modified `supabase/migrations/*.sql` files; a rename destination must reach Squawk as an added file.
 
 The schema job must download Supabase CLI `2.115.0`, verify its exact SHA-256, and run:
 

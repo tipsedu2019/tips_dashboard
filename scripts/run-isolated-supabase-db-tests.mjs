@@ -40,18 +40,25 @@ function processResult(command, args, options = {}) {
 }
 
 export function parseIsolatedDbArguments(argv) {
-  const result = { execute: false, authorized: false, requireFinal: false, reviewHead: false, lint: false, requestId: null, tests: [], probes: [] };
+  const result = { execute: false, authorized: false, requireFinal: false, reviewHead: false, reviewBaseSha: null, reviewHeadSha: null, lint: false, requestId: null, tests: [], probes: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--execute") result.execute = true;
     else if (value === "--authorized") result.authorized = true;
     else if (value === "--require-final") result.requireFinal = true;
     else if (value === "--review-head") result.reviewHead = true;
+    else if (value === "--review-base-sha") result.reviewBaseSha = argv[++index] || null;
+    else if (value === "--review-head-sha") result.reviewHeadSha = argv[++index] || null;
     else if (value === "--lint") result.lint = true;
     else if (value === "--request-id") result.requestId = argv[++index] || null;
     else if (value === "--test") result.tests.push(argv[++index] || "");
     else if (value === "--probe") result.probes.push(argv[++index] || "");
     else fail("isolated_supabase_db_arguments_invalid");
+  }
+  const hasReviewBase = result.reviewBaseSha !== null;
+  const hasReviewHead = result.reviewHeadSha !== null;
+  if (hasReviewBase || hasReviewHead) {
+    if (!result.reviewHead || !hasReviewBase || !hasReviewHead || !SHA40.test(result.reviewBaseSha) || !SHA40.test(result.reviewHeadSha)) fail("isolated_supabase_db_review_revision_invalid");
   }
   if (!result.tests.every((path) => SQL_TEST.test(path)) || !result.probes.every((path) => PROBE.test(path))) fail("isolated_supabase_db_target_invalid");
   if (result.execute && (!result.authorized || !REQUEST_ID.test(result.requestId || ""))) fail("isolated_supabase_db_approval_required");
@@ -133,6 +140,69 @@ export async function validateManifestMigrations({ root = ROOT, manifest, baseli
   return verified;
 }
 
+async function invokeGit({ root, args, executeGit }) {
+  let result;
+  try {
+    result = await executeGit({ command: "git", args, cwd: root, env: process.env });
+  } catch {
+    fail("isolated_supabase_db_review_history_unavailable");
+  }
+  if (result?.code !== 0 || typeof result.stdout !== "string") fail("isolated_supabase_db_review_history_unavailable");
+  return result.stdout;
+}
+
+export async function validateImmutableFinalMigrationHistory({
+  root = ROOT,
+  baseSha,
+  headSha,
+  executeGit = (invocation) => processResult(invocation.command, invocation.args, invocation),
+} = {}) {
+  if (!SHA40.test(baseSha || "") || !SHA40.test(headSha || "")) fail("isolated_supabase_db_review_revision_invalid");
+  const mergeBaseSha = (await invokeGit({ root, args: ["merge-base", baseSha, headSha], executeGit })).trim();
+  if (!SHA40.test(mergeBaseSha)) fail("isolated_supabase_db_review_history_unavailable");
+  const manifestRelativePath = "supabase/test-baselines/dashboard-free-tier-v1.manifest.json";
+  const readRevisionFile = async (revision, path) => invokeGit({
+    root,
+    args: ["show", `${revision}:${path}`],
+    executeGit,
+  });
+  let baseManifest;
+  let headManifest;
+  try {
+    baseManifest = validateBaselineManifest(JSON.parse(await readRevisionFile(mergeBaseSha, manifestRelativePath)));
+    headManifest = validateBaselineManifest(JSON.parse(await readRevisionFile(headSha, manifestRelativePath)));
+  } catch (error) {
+    if (error?.message === "isolated_supabase_db_review_history_unavailable") throw error;
+    fail("isolated_supabase_db_final_migration_history_drift");
+  }
+  const baseEntries = baseManifest.orderedNewMigrations;
+  const headEntries = headManifest.orderedNewMigrations;
+  if (headEntries.length < baseEntries.length) fail("isolated_supabase_db_final_migration_history_drift");
+  for (let index = 0; index < baseEntries.length; index += 1) {
+    if (canonical(headEntries[index]) !== canonical(baseEntries[index])) fail("isolated_supabase_db_final_migration_history_drift");
+  }
+  const baseFinalEntries = baseEntries.filter((entry) => entry.status === "final");
+  for (const entry of baseFinalEntries) {
+    const migrationPath = `supabase/migrations/${entry.fileName}`;
+    let baseSql;
+    let headSql;
+    try {
+      [baseSql, headSql] = await Promise.all([
+        readRevisionFile(mergeBaseSha, migrationPath),
+        readRevisionFile(headSha, migrationPath),
+      ]);
+    } catch {
+      fail("isolated_supabase_db_final_migration_history_drift");
+    }
+    if (baseSql !== headSql || sha256(baseSql) !== entry.sha256 || sha256(headSql) !== entry.sha256) fail("isolated_supabase_db_final_migration_history_drift");
+  }
+  return {
+    mergeBaseSha,
+    baseFinalCount: baseFinalEntries.length,
+    appendedCount: headEntries.length - baseEntries.length,
+  };
+}
+
 function parseLocalDbUrl(stdout, port) {
   let value;
   try { value = JSON.parse(stdout); } catch { fail("isolated_supabase_db_status_invalid"); }
@@ -165,18 +235,25 @@ export async function allocateLoopbackPorts(count) {
   }
 }
 
-async function prepareRuntime({ requestId, randomBytes = secureRandomBytes, allocatePort }) {
+async function prepareRuntime({ requestId, randomBytes = secureRandomBytes, allocatePort, log }) {
   const suffix = randomBytes(6).toString("hex");
   const projectId = `tips_supabase_db_qa_${suffix}`;
   const tempRoot = join("/private/tmp", `tips-supabase-db-qa-${requestId}`);
   try { await mkdir(tempRoot, { recursive: false, mode: 0o700 }); } catch { fail("isolated_supabase_db_temp_root_invalid"); }
-  const values = allocatePort
-    ? [await allocatePort(), await allocatePort(), await allocatePort(), await allocatePort()]
-    : await allocateLoopbackPorts(4);
-  const ports = { api: values[0], db: values[1], studio: values[2], inbucket: values[3] };
-  if (new Set(Object.values(ports)).size !== 4 || !Object.values(ports).every((port) => Number.isInteger(port) && port >= 1024 && port <= 65535)) fail("isolated_supabase_db_port_invalid");
-  const configPath = join(tempRoot, "supabase/config.toml");
-  return { tempRoot, projectId, ports, configPath };
+  try {
+    const values = allocatePort
+      ? [await allocatePort(), await allocatePort(), await allocatePort(), await allocatePort()]
+      : await allocateLoopbackPorts(4);
+    const ports = { api: values[0], db: values[1], studio: values[2], inbucket: values[3] };
+    if (new Set(Object.values(ports)).size !== 4 || !Object.values(ports).every((port) => Number.isInteger(port) && port >= 1024 && port <= 65535)) fail("isolated_supabase_db_port_invalid");
+    const configPath = join(tempRoot, "supabase/config.toml");
+    return { tempRoot, projectId, ports, configPath };
+  } catch (error) {
+    let tempRootState = "removed";
+    try { await rm(tempRoot, { recursive: true, force: true }); } catch { tempRootState = "failed"; }
+    log(JSON.stringify({ cleanup: tempRootState === "removed" ? "succeeded" : "failed", stop: "not_required", tempRoot: tempRootState }));
+    throw error;
+  }
 }
 
 async function stageContents(contents, target) { await mkdir(dirname(target), { recursive: true, mode: 0o700 }); await writeFile(target, contents, { mode: 0o600 }); }
@@ -188,21 +265,25 @@ async function snapshotRequestedFiles(root, paths) {
   return snapshots;
 }
 
-export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2), root = ROOT, log = () => {}, randomBytes, allocatePort, retainTempRoot = false, supabasePath: injectedSupabasePath, executeProcess = (invocation) => processResult(invocation.command, invocation.args, invocation) } = {}) {
+export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2), root = ROOT, log = () => {}, randomBytes, allocatePort, retainTempRoot = false, supabasePath: injectedSupabasePath, executeGit = (invocation) => processResult(invocation.command, invocation.args, invocation), executeProcess = (invocation) => processResult(invocation.command, invocation.args, invocation) } = {}) {
   const args = parseIsolatedDbArguments(argv);
   const artifactPaths = await loadBaselineState(root, { reviewHead: args.reviewHead });
   const captureManifest = validateBaselineManifest(JSON.parse(await readFile(artifactPaths.captureManifestPath, "utf8")));
   const manifest = validateBaselineManifest(JSON.parse(await readFile(artifactPaths.manifestPath, "utf8")));
   const artifacts = await validateArtifactPaths({ paths: artifactPaths, manifest: captureManifest });
   if (args.requireFinal && (!manifest.orderedNewMigrations.length || manifest.orderedNewMigrations.some((migration) => migration.status !== "final"))) fail("isolated_supabase_db_final_manifest_required");
-  if (!args.execute) return { status: "plan", tests: args.tests, probes: args.probes, manifest, artifactPaths };
-  const catalog = JSON.parse(artifacts.catalog.toString("utf8"));
-  if (catalog.captureStatus !== "reviewed" || catalog.originMainSha !== manifest.originMainSha || !Array.isArray(catalog.migrationLedger)) fail("isolated_supabase_db_baseline_review_required");
-  const migrations = await validateManifestMigrations({ root, manifest, baselineVersions: catalog.migrationLedger.map((row) => row.version) });
+  const reviewBoundary = args.reviewBaseSha ? await validateImmutableFinalMigrationHistory({ root, baseSha: args.reviewBaseSha, headSha: args.reviewHeadSha, executeGit }) : null;
+  let migrations;
+  if (args.execute || reviewBoundary) {
+    const catalog = JSON.parse(artifacts.catalog.toString("utf8"));
+    if (catalog.captureStatus !== "reviewed" || catalog.originMainSha !== manifest.originMainSha || !Array.isArray(catalog.migrationLedger)) fail("isolated_supabase_db_baseline_review_required");
+    migrations = await validateManifestMigrations({ root, manifest, baselineVersions: catalog.migrationLedger.map((row) => row.version) });
+  }
+  if (!args.execute) return { status: "plan", tests: args.tests, probes: args.probes, manifest, artifactPaths, reviewBoundary };
   const smokeTest = await readFile(join(root, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"));
   const requestedTests = await snapshotRequestedFiles(root, args.tests);
   const probes = await snapshotRequestedFiles(root, args.probes);
-  const runtime = await prepareRuntime({ requestId: args.requestId, randomBytes, allocatePort });
+  const runtime = await prepareRuntime({ requestId: args.requestId, randomBytes, allocatePort, log });
   const cleanEnvironment = { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" };
   const supabasePath = injectedSupabasePath || process.env.TASK_SUPABASE_CLI || SUPABASE;
   const invoke = async (argsForCli, { env = cleanEnvironment } = {}) => {
@@ -211,6 +292,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     return result;
   };
   let startAttempted = false;
+  let primaryError = null;
   try {
     await invoke(["init", "--workdir", runtime.tempRoot, "--yes"]);
     await mkdir(dirname(runtime.configPath), { recursive: true, mode: 0o700 });
@@ -238,12 +320,30 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
       if (probeResult.code !== 0) fail("isolated_supabase_db_probe_failed");
     }
     return { status: "passed", runtime: { ...runtime, configPath: runtime.configPath } };
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
+    let stopState = "not_required";
+    let tempRootState = retainTempRoot ? "retained" : "removed";
+    let cleanupFailed = false;
     if (startAttempted) {
-      try { await executeProcess({ command: supabasePath, args: ["stop", "--workdir", runtime.tempRoot, "--project-id", runtime.projectId, "--no-backup", "--yes"], cwd: runtime.tempRoot, env: cleanEnvironment }); } catch {}
+      try {
+        const stopResult = await executeProcess({ command: supabasePath, args: ["stop", "--workdir", runtime.tempRoot, "--project-id", runtime.projectId, "--no-backup", "--yes"], cwd: runtime.tempRoot, env: cleanEnvironment });
+        stopState = stopResult?.code === 0 ? "succeeded" : "failed";
+      } catch {
+        stopState = "failed";
+      }
+      cleanupFailed = stopState === "failed";
     }
-    if (!retainTempRoot) await rm(runtime.tempRoot, { recursive: true, force: true });
-    log(JSON.stringify({ cleanup: startAttempted ? "attempted" : "not_required" }));
+    if (!retainTempRoot) {
+      try { await rm(runtime.tempRoot, { recursive: true, force: true }); } catch {
+        tempRootState = "failed";
+        cleanupFailed = true;
+      }
+    }
+    log(JSON.stringify({ cleanup: cleanupFailed ? "failed" : startAttempted ? "succeeded" : "not_required", stop: stopState, tempRoot: tempRootState }));
+    if (cleanupFailed && !primaryError) fail("isolated_supabase_db_cleanup_failed");
   }
 }
 

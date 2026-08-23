@@ -23,6 +23,7 @@ import * as migrationLayoutVerifier from "../scripts/verify-supabase-migration-l
 const { validateSupabaseMigrationLayout } = migrationLayoutVerifier
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)))
+const isolatedRunnerUrl = new URL("../scripts/run-isolated-supabase-db-tests.mjs", import.meta.url)
 const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
@@ -1446,6 +1447,43 @@ test("required SQL review workflow의 실파일과 바이트를 fail-closed로 �
   )
 })
 
+test("SQL review workflow는 PR base/head SHA로 immutable-final boundary를 호출한다", async () => {
+  const workflow = await readFile(
+    join(repoRoot, ".github", "workflows", "supabase-sql-review.yml"),
+    "utf8",
+  )
+  assert.match(workflow, /      - name: Verify immutable final migrations\n/u)
+  assert.match(workflow, /          BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}\n/u)
+  assert.match(workflow, /          HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}\n/u)
+  assert.match(
+    workflow,
+    /node scripts\/run-isolated-supabase-db-tests\.mjs \\\n\s+--review-head --require-final \\\n\s+--review-base-sha "\$\{BASE_SHA\}" --review-head-sha "\$\{HEAD_SHA\}"/u,
+  )
+  assert.doesNotMatch(workflow, /secrets\./u)
+})
+
+test("immutable-final boundary는 Git history 부재를 argument-array 호출에서 fail-closed한다", async () => {
+  const { validateImmutableFinalMigrationHistory } = await import(isolatedRunnerUrl.href)
+  const baseSha = "a".repeat(40)
+  const headSha = "b".repeat(40)
+  let invocation
+  await assert.rejects(
+    validateImmutableFinalMigrationHistory({
+      root: repoRoot,
+      baseSha,
+      headSha,
+      executeGit: async (candidate) => {
+        invocation = candidate
+        return { code: 128, stdout: "", stderr: "fixture history unavailable" }
+      },
+    }),
+    /isolated_supabase_db_review_history_unavailable/,
+  )
+  assert.equal(invocation.command, "git")
+  assert.deepEqual(invocation.args, ["merge-base", baseSha, headSha])
+  assert.equal(invocation.cwd, repoRoot)
+})
+
 test("SQL review workflow는 migration diff 실패를 no-change로 통과시키지 않는다", async (t) => {
   const workflow = await readFile(
     join(repoRoot, ".github", "workflows", "supabase-sql-review.yml"),
@@ -1484,6 +1522,62 @@ test("SQL review workflow는 migration diff 실패를 no-change로 통과시키�
   assert.notEqual(result.status, 0, "migration diff failure must fail the workflow step")
   assert.match(result.stderr, /forced migration diff failure/)
   assert.doesNotMatch(result.stdout, /No added or modified Supabase migrations to lint\./)
+})
+
+test("SQL review workflow는 migration rename destination을 Squawk에 전달한다", async (t) => {
+  const workflow = await readFile(
+    join(repoRoot, ".github", "workflows", "supabase-sql-review.yml"),
+    "utf8",
+  )
+  const stepStart = workflow.indexOf("      - name: Lint changed migrations with Squawk\n")
+  assert.notEqual(stepStart, -1, "SQL review migration lint step must exist")
+  const runMatch = workflow.slice(stepStart).match(/^        run: \|\n((?: {10}.*(?:\n|$))*)/m)
+  assert.ok(runMatch, "SQL review migration lint step must contain a bash script")
+  const script = runMatch[1].replace(/^ {10}/gm, "")
+
+  const tempRoot = await mkdtemp(join(tmpdir(), "tips-sql-review-rename-"))
+  t.after(() => rm(tempRoot, { recursive: true, force: true }))
+  const repository = join(tempRoot, "repository")
+  const migrations = join(repository, "supabase", "migrations")
+  await mkdir(migrations, { recursive: true })
+  const original = "supabase/migrations/20260824000000_unfinalized_name.sql"
+  const renamed = "supabase/migrations/20260824000001_unfinalized_renamed.sql"
+  await writeFile(join(repository, original), "select 1;\n")
+  const git = (args) => {
+    const result = spawnSync("git", args, { cwd: repository, encoding: "utf8" })
+    assert.equal(result.status, 0, result.stderr)
+    return result.stdout.trim()
+  }
+  git(["init", "--quiet"])
+  git(["add", "."])
+  git(["-c", "user.name=Codex Test", "-c", "user.email=codex@example.invalid", "commit", "--quiet", "-m", "base"])
+  const baseSha = git(["rev-parse", "HEAD"])
+  git(["mv", original, renamed])
+  git(["-c", "user.name=Codex Test", "-c", "user.email=codex@example.invalid", "commit", "--quiet", "-m", "rename"])
+  const headSha = git(["rev-parse", "HEAD"])
+
+  const squawkArgs = join(tempRoot, "squawk-args")
+  const squawkPath = join(tempRoot, "squawk")
+  await writeFile(
+    squawkPath,
+    "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\0' \"$@\" > \"${SQUAWK_ARGS_FILE}\"\n",
+  )
+  await chmod(squawkPath, 0o755)
+  const portableMapfile = "mapfile() { migration_files=(); while IFS= read -r -d '' migration_file; do migration_files+=(\"${migration_file}\"); done; }\n"
+  const result = spawnSync("bash", ["-c", `${portableMapfile}${script}`], {
+    cwd: repository,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      BASE_SHA: baseSha,
+      HEAD_SHA: headSha,
+      RUNNER_TEMP: tempRoot,
+      SQUAWK_ARGS_FILE: squawkArgs,
+    },
+  })
+  assert.equal(result.status, 0, result.stderr)
+  const args = (await readFile(squawkArgs, "utf8")).split("\0").filter(Boolean)
+  assert.deepEqual(args, ["--pg-version", "17", renamed])
 })
 
 test("required DB push workflow는 verifier 성공 전 Supabase secret scope를 fail-closed로 거부한다", async () => {

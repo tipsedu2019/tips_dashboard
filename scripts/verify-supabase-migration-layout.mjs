@@ -26,7 +26,7 @@ const EXPECTED_TRANSACTIONAL_PGTAP_COMMAND =
 // step reordering cannot expand Supabase secret scope before the verifier exits.
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "e14a8005276824e6b2a8c67330efd476eff111784f2f79cc073b1c6bb30be920"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "07373c34ab1d2e2ef74e80f9350645a41654e75df33d43abc9385dc0ed252ef8"
+  "eee8d6988f3d191bae46379bb9cd1992afedf5ec23def8a805e6c0057f12d8c0"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
   ["free-tier-guardrails.yml", "bb7cf618f180e4f1d90ceefddc67382ba8aee1be725cb8569507d835360cb696"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
