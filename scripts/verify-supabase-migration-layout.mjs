@@ -37,13 +37,17 @@ const EXPECTED_POSTDEPLOY_VERIFIER_COMMAND =
   `node ${POSTDEPLOY_VERIFIER} --migration-ledger ${POSTDEPLOY_LEDGER} --query-receipt ${POSTDEPLOY_RECEIPT}`
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand Supabase secret scope before the verifier exits.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "fa5c1df15942aadd2bee7bdf4136fb0c7218e7a94fb52d957b878cce5fa645cd"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "8126baf45842dd9f47148c8c87310ecbf1c4c650b524869887a7f51d501f90fc"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "a527fa8c86e7be41c4bd9dc6a06139213c71e948aa4ff1eba7049649a46b7db8"
+  "1e3b7aac9bc49bf283ad5193c41f831f925d13e1b0c6447d647f44d11cfc0c25"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
-  ["free-tier-guardrails.yml", "bb7cf618f180e4f1d90ceefddc67382ba8aee1be725cb8569507d835360cb696"],
+  ["free-tier-guardrails.yml", "8ec5eadf18411ab3946228e9bf4a85fcd9e5152d2a92e7e888f1b35fda6f0258"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
   [REQUIRED_SQL_REVIEW_WORKFLOW, REQUIRED_SQL_REVIEW_WORKFLOW_SHA256],
+])
+const APPROVED_GITHUB_ACTION_REFS = Object.freeze([
+  ["actions/checkout", "08c6903cd8c0fde910a37f88322edcfb5dd907a8"],
+  ["actions/setup-node", "a0853c24544627f65ddf259abe73b1d18a591444"],
 ])
 const SCIENCE_MIGRATION_FILE = "20260722120000_science_notification_connection.sql"
 const SCIENCE_MIGRATION_SHA256 = "ce0ca95663fe2a7dd5ae54ebad6b09ae315dbed548bbc074185230907441dd46"
@@ -1461,6 +1465,20 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
     const workflow = await readFile(workflowPath, "utf8")
     const workflowRelativePath = relative(resolvedRoot, workflowPath)
     const workflowRelativeToDirectory = relative(workflowsDir, workflowPath)
+    if (allowedWorkflowHashes.has(workflowRelativeToDirectory)) {
+      const approvedRefs = new Map(APPROVED_GITHUB_ACTION_REFS)
+      const reportedActions = new Set()
+      for (const match of workflow.matchAll(/\buses:\s*(actions\/(?:checkout|setup-node))@([^\s#]+)/g)) {
+        const [, actionName, actionRef] = match
+        if (actionRef === approvedRefs.get(actionName) || reportedActions.has(actionName)) continue
+        addError(
+          errors,
+          "workflow_action_ref_not_approved",
+          `${workflowRelativePath}#${actionName}`,
+        )
+        reportedActions.add(actionName)
+      }
+    }
     if (workflowRelativeToDirectory === REQUIRED_SQL_REVIEW_WORKFLOW) continue
     if (
       workflow.includes("supabase/pending-migrations/notification-cutover") ||
