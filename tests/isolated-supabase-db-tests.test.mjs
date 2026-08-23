@@ -349,6 +349,18 @@ test("isolated DB runner parses explicit review-head and lint gates", async () =
   }
 });
 
+test("isolated DB runner redacts every supported child diagnostic secret and bounds output", async () => {
+  const { sanitizeChildDiagnostic } = await import(runnerUrl.href);
+  const jwt = "eyJabcdefghijk.abcdefghijk.abcdefghijk";
+  const secrets = ["basic-secret", jwt, "sbp_standalone-secret", "sb_secret_standalone-secret", "sb_publishable_standalone-secret", "anon-secret", "secret-key"];
+  const sanitized = sanitizeChildDiagnostic(`Authorization: Basic ${secrets[0]}; ${secrets[1]}; ${secrets[2]}; ${secrets[3]}; ${secrets[4]}; ANON_KEY=${secrets[5]}; SECRET_KEY=${secrets[6]}`);
+  for (const secret of secrets) assert.equal(sanitized.includes(secret), false);
+  assert.match(sanitized, /Authorization: \[redacted\]/u);
+  assert.equal((sanitized.match(/\[redacted\]/gu) || []).length, 7);
+  const oversized = "x".repeat(8100);
+  assert.equal(sanitizeChildDiagnostic(oversized), oversized.slice(-8000));
+});
+
 test("review boundary rejects edits, deletions, renames, and reordering of base-final migrations", async (t) => {
   const { validateImmutableFinalMigrationHistory, sha256 } = await import(runnerUrl.href);
   const cases = [
@@ -995,13 +1007,20 @@ test("runner reports successful temp-root cleanup when Supabase init fails", asy
       allocatePort: (() => { let port = 55820; return () => ++port; })(),
       executeProcess: async (invocation) => {
         assert.equal(invocation.args[0], "init");
-        return { code: 61, stdout: "", stderr: "fixture init failed" };
+        return { code: 61, stdout: "", stderr: "fixture init failed; postgresql://postgres:local-secret@127.0.0.1/postgres; token=sbp_local-secret; SUPABASE_ACCESS_TOKEN=plain-secret; SUPABASE_SERVICE_ROLE_KEY=role-secret; DB_PASSWORD=db-secret; Authorization: Bearer bearer-secret; {\"SUPABASE_API_KEY\":\"json-secret\",\"authorization\":\"Bearer json-bearer\"}; https://example.invalid/?api_key=query-secret" };
       },
       log: (entry) => logs.push(JSON.parse(entry)),
     }),
     /isolated_supabase_db_child_failed/,
   );
   await assert.rejects(lstat(tempRoot), (error) => error?.code === "ENOENT");
+  assert.deepEqual(logs.at(-2), {
+    event: "isolated_supabase_db_child_failed",
+    step: "init",
+    exitCode: 61,
+    stdout: "",
+    stderr: "fixture init failed; postgresql://[redacted]@127.0.0.1/postgres; token=[redacted]; SUPABASE_ACCESS_TOKEN=[redacted]; SUPABASE_SERVICE_ROLE_KEY=[redacted]; DB_PASSWORD=[redacted]; Authorization: [redacted]; {\"SUPABASE_API_KEY\":\"[redacted]\",\"authorization\":\"[redacted]\"}; https://example.invalid/?api_key=[redacted]",
+  });
   assert.deepEqual(logs.at(-1), {
     cleanup: "succeeded",
     stop: "not_required",
@@ -1089,6 +1108,13 @@ test("cleanup failure is logged without masking an earlier execution failure", a
     }),
     (error) => error?.message === "isolated_supabase_db_child_failed",
   );
+  assert.deepEqual(logs.at(-2), {
+    event: "isolated_supabase_db_child_failed",
+    step: "db start",
+    exitCode: 66,
+    stdout: "",
+    stderr: "fixture primary failure",
+  });
   assert.deepEqual(logs.at(-1), {
     cleanup: "failed",
     stop: "failed",

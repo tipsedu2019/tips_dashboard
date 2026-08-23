@@ -24,6 +24,16 @@ const REVIEWED_MANIFEST_BOOTSTRAP = Object.freeze({
 
 function fail(code) { throw new Error(code); }
 export function sha256(value) { return createHash("sha256").update(value).digest("hex"); }
+export function sanitizeChildDiagnostic(value) {
+  if (typeof value !== "string") return "";
+  return value
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^@\s;]+@/giu, "$1[redacted]@")
+    .replace(/(["']?authorization["']?\s*[:=]\s*)(?:(["'])(?:bearer|basic)\s+[^"'\r\n]*\2|(?:bearer|basic)\s+[^\s;,&}]+)/giu, (_match, prefix, quote) => `${prefix}${quote || ""}[redacted]${quote || ""}`)
+    .replace(/(["']?[a-z0-9_-]*(?:token|password|secret|key)["']?\s*[:=]\s*)(?:(["'])[^"'\r\n]*\2|[^\s;,&}]+)/giu, (_match, prefix, quote) => `${prefix}${quote || ""}[redacted]${quote || ""}`)
+    .replace(/\beyJ[a-z0-9_-]{10,}\.[a-z0-9_-]{10,}\.[a-z0-9_-]{10,}\b/giu, "[redacted]")
+    .replace(/\b(?:sbp|sb_secret|sb_publishable)_[a-z0-9._-]+\b/giu, "[redacted]")
+    .slice(-8000);
+}
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
@@ -346,7 +356,17 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   const supabasePath = injectedSupabasePath || process.env.TASK_SUPABASE_CLI || SUPABASE;
   const invoke = async (argsForCli, { env = cleanEnvironment } = {}) => {
     const result = await executeProcess({ command: supabasePath, args: argsForCli, cwd: runtime.tempRoot, env });
-    if (result.code !== 0) fail("isolated_supabase_db_child_failed");
+    if (result.code !== 0) {
+      const step = ["db", "migration", "test"].includes(argsForCli[0]) ? argsForCli.slice(0, 2).join(" ") : argsForCli[0];
+      log(JSON.stringify({
+        event: "isolated_supabase_db_child_failed",
+        step,
+        exitCode: Number.isInteger(result.code) ? result.code : null,
+        stdout: sanitizeChildDiagnostic(result.stdout),
+        stderr: sanitizeChildDiagnostic(result.stderr),
+      }));
+      fail("isolated_supabase_db_child_failed");
+    }
     return result;
   };
   let startAttempted = false;
@@ -410,4 +430,4 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) runIsolatedSupabaseDbTests().then((result) => process.stdout.write(`${JSON.stringify(result)}\n`)).catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });
+if (process.argv[1] === fileURLToPath(import.meta.url)) runIsolatedSupabaseDbTests({ log: (entry) => process.stderr.write(`${entry}\n`) }).then((result) => process.stdout.write(`${JSON.stringify(result)}\n`)).catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });
