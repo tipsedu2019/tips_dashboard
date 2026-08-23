@@ -19,9 +19,10 @@ function ledgerRows(ledger) {
     const [local = "", remote = ""] = columns.map((column) => column.trim())
     const isHeader = local === "Local" && remote === "Remote"
     const isSeparator = /^-+$/.test(local) && /^-+$/.test(remote)
-    if (isHeader || isSeparator || (!local && !remote)) {
+    if (isHeader || isSeparator) {
       continue
     }
+    if (!local && !remote) fail("postdeploy_ledger_malformed")
     if ((local && !VERSION_PATTERN.test(local)) || (remote && !VERSION_PATTERN.test(remote))) {
       fail("postdeploy_ledger_malformed")
     }

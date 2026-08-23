@@ -47,6 +47,7 @@ test("linked ledger rejects pending, remote-only, mismatched, duplicate, and mal
     ["mixed valid and 13-digit row", "2026082307440 | 2026082307440 | now", "postdeploy_ledger_malformed"],
     ["mixed valid and nonnumeric row", "not-a-version | not-a-version | now", "postdeploy_ledger_malformed"],
     ["mixed valid and malformed remote-only row", "                | remote-only-bad | now", "postdeploy_ledger_malformed"],
+    ["mixed valid and blank version cells", "                |                 | now", "postdeploy_ledger_malformed"],
     ["malformed only", "not a migration receipt", "postdeploy_ledger_no_versions"],
   ]
 
