@@ -28,7 +28,9 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = []
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "e14a8005276824e6b2a8c67330efd476eff111784f2f79cc073b1c6bb30be920"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "fa5c1df15942aadd2bee7bdf4136fb0c7218e7a94fb52d957b878cce5fa645cd"
+const POSTDEPLOY_READONLY_SQL_SHA256 =
+  "f1259e7c299163de88dc2e865e489df7dd6ef3f2bc21c93cfe0e12f3ebc115be"
 const FOCUSED_PGTAP_PATH =
   "supabase/tests/registration_level_test_result_parent_reconciliation_test.sql"
 const LINKED_MIGRATION_LEDGER_PATH = "\${RUNNER_TEMP}/supabase-migration-list.txt"
@@ -115,6 +117,11 @@ async function createRepoFixture() {
     cp(join(repoRoot, ".github"), join(fixtureRoot, ".github"), { recursive: true }),
     cp(join(repoRoot, "supabase"), join(fixtureRoot, "supabase"), { recursive: true }),
   ])
+  await mkdir(join(fixtureRoot, "scripts"), { recursive: true })
+  await copyFile(
+    join(repoRoot, "scripts", "verify-supabase-postdeploy-contract.mjs"),
+    join(fixtureRoot, "scripts", "verify-supabase-postdeploy-contract.mjs"),
+  )
   return fixtureRoot
 }
 
@@ -397,6 +404,9 @@ test("cutover SQL은 active lane 밖의 immutable quarantine에만 존재한다"
         "",
         "      - name: Test transactional safety contracts",
         "        run: node --test tests/retryable-sqlstate-contract.test.mjs tests/supabase-transactional-preflight-builder.test.mjs",
+        "",
+        "      - name: Test Supabase post-push receipt",
+        "        run: node --test tests/supabase-postdeploy-contract.test.mjs",
         "",
         "      - name: Verify Supabase migration layout",
         "        run: node scripts/verify-supabase-migration-layout.mjs",
@@ -1832,5 +1842,163 @@ test("required DB push workflow의 transactional preflight는 static preflight �
   assertIncludesErrorCode(
     reorderedErrors,
     "db_push_workflow_transactional_preflight_order_mismatch",
+  )
+})
+
+test("post-push receipt는 고정 read-only SQL과 fresh ledger·query·verifier 순서를 요구한다", async () => {
+  const postdeploySqlPath = join(
+    repoRoot,
+    "supabase",
+    "tests",
+    "active_registration_workflow_postdeploy_readonly.sql",
+  )
+  const postdeployVerifierPath = join(
+    repoRoot,
+    "scripts",
+    "verify-supabase-postdeploy-contract.mjs",
+  )
+  const [sqlExists, verifierExists] = await Promise.all([
+    readFile(postdeploySqlPath, "utf8").then(() => true, () => false),
+    readFile(postdeployVerifierPath, "utf8").then(() => true, () => false),
+  ])
+  assert.equal(sqlExists, true, "post-push catalog receipt SQL must exist")
+  assert.equal(verifierExists, true, "post-push receipt verifier must exist")
+
+  const [workflow, sql] = await Promise.all([
+    readFile(requiredWorkflowPath, "utf8"),
+    readFile(postdeploySqlPath, "utf8"),
+  ])
+  const pushIndex = workflow.indexOf("run: supabase db push --linked --include-all")
+  const ledgerIndex = workflow.indexOf(
+    'run: supabase migration list --linked > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"',
+  )
+  const queryIndex = workflow.indexOf(
+    "run: supabase db query --linked --output json --file supabase/tests/active_registration_workflow_postdeploy_readonly.sql > \"${RUNNER_TEMP}/active-registration-workflow-postdeploy.json\"",
+  )
+  const verifierIndex = workflow.indexOf(
+    'run: node scripts/verify-supabase-postdeploy-contract.mjs --migration-ledger "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt" --query-receipt "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"',
+  )
+  assert.ok(pushIndex < ledgerIndex && ledgerIndex < queryIndex && queryIndex < verifierIndex)
+  assert.match(sql, /^begin transaction read only;$/imu)
+  assert.match(sql, /^set local statement_timeout = '5s';$/imu)
+  assert.match(sql, /^set local lock_timeout = '1s';$/imu)
+  assert.match(sql, /\) as contract_ok;\s*rollback;\s*$/isu)
+  assert.doesNotMatch(sql, /\b(?:insert|update|delete|merge|truncate|alter|drop|create|grant|revoke|cron\.|net\.)\b/iu)
+})
+
+test("postdeploy search_path predicate treats NULL proconfig as a contract failure", async () => {
+  const sql = await readFile(
+    join(
+      repoRoot,
+      "supabase",
+      "tests",
+      "active_registration_workflow_postdeploy_readonly.sql",
+    ),
+    "utf8",
+  )
+
+  assert.match(
+    sql,
+    /\(\s*pg_catalog\.cardinality\(proconfig\) = 1\s*and proconfig\[1\] in \('search_path=', 'search_path=""'\)\s*\) is distinct from true/iu,
+    "NULL proconfig must fail the exact empty-search-path boundary",
+  )
+})
+
+test("layout verifier pins every semantic predicate in the fixed postdeploy catalog query", async () => {
+  const sqlPath = join(
+    repoRoot,
+    "supabase",
+    "tests",
+    "active_registration_workflow_postdeploy_readonly.sql",
+  )
+  const source = await readFile(sqlPath, "utf8")
+  assert.equal(await sha256(sqlPath), POSTDEPLOY_READONLY_SQL_SHA256)
+  const requiredPredicates = [
+    ["public signature", "public.set_registration_workflow_status_v1(uuid,text,integer,text)"],
+    ["private signature", "dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)"],
+    ["delegation", "dashboard_private.set_registration_workflow_status_v1_impl%"],
+    ["security modes", "is_private and not prosecdef"],
+    ["owner", "pg_catalog.pg_get_userbyid(proowner) <> 'postgres'"],
+    ["ACL", "'authenticated'"],
+    ["denied roles", "'service_role'::name"],
+    ["40001 predicate", "definition like '%40001%'"],
+    ["23514 predicate", "definition not like '%23514%'"],
+  ]
+
+  for (const [name, predicate] of requiredPredicates) {
+    const fixtureRoot = await createRepoFixture()
+    const fixturePath = join(
+      fixtureRoot,
+      "supabase",
+      "tests",
+      "active_registration_workflow_postdeploy_readonly.sql",
+    )
+    await writeFile(fixturePath, source.replace(predicate, `removed_${name.replaceAll(" ", "_")}`))
+    assertIncludesErrorCode(
+      await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot }),
+      "postdeploy_contract_sql_hash_mismatch",
+    )
+  }
+})
+
+test("layout verifier는 post-push 영수증 누락·순서·시크릿 scope·미승인 artifact를 fail-closed한다", async () => {
+  const cases = [
+    {
+      name: "ledger capture is missing",
+      mutate: (workflow) => workflow.replace(
+        'run: supabase migration list --linked > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"',
+        "run: echo ledger skipped",
+      ),
+      code: "db_push_workflow_postdeploy_ledger_missing",
+    },
+    {
+      name: "query runs before fresh ledger capture",
+      mutate: (workflow) => workflow
+        .replace(
+          "      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked > \"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt\"\n\n      - name: Capture active registration workflow contract",
+          "      - name: Capture active registration workflow contract",
+        )
+        .replace(
+          '        run: supabase db query --linked --output json --file supabase/tests/active_registration_workflow_postdeploy_readonly.sql > "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"',
+          '        run: supabase db query --linked --output json --file supabase/tests/active_registration_workflow_postdeploy_readonly.sql > "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"\n\n      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"',
+        ),
+      code: "db_push_workflow_postdeploy_order_mismatch",
+    },
+    {
+      name: "ledger capture runs before migration push",
+      mutate: (workflow) => workflow.replace(
+        "      - name: Push migrations\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase db push --linked --include-all\n\n      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked > \"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt\"",
+        "      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked > \"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt\"\n\n      - name: Push migrations\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase db push --linked --include-all",
+      ),
+      code: "db_push_workflow_postdeploy_order_mismatch",
+    },
+    {
+      name: "verifier receives a Supabase secret",
+      mutate: (workflow) => workflow.replace(
+        "      - name: Verify post-push receipt\n",
+        "      - name: Verify post-push receipt\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n",
+      ),
+      code: "db_push_workflow_postdeploy_verifier_secret_scope_mismatch",
+    },
+  ]
+
+  for (const { name, mutate, code } of cases) {
+    const fixtureRoot = await createRepoFixture()
+    const workflowPath = join(fixtureRoot, ".github", "workflows", "supabase-db-push.yml")
+    await writeFile(workflowPath, mutate(await readFile(workflowPath, "utf8")))
+    const errors = await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot })
+    assertIncludesErrorCode(errors, code)
+    assert.ok(errors.length > 0, `${name} must be rejected`)
+  }
+
+  const artifactFixture = await createRepoFixture()
+  await mkdir(join(artifactFixture, "scripts"), { recursive: true })
+  await writeFile(
+    join(artifactFixture, "scripts", "verify-supabase-postdeploy-unapproved.mjs"),
+    "export {}\n",
+  )
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: artifactFixture }),
+    "postdeploy_contract_artifact_unapproved",
   )
 })

@@ -22,9 +22,22 @@ const EXPECTED_TRANSACTIONAL_BUILDER_COMMAND =
   `node scripts/build-supabase-transactional-preflight.mjs --output ${TRANSACTIONAL_PGTAP_OUTPUT} --migration-ledger ${LINKED_MIGRATION_LEDGER} --forward-migrations supabase/migrations --focused-test ${FOCUSED_TRANSACTIONAL_PGTAP} --rollback`
 const EXPECTED_TRANSACTIONAL_PGTAP_COMMAND =
   `supabase test db --linked ${TRANSACTIONAL_PGTAP_OUTPUT}`
+const POSTDEPLOY_READONLY_SQL =
+  "supabase/tests/active_registration_workflow_postdeploy_readonly.sql"
+const POSTDEPLOY_READONLY_SQL_SHA256 =
+  "f1259e7c299163de88dc2e865e489df7dd6ef3f2bc21c93cfe0e12f3ebc115be"
+const POSTDEPLOY_VERIFIER = "scripts/verify-supabase-postdeploy-contract.mjs"
+const POSTDEPLOY_LEDGER = '"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"'
+const POSTDEPLOY_RECEIPT = '"${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"'
+const EXPECTED_POSTDEPLOY_LEDGER_COMMAND =
+  `supabase migration list --linked > ${POSTDEPLOY_LEDGER}`
+const EXPECTED_POSTDEPLOY_QUERY_COMMAND =
+  `supabase db query --linked --output json --file ${POSTDEPLOY_READONLY_SQL} > ${POSTDEPLOY_RECEIPT}`
+const EXPECTED_POSTDEPLOY_VERIFIER_COMMAND =
+  `node ${POSTDEPLOY_VERIFIER} --migration-ledger ${POSTDEPLOY_LEDGER} --query-receipt ${POSTDEPLOY_RECEIPT}`
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand Supabase secret scope before the verifier exits.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "e14a8005276824e6b2a8c67330efd476eff111784f2f79cc073b1c6bb30be920"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "fa5c1df15942aadd2bee7bdf4136fb0c7218e7a94fb52d957b878cce5fa645cd"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
   "a527fa8c86e7be41c4bd9dc6a06139213c71e948aa4ff1eba7049649a46b7db8"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
@@ -1027,7 +1040,40 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
   const quarantineReadmePath = join(quarantineDir, "README.md")
   const scienceMigrationPath = join(activeDir, SCIENCE_MIGRATION_FILE)
   const prepareAclMigrationPath = join(activeDir, PREPARE_ACL_MIGRATION_FILE)
+  const postdeploySqlPath = join(resolvedRoot, POSTDEPLOY_READONLY_SQL)
+  const postdeployVerifierPath = join(resolvedRoot, POSTDEPLOY_VERIFIER)
   let manifest = null
+
+  const postdeploySqlStat = await statKind(postdeploySqlPath)
+  if (!postdeploySqlStat?.isFile()) {
+    addError(errors, "postdeploy_contract_sql_not_regular", relative(resolvedRoot, postdeploySqlPath))
+  } else {
+    const postdeploySql = await readFile(postdeploySqlPath, "utf8")
+    if (sha256(postdeploySql) !== POSTDEPLOY_READONLY_SQL_SHA256) {
+      addError(errors, "postdeploy_contract_sql_hash_mismatch", relative(resolvedRoot, postdeploySqlPath))
+    }
+    if (
+      !/^begin transaction read only;\s*set local statement_timeout = '5s';\s*set local lock_timeout = '1s';/isu.test(postdeploySql) ||
+      (postdeploySql.match(/\bas contract_ok\b/giu) ?? []).length !== 1 ||
+      !/\) as contract_ok;\s*rollback;\s*$/isu.test(postdeploySql) ||
+      /\b(?:insert|update|delete|merge|truncate|alter|drop|create|grant|revoke|cron\.|net\.)\b/iu.test(postdeploySql)
+    ) {
+      addError(errors, "postdeploy_contract_sql_policy_mismatch", relative(resolvedRoot, postdeploySqlPath))
+    }
+  }
+  const postdeployVerifierStat = await statKind(postdeployVerifierPath)
+  if (!postdeployVerifierStat?.isFile()) {
+    addError(errors, "postdeploy_contract_verifier_not_regular", relative(resolvedRoot, postdeployVerifierPath))
+  }
+  for (const [directory, expectedFile, pattern] of [
+    [join(resolvedRoot, "scripts"), "verify-supabase-postdeploy-contract.mjs", /^verify-supabase-postdeploy-.*\.mjs$/],
+    [join(resolvedRoot, "supabase", "tests"), "active_registration_workflow_postdeploy_readonly.sql", /^active_registration_workflow_postdeploy.*\.sql$/],
+  ]) {
+    const entries = await listDirectory(directory)
+    if (entries?.some((entry) => pattern.test(entry) && entry !== expectedFile)) {
+      addError(errors, "postdeploy_contract_artifact_unapproved", relative(resolvedRoot, directory))
+    }
+  }
 
   try {
     manifest = JSON.parse(await readFile(manifestPath, "utf8"))
@@ -1441,6 +1487,7 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
           "node scripts/verify-supabase-migration-layout.mjs",
           "node scripts/verify-domain-sqlstate-contract.mjs",
           EXPECTED_TRANSACTIONAL_BUILDER_COMMAND,
+          EXPECTED_POSTDEPLOY_VERIFIER_COMMAND,
         ].includes(command)
       })
     ) {
@@ -1494,6 +1541,13 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       addError(
         errors,
         "db_push_workflow_static_preflight_domain_sqlstate_contract_missing",
+        workflowRelativePath,
+      )
+    }
+    if (!hasExactRun(staticPreflightLines, "node --test tests/supabase-postdeploy-contract.test.mjs")) {
+      addError(
+        errors,
+        "db_push_workflow_static_preflight_postdeploy_receipt_test_missing",
         workflowRelativePath,
       )
     }
@@ -1629,6 +1683,46 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
 
     if (!pushJobLines.some((line) => /^ {4}needs:\s*db-transactional-preflight\s*$/.test(line))) {
       addError(errors, "db_push_workflow_push_dependency_missing", workflowRelativePath)
+    }
+
+    const postdeployLedgerStep = workflowStepLines(pushJobLines, "Capture post-push linked migration ledger")
+    const postdeployQueryStep = workflowStepLines(pushJobLines, "Capture active registration workflow contract")
+    const postdeployVerifierStep = workflowStepLines(pushJobLines, "Verify post-push receipt")
+    for (const [step, command, code] of [
+      [postdeployLedgerStep, EXPECTED_POSTDEPLOY_LEDGER_COMMAND, "db_push_workflow_postdeploy_ledger_missing"],
+      [postdeployQueryStep, EXPECTED_POSTDEPLOY_QUERY_COMMAND, "db_push_workflow_postdeploy_query_missing"],
+      [postdeployVerifierStep, EXPECTED_POSTDEPLOY_VERIFIER_COMMAND, "db_push_workflow_postdeploy_verifier_missing"],
+    ]) {
+      if (!hasExactRun(step, command)) addError(errors, code, workflowRelativePath)
+    }
+    for (const [step, code] of [
+      [postdeployLedgerStep, "db_push_workflow_postdeploy_ledger_secret_scope_mismatch"],
+      [postdeployQueryStep, "db_push_workflow_postdeploy_query_secret_scope_mismatch"],
+    ]) {
+      if (
+        !exposesSupabaseSecret(step) ||
+        !step.some((line) => line.includes("SUPABASE_ACCESS_TOKEN")) ||
+        !step.some((line) => line.includes("SUPABASE_DB_PASSWORD"))
+      ) {
+        addError(errors, code, workflowRelativePath)
+      }
+    }
+    if (exposesSupabaseSecret(postdeployVerifierStep)) {
+      addError(errors, "db_push_workflow_postdeploy_verifier_secret_scope_mismatch", workflowRelativePath)
+    }
+
+    const postdeployPushIndex = workflow.indexOf("run: supabase db push --linked --include-all")
+    const postdeployLedgerIndex = workflow.indexOf(`run: ${EXPECTED_POSTDEPLOY_LEDGER_COMMAND}`)
+    const postdeployQueryIndex = workflow.indexOf(`run: ${EXPECTED_POSTDEPLOY_QUERY_COMMAND}`)
+    const postdeployVerifierIndex = workflow.indexOf(`run: ${EXPECTED_POSTDEPLOY_VERIFIER_COMMAND}`)
+    if (
+      postdeployPushIndex < 0 ||
+      postdeployLedgerIndex < 0 ||
+      postdeployQueryIndex < 0 ||
+      postdeployVerifierIndex < 0 ||
+      !(postdeployPushIndex < postdeployLedgerIndex && postdeployLedgerIndex < postdeployQueryIndex && postdeployQueryIndex < postdeployVerifierIndex)
+    ) {
+      addError(errors, "db_push_workflow_postdeploy_order_mismatch", workflowRelativePath)
     }
 
     for (const line of lines) {
