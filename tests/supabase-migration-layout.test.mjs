@@ -28,7 +28,7 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = []
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "fcf365e8305c6995ceaec22f49b6d8be2d27d07f667f686159f485e083ad0067"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
   "f1259e7c299163de88dc2e865e489df7dd6ef3f2bc21c93cfe0e12f3ebc115be"
 const FOCUSED_PGTAP_PATH =
@@ -282,7 +282,7 @@ function workflowWithTransactionalPreflight({
     '        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"',
     "",
     "      - name: Capture linked migration ledger",
-    `        run: supabase migration list --linked > "${LINKED_MIGRATION_LEDGER_PATH}"`,
+    `        run: supabase migration list --linked --output-format json > "${LINKED_MIGRATION_LEDGER_PATH}"`,
     "",
     "      - name: Build transactional pgTAP input",
     `        run: ${builderCommand}`,
@@ -1823,8 +1823,16 @@ test("required DB push workflow의 transactional preflight는 static preflight �
     {
       name: "linked migration ledger capture is skipped",
       source: workflowWithTransactionalPreflight().replace(
-        `        run: supabase migration list --linked > "${LINKED_MIGRATION_LEDGER_PATH}"`,
+        `        run: supabase migration list --linked --output-format json > "${LINKED_MIGRATION_LEDGER_PATH}"`,
         "        run: echo migration ledger skipped",
+      ),
+      code: "db_push_workflow_transactional_preflight_migration_ledger_missing",
+    },
+    {
+      name: "linked migration ledger falls back to display-dependent output",
+      source: workflowWithTransactionalPreflight().replace(
+        `        run: supabase migration list --linked --output-format json > "${LINKED_MIGRATION_LEDGER_PATH}"`,
+        `        run: supabase migration list --linked > "${LINKED_MIGRATION_LEDGER_PATH}"`,
       ),
       code: "db_push_workflow_transactional_preflight_migration_ledger_missing",
     },
@@ -1921,10 +1929,10 @@ test("post-push receipt는 고정 read-only SQL과 fresh ledger·query·verifier
   ])
   const pushIndex = workflow.indexOf("run: supabase db push --linked --include-all")
   const ledgerIndex = workflow.indexOf(
-    'run: supabase migration list --linked > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"',
+    'run: supabase migration list --linked --output-format json > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"',
   )
   const queryIndex = workflow.indexOf(
-    "run: supabase db query --linked --output json --file supabase/tests/active_registration_workflow_postdeploy_readonly.sql > \"${RUNNER_TEMP}/active-registration-workflow-postdeploy.json\"",
+    "run: supabase db query --linked --output-format json --file supabase/tests/active_registration_workflow_postdeploy_readonly.sql > \"${RUNNER_TEMP}/active-registration-workflow-postdeploy.json\"",
   )
   const verifierIndex = workflow.indexOf(
     'run: node scripts/verify-supabase-postdeploy-contract.mjs --migration-ledger "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt" --query-receipt "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"',
@@ -1997,29 +2005,45 @@ test("layout verifier는 post-push 영수증 누락·순서·시크릿 scope·�
     {
       name: "ledger capture is missing",
       mutate: (workflow) => workflow.replace(
-        'run: supabase migration list --linked > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"',
+        'run: supabase migration list --linked --output-format json > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"',
         "run: echo ledger skipped",
       ),
       code: "db_push_workflow_postdeploy_ledger_missing",
     },
     {
+      name: "ledger capture falls back to display-dependent output",
+      mutate: (workflow) => workflow.replace(
+        'run: supabase migration list --linked --output-format json > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"',
+        'run: supabase migration list --linked > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"',
+      ),
+      code: "db_push_workflow_postdeploy_ledger_missing",
+    },
+    {
+      name: "query capture uses the legacy output flag",
+      mutate: (workflow) => workflow.replace(
+        "supabase db query --linked --output-format json --file",
+        "supabase db query --linked --output json --file",
+      ),
+      code: "db_push_workflow_postdeploy_query_missing",
+    },
+    {
       name: "query runs before fresh ledger capture",
       mutate: (workflow) => workflow
         .replace(
-          "      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked > \"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt\"\n\n      - name: Capture active registration workflow contract",
+          "      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked --output-format json > \"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt\"\n\n      - name: Capture active registration workflow contract",
           "      - name: Capture active registration workflow contract",
         )
         .replace(
-          '        run: supabase db query --linked --output json --file supabase/tests/active_registration_workflow_postdeploy_readonly.sql > "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"',
-          '        run: supabase db query --linked --output json --file supabase/tests/active_registration_workflow_postdeploy_readonly.sql > "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"\n\n      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"',
+          '        run: supabase db query --linked --output-format json --file supabase/tests/active_registration_workflow_postdeploy_readonly.sql > "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"',
+          '        run: supabase db query --linked --output-format json --file supabase/tests/active_registration_workflow_postdeploy_readonly.sql > "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"\n\n      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked --output-format json > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"',
         ),
       code: "db_push_workflow_postdeploy_order_mismatch",
     },
     {
       name: "ledger capture runs before migration push",
       mutate: (workflow) => workflow.replace(
-        "      - name: Push migrations\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase db push --linked --include-all\n\n      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked > \"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt\"",
-        "      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked > \"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt\"\n\n      - name: Push migrations\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase db push --linked --include-all",
+        "      - name: Push migrations\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase db push --linked --include-all\n\n      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked --output-format json > \"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt\"",
+        "      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked --output-format json > \"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt\"\n\n      - name: Push migrations\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase db push --linked --include-all",
       ),
       code: "db_push_workflow_postdeploy_order_mismatch",
     },

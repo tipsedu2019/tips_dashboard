@@ -10,6 +10,15 @@ const builderUrl = new URL(
   import.meta.url,
 )
 
+const supabaseCli2115Ledger = JSON.stringify({
+  migrations: [
+    { local: "20260820150057", remote: "20260820150057", time: "2026-08-20 15:00:57" },
+    { local: "20260820152710", remote: "", time: "2026-08-20 15:27:10" },
+    { local: "20260820160000", remote: "", time: "2026-08-20 16:00:00" },
+  ],
+  message: "Migrations listed",
+})
+
 async function createFixture({
   ledger = [
     "   Local          | Remote         | Time (UTC)",
@@ -81,6 +90,65 @@ test("linked ledger 이후의 forward migrations만 순서대로 넣고 하나�
   assert.match(result.sql.trimEnd(), /rollback;$/i)
 })
 
+test("Supabase CLI 2.115 JSON ledger에서 forward migrations만 정확히 고른다", async () => {
+  const { buildTransactionalPreflightSql } = await import(builderUrl)
+  const { root } = await createFixture({ ledger: supabaseCli2115Ledger })
+  const result = await buildTransactionalPreflightSql({
+    repoRoot: root,
+    migrationLedger: supabaseCli2115Ledger,
+    forwardMigrationsPath: "supabase/migrations",
+    focusedTestPath: "supabase/tests/focused.sql",
+  })
+
+  assert.deepEqual(result.pendingVersions, ["20260820152710", "20260820160000"])
+  assert.doesNotMatch(result.sql, /applied_marker/)
+  assert.match(result.sql, /pending_first_marker/)
+  assert.match(result.sql, /pending_second_marker/)
+})
+
+test("Supabase CLI JSON ledger 구조가 다르면 fail closed 한다", async () => {
+  const { buildTransactionalPreflightSql } = await import(builderUrl)
+  const malformedLedgers = [
+    "{",
+    JSON.stringify({ migrations: {}, message: "Migrations listed" }),
+    JSON.stringify({ migrations: [], message: "unexpected" }),
+    JSON.stringify({ migrations: [], message: "Migrations listed", extra: true }),
+    JSON.stringify({
+      migrations: [{ local: "20260820150057", remote: "20260820150057" }],
+      message: "Migrations listed",
+    }),
+    JSON.stringify({
+      migrations: [{ local: "2026082015005", remote: "2026082015005", time: "now" }],
+      message: "Migrations listed",
+    }),
+    JSON.stringify({
+      migrations: [{ local: "202608201500577", remote: "202608201500577", time: "now" }],
+      message: "Migrations listed",
+    }),
+    JSON.stringify({
+      migrations: [{ local: 20260820150057, remote: "20260820150057", time: "now" }],
+      message: "Migrations listed",
+    }),
+    JSON.stringify({
+      migrations: [{ local: "", remote: "", time: "now" }],
+      message: "Migrations listed",
+    }),
+  ]
+
+  for (const migrationLedger of malformedLedgers) {
+    const { root } = await createFixture({ ledger: migrationLedger })
+    await assert.rejects(
+      buildTransactionalPreflightSql({
+        repoRoot: root,
+        migrationLedger,
+        forwardMigrationsPath: "supabase/migrations",
+        focusedTestPath: "supabase/tests/focused.sql",
+      }),
+      { message: "transactional_preflight_ledger_malformed" },
+    )
+  }
+})
+
 test("remote max가 최신 local migration이면 schema mutation 없이 focused test만 만든다", async () => {
   const { buildTransactionalPreflightSql } = await import(builderUrl)
   const { root } = await createFixture()
@@ -121,6 +189,21 @@ test("remote version이 없는 ledger는 fail closed 한다", async () => {
     }),
     { message: "transactional_preflight_remote_ledger_missing" },
   )
+
+  await assert.rejects(
+    buildTransactionalPreflightSql({
+      repoRoot: root,
+      migrationLedger: JSON.stringify({
+        migrations: [
+          { local: "20260820152710", remote: "", time: "2026-08-20 15:27:10" },
+        ],
+        message: "Migrations listed",
+      }),
+      forwardMigrationsPath: "supabase/migrations",
+      focusedTestPath: "supabase/tests/focused.sql",
+    }),
+    { message: "transactional_preflight_remote_ledger_missing" },
+  )
 })
 
 test("remote-only 또는 과거 local-only ledger drift는 migration 선택 전에 fail closed 한다", async () => {
@@ -141,6 +224,23 @@ test("remote-only 또는 과거 local-only ledger drift는 migration 선택 전�
     { message: "transactional_preflight_remote_history_drift" },
   )
 
+  await assert.rejects(
+    buildTransactionalPreflightSql({
+      repoRoot: remoteOnly.root,
+      migrationLedger: JSON.stringify({
+        migrations: [
+          { local: "20260820150057", remote: "20260820150057", time: "2026-08-20 15:00:57" },
+          { local: "", remote: "20260820151500", time: "2026-08-20 15:15:00" },
+          { local: "20260820152710", remote: "", time: "2026-08-20 15:27:10" },
+        ],
+        message: "Migrations listed",
+      }),
+      forwardMigrationsPath: "supabase/migrations",
+      focusedTestPath: "supabase/tests/focused.sql",
+    }),
+    { message: "transactional_preflight_remote_history_drift" },
+  )
+
   const historicalLocalOnly = await createFixture()
   await assert.rejects(
     buildTransactionalPreflightSql({
@@ -151,6 +251,23 @@ test("remote-only 또는 과거 local-only ledger drift는 migration 선택 전�
         "20260820150057 | 20260820150057 | now",
         "20260820152710 | | now",
       ].join("\n"),
+      forwardMigrationsPath: "supabase/migrations",
+      focusedTestPath: "supabase/tests/focused.sql",
+    }),
+    { message: "transactional_preflight_unapplied_legacy_migration" },
+  )
+
+  await assert.rejects(
+    buildTransactionalPreflightSql({
+      repoRoot: historicalLocalOnly.root,
+      migrationLedger: JSON.stringify({
+        migrations: [
+          { local: "20260820140000", remote: "", time: "2026-08-20 14:00:00" },
+          { local: "20260820150057", remote: "20260820150057", time: "2026-08-20 15:00:57" },
+          { local: "20260820152710", remote: "", time: "2026-08-20 15:27:10" },
+        ],
+        message: "Migrations listed",
+      }),
       forwardMigrationsPath: "supabase/migrations",
       focusedTestPath: "supabase/tests/focused.sql",
     }),
