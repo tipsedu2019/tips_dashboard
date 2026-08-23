@@ -54,7 +54,10 @@ jobs:
         run: |
           set -euo pipefail
           merge_base="$(git merge-base "${BASE_SHA}" "${HEAD_SHA}")"
-          mapfile -d '' -t migration_files < <(git diff --name-only --diff-filter=AM -z "${merge_base}" "${HEAD_SHA}" -- ':(glob)supabase/migrations/*.sql')
+          diff_file="$(mktemp "${RUNNER_TEMP}/squawk-migrations.XXXXXX")"
+          trap 'rm -f "${diff_file}"' EXIT
+          git diff --name-only --diff-filter=AM -z "${merge_base}" "${HEAD_SHA}" -- ':(glob)supabase/migrations/*.sql' > "${diff_file}"
+          mapfile -d '' -t migration_files < "${diff_file}"
           if ((${#migration_files[@]} == 0)); then
             echo "No added or modified Supabase migrations to lint."
             exit 0

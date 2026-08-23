@@ -1,7 +1,9 @@
 import assert from "node:assert/strict"
+import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import {
   appendFile,
+  chmod,
   copyFile,
   cp,
   mkdir,
@@ -1442,6 +1444,46 @@ test("required SQL review workflow의 실파일과 바이트를 fail-closed로 �
     await validateSupabaseMigrationLayout({ repoRoot: mutatedWorkflowFixture }),
     "required_sql_review_workflow_hash_mismatch",
   )
+})
+
+test("SQL review workflow는 migration diff 실패를 no-change로 통과시키지 않는다", async (t) => {
+  const workflow = await readFile(
+    join(repoRoot, ".github", "workflows", "supabase-sql-review.yml"),
+    "utf8",
+  )
+  const stepStart = workflow.indexOf("      - name: Lint changed migrations with Squawk\n")
+  assert.notEqual(stepStart, -1, "SQL review migration lint step must exist")
+  const runMatch = workflow.slice(stepStart).match(/^        run: \|\n((?: {10}.*(?:\n|$))*)/m)
+  assert.ok(runMatch, "SQL review migration lint step must contain a bash script")
+  const script = runMatch[1].replace(/^ {10}/gm, "")
+
+  const tempRoot = await mkdtemp(join(tmpdir(), "tips-sql-review-diff-failure-"))
+  t.after(() => rm(tempRoot, { recursive: true, force: true }))
+  const binDir = join(tempRoot, "bin")
+  await mkdir(binDir)
+  const gitPath = spawnSync("which", ["git"], { encoding: "utf8" })
+  assert.equal(gitPath.status, 0, gitPath.stderr)
+  await writeFile(
+    join(binDir, "git"),
+    `#!/usr/bin/env bash\nif [[ "$1" == "diff" ]]; then\n  echo "forced migration diff failure" >&2\n  exit 73\nfi\nexec ${JSON.stringify(gitPath.stdout.trim())} "$@"\n`,
+  )
+  await chmod(join(binDir, "git"), 0o755)
+
+  const scriptWithSuccessfulEmptyMapfile = `mapfile() { migration_files=(); return 0; }\n${script}`
+  const result = spawnSync("bash", ["-c", scriptWithSuccessfulEmptyMapfile], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      BASE_SHA: "HEAD",
+      HEAD_SHA: "HEAD",
+      PATH: `${binDir}:${process.env.PATH}`,
+      RUNNER_TEMP: tempRoot,
+    },
+  })
+  assert.notEqual(result.status, 0, "migration diff failure must fail the workflow step")
+  assert.match(result.stderr, /forced migration diff failure/)
+  assert.doesNotMatch(result.stdout, /No added or modified Supabase migrations to lint\./)
 })
 
 test("required DB push workflow는 verifier 성공 전 Supabase secret scope를 fail-closed로 거부한다", async () => {
