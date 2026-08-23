@@ -13,9 +13,9 @@ const FOCUSED_TRANSACTIONAL_PGTAP =
   "supabase/tests/registration_level_test_result_parent_reconciliation_test.sql"
 const LINKED_MIGRATION_LEDGER = '"${RUNNER_TEMP}/supabase-migration-list.txt"'
 const TRANSACTIONAL_PGTAP_OUTPUT = '"${RUNNER_TEMP}/supabase-transactional-preflight.sql"'
-const PINNED_SUPABASE_CLI_VERSION = "2.107.0"
+const PINNED_SUPABASE_CLI_VERSION = "2.115.0"
 const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
-  "ea233b337be698cee5bbca0795ee3e63b9dd154948c515c03cb72f191b3d103c"
+  "ff099608ce758b625532ef03a61f4c9520b995e94ff6cd5480dc0428cad64cb3"
 const EXPECTED_LEDGER_COMMAND =
   `supabase migration list --linked > ${LINKED_MIGRATION_LEDGER}`
 const EXPECTED_TRANSACTIONAL_BUILDER_COMMAND =
@@ -37,7 +37,7 @@ const EXPECTED_POSTDEPLOY_VERIFIER_COMMAND =
   `node ${POSTDEPLOY_VERIFIER} --migration-ledger ${POSTDEPLOY_LEDGER} --query-receipt ${POSTDEPLOY_RECEIPT}`
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand Supabase secret scope before the verifier exits.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "8126baf45842dd9f47148c8c87310ecbf1c4c650b524869887a7f51d501f90fc"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "fcf365e8305c6995ceaec22f49b6d8be2d27d07f667f686159f485e083ad0067"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
   "1e3b7aac9bc49bf283ad5193c41f831f925d13e1b0c6447d647f44d11cfc0c25"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([

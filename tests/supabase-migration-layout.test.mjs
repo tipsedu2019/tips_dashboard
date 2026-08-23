@@ -28,15 +28,15 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = []
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "8126baf45842dd9f47148c8c87310ecbf1c4c650b524869887a7f51d501f90fc"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "fcf365e8305c6995ceaec22f49b6d8be2d27d07f667f686159f485e083ad0067"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
   "f1259e7c299163de88dc2e865e489df7dd6ef3f2bc21c93cfe0e12f3ebc115be"
 const FOCUSED_PGTAP_PATH =
   "supabase/tests/registration_level_test_result_parent_reconciliation_test.sql"
 const LINKED_MIGRATION_LEDGER_PATH = "\${RUNNER_TEMP}/supabase-migration-list.txt"
-const PINNED_SUPABASE_CLI_VERSION = "2.107.0"
+const PINNED_SUPABASE_CLI_VERSION = "2.115.0"
 const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
-  "ea233b337be698cee5bbca0795ee3e63b9dd154948c515c03cb72f191b3d103c"
+  "ff099608ce758b625532ef03a61f4c9520b995e94ff6cd5480dc0428cad64cb3"
 const PREPARE_ACL_MIGRATION_FILE = "20260722130000_notification_prepare_acl_hardening.sql"
 const PREPARE_ACL_MIGRATION_SHA256 = "970d203f816736b05ed56d973d415a75e00e2f659f55f84c7831c60db8c261a3"
 const CLAIM_RECONCILE_BASELINE_FILE = "20260716112000_notification_control_plane_worker_rpc.sql"
@@ -438,6 +438,21 @@ test("cutover SQL은 active lane 밖의 immutable quarantine에만 존재한다"
     assert.equal(await sha256(join(quarantineDir, file)), digest)
     await assert.rejects(readFile(join(activeDir, file)))
   }
+})
+
+test("required DB push workflow pins the reviewed Supabase CLI release", async () => {
+  const requiredWorkflow = await readFile(requiredWorkflowPath, "utf8")
+  const pinnedVersions = [...requiredWorkflow.matchAll(/^\s+version="([^"]+)"$/gm)]
+    .map((match) => match[1])
+  const pinnedChecksums = [...requiredWorkflow.matchAll(
+    /^\s+echo "([0-9a-f]{64})  \$\{archive_path\}" \| sha256sum --check --strict$/gm,
+  )].map((match) => match[1])
+
+  assert.deepEqual(pinnedVersions, [PINNED_SUPABASE_CLI_VERSION, PINNED_SUPABASE_CLI_VERSION])
+  assert.deepEqual(pinnedChecksums, [
+    PINNED_SUPABASE_CLI_ARCHIVE_SHA256,
+    PINNED_SUPABASE_CLI_ARCHIVE_SHA256,
+  ])
 })
 
 test("quarantine SQL과 manifest 변조를 fail-closed로 거부한다", async () => {
