@@ -4,6 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const captureUrl = new URL("../scripts/capture-dashboard-free-tier-catalog.mjs", import.meta.url);
@@ -149,6 +150,46 @@ async function createFinalManifestHistory(t) {
     return runGit(root, ["rev-parse", "HEAD"]);
   };
   return { root, manifest, manifestPath, migrationsPath, writeManifest, baseSha, commitHead };
+}
+
+const reviewedManifestBootstrapBaseSha = "c7ea76b3dcd94101503305feadc95ce591f68050";
+const reviewedManifestBootstrapHeadSha = "d".repeat(40);
+const reviewedManifestPath = "supabase/test-baselines/dashboard-free-tier-v1.manifest.json";
+
+function readGitFile(root, revision, path) {
+  const result = spawnSync("git", ["show", `${revision}:${path}`], { cwd: root, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout;
+}
+
+async function createReviewedManifestBootstrapFixture() {
+  const root = fileURLToPath(new URL("..", runnerUrl));
+  const baseManifestSource = readGitFile(root, reviewedManifestBootstrapBaseSha, reviewedManifestPath);
+  const headManifestSource = await readFile(join(root, reviewedManifestPath), "utf8");
+  const baseManifest = JSON.parse(baseManifestSource);
+  const headManifest = JSON.parse(headManifestSource);
+  const revisionFiles = new Map([
+    [`${reviewedManifestBootstrapBaseSha}:${reviewedManifestPath}`, baseManifestSource],
+    [`${reviewedManifestBootstrapHeadSha}:${reviewedManifestPath}`, headManifestSource],
+  ]);
+  for (const entry of baseManifest.orderedNewMigrations) {
+    const path = `supabase/migrations/${entry.fileName}`;
+    revisionFiles.set(`${reviewedManifestBootstrapBaseSha}:${path}`, readGitFile(root, reviewedManifestBootstrapBaseSha, path));
+  }
+  for (const entry of headManifest.orderedNewMigrations) {
+    const path = `supabase/migrations/${entry.fileName}`;
+    revisionFiles.set(`${reviewedManifestBootstrapHeadSha}:${path}`, await readFile(join(root, path), "utf8"));
+  }
+  const executeGit = async ({ args }) => {
+    if (args[0] === "merge-base") {
+      return { code: 0, stdout: `${reviewedManifestBootstrapBaseSha}\n`, stderr: "" };
+    }
+    const source = revisionFiles.get(args[1]);
+    return source === undefined
+      ? { code: 128, stdout: "", stderr: "fixture revision path missing" }
+      : { code: 0, stdout: source, stderr: "" };
+  };
+  return { root, baseManifest, headManifest, revisionFiles, executeGit };
 }
 
 async function configureEmptyReviewedRunnerRepo(root) {
@@ -382,6 +423,110 @@ test("review boundary accepts an exact final prefix with only a valid appended m
     baseFinalCount: 2,
     appendedCount: 1,
   });
+});
+
+test("review boundary accepts only the pinned one-time reviewed manifest completion", async () => {
+  const { validateImmutableFinalMigrationHistory } = await import(runnerUrl.href);
+  const fixture = await createReviewedManifestBootstrapFixture();
+
+  const result = await validateImmutableFinalMigrationHistory({
+    root: fixture.root,
+    baseSha: reviewedManifestBootstrapBaseSha,
+    headSha: reviewedManifestBootstrapHeadSha,
+    executeGit: fixture.executeGit,
+  });
+
+  assert.deepEqual(result, {
+    mergeBaseSha: reviewedManifestBootstrapBaseSha,
+    baseFinalCount: 6,
+    appendedCount: 12,
+  });
+});
+
+test("reviewed manifest completion rejects every mutation outside the pinned transition", async (t) => {
+  const { validateImmutableFinalMigrationHistory } = await import(runnerUrl.href);
+  const headManifestKey = `${reviewedManifestBootstrapHeadSha}:${reviewedManifestPath}`;
+  const baseManifestKey = `${reviewedManifestBootstrapBaseSha}:${reviewedManifestPath}`;
+  const writeMutatedHeadManifest = (fixture, mutate) => {
+    const manifest = JSON.parse(JSON.stringify(fixture.headManifest));
+    mutate(manifest);
+    fixture.revisionFiles.set(headManifestKey, `${JSON.stringify(manifest, null, 2)}\n`);
+  };
+  const cases = [
+    {
+      name: "base manifest byte hash",
+      mutate: (fixture) => fixture.revisionFiles.set(baseManifestKey, `${fixture.revisionFiles.get(baseManifestKey)} `),
+    },
+    {
+      name: "head manifest byte hash",
+      mutate: (fixture) => fixture.revisionFiles.set(headManifestKey, `${fixture.revisionFiles.get(headManifestKey)} `),
+    },
+    {
+      name: "newly completed SQL bytes",
+      mutate: (fixture) => {
+        const entry = fixture.headManifest.orderedNewMigrations.find(({ fileName }) => fileName === "20260819012301_registration_customer_message_bundles.sql");
+        const key = `${reviewedManifestBootstrapHeadSha}:supabase/migrations/${entry.fileName}`;
+        fixture.revisionFiles.set(key, `${fixture.revisionFiles.get(key)}-- mutation\n`);
+      },
+    },
+    {
+      name: "newly completed SQL deletion",
+      mutate: (fixture) => {
+        const entry = fixture.headManifest.orderedNewMigrations.find(({ fileName }) => fileName === "20260819012301_registration_customer_message_bundles.sql");
+        fixture.revisionFiles.delete(`${reviewedManifestBootstrapHeadSha}:supabase/migrations/${entry.fileName}`);
+      },
+    },
+    {
+      name: "migration rename",
+      mutate: (fixture) => writeMutatedHeadManifest(fixture, (manifest) => {
+        manifest.orderedNewMigrations[6].fileName = "20260819012301_registration_customer_message_bundles_renamed.sql";
+      }),
+    },
+    {
+      name: "manifest reorder",
+      mutate: (fixture) => writeMutatedHeadManifest(fixture, (manifest) => {
+        [manifest.orderedNewMigrations[6], manifest.orderedNewMigrations[7]] = [manifest.orderedNewMigrations[7], manifest.orderedNewMigrations[6]];
+      }),
+    },
+    {
+      name: "unexpected status transition",
+      mutate: (fixture) => writeMutatedHeadManifest(fixture, (manifest) => {
+        manifest.orderedNewMigrations[0].status = "candidate";
+      }),
+    },
+    {
+      name: "unexpected pinned hash",
+      mutate: (fixture) => writeMutatedHeadManifest(fixture, (manifest) => {
+        manifest.orderedNewMigrations[6].sha256 = "0".repeat(64);
+      }),
+    },
+    {
+      name: "unexpected manifest entry",
+      mutate: (fixture) => writeMutatedHeadManifest(fixture, (manifest) => {
+        manifest.orderedNewMigrations.push({
+          fileName: "20260823080000_unexpected.sql",
+          status: "final",
+          sha256: createHash("sha256").update("select 1;\n").digest("hex"),
+        });
+      }),
+    },
+  ];
+
+  for (const fixtureCase of cases) {
+    await t.test(fixtureCase.name, async () => {
+      const fixture = await createReviewedManifestBootstrapFixture();
+      fixtureCase.mutate(fixture);
+      await assert.rejects(
+        validateImmutableFinalMigrationHistory({
+          root: fixture.root,
+          baseSha: reviewedManifestBootstrapBaseSha,
+          headSha: reviewedManifestBootstrapHeadSha,
+          executeGit: fixture.executeGit,
+        }),
+        /isolated_supabase_db_final_migration_history_drift/,
+      );
+    });
+  }
 });
 
 test("isolated DB runner allocates four distinct loopback ports by default", async () => {
@@ -781,6 +926,66 @@ test("runner removes its temp root when port allocation fails before runtime ret
     cleanup: "succeeded",
     stop: "not_required",
     tempRoot: "removed",
+  });
+});
+
+test("runner reports successful temp-root cleanup when Supabase init fails", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const root = await makeRepo(t);
+  await configureEmptyReviewedRunnerRepo(root);
+  const requestId = "init-failure-cleanup-fixture";
+  const tempRoot = join("/private/tmp", `tips-supabase-db-qa-${requestId}`);
+  await rm(tempRoot, { recursive: true, force: true });
+  const logs = [];
+  await assert.rejects(
+    runIsolatedSupabaseDbTests({
+      root,
+      argv: ["--execute", "--authorized", "--request-id", requestId],
+      allocatePort: (() => { let port = 55820; return () => ++port; })(),
+      executeProcess: async (invocation) => {
+        assert.equal(invocation.args[0], "init");
+        return { code: 61, stdout: "", stderr: "fixture init failed" };
+      },
+      log: (entry) => logs.push(JSON.parse(entry)),
+    }),
+    /isolated_supabase_db_child_failed/,
+  );
+  await assert.rejects(lstat(tempRoot), (error) => error?.code === "ENOENT");
+  assert.deepEqual(logs.at(-1), {
+    cleanup: "succeeded",
+    stop: "not_required",
+    tempRoot: "removed",
+  });
+});
+
+test("runner retains its temp root after Supabase init failure only when requested", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const root = await makeRepo(t);
+  await configureEmptyReviewedRunnerRepo(root);
+  const requestId = "init-failure-retained-fixture";
+  const tempRoot = join("/private/tmp", `tips-supabase-db-qa-${requestId}`);
+  await rm(tempRoot, { recursive: true, force: true });
+  t.after(() => rm(tempRoot, { recursive: true, force: true }));
+  const logs = [];
+  await assert.rejects(
+    runIsolatedSupabaseDbTests({
+      root,
+      argv: ["--execute", "--authorized", "--request-id", requestId],
+      retainTempRoot: true,
+      allocatePort: (() => { let port = 55840; return () => ++port; })(),
+      executeProcess: async (invocation) => {
+        assert.equal(invocation.args[0], "init");
+        return { code: 61, stdout: "", stderr: "fixture init failed" };
+      },
+      log: (entry) => logs.push(JSON.parse(entry)),
+    }),
+    /isolated_supabase_db_child_failed/,
+  );
+  assert.equal((await lstat(tempRoot)).isDirectory(), true);
+  assert.deepEqual(logs.at(-1), {
+    cleanup: "not_required",
+    stop: "not_required",
+    tempRoot: "retained",
   });
 });
 

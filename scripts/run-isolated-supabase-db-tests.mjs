@@ -13,6 +13,13 @@ const SQL_TEST = /^supabase\/tests\/[a-z0-9_]+\.sql$/u;
 const PROBE = /^(?:tests\/[a-z0-9_./-]+\.mjs|scripts\/probe-dashboard-audit-chain-concurrency\.mjs)$/u;
 const MIGRATION = /^(\d{14})_([a-z0-9_]+)\.sql$/u;
 const SUPABASE = "/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supabase/cli-darwin-arm64/bin/supabase";
+const REVIEWED_MANIFEST_BOOTSTRAP = Object.freeze({
+  baseSha: "c7ea76b3dcd94101503305feadc95ce591f68050",
+  baseManifestSha256: "0b55a4b7629dc8105fb9df45828db7fa1122651601096e529c8c79c5e801eef1",
+  headManifestSha256: "1863b8d3762e3aaa464ef1ec52e0e6883527a44e54412efbc7966975d8de5c30",
+  promotedFileName: "20260820150057_ops_task_completion_actor.sql",
+  promotedSha256: "2bd12279b8f79757dfbf6e5d84423bf34019d5f172c80e36377166002e89ceba",
+});
 
 function fail(code) { throw new Error(code); }
 export function sha256(value) { return createHash("sha256").update(value).digest("hex"); }
@@ -166,22 +173,71 @@ export async function validateImmutableFinalMigrationHistory({
     args: ["show", `${revision}:${path}`],
     executeGit,
   });
+  let baseManifestSource;
+  let headManifestSource;
   let baseManifest;
   let headManifest;
   try {
-    baseManifest = validateBaselineManifest(JSON.parse(await readRevisionFile(mergeBaseSha, manifestRelativePath)));
-    headManifest = validateBaselineManifest(JSON.parse(await readRevisionFile(headSha, manifestRelativePath)));
+    [baseManifestSource, headManifestSource] = await Promise.all([
+      readRevisionFile(mergeBaseSha, manifestRelativePath),
+      readRevisionFile(headSha, manifestRelativePath),
+    ]);
+    baseManifest = validateBaselineManifest(JSON.parse(baseManifestSource));
+    headManifest = validateBaselineManifest(JSON.parse(headManifestSource));
   } catch (error) {
     if (error?.message === "isolated_supabase_db_review_history_unavailable") throw error;
     fail("isolated_supabase_db_final_migration_history_drift");
   }
   const baseEntries = baseManifest.orderedNewMigrations;
   const headEntries = headManifest.orderedNewMigrations;
+  const baseFinalEntries = baseEntries.filter((entry) => entry.status === "final");
+  const isReviewedManifestBootstrap = baseSha === REVIEWED_MANIFEST_BOOTSTRAP.baseSha
+    && mergeBaseSha === REVIEWED_MANIFEST_BOOTSTRAP.baseSha;
+  if (isReviewedManifestBootstrap) {
+    if (sha256(baseManifestSource) !== REVIEWED_MANIFEST_BOOTSTRAP.baseManifestSha256
+      || sha256(headManifestSource) !== REVIEWED_MANIFEST_BOOTSTRAP.headManifestSha256) {
+      fail("isolated_supabase_db_final_migration_history_drift");
+    }
+    let nextHeadIndex = 0;
+    for (const entry of baseFinalEntries) {
+      const matchingHeadIndex = headEntries.findIndex((headEntry, index) => index >= nextHeadIndex && headEntry.fileName === entry.fileName);
+      if (matchingHeadIndex < 0 || canonical(headEntries[matchingHeadIndex]) !== canonical(entry)) fail("isolated_supabase_db_final_migration_history_drift");
+      nextHeadIndex = matchingHeadIndex + 1;
+    }
+    const baseCandidates = baseEntries.filter((entry) => entry.status === "candidate");
+    const promotedHeadEntry = headEntries.find((entry) => entry.fileName === REVIEWED_MANIFEST_BOOTSTRAP.promotedFileName);
+    if (baseCandidates.length !== 1
+      || baseCandidates[0].fileName !== REVIEWED_MANIFEST_BOOTSTRAP.promotedFileName
+      || baseCandidates[0].sha256 !== REVIEWED_MANIFEST_BOOTSTRAP.promotedSha256
+      || canonical(promotedHeadEntry) !== canonical({ ...baseCandidates[0], status: "final" })) {
+      fail("isolated_supabase_db_final_migration_history_drift");
+    }
+    try {
+      for (const entry of baseEntries) {
+        const migrationPath = `supabase/migrations/${entry.fileName}`;
+        const [baseSql, headSql] = await Promise.all([
+          readRevisionFile(mergeBaseSha, migrationPath),
+          readRevisionFile(headSha, migrationPath),
+        ]);
+        if (baseSql !== headSql || sha256(baseSql) !== entry.sha256 || sha256(headSql) !== entry.sha256) fail("isolated_supabase_db_final_migration_history_drift");
+      }
+      for (const entry of headEntries) {
+        const headSql = await readRevisionFile(headSha, `supabase/migrations/${entry.fileName}`);
+        if (entry.status !== "final" || sha256(headSql) !== entry.sha256) fail("isolated_supabase_db_final_migration_history_drift");
+      }
+    } catch {
+      fail("isolated_supabase_db_final_migration_history_drift");
+    }
+    return {
+      mergeBaseSha,
+      baseFinalCount: baseFinalEntries.length,
+      appendedCount: headEntries.length - baseEntries.length,
+    };
+  }
   if (headEntries.length < baseEntries.length) fail("isolated_supabase_db_final_migration_history_drift");
   for (let index = 0; index < baseEntries.length; index += 1) {
     if (canonical(headEntries[index]) !== canonical(baseEntries[index])) fail("isolated_supabase_db_final_migration_history_drift");
   }
-  const baseFinalEntries = baseEntries.filter((entry) => entry.status === "final");
   for (const entry of baseFinalEntries) {
     const migrationPath = `supabase/migrations/${entry.fileName}`;
     let baseSql;
@@ -327,7 +383,10 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     let stopState = "not_required";
     let tempRootState = retainTempRoot ? "retained" : "removed";
     let cleanupFailed = false;
+    let stopAttempted = false;
+    let tempRootCleanupAttempted = false;
     if (startAttempted) {
+      stopAttempted = true;
       try {
         const stopResult = await executeProcess({ command: supabasePath, args: ["stop", "--workdir", runtime.tempRoot, "--project-id", runtime.projectId, "--no-backup", "--yes"], cwd: runtime.tempRoot, env: cleanEnvironment });
         stopState = stopResult?.code === 0 ? "succeeded" : "failed";
@@ -337,12 +396,14 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
       cleanupFailed = stopState === "failed";
     }
     if (!retainTempRoot) {
+      tempRootCleanupAttempted = true;
       try { await rm(runtime.tempRoot, { recursive: true, force: true }); } catch {
         tempRootState = "failed";
         cleanupFailed = true;
       }
     }
-    log(JSON.stringify({ cleanup: cleanupFailed ? "failed" : startAttempted ? "succeeded" : "not_required", stop: stopState, tempRoot: tempRootState }));
+    const cleanupAttempted = stopAttempted || tempRootCleanupAttempted;
+    log(JSON.stringify({ cleanup: cleanupFailed ? "failed" : cleanupAttempted ? "succeeded" : "not_required", stop: stopState, tempRoot: tempRootState }));
     if (cleanupFailed && !primaryError) fail("isolated_supabase_db_cleanup_failed");
   }
 }
