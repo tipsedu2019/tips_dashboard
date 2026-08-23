@@ -28,6 +28,9 @@ jobs:
       - name: Test transactional safety contracts
         run: node --test tests/retryable-sqlstate-contract.test.mjs tests/supabase-transactional-preflight-builder.test.mjs
 
+      - name: Test Supabase post-push receipt
+        run: node --test tests/supabase-postdeploy-contract.test.mjs
+
       - name: Verify Supabase migration layout
         run: node scripts/verify-supabase-migration-layout.mjs
 
@@ -151,3 +154,18 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: supabase db push --linked --include-all
+
+      - name: Capture post-push linked migration ledger
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase migration list --linked > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"
+
+      - name: Capture active registration workflow contract
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase db query --linked --output json --file supabase/tests/active_registration_workflow_postdeploy_readonly.sql > "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"
+
+      - name: Verify post-push receipt
+        run: node scripts/verify-supabase-postdeploy-contract.mjs --migration-ledger "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt" --query-receipt "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"
