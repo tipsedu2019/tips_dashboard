@@ -24,6 +24,8 @@ const EXPECTED_TRANSACTIONAL_PGTAP_COMMAND =
   `supabase test db --linked ${TRANSACTIONAL_PGTAP_OUTPUT}`
 const POSTDEPLOY_READONLY_SQL =
   "supabase/tests/active_registration_workflow_postdeploy_readonly.sql"
+const POSTDEPLOY_READONLY_SQL_SHA256 =
+  "f1259e7c299163de88dc2e865e489df7dd6ef3f2bc21c93cfe0e12f3ebc115be"
 const POSTDEPLOY_VERIFIER = "scripts/verify-supabase-postdeploy-contract.mjs"
 const POSTDEPLOY_LEDGER = '"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"'
 const POSTDEPLOY_RECEIPT = '"${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"'
@@ -1047,6 +1049,9 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
     addError(errors, "postdeploy_contract_sql_not_regular", relative(resolvedRoot, postdeploySqlPath))
   } else {
     const postdeploySql = await readFile(postdeploySqlPath, "utf8")
+    if (sha256(postdeploySql) !== POSTDEPLOY_READONLY_SQL_SHA256) {
+      addError(errors, "postdeploy_contract_sql_hash_mismatch", relative(resolvedRoot, postdeploySqlPath))
+    }
     if (
       !/^begin transaction read only;\s*set local statement_timeout = '5s';\s*set local lock_timeout = '1s';/isu.test(postdeploySql) ||
       (postdeploySql.match(/\bas contract_ok\b/giu) ?? []).length !== 1 ||

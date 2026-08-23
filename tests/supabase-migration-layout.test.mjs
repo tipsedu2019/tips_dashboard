@@ -29,6 +29,8 @@ const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notifica
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = []
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "fa5c1df15942aadd2bee7bdf4136fb0c7218e7a94fb52d957b878cce5fa645cd"
+const POSTDEPLOY_READONLY_SQL_SHA256 =
+  "f1259e7c299163de88dc2e865e489df7dd6ef3f2bc21c93cfe0e12f3ebc115be"
 const FOCUSED_PGTAP_PATH =
   "supabase/tests/registration_level_test_result_parent_reconciliation_test.sql"
 const LINKED_MIGRATION_LEDGER_PATH = "\${RUNNER_TEMP}/supabase-migration-list.txt"
@@ -1882,6 +1884,61 @@ test("post-push receipt는 고정 read-only SQL과 fresh ledger·query·verifier
   assert.match(sql, /^set local lock_timeout = '1s';$/imu)
   assert.match(sql, /\) as contract_ok;\s*rollback;\s*$/isu)
   assert.doesNotMatch(sql, /\b(?:insert|update|delete|merge|truncate|alter|drop|create|grant|revoke|cron\.|net\.)\b/iu)
+})
+
+test("postdeploy search_path predicate treats NULL proconfig as a contract failure", async () => {
+  const sql = await readFile(
+    join(
+      repoRoot,
+      "supabase",
+      "tests",
+      "active_registration_workflow_postdeploy_readonly.sql",
+    ),
+    "utf8",
+  )
+
+  assert.match(
+    sql,
+    /\(\s*pg_catalog\.cardinality\(proconfig\) = 1\s*and proconfig\[1\] in \('search_path=', 'search_path=""'\)\s*\) is distinct from true/iu,
+    "NULL proconfig must fail the exact empty-search-path boundary",
+  )
+})
+
+test("layout verifier pins every semantic predicate in the fixed postdeploy catalog query", async () => {
+  const sqlPath = join(
+    repoRoot,
+    "supabase",
+    "tests",
+    "active_registration_workflow_postdeploy_readonly.sql",
+  )
+  const source = await readFile(sqlPath, "utf8")
+  assert.equal(await sha256(sqlPath), POSTDEPLOY_READONLY_SQL_SHA256)
+  const requiredPredicates = [
+    ["public signature", "public.set_registration_workflow_status_v1(uuid,text,integer,text)"],
+    ["private signature", "dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)"],
+    ["delegation", "dashboard_private.set_registration_workflow_status_v1_impl%"],
+    ["security modes", "is_private and not prosecdef"],
+    ["owner", "pg_catalog.pg_get_userbyid(proowner) <> 'postgres'"],
+    ["ACL", "'authenticated'"],
+    ["denied roles", "'service_role'::name"],
+    ["40001 predicate", "definition like '%40001%'"],
+    ["23514 predicate", "definition not like '%23514%'"],
+  ]
+
+  for (const [name, predicate] of requiredPredicates) {
+    const fixtureRoot = await createRepoFixture()
+    const fixturePath = join(
+      fixtureRoot,
+      "supabase",
+      "tests",
+      "active_registration_workflow_postdeploy_readonly.sql",
+    )
+    await writeFile(fixturePath, source.replace(predicate, `removed_${name.replaceAll(" ", "_")}`))
+    assertIncludesErrorCode(
+      await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot }),
+      "postdeploy_contract_sql_hash_mismatch",
+    )
+  }
 })
 
 test("layout verifier는 post-push 영수증 누락·순서·시크릿 scope·미승인 artifact를 fail-closed한다", async () => {

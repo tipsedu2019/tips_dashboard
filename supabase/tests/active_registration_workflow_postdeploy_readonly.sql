@@ -28,8 +28,10 @@ select (
     from functions
     where oid is null
       or pg_catalog.pg_get_userbyid(proowner) <> 'postgres'
-      or pg_catalog.cardinality(proconfig) <> 1
-      or proconfig[1] not in ('search_path=', 'search_path=""')
+      or (
+        pg_catalog.cardinality(proconfig) = 1
+        and proconfig[1] in ('search_path=', 'search_path=""')
+      ) is distinct from true
       or (is_private and not prosecdef)
       or (not is_private and prosecdef)
       or definition like '%40001%'

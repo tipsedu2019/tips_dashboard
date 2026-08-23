@@ -43,7 +43,7 @@ as $$
   where procedure.oid = p_function;
 $$;
 
-select plan(19);
+select plan(21);
 
 select ok(
   pg_catalog.to_regprocedure('public.set_registration_workflow_status_v1(uuid,text,integer,text)') is not null,
@@ -262,6 +262,36 @@ select is(
   'exact function boundary rejects wrapper search path drift'
 );
 rollback to savepoint wrapper_search_path_mutation;
+
+create function pg_temp.postdeploy_null_proconfig_boundary()
+returns boolean
+language sql
+as $$
+  select true;
+$$;
+
+select is(
+  (
+    select procedure.proconfig is null
+    from pg_catalog.pg_proc procedure
+    where procedure.oid = 'pg_temp.postdeploy_null_proconfig_boundary()'::pg_catalog.regprocedure
+  ),
+  true,
+  'postdeploy exact empty search path fixture has NULL proconfig'
+);
+
+select is(
+  (
+    select (
+      pg_catalog.cardinality(procedure.proconfig) = 1
+      and procedure.proconfig[1] in ('search_path=', 'search_path=""')
+    ) is distinct from true
+    from pg_catalog.pg_proc procedure
+    where procedure.oid = 'pg_temp.postdeploy_null_proconfig_boundary()'::pg_catalog.regprocedure
+  ),
+  true,
+  'postdeploy exact empty search path boundary rejects NULL proconfig'
+);
 
 select * from finish();
 rollback;
