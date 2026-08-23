@@ -1965,6 +1965,14 @@ test("layout verifier는 post-push 영수증 누락·순서·시크릿 scope·�
       code: "db_push_workflow_postdeploy_order_mismatch",
     },
     {
+      name: "ledger capture runs before migration push",
+      mutate: (workflow) => workflow.replace(
+        "      - name: Push migrations\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase db push --linked --include-all\n\n      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked > \"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt\"",
+        "      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked > \"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt\"\n\n      - name: Push migrations\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase db push --linked --include-all",
+      ),
+      code: "db_push_workflow_postdeploy_order_mismatch",
+    },
+    {
       name: "verifier receives a Supabase secret",
       mutate: (workflow) => workflow.replace(
         "      - name: Verify post-push receipt\n",

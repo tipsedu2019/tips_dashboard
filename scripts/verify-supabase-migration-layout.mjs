@@ -1711,14 +1711,16 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       addError(errors, "db_push_workflow_postdeploy_verifier_secret_scope_mismatch", workflowRelativePath)
     }
 
+    const postdeployPushIndex = workflow.indexOf("run: supabase db push --linked --include-all")
     const postdeployLedgerIndex = workflow.indexOf(`run: ${EXPECTED_POSTDEPLOY_LEDGER_COMMAND}`)
     const postdeployQueryIndex = workflow.indexOf(`run: ${EXPECTED_POSTDEPLOY_QUERY_COMMAND}`)
     const postdeployVerifierIndex = workflow.indexOf(`run: ${EXPECTED_POSTDEPLOY_VERIFIER_COMMAND}`)
     if (
+      postdeployPushIndex < 0 ||
       postdeployLedgerIndex < 0 ||
       postdeployQueryIndex < 0 ||
       postdeployVerifierIndex < 0 ||
-      !(exactPushLines[0] < postdeployLedgerIndex && postdeployLedgerIndex < postdeployQueryIndex && postdeployQueryIndex < postdeployVerifierIndex)
+      !(postdeployPushIndex < postdeployLedgerIndex && postdeployLedgerIndex < postdeployQueryIndex && postdeployQueryIndex < postdeployVerifierIndex)
     ) {
       addError(errors, "db_push_workflow_postdeploy_order_mismatch", workflowRelativePath)
     }

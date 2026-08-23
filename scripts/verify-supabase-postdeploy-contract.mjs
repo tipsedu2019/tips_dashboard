@@ -17,14 +17,12 @@ function ledgerRows(ledger) {
       continue
     }
     const [local = "", remote = ""] = columns.map((column) => column.trim())
-    const localIsVersion = VERSION_PATTERN.test(local)
-    const remoteIsVersion = VERSION_PATTERN.test(remote)
-    const hasVersion = localIsVersion || remoteIsVersion
-    if (!hasVersion) {
-      if (/\d{14}/.test(`${local}|${remote}`)) fail("postdeploy_ledger_malformed")
+    const isHeader = local === "Local" && remote === "Remote"
+    const isSeparator = /^-+$/.test(local) && /^-+$/.test(remote)
+    if (isHeader || isSeparator || (!local && !remote)) {
       continue
     }
-    if ((local && !localIsVersion) || (remote && !remoteIsVersion)) {
+    if ((local && !VERSION_PATTERN.test(local)) || (remote && !VERSION_PATTERN.test(remote))) {
       fail("postdeploy_ledger_malformed")
     }
     rows.push({ local: local || null, remote: remote || null })
