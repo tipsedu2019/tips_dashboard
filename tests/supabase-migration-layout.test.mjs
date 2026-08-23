@@ -28,7 +28,7 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = []
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "fa5c1df15942aadd2bee7bdf4136fb0c7218e7a94fb52d957b878cce5fa645cd"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "8126baf45842dd9f47148c8c87310ecbf1c4c650b524869887a7f51d501f90fc"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
   "f1259e7c299163de88dc2e865e489df7dd6ef3f2bc21c93cfe0e12f3ebc115be"
 const FOCUSED_PGTAP_PATH =
@@ -1188,6 +1188,42 @@ test("prepare ACL migration만 science 이후 protected function 참조로 허�
     await validateSupabaseMigrationLayout({ repoRoot: renamedFixture }),
     "science_final_definition_mismatch",
   )
+})
+
+test("required workflows reject mutable GitHub action references", async () => {
+  const fixtureRoot = await createRepoFixture()
+  const workflowNames = [
+    "free-tier-guardrails.yml",
+    "supabase-db-push.yml",
+    "supabase-sql-review.yml",
+  ]
+
+  for (const workflowName of workflowNames) {
+    const workflowPath = join(fixtureRoot, ".github", "workflows", workflowName)
+    const source = await readFile(workflowPath, "utf8")
+    assert.match(source, /actions\/checkout@/)
+    assert.match(source, /actions\/setup-node@/)
+    await writeFile(
+      workflowPath,
+      source
+        .replaceAll(/actions\/checkout@[^\s#]+/g, "actions/checkout@v4")
+        .replaceAll(/actions\/setup-node@[^\s#]+/g, "actions/setup-node@v4"),
+    )
+  }
+
+  const errors = await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot })
+  for (const workflowName of workflowNames) {
+    for (const actionName of ["actions/checkout", "actions/setup-node"]) {
+      assert.ok(
+        errors.some(
+          (error) => error.includes("workflow_action_ref_not_approved")
+            && error.includes(workflowName)
+            && error.includes(actionName),
+        ),
+        `expected immutable ${actionName} enforcement for ${workflowName}, received ${JSON.stringify(errors)}`,
+      )
+    }
+  }
 })
 
 test("required DB push workflow의 실파일, exact command, 순서를 강제한다", async () => {
