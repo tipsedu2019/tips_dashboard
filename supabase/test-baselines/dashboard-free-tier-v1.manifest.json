@@ -114,6 +114,16 @@
       "fileName": "20260824182043_registration_admission_order_independence.sql",
       "status": "final",
       "sha256": "cc541b6ddae1a43f6a1022491b547efafb8775006dd39c0d14ba76e551467bd4"
+    },
+    {
+      "fileName": "20260824182143_class_close_atomic_roster_transition.sql",
+      "status": "final",
+      "sha256": "f6fd3c2d23f6f618f7cbb287cbb5c77ecd450324f58ed7a3dd9017acce91e06f"
+    },
+    {
+      "fileName": "20260824182243_class_close_enrollment_constraints_validate.sql",
+      "status": "final",
+      "sha256": "0dbaba62795870cf6ba93794d2f53c40bc83a694c4ef9947f0b367c6dc2de5b1"
     }
   ]
 }

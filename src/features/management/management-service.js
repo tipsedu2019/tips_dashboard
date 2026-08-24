@@ -1470,6 +1470,30 @@ export function createManagementService(options = {}) {
   });
   const refreshPublicClassesCache = options.refreshPublicClassesCache || ((reason) =>
     invalidatePublicClassesCacheAfterMutation(supabase, reason));
+  const classCloseRequestKeys = new Map();
+  const commitClassClose = async (client, classId, requestKey) => {
+    const safeClassId = trimText(classId);
+    if (!safeClassId) {
+      throw new Error("수업 ID를 찾을 수 없습니다.");
+    }
+    const safeRequestKey = trimText(requestKey)
+      || classCloseRequestKeys.get(safeClassId)
+      || trimText(generateId());
+    if (!safeRequestKey) {
+      throw new Error("종강 요청 키를 만들 수 없습니다.");
+    }
+    classCloseRequestKeys.set(safeClassId, safeRequestKey);
+    const { data, error } = await client.rpc("close_class_atomic_v1", {
+      p_class_id: safeClassId,
+      p_request_key: safeRequestKey,
+    })
+      .abortSignal(AbortSignal.timeout(8_000))
+      .retry(false);
+    if (error) {
+      throw error;
+    }
+    return data || null;
+  };
 
   return {
     get configError() {
@@ -1688,6 +1712,13 @@ export function createManagementService(options = {}) {
       const payload = options.scheduleOwnership === "normalized"
         ? buildClassMetadataPayload(record, payloadOptions)
         : buildClassPayload(record, payloadOptions);
+      if (payload.status === ARCHIVED_CLASS_STATUS) {
+        const metadataPayload = stripPayloadFields(payload, ["status", "student_ids", "waitlist_ids"]);
+        await upsertClassRows(client, metadataPayload);
+        const closed = await commitClassClose(client, payload.id, options.requestKey);
+        await refreshPublicClassesCache("class");
+        return closed;
+      }
       const updated = await upsertClassRows(
         client,
         runtime.mode === "legacy" ? payload : stripReadyClassWriteFields(payload),
@@ -1770,20 +1801,13 @@ export function createManagementService(options = {}) {
       return data || null;
     },
 
-    async deleteClass(id) {
+    async deleteClass(id, options = {}) {
       const client = ensureClient(supabase);
       const safeId = trimText(id);
       if (!safeId) {
         return [];
       }
-      const { data, error } = await client
-        .from("classes")
-        .update({ status: ARCHIVED_CLASS_STATUS })
-        .eq("id", safeId)
-        .select();
-      if (error) {
-        throw error;
-      }
+      const data = await commitClassClose(client, safeId, options.requestKey);
       await refreshPublicClassesCache("class");
       return data || [];
     },

@@ -468,6 +468,20 @@ test("query budget allows the exact task stats scalar RPC without a page limit",
   assert.deepEqual(result, { ok: true, violations: [] })
 })
 
+test("query budget allows the exact atomic class-close scalar RPC with bounded request controls", async () => {
+  const result = await verifyFixture({
+    surface: "management",
+    file: "src/features/management/management-service.js",
+    source: `export async function commitClassClose(client, classId, requestKey) {
+  return client.rpc("close_class_atomic_v1", { p_class_id: classId, p_request_key: requestKey })
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result, { ok: true, violations: [] })
+})
+
 test("query budget allows exact operations scalar and internally bounded catalog RPCs", async () => {
   const result = await verifyFixture({
     surface: "operations",

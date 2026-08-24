@@ -15,6 +15,44 @@ export function reconcilePendingManagementFilters({ current, requested, pending 
   return { filters: current, pending };
 }
 
+function normalizeSearchValue(value) {
+  return String(value || "").trim();
+}
+
+export function reconcilePendingManagementSearch({
+  pendingSearch,
+  currentInput,
+  debouncedInput,
+  requestedSearch,
+  composing,
+}) {
+  if (pendingSearch === null || pendingSearch === undefined) {
+    return { shouldSyncUrl: false, pendingSearch: null };
+  }
+
+  const pending = normalizeSearchValue(pendingSearch);
+  const current = normalizeSearchValue(currentInput);
+  const debounced = normalizeSearchValue(debouncedInput);
+  const requested = normalizeSearchValue(requestedSearch);
+
+  if (composing || current !== pending || debounced !== pending) {
+    return { shouldSyncUrl: false, pendingSearch: pending };
+  }
+
+  if (requested === debounced) {
+    return { shouldSyncUrl: false, pendingSearch: null };
+  }
+
+  return { shouldSyncUrl: true, pendingSearch: pending };
+}
+
+export function withRequestedDefaultClassPeriod(requested, defaultPeriod) {
+  return {
+    ...(requested || {}),
+    period: String(defaultPeriod || "").trim(),
+  };
+}
+
 export function shouldRenderManagementInitialLoading(loading, rowCount) {
   return Boolean(loading && rowCount === 0);
 }

@@ -836,6 +836,7 @@ test("class management ends classes through the status field and keeps audit dat
   const serviceSource = await readFile(new URL("src/features/management/management-service.js", root), "utf8");
   const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
   const auditMigration = await readFile(new URL("supabase/migrations/20260429162000_teacher_account_link_audit.sql", root), "utf8");
+  const classCloseMigration = await readFile(new URL("supabase/migrations/20260824182143_class_close_atomic_roster_transition.sql", root), "utf8");
 
   assert.match(hookSource, /function readOptionalClassAuditLogs/);
   assert.match(hookSource, /from\("dashboard_audit_logs"\)/);
@@ -863,7 +864,12 @@ test("class management ends classes through the status field and keeps audit dat
   assert.doesNotMatch(tableSource, /종강 처리/);
   assert.doesNotMatch(tableSource, /일괄 종강/);
   assert.match(serviceSource, /const ARCHIVED_CLASS_STATUS = "종강"/);
-  assert.match(serviceSource, /\.update\(\{ status: ARCHIVED_CLASS_STATUS \}\)/);
+  assert.match(serviceSource, /client\.rpc\("close_class_atomic_v1"/);
+  assert.match(serviceSource, /client\.rpc\("close_class_atomic_v1"[\s\S]*?\.abortSignal\(AbortSignal\.timeout\(8_000\)\)[\s\S]*?\.retry\(false\)/);
+  assert.doesNotMatch(serviceSource, /\.update\(\{ status: ARCHIVED_CLASS_STATUS \}\)/);
+  assert.match(classCloseMigration, /create or replace function public\.close_class_atomic_v1/);
+  assert.match(classCloseMigration, /create trigger class_close_requires_atomic_rpc/);
+  assert.match(classCloseMigration, /grant execute on function public\.close_class_atomic_v1\(uuid, uuid\)[\s\S]*?to authenticated/);
   assert.match(auditMigration, /create trigger dashboard_audit_classes/);
 });
 

@@ -83,9 +83,11 @@ import {
 import {
   formatStudentSchoolCategoryLabel,
   reconcilePendingManagementFilters,
+  reconcilePendingManagementSearch,
   replaceManagementListUrl,
   shouldRenderManagementInitialLoading,
   sortStudentSchoolCategoryValues,
+  withRequestedDefaultClassPeriod,
 } from "./management-filter-transition.js";
 
 const STORAGE_VERSION = 14;
@@ -1410,8 +1412,8 @@ export function ManagementDataTable({
         ? requestedStudentListQueryState.q
         : requestedTextbookListQueryState.q
   ));
-  const globalFilterCompositionRef = useRef(false);
-  const searchInputPendingRef = useRef(false);
+  const [searchComposing, setSearchComposing] = useState(false);
+  const pendingSearchValueRef = useRef<string | null>(null);
   const deferredGlobalFilter = useDeferredValue(globalFilter);
   const debouncedGlobalFilter = useDebouncedValue(globalFilter, 300).trim();
   const [classGroupFilter, setClassGroupFilter] = useState(() => requestedClassListQueryState.period);
@@ -2130,17 +2132,44 @@ export function ManagementDataTable({
   }, [currentTextbookListQueryState, kind, pathname, router, searchParamString]);
 
   useEffect(() => {
-    if (globalFilterCompositionRef.current) return;
+    const requestedSearch = kind === "classes"
+      ? requestedClassListQueryState.q
+      : kind === "students"
+        ? requestedStudentListQueryState.q
+        : requestedTextbookListQueryState.q;
+    const reconciliation = reconcilePendingManagementSearch({
+      pendingSearch: pendingSearchValueRef.current,
+      currentInput: globalFilter,
+      debouncedInput: debouncedGlobalFilter,
+      requestedSearch,
+      composing: searchComposing,
+    });
+    pendingSearchValueRef.current = reconciliation.pendingSearch;
+    if (!reconciliation.shouldSyncUrl) return;
     syncClassListQueryState({ q: debouncedGlobalFilter });
     syncStudentListQueryState({ q: debouncedGlobalFilter });
     syncTextbookListQueryState({ q: debouncedGlobalFilter });
-  }, [debouncedGlobalFilter, syncClassListQueryState, syncStudentListQueryState, syncTextbookListQueryState]);
+  }, [
+    debouncedGlobalFilter,
+    globalFilter,
+    kind,
+    requestedClassListQueryState.q,
+    requestedStudentListQueryState.q,
+    requestedTextbookListQueryState.q,
+    searchComposing,
+    syncClassListQueryState,
+    syncStudentListQueryState,
+    syncTextbookListQueryState,
+  ]);
 
   useEffect(() => {
     if (kind === "classes" && !requestedClassListQueryState.period && defaultPeriodFilter) {
-      syncClassListQueryState({ period: defaultPeriodFilter });
+      syncClassListQueryState(withRequestedDefaultClassPeriod(
+        requestedClassListQueryState,
+        defaultPeriodFilter,
+      ));
     }
-  }, [defaultPeriodFilter, kind, requestedClassListQueryState.period, syncClassListQueryState]);
+  }, [defaultPeriodFilter, kind, requestedClassListQueryState, syncClassListQueryState]);
 
   useEffect(() => {
     const requestedSearch = kind === "classes"
@@ -2148,13 +2177,18 @@ export function ManagementDataTable({
       : kind === "students"
         ? requestedStudentListQueryState.q
         : requestedTextbookListQueryState.q;
-    if (searchInputPendingRef.current && requestedSearch === debouncedGlobalFilter) {
-      searchInputPendingRef.current = false;
-    }
-    if (!searchInputPendingRef.current && !globalFilterCompositionRef.current && globalFilter !== requestedSearch) {
+    const reconciliation = reconcilePendingManagementSearch({
+      pendingSearch: pendingSearchValueRef.current,
+      currentInput: globalFilter,
+      debouncedInput: debouncedGlobalFilter,
+      requestedSearch,
+      composing: searchComposing,
+    });
+    pendingSearchValueRef.current = reconciliation.pendingSearch;
+    if (reconciliation.pendingSearch === null && !searchComposing && globalFilter !== requestedSearch) {
       setGlobalFilter(requestedSearch);
     }
-  }, [debouncedGlobalFilter, globalFilter, kind, requestedClassListQueryState.q, requestedStudentListQueryState.q, requestedTextbookListQueryState.q]);
+  }, [debouncedGlobalFilter, globalFilter, kind, requestedClassListQueryState.q, requestedStudentListQueryState.q, requestedTextbookListQueryState.q, searchComposing]);
 
   useEffect(() => {
     if (kind !== "classes" || !statusColumn) {
@@ -2276,7 +2310,7 @@ export function ManagementDataTable({
   };
 
   const resetFilters = () => {
-    searchInputPendingRef.current = true;
+    pendingSearchValueRef.current = "";
     setGlobalFilter("");
     setClassGroupFilter(defaultPeriodFilter);
     setStudentSchoolCategoryFilter("");
@@ -2321,7 +2355,9 @@ export function ManagementDataTable({
   };
 
   const updateGlobalFilter = (value: string, options: { syncUrl?: boolean } = {}) => {
-    searchInputPendingRef.current = true;
+    if (options.syncUrl !== false) {
+      pendingSearchValueRef.current = value.trim();
+    }
     setGlobalFilter(value);
     setRowSelection({});
     setBulkEditValue("");
@@ -2330,7 +2366,7 @@ export function ManagementDataTable({
   };
 
   const isComposingSearchInput = (event: ChangeEvent<HTMLInputElement>) => (
-    globalFilterCompositionRef.current ||
+    searchComposing ||
     ("isComposing" in event.nativeEvent && Boolean(event.nativeEvent.isComposing))
   );
 
@@ -2339,11 +2375,11 @@ export function ManagementDataTable({
   };
 
   const handleGlobalFilterCompositionStart = () => {
-    globalFilterCompositionRef.current = true;
+    setSearchComposing(true);
   };
 
   const handleGlobalFilterCompositionEnd = (event: CompositionEvent<HTMLInputElement>) => {
-    globalFilterCompositionRef.current = false;
+    setSearchComposing(false);
     updateGlobalFilter(String(event.currentTarget.value), { syncUrl: true });
   };
 
@@ -3153,7 +3189,7 @@ export function ManagementDataTable({
           onSearchChange={updateGlobalFilter}
           onSearchCompositionStart={handleGlobalFilterCompositionStart}
           onSearchCompositionEnd={(value) => {
-            globalFilterCompositionRef.current = false;
+            setSearchComposing(false);
             updateGlobalFilter(value, { syncUrl: true });
           }}
           summaryLabel={""}

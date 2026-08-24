@@ -84,3 +84,107 @@ test("student school category keeps server values and shows Korean labels", asyn
     ["elementary", "middle", "high"],
   );
 });
+
+test("class deep-link search never rewrites URL-owned status or period filters", async () => {
+  const model = await loadTransitionModel();
+  assert.ok(model, "management filter transition model should exist");
+
+  const directStatusLink = model.reconcilePendingManagementSearch({
+    pendingSearch: null,
+    currentInput: "없는검색어",
+    debouncedInput: "없는검색어",
+    requestedSearch: "없는검색어",
+    composing: false,
+  });
+  assert.deepEqual(directStatusLink, {
+    shouldSyncUrl: false,
+    pendingSearch: null,
+  });
+
+  const directPeriodLink = model.reconcilePendingManagementSearch({
+    pendingSearch: null,
+    currentInput: "테스트",
+    debouncedInput: "테스트",
+    requestedSearch: "테스트",
+    composing: false,
+  });
+  assert.deepEqual(directPeriodLink, {
+    shouldSyncUrl: false,
+    pendingSearch: null,
+  });
+});
+
+test("user-owned search writes once after debounce and stops after the URL catches up", async () => {
+  const model = await loadTransitionModel();
+  assert.ok(model, "management filter transition model should exist");
+
+  assert.deepEqual(
+    model.reconcilePendingManagementSearch({
+      pendingSearch: "새 검색",
+      currentInput: "새 검색",
+      debouncedInput: "이전 검색",
+      requestedSearch: "이전 검색",
+      composing: false,
+    }),
+    { shouldSyncUrl: false, pendingSearch: "새 검색" },
+  );
+
+  assert.deepEqual(
+    model.reconcilePendingManagementSearch({
+      pendingSearch: "새 검색",
+      currentInput: "새 검색",
+      debouncedInput: "새 검색",
+      requestedSearch: "이전 검색",
+      composing: false,
+    }),
+    { shouldSyncUrl: true, pendingSearch: "새 검색" },
+  );
+
+  assert.deepEqual(
+    model.reconcilePendingManagementSearch({
+      pendingSearch: "새 검색",
+      currentInput: "새 검색",
+      debouncedInput: "새 검색",
+      requestedSearch: "새 검색",
+      composing: false,
+    }),
+    { shouldSyncUrl: false, pendingSearch: null },
+  );
+
+  assert.deepEqual(
+    model.reconcilePendingManagementSearch({
+      pendingSearch: null,
+      currentInput: "새 검색",
+      debouncedInput: "새 검색",
+      requestedSearch: "뒤로가기 검색",
+      composing: false,
+    }),
+    { shouldSyncUrl: false, pendingSearch: null },
+  );
+});
+
+test("default period canonicalization preserves URL-owned class search and status", async () => {
+  const model = await loadTransitionModel();
+  assert.ok(model, "management filter transition model should exist");
+
+  assert.deepEqual(
+    model.withRequestedDefaultClassPeriod({
+      q: "테스트",
+      period: "",
+      status: "종강",
+      subject: "영어",
+      grade: "중1",
+      teacher: "김교사",
+      classroom: "1강의실",
+    }, "period-default"),
+    {
+      q: "테스트",
+      period: "period-default",
+      status: "종강",
+      subject: "영어",
+      grade: "중1",
+      teacher: "김교사",
+      classroom: "1강의실",
+    },
+  );
+});
