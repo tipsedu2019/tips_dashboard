@@ -115,6 +115,7 @@ jobs:
           TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs \
             --review-head --lint --require-final --execute --authorized \
             --request-id "github-pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --postdeploy-contract \
             --test supabase/tests/active_registration_workflow_sqlstate_contract_test.sql \
             --test supabase/tests/registration_admission_order_independence_test.sql \
             --test supabase/tests/registration_level_test_result_parent_reconciliation_test.sql \

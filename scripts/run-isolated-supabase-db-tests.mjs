@@ -18,6 +18,7 @@ const ISOLATED_SCHEMA_REPAIR_PATH = "scripts/fixtures/dashboard-free-tier-isolat
 const ISOLATED_SCHEMA_REPAIR_SHA256 = "00c1a584269816060933bb6d728494aef085592d6c6b08dbc8a715cf6ee2794b";
 const ISOLATED_MIGRATION_PREREQUISITE_PATH = "scripts/fixtures/dashboard-free-tier-migration-prerequisites.sql";
 const ISOLATED_MIGRATION_PREREQUISITE_SHA256 = "051f9a7f82ab02abfb3437c6064782651032e4eded02aa89d8986dc9cf94c5f1";
+const POSTDEPLOY_CONTRACT_PATH = "supabase/tests/active_registration_workflow_postdeploy_readonly.sql";
 const REVIEWED_MANIFEST_BOOTSTRAP = Object.freeze({
   baseSha: "c7ea76b3dcd94101503305feadc95ce591f68050",
   baseManifestSha256: "0b55a4b7629dc8105fb9df45828db7fa1122651601096e529c8c79c5e801eef1",
@@ -40,6 +41,10 @@ const REVIEWED_MANIFEST_BOOTSTRAP = Object.freeze({
 
 function fail(code) { throw new Error(code); }
 export function sha256(value) { return createHash("sha256").update(value).digest("hex"); }
+export function validateIsolatedPostdeployContractOutput(value) {
+  if (typeof value !== "string" || value.trim() !== "t") fail("isolated_supabase_db_postdeploy_contract_invalid");
+  return true;
+}
 export function sanitizeChildDiagnostic(value) {
   if (typeof value !== "string") return "";
   return value
@@ -83,7 +88,7 @@ function processResult(command, args, options = {}) {
 }
 
 export function parseIsolatedDbArguments(argv) {
-  const result = { execute: false, authorized: false, requireFinal: false, reviewHead: false, reviewBaseSha: null, reviewHeadSha: null, lint: false, requestId: null, tests: [], probes: [] };
+  const result = { execute: false, authorized: false, requireFinal: false, reviewHead: false, reviewBaseSha: null, reviewHeadSha: null, lint: false, postdeployContract: false, requestId: null, tests: [], probes: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--execute") result.execute = true;
@@ -93,6 +98,7 @@ export function parseIsolatedDbArguments(argv) {
     else if (value === "--review-base-sha") result.reviewBaseSha = argv[++index] || null;
     else if (value === "--review-head-sha") result.reviewHeadSha = argv[++index] || null;
     else if (value === "--lint") result.lint = true;
+    else if (value === "--postdeploy-contract") result.postdeployContract = true;
     else if (value === "--request-id") result.requestId = argv[++index] || null;
     else if (value === "--test") result.tests.push(argv[++index] || "");
     else if (value === "--probe") result.probes.push(argv[++index] || "");
@@ -479,6 +485,9 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   try { migrationPrerequisite = await readFile(safeRepoPath(root, ISOLATED_MIGRATION_PREREQUISITE_PATH)); } catch { fail("isolated_supabase_db_prerequisite_drift"); }
   if (sha256(migrationPrerequisite) !== ISOLATED_MIGRATION_PREREQUISITE_SHA256) fail("isolated_supabase_db_prerequisite_drift");
   const requestedTests = await snapshotRequestedFiles(root, args.tests);
+  const postdeployContract = args.postdeployContract
+    ? (await snapshotRequestedFiles(root, [POSTDEPLOY_CONTRACT_PATH]))[0]
+    : null;
   const probes = await snapshotRequestedFiles(root, args.probes);
   const runtime = await prepareRuntime({ requestId: args.requestId, randomBytes, allocatePort, log, tempDirectory });
   const cleanEnvironment = { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" };
@@ -511,6 +520,9 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     await stageContents(migrationPrerequisite, join(runtime.tempRoot, "supabase/migrations/00000000000002_dashboard_free_tier_test_prerequisites.sql"));
     await stageContents(artifacts.parity, join(runtime.tempRoot, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"));
     await stageContents(smokeTest, join(runtime.tempRoot, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"));
+    if (postdeployContract) {
+      await stageContents(postdeployContract.contents, join(runtime.tempRoot, postdeployContract.path));
+    }
     startAttempted = true;
     await invoke(["db", "start", "--workdir", runtime.tempRoot, "--yes"]);
     await invoke(["test", "db", "--local", "--workdir", runtime.tempRoot, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql", "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"]);
@@ -519,6 +531,30 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     if (args.lint) await invoke(["db", "lint", "--local", "--workdir", runtime.tempRoot, "--fail-on", "error"]);
     for (const test of requestedTests) await stageContents(test.contents, join(runtime.tempRoot, test.path));
     if (args.tests.length) await invoke(["test", "db", "--local", "--workdir", runtime.tempRoot, ...args.tests]);
+    if (postdeployContract) {
+      const result = await executeProcess({
+        command: "docker",
+        args: [
+          "exec", `supabase_db_${runtime.projectId}`,
+          "psql", "--quiet", "--tuples-only", "--no-align", "--set", "ON_ERROR_STOP=1",
+          "--username", "postgres", "--dbname", "postgres", "--command",
+          postdeployContract.contents.toString("utf8"),
+        ],
+        cwd: runtime.tempRoot,
+        env: cleanEnvironment,
+      });
+      if (result.code !== 0) {
+        log(JSON.stringify({
+          event: "isolated_supabase_db_child_failed",
+          step: "postdeploy contract",
+          exitCode: Number.isInteger(result.code) ? result.code : null,
+          stdout: sanitizeChildDiagnostic(result.stdout),
+          stderr: sanitizeChildDiagnostic(result.stderr),
+        }));
+        fail("isolated_supabase_db_child_failed");
+      }
+      validateIsolatedPostdeployContractOutput(result.stdout);
+    }
     const status = await invoke(["status", "--workdir", runtime.tempRoot, "--output", "json"]);
     const localDbUrl = parseLocalDbUrl(status.stdout, runtime.ports.db);
     for (const probe of probes) {

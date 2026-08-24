@@ -75,6 +75,7 @@ async function makeRepo(t) {
     "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json",
     "supabase/tests/dashboard_free_tier_catalog_parity_test.sql",
     "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql",
+    "supabase/tests/active_registration_workflow_postdeploy_readonly.sql",
   ]) {
     const source = await readFile(new URL(`../${path}`, import.meta.url));
     const target = join(root, path);
@@ -382,9 +383,18 @@ test("isolated DB runner only plans without the explicit local authorization con
 });
 
 test("isolated DB runner exposes an explicit final-only lifecycle gate", async () => {
-  const { parseIsolatedDbArguments } = await import(runnerUrl.href);
+  const { parseIsolatedDbArguments, validateIsolatedPostdeployContractOutput } = await import(runnerUrl.href);
   const plan = parseIsolatedDbArguments(["--require-final"]);
   assert.equal(plan.requireFinal, true);
+  const postdeployPlan = parseIsolatedDbArguments(["--postdeploy-contract"]);
+  assert.equal(postdeployPlan.postdeployContract, true);
+  assert.equal(validateIsolatedPostdeployContractOutput("t\n"), true);
+  for (const invalid of ["", "f\n", "t\nt\n", '[{"contract_ok":true}]\n']) {
+    assert.throws(
+      () => validateIsolatedPostdeployContractOutput(invalid),
+      /isolated_supabase_db_postdeploy_contract_invalid/,
+    );
+  }
 });
 
 test("isolated DB runner parses explicit review-head and lint gates", async () => {
@@ -1086,16 +1096,17 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   const capture = join(root, "supabase/test-baselines/dashboard-free-tier-v1-captures", pointer.captureId);
   const originalParity = await readFile(join(capture, "parity.sql"));
   const originalSmoke = await readFile(join(root, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"));
+  const originalPostdeploy = await readFile(join(root, "supabase/tests/active_registration_workflow_postdeploy_readonly.sql"));
   const originalProbe = await readFile(join(root, "tests/probe.mjs"));
   const schemaRepairPath = join(root, "scripts/fixtures/dashboard-free-tier-isolated-schema-repair.sql");
   const originalSchemaRepair = await readFile(schemaRepairPath);
   const prerequisitePath = join(root, "scripts/fixtures/dashboard-free-tier-migration-prerequisites.sql");
   const originalPrerequisite = await readFile(prerequisitePath);
   const calls = [];
-  const staged = { baseline: false, schemaRepair: false, prerequisite: false, parity: false, smoke: false, migration: false, probe: false };
+  const staged = { baseline: false, schemaRepair: false, prerequisite: false, parity: false, smoke: false, migration: false, postdeploy: false, probe: false };
   const result = await runIsolatedSupabaseDbTests({
     root,
-    argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f", "--test", "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql", "--probe", "tests/probe.mjs"],
+    argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f", "--postdeploy-contract", "--test", "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql", "--probe", "tests/probe.mjs"],
     randomBytes: () => Buffer.from("a1b2c3d4e5f6", "hex"),
     retainTempRoot: true,
     allocatePort: (() => {
@@ -1123,6 +1134,13 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
         staged.smoke = (await readFile(join(invocation.cwd, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"))).equals(originalSmoke);
       }
       if (invocation.args[0] === "migration") staged.migration = (await readFile(join(invocation.cwd, "supabase/migrations/20260814000000_candidate.sql"), "utf8")) === "select 1;\n";
+      if (invocation.command === "docker") {
+        staged.postdeploy = (await readFile(join(invocation.cwd, "supabase/tests/active_registration_workflow_postdeploy_readonly.sql"))).equals(originalPostdeploy);
+        assert.equal(invocation.args[0], "exec");
+        assert.equal(invocation.args[1], "supabase_db_tips_supabase_db_qa_a1b2c3d4e5f6");
+        assert.equal(invocation.args.at(-1), originalPostdeploy.toString("utf8"));
+        return { code: 0, stdout: "t\n", stderr: "" };
+      }
       if (invocation.command === process.execPath) staged.probe = (await readFile(invocation.args[0])).equals(originalProbe);
       if (invocation.args[0] === "status") return { code: 0, stdout: JSON.stringify({ DB_URL: "postgresql://postgres:postgres@127.0.0.1:55433/postgres" }), stderr: "" };
       return { code: 0, stdout: "", stderr: "" };
@@ -1133,7 +1151,11 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   assert.equal(calls.filter((call) => call.args[0] === "stop").length, 1);
   assert.equal(calls.find((call) => call.command === process.execPath).env.TASK_LOCAL_DB_URL.includes("127.0.0.1"), true);
   assert.equal(calls.find((call) => call.command === process.execPath).env.SUPABASE_DATABASE_READ_TOKEN, undefined);
-  assert.deepEqual(staged, { baseline: true, schemaRepair: true, prerequisite: true, parity: true, smoke: true, migration: true, probe: true });
+  assert.equal(
+    Object.keys(calls.find((call) => call.command === "docker").env).some((key) => key.startsWith("SUPABASE_")),
+    false,
+  );
+  assert.deepEqual(staged, { baseline: true, schemaRepair: true, prerequisite: true, parity: true, smoke: true, migration: true, postdeploy: true, probe: true });
   assert.equal(dirname(result.runtime.tempRoot), process.env.RUNNER_TEMP || tmpdir());
   const runtimeConfig = await readFile(result.runtime.configPath, "utf8");
   assert.match(runtimeConfig, /project_id = "tips_supabase_db_qa_a1b2c3d4e5f6"/u);
@@ -1145,6 +1167,22 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   await writeFile(join(root, "tests/probe.mjs"), originalProbe);
   await writeFile(schemaRepairPath, originalSchemaRepair);
   await writeFile(prerequisitePath, originalPrerequisite);
+  await writeFile(join(root, "supabase/migrations/20260814000000_candidate.sql"), "select 1;\n");
+  const falseContractCalls = [];
+  await assert.rejects(
+    runIsolatedSupabaseDbTests({
+      root,
+      argv: ["--execute", "--authorized", "--request-id", "false-postdeploy-contract", "--postdeploy-contract"],
+      allocatePort: (() => { let port = 55700; return () => ++port; })(),
+      executeProcess: async (invocation) => {
+        falseContractCalls.push(invocation);
+        if (invocation.command === "docker") return { code: 0, stdout: "f\n", stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    }),
+    /isolated_supabase_db_postdeploy_contract_invalid/,
+  );
+  assert.equal(falseContractCalls.filter((call) => call.args[0] === "stop").length, 1);
   await writeFile(join(root, "supabase/migrations/20260814000000_candidate.sql"), "select 2;\n");
   await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_migration_hash_drift/);
   await writeFile(join(root, "supabase/migrations/20260814000000_candidate.sql"), "select 1;\n");
