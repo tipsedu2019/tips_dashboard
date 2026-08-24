@@ -7,6 +7,20 @@ import { createManagementService } from "../src/features/management/management-s
 const CLASS_ID = "10000000-0000-4000-8000-000000000201";
 const REQUEST_KEY = "20000000-0000-4000-8000-000000000201";
 
+function makeRpcQuery(result) {
+  return {
+    abortSignal(signal) {
+      assert.equal(signal instanceof AbortSignal, true);
+      return {
+        retry(enabled) {
+          assert.equal(enabled, false);
+          return Promise.resolve(result);
+        },
+      };
+    },
+  };
+}
+
 function makeClassCloseClient() {
   const calls = [];
 
@@ -28,9 +42,9 @@ function makeClassCloseClient() {
         },
       };
     },
-    async rpc(name, args) {
+    rpc(name, args) {
       calls.push(["rpc", name, args]);
-      return {
+      return makeRpcQuery({
         data: {
           id: CLASS_ID,
           classId: CLASS_ID,
@@ -38,7 +52,7 @@ function makeClassCloseClient() {
           removedStudentCount: 2,
         },
         error: null,
-      };
+      });
     },
   };
 }
@@ -106,15 +120,15 @@ test("an ambiguous class close retry reuses the same request key", async () => {
   const rpcCalls = [];
   let generated = 0;
   const client = {
-    async rpc(name, args) {
+    rpc(name, args) {
       rpcCalls.push([name, args]);
       if (rpcCalls.length === 1) {
-        return { data: null, error: new Error("network response lost") };
+        return makeRpcQuery({ data: null, error: new Error("network response lost") });
       }
-      return {
+      return makeRpcQuery({
         data: { id: CLASS_ID, classId: CLASS_ID, status: "종강" },
         error: null,
-      };
+      });
     },
   };
   const service = createManagementService({
@@ -142,12 +156,12 @@ test("a post-close cache refresh retry replays the committed request key", async
   let generated = 0;
   let refreshCalls = 0;
   const client = {
-    async rpc(name, args) {
+    rpc(name, args) {
       rpcCalls.push([name, args]);
-      return {
+      return makeRpcQuery({
         data: { id: CLASS_ID, classId: CLASS_ID, status: "종강" },
         error: null,
-      };
+      });
     },
   };
   const service = createManagementService({
@@ -178,12 +192,12 @@ test("a successful close keeps its receipt key for an outer workflow retry", asy
   const rpcCalls = [];
   let generated = 0;
   const client = {
-    async rpc(name, args) {
+    rpc(name, args) {
       rpcCalls.push([name, args]);
-      return {
+      return makeRpcQuery({
         data: { id: CLASS_ID, classId: CLASS_ID, status: "종강" },
         error: null,
-      };
+      });
     },
   };
   const service = createManagementService({

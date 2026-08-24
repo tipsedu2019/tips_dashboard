@@ -864,8 +864,8 @@ test("class management ends classes through the status field and keeps audit dat
   assert.doesNotMatch(tableSource, /종강 처리/);
   assert.doesNotMatch(tableSource, /일괄 종강/);
   assert.match(serviceSource, /const ARCHIVED_CLASS_STATUS = "종강"/);
-  assert.match(serviceSource, /const CLASS_CLOSE_RPC = "close_class_atomic_v1"/);
-  assert.match(serviceSource, /client\.rpc\(CLASS_CLOSE_RPC/);
+  assert.match(serviceSource, /client\.rpc\("close_class_atomic_v1"/);
+  assert.match(serviceSource, /client\.rpc\("close_class_atomic_v1"[\s\S]*?\.abortSignal\(AbortSignal\.timeout\(8_000\)\)[\s\S]*?\.retry\(false\)/);
   assert.doesNotMatch(serviceSource, /\.update\(\{ status: ARCHIVED_CLASS_STATUS \}\)/);
   assert.match(classCloseMigration, /create or replace function public\.close_class_atomic_v1/);
   assert.match(classCloseMigration, /create trigger class_close_requires_atomic_rpc/);

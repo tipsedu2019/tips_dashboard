@@ -24,6 +24,7 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "get_academic_timetable_range_v1",
   "get_academic_curriculum_detail_v1",
   "current_dashboard_role",
+  "close_class_atomic_v1",
 ])
 const EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES = new Set([
   "save_class_schedule_defaults_v1",

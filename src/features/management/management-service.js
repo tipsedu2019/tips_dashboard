@@ -19,7 +19,6 @@ const CONTINUOUS_CLASS_SCHEDULE_RPC = {
 };
 const CLASS_CREATE_WITH_GROUPS_RPC = "create_class_with_group_memberships_v1";
 const CLASS_REPLACE_GROUPS_RPC = "replace_class_group_memberships_v1";
-const CLASS_CLOSE_RPC = "close_class_atomic_v1";
 const MANAGEMENT_PAGE_SIZE = 30;
 const MANAGEMENT_KINDS = new Set(["students", "classes", "textbooks"]);
 const MANAGEMENT_FILTER_KEYS = Object.freeze({
@@ -1484,10 +1483,12 @@ export function createManagementService(options = {}) {
       throw new Error("종강 요청 키를 만들 수 없습니다.");
     }
     classCloseRequestKeys.set(safeClassId, safeRequestKey);
-    const { data, error } = await client.rpc(CLASS_CLOSE_RPC, {
+    const { data, error } = await client.rpc("close_class_atomic_v1", {
       p_class_id: safeClassId,
       p_request_key: safeRequestKey,
-    });
+    })
+      .abortSignal(AbortSignal.timeout(8_000))
+      .retry(false);
     if (error) {
       throw error;
     }
