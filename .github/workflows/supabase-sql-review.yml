@@ -45,6 +45,9 @@ jobs:
       - name: Verify domain SQLSTATE contract
         run: node scripts/verify-domain-sqlstate-contract.mjs
 
+      - name: Test legacy notification retry-storm regression
+        run: node --test --experimental-strip-types tests/notification-legacy-retry-storm.test.mjs tests/notification-legacy-retry-storm-route.test.mjs
+
       - name: Setup Squawk
         shell: bash
         run: |
@@ -114,4 +117,5 @@ jobs:
             --request-id "github-pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
             --test supabase/tests/active_registration_workflow_sqlstate_contract_test.sql \
             --test supabase/tests/registration_level_test_result_parent_reconciliation_test.sql \
-            --test supabase/tests/notification_contract_drain_evidence_schema_repair_test.sql
+            --test supabase/tests/notification_contract_drain_evidence_schema_repair_test.sql \
+            --test supabase/tests/legacy_notification_retry_storm_test.sql
