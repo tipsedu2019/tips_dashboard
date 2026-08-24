@@ -3015,8 +3015,7 @@ function fixturePhoneDigits(value: unknown) {
 
 function fixtureRegistrationIdentityFrozen(detail: OpsRegistrationCaseDetail) {
   return Boolean(
-    detail.task.registration?.admissionNoticeSent
-    || detail.admissionBatches.length > 0
+    detail.admissionBatches.length > 0
     || detail.enrollments.some((enrollment) => (
       !(enrollment.status === "planned" && enrollment.admissionBatchId === null)
     ))

@@ -10,6 +10,7 @@ export type RegistrationAdmissionProgressStep<TKey extends RegistrationAdmission
   label: string
   complete: boolean
   locked?: boolean
+  optional?: boolean
   content?: ReactNode
 }
 
@@ -26,19 +27,20 @@ export function RegistrationAdmissionProgress({
 }: {
   steps: RegistrationAdmissionProgressSteps
 }) {
-  const activeStepIndex = steps.findIndex((step) => !step.complete && !step.locked)
+  const activeStepIndex = steps.findIndex((step) => !step.complete && !step.locked && !step.optional)
 
   return (
     <ol aria-label="입학 처리 항목" className="divide-y rounded-md border bg-background">
       {steps.map((step, index) => {
-        const state = step.complete ? "complete" : index === activeStepIndex ? "active" : "pending"
-        const statusLabel = step.complete ? "완료" : state === "active" ? "진행" : "대기"
+        const state = step.complete ? "complete" : step.optional ? "optional" : index === activeStepIndex ? "active" : "pending"
+        const statusLabel = step.complete ? "완료" : state === "active" ? "진행" : state === "optional" ? "선택" : "대기"
         return (
           <li
             key={step.key}
             aria-label={`${step.label}: ${statusLabel}`}
             aria-current={state === "active" ? "step" : undefined}
             data-registration-admission-locked={step.locked ? "true" : undefined}
+            data-registration-admission-optional={step.optional ? "true" : undefined}
             data-registration-admission-state={state}
             className={`grid min-w-0 gap-3 p-3 transition-colors sm:grid-cols-[13rem_minmax(0,1fr)] sm:items-center ${
               state === "active" ? "bg-primary/[0.04]" : step.locked ? "bg-muted/20" : ""

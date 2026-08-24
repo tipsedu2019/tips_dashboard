@@ -427,10 +427,10 @@ test("R26 admission-form completion is unavailable before an enrollment decision
   assert.equal(availability.admissionNoticeSent.enabled, false);
 });
 
-test("R27 MakeEdu registration follows admission-form sending", () => {
+test("R27 MakeEdu registration is independent from admission-form sending", () => {
   const beforeAdmission = getRegistrationChecklistAvailability({ pipelineStatus: "6. 수납 확인", registration: { admissionNoticeSent: false } });
-  assert.equal(beforeAdmission.makeeduRegistered.enabled, false);
-  assert.match(beforeAdmission.makeeduRegistered.reason, /입학신청서 발송/);
+  assert.equal(beforeAdmission.makeeduRegistered.enabled, true);
+  assert.equal(beforeAdmission.makeeduRegistered.reason, "");
 
   const afterAdmission = getRegistrationChecklistAvailability({ pipelineStatus: "6. 수납 확인", registration: { admissionNoticeSent: true } });
   assert.equal(afterAdmission.makeeduRegistered.enabled, true);
@@ -459,7 +459,7 @@ test("R30 textbook billing is not a new admission checklist action", () => {
   assert.equal(Object.hasOwn(availability, "textbookBillingIssued"), false);
 });
 
-test("R30b unchecking a manual admission step clears only its downstream steps", () => {
+test("R30b admission-form history is independent while finance steps keep their downstream order", () => {
   const applyRegistrationChecklistChange = registrationWorkflow.applyRegistrationChecklistChange;
   assert.equal(typeof applyRegistrationChecklistChange, "function");
   const completed = {
@@ -473,9 +473,6 @@ test("R30b unchecking a manual admission step clears only its downstream steps",
   assert.deepEqual(applyRegistrationChecklistChange(completed, "admissionNoticeSent", false), {
     ...completed,
     admissionNoticeSent: false,
-    makeeduRegistered: false,
-    makeeduInvoiceSent: false,
-    paymentChecked: false,
   });
   assert.deepEqual(applyRegistrationChecklistChange(completed, "makeeduRegistered", false), {
     ...completed,
@@ -494,6 +491,10 @@ test("R30b unchecking a manual admission step clears only its downstream steps",
   });
   assert.equal(
     applyRegistrationChecklistChange({ ...completed, pipelineStatus: "6. 수납 확인" }, "admissionNoticeSent", false).pipelineStatus,
+    "6. 수납 확인",
+  );
+  assert.equal(
+    applyRegistrationChecklistChange({ ...completed, pipelineStatus: "5-1. 입학신청서 발송 완료" }, "admissionNoticeSent", false).pipelineStatus,
     "5. 입학 등록 결정",
   );
   assert.equal(completed.paymentChecked, true);
@@ -867,8 +868,8 @@ test("R62 later workflow stages retain a completed consultation", () => {
   assert.ok(blockers.includes("상담 완료일시"));
 });
 
-test("R63 admission checklist values cannot outlive their new chronological prerequisites", () => {
-  assert.ok(getRegistrationConsistencyBlockers({ registration: {
+test("R63 admission sending is independent while finance values retain chronological prerequisites", () => {
+  assert.ok(!getRegistrationConsistencyBlockers({ registration: {
     pipelineStatus: "6. 수납 확인",
     admissionNoticeSent: false,
     makeeduRegistered: true,

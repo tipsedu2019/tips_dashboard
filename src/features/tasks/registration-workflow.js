@@ -129,8 +129,8 @@ const REGISTRATION_WORKFLOW_STAGES = Object.freeze([
     summary: "입학 · 수납 · 운영 처리",
     details: Object.freeze([
       "입력 · 입학 절차와 수업·교재 정보",
-      "처리 · 입학신청서 발송 → MakeEdu 수업·교재 등록 → 청구서 발송 → 수납 완료 확인 순서로 처리합니다.",
-      "완료 · 네 단계와 학생·수업·수업 시작 정보를 확인한 뒤 등록 완료로 이동합니다.",
+      "처리 · 입학신청서 알림톡은 선택 사항이며, 필요하면 미리보기로 발송합니다. MakeEdu 수업·교재 등록 → 청구서 발송 → 수납 완료 확인 순서로 처리합니다.",
+      "완료 · MakeEdu 등록·청구서·수납 확인과 학생·수업·수업 시작 정보를 확인한 뒤 등록 완료로 이동합니다.",
     ]),
   }),
   Object.freeze({
@@ -535,10 +535,7 @@ export function getRegistrationConsistencyBlockers(task = {}, pipelineStatus = "
     blockers.push("상담 완료일시");
   }
 
-  const admissionNoticeRequired = ["5-1.", "6.", "7."].includes(prefix);
   const completionRequired = prefix === "7.";
-  if (admissionNoticeRequired && !registration.admissionNoticeSent) blockers.push("입학신청서 발송");
-  if (registration.makeeduRegistered && !registration.admissionNoticeSent) blockers.push("입학신청서 발송");
   if (registration.makeeduInvoiceSent && !registration.makeeduRegistered) blockers.push("메이크에듀 등록(수업, 교재)");
   if (registration.paymentChecked && !registration.makeeduInvoiceSent) blockers.push("청구서 발송");
   if (completionRequired) {
@@ -628,13 +625,12 @@ export function getRegistrationChecklistAvailability({ pipelineStatus = "", regi
   const prefix = getRegistrationPipelinePrefix(pipelineStatus);
   const admissionStage = ["5.", "5-1.", "6."].includes(prefix);
   const operationsStage = prefix === "6.";
-  const admissionReady = Boolean(registration.admissionNoticeSent);
   const makeEduReady = Boolean(registration.makeeduRegistered);
   const invoiceReady = Boolean(registration.makeeduInvoiceSent);
 
   return {
     admissionNoticeSent: checklistAvailability(admissionStage, "입학 등록 결정 후 확인할 수 있습니다."),
-    makeeduRegistered: checklistAvailability(operationsStage && admissionReady, admissionReady ? "수납 확인 단계에서 확인할 수 있습니다." : "입학신청서 발송을 먼저 완료하세요."),
+    makeeduRegistered: checklistAvailability(operationsStage, "수납 확인 단계에서 확인할 수 있습니다."),
     makeeduInvoiceSent: checklistAvailability(operationsStage && makeEduReady, makeEduReady ? "수납 확인 단계에서 확인할 수 있습니다." : "메이크에듀 등록을 먼저 완료하세요."),
     paymentChecked: checklistAvailability(operationsStage && invoiceReady, invoiceReady ? "수납 확인 단계에서 확인할 수 있습니다." : "청구서 발송을 먼저 완료하세요."),
   };
@@ -659,19 +655,14 @@ export function applyRegistrationChecklistChange(registration = {}, field = "", 
   const nextRegistration = { ...registration, [field]: Boolean(checked) };
   if (checked) return nextRegistration;
 
-  if (field === "admissionNoticeSent") {
-    if (["5-1.", "6."].includes(getRegistrationPipelinePrefix(nextRegistration.pipelineStatus))) {
-      nextRegistration.pipelineStatus = statusForPrefix("5.") || "5. 입학 등록 결정";
-    }
-    nextRegistration.makeeduRegistered = false;
-    nextRegistration.makeeduInvoiceSent = false;
-    nextRegistration.paymentChecked = false;
-  }
   if (field === "makeeduRegistered") {
     nextRegistration.makeeduInvoiceSent = false;
     nextRegistration.paymentChecked = false;
   }
   if (field === "makeeduInvoiceSent") nextRegistration.paymentChecked = false;
+  if (field === "admissionNoticeSent" && getRegistrationPipelinePrefix(nextRegistration.pipelineStatus) === "5-1.") {
+    nextRegistration.pipelineStatus = statusForPrefix("5.") || "5. 입학 등록 결정";
+  }
   return nextRegistration;
 }
 

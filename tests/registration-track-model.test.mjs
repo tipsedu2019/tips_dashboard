@@ -885,6 +885,23 @@ test("admission application state follows eligible child tracks and active messa
   }
 })
 
+test("admission application remains sendable after enrollment processing starts", () => {
+  assert.deepEqual(getRegistrationAdmissionApplicationState({
+    tracks: [{ id: "english", status: "enrollment_processing", workflowStatus: "payment_in_progress" }],
+    enrollments: [{ trackId: "english", status: "planned", admissionBatchId: "batch-1" }],
+    admissionNoticeSent: false,
+    admissionApplicationMessageStatus: "",
+    admissionApplicationMessageClaimActive: false,
+  }), {
+    targetTrackIds: ["english"],
+    eligible: true,
+    delivered: false,
+    syncNeeded: false,
+    blocked: false,
+    canSend: true,
+  })
+})
+
 test("manual enrollment status and persisted planned rows make admission actionable without legacy pipeline routing", () => {
   assert.deepEqual(getRegistrationAdmissionApplicationState({
     tracks: [
@@ -1304,6 +1321,43 @@ test("a second admission batch cannot start while another batch is open", () => 
     admissionNoticeSent: true,
     hasOtherOpenBatch: true,
   }), ["진행 중인 입학 처리"])
+})
+
+test("admission processing does not depend on admission-form message delivery", () => {
+  assert.deepEqual(getRegistrationTrackTransitionBlockers({
+    status: "enrollment_decided",
+    action: "start_enrollment_processing",
+    enrollmentCount: 1,
+    everyScheduleValid: true,
+    admissionNoticeSent: false,
+    hasOtherOpenBatch: false,
+  }), [])
+})
+
+test("identity editing ignores message history but retains active mutation locks", () => {
+  const getRegistrationIdentityEditLock = registrationTrackModel.getRegistrationIdentityEditLock
+  assert.equal(typeof getRegistrationIdentityEditLock, "function")
+
+  const deliveredOnly = {
+    enrollments: [],
+    admissionBatches: [],
+    admissionApplicationAccepted: true,
+    admissionApplicationMessageClaimActive: false,
+    task: { registration: { admissionNoticeSent: true } },
+  }
+  assert.equal(getRegistrationIdentityEditLock(deliveredOnly), false)
+  assert.equal(getRegistrationIdentityEditLock({
+    ...deliveredOnly,
+    admissionApplicationMessageClaimActive: true,
+  }), true)
+  assert.equal(getRegistrationIdentityEditLock({
+    ...deliveredOnly,
+    admissionBatches: [{ id: "batch-1" }],
+  }), true)
+  assert.equal(getRegistrationIdentityEditLock({
+    ...deliveredOnly,
+    enrollments: [{ status: "enrolled" }],
+  }), true)
 })
 
 test("canceling an add-class batch restores a track that still has enrolled classes", () => {

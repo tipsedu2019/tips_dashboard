@@ -198,6 +198,12 @@ export function getRegistrationAdmissionApplicationState(input?: {
   admissionApplicationMessageClaimActive?: boolean
 }): RegistrationAdmissionApplicationState
 
+export function getRegistrationIdentityEditLock(input?: {
+  enrollments?: readonly { status?: string | null }[]
+  admissionBatches?: readonly unknown[]
+  admissionApplicationMessageClaimActive?: boolean
+}): boolean
+
 export type RegistrationEnrollmentDraft = {
   id: string | null
   clientKey: string

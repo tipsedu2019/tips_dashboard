@@ -119,6 +119,7 @@ import {
   type RegistrationSchoolCatalogStatus,
 } from "./ops-task-service"
 import { mergeOpsTaskPageSupplement } from "./ops-task-page-supplement"
+import { RegistrationTabCountSlot } from "./registration-tab-count-slot"
 import {
   ClassScheduleCalendarSurface,
   type ClassScheduleCalendarDay,
@@ -1706,7 +1707,6 @@ function isRegistrationPipelineComplete(input: OpsTaskInput) {
 
 function getMissingRegistrationCheckLabels(registration?: OpsTaskInput["registration"]) {
   return [
-    { checked: Boolean(registration?.admissionNoticeSent), label: "입학신청서 발송" },
     { checked: Boolean(registration?.makeeduRegistered), label: "메이크에듀 등록(수업, 교재)" },
     { checked: Boolean(registration?.makeeduInvoiceSent), label: "청구서 발송" },
     { checked: Boolean(registration?.paymentChecked), label: "수납 완료 확인" },
@@ -2065,11 +2065,11 @@ function getRegistrationOperationsChecklist(
     registration,
   })
   return [
-    { key: "admission", field: "admissionNoticeSent" as const, label: "입학신청서 발송", detail: "입학신청서 발송", checked: Boolean(registration?.admissionNoticeSent), editable: true, available: availability.admissionNoticeSent.enabled, unavailableReason: availability.admissionNoticeSent.reason },
+    { key: "admission", field: "admissionNoticeSent" as const, label: "입학신청서 알림톡 (선택)", detail: "입학신청서 알림톡 (선택)", checked: Boolean(registration?.admissionNoticeSent), editable: true, available: availability.admissionNoticeSent.enabled, unavailableReason: availability.admissionNoticeSent.reason },
     { key: "makeedu", field: "makeeduRegistered" as const, label: "메이크에듀 등록(수업, 교재)", detail: "메이크에듀 등록(수업, 교재)", checked: Boolean(registration?.makeeduRegistered), editable: true, available: availability.makeeduRegistered.enabled, unavailableReason: availability.makeeduRegistered.reason },
     { key: "invoice", field: "makeeduInvoiceSent" as const, label: "청구서 발송", detail: "청구서 발송", checked: Boolean(registration?.makeeduInvoiceSent), editable: true, available: availability.makeeduInvoiceSent.enabled, unavailableReason: availability.makeeduInvoiceSent.reason },
     { key: "payment", field: "paymentChecked" as const, label: "수납 완료 확인", detail: "수납 완료 확인", checked: Boolean(registration?.paymentChecked), editable: true, available: availability.paymentChecked.enabled, unavailableReason: availability.paymentChecked.reason },
-    { key: "complete", label: "등록 완료", detail: "등록 완료", checked: getRegistrationPipelinePrefix(registration?.pipelineStatus) === "7.", editable: false, available: getRegistrationPipelinePrefix(registration?.pipelineStatus) === "7.", unavailableReason: "네 단계와 등록 정보를 모두 확인한 뒤 등록 완료로 이동합니다." },
+    { key: "complete", label: "등록 완료", detail: "등록 완료", checked: getRegistrationPipelinePrefix(registration?.pipelineStatus) === "7.", editable: false, available: getRegistrationPipelinePrefix(registration?.pipelineStatus) === "7.", unavailableReason: "메이크에듀 등록·청구서·수납 확인과 등록 정보를 모두 확인한 뒤 등록 완료로 이동합니다." },
   ]
 }
 
@@ -13084,11 +13084,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                        ].join(" ")}
 	                      >
 	                        <span>{tab.label}</span>
-	                        {registrationCount > 0 && (
-	                          <span aria-hidden="true" className="ml-1 rounded bg-background/65 px-1.5 py-0.5 text-xs text-inherit opacity-80">
-	                            {registrationCount}
-	                          </span>
-	                        )}
+	                        <RegistrationTabCountSlot count={registrationCount} />
 	                      </button>
 	                    )
 	                  })
@@ -13114,11 +13110,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                        ].join(" ")}
 	                      >
 	                        <span>{tab.label}</span>
-	                        {registrationCount > 0 && (
-	                          <span aria-hidden="true" className="ml-1 rounded bg-background/65 px-1.5 py-0.5 text-xs text-inherit opacity-80">
-	                            {registrationCount}
-	                          </span>
-	                        )}
+	                        <RegistrationTabCountSlot count={registrationCount} />
 	                      </button>
 	                    )
 	                  })
@@ -17979,7 +17971,7 @@ function TypeDetail({ task }: { task: OpsTask }) {
         </dl>
         <OperationChecklistSummary
           manualItems={[
-            { label: "입학신청서 발송", checked: Boolean(registration.admissionNoticeSent) },
+            { label: "입학신청서 알림톡 (선택)", checked: Boolean(registration.admissionNoticeSent) },
             { label: "메이크에듀 등록(수업, 교재)", checked: Boolean(registration.makeeduRegistered) },
             { label: "청구서 발송", checked: Boolean(registration.makeeduInvoiceSent) },
             { label: "수납 완료 확인", checked: Boolean(registration.paymentChecked) },

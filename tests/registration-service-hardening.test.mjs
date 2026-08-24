@@ -648,7 +648,7 @@ test("registration completion validates and synchronizes textbook work only when
   assert.match(syncSource, /if \(textbook\) \{[\s\S]*writeAutoSyncEventOnce\(taskId, "교재 연결"/);
 });
 
-test("registration manual check events follow the four-step admission sequence while legacy columns stay compatible", () => {
+test("registration manual check events retain admission history without requiring delivery for completion", () => {
   const manualDefinitionsSource = sourceBetween(
     "const MANUAL_CHECK_FIELD_DEFINITIONS",
     "async function writeManualCheckEvents",
@@ -669,9 +669,11 @@ test("registration manual check events follow the four-step admission sequence w
     "청구서 발송",
     "수납 완료 확인",
   ];
+  const completionRequiredLabels = orderedLabels.slice(1);
 
   assertInOrder(registrationManualSource, orderedLabels);
-  assertInOrder(missingLabelsSource, orderedLabels);
+  assertInOrder(missingLabelsSource, completionRequiredLabels);
+  assert.doesNotMatch(missingLabelsSource, /admissionNoticeSent|입학신청서 발송/);
   assert.doesNotMatch(registrationManualSource, /textbook_billing_issued|textbookBillingIssued|교재 청구출고표/);
   assert.doesNotMatch(missingLabelsSource, /textbookBillingIssued|교재 청구출고표/);
   assert.match(mapSource, /textbookBillingIssued: bool\(row\.textbook_billing_issued\)/);

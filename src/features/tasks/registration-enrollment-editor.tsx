@@ -1126,7 +1126,7 @@ export function RegistrationAdmissionPanel({
 
   async function startBatch() {
     const enrollmentIds = activeSelectedEnrollmentIds
-    if (busyAction || batchRefreshPending || !permissions.canManage || !admissionNoticeSent || selectedTrackIds.length === 0 || enrollmentIds.length === 0) return
+    if (busyAction || batchRefreshPending || !permissions.canManage || selectedTrackIds.length === 0 || enrollmentIds.length === 0) return
     if (!selectedEnrollmentsHaveCompleteSchedules) {
       onWarning("입학 처리 전에 선택한 모든 수업의 시작 일정을 지정하세요.")
       return
@@ -1267,6 +1267,7 @@ export function RegistrationAdmissionPanel({
       key: "admissionNotice",
       label: "입학신청서 알림톡",
       complete: checklist.admissionNotice,
+      optional: true,
       content: (
         <div className="grid gap-2 text-sm">
           <span className="text-xs text-muted-foreground">{messageStatusLabel}</span>
@@ -1316,10 +1317,9 @@ export function RegistrationAdmissionPanel({
                 )
               }) : <p className="text-sm text-muted-foreground">입학 처리할 저장된 수업이 없습니다.</p>}
               {permissions.canManage && unbatchedPlannedEnrollments.length > 0 ? (
-                <Button type="button" data-registration-primary-action="admission-start" onClick={() => void startBatch()} disabled={!admissionNoticeSent || activeSelectedEnrollmentIds.length === 0 || !selectedEnrollmentsHaveCompleteSchedules || Boolean(busyAction) || batchRefreshPending}>입학 처리 시작</Button>
+                <Button type="button" data-registration-primary-action="admission-start" onClick={() => void startBatch()} disabled={activeSelectedEnrollmentIds.length === 0 || !selectedEnrollmentsHaveCompleteSchedules || Boolean(busyAction) || batchRefreshPending}>입학 처리 시작</Button>
               ) : null}
-              {!admissionNoticeSent && unbatchedPlannedEnrollments.length > 0 ? <p className="text-xs text-muted-foreground">입학신청서 발송을 먼저 완료하세요.</p> : null}
-              {admissionNoticeSent && activeSelectedEnrollmentIds.length > 0 && !selectedEnrollmentsHaveCompleteSchedules ? <p className="text-xs text-muted-foreground">입학 처리 전에 선택한 모든 수업의 시작 일정을 지정하세요.</p> : null}
+              {activeSelectedEnrollmentIds.length > 0 && !selectedEnrollmentsHaveCompleteSchedules ? <p className="text-xs text-muted-foreground">입학 처리 전에 선택한 모든 수업의 시작 일정을 지정하세요.</p> : null}
             </div>
           ) : currentBatchEnrollments.map((enrollment) => {
             const track = trackById.get(enrollment.trackId)
@@ -1368,7 +1368,7 @@ export function RegistrationAdmissionPanel({
     <section ref={admissionSectionRef} className="grid gap-4" aria-label="입학 처리">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">입학 처리</h3>
-        <Badge variant={openBatch ? "default" : "outline"}>{displayBatch ? `${displayBatch.revisionNumber}차 처리` : checklist.admissionNotice ? "수업 선택" : "시작 전"}</Badge>
+        <Badge variant={openBatch ? "default" : "outline"}>{displayBatch ? `${displayBatch.revisionNumber}차 처리` : "수업 선택"}</Badge>
       </div>
 
       <div role="group" aria-label={permissions.canManage ? undefined : "읽기 전용 입학 처리 상태"}>

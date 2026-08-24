@@ -2827,7 +2827,6 @@ function isRegistrationWaitlistPipelineStatus(value?: string) {
 
 function getMissingRegistrationCheckLabels(registration?: OpsRegistrationDetail) {
   return [
-    { checked: Boolean(registration?.admissionNoticeSent), label: "입학신청서 발송" },
     { checked: Boolean(registration?.makeeduRegistered), label: "메이크에듀 등록(수업, 교재)" },
     { checked: Boolean(registration?.makeeduInvoiceSent), label: "청구서 발송" },
     { checked: Boolean(registration?.paymentChecked), label: "수납 완료 확인" },

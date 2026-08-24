@@ -3742,7 +3742,8 @@ test("saved admission section owns one ordered flat action list", async () => {
   assert.match(progress, /\{step\.content\}/)
   assert.match(progress, /aria-current=\{state === "active" \? "step" : undefined\}/)
   assert.match(progress, /statusLabel/)
-  assert.match(progress, /state === "active" \? "진행" : "대기"/)
+  assert.match(progress, /optional\?: boolean/)
+  assert.match(progress, /state === "optional" \? "선택" : "대기"/)
   assert.doesNotMatch(progress, /role="tab"|role="tabpanel"|selectedKey|useState|CircleDot/)
   assert.equal((create.match(/<RegistrationAdmissionProgress/g) || []).length, 0)
   assert.equal((create.match(/locked: true/g) || []).length, 0)
@@ -3843,6 +3844,26 @@ test("a completed saved admission case renders five complete rows", async () => 
   assert.equal((html.match(/data-registration-admission-state="active"/g) || []).length, 0)
 })
 
+test("an unsent optional admission notice never becomes active while MakeEdu is active", async () => {
+  const { RegistrationAdmissionProgress } = await loadAdmissionProgressRuntime()
+  const html = renderToStaticMarkup(createElement(RegistrationAdmissionProgress, {
+    steps: [
+      { key: "admissionNotice", label: "입학신청서 알림톡", complete: false, optional: true },
+      { key: "makeedu", label: "메이크에듀 등록(수업, 교재)", complete: false },
+      { key: "invoice", label: "청구서 발송", complete: false, locked: true },
+      { key: "payment", label: "수납 완료 확인", complete: false, locked: true },
+      { key: "complete", label: "등록 완료", complete: false, locked: true },
+    ],
+  }))
+  const optionalNotice = html.match(/<li[^>]*aria-label="입학신청서 알림톡: [^"]+"[^>]*>/)?.[0] || ""
+  const activeMakeEdu = html.match(/<li[^>]*aria-label="메이크에듀 등록\(수업, 교재\): [^"]+"[^>]*>/)?.[0] || ""
+
+  assert.match(optionalNotice, /data-registration-admission-state="optional"/)
+  assert.doesNotMatch(optionalNotice, /aria-current/)
+  assert.match(activeMakeEdu, /data-registration-admission-state="active"/)
+  assert.match(activeMakeEdu, /aria-current="step"/)
+})
+
 test("ordered admission steps use preview-first messaging and retain batch RPC controls", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
   const panel = source.slice(source.indexOf("export function RegistrationAdmissionPanel"))
@@ -3856,14 +3877,30 @@ test("ordered admission steps use preview-first messaging and retain batch RPC c
     assert.equal((panel.match(new RegExp(`${action}\\(\\{`, "g")) || []).length, 1, action)
   }
   assert.equal((panel.match(/onOpenCustomerMessage\?\.\(\{ messageKind: "admission_application", sourceId: taskId \}\)/g) || []).length, 1)
+  assert.match(panel, /key: "admissionNotice",[\s\S]*?optional: true,[\s\S]*?onOpenCustomerMessage/)
   assert.doesNotMatch(panel, /onSendAdmissionMessage|onCheckAdmissionMessage|onReconcileAdmissionMessage|onReleaseAdmissionMessageRetry/)
   assert.match(panel, /openBatch && permissions\.canManage \? <Button[\s\S]*?setMakeedu\(enrollment\)/)
   assert.equal((panel.match(/content: openBatch && permissions\.canManage \? \(/g) || []).length, 3)
   assert.match(panel, /\{openBatch \? \([\s\S]*?입학 처리 취소/)
-  assert.match(panel, /disabled=\{!admissionNoticeSent \|\| activeSelectedEnrollmentIds\.length === 0 \|\| !selectedEnrollmentsHaveCompleteSchedules \|\| Boolean\(busyAction\) \|\| batchRefreshPending\}/)
+  assert.match(panel, /disabled=\{activeSelectedEnrollmentIds\.length === 0 \|\| !selectedEnrollmentsHaveCompleteSchedules \|\| Boolean\(busyAction\) \|\| batchRefreshPending\}/)
+  assert.doesNotMatch(panel, /입학신청서 발송을 먼저 완료하세요/)
   assert.match(panel, /disabled=\{batchRefreshPending \|\| !checklist\.makeedu \|\| checklist\.invoice \|\| Boolean\(busyAction\)\}/)
   assert.match(panel, /disabled=\{batchRefreshPending \|\| !checklist\.invoice \|\| checklist\.payment \|\| Boolean\(busyAction\)\}/)
   assert.match(panel, /disabled=\{batchRefreshPending \|\| !checklist\.payment \|\| checklist\.complete \|\| Boolean\(busyAction\)\}/)
+})
+
+test("browser fixture mirrors message-independent identity editing locks", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-fixtures.ts", import.meta.url), "utf8")
+  const lock = sourceBetween(
+    source,
+    "function fixtureRegistrationIdentityFrozen",
+    "function fixtureRegistrationTrackRemovalBlocked",
+  )
+
+  assert.doesNotMatch(lock, /admissionNoticeSent/)
+  assert.match(lock, /detail\.admissionBatches\.length > 0/)
+  assert.match(lock, /enrollment\.status === "planned" && enrollment\.admissionBatchId === null/)
+  assert.match(lock, /detail\.admissionApplicationMessageClaimActive/)
 })
 
 test("case admission message state remains readable while actions use the shared preview dialog", async () => {
