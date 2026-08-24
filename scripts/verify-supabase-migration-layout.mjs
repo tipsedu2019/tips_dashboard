@@ -25,7 +25,7 @@ const EXPECTED_TRANSACTIONAL_PGTAP_COMMAND =
 const POSTDEPLOY_READONLY_SQL =
   "supabase/tests/active_registration_workflow_postdeploy_readonly.sql"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
-  "f1259e7c299163de88dc2e865e489df7dd6ef3f2bc21c93cfe0e12f3ebc115be"
+  "b1d033c9d2d8dc989ac6e4a09b45225664d0895d15ce1d5308d8459cbde312ec"
 const POSTDEPLOY_VERIFIER = "scripts/verify-supabase-postdeploy-contract.mjs"
 const POSTDEPLOY_LEDGER = '"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"'
 const POSTDEPLOY_RECEIPT = '"${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"'
@@ -39,7 +39,7 @@ const EXPECTED_POSTDEPLOY_VERIFIER_COMMAND =
 // step reordering cannot expand Supabase secret scope before the verifier exits.
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "c96fd48fc7972a043ecfd8587cb935649ad8457e5390a6bdd63b20ff98300205"
+  "2a7b7bf39a5018df961d76378154bb65bda58cb3d357b030952b6829de34f571"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
   ["free-tier-guardrails.yml", "8ec5eadf18411ab3946228e9bf4a85fcd9e5152d2a92e7e888f1b35fda6f0258"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],

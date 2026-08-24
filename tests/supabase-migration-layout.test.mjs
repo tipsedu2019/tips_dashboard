@@ -30,7 +30,13 @@ const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db
 const fixtureRoots = []
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
-  "f1259e7c299163de88dc2e865e489df7dd6ef3f2bc21c93cfe0e12f3ebc115be"
+  "b1d033c9d2d8dc989ac6e4a09b45225664d0895d15ce1d5308d8459cbde312ec"
+const ADMISSION_ORDER_INDEPENDENCE_MIGRATION =
+  "20260824182043_registration_admission_order_independence.sql"
+const ADMISSION_ORDER_INDEPENDENCE_MIGRATION_SHA256 =
+  "cc541b6ddae1a43f6a1022491b547efafb8775006dd39c0d14ba76e551467bd4"
+const ADMISSION_ORDER_INDEPENDENCE_PGTAP =
+  "supabase/tests/registration_admission_order_independence_test.sql"
 const FOCUSED_PGTAP_PATH =
   "supabase/tests/registration_level_test_result_parent_reconciliation_test.sql"
 const LINKED_MIGRATION_LEDGER_PATH = "\${RUNNER_TEMP}/supabase-migration-list.txt"
@@ -350,6 +356,176 @@ test("원격 이력과 정렬한 migration identity와 바이트를 독립 상�
       `obsolete local timestamp must stay absent: ${file}`,
     )
   }
+})
+
+test("admission-order patch is immutable, runs in PR schema CI, and is covered by postdeploy catalog checks", async () => {
+  const postdeploySqlPath = join(
+    repoRoot,
+    "supabase",
+    "tests",
+    "active_registration_workflow_postdeploy_readonly.sql",
+  )
+  const sqlReviewWorkflowPath = join(
+    repoRoot,
+    ".github",
+    "workflows",
+    "supabase-sql-review.yml",
+  )
+  const migrationPath = join(activeDir, ADMISSION_ORDER_INDEPENDENCE_MIGRATION)
+  const manifestPath = join(
+    repoRoot,
+    "supabase",
+    "test-baselines",
+    "dashboard-free-tier-v1.manifest.json",
+  )
+  const pgTapPath = join(repoRoot, ...ADMISSION_ORDER_INDEPENDENCE_PGTAP.split("/"))
+  const [manifestSource, sqlReviewWorkflow, postdeploySql, pgTapSource, migrationSource] = await Promise.all([
+    readFile(manifestPath, "utf8"),
+    readFile(sqlReviewWorkflowPath, "utf8"),
+    readFile(postdeploySqlPath, "utf8"),
+    readFile(pgTapPath, "utf8"),
+    readFile(migrationPath, "utf8"),
+  ])
+  const manifest = JSON.parse(manifestSource)
+
+  assert.equal(await sha256(migrationPath), ADMISSION_ORDER_INDEPENDENCE_MIGRATION_SHA256)
+  assert.deepEqual(
+    manifest.orderedNewMigrations.find(
+      ({ fileName }) => fileName === ADMISSION_ORDER_INDEPENDENCE_MIGRATION,
+    ),
+    {
+      fileName: ADMISSION_ORDER_INDEPENDENCE_MIGRATION,
+      status: "final",
+      sha256: ADMISSION_ORDER_INDEPENDENCE_MIGRATION_SHA256,
+    },
+  )
+  assert.equal(
+    manifest.orderedNewMigrations.filter(
+      ({ fileName }) => fileName === ADMISSION_ORDER_INDEPENDENCE_MIGRATION,
+    ).length,
+    1,
+  )
+  assert.ok(
+    sqlReviewWorkflow.split(/\r?\n/).some(
+      (line) => line.trim() === `--test ${ADMISSION_ORDER_INDEPENDENCE_PGTAP} ${"\\"}`,
+    ),
+    "PR schema contract must invoke the admission-order pgTAP exactly",
+  )
+
+  for (const marker of [
+    "dashboard_private.start_registration_admission_batch_impl(uuid,uuid[],uuid[],text)",
+    "dashboard_private.update_registration_case_common_impl(uuid,text,text,text,text,text,text,timestamp with time zone,text,text,integer,text)",
+    "registration_admission_notice_required",
+    "registration_admission_batch_already_open",
+    "idempotency_key_reused",
+    "message.claim_active",
+    "ops_registration_admission_batches",
+    "enrollment.status = ''planned''",
+    "'up' || 'date of enrollment;'",
+    "registration_common_revision_conflict",
+    "registration_student_identity_correction_required",
+    "registration_invalid_source_state",
+  ]) {
+    assert.ok(postdeploySql.includes(marker), `missing postdeploy marker: ${marker}`)
+  }
+  assert.equal(
+    (postdeploySql.match(/definition like '%v_detail\.admission_notice_sent%'/g) ?? []).length,
+    2,
+    "both patched final definitions must reject an admission-notice prerequisite",
+  )
+  assert.doesNotMatch(
+    postdeploySql,
+    /\n\s*false\s*\n\s*\)/,
+    "all four postdeploy function contracts must reject retryable 40001",
+  )
+  for (const marker of [
+    "v_start_pipeline_status_old_fragment",
+    "v_start_pipeline_status_occurrences",
+    "v_start_pipeline_status_forbidden_predicate",
+    "v_start_pipeline_status_occurrences not in (0, 1)",
+    "registration_admission_batch_pipeline_status_patch_target_drift",
+  ]) {
+    assert.ok(migrationSource.includes(marker), `migration must fail closed on ${marker}`)
+  }
+  assert.match(
+    pgTapSource,
+    /^select plan\(21\);$/mu,
+    "focused pgTAP must keep its 16 schema assertions plus five runtime assertions",
+  )
+  assert.equal(
+    (pgTapSource.match(/^select ok\(/gmu) ?? []).length,
+    21,
+    "focused pgTAP must express each schema and runtime assertion with portable ok",
+  )
+  assert.doesNotMatch(
+    pgTapSource,
+    /\b(?:has_function|like|unlike)\s*\(/iu,
+    "focused pgTAP must avoid unavailable helper functions",
+  )
+  for (const [signature, marker] of [
+    [
+      "dashboard_private.start_registration_admission_batch_impl(uuid,uuid[],uuid[],text)",
+      "v_detail.admission_notice_sent",
+    ],
+    [
+      "dashboard_private.start_registration_admission_batch_impl(uuid,uuid[],uuid[],text)",
+      "40001",
+    ],
+    [
+      "dashboard_private.start_registration_admission_batch_impl(uuid,uuid[],uuid[],text)",
+      "registration_invalid_source_state",
+    ],
+    [
+      "dashboard_private.update_registration_case_common_impl(uuid,text,text,text,text,text,text,timestamp with time zone,text,text,integer,text)",
+      "40001",
+    ],
+  ]) {
+    assert.ok(
+      pgTapSource.includes(
+        `pg_catalog.pg_get_functiondef(\n      '${signature}'::regprocedure\n    ),\n    '${marker}'\n  ) = 0`,
+      ),
+      `pgTAP must reject ${marker} in ${signature} with portable strpos`,
+    )
+  }
+  for (const marker of [
+    "registration_admission_batch_already_open' using errcode = '23514'",
+    "registration_common_revision_conflict' using errcode = '23514'",
+    "registration_student_identity_correction_required' using errcode = '23514'",
+  ]) {
+    assert.ok(pgTapSource.includes(marker), `pgTAP must pin non-retryable ${marker}`)
+  }
+  for (const marker of [
+    "registration_admission_order_runtime_response",
+    "public.start_registration_admission_batch(",
+    "set local statement_timeout = '30s';",
+    "set local lock_timeout = '5s';",
+    "admission_notice_sent is false",
+    "pipeline_status = 'inquiry'",
+    "pipeline_status = 'enrollment_processing'",
+    "status = 'planned' and roster_active",
+  ]) {
+    assert.ok(pgTapSource.includes(marker), `focused pgTAP runtime fixture must cover ${marker}`)
+  }
+  const adminFixtureIndex = pgTapSource.indexOf(
+    "insert into public.profiles(id, role, name, email, created_at, updated_at)",
+  )
+  const jwtFixtureIndex = pgTapSource.indexOf(
+    "select pg_catalog.set_config(\n  'request.jwt.claims',",
+  )
+  const enrollmentFixtureIndex = pgTapSource.indexOf(
+    "insert into public.ops_registration_enrollments(",
+  )
+  assert.ok(
+    adminFixtureIndex >= 0
+      && jwtFixtureIndex > adminFixtureIndex
+      && enrollmentFixtureIndex > jwtFixtureIndex,
+    "focused pgTAP must establish its authenticated actor before the enrollment trigger runs",
+  )
+  assert.equal(
+    (pgTapSource.match(/'request\.jwt\.claims'/g) ?? []).length,
+    1,
+    "focused pgTAP must set the transaction-local JWT claims exactly once",
+  )
 })
 
 test("원격 이력 정렬 migration의 누락·변조·구 timestamp 재등장을 거부한다", async () => {
@@ -1982,6 +2158,22 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
     ["denied roles", "'service_role'::name"],
     ["40001 predicate", "definition like '%40001%'"],
     ["23514 predicate", "definition not like '%23514%'"],
+    ["admission batch signature", "dashboard_private.start_registration_admission_batch_impl(uuid,uuid[],uuid[],text)"],
+    ["common update signature", "dashboard_private.update_registration_case_common_impl(uuid,text,text,text,text,text,text,timestamp with time zone,text,text,integer,text)"],
+    ["admission notice gate removed", "definition like '%registration_admission_notice_required%'"],
+    ["admission notice reference removed", "definition like '%v_detail.admission_notice_sent%'"],
+    ["legacy pipeline gate removed", "definition like '%registration_invalid_source_state%'"],
+    ["admission batch duplicate protection", "definition not like '%registration_admission_batch_already_open%'"],
+    ["admission batch nonretryable conflict", "definition not like '%registration_admission_batch_already_open'' using errcode = ''23514''%'"],
+    ["admission batch idempotency", "definition not like '%idempotency_key_reused%'"],
+    ["identity notice gate removed", "definition like '%v_detail.admission_notice_sent%'"],
+    ["identity claim protection", "definition not like '%message.claim_active%'"],
+    ["identity batch protection", "definition not like '%ops_registration_admission_batches%'"],
+    ["identity enrollment protection", "definition not like '%enrollment.status = ''planned''%'"],
+    ["common revision nonretryable conflict", "definition not like '%registration_common_revision_conflict'' using errcode = ''23514''%'"],
+    ["identity correction nonretryable conflict", "definition not like '%registration_student_identity_correction_required'' using errcode = ''23514''%'"],
+    ["enrollment lock", "'up' || 'date of enrollment;'"],
+    ["function-specific ACL", "authenticated_execute_required::integer"],
   ]
 
   for (const [name, predicate] of requiredPredicates) {

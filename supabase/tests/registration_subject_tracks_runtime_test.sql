@@ -1829,7 +1829,7 @@ from registration_runtime_paid_rows saved
 cross join lateral jsonb_array_elements(saved.payload -> 'rows') row_item;
 set local role postgres;
 update public.ops_registration_details
-set admission_notice_sent = true
+set admission_notice_sent = false
 where task_id = (select task_id from registration_runtime_paid_track);
 set local role authenticated;
 select pg_temp.registration_set_actor('00000000-0000-4000-8000-000000000101');
