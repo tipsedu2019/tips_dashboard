@@ -116,6 +116,7 @@ jobs:
             --review-head --lint --require-final --execute --authorized \
             --request-id "github-pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
             --test supabase/tests/active_registration_workflow_sqlstate_contract_test.sql \
+            --test supabase/tests/registration_admission_order_independence_test.sql \
             --test supabase/tests/registration_level_test_result_parent_reconciliation_test.sql \
             --test supabase/tests/notification_contract_drain_evidence_schema_repair_test.sql \
             --test supabase/tests/legacy_notification_retry_storm_test.sql

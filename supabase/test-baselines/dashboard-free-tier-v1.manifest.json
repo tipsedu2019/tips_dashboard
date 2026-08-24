@@ -109,6 +109,11 @@
       "fileName": "20260824080823_notification_legacy_retry_storm.sql",
       "status": "final",
       "sha256": "f8586a8af1b5bef4c1a0f3b0e2389a708ed5c542d2e1af56116dc29515d8c5a7"
+    },
+    {
+      "fileName": "20260824182043_registration_admission_order_independence.sql",
+      "status": "final",
+      "sha256": "cc541b6ddae1a43f6a1022491b547efafb8775006dd39c0d14ba76e551467bd4"
     }
   ]
 }

@@ -3964,3 +3964,58 @@ test("observation enrollment source forward migration keeps the registration gat
     /solapi|google_chat|http_post|net\.http|send_web_push/i,
   )
 })
+
+test("admission order independence patches the final functions without weakening mutation locks", async () => {
+  const [migration, pgTap, runtime] = await Promise.all([
+    readMigration("registration_admission_order_independence"),
+    readFile(new URL("registration_admission_order_independence_test.sql", supabaseTestsUrl), "utf8"),
+    readFile(new URL("registration_subject_tracks_runtime_test.sql", supabaseTestsUrl), "utf8"),
+  ])
+
+  assert.match(migration.trim(), /^begin;/i)
+  assert.match(migration.trim(), /commit;$/i)
+  assert.match(migration, /set local lock_timeout = '5s'/i)
+  assert.match(migration, /set local statement_timeout = '120s'/i)
+  assert.match(
+    migration,
+    /dashboard_private\.start_registration_admission_batch_impl\(uuid,uuid\[\],uuid\[\],text\)/,
+  )
+  assert.match(
+    migration,
+    /dashboard_private\.update_registration_case_common_impl\(uuid,text,text,text,text,text,text,timestamp with time zone,text,text,integer,text\)/,
+  )
+  assert.match(migration, /pg_catalog\.pg_get_functiondef/)
+  assert.match(migration, /registration_admission_batch_notice_gate_patch_target_missing/)
+  assert.match(migration, /registration_identity_notice_gate_patch_target_missing/)
+  assert.match(migration, /registration_admission_order_patch_metadata_changed/)
+  assert.match(migration, /v_start_owner[\s\S]*?v_start_acl/)
+  assert.match(migration, /v_identity_owner[\s\S]*?v_identity_acl/)
+  assert.doesNotMatch(migration, /solapi|google_chat|http_post|net\.http|send_web_push/i)
+
+  assert.match(pgTap, /select\s+plan\(21\);/i)
+  assert.equal((pgTap.match(/^select ok\(/gmu) || []).length, 21)
+  assert.doesNotMatch(pgTap, /\b(?:has_function|like|unlike)\s*\(/i)
+  assert.match(pgTap, /pg_catalog\.strpos/)
+  assert.match(pgTap, /registration_admission_notice_required/)
+  assert.match(pgTap, /registration_admission_batch_already_open/)
+  assert.match(pgTap, /idempotency_key_reused/)
+  assert.match(pgTap, /v_detail\.admission_notice_sent/)
+  assert.match(pgTap, /registration_invalid_source_state/)
+  assert.match(pgTap, /40001/)
+  assert.match(pgTap, /message\.claim_active/)
+  assert.match(pgTap, /ops_registration_admission_batches/)
+  assert.match(pgTap, /enrollment\.status = ''planned''/)
+  assert.match(pgTap, /registration_admission_order_runtime_response/)
+  assert.match(pgTap, /select public\.start_registration_admission_batch\(/)
+  assert.match(pgTap, /pipeline_status = 'inquiry'/)
+  assert.match(pgTap, /pipeline_status = 'enrollment_processing'/)
+  assert.match(pgTap, /status = 'planned' and roster_active/)
+  assert.match(pgTap, /admission_notice_sent is false/)
+  assert.doesNotMatch(pgTap, /solapi|google_chat|http_post|net\.http|send_web_push/i)
+  assert.match(pgTap, /select\s+\*\s+from\s+finish\(\);\s*rollback;/i)
+
+  assert.match(
+    runtime,
+    /set admission_notice_sent = false[\s\S]*?select public\.start_registration_admission_batch\(/,
+  )
+})
