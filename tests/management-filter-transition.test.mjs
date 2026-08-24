@@ -188,3 +188,34 @@ test("default period canonicalization preserves URL-owned class search and statu
     },
   );
 });
+
+test("class period hydration preserves URL-owned values and only defaults an empty period", async () => {
+  const model = await loadTransitionModel();
+  assert.ok(model, "management filter transition model should exist");
+
+  const options = [
+    {
+      value: "period-default",
+      label: "2026년 1학기",
+      aliases: ["2026-1"],
+      isDefault: true,
+    },
+  ];
+
+  assert.equal(
+    model.resolveManagementPeriodFilterValue([], "period-deep-link", ""),
+    "period-deep-link",
+  );
+  assert.equal(
+    model.resolveManagementPeriodFilterValue(options, "period-deep-link", "period-default"),
+    "period-deep-link",
+  );
+  assert.equal(
+    model.resolveManagementPeriodFilterValue(options, "2026-1", "period-default"),
+    "2026-1",
+  );
+  assert.equal(
+    model.resolveManagementPeriodFilterValue(options, "", "period-default"),
+    "period-default",
+  );
+});

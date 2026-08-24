@@ -61,3 +61,17 @@ test("default period preference uses the server-configured period before stored 
   assert.match(tableSource, /isDefault: record\.isDefault === true/);
   assert.match(recordsSource, /readOptionalTable\("class_schedule_sync_groups"\)/);
 });
+
+test("direct class period links use one stable target during option hydration", async () => {
+  const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+
+  assert.match(source, /resolveManagementPeriodFilterValue\(periodOptions, classGroupFilter, defaultPeriodFilter\)/);
+  assert.match(
+    source,
+    /const requestedPeriodFilter = resolveManagementPeriodFilterValue\([\s\S]*?periodOptions,[\s\S]*?nextFilters\.period,[\s\S]*?defaultPeriodFilter,[\s\S]*?\);/,
+  );
+  assert.doesNotMatch(
+    source,
+    /if \(periodOptions\.length === 0\) \{[\s\S]*?setClassGroupFilter\(""\)/,
+  );
+});
