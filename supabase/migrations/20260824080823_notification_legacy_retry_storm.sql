@@ -1,5 +1,8 @@
 begin;
 
+set local lock_timeout = '5s';
+set local statement_timeout = '30s';
+
 create or replace function public.begin_legacy_notification_dispatch_v1(
   p_workflow_key text,
   p_occurrence_key text,
