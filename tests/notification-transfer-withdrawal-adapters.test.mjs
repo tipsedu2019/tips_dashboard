@@ -263,9 +263,7 @@ test("legacy route는 task·word_retest를 canonical workflow로 정규화하고
   for (const prefix of ["task", "word_retest", "registration", "transfer", "withdrawal"]) {
     assert.ok(parse.includes(`"${prefix}"`), `route 이벤트 prefix 누락: ${prefix}`)
   }
-  assert.match(begin, /prefix === "task"[\s\S]*\? "tasks"/)
-  assert.match(begin, /prefix === "word_retest"[\s\S]*\? "word_retests"/)
-  assert.match(begin, /: prefix/)
+  assert.match(begin, /const workflowKey = legacyNotificationWorkflowKey\(item\.eventKey\)/)
   assert.match(begin, /workflowKey === "registration"[\s\S]*registration_core_legacy_bridge_v1[\s\S]*ops_task_legacy_bridge_v1/)
   assert.match(load, /get_ops_task_legacy_dispatch_plan_v1/)
   assert.match(load, /code\) !== "P0002"/)

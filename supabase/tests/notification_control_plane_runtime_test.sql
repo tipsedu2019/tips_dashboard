@@ -1,5 +1,5 @@
 begin;
-select plan(244);
+select plan(246);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
@@ -5769,9 +5769,15 @@ select 'worker-legacy-finalized-replay', public.finalize_legacy_notification_dis
   'sent',
   'legacy-provider-reference-1'
 );
-select ok(
-  pg_temp.notification_runtime_throws(
-    pg_catalog.format(
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-legacy-begin-after-finalize', public.begin_legacy_notification_dispatch_v1(
+  'tasks', 'ownership-legacy-first',
+  '76000000-0000-4000-8000-000000000101', 'google_chat',
+  'connection:legacy-first', 1, 'legacy-worker-fixture', 0,
+  '76000000-0000-4000-8000-000000000902'
+);
+select throws_ok(
+  pg_catalog.format(
       'select public.finalize_legacy_notification_dispatch_v1(%L::uuid,%L::bigint,%L::uuid,%L,%L)',
       (
         select payload ->> 'claim_id'
@@ -5790,14 +5796,13 @@ select ok(
       ),
       'failed',
       'legacy-provider-reference-1'
-    ),
-    'notification_legacy_finalize_replay_mismatch'
   ),
+  '23514',
+  'notification_legacy_finalize_replay_mismatch',
   'a closed legacy sent outcome cannot be replayed as failed'
 );
-select ok(
-  pg_temp.notification_runtime_throws(
-    pg_catalog.format(
+select throws_ok(
+  pg_catalog.format(
       'select public.finalize_legacy_notification_dispatch_v1(%L::uuid,%L::bigint,%L::uuid,%L,%L)',
       (
         select payload ->> 'claim_id'
@@ -5816,9 +5821,9 @@ select ok(
       ),
       'sent',
       'changed-provider-reference'
-    ),
-    'notification_legacy_finalize_replay_mismatch'
   ),
+  '23514',
+  'notification_legacy_finalize_replay_mismatch',
   'a closed legacy outcome cannot replay with a changed provider reference'
 );
 select ok(
@@ -5849,6 +5854,17 @@ select ok(
 reset role;
 select ok(
   (
+    select payload ->> 'acquired' = 'false'
+      and payload ->> 'status' = 'sent'
+      and payload ->> 'reason' = 'idempotent_dispatch_replay'
+      and not payload ? 'dispatch_token'
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-legacy-begin-after-finalize'
+  ),
+  'a closed legacy begin replay cannot reacquire or expose a dispatch token'
+);
+select ok(
+  (
     select payload ->> 'outcome' = 'sent'
       and not (payload ->> 'replayed')::boolean
     from notification_control_plane_runtime_results
@@ -5871,6 +5887,18 @@ select ok(
     )
   ),
   'legacy finalize replays only its first persisted terminal outcome and provider reference'
+);
+select ok(
+  pg_catalog.pg_get_functiondef(
+    'public.finalize_legacy_notification_dispatch_v1(uuid,bigint,uuid,text,text)'::regprocedure
+  ) ~ 'notification_legacy_ownership_mismatch[^;]+23514'
+  and pg_catalog.pg_get_functiondef(
+    'public.finalize_legacy_notification_dispatch_v1(uuid,bigint,uuid,text,text)'::regprocedure
+  ) ~ 'notification_legacy_finalize_replay_mismatch[^;]+23514'
+  and pg_catalog.pg_get_functiondef(
+    'public.finalize_legacy_notification_dispatch_v1(uuid,bigint,uuid,text,text)'::regprocedure
+  ) !~ 'errcode = ''40001''',
+  'final active legacy finalize definition keeps business-state conflicts non-retryable'
 );
 
 select has_function(

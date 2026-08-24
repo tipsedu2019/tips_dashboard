@@ -5,6 +5,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { readLegacyGoogleChatWebhookUrl } from "@/features/notifications/server/legacy-google-chat-connection"
 import { requireRegisteredNotificationExternalAttempt } from "@/features/notifications/server/external-attempt-gate"
 import { normalizedNotificationRenderedHash } from "@/features/notifications/server/legacy-delivery-intent"
+import { legacyNotificationWorkflowKey } from "@/features/notifications/server/legacy-notification-workflow"
 import { createGoogleChatProvider } from "@/features/notifications/server/providers/google-chat-provider"
 
 export const runtime = "nodejs"
@@ -148,12 +149,7 @@ function parsePlan(value: unknown): LegacyDispatchItem[] {
 }
 
 async function beginLegacyDispatch(client: SupabaseClient, item: LegacyDispatchItem) {
-  const prefix = item.eventKey.split(".")[0]
-  const workflowKey = prefix === "task"
-    ? "tasks"
-    : prefix === "word_retest"
-      ? "word_retests"
-      : prefix
+  const workflowKey = legacyNotificationWorkflowKey(item.eventKey)
   const renderedHash = normalizedNotificationRenderedHash({
     title: item.renderedTitle,
     body: item.renderedBody,
@@ -310,6 +306,7 @@ async function dispatchGoogleChat(client: SupabaseClient, item: LegacyDispatchIt
     return "failed" as const
   }
 
+  let finalizationAttempted = false
   try {
     const attempt = await requireRegisteredNotificationExternalAttempt({
       register: () => rpc(client, "register_notification_external_attempt_v1", {
@@ -320,12 +317,10 @@ async function dispatchGoogleChat(client: SupabaseClient, item: LegacyDispatchIt
         p_dispatch_token: text(begun.dispatch_token),
         p_request_id: text(begun.dispatch_token),
       }),
-      finalizeUnknown: (reason: string) => finalizeLegacyDispatch(
-        client,
-        begun,
-        "delivery_unknown",
-        reason,
-      ),
+      finalizeUnknown: (reason: string) => {
+        finalizationAttempted = true
+        return finalizeLegacyDispatch(client, begun, "delivery_unknown", reason)
+      },
     })
     if (!attempt.allowed) return "delivery_unknown" as const
 
@@ -335,6 +330,7 @@ async function dispatchGoogleChat(client: SupabaseClient, item: LegacyDispatchIt
       dispatch_token: text(begun.dispatch_token),
       status: "sending",
       channel_key: "google_chat",
+      workflow_key: legacyNotificationWorkflowKey(item.eventKey),
       connection_key: item.connectionKey,
       webhook_url: webhookUrl,
       rendered_title: item.renderedTitle,
@@ -346,6 +342,7 @@ async function dispatchGoogleChat(client: SupabaseClient, item: LegacyDispatchIt
       : result.status === "delivery_unknown"
         ? "delivery_unknown"
         : "failed"
+    finalizationAttempted = true
     await finalizeLegacyDispatch(
       client,
       begun,
@@ -354,7 +351,9 @@ async function dispatchGoogleChat(client: SupabaseClient, item: LegacyDispatchIt
     )
     return outcome
   } catch (error) {
+    if (finalizationAttempted) throw error
     const providerReference = text((error as { code?: unknown })?.code) || "provider_exception"
+    finalizationAttempted = true
     await finalizeLegacyDispatch(client, begun, "delivery_unknown", providerReference)
     return "delivery_unknown" as const
   }
