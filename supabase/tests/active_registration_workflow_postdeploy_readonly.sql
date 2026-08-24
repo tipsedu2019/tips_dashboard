@@ -105,11 +105,12 @@ select (
         count(*) = 1 + authenticated_execute_required::integer
         and count(*) filter (
           where (
-            case
-              when acl.grantee = 0 then 'PUBLIC'
-              else pg_catalog.pg_get_userbyid(acl.grantee)::text
-            end
-          ) = 'postgres'
+            (
+              case
+                when acl.grantee = 0 then 'PUBLIC'
+                else pg_catalog.pg_get_userbyid(acl.grantee)::text
+              end
+            ) = 'postgres'
             or (
               authenticated_execute_required
               and (

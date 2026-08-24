@@ -30,7 +30,7 @@ const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db
 const fixtureRoots = []
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
-  "b1d033c9d2d8dc989ac6e4a09b45225664d0895d15ce1d5308d8459cbde312ec"
+  "658861d85d0d8b37874696d50e3f040a7b1fdd89441093cbec36bd87e85e4de5"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION =
   "20260824182043_registration_admission_order_independence.sql"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION_SHA256 =
@@ -410,6 +410,11 @@ test("admission-order patch is immutable, runs in PR schema CI, and is covered b
       (line) => line.trim() === `--test ${ADMISSION_ORDER_INDEPENDENCE_PGTAP} ${"\\"}`,
     ),
     "PR schema contract must invoke the admission-order pgTAP exactly",
+  )
+  assert.match(
+    sqlReviewWorkflow,
+    /--postdeploy-contract/u,
+    "PR schema contract must parse and execute the production postdeploy query",
   )
 
   for (const marker of [
