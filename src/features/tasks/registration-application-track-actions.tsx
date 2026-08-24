@@ -61,6 +61,7 @@ import {
   getRegistrationConsultationOutcomeSaveState,
   getRegistrationWaitingDetailsDraft,
 } from "./registration-track-model.js"
+export { getRegistrationIdentityEditLock } from "./registration-track-model.js"
 import { getRegistrationPersistenceErrorMessage } from "./registration-workflow.js"
 import { RegistrationSelect } from "./registration-select"
 import { RegistrationSaveButton } from "./registration-save-button"
@@ -764,16 +765,6 @@ function hasLegacyLevelTestReservation(legacy: OpsRegistrationMigrationLegacySna
 
 function hasLegacyVisitReservation(legacy: OpsRegistrationMigrationLegacySnapshot | null) {
   return Boolean(legacy?.visitConsultationAt && legacy.visitConsultationPlace)
-}
-
-export function getRegistrationIdentityEditLock(detail: OpsRegistrationCaseDetail) {
-  return Boolean(
-    detail.enrollments.some((enrollment) => enrollment.status !== "planned")
-    || detail.admissionBatches.length > 0
-    || detail.admissionApplicationAccepted
-    || detail.admissionApplicationMessageClaimActive
-    || detail.task.registration?.admissionNoticeSent,
-  )
 }
 
 function SubjectClassSelect({

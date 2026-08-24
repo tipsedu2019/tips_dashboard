@@ -69,7 +69,6 @@ export function getRegistrationTrackTransitionBlockers(input = {}) {
     return [
       Number(input.enrollmentCount || 0) > 0 ? "" : "수업",
       input.everyScheduleValid ? "" : "수업 시작 일정",
-      input.admissionNoticeSent ? "" : "입학신청서 발송",
       input.hasOtherOpenBatch ? "진행 중인 입학 처리" : "",
     ].filter(Boolean)
   }
@@ -246,6 +245,7 @@ export function getRegistrationAdmissionApplicationState(input = {}) {
     if (!trackId || targetTrackIdSet.has(trackId)) continue
     if (
       track?.status !== "enrollment_decided"
+      && track?.status !== "enrollment_processing"
       && track?.workflowStatus !== "enrollment_requested"
       && !plannedTrackIds.has(trackId)
     ) continue
@@ -268,6 +268,16 @@ export function getRegistrationAdmissionApplicationState(input = {}) {
     blocked,
     canSend: eligible && !delivered && !claimActive,
   }
+}
+
+export function getRegistrationIdentityEditLock(input = {}) {
+  const enrollments = Array.isArray(input.enrollments) ? input.enrollments : []
+  const admissionBatches = Array.isArray(input.admissionBatches) ? input.admissionBatches : []
+  return Boolean(
+    enrollments.some((enrollment) => enrollment?.status !== "planned")
+    || admissionBatches.length > 0
+    || input.admissionApplicationMessageClaimActive
+  )
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i

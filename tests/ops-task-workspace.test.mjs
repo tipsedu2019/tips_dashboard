@@ -5217,7 +5217,20 @@ test("registration completion keeps textbook optional while validating a nonempt
   assert.match(blockerSource, /if \(hasLinkedRecord\(input\.textbookId\) && !findTextbookOption/);
 });
 
-test("registration admission checklist remains chronological in saved detail and is omitted during create", async () => {
+test("registration completion does not require admission-form delivery", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const blockerStart = source.indexOf("function getMissingRegistrationCheckLabels");
+  const blockerSource = source.slice(
+    blockerStart,
+    source.indexOf("function getMissingWithdrawalCheckLabels", blockerStart),
+  );
+
+  assert.ok(blockerStart >= 0);
+  assert.doesNotMatch(blockerSource, /admissionNoticeSent|입학신청서 발송/);
+  assertIncludesAll(blockerSource, ["makeeduRegistered", "makeeduInvoiceSent", "paymentChecked"]);
+});
+
+test("registration admission checklist keeps optional messaging separate from the financial order and is omitted during create", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const create = await readSource("src/features/tasks/registration-application-create.tsx");
   const checklistStart = source.indexOf("function getRegistrationOperationsChecklist(");
@@ -5230,7 +5243,7 @@ test("registration admission checklist remains chronological in saved detail and
   const summaryStart = source.indexOf('if (task.type === "registration" && task.registration)');
   const registrationSummarySource = source.slice(summaryStart, source.indexOf('if (task.type === "withdrawal"', summaryStart));
   const orderedLabels = [
-    "입학신청서 발송",
+    "입학신청서 알림톡 (선택)",
     "메이크에듀 등록(수업, 교재)",
     "청구서 발송",
     "수납 완료 확인",
@@ -5238,6 +5251,8 @@ test("registration admission checklist remains chronological in saved detail and
   ];
 
   assertInOrder(checklistSource, orderedLabels);
+  assert.match(checklistSource, /입학신청서 알림톡 \(선택\)/);
+  assert.doesNotMatch(checklistSource, /입학신청서 발송/);
   assert.match(checklistSource, /getRegistrationPipelinePrefix\(registration\?\.pipelineStatus\) === "7\."/);
   assert.doesNotMatch(checklistSource, /textbookBillingIssued|textbookReady|timetableRosterUpdated|교재 청구출고표|교재 준비|수업시간표 명단/);
   for (const label of orderedLabels) assert.ok(!create.includes(label), `create omits future field: ${label}`);
