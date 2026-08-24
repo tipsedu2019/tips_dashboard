@@ -53,6 +53,36 @@ export function withRequestedDefaultClassPeriod(requested, defaultPeriod) {
   };
 }
 
+export function resolveManagementPeriodFilterValue(options, value, fallback) {
+  const availableOptions = Array.isArray(options) ? options : [];
+  const requestedValue = String(value || "").trim();
+  const fallbackValue = String(fallback || "").trim();
+  const findOption = (candidate) => {
+    if (!candidate) {
+      return undefined;
+    }
+
+    return availableOptions.find((option) => {
+      const optionValue = String(option?.value || "").trim();
+      const aliases = Array.isArray(option?.aliases)
+        ? option.aliases.map((alias) => String(alias || "").trim())
+        : [];
+      return optionValue === candidate || aliases.includes(candidate);
+    });
+  };
+
+  if (requestedValue) {
+    return requestedValue;
+  }
+
+  const fallbackOption = findOption(fallbackValue);
+  return (
+    String(fallbackOption?.value || "").trim() ||
+    fallbackValue ||
+    String(availableOptions[0]?.value || "").trim()
+  );
+}
+
 export function shouldRenderManagementInitialLoading(loading, rowCount) {
   return Boolean(loading && rowCount === 0);
 }

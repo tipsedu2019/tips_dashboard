@@ -85,6 +85,7 @@ import {
   reconcilePendingManagementFilters,
   reconcilePendingManagementSearch,
   replaceManagementListUrl,
+  resolveManagementPeriodFilterValue,
   shouldRenderManagementInitialLoading,
   sortStudentSchoolCategoryValues,
   withRequestedDefaultClassPeriod,
@@ -745,28 +746,6 @@ function getServerPeriodOptions(value: unknown) {
 
 function getPeriodFilterLabel(options: PeriodOption[], value: string) {
   return options.find((option) => option.value === value || option.aliases.includes(value))?.label || value;
-}
-
-function findPeriodOption(options: PeriodOption[], value: string) {
-  if (!value) {
-    return undefined;
-  }
-
-  return options.find((option) => option.value === value || option.aliases.includes(value));
-}
-
-function resolvePeriodFilterValue(options: PeriodOption[], value: string, fallback: string) {
-  if (options.length === 0) {
-    return "";
-  }
-
-  const selectedOption = findPeriodOption(options, value);
-  if (selectedOption) {
-    return selectedOption.value;
-  }
-
-  const fallbackOption = findPeriodOption(options, fallback);
-  return fallbackOption?.value || options[0]?.value || "";
 }
 
 function getClassStatusFilterValue(row: ManagementRow) {
@@ -1750,7 +1729,7 @@ export function ManagementDataTable({
   const effectiveClassGroupFilter = useMemo(
     () =>
       kind === "classes"
-        ? resolvePeriodFilterValue(periodOptions, classGroupFilter, defaultPeriodFilter)
+        ? resolveManagementPeriodFilterValue(periodOptions, classGroupFilter, defaultPeriodFilter)
         : classGroupFilter,
     [classGroupFilter, defaultPeriodFilter, kind, periodOptions],
   );
@@ -1779,13 +1758,6 @@ export function ManagementDataTable({
 
   useEffect(() => {
     if (kind !== "classes") {
-      return;
-    }
-
-    if (periodOptions.length === 0) {
-      if (classGroupFilter) {
-        setClassGroupFilter("");
-      }
       return;
     }
 
@@ -2218,7 +2190,11 @@ export function ManagementDataTable({
     pendingClassListQueryStateRef.current = reconciliation.pending;
     const nextFilters = reconciliation.filters;
 
-    const requestedPeriodFilter = nextFilters.period || defaultPeriodFilter;
+    const requestedPeriodFilter = resolveManagementPeriodFilterValue(
+      periodOptions,
+      nextFilters.period,
+      defaultPeriodFilter,
+    );
     if (requestedPeriodFilter && classGroupFilter !== requestedPeriodFilter) {
       setClassGroupFilter(requestedPeriodFilter);
     }
@@ -2240,6 +2216,7 @@ export function ManagementDataTable({
     currentClassListQueryState,
     defaultPeriodFilter,
     kind,
+    periodOptions,
     requestedClassListQueryState,
     statusColumn,
     statusFilter,
