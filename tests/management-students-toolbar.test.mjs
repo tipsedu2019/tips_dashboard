@@ -185,12 +185,12 @@ test("management search preserves Korean IME composition before syncing URL filt
   const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
   const panelSource = await readFile(new URL("src/features/management/class-filter-panel.tsx", root), "utf8");
 
-  assert.match(tableSource, /const globalFilterCompositionRef = useRef\(false\)/);
-  assert.match(tableSource, /if \(globalFilterCompositionRef\.current\) return;/);
+  assert.match(tableSource, /const \[searchComposing, setSearchComposing\] = useState\(false\)/);
+  assert.match(tableSource, /composing:\s*searchComposing/);
   assert.match(tableSource, /onChange=\{handleGlobalFilterChange\}/);
   assert.match(tableSource, /onCompositionStart=\{handleGlobalFilterCompositionStart\}/);
   assert.match(tableSource, /onCompositionEnd=\{handleGlobalFilterCompositionEnd\}/);
-  assert.match(tableSource, /!searchInputPendingRef\.current && !globalFilterCompositionRef\.current && globalFilter !== requestedSearch/);
+  assert.match(tableSource, /reconciliation\.pendingSearch === null && !searchComposing && globalFilter !== requestedSearch/);
   assert.match(panelSource, /onSearchChange: \(value: string, options\?: \{ syncUrl\?: boolean \}\) => void/);
   assert.match(panelSource, /isComposingSearchInput\(event\)/);
   assert.match(panelSource, /onCompositionEnd=\{\(event\) => onSearchCompositionEnd\?\.\(event\.currentTarget\.value\)\}/);

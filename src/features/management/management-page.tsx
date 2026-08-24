@@ -3026,10 +3026,12 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         });
         savedResult = updated;
         const classId = getSavedClassId(updated, payload.id || selectedRow.id);
-        await service.replaceClassGroupMemberships({
-          classId,
-          groupIds: parseClassGroupIds(form.classGroupIds),
-        });
+        if (text((updated as Record<string, unknown>)?.status) !== "종강") {
+          await service.replaceClassGroupMemberships({
+            classId,
+            groupIds: parseClassGroupIds(form.classGroupIds),
+          });
+        }
       } else {
         savedResult = await service.updateTextbook(payload);
       }
