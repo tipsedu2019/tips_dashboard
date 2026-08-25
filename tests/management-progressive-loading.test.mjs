@@ -467,7 +467,7 @@ test("management hook and UI keep list reads bounded while details and relation 
   assert.match(tableSource, /syncTextbookListQueryState\(\{ publisher: nextValue \}\)/);
   assert.match(tableSource, /syncTextbookListQueryState\(\{ status: nextValue \}\)/);
 
-  assert.match(serviceSource, /\.select\("id,name,subject,grade,status,schedule,teacher_name,teacher,classroom,room"\)/);
+  assert.match(serviceSource, /\.select\("id,name,subject,grade,status,schedule,teacher,room"\)/);
   assert.match(serviceSource, /\.select\("id,name,school,grade,status,recent_issue"\)/);
   assert.match(serviceSource, /\.limit\(30\)[\s\S]*?\.abortSignal\(AbortSignal\.timeout\(8_000\)\)[\s\S]*?\.retry\(false\)/);
 });

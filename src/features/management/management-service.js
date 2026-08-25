@@ -1061,7 +1061,7 @@ async function selectStudentRosterRecord(client, studentId) {
 async function selectClassRosterRecord(client, classId) {
   const { data, error } = await client
     .from("classes")
-    .select("id,name,status,student_ids,waitlist_ids,waitlist_student_ids")
+    .select("id,name,status,student_ids,waitlist_ids")
     .eq("id", classId)
     .maybeSingle()
     .abortSignal(AbortSignal.timeout(8_000))
@@ -1093,10 +1093,9 @@ async function updateClassRosterRecord(client, classId, record) {
     .update({
       student_ids: normalizeIdList(record?.student_ids || record?.studentIds),
       waitlist_ids: waitlistIds,
-      waitlist_student_ids: waitlistIds,
     })
     .eq("id", classId)
-    .select("id,name,status,student_ids,waitlist_ids,waitlist_student_ids")
+    .select("id,name,status,student_ids,waitlist_ids")
     .maybeSingle()
     .abortSignal(AbortSignal.timeout(8_000))
     .retry(false);
@@ -1850,7 +1849,7 @@ export function createManagementService(options = {}) {
       if (kind === "students") {
         const { data, error } = await client
           .from("classes")
-          .select("id,name,subject,grade,status,schedule,teacher_name,teacher,classroom,room")
+          .select("id,name,subject,grade,status,schedule,teacher,room")
           .ilike("name", `%${normalizedSearch}%`)
           .order("name", { ascending: true })
           .order("id", { ascending: true })

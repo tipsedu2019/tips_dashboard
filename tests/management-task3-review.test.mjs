@@ -55,11 +55,12 @@ test("student enrollment pages merge direct roster arrays with registration enro
   assert.match(relation, /className/);
 });
 
-test("the configured default class period becomes the canonical URL and server request", async () => {
+test("the configured default class period canonicalizes the URL without dropping requested filters", async () => {
   const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
   assert.match(tableSource, /setClassListQueryParam\(params, CLASS_LIST_QUERY_PARAM_KEYS\.period, state\.period\)/);
   assert.doesNotMatch(tableSource, /CLASS_LIST_QUERY_PARAM_KEYS\.period, state\.period, defaultPeriodFilter/);
-  assert.match(tableSource, /!requestedClassListQueryState\.period && defaultPeriodFilter[\s\S]*?syncClassListQueryState\(\{ period: defaultPeriodFilter \}\)/);
+  assert.match(tableSource, /!requestedClassListQueryState\.period && defaultPeriodFilter[\s\S]*?syncClassListQueryState\(withRequestedDefaultClassPeriod\([\s\S]*?requestedClassListQueryState,[\s\S]*?defaultPeriodFilter,[\s\S]*?\)\)/);
+  assert.doesNotMatch(tableSource, /syncClassListQueryState\(\{ period: defaultPeriodFilter \}\)/);
 });
 
 test("bounded list rows preserve every currently rendered scalar field", async () => {
@@ -146,7 +147,7 @@ test("relation payloads match roster contacts and student history renderer label
   assert.match(migration, /'label'.*?'changedAt'/s);
 });
 
-test("relation paging preserves legacy waitlists and canonical class display aliases", async () => {
+test("relation paging and fallback clients use canonical class columns while normalizing aliases", async () => {
   const migration = await readFile(new URL("supabase/migrations/20260814011752_management_page_reads.sql", root), "utf8");
   const relation = migration.slice(
     migration.indexOf("create function public.list_management_detail_relation_page_v1"),
@@ -155,10 +156,10 @@ test("relation paging preserves legacy waitlists and canonical class display ali
   const serviceSource = await readFile(new URL("src/features/management/management-service.js", root), "utf8");
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
 
-  assert.match(relation, /coalesce\(class\.waitlist_ids,'\[\]'::jsonb\)\s*\|\|\s*pg_catalog\.coalesce\(class\.waitlist_student_ids,'\[\]'::jsonb\)/i);
-  assert.ok((relation.match(/class\.waitlist_student_ids/g) || []).length >= 2);
-  assert.match(relation, /coalesce\(pg_catalog\.nullif\(pg_catalog\.btrim\(class\.teacher_name\),''\),class\.teacher\)/i);
-  assert.match(relation, /coalesce\(pg_catalog\.nullif\(pg_catalog\.btrim\(class\.classroom\),''\),class\.room\)/i);
+  assert.ok((relation.match(/class\.waitlist_ids/g) || []).length >= 2);
+  assert.doesNotMatch(relation, /class\.(?:waitlist_student_ids|teacher_name|classroom)/i);
+  assert.match(relation, /'teacher',class\.teacher/);
+  assert.match(relation, /'classroom',class\.room/);
   assert.match(relation, /p_relation_kind\s*=\s*'class_picker'[\s\S]*?'teacher'[\s\S]*?'classroom'/i);
   assert.doesNotMatch(relation, /to_jsonb\(class\)/i);
 
@@ -188,7 +189,8 @@ test("relation paging preserves legacy waitlists and canonical class display ali
     classroom: "fallback room",
     room: "fallback room",
   });
-  assert.match(serviceSource, /\.select\("id,name,subject,grade,status,schedule,teacher_name,teacher,classroom,room"\)/);
+  assert.match(serviceSource, /\.select\("id,name,subject,grade,status,schedule,teacher,room"\)/);
+  assert.doesNotMatch(serviceSource, /\.select\("[^"\n]*(?:teacher_name|waitlist_student_ids|classroom)[^"\n]*"\)/);
   assert.match(serviceSource, /return \(data \|\| \[\]\)\.map\(normalizeClassRelationRecord\)/);
   assert.match(pageSource, /record\.teacher \|\| record\.teacher_name \|\| record\.teacherName/);
   assert.match(pageSource, /record\.classroom \|\| record\.room \|\| record\.class_room/);
@@ -204,5 +206,10 @@ test("roster mutations read exact targeted projections and never full collection
   assert.match(mutationSource, /selectStudentRosterRecord\(client, safeStudentId\)/);
   assert.match(mutationSource, /selectClassRosterRecord\(client, safeClassId\)/);
   assert.match(serviceSource, /\.select\("id,name,status,class_ids,waitlist_class_ids"\)[\s\S]*?\.eq\("id", studentId\)[\s\S]*?\.maybeSingle\(\)/);
-  assert.match(serviceSource, /\.select\("id,name,status,student_ids,waitlist_ids,waitlist_student_ids"\)[\s\S]*?\.eq\("id", classId\)[\s\S]*?\.maybeSingle\(\)/);
+  assert.match(serviceSource, /\.select\("id,name,status,student_ids,waitlist_ids"\)[\s\S]*?\.eq\("id", classId\)[\s\S]*?\.maybeSingle\(\)/);
+  const classRosterWrite = serviceSource.slice(
+    serviceSource.indexOf("async function updateClassRosterRecord"),
+    serviceSource.indexOf("async function selectOptionalRows"),
+  );
+  assert.doesNotMatch(classRosterWrite, /waitlist_student_ids/);
 });
