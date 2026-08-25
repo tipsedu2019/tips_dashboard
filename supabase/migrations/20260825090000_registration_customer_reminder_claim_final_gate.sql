@@ -25,10 +25,6 @@ begin
     return null;
   end if;
 
-  insert into dashboard_private.registration_customer_reminder_worker_heartbeats(singleton, succeeded_at, updated_at)
-  values (true, v_now, v_now)
-  on conflict (singleton) do update set succeeded_at = excluded.succeeded_at, updated_at = excluded.updated_at;
-
   perform dashboard_private.materialize_registration_observation_solapi_events_v1(100);
   perform dashboard_private.sync_registration_customer_reminder_jobs_v1();
 

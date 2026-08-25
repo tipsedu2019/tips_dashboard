@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { execFileSync, spawnSync } from "node:child_process"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import test from "node:test"
@@ -13,6 +13,10 @@ import {
 } from "../scripts/verify-free-tier-query-contracts.mjs"
 
 const verifier = new URL("../scripts/verify-free-tier-query-contracts.mjs", import.meta.url)
+const finalReminderClaimMigration = new URL(
+  "../supabase/migrations/20260825090000_registration_customer_reminder_claim_final_gate.sql",
+  import.meta.url,
+)
 
 function git(root, args) {
   return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim()
@@ -77,6 +81,19 @@ delete from cron.job where jobname like 'notification-%';
     "provider_raw_receipt_column",
     "webhook_receipt_column",
   ])
+})
+
+test("final reminder claim migration does not reintroduce heartbeat writes", async () => {
+  const source = await readFile(finalReminderClaimMigration, "utf8")
+  const violations = inspectOperationalMigrationSource({
+    file: "supabase/migrations/20260825090000_registration_customer_reminder_claim_final_gate.sql",
+    source,
+  })
+
+  assert.deepEqual(
+    violations.filter(({ reason }) => reason === "heartbeat_or_watchdog_write"),
+    [],
+  )
 })
 
 test("operational SQL guard permits runtime function definitions, exact unschedule, and bounded receipt metadata", () => {
