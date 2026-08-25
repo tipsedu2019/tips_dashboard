@@ -1605,7 +1605,23 @@ export function RegistrationApplication({
             panelIdsByTrackId={subjectPanelIdsByTrackId}
             onValueChange={handleSubjectTabChange}
           />
-          {activeGenericTrack ? (
+          {activeTrack && isRegistrationObservationWorkflowStatus(activeTrack.workflowStatus) ? (
+            <div data-registration-workflow-status="observation" className="grid min-w-0 gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">진행상태</span>
+              <select
+                aria-label={`${activeTrack.subject} 진행상태`}
+                value={activeTrack.workflowStatus}
+                disabled={workflowStatusSaving || observationWorkflowStatusOptions.length === 0}
+                onChange={(event) => void changeObservationWorkflowStatus(event.target.value)}
+                className="h-10 min-w-0 rounded-md border border-primary/30 bg-primary/5 px-3 text-sm font-semibold text-primary outline-none focus:ring-2 focus:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value={activeTrack.workflowStatus}>{REGISTRATION_WORKFLOW_STATUS_LABELS[activeTrack.workflowStatus]}</option>
+                {observationWorkflowStatusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+          ) : activeGenericTrack ? (
             <div data-registration-workflow-status="" className="grid min-w-0 gap-1.5">
               <span className="text-xs font-medium text-muted-foreground">진행상태</span>
               <select
@@ -1621,22 +1637,6 @@ export function RegistrationApplication({
                 ))}
               </select>
               <GoogleChatDeliveryControl eventId={latestGoogleChatEventId} onWarning={onWarning} />
-            </div>
-          ) : activeTrack ? (
-            <div data-registration-workflow-status="observation" className="grid min-w-0 gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">진행상태</span>
-              <select
-                aria-label={`${activeTrack.subject} 진행상태`}
-                value={activeTrack.workflowStatus}
-                disabled={workflowStatusSaving || observationWorkflowStatusOptions.length === 0}
-                onChange={(event) => void changeObservationWorkflowStatus(event.target.value)}
-                className="h-10 min-w-0 rounded-md border border-primary/30 bg-primary/5 px-3 text-sm font-semibold text-primary outline-none focus:ring-2 focus:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <option value={activeTrack.workflowStatus}>{REGISTRATION_WORKFLOW_STATUS_LABELS[activeTrack.workflowStatus]}</option>
-                {observationWorkflowStatusOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
             </div>
           ) : null}
         </div>

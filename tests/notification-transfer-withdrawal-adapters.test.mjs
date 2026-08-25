@@ -193,7 +193,7 @@ test("브라우저는 저장 후 안정된 sourceEventId만 legacy bridge로 보
   const dispatch = block(
     workspace,
     "async function dispatchLegacyOpsTaskSource",
-    "function WithdrawalNotificationSettingsDialog",
+    "function DashboardMetric",
   )
   assert.match(dispatch, /\/api\/notifications\/legacy\/ops-task/)
   assert.match(dispatch, /JSON\.stringify\(\{ sourceEventId \}\)/)

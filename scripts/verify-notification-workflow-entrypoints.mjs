@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises"
+import { readFile, readdir } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 
 export const NOTIFICATION_WORKFLOW_ENTRYPOINTS = Object.freeze([
@@ -34,25 +34,105 @@ async function sourceAt(rootUrl, relativePath) {
   return readFile(new URL(relativePath, rootUrl), "utf8")
 }
 
+const ROUTE_LOCAL_NOTIFICATION_DIALOG_PATTERNS = Object.freeze([
+  /<NotificationControlPanel\b/u,
+  /\b[A-Za-z]+NotificationSettingsDialog\b/u,
+  /\bnotificationDialogOpen\b/u,
+  /<Dialog\b[\s\S]{0,240}?알림 설정/u,
+])
+
+const ROUTE_LOCAL_GOOGLE_CHAT_API_REFERENCE = /\/api\/google-chat\b/u
+const SOURCE_CODE_EXTENSION = /\.(?:ts|tsx|js|jsx)$/u
+const GOOGLE_CHAT_API_REFERENCE_ALLOWLIST = new Set([
+  "src/app/api/google-chat/route.ts",
+])
+
+async function listSourceCodePaths(rootUrl, relativeDirectory = "src/") {
+  const entries = await readdir(new URL(relativeDirectory, rootUrl), { withFileTypes: true })
+  entries.sort((left, right) => left.name.localeCompare(right.name))
+  const paths = []
+  for (const entry of entries) {
+    const relativePath = `${relativeDirectory}${entry.name}`
+    if (entry.isDirectory()) {
+      paths.push(...await listSourceCodePaths(rootUrl, `${relativePath}/`))
+    } else if (entry.isFile() && SOURCE_CODE_EXTENSION.test(entry.name)) {
+      paths.push(relativePath)
+    }
+  }
+  return paths
+}
+
+async function findGoogleChatApiReferencePaths(rootUrl) {
+  const paths = await listSourceCodePaths(rootUrl)
+  const matches = []
+  for (const relativePath of paths) {
+    if (GOOGLE_CHAT_API_REFERENCE_ALLOWLIST.has(relativePath)) continue
+    const source = await sourceAt(rootUrl, relativePath)
+    if (ROUTE_LOCAL_GOOGLE_CHAT_API_REFERENCE.test(source)) matches.push(relativePath)
+  }
+  return matches
+}
+
+function hasRouteLocalNotificationDialog(source) {
+  return ROUTE_LOCAL_NOTIFICATION_DIALOG_PATTERNS.some((pattern) => pattern.test(source))
+}
+
 export async function scanNotificationWorkflowEntrypoints(rootUrl) {
   const blockers = []
   const taskWorkspace = await sourceAt(rootUrl, "src/features/tasks/ops-task-workspace.tsx")
   const makeupWorkspace = await sourceAt(rootUrl, "src/features/makeup-requests/makeup-request-workspace.tsx")
   const approvalWorkspace = await sourceAt(rootUrl, "src/features/approvals/approval-workspace.tsx")
+  const settingsPage = await sourceAt(rootUrl, "src/app/admin/settings/notifications/page.tsx")
+  const settingsWorkspace = await sourceAt(rootUrl, "src/features/notifications/notification-settings-workspace.tsx")
+  const controlPanel = await sourceAt(rootUrl, "src/features/notifications/notification-control-panel.tsx")
+  const controlPlaneTypes = await sourceAt(rootUrl, "src/features/notifications/notification-control-plane-types.ts")
+  const navigation = await sourceAt(rootUrl, "src/lib/navigation.ts")
+  const centralPanelReady = (
+    settingsPage.includes("<NotificationSettingsWorkspace")
+    && settingsWorkspace.includes("<NotificationControlPanel")
+    && settingsWorkspace.includes('presentation="page"')
+    && controlPanel.includes("NOTIFICATION_WORKFLOW_OPTIONS.map")
+    && controlPanel.includes("data-notification-workflow={activeWorkflow}")
+    && navigation.includes('{ title: "알림 설정", url: "/admin/settings/notifications" }')
+  )
+  const workspaceSurfaceByWorkflow = new Map([
+    ["tasks", taskWorkspace],
+    ["word_retests", taskWorkspace],
+    ["registration", taskWorkspace],
+    ["transfer", taskWorkspace],
+    ["withdrawal", taskWorkspace],
+    ["makeup_requests", makeupWorkspace],
+    ["approvals", approvalWorkspace],
+  ])
+  const routeLocalSourcePaths = new Set([
+    ...NOTIFICATION_WORKFLOW_ENTRYPOINTS.map((entry) => entry.page),
+    "src/features/tasks/ops-task-workspace.tsx",
+    "src/features/makeup-requests/makeup-request-workspace.tsx",
+    "src/features/approvals/approval-workspace.tsx",
+  ])
 
   for (const entry of NOTIFICATION_WORKFLOW_ENTRYPOINTS) {
     const page = await sourceAt(rootUrl, entry.page)
     if (entry.workspace && !page.includes(`workspace="${entry.workspace}"`)) {
       blockers.push(`page_workspace_mismatch:${entry.workflowKey}`)
     }
-    const surface = entry.workspace
-      ? taskWorkspace
-      : entry.workflowKey === "makeup_requests" ? makeupWorkspace : approvalWorkspace
-    const hasKey = entry.workspace
-      ? new RegExp(`${entry.workspace}:\\s*["']${entry.workflowKey}["']`).test(surface)
-      : new RegExp(`workflowKey=["']${entry.workflowKey}["']`).test(surface)
-    if (!hasKey || !surface.includes("<NotificationControlPanel")) {
+    const hasKey = new RegExp(`key:\\s*["']${entry.workflowKey}["']`).test(controlPlaneTypes)
+    if (!centralPanelReady || !hasKey) {
       blockers.push(`common_panel_missing:${entry.workflowKey}`)
+    }
+    const routeLocalSurfaces = [page, workspaceSurfaceByWorkflow.get(entry.workflowKey) || ""]
+    if (routeLocalSurfaces.some(hasRouteLocalNotificationDialog)) {
+      blockers.push(`route_local_dialog:${entry.workflowKey}`)
+    }
+    if (routeLocalSurfaces.some((source) => ROUTE_LOCAL_GOOGLE_CHAT_API_REFERENCE.test(source))) {
+      blockers.push(`settings_provider_call:${entry.workflowKey}`)
+    }
+  }
+
+  const googleChatApiReferencePaths = await findGoogleChatApiReferencePaths(rootUrl)
+  for (const relativePath of googleChatApiReferencePaths) {
+    if (!routeLocalSourcePaths.has(relativePath)) {
+      blockers.push(`settings_provider_call:source:${relativePath}`)
     }
   }
 

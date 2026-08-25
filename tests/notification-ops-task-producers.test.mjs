@@ -959,7 +959,8 @@ test("클라이언트 서비스는 모든 실제 알림 원본 ID를 타입이 �
   assert.match(create, /taskId: producerTaskId\(response\)[\s\S]*sourceEventIds: producerSourceEventIds\(response\)/)
   assert.match(update, /Promise<OpsTaskSourceEventReceipt>/)
   assert.match(update, /update_ops_task_v2[\s\S]*sourceEventIds: \[\.\.\.startSourceEventIds, \.\.\.producerSourceEventIds\(response\)\]/)
-  assert.match(update, /completionSourceEventIds[\s\S]*sourceEventIds: \[\.\.\.sourceEventIds, \.\.\.\(completionSourceEventIds \|\| \[\]\)\]/)
+  assert.match(update, /const completion = await completeReadyOpsRosterTransition[\s\S]*sourceEventIds: \[\.\.\.sourceEventIds, \.\.\.\(completion\?\.sourceEventIds \|\| \[\]\)\]/)
+  assert.match(update, /completion\?\.publicClassesCacheRefresh[\s\S]*publicClassesCacheRefresh: completion\.publicClassesCacheRefresh/)
 
   for (const rpc of [
     "retry_word_retest_v1",
@@ -1007,7 +1008,7 @@ test("업무 화면은 생성·수정·상태·재시험 전용 동작·댓글 r
   const dispatch = block(
     workspace,
     "async function dispatchLegacyOpsTaskSource",
-    "function WithdrawalNotificationSettingsDialog",
+    "function DashboardMetric",
   )
   assert.match(dispatch, /Promise\.allSettled/)
   assert.match(dispatch, /dispatchLegacyOpsTaskSource/)

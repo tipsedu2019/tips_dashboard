@@ -165,12 +165,10 @@ function loadMakeupTableReaders(supabase) {
     source,
     [
       "readTable",
-      "readNotificationDeliveryRows",
       "loadMakeupClassSchedulePlan: typeof loadMakeupClassSchedulePlan === 'function' ? loadMakeupClassSchedulePlan : undefined",
     ],
     {
       AbortSignal,
-      MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT: 40,
       MAKEUP_TABLE_TIMEOUT_MS: 12_000,
       isMissingRelationError: () => false,
       isPermissionError: () => false,
@@ -209,22 +207,16 @@ function loadMakeupWorkspaceDataLoader(supabase) {
         classes: [],
         classrooms: [],
         academicEvents: [],
-        notificationSettings: [],
-        notificationDeliveries: [],
       },
-      MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT: 40,
       MAKEUP_TABLE_TIMEOUT_MS: 12_000,
       getMakeupWorkspaceLoadErrorMessage: () => "load error",
       isMissingRelationError: () => false,
       isPermissionError: () => false,
       mapClass: (row) => row,
       mapEvent: (row) => row,
-      mapNotificationDelivery: (row) => row,
-      mapNotificationSetting: (row) => row,
       mapProfile: (row) => row,
       mapRequest: (row) => row,
       mapTeacher: (row) => row,
-      mergeNotificationSettings: (rows) => rows,
       parseObject: (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {},
       supabase,
       text: (value) => String(value ?? "").trim(),
@@ -283,7 +275,7 @@ function loadMakeupClassSchedulePlanErrorClearer() {
   const source = sourceBetween(
     workspaceSource,
     "const MAKEUP_CLASS_SCHEDULE_PLAN_LOAD_ERROR",
-    "const NOTIFICATION_DELIVERY_STATUS_LABELS",
+    "function sortSubjectOptions",
   );
   return transpileAndLoad(
     source,
@@ -368,28 +360,20 @@ test("휴보강 초기 조회의 timeout과 네트워크 오류를 재시도 가
 
 test("휴보강 초기 테이블 조회는 모든 PostgREST 경로에 취소 신호를 연결하고 자동 재시도를 끈다", async () => {
   const tableCalls = [];
-  const deliveryCalls = [];
-  const builders = [
-    createCompleteMakeupQueryBuilder(tableCalls),
-    createCompleteMakeupQueryBuilder(deliveryCalls),
-  ];
   const supabase = {
     from() {
-      return builders.shift();
+      return createCompleteMakeupQueryBuilder(tableCalls);
     },
   };
-  const { readTable, readNotificationDeliveryRows } = loadMakeupTableReaders(supabase);
+  const { readTable } = loadMakeupTableReaders(supabase);
 
   await readTable("profiles", "id", true);
-  await readNotificationDeliveryRows();
 
-  for (const calls of [tableCalls, deliveryCalls]) {
-    const abortCall = calls.find((call) => call.method === "abortSignal");
-    assert.ok(abortCall, "the PostgREST builder must receive an abort signal");
-    assert.equal(abortCall.args.length, 1);
-    assert.equal(typeof abortCall.args[0]?.addEventListener, "function");
-    assert.deepEqual(calls.at(-1), { method: "retry", args: [false] });
-  }
+  const abortCall = tableCalls.find((call) => call.method === "abortSignal");
+  assert.ok(abortCall, "the PostgREST builder must receive an abort signal");
+  assert.equal(abortCall.args.length, 1);
+  assert.equal(typeof abortCall.args[0]?.addEventListener, "function");
+  assert.deepEqual(tableCalls.at(-1), { method: "retry", args: [false] });
 });
 
 test("휴보강 초기 목록은 일정 원본과 요청 스냅샷을 제외한 projection만 조회한다", async () => {
@@ -403,7 +387,7 @@ test("휴보강 초기 목록은 일정 원본과 요청 스냅샷을 제외한 
   };
   const { loadMakeupRequestWorkspaceData } = loadMakeupWorkspaceDataLoader(supabase);
 
-  await loadMakeupRequestWorkspaceData();
+  const workspaceData = await loadMakeupRequestWorkspaceData();
 
   const classSelect = calls.find((entry) => entry.table === "classes")?.calls.find((call) => call.method === "select");
   const requestSelect = calls.find((entry) => entry.table === "makeup_requests")?.calls.find((call) => call.method === "select");
@@ -413,6 +397,10 @@ test("휴보강 초기 목록은 일정 원본과 요청 스냅샷을 제외한 
   assert.deepEqual(requestSelect?.args, [
     "id,status,subject,approval_group,requester_id,teacher_catalog_id,teacher_profile_id,class_id,class_name,request_kind,reason,cancel_date,makeup_start_at,makeup_end_at,makeup_classroom,makeup_slots,approver_teacher_catalog_id,approver_profile_id,returned_reason,rejected_reason,final_note,approved_by,approved_at,completed_by,completed_at,canceled_by,canceled_at,cancel_academic_event_id,makeup_academic_event_id,makeup_academic_event_ids,created_at,updated_at",
   ]);
+  assert.equal(calls.some((entry) => entry.table === "makeup_notification_settings"), false);
+  assert.equal(calls.some((entry) => entry.table === "makeup_notification_deliveries"), false);
+  assert.equal(Object.hasOwn(workspaceData, "notificationSettings"), false);
+  assert.equal(Object.hasOwn(workspaceData, "notificationDeliveries"), false);
 });
 
 test("legacy 휴보강 수업 일정은 한 행만 12초 경계에서 자동 재시도 없이 조회한다", async () => {
@@ -1137,19 +1125,13 @@ test("makeup dialogs provide sr-only descriptions without adding visual helper c
   );
   const detailDialogSource = workspaceSource.slice(
     workspaceSource.indexOf('<Dialog open={Boolean(detailRequest)}'),
-    workspaceSource.indexOf('<Dialog open={notificationDialogOpen}'),
-  );
-  const notificationDialogSource = workspaceSource.slice(
-    workspaceSource.indexOf('<Dialog open={notificationDialogOpen}'),
-    workspaceSource.indexOf('<Dialog open={Boolean(selectedNotificationSetting)}'),
+    workspaceSource.indexOf('<Dialog open={Boolean(approvalRequest)}'),
   );
 
   assert.match(requestDialogSource, /<DialogDescription className="sr-only">[\s\S]*?휴보강 신청 정보를 입력하고 결재자에게 상신합니다\.[\s\S]*?<\/DialogDescription>/);
   assert.match(detailDialogSource, /<DialogDescription className="sr-only">[\s\S]*?선택한 휴보강 신청의 결재 상태와 처리 내용을 확인합니다\.[\s\S]*?<\/DialogDescription>/);
-  assert.match(notificationDialogSource, /<DialogDescription className="sr-only">[\s\S]*?휴보강 프로세스별 웹 알림과 구글챗 발송 설정을 관리합니다\.[\s\S]*?<\/DialogDescription>/);
   assert.doesNotMatch(requestDialogSource, /<DialogDescription(?! className="sr-only")/);
   assert.doesNotMatch(detailDialogSource, /<DialogDescription(?! className="sr-only")/);
-  assert.doesNotMatch(notificationDialogSource, /<DialogDescription(?! className="sr-only")/);
 });
 
 test("makeup pending requests can continue to makeup scheduling or refund tracking", () => {
@@ -1246,24 +1228,18 @@ test("makeup workspace avoids browser prompt and fills wide screens", () => {
 test("makeup workspace delegates notification settings to the central page", () => {
   assert.doesNotMatch(workspaceSource, /NotificationControlPanel/);
   assert.doesNotMatch(workspaceSource, /useNotificationControlPlaneAvailability/);
-  assert.doesNotMatch(workspaceSource, /aria-label="휴보강 알림 설정"/);
+  assert.doesNotMatch(workspaceSource, /notificationDialogOpen|[A-Za-z]+NotificationSettingsDialog/);
+  assert.doesNotMatch(workspaceSource, /fetch\(\s*["'`]\/api\/google-chat["'`]\s*,\s*\{[\s\S]{0,240}?method:\s*["']PATCH["']/);
 });
 
-test("makeup workspace exposes notification controls cancellation and fixed subject ordering", () => {
+test("makeup workspace keeps cancellation and fixed subject ordering without local notification controls", () => {
   assert.match(workspaceSource, /const SUBJECT_SORT_ORDER = \["영어", "수학", "과학"\]/);
   assert.match(workspaceSource, /sortSubjectOptions/);
-  assert.match(workspaceSource, /알림 설정/);
-  assert.match(workspaceSource, /notificationDialogOpen/);
-  assert.match(workspaceSource, /발송 현황/);
   assert.match(serviceSource, /google_chat_math: "구글챗 · 수학팀"/);
   assert.match(serviceSource, /google_chat_english: "구글챗 · 영어팀"/);
   assert.doesNotMatch(serviceSource, /Google Chat/);
   assert.doesNotMatch(workspaceSource, /Google Chat/);
-  assert.match(workspaceSource, /function getNotificationDeliveryTargetLabel/);
-  assert.match(workspaceSource, /delivery\.targetType === "google_chat"/);
-  assert.match(workspaceSource, /getNotificationDeliveryTargetLabel\(delivery\)/);
-  assert.match(workspaceSource, /formatDateTime\(delivery\.createdAt\)/);
-  assert.match(workspaceSource, /toggleMakeupNotificationSetting/);
+  assert.doesNotMatch(workspaceSource, /toggleMakeupNotificationSetting|updateMakeupNotificationTriggerContent/);
   assert.match(workspaceSource, /cancelCompletedMakeupRequest/);
   assert.match(workspaceSource, /finalCancelRequest/);
   assert.match(workspaceSource, /승인 취소/);
@@ -1348,162 +1324,9 @@ test("makeup workspace exposes notification controls cancellation and fixed subj
   assert.doesNotMatch(serviceSource, /completed: "처리 완료"/);
 });
 
-test("makeup notification controls render a process by channel matrix", () => {
-  const notificationDialogSource = workspaceSource.slice(
-    workspaceSource.indexOf("<Dialog open={notificationDialogOpen}"),
-    workspaceSource.indexOf("<Dialog open={Boolean(finalCancelRequest)}"),
-  );
-  assert.match(workspaceSource, /const MAKEUP_NOTIFICATION_CHANNEL_ORDER[\s\S]*= \[/);
-  for (const channelKey of [
-    "dashboard_personal",
-    "dashboard_management",
-    "google_chat_executive",
-    "google_chat_admin",
-    "google_chat_english",
-    "google_chat_math",
-  ]) {
-    assert.match(workspaceSource, new RegExp(`"${channelKey}"`));
-  }
-  const notificationChannelOrderSource = workspaceSource.slice(
-    workspaceSource.indexOf("const MAKEUP_NOTIFICATION_CHANNEL_ORDER"),
-    workspaceSource.indexOf("const MAKEUP_NOTIFICATION_TABLE_GRID_STYLE"),
-  );
-  assert.ok(
-    notificationChannelOrderSource.indexOf('"google_chat_english"') < notificationChannelOrderSource.indexOf('"google_chat_math"'),
-    "english chat column should appear before math chat column",
-  );
-  assert.match(notificationDialogSource, /role="table"/);
-  assert.match(notificationDialogSource, /aria-label="휴보강 알림 설정 표"/);
-  assert.doesNotMatch(notificationDialogSource, /알림\/웹훅/);
-  assert.doesNotMatch(notificationDialogSource, /알림\/웹훅 트리거와 구글챗 발송 현황을 확인합니다/);
-  assert.doesNotMatch(notificationDialogSource, /<Bell className/);
-  assert.doesNotMatch(notificationDialogSource, /알림 제어/);
-  assert.doesNotMatch(notificationDialogSource, /읽기 전용/);
-  assert.match(notificationDialogSource, /role="columnheader"/);
-  assert.match(notificationDialogSource, /프로세스/);
-  assert.match(notificationDialogSource, /알림 위치/);
-  assert.match(workspaceSource, /const MAKEUP_GOOGLE_CHAT_CHANNEL_MAP/);
-  assert.match(notificationDialogSource, /MAKEUP_NOTIFICATION_CHANNEL_ORDER\.map/);
-  assert.match(notificationDialogSource, /웹훅 URL 보기/);
-  assert.match(notificationDialogSource, /handleOpenWebhookInfo\(channel\)/);
-  assert.match(notificationDialogSource, /selectedWebhookInfo/);
-  assert.match(notificationDialogSource, /웹훅 URL 수정/);
-  assert.match(notificationDialogSource, /webhookUrlInput/);
-  assert.match(notificationDialogSource, /handleSaveWebhookInfo/);
-  assert.match(notificationDialogSource, /maskedUrl/);
-  assert.match(notificationDialogSource, /envName/);
-  assert.match(notificationDialogSource, /role="rowheader"/);
-  assert.match(notificationDialogSource, /role="cell"/);
-  assert.match(notificationDialogSource, /openNotificationTemplateEditor\(triggerKind, settings\)/);
-  assert.match(notificationDialogSource, /find\(\(item\) => item\.channel === channel\)/);
-  assert.match(notificationDialogSource, /setting\.enabled \? "켜짐" : "꺼짐"/);
-  assert.match(notificationDialogSource, /알림 \$\{setting\.enabled \? "끄기" : "켜기"\}/);
-  assert.doesNotMatch(notificationDialogSource, /MAKEUP_NOTIFICATION_CHANNEL_LABELS\[channel\]\} 알림 내용 수정/);
-  assert.doesNotMatch(notificationDialogSource, /grid-cols-\[1fr_auto\]/);
-  assert.doesNotMatch(notificationDialogSource, /rounded-md border bg-muted\/15 p-3 md:grid-cols-\[120px_minmax\(0,1fr\)\]/);
-});
-
-test("makeup notification controls use mobile cards instead of a clipped desktop matrix", () => {
-  const notificationDialogSource = workspaceSource.slice(
-    workspaceSource.indexOf("<Dialog open={notificationDialogOpen}"),
-    workspaceSource.indexOf("<Dialog open={Boolean(finalCancelRequest)}"),
-  );
-
-  assert.match(notificationDialogSource, /data-testid="makeup-notification-mobile-list"/);
-  assert.match(notificationDialogSource, /className="grid gap-2 md:hidden"/);
-  assert.match(notificationDialogSource, /className="hidden overflow-x-auto rounded-md border md:block"/);
-  assert.match(notificationDialogSource, /aria-label=\{`\$\{triggerLabel\} 모바일 알림 설정`\}/);
-  assert.match(notificationDialogSource, /MAKEUP_NOTIFICATION_CHANNEL_ORDER\.map\(\(channel\) => \{/);
-  assert.match(notificationDialogSource, /MAKEUP_NOTIFICATION_CHANNEL_LABELS\[channel\]/);
-  assert.match(notificationDialogSource, /openNotificationTemplateEditor\(triggerKind, settings\)/);
-  assert.match(notificationDialogSource, /handleToggleNotificationSetting\(setting\)/);
-  assert.match(notificationDialogSource, /handleOpenWebhookInfo\(channel\)/);
-  assert.ok(
-    notificationDialogSource.indexOf("{selectedWebhookInfo || webhookInfoError ? (") <
-      notificationDialogSource.indexOf('data-testid="makeup-notification-mobile-list"'),
-    "webhook connection detail should appear before the long mobile settings list",
-  );
-  assert.match(workspaceSource, /webhookInfoPanelRef/);
-  assert.match(workspaceSource, /scrollIntoView\(\{ block: "start" \}\)/);
-});
-
-test("makeup notification controls can preview and edit per-process content templates", () => {
-  const notificationDialogSource = workspaceSource.slice(
-    workspaceSource.indexOf("<Dialog open={notificationDialogOpen}"),
-    workspaceSource.indexOf("<Dialog open={Boolean(finalCancelRequest)}"),
-  );
+test("makeup notification compatibility writers stay behind the canonical service and out of the workspace", () => {
   assert.match(allMigrationSource, /title_template text not null default ''/);
   assert.match(allMigrationSource, /body_template text not null default ''/);
-  assert.match(allMigrationSource, /notify pgrst, 'reload schema'/);
-  assert.match(serviceSource, /titleTemplate: text\(row\.title_template\)/);
-  assert.match(serviceSource, /bodyTemplate: text\(row\.body_template\)/);
-  assert.match(serviceSource, /function getDefaultMakeupNotificationTitleTemplate/);
-  assert.match(serviceSource, /function getDefaultMakeupNotificationBodyTemplate/);
-  assert.match(serviceSource, /function renderMakeupNotificationTemplate/);
-  assert.match(serviceSource, /export async function updateMakeupNotificationTriggerContent/);
-  assert.match(serviceSource, /saveCanonicalMakeupNotificationRules/);
-  assert.match(serviceSource, /\(\) => \(\{ titleTemplate, bodyTemplate \}\)/);
-  assert.doesNotMatch(serviceSource, /title_template: titleTemplate/);
-  assert.doesNotMatch(serviceSource, /body_template: bodyTemplate/);
-  assert.match(notificationMakeupAdapterMigrationSource, /notification_makeup_render_template_v1/);
-  assert.match(notificationMakeupAdapterMigrationSource, /'\{보강 강의실\}'/);
-  assert.match(notificationMakeupAdapterMigrationSource, /'\{승인 메모\}'/);
-  assert.match(workspaceSource, /updateMakeupNotificationTriggerContent/);
-  assert.match(workspaceSource, /selectedNotificationSetting/);
-  assert.match(workspaceSource, /notificationTemplateInput/);
-  assert.match(notificationDialogSource, /내용/);
-  assert.match(notificationDialogSource, /DialogTitle>알림 내용 수정/);
-  assert.match(notificationDialogSource, /Textarea/);
-  assert.match(notificationDialogSource, /미리보기/);
-  assert.match(notificationDialogSource, /저장/);
-  assert.match(notificationDialogSource, /사용 가능 변수/);
-  assert.match(notificationDialogSource, /className="flex max-h-\[calc\(100dvh-2rem\)\] flex-col overflow-hidden sm:max-w-2xl"/);
-  assert.match(notificationDialogSource, /className="grid min-h-0 gap-4 overflow-y-auto pr-1"/);
-  assert.match(notificationDialogSource, /<DialogFooter className="shrink-0">/);
-  const notificationVariableSource = workspaceSource.slice(
-    workspaceSource.indexOf("const MAKEUP_NOTIFICATION_TEMPLATE_VARIABLES"),
-    workspaceSource.indexOf("const hiddenOnCardColumnKeys"),
-  );
-  const tableColumnSource = workspaceSource.slice(
-    workspaceSource.indexOf("const MAKEUP_REQUEST_TABLE_COLUMNS"),
-    workspaceSource.indexOf("const hiddenOnCardColumnKeys"),
-  );
-  assert.match(notificationVariableSource, /"프로세스"/);
-  assert.match(notificationVariableSource, /MAKEUP_REQUEST_TABLE_COLUMNS/);
-  assert.match(notificationVariableSource, /\.map\(\(column\) => column\.label\)/);
-  assert.match(notificationVariableSource, /\.filter\(\(label\) => label !== "액션"\)/);
-  for (const variable of [
-    "상태",
-    "수업",
-    "과목",
-    "선생님",
-    "사유",
-    "휴강일",
-    "보강일시",
-    "보강 강의실",
-    "신청자",
-    "상신일시",
-    "보완요청일시",
-    "보완 사유",
-    "승인일시",
-    "승인 메모",
-    "반려일시",
-    "반려 사유",
-    "승인취소일시",
-    "승인취소 메모",
-    "결재자",
-  ]) {
-    assert.match(tableColumnSource, new RegExp(`label: "${variable}"`));
-  }
-  assert.match(notificationMakeupAdapterMigrationSource, /'makeup_room_spaced', request\.makeup_classroom/);
-  assert.match(notificationMakeupAdapterMigrationSource, /'approval_note', coalesce\([\s\S]*history\.event_type = 'approved'/);
-  assert.match(notificationMakeupAdapterMigrationSource, /'canceled_note'/);
-  assert.match(workspaceSource, /function getMakeupApprovalNoteValue/);
-  assert.match(workspaceSource, /case "finalNote":[\s\S]*getMakeupApprovalNoteValue\(request\)/);
-  assert.doesNotMatch(workspaceSource, /case "finalNote":[\s\S]*return request\.finalNote \|\| "-"/);
-});
-
-test("legacy makeup editor delegates toggles and content saves to the canonical v2 command", () => {
   assert.match(serviceSource, /createNotificationControlPlaneService/);
   assert.match(serviceSource, /getControlPlane\(\{\s*workflowKey:\s*"makeup_requests"\s*\}\)/);
   assert.match(serviceSource, /saveControlPlane\(\{[\s\S]*workflowKey:\s*"makeup_requests"/);
@@ -1513,8 +1336,12 @@ test("legacy makeup editor delegates toggles and content saves to the canonical 
     serviceSource,
     /\.from\("makeup_notification_settings"\)[\s\S]{0,240}\.upsert\(/,
   );
-  assert.match(workspaceSource, /toggleMakeupNotificationSetting\(/);
-  assert.match(workspaceSource, /updateMakeupNotificationTriggerContent\(/);
+  assert.match(notificationMakeupAdapterMigrationSource, /notification_makeup_render_template_v1/);
+  assert.match(notificationMakeupAdapterMigrationSource, /'\{보강 강의실\}'/);
+  assert.match(notificationMakeupAdapterMigrationSource, /'\{승인 메모\}'/);
+  assert.doesNotMatch(workspaceSource, /notificationDialogOpen|selectedNotificationSetting/);
+  assert.doesNotMatch(workspaceSource, /toggleMakeupNotificationSetting|updateMakeupNotificationTriggerContent/);
+  assert.doesNotMatch(workspaceSource, /\/api\/google-chat/);
 });
 
 test("makeup workspace keeps terminal requests in the approval result tab", () => {
@@ -1529,7 +1356,7 @@ test("makeup workspace keeps terminal requests in the approval result tab", () =
 });
 
 test("makeup workspace does not expose direct delete for closed request rows", () => {
-  assert.match(workspaceSource, /const \{ user, role, loading: authLoading, session \} = useAuth\(\)/);
+  assert.match(workspaceSource, /const \{ user, role, loading: authLoading \} = useAuth\(\)/);
   assert.doesNotMatch(workspaceSource, /isAdmin/);
   assert.doesNotMatch(workspaceSource, /deleteMakeupRequest/);
   assert.doesNotMatch(workspaceSource, /handleForceDeleteRequest/);
@@ -1587,7 +1414,7 @@ test("makeup workspace filters table rows by subject teacher period and collapsi
 test("makeup workspace opens row details and uses cards on narrow viewports", () => {
   const detailDialogSource = workspaceSource.slice(
     workspaceSource.indexOf("<Dialog open={Boolean(detailRequest)}"),
-    workspaceSource.indexOf("<Dialog open={notificationDialogOpen}"),
+    workspaceSource.indexOf("<Dialog open={Boolean(approvalRequest)}"),
   );
   const detailCardSource = workspaceSource.slice(
     workspaceSource.indexOf("function MakeupRequestDetailCard"),
@@ -1665,7 +1492,7 @@ test("makeup workspace opens row details and uses cards on narrow viewports", ()
   assert.match(workspaceSource, /getRequestEvent\(request, \["approval_canceled", "completed_canceled"\]\)\?\.note/);
 });
 
-test("휴보강 서비스는 업무 저장과 서버 알림 브리지를 분리하고 보관 이력을 읽기 전용으로 유지한다", () => {
+test("휴보강 서비스는 업무 저장과 서버 알림 브리지를 분리하고 초기 화면에서 알림 보관 테이블을 읽지 않는다", () => {
   const pruneOverrideSource = sourceBetween(
     notificationMakeupAdapterMigrationSource,
     "create or replace function public.prune_makeup_notification_deliveries",
@@ -1688,12 +1515,9 @@ test("휴보강 서비스는 업무 저장과 서버 알림 브리지를 분리�
   assert.match(notificationMakeupLegacyRouteSource, /createWebPushProvider/);
   assert.match(notificationMakeupLegacyRouteSource, /prepare_makeup_legacy_web_push_v1/);
   assert.match(notificationMakeupLegacyRouteSource, /readLegacyGoogleChatWebhookUrl/);
-  assert.match(serviceSource, /makeup_notification_settings/);
-  assert.match(serviceSource, /makeup_notification_deliveries/);
-  assert.match(serviceSource, /const MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT = 40/);
-  assert.match(serviceSource, /async function readNotificationDeliveryRows/);
-  assert.match(serviceSource, /\.from\("makeup_notification_deliveries"\)[\s\S]*\.order\("created_at", \{ ascending: false \}\)[\s\S]*\.limit\(MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT\)/);
-  assert.doesNotMatch(serviceSource, /readTable\("makeup_notification_deliveries", "\*", true\)/);
+  assert.doesNotMatch(serviceSource, /\.from\("makeup_notification_settings"\)/);
+  assert.doesNotMatch(serviceSource, /\.from\("makeup_notification_deliveries"\)/);
+  assert.doesNotMatch(serviceSource, /readNotificationDeliveryRows|MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT/);
   assert.match(pruneOverrideSource, /notification_refresh_makeup_retention_snapshot_v1/);
   assert.doesNotMatch(pruneOverrideSource, /delete\s+from\s+public\.makeup_notification_deliveries/i);
   assert.doesNotMatch(serviceSource, /recordNotificationDelivery|createDashboardNotification|sendGoogleChatNotification|sendDashboardWebPushNotification/);

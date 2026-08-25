@@ -1368,6 +1368,7 @@ test("관찰 worker materialize는 source_dirty/suppressed를 terminal receipt�
     })
     const worker = createNotificationWorkerRuntime({
       rpc: harness.rpc, getAdapter: () => null, getProvider: () => null, createRunId: () => RUN_ID,
+      now: () => new Date("2026-08-17T08:00:00.000Z"),
       observationSourceReader: {
         async readSource() { return createObservationSourceForJob(job) },
         async readCurrentPreparation() { return { textbookNames: ["현재 교재"], progressSummary: "50~57쪽" } },
@@ -1418,6 +1419,7 @@ test("반복 observation materialize는 하나의 durable event를 fanout/apply/
   let sends = 0
   const worker = createNotificationWorkerRuntime({
     rpc, createRunId: () => RUN_ID,
+    now: () => new Date("2026-08-17T08:00:00.000Z"),
     observationSourceReader: {
       async readSource() { return createObservationSourceForJob(job) },
       async readCurrentPreparation() { return { textbookNames: ["교재"], progressSummary: "50~57쪽" } },
@@ -1455,6 +1457,7 @@ test("관찰 worker는 scheduled 저장 preparation을 유지하고 reminder에�
     })
     const worker = createNotificationWorkerRuntime({
       rpc: harness.rpc, getAdapter: () => null, getProvider: () => null, createRunId: () => RUN_ID,
+      now: () => new Date("2026-08-17T08:00:00.000Z"),
       observationSourceReader: {
         async readSource() { return createObservationSourceForJob(job) },
         async readCurrentPreparation() { preparationReads += 1; return { textbookNames: ["교재"], progressSummary: "50~57쪽" } },
@@ -2414,6 +2417,7 @@ test("관찰 first-attempt generic payload는 locked frozen snapshot과 byte-ide
   await assert.rejects(prepareRegistrationObservationDeliveryForDispatch({
     claim,
     adapter: createAdapter({ async revalidateBeforeSend() { revalidationCalls += 1; return { ok: true } } }),
+    now: () => new Date("2026-08-17T08:00:00.000Z"),
     async rpc(name) {
       if (name === "read_registration_observation_delivery_frozen_state_v1") return {
         expiresAt: "2026-08-17T10:00:00.000Z", snapshot: { locked: true }, payloadFingerprint: null,
@@ -2489,6 +2493,7 @@ test("관찰 final-prepare 결과는 닫힌 union·동일 delivery·in-app provi
   ]) {
     await assert.rejects(prepareRegistrationObservationDeliveryForDispatch({
       claim, adapter: createAdapter(),
+      now: () => new Date("2026-08-17T08:00:00.000Z"),
       async rpc(name) {
         if (name === "read_registration_observation_delivery_frozen_state_v1") return frozen
         if (name === "prepare_registration_observation_notification_delivery_v1") return malformed
@@ -2535,6 +2540,7 @@ test("feedback_submitted의 in-app은 provider 0이고 빈 mention management Ch
   })
   const worker = createNotificationWorkerRuntime({
     rpc: harness.rpc, getAdapter: () => createAdapter(), createRunId: () => RUN_ID,
+    now: () => new Date("2026-08-17T08:00:00.000Z"),
     getProvider(channel) {
       providerLookups += 1
       assert.equal(channel, "google_chat")
@@ -2582,6 +2588,7 @@ test("nullable/inactive feedback director의 in-app cancel은 management Chat을
     const revalidations = []
     const worker = createNotificationWorkerRuntime({
       rpc: harness.rpc,
+      now: () => new Date("2026-08-17T08:00:00.000Z"),
       getAdapter: () => createAdapter({
         async revalidateBeforeSend(input) {
           revalidations.push(input)

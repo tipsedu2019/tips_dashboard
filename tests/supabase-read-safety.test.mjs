@@ -36,7 +36,7 @@ test("public classes query safety applies an 8-second abort and disables retries
 test("academic and operations readers cancel stalled GETs without automatic retries", async () => {
   const [academic, operations] = await Promise.all([
     readFile(
-      new URL("../src/features/academic/use-academic-workspace-data.ts", import.meta.url),
+      new URL("../src/features/academic/academic-read-service.js", import.meta.url),
       "utf8",
     ),
     readFile(
@@ -45,7 +45,9 @@ test("academic and operations readers cancel stalled GETs without automatic retr
     ),
   ])
 
-  assert.match(academic, /\.select\("\*"\)\s*\.abortSignal\(AbortSignal\.timeout\([^)]*\)\)\s*\.retry\(false\)/)
+  assert.match(academic, /client\.rpc\("get_academic_curriculum_page_v1"[\s\S]*?\.abortSignal\(AbortSignal\.timeout\(8_000\)\)\s*\.retry\(false\)/)
+  assert.match(academic, /client\.rpc\("get_academic_timetable_range_v1"[\s\S]*?\.abortSignal\(AbortSignal\.timeout\(8_000\)\)\s*\.retry\(false\)/)
+  assert.match(academic, /client\.rpc\("get_academic_curriculum_detail_v1"[\s\S]*?\.abortSignal\(AbortSignal\.timeout\(8_000\)\)\s*\.retry\(false\)/)
   assert.match(operations, /client\.rpc\("get_operations_calendar_range_v1"[\s\S]*?\.abortSignal\(AbortSignal\.timeout\(8_000\)\)\s*\.retry\(false\)/)
   assert.match(operations, /client\.rpc\("get_operations_class_lesson_design_detail_v1"[\s\S]*?\.abortSignal\(AbortSignal\.timeout\(8_000\)\)\s*\.retry\(false\)/)
   assert.doesNotMatch(academic, /Promise\.race/)

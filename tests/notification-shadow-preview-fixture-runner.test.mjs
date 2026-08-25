@@ -36,8 +36,9 @@ const EXPECTED_IDENTITIES = coverageFixture.ruleGroups
   .sort((left, right) => identityKey(left).localeCompare(identityKey(right)))
 
 const EXPECTED_IDENTITY_KEYS = EXPECTED_IDENTITIES.map(identityKey)
+const EXPECTED_IDENTITY_COUNT = 196
 
-test("preview fixture runner는 전체 188개 in-scope identity를 exact content와 단일 destination으로 독립 비교한다", async () => {
+test("preview fixture runner는 전체 in-scope identity를 exact content와 단일 destination으로 독립 비교한다", async () => {
   const originalFetch = globalThis.fetch
   let networkRequests = 0
   globalThis.fetch = async () => {
@@ -46,6 +47,11 @@ test("preview fixture runner는 전체 188개 in-scope identity를 exact content
   }
 
   try {
+    assert.equal(
+      EXPECTED_IDENTITIES.length,
+      EXPECTED_IDENTITY_COUNT,
+      "현재 in-scope notification identity graph cardinality를 독립적으로 고정해야 한다",
+    )
     const runner = await import(`${runnerUrl.href}?success=${Date.now()}`)
     const first = await runner.runNotificationShadowPreviewFixtures()
     const second = await runner.runNotificationShadowPreviewFixtures()
@@ -53,8 +59,8 @@ test("preview fixture runner는 전체 188개 in-scope identity를 exact content
     assert.deepEqual(runner.NOTIFICATION_SHADOW_PREVIEW_IDENTITIES, EXPECTED_IDENTITY_KEYS)
     assert.equal(first.passed, true)
     assert.deepEqual(first.identityOrder, EXPECTED_IDENTITY_KEYS)
-    assert.equal(first.cycles.length, 188)
-    assert.equal(first.totals.completedIdentities, 188)
+    assert.equal(first.cycles.length, EXPECTED_IDENTITY_COUNT)
+    assert.equal(first.totals.completedIdentities, EXPECTED_IDENTITY_COUNT)
     assert.equal(first.totals.externalRequests, 0)
     assert.equal(first.totals.providerAttempts, 0)
     assert.equal(first.totals.canonicalInboxProjections, 0)
@@ -218,7 +224,7 @@ test("CLI는 환경 변수 없이 JSON 증거와 검증 가능한 SHA256 manifes
   const evidence = JSON.parse(result.stdout)
   assert.equal(evidence.passed, true)
   assert.deepEqual(evidence.identityOrder, EXPECTED_IDENTITY_KEYS)
-  assert.equal(evidence.totals.completedIdentities, 188)
+  assert.equal(evidence.totals.completedIdentities, EXPECTED_IDENTITY_COUNT)
   assert.equal(evidence.totals.externalRequests, 0)
   assert.equal(evidence.totals.canonicalInboxProjections, 0)
   assert.match(evidence.manifest.digest, /^[a-f0-9]{64}$/)

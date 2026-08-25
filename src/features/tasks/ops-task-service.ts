@@ -1810,7 +1810,9 @@ async function loadOpsTaskPageStats(
         p_type: filters.taskType,
         p_filters: filters,
       })
-      .abortSignal(AbortSignal.timeout(8_000))
+      .abortSignal(signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+        : AbortSignal.timeout(8_000))
       .retry(false)
     return mapOpsTaskPageStatsResult(statsResult)
   })
@@ -1848,23 +1850,32 @@ export async function loadOpsTaskPage(options: OpsTaskPageLoadOptions): Promise<
     throw new Error("cursor_scope_mismatch")
   }
 
-  const pageArgs = {
-    p_type: options.filters.taskType,
-    p_filters: options.filters,
-    p_cursor_sort_values: options.cursor?.sortValues || null,
-    p_cursor_id: options.cursor?.id || null,
-    p_limit: 30,
-  }
-  let pageResult = await supabase
-    .rpc("list_ops_task_page_v2", pageArgs)
-    .abortSignal(AbortSignal.timeout(8_000))
+  const primaryPageResult = await supabase
+    .rpc("list_ops_task_page_v2", {
+      p_type: options.filters.taskType,
+      p_filters: options.filters,
+      p_cursor_sort_values: options.cursor?.sortValues || null,
+      p_cursor_id: options.cursor?.id || null,
+      p_limit: 30,
+    })
+    .abortSignal(options.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(8_000)])
+      : AbortSignal.timeout(8_000))
     .retry(false)
-  if (pageResult.error && isMissingRpcFunctionError(pageResult.error)) {
-    pageResult = await supabase
-      .rpc("list_ops_task_page_v1", pageArgs)
-      .abortSignal(AbortSignal.timeout(8_000))
+  const pageResult = primaryPageResult.error && isMissingRpcFunctionError(primaryPageResult.error)
+    ? await supabase
+      .rpc("list_ops_task_page_v1", {
+        p_type: options.filters.taskType,
+        p_filters: options.filters,
+        p_cursor_sort_values: options.cursor?.sortValues || null,
+        p_cursor_id: options.cursor?.id || null,
+        p_limit: 30,
+      })
+      .abortSignal(options.signal
+        ? AbortSignal.any([options.signal, AbortSignal.timeout(8_000)])
+        : AbortSignal.timeout(8_000))
       .retry(false)
-  }
+    : primaryPageResult
   if (pageResult.error) throw pageResult.error
 
   const rawRows = ((pageResult.data || []) as unknown as Row[])

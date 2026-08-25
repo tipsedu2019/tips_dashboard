@@ -91,6 +91,21 @@ function acceptedProviderResponse() {
   })
 }
 
+function expectedBatchResult(overrides = {}) {
+  return {
+    ok: true,
+    processed: 0,
+    providerAttempted: 0,
+    accepted: 0,
+    held: 0,
+    skipped: 0,
+    failedHold: 0,
+    unknown: 0,
+    stopped: "idle",
+    ...overrides,
+  }
+}
+
 async function withGlobalFetchPoison(calls, action) {
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (url) => {
@@ -183,6 +198,12 @@ function createDbOwnedLifecycleScenario(options = {}) {
       calls.rpc.push({ name, args })
       let response
       if (name === "claim_registration_customer_reminder_job_v1") {
+        const available = lifecycleGate(
+          "claim:available",
+          state.job.availableAt !== null
+            && Date.parse(state.job.availableAt) <= state.now.getTime()
+            && Date.parse(state.dueAt) <= state.now.getTime(),
+        )
         const schedulable = lifecycleGate(
           `claim:operational:${state.operationalState}`,
           state.operationalState === "scheduled",
@@ -214,7 +235,9 @@ function createDbOwnedLifecycleScenario(options = {}) {
                 >= Date.parse(state.activation.automaticDeliveryCutoffAt)
             ),
         )
-        if (!verificationEventCurrent || !verificationStartedAtCurrent) {
+        if (!available || !schedulable || !runtimeReady || !bookingCurrent || state.job.status !== "pending") {
+          response = result(null)
+        } else if (!verificationEventCurrent || !verificationStartedAtCurrent) {
           state.job.availableAt = null
           state.job.claimExpiresAt = null
           state.job.claimToken = null
@@ -225,8 +248,6 @@ function createDbOwnedLifecycleScenario(options = {}) {
         } else if (!liveCutoffCurrent) {
           state.job.lastErrorCode = "pre_cutoff_backlog"
           state.job.status = "canceled"
-          response = result(null)
-        } else if (!schedulable || !runtimeReady || !bookingCurrent || state.job.status !== "pending") {
           response = result(null)
         } else {
           state.job.claimed = true
@@ -282,6 +303,9 @@ function createDbOwnedLifecycleScenario(options = {}) {
             state.now.getTime() + state.leadHours * 60 * 60 * 1_000
           )
           state.job.status = enoughLeadTime ? "pending" : "canceled"
+          state.job.availableAt = enoughLeadTime
+            ? new Date(Math.max(state.now.getTime(), Date.parse(state.dueAt))).toISOString()
+            : null
           state.job.lastErrorCode = enoughLeadTime
             ? "settings_changed"
             : "lead_time_changed_insufficient"
@@ -352,12 +376,16 @@ function createDbOwnedLifecycleScenario(options = {}) {
           })
         }
       } else if (name === "release_registration_customer_reminder_job_v1") {
-        state.job.status = [
+        const terminal = [
           "source_ineligible",
           "runtime_inactive",
           "booking_fact_changed",
           "source_revision_unstable",
-        ].includes(args.p_error_code) ? "canceled" : "pending"
+        ].includes(args.p_error_code)
+        state.job.status = terminal ? "canceled" : "pending"
+        state.job.availableAt = terminal
+          ? null
+          : new Date(state.now.getTime() + 5 * 60 * 1_000).toISOString()
         state.job.lastErrorCode = args.p_error_code
         response = result({ released: true })
       } else if (name === "finalize_registration_customer_reminder_dispatch_v1") {
@@ -425,7 +453,11 @@ async function assertProviderZero(name, scenario, expectedGate) {
   assert.equal(scenario.calls.fetches.length, 0, name)
   assert.equal(scenario.calls.markerCount - markerBefore, 0, name)
   assert.equal(scenario.calls.gates.includes(expectedGate), true, name)
-  assert.equal(result.providerAttempted, false, name)
+  assert.equal(result.providerAttempted, 0, name)
+  assert.equal(result.accepted, 0, name)
+  assert.equal(result.unknown, 0, name)
+  assert.equal(result.stopped, "idle", name)
+  assert.equal(result.processed, result.held + result.skipped + result.failedHold, name)
   assertExactRpcTransport(scenario)
 }
 
@@ -486,7 +518,7 @@ test("DB-owned observation readiness and identity drifts stay provider-zero", as
     }, "begin:canonical-phone"],
     ["lead hours changes while claimed", {
       leadHours: 36,
-      afterClaim({ state }) { state.leadHours = 3 },
+      afterClaim({ state }) { state.leadHours = 2 },
     }, "begin:lead-hours"],
   ]
   for (const [name, options, expectedGate, expectedState] of cases) {
@@ -517,12 +549,7 @@ test("a verification restart cancels an existing T0 job before the worker claim"
   })
   const response = await scenario.run()
 
-  assert.deepEqual(await response.json(), {
-    ok: true,
-    processed: false,
-    providerAttempted: false,
-    outcome: "idle",
-  })
+  assert.deepEqual(await response.json(), expectedBatchResult())
   assert.deepEqual(
     scenario.calls.rpc.map(({ name }) => name),
     ["claim_registration_customer_reminder_job_v1"],
@@ -583,6 +610,7 @@ test("double revision drift gets only two real source reads and remains provider
       "begin_registration_customer_reminder_dispatch_v1",
       "read_registration_customer_reminder_source_v1",
       "begin_registration_customer_reminder_dispatch_v1",
+      "claim_registration_customer_reminder_job_v1",
     ],
   )
 })
@@ -600,12 +628,11 @@ test("one refreshed observation payload crosses the real SOLAPI adapter exactly 
   })
   const markerBefore = scenario.calls.markerCount
   const response = await scenario.run()
-  assert.deepEqual(await response.json(), {
-    ok: true,
-    processed: true,
-    providerAttempted: true,
-    outcome: "accepted",
-  })
+  assert.deepEqual(await response.json(), expectedBatchResult({
+    processed: 1,
+    providerAttempted: 1,
+    accepted: 1,
+  }))
   assert.equal(SOLAPI_SEND_MANY_URL, "https://api.solapi.com/messages/v4/send-many/detail")
   assert.equal(scenario.calls.globalFetchAttempts, 0)
   assert.equal(scenario.calls.globalFetchRestores, 1)
@@ -627,8 +654,12 @@ test("unknown synthetic provider dispatch is finalized once and a second invocat
   const first = await scenario.run()
   const callsAfterFirst = scenario.calls.fetches.length
   const second = await scenario.run()
-  assert.equal((await first.json()).outcome, "unknown")
-  assert.equal((await second.json()).outcome, "idle")
+  assert.deepEqual(await first.json(), expectedBatchResult({
+    processed: 1,
+    providerAttempted: 1,
+    unknown: 1,
+  }))
+  assert.deepEqual(await second.json(), expectedBatchResult())
   assert.equal(callsAfterFirst, 1)
   assert.equal(scenario.calls.fetches.length, 1)
   assert.equal(scenario.calls.markerCount, 1)
@@ -650,7 +681,11 @@ test("poisoned global fetch catches an omitted production override before any re
   const scenario = createDbOwnedLifecycleScenario({ omitProviderFetch: true })
   const response = await scenario.run()
 
-  assert.equal((await response.json()).outcome, "unknown")
+  assert.deepEqual(await response.json(), expectedBatchResult({
+    processed: 1,
+    providerAttempted: 1,
+    unknown: 1,
+  }))
   assert.equal(scenario.calls.fetches.length, 0)
   assert.equal(scenario.calls.globalFetchAttempts, 1)
   assert.equal(scenario.calls.globalFetchRestores, 1)
@@ -668,12 +703,10 @@ test("live cutoff drift after a real automatic read holds before marker mutation
   })
   const response = await scenario.run()
 
-  assert.deepEqual(await response.json(), {
-    ok: true,
-    processed: true,
-    providerAttempted: false,
-    outcome: "held",
-  })
+  assert.deepEqual(await response.json(), expectedBatchResult({
+    processed: 1,
+    held: 1,
+  }))
   assert.equal(scenario.calls.gates.includes("begin:live-cutoff"), true)
   assert.equal(scenario.calls.fetches.length, 0)
   assert.equal(scenario.calls.globalFetchAttempts, 0)
@@ -689,7 +722,7 @@ test("claimed lead-hours changes distinguish a pending refresh from an insuffici
   // the DB's distinct settings_changed versus lead_time_changed_insufficient state.
   const refresh = createDbOwnedLifecycleScenario({
     leadHours: 36,
-    afterClaim({ state }) { state.leadHours = 3 },
+    afterClaim({ state }) { state.leadHours = 2 },
   })
   const insufficient = createDbOwnedLifecycleScenario({
     leadHours: 3,
@@ -699,12 +732,12 @@ test("claimed lead-hours changes distinguish a pending refresh from an insuffici
   const refreshed = await refresh.run()
   const canceled = await insufficient.run()
 
-  assert.equal((await refreshed.json()).outcome, "skipped")
+  assert.deepEqual(await refreshed.json(), expectedBatchResult({ processed: 1, skipped: 1 }))
   assert.deepEqual(
     { status: refresh.state.job.status, error: refresh.state.job.lastErrorCode },
     { status: "pending", error: "settings_changed" },
   )
-  assert.equal((await canceled.json()).outcome, "skipped")
+  assert.deepEqual(await canceled.json(), expectedBatchResult({ processed: 1, skipped: 1 }))
   assert.deepEqual(
     { status: insufficient.state.job.status, error: insufficient.state.job.lastErrorCode },
     { status: "canceled", error: "lead_time_changed_insufficient" },

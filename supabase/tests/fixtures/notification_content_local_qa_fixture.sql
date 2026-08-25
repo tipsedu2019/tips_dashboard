@@ -137,6 +137,9 @@ insert into notification_content_local_qa_event_catalog(
   ('registration', 'registration.case_created', '문의 접수', '등록 진행', '새 등록 문의가 접수되었을 때', 1),
   ('registration', 'registration.registration_completed', '등록 완료', '등록 진행', '등록 처리가 완료되었을 때', 2),
   ('registration', 'registration.case_closed', '문의 종료', '등록 진행', '등록 없이 문의가 종료되었을 때', 3),
+  ('registration', 'registration.consultation_completed', '상담 완료', '등록 진행', '상담 완료 상태가 저장되었을 때', 4),
+  ('registration', 'registration.waiting_transitioned', '대기 신청', '등록 진행', '고객이 대기 상태로 전환되었을 때', 5),
+  ('registration', 'registration.admission_started', '등록 신청', '등록 진행', '고객의 등록 절차가 시작되었을 때', 6),
   ('registration', 'registration.appointment_reminder_due', '예약 알림', '예약 알림', '예약 일정에 맞춘 알림 시각이 되었을 때', 4),
   ('registration', 'registration.phone_consultation_ready', '전화상담 준비', '상담 인계', '전화상담 담당자에게 인계할 준비가 되었을 때', 101),
   ('registration', 'registration.visit_scheduled', '방문상담 예약', '상담 인계', '방문상담 일정이 처음 배정되었을 때', 102),
@@ -144,6 +147,13 @@ insert into notification_content_local_qa_event_catalog(
   ('registration', 'registration.visit_replaced', '방문상담 예약 교체', '상담 인계', '방문상담 예약이 다른 예약으로 교체되었을 때', 104),
   ('registration', 'registration.visit_subject_deselected', '방문상담 과목 제외', '상담 인계', '방문상담 대상 과목이 제외되었을 때', 105),
   ('registration', 'registration.visit_canceled', '방문상담 취소', '상담 인계', '방문상담 예약이 취소되었을 때', 106),
+  ('registration', 'registration.observation_scheduled', '청강 예약', '청강', '청강 일정이 처음 예약되었을 때', 201),
+  ('registration', 'registration.observation_rescheduled', '청강 일정 변경', '청강', '청강 일정이 변경되었을 때', 202),
+  ('registration', 'registration.observation_canceled', '청강 취소', '청강', '청강 예약이 취소되었을 때', 203),
+  ('registration', 'registration.observation_reminder_due', '오늘 청강 준비', '청강', '청강 3시간 전 준비가 필요할 때', 204),
+  ('registration', 'registration.observation_feedback_due', '청강 피드백 요청', '청강', '청강 종료 30분 뒤 피드백이 필요할 때', 205),
+  ('registration', 'registration.observation_feedback_submitted', '청강 피드백 등록', '청강', '청강 피드백이 등록되었을 때', 206),
+  ('registration', 'registration.observation_director_reassigned', '청강 담당 원장 변경', '청강', '청강 담당 원장이 변경되었을 때', 207),
 
   ('transfer', 'transfer.submitted', '제출', '전반 진행', '전반 신청이 제출되었을 때', 1),
   ('transfer', 'transfer.completed', '완료', '전반 진행', '전반 처리가 완료되었을 때', 2),
@@ -420,6 +430,27 @@ $notification_content_local_qa_rule_groups$
     },
     {
       "workflowKey":"registration",
+      "eventKeys":["registration.observation_scheduled","registration.observation_rescheduled","registration.observation_canceled","registration.observation_reminder_due","registration.observation_feedback_due"],
+      "cells":[{"audienceKey":"subject_team","channelKey":"google_chat","ruleVariantKeys":["immediate"]}],
+      "scopeState":"in_scope","configurationKind":"editable_rule","enabledState":"disabled","dispatchOwner":"canonical"
+    },
+    {
+      "workflowKey":"registration",
+      "eventKeys":["registration.observation_feedback_submitted"],
+      "cells":[
+        {"audienceKey":"management_team","channelKey":"google_chat","ruleVariantKeys":["immediate"]},
+        {"audienceKey":"track_director","channelKey":"in_app","ruleVariantKeys":["immediate"]}
+      ],
+      "scopeState":"in_scope","configurationKind":"editable_rule","enabledState":"disabled","dispatchOwner":"canonical"
+    },
+    {
+      "workflowKey":"registration",
+      "eventKeys":["registration.observation_director_reassigned"],
+      "cells":[{"audienceKey":"management_team","channelKey":"google_chat","ruleVariantKeys":["immediate"]}],
+      "scopeState":"in_scope","configurationKind":"editable_rule","enabledState":"disabled","dispatchOwner":"canonical"
+    },
+    {
+      "workflowKey":"registration",
       "eventKeys":["registration.admission_message_requested"],
       "cells":[{"audienceKey":"applicant_guardian","channelKey":"customer_message","ruleVariantKeys":["immediate"]}],
       "scopeState":"excluded_channel","configurationKind":"not_applicable","enabledState":"enabled","dispatchOwner":"legacy"
@@ -496,12 +527,12 @@ cross join lateral pg_catalog.jsonb_array_elements_text(cell_item.value -> 'rule
 
 do $$
 begin
-  if (select pg_catalog.count(*) from notification_content_local_qa_identities) <> 189
+  if (select pg_catalog.count(*) from notification_content_local_qa_identities) <> 197
     or (
       select pg_catalog.count(*)
       from notification_content_local_qa_identities
       where scope_state = 'in_scope'
-    ) <> 188
+    ) <> 196
     or (
       select pg_catalog.count(*)
       from notification_content_local_qa_identities
@@ -516,7 +547,7 @@ begin
       select pg_catalog.count(distinct (workflow_key, event_key))
       from notification_content_local_qa_identities
       where scope_state = 'in_scope'
-    ) <> 51
+    ) <> 58
   then
     raise exception 'notification_content_local_qa_rule_groups_invalid'
       using errcode = '55000';
@@ -534,7 +565,7 @@ begin
     )
     from notification_content_local_qa_identities
     where scope_state = 'in_scope'
-  ) <> '2b09a1c44db7beb0c67b7bce13baf931e7c91677d423cdb0247acd7a1d50a178' then
+  ) <> '7468e67c9b23817f83bd924ddb1dc8935403a2131a7dcc1f9c5904e91dce0f1a' then
     raise exception 'notification_content_local_qa_identity_hash_mismatch'
       using errcode = '55000';
   end if;
@@ -671,7 +702,7 @@ begin
   if (
     select pg_catalog.count(*)
     from dashboard_private.notification_settings_ui_registry
-  ) <> 177 then
+  ) <> 185 then
     raise exception 'notification_content_local_qa_editable_registry_install_incomplete'
       using errcode = '55000';
   end if;
@@ -682,8 +713,8 @@ select dashboard_private.notification_seed_workflow_settings_v1();
 
 do $$
 begin
-  if (select pg_catalog.count(*) from dashboard_private.notification_rules) <> 177
-    or (select pg_catalog.count(*) from dashboard_private.notification_templates) <> 177
+  if (select pg_catalog.count(*) from dashboard_private.notification_rules) <> 185
+    or (select pg_catalog.count(*) from dashboard_private.notification_templates) <> 185
     or (
       select pg_catalog.count(*)
       from dashboard_private.notification_settings_import_metadata
@@ -873,13 +904,13 @@ order by event_catalog.event_sort, fixed.audience_key;
 
 do $$
 begin
-  if (select pg_catalog.count(*) from dashboard_private.notification_settings_ui_registry) <> 188
-    or (select pg_catalog.count(*) from dashboard_private.notification_rules) <> 189
+  if (select pg_catalog.count(*) from dashboard_private.notification_settings_ui_registry) <> 196
+    or (select pg_catalog.count(*) from dashboard_private.notification_rules) <> 197
     or (
       select pg_catalog.count(*)
       from dashboard_private.notification_templates
       where content_contract_version is null
-    ) <> 189
+    ) <> 197
     or (
       select pg_catalog.count(*)
       from dashboard_private.notification_settings_ui_registry
@@ -1006,27 +1037,27 @@ begin
       using errcode = '55000';
   end if;
 
-  if (select pg_catalog.count(*) from dashboard_private.notification_settings_ui_registry) <> 188
-    or (select pg_catalog.count(*) from dashboard_private.notification_rules) <> 189
-    or (select pg_catalog.count(*) from dashboard_private.notification_templates) <> 377
+  if (select pg_catalog.count(*) from dashboard_private.notification_settings_ui_registry) <> 196
+    or (select pg_catalog.count(*) from dashboard_private.notification_rules) <> 197
+    or (select pg_catalog.count(*) from dashboard_private.notification_templates) <> 393
     or (
       select pg_catalog.count(*)
       from dashboard_private.notification_templates
       where content_contract_version is null
-    ) <> 189
+    ) <> 197
     or (
       select pg_catalog.count(*)
       from dashboard_private.notification_templates
       where content_contract_version = '1'
-    ) <> 188
+    ) <> 196
     or (
       select pg_catalog.count(*)
       from dashboard_private.notification_rule_content_contracts
-    ) <> 188
+    ) <> 196
     or (
       select pg_catalog.count(*)
       from dashboard_private.notification_template_compliance_audits
-    ) <> 188
+    ) <> 196
     or (
       select pg_catalog.count(*)
       from public.makeup_notification_settings
@@ -1066,17 +1097,17 @@ begin
     or (
       select pg_catalog.count(distinct (workflow_key, event_key))
       from dashboard_private.notification_settings_ui_registry
-    ) <> 48
+    ) <> 58
     or (
       select pg_catalog.count(*)
       from dashboard_private.notification_settings_ui_registry
       where initial_enabled
-    ) <> 50
+    ) <> 53
     or (
       select pg_catalog.count(*)
       from dashboard_private.notification_rules
       where enabled
-    ) <> 51
+    ) <> 54
   then
     raise exception 'notification_content_local_qa_workflow_shape_mismatch'
       using errcode = '55000';
@@ -1087,7 +1118,7 @@ begin
       values
         ('approvals'::text, 36::bigint),
         ('makeup_requests'::text, 32::bigint),
-        ('registration'::text, 23::bigint),
+        ('registration'::text, 34::bigint),
         ('tasks'::text, 40::bigint),
         ('transfer'::text, 2::bigint),
         ('withdrawal'::text, 2::bigint),
@@ -1111,7 +1142,7 @@ begin
       values
         ('approvals'::text, 36::bigint),
         ('makeup_requests'::text, 32::bigint),
-        ('registration'::text, 24::bigint),
+        ('registration'::text, 35::bigint),
         ('tasks'::text, 40::bigint),
         ('transfer'::text, 2::bigint),
         ('withdrawal'::text, 2::bigint),
@@ -1151,7 +1182,7 @@ begin
       ) as identity_key
       from dashboard_private.notification_settings_ui_registry registry
     ) identities
-  ) <> '2b09a1c44db7beb0c67b7bce13baf931e7c91677d423cdb0247acd7a1d50a178' then
+  ) <> '7468e67c9b23817f83bd924ddb1dc8935403a2131a7dcc1f9c5904e91dce0f1a' then
     raise exception 'notification_content_local_qa_registry_identity_hash_mismatch'
       using errcode = '55000';
   end if;

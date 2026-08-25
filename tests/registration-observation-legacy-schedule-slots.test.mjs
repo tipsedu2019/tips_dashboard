@@ -109,10 +109,12 @@ test("local DB runner exposes the exact provider-zero legacy-schedule focus", as
   assert.match(stdout, /DRY RUN — zero database changes/);
   const receipt = JSON.parse(stdout.slice(stdout.indexOf("{") ));
   assert.equal(receipt.focus, "legacy-schedule");
-  assert.equal(receipt.migrationCeiling, "20260813093446");
+  assert.equal(receipt.migrationCeiling, "20260815040537");
   assert.deepEqual(receipt.migrations, [
     "20260813064146_registration_observation_legacy_schedule_slots.sql",
     "20260813093446_registration_observation_legacy_schedule_slot_catalogs.sql",
+    "20260815035229_fix_observation_legacy_session_list.sql",
+    "20260815040537_expose_observation_return_status.sql",
   ]);
   assert.deepEqual(receipt.pgTapTests, [
     "supabase/tests/registration_observation_legacy_schedule_slots_test.sql",

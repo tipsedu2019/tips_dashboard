@@ -993,13 +993,31 @@ function chainHasWildcardProjection(value) {
   return /(?:^|[,(])\s*(?:[A-Za-z_$][\w$]*\s*:\s*)?\*(?=\s*(?:[,)]|$))/u.test(value)
 }
 
+function isProvablyBoundedAbortExpression(expression) {
+  const signal = unwrap(expression)
+  if (ts.isConditionalExpression(signal)) {
+    return isProvablyBoundedAbortExpression(signal.whenTrue)
+      && isProvablyBoundedAbortExpression(signal.whenFalse)
+  }
+  if (!ts.isCallExpression(signal)) return false
+  const access = accessParts(signal)
+  if (rootIdentifier(access?.receiver) !== "AbortSignal") return false
+  if (access.method === "timeout") {
+    return signal.arguments.length === 1
+      && argumentValue(signal.arguments[0], new Map()) === 8000
+  }
+  if (access.method !== "any" || signal.arguments.length !== 1) return false
+  const signals = unwrap(signal.arguments[0])
+  return ts.isArrayLiteralExpression(signals)
+    && signals.elements.length === 2
+    && !signals.elements.some(ts.isSpreadElement)
+    && signals.elements.some((candidate) => isProvablyBoundedAbortExpression(candidate))
+}
+
 function isExactTimeoutAbortSignal(call) {
-  if (callMethod(call) !== "abortSignal" || call.arguments.length !== 1) return false
-  const timeout = unwrap(call.arguments[0])
-  if (!ts.isCallExpression(timeout) || timeout.arguments.length !== 1) return false
-  const access = accessParts(timeout)
-  return access?.method === "timeout" && rootIdentifier(access.receiver) === "AbortSignal"
-    && argumentValue(timeout.arguments[0], new Map()) === 8000
+  return callMethod(call) === "abortSignal"
+    && call.arguments.length === 1
+    && isProvablyBoundedAbortExpression(call.arguments[0])
 }
 
 function hasExactDetailPredicate(operations, constants, scope, surface) {

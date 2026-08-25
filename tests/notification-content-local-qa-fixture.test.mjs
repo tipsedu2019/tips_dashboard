@@ -48,13 +48,14 @@ const expectedPgTapFiles = Object.freeze([
   "supabase/tests/notification_approval_adapter_test.sql",
   "supabase/tests/notification_system_template_vnext_test.sql",
   "supabase/tests/notification_worker_production_schedule_test.sql",
+  "supabase/tests/notification_contract_drain_evidence_schema_repair_test.sql",
 ])
 
 async function loadSubject() {
   return import(fixtureModuleUrl.href)
 }
 
-test("합성 fixture manifest는 현재 188개 설정 graph와 고정 identity를 잠근다", async () => {
+test("합성 fixture manifest는 현재 196개 설정 graph와 고정 identity를 잠근다", async () => {
   const { loadNotificationContentLocalQaContract } = await loadSubject()
   const contract = await loadNotificationContentLocalQaContract()
 
@@ -70,14 +71,14 @@ test("합성 fixture manifest는 현재 188개 설정 graph와 고정 identity�
     authUsers: 1,
     profiles: 1,
     workflows: 7,
-    eventKeys: 51,
-    settingsRegistry: 188,
-    rules: 189,
-    historicalTemplates: 189,
-    vNextTemplates: 188,
-    templates: 377,
-    contentContracts: 188,
-    complianceAudits: 188,
+    eventKeys: 58,
+    settingsRegistry: 196,
+    rules: 197,
+    historicalTemplates: 197,
+    vNextTemplates: 196,
+    templates: 393,
+    contentContracts: 196,
+    complianceAudits: 196,
     legacySettings: 42,
     importMetadata: 42,
     runtimeFlags: 12,
@@ -97,15 +98,15 @@ test("합성 fixture manifest는 현재 188개 설정 graph와 고정 identity�
     contract.manifest.identities.actor.userId,
     "31500000-0000-4000-8000-000000000001",
   )
-  assert.equal(contract.manifest.identities.configuration.count, 188)
+  assert.equal(contract.manifest.identities.configuration.count, 196)
   assert.equal(
     contract.manifest.identities.configuration.sha256,
-    "2b09a1c44db7beb0c67b7bce13baf931e7c91677d423cdb0247acd7a1d50a178",
+    "7468e67c9b23817f83bd924ddb1dc8935403a2131a7dcc1f9c5904e91dce0f1a",
   )
   assert.deepEqual(contract.manifest.identities.configuration.byWorkflow, {
     approvals: 36,
     makeup_requests: 32,
-    registration: 26,
+    registration: 34,
     tasks: 40,
     transfer: 2,
     withdrawal: 2,
@@ -114,7 +115,7 @@ test("합성 fixture manifest는 현재 188개 설정 graph와 고정 identity�
   assert.deepEqual(contract.manifest.identities.configuration.ruleByWorkflow, {
     approvals: 36,
     makeup_requests: 32,
-    registration: 27,
+    registration: 35,
     tasks: 40,
     transfer: 2,
     withdrawal: 2,
@@ -139,13 +140,13 @@ test("합성 fixture manifest는 현재 188개 설정 graph와 고정 identity�
   assert.equal(Object.isFrozen(contract.manifest.identities), true)
 })
 
-test("pgTAP 계약은 review된 13개 파일의 순서와 실제 SHA-256만 허용한다", async () => {
+test("pgTAP 계약은 review된 14개 파일의 순서와 실제 SHA-256만 허용한다", async () => {
   const { loadNotificationContentLocalQaContract } = await loadSubject()
   const contract = await loadNotificationContentLocalQaContract()
 
   assert.deepEqual(contract.pgTap.files.map((entry) => entry.relativePath), expectedPgTapFiles)
-  assert.equal(contract.pgTap.fileCount, 13)
-  assert.equal(new Set(contract.pgTap.files.map((entry) => entry.relativePath)).size, 13)
+  assert.equal(contract.pgTap.fileCount, 14)
+  assert.equal(new Set(contract.pgTap.files.map((entry) => entry.relativePath)).size, 14)
   assert.equal(contract.pgTap.files.every((entry) => /^[a-f0-9]{64}$/u.test(entry.sha256)), true)
   assert.match(contract.pgTap.sha256, /^[a-f0-9]{64}$/u)
   assert.equal(Object.isFrozen(contract.pgTap), true)
@@ -153,7 +154,7 @@ test("pgTAP 계약은 review된 13개 파일의 순서와 실제 SHA-256만 허�
   assert.equal(contract.pgTap.files.every(Object.isFrozen), true)
   assert.equal(
     contract.pgTap.files.at(-1).relativePath,
-    "supabase/tests/notification_worker_production_schedule_test.sql",
+    "supabase/tests/notification_contract_drain_evidence_schema_repair_test.sql",
   )
   assert.equal(contract.pgTap.files.some((entry) => /pending-migrations|quarantine/u.test(entry.relativePath)), false)
 })
@@ -238,7 +239,7 @@ test("round-trip SQL은 settings UI flag만 임시 true로 만들고 false 복�
   )
 })
 
-test("allowlist pgTAP은 최신 188 identity와 single-writer/vNext 상태를 서로 모순 없이 검증한다", async () => {
+test("allowlist pgTAP은 최신 196 identity와 single-writer/vNext 상태를 서로 모순 없이 검증한다", async () => {
   const [runtime, schema, makeup, content] = await Promise.all([
     readFile(runtimePgTapUrl, "utf8"),
     readFile(schemaPgTapUrl, "utf8"),
@@ -246,7 +247,7 @@ test("allowlist pgTAP은 최신 188 identity와 single-writer/vNext 상태를 �
     readFile(contentPgTapUrl, "utf8"),
   ])
 
-  assert.match(runtime, /188::bigint/u)
+  assert.match(runtime, /196::bigint/u)
   assert.doesNotMatch(runtime, /165::bigint/u)
   assert.match(runtime, /registration\.appointment_reminder_due/u)
   assert.match(runtime, /registration\.visit_subject_deselected/u)
@@ -266,7 +267,7 @@ test("allowlist pgTAP은 최신 188 identity와 single-writer/vNext 상태를 �
   )
 })
 
-test("isolated DB runner plan은 fixture count와 exact pgTAP 13개를 출력하지만 실행은 계속 닫힌다", async () => {
+test("isolated DB runner plan은 fixture count와 exact pgTAP 14개를 출력하지만 실행은 계속 닫힌다", async () => {
   const result = spawnSync(process.execPath, ["--experimental-strip-types", runnerUrl.pathname], {
     cwd: new URL("..", import.meta.url),
     encoding: "utf8",
@@ -275,10 +276,10 @@ test("isolated DB runner plan은 fixture count와 exact pgTAP 13개를 출력하
   assert.equal(result.status, 0, result.stderr)
   const plan = JSON.parse(result.stdout)
   assert.equal(plan.mode, "plan")
-  assert.equal(plan.expectedResources.syntheticFixture.settingsRegistry, 188)
-  assert.equal(plan.expectedResources.syntheticFixture.rules, 189)
+  assert.equal(plan.expectedResources.syntheticFixture.settingsRegistry, 196)
+  assert.equal(plan.expectedResources.syntheticFixture.rules, 197)
   assert.equal(plan.expectedResources.syntheticFixture.operationalRows, 0)
-  assert.equal(plan.expectedResources.pgTapFileCount, 13)
+  assert.equal(plan.expectedResources.pgTapFileCount, 14)
   assert.deepEqual(plan.expectedResources.pgTapFiles, expectedPgTapFiles)
   assert.equal(plan.expectedResources.providerEgressBlocked, true)
   assert.equal(plan.expectedResources.productionRowDataCopied, 0)

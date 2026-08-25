@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
-  REGISTRATION_CUSTOMER_MESSAGE_KINDS,
+  REGISTRATION_CUSTOMER_MESSAGE_SINGLE_SOURCE_KINDS,
   assertRegistrationCustomerMessagePublicPayload,
   parseRegistrationCustomerMessageTarget,
 } from "../src/features/tasks/registration-customer-message-contract.ts"
@@ -10,7 +10,7 @@ import {
 const SOURCE_ID = "97000000-0000-4000-8000-000000000001"
 
 test("customer-message contract exposes both closed observation kinds", () => {
-  assert.deepEqual(REGISTRATION_CUSTOMER_MESSAGE_KINDS, [
+  assert.deepEqual(REGISTRATION_CUSTOMER_MESSAGE_SINGLE_SOURCE_KINDS, [
     "level_test_booking",
     "visit_consultation_booking",
     "appointment_reminder",

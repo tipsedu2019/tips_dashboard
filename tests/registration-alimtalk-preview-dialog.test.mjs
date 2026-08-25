@@ -7,7 +7,10 @@ import vm from "node:vm"
 import { act, createElement, forwardRef } from "react"
 import { createRoot } from "react-dom/client"
 import ts from "typescript"
-import { assertRegistrationCustomerMessagePublicPayload } from "../src/features/tasks/registration-customer-message-contract.ts"
+import {
+  assertRegistrationCustomerMessagePublicPayload,
+  isRegistrationCustomerMessageBundleKind,
+} from "../src/features/tasks/registration-customer-message-contract.ts"
 
 const require = createRequire(import.meta.url)
 const { JSDOM } = require("jsdom")
@@ -42,7 +45,10 @@ async function loadService(fetch) {
         specifier === "./registration-customer-message-contract"
         || specifier === "./registration-customer-message-contract.ts"
       ) {
-        return { assertRegistrationCustomerMessagePublicPayload }
+        return {
+          assertRegistrationCustomerMessagePublicPayload,
+          isRegistrationCustomerMessageBundleKind,
+        }
       }
       throw new Error(`unexpected require: ${specifier}`)
     },
@@ -146,6 +152,8 @@ test("mounted observation dialog ignores a stale preview and one confirmation ge
   const originalWindow = globalThis.window
   const originalDocument = globalThis.document
   const originalNavigator = globalThis.navigator
+  const originalCrypto = globalThis.crypto
+  const originalCryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto")
   const originalActEnvironment = globalThis.IS_REACT_ACT_ENVIRONMENT
   const first = controlledPromise()
   const second = controlledPromise()
@@ -231,8 +239,14 @@ test("mounted observation dialog ignores a stale preview and one confirmation ge
     globalThis.window = originalWindow
     globalThis.document = originalDocument
     Object.defineProperty(globalThis, "navigator", { configurable: true, value: originalNavigator })
+    if (originalCryptoDescriptor) {
+      Object.defineProperty(globalThis, "crypto", originalCryptoDescriptor)
+    } else {
+      Reflect.deleteProperty(globalThis, "crypto")
+    }
     globalThis.IS_REACT_ACT_ENVIRONMENT = originalActEnvironment
   }
+  assert.strictEqual(globalThis.crypto, originalCrypto)
 })
 
 test("registration customer message client sends only strict target and confirmation DTOs", async () => {

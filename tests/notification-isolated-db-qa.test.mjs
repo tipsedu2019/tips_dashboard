@@ -27,7 +27,9 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url))
 const runnerSource = readFileSync(runnerUrl, "utf8")
 const expectedPgTapFiles = Object.freeze([
   "supabase/tests/notification_control_plane_schema_test.sql",
+  "supabase/tests/notification_adapters_forward_install_test.sql",
   "supabase/tests/notification_content_contract_test.sql",
+  "supabase/tests/notification_delivery_pending_schedule_test.sql",
   "supabase/tests/notification_makeup_single_writer_test.sql",
   "supabase/tests/notification_control_plane_runtime_test.sql",
   "supabase/tests/notification_ops_task_adapters_test.sql",
@@ -36,6 +38,8 @@ const expectedPgTapFiles = Object.freeze([
   "supabase/tests/notification_makeup_adapter_test.sql",
   "supabase/tests/notification_approval_adapter_test.sql",
   "supabase/tests/notification_system_template_vnext_test.sql",
+  "supabase/tests/notification_worker_production_schedule_test.sql",
+  "supabase/tests/notification_contract_drain_evidence_schema_repair_test.sql",
 ])
 const exactLocalOrchestrationSteps = Object.freeze([
   "preexisting-resource-check",
@@ -60,14 +64,14 @@ const expectedFixtureCounts = Object.freeze({
   authUsers: 1,
   profiles: 1,
   workflows: 7,
-  eventKeys: 48,
-  settingsRegistry: 185,
-  rules: 186,
-  historicalTemplates: 186,
-  vNextTemplates: 185,
-  templates: 371,
-  contentContracts: 185,
-  complianceAudits: 185,
+  eventKeys: 58,
+  settingsRegistry: 196,
+  rules: 197,
+  historicalTemplates: 197,
+  vNextTemplates: 196,
+  templates: 393,
+  contentContracts: 196,
+  complianceAudits: 196,
   legacySettings: 42,
   importMetadata: 42,
   runtimeFlags: 12,
@@ -256,7 +260,7 @@ function fixtureContractFixture() {
       sha256: "d".repeat(64),
     },
     pgTap: {
-      fileCount: 10,
+      fileCount: 14,
       sha256: "e".repeat(64),
       files: expectedPgTapFiles.map((relativePath, index) => ({
         relativePath,
@@ -417,10 +421,10 @@ function successfulStepEvidence(step, manifest) {
     case "read-only-evidence":
       return {
         mode: "read-only",
-        settingsRegistry: 185,
-        rules: 186,
-        templates: 371,
-        contentContracts: 185,
+        settingsRegistry: 196,
+        rules: 197,
+        templates: 393,
+        contentContracts: 196,
         operationalRows: 0,
       }
     case "disposable-round-trip":
@@ -433,8 +437,8 @@ function successfulStepEvidence(step, manifest) {
       }
     case "pgtap":
       return {
-        fileCount: 10,
-        passed: 10,
+        fileCount: 14,
+        passed: 14,
         failed: 0,
         files: expectedPgTapFiles,
       }
@@ -2344,11 +2348,11 @@ test("CLI 기본 모드는 무료 티어 계획만 출력하고 자원을 만들
         steadyStateContainers: ["database"],
       },
       syntheticFixture: {
-        settingsRegistry: 188,
-        rules: 189,
+        settingsRegistry: 196,
+        rules: 197,
         operationalRows: 0,
       },
-      pgTapFileCount: 10,
+      pgTapFileCount: 14,
       pgTapFiles: expectedPgTapFiles,
       providerEgressBlocked: true,
       remoteCollector: {
@@ -2766,28 +2770,28 @@ test("dry-run은 stdout·stderr를 합쳐 exact pending filename 집합만 허�
   }
 })
 
-test("pgTAP은 raw plan line 대신 pg_prove의 exact 10-file PASS summary를 판정한다", async () => {
+test("pgTAP은 raw plan line 대신 pg_prove의 exact 14-file PASS summary를 판정한다", async () => {
   const { assertNotificationPgTapSummary } = await loadSubject()
   const success = [
     "All tests successful.",
-    "Files=10, Tests=59,  3 wallclock secs",
+    "Files=14, Tests=59,  3 wallclock secs",
     "Result: PASS",
   ].join("\n")
-  assert.deepEqual(assertNotificationPgTapSummary(success, 10), {
-    fileCount: 10,
+  assert.deepEqual(assertNotificationPgTapSummary(success, 14), {
+    fileCount: 14,
     testCount: 59,
   })
 
   for (const output of [
-    "All tests successful.\nFiles=9, Tests=59\nResult: PASS",
-    "All tests successful.\nFiles=10, Tests=0\nResult: PASS",
-    "Files=10, Tests=59\nResult: PASS",
-    "All tests successful.\nFiles=10, Tests=59\nResult: FAIL",
-    "All tests successful.\nFiles=10, Tests=59\nResult: PASS\nDubious, test returned 1",
-    "All tests successful.\nFiles=10, Tests=59\nResult: PASS\nnot ok 3",
+    "All tests successful.\nFiles=13, Tests=59\nResult: PASS",
+    "All tests successful.\nFiles=14, Tests=0\nResult: PASS",
+    "Files=14, Tests=59\nResult: PASS",
+    "All tests successful.\nFiles=14, Tests=59\nResult: FAIL",
+    "All tests successful.\nFiles=14, Tests=59\nResult: PASS\nDubious, test returned 1",
+    "All tests successful.\nFiles=14, Tests=59\nResult: PASS\nnot ok 3",
   ]) {
     assert.throws(
-      () => assertNotificationPgTapSummary(output, 10),
+      () => assertNotificationPgTapSummary(output, 14),
       /notification_local_db_pgtap_failed/u,
     )
   }
@@ -3039,7 +3043,7 @@ test("trusted executor는 fake subprocess transcript로 17단계 command를 실�
       ))
     }
     if (call.step === "pgtap" && args[0] === "test") {
-      return success("All tests successful.\nFiles=10, Tests=59, 1 wallclock secs\nResult: PASS\n")
+      return success("All tests successful.\nFiles=14, Tests=59, 1 wallclock secs\nResult: PASS\n")
     }
     if (call.step === "cleanup") return success()
     if (args[0] === "db" && args[1] === "query") return success()
@@ -3058,7 +3062,7 @@ test("trusted executor는 fake subprocess transcript로 17단계 command를 실�
 
   assert.equal(result.status, "passed")
   assert.equal(localConfigContractChecked, true)
-  assert.equal(result.pgTap.fileCount, 10)
+  assert.equal(result.pgTap.fileCount, 14)
   const networkCreate = processCalls.find(({ step, args }) => (
     step === "internal-network-create" && args[1] === "create"
   ))
@@ -3231,7 +3235,7 @@ test("fake executor로 17개 local orchestration을 exact order로 실행하고 
   assert.deepEqual(result.orchestration.steps, exactLocalOrchestrationSteps)
   assert.equal(result.orchestration.localStartAttempted, true)
   assert.deepEqual(result.counts, expectedFixtureCounts)
-  assert.deepEqual(result.pgTap, { fileCount: 10, passed: 10, failed: 0 })
+  assert.deepEqual(result.pgTap, { fileCount: 14, passed: 14, failed: 0 })
   assert.deepEqual(result.safety, {
     productionRowDataCopied: 0,
     productionMutationCount: 0,

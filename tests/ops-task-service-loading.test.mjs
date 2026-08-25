@@ -6,6 +6,7 @@ import vm from "node:vm";
 import ts from "typescript";
 
 import { getRegistrationWorkflowStatusFromLegacyTrack } from "../src/features/tasks/registration-workflow-status.js";
+import { createOpsTaskPageStatsCache } from "../src/features/tasks/ops-task-page-stats-cache.ts";
 
 const serviceSource = await readFile(
   new URL("../src/features/tasks/ops-task-service.ts", import.meta.url),
@@ -61,6 +62,7 @@ function transpileAndLoad(source, exports, mocks = {}) {
   vm.runInNewContext(compiled, {
     module: sandboxModule,
     exports: sandboxModule.exports,
+    createOpsTaskPageStatsCache,
     setRegistrationTrackMutationCacheInvalidator: () => {},
     ...mocks,
   });
@@ -164,7 +166,7 @@ function loadDashboardConflictTaskLinkReader(mocks) {
 
 function loadOpsTaskPageWithMocks(mocks) {
   const source = sourceBetween(
-    "function opsTaskRequestSignal",
+    "export async function loadOpsTaskPage",
     "export async function loadOpsTaskWorkspaceData",
   );
   return transpileAndLoad(
@@ -174,6 +176,7 @@ function loadOpsTaskPageWithMocks(mocks) {
       OPS_TASK_PAGE_SIZE: 30,
       assertOpsTaskPageFilters: () => {},
       getOpsTaskPageScope: async () => "scope-a",
+      isMissingRpcFunctionError: () => false,
       mapOpsTaskPageRow: (row) => row.row_data,
       probeRegistrationSubjectTrackRuntime: async () => null,
       text: (value) => String(value || "").trim(),
@@ -181,6 +184,22 @@ function loadOpsTaskPageWithMocks(mocks) {
       ...mocks,
     },
   ).loadOpsTaskPage;
+}
+
+function loadOpsTaskPageStatsSupplementWithMocks(mocks) {
+  const source = sourceBetween(
+    "function mapOpsTaskPageStatsResult",
+    "export function startOpsRegistrationTaskPageSupplementLoad",
+  );
+  return transpileAndLoad(
+    source,
+    ["startOpsTaskPageStatsSupplementLoad"],
+    {
+      opsTaskPageStatsCache: { load: (_key, loader) => loader() },
+      text: (value) => String(value || "").trim(),
+      ...mocks,
+    },
+  ).startOpsTaskPageStatsSupplementLoad;
 }
 
 function taskPageRpcResult(data, error = null) {
@@ -194,16 +213,16 @@ function taskPageRpcResult(data, error = null) {
   return result;
 }
 
-test("task continuation pages skip aggregate RPCs and a stats failure does not discard page rows", async () => {
+test("task pages never wait for the independently loaded aggregate supplement", async () => {
   const calls = [];
   const loadPage = loadOpsTaskPageWithMocks({
     supabase: {
       rpc(name) {
         calls.push(name);
-        if (name === "list_ops_task_page_v1") {
+        if (name === "list_ops_task_page_v2") {
           return taskPageRpcResult([{ id: "task-a", row_data: { id: "task-a" }, sort_values: ["2026-08-14T00:00:00Z"] }]);
         }
-        return taskPageRpcResult(null, new Error("stats unavailable"));
+        return taskPageRpcResult(null, new Error("unexpected rpc"));
       },
     },
   });
@@ -216,7 +235,7 @@ test("task continuation pages skip aggregate RPCs and a stats failure does not d
   });
   assert.deepEqual(JSON.parse(JSON.stringify(firstPage.page.rows)), [{ id: "task-a" }]);
   assert.equal(firstPage.stats, undefined);
-  assert.deepEqual([...calls].sort(), ["get_ops_task_list_stats_v1", "list_ops_task_page_v1"]);
+  assert.deepEqual(calls, ["list_ops_task_page_v2"]);
 
   calls.length = 0;
   const continuation = await loadPage({
@@ -227,7 +246,7 @@ test("task continuation pages skip aggregate RPCs and a stats failure does not d
   });
   assert.deepEqual(JSON.parse(JSON.stringify(continuation.page.rows)), [{ id: "task-a" }]);
   assert.equal(continuation.stats, undefined);
-  assert.deepEqual(calls, ["list_ops_task_page_v1"]);
+  assert.deepEqual(calls, ["list_ops_task_page_v2"]);
 });
 
 test("registration list keeps successful page rows when the optional runtime probe fails", async () => {
@@ -237,7 +256,7 @@ test("registration list keeps successful page rows when the optional runtime pro
     },
     supabase: {
       rpc(name) {
-        if (name === "list_ops_task_page_v1") {
+        if (name === "list_ops_task_page_v2") {
           return taskPageRpcResult([{ id: "task-a", row_data: { id: "task-a" }, sort_values: ["2026-08-14T00:00:00Z"] }]);
         }
         return taskPageRpcResult(null, new Error("stats unavailable"));
@@ -271,7 +290,7 @@ test("registration list resolves before optional stats and runtime probes settle
     },
     supabase: {
       rpc(name) {
-        if (name === "list_ops_task_page_v1") {
+        if (name === "list_ops_task_page_v2") {
           return taskPageRpcResult([{ id: "task-a", row_data: { id: "task-a" }, sort_values: ["2026-08-14T00:00:00Z"] }]);
         }
         return pendingStatsResult;
@@ -296,23 +315,29 @@ test("registration list resolves before optional stats and runtime probes settle
   assert.equal(runtimeProbeCalls, 0);
 });
 
-test("registration list combines caller cancellation with a twelve-second success buffer", async () => {
+test("task page fallback combines caller cancellation with each bounded timeout", async () => {
+  const missingV2 = { code: "PGRST202" };
   const callerSignal = { kind: "caller" };
-  let requestSignal = null;
-  const pageResult = taskPageRpcResult([]);
-  pageResult.abortSignal = (signal) => {
-    requestSignal = signal;
-    return pageResult;
-  };
+  const requestSignals = [];
+  const calls = [];
+  const v2Result = taskPageRpcResult(null, missingV2);
+  const v1Result = taskPageRpcResult([]);
+  for (const result of [v2Result, v1Result]) {
+    result.abortSignal = (signal) => {
+      requestSignals.push(signal);
+      return result;
+    };
+  }
   const loadPage = loadOpsTaskPageWithMocks({
+    isMissingRpcFunctionError: (error) => error === missingV2,
     AbortSignal: {
       timeout: (milliseconds) => ({ kind: "timeout", milliseconds }),
       any: (signals) => ({ kind: "combined", signals }),
     },
     supabase: {
-      rpc(name) {
-        assert.equal(name, "list_ops_task_page_v1");
-        return pageResult;
+      rpc(name, args) {
+        calls.push({ name, args });
+        return name === "list_ops_task_page_v2" ? v2Result : v1Result;
       },
     },
   });
@@ -325,9 +350,80 @@ test("registration list combines caller cancellation with a twelve-second succes
     signal: callerSignal,
   });
 
-  assert.equal(requestSignal.kind, "combined");
-  assert.equal(requestSignal.signals[0], callerSignal);
-  assert.deepEqual(requestSignal.signals[1], { kind: "timeout", milliseconds: 12_000 });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    {
+      name: "list_ops_task_page_v2",
+      args: {
+        p_type: "registration",
+        p_filters: { taskType: "registration" },
+        p_cursor_sort_values: null,
+        p_cursor_id: null,
+        p_limit: 30,
+      },
+    },
+    {
+      name: "list_ops_task_page_v1",
+      args: {
+        p_type: "registration",
+        p_filters: { taskType: "registration" },
+        p_cursor_sort_values: null,
+        p_cursor_id: null,
+        p_limit: 30,
+      },
+    },
+  ]);
+  assert.equal(requestSignals.length, 2);
+  for (const requestSignal of requestSignals) {
+    assert.strictEqual(requestSignal.signals[0], callerSignal);
+  }
+  assert.deepEqual(JSON.parse(JSON.stringify(requestSignals)), [
+    {
+      kind: "combined",
+      signals: [callerSignal, { kind: "timeout", milliseconds: 8_000 }],
+    },
+    {
+      kind: "combined",
+      signals: [callerSignal, { kind: "timeout", milliseconds: 8_000 }],
+    },
+  ]);
+});
+
+test("task stats supplement combines caller cancellation with the exact bounded timeout", async () => {
+  const callerSignal = { kind: "caller" };
+  let requestSignal = null;
+  const statsResult = taskPageRpcResult([{ total: 1, byStatus: {}, byView: {}, metrics: {}, facets: {} }]);
+  statsResult.abortSignal = (signal) => {
+    requestSignal = signal;
+    return statsResult;
+  };
+  const startStatsSupplement = loadOpsTaskPageStatsSupplementWithMocks({
+    AbortSignal: {
+      timeout: (milliseconds) => ({ kind: "timeout", milliseconds }),
+      any: (signals) => ({ kind: "combined", signals }),
+    },
+    supabase: {
+      rpc(name, args) {
+        assert.equal(name, "get_ops_task_list_stats_v1");
+        assert.deepEqual(JSON.parse(JSON.stringify(args)), {
+          p_type: "general",
+          p_filters: { taskType: "general" },
+        });
+        return statsResult;
+      },
+    },
+  });
+
+  const stats = await startStatsSupplement({
+    filters: { taskType: "general" },
+    viewerId: "viewer-a",
+    signal: callerSignal,
+  });
+
+  assert.equal(stats.total, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(requestSignal)), {
+    kind: "combined",
+    signals: [callerSignal, { kind: "timeout", milliseconds: 8_000 }],
+  });
 });
 
 test("dashboard conflict task link lookup aborts after eight seconds without automatic retry", async () => {
@@ -501,7 +597,6 @@ function createWorkspaceLoaderHarness({
   registrationTrackSummaryFactory = (taskIds) => taskIds.map((taskId) => (
     registrationSummaryTrack(taskId, `track:${taskId}`, "영어", "inquiry")
   )),
-  registrationWorkspaceTrackSummaryLoader = async () => ({ mode: "ready", tracks: [] }),
 } = {}) {
   const defaultTaskGate = deferred();
   const explicitTaskGates = new Map(
@@ -1499,14 +1594,12 @@ test("task list reads use a bounded RPC page and selected detail stays exact-id 
   assert.match(serviceSource, /export async function loadOpsTaskPage/);
 
   const pageReader = sourceBetween(
-    "function opsTaskRequestSignal",
+    "export async function loadOpsTaskPage",
     "export async function loadOpsTaskWorkspaceData",
   );
+  assert.match(pageReader, /rpc\("list_ops_task_page_v2"/);
   assert.match(pageReader, /rpc\("list_ops_task_page_v1"/);
-  assert.match(pageReader, /rpc\("get_ops_task_list_stats_v1"/);
   assert.match(pageReader, /p_limit: 30/);
-  assert.match(pageReader, /opsTaskRequestSignal\(signal, 8_000\)/);
-  assert.match(pageReader, /taskType === "registration" \? 12_000 : 8_000/);
   assert.match(pageReader, /\.retry\(false\)/);
   assert.match(pageReader, /rawRows\.slice\(0, OPS_TASK_PAGE_SIZE\)/);
   assert.match(pageReader, /rawRows\.length > OPS_TASK_PAGE_SIZE/);
@@ -1547,13 +1640,14 @@ test("task page stats expose authoritative sibling counts metrics and bounded fi
     serviceSource,
     /export type OpsTaskPageStats = \{[\s\S]*?byView: Record<string, number>[\s\S]*?metrics: Record<string, number>[\s\S]*?facets: Record<string, OpsTaskFacetOption\[]>/,
   );
-  const pageReader = sourceBetween(
-    "function opsTaskRequestSignal",
-    "export async function loadOpsTaskWorkspaceData",
+  const statsReader = sourceBetween(
+    "function mapOpsTaskPageStatsResult",
+    "export async function loadOpsTaskPage",
   );
-  assert.match(pageReader, /byView:/);
-  assert.match(pageReader, /metrics:/);
-  assert.match(pageReader, /facets:/);
+  assert.match(statsReader, /rpc\("get_ops_task_list_stats_v1"/);
+  assert.match(statsReader, /byView:/);
+  assert.match(statsReader, /metrics:/);
+  assert.match(statsReader, /facets:/);
   assert.match(taskPageMigrationSource, /'byView'/);
   assert.match(taskPageMigrationSource, /'metrics'/);
   assert.match(taskPageMigrationSource, /'facets'/);
