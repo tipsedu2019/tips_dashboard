@@ -1280,6 +1280,62 @@ test("fixture reset is deterministic and contains the approved workflow samples"
   assert.equal(first.caseDetails["fixture-task-migration-review"].tracks.every((track) => track.migrationReviewRequired), true)
 })
 
+test("fixture registered workflow finalizes enrollment without cascading the checklist", async () => {
+  const {
+    createRegistrationSubjectTrackFixtureState,
+    reduceRegistrationSubjectTrackFixture,
+  } = await loadFixtureModule()
+  let state = createRegistrationSubjectTrackFixtureState()
+
+  let outcome = reduceRegistrationSubjectTrackFixture(state, {
+    type: "setRegistrationAdmissionChecklistItem",
+    requestKey: "fixture-check-registration-completed-first",
+    payload: {
+      taskId: "fixture-task-partial-registration",
+      item: "registrationCompleted",
+      checked: true,
+    },
+  })
+  state = outcome.state
+  outcome = reduceRegistrationSubjectTrackFixture(state, {
+    type: "setRegistrationWorkflowStatus",
+    requestKey: "fixture-register-partial-math",
+    payload: {
+      trackId: "fixture-track-partial-math",
+      workflowStatus: "registered",
+      expectedWorkflowRevision: 1,
+    },
+  })
+
+  const detail = outcome.state.caseDetails["fixture-task-partial-registration"]
+  const enrollment = detail.enrollments.find((item) => item.id === "fixture-enrollment-partial-math")
+  const track = detail.tracks.find((item) => item.id === "fixture-track-partial-math")
+  assert.deepEqual(plain(detail.admissionChecklist), {
+    applicationSent: false,
+    makeeduRegistered: false,
+    invoiceSent: false,
+    paymentConfirmed: false,
+    registrationCompleted: true,
+  })
+  assert.deepEqual(plain({
+    workflowStatus: track.workflowStatus,
+    pipelineStatus: track.status,
+    enrollmentStatus: enrollment.status,
+    rosterActive: enrollment.rosterActive,
+    studentId: enrollment.studentId,
+    batchStatus: detail.admissionBatches.find((item) => item.id === enrollment.admissionBatchId)?.status,
+  }), {
+    workflowStatus: "registered",
+    pipelineStatus: "registered",
+    enrollmentStatus: "enrolled",
+    rosterActive: true,
+    studentId: detail.task.studentId,
+    batchStatus: "completed",
+  })
+  assert.equal(outcome.result.enrollmentFinalization.changed, true)
+  assert.equal(outcome.state.externalCallLedger.length, 0)
+})
+
 test("saved waiting-notice fixture is complete and immediately message-eligible", async () => {
   const fixture = await loadFixtureModule()
   const state = fixture.createRegistrationSubjectTrackFixtureState()
@@ -3279,6 +3335,7 @@ test("every fixture UI mutation is declared and produces an idempotency receipt"
     "saveRegistrationCaseInquiry",
     "updateRegistrationCaseCommon",
     "setRegistrationWorkflowStatus",
+    "setRegistrationAdmissionChecklistItem",
     "routeRegistrationInquiry",
     "assignRegistrationTrackDirector",
     "saveRegistrationSharedAppointment",

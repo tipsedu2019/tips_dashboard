@@ -330,6 +330,20 @@ export type OpsRegistrationAdmissionBatch = {
   updatedAt: string
 }
 
+export type RegistrationAdmissionChecklistItem =
+  | "applicationSent"
+  | "makeeduRegistered"
+  | "invoiceSent"
+  | "paymentConfirmed"
+  | "registrationCompleted"
+
+export type RegistrationAdmissionChecklistState = Record<RegistrationAdmissionChecklistItem, boolean>
+
+export type RegistrationAdmissionChecklistMutationResponse = {
+  taskId: string
+  checklist: RegistrationAdmissionChecklistState
+}
+
 export type OpsRegistrationTrackEvent = {
   id: string
   taskId: string
@@ -390,6 +404,7 @@ type OpsRegistrationCaseDetailFields<
   admissionApplicationMessageClaimActive: boolean
   admissionApplicationMessageUpdatedAt: string | null
   admissionApplicationAccepted: boolean
+  admissionChecklist: RegistrationAdmissionChecklistState
   comments: OpsTaskComment[]
   attachments: OpsTaskAttachment[]
   tracks: TTrack[]
@@ -506,6 +521,13 @@ export type RegistrationWorkflowStatusMutationResponse = {
   workflowStatus: OpsRegistrationWorkflowStatus
   workflowRevision: number
   workflowStatusEnteredAt: string
+  enrollmentFinalization: {
+    trackId: string
+    studentId: string
+    batchId: string | null
+    enrollmentIds: string[]
+    changed: boolean
+  } | null
 }
 
 export type RegistrationDirectorAssignmentResponse = RegistrationTrackTransitionResponse & {
@@ -965,6 +987,19 @@ function nullableText(input: unknown) {
 
 function bool(input: unknown) {
   return input === true
+}
+
+export function normalizeRegistrationAdmissionChecklist(input: unknown): RegistrationAdmissionChecklistState {
+  const checklist = input && typeof input === "object" && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : {}
+  return {
+    applicationSent: bool(checklist.applicationSent),
+    makeeduRegistered: bool(checklist.makeeduRegistered),
+    invoiceSent: bool(checklist.invoiceSent),
+    paymentConfirmed: bool(checklist.paymentConfirmed),
+    registrationCompleted: bool(checklist.registrationCompleted),
+  }
 }
 
 function numberValue(input: unknown) {
@@ -2427,6 +2462,9 @@ export function createRegistrationTrackService(
             admissionApplicationMessageClaimActive: bool(value(activeMessage, "claim_active", "claimActive")),
             admissionApplicationMessageUpdatedAt: nullableText(value(activeMessage, "updated_at", "updatedAt")),
             admissionApplicationAccepted: activeStatus === "accepted",
+            admissionChecklist: normalizeRegistrationAdmissionChecklist(
+              value(detailRow, "admission_checklist", "admissionChecklist"),
+            ),
             comments,
             attachments,
             tracks,
@@ -3217,11 +3255,44 @@ export function createRegistrationTrackService(
     if (!isOpsRegistrationWorkflowStatus(status)) {
       throw new Error("registration_workflow_status_response_invalid")
     }
+    const rawFinalization = parseJsonRecord(value(result, "enrollment_finalization", "enrollmentFinalization"))
+    const rawEnrollmentIds = rawFinalization?.enrollmentIds
     return {
       trackId: text(value(result, "track_id", "trackId")),
       workflowStatus: status,
       workflowRevision: numberValue(value(result, "workflow_revision", "workflowRevision")),
       workflowStatusEnteredAt: text(value(result, "workflow_status_entered_at", "workflowStatusEnteredAt")),
+      enrollmentFinalization: rawFinalization
+        ? {
+            trackId: text(value(rawFinalization, "track_id", "trackId")),
+            studentId: text(value(rawFinalization, "student_id", "studentId")),
+            batchId: nullableText(value(rawFinalization, "batch_id", "batchId")),
+            enrollmentIds: Array.isArray(rawEnrollmentIds)
+              ? rawEnrollmentIds.map((item) => text(item)).filter(Boolean)
+              : [],
+            changed: bool(value(rawFinalization, "changed")),
+          }
+        : null,
+    }
+  }
+
+  async function setRegistrationAdmissionChecklistItem(input: {
+    taskId: string
+    item: RegistrationAdmissionChecklistItem
+    checked: boolean
+    requestKey: string
+  }): Promise<RegistrationAdmissionChecklistMutationResponse> {
+    const result = await callRpc<Row>("set_registration_admission_checklist_item_v1", {
+      p_task_id: input.taskId,
+      p_item: input.item,
+      p_checked: input.checked,
+      p_request_key: requireRequestKey(input.requestKey),
+    })
+    const taskId = text(value(result, "task_id", "taskId"))
+    if (taskId !== input.taskId) throw new Error("registration_admission_checklist_response_invalid")
+    return {
+      taskId,
+      checklist: normalizeRegistrationAdmissionChecklist(value(result, "checklist")),
     }
   }
 
@@ -3622,6 +3693,7 @@ export function createRegistrationTrackService(
     saveRegistrationConsultationResult,
     saveRegistrationPhoneConsultation,
     setRegistrationWorkflowStatus,
+    setRegistrationAdmissionChecklistItem,
     transitionRegistrationWaiting,
     saveRegistrationWaitingDetails,
     routeRegistrationEnrollmentDecision,
@@ -4112,6 +4184,17 @@ export function startRegistrationAdmissionBatch(
   const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationAdmissionBatchMutationResponse>("startRegistrationAdmissionBatch", input)
   if (fixture) return fixture
   return defaultRegistrationTrackService.startRegistrationAdmissionBatch(input)
+}
+
+export function setRegistrationAdmissionChecklistItem(
+  input: Parameters<typeof defaultRegistrationTrackService.setRegistrationAdmissionChecklistItem>[0],
+): Promise<RegistrationAdmissionChecklistMutationResponse> {
+  const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationAdmissionChecklistMutationResponse>(
+    "setRegistrationAdmissionChecklistItem",
+    input,
+  )
+  if (fixture) return fixture
+  return defaultRegistrationTrackService.setRegistrationAdmissionChecklistItem(input)
 }
 
 export function setRegistrationEnrollmentMakeedu(

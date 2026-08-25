@@ -118,6 +118,7 @@ jobs:
             --postdeploy-contract \
             --test supabase/tests/active_registration_workflow_sqlstate_contract_test.sql \
             --test supabase/tests/registration_admission_order_independence_test.sql \
+            --test supabase/tests/registration_admission_checklist_roster_consistency_test.sql \
             --test supabase/tests/registration_level_test_result_parent_reconciliation_test.sql \
             --test supabase/tests/notification_contract_drain_evidence_schema_repair_test.sql \
             --test supabase/tests/registration_customer_reminder_claim_final_gate_test.sql \

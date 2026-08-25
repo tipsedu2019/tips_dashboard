@@ -129,6 +129,11 @@
       "fileName": "20260825090000_registration_customer_reminder_claim_final_gate.sql",
       "status": "final",
       "sha256": "78c551b1627dd62f6aa9c2855d610a7462e066e12f7a79d780b8e79f0088e5b0"
+    },
+    {
+      "fileName": "20260825152044_registration_admission_checklist_roster_consistency.sql",
+      "status": "final",
+      "sha256": "48d990a1affab61afe3ad57b4e64456b938e1ad1b0c0feb90a76a9a854849e6e"
     }
   ]
 }

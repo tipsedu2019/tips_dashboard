@@ -843,7 +843,6 @@ test("registration workspace replaces Notion registration management with one ap
     "buildRegistrationCaseListItems",
     "filterRegistrationCaseListItems",
     "RegistrationWorkflowStatusBadge",
-    "RegistrationOperationsChecklistChips",
     "RegistrationDetailPanel",
     "getRegistrationCaseTabCounts",
     "collectRegistrationLegacySourceIds",
@@ -884,7 +883,6 @@ test("registration workspace replaces Notion registration management with one ap
   assert.doesNotMatch(registrationTableSource, /item\.tracks\.map/);
 
   assertIncludesAll(workspaceSource, [
-    'label="진행상태"',
     'label="과목"',
     'label="학년"',
     "RegistrationApplicationCreate",
@@ -1644,7 +1642,7 @@ test("viewer transitions hide and reset the previous viewer's workspace state be
   assert.match(workspaceSource, /open=\{workspaceDataBelongsToCurrentViewer && detailOpen\}/);
 });
 
-test("registration detail prioritizes reached sections instead of listing empty future work", async () => {
+test("legacy registration detail prioritizes reached sections without duplicating admission processing", async () => {
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const detailSource = workspaceSource.slice(
     workspaceSource.indexOf("function RegistrationDetailPanel"),
@@ -1656,13 +1654,12 @@ test("registration detail prioritizes reached sections instead of listing empty 
     "const showLevelTestDetail =",
     "const showConsultationDetail =",
     "const showPlacementDetail =",
-    "const showAdmissionDetail =",
     'aria-label="문의 정보"',
     'aria-label="레벨테스트 정보"',
     'aria-label="상담 정보"',
     'aria-label="등록·대기 정보"',
-    'aria-label="입학 처리 정보"',
   ]);
+  assert.doesNotMatch(detailSource, /showAdmissionDetail|aria-label="입학 처리 정보"|RegistrationOperationsChecklistChips/);
 });
 
 test("registration mobile cards derive terminal sections from task links as well as detail fields", async () => {
@@ -2035,13 +2032,12 @@ test("canonical registration application opens one honest read-only timeline fro
     "historyAction={<RegistrationApplicationHistoryAction detail={genericDetail} profiles={profiles} />}",
   ]);
   assert.equal(
-    editorSource.split("detail={genericDetail}").length - 1,
-    6,
-    "every generic detail consumer must receive the narrow projection",
+    editorSource.split("historyAction={<RegistrationApplicationHistoryAction detail={genericDetail} profiles={profiles} />}").length - 1,
+    1,
+    "the detail header should expose exactly one canonical history action",
   );
   assert.equal(editorSource.split("detail={detail}").length - 1, 0);
   assert.equal(editorSource.split("eligibleTracks={genericTracks}").length - 1, 2);
-  assert.equal(editorSource.split("tracks={genericTracks}").length - 1, 1);
   assert.doesNotMatch(editorSource, /history=\{<RegistrationHistoryTimeline/);
   assert.match(actionSource, /aria-label="자동 이력 보기"/);
   assert.match(actionSource, /<Popover>/);
@@ -3776,7 +3772,6 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     'blockers.push("출제 개수")',
     'blockers.push("교재")',
     'blockers.push("시험범위")',
-    "label=\"진행상태\"",
     "출제 개수",
     "커트라인(합격 개수)",
     "커트라인",
@@ -5157,7 +5152,7 @@ test("registration completion keeps textbook optional while validating a nonempt
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const blockerSource = source.slice(
     source.indexOf("function getOperationCompletionBlockers"),
-    source.indexOf("function getTaskCompletionBlockers"),
+    source.indexOf("function getWordRetestRequiredInputBlockers"),
   );
 
   assert.match(blockerSource, /if \(!String\(input\.registration\?\.classStartSession/);
@@ -5165,49 +5160,53 @@ test("registration completion keeps textbook optional while validating a nonempt
   assert.match(blockerSource, /if \(hasLinkedRecord\(input\.textbookId\) && !findTextbookOption/);
 });
 
-test("registration completion does not require admission-form delivery", async () => {
+test("registration completion does not depend on admission checklist items", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const blockerStart = source.indexOf("function getMissingRegistrationCheckLabels");
   const blockerSource = source.slice(
-    blockerStart,
-    source.indexOf("function getMissingWithdrawalCheckLabels", blockerStart),
+    source.indexOf("function getOperationCompletionBlockers"),
+    source.indexOf("function getWordRetestRequiredInputBlockers"),
   );
 
-  assert.ok(blockerStart >= 0);
-  assert.doesNotMatch(blockerSource, /admissionNoticeSent|입학신청서 발송/);
-  assertIncludesAll(blockerSource, ["makeeduRegistered", "makeeduInvoiceSent", "paymentChecked"]);
+  assert.match(blockerSource, /if \(input\.type === "registration" && isRegistrationPipelineComplete\(input\)\)/);
+  assert.doesNotMatch(
+    blockerSource,
+    /getMissingRegistrationCheckLabels|admissionNoticeSent|makeeduRegistered|makeeduInvoiceSent|paymentChecked|입학신청서 발송|메이크에듀 등록\(수업, 교재\)|청구서 발송|수납 완료 확인/,
+  );
 });
 
-test("registration admission checklist keeps optional messaging separate from the financial order and is omitted during create", async () => {
-  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const create = await readSource("src/features/tasks/registration-application-create.tsx");
-  const checklistStart = source.indexOf("function getRegistrationOperationsChecklist(");
-  const checklistSource = source.slice(
-    checklistStart,
-    source.indexOf("function getRegistrationOperationsChecklistValue", checklistStart),
-  );
-  const detailStart = source.indexOf("function RegistrationDetailPanel");
-  const registrationDetailSource = source.slice(detailStart, source.indexOf("function WithdrawalDetailPanel", detailStart));
-  const summaryStart = source.indexOf('if (task.type === "registration" && task.registration)');
-  const registrationSummarySource = source.slice(summaryStart, source.indexOf('if (task.type === "withdrawal"', summaryStart));
+test("registration admission checklist is five independent checkboxes and is omitted during create", async () => {
+  const [workspaceSource, createSource, checklistSource, enrollmentSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/registration-application-create.tsx"),
+    readSource("src/features/tasks/registration-admission-progress.tsx"),
+    readSource("src/features/tasks/registration-enrollment-editor.tsx"),
+  ]);
   const orderedLabels = [
-    "입학신청서 알림톡 (선택)",
+    "입학신청서 발송",
     "메이크에듀 등록(수업, 교재)",
     "청구서 발송",
     "수납 완료 확인",
     "등록 완료",
   ];
+  const admissionPanelSource = enrollmentSource.slice(
+    enrollmentSource.indexOf("export function RegistrationAdmissionPanel"),
+  );
 
   assertInOrder(checklistSource, orderedLabels);
-  assert.match(checklistSource, /입학신청서 알림톡 \(선택\)/);
-  assert.doesNotMatch(checklistSource, /입학신청서 발송/);
-  assert.match(checklistSource, /getRegistrationPipelinePrefix\(registration\?\.pipelineStatus\) === "7\."/);
-  assert.doesNotMatch(checklistSource, /textbookBillingIssued|textbookReady|timetableRosterUpdated|교재 청구출고표|교재 준비|수업시간표 명단/);
-  for (const label of orderedLabels) assert.ok(!create.includes(label), `create omits future field: ${label}`);
-  assert.doesNotMatch(create, /RegistrationApplicationAdmissionSection/);
-  assert.doesNotMatch(registrationDetailSource, /<Info label="교재 준비"|textbookBillingIssued/);
-  assertInOrder(registrationSummarySource, orderedLabels);
-  assert.doesNotMatch(registrationSummarySource, /autoItems=|textbookBillingIssued|교재 청구출고표|교재 준비|수업시간표 명단/);
+  assertIncludesAll(checklistSource, [
+    "export function RegistrationAdmissionChecklist",
+    "REGISTRATION_ADMISSION_CHECKLIST_ITEMS.map",
+    'type="checkbox"',
+    "checked={checklist[item.key]}",
+    "onCheckedChange(item.key, event.target.checked)",
+  ]);
+  assert.doesNotMatch(checklistSource, /aria-current|locked|active|pending|optional|statusLabel/);
+  assert.match(admissionPanelSource, /<RegistrationAdmissionChecklist/);
+  assert.match(admissionPanelSource, /setRegistrationAdmissionChecklistItem\(\{/);
+  assert.doesNotMatch(admissionPanelSource, /getRegistrationChecklistAvailability|RegistrationAdmissionProgress/);
+  for (const label of orderedLabels) assert.ok(!createSource.includes(label), `create omits future field: ${label}`);
+  assert.doesNotMatch(createSource, /RegistrationApplicationAdmissionSection|RegistrationAdmissionChecklist/);
+  assert.doesNotMatch(workspaceSource, /RegistrationOperationsChecklistChips|입학 처리 정보|입학신청서 알림톡 \(선택\)/);
 });
 
 test("registration form saves common edits through the canonical common writer", async () => {

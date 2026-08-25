@@ -134,7 +134,6 @@ import {
   getRegistrationBlockerFocusKey,
   getRegistrationBlockerSection,
   getRegistrationBranchActions,
-  getRegistrationChecklistAvailability,
   getRegistrationCreateBlockers,
   getRegistrationCreateDefaults,
   getRegistrationCreateErrorMessage,
@@ -427,7 +426,6 @@ type OpsTaskOptionIndexes = {
 }
 type OperationCompletionBlockerMap = Map<string, string[]>
 type OperationConfirmationMap = Map<string, boolean>
-type RegistrationChecklistField = "admissionNoticeSent" | "makeeduRegistered" | "makeeduInvoiceSent" | "paymentChecked"
 type WithdrawalChecklistField = "makeeduWithdrawalDone" | "feeProcessed" | "textbookFeeProcessed"
 type TransferChecklistField = "makeeduTransferDone" | "feeProcessed" | "textbookFeeProcessed"
 type FormDetailStepKey =
@@ -1679,14 +1677,6 @@ function isRegistrationPipelineComplete(input: OpsTaskInput) {
   return input.status === "done" || String(input.registration?.pipelineStatus || "").startsWith("7.")
 }
 
-function getMissingRegistrationCheckLabels(registration?: OpsTaskInput["registration"]) {
-  return [
-    { checked: Boolean(registration?.makeeduRegistered), label: "메이크에듀 등록(수업, 교재)" },
-    { checked: Boolean(registration?.makeeduInvoiceSent), label: "청구서 발송" },
-    { checked: Boolean(registration?.paymentChecked), label: "수납 완료 확인" },
-  ].filter((item) => !item.checked).map((item) => item.label)
-}
-
 function getMissingWithdrawalCheckLabels(withdrawal?: OpsTaskInput["withdrawal"]) {
   return [
     { checked: Boolean(withdrawal?.makeeduWithdrawalDone), label: "메이크에듀 퇴원처리" },
@@ -2022,42 +2012,6 @@ function getTransferOperationsChecklistValue(transfer?: OpsTask["transfer"]) {
   return pendingItems.length > 0 ? `${completedCount}/3 · ${pendingItems.join(", ")}` : "3/3 · 처리 확인 완료"
 }
 
-function getRegistrationOperationsChecklist(
-  registration?: OpsTask["registration"],
-): Array<{
-  key: string
-  field?: RegistrationChecklistField
-  label: string
-  detail: string
-  checked: boolean
-  editable: boolean
-  available: boolean
-  unavailableReason: string
-}> {
-  const availability = getRegistrationChecklistAvailability({
-    pipelineStatus: registration?.pipelineStatus,
-    registration,
-  })
-  return [
-    { key: "admission", field: "admissionNoticeSent" as const, label: "입학신청서 알림톡 (선택)", detail: "입학신청서 알림톡 (선택)", checked: Boolean(registration?.admissionNoticeSent), editable: true, available: availability.admissionNoticeSent.enabled, unavailableReason: availability.admissionNoticeSent.reason },
-    { key: "makeedu", field: "makeeduRegistered" as const, label: "메이크에듀 등록(수업, 교재)", detail: "메이크에듀 등록(수업, 교재)", checked: Boolean(registration?.makeeduRegistered), editable: true, available: availability.makeeduRegistered.enabled, unavailableReason: availability.makeeduRegistered.reason },
-    { key: "invoice", field: "makeeduInvoiceSent" as const, label: "청구서 발송", detail: "청구서 발송", checked: Boolean(registration?.makeeduInvoiceSent), editable: true, available: availability.makeeduInvoiceSent.enabled, unavailableReason: availability.makeeduInvoiceSent.reason },
-    { key: "payment", field: "paymentChecked" as const, label: "수납 완료 확인", detail: "수납 완료 확인", checked: Boolean(registration?.paymentChecked), editable: true, available: availability.paymentChecked.enabled, unavailableReason: availability.paymentChecked.reason },
-    { key: "complete", label: "등록 완료", detail: "등록 완료", checked: getRegistrationPipelinePrefix(registration?.pipelineStatus) === "7.", editable: false, available: getRegistrationPipelinePrefix(registration?.pipelineStatus) === "7.", unavailableReason: "메이크에듀 등록·청구서·수납 확인과 등록 정보를 모두 확인한 뒤 등록 완료로 이동합니다." },
-  ]
-}
-
-// 기존 정적 계약과 요약 포맷 호환을 위해 유지한다.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function getRegistrationOperationsChecklistValue(registration?: OpsTask["registration"]) {
-  const items = getRegistrationOperationsChecklist(registration)
-  const completedCount = items.filter((item) => item.checked).length
-  const pendingItems = items.filter((item) => !item.checked).map((item) => item.detail)
-  return pendingItems.length > 0
-    ? `${completedCount}/${items.length} · ${pendingItems.join(", ")}`
-    : `${items.length}/${items.length} · 등록 확인 완료`
-}
-
 function WithdrawalOperationsChecklistChips({
   withdrawal,
   editable = false,
@@ -2136,62 +2090,6 @@ function TransferOperationsChecklistChips({
         if (!editable || !onChange) {
           return (
             <span key={item.key} className={className} title={item.detail}>
-              {item.checked ? <Check className="size-3 shrink-0" aria-hidden="true" /> : null}
-              <span className="truncate">{item.label}</span>
-            </span>
-          )
-        }
-
-        return (
-          <button
-            key={item.key}
-            type="button"
-            aria-pressed={item.checked}
-            aria-label={`${item.detail} ${item.checked ? "완료 취소" : "완료 체크"}`}
-            className={className}
-            title={item.detail}
-            disabled={disabled}
-            onClick={() => {
-              if (item.field && onChange) onChange(item.field, !item.checked)
-            }}
-          >
-            {item.checked ? <Check className="size-3 shrink-0" aria-hidden="true" /> : null}
-            <span className="truncate">{item.label}</span>
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-function RegistrationOperationsChecklistChips({
-  registration,
-  editable = false,
-  disabled = false,
-  onChange,
-}: {
-  registration?: OpsTask["registration"]
-  editable?: boolean
-  disabled?: boolean
-  onChange?: (field: RegistrationChecklistField, checked: boolean) => void
-}) {
-  return (
-    <div className="flex min-w-0 flex-wrap gap-1">
-      {getRegistrationOperationsChecklist(registration).map((item) => {
-        const canToggle = Boolean(item.editable && item.available && item.field && editable && onChange)
-        const className = [
-          "inline-flex h-6 max-w-full items-center gap-1 rounded-md border px-2 text-xs font-medium",
-          item.checked
-            ? "border-primary/20 bg-primary/10 text-primary"
-            : item.editable && item.available
-              ? "border-amber-300 bg-amber-50 text-amber-800"
-              : "border-muted bg-muted/45 text-muted-foreground",
-          canToggle ? "transition hover:border-primary/40 hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-70" : "",
-        ].join(" ")
-
-        if (!canToggle) {
-          return (
-            <span key={item.key} className={className} title={item.available ? item.detail : item.unavailableReason || item.detail}>
               {item.checked ? <Check className="size-3 shrink-0" aria-hidden="true" /> : null}
               <span className="truncate">{item.label}</span>
             </span>
@@ -2395,7 +2293,6 @@ function getOperationCompletionBlockers(
     if (!hasLinkedRecord(input.classId)) blockers.push("수업")
     if (hasLinkedRecord(input.classId) && !findClassOption(classes, input.classId, indexes)) blockers.push("수업")
     if (hasLinkedRecord(input.textbookId) && !findTextbookOption(textbooks, input.textbookId, indexes)) blockers.push("교재")
-    getMissingRegistrationCheckLabels(input.registration).forEach((label) => blockers.push(label))
   }
 
   if (input.type === "withdrawal" && input.status === "done") {
@@ -17438,13 +17335,9 @@ function RegistrationDetailPanel({ task, selectedTrackId }: { task: OpsTask; sel
   const hasPlacementDetail = Boolean(
     task.classId || task.className || task.textbookId || task.textbookTitle || registration.classStartDate || registration.classStartSession || registration.requestNote,
   )
-  const hasAdmissionDetail = Boolean(
-    registration.admissionNoticeSent || registration.makeeduRegistered || registration.makeeduInvoiceSent || registration.paymentChecked,
-  )
   const showLevelTestDetail = reachedSections.includes("level_test") && hasLevelTestDetail
   const showConsultationDetail = reachedSections.includes("consultation") && hasConsultationDetail
   const showPlacementDetail = reachedSections.includes("placement") || hasPlacementDetail
-  const showAdmissionDetail = reachedSections.includes("admission") || hasAdmissionDetail
 
   return (
     <section className="grid gap-4" aria-label="등록 상세 신청서">
@@ -17502,13 +17395,6 @@ function RegistrationDetailPanel({ task, selectedTrackId }: { task: OpsTask; sel
           <Info label="수업시작회차" value={registration.classStartSession || "미정"} />
           <OptionalInfo label="요청 사항" value={registration.requestNote} />
           </dl>
-        </section>
-      ) : null}
-
-      {showAdmissionDetail ? (
-        <section className="grid gap-3 rounded-md border p-3" aria-label="입학 처리 정보">
-          <h3 className="text-sm font-semibold">입학 처리</h3>
-          <RegistrationOperationsChecklistChips registration={registration} />
         </section>
       ) : null}
 
@@ -17661,29 +17547,6 @@ function CommentPanelContent({
 }
 
 function TypeDetail({ task }: { task: OpsTask }) {
-  if (task.type === "registration" && task.registration) {
-    const registration = task.registration
-	    return (
-	      <div className="flex flex-col gap-3">
-        <dl className="grid gap-3 rounded-md bg-muted/50 p-3 text-sm md:grid-cols-2">
-          <Info label="진행상태" value={registration.pipelineStatus || REGISTRATION_PIPELINE_STATUSES[0]?.value || "0. 등록 문의"} />
-          <OptionalInfo label="전화상담" value={dateInputValue(registration.phoneConsultationAt)} />
-          <OptionalInfo label="방문상담" value={dateInputValue(registration.visitConsultationAt)} />
-          <OptionalInfo label="레벨테스트" value={dateInputValue(registration.levelTestAt)} />
-          <OptionalInfo label="수업 시작" value={dateInputValue(registration.classStartDate)} />
-        </dl>
-        <OperationChecklistSummary
-          manualItems={[
-            { label: "입학신청서 알림톡 (선택)", checked: Boolean(registration.admissionNoticeSent) },
-            { label: "메이크에듀 등록(수업, 교재)", checked: Boolean(registration.makeeduRegistered) },
-            { label: "청구서 발송", checked: Boolean(registration.makeeduInvoiceSent) },
-            { label: "수납 완료 확인", checked: Boolean(registration.paymentChecked) },
-            { label: "등록 완료", checked: getRegistrationPipelinePrefix(registration.pipelineStatus) === "7." },
-          ]}
-        />
-      </div>
-    )
-  }
 	  if (task.type === "withdrawal" && task.withdrawal) {
 	    return <WithdrawalDetailPanel task={task} />
 	  }
