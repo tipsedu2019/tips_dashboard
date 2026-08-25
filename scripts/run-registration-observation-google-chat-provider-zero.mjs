@@ -2763,8 +2763,11 @@ function serviceRoleRpcSql(name, parameters) {
   const invalid = "registration_observation_google_chat_provider_zero_worker_rpc_rejected";
   if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) fail(invalid);
   let call;
-  if (name === "read_registration_observation_notification_delivery_frozen_state_v1") {
+  if (name === "read_registration_observation_delivery_frozen_state_v1") {
     if (!exactKeys(parameters, ["p_delivery_id", "p_claim_token"])) fail(invalid);
+    // The isolated baseline intentionally stops before the later RPC rename.
+    // Accept the production worker's canonical name, then invoke the only
+    // physical function available in that frozen schema.
     call = `public.read_registration_observation_notification_delivery_frozen_state_v1(
       ${sqlUuid(parameters.p_delivery_id, invalid)},
       ${sqlUuid(parameters.p_claim_token, invalid)}
@@ -2955,7 +2958,7 @@ async function runProductionDispatchSeam(project, claim) {
     observationSourceReader: sourceReader,
   });
   const initialFrozen = await rpc(
-    "read_registration_observation_notification_delivery_frozen_state_v1",
+    "read_registration_observation_delivery_frozen_state_v1",
     { p_delivery_id: claim.delivery_id, p_claim_token: claim.claim_token },
   );
   if (!exactKeys(initialFrozen, [

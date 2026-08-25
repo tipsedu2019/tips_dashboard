@@ -91,7 +91,14 @@ async function loadRegistrationServiceFactory() {
     module: sandboxModule,
     exports: sandboxModule.exports,
     crypto: { randomUUID: () => "generated-request-id" },
+    clearTimeout,
+    invalidatePublicClassesCacheAfterMutation: async (_client, reason) => ({
+      status: "refreshed",
+      reason,
+      requestId: "test-cache-invalidation",
+    }),
     normalizeRegistrationLevelTestPlace,
+    setTimeout,
   });
   return sandboxModule.exports;
 }
@@ -159,6 +166,7 @@ test("registration management dispatch deduplicates opaque sources and reports e
     )
     assert.deepEqual(result, {
       failedSourceEventIds: ["event-failed", "event-provider-failed"],
+      googleChatEventIds: [],
     })
     assert.equal(calls.length, 3)
     assert.deepEqual(calls.map(([url, init]) => ({

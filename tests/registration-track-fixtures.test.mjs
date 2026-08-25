@@ -30,6 +30,9 @@ import {
 import {
   probeRegistrationObservationRuntime as probeRegistrationObservationRuntimeClient,
 } from "../src/features/tasks/registration-observation-runtime-probe.ts"
+import {
+  isRegistrationCustomerMessageSingleSourceKind,
+} from "../src/features/tasks/registration-customer-message-contract.ts"
 
 const academicSubjectRegistry = {
   ACADEMIC_SUBJECT_VALUES,
@@ -75,6 +78,9 @@ async function loadTsModule(url) {
           REGISTRATION_WORKFLOW_STATUSES,
           getRegistrationWorkflowStatusFromLegacyTrack,
         }
+      }
+      if (specifier === "./registration-customer-message-contract.ts") {
+        return { isRegistrationCustomerMessageSingleSourceKind }
       }
       if (specifier === "../../lib/academic-subject-registry.ts") return academicSubjectRegistry
       throw new Error(`unexpected require: ${specifier}`)
@@ -161,8 +167,13 @@ async function loadServiceBoundary({
     module: sandboxModule,
     exports: sandboxModule.exports,
     structuredClone,
+    setTimeout,
+    clearTimeout,
     require(specifier) {
       if (specifier === "@/lib/supabase") return { supabase }
+      if (specifier === "@/lib/public-classes-cache-invalidation.js") {
+        return { invalidatePublicClassesCacheAfterMutation: async () => undefined }
+      }
       if (specifier === "./registration-appointment-calendar-model") {
         return {
           buildRegistrationAppointmentCalendarItems(rows, options) {
@@ -3377,7 +3388,8 @@ test("workspace mounts the real list/editor and exposes create only to fixture m
   assert.match(source, /if \(registrationFixtureFault\) adapter\.debugSetNextFault\?\.\(registrationFixtureFault\)/)
   assert.match(source, /registrationFixtureEnabled[\s\S]*?<RegistrationCaseList/)
   assert.match(source, /registrationFixtureEnabled[\s\S]*?<RegistrationApplication/)
-  assert.match(source, /!registrationFixtureRequested && showLegacyNotificationSettingsLauncher && \(isRegistrationWorkspace \|\| isWithdrawalWorkspace \|\| isTransferWorkspace\)/)
+  assert.doesNotMatch(source, /legacyNotificationEnabled/)
+  assert.doesNotMatch(source, /RegistrationNotificationSettingsDialog/)
   assert.match(source, /showToolbarCreate = \(!registrationFixtureEnabled \|\| canManageRegistrationWorkflow\)/)
   assert.match(source, /canManageRegistrationWorkflow = registrationFixtureEnabled[\s\S]*?\["admin", "staff"\]\.includes/)
   assert.match(source, /resolveRegistrationSubjectTrackFixtureViewer/)

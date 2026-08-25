@@ -844,7 +844,6 @@ test("registration workspace replaces Notion registration management with one ap
     "filterRegistrationCaseListItems",
     "RegistrationWorkflowStatusBadge",
     "RegistrationOperationsChecklistChips",
-    "RegistrationNotificationSettingsDialog",
     "RegistrationDetailPanel",
     "getRegistrationCaseTabCounts",
     "collectRegistrationLegacySourceIds",
@@ -959,7 +958,6 @@ test("fixture registration withholds every provider token even before its runtim
   assertIncludesAll(workspaceSource, [
     'const registrationNotificationSessionToken = registrationFixtureRequested ? "" : notificationSessionToken',
     "sendRegistrationVisitNotificationTarget(target, registrationNotificationSessionToken)",
-    "sessionToken={registrationNotificationSessionToken}",
     "notificationToken={registrationNotificationSessionToken}",
   ]);
   assert.doesNotMatch(workspaceSource, /showLegacyNotificationSettingsLauncher/);
@@ -2369,7 +2367,7 @@ test("registration application hosts pass the shared school catalog controls", a
 test("appointment refresh retry reuses canonical appointment validation and clears stale links", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const resolverStart = source.indexOf("function resolveRegistrationAppointmentFocus");
-  const resolverEnd = source.indexOf("\nconst WITHDRAWAL_NOTIFICATION_CHANNELS", resolverStart);
+  const resolverEnd = source.indexOf("\nconst WORKSPACE_TASK_TYPE", resolverStart);
   const resolver = source.slice(resolverStart, resolverEnd);
   const openStart = source.indexOf("const openRegistrationAppointment = useCallback");
   const openEnd = source.indexOf("\n  const openRegistrationCalendarItem", openStart);
@@ -2589,10 +2587,7 @@ test("operation forms keep staged linked selectors outside canonical registratio
 });
 
 test("withdrawal workspace follows request processing and completed queues", async () => {
-  const [source, googleChatRouteSource] = await Promise.all([
-    readSource("src/features/tasks/ops-task-workspace.tsx"),
-    readSource("src/app/api/google-chat/route.ts"),
-  ]);
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const withdrawalDataTableSource = source.slice(
     source.indexOf("function WithdrawalResizableHeaderCell"),
     source.indexOf("function DashboardMetric"),
@@ -2637,24 +2632,11 @@ test("withdrawal workspace follows request processing and completed queues", asy
     source.indexOf("function getNextTaskStatusAction"),
     source.indexOf("function canEditTaskDetails"),
   );
-  const withdrawalNotificationDialogSource = source.slice(
-    source.indexOf("function WithdrawalNotificationSettingsDialog"),
-    source.indexOf("function TransferNotificationSettingsDialog"),
-  );
-  const notificationDialogWrappersSource = source.slice(
-    source.indexOf("function TransferNotificationSettingsDialog"),
-    source.indexOf("function DashboardMetric"),
-  );
-
   assertIncludesAll(source, [
     'type WithdrawalViewKey = "applicant" | "operations" | "closed"',
     'type WithdrawalPeriodFilter = "all" | "today" | "week" | "month" | "custom"',
     "type WithdrawalTableColumnKey",
     "WITHDRAWAL_VIEW_TABS",
-    "WITHDRAWAL_NOTIFICATION_CHANNELS",
-    "WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP",
-    "WithdrawalNotificationSettingsDialog",
-    "WithdrawalGoogleChatWebhookInfo",
     "WITHDRAWAL_PERIOD_FILTERS",
     "WITHDRAWAL_TABLE_COLUMNS",
     "WITHDRAWAL_TABLE_COLUMN_WIDTHS",
@@ -2704,46 +2686,12 @@ test("withdrawal workspace follows request processing and completed queues", asy
     "legacy confirmed withdrawal rows should use the same processing action language",
   );
   assert.doesNotMatch(withdrawalWorkspaceToolbarSource, /알림 설정|setWithdrawalNotificationOpen\(true\)|<Bell/);
+  assert.doesNotMatch(source, /[A-Za-z]+NotificationSettingsDialog|\/api\/google-chat/);
   assert.match(
     withdrawalWorkspaceToolbarSource,
     /!isWordRetestWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && \(/,
     "withdrawal toolbar should exclude the generic refresh action",
   );
-  assertIncludesAll(withdrawalNotificationDialogSource, [
-    'data-testid="task-notification-settings-containment"',
-    "공통 알림 설정 저장 기능이 적용될 때까지 알림 켜기/끄기와 내용 편집은 사용할 수 없습니다.",
-    'data-testid="task-notification-webhook-connection"',
-    'aria-label="구글챗 · 관리팀 웹훅 관리"',
-    'handleOpenWithdrawalWebhookInfo("google_chat_admin")',
-    "웹훅 URL 수정",
-    "handleOpenWithdrawalWebhookInfo",
-    "handleSaveWithdrawalWebhookInfo",
-    "selectedWebhookInfo",
-    "webhookUrlInput",
-    "/api/google-chat?channel=",
-    'method: "PATCH"',
-    "웹훅 URL 저장",
-    "onClick={() => onOpenChange(false)}",
-    "닫기",
-  ]);
-  assert.doesNotMatch(withdrawalNotificationDialogSource, /toggleNotificationSetting|aria-pressed/);
-  assert.doesNotMatch(withdrawalNotificationDialogSource, /openWithdrawalNotificationTemplateEditor|selectedNotificationTrigger/);
-  assert.doesNotMatch(withdrawalNotificationDialogSource, /알림 내용 수정|withdrawal-notification-title-template|withdrawal-notification-body-template|<Textarea/);
-  assert.doesNotMatch(withdrawalNotificationDialogSource, /localStorage|sessionStorage|설정 저장됨|알림 설정을 저장/);
-  assert.match(withdrawalNotificationDialogSource, /webhookInfoPanelRef/);
-  assert.match(withdrawalNotificationDialogSource, /scrollIntoView\(\{ block: "start" \}\)/);
-  assertIncludesAll(notificationDialogWrappersSource, [
-    'workflowLabel="전반"',
-    'workflowLabel="등록"',
-  ]);
-  assertIncludesAll(googleChatRouteSource, [
-    '.from("google_chat_webhook_settings")',
-    'serviceClient.rpc("replace_google_chat_connection_v1"',
-    "p_actor: input.actorUserId",
-    "p_webhook_url: input.webhookUrl",
-    "p_webhook_url_ciphertext: input.webhookUrlCiphertext",
-  ]);
-  assert.doesNotMatch(googleChatRouteSource, /\.upsert\(/);
   assert.doesNotMatch(source, /NotificationSettings\] = useState<WithdrawalNotificationSetting/);
   assert.doesNotMatch(source, /NotificationTemplates\] = useState<Record<WithdrawalNotificationTriggerKey/);
   assert.match(source, /async function dispatchLegacyOpsTaskSources/);
@@ -3263,7 +3211,6 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     "TransferWorkflowChart",
     "TransferTuitionAdjustmentPanel",
     "dispatchLegacyOpsTaskSources",
-    "TransferNotificationSettingsDialog",
     "TransferDetailPanel",
   ]);
   assertIncludesAll(serviceSource, [
@@ -4959,7 +4906,8 @@ test("browser workflow scripts target the operation surfaces", async () => {
     "type OpsTaskWorkspaceLoadOptions",
     "getOpsTaskWorkspaceCacheKey",
     "const opsTaskWorkspaceDataCache = new Map",
-    'rpc("list_ops_task_page_v2", pageArgs)',
+    'rpc("list_ops_task_page_v2", {',
+    'rpc("list_ops_task_page_v1", {',
     'rpc("get_ops_task_list_stats_v1", {',
     "p_limit: 30",
     "loadOpsTaskPage({",

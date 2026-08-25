@@ -24,6 +24,18 @@ const providerPayloadChecksumMigrationUrl = new URL(
   "../supabase/migrations/20260816002344_registration_customer_reminder_provider_payload_checksum.sql",
   import.meta.url,
 );
+const finalClaimGateMigrationUrl = new URL(
+  "../supabase/migrations/20260825090000_registration_customer_reminder_claim_final_gate.sql",
+  import.meta.url,
+);
+const finalClaimGatePgTapUrl = new URL(
+  "../supabase/tests/registration_customer_reminder_claim_final_gate_test.sql",
+  import.meta.url,
+);
+const sqlReviewWorkflowUrl = new URL(
+  "../.github/workflows/supabase-sql-review.yml",
+  import.meta.url,
+);
 const currentHistoryMigrationUrl = new URL(
   "../supabase/migrations/20260814102020_registration_observation_current_history.sql",
   import.meta.url,
@@ -502,6 +514,88 @@ test("evidence migration removes disposable test rows from every live worker gat
   assert.match(priorClaim, /automatic_delivery_cutoff_at/);
   assert.match(priorClaim, /verification_task_id/);
   assert.match(priorClaim, /verification_recipient_hash/);
+});
+
+test("final reminder claim and backlog retain the post-evidence delivery gates", async () => {
+  const sql = normalizeSql(await readFile(finalClaimGateMigrationUrl, "utf8"));
+  const claim = functionBlock(sql, "public.claim_registration_customer_reminder_job_v1");
+  const backlog = functionBlock(sql, "public.has_registration_customer_reminder_backlog_v1");
+
+  assert.match(claim, /for v_job in[\s\S]*?for update of job skip locked limit 100/);
+  const candidatePage = claim.slice(
+    claim.indexOf("for v_job in"),
+    claim.indexOf("loop", claim.indexOf("for v_job in")),
+  );
+  assert.match(candidatePage, /join dashboard_private\.registration_customer_solapi_activation activation[\s\S]*?activation\.message_kind = job\.message_kind/);
+  assert.match(candidatePage, /join dashboard_private\.registration_customer_solapi_template_receipts receipt[\s\S]*?receipt\.provider_status = 'sendable'[\s\S]*?receipt\.catalog_checksum = receipt\.provider_checksum/);
+  assert.match(candidatePage, /activation\.mode = 'live'[\s\S]*?registration_customer_solapi_live_evidence_valid_v1/);
+  assert.match(candidatePage, /activation\.mode in \('verification', 'live'\)/);
+  assert.doesNotMatch(claim, /where activation\.message_kind = v_job\.message_kind for share/);
+  assert.doesNotMatch(claim, /where receipt\.message_kind = v_job\.message_kind[\s\S]*?for share/);
+  assert.match(claim, /v_activation\.mode is distinct from 'live'/);
+  assert.match(claim, /registration_customer_solapi_live_evidence_valid_v1\(\s*'appointment_reminder'/);
+  assert.match(claim, /v_activation\.mode not in \('verification', 'live'\)/);
+  assert.match(claim, /verification_scope_changed/);
+  assert.match(claim, /pre_cutoff_backlog/);
+  assert.match(claim, /registration_customer_solapi_live_evidence_valid_v1\(\s*'observation_reminder'/);
+  assert.match(claim, /resolve_registration_customer_message_source_v1_impl/);
+  assert.match(claim, /last_error_code = 'source_ineligible'/);
+  assert.match(claim, /booking_fact_changed/);
+  assert.match(
+    claim,
+    /when sqlstate 'P0001' then[\s\S]*?if sqlerrm <> 'registration_customer_reminder_booking_fact_changed' then[\s\S]*?raise;/,
+  );
+  assert.doesNotMatch(claim, /when others then/);
+  assert.doesNotMatch(claim, /errcode\s*=\s*'40001'/);
+
+  assert.match(backlog, /registration_customer_solapi_template_receipts/);
+  assert.match(backlog, /provider_status = 'sendable'/);
+  assert.match(backlog, /catalog_checksum = receipt\.provider_checksum/);
+  assert.match(backlog, /registration_customer_solapi_live_evidence_valid_v1/);
+  assert.match(backlog, /verification_scope_changed|verification_started_at/);
+  assert.match(backlog, /automatic_delivery_cutoff_at/);
+  assert.doesNotMatch(backlog, /errcode\s*=\s*'40001'/);
+
+  assert.match(sql, /v_old_state text := '40' \|\| '001'/);
+  assert.match(sql, /v_new_state text := 'P0001'/);
+  for (const signature of [
+    "dashboard_private.resolve_registration_customer_message_source_v1_impl(text,uuid)",
+    "public.read_registration_customer_reminder_source_v1(uuid,uuid)",
+    "public.begin_registration_customer_reminder_dispatch_v1(uuid,uuid,jsonb,jsonb)",
+  ]) {
+    assert.match(sql, new RegExp(signature.replace(/[().]/g, "\\$&")));
+  }
+  assert.match(sql, /registration_customer_reminder_sqlstate_patch_failed/);
+});
+
+test("final reminder claim pgTAP pins the active SQLSTATE, ACL, and provider-zero gates", async () => {
+  const sql = await readFile(finalClaimGatePgTapUrl, "utf8");
+  assert.match(sql, /select plan\(21\);/);
+  assert.equal(
+    [...sql.matchAll(/^select (?:has_function|function_privs_are|ok|is|throws_ok)\(/gmu)].length,
+    21,
+  );
+  assert.match(sql, /resolve_registration_customer_message_source_v1_impl\(text,uuid\)/);
+  assert.match(sql, /read_registration_customer_reminder_source_v1\(uuid,uuid\)/);
+  assert.match(sql, /begin_registration_customer_reminder_dispatch_v1\(uuid,uuid,jsonb,jsonb\)/);
+  assert.match(sql, /registration_customer_reminder_booking_fact_changed/);
+  assert.match(sql, /request\.jwt\.claim\.role/);
+  assert.match(sql, /final gate checks add no provider marker while disabled/);
+});
+
+test("final reminder claim gate is bounded and mandatory in isolated schema CI", async () => {
+  const [migration, workflow] = await Promise.all([
+    readFile(finalClaimGateMigrationUrl, "utf8"),
+    readFile(sqlReviewWorkflowUrl, "utf8"),
+  ]);
+  assert.match(
+    migration,
+    /^begin;\n\nset local lock_timeout = '5s';\nset local statement_timeout = '120s';/,
+  );
+  assert.match(
+    workflow,
+    /TASK_SUPABASE_CLI="\$\{RUNNER_TEMP\}\/supabase-cli\/supabase" node scripts\/run-isolated-supabase-db-tests\.mjs[\s\S]*?--postdeploy-contract[\s\S]*?--test supabase\/tests\/registration_customer_reminder_claim_final_gate_test\.sql/,
+  );
 });
 
 test("begin and finalize own marker, refresh, uncertainty, and composite identity", async () => {

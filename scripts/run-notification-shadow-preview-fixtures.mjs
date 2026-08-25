@@ -9,6 +9,7 @@ import {
 import { renderNotificationSnapshot } from "../src/features/notifications/server/notification-worker.ts"
 import { getNotificationWorkflowAdapter } from "../src/features/notifications/server/notification-workflow-registry.ts"
 import { listNotificationContentCoverage } from "../src/features/notifications/notification-content-manifest.ts"
+import { getNotificationContentContract } from "../src/features/notifications/notification-content-contract-registry.ts"
 import {
   compareNotificationShadowIntents,
   verifyDeterministicNotificationShadowFixture,
@@ -60,6 +61,29 @@ const CONTENT_GOLDEN = JSON.parse(readFileSync(
 ))
 const CONTENT_GOLDEN_BY_EVENT = new Map(
   CONTENT_GOLDEN.eventGoldens.map((entry) => [entry.eventKey, Object.freeze(entry)]),
+)
+const CONTENT_GOLDEN_BY_IDENTITY = new Map(
+  CONTENT_GOLDEN.observationGoldenCards.map((entry) => {
+    const contract = getNotificationContentContract(entry)
+    if (!contract) {
+      throw new Error(`notification_shadow_preview_contract_missing:${contentIdentityKey(entry)}`)
+    }
+    const representativePayload = Object.fromEntries(contract.availableVariables.map((variable) => {
+      if (!Object.hasOwn(entry.templateValues, variable.token)) {
+        throw new Error(`notification_shadow_preview_value_missing:${contentIdentityKey(entry)}:${variable.token}`)
+      }
+      return [variable.key, entry.templateValues[variable.token]]
+    }))
+    return [
+      contentIdentityKey(entry),
+      Object.freeze({
+        ...entry,
+        representativePayload: Object.freeze(representativePayload),
+        allowedVariables: contract.availableVariables,
+        payloadSchemaVersion: contract.supportedPayloadVersions[0],
+      }),
+    ]
+  }),
 )
 const GOOGLE_CHAT_DESTINATIONS = Object.freeze([
   "google_chat.management",
@@ -841,8 +865,9 @@ function identityTemplate(golden) {
   return canonicalSeedTemplate(
     golden.titleTemplate,
     golden.bodyTemplate,
-    Object.keys(golden.representativePayload).sort().map((key) => canonicalSeedVariable(key, key)),
-    1,
+    golden.allowedVariables
+      ?? Object.keys(golden.representativePayload).sort().map((key) => canonicalSeedVariable(key, key)),
+    golden.payloadSchemaVersion ?? 1,
   )
 }
 
@@ -885,7 +910,7 @@ function identityRenderErrorParity(input) {
   const check = (context) => {
     const canonical = renderError(() => input.renderSnapshot({
       workflowKey: input.workflowKey,
-      payloadSchemaVersion: 1,
+      payloadSchemaVersion: input.template.payloadSchemaVersion,
       template: input.template,
       renderContext: context,
       href: input.href,
@@ -901,7 +926,8 @@ function identityRenderErrorParity(input) {
 
 async function runContentIdentityCycle(identity, dependencies) {
   const key = contentIdentityKey(identity)
-  const golden = CONTENT_GOLDEN_BY_EVENT.get(identity.eventKey)
+  const golden = CONTENT_GOLDEN_BY_IDENTITY.get(key)
+    ?? CONTENT_GOLDEN_BY_EVENT.get(identity.eventKey)
   if (!golden) throw new Error(`notification_shadow_preview_golden_missing:${key}`)
   const href = identityHref(identity)
   const context = Object.freeze({ ...golden.representativePayload })
@@ -910,7 +936,7 @@ async function runContentIdentityCycle(identity, dependencies) {
   const legacyTemplate = dependencies.legacyTemplateTransform(baselineTemplate, identity.workflowKey)
   const canonical = dependencies.renderSnapshot({
     workflowKey: identity.workflowKey,
-    payloadSchemaVersion: 1,
+    payloadSchemaVersion: baselineTemplate.payloadSchemaVersion,
     template: canonicalTemplate,
     renderContext: context,
     href,

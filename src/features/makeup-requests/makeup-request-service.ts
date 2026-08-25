@@ -171,8 +171,6 @@ export type MakeupRequestWorkspaceData = {
   classes: MakeupClassOption[]
   classrooms: Row[]
   academicEvents: Row[]
-  notificationSettings: MakeupNotificationSetting[]
-  notificationDeliveries: MakeupNotificationDelivery[]
   error?: string
 }
 
@@ -189,30 +187,6 @@ export type MakeupNotificationChannel =
   | "google_chat_math"
   | "google_chat_english"
 
-export type MakeupNotificationSetting = {
-  triggerKind: MakeupNotificationTrigger
-  channel: MakeupNotificationChannel
-  enabled: boolean
-  titleTemplate: string
-  bodyTemplate: string
-  updatedAt: string
-}
-
-export type MakeupNotificationDelivery = {
-  id: string
-  requestId: string
-  triggerKind: MakeupNotificationTrigger
-  channel: MakeupNotificationChannel
-  targetType: string
-  targetLabel: string
-  status: string
-  dedupeKey: string
-  title: string
-  body: string
-  error: string
-  createdAt: string
-}
-
 const EMPTY_WORKSPACE_DATA: MakeupRequestWorkspaceData = {
   schemaReady: true,
   requests: [],
@@ -221,8 +195,6 @@ const EMPTY_WORKSPACE_DATA: MakeupRequestWorkspaceData = {
   classes: [],
   classrooms: [],
   academicEvents: [],
-  notificationSettings: [],
-  notificationDeliveries: [],
 }
 
 const MAKEUP_CLASS_LIST_SELECT = "id,name,subject,grade,teacher,room,schedule,schedule_storage_mode,textbook_ids"
@@ -246,9 +218,6 @@ export const MAKEUP_NOTIFICATION_CHANNEL_LABELS: Record<MakeupNotificationChanne
   google_chat_english: "구글챗 · 영어팀",
 }
 
-const MAKEUP_NOTIFICATION_TRIGGERS = Object.keys(MAKEUP_NOTIFICATION_TRIGGER_LABELS) as ActiveMakeupNotificationTrigger[]
-const MAKEUP_NOTIFICATION_CHANNELS = Object.keys(MAKEUP_NOTIFICATION_CHANNEL_LABELS) as MakeupNotificationChannel[]
-const MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT = 40
 const MAKEUP_NOTIFICATION_EVENT_BY_TRIGGER: Readonly<Record<MakeupNotificationTrigger, string>> = Object.freeze({
   submitted: "makeup.submitted",
   refund_requested: "makeup.refund_requested",
@@ -477,64 +446,6 @@ function mapEvent(row: Row, profilesById: Map<string, MakeupProfileOption>): Mak
   }
 }
 
-function mapNotificationSetting(row: Row): MakeupNotificationSetting {
-  const triggerKind = text(row.trigger_kind) as MakeupNotificationTrigger
-  return {
-    triggerKind,
-    channel: text(row.channel) as MakeupNotificationChannel,
-    enabled: row.enabled !== false,
-    titleTemplate: text(row.title_template) || getDefaultMakeupNotificationTitleTemplate(triggerKind),
-    bodyTemplate: text(row.body_template) || getDefaultMakeupNotificationBodyTemplate(),
-    updatedAt: text(row.updated_at),
-  }
-}
-
-function mapNotificationDelivery(row: Row): MakeupNotificationDelivery {
-  return {
-    id: text(row.id),
-    requestId: text(row.request_id),
-    triggerKind: text(row.trigger_kind) as MakeupNotificationTrigger,
-    channel: text(row.channel) as MakeupNotificationChannel,
-    targetType: text(row.target_type),
-    targetLabel: text(row.target_label),
-    status: text(row.status),
-    dedupeKey: text(row.dedupe_key),
-    title: text(row.title),
-    body: text(row.body),
-    error: text(row.error),
-    createdAt: text(row.created_at),
-  }
-}
-
-function buildDefaultNotificationSettings() {
-  return MAKEUP_NOTIFICATION_TRIGGERS.flatMap((triggerKind) => (
-    MAKEUP_NOTIFICATION_CHANNELS.map((channel) => ({
-      triggerKind,
-      channel,
-      enabled: true,
-      titleTemplate: getDefaultMakeupNotificationTitleTemplate(triggerKind),
-      bodyTemplate: getDefaultMakeupNotificationBodyTemplate(),
-      updatedAt: "",
-    }))
-  ))
-}
-
-function mergeNotificationSettings(settings: MakeupNotificationSetting[]) {
-  const settingMap = new Map(settings.map((item) => [`${item.triggerKind}:${item.channel}`, item]))
-  return buildDefaultNotificationSettings().map((fallback) => (
-    (() => {
-      const setting = settingMap.get(`${fallback.triggerKind}:${fallback.channel}`)
-      if (!setting) return fallback
-      return {
-        ...fallback,
-        ...setting,
-        titleTemplate: setting.titleTemplate || fallback.titleTemplate,
-        bodyTemplate: setting.bodyTemplate || fallback.bodyTemplate,
-      }
-    })()
-  ))
-}
-
 async function readTable(table: string, select = "*", optional = false) {
   if (!supabase) {
     throw new Error("Supabase 연결 설정이 필요합니다.")
@@ -549,27 +460,6 @@ async function readTable(table: string, select = "*", optional = false) {
     if (optional && (isMissingRelationError(error) || isPermissionError(error))) {
       return [] as Row[]
     }
-    throw error
-  }
-
-  return ((data || []) as unknown) as Row[]
-}
-
-async function readNotificationDeliveryRows() {
-  if (!supabase) {
-    throw new Error("Supabase 연결 설정이 필요합니다.")
-  }
-
-  const { data, error } = await supabase
-    .from("makeup_notification_deliveries")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT)
-    .abortSignal(AbortSignal.timeout(MAKEUP_TABLE_TIMEOUT_MS))
-    .retry(false)
-
-  if (error) {
-    if (isMissingRelationError(error) || isPermissionError(error)) return [] as Row[]
     throw error
   }
 
@@ -693,15 +583,13 @@ export async function loadMakeupRequestWorkspaceData(): Promise<MakeupRequestWor
   }
 
   try {
-    const [profilesRows, teacherRows, classRows, classroomRows, academicEventRows, requestRows, notificationSettingRows, notificationDeliveryRows, lessonSessionRows] = await Promise.all([
+    const [profilesRows, teacherRows, classRows, classroomRows, academicEventRows, requestRows, lessonSessionRows] = await Promise.all([
       readTable("profiles", "id,email,name,role,login_id,teacher_catalog_id", true),
       readTable("teacher_catalogs", "id,name,subjects,is_visible,sort_order,profile_id,account_email,dashboard_role", true),
       readTable("classes", MAKEUP_CLASS_LIST_SELECT, true),
       readTable("classroom_catalogs", "*", true),
       readTable("academic_events", "*", true),
       readTable("makeup_requests", MAKEUP_REQUEST_LIST_SELECT, false),
-      readTable("makeup_notification_settings", "*", true),
-      readNotificationDeliveryRows(),
       readTable("class_lesson_sessions", "id,class_id,session_date,schedule_state", true),
     ])
     const profiles = profilesRows.map(mapProfile)
@@ -742,8 +630,6 @@ export async function loadMakeupRequestWorkspaceData(): Promise<MakeupRequestWor
       classes,
       classrooms: classroomRows,
       academicEvents: academicEventRows,
-      notificationSettings: mergeNotificationSettings(notificationSettingRows.map(mapNotificationSetting)),
-      notificationDeliveries: notificationDeliveryRows.map(mapNotificationDelivery),
     }
   } catch (error) {
     if (isMissingRelationError(error)) {

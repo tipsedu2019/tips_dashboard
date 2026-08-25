@@ -124,6 +124,11 @@
       "fileName": "20260824182243_class_close_enrollment_constraints_validate.sql",
       "status": "final",
       "sha256": "0dbaba62795870cf6ba93794d2f53c40bc83a694c4ef9947f0b367c6dc2de5b1"
+    },
+    {
+      "fileName": "20260825090000_registration_customer_reminder_claim_final_gate.sql",
+      "status": "final",
+      "sha256": "f5a1d8f77f5f0cee2b5e2e8245565a012a992b03ea57ec755e388e8e86153251"
     }
   ]
 }

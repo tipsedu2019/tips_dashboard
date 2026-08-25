@@ -958,6 +958,53 @@ test("list contracts require an exact timeout call, deterministic order, and exa
   ])
 })
 
+test("list contracts accept caller cancellation only when every path retains the exact timeout bound", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client, callerSignal) {
+  await client.rpc("list_ops_task_page_v2", { p_limit: 30 })
+    .abortSignal(AbortSignal.any([callerSignal, AbortSignal.timeout(8_000)]))
+    .retry(false)
+  return client.rpc("list_ops_task_page_v1", { p_limit: 30 })
+    .abortSignal(callerSignal
+      ? AbortSignal.any([callerSignal, AbortSignal.timeout(8_000)])
+      : AbortSignal.timeout(8_000))
+    .retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result, { ok: true, violations: [] })
+})
+
+test("list contracts reject combined cancellation when the exact timeout bound is not provable", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client, callerSignal, signals) {
+  await client.rpc("list_ops_task_page_v2", { p_limit: 30 })
+    .abortSignal(AbortSignal.any([callerSignal]))
+    .retry(false)
+  await client.rpc("list_ops_task_page_v1", { p_limit: 30 })
+    .abortSignal(AbortSignal.any([callerSignal, AbortSignal.timeout(12_000)]))
+    .retry(false)
+  await client.rpc("list_ops_task_page_v2", { p_limit: 30 })
+    .abortSignal(AbortSignal.any([...signals, AbortSignal.timeout(8_000)]))
+    .retry(false)
+  return client.rpc("list_ops_task_page_v1", { p_limit: 30 })
+    .abortSignal(callerSignal
+      ? AbortSignal.any([callerSignal, AbortSignal.timeout(8_000)])
+      : callerSignal)
+    .retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, Array.from({ length: 4 }, () => ({
+    file: "src/features/tasks/list-tasks.ts",
+    symbol: "load",
+    surface: "tasks",
+    reason: "list_abort_signal_missing",
+  })))
+})
+
 test("ordered exact-key details and nested projections without wildcards remain allowed", async () => {
   const result = await verifyFixture({
     source: `async function load(client, id) {

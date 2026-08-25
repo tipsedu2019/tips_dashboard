@@ -13,7 +13,7 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/u
 const FIXTURE_EMAIL = "notification-content-local-qa@runtime.invalid"
 const FIXTURE_NAMESPACE = "notification-content-local-qa-v1"
 const CONFIGURATION_IDENTITY_SHA256 =
-  "2b09a1c44db7beb0c67b7bce13baf931e7c91677d423cdb0247acd7a1d50a178"
+  "7468e67c9b23817f83bd924ddb1dc8935403a2131a7dcc1f9c5904e91dce0f1a"
 const RULE_GROUPS_JSON_TAG = "$notification_content_local_qa_rule_groups$"
 const RULE_GROUPS_JSON_BEGIN = "notification_content_local_qa_rule_groups_json_begin"
 const RULE_GROUPS_JSON_END = "notification_content_local_qa_rule_groups_json_end"
@@ -32,20 +32,21 @@ export const NOTIFICATION_CONTENT_LOCAL_QA_PGTAP_FILES = Object.freeze([
   "supabase/tests/notification_approval_adapter_test.sql",
   "supabase/tests/notification_system_template_vnext_test.sql",
   "supabase/tests/notification_worker_production_schedule_test.sql",
+  "supabase/tests/notification_contract_drain_evidence_schema_repair_test.sql",
 ])
 
 export const NOTIFICATION_CONTENT_LOCAL_QA_EXPECTED_COUNTS = deepFreeze({
   authUsers: 1,
   profiles: 1,
   workflows: 7,
-  eventKeys: 51,
-  settingsRegistry: 188,
-  rules: 189,
-  historicalTemplates: 189,
-  vNextTemplates: 188,
-  templates: 377,
-  contentContracts: 188,
-  complianceAudits: 188,
+  eventKeys: 58,
+  settingsRegistry: 196,
+  rules: 197,
+  historicalTemplates: 197,
+  vNextTemplates: 196,
+  templates: 393,
+  contentContracts: 196,
+  complianceAudits: 196,
   legacySettings: 42,
   importMetadata: 42,
   runtimeFlags: 12,
@@ -54,12 +55,12 @@ export const NOTIFICATION_CONTENT_LOCAL_QA_EXPECTED_COUNTS = deepFreeze({
 })
 
 const EXPECTED_CONFIGURATION_IDENTITY = deepFreeze({
-  count: 188,
+  count: 196,
   sha256: CONFIGURATION_IDENTITY_SHA256,
   byWorkflow: {
     approvals: 36,
     makeup_requests: 32,
-    registration: 26,
+    registration: 34,
     tasks: 40,
     transfer: 2,
     withdrawal: 2,
@@ -68,7 +69,7 @@ const EXPECTED_CONFIGURATION_IDENTITY = deepFreeze({
   ruleByWorkflow: {
     approvals: 36,
     makeup_requests: 32,
-    registration: 27,
+    registration: 35,
     tasks: 40,
     transfer: 2,
     withdrawal: 2,
@@ -625,8 +626,8 @@ function assertPgTapSource(value) {
 
 async function loadPgTapContract() {
   if (
-    NOTIFICATION_CONTENT_LOCAL_QA_PGTAP_FILES.length !== 13
-    || new Set(NOTIFICATION_CONTENT_LOCAL_QA_PGTAP_FILES).size !== 13
+    NOTIFICATION_CONTENT_LOCAL_QA_PGTAP_FILES.length !== 14
+    || new Set(NOTIFICATION_CONTENT_LOCAL_QA_PGTAP_FILES).size !== 14
   ) {
     fileRefused()
   }

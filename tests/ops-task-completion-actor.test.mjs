@@ -61,8 +61,8 @@ test("상세 조회와 완료일시 옆 UI가 담당자가 아닌 완료 처리�
   assert.match(serviceSource, /taskRow\.completed_by/);
   assert.match(serviceSource, /completedBy: text\(payload\.completedById\)/);
   assert.match(serviceSource, /completedByLabel: text\(payload\.completedByLabel\)/);
-  assert.match(serviceSource, /rpc\("list_ops_task_page_v2", pageArgs\)/);
-  assert.match(serviceSource, /rpc\("list_ops_task_page_v1", pageArgs\)/);
+  assert.match(serviceSource, /rpc\("list_ops_task_page_v2", \{[\s\S]{0,400}?p_limit: 30,/);
+  assert.match(serviceSource, /rpc\("list_ops_task_page_v1", \{[\s\S]{0,400}?p_limit: 30,/);
 
   assert.match(registrationTrackSource, /completedByLabel: text\(value\(row, "completed_by_label", "completedByLabel"\)\)/);
 

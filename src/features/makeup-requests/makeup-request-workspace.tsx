@@ -11,7 +11,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react"
-import { ArrowDown, ArrowUp, Check, ChevronRight, ChevronsUpDown, Filter, MessageSquare, Pencil, Plus, RotateCcw, Send, Trash2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Check, ChevronRight, ChevronsUpDown, Filter, Plus, RotateCcw, Send, Trash2, X } from "lucide-react"
 import { useSearchParams } from "next/navigation"
 
 import { Badge } from "@/components/ui/badge"
@@ -52,22 +52,13 @@ import {
   cancelCompletedMakeupRequest,
   completeMakeupRefund,
   createMakeupRequest,
-  getMakeupNotificationTriggerLabel,
   loadMakeupClassSchedulePlan,
   loadMakeupRequestWorkspaceData,
-  MAKEUP_NOTIFICATION_CHANNEL_LABELS,
-  MAKEUP_NOTIFICATION_TRIGGER_LABELS,
   rejectMakeupRequest,
-  renderMakeupNotificationTemplate,
   requestMakeupRefund,
   requestMakeupRequestRevision,
   resubmitMakeupRequest,
-  toggleMakeupNotificationSetting,
-  updateMakeupNotificationTriggerContent,
-  type GoogleChatChannel,
   type MakeupClassOption,
-  type MakeupNotificationDelivery,
-  type MakeupNotificationSetting,
   type MakeupRequest,
   type MakeupRequestInput,
   type MakeupTeacherOption,
@@ -169,91 +160,6 @@ const MAKEUP_CLASS_SCHEDULE_PLAN_LOAD_ERROR = "수업 일정을 불러오지 못
 
 function clearMakeupClassSchedulePlanLoadError(error: string) {
   return error === MAKEUP_CLASS_SCHEDULE_PLAN_LOAD_ERROR ? "" : error
-}
-
-const NOTIFICATION_DELIVERY_STATUS_LABELS: Record<string, string> = {
-  sent: "발송",
-  skipped: "건너뜀",
-  failed: "실패",
-  disabled: "꺼짐",
-  deduped: "중복 차단",
-}
-
-const MAKEUP_NOTIFICATION_CHANNEL_ORDER: Array<MakeupNotificationSetting["channel"]> = [
-  "dashboard_personal",
-  "dashboard_management",
-  "google_chat_executive",
-  "google_chat_admin",
-  "google_chat_english",
-  "google_chat_math",
-]
-
-const MAKEUP_GOOGLE_CHAT_CHANNEL_MAP: Partial<Record<MakeupNotificationSetting["channel"], GoogleChatChannel>> = {
-  google_chat_executive: "executive",
-  google_chat_admin: "admin",
-  google_chat_english: "english",
-  google_chat_math: "math",
-}
-
-const MAKEUP_NOTIFICATION_TABLE_GRID_STYLE: CSSProperties = {
-  gridTemplateColumns: `minmax(160px, 0.95fr) repeat(${MAKEUP_NOTIFICATION_CHANNEL_ORDER.length}, minmax(118px, 1fr))`,
-}
-
-const EMPTY_NOTIFICATION_TEMPLATE_INPUT = {
-  titleTemplate: "",
-  bodyTemplate: "",
-}
-
-type MakeupGoogleChatWebhookInfo = {
-  channelKey: MakeupNotificationSetting["channel"]
-  channelLabel: string
-  envName: string
-  configured: boolean
-  maskedUrl: string
-}
-
-type GoogleChatWebhookInfoResponse = {
-  ok?: boolean
-  envName?: string
-  configured?: boolean
-  maskedUrl?: string
-  error?: string
-}
-
-const MAKEUP_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT: Record<string, string> = {
-  프로세스: "신청 제출",
-  상태: "결재자 승인 대기",
-  수업: "대기고1A",
-  과목: "영어",
-  선생님: "강부희",
-  사유: "개인 일정",
-  휴강일: "2026-07-07",
-  보강일시: "2026-07-08 10:00 - 2026-07-08 12:00",
-  "보강 강의실": "별관 3강",
-  보강강의실: "별관 3강",
-  신청자: "임현준",
-  상신일시: "2026-07-06 12:03",
-  보완요청일시: "-",
-  "보완 사유": "-",
-  승인일시: "2026-07-06 12:06",
-  "승인 메모": "-",
-  반려일시: "-",
-  "반려 사유": "-",
-  승인취소일시: "2026-07-06 12:44",
-  "승인취소 메모": "-",
-  결재자: "강부희",
-}
-
-function getNotificationTemplateSetting(triggerKind: MakeupNotificationSetting["triggerKind"], settings: MakeupNotificationSetting[]) {
-  const triggerSettings = settings.filter((item) => item.triggerKind === triggerKind)
-  return triggerSettings.find((item) => item.channel === "dashboard_personal") || triggerSettings[0] || null
-}
-
-function getNotificationDeliveryTargetLabel(delivery: MakeupNotificationDelivery) {
-  if (delivery.targetType === "google_chat") {
-    return MAKEUP_NOTIFICATION_CHANNEL_LABELS[delivery.channel] || delivery.targetLabel || delivery.targetType
-  }
-  return delivery.targetLabel || delivery.targetType
 }
 
 function sortSubjectOptions(left: string, right: string) {
@@ -653,13 +559,6 @@ const MAKEUP_REQUEST_TABLE_COLUMNS: Array<{
   { columnKey: "canceledNote", label: "승인취소 메모", width: 230, minWidth: 160 },
   { columnKey: "approver", label: "결재자", width: 118, minWidth: 96 },
   { columnKey: "action", label: "액션", width: 250, minWidth: 230, align: "right" },
-]
-
-const MAKEUP_NOTIFICATION_TEMPLATE_VARIABLES = [
-  "프로세스",
-  ...MAKEUP_REQUEST_TABLE_COLUMNS
-    .map((column) => column.label)
-    .filter((label) => label !== "액션"),
 ]
 
 const hiddenOnCardColumnKeys = new Set<MakeupRequestTableColumnKey>(["className", "subject", "teacher"])
@@ -1900,7 +1799,7 @@ function createMakeupClassSchedulePlanLoadCache(
 }
 
 export function MakeupRequestWorkspace() {
-  const { user, role, loading: authLoading, session } = useAuth()
+  const { user, role, loading: authLoading } = useAuth()
   const searchParams = useSearchParams()
   const [view, setView] = useState<MakeupRequestView>("mine")
   const [data, setData] = useState<MakeupRequestWorkspaceData>({
@@ -1911,8 +1810,6 @@ export function MakeupRequestWorkspace() {
     classes: [],
     classrooms: [],
     academicEvents: [],
-    notificationSettings: [],
-    notificationDeliveries: [],
   })
   const [input, setInput] = useState<MakeupRequestInput>(EMPTY_INPUT)
   const [selectedSubject, setSelectedSubject] = useState("")
@@ -1928,15 +1825,6 @@ export function MakeupRequestWorkspace() {
   const [actionNote, setActionNote] = useState("")
   const [finalCancelRequest, setFinalCancelRequest] = useState<MakeupRequest | null>(null)
   const [finalCancelNote, setFinalCancelNote] = useState("")
-  const [notificationDialogOpen, setNotificationDialogOpen] = useState(false)
-  const [selectedNotificationSetting, setSelectedNotificationSetting] = useState<MakeupNotificationSetting | null>(null)
-  const [notificationTemplateInput, setNotificationTemplateInput] = useState(EMPTY_NOTIFICATION_TEMPLATE_INPUT)
-  const [selectedWebhookInfo, setSelectedWebhookInfo] = useState<MakeupGoogleChatWebhookInfo | null>(null)
-  const [webhookUrlInput, setWebhookUrlInput] = useState("")
-  const [webhookInfoLoading, setWebhookInfoLoading] = useState<MakeupNotificationSetting["channel"] | "">("")
-  const [webhookInfoSaving, setWebhookInfoSaving] = useState(false)
-  const [webhookInfoError, setWebhookInfoError] = useState("")
-  const webhookInfoPanelRef = useRef<HTMLDivElement | null>(null)
   const [requestDialogOpen, setRequestDialogOpen] = useState(false)
   const [selectedDetailRequest, setSelectedDetailRequest] = useState<MakeupRequest | null>(null)
   const consumedDeepLinkRequestIdRef = useRef("")
@@ -1960,11 +1848,6 @@ export function MakeupRequestWorkspace() {
       : null
   ), [data.requests, selectedDetailRequest])
   const actionNoteConfig = actionNoteRequest ? MAKEUP_ACTION_NOTE_CONFIG[actionNoteRequest.kind] : MAKEUP_ACTION_NOTE_CONFIG.revision
-
-  useEffect(() => {
-    if (!selectedWebhookInfo && !webhookInfoError) return
-    webhookInfoPanelRef.current?.scrollIntoView({ block: "start" })
-  }, [selectedWebhookInfo, webhookInfoError])
 
   const refresh = useCallback(async () => {
     schedulePlanLoadCacheRef.current?.reset()
@@ -2124,21 +2007,6 @@ export function MakeupRequestWorkspace() {
       [tab.id]: getMakeupRequestViewRequests(data.requests, tab.id, currentUserId, isManager).length,
     }), {} as Record<MakeupRequestView, number>)
   ), [currentUserId, data.requests, isManager])
-
-  const notificationSettingsByTrigger = useMemo(() => {
-    const grouped = new Map<string, MakeupNotificationSetting[]>()
-    for (const setting of data.notificationSettings || []) {
-      const list = grouped.get(setting.triggerKind) || []
-      list.push(setting)
-      grouped.set(setting.triggerKind, list)
-    }
-    return grouped
-  }, [data.notificationSettings])
-
-  const notificationTemplatePreview = useMemo(() => ({
-    title: renderMakeupNotificationTemplate(notificationTemplateInput.titleTemplate, MAKEUP_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT),
-    body: renderMakeupNotificationTemplate(notificationTemplateInput.bodyTemplate, MAKEUP_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT),
-  }), [notificationTemplateInput])
 
   const patchInput = useCallback((patch: Partial<MakeupRequestInput>) => {
     setInput((current) => ({ ...current, ...patch }))
@@ -2417,149 +2285,6 @@ export function MakeupRequestWorkspace() {
       closeDetailRequest()
     }
   }, [closeDetailRequest, currentUserId, finalCancelNote, finalCancelRequest, runAction])
-
-  const handleToggleNotificationSetting = useCallback(async (setting: MakeupNotificationSetting) => {
-    if (!isManager) {
-      setError("관리 권한이 있는 계정만 알림 설정을 변경할 수 있습니다.")
-      return
-    }
-    await runAction(
-      () => toggleMakeupNotificationSetting(setting.triggerKind, setting.channel, !setting.enabled),
-      "알림 설정을 저장했습니다.",
-    )
-  }, [isManager, runAction])
-
-  const handleOpenWebhookInfo = useCallback(async (channel: MakeupNotificationSetting["channel"]) => {
-    const googleChatChannel = MAKEUP_GOOGLE_CHAT_CHANNEL_MAP[channel]
-    if (!googleChatChannel) return
-
-    const channelLabel = MAKEUP_NOTIFICATION_CHANNEL_LABELS[channel]
-    setSelectedWebhookInfo({
-      channelKey: channel,
-      channelLabel,
-      envName: "",
-      configured: false,
-      maskedUrl: "",
-    })
-    setWebhookUrlInput("")
-    setWebhookInfoError("")
-
-    if (!session?.access_token) {
-      setWebhookInfoError("로그인 세션을 확인할 수 없습니다.")
-      return
-    }
-
-    setWebhookInfoLoading(channel)
-    try {
-      const response = await fetch(`/api/google-chat?channel=${encodeURIComponent(googleChatChannel)}`, {
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      })
-      const payload = await response.json().catch(() => ({})) as GoogleChatWebhookInfoResponse
-      if (!response.ok || !payload.ok) {
-        throw new Error(toText(payload.error) || "웹훅 정보를 불러오지 못했습니다.")
-      }
-      setSelectedWebhookInfo({
-        channelKey: channel,
-        channelLabel,
-        envName: toText(payload.envName),
-        configured: Boolean(payload.configured),
-        maskedUrl: toText(payload.maskedUrl),
-      })
-    } catch (error) {
-      setWebhookInfoError(error instanceof Error ? error.message : "웹훅 정보를 불러오지 못했습니다.")
-    } finally {
-      setWebhookInfoLoading("")
-    }
-  }, [session?.access_token])
-
-  const handleSaveWebhookInfo = useCallback(async () => {
-    if (!selectedWebhookInfo) return
-    if (!isManager) {
-      setWebhookInfoError("관리 권한이 있는 계정만 웹훅 URL을 변경할 수 있습니다.")
-      return
-    }
-    if (!session?.access_token) {
-      setWebhookInfoError("로그인 세션을 확인할 수 없습니다.")
-      return
-    }
-
-    const googleChatChannel = MAKEUP_GOOGLE_CHAT_CHANNEL_MAP[selectedWebhookInfo.channelKey]
-    const webhookUrl = toText(webhookUrlInput)
-    if (!googleChatChannel || !webhookUrl) {
-      setWebhookInfoError("저장할 웹훅 URL을 입력해 주세요.")
-      return
-    }
-
-    setWebhookInfoSaving(true)
-    setWebhookInfoError("")
-    try {
-      const response = await fetch("/api/google-chat", {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          channel: googleChatChannel,
-          webhookUrl,
-        }),
-      })
-      const payload = await response.json().catch(() => ({})) as GoogleChatWebhookInfoResponse
-      if (!response.ok || !payload.ok) {
-        throw new Error(toText(payload.error) || "웹훅 URL을 저장하지 못했습니다.")
-      }
-      setSelectedWebhookInfo((current) => current ? {
-        ...current,
-        envName: toText(payload.envName),
-        configured: Boolean(payload.configured),
-        maskedUrl: toText(payload.maskedUrl),
-      } : current)
-      setWebhookUrlInput("")
-      setMessage("웹훅 URL을 저장했습니다.")
-    } catch (error) {
-      setWebhookInfoError(error instanceof Error ? error.message : "웹훅 URL을 저장하지 못했습니다.")
-    } finally {
-      setWebhookInfoSaving(false)
-    }
-  }, [isManager, selectedWebhookInfo, session?.access_token, webhookUrlInput])
-
-  const openNotificationTemplateEditor = useCallback((triggerKind: MakeupNotificationSetting["triggerKind"], settings: MakeupNotificationSetting[]) => {
-    const setting = getNotificationTemplateSetting(triggerKind, settings)
-    if (!setting) return
-    setSelectedNotificationSetting(setting)
-    setNotificationTemplateInput({
-      titleTemplate: setting.titleTemplate,
-      bodyTemplate: setting.bodyTemplate,
-    })
-  }, [])
-
-  const closeNotificationTemplateEditor = useCallback(() => {
-    if (saving) return
-    setSelectedNotificationSetting(null)
-    setNotificationTemplateInput(EMPTY_NOTIFICATION_TEMPLATE_INPUT)
-  }, [saving])
-
-  const handleSaveNotificationTemplate = useCallback(async () => {
-    if (!selectedNotificationSetting) return
-    if (!isManager) {
-      setError("관리 권한이 있는 계정만 알림 내용을 변경할 수 있습니다.")
-      return
-    }
-    const saved = await runAction(
-      () => updateMakeupNotificationTriggerContent(
-        selectedNotificationSetting.triggerKind,
-        notificationTemplateInput.titleTemplate,
-        notificationTemplateInput.bodyTemplate,
-      ),
-      "알림 내용을 저장했습니다.",
-    )
-    if (saved) {
-      setSelectedNotificationSetting(null)
-      setNotificationTemplateInput(EMPTY_NOTIFICATION_TEMPLATE_INPUT)
-    }
-  }, [isManager, notificationTemplateInput, runAction, selectedNotificationSetting])
 
   const handleEditForRevision = useCallback((request: MakeupRequest) => {
     const requestClass = data.classes.find((classItem) => classItem.id === request.classId) || null
@@ -3003,334 +2728,6 @@ export function MakeupRequestWorkspace() {
               variant="detail"
             />
           ) : null}
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={notificationDialogOpen} onOpenChange={setNotificationDialogOpen}>
-        <DialogContent className="max-h-[86vh] overflow-y-auto sm:max-w-5xl">
-          <DialogHeader>
-            <DialogTitle>알림 설정</DialogTitle>
-            <DialogDescription className="sr-only">
-              휴보강 프로세스별 웹 알림과 구글챗 발송 설정을 관리합니다.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.8fr)]">
-            <div className="grid gap-2">
-              {selectedWebhookInfo || webhookInfoError ? (
-                <div ref={webhookInfoPanelRef} className="grid gap-2 rounded-md border bg-muted/20 p-3 text-xs">
-                  {selectedWebhookInfo ? (
-                    <>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium">{selectedWebhookInfo.channelLabel}</span>
-                        <Badge variant={selectedWebhookInfo.configured ? "default" : "outline"}>
-                          {webhookInfoLoading === selectedWebhookInfo.channelKey ? "확인 중" : selectedWebhookInfo.configured ? "연결됨" : "미설정"}
-                        </Badge>
-                      </div>
-                      <div className="grid gap-1">
-                        <div className="text-muted-foreground">환경 변수</div>
-                        <code className="break-all rounded bg-background px-2 py-1">{selectedWebhookInfo.envName || "-"}</code>
-                      </div>
-                      <div className="grid gap-1">
-                        <div className="text-muted-foreground">웹훅 URL</div>
-                        <code className="break-all rounded bg-background px-2 py-1">{selectedWebhookInfo.maskedUrl || "-"}</code>
-                      </div>
-                      <div className="grid gap-1">
-                        <Label htmlFor="makeup-google-chat-webhook-url" className="text-xs text-muted-foreground">
-                          웹훅 URL 수정
-                        </Label>
-                        <div className="flex gap-2">
-                          <Input
-                            id="makeup-google-chat-webhook-url"
-                            type="password"
-                            value={webhookUrlInput}
-                            onChange={(event) => setWebhookUrlInput(event.target.value)}
-                            placeholder="새 구글챗 웹훅 URL 입력"
-                            disabled={!isManager || webhookInfoSaving}
-                          />
-                          <Button
-                            type="button"
-                            size="sm"
-                            className="shrink-0"
-                            disabled={!isManager || webhookInfoSaving || !webhookUrlInput.trim()}
-                            onClick={() => void handleSaveWebhookInfo()}
-                          >
-                            저장
-                          </Button>
-                        </div>
-                      </div>
-                    </>
-                  ) : null}
-                  {webhookInfoError ? <div className="text-destructive">{webhookInfoError}</div> : null}
-                </div>
-              ) : null}
-              <div data-testid="makeup-notification-mobile-list" className="grid gap-2 md:hidden">
-                {(Object.entries(MAKEUP_NOTIFICATION_TRIGGER_LABELS) as Array<[keyof typeof MAKEUP_NOTIFICATION_TRIGGER_LABELS, string]>).map(([triggerKind, triggerLabel]) => {
-                  const settings = notificationSettingsByTrigger.get(triggerKind) || []
-                  return (
-                    <article key={`mobile-${triggerKind}`} className="grid gap-2 rounded-md border bg-background p-3" aria-label={`${triggerLabel} 모바일 알림 설정`}>
-                      <div className="flex min-w-0 items-center justify-between gap-2">
-                        <div className="truncate text-sm font-semibold">{triggerLabel}</div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 shrink-0 px-2 text-xs"
-                          disabled={saving || !isManager || settings.length === 0}
-                          aria-label={`${triggerLabel} 알림 내용 수정`}
-                          onClick={() => openNotificationTemplateEditor(triggerKind, settings)}
-                        >
-                          <Pencil className="size-3.5" aria-hidden="true" />
-                          내용
-                        </Button>
-                      </div>
-                      <div className="grid gap-1.5">
-                        {MAKEUP_NOTIFICATION_CHANNEL_ORDER.map((channel) => {
-                          const setting = settings.find((item) => item.channel === channel)
-                          const googleChatChannel = MAKEUP_GOOGLE_CHAT_CHANNEL_MAP[channel]
-                          const channelLabel = MAKEUP_NOTIFICATION_CHANNEL_LABELS[channel]
-                          return (
-                            <div key={`${triggerKind}-${channel}-mobile`} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md bg-muted/30 px-2 py-2">
-                              <div className="min-w-0">
-                                {googleChatChannel ? (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-auto min-h-0 max-w-full justify-start px-0 py-0 text-left text-xs font-medium text-muted-foreground hover:bg-transparent"
-                                    disabled={webhookInfoLoading === channel}
-                                    aria-label={`${channelLabel} 웹훅 URL 보기`}
-                                    title={`${channelLabel} 웹훅 URL 보기`}
-                                    onClick={() => void handleOpenWebhookInfo(channel)}
-                                  >
-                                    <span className="truncate">{channelLabel}</span>
-                                  </Button>
-                                ) : (
-                                  <div className="truncate text-xs font-medium text-muted-foreground">{channelLabel}</div>
-                                )}
-                              </div>
-                              {setting ? (
-                                <Button
-                                  type="button"
-                                  variant={setting.enabled ? "default" : "outline"}
-                                  size="sm"
-                                  className="h-8 min-w-16 justify-center px-2 text-xs"
-                                  disabled={saving || !isManager}
-                                  aria-label={`${triggerLabel} ${MAKEUP_NOTIFICATION_CHANNEL_LABELS[channel]} 알림 ${setting.enabled ? "끄기" : "켜기"}`}
-                                  onClick={() => void handleToggleNotificationSetting(setting)}
-                                >
-                                  {setting.enabled ? "켜짐" : "꺼짐"}
-                                </Button>
-                              ) : (
-                                <span className="rounded-md border border-dashed px-2 py-1.5 text-center text-xs text-muted-foreground">-</span>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </article>
-                  )
-                })}
-              </div>
-              <div className="hidden overflow-x-auto rounded-md border md:block" role="table" aria-label="휴보강 알림 설정 표">
-                <div className="min-w-[880px]">
-                  <div
-                    role="row"
-                    className="grid border-b bg-muted/40 text-xs font-medium text-muted-foreground"
-                    style={MAKEUP_NOTIFICATION_TABLE_GRID_STYLE}
-                  >
-                    <div role="columnheader" className="border-r px-3 py-2">
-                      프로세스
-                    </div>
-                    <div role="columnheader" className="col-span-6 px-3 py-2 text-center">
-                      알림 위치
-                    </div>
-                  </div>
-                  <div
-                    role="row"
-                    className="grid border-b bg-muted/20 text-xs font-medium text-muted-foreground"
-                    style={MAKEUP_NOTIFICATION_TABLE_GRID_STYLE}
-                  >
-                    <div role="columnheader" className="border-r px-3 py-2" aria-label="프로세스" />
-                    {MAKEUP_NOTIFICATION_CHANNEL_ORDER.map((channel) => {
-                      const googleChatChannel = MAKEUP_GOOGLE_CHAT_CHANNEL_MAP[channel]
-                      const channelLabel = MAKEUP_NOTIFICATION_CHANNEL_LABELS[channel]
-                      return (
-                        <div key={channel} role="columnheader" className="border-r px-3 py-2 last:border-r-0">
-                          {googleChatChannel ? (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="h-auto min-h-0 w-full justify-start px-0 py-0 text-left text-xs font-medium text-muted-foreground hover:bg-transparent"
-                              disabled={webhookInfoLoading === channel}
-                              aria-label={`${channelLabel} 웹훅 URL 보기`}
-                              title={`${channelLabel} 웹훅 URL 보기`}
-                              onClick={() => void handleOpenWebhookInfo(channel)}
-                            >
-                              <span className="truncate">{channelLabel}</span>
-                            </Button>
-                          ) : channelLabel}
-                        </div>
-                      )
-                    })}
-                  </div>
-                  {(Object.entries(MAKEUP_NOTIFICATION_TRIGGER_LABELS) as Array<[keyof typeof MAKEUP_NOTIFICATION_TRIGGER_LABELS, string]>).map(([triggerKind, triggerLabel]) => {
-                    const settings = notificationSettingsByTrigger.get(triggerKind) || []
-                    return (
-                      <div
-                        key={triggerKind}
-                        role="row"
-                        className="grid border-b last:border-b-0"
-                        style={MAKEUP_NOTIFICATION_TABLE_GRID_STYLE}
-                      >
-                        <div role="rowheader" className="border-r bg-muted/10 px-3 py-2 text-sm font-medium">
-                          <div className="flex min-w-0 items-center justify-between gap-2">
-                            <span className="truncate">{triggerLabel}</span>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-7 shrink-0 px-2 text-xs"
-                              disabled={saving || !isManager || settings.length === 0}
-                              aria-label={`${triggerLabel} 알림 내용 수정`}
-                              onClick={() => openNotificationTemplateEditor(triggerKind, settings)}
-                            >
-                              <Pencil className="size-3.5" aria-hidden="true" />
-                              내용
-                            </Button>
-                          </div>
-                        </div>
-                        {MAKEUP_NOTIFICATION_CHANNEL_ORDER.map((channel) => {
-                          const setting = settings.find((item) => item.channel === channel)
-                          if (!setting) {
-                            return (
-                              <div key={`${triggerKind}-${channel}`} role="cell" className="border-r px-2 py-2 last:border-r-0">
-                                <span className="block rounded-md border border-dashed px-2 py-1.5 text-center text-xs text-muted-foreground">-</span>
-                              </div>
-                            )
-                          }
-                          return (
-                            <div key={`${setting.triggerKind}-${setting.channel}`} role="cell" className="border-r px-2 py-2 last:border-r-0">
-                              <Button
-                                type="button"
-                                variant={setting.enabled ? "default" : "outline"}
-                                size="sm"
-                                className="h-8 w-full justify-center px-2 text-xs"
-                                disabled={saving || !isManager}
-                                aria-label={`${triggerLabel} ${MAKEUP_NOTIFICATION_CHANNEL_LABELS[channel]} 알림 ${setting.enabled ? "끄기" : "켜기"}`}
-                                onClick={() => void handleToggleNotificationSetting(setting)}
-                              >
-                                {setting.enabled ? "켜짐" : "꺼짐"}
-                              </Button>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <div className="min-w-0 rounded-md border">
-              <div className="flex items-center justify-between border-b bg-muted/30 px-3 py-2">
-                <div className="inline-flex items-center gap-2 text-sm font-medium">
-                  <MessageSquare className="size-4" aria-hidden="true" />
-                  발송 현황
-                </div>
-                <Badge variant="outline">{data.notificationDeliveries.length}</Badge>
-              </div>
-              <div className="max-h-80 overflow-y-auto">
-                {data.notificationDeliveries.length === 0 ? (
-                  <div className="px-3 py-8 text-center text-sm text-muted-foreground">최근 발송 기록이 없습니다.</div>
-                ) : data.notificationDeliveries.map((delivery) => (
-                  <div key={delivery.id} className="grid gap-1 border-b px-3 py-2 text-xs last:border-b-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="min-w-0 truncate font-medium">
-                        {getMakeupNotificationTriggerLabel(delivery.triggerKind)} · {MAKEUP_NOTIFICATION_CHANNEL_LABELS[delivery.channel]}
-                      </span>
-                      <Badge variant={delivery.status === "failed" ? "destructive" : delivery.status === "sent" ? "default" : "outline"}>
-                        {NOTIFICATION_DELIVERY_STATUS_LABELS[delivery.status] || delivery.status}
-                      </Badge>
-                    </div>
-                    <div className="truncate text-muted-foreground">
-                      {getNotificationDeliveryTargetLabel(delivery)} · {formatDateTime(delivery.createdAt)}
-                    </div>
-                    {delivery.error ? <div className="truncate text-destructive">{delivery.error}</div> : null}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={Boolean(selectedNotificationSetting)} onOpenChange={(open) => {
-        if (!open) closeNotificationTemplateEditor()
-      }}>
-        <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>알림 내용 수정</DialogTitle>
-            <DialogDescription>
-              {selectedNotificationSetting
-                ? getMakeupNotificationTriggerLabel(selectedNotificationSetting.triggerKind)
-                : "알림 내용"}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid min-h-0 gap-4 overflow-y-auto pr-1">
-            <div className="grid gap-2">
-              <Label htmlFor="makeup-notification-title-template">제목</Label>
-              <Input
-                id="makeup-notification-title-template"
-                value={notificationTemplateInput.titleTemplate}
-                onChange={(event) => setNotificationTemplateInput((current) => ({
-                  ...current,
-                  titleTemplate: event.target.value,
-                }))}
-                placeholder="알림 제목"
-                disabled={saving || !isManager}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="makeup-notification-body-template">본문</Label>
-              <Textarea
-                id="makeup-notification-body-template"
-                value={notificationTemplateInput.bodyTemplate}
-                onChange={(event) => setNotificationTemplateInput((current) => ({
-                  ...current,
-                  bodyTemplate: event.target.value,
-                }))}
-                placeholder="알림 본문"
-                className="min-h-24"
-                disabled={saving || !isManager}
-              />
-            </div>
-            <div className="grid gap-2 rounded-md border bg-muted/20 p-3">
-              <div className="text-sm font-medium">미리보기</div>
-              <div className="grid gap-1 text-sm">
-                <div className="font-medium">{notificationTemplatePreview.title || "-"}</div>
-                <div className="whitespace-pre-wrap text-muted-foreground">{notificationTemplatePreview.body || "-"}</div>
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <div className="text-xs font-medium text-muted-foreground">사용 가능 변수</div>
-              <div className="flex flex-wrap gap-1">
-                {MAKEUP_NOTIFICATION_TEMPLATE_VARIABLES.map((variable) => (
-                  <Badge key={variable} variant="outline" className="font-mono">
-                    {`{${variable}}`}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="shrink-0">
-            <Button type="button" variant="outline" onClick={closeNotificationTemplateEditor} disabled={saving}>
-              취소
-            </Button>
-            <Button type="button" onClick={() => void handleSaveNotificationTemplate()} disabled={saving || !isManager}>
-              저장
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 

@@ -174,8 +174,8 @@ select is(
     select pg_catalog.count(*)
     from dashboard_private.notification_settings_ui_registry
   ),
-  188::bigint,
-  'closed registry contains the complete reviewed 188-cell graph'
+  196::bigint,
+  'closed registry contains the complete reviewed 196-cell graph'
 );
 select results_eq(
   $$
@@ -259,6 +259,28 @@ select is_empty($$
         'editable_rule',
         false
       )
+
+    union all
+
+    select
+      observation.event_key,
+      observation.audience_key,
+      observation.channel_key,
+      'immediate',
+      'immediate',
+      'editable_rule',
+      false
+    from (
+      values
+        ('registration.observation_scheduled'::text, 'subject_team'::text, 'google_chat'::text),
+        ('registration.observation_rescheduled', 'subject_team', 'google_chat'),
+        ('registration.observation_canceled', 'subject_team', 'google_chat'),
+        ('registration.observation_reminder_due', 'subject_team', 'google_chat'),
+        ('registration.observation_feedback_due', 'subject_team', 'google_chat'),
+        ('registration.observation_feedback_submitted', 'management_team', 'google_chat'),
+        ('registration.observation_feedback_submitted', 'track_director', 'in_app'),
+        ('registration.observation_director_reassigned', 'management_team', 'google_chat')
+    ) observation(event_key, audience_key, channel_key)
 
     union all
 
@@ -397,11 +419,11 @@ select is_empty($$
 
     select 'registration-count:' || pg_catalog.count(*)::text
     from actual
-    having pg_catalog.count(*) <> 26
+    having pg_catalog.count(*) <> 34
   )
   select violation
   from violations
-$$, 'registration registry matches the exact current 26-cell graph');
+$$, 'registration registry matches the exact current 34-cell graph');
 select is_empty($$
   select registry.event_key, registry.audience_key, registry.channel_key
   from dashboard_private.notification_settings_ui_registry registry
@@ -655,7 +677,7 @@ select is_empty($$
       registry.channel_key,
       registry.rule_variant_key
     )
-$$, 'current 188-cell registry graph resolves exact rules, active templates, and content contracts');
+$$, 'current 196-cell registry graph resolves exact rules, active templates, and content contracts');
 select is_empty($$
   select flag_row.flag_key
   from dashboard_private.notification_runtime_flags flag_row

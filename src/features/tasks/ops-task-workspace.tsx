@@ -27,7 +27,6 @@ import {
   type DateTimePickerDraftState,
 } from "@/components/ui/date-time-picker"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { GoogleChatDeliveryControl } from "@/features/notifications/notification-delivery-control"
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
@@ -303,21 +302,6 @@ type RegistrationViewKey = "inquiry" | "level_test" | "consultation_requested" |
 type RegistrationWorkspaceViewKey = RegistrationViewKey | "observation"
 type RegistrationWorkspaceMode = "list" | "calendar"
 type WithdrawalPeriodFilter = "all" | "today" | "week" | "month" | "custom"
-type WithdrawalNotificationChannelKey = "applicant" | "operations" | "google_chat_admin"
-type WithdrawalGoogleChatWebhookInfo = {
-  channelKey: WithdrawalNotificationChannelKey
-  channelLabel: string
-  envName: string
-  configured: boolean
-  maskedUrl: string
-}
-type WithdrawalGoogleChatWebhookInfoResponse = {
-  ok?: boolean
-  envName?: string
-  configured?: boolean
-  maskedUrl?: string
-  error?: string
-}
 type WordRetestMode = "assistant" | "teacher"
 type WordRetestEditMode = "full" | "expected_only"
 type WordRetestEditIntent = "standard_edit" | "expected_quick"
@@ -804,16 +788,6 @@ function resolveRegistrationAppointmentFocus(
     ? preferredTrackId
     : participantTrackIds[0]
   return { appointment, focusTrackId }
-}
-
-const WITHDRAWAL_NOTIFICATION_CHANNELS: Array<{ key: WithdrawalNotificationChannelKey; label: string }> = [
-  { key: "applicant", label: "담당선생님" },
-  { key: "operations", label: "관리팀" },
-  { key: "google_chat_admin", label: "구글챗 · 관리팀" },
-]
-
-const WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP: Partial<Record<WithdrawalNotificationChannelKey, "admin">> = {
-  google_chat_admin: "admin",
 }
 
 const WORKSPACE_TASK_TYPE: Record<WorkspaceKey, OpsTaskType> = {
@@ -7254,243 +7228,6 @@ async function collectRegistrationLegacySourceIds(tasks: OpsTask[]) {
   return results.flatMap((result) => result.status === "fulfilled" ? result.value : [])
 }
 
-function WithdrawalNotificationSettingsDialog({
-  open,
-  onOpenChange,
-  isManager,
-  sessionToken,
-  workflowLabel = "퇴원",
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  isManager: boolean
-  sessionToken: string
-  workflowLabel?: string
-}) {
-  const [selectedWebhookInfo, setSelectedWebhookInfo] = useState<WithdrawalGoogleChatWebhookInfo | null>(null)
-  const [webhookUrlInput, setWebhookUrlInput] = useState("")
-  const [webhookInfoLoading, setWebhookInfoLoading] = useState<WithdrawalNotificationChannelKey | "">("")
-  const [webhookInfoSaving, setWebhookInfoSaving] = useState(false)
-  const [webhookInfoError, setWebhookInfoError] = useState("")
-  const webhookInfoPanelRef = useRef<HTMLDivElement | null>(null)
-
-  async function handleOpenWithdrawalWebhookInfo(channelKey: WithdrawalNotificationChannelKey) {
-    const googleChatChannel = WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP[channelKey]
-    if (!googleChatChannel) return
-
-    const channelLabel = WITHDRAWAL_NOTIFICATION_CHANNELS.find((channel) => channel.key === channelKey)?.label || "구글챗"
-    setSelectedWebhookInfo({
-      channelKey,
-      channelLabel,
-      envName: "",
-      configured: false,
-      maskedUrl: "",
-    })
-    setWebhookUrlInput("")
-    setWebhookInfoError("")
-
-    if (!sessionToken) {
-      setWebhookInfoError("로그인 세션을 확인할 수 없습니다.")
-      return
-    }
-
-    setWebhookInfoLoading(channelKey)
-    try {
-      const response = await fetch(`/api/google-chat?channel=${encodeURIComponent(googleChatChannel)}`, {
-        headers: {
-          Authorization: `Bearer ${sessionToken}`,
-        },
-      })
-      const payload = await response.json().catch(() => ({})) as WithdrawalGoogleChatWebhookInfoResponse
-      if (!response.ok || !payload.ok) {
-        throw new Error(stringValue(payload.error) || "웹훅 정보를 불러오지 못했습니다.")
-      }
-      setSelectedWebhookInfo({
-        channelKey,
-        channelLabel,
-        envName: stringValue(payload.envName),
-        configured: Boolean(payload.configured),
-        maskedUrl: stringValue(payload.maskedUrl),
-      })
-    } catch (error) {
-      setWebhookInfoError(error instanceof Error ? error.message : "웹훅 정보를 불러오지 못했습니다.")
-    } finally {
-      setWebhookInfoLoading("")
-    }
-  }
-
-  async function handleSaveWithdrawalWebhookInfo() {
-    if (!selectedWebhookInfo) return
-    if (!isManager) {
-      setWebhookInfoError("관리 권한이 있는 계정만 웹훅 URL을 변경할 수 있습니다.")
-      return
-    }
-    if (!sessionToken) {
-      setWebhookInfoError("로그인 세션을 확인할 수 없습니다.")
-      return
-    }
-
-    const googleChatChannel = WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP[selectedWebhookInfo.channelKey]
-    const webhookUrl = stringValue(webhookUrlInput)
-    if (!googleChatChannel || !webhookUrl) {
-      setWebhookInfoError("저장할 웹훅 URL을 입력해 주세요.")
-      return
-    }
-
-    setWebhookInfoSaving(true)
-    setWebhookInfoError("")
-    try {
-      const response = await fetch("/api/google-chat", {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${sessionToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          channel: googleChatChannel,
-          webhookUrl,
-        }),
-      })
-      const payload = await response.json().catch(() => ({})) as WithdrawalGoogleChatWebhookInfoResponse
-      if (!response.ok || !payload.ok) {
-        throw new Error(stringValue(payload.error) || "웹훅 URL을 저장하지 못했습니다.")
-      }
-      setSelectedWebhookInfo((current) => current ? {
-        ...current,
-        envName: stringValue(payload.envName),
-        configured: Boolean(payload.configured),
-        maskedUrl: stringValue(payload.maskedUrl),
-      } : current)
-      setWebhookUrlInput("")
-    } catch (error) {
-      setWebhookInfoError(error instanceof Error ? error.message : "웹훅 URL을 저장하지 못했습니다.")
-    } finally {
-      setWebhookInfoSaving(false)
-    }
-  }
-
-  useEffect(() => {
-    if (!selectedWebhookInfo && !webhookInfoError) return
-    webhookInfoPanelRef.current?.scrollIntoView({ block: "start" })
-  }, [selectedWebhookInfo, webhookInfoError])
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[86vh] overflow-y-auto sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{workflowLabel} 알림 설정</DialogTitle>
-          <DialogDescription className="sr-only">
-            {workflowLabel} 알림 설정의 현재 제공 범위와 저장되는 Google Chat 연결을 확인합니다.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-4">
-          <div
-            data-testid="task-notification-settings-containment"
-            className="grid gap-1.5 rounded-md border bg-muted/20 p-4 text-sm"
-          >
-            <span className="font-medium">알림 설정 준비 중</span>
-            <p className="text-muted-foreground">
-              공통 알림 설정 저장 기능이 적용될 때까지 알림 켜기/끄기와 내용 편집은 사용할 수 없습니다.
-            </p>
-            <p className="text-xs text-muted-foreground">현재 기존 알림 발송 동작은 변경되지 않습니다.</p>
-          </div>
-
-          <div
-            data-testid="task-notification-webhook-connection"
-            className="grid gap-3 rounded-md border p-4"
-          >
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="grid gap-0.5">
-                <span className="text-sm font-medium">Google Chat 연결</span>
-                <span className="text-xs text-muted-foreground">이 연결 정보만 서버에 저장됩니다.</span>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={webhookInfoLoading === "google_chat_admin"}
-                aria-label="구글챗 · 관리팀 웹훅 관리"
-                onClick={() => void handleOpenWithdrawalWebhookInfo("google_chat_admin")}
-              >
-                {webhookInfoLoading === "google_chat_admin" ? "확인 중" : "구글챗 · 관리팀 웹훅 관리"}
-              </Button>
-            </div>
-
-            {selectedWebhookInfo || webhookInfoError ? (
-              <div ref={webhookInfoPanelRef} className="grid gap-2 rounded-md border bg-muted/20 p-3 text-xs">
-                {selectedWebhookInfo ? (
-                  <>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium">{selectedWebhookInfo.channelLabel}</span>
-                      <Badge variant={selectedWebhookInfo.configured ? "default" : "outline"}>
-                        {webhookInfoLoading === selectedWebhookInfo.channelKey
-                          ? "확인 중"
-                          : selectedWebhookInfo.configured
-                            ? "연결됨"
-                            : "미설정"}
-                      </Badge>
-                    </div>
-                    <div className="grid gap-1">
-                      <div className="text-muted-foreground">환경 변수</div>
-                      <code className="break-all rounded bg-background px-2 py-1">{selectedWebhookInfo.envName || "-"}</code>
-                    </div>
-                    <div className="grid gap-1">
-                      <div className="text-muted-foreground">웹훅 URL</div>
-                      <code className="break-all rounded bg-background px-2 py-1">{selectedWebhookInfo.maskedUrl || "-"}</code>
-                    </div>
-                    {isManager ? (
-                      <div className="grid gap-1">
-                        <Label htmlFor="withdrawal-google-chat-webhook-url" className="text-xs text-muted-foreground">
-                          웹훅 URL 수정
-                        </Label>
-                        <div className="flex flex-col gap-2 sm:flex-row">
-                          <Input
-                            id="withdrawal-google-chat-webhook-url"
-                            type="password"
-                            value={webhookUrlInput}
-                            onChange={(event) => setWebhookUrlInput(event.target.value)}
-                            placeholder="새 구글챗 웹훅 URL 입력"
-                            disabled={webhookInfoSaving}
-                          />
-                          <Button
-                            type="button"
-                            size="sm"
-                            className="shrink-0"
-                            disabled={webhookInfoSaving || !webhookUrlInput.trim()}
-                            onClick={() => void handleSaveWithdrawalWebhookInfo()}
-                          >
-                            웹훅 URL 저장
-                          </Button>
-                        </div>
-                      </div>
-                    ) : null}
-                  </>
-                ) : null}
-                {webhookInfoError ? <div className="text-destructive">{webhookInfoError}</div> : null}
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            닫기
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function TransferNotificationSettingsDialog(props: Omit<Parameters<typeof WithdrawalNotificationSettingsDialog>[0], "workflowLabel">) {
-  return <WithdrawalNotificationSettingsDialog {...props} workflowLabel="전반" />
-}
-
-function RegistrationNotificationSettingsDialog(props: Omit<Parameters<typeof WithdrawalNotificationSettingsDialog>[0], "workflowLabel">) {
-  return <WithdrawalNotificationSettingsDialog {...props} workflowLabel="등록" />
-}
-
 function DashboardMetric({
   label,
   value,
@@ -8275,7 +8012,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     : ""
   const { user, session, canManageAll, isAdmin, isStaff, isTeacher, isAssistant } = useAuth()
   const notificationSessionToken = session?.access_token || ""
-  const legacyNotificationEnabled = false
   const currentUserId = user?.id || ""
   const registrationFixtureValue = searchParams.get("fixture")
   const registrationFixtureActionType = searchParams.get("fixtureActionType")
@@ -8420,9 +8156,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [wordRetestStudentIds, setWordRetestStudentIds] = useState<string[]>([])
   const [wordRetestSelectedTaskIds, setWordRetestSelectedTaskIds] = useState<Set<string>>(() => new Set())
   const [wordRetestManualOpen, setWordRetestManualOpen] = useState(false)
-  const [withdrawalNotificationOpen, setWithdrawalNotificationOpen] = useState(false)
-  const [transferNotificationOpen, setTransferNotificationOpen] = useState(false)
-  const [registrationNotificationOpen, setRegistrationNotificationOpen] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
   const [formDetailStep, setFormDetailStep] = useState<FormDetailStepKey>("registration_contact")
   const [wordRetestEditMode, setWordRetestEditMode] = useState<WordRetestEditMode>("full")
@@ -8796,9 +8529,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setWordRetestEditIntent("standard_edit")
       setWordRetestPendingFocus("")
       setExpectedRetestDraft(EMPTY_DATE_TIME_PICKER_DRAFT)
-      setWithdrawalNotificationOpen(false)
-      setTransferNotificationOpen(false)
-      setRegistrationNotificationOpen(false)
       setStatusUndo(null)
       setCommentBody("")
       setAttachmentName("")
@@ -13661,33 +13391,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           </div>
         ) : null}
       </div>
-      {legacyNotificationEnabled && isWithdrawalWorkspace && (
-        <WithdrawalNotificationSettingsDialog
-          open={workspaceDataBelongsToCurrentViewer && withdrawalNotificationOpen}
-          onOpenChange={setWithdrawalNotificationOpen}
-          isManager={canManageAll || isStaff}
-          sessionToken={session?.access_token || ""}
-        />
-      )}
-
-      {legacyNotificationEnabled && isTransferWorkspace && (
-        <TransferNotificationSettingsDialog
-          open={workspaceDataBelongsToCurrentViewer && transferNotificationOpen}
-          onOpenChange={setTransferNotificationOpen}
-          isManager={canManageAll || isStaff}
-          sessionToken={session?.access_token || ""}
-        />
-      )}
-
-      {legacyNotificationEnabled && isRegistrationWorkspace && (
-        <RegistrationNotificationSettingsDialog
-          open={workspaceDataBelongsToCurrentViewer && registrationNotificationOpen}
-          onOpenChange={setRegistrationNotificationOpen}
-          isManager={canManageAll || isStaff}
-          sessionToken={registrationNotificationSessionToken}
-        />
-      )}
-
       {registrationApplicationHost.kind === "closed" ? (
       <Dialog open={workspaceDataBelongsToCurrentViewer && formOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className={[

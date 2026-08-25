@@ -147,7 +147,7 @@ test("observation source fingerprints cover canonical source, rendering, revisio
   const base = readRegistrationCustomerMessagePrivateSource(await resolveRaw(RAW))
   assert.equal(
     base.sourceFingerprint,
-    "e07d1f18847f5cf7dd49ef7d58bc5f3c7e1074d095722edb0303e7480b50e402",
+    "8092256a406d331468831474592e156f05fb90c7b269eb55eebfcbd36ea0ea5c",
   )
   assert.equal(
     base.sourceFactsChecksum,

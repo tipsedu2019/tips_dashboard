@@ -9,7 +9,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import ts from "typescript"
 
 import {
-  REGISTRATION_CUSTOMER_MESSAGE_KINDS,
+  REGISTRATION_CUSTOMER_MESSAGE_SINGLE_SOURCE_KINDS,
   assertRegistrationCustomerMessagePublicPayload,
   parseRegistrationObservationSolapiReadiness,
 } from "../src/features/tasks/registration-customer-message-contract.ts"
@@ -508,7 +508,7 @@ test("rollout panel renders every customer message kind including both observati
   const markup = renderToStaticMarkup(createElement(RolloutPanel))
 
   assert.equal(typeof MESSAGE_KIND_LABELS, "object")
-  assert.deepEqual(Object.keys(MESSAGE_KIND_LABELS), REGISTRATION_CUSTOMER_MESSAGE_KINDS)
+  assert.deepEqual(Object.keys(MESSAGE_KIND_LABELS), REGISTRATION_CUSTOMER_MESSAGE_SINGLE_SOURCE_KINDS)
 
   for (const label of [
     "레벨테스트 예약 안내",

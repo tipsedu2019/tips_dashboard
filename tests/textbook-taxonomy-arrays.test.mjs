@@ -23,6 +23,7 @@ let textbookServicePromise;
 function loadTextbookService() {
   if (!textbookServicePromise) {
     const supabaseStubUrl = `data:text/javascript,${encodeURIComponent('export const supabase = null; export const supabaseConfigError = "";')}`;
+    const cacheInvalidationStubUrl = `data:text/javascript,${encodeURIComponent('export async function invalidatePublicClassesCacheAfterMutation() {}')}`;
     const withKnownExtension = (url) => {
       const path = fileURLToPath(url);
       if (extname(path)) return url;
@@ -35,6 +36,9 @@ function loadTextbookService() {
       resolve(specifier, context, nextResolve) {
         if (specifier === "@/lib/supabase") {
           return { url: supabaseStubUrl, shortCircuit: true };
+        }
+        if (specifier === "@/lib/public-classes-cache-invalidation.js") {
+          return { url: cacheInvalidationStubUrl, shortCircuit: true };
         }
         if ((specifier.startsWith("./") || specifier.startsWith("../")) && context.parentURL) {
           return nextResolve(withKnownExtension(new URL(specifier, context.parentURL).href), context);

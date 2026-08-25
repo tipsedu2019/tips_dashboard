@@ -726,6 +726,10 @@ test("callback-free workflow target reconciliation fails closed without apply or
           workflow_key: "tasks",
         }]
       }
+      if (name === "reap_registration_observation_chat_job_leases_v1") {
+        return { reaped_count: 0, failed_count: 0 }
+      }
+      if (name === "claim_registration_observation_chat_jobs_v1") return []
       if (name === "reap_notification_leases_v1") return { reaped_count: 0 }
       if (name.startsWith("claim_notification_")) return []
       return {}

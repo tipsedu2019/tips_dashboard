@@ -581,7 +581,7 @@ function normalizeRuntimePendingMigrations(value) {
 function normalizeRuntimePgTap(value) {
   if (
     !hasExactKeys(value, ["fileCount", "files", "sha256"])
-    || value.fileCount !== 10
+    || value.fileCount !== 14
     || !SHA256_PATTERN.test(value.sha256)
     || !Array.isArray(value.files)
     || value.files.length !== value.fileCount
@@ -601,7 +601,7 @@ function normalizeRuntimePgTap(value) {
     seen.add(entry.relativePath)
     return Object.freeze({ relativePath: entry.relativePath, sha256: entry.sha256 })
   })
-  return Object.freeze({ fileCount: 10, files: Object.freeze(files), sha256: value.sha256 })
+  return Object.freeze({ fileCount: 14, files: Object.freeze(files), sha256: value.sha256 })
 }
 
 function runtimeManifestCore(value) {

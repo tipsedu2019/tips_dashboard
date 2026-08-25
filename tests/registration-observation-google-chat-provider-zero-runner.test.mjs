@@ -274,6 +274,25 @@ test("derives the local fanout target generation from the materialized observati
   );
 });
 
+test("bridges the canonical frozen-state RPC name to the frozen baseline function", async () => {
+  // Break caught: the production worker calls the 63-byte canonical RPC name,
+  // while this isolated runner deliberately stops before the rename migration.
+  // The bridge must accept the production contract without advancing that
+  // frozen migration baseline.
+  const runnerSource = await readFile(
+    path.join(repositoryRoot, "scripts", "run-registration-observation-google-chat-provider-zero.mjs"),
+    "utf8",
+  );
+  assert.match(
+    runnerSource,
+    /name === "read_registration_observation_delivery_frozen_state_v1"[\s\S]*?call = `public\.read_registration_observation_notification_delivery_frozen_state_v1\(/u,
+  );
+  assert.match(
+    runnerSource,
+    /const initialFrozen = await rpc\(\s*"read_registration_observation_delivery_frozen_state_v1"/u,
+  );
+});
+
 test("rejects unapproved provider-zero invocation before allocating a local project", async () => {
   // Break caught: removing the explicit two-flag approval lets a CLI invocation
   // create disposable Docker resources without the user's local-db consent.

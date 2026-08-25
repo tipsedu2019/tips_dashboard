@@ -104,7 +104,7 @@ test("science connection SQL keeps admin-only CAS, encrypted writes, and safe au
 
 test("prepare ACL hardening is one exact forward-only service-role contract", async () => {
   const pgTap = await readFile(notificationRuntimePgTapUrl, "utf8")
-  assert.match(pgTap, /select\s+plan\(244\);/i)
+  assert.match(pgTap, /select\s+plan\(246\);/i)
   assert.equal((pgTap.match(new RegExp(PREPARE_FUNCTION_SIGNATURE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? []).length, 4)
   assert.match(
     pgTap,
