@@ -570,16 +570,17 @@ test("final reminder claim and backlog retain the post-evidence delivery gates",
 
 test("final reminder claim pgTAP pins the active SQLSTATE, ACL, and provider-zero gates", async () => {
   const sql = await readFile(finalClaimGatePgTapUrl, "utf8");
-  assert.match(sql, /select plan\(21\);/);
+  assert.match(sql, /select plan\(22\);/);
   assert.equal(
     [...sql.matchAll(/^select (?:has_function|function_privs_are|ok|is|throws_ok)\(/gmu)].length,
-    21,
+    22,
   );
   assert.match(sql, /resolve_registration_customer_message_source_v1_impl\(text,uuid\)/);
   assert.match(sql, /read_registration_customer_reminder_source_v1\(uuid,uuid\)/);
   assert.match(sql, /begin_registration_customer_reminder_dispatch_v1\(uuid,uuid,jsonb,jsonb\)/);
   assert.match(sql, /registration_customer_reminder_booking_fact_changed/);
   assert.match(sql, /request\.jwt\.claim\.role/);
+  assert.match(sql, /final claim does not reintroduce the legacy heartbeat write/);
   assert.match(sql, /final gate checks add no provider marker while disabled/);
 });
 

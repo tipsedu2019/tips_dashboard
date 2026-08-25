@@ -185,7 +185,8 @@ test("OFF 리마인드는 cron·Vault·heartbeat 작업을 만들지 않고 ON �
   assert.doesNotMatch(scheduleManager, /'\* \* \* \* \*'/)
 
   assert.ok(invoke.indexOf("settings.enabled") < invoke.indexOf("registration_customer_reminder_worker_vault_v1"))
-  assert.ok(claim.indexOf("if not v_settings.enabled") < claim.indexOf("registration_customer_reminder_worker_heartbeats"))
+  assert.match(claim, /if not \(select enabled from dashboard_private\.registration_customer_reminder_settings/)
+  assert.doesNotMatch(claim, /registration_customer_reminder_worker_heartbeats/)
 
   assert.match(sql, /create trigger sync_registration_customer_reminder_cron_active/)
   assert.match(syncTrigger, /set_registration_customer_reminder_cron_active_v1\(new\.enabled\)/)

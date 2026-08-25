@@ -1,6 +1,6 @@
 begin;
 
-select plan(21);
+select plan(22);
 
 select has_function(
   'public', 'claim_registration_customer_reminder_job_v1', array[]::text[],
@@ -65,6 +65,14 @@ select ok(
     ) !~ 'message_kind = v_job.message_kind[^;]+for share'
   ),
   'claim does not invert the activation setter lock order'
+);
+select ok(
+  (
+    select pg_catalog.pg_get_functiondef(
+      'public.claim_registration_customer_reminder_job_v1()'::regprocedure
+    ) !~ 'registration_customer_reminder_worker_heartbeats'
+  ),
+  'final claim does not reintroduce the legacy heartbeat write'
 );
 select ok(
   (
