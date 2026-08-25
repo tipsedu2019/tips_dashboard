@@ -4093,3 +4093,37 @@ test("admission checklist is independent while registered status atomically fina
   assert.doesNotMatch(pgTap, /solapi|google_chat|http_post|net\.http|send_web_push/i)
   assert.match(pgTap, /select\s+\*\s+from\s+finish\(\);\s*rollback;/i)
 })
+
+test("admission checklist constraints validate only after their install transaction commits", async () => {
+  const installMigration = await readMigration(
+    "registration_admission_checklist_roster_consistency",
+  )
+  const validationMigration = await readMigration(
+    "registration_admission_checklist_constraints_validate",
+  )
+  const constraintNames = [
+    "ops_registration_details_admission_checklist_exact_v1",
+    "ops_registration_admission_batches_invoice_evidence_v2",
+    "ops_registration_admission_batches_payment_evidence_v2",
+  ]
+
+  assert.match(validationMigration.trim(), /^begin;/i)
+  assert.match(validationMigration.trim(), /commit;$/i)
+  assert.equal((validationMigration.match(/^begin;$/gim) ?? []).length, 1)
+  assert.equal((validationMigration.match(/^commit;$/gim) ?? []).length, 1)
+
+  for (const constraintName of constraintNames) {
+    assert.match(
+      installMigration,
+      new RegExp(`add constraint ${constraintName}[\\s\\S]*?not valid;`, "i"),
+    )
+    assert.doesNotMatch(
+      installMigration,
+      new RegExp(`validate constraint ${constraintName}`, "i"),
+    )
+    assert.match(
+      validationMigration,
+      new RegExp(`validate constraint ${constraintName};`, "i"),
+    )
+  }
+})

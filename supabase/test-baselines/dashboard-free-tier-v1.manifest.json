@@ -133,7 +133,12 @@
     {
       "fileName": "20260825152044_registration_admission_checklist_roster_consistency.sql",
       "status": "final",
-      "sha256": "48d990a1affab61afe3ad57b4e64456b938e1ad1b0c0feb90a76a9a854849e6e"
+      "sha256": "d8eca1e1c781b43d4c7bb2e75a5d685afb1bce408bd455ac3d0c9cca5ea6df7b"
+    },
+    {
+      "fileName": "20260825170546_registration_admission_checklist_constraints_validate.sql",
+      "status": "final",
+      "sha256": "6baac885c5dc73c12e7b417ac3dc6864ed65cdbaac2d14e8effd854ee0e078fc"
     }
   ]
 }
