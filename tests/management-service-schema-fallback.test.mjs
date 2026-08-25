@@ -7,7 +7,7 @@ import {
 } from "../src/features/management/management-service.js";
 
 function makeReadyRosterRpcClient() {
-  const calls = { rpc: [], tables: [] };
+  const calls = { rpc: [], tables: [], selections: [] };
   const rows = {
     students: [{
       id: "student-1",
@@ -30,7 +30,8 @@ function makeReadyRosterRpcClient() {
     from(table) {
       calls.tables.push(table);
       return {
-        select() {
+        select(columns) {
+          calls.selections.push([table, columns]);
           let selectedId = "";
           const builder = {
             eq(_column, id) {
@@ -73,7 +74,7 @@ function makeReadyRosterRpcClient() {
 }
 
 function makeStudentDeleteGuardClient({ student, classes = [], history = [], registrationEnrollments = [] }) {
-  const calls = { deletes: [] };
+  const calls = { deletes: [], deleteSelects: [] };
   const rows = {
     students: student ? [student] : [],
     classes,
@@ -89,9 +90,19 @@ function makeStudentDeleteGuardClient({ student, classes = [], history = [], reg
         },
         delete() {
           return {
-            async in(column, ids) {
+            in(column, ids) {
               calls.deletes.push([table, column, ids]);
-              return { data: [], error: null };
+              return {
+                async select(columns) {
+                  calls.deleteSelects.push([table, columns]);
+                  return {
+                    data: (rows[table] || [])
+                      .filter((row) => ids.includes(row?.[column]))
+                      .map((row) => ({ id: row.id })),
+                    error: null,
+                  };
+                },
+              };
             },
           };
         },
@@ -126,6 +137,10 @@ test("ready management roster assignment returns only the committed atomic RPC p
   assert.deepEqual(result.class.student_ids, ["student-1"]);
   assert.deepEqual(result.class.waitlist_ids, []);
   assert.deepEqual(client.calls.tables.sort(), ["classes", "students"]);
+  assert.deepEqual(client.calls.selections, [
+    ["students", "id,name,status,class_ids,waitlist_class_ids"],
+    ["classes", "id,name,status,student_ids,waitlist_ids"],
+  ]);
 });
 
 test("ready management roster rejects an incomplete or mismatched committed projection", async () => {
@@ -309,8 +324,10 @@ test("student physical deletion checks reverse roster links and immutable histor
   const mistakenRowClient = makeStudentDeleteGuardClient({
     student: { id: "student-1", class_ids: [], waitlist_class_ids: [] },
   });
-  await createManagementService({ supabase: mistakenRowClient }).deleteStudent("student-1");
+  const result = await createManagementService({ supabase: mistakenRowClient }).deleteStudent("student-1");
+  assert.deepEqual(result, { deletedIds: ["student-1"] });
   assert.deepEqual(mistakenRowClient.calls.deletes, [["students", "id", ["student-1"]]]);
+  assert.deepEqual(mistakenRowClient.calls.deleteSelects, [["students", "id"]]);
 });
 
 function makeStudentUpsertClient(errorColumn) {
@@ -731,6 +748,7 @@ test("student class relation changes update only canonical roster arrays", async
   assert.equal(client.calls.studentUpserts.length, 1);
   assert.equal(client.calls.classUpserts.length, 1);
   assert.ok(!Object.prototype.hasOwnProperty.call(client.calls.classUpserts[0], "class_type"));
+  assert.ok(!Object.prototype.hasOwnProperty.call(client.calls.classUpserts[0], "waitlist_student_ids"));
   assert.deepEqual(client.calls.classUpserts[0].student_ids, ["student-1"]);
   assert.deepEqual(client.calls.classUpserts[0].waitlist_ids, []);
   assert.equal(client.calls.historyInserts.length, 1);
