@@ -16,10 +16,7 @@ import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 
-import {
-  RegistrationAdmissionProgress,
-  type RegistrationAdmissionProgressSteps,
-} from "./registration-admission-progress"
+import { RegistrationAdmissionChecklist } from "./registration-admission-progress"
 import { RegistrationSelect } from "./registration-select"
 import { RegistrationSaveButton } from "./registration-save-button"
 
@@ -35,14 +32,10 @@ import {
   applyRegistrationEnrollmentStartSelection,
   createRegistrationEnrollmentDraft,
   createRegistrationEnrollmentStartLoadOwner,
-  getRegistrationAdmissionBatchCancellationGroups,
-  getRegistrationAdmissionBatchChecklist,
-  getRegistrationAdmissionProgressDisplay,
   getRegistrationEnrollmentBlockers,
   getRegistrationEnrollmentCancellationState,
   getRegistrationEnrollmentStartOptions,
   getRegistrationEnrollmentStartSaveErrorMessage,
-  getRegistrationSelectedAdmissionEnrollmentIds,
   restoreRegistrationEnrollmentDraft,
   serializeRegistrationEnrollmentRows,
   type RegistrationEnrollmentDraft,
@@ -55,22 +48,19 @@ import {
   type RegistrationEnrollmentDirtyScope as RegistrationEnrollmentDirtyScopeModel,
 } from "./registration-application-model"
 import {
-  advanceRegistrationAdmissionBatch,
-  cancelRegistrationAdmissionBatch,
   cancelRegistrationEnrollment,
-  completeRegistrationAdmissionBatch,
   createRegistrationMutationRequestKey,
   loadRegistrationEnrollmentStartObservation,
   saveRegistrationEnrollmentDetails,
-  setRegistrationEnrollmentMakeedu,
-  startRegistrationAdmissionBatch,
+  setRegistrationAdmissionChecklistItem,
   type OpsRegistrationAdmissionBatch,
   type OpsRegistrationEnrollment,
   type OpsRegistrationTrackSummary,
+  type RegistrationAdmissionChecklistItem,
+  type RegistrationAdmissionChecklistState,
   type RegistrationWaitingKind,
 } from "./registration-track-service"
 import type { RegistrationObservationFeedbackDetail } from "./registration-observation-model.ts"
-import type { RegistrationCustomerMessageTarget } from "./registration-customer-message-contract"
 
 type RegistrationManagementPermissions = {
   canManage: boolean
@@ -1024,449 +1014,74 @@ export function RegistrationEnrollmentEditor({
   )
 }
 
-export type AdmissionDirtyScope = { kind: "batch"; batchId: string }
-
 export type RegistrationAdmissionPanelProps = {
   taskId: string
-  tracks: OpsRegistrationTrackSummary[]
-  enrollments: OpsRegistrationEnrollment[]
-  batches: OpsRegistrationAdmissionBatch[]
-  classes: OpsClassOption[]
-  admissionNoticeSent: boolean
-  admissionApplicationMessageStatus: "" | "pending" | "accepted" | "unknown" | "failed_hold"
+  checklist: RegistrationAdmissionChecklistState
   permissions: RegistrationManagementPermissions
-  onOpenCustomerMessage?: (target: RegistrationCustomerMessageTarget) => void
-  onReload: () => void | Promise<void>
   onWarning: (message: string) => void
-  onDirtyChange?: (scope: AdmissionDirtyScope, dirty: boolean) => void
 }
 
 export function RegistrationAdmissionPanel({
   taskId,
-  tracks,
-  enrollments,
-  batches,
-  classes,
-  admissionNoticeSent,
-  admissionApplicationMessageStatus,
+  checklist,
   permissions,
-  onOpenCustomerMessage,
-  onReload,
   onWarning,
-  onDirtyChange,
 }: RegistrationAdmissionPanelProps) {
   const submissionKeys = useSubmissionKeys()
-  const [selectedEnrollmentIds, setSelectedEnrollmentIds] = useState<Set<string>>(() => new Set())
-  const [busyAction, setBusyAction] = useState("")
-  const [batchRefreshPending, setBatchRefreshPending] = useState(false)
-  const [cancelBatchOpen, setCancelBatchOpen] = useState(false)
-  const [cancelBatchReason, setCancelBatchReason] = useState("")
-  const [cancelDestinations, setCancelDestinations] = useState<Record<string, "" | "waiting" | "not_registered">>({})
-  const [cancelWaitingKinds, setCancelWaitingKinds] = useState<Record<string, RegistrationWaitingKind>>({})
-  const [cancelClassIds, setCancelClassIds] = useState<Record<string, string>>({})
-  const [validationError, setValidationError] = useState("")
-  const [priorBatchesOpen, setPriorBatchesOpen] = useState(false)
-  const admissionSectionRef = useRef<HTMLElement | null>(null)
-  const trackById = useMemo(() => new Map(tracks.map((track) => [track.id, track])), [tracks])
-  const classById = useMemo(() => new Map(classes.map((classItem) => [classItem.id, classItem])), [classes])
-  const unbatchedPlannedEnrollments = enrollments.filter((enrollment) => (
-    enrollment.status === "planned" && !enrollment.admissionBatchId && Boolean(enrollment.id)
-  ))
-  const {
-    openBatch,
-    displayBatch,
-    displayEnrollments: currentBatchEnrollments,
-  } = getRegistrationAdmissionProgressDisplay({ batches, enrollments })
-  const activeSelectedEnrollmentIds = getRegistrationSelectedAdmissionEnrollmentIds({
-    selectedEnrollmentIds,
-    enrollments: unbatchedPlannedEnrollments,
-  })
-  const activeSelectedEnrollmentIdSet = new Set(activeSelectedEnrollmentIds)
-  const selectedEnrollmentsHaveCompleteSchedules = unbatchedPlannedEnrollments
-    .filter((enrollment) => activeSelectedEnrollmentIdSet.has(enrollment.id))
-    .every((enrollment) => Boolean(
-      enrollment.classStartDate
-      && enrollment.classStartSessionKey
-      && enrollment.classStartSession,
-    ))
-  const selectedTrackIds = Array.from(new Set(unbatchedPlannedEnrollments
-    .filter((enrollment) => activeSelectedEnrollmentIdSet.has(enrollment.id))
-    .map((enrollment) => enrollment.trackId)))
-  const checklist = getRegistrationAdmissionBatchChecklist({
-    admissionNoticeSent,
-    enrollments: currentBatchEnrollments,
-    batch: displayBatch,
-  })
-  const batchScope: AdmissionDirtyScope = { kind: "batch", batchId: openBatch?.id || "new" }
-  const batchDirty = !batchRefreshPending && (openBatch
-    ? Boolean(cancelBatchOpen || cancelBatchReason || Object.keys(cancelDestinations).length || Object.keys(cancelWaitingKinds).length || Object.keys(cancelClassIds).length)
-    : selectedEnrollmentIds.size > 0)
-  useScopedDirtyState(batchScope, batchDirty, onDirtyChange)
+  const [currentChecklist, setCurrentChecklist] = useState(checklist)
+  const [savingItems, setSavingItems] = useState<Set<RegistrationAdmissionChecklistItem>>(
+    () => new Set(),
+  )
 
-  async function afterCommitted() {
-    setBatchRefreshPending(true)
-    try {
-      await onReload()
-      setBatchRefreshPending(false)
-    } catch {
-      setBatchRefreshPending(true)
-      onWarning("저장은 완료됐지만 최신 내용을 불러오지 못했습니다")
-    }
-  }
+  useEffect(() => {
+    setCurrentChecklist(checklist)
+  }, [checklist])
 
-  async function retryAdmissionReload() {
-    try {
-      await onReload()
-      setBatchRefreshPending(false)
-    } catch {
-      setBatchRefreshPending(true)
-      onWarning("최신 입학 처리 내용을 다시 불러오지 못했습니다.")
-    }
-  }
+  async function setChecklistItem(
+    item: RegistrationAdmissionChecklistItem,
+    checked: boolean,
+  ) {
+    if (!permissions.canManage || savingItems.has(item)) return
 
-  async function startBatch() {
-    const enrollmentIds = activeSelectedEnrollmentIds
-    if (busyAction || batchRefreshPending || !permissions.canManage || selectedTrackIds.length === 0 || enrollmentIds.length === 0) return
-    if (!selectedEnrollmentsHaveCompleteSchedules) {
-      onWarning("입학 처리 전에 선택한 모든 수업의 시작 일정을 지정하세요.")
-      return
-    }
-    const entityId = `${taskId}:${[...enrollmentIds].sort().join(",")}`
-    const requestKey = submissionKeys.getOrCreate("batch-start", entityId)
-    setBusyAction("batch-start")
+    const previousChecked = currentChecklist[item]
+    const entityId = `${taskId}:${item}:${checked}`
+    const requestKey = submissionKeys.getOrCreate("admission-checklist", entityId)
+    setCurrentChecklist((current) => ({ ...current, [item]: checked }))
+    setSavingItems((current) => new Set(current).add(item))
+
     try {
-      await startRegistrationAdmissionBatch({ taskId, trackIds: selectedTrackIds, enrollmentIds, requestKey })
-      submissionKeys.clear("batch-start", entityId)
-      setSelectedEnrollmentIds(new Set())
-      onDirtyChange?.(batchScope, false)
-      await afterCommitted()
+      const saved = await setRegistrationAdmissionChecklistItem({
+        taskId,
+        item,
+        checked,
+        requestKey,
+      })
+      submissionKeys.clear("admission-checklist", entityId)
+      setCurrentChecklist((current) => ({
+        ...current,
+        [item]: saved.checklist[item],
+      }))
     } catch (error) {
-      onWarning(errorMessage(error, "입학 처리를 시작하지 못했습니다."))
+      setCurrentChecklist((current) => ({ ...current, [item]: previousChecked }))
+      onWarning(errorMessage(error, "입학 처리 체크 항목을 저장하지 못했습니다."))
     } finally {
-      setBusyAction("")
+      setSavingItems((current) => {
+        const next = new Set(current)
+        next.delete(item)
+        return next
+      })
     }
   }
-
-  async function setMakeedu(enrollment: OpsRegistrationEnrollment) {
-    if (busyAction || batchRefreshPending) return
-    const logicalId = `${enrollment.id}:${!enrollment.makeeduRegistered}`
-    const requestKey = submissionKeys.getOrCreate("batch-makeedu", logicalId)
-    setBusyAction(`makeedu:${enrollment.id}`)
-    try {
-      await setRegistrationEnrollmentMakeedu({ enrollmentId: enrollment.id, registered: !enrollment.makeeduRegistered, requestKey })
-      submissionKeys.clear("batch-makeedu", logicalId)
-      await afterCommitted()
-    } catch (error) {
-      onWarning(errorMessage(error, "메이크에듀 등록 상태를 변경하지 못했습니다."))
-    } finally {
-      setBusyAction("")
-    }
-  }
-
-  async function advanceBatch(action: "invoice_sent" | "payment_confirmed") {
-    if (!openBatch || busyAction || batchRefreshPending) return
-    const kind = action === "invoice_sent" ? "batch-invoice" : "batch-payment"
-    const requestKey = submissionKeys.getOrCreate(kind, openBatch.id)
-    setBusyAction(kind)
-    try {
-      await advanceRegistrationAdmissionBatch({ batchId: openBatch.id, action, requestKey })
-      submissionKeys.clear(kind, openBatch.id)
-      await afterCommitted()
-    } catch (error) {
-      onWarning(errorMessage(error, "입학 처리 상태를 변경하지 못했습니다."))
-    } finally {
-      setBusyAction("")
-    }
-  }
-
-  async function completeBatch() {
-    if (!openBatch || busyAction || batchRefreshPending) return
-    const requestKey = submissionKeys.getOrCreate("batch-complete", openBatch.id)
-    setBusyAction("batch-complete")
-    try {
-      const receipt = await completeRegistrationAdmissionBatch({ batchId: openBatch.id, requestKey })
-      submissionKeys.clear("batch-complete", openBatch.id)
-      await afterCommitted()
-      if (receipt.publicClassesCacheRefresh?.status === "pending") {
-        onWarning("등록은 완료되었습니다. 공개 수업 캐시 갱신 대기 중")
-      }
-    } catch (error) {
-      onWarning(errorMessage(error, "등록을 완료하지 못했습니다."))
-    } finally {
-      setBusyAction("")
-    }
-  }
-
-  const currentBatchTrackIds = Array.from(new Set(currentBatchEnrollments.map((enrollment) => enrollment.trackId)))
-  const { addClassTrackIds, firstAdmissionTrackIds } = getRegistrationAdmissionBatchCancellationGroups({
-    batchId: openBatch?.id || "",
-    currentBatchEnrollments,
-    enrollments,
-  })
-
-  async function cancelBatch() {
-    if (!openBatch || busyAction || batchRefreshPending || openBatch.status === "paid") return
-    if (!cancelBatchReason.trim()) {
-      setValidationError("입학 처리 취소 사유를 입력하세요.")
-      window.requestAnimationFrame(() => admissionSectionRef.current?.querySelector<HTMLElement>("[aria-label='입학 처리 취소 사유']")?.focus())
-      return
-    }
-    const resolutions = firstAdmissionTrackIds.map((trackId) => ({
-      trackId,
-      destination: cancelDestinations[trackId] || "",
-      waitingKind: cancelDestinations[trackId] === "waiting" ? cancelWaitingKinds[trackId] || null : null,
-      classId: cancelDestinations[trackId] === "waiting" && cancelWaitingKinds[trackId] === "current_class"
-        ? cancelClassIds[trackId] || null
-        : null,
-    }))
-    if (resolutions.some((item) => !item.destination)) {
-      setValidationError("취소 후 단계를 과목별로 선택하세요.")
-      window.requestAnimationFrame(() => admissionSectionRef.current?.querySelector<HTMLElement>("[data-slot='select-trigger']")?.focus())
-      return
-    }
-    if (resolutions.some((item) => item.destination === "waiting" && !item.waitingKind)) {
-      setValidationError("대기 종류를 과목별로 선택하세요.")
-      window.requestAnimationFrame(() => admissionSectionRef.current?.querySelector<HTMLElement>("[data-slot='select-trigger']")?.focus())
-      return
-    }
-    if (resolutions.some((item) => item.waitingKind === "current_class" && !item.classId)) {
-      setValidationError("대기 수업을 과목별로 선택하세요.")
-      window.requestAnimationFrame(() => admissionSectionRef.current?.querySelector<HTMLElement>("[data-slot='select-trigger']")?.focus())
-      return
-    }
-    const entityId = `${openBatch.id}:${cancelBatchReason.trim()}:${JSON.stringify(resolutions)}`
-    const requestKey = submissionKeys.getOrCreate("batch-cancel", entityId)
-    setBusyAction("batch-cancel")
-    try {
-      await cancelRegistrationAdmissionBatch({ batchId: openBatch.id, resolutions, reason: cancelBatchReason.trim(), requestKey })
-      submissionKeys.clear("batch-cancel", entityId)
-      setCancelBatchOpen(false)
-      setCancelDestinations({})
-      setCancelWaitingKinds({})
-      setCancelClassIds({})
-      setCancelBatchReason("")
-      onDirtyChange?.(batchScope, false)
-      await afterCommitted()
-    } catch (error) {
-      onWarning(errorMessage(error, "입학 처리를 취소하지 못했습니다."))
-    } finally {
-      setBusyAction("")
-    }
-  }
-
-  const messageStatusLabel = {
-    pending: "발송 처리 중",
-    accepted: admissionNoticeSent ? "입학신청서 발송 완료" : "발송 접수됨 · 상태 동기화 필요",
-    unknown: "발송 결과 확인 필요",
-    failed_hold: "미접수 확인 · 재발송 잠금",
-    "": admissionNoticeSent ? "입학신청서 발송 완료" : "입학신청서 발송 전",
-  }[admissionApplicationMessageStatus]
-
-  const admissionProgressSteps: RegistrationAdmissionProgressSteps = [
-    {
-      key: "admissionNotice",
-      label: "입학신청서 알림톡",
-      complete: checklist.admissionNotice,
-      optional: true,
-      content: (
-        <div className="grid gap-2 text-sm">
-          <span className="text-xs text-muted-foreground">{messageStatusLabel}</span>
-          {permissions.canManage ? (
-            <Button
-              type="button"
-              size="sm"
-              className="min-h-11 min-w-11 w-fit"
-              onClick={() => onOpenCustomerMessage?.({ messageKind: "admission_application", sourceId: taskId })}
-            >
-              입학신청서 알림톡
-            </Button>
-          ) : null}
-        </div>
-      ),
-    },
-    {
-      key: "makeedu",
-      label: "메이크에듀 등록(수업, 교재)",
-      complete: checklist.makeedu,
-      content: (
-        <div className="grid gap-2">
-          {batchRefreshPending ? (
-            <RegistrationRefreshAlert>
-              <Button type="button" aria-label="입학 처리 최신 내용 다시 불러오기" variant="outline" size="sm" className="w-fit" onClick={() => void retryAdmissionReload()}>
-                <RefreshCw className="size-4" aria-hidden="true" />
-                최신 내용 다시 불러오기
-              </Button>
-            </RegistrationRefreshAlert>
-          ) : null}
-          {!displayBatch ? (
-            <div data-registration-action-owner="admission-start" className="grid gap-2">
-              {unbatchedPlannedEnrollments.length > 0 ? unbatchedPlannedEnrollments.map((enrollment) => {
-                const track = trackById.get(enrollment.trackId)
-                const classItem = classById.get(enrollment.classId)
-                return (
-                  <label key={enrollment.id} className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
-                    {permissions.canManage ? <input type="checkbox" aria-label={`${track?.subject || "과목"} ${classItem?.label || enrollment.classId} 입학 처리 선택`} checked={selectedEnrollmentIds.has(enrollment.id)} onChange={(event) => setSelectedEnrollmentIds((current) => {
-                      const next = new Set(current)
-                      if (event.target.checked) next.add(enrollment.id)
-                      else next.delete(enrollment.id)
-                      return next
-                    })} disabled={Boolean(busyAction) || batchRefreshPending} /> : null}
-                    <Badge variant="outline">{track?.subject || "과목"}</Badge>
-                    <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{classItem?.label || enrollment.classId}</span>
-                  </label>
-                )
-              }) : <p className="text-sm text-muted-foreground">입학 처리할 저장된 수업이 없습니다.</p>}
-              {permissions.canManage && unbatchedPlannedEnrollments.length > 0 ? (
-                <Button type="button" data-registration-primary-action="admission-start" onClick={() => void startBatch()} disabled={activeSelectedEnrollmentIds.length === 0 || !selectedEnrollmentsHaveCompleteSchedules || Boolean(busyAction) || batchRefreshPending}>입학 처리 시작</Button>
-              ) : null}
-              {activeSelectedEnrollmentIds.length > 0 && !selectedEnrollmentsHaveCompleteSchedules ? <p className="text-xs text-muted-foreground">입학 처리 전에 선택한 모든 수업의 시작 일정을 지정하세요.</p> : null}
-            </div>
-          ) : currentBatchEnrollments.map((enrollment) => {
-            const track = trackById.get(enrollment.trackId)
-            const classItem = classById.get(enrollment.classId)
-            return (
-              <div key={enrollment.id} className="grid gap-2 rounded-md border px-3 py-2 text-sm sm:grid-cols-[auto_1fr_auto] sm:items-center">
-                <Badge variant="outline">{track?.subject || "과목"}</Badge>
-                <span className="truncate">{classItem?.label || enrollment.classId}</span>
-                {openBatch && permissions.canManage ? <Button type="button" aria-label={`${track?.subject || "과목"} ${enrollment.makeeduRegistered ? "메이크에듀 등록됨" : "메이크에듀 등록"}`} size="sm" variant={enrollment.makeeduRegistered ? "default" : "outline"} onClick={() => void setMakeedu(enrollment)} disabled={batchRefreshPending || Boolean(busyAction) || openBatch.status !== "draft"}>{enrollment.makeeduRegistered ? "등록됨" : "메이크에듀 등록"}</Button> : <span>{enrollment.makeeduRegistered ? "등록됨" : "대기"}</span>}
-              </div>
-            )
-          })}
-        </div>
-      ),
-    },
-    {
-      key: "invoice",
-      label: "청구서 발송",
-      complete: checklist.invoice,
-      locked: !displayBatch,
-      content: openBatch && permissions.canManage ? (
-        <Button type="button" variant={checklist.invoice ? "outline" : "default"} onClick={() => void advanceBatch("invoice_sent")} disabled={batchRefreshPending || !checklist.makeedu || checklist.invoice || Boolean(busyAction)}>청구서 발송</Button>
-      ) : displayBatch ? <span className="text-sm text-muted-foreground">{checklist.invoice ? "완료" : "대기"}</span> : <span className="text-sm text-muted-foreground">입학 처리 시작 후 진행합니다.</span>,
-    },
-    {
-      key: "payment",
-      label: "수납 완료 확인",
-      complete: checklist.payment,
-      locked: !displayBatch,
-      content: openBatch && permissions.canManage ? (
-        <Button type="button" variant={checklist.payment ? "outline" : "default"} onClick={() => void advanceBatch("payment_confirmed")} disabled={batchRefreshPending || !checklist.invoice || checklist.payment || Boolean(busyAction)}>수납 완료 확인</Button>
-      ) : displayBatch ? <span className="text-sm text-muted-foreground">{checklist.payment ? "완료" : "대기"}</span> : <span className="text-sm text-muted-foreground">입학 처리 시작 후 진행합니다.</span>,
-    },
-    {
-      key: "complete",
-      label: "등록 완료",
-      complete: checklist.complete,
-      locked: !displayBatch,
-      content: openBatch && permissions.canManage ? (
-        <Button type="button" onClick={() => void completeBatch()} disabled={batchRefreshPending || !checklist.payment || checklist.complete || Boolean(busyAction)}>등록 완료</Button>
-      ) : displayBatch ? <span className="text-sm text-muted-foreground">{checklist.complete ? "완료" : "대기"}</span> : <span className="text-sm text-muted-foreground">입학 처리 시작 후 진행합니다.</span>,
-    },
-  ]
 
   return (
-    <section ref={admissionSectionRef} className="grid gap-4" aria-label="입학 처리">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">입학 처리</h3>
-        <Badge variant={openBatch ? "default" : "outline"}>{displayBatch ? `${displayBatch.revisionNumber}차 처리` : "수업 선택"}</Badge>
-      </div>
-
-      <div role="group" aria-label={permissions.canManage ? undefined : "읽기 전용 입학 처리 상태"}>
-        <RegistrationAdmissionProgress steps={admissionProgressSteps} />
-      </div>
-
-      {openBatch ? (
-        <div className="grid gap-2">
-          {permissions.canManage && ["draft", "invoiced"].includes(openBatch.status) ? (
-            <Button type="button" variant="destructive" onClick={() => {
-              if (cancelBatchOpen) {
-                setCancelBatchOpen(false)
-                return
-              }
-              setCancelDestinations({})
-              setCancelWaitingKinds({})
-              setCancelClassIds({})
-              setCancelBatchReason("")
-              setCancelBatchOpen(true)
-            }} disabled={batchRefreshPending || Boolean(busyAction)}>입학 처리 취소</Button>
-          ) : null}
-          {permissions.canManage && cancelBatchOpen ? (
-            <div className="grid gap-3 rounded-md border border-destructive/30 p-3">
-              {currentBatchTrackIds.map((trackId) => {
-                const track = trackById.get(trackId)
-                const isFirstAdmission = firstAdmissionTrackIds.includes(trackId)
-                const isAddClass = addClassTrackIds.includes(trackId)
-                const subjectClasses = classes.filter((classItem) => classItem.subject === track?.subject)
-                return (
-                  <div key={trackId} className="grid gap-2 sm:grid-cols-3">
-                    <span className="text-sm font-medium">{track?.subject || "과목"}</span>
-                    {isFirstAdmission ? (
-                      <>
-                        <RegistrationSelect
-                          aria-label={`${track?.subject || "과목"} 입학 처리 취소 후 단계`}
-                          value={cancelDestinations[trackId] || ""}
-                          placeholder="취소 후 단계 선택"
-                          options={[
-                            { value: "", label: "취소 후 단계 선택" },
-                            { value: "not_registered", label: "미등록 완료" },
-                            { value: "waiting", label: "대기로 이동" },
-                          ]}
-                          onValueChange={(value) => setCancelDestinations((current) => ({ ...current, [trackId]: value as "" | "waiting" | "not_registered" }))}
-                          disabled={batchRefreshPending}
-                        />
-                        {cancelDestinations[trackId] === "waiting" ? (
-                          <div className="grid gap-2">
-                            <RegistrationSelect
-                              aria-label={`${track?.subject || "과목"} 입학 처리 취소 대기 종류`}
-                              value={cancelWaitingKinds[trackId] || ""}
-                              placeholder="대기 종류 선택"
-                              options={[{ value: "", label: "대기 종류 선택" }, ...WAITING_KIND_OPTIONS]}
-                              onValueChange={(value) => setCancelWaitingKinds((current) => ({ ...current, [trackId]: value as RegistrationWaitingKind }))}
-                              disabled={batchRefreshPending}
-                            />
-                            {cancelWaitingKinds[trackId] === "current_class" ? (
-                              <RegistrationSelect
-                                aria-label={`${track?.subject || "과목"} 입학 처리 취소 대기 수업`}
-                                value={cancelClassIds[trackId] || ""}
-                                placeholder="대기 수업 선택"
-                                options={[
-                                  { value: "", label: "대기 수업 선택" },
-                                  ...subjectClasses.map((classItem) => ({ value: classItem.id, label: classItem.label })),
-                                ]}
-                                onValueChange={(value) => setCancelClassIds((current) => ({ ...current, [trackId]: value }))}
-                                disabled={batchRefreshPending}
-                              />
-                            ) : null}
-                          </div>
-                        ) : <span />}
-                      </>
-                    ) : isAddClass ? <span className="text-sm text-muted-foreground sm:col-span-2">기존 등록 유지</span> : null}
-                  </div>
-                )
-              })}
-              <Textarea aria-label="입학 처리 취소 사유" value={cancelBatchReason} onChange={(event) => setCancelBatchReason(event.target.value)} placeholder="입학 처리 취소 사유" disabled={batchRefreshPending} />
-              <Button type="button" variant="destructive" onClick={() => void cancelBatch()} disabled={batchRefreshPending || Boolean(busyAction)}>입학 처리 취소 확인</Button>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      {validationError ? <p role="alert" className="text-xs text-destructive">{validationError}</p> : null}
-
-      {batches.some((batch) => ["completed", "canceled"].includes(batch.status)) ? (
-        <Collapsible open={priorBatchesOpen} onOpenChange={setPriorBatchesOpen} className="group rounded-md border p-3">
-          <RegistrationCollapsibleTrigger>이전 입학 처리</RegistrationCollapsibleTrigger>
-          <CollapsibleContent className="mt-2 grid gap-2">
-            {batches.filter((batch) => ["completed", "canceled"].includes(batch.status)).map((batch) => (
-              <div key={batch.id} className="flex items-center justify-between gap-2 rounded-md bg-muted/30 px-3 py-2 text-sm">
-                <span>{batch.revisionNumber}차 처리</span>
-                <Badge variant="outline">{batch.status === "completed" ? "등록 완료" : "취소"}</Badge>
-              </div>
-            ))}
-          </CollapsibleContent>
-        </Collapsible>
-      ) : null}
-
+    <section className="grid gap-3" aria-label="입학 처리">
+      <h3 className="text-sm font-semibold">입학 처리</h3>
+      <RegistrationAdmissionChecklist
+        checklist={currentChecklist}
+        editable={permissions.canManage}
+        savingItems={savingItems}
+        onCheckedChange={(item, checked) => void setChecklistItem(item, checked)}
+      />
     </section>
   )
 }

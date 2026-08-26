@@ -34,8 +34,13 @@ async function withPostgres17(t, run) {
   t.after(() => invoke(["rm", "--force", name]));
   let consecutiveReadyChecks = 0;
   for (let attempt = 0; attempt < 80; attempt += 1) {
-    const result = invoke(["exec", name, "psql", "--quiet", "--tuples-only", "--no-align", "--username", "supabase_admin", "--dbname", "postgres", "--command", "select 1"]);
-    consecutiveReadyChecks = result.status === 0 ? consecutiveReadyChecks + 1 : 0;
+    const pid1 = invoke(["exec", name, "sh", "-c", "tr '\\000' ' ' < /proc/1/cmdline"]);
+    const pid1Executable = pid1.stdout.trim().split(/\s+/u, 1)[0] ?? "";
+    const isFinalPostgresProcess = pid1Executable.split("/").at(-1) === "postgres";
+    const result = isFinalPostgresProcess
+      ? invoke(["exec", name, "psql", "--quiet", "--tuples-only", "--no-align", "--username", "supabase_admin", "--dbname", "postgres", "--command", "select 1"])
+      : null;
+    consecutiveReadyChecks = result?.status === 0 ? consecutiveReadyChecks + 1 : 0;
     if (consecutiveReadyChecks === 3) break;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }

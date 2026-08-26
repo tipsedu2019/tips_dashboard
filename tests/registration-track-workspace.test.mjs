@@ -241,6 +241,7 @@ async function loadMountedRegistrationEnrollmentEditor({
     },
     loadRegistrationEnrollmentStartObservation: loadObservation,
     saveRegistrationEnrollmentDetails: saveEnrollmentDetails,
+    setRegistrationAdmissionChecklistItem: async () => undefined,
     setRegistrationEnrollmentMakeedu: async () => undefined,
     startRegistrationAdmissionBatch: async () => undefined,
   }
@@ -254,7 +255,7 @@ async function loadMountedRegistrationEnrollmentEditor({
     ["@/components/ui/label", { Label }],
     ["@/components/ui/popover", { Popover: Wrapper, PopoverContent: Wrapper, PopoverTrigger: Wrapper }],
     ["@/components/ui/textarea", { Textarea }],
-    ["./registration-admission-progress", { RegistrationAdmissionProgress: Wrapper }],
+    ["./registration-admission-progress", { RegistrationAdmissionChecklist: Wrapper }],
     ["./registration-select", { RegistrationSelect }],
     ["./registration-save-button", { RegistrationSaveButton }],
     ["./ops-task-service", { loadOpsRegistrationClassDetails: loadClassDetails }],
@@ -599,24 +600,6 @@ function mountedRegistrationClassDetails() {
       },
     },
   }
-}
-
-const ADMISSION_PROGRESS_LABELS = [
-  "입학신청서 발송",
-  "메이크에듀 등록(수업, 교재)",
-  "청구서 발송",
-  "수납 완료 확인",
-  "등록 완료",
-]
-
-function admissionProgressSteps(checklist) {
-  return [
-    { key: "admissionNotice", label: ADMISSION_PROGRESS_LABELS[0], complete: checklist.admissionNotice },
-    { key: "makeedu", label: ADMISSION_PROGRESS_LABELS[1], complete: checklist.makeedu },
-    { key: "invoice", label: ADMISSION_PROGRESS_LABELS[2], complete: checklist.invoice },
-    { key: "payment", label: ADMISSION_PROGRESS_LABELS[3], complete: checklist.payment },
-    { key: "complete", label: ADMISSION_PROGRESS_LABELS[4], complete: checklist.complete },
-  ]
 }
 
 function sourceBetween(source, startMarker, endMarker) {
@@ -1437,11 +1420,12 @@ test("desktop application rows provide one table cell for each column while mobi
   assert.equal((source.match(/role=\{cellRole\}/g) || []).length, 2);
 });
 
-test("registration enrollment values wrap instead of clipping", async () => {
+test("registration enrollment controls stay responsive without truncated labels", async () => {
   const enrollmentSource = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8");
 
   assert.doesNotMatch(enrollmentSource, /className="min-w-0 flex-1 truncate">\{classItem\?\.label/);
-  assert.match(enrollmentSource, /className="min-w-0 flex-1 break-words \[overflow-wrap:anywhere\]"/);
+  assert.match(enrollmentSource, /sm:grid-cols-\[minmax\(0,1\.4fr\)_minmax\(0,1fr\)_minmax\(0,1\.25fr\)_auto\]/);
+  assert.match(enrollmentSource, /<RegistrationSelect[\s\S]*?aria-label=\{`\$\{track\.subject\} 수업 \$\{index \+ 1\} 선택`\}/);
 });
 
 test("selected visit consultation card shows the canonical appointment time and place", async () => {
@@ -1471,12 +1455,13 @@ test("selected phone consultation card shows active readiness without a stage fa
   assert.match(detail, /RegistrationConsultationOutcomeEditor/)
 })
 
-test("unbatched enrollment drafts may omit a schedule while batch start requires complete schedules", async () => {
+test("unbatched enrollment drafts may omit a schedule without gating the admission checklist", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
   const draftBlock = sourceBetween(source, "const blockers = useMemo", "function updateRow")
+  const checklistBlock = source.slice(source.indexOf("export function RegistrationAdmissionPanel"))
   assert.match(draftBlock, /requireSchedule:\s*false/)
-  assert.match(source, /selectedEnrollmentsHaveCompleteSchedules/)
-  assert.match(source, /입학 처리 전에 선택한 모든 수업의 시작 일정을 지정하세요/)
+  assert.doesNotMatch(checklistBlock, /classStartSession|selectedEnrollmentsHaveCompleteSchedules|requireSchedule/)
+  assert.doesNotMatch(checklistBlock, /먼저 완료|입학 처리 전에/)
 })
 
 test("case list keeps the Notion-like workflow status editable in place without a parallel quick-action path", async () => {
@@ -1722,26 +1707,14 @@ test("terminal subjects do not gate common edits and progressed subjects cannot 
   assert.match(inquiry, /registration_subject_removal_blocked/)
 })
 
-test("two decided subjects share one admission preview action and expose two badges", async () => {
-  const [application, enrollment] = await Promise.all([
-    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8"),
-  ])
-  const decidedTracks = [
-    { id: "english-track", subject: "영어", status: "enrollment_decided" },
-    { id: "math-track", subject: "수학", status: "enrollment_decided" },
-  ]
-  const badges = decidedTracks.filter((track) => track.status === "enrollment_decided").map((track) => track.subject)
+test("all subjects share one case-level admission checklist without target badges", async () => {
+  const application = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const admission = sourceBetween(application, "admission={(\n", "<RegistrationAlimtalkPreviewDialog")
 
-  assert.deepEqual(badges, ["영어", "수학"])
   assert.equal((application.match(/<RegistrationAdmissionPanel/g) || []).length, 1)
   assert.match(application, /getRegistrationApplicationCaseEditableSections\(\{[\s\S]*?admissionBatches: detail\.admissionBatches/)
-  assert.match(application, /getRegistrationAdmissionApplicationState\(\{[\s\S]*?tracks: genericTracks,[\s\S]*?enrollments: detail\.enrollments/)
-  assert.match(application, /const genericTracks = useMemo[\s\S]*?isOpsRegistrationWorkflowStatus/)
-  assert.match(application, /admissionApplicationState\.canSend/)
-  assert.match(application, /admissionApplicationState\.targetTrackIds/)
-  assert.match(application, /admissionTargetTracks\.map/)
-  assert.equal((enrollment.match(/>\s*입학신청서 알림톡\s*<\/Button>/g) || []).length, 1)
+  assert.match(admission, /checklist=\{detail\.admissionChecklist\}/)
+  assert.doesNotMatch(admission, /targetTrackIds|admissionTargetTracks|Badge|알림톡/)
 })
 
 test("saved and create applications share the intake shell while saved detail owns later stages", async () => {
@@ -1798,7 +1771,8 @@ test("saved application keeps exception actions in their owning sections", async
   assert.doesNotMatch(observation, /RegistrationEnrollmentTrackEditor|RegistrationAdmissionPanel/)
   assert.match(source, /section === "placement"[\s\S]*?<RegistrationEnrollmentTrackEditor/)
   assert.match(admission, /RegistrationAdmissionPanel/)
-  assert.match(admission, /cancelRegistrationAdmissionBatch|onOpenCustomerMessage/)
+  assert.match(admission, /checklist=\{detail\.admissionChecklist\}/)
+  assert.doesNotMatch(admission, /cancelRegistrationAdmissionBatch|onOpenCustomerMessage/)
 })
 
 test("registration application threads the exact deep-linked attempt into the real observation editor mount", async () => {
@@ -3693,7 +3667,7 @@ test("enrollment workspace delegates workflow status changes to the subject stat
 
 test("enrollment workspace keeps status routing out of the enrollment form", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
-  const renderedEnrollment = sourceBetween(source, "  return (\n    <section ref={sectionRef}", "\n}\n\nexport type AdmissionDirtyScope")
+  const renderedEnrollment = sourceBetween(source, "  return (\n    <section ref={sectionRef}", "\n}\n\nexport type RegistrationAdmissionPanelProps")
   assert.doesNotMatch(renderedEnrollment, /등록 대신 다른 단계로 이동/)
   assert.doesNotMatch(renderedEnrollment, />대기로 전환</)
   assert.doesNotMatch(renderedEnrollment, />미등록 완료</)
@@ -3707,195 +3681,79 @@ test("appointment editor keeps an unchanged or empty reservation quiet until a f
   assert.match(source, /<RegistrationSaveButton[\s\S]*?dirty=\{appointmentDirty \|\| externalDirty\}[\s\S]*?cleanLabel=\{appointment \? "저장됨" : "예약 정보를 입력하세요"\}/)
 })
 
-test("case admission panel selects exact rows and renders the ordered mixed-subject batch checklist", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
-  assert.match(source, /export function RegistrationAdmissionPanel/)
-  assert.match(source, /currentBatchEnrollments\.map/)
-  assert.match(source, /trackById\.get\(enrollment\.trackId\)/)
-  assert.match(source, /selectedEnrollmentIds/)
-  assert.match(source, /selectedTrackIds/)
-  assert.match(source, /startRegistrationAdmissionBatch/)
-  assert.match(source, /setRegistrationEnrollmentMakeedu/)
-  assert.match(source, /advanceRegistrationAdmissionBatch/)
-  assert.match(source, /completeRegistrationAdmissionBatch/)
-  assert.match(source, /cancelRegistrationAdmissionBatch/)
-  assert.match(source, /cancelRegistrationEnrollment/)
-  assert.match(source, /입학신청서 알림톡/)
-  assert.match(source, /메이크에듀 등록/)
-  assert.match(source, /청구서 발송/)
-  assert.match(source, /수납 완료 확인/)
-  assert.match(source, /등록 완료/)
-  assert.match(source, /이전 입학 처리/)
-})
-
-test("saved admission section owns one ordered flat action list", async () => {
-  const [progress, create, enrollment] = await Promise.all([
+test("admission processing is only five freely editable checklist rows", async () => {
+  const [progress, enrollment] = await Promise.all([
     readAdmissionProgressSource(),
-    readFile(new URL("../src/features/tasks/registration-application-create.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8"),
   ])
+  const panel = enrollment.slice(enrollment.indexOf("export function RegistrationAdmissionPanel"))
   const labels = [
-    "입학신청서 알림톡",
+    "입학신청서 발송",
     "메이크에듀 등록(수업, 교재)",
     "청구서 발송",
     "수납 완료 확인",
     "등록 완료",
   ]
 
-  assert.equal((progress.match(/<ol aria-label="입학 처리 항목"/g) || []).length, 1)
-  assert.match(progress, /export type RegistrationAdmissionProgressSteps = readonly \[[\s\S]*?RegistrationAdmissionProgressStep<"admissionNotice">,[\s\S]*?RegistrationAdmissionProgressStep<"makeedu">,[\s\S]*?RegistrationAdmissionProgressStep<"invoice">,[\s\S]*?RegistrationAdmissionProgressStep<"payment">,[\s\S]*?RegistrationAdmissionProgressStep<"complete">,[\s\S]*?\]/)
-  assert.match(progress, /steps: RegistrationAdmissionProgressSteps/)
-  assert.match(progress, /data-registration-admission-locked=\{step\.locked \? "true" : undefined\}/)
-  assert.match(progress, /step\.complete[\s\S]*?<Check/)
-  assert.match(progress, /divide-y/)
-  assert.match(progress, /\{step\.content\}/)
-  assert.match(progress, /aria-current=\{state === "active" \? "step" : undefined\}/)
-  assert.match(progress, /statusLabel/)
-  assert.match(progress, /optional\?: boolean/)
-  assert.match(progress, /state === "optional" \? "선택" : "대기"/)
-  assert.doesNotMatch(progress, /role="tab"|role="tabpanel"|selectedKey|useState|CircleDot/)
-  assert.equal((create.match(/<RegistrationAdmissionProgress/g) || []).length, 0)
-  assert.equal((create.match(/locked: true/g) || []).length, 0)
-  assert.equal((enrollment.match(/<RegistrationAdmissionProgress/g) || []).length, 1)
-  for (const label of labels) {
-    assert.ok(!create.includes(`label: "${label}"`), `create omits future field: ${label}`)
-    assert.ok(enrollment.includes(`label: "${label}"`), `saved: ${label}`)
-  }
-})
+  assert.match(progress, /export function RegistrationAdmissionChecklist/)
+  assert.equal((progress.match(/<input/g) || []).length, 1)
+  assert.match(progress, /type="checkbox"/)
+  assert.match(progress, /REGISTRATION_ADMISSION_CHECKLIST_ITEMS\.map/)
+  assert.match(progress, /checked=\{checklist\[item\.key\]\}/)
+  assert.match(progress, /onChange=\{\(event\) => onCheckedChange\(item\.key, event\.target\.checked\)\}/)
+  assert.doesNotMatch(progress, /aria-current|locked|active|pending|optional|content|statusLabel/)
 
-test("admission work renders one semantic action list with an explicit current action", async () => {
-  const { RegistrationAdmissionProgress } = await loadAdmissionProgressRuntime()
-  const html = renderToStaticMarkup(createElement(RegistrationAdmissionProgress, {
-    steps: admissionProgressSteps({
-      admissionNotice: true,
-      makeedu: false,
-      invoice: false,
-      payment: false,
-      complete: false,
-    }),
-  }))
-  const rows = html.match(/<li\b[\s\S]*?<\/li>/g) || []
-
-  assert.equal((html.match(/<ol\b/g) || []).length, 1)
-  assert.match(html, /<ol aria-label="입학 처리 항목"/)
-  assert.equal(rows.length, 5)
-  let previousLabelIndex = -1
-  for (const label of ADMISSION_PROGRESS_LABELS) {
-    const labelIndex = html.indexOf(label)
-    assert.ok(labelIndex > previousLabelIndex, `${label} remains in its ordered position`)
-    previousLabelIndex = labelIndex
-  }
-  assert.match(rows[0], /data-registration-admission-state="complete"[\s\S]*?lucide-check[\s\S]*?완료/)
-  assert.match(rows[1], /aria-current="step"[\s\S]*?data-registration-admission-state="active"[\s\S]*?메이크에듀 등록\(수업, 교재\)[\s\S]*?진행/)
-  assert.equal((html.match(/aria-current="step"/g) || []).length, 1)
-  assert.match(rows[2], /data-registration-admission-state="pending"[\s\S]*?대기/)
-})
-
-test("admission progress keeps every action panel visible without tab navigation", async () => {
-  const { RegistrationAdmissionProgress } = await loadAdmissionProgressRuntime()
-  const steps = admissionProgressSteps({
-    admissionNotice: false,
-    makeedu: false,
-    invoice: false,
-    payment: false,
-    complete: false,
-  }).map((step) => ({
-    ...step,
-    locked: step.key !== "admissionNotice",
-    content: createElement("span", null, `content:${step.key}`),
-  }))
-  const html = renderToStaticMarkup(createElement(RegistrationAdmissionProgress, { steps }))
-
-  for (const key of ["admissionNotice", "makeedu", "invoice", "payment", "complete"]) {
-    assert.match(html, new RegExp(`content:${key}`), key)
-  }
-  assert.doesNotMatch(html, /role="tab"|role="tabpanel"/)
-  assert.doesNotMatch(html, /<button[^>]+disabled/)
-})
-
-test("a completed saved admission case renders five complete rows", async () => {
-  const [{ RegistrationAdmissionProgress }, model] = await Promise.all([
-    loadAdmissionProgressRuntime(),
-    import("../src/features/tasks/registration-track-model.js"),
-  ])
-  assert.equal(typeof model.getRegistrationAdmissionProgressDisplay, "function")
-
-  const completedBatch = {
-    id: "completed-batch",
-    revisionNumber: 2,
-    status: "completed",
-    invoiceSentAt: "2026-07-20",
-    paymentConfirmedAt: "2026-07-21",
-  }
-  const display = model.getRegistrationAdmissionProgressDisplay({
-    batches: [completedBatch],
-    enrollments: [{
-      id: "completed-enrollment",
-      admissionBatchId: completedBatch.id,
-      status: "canceled",
-      makeeduRegistered: true,
-    }],
-  })
-  const checklist = model.getRegistrationAdmissionBatchChecklist({
-    admissionNoticeSent: true,
-    enrollments: display.displayEnrollments,
-    batch: display.displayBatch,
-  })
-  const html = renderToStaticMarkup(createElement(RegistrationAdmissionProgress, {
-    steps: admissionProgressSteps(checklist),
-  }))
-
-  assert.equal(display.openBatch, null)
-  assert.equal(display.displayBatch.id, completedBatch.id)
-  assert.equal((html.match(/<li\b/g) || []).length, 5)
-  assert.equal((html.match(/data-registration-admission-state="complete"/g) || []).length, 5)
-  assert.equal((html.match(/data-registration-admission-state="pending"/g) || []).length, 0)
-  assert.equal((html.match(/data-registration-admission-state="active"/g) || []).length, 0)
-})
-
-test("an unsent optional admission notice never becomes active while MakeEdu is active", async () => {
-  const { RegistrationAdmissionProgress } = await loadAdmissionProgressRuntime()
-  const html = renderToStaticMarkup(createElement(RegistrationAdmissionProgress, {
-    steps: [
-      { key: "admissionNotice", label: "입학신청서 알림톡", complete: false, optional: true },
-      { key: "makeedu", label: "메이크에듀 등록(수업, 교재)", complete: false },
-      { key: "invoice", label: "청구서 발송", complete: false, locked: true },
-      { key: "payment", label: "수납 완료 확인", complete: false, locked: true },
-      { key: "complete", label: "등록 완료", complete: false, locked: true },
-    ],
-  }))
-  const optionalNotice = html.match(/<li[^>]*aria-label="입학신청서 알림톡: [^"]+"[^>]*>/)?.[0] || ""
-  const activeMakeEdu = html.match(/<li[^>]*aria-label="메이크에듀 등록\(수업, 교재\): [^"]+"[^>]*>/)?.[0] || ""
-
-  assert.match(optionalNotice, /data-registration-admission-state="optional"/)
-  assert.doesNotMatch(optionalNotice, /aria-current/)
-  assert.match(activeMakeEdu, /data-registration-admission-state="active"/)
-  assert.match(activeMakeEdu, /aria-current="step"/)
-})
-
-test("ordered admission steps use preview-first messaging and retain batch RPC controls", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
-  const panel = source.slice(source.indexOf("export function RegistrationAdmissionPanel"))
-
-  for (const action of [
+  for (const label of labels) assert.match(progress, new RegExp(label.replace(/[()]/g, "\\$&")))
+  assert.equal((panel.match(/\n\s*<RegistrationAdmissionChecklist\n/g) || []).length, 1)
+  assert.match(panel, /setRegistrationAdmissionChecklistItem\(\{/)
+  assert.match(panel, /taskId,[\s\S]*?item,[\s\S]*?checked,[\s\S]*?requestKey/)
+  for (const removedAction of [
     "startRegistrationAdmissionBatch",
     "setRegistrationEnrollmentMakeedu",
     "advanceRegistrationAdmissionBatch",
     "completeRegistrationAdmissionBatch",
-  ]) {
-    assert.equal((panel.match(new RegExp(`${action}\\(\\{`, "g")) || []).length, 1, action)
-  }
-  assert.equal((panel.match(/onOpenCustomerMessage\?\.\(\{ messageKind: "admission_application", sourceId: taskId \}\)/g) || []).length, 1)
-  assert.match(panel, /key: "admissionNotice",[\s\S]*?optional: true,[\s\S]*?onOpenCustomerMessage/)
-  assert.doesNotMatch(panel, /onSendAdmissionMessage|onCheckAdmissionMessage|onReconcileAdmissionMessage|onReleaseAdmissionMessageRetry/)
-  assert.match(panel, /openBatch && permissions\.canManage \? <Button[\s\S]*?setMakeedu\(enrollment\)/)
-  assert.equal((panel.match(/content: openBatch && permissions\.canManage \? \(/g) || []).length, 3)
-  assert.match(panel, /\{openBatch \? \([\s\S]*?입학 처리 취소/)
-  assert.match(panel, /disabled=\{activeSelectedEnrollmentIds\.length === 0 \|\| !selectedEnrollmentsHaveCompleteSchedules \|\| Boolean\(busyAction\) \|\| batchRefreshPending\}/)
-  assert.doesNotMatch(panel, /입학신청서 발송을 먼저 완료하세요/)
-  assert.match(panel, /disabled=\{batchRefreshPending \|\| !checklist\.makeedu \|\| checklist\.invoice \|\| Boolean\(busyAction\)\}/)
-  assert.match(panel, /disabled=\{batchRefreshPending \|\| !checklist\.invoice \|\| checklist\.payment \|\| Boolean\(busyAction\)\}/)
-  assert.match(panel, /disabled=\{batchRefreshPending \|\| !checklist\.payment \|\| checklist\.complete \|\| Boolean\(busyAction\)\}/)
+    "cancelRegistrationAdmissionBatch",
+    "RegistrationAdmissionProgress",
+    "onOpenCustomerMessage",
+    "입학 처리 취소",
+    "이전 입학 처리",
+  ]) assert.doesNotMatch(panel, new RegExp(removedAction))
+  assert.doesNotMatch(panel, /checklist\.(?:applicationSent|makeeduRegistered|invoiceSent|paymentConfirmed|registrationCompleted)[\s\S]{0,160}disabled/)
+})
+
+test("registration-completed may be checked while every earlier checklist item is unchecked", async () => {
+  const { RegistrationAdmissionChecklist } = await loadAdmissionProgressRuntime()
+  const html = renderToStaticMarkup(createElement(RegistrationAdmissionChecklist, {
+    checklist: {
+      applicationSent: false,
+      makeeduRegistered: false,
+      invoiceSent: false,
+      paymentConfirmed: false,
+      registrationCompleted: true,
+    },
+    editable: true,
+    savingItems: new Set(),
+    onCheckedChange: () => undefined,
+  }))
+  const rows = html.match(/<li\b[\s\S]*?<\/li>/g) || []
+
+  assert.equal(rows.length, 5)
+  assert.equal((html.match(/type="checkbox"/g) || []).length, 5)
+  assert.equal((html.match(/disabled=""/g) || []).length, 0)
+  assert.doesNotMatch(rows[0], /checked=""/)
+  assert.doesNotMatch(rows[1], /checked=""/)
+  assert.doesNotMatch(rows[2], /checked=""/)
+  assert.doesNotMatch(rows[3], /checked=""/)
+  assert.match(rows[4], /checked=""/)
+})
+
+test("the legacy registration detail does not render a second dependent admission checklist", async () => {
+  const source = await readWorkspaceSource()
+
+  assert.doesNotMatch(source, /RegistrationOperationsChecklistChips/)
+  assert.doesNotMatch(source, /getRegistrationChecklistAvailability|getMissingRegistrationCheckLabels/)
+  assert.doesNotMatch(source, /입학신청서 알림톡 \(선택\)|입학 처리 정보/)
+  assert.match(source, /<RegistrationApplication/)
 })
 
 test("browser fixture mirrors message-independent identity editing locks", async () => {
@@ -3912,29 +3770,6 @@ test("browser fixture mirrors message-independent identity editing locks", async
   assert.match(lock, /detail\.admissionApplicationMessageClaimActive/)
 })
 
-test("case admission message state remains readable while actions use the shared preview dialog", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
-  assert.match(source, /admissionApplicationMessageStatus/)
-  assert.match(source, /발송 처리 중/)
-  assert.match(source, /발송 접수됨 · 상태 동기화 필요/)
-  assert.match(source, /발송 결과 확인 필요/)
-  assert.match(source, /미접수 확인 · 재발송 잠금/)
-  assert.match(source, /onOpenCustomerMessage/)
-  assert.match(source, /messageKind: "admission_application", sourceId: taskId/)
-  assert.doesNotMatch(source, /onCheckAdmissionMessage|onReconcileAdmissionMessage|onReleaseAdmissionMessageRetry|onSendAdmissionMessage/)
-})
-
-test("case admission badges use the same decided and add-class eligibility as the send action", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
-  const admission = sourceBetween(source, "admission={(\n", "<RegistrationAlimtalkPreviewDialog")
-
-  assert.match(source, /admissionApplicationState\.targetTrackIds/)
-  assert.match(source, /admissionTargetTracks/)
-  assert.match(admission, /admissionTargetTracks\.map/)
-  assert.doesNotMatch(admission, /track\.status === "enrollment_decided"/)
-  assert.equal((source.match(/<RegistrationAdmissionPanel/g) || []).length, 1)
-})
-
 test("unified track editor and workspace mount subject rows plus one case-level admission panel", async () => {
   const trackEditor = await readRegistrationApplicationSource()
   assert.match(trackEditor, /RegistrationEnrollmentTrackEditor/)
@@ -3948,7 +3783,7 @@ test("unified track editor and workspace mount subject rows plus one case-level 
   assert.doesNotMatch(shell, /<RegistrationAdmissionPanel/)
 })
 
-test("canonical registration editors expose five preview-first alimtalk targets through one dialog owner", async () => {
+test("canonical registration editors keep messaging outside the admission checklist", async () => {
   const [appointment, observation, actions, enrollment, application] = await Promise.all([
     readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/features/tasks/registration-observation-editor.tsx", import.meta.url), "utf8"),
@@ -3997,13 +3832,11 @@ test("canonical registration editors expose five preview-first alimtalk targets 
   assert.match(waiting, /className="min-h-11 min-w-11"[\s\S]*대기 안내 알림톡/)
 
   const admission = enrollment.slice(enrollment.indexOf("export function RegistrationAdmissionPanel"))
-  assert.match(admission, /입학신청서 알림톡/)
-  assert.match(admission, /messageKind: "admission_application", sourceId: taskId/)
   assert.match(admission, /permissions\.canManage/)
-  assert.match(admission, /className="min-h-11 min-w-11 w-fit"[\s\S]*입학신청서 알림톡/)
-  assert.doesNotMatch(admission, /onSendAdmissionMessage|onReconcileAdmissionMessage|onReleaseAdmissionMessageRetry|제공사 확인 증빙|재발송 허용/)
+  assert.match(admission, /<RegistrationAdmissionChecklist/)
+  assert.doesNotMatch(admission, /알림톡|messageKind|onOpenCustomerMessage|onSendAdmissionMessage|onReconcileAdmissionMessage|onReleaseAdmissionMessageRetry|제공사 확인 증빙|재발송 허용/)
 
-  assert.equal((application.match(/onOpenCustomerMessage=\{openCustomerMessage\}/g) || []).length, 4)
+  assert.equal((application.match(/onOpenCustomerMessage=\{openCustomerMessage\}/g) || []).length, 3)
   assert.match(application, /onOpenCustomerMessage=\{canManageCase \? openCustomerMessage : undefined\}/)
   assert.doesNotMatch(application, /admissionActions/)
 })
@@ -4035,19 +3868,16 @@ test("enrollment stages show the real work surface without a redundant placehold
   assert.match(source, /section === "consultation" && !context\.track\.migrationReviewRequired/)
 })
 
-test("committed enrollment and admission batch saves recover refresh without resubmitting mutations", async () => {
+test("committed enrollment saves recover refresh without resubmitting mutations", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
   const enrollmentBlock = sourceBetween(source, "export function RegistrationEnrollmentEditor", "export type RegistrationAdmissionPanelProps")
-  const admissionBlock = sourceBetween(source, "export function RegistrationAdmissionPanel", "return (\n    <section")
   assert.match(source, /const REGISTRATION_REFRESH_TIMEOUT_MS = 10_000/)
   assert.match(source, /function withRegistrationRefreshTimeout[\s\S]*?Promise\.race/)
   assert.match(enrollmentBlock, /async function retryEnrollmentReload/)
   assert.match(enrollmentBlock, /await withRegistrationRefreshTimeout\(onReload\(\)\)[\s\S]*setOwnerRefreshPending\(owner, false\)[\s\S]*catch[\s\S]*setOwnerRefreshPending\(owner, true\)/)
   assert.doesNotMatch(enrollmentBlock, /setOwnerRefreshPending\([^,]+, true\)\s*\n\s*await reloadCommitted/)
-  assert.match(admissionBlock, /async function retryAdmissionReload\(\)[\s\S]*await onReload\(\)[\s\S]*setBatchRefreshPending\(false\)[\s\S]*catch[\s\S]*setBatchRefreshPending\(true\)/)
   assert.match(source, /onClick=\{\(\) => void retryEnrollmentReload\(\{ kind: "rows" \}\)\}/)
-  assert.match(source, /onClick=\{\(\) => void retryAdmissionReload\(\)\}/)
-  assert.doesNotMatch(source, /retryAdmissionReload\("message"\)|setMessageRefreshPending/)
+  assert.doesNotMatch(source, /retryAdmissionReload|setBatchRefreshPending|setMessageRefreshPending/)
 })
 
 test("registered add-class starts empty and cannot submit an empty draft list", async () => {
@@ -4067,22 +3897,13 @@ test("persisted planned rows cancel explicitly and class detail failures can be 
   assert.match(source, /activeEnrollmentRows/)
 })
 
-test("batch cancellation requires each first-admission destination without a legacy message recovery owner", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
-  assert.match(source, /cancelDestinations\[trackId\] \|\| ""/)
-  assert.match(source, /resolutions\.some\(\(item\) => !item\.destination\)/)
-  assert.doesNotMatch(source, /messageRecoveryAvailable|발송 후 15분이 지나면 확인할 수 있습니다|재발송 허용/)
-})
-
-test("enrollment and batch cancellation UI consumes the canonical history classifiers", async () => {
+test("enrollment cancellation UI consumes the canonical history classifier", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
   assert.match(source, /getRegistrationEnrollmentCancellationState/)
-  assert.match(source, /getRegistrationAdmissionBatchCancellationGroups/)
   assert.match(source, /selectedEnrollmentCancellation\.requiresDestination/)
   assert.doesNotMatch(source, /const otherActiveRows/)
-  assert.doesNotMatch(source, /enrollment\.admissionBatchId !== openBatch\?\.id[\s\S]*enrollment\.rosterActive/)
   assert.match(source, /setCancelDestination\(""\)[\s\S]*setCancelEnrollmentId\(row\.id\)/)
-  assert.match(source, /setCancelDestinations\(\{\}\)[\s\S]*setCancelBatchOpen\(true\)/)
+  assert.doesNotMatch(source, /getRegistrationAdmissionBatchCancellationGroups|setCancelBatchOpen/)
 })
 
 test("an unrelated subject open batch does not block registered draft editing", async () => {
@@ -4104,19 +3925,22 @@ test("persisted null textbooks remain explicitly cleared after editor remount", 
 })
 
 test("read-only admission viewers see checklist status without mutation buttons", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
-  assert.match(source, /permissions\.canManage \? \([\s\S]*>청구서 발송<[\s\S]*>수납 완료 확인<[\s\S]*>등록 완료</)
-  assert.doesNotMatch(source, />3\. 청구서 발송<|>4\. 수납 완료 확인<|>5\. 등록 완료</)
-  assert.match(source, /aria-label=\{permissions\.canManage \? undefined : "읽기 전용 입학 처리 상태"\}/)
-  assert.match(source, /const isAddClass = addClassTrackIds\.includes\(trackId\)/)
-  assert.match(source, /isAddClass \? <span[\s\S]*기존 등록 유지/)
-})
-
-test("admission batch selection ignores stale IDs when enabling and submitting", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
-  assert.match(source, /getRegistrationSelectedAdmissionEnrollmentIds/)
-  assert.match(source, /activeSelectedEnrollmentIds\.length === 0/)
-  assert.match(source, /const enrollmentIds = activeSelectedEnrollmentIds/)
+  const { RegistrationAdmissionChecklist } = await loadAdmissionProgressRuntime()
+  const html = renderToStaticMarkup(createElement(RegistrationAdmissionChecklist, {
+    checklist: {
+      applicationSent: true,
+      makeeduRegistered: false,
+      invoiceSent: true,
+      paymentConfirmed: false,
+      registrationCompleted: true,
+    },
+    editable: false,
+    savingItems: new Set(),
+    onCheckedChange: () => undefined,
+  }))
+  assert.equal((html.match(/type="checkbox"/g) || []).length, 5)
+  assert.equal((html.match(/disabled=""/g) || []).length, 5)
+  assert.equal((html.match(/checked=""/g) || []).length, 3)
 })
 
 test("admission panel leaves provider recovery timing to the shared dialog", async () => {
@@ -4125,13 +3949,10 @@ test("admission panel leaves provider recovery timing to the shared dialog", asy
   assert.doesNotMatch(source, /재발송 허용|onReleaseAdmissionMessageRetry/)
 })
 
-test("enrollment and admission batch saves lock after a committed refresh failure", async () => {
+test("enrollment saves lock after a committed refresh failure", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
-  const startBlock = sourceBetween(source, "async function startBatch", "async function setMakeedu")
-  assert.match(startBlock, /busyAction \|\| batchRefreshPending/)
   assert.match(source, /<RegistrationSaveButton[\s\S]*?blocked=\{rowsRefreshPending \|\| draftRows\.length === 0\}/)
-  assert.match(source, /disabled=\{batchRefreshPending \|\| Boolean\(busyAction\)/)
-  assert.doesNotMatch(source, /messageRefreshPending/)
+  assert.doesNotMatch(source, /batchRefreshPending|messageRefreshPending/)
 })
 
 test("enrollment form contains no secondary decision-routing controls", async () => {
@@ -4152,7 +3973,6 @@ test("registration application owns the exact stable dirty-key aggregates", asyn
     "level_test:track-${trackId}",
     "consultation:track-${context.track.id}",
     "placement:track-${track.id}",
-    "admission:batch-${scope.batchId}",
   ]) assert.ok(source.includes(key), `missing dirty owner ${key}`)
   assert.match(editor, /getRegistrationEnrollmentDirtyKey\(track\.id, scope\)/)
   assert.match(editor, /level_test:appointment-/)
@@ -4169,7 +3989,7 @@ test("every local registration editor reports dirty state through its owner", as
   assert.match(appointment, /onDirtyChange\?: \(dirty: boolean\) => void/)
   assert.match(appointment, /onTrackDirtyChange\?: \(trackId: string, dirty: boolean\) => void/)
   assert.match(enrollment, /RegistrationEnrollmentEditorProps[\s\S]*?onDirtyChange\?: \(scope: RegistrationEnrollmentDirtyScope, dirty: boolean\) => void/)
-  assert.match(enrollment, /RegistrationAdmissionPanelProps[\s\S]*?onDirtyChange\?: \(scope: AdmissionDirtyScope, dirty: boolean\) => void/)
+  assert.doesNotMatch(enrollment, /RegistrationAdmissionPanelProps[\s\S]*?onDirtyChange/)
   assert.match(inquiry, /onDirtyChange\?: \(dirty: boolean\) => void/)
 })
 
@@ -4283,9 +4103,7 @@ test("committed refresh failures clear only their dirty owner and lock mutation 
   assert.doesNotMatch(appointment, /reasonDirty/)
   assert.match(enrollment, /rowsRefreshPending/)
   assert.match(enrollment, /cancellationRefreshPending/)
-  assert.match(enrollment, /batchRefreshPending/)
-  assert.match(enrollment, /async function afterCommitted\(\)/)
-  assert.doesNotMatch(enrollment, /messageRefreshPending|afterCommitted\(owner: "message" \| "batch"\)/)
+  assert.doesNotMatch(enrollment, /batchRefreshPending|messageRefreshPending/)
   assert.doesNotMatch(sourceBetween(source, "async function retryRefresh()", "return ("), /completeRegistrationConsultation/)
 })
 
@@ -4364,7 +4182,7 @@ test("enrollment rows and persisted cancellations report and recover separate ow
   const actions = await readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8")
   const enrollment = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
   const editor = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
-  const block = sourceBetween(enrollment, "export function RegistrationEnrollmentEditor", "export type AdmissionDirtyScope")
+  const block = sourceBetween(enrollment, "export function RegistrationEnrollmentEditor", "export type RegistrationAdmissionPanelProps")
 
   assert.match(enrollment, /export type RegistrationEnrollmentDirtyScope/)
   assert.match(block, /rowsRefreshPending/)

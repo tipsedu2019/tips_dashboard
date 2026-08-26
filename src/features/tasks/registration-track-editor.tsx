@@ -2,7 +2,6 @@
 
 import { Children, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { GoogleChatDeliveryControl } from "@/features/notifications/notification-delivery-control"
 import { supabase } from "@/lib/supabase"
@@ -115,7 +114,6 @@ import { ACADEMIC_SUBJECT_VALUES } from "../../lib/academic-subject-registry.ts"
 import {
   getRegistrationActionPermissions,
   getRegistrationActiveConsultation,
-  getRegistrationAdmissionApplicationState,
   shouldRenderRegistrationConsultationOutcome,
 } from "./registration-track-model.js"
 import {
@@ -770,26 +768,7 @@ export function RegistrationApplication({
           ? customerMessageTarget.sourceId === detail.task.id
         : detail.appointments.some((appointment) => appointment.id === customerMessageTarget.sourceId)
   ) ? customerMessageTarget : null
-  const admissionApplicationState = getRegistrationAdmissionApplicationState({
-    tracks: genericTracks,
-    enrollments: detail.enrollments,
-    admissionNoticeSent: Boolean(detail.task.registration?.admissionNoticeSent),
-    admissionApplicationMessageStatus: detail.admissionApplicationMessageStatus,
-    admissionApplicationMessageClaimActive: detail.admissionApplicationMessageClaimActive,
-  })
-  const admissionTargetTracks = admissionApplicationState.targetTrackIds.flatMap((trackId) => {
-    const track = genericTracks.find((item) => item.id === trackId)
-    return track ? [track] : []
-  })
-  const admissionMessageRecoveryAvailable = Boolean(
-    detail.admissionApplicationMessageId
-    && ["pending", "unknown", "failed_hold"].includes(detail.admissionApplicationMessageStatus),
-  )
-  const admissionEditable = canManageCase && (
-    admissionApplicationState.canSend
-    || admissionApplicationState.syncNeeded
-    || admissionMessageRecoveryAvailable
-  )
+  const admissionEditable = canManageCase
   const appointmentActionPlans = getRegistrationApplicationAppointmentActionPlans({
     tracks: genericTracks,
     appointments: detail.appointments,
@@ -1849,29 +1828,12 @@ export function RegistrationApplication({
         <RegistrationApplicationAdmissionSection
           editable={openSectionStates.admission.editable}
           fields={(
-            <div className="grid gap-3">
-              {admissionTargetTracks.length > 0 ? (
-                <div className="flex flex-wrap gap-1" aria-label="입학신청서 발송 과목">
-                  {admissionTargetTracks.map((track) => (
-                    <Badge key={track.id} variant="outline">{track.subject}</Badge>
-                  ))}
-                </div>
-              ) : null}
-              <RegistrationAdmissionPanel
-                taskId={detail.task.id}
-                tracks={genericTracks}
-                enrollments={detail.enrollments}
-                batches={detail.admissionBatches}
-                classes={classOptions}
-                admissionNoticeSent={Boolean(detail.task.registration?.admissionNoticeSent)}
-                admissionApplicationMessageStatus={detail.admissionApplicationMessageStatus}
-                permissions={{ canManage: canManageCase, readOnly: !canManageCase }}
-                onOpenCustomerMessage={openCustomerMessage}
-                onReload={onReload}
-                onWarning={onWarning}
-                onDirtyChange={(scope, dirty) => setDirty(`admission:batch-${scope.batchId}`, dirty)}
-              />
-            </div>
+            <RegistrationAdmissionPanel
+              taskId={detail.task.id}
+              checklist={detail.admissionChecklist}
+              permissions={{ canManage: canManageCase, readOnly: !canManageCase }}
+              onWarning={onWarning}
+            />
           )}
         />
       )}

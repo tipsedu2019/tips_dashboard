@@ -878,7 +878,97 @@ test("manual workflow status uses only its dedicated revisioned RPC", async () =
   assert.equal(result.workflowStatus, "payment_in_progress");
   assert.equal(result.workflowRevision, 4);
   assert.equal(result.workflowStatusEnteredAt, "2026-08-01T03:00:00.000Z");
+  assert.equal(result.enrollmentFinalization, null);
   assert.equal(invalidations, 1);
+});
+
+test("registered workflow maps the canonical enrollment finalization receipt", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    rpcHandler(name) {
+      assert.equal(name, "set_registration_workflow_status_v1");
+      return {
+        data: {
+          trackId: "track-registered",
+          workflowStatus: "registered",
+          workflowRevision: 2,
+          workflowStatusEnteredAt: "2026-08-26T03:00:00.000Z",
+          enrollmentFinalization: {
+            trackId: "track-registered",
+            studentId: "student-1",
+            batchId: "batch-2",
+            enrollmentIds: ["enrollment-1", "enrollment-2"],
+            changed: true,
+          },
+        },
+        error: null,
+      };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const result = await service.setRegistrationWorkflowStatus({
+    trackId: "track-registered",
+    workflowStatus: "registered",
+    expectedWorkflowRevision: 1,
+    requestKey: "workflow-register-receipt",
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result.enrollmentFinalization)), {
+    trackId: "track-registered",
+    studentId: "student-1",
+    batchId: "batch-2",
+    enrollmentIds: ["enrollment-1", "enrollment-2"],
+    changed: true,
+  });
+});
+
+test("admission checklist saves one independent item through its dedicated RPC", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    rpcHandler(name, args) {
+      assert.equal(name, "set_registration_admission_checklist_item_v1");
+      assert.deepEqual({ ...args }, {
+        p_task_id: "task-1",
+        p_item: "registrationCompleted",
+        p_checked: true,
+        p_request_key: "checklist-request",
+      });
+      return {
+        data: {
+          taskId: "task-1",
+          checklist: {
+            applicationSent: false,
+            makeeduRegistered: false,
+            invoiceSent: false,
+            paymentConfirmed: false,
+            registrationCompleted: true,
+          },
+        },
+        error: null,
+      };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const result = await service.setRegistrationAdmissionChecklistItem({
+    taskId: "task-1",
+    item: "registrationCompleted",
+    checked: true,
+    requestKey: "checklist-request",
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    taskId: "task-1",
+    checklist: {
+      applicationSent: false,
+      makeeduRegistered: false,
+      invoiceSent: false,
+      paymentConfirmed: false,
+      registrationCompleted: true,
+    },
+  });
+  assert.equal(harness.queries.length, 0);
 });
 
 test("registration management notification producers return only server-issued source IDs", async () => {

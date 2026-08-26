@@ -838,6 +838,56 @@ test("query budget compares a changed real legacy task source against its baseli
   }])
 })
 
+test("registration detail debt manifest permits only the exact baseline query occurrences", async () => {
+  const file = "src/features/tasks/registration-track-service.ts"
+  const baselineSha = "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101"
+  const baselineSource = execFileSync("git", ["show", `${baselineSha}:${file}`], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  })
+  const checklistSource = baselineSource.replace(
+    '            admissionApplicationAccepted: activeStatus === "accepted",\n',
+    '            admissionApplicationAccepted: activeStatus === "accepted",\n            admissionChecklist: {},\n',
+  )
+  assert.notEqual(checklistSource, baselineSource)
+  const debtManifest = (fixtureBaseSha) => QUERY_SURFACE_DEBT_MANIFEST
+    .filter((entry) => entry.surface === "tasks" && entry.file === file)
+    .map((entry) => ({ ...entry, baselineSha: fixtureBaseSha }))
+
+  const unchangedDebt = await verifyFixture({
+    file,
+    baselineSource,
+    source: checklistSource,
+    debtManifest,
+  })
+  assert.deepEqual(unchangedDebt, { ok: true, violations: [] })
+
+  const injectedSource = checklistSource.replace(
+    "    detailInFlight.set(cacheKey, request)\n",
+    `    const queryBudgetInjected = client.from("ops_tasks")
+      .select("*")
+      .limit(30)
+      .order("id")
+      .abortSignal(AbortSignal.timeout(8_000))
+      .retry(false)
+    detailInFlight.set(cacheKey, request)
+`,
+  )
+  assert.notEqual(injectedSource, checklistSource)
+  const addedViolation = await verifyFixture({
+    file,
+    baselineSource,
+    source: injectedSource,
+    debtManifest,
+  })
+  assert.deepEqual(addedViolation.violations, [{
+    file,
+    symbol: "loadCaseDetail",
+    surface: "tasks",
+    reason: "list_select_star",
+  }])
+})
+
 test("receiver-aware query analysis accepts Supabase aliases, optional calls, multiline reassignment, and nested projections", async () => {
   const result = await verifyFixture({
     source: `async function load(client) {

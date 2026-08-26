@@ -37,6 +37,34 @@ with expected_functions(
       true,
       false,
       true
+    ),
+    (
+      'checklist_public',
+      'public.set_registration_admission_checklist_item_v1(uuid,text,boolean,text)'::text,
+      false,
+      true,
+      true
+    ),
+    (
+      'checklist_private',
+      'dashboard_private.set_registration_admission_checklist_item_v1_impl(uuid,text,boolean,text)'::text,
+      true,
+      true,
+      true
+    ),
+    (
+      'enrollment_finalizer_private',
+      'dashboard_private.finalize_registration_track_enrollments_v1(uuid,uuid)'::text,
+      true,
+      false,
+      true
+    ),
+    (
+      'roster_projection_private',
+      'dashboard_private.apply_student_class_roster_mode(uuid,uuid,text,text,uuid,text,uuid)'::text,
+      true,
+      false,
+      true
     )
 ),
 functions as (
@@ -57,7 +85,7 @@ functions as (
     on procedure.oid = pg_catalog.to_regprocedure(expected_functions.function_name)
 )
 select (
-  (select count(*) from functions where oid is not null) = 4
+  (select count(*) from functions where oid is not null) = 8
   and not exists (
     select 1
     from functions
@@ -74,6 +102,8 @@ select (
       or (function_key = 'workflow_private' and (
         definition not like '%registration_workflow_status_refresh_required%'
         or definition not like '%23514%'
+        or definition not like '%dashboard_private.finalize_registration_track_enrollments_v1%'
+        or definition not like '%enrollmentFinalization%'
       ))
       or (function_key = 'admission_batch_private' and (
         definition like '%registration_admission_notice_required%'
@@ -95,6 +125,40 @@ select (
         or definition not like '%enrollment.status = ''planned''%'
         or definition not like '%pg_catalog.pg_advisory_xact_lock%'
         or definition not like '%' || 'for ' || 'up' || 'date of enrollment;' || '%'
+      ))
+      or (function_key = 'checklist_public' and (
+        definition not like '%dashboard_private.set_registration_admission_checklist_item_v1_impl%'
+      ))
+      or (function_key = 'checklist_private' and (
+        definition not like '%registration_admission_checklist_item_invalid%'
+        or definition not like '%applicationSent%'
+        or definition not like '%makeeduRegistered%'
+        or definition not like '%invoiceSent%'
+        or definition not like '%paymentConfirmed%'
+        or definition not like '%registrationCompleted%'
+        or definition not like '%idempotency_key_reused%'
+        or definition not like '%pg_catalog.pg_advisory_xact_lock%'
+        or definition not like '%pg_catalog.jsonb_set%'
+        or definition like '%recompute_registration_parent%'
+        or definition like '%transition_registration_track_status%'
+        or definition ~* ('up' || 'date[[:space:]]+public[.]ops_tasks')
+        or definition ~* ('up' || 'date[[:space:]]+public[.]ops_registration_subject_tracks')
+      ))
+      or (function_key = 'enrollment_finalizer_private' and (
+        definition not like '%registration_enrollment_pipeline_invalid%'
+        or definition not like '%registration_enrollment_pipeline_invalid'' using errcode = ''23514''%'
+        or definition not like '%dashboard_private.apply_student_class_roster_mode%'
+        or definition not like '%status = ''enrolled''%'
+        or definition not like '%roster_active = true%'
+        or definition not like '%registration_roster_projection_invalid%'
+        or definition not like '%v_unbatched_count%'
+        or definition not like '%v_batch_count > 1 or (v_batch_count = 1 and v_unbatched_count > 0)%'
+        or definition not like '%Status-driven registration owns a dedicated compatibility batch%'
+        or definition like '%batch.status not in (''completed'', ''canceled'')%'
+        or definition like '%admission_checklist%'
+      ))
+      or (function_key = 'roster_projection_private' and (
+        definition not like '%23514%'
       ))
   )
   and not exists (
@@ -137,6 +201,16 @@ select (
       values ('public'::name), ('anon'::name), ('service_role'::name)
     ) denied_role(role_name)
     where pg_catalog.has_function_privilege(denied_role.role_name, oid, 'EXECUTE')
+  )
+  and exists (
+    select 1
+    from pg_catalog.pg_trigger trigger
+    where trigger.tgrelid = 'public.ops_registration_details'::pg_catalog.regclass
+      and trigger.tgname = 'prevent_registration_compatibility_override'
+      and not trigger.tgisinternal
+      and pg_catalog.pg_get_triggerdef(trigger.oid) like
+        '%' || 'BEFORE ' || 'UP' || 'DATE OF pipeline_status, counselor, makeedu_registered, makeedu_invoice_sent, payment_checked%'
+      and pg_catalog.pg_get_triggerdef(trigger.oid) not like '%admission_checklist%'
   )
 ) as contract_ok;
 rollback;

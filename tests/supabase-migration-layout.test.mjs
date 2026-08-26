@@ -30,7 +30,7 @@ const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db
 const fixtureRoots = []
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
-  "658861d85d0d8b37874696d50e3f040a7b1fdd89441093cbec36bd87e85e4de5"
+  "b2edd9e8b7f049b2f9014b1054144db40cf9884e0bea7758fb53df021ce1f15b"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION =
   "20260824182043_registration_admission_order_independence.sql"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION_SHA256 =
@@ -2165,6 +2165,28 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
     ["23514 predicate", "definition not like '%23514%'"],
     ["admission batch signature", "dashboard_private.start_registration_admission_batch_impl(uuid,uuid[],uuid[],text)"],
     ["common update signature", "dashboard_private.update_registration_case_common_impl(uuid,text,text,text,text,text,text,timestamp with time zone,text,text,integer,text)"],
+    ["checklist public signature", "public.set_registration_admission_checklist_item_v1(uuid,text,boolean,text)"],
+    ["checklist private signature", "dashboard_private.set_registration_admission_checklist_item_v1_impl(uuid,text,boolean,text)"],
+    ["enrollment finalizer signature", "dashboard_private.finalize_registration_track_enrollments_v1(uuid,uuid)"],
+    ["roster projection signature", "dashboard_private.apply_student_class_roster_mode(uuid,uuid,text,text,uuid,text,uuid)"],
+    ["checklist delegation", "dashboard_private.set_registration_admission_checklist_item_v1_impl%"],
+    ["workflow finalizer delegation", "dashboard_private.finalize_registration_track_enrollments_v1%"],
+    ["workflow finalization receipt", "enrollmentFinalization%"],
+    ["checklist item validation", "registration_admission_checklist_item_invalid%"],
+    ["checklist single key write", "pg_catalog.jsonb_set%"],
+    ["checklist parent isolation", "definition like '%recompute_registration_parent%'"],
+    ["checklist track isolation", "definition like '%transition_registration_track_status%'"],
+    ["checklist task write isolation", "'up' || 'date[[:space:]]+public[.]ops_tasks'"],
+    ["enrollment pipeline guard", "registration_enrollment_pipeline_invalid%"],
+    ["enrollment pipeline SQLSTATE", "registration_enrollment_pipeline_invalid'' using errcode = ''23514''%"],
+    ["roster projection delegation", "dashboard_private.apply_student_class_roster_mode%"],
+    ["enrolled status projection", "status = ''enrolled''%"],
+    ["active roster projection", "roster_active = true%"],
+    ["roster invariant", "registration_roster_projection_invalid%"],
+    ["unbatched membership count", "definition not like '%v_unbatched_count%'"],
+    ["mixed membership rejection", "v_batch_count > 1 or (v_batch_count = 1 and v_unbatched_count > 0)%"],
+    ["dedicated compatibility batch", "Status-driven registration owns a dedicated compatibility batch%"],
+    ["legacy batch fallback rejected", "definition like '%batch.status not in (''completed'', ''canceled'')%'"],
     ["admission notice gate removed", "definition like '%registration_admission_notice_required%'"],
     ["admission notice reference removed", "definition like '%v_detail.admission_notice_sent%'"],
     ["legacy pipeline gate removed", "definition like '%registration_invalid_source_state%'"],
@@ -2179,6 +2201,8 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
     ["identity correction nonretryable conflict", "definition not like '%registration_student_identity_correction_required'' using errcode = ''23514''%'"],
     ["enrollment lock", "'up' || 'date of enrollment;'"],
     ["function-specific ACL", "authenticated_execute_required::integer"],
+    ["compatibility trigger scope", "prevent_registration_compatibility_override"],
+    ["compatibility trigger columns", "'BEFORE ' || 'UP' || 'DATE OF pipeline_status, counselor, makeedu_registered, makeedu_invoice_sent, payment_checked%'"],
   ]
 
   for (const [name, predicate] of requiredPredicates) {

@@ -4019,3 +4019,111 @@ test("admission order independence patches the final functions without weakening
     /set admission_notice_sent = false[\s\S]*?select public\.start_registration_admission_batch\(/,
   )
 })
+
+test("admission checklist is independent while registered status atomically finalizes the canonical roster", async () => {
+  const [migration, pgTap] = await Promise.all([
+    readMigration("registration_admission_checklist_roster_consistency"),
+    readFile(new URL("registration_admission_checklist_roster_consistency_test.sql", supabaseTestsUrl), "utf8"),
+  ])
+
+  assert.match(migration.trim(), /^begin;/i)
+  assert.match(migration.trim(), /commit;$/i)
+  assert.match(migration, /add column if not exists admission_checklist jsonb not null/i)
+  for (const key of [
+    "applicationSent",
+    "makeeduRegistered",
+    "invoiceSent",
+    "paymentConfirmed",
+    "registrationCompleted",
+  ]) assert.match(migration, new RegExp(key))
+  assert.match(migration, /create or replace function public\.set_registration_admission_checklist_item_v1/i)
+  assert.match(migration, /create or replace function dashboard_private\.set_registration_admission_checklist_item_v1_impl/i)
+  assert.match(migration, /security invoker[\s\S]*?set search_path = ''/i)
+  assert.match(migration, /security definer[\s\S]*?set search_path = ''/i)
+  assert.match(migration, /mutation_type = 'set_admission_checklist_item'/)
+  assert.match(migration, /idempotency_key_reused[\s\S]*?22023/)
+  assert.doesNotMatch(migration, /set_admission_checklist_item[\s\S]{0,4000}(?:ops_registration_admission_batches|ops_registration_messages|notification_deliveries)/i)
+  const checklistImpl = readFunctionBlock(
+    migration,
+    "dashboard_private",
+    "set_registration_admission_checklist_item_v1_impl",
+  )
+  assert.doesNotMatch(checklistImpl, /recompute_registration_parent|transition_registration_track_status/)
+  assert.match(
+    migration,
+    /create trigger prevent_registration_compatibility_override\s+before update of\s+pipeline_status,[\s\S]*?timetable_roster_updated\s+on public\.ops_registration_details/i,
+  )
+
+  assert.match(migration, /create or replace function dashboard_private\.finalize_registration_track_enrollments_v1/i)
+  const finalizer = readFunctionBlock(
+    migration,
+    "dashboard_private",
+    "finalize_registration_track_enrollments_v1",
+  )
+  assert.match(migration, /if v_workflow_status = 'registered'/)
+  assert.match(finalizer, /apply_student_class_roster_mode/)
+  assert.match(finalizer, /status = 'enrolled'/)
+  assert.match(finalizer, /v_batch_count > 1 or \(v_batch_count = 1 and v_unbatched_count > 0\)/)
+  assert.match(finalizer, /Status-driven registration owns a dedicated compatibility batch/)
+  assert.match(finalizer, /revision_number,[\s\S]*?status[\s\S]*?'completed'/)
+  assert.doesNotMatch(
+    finalizer,
+    /where batch\.task_id = v_task\.id[\s\S]{0,200}?batch\.status not in \('completed', 'canceled'\)/,
+  )
+  assert.match(migration, /transition_registration_track_status\([\s\S]*?'registered'/)
+  assert.match(migration, /registration_workflow_registered_backfill/)
+  assert.match(migration, /when data_exception\s+or integrity_constraint_violation\s+or no_data_found/)
+  assert.match(migration, /registration_workflow_registered_backfill_skipped/)
+  assert.match(migration, /active_enrollment\.status <> 'planned'/)
+  assert.match(migration, /count\(distinct planned_enrollment\.admission_batch_id\)/)
+  assert.doesNotMatch(migration, /registration_workflow_registered_backfill[\s\S]*?when others/)
+  assert.match(migration, /enrollment\.status = 'enrolled' and enrollment\.roster_active/)
+  assert.doesNotMatch(migration, /solapi|google_chat|http_post|net\.http|send_web_push/i)
+
+  assert.match(pgTap, /select\s+plan\(/i)
+  assert.match(pgTap, /registrationCompleted/)
+  assert.match(pgTap, /workflow_status = 'registered'/)
+  assert.match(pgTap, /status = 'enrolled'/)
+  assert.match(pgTap, /student_ids/)
+  assert.match(pgTap, /class_ids/)
+  assert.match(pgTap, /admission-register-isolated-unbatched-subject/)
+  assert.match(pgTap, /admission-register-mixed-batch-membership/)
+  assert.match(pgTap, /admission-checklist-teacher-denied/)
+  assert.match(pgTap, /23514/)
+  assert.doesNotMatch(pgTap, /solapi|google_chat|http_post|net\.http|send_web_push/i)
+  assert.match(pgTap, /select\s+\*\s+from\s+finish\(\);\s*rollback;/i)
+})
+
+test("admission checklist constraints validate only after their install transaction commits", async () => {
+  const installMigration = await readMigration(
+    "registration_admission_checklist_roster_consistency",
+  )
+  const validationMigration = await readMigration(
+    "registration_admission_checklist_constraints_validate",
+  )
+  const constraintNames = [
+    "ops_registration_details_admission_checklist_exact_v1",
+    "ops_registration_admission_batches_invoice_evidence_v2",
+    "ops_registration_admission_batches_payment_evidence_v2",
+  ]
+
+  assert.match(validationMigration.trim(), /^begin;/i)
+  assert.match(validationMigration.trim(), /commit;$/i)
+  assert.equal((validationMigration.match(/^begin;$/gim) ?? []).length, 1)
+  assert.equal((validationMigration.match(/^commit;$/gim) ?? []).length, 1)
+
+  for (const constraintName of constraintNames) {
+    assert.match(
+      installMigration,
+      new RegExp(`add constraint ${constraintName}[\\s\\S]*?not valid;`, "i"),
+    )
+    assert.doesNotMatch(
+      installMigration,
+      new RegExp(`validate constraint ${constraintName}`, "i"),
+    )
+    assert.match(
+      validationMigration,
+      new RegExp(`validate constraint ${constraintName};`, "i"),
+    )
+  }
+})

@@ -53,7 +53,6 @@ import {
 import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
 import type {
   RegistrationCustomerMessageClient,
-  RegistrationCustomerMessageKind,
   RegistrationCustomerMessageSingleSourceKind,
   RegistrationCustomerMessagePreviewResponse,
   RegistrationCustomerMessageReadiness,
@@ -85,6 +84,7 @@ export const REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS = [
   "saveRegistrationCaseInquiry",
   "updateRegistrationCaseCommon",
   "setRegistrationWorkflowStatus",
+  "setRegistrationAdmissionChecklistItem",
   "routeRegistrationInquiry",
   "assignRegistrationTrackDirector",
   "saveRegistrationSharedAppointment",
@@ -1860,6 +1860,7 @@ function caseDetail(input: {
   enrollments?: OpsRegistrationEnrollment[]
   events?: OpsRegistrationTrackEvent[]
   migrationLegacy?: OpsRegistrationCaseDetail["migrationLegacy"]
+  admissionChecklist?: OpsRegistrationCaseDetail["admissionChecklist"]
 }): OpsRegistrationCaseDetail {
   return {
     task: input.task,
@@ -1869,6 +1870,13 @@ function caseDetail(input: {
     admissionApplicationMessageClaimActive: false,
     admissionApplicationMessageUpdatedAt: null,
     admissionApplicationAccepted: false,
+    admissionChecklist: input.admissionChecklist || {
+      applicationSent: false,
+      makeeduRegistered: false,
+      invoiceSent: false,
+      paymentConfirmed: false,
+      registrationCompleted: false,
+    },
     comments: [],
     attachments: [],
     tracks: input.tracks,
@@ -3567,6 +3575,70 @@ export function reduceRegistrationSubjectTrackFixture(
       if (Number(payload.expectedWorkflowRevision) !== selected.workflowRevision) {
         throw new Error("registration_workflow_status_refresh_required")
       }
+      let enrollmentFinalization: Record<string, unknown> | null = null
+      if (nextStatus === "registered") {
+        if (!["enrollment_processing", "registered"].includes(selected.status)) {
+          throw new Error("registration_enrollment_pipeline_invalid")
+        }
+        const selectedEnrollments = detail.enrollments.filter((item) => (
+          item.trackId === selected.id
+          && (item.status === "planned" || (item.status === "enrolled" && item.rosterActive))
+        ))
+        if (selectedEnrollments.length === 0) throw new Error("registration_enrollment_required")
+        if (selectedEnrollments.some((item) => !item.classId || !item.classStartDate || !item.classStartSessionKey || !item.classStartSession)) {
+          throw new Error("registration_enrollment_schedule_incomplete")
+        }
+
+        const studentId = detail.task.studentId || `fixture-student-${detail.task.id}`
+        detail.task.studentId = studentId
+        const plannedEnrollments = selectedEnrollments.filter((item) => item.status === "planned")
+        const plannedBatchIds = Array.from(new Set(
+          plannedEnrollments.map((item) => item.admissionBatchId).filter((item): item is string => Boolean(item)),
+        ))
+        const unbatchedCount = plannedEnrollments.filter((item) => !item.admissionBatchId).length
+        if (plannedBatchIds.length > 1 || (plannedBatchIds.length === 1 && unbatchedCount > 0)) {
+          throw new Error("registration_admission_batch_membership_invariant")
+        }
+        let targetBatch = plannedBatchIds.length === 1
+          ? detail.admissionBatches.find((item) => item.id === plannedBatchIds[0]) || null
+          : null
+        if (plannedBatchIds.length === 1 && (!targetBatch || targetBatch.status === "canceled")) {
+          throw new Error("registration_admission_batch_membership_invariant")
+        }
+        if (plannedEnrollments.length > 0 && plannedBatchIds.length === 0) {
+          targetBatch = batch({
+            id: `fixture-batch-workflow-${detail.task.id}-${detail.admissionBatches.length + 1}`,
+            taskId: detail.task.id,
+            revisionNumber: Math.max(0, ...detail.admissionBatches.map((item) => item.revisionNumber)) + 1,
+            status: "completed",
+          })
+          detail.admissionBatches.push(targetBatch)
+        }
+        for (const item of plannedEnrollments) {
+          item.studentId = studentId
+          item.admissionBatchId ||= targetBatch?.id || null
+          item.status = "enrolled"
+          item.rosterActive = true
+          item.updatedAt = FIXTURE_NOW
+        }
+        if (
+          targetBatch
+          && targetBatch.status !== "canceled"
+          && !detail.enrollments.some((item) => item.admissionBatchId === targetBatch.id && item.status === "planned")
+        ) {
+          targetBatch.status = "completed"
+          targetBatch.updatedAt = FIXTURE_NOW
+        }
+        selected.status = "registered"
+        selected.stageEnteredAt = FIXTURE_NOW
+        enrollmentFinalization = {
+          trackId: selected.id,
+          studentId,
+          batchId: targetBatch?.id || null,
+          enrollmentIds: selectedEnrollments.map((item) => item.id),
+          changed: plannedEnrollments.length > 0,
+        }
+      }
       if (selected.workflowStatus !== nextStatus) {
         selected.workflowStatus = nextStatus as OpsRegistrationWorkflowStatus
         selected.workflowRevision += 1
@@ -3578,7 +3650,22 @@ export function reduceRegistrationSubjectTrackFixture(
         workflowStatus: selected.workflowStatus,
         workflowRevision: selected.workflowRevision,
         workflowStatusEnteredAt: selected.workflowStatusEnteredAt,
+        enrollmentFinalization,
       }
+      break
+    }
+    case "setRegistrationAdmissionChecklistItem": {
+      const taskId = asText(payload, "taskId")
+      const detail = requireCase(state.caseDetails[taskId], "case_not_found")
+      const item = asText(payload, "item") as keyof OpsRegistrationCaseDetail["admissionChecklist"]
+      if (!Object.prototype.hasOwnProperty.call(detail.admissionChecklist, item)) {
+        throw new Error("registration_admission_checklist_item_invalid")
+      }
+      detail.admissionChecklist = {
+        ...detail.admissionChecklist,
+        [item]: Boolean(payload.checked),
+      }
+      result = { taskId, checklist: clone(detail.admissionChecklist) }
       break
     }
     case "routeRegistrationInquiry": {

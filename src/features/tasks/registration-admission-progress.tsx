@@ -1,72 +1,45 @@
 "use client"
 
-import type { ReactNode } from "react"
-import { Check } from "lucide-react"
+import type { RegistrationAdmissionChecklistItem, RegistrationAdmissionChecklistState } from "./registration-track-service"
 
-export type RegistrationAdmissionProgressKey = "admissionNotice" | "makeedu" | "invoice" | "payment" | "complete"
-
-export type RegistrationAdmissionProgressStep<TKey extends RegistrationAdmissionProgressKey = RegistrationAdmissionProgressKey> = {
-  key: TKey
+export const REGISTRATION_ADMISSION_CHECKLIST_ITEMS: ReadonlyArray<{
+  key: RegistrationAdmissionChecklistItem
   label: string
-  complete: boolean
-  locked?: boolean
-  optional?: boolean
-  content?: ReactNode
-}
-
-export type RegistrationAdmissionProgressSteps = readonly [
-  RegistrationAdmissionProgressStep<"admissionNotice">,
-  RegistrationAdmissionProgressStep<"makeedu">,
-  RegistrationAdmissionProgressStep<"invoice">,
-  RegistrationAdmissionProgressStep<"payment">,
-  RegistrationAdmissionProgressStep<"complete">,
+}> = [
+  { key: "applicationSent", label: "입학신청서 발송" },
+  { key: "makeeduRegistered", label: "메이크에듀 등록(수업, 교재)" },
+  { key: "invoiceSent", label: "청구서 발송" },
+  { key: "paymentConfirmed", label: "수납 완료 확인" },
+  { key: "registrationCompleted", label: "등록 완료" },
 ]
 
-export function RegistrationAdmissionProgress({
-  steps,
+export function RegistrationAdmissionChecklist({
+  checklist,
+  editable,
+  savingItems,
+  onCheckedChange,
 }: {
-  steps: RegistrationAdmissionProgressSteps
+  checklist: RegistrationAdmissionChecklistState
+  editable: boolean
+  savingItems: ReadonlySet<RegistrationAdmissionChecklistItem>
+  onCheckedChange: (item: RegistrationAdmissionChecklistItem, checked: boolean) => void
 }) {
-  const activeStepIndex = steps.findIndex((step) => !step.complete && !step.locked && !step.optional)
-
   return (
-    <ol aria-label="입학 처리 항목" className="divide-y rounded-md border bg-background">
-      {steps.map((step, index) => {
-        const state = step.complete ? "complete" : step.optional ? "optional" : index === activeStepIndex ? "active" : "pending"
-        const statusLabel = step.complete ? "완료" : state === "active" ? "진행" : state === "optional" ? "선택" : "대기"
-        return (
-          <li
-            key={step.key}
-            aria-label={`${step.label}: ${statusLabel}`}
-            aria-current={state === "active" ? "step" : undefined}
-            data-registration-admission-locked={step.locked ? "true" : undefined}
-            data-registration-admission-optional={step.optional ? "true" : undefined}
-            data-registration-admission-state={state}
-            className={`grid min-w-0 gap-3 p-3 transition-colors sm:grid-cols-[13rem_minmax(0,1fr)] sm:items-center ${
-              state === "active" ? "bg-primary/[0.04]" : step.locked ? "bg-muted/20" : ""
-            }`}
-          >
-            <div className="flex min-w-0 items-center gap-2">
-              <span className={`flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold ${
-                step.complete
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : state === "active"
-                    ? "border-primary text-primary"
-                    : "border-muted-foreground/30 bg-muted/40 text-muted-foreground"
-              }`} aria-hidden="true">
-                {step.complete ? <Check className="size-4" /> : index + 1}
-              </span>
-              <span className="grid min-w-0 gap-0.5">
-                <span className="text-sm font-medium">{step.label}</span>
-                <span className={`text-xs font-medium ${state === "active" ? "text-primary" : "text-muted-foreground"}`}>{statusLabel}</span>
-              </span>
-            </div>
-            <div id={`registration-admission-panel-${step.key}`} className="grid min-w-0 gap-2">
-              {step.content}
-            </div>
-          </li>
-        )
-      })}
-    </ol>
+    <ul aria-label="입학 처리 체크리스트" className="divide-y rounded-md border bg-background">
+      {REGISTRATION_ADMISSION_CHECKLIST_ITEMS.map((item) => (
+        <li key={item.key} className="min-w-0">
+          <label className="flex min-h-12 cursor-pointer items-center gap-3 px-3 py-2 text-sm font-medium">
+            <input
+              type="checkbox"
+              checked={checklist[item.key]}
+              disabled={!editable || savingItems.has(item.key)}
+              onChange={(event) => onCheckedChange(item.key, event.target.checked)}
+              className="size-4 shrink-0 accent-primary"
+            />
+            <span className="min-w-0 break-words">{item.label}</span>
+          </label>
+        </li>
+      ))}
+    </ul>
   )
 }
