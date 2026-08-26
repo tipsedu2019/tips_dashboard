@@ -139,6 +139,11 @@
       "fileName": "20260825170546_registration_admission_checklist_constraints_validate.sql",
       "status": "final",
       "sha256": "6baac885c5dc73c12e7b417ac3dc6864ed65cdbaac2d14e8effd854ee0e078fc"
+    },
+    {
+      "fileName": "20260826101200_registration_legacy_first_consultation.sql",
+      "status": "final",
+      "sha256": "3637d62a4a52914e4c0e82f2ee38454f11dd0169ed8d1ec9c3b7dab8aabb7ccc"
     }
   ]
 }
