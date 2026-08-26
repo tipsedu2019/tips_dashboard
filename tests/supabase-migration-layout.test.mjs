@@ -30,7 +30,7 @@ const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db
 const fixtureRoots = []
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
-  "b2edd9e8b7f049b2f9014b1054144db40cf9884e0bea7758fb53df021ce1f15b"
+  "159fcc3eb0c5b31d640ac9f4b9e16abd2997c3a5e53c1eb90a0eb482e1109e5f"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION =
   "20260824182043_registration_admission_order_independence.sql"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION_SHA256 =
@@ -2169,6 +2169,7 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
     ["checklist private signature", "dashboard_private.set_registration_admission_checklist_item_v1_impl(uuid,text,boolean,text)"],
     ["enrollment finalizer signature", "dashboard_private.finalize_registration_track_enrollments_v1(uuid,uuid)"],
     ["roster projection signature", "dashboard_private.apply_student_class_roster_mode(uuid,uuid,text,text,uuid,text,uuid)"],
+    ["first consultation signature", "dashboard_private.create_registration_first_consultation_task_v1()"],
     ["checklist delegation", "dashboard_private.set_registration_admission_checklist_item_v1_impl%"],
     ["workflow finalizer delegation", "dashboard_private.finalize_registration_track_enrollments_v1%"],
     ["workflow finalization receipt", "enrollmentFinalization%"],
@@ -2183,6 +2184,9 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
     ["enrolled status projection", "status = ''enrolled''%"],
     ["active roster projection", "roster_active = true%"],
     ["roster invariant", "registration_roster_projection_invalid%"],
+    ["legacy consultation resolver", "registration_observation_effective_legacy_slots_v1%"],
+    ["legacy consultation mode", "schedule_storage_mode in (''legacy'', ''shadow'')%"],
+    ["legacy consultation failure", "registration_first_consultation_assignee_required%"],
     ["unbatched membership count", "definition not like '%v_unbatched_count%'"],
     ["mixed membership rejection", "v_batch_count > 1 or (v_batch_count = 1 and v_unbatched_count > 0)%"],
     ["dedicated compatibility batch", "Status-driven registration owns a dedicated compatibility batch%"],
@@ -2203,6 +2207,7 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
     ["function-specific ACL", "authenticated_execute_required::integer"],
     ["compatibility trigger scope", "prevent_registration_compatibility_override"],
     ["compatibility trigger columns", "'BEFORE ' || 'UP' || 'DATE OF pipeline_status, counselor, makeedu_registered, makeedu_invoice_sent, payment_checked%'"],
+    ["nullable legacy lesson authority", "and not attribute.attnotnull"],
   ]
 
   for (const [name, predicate] of requiredPredicates) {

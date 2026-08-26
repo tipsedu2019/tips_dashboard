@@ -65,6 +65,13 @@ with expected_functions(
       true,
       false,
       true
+    ),
+    (
+      'first_consultation_private',
+      'dashboard_private.create_registration_first_consultation_task_v1()'::text,
+      true,
+      false,
+      true
     )
 ),
 functions as (
@@ -85,7 +92,7 @@ functions as (
     on procedure.oid = pg_catalog.to_regprocedure(expected_functions.function_name)
 )
 select (
-  (select count(*) from functions where oid is not null) = 8
+  (select count(*) from functions where oid is not null) = 9
   and not exists (
     select 1
     from functions
@@ -160,6 +167,11 @@ select (
       or (function_key = 'roster_projection_private' and (
         definition not like '%23514%'
       ))
+      or (function_key = 'first_consultation_private' and (
+        definition not like '%registration_observation_effective_legacy_slots_v1%'
+        or definition not like '%schedule_storage_mode in (''legacy'', ''shadow'')%'
+        or definition not like '%registration_first_consultation_assignee_required%'
+      ))
   )
   and not exists (
     select 1
@@ -211,6 +223,15 @@ select (
       and pg_catalog.pg_get_triggerdef(trigger.oid) like
         '%' || 'BEFORE ' || 'UP' || 'DATE OF pipeline_status, counselor, makeedu_registered, makeedu_invoice_sent, payment_checked%'
       and pg_catalog.pg_get_triggerdef(trigger.oid) not like '%admission_checklist%'
+  )
+  and exists (
+    select 1
+    from pg_catalog.pg_attribute attribute
+    where attribute.attrelid =
+        'dashboard_private.registration_first_consultation_task_links'::pg_catalog.regclass
+      and attribute.attname = 'class_lesson_session_id'
+      and not attribute.attisdropped
+      and not attribute.attnotnull
   )
 ) as contract_ok;
 rollback;

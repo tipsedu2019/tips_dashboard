@@ -1,6 +1,6 @@
 begin;
 
-select plan(28);
+select plan(29);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
@@ -221,7 +221,7 @@ values
     '수학',
     '중3',
     '입학 체크 교사',
-    '수 18:00',
+    '수 18:00-20:00',
     '본관',
     11,
     100000,
@@ -435,7 +435,7 @@ values
     '2026-09-02',
     '2026-09-02:1',
     '1회차',
-    '00000000-0000-4000-8000-00000000b306',
+    null,
     'planned',
     false,
     false,
@@ -714,6 +714,22 @@ select ok(
     from registration_isolated_batch_result result
   ),
   'an unbatched subject receives its own terminal compatibility batch'
+);
+
+select ok(
+  exists (
+    select 1
+    from dashboard_private.registration_first_consultation_task_links link
+    join public.ops_tasks task on task.id = link.task_id
+    where link.enrollment_id = '00000000-0000-4000-8000-00000000b406'
+      and link.class_lesson_session_id is null
+      and task.assignee_id = '00000000-0000-4000-8000-00000000b102'
+      and task.student_id = '00000000-0000-4000-8000-00000000b202'
+      and task.class_id = '00000000-0000-4000-8000-00000000b305'
+      and task.start_at = '2026-09-02 20:00+09'::timestamptz
+      and task.due_at = '2026-09-03 20:00+09'::timestamptz
+  ),
+  'a legacy enrollment creates one first-consultation task from its effective class slot'
 );
 
 select ok(
