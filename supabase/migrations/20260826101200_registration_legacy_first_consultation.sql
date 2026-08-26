@@ -1,3 +1,4 @@
+-- squawk-ignore-file ban-drop-not-null
 begin;
 
 set local lock_timeout = '5s';
@@ -64,6 +65,8 @@ begin
 end;
 $registration_legacy_first_consultation_dependencies$;
 
+-- Legacy and shadow schedules intentionally have no normalized lesson authority;
+-- the nullable FK remains authoritative for normalized schedules.
 alter table dashboard_private.registration_first_consultation_task_links
   alter column class_lesson_session_id drop not null;
 
