@@ -224,6 +224,26 @@ select (
         '%' || 'BEFORE ' || 'UP' || 'DATE OF pipeline_status, counselor, makeedu_registered, makeedu_invoice_sent, payment_checked%'
       and pg_catalog.pg_get_triggerdef(trigger.oid) not like '%admission_checklist%'
   )
+  and (
+    select pg_catalog.count(*) = 1
+    from pg_catalog.pg_trigger trigger
+    join pg_catalog.pg_attribute status_attribute
+      on status_attribute.attrelid = trigger.tgrelid
+      and status_attribute.attname = 'status'
+      and not status_attribute.attisdropped
+    where trigger.tgrelid =
+        'public.ops_registration_enrollments'::pg_catalog.regclass
+      and trigger.tgname = 'create_registration_first_consultation_task_v1'
+      and not trigger.tgisinternal
+      and trigger.tgenabled = 'O'
+      and trigger.tgtype = 17
+      and pg_catalog.cardinality(trigger.tgattr::smallint[]) = 1
+      and status_attribute.attnum = any(trigger.tgattr::smallint[])
+      and trigger.tgqual is null
+      and trigger.tgnargs = 0
+      and trigger.tgfoid =
+        'dashboard_private.create_registration_first_consultation_task_v1()'::pg_catalog.regprocedure
+  )
   and exists (
     select 1
     from pg_catalog.pg_attribute attribute

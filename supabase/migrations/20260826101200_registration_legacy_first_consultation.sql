@@ -6,6 +6,7 @@ set local statement_timeout = '120s';
 do $registration_legacy_first_consultation_dependencies$
 declare
   v_definition text;
+  v_trigger_count bigint;
 begin
   if pg_catalog.to_regprocedure(
     'dashboard_private.create_registration_first_consultation_task_v1()'
@@ -35,6 +36,29 @@ begin
     ) = 0
   then
     raise exception 'registration_legacy_first_consultation_dependency_drift'
+      using errcode = '55000';
+  end if;
+
+  select pg_catalog.count(*)
+  into v_trigger_count
+  from pg_catalog.pg_trigger trigger
+  join pg_catalog.pg_attribute status_attribute
+    on status_attribute.attrelid = trigger.tgrelid
+    and status_attribute.attname = 'status'
+    and not status_attribute.attisdropped
+  where trigger.tgrelid = 'public.ops_registration_enrollments'::pg_catalog.regclass
+    and trigger.tgname = 'create_registration_first_consultation_task_v1'
+    and not trigger.tgisinternal
+    and trigger.tgenabled = 'O'
+    and trigger.tgtype = 17
+    and pg_catalog.cardinality(trigger.tgattr::smallint[]) = 1
+    and status_attribute.attnum = any(trigger.tgattr::smallint[])
+    and trigger.tgqual is null
+    and trigger.tgnargs = 0
+    and trigger.tgfoid =
+      'dashboard_private.create_registration_first_consultation_task_v1()'::pg_catalog.regprocedure;
+  if v_trigger_count <> 1 then
+    raise exception 'registration_legacy_first_consultation_trigger_drift'
       using errcode = '55000';
   end if;
 end;
@@ -143,6 +167,45 @@ begin
   v_first_lesson_end := (
     new.class_start_date + v_first_lesson_end_time
   ) at time zone 'Asia/Seoul';
+
+  select link.task_id
+  into v_task_id
+  from dashboard_private.registration_first_consultation_task_links link
+  where link.enrollment_id = new.id
+  for update;
+  if found then
+    update dashboard_private.registration_first_consultation_task_links link
+    set class_lesson_session_id = new.class_start_lesson_session_id
+    where link.enrollment_id = new.id;
+
+    update public.ops_tasks task
+    set
+      title = '신규 등록 학부모 첫 상담 · '
+        || coalesce(v_parent.student_name, '학생')
+        || ' · '
+        || v_track.subject,
+      status = case
+        when task.status = 'canceled' then 'requested'
+        else task.status
+      end,
+      assignee_id = v_teacher_profile_id,
+      student_id = new.student_id,
+      class_id = new.class_id,
+      student_name = v_parent.student_name,
+      class_name = v_class.name,
+      subject = v_track.subject,
+      start_at = v_first_lesson_end,
+      due_at = v_first_lesson_end + interval '24 hours',
+      completed_at = case
+        when task.status = 'canceled' then null
+        else task.completed_at
+      end,
+      updated_at = pg_catalog.clock_timestamp()
+    where task.id = v_task_id
+      and task.status <> 'done';
+    return new;
+  end if;
+
   insert into public.ops_tasks(
     title,
     type,
@@ -186,7 +249,7 @@ begin
     new.id,
     v_task_id,
     new.class_start_lesson_session_id
-  ) on conflict (enrollment_id) do nothing;
+  );
   return new;
 end;
 $$;

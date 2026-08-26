@@ -52,12 +52,24 @@ test("enrollment creates an ordinary first-parent-consultation task for the firs
 
 test("legacy enrollment resolves one effective weekday slot without inventing a lesson session", async () => {
   const sql = await readFile(legacyFinalizationMigrationUrl, "utf8")
+  assert.match(sql, /trigger\.tgrelid = 'public\.ops_registration_enrollments'/i)
+  assert.match(sql, /trigger\.tgname = 'create_registration_first_consultation_task_v1'/i)
+  assert.match(sql, /trigger\.tgenabled = 'O'/i)
+  assert.match(sql, /trigger\.tgtype = 17/i)
+  assert.match(sql, /cardinality\(trigger\.tgattr::smallint\[\]\) = 1/i)
+  assert.match(sql, /status_attribute\.attnum = any\(trigger\.tgattr::smallint\[\]\)/i)
+  assert.match(sql, /trigger\.tgqual is null/i)
+  assert.match(sql, /trigger\.tgnargs = 0/i)
+  assert.match(sql, /trigger\.tgfoid =[\s\S]*dashboard_private\.create_registration_first_consultation_task_v1/i)
   assert.match(sql, /alter column class_lesson_session_id drop not null/i)
   assert.match(sql, /registration_observation_effective_legacy_slots_v1\([\s\S]*new\.class_id/i)
   assert.match(sql, /v_legacy_slot_count <> 1/i)
   assert.match(sql, /profiles\.teacher_catalog_id = v_teacher_catalog_id/i)
   assert.match(sql, /new\.class_start_date \+ v_first_lesson_end_time/i)
-  assert.match(sql, /new\.class_start_lesson_session_id[\s\S]*on conflict \(enrollment_id\) do nothing/i)
+  assert.match(sql, /where link\.enrollment_id = new\.id[\s\S]*for update/i)
+  assert.match(sql, /task\.status = 'canceled'[\s\S]*'requested'/i)
+  assert.match(sql, /new\.class_start_lesson_session_id[\s\S]*return new;[\s\S]*insert into public\.ops_tasks/i)
+  assert.doesNotMatch(sql, /on conflict \(enrollment_id\) do nothing/i)
 })
 
 test("first-parent-consultation task follows first-session schedule and teacher changes", async () => {

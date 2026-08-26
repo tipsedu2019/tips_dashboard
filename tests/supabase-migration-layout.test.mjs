@@ -30,7 +30,7 @@ const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db
 const fixtureRoots = []
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
-  "159fcc3eb0c5b31d640ac9f4b9e16abd2997c3a5e53c1eb90a0eb482e1109e5f"
+  "e8a27313a1315d6d1edca2105f0d60cd4160ead8958eb425934f3dc9b45c2e39"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION =
   "20260824182043_registration_admission_order_independence.sql"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION_SHA256 =
@@ -2207,6 +2207,14 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
     ["function-specific ACL", "authenticated_execute_required::integer"],
     ["compatibility trigger scope", "prevent_registration_compatibility_override"],
     ["compatibility trigger columns", "'BEFORE ' || 'UP' || 'DATE OF pipeline_status, counselor, makeedu_registered, makeedu_invoice_sent, payment_checked%'"],
+    ["first consultation trigger scope", "trigger.tgname = 'create_registration_first_consultation_task_v1'"],
+    ["first consultation trigger enabled", "and trigger.tgenabled = 'O'"],
+    ["first consultation trigger target", "'dashboard_private.create_registration_first_consultation_task_v1()'::pg_catalog.regprocedure"],
+    ["first consultation trigger timing and event", "and trigger.tgtype = 17"],
+    ["first consultation trigger column count", "pg_catalog.cardinality(trigger.tgattr::smallint[]) = 1"],
+    ["first consultation trigger status column", "status_attribute.attnum = any(trigger.tgattr::smallint[])"],
+    ["first consultation trigger no condition", "and trigger.tgqual is null"],
+    ["first consultation trigger no arguments", "and trigger.tgnargs = 0"],
     ["nullable legacy lesson authority", "and not attribute.attnotnull"],
   ]
 

@@ -25,7 +25,7 @@ const EXPECTED_TRANSACTIONAL_PGTAP_COMMAND =
 const POSTDEPLOY_READONLY_SQL =
   "supabase/tests/active_registration_workflow_postdeploy_readonly.sql"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
-  "159fcc3eb0c5b31d640ac9f4b9e16abd2997c3a5e53c1eb90a0eb482e1109e5f"
+  "e8a27313a1315d6d1edca2105f0d60cd4160ead8958eb425934f3dc9b45c2e39"
 const POSTDEPLOY_VERIFIER = "scripts/verify-supabase-postdeploy-contract.mjs"
 const POSTDEPLOY_LEDGER = '"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"'
 const POSTDEPLOY_RECEIPT = '"${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"'

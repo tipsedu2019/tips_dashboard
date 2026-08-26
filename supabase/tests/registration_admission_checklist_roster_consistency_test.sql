@@ -1,6 +1,6 @@
 begin;
 
-select plan(29);
+select plan(32);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
@@ -717,8 +717,8 @@ select ok(
 );
 
 select ok(
-  exists (
-    select 1
+  (
+    select pg_catalog.count(*) = 1
     from dashboard_private.registration_first_consultation_task_links link
     join public.ops_tasks task on task.id = link.task_id
     where link.enrollment_id = '00000000-0000-4000-8000-00000000b406'
@@ -728,8 +728,144 @@ select ok(
       and task.class_id = '00000000-0000-4000-8000-00000000b305'
       and task.start_at = '2026-09-02 20:00+09'::timestamptz
       and task.due_at = '2026-09-03 20:00+09'::timestamptz
+  )
+  and (
+    select pg_catalog.count(*) = 1
+    from public.ops_tasks task
+    where task.student_id = '00000000-0000-4000-8000-00000000b202'
+      and task.class_id = '00000000-0000-4000-8000-00000000b305'
+      and task.title like '신규 등록 학부모 첫 상담 · %'
   ),
   'a legacy enrollment creates one first-consultation task from its effective class slot'
+);
+
+update public.ops_registration_enrollments
+set status = 'canceled',
+    roster_active = false
+where id = '00000000-0000-4000-8000-00000000b406';
+
+create temporary table registration_legacy_failure_before on commit drop as
+select
+  pg_catalog.to_jsonb(enrollment) as enrollment_row,
+  link.task_id,
+  pg_catalog.to_jsonb(task) as task_row,
+  coalesce(student.class_ids, '[]'::jsonb) as student_class_ids,
+  coalesce(pg_catalog.to_jsonb(class.student_ids), '[]'::jsonb) as class_student_ids,
+  (
+    select pg_catalog.count(*)
+    from dashboard_private.registration_first_consultation_task_links all_links
+    where all_links.enrollment_id = enrollment.id
+  ) as link_count,
+  (
+    select pg_catalog.count(*)
+    from public.ops_tasks matching_task
+    where matching_task.student_id = enrollment.student_id
+      and matching_task.class_id = enrollment.class_id
+      and matching_task.title like '신규 등록 학부모 첫 상담 · %'
+  ) as task_count,
+  (select pg_catalog.count(*) from public.ops_registration_messages) as message_count,
+  (select pg_catalog.count(*) from dashboard_private.notification_deliveries) as delivery_count
+from public.ops_registration_enrollments enrollment
+join dashboard_private.registration_first_consultation_task_links link
+  on link.enrollment_id = enrollment.id
+join public.ops_tasks task on task.id = link.task_id
+join public.students student on student.id = enrollment.student_id
+join public.classes class on class.id = enrollment.class_id
+where enrollment.id = '00000000-0000-4000-8000-00000000b406';
+
+update public.classes
+set schedule = E'수 18:00-20:00\n수 20:00-22:00'
+where id = '00000000-0000-4000-8000-00000000b305';
+
+select throws_ok(
+  $$update public.ops_registration_enrollments
+    set status = 'enrolled',
+        roster_active = true
+    where id = '00000000-0000-4000-8000-00000000b406'$$,
+  '55000',
+  'registration_first_consultation_assignee_required',
+  'ambiguous legacy weekday slots fail closed with the exact operational SQLSTATE'
+);
+
+select ok(
+  (
+    select before.enrollment_row = (
+        select pg_catalog.to_jsonb(enrollment)
+        from public.ops_registration_enrollments enrollment
+        where enrollment.id = '00000000-0000-4000-8000-00000000b406'
+      )
+      and before.task_row = (
+        select pg_catalog.to_jsonb(task)
+        from public.ops_tasks task
+        where task.id = before.task_id
+      )
+      and before.task_id = (
+        select link.task_id
+        from dashboard_private.registration_first_consultation_task_links link
+        where link.enrollment_id = '00000000-0000-4000-8000-00000000b406'
+      )
+      and before.link_count = (
+        select pg_catalog.count(*)
+        from dashboard_private.registration_first_consultation_task_links link
+        where link.enrollment_id = '00000000-0000-4000-8000-00000000b406'
+      )
+      and before.task_count = (
+        select pg_catalog.count(*)
+        from public.ops_tasks task
+        where task.student_id = '00000000-0000-4000-8000-00000000b202'
+          and task.class_id = '00000000-0000-4000-8000-00000000b305'
+          and task.title like '신규 등록 학부모 첫 상담 · %'
+      )
+      and before.student_class_ids = (
+        select coalesce(student.class_ids, '[]'::jsonb)
+        from public.students student
+        where student.id = '00000000-0000-4000-8000-00000000b202'
+      )
+      and before.class_student_ids = (
+        select coalesce(pg_catalog.to_jsonb(class.student_ids), '[]'::jsonb)
+        from public.classes class
+        where class.id = '00000000-0000-4000-8000-00000000b305'
+      )
+      and before.message_count = (
+        select pg_catalog.count(*) from public.ops_registration_messages
+      )
+      and before.delivery_count = (
+        select pg_catalog.count(*) from dashboard_private.notification_deliveries
+      )
+    from registration_legacy_failure_before before
+  ),
+  'ambiguous legacy finalization rolls back enrollment, rosters, task, link, and delivery state atomically'
+);
+
+update public.classes
+set schedule = '수 18:00-20:00'
+where id = '00000000-0000-4000-8000-00000000b305';
+
+update public.ops_registration_enrollments
+set status = 'enrolled',
+    roster_active = true
+where id = '00000000-0000-4000-8000-00000000b406';
+
+select ok(
+  (
+    select pg_catalog.count(*) = 1
+    from public.ops_tasks task
+    where task.student_id = '00000000-0000-4000-8000-00000000b202'
+      and task.class_id = '00000000-0000-4000-8000-00000000b305'
+      and task.title like '신규 등록 학부모 첫 상담 · %'
+  )
+  and exists (
+    select 1
+    from registration_legacy_failure_before before
+    join dashboard_private.registration_first_consultation_task_links link
+      on link.task_id = before.task_id
+    join public.ops_tasks task on task.id = link.task_id
+    where link.enrollment_id = '00000000-0000-4000-8000-00000000b406'
+      and link.class_lesson_session_id is null
+      and task.status = 'requested'
+      and task.completed_at is null
+  ),
+  'legacy reenrollment reactivates its one linked consultation task without an orphan'
 );
 
 select ok(
