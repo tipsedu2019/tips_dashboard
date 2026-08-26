@@ -119,7 +119,7 @@ test("class management keeps progress out while allowing direct textbook links i
   assert.match(pickerSource, /전체 보기/);
   assert.match(pickerSource, /교재 검색 또는 선택/);
   assert.match(pickerSource, /조건에 맞는 교재 없음/);
-  assert.match(pickerSource, /max-h-72 overscroll-contain overflow-y-auto/);
+  assert.match(pickerSource, /<SearchCombobox/);
   assert.match(pickerSource, /aria-label="학교 구분"/);
   assert.match(pickerSource, /aria-label="세부과목"/);
   assert.match(pickerModelSource, /getDefaultClassTextbookFilters/);
@@ -145,10 +145,10 @@ test("management pickers share labeled compact filter surfaces and textbook cand
   assert.match(pageSource, /<PickerFilterField label="과목">[\s\S]*<PickerFilterField label="학년">/);
   assert.match(pageSource, /<PickerFilterField label="학년">[\s\S]*<PickerFilterField label="학교">/);
   assert.doesNotMatch(candidateSource, /key: "publisher"/);
-  assert.match(pickerSource, /placeholder="교재명, 출판사 검색"/);
+  assert.match(pickerSource, /searchPlaceholder="교재명, 출판사 검색"/);
 });
 
-test("student class picker shows class subject metadata and keeps its long menu scrollable inside the dialog", async () => {
+test("student class picker shows class subject metadata through the shared combobox", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
   const pillSource = await readFile(new URL("src/features/management/picker-meta-pills.tsx", root), "utf8").catch(() => "");
 
@@ -160,8 +160,8 @@ test("student class picker shows class subject metadata and keeps its long menu 
   assert.match(pageSource, /key: "classroom"/);
   assert.match(pageSource, /<PickerMetaPills items=\{getClassCandidateMetaItems\(record\)\}/);
   assert.match(pillSource, /rounded-full/);
-  assert.match(pageSource, /<Popover modal open=\{relationPickerOpen\}/);
-  assert.match(pageSource, /max-h-72 overscroll-contain overflow-y-auto/);
+  assert.match(pageSource, /<ManagementRelationCombobox/);
+  assert.match(pageSource, /items=\{relationPickerItems\}/);
 });
 
 test("student class picker narrows by subject first and grade second", async () => {
@@ -467,7 +467,7 @@ test("class student add control uses one picker and confirms direct enrolled or 
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
 
   assert.match(pageSource, /data-testid=\{kind === "classes" \? "class-relation-picker" : undefined\}/);
-  assert.match(pageSource, /data-testid=\{kind === "classes" \? "class-relation-picker-search" : undefined\}/);
+  assert.match(pageSource, /searchTestId=\{kind === "classes" \? "class-relation-picker-search" : undefined\}/);
   assert.match(pageSource, /data-testid="class-relation-confirm-dialog"/);
   assert.match(pageSource, /const \[pendingRelationMode, setPendingRelationMode\] = useState<"enrolled" \| "waitlist" \| null>\(null\)/);
   assert.match(pageSource, /const requestRelationSave = \(mode: "enrolled" \| "waitlist"\) =>/);

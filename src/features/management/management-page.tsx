@@ -24,6 +24,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -43,6 +44,7 @@ import { useAuth } from "@/providers/auth-provider";
 
 import { ManagementDataTable } from "./management-data-table";
 import { ClassTextbookPicker } from "./class-textbook-picker";
+import { ManagementRelationCombobox } from "./management-relation-combobox";
 import {
   getDefaultClassTextbookFilters,
   type ClassTextbookPickerFilters,
@@ -3479,6 +3481,106 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     const selectedRelationLabel = selectedRelationRecord
       ? [relatedTitle(selectedRelationRecord), relatedMeta(kind, selectedRelationRecord)].filter(Boolean).join(" · ")
       : "";
+    const relationPickerFilters = kind === "students" ? (
+      <PickerFilterSurface>
+        <PickerFilterField label="과목">
+          <Select
+            value={studentClassFilters.subject || "all"}
+            onValueChange={(value) => setStudentClassFilters((current) => ({
+              ...current,
+              subject: value === "all" ? "" : value,
+            }))}
+          >
+            <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="수업 과목">
+              <SelectValue placeholder="과목" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="all">전체 과목</SelectItem>
+                {studentClassSubjectOptions.map((subject) => (
+                  <SelectItem key={subject} value={subject}>{subject}</SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </PickerFilterField>
+        <PickerFilterField label="학년">
+          <Select
+            value={studentClassFilters.grade || "all"}
+            onValueChange={(value) => setStudentClassFilters((current) => ({
+              ...current,
+              grade: value === "all" ? "" : value,
+            }))}
+          >
+            <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="수업 학년">
+              <SelectValue placeholder="학년" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="all">전체 학년</SelectItem>
+                {[...new Set([studentClassFilters.grade, ...studentClassGradeOptions].filter(Boolean))].map((grade) => (
+                  <SelectItem key={grade} value={grade}>{grade}</SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </PickerFilterField>
+      </PickerFilterSurface>
+    ) : kind === "classes" ? (
+      <PickerFilterSurface>
+        <PickerFilterField label="학년">
+          <Select
+            value={classStudentFilters.grade || "all"}
+            onValueChange={(value) => setClassStudentFilters({
+              grade: value === "all" ? "" : value,
+              school: "",
+            })}
+          >
+            <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="학생 학년">
+              <SelectValue placeholder="학년" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="all">전체 학년</SelectItem>
+                {[...new Set([classStudentFilters.grade, ...classStudentGradeOptions].filter(Boolean))].map((grade) => (
+                  <SelectItem key={grade} value={grade}>{grade}</SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </PickerFilterField>
+        <PickerFilterField label="학교">
+          <Select
+            value={classStudentFilters.school || "all"}
+            onValueChange={(value) => setClassStudentFilters((current) => ({
+              ...current,
+              school: value === "all" ? "" : value,
+            }))}
+          >
+            <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="학생 학교">
+              <SelectValue placeholder="학교" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="all">전체 학교</SelectItem>
+                {classStudentSchoolOptions.map((school) => (
+                  <SelectItem key={school} value={school}>{school}</SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </PickerFilterField>
+      </PickerFilterSurface>
+    ) : null;
+    const relationPickerItems = filteredAvailableRelatedRows.map((record) => ({
+      id: text(record.id),
+      title: relatedTitle(record),
+      meta: kind === "students" ? (
+        <PickerMetaPills items={getClassCandidateMetaItems(record)} />
+      ) : relatedMeta(kind, record) ? (
+        <span className="truncate text-xs text-muted-foreground">{relatedMeta(kind, record)}</span>
+      ) : null,
+    })).filter((item) => item.id);
 
     return (
       <section data-testid={kind === "classes" ? "class-student-roster-panel" : undefined} className="space-y-3 border-t pt-4">
@@ -3487,148 +3589,26 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         ) : null}
         <div className="grid gap-3 rounded-md border bg-background p-3 lg:grid-cols-[minmax(16rem,1fr)_auto_auto]">
           <div data-testid={kind === "classes" ? "class-relation-picker" : undefined} className="grid gap-1.5">
-            <Label htmlFor={`${kind}-relation-picker-search`}>{relationLabel} 선택</Label>
-            <Popover modal open={relationPickerOpen} onOpenChange={setRelationPickerOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-10 w-full justify-between px-3 font-normal"
-                  disabled={!canMutateRows}
-                >
-                  <span className={cn("truncate", !selectedRelationLabel && "text-muted-foreground")}>
-                    {selectedRelationLabel || `${relationLabel} 검색 또는 선택`}
-                  </span>
-                  <ChevronDown className="ml-2 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="start" className="w-[--radix-popover-trigger-width] p-2">
-                <div className="grid gap-2">
-                  <Input
-                    id={`${kind}-relation-picker-search`}
-                    data-testid={kind === "classes" ? "class-relation-picker-search" : undefined}
-                    value={relationQuery}
-                    placeholder={`${relationLabel} 이름 검색`}
-                    disabled={!canMutateRows}
-                    onChange={(event) => setRelationQuery(event.target.value)}
-                  />
-                  {kind === "students" ? (
-                    <PickerFilterSurface>
-                      <PickerFilterField label="과목">
-                        <Select
-                          value={studentClassFilters.subject || "all"}
-                          onValueChange={(value) => setStudentClassFilters((current) => ({
-                            ...current,
-                            subject: value === "all" ? "" : value,
-                          }))}
-                        >
-                          <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="수업 과목">
-                            <SelectValue placeholder="과목" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">전체 과목</SelectItem>
-                            {studentClassSubjectOptions.map((subject) => (
-                              <SelectItem key={subject} value={subject}>{subject}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </PickerFilterField>
-                      <PickerFilterField label="학년">
-                        <Select
-                          value={studentClassFilters.grade || "all"}
-                          onValueChange={(value) => setStudentClassFilters((current) => ({
-                            ...current,
-                            grade: value === "all" ? "" : value,
-                          }))}
-                        >
-                          <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="수업 학년">
-                            <SelectValue placeholder="학년" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">전체 학년</SelectItem>
-                            {[...new Set([studentClassFilters.grade, ...studentClassGradeOptions].filter(Boolean))].map((grade) => (
-                              <SelectItem key={grade} value={grade}>{grade}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </PickerFilterField>
-                    </PickerFilterSurface>
-                  ) : kind === "classes" ? (
-                    <PickerFilterSurface>
-                      <PickerFilterField label="학년">
-                        <Select
-                          value={classStudentFilters.grade || "all"}
-                          onValueChange={(value) => setClassStudentFilters({
-                            grade: value === "all" ? "" : value,
-                            school: "",
-                          })}
-                        >
-                          <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="학생 학년">
-                            <SelectValue placeholder="학년" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">전체 학년</SelectItem>
-                            {[...new Set([classStudentFilters.grade, ...classStudentGradeOptions].filter(Boolean))].map((grade) => (
-                              <SelectItem key={grade} value={grade}>{grade}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </PickerFilterField>
-                      <PickerFilterField label="학교">
-                        <Select
-                          value={classStudentFilters.school || "all"}
-                          onValueChange={(value) => setClassStudentFilters((current) => ({
-                            ...current,
-                            school: value === "all" ? "" : value,
-                          }))}
-                        >
-                          <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="학생 학교">
-                            <SelectValue placeholder="학교" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">전체 학교</SelectItem>
-                            {classStudentSchoolOptions.map((school) => (
-                              <SelectItem key={school} value={school}>{school}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </PickerFilterField>
-                    </PickerFilterSurface>
-                  ) : null}
-                  <div className="max-h-72 overscroll-contain overflow-y-auto">
-                    {filteredAvailableRelatedRows.length === 0 ? (
-                      <div className="px-2 py-3 text-sm text-muted-foreground">조건에 맞는 {relationLabel} 없음</div>
-                    ) : filteredAvailableRelatedRows.map((record) => {
-                      const id = text(record.id);
-
-                      return (
-                        <button
-                          key={id}
-                          type="button"
-                          className={cn(
-                            "grid w-full gap-1.5 rounded-md px-2 py-2 text-left text-sm hover:bg-muted",
-                            targetId === id && "bg-primary/10 text-primary hover:bg-primary/10",
-                          )}
-                          onClick={() => {
-                            setTargetId(id);
-                            setRelationQuery("");
-                            setRelationPickerOpen(false);
-                          }}
-                          disabled={!canMutateRows}
-                        >
-                          <span className="truncate font-medium">{relatedTitle(record)}</span>
-                          {kind === "students" ? (
-                            <PickerMetaPills items={getClassCandidateMetaItems(record)} />
-                          ) : relatedMeta(kind, record) ? (
-                            <span className="truncate text-xs text-muted-foreground">{relatedMeta(kind, record)}</span>
-                          ) : null}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
+            <Label htmlFor={`${kind}-relation-picker-trigger`}>{relationLabel} 선택</Label>
+            <ManagementRelationCombobox
+              open={relationPickerOpen}
+              onOpenChange={setRelationPickerOpen}
+              disabled={!canMutateRows}
+              relationLabel={relationLabel}
+              selectedLabel={selectedRelationLabel}
+              query={relationQuery}
+              onQueryChange={setRelationQuery}
+              selectedId={targetId}
+              items={relationPickerItems}
+              filters={relationPickerFilters}
+              triggerId={`${kind}-relation-picker-trigger`}
+              searchTestId={kind === "classes" ? "class-relation-picker-search" : undefined}
+              onSelect={(id) => {
+                setTargetId(id);
+                setRelationQuery("");
+                setRelationPickerOpen(false);
+              }}
+            />
           </div>
           <div className="grid content-end">
             <Button type="button" className="h-10 px-5" onClick={() => requestRelationSave("enrolled")} disabled={!canMutateRows || !targetId || saving}>{kind === "students" ? "수강 추가" : "등록 추가"}</Button>

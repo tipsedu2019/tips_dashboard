@@ -1,12 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchCombobox, SearchComboboxItem } from "@/components/ui/search-combobox";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   TEXTBOOK_GRADE_OPTIONS,
   TEXTBOOK_SCHOOL_LEVEL_OPTIONS,
@@ -107,40 +105,37 @@ export function ClassTextbookPicker({
   }
 
   return (
-    <Popover modal open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          className="h-10 w-full justify-between px-3 font-normal"
-          disabled={disabled}
-        >
-          <span className="truncate text-muted-foreground">교재 검색 또는 선택</span>
-          <ChevronDown className="ml-2 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+    <SearchCombobox
+      open={open}
+      onOpenChange={setOpen}
+      triggerLabel="교재 검색 또는 선택"
+      triggerPlaceholder
+      triggerAriaLabel="교재 검색 또는 선택"
+      searchValue={query}
+      onSearchValueChange={onQueryChange}
+      searchPlaceholder="교재명, 출판사 검색"
+      searchAriaLabel="교재 검색"
+      searchAction={(
+        <Button type="button" size="sm" variant="ghost" onClick={showAll}>
+          전체 보기
         </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-[--radix-popover-trigger-width] min-w-[min(calc(100vw-2rem),24rem)] p-2">
-        <div className="grid gap-2">
-          <div className="flex items-center gap-2">
-            <Input
-              value={query}
-              placeholder="교재명, 출판사 검색"
-              aria-label="교재 검색"
-              onChange={(event) => {
-                onQueryChange(event.target.value);
-              }}
-            />
-            <Button type="button" size="sm" variant="ghost" className="shrink-0" onClick={showAll}>
-              전체 보기
-            </Button>
-          </div>
-          <PickerFilterSurface>
+      )}
+      listAriaLabel="선택 가능한 교재"
+      emptyMessage="조건에 맞는 교재 없음"
+      loading={loading && candidates.length === 0}
+      loadingMessage="교재 불러오는 중"
+      disabled={disabled}
+      contentClassName="min-w-[min(calc(100vw-2rem),24rem)]"
+      filters={(
+        <PickerFilterSurface>
             <PickerFilterField label="과목">
               <Select value={filters.subject || "all"} onValueChange={(value) => updateFilter("subject", value === "all" ? "" : value)}>
                 <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="과목"><SelectValue placeholder="과목" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">전체 과목</SelectItem>
-                  {TEXTBOOK_SUBJECT_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                  <SelectGroup>
+                    <SelectItem value="all">전체 과목</SelectItem>
+                    {TEXTBOOK_SUBJECT_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
             </PickerFilterField>
@@ -148,8 +143,10 @@ export function ClassTextbookPicker({
               <Select value={filters.subSubject || "all"} onValueChange={(value) => updateFilter("subSubject", value === "all" ? "" : value)}>
                 <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="세부과목"><SelectValue placeholder="세부과목" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">전체 세부과목</SelectItem>
-                  {subSubjectOptions.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
+                  <SelectGroup>
+                    <SelectItem value="all">전체 세부과목</SelectItem>
+                    {subSubjectOptions.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
             </PickerFilterField>
@@ -157,8 +154,10 @@ export function ClassTextbookPicker({
               <Select value={filters.schoolLevel || "all"} onValueChange={(value) => updateFilter("schoolLevel", value === "all" ? "" : value)}>
                 <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="학교 구분"><SelectValue placeholder="학교 구분" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">전체 학교 구분</SelectItem>
-                  {TEXTBOOK_SCHOOL_LEVEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                  <SelectGroup>
+                    <SelectItem value="all">전체 학교 구분</SelectItem>
+                    {TEXTBOOK_SCHOOL_LEVEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
             </PickerFilterField>
@@ -166,30 +165,37 @@ export function ClassTextbookPicker({
               <Select value={filters.gradeLevel || "all"} onValueChange={(value) => updateFilter("gradeLevel", value === "all" ? "" : value)}>
                 <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="학년"><SelectValue placeholder="학년" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">전체 학년</SelectItem>
-                  {gradeOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                  <SelectGroup>
+                    <SelectItem value="all">전체 학년</SelectItem>
+                    {gradeOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
             </PickerFilterField>
-          </PickerFilterSurface>
-          <div className="max-h-72 overscroll-contain overflow-y-auto">
-            {loading && candidates.length === 0 ? (
-              <div className="px-2 py-3 text-sm text-muted-foreground">교재 불러오는 중</div>
-            ) : candidates.length === 0 ? (
-              <div className="grid justify-items-start gap-2 px-2 py-3 text-sm text-muted-foreground">
-                <span>조건에 맞는 교재 없음</span>
-                <Button type="button" size="sm" variant="outline" onClick={showAll}>전체 보기</Button>
-              </div>
-            ) : candidates.map((textbook) => {
-              return (
-                <button
-                  key={textbook.id}
-                  type="button"
-                  className="grid w-full gap-1.5 rounded-md px-2 py-2 text-left text-sm hover:bg-muted"
-                  onClick={() => {
-                    onSelectedIdsChange(selectedIds.includes(textbook.id) ? selectedIds : [...selectedIds, textbook.id]);
-                  }}
-                >
+        </PickerFilterSurface>
+      )}
+      footer={hasMore ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="w-full"
+          disabled={loading}
+          onClick={() => void onLoadMore()}
+        >
+          {loading ? "더 불러오는 중" : "다음 30건"}
+        </Button>
+      ) : null}
+    >
+      {candidates.map((textbook) => (
+        <SearchComboboxItem
+          key={textbook.id}
+          value={textbook.id}
+          onSelect={() => {
+            onSelectedIdsChange(selectedIds.includes(textbook.id) ? selectedIds : [...selectedIds, textbook.id]);
+          }}
+        >
+          <div className="grid min-w-0 flex-1 gap-1.5 text-left">
                   <span className="truncate font-medium">{textbook.title}</span>
                   <PickerMetaPills
                     items={[
@@ -199,24 +205,9 @@ export function ClassTextbookPicker({
                       { key: "gradeLevel", value: getTextbookGradeSummary(textbook) },
                     ]}
                   />
-                </button>
-              );
-            })}
-            {hasMore ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="mt-1 w-full"
-                disabled={loading}
-                onClick={() => void onLoadMore()}
-              >
-                {loading ? "더 불러오는 중" : "다음 30건"}
-              </Button>
-            ) : null}
           </div>
-        </div>
-      </PopoverContent>
-    </Popover>
+        </SearchComboboxItem>
+      ))}
+    </SearchCombobox>
   );
 }
