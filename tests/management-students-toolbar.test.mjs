@@ -228,14 +228,10 @@ test("class schedule omits repeated teacher and classroom details", async () => 
 });
 
 test("class enrollment status cell does not repeat capacity text", async () => {
-  const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
-  const cellSource = source.slice(
-    source.indexOf("function renderEnrollmentStatusCell"),
-    source.indexOf("type StudentClassSummary"),
-  );
+  const cellSource = await readFile(new URL("src/features/management/class-enrollment-status-cell.tsx", root), "utf8");
 
-  assert.match(cellSource, /renderEnrollmentRosterPopover\("등록", registeredCount, registeredStudents\)/);
-  assert.match(cellSource, /renderEnrollmentRosterPopover\("대기", waitlistCount, waitlistStudents\)/);
+  assert.match(cellSource, /renderRosterPopover\("registered"\)/);
+  assert.match(cellSource, /renderRosterPopover\("waitlist"\)/);
   assert.doesNotMatch(cellSource, /capacityStatus/);
   assert.doesNotMatch(cellSource, />정원 \{/);
 });

@@ -81,6 +81,10 @@ import {
   splitClassResourceDisplayValues,
 } from "./class-schedule-slots";
 import {
+  ClassEnrollmentStatusCell,
+  type ClassRosterMode,
+} from "./class-enrollment-status-cell";
+import {
   formatStudentSchoolCategoryLabel,
   reconcilePendingManagementFilters,
   reconcilePendingManagementSearch,
@@ -333,6 +337,7 @@ type ManagementTableActions = {
   onOpenTeacherMaster?: () => void;
   onOpenClassroomMaster?: () => void;
   onOpenTermManager?: () => void;
+  onLoadClassRoster?: (classId: string, mode: ClassRosterMode) => Promise<unknown[]>;
 };
 
 type StoredManagementScroll = {
@@ -610,10 +615,6 @@ function formatDelimitedLabel(value: unknown) {
   return normalizeScalar(value).replace(/\s*,\s*/g, ", ");
 }
 
-function isUuidLike(value: unknown) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalizeScalar(value));
-}
-
 function getClassFilterValue(row: ManagementRow, columnId: ClassFilterColumnId) {
   const raw = row.raw || {};
   if (columnId === "subject") return normalizeScalar(raw.subject || row.badge);
@@ -821,128 +822,6 @@ function renderClassScheduleCell(row: ManagementRow) {
   );
 }
 
-type ClassStudentSummary = {
-  id?: string;
-  name?: string;
-  school?: string;
-  grade?: string;
-};
-
-function normalizeClassStudentSummaries(value: unknown): ClassStudentSummary[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((item) => {
-      if (item && typeof item === "object") {
-        const record = item as Record<string, unknown>;
-        return {
-          id: normalizeScalar(record.id),
-          name: normalizeScalar(record.name),
-          school: normalizeScalar(record.school),
-          grade: normalizeScalar(record.grade),
-        };
-      }
-
-      return {
-        id: normalizeScalar(item),
-      };
-    })
-    .filter((student) => student.name || student.id);
-}
-
-function formatClassStudentSummary(student: ClassStudentSummary) {
-  const rawName = student.name || "";
-  const rawId = student.id || "";
-  const name = rawName && !isUuidLike(rawName)
-    ? rawName
-    : rawId && !isUuidLike(rawId)
-      ? rawId
-      : "학생 정보 확인 필요";
-  const school = student.school || "";
-  const grade = school && student.grade?.startsWith(school.slice(-1))
-    ? student.grade.slice(1)
-    : student.grade || "";
-  const schoolGrade = [school, grade].filter(Boolean).join("");
-  return schoolGrade ? `${name}(${schoolGrade})` : name;
-}
-
-function sortClassStudentSummariesAscending(students: ClassStudentSummary[]) {
-  return [...students].sort((a, b) =>
-    formatClassStudentSummary(a).localeCompare(formatClassStudentSummary(b), "ko"),
-  );
-}
-
-function renderEnrollmentRosterPopover(
-  label: "등록" | "대기",
-  count: number,
-  students: ClassStudentSummary[],
-) {
-  const sortedStudents = sortClassStudentSummariesAscending(students);
-  const toneClassName =
-    label === "등록"
-      ? "bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-950/50"
-      : "bg-orange-50 text-orange-700 hover:bg-orange-100 dark:bg-orange-950/30 dark:text-orange-300 dark:hover:bg-orange-950/50";
-
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className={cn("relative z-20 h-6 rounded-full px-2.5 text-xs font-medium", toneClassName)}
-          aria-label={`${label} 학생 ${count}명 보기`}
-          onClick={(event) => event.stopPropagation()}
-        >
-          {label} {count}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={8} className="w-64 rounded-lg p-0 shadow-lg">
-        <div className="flex items-center justify-between border-b px-3 py-2">
-          <div className="text-sm font-semibold">{label} 학생</div>
-          <Badge variant="secondary" className="h-5 rounded-full px-2 text-[11px]">
-            {count}명
-          </Badge>
-        </div>
-        <div className="max-h-64 overflow-y-auto p-2">
-          {sortedStudents.length > 0 ? (
-            <div className="grid gap-1">
-              {sortedStudents.map((student, index) => (
-                <div
-                  key={`${label}-${student.id || student.name || index}`}
-                  className="rounded-md px-2 py-1.5 text-sm leading-5 hover:bg-muted/70"
-                >
-                  {formatClassStudentSummary(student)}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="px-2 py-5 text-center text-sm text-muted-foreground">
-              표시할 학생이 없습니다.
-            </div>
-          )}
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-function renderEnrollmentStatusCell(row: ManagementRow) {
-  const registeredCount = Number((row.raw || {}).registeredCount || (row.raw || {}).registered_count || row.metrics.studentCount || 0);
-  const waitlistCount = Number((row.raw || {}).waitlistCount || (row.raw || {}).waitlist_count || row.metrics.waitlistCount || 0);
-  const registeredStudents = normalizeClassStudentSummaries((row.raw || {}).registeredStudents || (row.raw || {}).registered_students);
-  const waitlistStudents = normalizeClassStudentSummaries((row.raw || {}).waitlistStudents || (row.raw || {}).waitlist_students);
-
-  return (
-    <div className="flex min-w-[12rem] flex-wrap items-center gap-2 py-0.5">
-      {renderEnrollmentRosterPopover("등록", registeredCount, registeredStudents)}
-      {renderEnrollmentRosterPopover("대기", waitlistCount, waitlistStudents)}
-    </div>
-  );
-}
-
 type StudentClassSummary = {
   id?: string;
   name?: string;
@@ -1082,6 +961,15 @@ function renderStudentClassStatusPopover(row: ManagementRow) {
 function renderClassCapacityCell(row: ManagementRow) {
   const capacity = getClassCapacity(row);
   return capacity > 0 ? <span className="text-sm text-foreground">{capacity}</span> : null;
+}
+
+function getClassEnrollmentStatusCellKey(row: ManagementRow) {
+  const raw = row.raw || {};
+  return [
+    row.id,
+    raw.registeredCount || raw.registered_count || row.metrics.studentCount || 0,
+    raw.waitlistCount || raw.waitlist_count || row.metrics.waitlistCount || 0,
+  ].join(":");
 }
 
 function renderPlainCell(value: unknown, className = "text-sm text-foreground") {
@@ -1577,7 +1465,13 @@ export function ManagementDataTable({
         id: "enrollmentStatus",
         accessorFn: (row) => normalizeScalar((row.raw || {}).capacityStatus || (row.raw || {}).capacity_status),
         header: "수강 현황",
-        cell: ({ row }) => renderEnrollmentStatusCell(row.original),
+        cell: ({ row }) => (
+          <ClassEnrollmentStatusCell
+            key={getClassEnrollmentStatusCellKey(row.original)}
+            row={row.original}
+            onLoadRoster={actions.onLoadClassRoster}
+          />
+        ),
       },
       {
         id: "capacity",
@@ -3029,7 +2923,13 @@ export function ManagementDataTable({
                 </div>
                 <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3">
                   <dt className="text-muted-foreground">수강</dt>
-                  <dd className="min-w-0 [&>div]:min-w-0">{renderEnrollmentStatusCell(record)}</dd>
+                  <dd className="min-w-0 [&>div]:min-w-0">
+                    <ClassEnrollmentStatusCell
+                      key={getClassEnrollmentStatusCellKey(record)}
+                      row={record}
+                      onLoadRoster={actions.onLoadClassRoster}
+                    />
+                  </dd>
                 </div>
                 <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3">
                   <dt className="text-muted-foreground">운영</dt>

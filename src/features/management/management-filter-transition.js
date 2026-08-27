@@ -19,6 +19,43 @@ function normalizeSearchValue(value) {
   return String(value || "").trim();
 }
 
+function nullableSearchParam(params, key) {
+  return normalizeSearchValue(params.get(key)) || null;
+}
+
+export function serializeManagementListFilters(kind, searchParamString) {
+  const params = new URLSearchParams(String(searchParamString || ""));
+  if (kind === "students") {
+    return JSON.stringify({
+      kind,
+      search: normalizeSearchValue(params.get("q")),
+      status: nullableSearchParam(params, "status"),
+      schoolCategory: nullableSearchParam(params, "schoolCategory"),
+      school: nullableSearchParam(params, "school"),
+      grade: nullableSearchParam(params, "grade"),
+    });
+  }
+  if (kind === "classes") {
+    return JSON.stringify({
+      kind,
+      search: normalizeSearchValue(params.get("q")),
+      periodId: nullableSearchParam(params, "period"),
+      status: nullableSearchParam(params, "status") || "수강",
+      subject: nullableSearchParam(params, "subject"),
+      grade: nullableSearchParam(params, "grade"),
+      teacher: nullableSearchParam(params, "teacher"),
+      classroom: nullableSearchParam(params, "classroom"),
+    });
+  }
+  return JSON.stringify({
+    kind,
+    search: normalizeSearchValue(params.get("q")),
+    status: nullableSearchParam(params, "status"),
+    subject: nullableSearchParam(params, "subject"),
+    publisher: nullableSearchParam(params, "publisher"),
+  });
+}
+
 export function reconcilePendingManagementSearch({
   pendingSearch,
   currentInput,

@@ -897,6 +897,24 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
     return readService.loadRelationPage({ kind, id, relationKind, cursor, limit: 30 });
   }, [kind, readService]);
 
+  const loadClassRosterPreview = useCallback(async ({
+    classId,
+    mode,
+  }: {
+    classId: string;
+    mode: "registered" | "waitlist";
+  }) => {
+    if (!readService || kind !== "classes") return [] as Record<string, unknown>[];
+    const result = await readService.loadRelationPage({
+      kind: "classes",
+      id: classId,
+      relationKind: mode === "registered" ? "registered_students" : "waitlisted_students",
+      cursor: null,
+      limit: 30,
+    });
+    return relationRows(result);
+  }, [kind, readService]);
+
   const loadClassTextbookCandidatePage = useCallback(async ({
     classId,
     search,
@@ -941,6 +959,7 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
     loadMore,
     loadDetail,
     loadRelationPage,
+    loadClassRosterPreview,
     loadClassTextbookCandidatePage,
     reloadRow,
     removeRows,

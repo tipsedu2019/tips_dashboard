@@ -219,3 +219,37 @@ test("class period hydration preserves URL-owned values and only defaults an emp
     "period-default",
   );
 });
+
+test("class detail route parameters do not change the list filter request scope", async () => {
+  const model = await loadTransitionModel();
+  assert.ok(model, "management filter transition model should exist");
+  assert.equal(
+    typeof model.serializeManagementListFilters,
+    "function",
+    "management list filters should have a stable URL scope serializer",
+  );
+
+  const listUrl = "period=period-1&teacher=%EA%B3%A0%EB%8D%95%EC%9D%80";
+  const detailUrl = `${listUrl}&classId=class-1&tab=basic&section=schedule`;
+  const otherDetailTabUrl = `${listUrl}&classId=class-1&tab=students&studentId=student-1`;
+  const expected = {
+    kind: "classes",
+    search: "",
+    periodId: "period-1",
+    status: "수강",
+    subject: null,
+    grade: null,
+    teacher: "고덕은",
+    classroom: null,
+  };
+
+  assert.equal(
+    model.serializeManagementListFilters("classes", listUrl),
+    model.serializeManagementListFilters("classes", detailUrl),
+  );
+  assert.equal(
+    model.serializeManagementListFilters("classes", detailUrl),
+    model.serializeManagementListFilters("classes", otherDetailTabUrl),
+  );
+  assert.deepEqual(JSON.parse(model.serializeManagementListFilters("classes", detailUrl)), expected);
+});

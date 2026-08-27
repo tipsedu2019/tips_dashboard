@@ -12,7 +12,7 @@ const root = new URL("../", import.meta.url);
 test("class student rosters never use raw UUIDs as display names", async () => {
   const hookSource = await readFile(new URL("src/features/management/use-management-records.ts", root), "utf8");
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
-  const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+  const rosterCellSource = await readFile(new URL("src/features/management/class-enrollment-status-cell.tsx", root), "utf8");
 
   assert.match(hookSource, /const studentName = textValue\(student\?\.name\)/);
   assert.match(hookSource, /name: studentName \|\| "학생 정보 확인 필요"/);
@@ -24,10 +24,10 @@ test("class student rosters never use raw UUIDs as display names", async () => {
   assert.match(pageSource, /return isUuidLike\(id\) \? fallbackTitle : id/);
   assert.doesNotMatch(pageSource, /return id \? \{ id, name: id \} : null/);
 
-  assert.match(tableSource, /function isUuidLike/);
-  assert.match(tableSource, /const rawName = student\.name \|\| ""/);
-  assert.match(tableSource, /: "학생 정보 확인 필요"/);
-  assert.doesNotMatch(tableSource, /const name = student\.name \|\| student\.id \|\| "학생"/);
+  assert.match(rosterCellSource, /function isUuidLike/);
+  assert.match(rosterCellSource, /const rawName = student\.name \|\| ""/);
+  assert.match(rosterCellSource, /: "학생 정보 확인 필요"/);
+  assert.doesNotMatch(rosterCellSource, /const name = student\.name \|\| student\.id \|\| "학생"/);
 });
 
 test("management roster writes are readiness-gated and use the atomic roster RPC", async () => {

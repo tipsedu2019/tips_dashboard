@@ -4,7 +4,7 @@ import { type FormEvent, type ReactNode, type TouchEvent, type WheelEvent, useCa
 import { Check, ChevronDown, ChevronUp, Plus, Save, Trash2, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import type { ClassFormReferences, ManagementKind, ManagementRow } from "@/features/management/use-management-records";
+import type { ClassFormReferences, ManagementKind, ManagementListFilters, ManagementRow } from "@/features/management/use-management-records";
 import { useManagementRecords } from "@/features/management/use-management-records";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -57,6 +57,7 @@ import {
   managementService,
 } from "./management-service.js";
 import { pickDefaultPeriodValue } from "./period-preferences";
+import { serializeManagementListFilters } from "./management-filter-transition.js";
 import {
   filterClassStudentCandidates,
   filterStudentClassCandidates,
@@ -1439,38 +1440,11 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const searchParams = useSearchParams();
   const { canManageAll } = useAuth();
   const config = PAGE_CONFIG[kind];
-  const managementListFilters = useMemo(() => {
-    const nullable = (value: string | null) => text(value) || null;
-    if (kind === "students") {
-      return {
-        kind,
-        search: text(searchParams.get("q")),
-        status: nullable(searchParams.get("status")),
-        schoolCategory: nullable(searchParams.get("schoolCategory")),
-        school: nullable(searchParams.get("school")),
-        grade: nullable(searchParams.get("grade")),
-      } as const;
-    }
-    if (kind === "classes") {
-      return {
-        kind,
-        search: text(searchParams.get("q")),
-        periodId: nullable(searchParams.get("period")),
-        status: nullable(searchParams.get("status")) || "수강",
-        subject: nullable(searchParams.get("subject")),
-        grade: nullable(searchParams.get("grade")),
-        teacher: nullable(searchParams.get("teacher")),
-        classroom: nullable(searchParams.get("classroom")),
-      } as const;
-    }
-    return {
-      kind,
-      search: text(searchParams.get("q")),
-      status: nullable(searchParams.get("status")),
-      subject: nullable(searchParams.get("subject")),
-      publisher: nullable(searchParams.get("publisher")),
-    } as const;
-  }, [kind, searchParams]);
+  const managementListFilterScope = serializeManagementListFilters(kind, searchParams.toString());
+  const managementListFilters = useMemo(
+    () => JSON.parse(managementListFilterScope) as ManagementListFilters,
+    [managementListFilterScope],
+  );
   const {
     rows,
     stats,
@@ -1484,6 +1458,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     loadMore,
     loadDetail,
     loadRelationPage,
+    loadClassRosterPreview,
     loadClassTextbookCandidatePage,
     removeRows,
     refresh,
@@ -2891,6 +2866,9 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         setDialogMode("create" as const);
       } : undefined,
       onOpenRow: openRow,
+      onLoadClassRoster: kind === "classes"
+        ? (classId: string, mode: "registered" | "waitlist") => loadClassRosterPreview({ classId, mode })
+        : undefined,
       onBulkUpdateRows: canMutateRows ? handleBulkUpdateRows : undefined,
       onBulkDeleteRows: canMutateRows && kind === "textbooks" ? handleBulkDeleteRows : undefined,
       onDeleteRow: kind === "classes" ? undefined : canMutateRows ? (row: ManagementRow) => {
@@ -2911,7 +2889,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       };
     }
     return base;
-  }, [canMutateRows, defaultClassGroupIdsForCreate, handleBulkDeleteRows, handleBulkUpdateRows, kind, openRow, router]);
+  }, [canMutateRows, defaultClassGroupIdsForCreate, handleBulkDeleteRows, handleBulkUpdateRows, kind, loadClassRosterPreview, openRow, router]);
 
   const deleteActionLabel = "삭제";
   const deleteRequestCount = deleteRequest?.rows.length || 0;
