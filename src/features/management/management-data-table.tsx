@@ -71,6 +71,11 @@ import { cn } from "@/lib/utils";
 import { STUDENT_STATUS_OPTIONS } from "@/lib/student-status";
 import type { ManagementKind, ManagementRow, ManagementStat } from "@/features/management/use-management-records";
 import {
+  MANAGEMENT_LIST_PAGE_SIZES,
+  pickManagementListPageSize,
+  type ManagementListPageSize,
+} from "./management-page-size";
+import {
   ClassFilterPanel,
   type ClassFilterPanelChip,
   type ClassFilterPanelSelect,
@@ -218,8 +223,6 @@ const EMPTY_TEXTBOOK_LIST_QUERY_STATE: TextbookListQueryState = {
   publisher: "",
 };
 
-const PAGE_SIZE_OPTIONS = [30] as const;
-const DEFAULT_PAGE_SIZE = 30;
 const MANAGEMENT_SCROLL_STORAGE_PREFIX = "tips:management-table-scroll:";
 
 const TEXTBOOK_TABLE_COLUMN_IDS = [
@@ -1232,6 +1235,10 @@ export function ManagementDataTable({
   statusLabel,
   emptyLabel,
   actions = {},
+  pageSize,
+  pageSizeMode,
+  onAutoPageSizeChange,
+  onPageSizePreferenceChange,
 }: {
   kind: ManagementKind;
   rows: ManagementRow[];
@@ -1243,12 +1250,18 @@ export function ManagementDataTable({
   statusLabel: string;
   emptyLabel: string;
   actions?: ManagementTableActions;
+  pageSize: ManagementListPageSize;
+  pageSizeMode: "auto" | "user";
+  onAutoPageSizeChange: (size: ManagementListPageSize) => void;
+  onPageSizePreferenceChange: (value: "auto" | ManagementListPageSize) => void;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const searchParamString = searchParams.toString();
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
+  const tableBodyRef = useRef<HTMLTableSectionElement | null>(null);
+  const tablePagerRef = useRef<HTMLDivElement | null>(null);
   const managementScrollStorageKey = useMemo(
     () => getManagementListScrollStorageKey(kind, pathname, searchParamString),
     [kind, pathname, searchParamString],
@@ -1291,6 +1304,7 @@ export function ManagementDataTable({
   const pendingStudentListQueryStateRef = useRef<StudentListQueryState | null>(null);
   const [grouping, setGrouping] = useState<GroupingState>([]);
   const [expanded, setExpanded] = useState<ExpandedState>({});
+  const [pageIndex, setPageIndex] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [columnSearchQuery, setColumnSearchQuery] = useState("");
   const [hydratedStorageKey, setHydratedStorageKey] = useState("");
@@ -1329,6 +1343,7 @@ export function ManagementDataTable({
         header: ({ table }) => (
           <div className="flex items-center justify-center px-1">
             <Checkbox
+              className="size-6"
               checked={
                 table.getIsAllPageRowsSelected() ||
                 (table.getIsSomePageRowsSelected() && "indeterminate")
@@ -1341,6 +1356,7 @@ export function ManagementDataTable({
         cell: ({ row }) => (
           <div className="flex items-center justify-center px-1">
             <Checkbox
+              className="size-6"
               checked={row.getIsSelected()}
               onCheckedChange={(value) => row.toggleSelected(!!value)}
               aria-label={`${emptyLabel} 항목 선택`}
@@ -1364,7 +1380,7 @@ export function ManagementDataTable({
             <button
               type="button"
               className={cn(
-                "-mx-1.5 inline-flex max-w-full cursor-pointer rounded-md px-1.5 py-1 text-left text-sm font-medium leading-5 underline-offset-4 transition-colors hover:bg-primary/5 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 active:translate-y-px",
+                "-mx-1.5 inline-flex min-h-6 max-w-full cursor-pointer rounded-md px-1.5 py-0.5 text-left text-sm font-medium leading-5 underline-offset-4 transition-colors hover:bg-primary/5 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 active:translate-y-px",
                 kind === "classes" ? "text-blue-600 dark:text-blue-400" : "text-foreground",
               )}
               onClick={() => openManagementRow(row.original)}
@@ -1504,7 +1520,7 @@ export function ManagementDataTable({
             <Button
               variant="ghost"
               size="icon"
-              className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              className="size-6 text-destructive hover:bg-destructive/10 hover:text-destructive"
               aria-label={`${row.original.title} ${kind === "students" ? "퇴원 처리" : "삭제"}`}
               title={kind === "students" ? "퇴원 처리" : "삭제"}
               onClick={() => actions.onDeleteRow?.(row.original)}
@@ -1680,6 +1696,10 @@ export function ManagementDataTable({
     }
   }, [kind, studentGradeFilter, studentGradeOptions]);
 
+  useEffect(() => {
+    setPageIndex(0);
+  }, [kind, pageSize]);
+
   const table = useReactTable({
     data: tableSourceRows,
     columns,
@@ -1704,6 +1724,13 @@ export function ManagementDataTable({
       setBulkEditValue("");
     },
     onExpandedChange: setExpanded,
+    onPaginationChange: (updater) => {
+      setPageIndex((current) => (
+        typeof updater === "function"
+          ? updater({ pageIndex: current, pageSize }).pageIndex
+          : updater.pageIndex
+      ));
+    },
     state: {
       sorting,
       columnFilters,
@@ -1714,6 +1741,7 @@ export function ManagementDataTable({
       globalFilter: deferredGlobalFilter,
       grouping,
       expanded,
+      pagination: { pageIndex, pageSize },
     },
     manualFiltering: true,
     globalFilterFn: (row, _, value) => {
@@ -1732,11 +1760,6 @@ export function ManagementDataTable({
       maxSize: 420,
     },
     columnResizeMode: "onChange",
-    initialState: {
-      pagination: {
-        pageSize: DEFAULT_PAGE_SIZE,
-      },
-    },
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -1744,6 +1767,46 @@ export function ManagementDataTable({
     getGroupedRowModel: getGroupedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
   });
+
+  useEffect(() => {
+    if (pageSizeMode !== "auto") {
+      return undefined;
+    }
+
+    const tableBody = tableBodyRef.current;
+    const tablePager = tablePagerRef.current;
+    if (!tableBody || !tablePager) {
+      return undefined;
+    }
+
+    const measurePageSize = () => {
+      if (tableBody.getClientRects().length === 0) {
+        return;
+      }
+
+      const firstRealRow = tableBody.querySelector<HTMLElement>('tr[data-management-row="true"]');
+      const measuredRowHeight = firstRealRow?.getBoundingClientRect().height || 34;
+      const bodyTop = tableBody.getBoundingClientRect().top;
+      const pagerHeight = tablePager.getBoundingClientRect().height || 44;
+      const fitRows = Math.floor((window.innerHeight - bodyTop - pagerHeight - 16) / measuredRowHeight);
+      const nextPageSize = pickManagementListPageSize(fitRows);
+
+      if (nextPageSize !== pageSize) {
+        onAutoPageSizeChange(nextPageSize);
+      }
+    };
+
+    const resizeObserver = new ResizeObserver(measurePageSize);
+    resizeObserver.observe(tableBody);
+    resizeObserver.observe(tablePager);
+    window.addEventListener("resize", measurePageSize, { passive: true });
+    measurePageSize();
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", measurePageSize);
+    };
+  }, [onAutoPageSizeChange, pageSize, pageSizeMode]);
 
   const badgeOptions = useMemo(
     () =>
@@ -1869,7 +1932,6 @@ export function ManagementDataTable({
   const secondarySortDirection = sorting[1]?.desc ? "desc" : "asc";
   const currentPage = table.getState().pagination.pageIndex + 1;
   const totalPages = table.getPageCount() || 1;
-  const pageSize = table.getState().pagination.pageSize;
   const visibleRangeStart = filteredRowCount === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const visibleRangeEnd = filteredRowCount === 0 ? 0 : Math.min(currentPage * pageSize, filteredRowCount);
   const captionSuffix = kind === "classes"
@@ -2272,8 +2334,17 @@ export function ManagementDataTable({
   const updatePageSize = (value: string) => {
     setRowSelection({});
     setBulkEditValue("");
-    table.setPageSize(Number(value));
-    table.setPageIndex(0);
+    setPageIndex(0);
+
+    if (value === "auto") {
+      onPageSizePreferenceChange("auto");
+      return;
+    }
+
+    const requestedSize = Number(value) as ManagementListPageSize;
+    if (MANAGEMENT_LIST_PAGE_SIZES.includes(requestedSize)) {
+      onPageSizePreferenceChange(requestedSize);
+    }
   };
 
   const columnSettingsControl = (
@@ -2287,7 +2358,7 @@ export function ManagementDataTable({
       }}
     >
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className="size-8" aria-label="컬럼 구성" title="컬럼 구성">
+        <Button variant="ghost" size="icon" className="size-6" aria-label="컬럼 구성" title="컬럼 구성">
           <Settings2 className="size-4" />
         </Button>
       </PopoverTrigger>
@@ -3232,7 +3303,7 @@ export function ManagementDataTable({
                       key={header.id}
                       aria-sort={sortState === "asc" ? "ascending" : sortState === "desc" ? "descending" : undefined}
                       className={cn(
-                        "sticky top-0 z-10 border-b bg-muted/30 px-3 py-2 text-xs font-semibold text-foreground relative",
+                        "sticky top-0 z-10 h-9 border-b bg-muted/30 px-2 py-1 text-xs font-semibold text-foreground relative",
                         getPinnedColumnClassName(header.id),
                       )}
                       style={getColumnSizeStyle(header.getSize())}
@@ -3296,13 +3367,13 @@ export function ManagementDataTable({
               </TableRow>
             ))}
           </TableHeader>
-          <TableBody>
+          <TableBody ref={tableBodyRef}>
             {showInitialLoading ? (
               <>
                 <TableRow>
                   <TableCell
                     colSpan={table.getVisibleLeafColumns().length || columns.length}
-                    className="px-3 py-2 text-sm text-muted-foreground"
+                    className="px-2 py-1 text-sm text-muted-foreground"
                     role="status"
                     aria-live="polite"
                   >
@@ -3311,8 +3382,8 @@ export function ManagementDataTable({
                 </TableRow>
                 {Array.from({ length: 5 }).map((_, index) => (
                   <TableRow key={`loading-${index}`}>
-                    <TableCell colSpan={table.getVisibleLeafColumns().length || columns.length}>
-                      <Skeleton className="h-10 w-full" />
+                    <TableCell colSpan={table.getVisibleLeafColumns().length || columns.length} className="px-2 py-1">
+                      <Skeleton className="h-6 w-full" />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -3321,21 +3392,22 @@ export function ManagementDataTable({
               table.getRowModel().rows.map((row) => (
                 <TableRow
                   key={row.id}
+                  data-management-row="true"
                   data-state={row.getIsSelected() && "selected"}
-                  className="border-b transition-colors hover:bg-muted/30 data-[state=selected]:bg-primary/5 last:border-b-0"
+                  className="h-[34px] border-b transition-colors hover:bg-muted/30 data-[state=selected]:bg-primary/5 last:border-b-0"
                 >
                   {row.getVisibleCells().map((cell) => {
                     if (cell.getIsGrouped()) {
                       return (
                         <TableCell
                           key={cell.id}
-                          className={cn("px-3 py-2 align-top", getPinnedColumnClassName(cell.column.id))}
+                          className={cn("px-2 py-1 align-middle", getPinnedColumnClassName(cell.column.id))}
                           style={getColumnSizeStyle(cell.column.getSize())}
                         >
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-auto px-0 py-0 font-normal"
+                            className="min-h-6 px-0 py-0 font-normal"
                             onClick={row.getToggleExpandedHandler()}
                           >
                             {row.getIsExpanded() ? <ChevronDown className="mr-2 size-4" /> : <ChevronRight className="mr-2 size-4" />}
@@ -3350,7 +3422,7 @@ export function ManagementDataTable({
                       return (
                         <TableCell
                           key={cell.id}
-                          className={cn("px-3 py-2 align-top", getPinnedColumnClassName(cell.column.id))}
+                          className={cn("px-2 py-1 align-middle", getPinnedColumnClassName(cell.column.id))}
                           style={getColumnSizeStyle(cell.column.getSize())}
                         />
                       );
@@ -3360,7 +3432,7 @@ export function ManagementDataTable({
                       return (
                         <TableCell
                           key={cell.id}
-                          className={cn("px-3 py-2 align-top", getPinnedColumnClassName(cell.column.id))}
+                          className={cn("px-2 py-1 align-middle", getPinnedColumnClassName(cell.column.id))}
                           style={getColumnSizeStyle(cell.column.getSize())}
                         />
                       );
@@ -3369,7 +3441,7 @@ export function ManagementDataTable({
                     return (
                       <TableCell
                         key={cell.id}
-                        className={cn("px-3 py-2 align-top", getPinnedColumnClassName(cell.column.id))}
+                        className={cn("px-2 py-1 align-middle", getPinnedColumnClassName(cell.column.id))}
                         style={getColumnSizeStyle(cell.column.getSize())}
                       >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -3401,7 +3473,7 @@ export function ManagementDataTable({
         </Table>
       </div>
 
-      <div className="flex flex-col gap-2 py-1 text-sm sm:flex-row sm:items-center sm:justify-between">
+      <div ref={tablePagerRef} className="flex min-h-11 flex-col gap-2 py-1 text-sm sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
           <span>
             페이지 {currentPage} / {totalPages} · 표시 범위 {visibleRangeStart}–{visibleRangeEnd}
@@ -3409,14 +3481,15 @@ export function ManagementDataTable({
           <div className="flex items-center gap-1.5">
             <span className="text-xs">페이지당</span>
             <Select
-              value={String(pageSize)}
+              value={pageSizeMode === "auto" ? "auto" : String(pageSize)}
               onValueChange={updatePageSize}
             >
               <SelectTrigger className="h-8 w-[5.5rem]" aria-label="페이지당 표시 개수">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {PAGE_SIZE_OPTIONS.map((option) => (
+                <SelectItem value="auto">자동 ({pageSize}개)</SelectItem>
+                {MANAGEMENT_LIST_PAGE_SIZES.map((option) => (
                   <SelectItem key={option} value={String(option)}>
                     {option}개
                   </SelectItem>

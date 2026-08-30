@@ -43,6 +43,12 @@ import {
 import { useAuth } from "@/providers/auth-provider";
 
 import { ManagementDataTable } from "./management-data-table";
+import {
+  estimateManagementListPageSize,
+  managementPageSizeStorageKey,
+  parseManagementPageSizePreference,
+  type ManagementListPageSize,
+} from "./management-page-size";
 import { ClassTextbookPicker } from "./class-textbook-picker";
 import { ManagementRelationCombobox } from "./management-relation-combobox";
 import {
@@ -1445,6 +1451,61 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     () => JSON.parse(managementListFilterScope) as ManagementListFilters,
     [managementListFilterScope],
   );
+  const [pageSizeState, setPageSizeState] = useState<{
+    ready: boolean;
+    mode: "auto" | "user";
+    size: ManagementListPageSize;
+  }>({ ready: false, mode: "auto", size: 20 });
+
+  useEffect(() => {
+    const storageKey = managementPageSizeStorageKey(kind);
+    let storedPreference = null;
+
+    try {
+      storedPreference = parseManagementPageSizePreference(window.localStorage.getItem(storageKey));
+    } catch {
+      // Storage can be unavailable; automatic sizing remains the safe fallback.
+    }
+
+    setPageSizeState({
+      ready: true,
+      mode: storedPreference ? "user" : "auto",
+      size: storedPreference?.size ?? estimateManagementListPageSize(window.innerHeight),
+    });
+  }, [kind]);
+
+  const handleAutoPageSizeChange = useCallback((size: ManagementListPageSize) => {
+    setPageSizeState((current) => (
+      current.mode === "auto" && current.size !== size
+        ? { ...current, size }
+        : current
+    ));
+  }, []);
+
+  const handlePageSizePreferenceChange = useCallback((value: "auto" | ManagementListPageSize) => {
+    const storageKey = managementPageSizeStorageKey(kind);
+
+    if (value === "auto") {
+      try {
+        window.localStorage.removeItem(storageKey);
+      } catch {
+        // Keep automatic sizing active even if storage cleanup is unavailable.
+      }
+      setPageSizeState({
+        ready: true,
+        mode: "auto",
+        size: estimateManagementListPageSize(window.innerHeight),
+      });
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify({ version: 1, size: value }));
+    } catch {
+      // The explicit in-memory choice still applies for the current session.
+    }
+    setPageSizeState({ ready: true, mode: "user", size: value });
+  }, [kind]);
   const {
     rows,
     stats,
@@ -1462,7 +1523,10 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     loadClassTextbookCandidatePage,
     removeRows,
     refresh,
-  } = useManagementRecords(kind, managementListFilters);
+  } = useManagementRecords(kind, managementListFilters, {
+    enabled: pageSizeState.ready,
+    pageSize: pageSizeState.size,
+  });
   const canMutateRows = canManageAll;
   const [dialogMode, setDialogMode] = useState<"create" | "detail" | null>(null);
   const [selectedRow, setSelectedRow] = useState<ManagementRow | null>(null);
@@ -3646,11 +3710,15 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           statusLabel={config.statusLabel}
           emptyLabel={config.emptyLabel}
           actions={actions}
+          pageSize={pageSizeState.size}
+          pageSizeMode={pageSizeState.mode}
+          onAutoPageSizeChange={handleAutoPageSizeChange}
+          onPageSizePreferenceChange={handlePageSizePreferenceChange}
         />
         <div className="flex justify-center py-4" data-testid="management-list-continuation">
           {hasMore ? (
             <Button type="button" variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>
-              {loadingMore ? "불러오는 중" : "다음 30건"}
+              {loadingMore ? "불러오는 중" : `다음 ${pageSizeState.size}건`}
             </Button>
           ) : rows.length > 0 && !loading ? (
             <span className="text-xs text-muted-foreground">목록의 끝입니다.</span>

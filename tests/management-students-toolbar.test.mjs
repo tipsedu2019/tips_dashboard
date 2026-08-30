@@ -334,7 +334,8 @@ test("management table keeps filter and search actions visible and reversible", 
   assert.match(panelSource, /primaryLabel\?: string/);
   assert.match(panelSource, /aria-label=\{`\$\{searchPlaceholder\} 지우기`\}/);
   assert.match(panelSource, /필터 \$\{String\(primaryLabel\)\}|필터 \$\{primaryLabel\}/);
-  assert.match(tableSource, /const DEFAULT_PAGE_SIZE = 30/);
+  assert.match(tableSource, /MANAGEMENT_LIST_PAGE_SIZES/);
+  assert.doesNotMatch(tableSource, /const DEFAULT_PAGE_SIZE = 30/);
   assert.match(tableSource, /onSearchChange=\{updateGlobalFilter\}/);
   assert.match(tableSource, /primaryLabel=\{activePeriodLabel\}/);
   assert.match(tableSource, /setRowSelection\(\{\}\);[\s\S]*table\.resetPagination\(\);/);
