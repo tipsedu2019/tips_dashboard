@@ -148,24 +148,37 @@ function makeRpcBuilder(result, calls) {
   };
 }
 
-test("management list uses bounded page, authoritative stats, and filter options without detail enrichment", async () => {
+function makeDeferredRpcBuilder(result, calls) {
+  return {
+    abortSignal(signal) {
+      calls.push(["abortSignal", signal]);
+      return this;
+    },
+    retry(value) {
+      calls.push(["retry", value]);
+      return result;
+    },
+  };
+}
+
+test("management list callers can request 10, 15, or 20 rows while 30 remains relation-only", async () => {
   const calls = [];
+  const studentId = "10000000-0000-4000-8000-000000000001";
   const client = {
     rpc(name, args) {
       calls.push([name, args]);
       if (name === "list_management_page_v1") {
         return makeRpcBuilder({
-          data: [
-            { id: "10000000-0000-4000-8000-000000000001", sort_key: "김학생", row_data: { kind: "students", id: "10000000-0000-4000-8000-000000000001", name: "김학생", status: "재원" } },
-          ],
+          data: Array.from({ length: 21 }, (_, index) => ({
+            id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+            sort_key: `김학생 ${index + 1}`,
+            row_data: { kind: "students", id: `student-${index + 1}`, name: `김학생 ${index + 1}`, status: "재원" },
+          })),
           error: null,
         }, calls);
       }
-      if (name === "get_management_stats_v1") {
-        return makeRpcBuilder({ data: { total: 37, byStatus: { "재원": 35, "퇴원": 2 } }, error: null }, calls);
-      }
-      if (name === "list_management_filter_options_v1") {
-        return makeRpcBuilder({ data: { school: ["팁스중"], grade: ["중2"] }, error: null }, calls);
+      if (name === "list_management_detail_relation_page_v1") {
+        return makeRpcBuilder({ data: { page: { rows: [], hasMore: false, nextCursor: null } }, error: null }, calls);
       }
       throw new Error(`unexpected rpc ${name}`);
     },
@@ -173,16 +186,84 @@ test("management list uses bounded page, authoritative stats, and filter options
   const service = createManagementReadService({ supabase: client });
   const filters = { kind: "students", search: "", status: null, schoolCategory: null, school: null, grade: null };
 
-  const result = await service.loadPage({ kind: "students", filters, cursor: null, limit: 30 });
+  for (const limit of [10, 15, 20]) {
+    const result = await service.loadNextPage({ kind: "students", filters, cursor: null, limit });
+    assert.equal(calls.findLast(([name]) => name === "list_management_page_v1")[1].p_limit, limit);
+    assert.ok(result.rows.length <= limit);
+  }
 
-  assert.equal(result.page.rows.length, 1);
-  assert.equal(result.stats.total, 37);
-  assert.deepEqual(result.filterOptions.school, ["팁스중"]);
-  assert.deepEqual(calls.filter(([name]) => name === "get_management_detail_v1"), []);
-  assert.deepEqual(calls.filter(([name]) => name === "list_management_detail_relation_page_v1"), []);
+  await assert.rejects(
+    service.loadNextPage({ kind: "students", filters, cursor: null, limit: 30 }),
+    (error) => error?.code === "management_page_limit_invalid",
+  );
+  await service.loadRelationPage({
+    kind: "students", id: studentId, relationKind: "lifecycle_history", cursor: null, limit: 30,
+  });
+  assert.equal(calls.findLast(([name]) => name === "list_management_detail_relation_page_v1")[1].p_limit, 30);
+});
+
+test("management initial reads return rows before metadata and cancel every query with the caller", async () => {
+  const calls = [];
+  const statsGate = deferred();
+  const filterOptionsGate = deferred();
+  const client = {
+    rpc(name, args) {
+      calls.push([name, args]);
+      if (name === "list_management_page_v1") {
+        return makeRpcBuilder({ data: [{ id: "student-1", sort_key: "김학생", row_data: { id: "student-1" } }], error: null }, calls);
+      }
+      if (name === "get_management_stats_v1") return makeDeferredRpcBuilder(statsGate.promise, calls);
+      if (name === "list_management_filter_options_v1") return makeDeferredRpcBuilder(filterOptionsGate.promise, calls);
+      throw new Error(`unexpected rpc ${name}`);
+    },
+  };
+  const service = createManagementReadService({ supabase: client });
+  const filters = { kind: "students", search: "", status: null, schoolCategory: null, school: null, grade: null };
+  const controller = new AbortController();
+
+  const result = await service.loadInitialPage({ kind: "students", filters, cursor: null, limit: 10, signal: controller.signal });
+  let metadataSettled = false;
+  void result.metadata.then(() => { metadataSettled = true; });
+  await Promise.resolve();
+
+  assert.deepEqual(result.page.rows, [{ id: "student-1" }]);
+  assert.equal(metadataSettled, false);
   assert.equal(calls.filter(([name]) => name === "abortSignal").length, 3);
   assert.deepEqual(calls.filter(([name]) => name === "retry").map(([, value]) => value), [false, false, false]);
-  assert.equal(calls.find(([name]) => name === "list_management_page_v1")[1].p_limit, 30);
+
+  controller.abort();
+  assert.ok(calls.filter(([name]) => name === "abortSignal").every(([, signal]) => signal.aborted));
+  statsGate.resolve({ data: { total: 37, byStatus: { "재원": 37 } }, error: null });
+  filterOptionsGate.resolve({ data: { school: ["팁스중"] }, error: null });
+  assert.deepEqual(await result.metadata, {
+    ok: true,
+    stats: { total: 37, byStatus: { "재원": 37 } },
+    filterOptions: { school: ["팁스중"] },
+  });
+});
+
+test("management metadata failures settle without discarding a loaded page", async () => {
+  const calls = [];
+  const client = {
+    rpc(name, args) {
+      calls.push([name, args]);
+      if (name === "list_management_page_v1") {
+        return makeRpcBuilder({ data: [{ id: "student-1", sort_key: "김학생", row_data: { id: "student-1" } }], error: null }, calls);
+      }
+      if (name === "get_management_stats_v1") return makeRpcBuilder({ data: null, error: new Error("stats unavailable") }, calls);
+      if (name === "list_management_filter_options_v1") return makeRpcBuilder({ data: { school: [] }, error: null }, calls);
+      throw new Error(`unexpected rpc ${name}`);
+    },
+  };
+  const service = createManagementReadService({ supabase: client });
+  const filters = { kind: "students", search: "", status: null, schoolCategory: null, school: null, grade: null };
+
+  const result = await service.loadInitialPage({ kind: "students", filters, cursor: null, limit: 10 });
+
+  assert.deepEqual(result.page.rows, [{ id: "student-1" }]);
+  const metadata = await result.metadata;
+  assert.equal(metadata.ok, false);
+  assert.equal(metadata.error.message, "stats unavailable");
 });
 
 test("the first class management bundle resolves and applies the default period before list stats or options", async () => {
@@ -211,14 +292,14 @@ test("the first class management bundle resolves and applies the default period 
   };
 
   const [result, concurrentResult] = await Promise.all([
-    service.loadInitialPage({ kind: "classes", filters, cursor: null, limit: 30 }),
-    service.loadInitialPage({ kind: "classes", filters, cursor: null, limit: 30 }),
+    service.loadInitialPage({ kind: "classes", filters, cursor: null, limit: 10 }),
+    service.loadInitialPage({ kind: "classes", filters, cursor: null, limit: 10 }),
   ]);
   const canonicalReplay = await service.loadInitialPage({
     kind: "classes",
     filters: { ...filters, periodId: defaultPeriodId },
     cursor: null,
-    limit: 30,
+    limit: 10,
     canonicalReplayToken: result.canonicalReplayToken,
   });
 
@@ -231,16 +312,16 @@ test("the first class management bundle resolves and applies the default period 
   }
   assert.equal(result.effectiveFilters.periodId, defaultPeriodId);
   assert.equal(concurrentResult, result);
-  assert.equal(canonicalReplay.stats.total, 1);
+  assert.equal((await canonicalReplay.metadata).stats.total, 1);
   assert.equal(canonicalReplay.canonicalReplayToken, null);
 
   const refreshed = await service.loadInitialPage({
     kind: "classes",
     filters: { ...filters, periodId: defaultPeriodId },
     cursor: null,
-    limit: 30,
+    limit: 10,
   });
-  assert.equal(refreshed.stats.total, 2);
+  assert.equal((await refreshed.metadata).stats.total, 2);
   for (const name of ["list_management_page_v1", "get_management_stats_v1", "list_management_filter_options_v1"]) {
     assert.equal(calls.filter(([calledName]) => calledName === name).length, 2);
   }
@@ -282,13 +363,13 @@ test("an explicit refresh bypasses and revokes an overlapping passive default-pe
     subject: null, grade: null, teacher: null, classroom: null,
   };
 
-  const passive = service.loadInitialPage({ kind: "classes", filters, cursor: null, limit: 30 });
+  const passive = service.loadInitialPage({ kind: "classes", filters, cursor: null, limit: 10 });
   for (let attempt = 0; attempt < 20 && callCounts.get("list_management_page_v1") !== 1; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   assert.equal(callCounts.get("list_management_page_v1"), 1);
   const refresh = service.loadInitialPage({
-    kind: "classes", filters, cursor: null, limit: 30, coalesceInitialRequest: false,
+    kind: "classes", filters, cursor: null, limit: 10, coalesceInitialRequest: false,
   });
   for (let attempt = 0; attempt < 20 && callCounts.get("list_management_page_v1") !== 2; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -299,12 +380,12 @@ test("an explicit refresh bypasses and revokes an overlapping passive default-pe
   }
   for (const entries of gates.values()) entries[1].resolve();
   const refreshed = await refresh;
-  assert.equal(refreshed.stats.total, 2);
+  assert.equal((await refreshed.metadata).stats.total, 2);
   assert.equal(refreshed.page.rows[0].revision, 2);
 
   for (const entries of gates.values()) entries[0].resolve();
   const stalePassive = await passive;
-  assert.equal(stalePassive.stats.total, 1);
+  assert.equal((await stalePassive.metadata).stats.total, 1);
   assert.equal(stalePassive.canonicalReplayToken, null);
 });
 
