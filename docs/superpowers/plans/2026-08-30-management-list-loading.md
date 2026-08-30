@@ -403,7 +403,7 @@ git commit -m "perf: fit compact management pages to viewport"
 Run:
 
 ```bash
-/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --test --experimental-strip-types tests/query-surface-budget.test.mjs tests/keyset-pagination.test.mjs tests/management-page-size.test.mjs tests/management-request-gate.test.mjs tests/management-progressive-loading.test.mjs tests/management-filter-transition.test.mjs tests/management-students-toolbar.test.mjs tests/management-page-ux.test.mjs
+/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --test --experimental-strip-types tests/query-surface-budget.test.mjs tests/keyset-pagination.test.mjs tests/management-page-size.test.mjs tests/management-request-gate.test.mjs tests/management-progressive-loading.test.mjs tests/management-filter-transition.test.mjs tests/management-students-toolbar.test.mjs
 ```
 
 Expected: PASS with zero failures.
