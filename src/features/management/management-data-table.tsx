@@ -1246,7 +1246,6 @@ export function ManagementDataTable({
   stats: ManagementStat[];
   loading: boolean;
   filterOptions?: Record<string, unknown>;
-  onRefresh: () => void;
   badgeLabel: string;
   statusLabel: string;
   emptyLabel: string;

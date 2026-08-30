@@ -64,6 +64,7 @@ import {
 } from "./management-service.js";
 import { pickDefaultPeriodValue } from "./period-preferences";
 import { serializeManagementListFilters } from "./management-filter-transition.js";
+import { getManagementListErrorRecoveryState } from "./management-list-load-state";
 import {
   filterClassStudentCandidates,
   filterStudentClassCandidates,
@@ -3687,13 +3688,37 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       ? relatedTitle(pendingClassStudentDetailRecord, "학생")
       : resolveRelatedTitle(pendingClassStudentDetailId)
     : "학생";
+  const errorRecovery = getManagementListErrorRecoveryState({
+    error,
+    loading,
+    rowCount: rows.length,
+  });
 
   return (
     <div className="flex flex-col gap-6">
-      {error && !loading ? (
+      {errorRecovery.visible ? (
         <div className="px-4 lg:px-6">
           <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>
+              <div className="flex w-full flex-wrap items-center justify-between gap-3">
+                <div className="grid gap-1">
+                  <span>{error}</span>
+                  {errorRecovery.hasRetainedRows ? (
+                    <span className="text-xs">기존 목록은 유지됩니다.</span>
+                  ) : null}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  aria-label={`${config.emptyLabel} 목록 다시 시도`}
+                  onClick={() => void refresh()}
+                  disabled={errorRecovery.retryDisabled}
+                >
+                  {loading ? "다시 시도 중" : "다시 시도"}
+                </Button>
+              </div>
+            </AlertDescription>
           </Alert>
         </div>
       ) : null}
@@ -3705,7 +3730,6 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           stats={stats}
           loading={loading}
           filterOptions={filterOptions}
-          onRefresh={refresh}
           badgeLabel={config.badgeLabel}
           statusLabel={config.statusLabel}
           emptyLabel={config.emptyLabel}

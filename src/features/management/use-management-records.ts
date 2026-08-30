@@ -22,6 +22,12 @@ import {
   executeManagementContinuationRequest,
   executeManagementInitialRequest,
 } from "./management-request-lifecycle";
+import {
+  beginManagementListLoad,
+  createManagementListLoadState,
+  isManagementListLoading,
+  settleManagementListLoad,
+} from "./management-list-load-state";
 
 export type ManagementKind = "students" | "classes" | "textbooks";
 
@@ -800,7 +806,7 @@ export function useManagementRecords(
   const [rows, setRows] = useState<ManagementRow[]>([]);
   const [stats, setStats] = useState<ManagementStat[]>([]);
   const [classFormReferences, setClassFormReferences] = useState<ClassFormReferences>(EMPTY_CLASS_FORM_REFERENCES);
-  const [loading, setLoading] = useState(enabled);
+  const [loadState, setLoadState] = useState(createManagementListLoadState);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<ManagementPageCursor | null>(null);
@@ -824,7 +830,6 @@ export function useManagementRecords(
     if (!enabled) {
       initialRequestGateRef.current.abort();
       initialTicketRef.current = null;
-      setLoading(false);
       return;
     }
 
@@ -832,12 +837,11 @@ export function useManagementRecords(
       initialRequestGateRef.current.abort();
       initialTicketRef.current = null;
       setError("Supabase 연결 설정을 확인해 주세요.");
-      setLoading(false);
+      setLoadState(settleManagementListLoad);
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    setLoadState(beginManagementListLoad);
     const canonicalReplayToken = allowCanonicalReplay ? canonicalReplayTokenRef.current : "";
     if (!allowCanonicalReplay && canonicalReplayTokenRef.current) {
       readService.discardCanonicalReplay(canonicalReplayTokenRef.current);
@@ -865,7 +869,7 @@ export function useManagementRecords(
         setHasMore(result.page.hasMore);
         setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
         setError(null);
-        setLoading(false);
+        setLoadState(settleManagementListLoad);
       },
       onMetadata: (metadata) => {
         const settled = metadata as {
@@ -884,7 +888,7 @@ export function useManagementRecords(
               ? "목록 부가 정보를 불러오지 못했습니다."
               : "알 수 없는 연결 오류가 발생했습니다.",
         );
-        setLoading(false);
+        setLoadState(settleManagementListLoad);
       },
     });
     initialTicketRef.current = execution.ticket;
@@ -1017,6 +1021,7 @@ export function useManagementRecords(
   }, []);
 
   const refresh = useCallback(() => load({ allowCanonicalReplay: false }), [load]);
+  const loading = isManagementListLoading(loadState);
 
   return {
     rows,

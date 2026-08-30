@@ -2,7 +2,7 @@
 
 - 검증일: 2026-08-30 (Asia/Seoul)
 - 작업공간: `/Users/hyunjun/Documents/Codex/tips_dashboard`
-- 브랜치/검증 기준: `codex/loading-performance` / `ced7f19f`
+- 브랜치/검증 기준: `codex/loading-performance` / `07f1737d` 이후 최종 리뷰 보완 포함
 - 로컬 프로덕션 서버: `http://localhost:3017` (`next start -p 3017`)
 - 결론: 집중 회귀, TypeScript, lint, 프로덕션 빌드는 통과했다. 인증된 브라우저 세션이 없어 관리 목록 내부의 768/900/952px 동작은 관찰하지 못했다. 이 문서는 로컬 증거만 기록하며 원격 배포나 운영 성능을 주장하지 않는다.
 
@@ -12,19 +12,28 @@
 
 `/admin/students`·`/admin/classes` 로드 → 768/900/952px 높이에 맞는 자동 페이지 크기 렌더링 → 행 선택/해제로 레이아웃 이동 후 안정적인 재측정 → 빠른 필터/새로고침에서 기존 행 유지 및 대체된 목록 요청 취소
 
-이번 슬라이스의 변경 파일은 관리 목록 서비스·요청 생명주기·요청 게이트·적응형 페이지 크기·테이블/페이지 컴포넌트와 관련 집중 테스트다. 이 QA 단계에서는 재현된 구현 회귀가 없어 제품 코드를 수정하지 않았다.
+이번 슬라이스의 변경 파일은 관리 목록 서비스·요청 생명주기·요청 게이트·적응형 페이지 크기·테이블/페이지 컴포넌트와 관련 집중 테스트다. 최초 브라우저 QA에서는 인증 경계 이전의 구현 회귀가 재현되지 않았지만, 이후 최종 코드 리뷰에서 냉간 진입의 빈 상태 노출과 읽기 오류의 재시도 동작 부재를 찾아 보완했다.
 
 ## 2. 자동 테스트 증거
 
 다음 집중 명령을 그대로 실행했다.
 
 ```bash
-/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --test --experimental-strip-types tests/query-surface-budget.test.mjs tests/keyset-pagination.test.mjs tests/management-page-size.test.mjs tests/management-request-gate.test.mjs tests/management-progressive-loading.test.mjs tests/management-filter-transition.test.mjs tests/management-students-toolbar.test.mjs
+/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --test --experimental-strip-types tests/query-surface-budget.test.mjs tests/keyset-pagination.test.mjs tests/management-page-size.test.mjs tests/management-request-gate.test.mjs tests/management-request-lifecycle.test.mjs tests/management-progressive-loading.test.mjs tests/management-filter-transition.test.mjs tests/management-students-toolbar.test.mjs
 ```
 
-- 결과: 종료 코드 0, 170/170 통과, 실패·취소·skip 0.
+- 결과: 종료 코드 0, 176/176 통과, 실패·취소·skip 0.
 - 확인된 계약에는 10/15/20 적응형 페이지 크기, 뷰포트 용량 양자화, 크기 축소 시 페이지 clamp, 선택 기반 상세/관계 조회, 호출자별 취소, 오래된 응답 차단, 새 요청 중 기존 행 유지, 빠른 필터 전환의 URL 소유권이 포함된다.
 - 위 항목은 소스/계약 회귀 증거이며 실제 인증 데이터 화면의 렌더링 증거로 해석하지 않는다.
+
+최종 리뷰 보완은 다음 별도 상태 전이 회귀로 확인했다.
+
+```bash
+/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --test --experimental-strip-types tests/management-list-load-state.test.mjs
+```
+
+- 결과: 종료 코드 0, 3/3 통과.
+- 확인된 계약은 환경설정 수화 전부터 첫 요청 성공·실패까지의 pending 표시, 빈 첫 로드 오류의 재시도, 기존 행을 보존한 새로고침 오류의 재시도, 재시도 중 비활성 상태다.
 
 TypeScript는 다음 명령으로 별도 확인했다.
 
