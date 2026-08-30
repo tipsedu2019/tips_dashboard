@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import {
+  clampManagementPageIndex,
   estimateManagementListPageSize,
   managementPageSizeStorageKey,
   parseManagementPageSizePreference,
@@ -19,6 +20,13 @@ test("management sizing quantizes measured row capacity without exceeding 20", (
   assert.equal(pickManagementListPageSize(19), 15);
   assert.equal(pickManagementListPageSize(20), 20);
   assert.equal(pickManagementListPageSize(200), 20);
+});
+
+test("management pagination clamps only indexes that exceed the available rows", () => {
+  assert.equal(clampManagementPageIndex(1, 40, 20), 1);
+  assert.equal(clampManagementPageIndex(1, 60, 20), 1);
+  assert.equal(clampManagementPageIndex(1, 20, 20), 0);
+  assert.equal(clampManagementPageIndex(1, 0, 20), 0);
 });
 
 test("management sizing accepts only a versioned user override", () => {
@@ -73,14 +81,21 @@ test("management page wires adaptive sizing into the request and controlled tabl
   assert.match(tableSource, /MANAGEMENT_LIST_PAGE_SIZES/);
   assert.match(tableSource, /pagination: \{ pageIndex, pageSize \}/);
   assert.match(tableSource, /onPaginationChange:/);
+  assert.match(tableSource, /const prePaginationRowCount = table\.getPrePaginationRowModel\(\)\.rows\.length/);
+  assert.match(tableSource, /clampManagementPageIndex\(current, prePaginationRowCount, pageSize\)/);
   assert.match(tableSource, /new ResizeObserver/);
   assert.match(tableSource, /resizeObserver\.disconnect\(\)/);
   assert.match(tableSource, /window\.removeEventListener\("resize", measurePageSize\)/);
+  assert.match(tableSource, /const tableLayoutRef = useRef<HTMLDivElement \| null>\(null\)/);
+  assert.match(tableSource, /<div ref=\{tableLayoutRef\} className="w-full space-y-3">/);
+  assert.match(tableSource, /resizeObserver\.observe\(tableLayout\)/);
   assert.match(tableSource, /<TableBody ref=\{tableBodyRef\}>/);
   assert.match(tableSource, /className="h-\[34px\] border-b/);
   assert.match(tableSource, /"sticky top-0 z-10 h-9 border-b[^"]*px-2 py-1/);
   assert.match(tableSource, /className="size-6 text-destructive/);
   assert.match(tableSource, /className="size-6" aria-label="컬럼 구성"/);
+  assert.match(tableSource, /checked=\{column\.getIsVisible\(\)\}[\s\S]*?className="size-6"/);
+  assert.match(tableSource, /aria-label=\{`\$\{columnLabel\} 열 너비 조절`\}[\s\S]*?w-6[\s\S]*?after:w-px/);
   assert.match(tableSource, /ref=\{tablePagerRef\} className="flex min-h-11/);
   assert.doesNotMatch(tableSource, /const PAGE_SIZE_OPTIONS = \[30\]/);
 });

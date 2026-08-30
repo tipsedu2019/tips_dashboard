@@ -202,7 +202,8 @@ test("management table exposes resize handles with a clear reset action", async 
 
   assert.match(resizeHandle, /aria-label=\{`\$\{columnLabel\} 열 너비 조절`\}/);
   assert.match(resizeHandle, /title=\{`\$\{columnLabel\} 열 너비 조절`\}/);
-  assert.match(resizeHandle, /w-4 cursor-col-resize/);
+  assert.match(resizeHandle, /w-6 cursor-col-resize/);
+  assert.match(resizeHandle, /after:w-px/);
   assert.match(resizeHandle, /focus-visible:ring-2 focus-visible:ring-ring/);
   assert.match(resizeHandle, /header\.column\.resetSize\(\)/);
   assert.doesNotMatch(resizeHandle, /aria-hidden="true"/);

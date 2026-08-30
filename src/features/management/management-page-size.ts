@@ -4,6 +4,14 @@ export const MANAGEMENT_LIST_PAGE_SIZES = [10, 15, 20] as const;
 export type ManagementListPageSize = (typeof MANAGEMENT_LIST_PAGE_SIZES)[number];
 export type ManagementPageSizePreference = { version: 1; size: ManagementListPageSize };
 
+export function clampManagementPageIndex(pageIndex: number, rowCount: number, pageSize: number) {
+  const safePageIndex = Number.isFinite(pageIndex) ? Math.max(0, Math.floor(pageIndex)) : 0;
+  const safeRowCount = Number.isFinite(rowCount) ? Math.max(0, Math.floor(rowCount)) : 0;
+  const safePageSize = Number.isFinite(pageSize) && pageSize > 0 ? Math.floor(pageSize) : 20;
+  const lastPageIndex = Math.max(0, Math.ceil(safeRowCount / safePageSize) - 1);
+  return Math.min(safePageIndex, lastPageIndex);
+}
+
 export function pickManagementListPageSize(fitRows: number): ManagementListPageSize {
   const safeFit = Number.isFinite(fitRows) ? Math.floor(fitRows) : 20;
   return [...MANAGEMENT_LIST_PAGE_SIZES].reverse().find((size) => size <= safeFit) ?? 10;

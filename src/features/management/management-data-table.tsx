@@ -71,6 +71,7 @@ import { cn } from "@/lib/utils";
 import { STUDENT_STATUS_OPTIONS } from "@/lib/student-status";
 import type { ManagementKind, ManagementRow, ManagementStat } from "@/features/management/use-management-records";
 import {
+  clampManagementPageIndex,
   MANAGEMENT_LIST_PAGE_SIZES,
   pickManagementListPageSize,
   type ManagementListPageSize,
@@ -1259,6 +1260,7 @@ export function ManagementDataTable({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const searchParamString = searchParams.toString();
+  const tableLayoutRef = useRef<HTMLDivElement | null>(null);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
   const tableBodyRef = useRef<HTMLTableSectionElement | null>(null);
   const tablePagerRef = useRef<HTMLDivElement | null>(null);
@@ -1698,7 +1700,7 @@ export function ManagementDataTable({
 
   useEffect(() => {
     setPageIndex(0);
-  }, [kind, pageSize]);
+  }, [kind]);
 
   const table = useReactTable({
     data: tableSourceRows,
@@ -1768,14 +1770,20 @@ export function ManagementDataTable({
     getExpandedRowModel: getExpandedRowModel(),
   });
 
+  const prePaginationRowCount = table.getPrePaginationRowModel().rows.length;
+  useEffect(() => {
+    setPageIndex((current) => clampManagementPageIndex(current, prePaginationRowCount, pageSize));
+  }, [pageSize, prePaginationRowCount]);
+
   useEffect(() => {
     if (pageSizeMode !== "auto") {
       return undefined;
     }
 
+    const tableLayout = tableLayoutRef.current;
     const tableBody = tableBodyRef.current;
     const tablePager = tablePagerRef.current;
-    if (!tableBody || !tablePager) {
+    if (!tableLayout || !tableBody || !tablePager) {
       return undefined;
     }
 
@@ -1797,6 +1805,7 @@ export function ManagementDataTable({
     };
 
     const resizeObserver = new ResizeObserver(measurePageSize);
+    resizeObserver.observe(tableLayout);
     resizeObserver.observe(tableBody);
     resizeObserver.observe(tablePager);
     window.addEventListener("resize", measurePageSize, { passive: true });
@@ -2544,6 +2553,7 @@ export function ManagementDataTable({
                               checked={column.getIsVisible()}
                               onCheckedChange={(value) => column.toggleVisibility(!!value)}
                               disabled={!column.getCanHide()}
+                              className="size-6"
                             />
                             <span className="min-w-0 truncate text-sm font-medium">{option.label}</span>
                           </div>
@@ -3128,7 +3138,7 @@ export function ManagementDataTable({
   ) : null;
 
   return (
-    <div className="w-full space-y-3">
+    <div ref={tableLayoutRef} className="w-full space-y-3">
       {kind === "classes" ? (
         <ClassFilterPanel
           selects={classFilterSelects}
@@ -3345,8 +3355,8 @@ export function ManagementDataTable({
                               aria-label={`${columnLabel} 열 너비 조절`}
                               title={`${columnLabel} 열 너비 조절`}
                               className={cn(
-                                "absolute right-0 top-0 h-full w-4 cursor-col-resize border-l border-transparent transition-colors hover:border-border hover:bg-accent/30 focus-visible:border-primary focus-visible:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                                header.column.getIsResizing() ? "border-primary bg-primary/15" : "",
+                                "absolute right-0 top-0 h-full w-6 cursor-col-resize transition-colors after:absolute after:right-0 after:top-0 after:h-full after:w-px after:bg-transparent after:content-[''] hover:bg-accent/30 hover:after:bg-border focus-visible:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:after:bg-primary",
+                                header.column.getIsResizing() ? "bg-primary/15 after:bg-primary" : "",
                               )}
                               onMouseDown={header.getResizeHandler()}
                               onTouchStart={header.getResizeHandler()}
