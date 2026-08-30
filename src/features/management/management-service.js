@@ -234,7 +234,8 @@ export function createManagementReadService(options = {}) {
    *   kind: "students" | "classes" | "textbooks",
    *   filters: Record<string, unknown>,
    *   cursor?: null | { sortKey: string, id: string, scopeHash: string },
-   *   limit?: number
+   *   limit?: number,
+   *   signal?: AbortSignal
    * }} request
    */
   const readListPage = async ({ kind, filters, cursor = null, limit = MANAGEMENT_LIST_DEFAULT_PAGE_SIZE, signal }) => {

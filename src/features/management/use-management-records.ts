@@ -13,6 +13,11 @@ import {
 } from "./records.js";
 import { buildCurriculumWorkspaceModel } from "../academic/records.js";
 import { createManagementReadService, getAssignedClassTextbookIds } from "./management-service.js";
+import type { ManagementListPageSize } from "./management-page-size";
+import {
+  createManagementRequestGate,
+  type ManagementRequestTicket,
+} from "./management-request-gate";
 
 export type ManagementKind = "students" | "classes" | "textbooks";
 
@@ -637,6 +642,24 @@ export type ManagementListFilters =
 
 type ManagementPageCursor = { sortKey: string; id: string; scopeHash: string };
 
+export type UseManagementRecordsOptions = {
+  pageSize: ManagementListPageSize;
+  enabled: boolean;
+};
+
+function managementRequestScope(
+  kind: ManagementKind,
+  filters: ManagementListFilters,
+  pageSize: ManagementListPageSize,
+  cursor: ManagementPageCursor | null,
+) {
+  return JSON.stringify([kind, filters, pageSize, cursor]);
+}
+
+function isManagementAbortError(error: unknown) {
+  return Boolean(error && typeof error === "object" && "name" in error && error.name === "AbortError");
+}
+
 function defaultManagementFilters(kind: ManagementKind): ManagementListFilters {
   if (kind === "students") return { kind, search: "", status: null, schoolCategory: null, school: null, grade: null };
   if (kind === "classes") return { kind, search: "", periodId: null, status: "수강", subject: null, grade: null, teacher: null, classroom: null };
@@ -769,31 +792,45 @@ function listRowToSource(kind: ManagementKind, row: Record<string, unknown>) {
   return { ...row, name: row.title, active_class_count: row.activeClassCount, updated_at: row.updatedAt };
 }
 
-export function useManagementRecords(kind: ManagementKind, requestedFilters?: ManagementListFilters) {
+export function useManagementRecords(
+  kind: ManagementKind,
+  requestedFilters?: ManagementListFilters,
+  { pageSize, enabled }: UseManagementRecordsOptions = { pageSize: 20, enabled: true },
+) {
   const [rows, setRows] = useState<ManagementRow[]>([]);
   const [stats, setStats] = useState<ManagementStat[]>([]);
   const [classFormReferences, setClassFormReferences] = useState<ClassFormReferences>(EMPTY_CLASS_FORM_REFERENCES);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<ManagementPageCursor | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [filterOptions, setFilterOptions] = useState<Record<string, unknown>>({});
   const [effectiveClassPeriodId, setEffectiveClassPeriodId] = useState("");
-  const loadGenerationRef = useRef(0);
+  const initialRequestGateRef = useRef(createManagementRequestGate());
+  const continuationRequestGateRef = useRef(createManagementRequestGate());
+  const initialTicketRef = useRef<ManagementRequestTicket | null>(null);
   const canonicalReplayTokenRef = useRef("");
   const filters = useMemo(() => requestedFilters || defaultManagementFilters(kind), [kind, requestedFilters]);
   const effectiveFiltersRef = useRef<ManagementListFilters>(filters);
   const readService = useMemo(() => supabase ? createManagementReadService({ supabase }) : null, []);
 
   const load = useCallback(async ({ allowCanonicalReplay = false }: { allowCanonicalReplay?: boolean } = {}) => {
-    const loadGeneration = loadGenerationRef.current + 1;
-    loadGenerationRef.current = loadGeneration;
-    const isCurrent = () => loadGenerationRef.current === loadGeneration;
+    continuationRequestGateRef.current.abort();
+    setLoadingMore(false);
+    setNextCursor(null);
+    setHasMore(false);
+    const ticket = initialRequestGateRef.current.begin(
+      managementRequestScope(kind, filters, pageSize, null),
+    );
+    initialTicketRef.current = ticket;
+
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
 
     if (!readService) {
-      setRows([]);
-      setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
       setError("Supabase 연결 설정을 확인해 주세요.");
       setLoading(false);
       return;
@@ -811,49 +848,77 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
         kind,
         filters,
         cursor: null,
-        limit: 30,
+        limit: pageSize,
         canonicalReplayToken,
         coalesceInitialRequest: allowCanonicalReplay,
+        signal: ticket.signal,
       });
-      if (!isCurrent()) return;
+      if (!initialRequestGateRef.current.isCurrent(ticket)) return;
       canonicalReplayTokenRef.current = textValue(result.canonicalReplayToken);
       effectiveFiltersRef.current = result.effectiveFilters as ManagementListFilters;
       setEffectiveClassPeriodId(kind === "classes" ? textValue(result.effectiveFilters.periodId) : "");
       const sourceRows = result.page.rows.map((row: Record<string, unknown>) => listRowToSource(kind, row));
       setRows(normalizeManagementRows(kind, sourceRows));
-      setStats(aggregateToStats(kind, result.stats));
-      setFilterOptions(result.filterOptions);
       setNextCursor(result.page.nextCursor);
       setHasMore(result.page.hasMore);
       setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
       setError(null);
       setLoading(false);
+
+      const metadata = await result.metadata;
+      if (!initialRequestGateRef.current.isCurrent(ticket)) return;
+      if (metadata.ok) {
+        setStats(aggregateToStats(kind, metadata.stats));
+        setFilterOptions(metadata.filterOptions);
+      } else if (!isManagementAbortError(metadata.error)) {
+        setError(
+          metadata.error instanceof Error
+            ? metadata.error.message
+            : "목록 부가 정보를 불러오지 못했습니다.",
+        );
+      }
     } catch (fetchError) {
-      if (isCurrent()) {
-        setRows([]);
-        if (kind === "classes") {
-          setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
-        }
+      if (initialRequestGateRef.current.isCurrent(ticket) && !isManagementAbortError(fetchError)) {
         setError(
           fetchError instanceof Error ? fetchError.message : "알 수 없는 연결 오류가 발생했습니다.",
         );
         setLoading(false);
       }
     }
-  }, [filters, kind, readService]);
+  }, [enabled, filters, kind, pageSize, readService]);
 
   useEffect(() => {
+    const initialRequestGate = initialRequestGateRef.current;
+    const continuationRequestGate = continuationRequestGateRef.current;
     void load({ allowCanonicalReplay: true });
     return () => {
-      loadGenerationRef.current += 1;
+      initialRequestGate.abort();
+      continuationRequestGate.abort();
+      initialTicketRef.current = null;
     };
   }, [load]);
 
   const loadMore = useCallback(async () => {
-    if (!readService || !nextCursor || !hasMore || loadingMore) return;
+    if (!enabled || !readService || !nextCursor || !hasMore || loadingMore) return;
+    const initialTicket = initialTicketRef.current;
+    if (!initialTicket || !initialRequestGateRef.current.isCurrent(initialTicket)) return;
+    const ticket = continuationRequestGateRef.current.begin(
+      managementRequestScope(kind, effectiveFiltersRef.current, pageSize, nextCursor),
+    );
     setLoadingMore(true);
     try {
-      const page = await readService.loadNextPage({ kind, filters: effectiveFiltersRef.current, cursor: nextCursor, limit: 30 });
+      const page = await readService.loadNextPage({
+        kind,
+        filters: effectiveFiltersRef.current,
+        cursor: nextCursor,
+        limit: pageSize,
+        signal: ticket.signal,
+      });
+      if (
+        !continuationRequestGateRef.current.isCurrent(ticket)
+        || initialTicketRef.current !== initialTicket
+        || !initialRequestGateRef.current.isCurrent(initialTicket)
+      ) return;
       const incoming = normalizeManagementRows(kind, page.rows.map((row: Record<string, unknown>) => listRowToSource(kind, row)));
       setRows((current) => {
         const byId = new Map(current.map((row) => [row.id, row]));
@@ -863,11 +928,20 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
       setNextCursor(page.nextCursor);
       setHasMore(page.hasMore);
     } catch (fetchError) {
-      setError(fetchError instanceof Error ? fetchError.message : "다음 목록을 불러오지 못했습니다.");
+      if (
+        continuationRequestGateRef.current.isCurrent(ticket)
+        && initialTicketRef.current === initialTicket
+        && initialRequestGateRef.current.isCurrent(initialTicket)
+        && !isManagementAbortError(fetchError)
+      ) {
+        setError(fetchError instanceof Error ? fetchError.message : "다음 목록을 불러오지 못했습니다.");
+      }
     } finally {
-      setLoadingMore(false);
+      if (continuationRequestGateRef.current.isCurrent(ticket)) {
+        setLoadingMore(false);
+      }
     }
-  }, [hasMore, kind, loadingMore, nextCursor, readService]);
+  }, [enabled, hasMore, kind, loadingMore, nextCursor, pageSize, readService]);
 
   const loadDetail = useCallback(async (id: string) => {
     if (!readService) return null;
