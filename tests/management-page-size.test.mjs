@@ -9,6 +9,7 @@ import {
   parseManagementPageSizePreference,
   pickManagementListPageSize,
 } from "../src/features/management/management-page-size.ts";
+import * as managementPageSizing from "../src/features/management/management-page-size.ts";
 
 const root = new URL("../", import.meta.url);
 
@@ -42,21 +43,65 @@ test("management sizing estimates viewport capacities at fixed breakpoints", () 
   assert.equal(estimateManagementListPageSize(940), 20);
 });
 
-test("management sizing quantizes hand-derived available-height fits", () => {
+test("management sizing reserves the complete footer, measured gap, and shell bottom space", () => {
+  assert.equal(typeof managementPageSizing.getManagementListRowCapacity, "function");
   const cases = [
-    { viewportBottom: 860, bodyTop: 120, pagerHeight: 44, margin: 16, rowHeight: 34, expectedFit: 20, expectedSize: 20 },
-    { viewportBottom: 690, bodyTop: 120, pagerHeight: 44, margin: 16, rowHeight: 34, expectedFit: 15, expectedSize: 15 },
-    { viewportBottom: 656, bodyTop: 120, pagerHeight: 44, margin: 16, rowHeight: 34, expectedFit: 14, expectedSize: 10 },
+    { viewportHeight: 768, footerHeight: 44, expectedFit: 10, expectedSize: 10 },
+    { viewportHeight: 952, footerHeight: 44, expectedFit: 15, expectedSize: 15 },
+    { viewportHeight: 930, footerHeight: 44, expectedFit: 14, expectedSize: 10 },
+    { viewportHeight: 952, footerHeight: 80, expectedFit: 14, expectedSize: 10 },
   ];
 
   for (const testCase of cases) {
-    const fit = Math.floor(
-      (testCase.viewportBottom - testCase.bodyTop - testCase.pagerHeight - testCase.margin)
-      / testCase.rowHeight,
-    );
+    const fit = managementPageSizing.getManagementListRowCapacity({
+      viewportHeight: testCase.viewportHeight,
+      bodyViewportTop: 287,
+      documentScrollTop: 0,
+      rowHeight: 37,
+      footerHeight: testCase.footerHeight,
+      bodyToFooterGap: 13,
+      bottomReserve: 32,
+    });
     assert.equal(fit, testCase.expectedFit);
     assert.equal(pickManagementListPageSize(fit), testCase.expectedSize);
   }
+});
+
+test("management sizing uses document position so scrolling cannot create extra row capacity", () => {
+  assert.equal(typeof managementPageSizing.getManagementListRowCapacity, "function");
+  for (const [bodyViewportTop, documentScrollTop] of [[287, 0], [87, 200], [-213, 500]]) {
+    assert.equal(managementPageSizing.getManagementListRowCapacity({
+      viewportHeight: 768,
+      bodyViewportTop,
+      documentScrollTop,
+      rowHeight: 37,
+      footerHeight: 44,
+      bodyToFooterGap: 13,
+      bottomReserve: 32,
+    }), 10);
+  }
+});
+
+test("management sizing accounts for a bulk-action layout shift without negative capacities", () => {
+  assert.equal(typeof managementPageSizing.getManagementListRowCapacity, "function");
+  assert.equal(managementPageSizing.getManagementListRowCapacity({
+    viewportHeight: 768,
+    bodyViewportTop: 383,
+    documentScrollTop: 0,
+    rowHeight: 37,
+    footerHeight: 44,
+    bodyToFooterGap: 13,
+    bottomReserve: 32,
+  }), 8);
+  assert.equal(managementPageSizing.getManagementListRowCapacity({
+    viewportHeight: 200,
+    bodyViewportTop: 287,
+    documentScrollTop: 0,
+    rowHeight: 37,
+    footerHeight: 44,
+    bodyToFooterGap: 13,
+    bottomReserve: 32,
+  }), 0);
 });
 
 test("management sizing uses a versioned kind-specific storage key", () => {
@@ -75,8 +120,14 @@ test("management page wires adaptive sizing into the request and controlled tabl
   assert.match(pageSource, /pageSizeMode=\{pageSizeState\.mode\}/);
   assert.match(pageSource, /onAutoPageSizeChange=\{handleAutoPageSizeChange\}/);
   assert.match(pageSource, /onPageSizePreferenceChange=\{handlePageSizePreferenceChange\}/);
-  assert.match(pageSource, /`다음 \$\{pageSizeState\.size\}건`/);
-  assert.doesNotMatch(pageSource, /loadingMore \? "불러오는 중" : "다음 30건"/);
+  assert.match(pageSource, /hasMore=\{hasMore\}/);
+  assert.match(pageSource, /loadingMore=\{loadingMore\}/);
+  assert.match(pageSource, /onLoadMore=\{loadMore\}/);
+  assert.doesNotMatch(pageSource, /data-testid="management-list-continuation"/);
+  assert.match(tableSource, /`다음 \$\{pageSize\}건`/);
+  assert.match(tableSource, /data-testid="management-list-continuation"/);
+  assert.match(tableSource, /onClick=\{\(\) => void onLoadMore\(\)\}/);
+  assert.match(tableSource, /disabled=\{loading \|\| loadingMore\}/);
 
   assert.match(tableSource, /MANAGEMENT_LIST_PAGE_SIZES/);
   assert.match(tableSource, /pagination: \{ pageIndex, pageSize \}/);
@@ -90,6 +141,8 @@ test("management page wires adaptive sizing into the request and controlled tabl
   assert.match(tableSource, /const tableLayoutRef = useRef<HTMLDivElement \| null>\(null\)/);
   assert.match(tableSource, /<div ref=\{tableLayoutRef\} className="w-full space-y-3">/);
   assert.match(tableSource, /resizeObserver\.observe\(tableLayout\)/);
+  assert.match(tableSource, /getManagementListRowCapacity\(\{/);
+  assert.match(tableSource, /documentScrollTop: window\.scrollY/);
   assert.match(tableSource, /<TableBody ref=\{tableBodyRef\}>/);
   assert.match(tableSource, /className="h-\[34px\] border-b/);
   assert.match(tableSource, /"sticky top-0 z-10 h-9 border-b[^"]*px-2 py-1/);

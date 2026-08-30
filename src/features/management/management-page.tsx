@@ -3729,6 +3729,9 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           rows={rows}
           stats={stats}
           loading={loading}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
+          onLoadMore={loadMore}
           filterOptions={filterOptions}
           badgeLabel={config.badgeLabel}
           statusLabel={config.statusLabel}
@@ -3739,15 +3742,6 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           onAutoPageSizeChange={handleAutoPageSizeChange}
           onPageSizePreferenceChange={handlePageSizePreferenceChange}
         />
-        <div className="flex justify-center py-4" data-testid="management-list-continuation">
-          {hasMore ? (
-            <Button type="button" variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>
-              {loadingMore ? "불러오는 중" : `다음 ${pageSizeState.size}건`}
-            </Button>
-          ) : rows.length > 0 && !loading ? (
-            <span className="text-xs text-muted-foreground">목록의 끝입니다.</span>
-          ) : null}
-        </div>
       </div>
 
       <Dialog open={dialogMode !== null} onOpenChange={handleDialogOpenChange}>

@@ -17,6 +17,29 @@ export function pickManagementListPageSize(fitRows: number): ManagementListPageS
   return [...MANAGEMENT_LIST_PAGE_SIZES].reverse().find((size) => size <= safeFit) ?? 10;
 }
 
+export function getManagementListRowCapacity({
+  viewportHeight,
+  bodyViewportTop,
+  documentScrollTop,
+  rowHeight,
+  footerHeight,
+  bodyToFooterGap,
+  bottomReserve,
+}: {
+  viewportHeight: number;
+  bodyViewportTop: number;
+  documentScrollTop: number;
+  rowHeight: number;
+  footerHeight: number;
+  bodyToFooterGap: number;
+  bottomReserve: number;
+}) {
+  const bodyDocumentTop = bodyViewportTop + documentScrollTop;
+  const availableHeight = viewportHeight - bodyDocumentTop - footerHeight
+    - Math.max(0, bodyToFooterGap) - Math.max(0, bottomReserve);
+  return Math.max(0, Math.floor(availableHeight / (rowHeight > 0 ? rowHeight : 34)));
+}
+
 export function estimateManagementListPageSize(viewportHeight: number): ManagementListPageSize {
   if (viewportHeight >= 940) return 20;
   if (viewportHeight >= 760) return 15;

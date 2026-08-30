@@ -72,6 +72,7 @@ import { STUDENT_STATUS_OPTIONS } from "@/lib/student-status";
 import type { ManagementKind, ManagementRow, ManagementStat } from "@/features/management/use-management-records";
 import {
   clampManagementPageIndex,
+  getManagementListRowCapacity,
   MANAGEMENT_LIST_PAGE_SIZES,
   pickManagementListPageSize,
   type ManagementListPageSize,
@@ -1231,6 +1232,9 @@ export function ManagementDataTable({
   rows,
   stats,
   loading,
+  hasMore,
+  loadingMore,
+  onLoadMore,
   filterOptions = {},
   badgeLabel,
   statusLabel,
@@ -1245,6 +1249,9 @@ export function ManagementDataTable({
   rows: ManagementRow[];
   stats: ManagementStat[];
   loading: boolean;
+  hasMore: boolean;
+  loadingMore: boolean;
+  onLoadMore: () => Promise<void> | void;
   filterOptions?: Record<string, unknown>;
   badgeLabel: string;
   statusLabel: string;
@@ -1793,9 +1800,25 @@ export function ManagementDataTable({
 
       const firstRealRow = tableBody.querySelector<HTMLElement>('tr[data-management-row="true"]');
       const measuredRowHeight = firstRealRow?.getBoundingClientRect().height || 34;
-      const bodyTop = tableBody.getBoundingClientRect().top;
-      const pagerHeight = tablePager.getBoundingClientRect().height || 44;
-      const fitRows = Math.floor((window.innerHeight - bodyTop - pagerHeight - 16) / measuredRowHeight);
+      const bodyRect = tableBody.getBoundingClientRect();
+      const pagerRect = tablePager.getBoundingClientRect();
+      let bottomReserve = 0;
+      for (let ancestor: HTMLElement | null = tableLayout; ancestor; ancestor = ancestor.parentElement) {
+        const style = window.getComputedStyle(ancestor);
+        bottomReserve += (Number.parseFloat(style.paddingBottom) || 0)
+          + (Number.parseFloat(style.borderBottomWidth) || 0)
+          + (Number.parseFloat(style.marginBottom) || 0);
+        if (ancestor.dataset.slot === "sidebar-inset") break;
+      }
+      const fitRows = getManagementListRowCapacity({
+        viewportHeight: window.innerHeight,
+        bodyViewportTop: bodyRect.top,
+        documentScrollTop: window.scrollY,
+        rowHeight: measuredRowHeight,
+        footerHeight: pagerRect.height || 44,
+        bodyToFooterGap: pagerRect.top - bodyRect.bottom,
+        bottomReserve,
+      });
       const nextPageSize = pickManagementListPageSize(fitRows);
 
       if (nextPageSize !== pageSize) {
@@ -3493,7 +3516,7 @@ export function ManagementDataTable({
               value={pageSizeMode === "auto" ? "auto" : String(pageSize)}
               onValueChange={updatePageSize}
             >
-              <SelectTrigger className="h-8 w-[5.5rem]" aria-label="페이지당 표시 개수">
+              <SelectTrigger className="h-8 w-32" aria-label="페이지당 표시 개수">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -3507,7 +3530,23 @@ export function ManagementDataTable({
             </Select>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <div data-testid="management-list-continuation" aria-live="polite">
+            {hasMore ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-label={`${emptyLabel} 다음 ${pageSize}건 불러오기`}
+                onClick={() => void onLoadMore()}
+                disabled={loading || loadingMore}
+              >
+                {loadingMore ? "불러오는 중" : `다음 ${pageSize}건`}
+              </Button>
+            ) : rows.length > 0 && !loading ? (
+              <span className="text-xs text-muted-foreground">목록의 끝입니다.</span>
+            ) : null}
+          </div>
           <Button variant="outline" size="sm" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>
             이전
           </Button>
