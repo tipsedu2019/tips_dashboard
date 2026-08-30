@@ -22,7 +22,7 @@ test("management sizing quantizes measured row capacity without exceeding 20", (
   assert.equal(pickManagementListPageSize(200), 20);
 });
 
-test("management pagination clamps only indexes that exceed the available rows", () => {
+test("management pagination preserves appends and clamps shrink at an unchanged page size", () => {
   assert.equal(clampManagementPageIndex(1, 40, 20), 1);
   assert.equal(clampManagementPageIndex(1, 60, 20), 1);
   assert.equal(clampManagementPageIndex(1, 20, 20), 0);
@@ -81,6 +81,7 @@ test("management page wires adaptive sizing into the request and controlled tabl
   assert.match(tableSource, /MANAGEMENT_LIST_PAGE_SIZES/);
   assert.match(tableSource, /pagination: \{ pageIndex, pageSize \}/);
   assert.match(tableSource, /onPaginationChange:/);
+  assert.match(tableSource, /useEffect\(\(\) => \{\s*setPageIndex\(0\);\s*\}, \[kind, pageSize\]\);/);
   assert.match(tableSource, /const prePaginationRowCount = table\.getPrePaginationRowModel\(\)\.rows\.length/);
   assert.match(tableSource, /clampManagementPageIndex\(current, prePaginationRowCount, pageSize\)/);
   assert.match(tableSource, /new ResizeObserver/);

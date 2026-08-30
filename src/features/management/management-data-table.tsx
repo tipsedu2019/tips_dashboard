@@ -1700,7 +1700,7 @@ export function ManagementDataTable({
 
   useEffect(() => {
     setPageIndex(0);
-  }, [kind]);
+  }, [kind, pageSize]);
 
   const table = useReactTable({
     data: tableSourceRows,
