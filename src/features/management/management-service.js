@@ -265,10 +265,7 @@ export function createManagementReadService(options = {}) {
     };
   };
 
-  const loadPageBundle = async ({ kind, filters, cursor = null, limit = MANAGEMENT_LIST_DEFAULT_PAGE_SIZE, signal }) => {
-    assertManagementFilters(kind, filters);
-    assertManagementListLimit(limit);
-    const metadata = Promise.all([
+  const loadMetadata = ({ kind, filters, signal }) => Promise.all([
       client.rpc("get_management_stats_v1", { p_kind: kind, p_filters: filters })
         .abortSignal(managementRequestSignal(signal)).retry(false),
       client.rpc("list_management_filter_options_v1", { p_kind: kind, p_filters: filters })
@@ -284,6 +281,11 @@ export function createManagementReadService(options = {}) {
         };
       })
       .catch((error) => ({ ok: false, error }));
+
+  const loadPageBundle = async ({ kind, filters, cursor = null, limit = MANAGEMENT_LIST_DEFAULT_PAGE_SIZE, signal }) => {
+    assertManagementFilters(kind, filters);
+    assertManagementListLimit(limit);
+    const metadata = loadMetadata({ kind, filters, signal });
     const page = await readListPage({ kind, filters, cursor, limit, signal });
     return {
       page,
@@ -319,7 +321,13 @@ export function createManagementReadService(options = {}) {
           && cursor === null
           && replay.limit === limit
           && replay.effectiveFingerprint === requestedFingerprint) {
-          return replay.result;
+          if (replay.signal === signal) return replay.result;
+          return {
+            page: replay.result.page,
+            effectiveFilters: replay.result.effectiveFilters,
+            metadata: loadMetadata({ kind, filters: replay.result.effectiveFilters, signal }),
+            canonicalReplayToken: null,
+          };
         }
       } else if (safeReplayToken) {
         canonicalReplayBundles.delete(safeReplayToken);
@@ -336,7 +344,8 @@ export function createManagementReadService(options = {}) {
             if (replay.initialFingerprint === initialFingerprint) canonicalReplayBundles.delete(token);
           }
         } else {
-          const inFlight = inFlightInitialClassBundles.get(initialFingerprint);
+          const inFlightBySignal = inFlightInitialClassBundles.get(initialFingerprint);
+          const inFlight = inFlightBySignal?.get(signal);
           if (inFlight) return inFlight;
         }
         const initialPromise = (async () => {
@@ -354,17 +363,24 @@ export function createManagementReadService(options = {}) {
           canonicalReplayBundles.set(replayToken, {
             initialFingerprint,
             limit,
+            signal,
             effectiveFingerprint: filterFingerprint(effectiveFilters),
             result: { ...result, canonicalReplayToken: null },
           });
           return { ...result, canonicalReplayToken: replayToken };
         })();
-        if (coalesceInitialRequest) inFlightInitialClassBundles.set(initialFingerprint, initialPromise);
+        if (coalesceInitialRequest) {
+          const inFlightBySignal = inFlightInitialClassBundles.get(initialFingerprint) || new Map();
+          inFlightBySignal.set(signal, initialPromise);
+          inFlightInitialClassBundles.set(initialFingerprint, inFlightBySignal);
+        }
         try {
           return await initialPromise;
         } finally {
-          if (inFlightInitialClassBundles.get(initialFingerprint) === initialPromise) {
-            inFlightInitialClassBundles.delete(initialFingerprint);
+          const inFlightBySignal = inFlightInitialClassBundles.get(initialFingerprint);
+          if (inFlightBySignal?.get(signal) === initialPromise) {
+            inFlightBySignal.delete(signal);
+            if (inFlightBySignal.size === 0) inFlightInitialClassBundles.delete(initialFingerprint);
           }
         }
       }

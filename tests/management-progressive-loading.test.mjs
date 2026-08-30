@@ -266,6 +266,150 @@ test("management metadata failures settle without discarding a loaded page", asy
   assert.equal(metadata.error.message, "stats unavailable");
 });
 
+test("same-scope class reads with different caller signals keep independent in-flight transports", async () => {
+  const calls = [];
+  const requestSignals = [];
+  const listGates = [deferred(), deferred()];
+  let listCallCount = 0;
+  const defaultPeriodId = "30000000-0000-4000-8000-000000000003";
+  const client = {
+    rpc(name, args) {
+      calls.push([name, args]);
+      const result = name === "get_management_default_class_period_v1"
+        ? { data: { periodId: defaultPeriodId }, error: null }
+        : name === "list_management_page_v1"
+          ? { data: [{ id: `class-${listCallCount + 1}`, sort_key: "수학", row_data: { id: `class-${listCallCount + 1}` } }], error: null }
+          : name === "get_management_stats_v1"
+            ? { data: { total: 1, byStatus: {} }, error: null }
+            : name === "list_management_filter_options_v1"
+              ? { data: { periods: [] }, error: null }
+              : null;
+      if (!result) throw new Error(`unexpected rpc ${name}`);
+      const pending = name === "list_management_page_v1" ? listGates[listCallCount++] : null;
+      return {
+        abortSignal(signal) {
+          requestSignals.push({ name, signal });
+          return this;
+        },
+        retry(value) {
+          calls.push(["retry", value]);
+          return pending ? pending.promise.then(() => result) : Promise.resolve(result);
+        },
+      };
+    },
+  };
+  const service = createManagementReadService({ supabase: client });
+  const filters = {
+    kind: "classes", search: "", periodId: null, status: "수강",
+    subject: null, grade: null, teacher: null, classroom: null,
+  };
+  const firstController = new AbortController();
+  const secondController = new AbortController();
+
+  const first = service.loadInitialPage({ kind: "classes", filters, cursor: null, limit: 10, signal: firstController.signal });
+  const second = service.loadInitialPage({ kind: "classes", filters, cursor: null, limit: 10, signal: secondController.signal });
+  for (let attempt = 0; attempt < 20 && calls.filter(([name]) => name === "list_management_page_v1").length !== 2; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  assert.equal(calls.filter(([name]) => name === "list_management_page_v1").length, 2);
+  const primarySignals = requestSignals.filter(({ name }) => [
+    "list_management_page_v1", "get_management_stats_v1", "list_management_filter_options_v1",
+  ].includes(name));
+  assert.equal(primarySignals.length, 6);
+
+  firstController.abort();
+  assert.equal(primarySignals.filter(({ signal }) => signal.aborted).length, 3);
+  assert.equal(primarySignals.filter(({ signal }) => !signal.aborted).length, 3);
+  secondController.abort();
+  assert.ok(primarySignals.every(({ signal }) => signal.aborted));
+
+  for (const gate of listGates) gate.resolve();
+  await Promise.all([first, second]);
+});
+
+test("canonical class replay gives a new caller independently cancellable metadata", async () => {
+  const calls = [];
+  const requestSignals = [];
+  const statsGates = [deferred(), deferred()];
+  const filterOptionsGates = [deferred(), deferred()];
+  let statsCallCount = 0;
+  let filterOptionsCallCount = 0;
+  const defaultPeriodId = "30000000-0000-4000-8000-000000000004";
+  const client = {
+    rpc(name, args) {
+      calls.push([name, args]);
+      const result = name === "get_management_default_class_period_v1"
+        ? { data: { periodId: defaultPeriodId }, error: null }
+        : name === "list_management_page_v1"
+          ? { data: [{ id: "class-1", sort_key: "수학", row_data: { id: "class-1" } }], error: null }
+          : name === "get_management_stats_v1"
+            ? { data: { total: statsCallCount + 1, byStatus: {} }, error: null }
+            : name === "list_management_filter_options_v1"
+              ? { data: { periods: [] }, error: null }
+              : null;
+      if (!result) throw new Error(`unexpected rpc ${name}`);
+      const pending = name === "get_management_stats_v1"
+        ? statsGates[statsCallCount++]
+        : name === "list_management_filter_options_v1"
+          ? filterOptionsGates[filterOptionsCallCount++]
+          : null;
+      return {
+        abortSignal(signal) {
+          requestSignals.push({ name, signal });
+          return this;
+        },
+        retry(value) {
+          calls.push(["retry", value]);
+          return pending ? pending.promise.then(() => result) : Promise.resolve(result);
+        },
+      };
+    },
+  };
+  const service = createManagementReadService({ supabase: client });
+  const emptyPeriodFilters = {
+    kind: "classes", search: "", periodId: null, status: "수강",
+    subject: null, grade: null, teacher: null, classroom: null,
+  };
+  const firstController = new AbortController();
+  const replayController = new AbortController();
+
+  const initial = await service.loadInitialPage({
+    kind: "classes", filters: emptyPeriodFilters, cursor: null, limit: 10, signal: firstController.signal,
+  });
+  const replay = await service.loadInitialPage({
+    kind: "classes",
+    filters: { ...emptyPeriodFilters, periodId: defaultPeriodId },
+    cursor: null,
+    limit: 10,
+    canonicalReplayToken: initial.canonicalReplayToken,
+    signal: replayController.signal,
+  });
+
+  assert.deepEqual(replay.page, initial.page);
+  assert.notEqual(replay.metadata, initial.metadata);
+  assert.equal(calls.filter(([name]) => name === "list_management_page_v1").length, 1);
+  assert.equal(calls.filter(([name]) => name === "get_management_stats_v1").length, 2);
+  assert.equal(calls.filter(([name]) => name === "list_management_filter_options_v1").length, 2);
+  const metadataSignals = requestSignals.filter(({ name }) => [
+    "get_management_stats_v1", "list_management_filter_options_v1",
+  ].includes(name));
+  const originalMetadataSignals = metadataSignals.slice(0, 2);
+  const replayMetadataSignals = metadataSignals.slice(2, 4);
+  assert.equal(originalMetadataSignals.length, 2);
+  assert.equal(replayMetadataSignals.length, 2);
+
+  firstController.abort();
+  assert.ok(originalMetadataSignals.every(({ signal }) => signal.aborted));
+  assert.ok(replayMetadataSignals.every(({ signal }) => !signal.aborted));
+  replayController.abort();
+  assert.ok(replayMetadataSignals.every(({ signal }) => signal.aborted));
+
+  for (const gate of statsGates) gate.resolve();
+  for (const gate of filterOptionsGates) gate.resolve();
+  await Promise.all([initial.metadata, replay.metadata]);
+});
+
 test("the first class management bundle resolves and applies the default period before list stats or options", async () => {
   const calls = [];
   const defaultPeriodId = "30000000-0000-4000-8000-000000000001";
