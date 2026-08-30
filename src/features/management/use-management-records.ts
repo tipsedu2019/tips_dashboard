@@ -18,6 +18,10 @@ import {
   createManagementRequestGate,
   type ManagementRequestTicket,
 } from "./management-request-gate";
+import {
+  executeManagementContinuationRequest,
+  executeManagementInitialRequest,
+} from "./management-request-lifecycle";
 
 export type ManagementKind = "students" | "classes" | "textbooks";
 
@@ -656,10 +660,6 @@ function managementRequestScope(
   return JSON.stringify([kind, filters, pageSize, cursor]);
 }
 
-function isManagementAbortError(error: unknown) {
-  return Boolean(error && typeof error === "object" && "name" in error && error.name === "AbortError");
-}
-
 function defaultManagementFilters(kind: ManagementKind): ManagementListFilters {
   if (kind === "students") return { kind, search: "", status: null, schoolCategory: null, school: null, grade: null };
   if (kind === "classes") return { kind, search: "", periodId: null, status: "수강", subject: null, grade: null, teacher: null, classroom: null };
@@ -820,17 +820,17 @@ export function useManagementRecords(
     setLoadingMore(false);
     setNextCursor(null);
     setHasMore(false);
-    const ticket = initialRequestGateRef.current.begin(
-      managementRequestScope(kind, filters, pageSize, null),
-    );
-    initialTicketRef.current = ticket;
 
     if (!enabled) {
+      initialRequestGateRef.current.abort();
+      initialTicketRef.current = null;
       setLoading(false);
       return;
     }
 
     if (!readService) {
+      initialRequestGateRef.current.abort();
+      initialTicketRef.current = null;
       setError("Supabase 연결 설정을 확인해 주세요.");
       setLoading(false);
       return;
@@ -838,60 +838,68 @@ export function useManagementRecords(
 
     setLoading(true);
     setError(null);
-    try {
-      const canonicalReplayToken = allowCanonicalReplay ? canonicalReplayTokenRef.current : "";
-      if (!allowCanonicalReplay && canonicalReplayTokenRef.current) {
-        readService.discardCanonicalReplay(canonicalReplayTokenRef.current);
-      }
-      canonicalReplayTokenRef.current = "";
-      const result = await readService.loadInitialPage({
+    const canonicalReplayToken = allowCanonicalReplay ? canonicalReplayTokenRef.current : "";
+    if (!allowCanonicalReplay && canonicalReplayTokenRef.current) {
+      readService.discardCanonicalReplay(canonicalReplayTokenRef.current);
+    }
+    canonicalReplayTokenRef.current = "";
+    const execution = executeManagementInitialRequest({
+      gate: initialRequestGateRef.current,
+      scope: managementRequestScope(kind, filters, pageSize, null),
+      load: (signal) => readService.loadInitialPage({
         kind,
         filters,
         cursor: null,
         limit: pageSize,
         canonicalReplayToken,
         coalesceInitialRequest: allowCanonicalReplay,
-        signal: ticket.signal,
-      });
-      if (!initialRequestGateRef.current.isCurrent(ticket)) return;
-      canonicalReplayTokenRef.current = textValue(result.canonicalReplayToken);
-      effectiveFiltersRef.current = result.effectiveFilters as ManagementListFilters;
-      setEffectiveClassPeriodId(kind === "classes" ? textValue(result.effectiveFilters.periodId) : "");
-      const sourceRows = result.page.rows.map((row: Record<string, unknown>) => listRowToSource(kind, row));
-      setRows(normalizeManagementRows(kind, sourceRows));
-      setNextCursor(result.page.nextCursor);
-      setHasMore(result.page.hasMore);
-      setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
-      setError(null);
-      setLoading(false);
-
-      const metadata = await result.metadata;
-      if (!initialRequestGateRef.current.isCurrent(ticket)) return;
-      if (metadata.ok) {
-        setStats(aggregateToStats(kind, metadata.stats));
-        setFilterOptions(metadata.filterOptions);
-      } else if (!isManagementAbortError(metadata.error)) {
+        signal,
+      }),
+      onPage: (result) => {
+        canonicalReplayTokenRef.current = textValue(result.canonicalReplayToken);
+        effectiveFiltersRef.current = result.effectiveFilters as ManagementListFilters;
+        setEffectiveClassPeriodId(kind === "classes" ? textValue(result.effectiveFilters.periodId) : "");
+        const sourceRows = result.page.rows.map((row: Record<string, unknown>) => listRowToSource(kind, row));
+        setRows(normalizeManagementRows(kind, sourceRows));
+        setNextCursor(result.page.nextCursor);
+        setHasMore(result.page.hasMore);
+        setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
+        setError(null);
+        setLoading(false);
+      },
+      onMetadata: (metadata) => {
+        const settled = metadata as {
+          ok: true;
+          stats: Record<string, unknown>;
+          filterOptions: Record<string, unknown>;
+        };
+        setStats(aggregateToStats(kind, settled.stats));
+        setFilterOptions(settled.filterOptions);
+      },
+      onError: (fetchError, phase) => {
         setError(
-          metadata.error instanceof Error
-            ? metadata.error.message
-            : "목록 부가 정보를 불러오지 못했습니다.",
-        );
-      }
-    } catch (fetchError) {
-      if (initialRequestGateRef.current.isCurrent(ticket) && !isManagementAbortError(fetchError)) {
-        setError(
-          fetchError instanceof Error ? fetchError.message : "알 수 없는 연결 오류가 발생했습니다.",
+          fetchError instanceof Error
+            ? fetchError.message
+            : phase === "metadata"
+              ? "목록 부가 정보를 불러오지 못했습니다."
+              : "알 수 없는 연결 오류가 발생했습니다.",
         );
         setLoading(false);
-      }
-    }
+      },
+    });
+    initialTicketRef.current = execution.ticket;
+    await execution.completion;
   }, [enabled, filters, kind, pageSize, readService]);
 
   useEffect(() => {
     const initialRequestGate = initialRequestGateRef.current;
     const continuationRequestGate = continuationRequestGateRef.current;
-    void load({ allowCanonicalReplay: true });
+    let active = true;
+    queueMicrotask(() => {
+      if (active) void load({ allowCanonicalReplay: true });
+    });
     return () => {
+      active = false;
       initialRequestGate.abort();
       continuationRequestGate.abort();
       initialTicketRef.current = null;
@@ -902,45 +910,35 @@ export function useManagementRecords(
     if (!enabled || !readService || !nextCursor || !hasMore || loadingMore) return;
     const initialTicket = initialTicketRef.current;
     if (!initialTicket || !initialRequestGateRef.current.isCurrent(initialTicket)) return;
-    const ticket = continuationRequestGateRef.current.begin(
-      managementRequestScope(kind, effectiveFiltersRef.current, pageSize, nextCursor),
-    );
     setLoadingMore(true);
-    try {
-      const page = await readService.loadNextPage({
+    const execution = executeManagementContinuationRequest({
+      gate: continuationRequestGateRef.current,
+      initialGate: initialRequestGateRef.current,
+      initialTicket,
+      scope: managementRequestScope(kind, effectiveFiltersRef.current, pageSize, nextCursor),
+      load: (signal) => readService.loadNextPage({
         kind,
         filters: effectiveFiltersRef.current,
         cursor: nextCursor,
         limit: pageSize,
-        signal: ticket.signal,
-      });
-      if (
-        !continuationRequestGateRef.current.isCurrent(ticket)
-        || initialTicketRef.current !== initialTicket
-        || !initialRequestGateRef.current.isCurrent(initialTicket)
-      ) return;
-      const incoming = normalizeManagementRows(kind, page.rows.map((row: Record<string, unknown>) => listRowToSource(kind, row)));
-      setRows((current) => {
-        const byId = new Map(current.map((row) => [row.id, row]));
-        for (const row of incoming) byId.set(row.id, row);
-        return [...byId.values()];
-      });
-      setNextCursor(page.nextCursor);
-      setHasMore(page.hasMore);
-    } catch (fetchError) {
-      if (
-        continuationRequestGateRef.current.isCurrent(ticket)
-        && initialTicketRef.current === initialTicket
-        && initialRequestGateRef.current.isCurrent(initialTicket)
-        && !isManagementAbortError(fetchError)
-      ) {
+        signal,
+      }),
+      onPage: (page) => {
+        const incoming = normalizeManagementRows(kind, page.rows.map((row: Record<string, unknown>) => listRowToSource(kind, row)));
+        setRows((current) => {
+          const byId = new Map(current.map((row) => [row.id, row]));
+          for (const row of incoming) byId.set(row.id, row);
+          return [...byId.values()];
+        });
+        setNextCursor(page.nextCursor);
+        setHasMore(page.hasMore);
+      },
+      onError: (fetchError) => {
         setError(fetchError instanceof Error ? fetchError.message : "다음 목록을 불러오지 못했습니다.");
-      }
-    } finally {
-      if (continuationRequestGateRef.current.isCurrent(ticket)) {
-        setLoadingMore(false);
-      }
-    }
+      },
+      onSettled: () => setLoadingMore(false),
+    });
+    await execution.completion;
   }, [enabled, hasMore, kind, loadingMore, nextCursor, pageSize, readService]);
 
   const loadDetail = useCallback(async (id: string) => {
