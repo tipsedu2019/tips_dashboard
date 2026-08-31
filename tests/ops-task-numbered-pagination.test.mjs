@@ -71,12 +71,12 @@ function registrationPatch(n, studentName = '등록 학생') {
     enrollmentDetailRows: [], migrationReviewRequired: false, observationSummaryVisible: true,
   })) };
 }
-function transport() {
+function transport(pendingRpcNames = []) {
   const requests = [];
   return { requests, supabase: { rpc(name, args) {
     const pending = Promise.withResolvers();
     const request = { name, args, ...pending }; requests.push(request);
-    return { abortSignal(signal) { request.signal = signal; return this; }, retry() { return pending.promise; } };
+    return { ...(name === 'add_ops_task_comment_v2' || pendingRpcNames.includes(name) ? { then: pending.promise.then.bind(pending.promise) } : {}), abortSignal(signal) { request.signal = signal; return this; }, retry() { return pending.promise; } };
   } }, finish(index, totalCount = 260, patches = []) {
     const request = requests[index], { p_page: page, p_page_size: pageSize } = request.args;
     request.resolve({ error: null, data: { page, pageSize, totalCount,
@@ -178,6 +178,47 @@ test('query readiness pauses without clearing the successful actor page', async 
   assert.equal(page.state.rows[0]?.title, '업무 1');
   assert.equal(page.state.totalCount, 260);
 });
+for (const outcome of ['complete', 'reject']) test(`paused in-flight ${outcome} resumes its requested page without page-one replay`, async (t) => {
+  const page = await hook(t);
+  await act(async () => page.finish(0));
+  await act(async () => { void page.state.goToPage(2); });
+  await page.render({ enabled: false });
+  await act(async () => outcome === 'complete' ? page.finish(1) : page.requests[1].reject(new Error('paused offline')));
+  assert.equal(page.state.rows[0].title, '업무 1'); assert.equal(page.state.totalCount, 260);
+  await page.render({ enabled: true });
+  assert.equal(page.requests.length, 3);
+  assert.equal(page.requests[2].args.p_page, 2);
+  await act(async () => page.finish(2));
+  assert.equal(page.state.loading, false); assert.equal(page.state.error, null);
+  assert.equal(page.state.page, 2); assert.equal(page.state.rows[0].title, '업무 11');
+});
+test('paused request recovery yields to a restored target and rejects an old-scope completion', async (t) => {
+  const page = await hook(t);
+  await act(async () => page.finish(0));
+  await act(async () => { void page.state.goToPage(2); });
+  await page.render({ enabled: false });
+  await page.render({ enabled: false, filters: { ...page.props.filters, search: 'NEW SCOPE' }, restoredPage: 7, restorationKey: 'restore-seven' });
+  await act(async () => page.finish(1));
+  await page.render({ enabled: true });
+  assert.equal(page.requests.length, 3); assert.equal(page.requests[2].args.p_page, 7);
+  assert.equal(page.requests[2].args.p_filters.search, 'NEW SCOPE');
+  assert.equal(page.state.rows[0].title, '업무 1');
+  await act(async () => page.finish(2, 70));
+  assert.equal(page.state.page, 7); assert.equal(page.state.loading, false);
+});
+test('paused old-actor request cannot resume into the new actor or publish late completion', async (t) => {
+  const page = await hook(t);
+  await act(async () => page.finish(0));
+  await act(async () => { void page.state.goToPage(2); });
+  await page.render({ enabled: false });
+  await page.render({ viewerId: 'actor-b', enabled: false });
+  await act(async () => page.finish(1));
+  assert.equal(page.state.rows.length, 0);
+  await page.render({ enabled: true });
+  assert.equal(page.requests.length, 3); assert.equal(page.requests[2].args.p_page, 1);
+  await act(async () => page.finish(2, 1, [{ title: 'B ONLY' }]));
+  assert.equal(page.state.rows[0].title, 'B ONLY'); assert.equal(page.state.loading, false);
+});
 test('same-id role change, logout, actor switch and unresolved profile clear output without anonymous reads', async (t) => {
   const page = await hook(t, { enabled: false, viewerRole: '' }); assert.equal(page.requests.length, 0);
   await page.render({ enabled: true, viewerRole: 'staff' }); assert.equal(page.requests.length, 1);
@@ -197,7 +238,7 @@ test('same-id role change, logout, actor switch and unresolved profile clear out
 async function workspace(t, initial = {}) {
   const { root } = await setup(t, `https://test.invalid/admin/${initial.workspace || 'tasks'}${initial.search || ''}`);
   if (initial.historyState) window.history.replaceState(initial.historyState, '', window.location.href);
-  const io = transport();
+  const io = transport(initial.pendingRpcNames);
   // Table/auth/router are external boundaries; hook, service DTO and workspace models stay real.
   const queries = [], tableRequests = [];
   io.supabase.from = (table) => {
@@ -207,7 +248,7 @@ async function workspace(t, initial = {}) {
       if (key === 'then') return pending.promise.then.bind(pending.promise);
       return (...args) => { request.filters.push([key, ...args]); return query; };
     } });
-    if (!initial.deferTables && table !== 'ops_tasks') pending.resolve({ data: [], error: null });
+    if (!initial.deferTables && table !== 'ops_tasks') pending.resolve({ data: initial.tableData?.[table] || [], error: null });
     queries.push(table); return query;
   };
   let props = { workspace: 'todo', viewerId: 'actor-a', viewerRole: 'staff', loading: false, ...initial };
@@ -402,6 +443,87 @@ test('initial unresolved login preserves an incoming nonregistration deep link a
   await act(async () => detail.resolve({ error: null, data: { id: id(999), title: '독립 상세', type: 'general', status: 'requested', priority: 'normal' } }));
   assert.ok(document.querySelector('[role="dialog"]')?.textContent.includes('독립 상세'));
   assert.equal(document.querySelector('[data-testid="todo-table-task-list"]')?.textContent.includes('독립 상세'), false);
+  assert.ok(document.body.textContent.includes('1건 · 1–1번째'));
+});
+for (const taskType of ['general', 'textbook']) test(`on-page exact ${taskType} detail owns its full payload while numbered summary rows stay unchanged`, async (t) => {
+  const page = await workspace(t, { tableData: {
+    ops_task_comments: [{ id: id(801), task_id: id(1), author_id: 'actor-a', body: 'DETAIL ONLY COMMENT', created_at: '2026-08-31T00:00:00Z' }],
+    ops_task_attachments: [{ id: id(803), task_id: id(1), file_name: 'DETAIL ONLY FILE', file_kind: 'link', drive_file_id: '', drive_link: 'https://example.invalid/detail-file', uploaded_by: 'actor-a', uploaded_at: '2026-08-31T00:00:00Z' }],
+    ops_task_events: [1, 2].map((n) => ({ id: id(803 + n), task_id: id(1), actor_id: 'actor-a', event_type: 'status_changed', field_name: 'status', before_value: 'requested', after_value: 'confirmed', created_at: '2026-08-31T00:00:00Z' })),
+  } });
+  const numbered = () => page.requests.filter((request) => request.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(page.requests.indexOf(numbered()[0]), 2, [{ type: taskType, title: 'LIST SUMMARY', memo: 'LIST MEMO' }, { title: 'SECOND ROW' }]));
+  const open = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('LIST SUMMARY'));
+  await act(async () => open.click());
+  const detail = page.tableRequests.find((request) => request.table === 'ops_tasks');
+  await act(async () => detail.resolve({ error: null, data: { id: id(1), title: 'FULL DETAIL', memo: 'FULL DETAIL MEMO', type: taskType, status: 'requested', priority: 'normal' } }));
+  const dialog = document.querySelector('[role="dialog"]');
+  assert.ok(dialog.textContent.includes('FULL DETAIL'));
+  assert.ok(dialog.textContent.includes('FULL DETAIL MEMO'));
+  assert.ok(dialog.textContent.includes('DETAIL ONLY COMMENT'));
+  if (taskType === 'textbook') {
+    assert.equal(dialog.querySelector('a[href="https://example.invalid/detail-file"]')?.textContent, 'DETAIL ONLY FILE');
+    assert.ok(dialog.textContent.includes('이력 2'));
+  }
+  const table = document.getElementById('root');
+  assert.ok(table.textContent.includes('LIST SUMMARY')); assert.equal(table.textContent.includes('FULL DETAIL'), false);
+  assert.ok(table.textContent.indexOf('LIST SUMMARY') < table.textContent.indexOf('SECOND ROW'));
+  assert.ok(document.body.textContent.includes('2건 · 1–2번째'));
+  const input = dialog.querySelector('textarea[placeholder="댓글"]');
+  await act(async () => input[Object.keys(input).find((key) => key.startsWith('__reactProps'))].onChange({ target: { value: 'NEW COMMENT' } }));
+  await act(async () => [...dialog.querySelectorAll('button')].find((button) => button.textContent === '댓글 추가').click());
+  const mutationDetail = page.tableRequests.filter((request) => request.table === 'ops_tasks').at(-1);
+  assert.notEqual(mutationDetail, detail);
+  await act(async () => mutationDetail.resolve({ error: null, data: { id: id(1), title: 'FULL DETAIL', memo: 'FULL DETAIL MEMO', type: taskType, status: 'requested', priority: 'normal' } }));
+  // The real producer hashes its idempotency request before issuing the RPC.
+  for (let attempt = 0; attempt < 20 && !page.requests.some((request) => request.name === 'add_ops_task_comment_v2'); attempt++) await act(async () => new Promise((resolve) => setTimeout(resolve, 5)));
+  const mutation = page.requests.find((request) => request.name === 'add_ops_task_comment_v2');
+  assert.ok(mutation);
+  await act(async () => mutation.resolve({ error: null, data: { sourceId: id(802), sourceEventIds: [], comment: { id: id(802), task_id: id(1), author_id: 'actor-a', body: 'NEW COMMENT', created_at: '2026-08-31T00:01:00Z' } } }));
+  assert.equal(numbered().length, 2);
+  await act(async () => page.finish(page.requests.indexOf(numbered()[1]), 2, [{ title: 'REFRESHED LIST SUMMARY' }, { title: 'SECOND ROW' }]));
+  assert.ok(dialog.textContent.includes('NEW COMMENT'));
+  assert.ok(dialog.textContent.includes('DETAIL ONLY COMMENT'));
+  assert.ok(dialog.textContent.includes('FULL DETAIL MEMO'));
+  assert.ok(document.getElementById('root').textContent.includes('REFRESHED LIST SUMMARY'));
+});
+for (const statsOutcome of ['pending', 'unavailable']) test(`ordinary catalogs become visible with optional stats ${statsOutcome}`, async (t) => {
+  const page = await workspace(t, { workspace: 'word_retest', deferTables: true });
+  const request = page.requests.find((r) => r.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(page.requests.indexOf(request), 1, [operationPatch('word_retest')]));
+  if (statsOutcome === 'unavailable') await act(async () => page.requests.find((r) => r.name === 'get_ops_task_list_stats_v1').reject(new Error('stats unavailable')));
+  assert.equal(page.tableRequests.length, 0, 'catalog remains lazy until Add');
+  const add = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('추가') && !button.getAttribute('aria-label'));
+  assert.ok(add);
+  await act(async () => add.click());
+  await act(async () => {
+    for (const pending of page.tableRequests) pending.resolve({ error: null, data: pending.table === 'teacher_catalogs'
+      ? [{ id: id(800), name: 'CATALOG TEACHER', subjects: ['영어'], is_visible: true, sort_order: 1, profile_id: id(801), account_email: 'teacher@example.invalid' }]
+      : pending.table === 'profiles' ? [{ id: id(801), name: 'CATALOG TEACHER', role: 'teacher', email: 'teacher@example.invalid', login_id: 'catalog-teacher' }] : [] });
+  });
+  const dialog = document.querySelector('[role="dialog"]');
+  assert.ok(dialog);
+  const selector = [...dialog.querySelectorAll('button[aria-labelledby]')].find((button) => document.getElementById(button.getAttribute('aria-labelledby'))?.textContent === '담당선생님');
+  assert.ok(selector);
+  await act(async () => selector.click());
+  assert.ok(document.body.textContent.includes('CATALOG TEACHER'), `${selector.outerHTML}\n${document.body.textContent.slice(-800)}`);
+  assert.equal(page.requests.filter((r) => r.name === 'list_ops_task_numbered_page_v1').length, 1);
+});
+
+test('registration linked catalogs render independently while optional stats remain pending', async (t) => {
+  const page = await workspace(t, { workspace: 'registration', search: '?flow=waiting', deferTables: true, pendingRpcNames: ['registration_subject_tracks_runtime_version'] });
+  t.after(async () => act(async () => { for (const request of page.requests.filter((r) => r.name === 'registration_subject_tracks_runtime_version')) request.resolve({ error: null, data: 1 }); }));
+  const request = page.requests.find((r) => r.name === 'list_ops_task_numbered_page_v1');
+  const patch = registrationPatch(1);
+  patch.registrationTracks = patch.registrationTracks.map((track) => ({ ...track, status: 'waiting', workflowStatus: 'waiting_current_class', waitingKind: 'current_class', waitingDetailKind: 'current_class', waitingDetailClassId: id(800) }));
+  await act(async () => page.finish(page.requests.indexOf(request), 1, [patch]));
+  assert.ok(document.body.textContent.includes(id(800)), document.body.textContent);
+  await act(async () => {
+    for (const pending of page.tableRequests) pending.resolve({ error: null, data: pending.table === 'classes'
+      ? [{ id: id(800), name: 'INDEPENDENT CLASS', subject: '영어', grade: '중1', teacher: '담당', room: '101', textbook_ids: [], status: 'active' }] : [] });
+  });
+  assert.ok(document.body.textContent.includes('INDEPENDENT CLASS'));
+  assert.equal(document.body.textContent.includes(id(800)), false);
   assert.ok(document.body.textContent.includes('1건 · 1–1번째'));
 });
 test('late rejected old-actor exact detail cannot erase a new actor detail URL', async (t) => {

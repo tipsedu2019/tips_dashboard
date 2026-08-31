@@ -8603,9 +8603,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
     registrationOptionsLoadedRef.current = true
     registrationOptionsDataRef.current = enrichmentData
-    setData((current) => current
-      ? mergeOpsTaskWorkspaceOptionData(current, enrichmentData)
-      : current)
+    setData((current) => mergeOpsTaskWorkspaceOptionData(current || emptyOpsTaskWorkspaceData, enrichmentData))
     setRegistrationOptionsLoading(false)
     return enrichmentData.directorCatalogStatus === "authoritative"
   }, [currentUserId, isRegistrationWorkspace, registrationFixtureEnabled, registrationFixtureRequested, scopedTaskType])
@@ -8636,7 +8634,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
     taskOptionsLoadedKeyRef.current = optionsKey
     taskOptionsDataRef.current = enrichmentData
-    setData((current) => current ? mergeOpsTaskWorkspaceOptionData(current, enrichmentData) : current)
+    setData((current) => mergeOpsTaskWorkspaceOptionData(current || emptyOpsTaskWorkspaceData, enrichmentData))
     return enrichmentData
   }, [currentUserId, isRegistrationWorkspace, scopedTaskType])
 
@@ -12469,7 +12467,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }
 
   const selectedTaskFresh = workspaceDataBelongsToCurrentViewer && selectedTask
-    ? selectedTask.type === "registration" && selectedRegistrationTrackId
+    ? numberedServerPage || (selectedTask.type === "registration" && selectedRegistrationTrackId)
       ? selectedTask
       : taskById.get(selectedTask.id) || selectedTask
     : null

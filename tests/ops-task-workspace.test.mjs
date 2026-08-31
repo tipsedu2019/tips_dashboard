@@ -1492,7 +1492,7 @@ test("registration list renders core data without starting option reads until a 
     "const ensureRegistrationOptions = useCallback",
     "loadOpsTaskWorkspaceOptionData({",
     "viewerId: currentUserId",
-    "mergeOpsTaskWorkspaceOptionData(current, enrichmentData)",
+    "mergeOpsTaskWorkspaceOptionData(current || emptyOpsTaskWorkspaceData, enrichmentData)",
     "REGISTRATION_VIEWS_REQUIRING_LINKED_LABELS",
     "void ensureRegistrationOptions()",
     "workspaceLoadGenerationRef.current === generation",

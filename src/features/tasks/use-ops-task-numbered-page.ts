@@ -38,6 +38,7 @@ export function useOpsTaskNumberedPage({ viewerId, viewerRole, filters, enabled,
   const actorRef = useRef(actor)
   const enabledRef = useRef(enabled)
   const consumedRestoration = useRef<string | undefined>(undefined)
+  const resumeRequired = useRef(false)
   const onPageCommitRef = useRef(onPageCommit)
   useLayoutEffect(() => {
     scopeRef.current = scope
@@ -49,6 +50,7 @@ export function useOpsTaskNumberedPage({ viewerId, viewerRole, filters, enabled,
   useEffect(() => {
     activeScope.current = ""
     consumedRestoration.current = undefined
+    resumeRequired.current = false
     if (!actor) return
     const controller = createNumberedPageController<OpsTask>({
       loadPage: async ({ scope: requestScope, page, pageSize, signal }) => {
@@ -60,7 +62,14 @@ export function useOpsTaskNumberedPage({ viewerId, viewerRole, filters, enabled,
         return result
       },
       onChange(snapshot) {
-        if (actorRef.current !== actor || !enabledRef.current) return
+        if (actorRef.current !== actor) return
+        if (!enabledRef.current) {
+          // The controller settled while its UI subscription was paused. Its
+          // retry target still owns the interrupted page.
+          resumeRequired.current = true
+          return
+        }
+        resumeRequired.current = false
         setDisplay({ actor, snapshot })
         if (!snapshot.loading && !snapshot.error && snapshot.scope === scopeRef.current) {
           onPageCommitRef.current?.({ scope: snapshot.scope, page: snapshot.page, pageSize: snapshot.pageSize })
@@ -74,10 +83,17 @@ export function useOpsTaskNumberedPage({ viewerId, viewerRole, filters, enabled,
   useEffect(() => {
     if (!enabled || !actor || !preference.ready || !controllerRef.current) return
     const restoring = restorationKey !== undefined && restorationKey !== consumedRestoration.current
-    if (!restoring && activeScope.current === scope) return
+    if (!restoring && activeScope.current === scope) {
+      if (resumeRequired.current) {
+        resumeRequired.current = false
+        void controllerRef.current.retry()
+      }
+      return
+    }
     const page = restoring && restoredPage <= 2147483647 ? normalizePage(restoredPage) : 1
     consumedRestoration.current = restorationKey
     activeScope.current = scope
+    resumeRequired.current = false
     void controllerRef.current.load({ scope, page, pageSize: preference.pageSize })
   }, [actor, enabled, preference.pageSize, preference.ready, restorationKey, restoredPage, scope])
 
