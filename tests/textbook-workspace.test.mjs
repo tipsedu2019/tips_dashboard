@@ -14,6 +14,7 @@ import {
 } from "../src/features/textbooks/textbook-ledger.js";
 
 const root = new URL("../", import.meta.url);
+const handoffModelSource = await readFile(new URL("src/features/textbooks/textbook-handoff-model.ts", root), "utf8");
 const readModelSource = await readFile(new URL("src/features/textbooks/textbook-read-model.ts", root), "utf8");
 const readTypesSource = await readFile(new URL("src/features/textbooks/textbook-read-types.ts", root), "utf8");
 
@@ -848,19 +849,19 @@ test("textbook workspace exports supplier orders and MakeEdu billing handoffs", 
   assert.match(workspaceSource, /captureElementAsPngBlob/);
   assert.match(workspaceSource, /downloadBlob/);
   assert.match(workspaceSource, /function TextbookHandoffDialog/);
-  assert.match(workspaceSource, /function buildPurchaseSupplierHandoffGroups/);
-  assert.match(workspaceSource, /function buildMakeEduBillingHandoffGroups/);
+  assert.match(handoffModelSource, /function buildPurchaseSupplierHandoffGroups/);
+  assert.match(handoffModelSource, /function buildMakeEduBillingHandoffGroups/);
   assert.match(workspaceSource, /공급처별 주문 전달 열기/);
   assert.match(workspaceSource, /메이크에듀 청구 준비 열기/);
   assert.match(workspaceSource, /전체 복사/);
   assert.match(workspaceSource, /이미지/);
   assert.match(workspaceSource, /PDF/);
-  assert.match(workspaceSource, /수납명:/);
-  assert.match(workspaceSource, /수납시작:/);
-  assert.match(workspaceSource, /반복: 1회/);
+  assert.match(handoffModelSource, /수납명:/);
+  assert.match(handoffModelSource, /수납시작:/);
+  assert.match(handoffModelSource, /반복: 1회/);
   assert.match(workspaceSource, /downloadHandoffImage/);
   assert.match(workspaceSource, /downloadHandoffPdf/);
-  assert.match(workspaceSource, /getSupplierContact/);
+  assert.match(handoffModelSource, /getSupplierContact/);
   assert.match(workspaceSource, /getStudentGradeLabel/);
   assert.doesNotMatch(workspaceSource, /syncMakeEduTextbookPayments/);
   assert.doesNotMatch(workspaceSource, /makeEduImportDialogOpen/);
@@ -911,13 +912,13 @@ test("purchase supplier handoff is a location-first supplier order sheet with di
     "utf8",
   );
   const imageExportSource = await readFile(new URL("src/lib/export-as-image.ts", root), "utf8");
-  const messageSource = workspaceSource.slice(
-    workspaceSource.indexOf("function buildPurchaseSupplierMessage"),
-    workspaceSource.indexOf("function buildMakeEduBillingMessage"),
+  const messageSource = handoffModelSource.slice(
+    handoffModelSource.indexOf("function buildPurchaseSupplierMessage"),
+    handoffModelSource.indexOf("function buildMakeEduBillingMessage"),
   );
-  const handoffSource = workspaceSource.slice(
-    workspaceSource.indexOf("function buildPurchaseSupplierHandoffGroups"),
-    workspaceSource.indexOf("function buildMakeEduBillingHandoffGroups"),
+  const handoffSource = handoffModelSource.slice(
+    handoffModelSource.indexOf("function buildPurchaseSupplierHandoffGroups"),
+    handoffModelSource.indexOf("function buildMakeEduBillingHandoffGroups"),
   );
   const dialogSource = workspaceSource.slice(
     workspaceSource.indexOf("function TextbookHandoffDialog"),
@@ -969,19 +970,19 @@ test("purchase supplier handoff renders as a dated order document with academy f
     workspaceSource.indexOf("function TextbookHandoffDialog"),
     workspaceSource.indexOf("type SearchSelectOption"),
   );
-  const messageSource = workspaceSource.slice(
-    workspaceSource.indexOf("function buildPurchaseSupplierMessage"),
-    workspaceSource.indexOf("function buildMakeEduBillingMessage"),
+  const messageSource = handoffModelSource.slice(
+    handoffModelSource.indexOf("function buildPurchaseSupplierMessage"),
+    handoffModelSource.indexOf("function buildMakeEduBillingMessage"),
   );
 
-  assert.match(workspaceSource, /const TEXTBOOK_HANDOFF_BUSINESS_NAME = "TIPS 영어수학학원"/);
-  assert.match(workspaceSource, /function formatKoreanDocumentDate/);
-  assert.match(workspaceSource, /function getTextbookHandoffDocumentMeta/);
+  assert.match(handoffModelSource, /const TEXTBOOK_HANDOFF_BUSINESS_NAME = "TIPS 영어수학학원"/);
+  assert.match(handoffModelSource, /function formatKoreanDocumentDate/);
+  assert.match(handoffModelSource, /function getTextbookHandoffDocumentMeta/);
   assert.match(dialogSource, /문서일자/);
   assert.match(dialogSource, /내용/);
   assert.match(dialogSource, /발신/);
   assert.match(dialogSource, /TEXTBOOK_HANDOFF_BUSINESS_NAME/);
-  assert.match(workspaceSource, /documentTitle: "주문서"/);
+  assert.match(handoffModelSource, /documentTitle: "주문서"/);
   assert.match(messageSource, /documentMeta\.documentTitle/);
   assert.match(messageSource, /문서일자:/);
   assert.match(messageSource, /내용: 교재 주문 요청/);
@@ -993,9 +994,9 @@ test("purchase process exposes supplier return requests opposite the order hando
     new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
     "utf8",
   );
-  const returnHandoffSource = workspaceSource.slice(
-    workspaceSource.indexOf("function buildPurchaseSupplierReturnHandoffGroups"),
-    workspaceSource.indexOf("function buildMakeEduBillingHandoffGroups"),
+  const returnHandoffSource = handoffModelSource.slice(
+    handoffModelSource.indexOf("function buildPurchaseSupplierReturnHandoffGroups"),
+    handoffModelSource.indexOf("function buildMakeEduBillingHandoffGroups"),
   );
   const tableSource = workspaceSource.slice(workspaceSource.indexOf("function PurchaseProcessTable"));
 
@@ -1003,8 +1004,8 @@ test("purchase process exposes supplier return requests opposite the order hando
   assert.match(workspaceSource, /returnable: "반품 가능"/);
   assert.match(workspaceSource, /returned: "반품 완료"/);
   assert.match(workspaceSource, /const \[returnHandoffDialogOpen, setReturnHandoffDialogOpen\] = useState\(false\)/);
-  assert.match(workspaceSource, /function buildPurchaseSupplierReturnMessage/);
-  assert.match(workspaceSource, /function buildPurchaseSupplierReturnHandoffGroups/);
+  assert.match(handoffModelSource, /function buildPurchaseSupplierReturnMessage/);
+  assert.match(handoffModelSource, /function buildPurchaseSupplierReturnHandoffGroups/);
   assert.match(returnHandoffSource, /status !== "received" && status !== "partially_received"/);
   assert.match(returnHandoffSource, /const quantity = Math\.max\(0, receivedQuantity\)/);
   assert.match(returnHandoffSource, /반품 요청서/);
@@ -1329,7 +1330,7 @@ test("purchase process derives supplier and unit cost from settings and separate
   const tableSource = workspaceSource.slice(workspaceSource.indexOf("function PurchaseProcessTable"));
 
   assert.match(workspaceSource, /getConfiguredSupplierIdForTextbook/);
-  assert.match(workspaceSource, /getPublisherIdForTextbook/);
+  assert.match(handoffModelSource, /getPublisherIdForTextbook/);
   assert.match(workspaceSource, /normalizeTextbookLookup/);
   assert.match(workspaceSource, /getTextbookTitle\(textbook\)/);
   assert.match(workspaceSource, /publisherSupplierLinks=\{data\.publisherSupplierLinks\}/);
@@ -1411,9 +1412,9 @@ test("purchase process resolves supplier links by publisher name and exposes sha
     new URL("src/features/management/settings-table-columns.tsx", root),
     "utf8",
   );
-  const supplierResolverSource = workspaceSource.slice(
-    workspaceSource.indexOf("function getPublisherIdForTextbook"),
-    workspaceSource.indexOf("function buildTextbookLookupMap"),
+  const supplierResolverSource = handoffModelSource.slice(
+    handoffModelSource.indexOf("function getPublisherIdForTextbook"),
+    handoffModelSource.indexOf("function getStudentNameById"),
   );
   const tableSource = workspaceSource.slice(workspaceSource.indexOf("function PurchaseProcessTable"));
 
@@ -1524,13 +1525,9 @@ test("purchase order modal separates requested copy scope totals before ordering
 });
 
 test("purchase supplier handoff excludes request-only rows and never falls back to requested quantity", async () => {
-  const workspaceSource = await readFile(
-    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
-    "utf8",
-  );
-  const handoffSource = workspaceSource.slice(
-    workspaceSource.indexOf("function buildPurchaseSupplierHandoffGroups"),
-    workspaceSource.indexOf("function buildMakeEduBillingHandoffGroups"),
+  const handoffSource = handoffModelSource.slice(
+    handoffModelSource.indexOf("function buildPurchaseSupplierHandoffGroups"),
+    handoffModelSource.indexOf("function buildMakeEduBillingHandoffGroups"),
   );
 
   assert.match(handoffSource, /if \(status !== "ordered" && status !== "partially_received"\) \{/);
@@ -1548,10 +1545,10 @@ test("purchase copy-scope actions identify student and teacher copies through or
   assert.match(workspaceSource, /<SelectItem value="request">요청 접수<\/SelectItem>/);
   assert.match(workspaceSource, /<Badge variant="outline" className="w-fit rounded-md">[\s\S]*\{getTextbookCopyScopeLabel\(draft\.copyScope\)\}[\s\S]*<\/Badge>/);
   assert.match(workspaceSource, /detail: \[[\s\S]*getTextbookCopyScopeLabel\(draft\.copyScope\),[\s\S]*statusLabel/);
-  assert.match(workspaceSource, /type PurchaseSupplierHandoffLineAccumulator/);
-  assert.match(workspaceSource, /lineAccumulators: new Map/);
-  assert.match(workspaceSource, /getPurchaseSupplierHandoffQuantityLabel\(line\.scopeQuantities\)/);
-  assert.match(workspaceSource, /학생용\/교사용/);
+  assert.match(handoffModelSource, /type PurchaseSupplierHandoffLineAccumulator/);
+  assert.match(handoffModelSource, /lineAccumulators: new Map/);
+  assert.match(handoffModelSource, /getPurchaseSupplierHandoffQuantityLabel\(line\.scopeQuantities\)/);
+  assert.match(handoffModelSource, /학생용\/교사용/);
 });
 
 test("purchase order edits allow zero requested quantities for direct management orders", async () => {
@@ -2067,7 +2064,7 @@ test("textbook workspace reduces idle clutter and exposes group totals", async (
   assert.doesNotMatch(workspaceSource, /const groupAmountValue = group\.rows\.reduce/);
   assert.match(workspaceSource, /const groupCountLabel = `\$\{formatQuantity\(group\.rows\.length\)\}/);
   assert.match(workspaceSource, /const groupDetailText = \[/);
-  assert.match(workspaceSource, /function getKnownPublisherLabel/);
+  assert.match(handoffModelSource, /function getKnownPublisherLabel/);
   assert.match(workspaceSource, /getKnownPublisherLabel\(row\)/);
   assert.match(workspaceSource, /publisherLabel \? \(/);
   assert.match(workspaceSource, /MASTER_TEXTBOOK_PAGE_SIZE/);
@@ -2797,13 +2794,6 @@ test("textbook workspace locks 50 sale issuing safeguards", async () => {
   );
 
   const safeguards = [
-    /function normalizeMonthInput/,
-    /function getSaleLineQuantity/,
-    /function getSaleLineUnitPrice/,
-    /function getSaleLineAmount/,
-    /function getSaleLineMonth/,
-    /function getSaleLineStatus/,
-    /function isBillableSaleLineStatus/,
     /saleStudentQuery/,
     /setSaleStudentQuery/,
     /const normalizedSaleChargeMonth = normalizeMonthInput\(saleForm\.chargeMonth\)/,
@@ -2849,7 +2839,9 @@ test("textbook workspace locks 50 sale issuing safeguards", async () => {
     /청구 \{formatQuantity\(makeEduBillingGroups\.length\)\}건 · \{formatCurrency\(makeEduBillingTotalAmount\)\}/,
   ];
 
-  assert.equal(safeguards.length, 50);
+  const handoffSafeguards = [/function normalizeMonthInput/, /function getSaleLineQuantity/, /function getSaleLineUnitPrice/, /function getSaleLineAmount/, /function getSaleLineMonth/, /function getSaleLineStatus/, /function isBillableSaleLineStatus/];
+  assert.equal(safeguards.length + handoffSafeguards.length, 50);
+  for (const safeguard of handoffSafeguards) assert.match(handoffModelSource, safeguard);
   for (const safeguard of safeguards) {
     assert.match(workspaceSource, safeguard);
   }
