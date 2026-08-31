@@ -2,12 +2,30 @@ begin;
 
 select plan(16);
 
+insert into auth.users(
+  id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
+  raw_app_meta_data, raw_user_meta_data, created_at, updated_at
+)
+values
+  ('00000000-0000-4000-8000-00000000c101', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'actor-a@example.invalid', '', now(), '{"provider":"email","providers":["email"]}', '{}', now(), now()),
+  ('00000000-0000-4000-8000-00000000c102', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'actor-b@example.invalid', '', now(), '{"provider":"email","providers":["email"]}', '{}', now(), now()),
+  ('00000000-0000-4000-8000-00000000c103', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'spoofed@example.invalid', '', now(), '{"provider":"email","providers":["email"]}', '{}', now(), now());
+
 insert into public.profiles(id, role, name, login_id)
 values
   ('00000000-0000-4000-8000-00000000c101', 'staff', '처리자 A', 'actor-a'),
   ('00000000-0000-4000-8000-00000000c102', 'staff', '처리자 B', 'actor-b'),
-  ('00000000-0000-4000-8000-00000000c103', 'staff', '클라이언트 위조값', 'spoofed');
+  ('00000000-0000-4000-8000-00000000c103', 'staff', '클라이언트 위조값', 'spoofed')
+on conflict (id) do update
+set role = excluded.role,
+    name = excluded.name,
+    login_id = excluded.login_id;
 
+select pg_catalog.set_config(
+  'request.jwt.claims',
+  '{"sub":"00000000-0000-4000-8000-00000000c101","role":"authenticated"}',
+  true
+);
 select pg_catalog.set_config(
   'request.jwt.claim.sub',
   '00000000-0000-4000-8000-00000000c101',
@@ -96,6 +114,11 @@ select is(
 );
 
 select pg_catalog.set_config(
+  'request.jwt.claims',
+  '{"sub":"00000000-0000-4000-8000-00000000c102","role":"authenticated"}',
+  true
+);
+select pg_catalog.set_config(
   'request.jwt.claim.sub',
   '00000000-0000-4000-8000-00000000c102',
   true
@@ -180,6 +203,7 @@ values (
 alter table public.ops_tasks enable trigger write_ops_transition_task_source_v1;
 alter table public.ops_tasks enable trigger prevent_ops_roster_completion_bypass;
 
+select pg_catalog.set_config('request.jwt.claims', '', true);
 select pg_catalog.set_config('request.jwt.claim.sub', '', true);
 select is((select auth.uid()), null::uuid, 'historical backfill runs without a JWT actor');
 select pg_catalog.set_config('app.ops_transition_defer_details', 'true', true);

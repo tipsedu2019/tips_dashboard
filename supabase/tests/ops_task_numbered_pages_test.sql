@@ -256,6 +256,61 @@ select throws_ok(format('select public.list_ops_task_numbered_page_v1(%L,%L::jso
 from (values ('{"period":"custom","dateFrom":"2026-02-30","dateTo":"2026-03-01"}'::jsonb),('{"period":"custom","dateFrom":"2026-09-01","dateTo":"2026-08-31"}'),('{"sortColumn":"status","sortDirection":"bad"}'),('{"dateFrom":"2026-08-31"}'),('{"filterColumn":""}'),('{"sortColumn":"","sortDirection":"asc"}')) v(patch);
 select throws_ok($$select public.list_ops_task_numbered_page_v1(null,null,1,10)$$,'22023',null,'null type filters22023');
 
+-- These are warm, public-function wrapper plans after the authorized fixture
+-- assertions above. They record the actual authenticated actor/filter/page-size
+-- requests only; no nested eligible-key or projector statement plan is claimed.
+create function pg_temp.task_numbered_explain(query text) returns jsonb language plpgsql as $f$
+declare result jsonb;
+begin
+  execute 'explain (analyze,buffers,format json) ' || query into result;
+  return result;
+end
+$f$;
+create temporary table numbered_wrapper_plans on commit drop as
+with input as (
+  select
+    current_setting('request.jwt.claim.sub', true)::uuid as actor_id,
+    pg_temp.task_filters('general') as filters,
+    (public.list_ops_task_numbered_page_v1('general', pg_temp.task_filters('general'), 1, 10)->>'totalCount')::integer as fixture_count
+)
+select
+  input.actor_id,
+  input.filters,
+  input.fixture_count,
+  page,
+  10::integer as page_size,
+  'warm_after_prior_fixture_assertions'::text as cache_context,
+  pg_temp.task_numbered_explain(format(
+    'select public.list_ops_task_numbered_page_v1(%L,%L::jsonb,%s,%s)',
+    'general', input.filters, page, 10
+  )) as plan
+from input cross join (values (1), (6), (11)) pages(page);
+select ok(
+  actor_id = '94000000-0000-4000-8000-000000000001'::uuid
+  and filters = pg_temp.task_filters('general')
+  and fixture_count = 101
+  and page_size = 10
+  and cache_context = 'warm_after_prior_fixture_assertions'
+  and plan #>> '{0,Execution Time}' is not null
+  and plan #>> '{0,Plan,Shared Hit Blocks}' is not null,
+  'authenticated general wrapper plan records fixture, filter, size and warm context for page ' || page
+)
+from numbered_wrapper_plans;
+select diag(jsonb_build_object(
+  'evidence', 'ops_task_numbered_wrapper_plan',
+  'actorId', actor_id,
+  'taskType', 'general',
+  'filters', filters,
+  'fixtureCount', fixture_count,
+  'page', page,
+  'pageSize', page_size,
+  'cacheContext', cache_context,
+  'scope', 'public_function_wrapper_only',
+  'nestedEligibleKeyOrProjectorPlan', 'not_observed',
+  'plan', plan
+)::text)
+from numbered_wrapper_plans order by page;
+
 reset role;
 select set_config('request.jwt.claims','{"sub":"94000000-0000-4000-8000-000000000002","role":"authenticated"}',true);
 select set_config('request.jwt.claim.sub','94000000-0000-4000-8000-000000000002',true);
