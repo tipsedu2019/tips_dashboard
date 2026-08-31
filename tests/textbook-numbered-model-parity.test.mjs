@@ -10,6 +10,7 @@ import {
   groupPurchaseLinesByStatus,
   groupSaleLinesByStatus,
   getTextbookByReference,
+  getTextbookPurchaseUnitCost,
 } from "../src/features/textbooks/textbook-ledger.js";
 
 const modelUrl = new URL("../src/features/textbooks/textbook-read-model.ts", import.meta.url);
@@ -43,6 +44,19 @@ const line = (id, extra = {}) => ({
 const filters = (extra = {}) => ({
   search: "", subject: "all", schoolLevel: "all", gradeLevel: "all",
   subSubject: "all", quality: "all", inventory: "all", ...extra,
+});
+
+test("purchase cost business labels remove ECMAScript whitespace without compatibility normalization", () => {
+  const whitespace = "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
+  for (const field of ["publisher", "supplier"]) {
+    assert.equal(getTextbookPurchaseUnitCost({ sale_price: 10000, [field]: "팁스\ufeff서점" }), 0, `${field} FEFF`);
+    for (const space of whitespace) {
+      assert.equal(getTextbookPurchaseUnitCost({ sale_price: 10000, [field]: `팁스${space}서점` }), 0, `${field} U+${space.codePointAt(0).toString(16)}`);
+    }
+    for (const label of ["팁스\u200b서점", "팁스\u0085서점", "팁스\u180e서점", "팁스서점"]) {
+      assert.equal(getTextbookPurchaseUnitCost({ sale_price: 10000, [field]: label }), 9000, `${field} non-whitespace/no-NFKC fence`);
+    }
+  }
 });
 
 test("purchase display parents pair only the base case, preserve cross-order members and student primary", async () => {
