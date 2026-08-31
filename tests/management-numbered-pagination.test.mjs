@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import vm from "node:vm";
 import { JSDOM } from "jsdom";
-import { act, createElement, StrictMode, useEffect, useState } from "react";
+import { act, createContext, createElement, StrictMode, Suspense, startTransition, useContext, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import ts from "typescript";
 
@@ -49,12 +49,136 @@ function transport() {
     const request = requests[index], { p_page: page, p_page_size: pageSize, p_kind: kind } = request.args;
     request.resolve({ error: null, data: { page, pageSize, totalCount, rows: Array.from({ length: Math.min(pageSize, Math.max(0, totalCount - (page - 1) * pageSize)) }, (_, i) => ({
       kind, id: `row-${page}-${i}`, name: `Row ${page}-${i}`, status: "재원", sortKey: `row-${page}-${i}`, updatedAt: "2026-08-31", grade: null, school: null, contact: null, parentContact: null,
-      subject: "수학", schedule: null, teacherName: null, classroom: null, capacity: null, weeklyMinutes: null, fee: null, studentCount: 0,
+      subject: "수학", title: `Book ${page}-${i}`, publisher: null, price: null, activeClassCount: 0,
+      schedule: null, teacherName: null, classroom: null, capacity: null, weeklyMinutes: null, fee: null, studentCount: 0,
     })) } });
   }
   return { supabase, requests, finish };
 }
 const filters = { kind: "students", search: "", status: null, schoolCategory: null, school: null, grade: null };
+
+async function mountManagementPage(t, { kind = "students", preference = 10, holdNavigation = false, mutationError = null } = {}) {
+  const dom = new JSDOM("<div id='root'></div>", { url: `https://test.invalid/admin/${kind}?page=11` });
+  globalThis.window = dom.window; globalThis.document = dom.window.document;
+  for (const key of ["HTMLElement", "DocumentFragment", "MutationObserver", "CustomEvent", "Event", "Node", "HTMLInputElement"]) globalThis[key] = dom.window[key];
+  globalThis.getComputedStyle = dom.window.getComputedStyle;
+  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+  if (preference !== "auto") window.localStorage.setItem("tips.data-table-page-size.v1", JSON.stringify({ [`management:${kind}`]: { mode: "manual", pageSize: preference } }));
+  const { supabase, requests, finish } = transport();
+  const actualService = loadHook(supabase, "src/features/management/management-service.js");
+  const mutations = [];
+  const navigation = createContext(null);
+  const navigationGate = Promise.withResolvers();
+  let navigationHeld = holdNavigation;
+  const initialSearch = window.location.search;
+  let table, setSearch;
+  const originalReplace = window.history.replaceState.bind(window.history);
+  window.history.replaceState = (data, unused, url) => {
+    originalReplace(data, unused, url);
+    startTransition(() => setSearch(window.location.search));
+  };
+  const { ManagementPage } = loadHook(supabase, "src/features/management/management-page.tsx", {
+    "@/providers/auth-provider": { useAuth: () => ({ user: { id: "actor" }, role: "admin", loading: false, canManageAll: true }) },
+    "next/navigation": {
+      usePathname: () => `/admin/${kind}`,
+      useSearchParams: () => new URLSearchParams(useContext(navigation)),
+      useRouter: () => ({ replace: (url) => window.history.replaceState(null, "", url), push: (url) => window.history.replaceState(null, "", url) }),
+    },
+    "./management-data-table": { ManagementDataTable(props) { useEffect(() => { table = props; }, [props]); return null; } },
+    "./management-service.js": { ...actualService, managementService: {
+      ...actualService.managementService,
+      deleteTextbook: async (id) => { mutations.push(id); if (mutationError) throw mutationError; return {}; },
+    } },
+    "@/components/ui/dialog": {
+      Dialog: ({ open, children }) => open ? createElement("section", null, children) : null,
+      DialogContent: ({ children }) => createElement("div", null, children),
+      DialogDescription: ({ children }) => createElement("p", null, children),
+      DialogFooter: ({ children }) => createElement("footer", null, children),
+      DialogHeader: ({ children }) => createElement("header", null, children),
+      DialogTitle: ({ children }) => createElement("h2", null, children),
+    },
+  });
+  function Probe() {
+    const [search, updateSearch] = useState(window.location.search);
+    useEffect(() => { setSearch = updateSearch; }, []);
+    return createElement(Suspense, { fallback: null }, createElement(navigation.Provider, { value: search },
+      createElement(NavigationDelay, { search }), createElement(ManagementPage, { kind })));
+  }
+  function NavigationDelay({ search }) {
+    if (navigationHeld && search !== initialSearch) throw navigationGate.promise;
+    return null;
+  }
+  const root = createRoot(document.getElementById("root"));
+  t.after(async () => { await act(async () => root.unmount()); dom.window.close(); });
+  await act(async () => root.render(createElement(StrictMode, null, createElement(Probe))));
+  return { requests, finish, mutations, get table() { return table; },
+    releaseNavigation() { navigationHeld = false; navigationGate.resolve(); },
+    navigate: (search) => window.history.replaceState(null, "", `/admin/${kind}${search}`) };
+}
+
+test("actual manual size handler never requests old page with the new size during transition URL reset", async (t) => {
+  const page = await mountManagementPage(t, { holdNavigation: true });
+  await act(async () => page.finish(0));
+  await act(async () => page.table.onPageSizePreferenceChange(15));
+  assert.deepEqual(page.requests.map((request) => [request.args.p_page, request.args.p_page_size]), [[11, 10], [1, 15]]);
+  assert.equal(page.requests[1].signal.aborted, false);
+  await act(async () => page.releaseNavigation());
+  assert.equal(page.requests.length, 2);
+  await act(async () => page.finish(1));
+  await act(async () => page.navigate("?page=11"));
+  assert.deepEqual(page.requests.map((request) => [request.args.p_page, request.args.p_page_size]), [[11, 10], [1, 15], [11, 15]], "Back/navigation restores page 11 at the selected size");
+});
+
+test("actual auto measurement preserves initial restored page and atomically resets later size changes", async (t) => {
+  const page = await mountManagementPage(t, { preference: "auto", holdNavigation: true });
+  assert.equal(page.requests.length, 0);
+  await act(async () => page.table.onAutoPageSizeChange(15));
+  assert.deepEqual(page.requests.map((request) => [request.args.p_page, request.args.p_page_size]), [[11, 15]]);
+  await act(async () => page.finish(0));
+  await act(async () => page.table.onAutoPageSizeChange(20));
+  assert.deepEqual(page.requests.map((request) => [request.args.p_page, request.args.p_page_size]), [[11, 15], [1, 20]]);
+  await act(async () => page.releaseNavigation());
+  assert.equal(page.requests.length, 2);
+  await act(async () => page.requests[1].reject(new Error("offline")));
+  assert.equal(page.table.page, 11); assert.equal(page.table.pageSize, 15);
+  assert.equal(page.table.rows.length, 15);
+});
+
+for (const totalAfter of [101, 100]) {
+  test(`actual confirmed deletion has one reconciliation owner (remaining ${totalAfter})`, async (t) => {
+    const page = await mountManagementPage(t, { kind: "textbooks" });
+    await act(async () => page.finish(0, 102));
+    await act(async () => page.table.actions.onDeleteRow(page.table.rows[0]));
+    assert.equal(page.mutations.length, 0, "requesting deletion must retain confirmation");
+    const confirm = [...document.querySelectorAll("button")].find((button) => button.textContent === "삭제");
+    assert.ok(confirm);
+    await act(async () => confirm.click());
+    assert.equal(page.mutations.length, 1);
+    assert.equal(page.requests.length, 2, "the confirmed-delete chain must send exactly one refresh");
+    assert.equal(page.requests[1].signal.aborted, false);
+    assert.equal(page.table.rows.length, 2, "prior successful rows stay until reconciliation succeeds");
+    await act(async () => page.finish(1, totalAfter));
+    if (totalAfter === 100) {
+      assert.equal(page.requests.length, 3); assert.equal(page.requests[2].args.p_page, 10);
+      await act(async () => page.finish(2, 100));
+      assert.equal(page.table.page, 10);
+    } else {
+      assert.equal(page.requests.length, 2); assert.equal(page.table.page, 11);
+    }
+    assert.equal(page.table.totalCount, totalAfter);
+  });
+}
+
+test("actual confirmed deletion retains rows and does not refresh when the mutation fails", async (t) => {
+  const page = await mountManagementPage(t, { kind: "textbooks", mutationError: new Error("delete unavailable") });
+  await act(async () => page.finish(0, 102));
+  await act(async () => page.table.actions.onDeleteRow(page.table.rows[0]));
+  const confirm = [...document.querySelectorAll("button")].find((button) => button.textContent === "삭제");
+  await act(async () => confirm.click());
+  assert.equal(page.mutations.length, 1);
+  assert.equal(page.requests.length, 1);
+  assert.equal(page.table.rows.length, 2);
+});
 
 test("management hook uses direct server pages, sort resets, refresh and independent detail under StrictMode", async (t) => {
   const dom = new JSDOM("<div id='root'></div>", { url: "https://test.invalid" });
@@ -221,6 +345,55 @@ test("metadata failure stays visible without discarding a successful numbered pa
   assert.equal(state.rows.length, 10);
   assert.equal(state.error, "metadata unavailable");
   await act(async () => root.unmount());
+});
+
+test("authorized detail catalogs remain available through metadata failure and clear on role or logout", async (t) => {
+  const dom = new JSDOM("<div id='root'></div>", { url: "https://test.invalid" });
+  globalThis.window = dom.window; globalThis.document = dom.window.document;
+  t.after(() => dom.window.close());
+  const { supabase } = transport();
+  const rpc = supabase.rpc, details = [];
+  supabase.rpc = (name, args) => name === "get_management_stats_v1" ? {
+    abortSignal() { return this; }, retry: () => Promise.resolve({ data: null, error: new Error("stats unavailable") }),
+  } : name === "get_management_detail_v1" ? {
+    abortSignal() { return this; }, retry: () => new Promise((resolve) => details.push({ args, resolve })),
+  } : rpc(name, args);
+  const { useManagementRecords } = loadHook(supabase);
+  let state;
+  const classFilters = { kind: "classes", search: "", periodId: "period", status: "수강", subject: null, grade: null, teacher: null, classroom: null };
+  function Probe({ actor = "A", role = "admin" }) {
+    const result = useManagementRecords("classes", classFilters, { pageSize: 10, enabled: Boolean(actor), authorizationScope: JSON.stringify([actor, role]) });
+    useEffect(() => { state = result; }, [result]);
+    return null;
+  }
+  function resolveDetail(index, teacher) {
+    details[index].resolve({ error: null, data: { kind: "classes", record: { id: details[index].args.p_id, name: "Class", subject: "수학", status: "수강" },
+      formReferences: { teacherCatalogs: [{ id: teacher, name: teacher }], classroomCatalogs: [{ id: "room", name: "room" }], scienceSubjectAreas: [{ key: "physics", label: "물리" }] } } });
+  }
+  const root = createRoot(document.getElementById("root"));
+  t.after(async () => { await act(async () => root.unmount()); });
+  await act(async () => root.render(createElement(StrictMode, null, createElement(Probe))));
+  let detail;
+  await act(async () => { detail = state.loadDetail("outside-page"); });
+  await act(async () => { resolveDetail(0, "teacher-A"); await detail; });
+  assert.equal(state.classFormReferences.teacherCatalogs.length, 1);
+  assert.equal(state.classFormReferences.classroomCatalogs.length, 1);
+  assert.equal(state.classFormReferences.scienceSubjectAreas.length, 1);
+  assert.equal(state.error, "stats unavailable");
+  const oldLoadDetail = state.loadDetail;
+  let staleDetail;
+  await act(async () => { staleDetail = state.loadDetail("stale-A"); });
+  await act(async () => root.render(createElement(StrictMode, null, createElement(Probe, { role: "teacher" }))));
+  assert.equal(state.classFormReferences.teacherCatalogs.length, 0);
+  await act(async () => { detail = state.loadDetail("current-role"); });
+  await act(async () => { resolveDetail(2, "teacher-current-role"); await detail; });
+  assert.equal(state.classFormReferences.teacherCatalogs[0].id, "teacher-current-role");
+  await act(async () => { resolveDetail(1, "stale-teacher-A"); await staleDetail; });
+  assert.equal(state.classFormReferences.teacherCatalogs[0].id, "teacher-current-role", "late old-role detail must not erase the current catalogs");
+  await act(async () => { void oldLoadDetail("old-callback"); });
+  assert.equal(details.length, 3, "old-role detail callback must not issue a request in the new authorization scope");
+  await act(async () => root.render(createElement(StrictMode, null, createElement(Probe, { actor: null, role: "viewer" }))));
+  assert.equal(state.classFormReferences.teacherCatalogs.length, 0);
 });
 
 test("the real table renders server page rows unchanged, routes sort headers and disables derived sorts", async (t) => {

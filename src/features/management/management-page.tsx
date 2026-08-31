@@ -1507,7 +1507,6 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     loadRelationPage,
     loadClassRosterPreview,
     loadClassTextbookCandidatePage,
-    removeRows,
     refresh,
   } = useManagementRecords(kind, managementListFilters, {
     enabled: pageSizeReady && (pageSizeMode !== "auto" || autoMeasurementKind === kind) && savedSort?.kind === kind && !authLoading && Boolean(user?.id),
@@ -2876,14 +2875,13 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     try {
       const results = await Promise.all(rows.map((row) => service.deleteTextbook(row.id)));
       reportPublicClassesCacheRefresh(results);
-      removeRows(rows.map((row) => row.id));
       await reconcileManagementPage();
     } catch (bulkError) {
       setOperationError(bulkError instanceof Error ? bulkError.message : "일괄 처리 중 오류가 발생했습니다.");
     } finally {
       setSaving(false);
     }
-  }, [canMutateRows, kind, reconcileManagementPage, removeRows]);
+  }, [canMutateRows, kind, reconcileManagementPage]);
 
   const handleBulkDeleteRows = useCallback((rows: ManagementRow[]) => {
     if (rows.length === 0) {

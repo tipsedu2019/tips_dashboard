@@ -787,8 +787,23 @@ export function useManagementRecords(
   requestedFilters?: ManagementListFilters,
   { pageSize, enabled, authorizationScope = "", page = 1, sort, onQueryChange }: UseManagementRecordsOptions = { pageSize: 20, enabled: true },
 ) {
+  // Native history updates are transitions, while size preferences/measurements
+  // are urgent. Reconcile the request pair before effects can issue a query.
+  const [requestPagination, setRequestPagination] = useState({
+    urlPage: page, page, pageSize, initialized: enabled,
+  });
+  if (requestPagination.urlPage !== page || requestPagination.pageSize !== pageSize || (!requestPagination.initialized && enabled)) {
+    setRequestPagination({
+      urlPage: page,
+      page: requestPagination.initialized && requestPagination.pageSize !== pageSize
+        ? 1 : requestPagination.urlPage !== page ? page : requestPagination.page,
+      pageSize,
+      initialized: requestPagination.initialized || enabled,
+    });
+  }
   const [stats, setStats] = useState<ManagementStat[]>([]);
-  const [classFormReferences, setClassFormReferences] = useState<ClassFormReferences>(EMPTY_CLASS_FORM_REFERENCES);
+  const [classFormReferences, setClassFormReferences] = useState<{ owner: string; references: ClassFormReferences } | null>(null);
+  const detailAuthorizationRef = useRef<{ owner: string } | null>(null);
   const [filterOptions, setFilterOptions] = useState<Record<string, unknown>>({});
   const [effectiveClassPeriodId, setEffectiveClassPeriodId] = useState("");
   const [metadataFailure, setMetadataFailure] = useState<{ owner: string; error: string } | null>(null);
@@ -804,6 +819,16 @@ export function useManagementRecords(
   const requestedSort = sanitizeManagementNumberedSort(kind, sort);
   const scope = JSON.stringify({ authorizationScope, kind, filters, sort: requestedSort });
   const owner = JSON.stringify([authorizationScope, kind]);
+  if (classFormReferences && classFormReferences.owner !== owner) {
+    setClassFormReferences(null);
+  }
+  useEffect(() => {
+    const authorization = { owner };
+    detailAuthorizationRef.current = authorization;
+    return () => {
+      if (detailAuthorizationRef.current === authorization) detailAuthorizationRef.current = null;
+    };
+  }, [owner]);
   useEffect(() => {
     let active = true;
     lastRequestKeyRef.current = "";
@@ -864,31 +889,38 @@ export function useManagementRecords(
   useEffect(() => {
     let active = true;
     queueMicrotask(() => {
-      const key = JSON.stringify([scope, page, pageSize]);
+      const { page: requestedPage, pageSize: requestedSize } = requestPagination;
+      const key = JSON.stringify([scope, requestedPage, requestedSize]);
       if (!active || !enabled || lastRequestKeyRef.current === key) return;
       lastRequestKeyRef.current = key;
-      void controllerRef.current?.load({ scope, page, pageSize });
+      void controllerRef.current?.load({ scope, page: requestedPage, pageSize: requestedSize });
     });
     return () => { active = false; };
-  }, [enabled, scope, page, pageSize]);
+  }, [enabled, scope, requestPagination]);
 
   const goToPage = useCallback((nextPage: number) => onQueryChangeRef.current?.({ page: nextPage, sort: JSON.parse(scope).sort }), [onQueryChangeRef, scope]);
   const setSort = useCallback((nextSort: ManagementNumberedSort) => onQueryChangeRef.current?.({ page: 1, sort: sanitizeManagementNumberedSort(kind, nextSort) }), [kind, onQueryChangeRef]);
 
   const loadDetail = useCallback(async (id: string) => {
     if (!readService) return null;
+    const authorization = detailAuthorizationRef.current;
+    if (!authorization || authorization.owner !== owner) return null;
     const detail = await readService.loadDetail({ kind, id });
+    if (detailAuthorizationRef.current !== authorization) return null;
     const sourceRow = detailToSourceRow(kind, detail);
     if (!sourceRow) return null;
     if (kind === "classes") {
       setClassFormReferences({
-        teacherCatalogs: Array.isArray(sourceRow.available_teacher_catalogs) ? sourceRow.available_teacher_catalogs as Record<string, unknown>[] : [],
-        classroomCatalogs: Array.isArray(sourceRow.available_classroom_catalogs) ? sourceRow.available_classroom_catalogs as Record<string, unknown>[] : [],
-        scienceSubjectAreas: Array.isArray(sourceRow.available_science_subject_areas) ? sourceRow.available_science_subject_areas as Record<string, unknown>[] : [],
+        owner,
+        references: {
+          teacherCatalogs: Array.isArray(sourceRow.available_teacher_catalogs) ? sourceRow.available_teacher_catalogs as Record<string, unknown>[] : [],
+          classroomCatalogs: Array.isArray(sourceRow.available_classroom_catalogs) ? sourceRow.available_classroom_catalogs as Record<string, unknown>[] : [],
+          scienceSubjectAreas: Array.isArray(sourceRow.available_science_subject_areas) ? sourceRow.available_science_subject_areas as Record<string, unknown>[] : [],
+        },
       });
     }
     return normalizeManagementRows(kind, [sourceRow])[0] || null;
-  }, [kind, readService, setClassFormReferences]);
+  }, [kind, owner, readService, setClassFormReferences]);
 
   const loadRelationPage = useCallback(async ({
     id,
@@ -961,7 +993,7 @@ export function useManagementRecords(
     stats: metadataOwner === owner ? stats : [],
     loading,
     error,
-    classFormReferences: metadataOwner === owner ? classFormReferences : EMPTY_CLASS_FORM_REFERENCES,
+    classFormReferences: classFormReferences?.owner === owner ? classFormReferences.references : EMPTY_CLASS_FORM_REFERENCES,
     filterOptions: metadataOwner === owner ? filterOptions : {},
     effectiveClassPeriodId: displayed ? effectiveClassPeriodId : "",
     page: displayed?.page || 1,
