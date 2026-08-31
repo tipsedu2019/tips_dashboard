@@ -165,5 +165,45 @@ select is((select count(*) from dashboard_private.notification_events),(select e
 select is((select count(*) from dashboard_private.notification_event_fanout_jobs),(select jobs from read_before),'reads no jobs');
 select is((select count(*) from dashboard_private.notification_deliveries),(select deliveries from read_before),'reads no deliveries');
 select is((select count(*) from public.makeup_request_events),(select request_events from read_before),'reads no request events');
+
+-- R1 precision characterization is isolated after all original view/count fixtures.
+select ok((select not p.prosecdef and 'search_path=""'=any(p.proconfig) and has_function_privilege('authenticated',p.oid,'execute') and not has_function_privilege('anon',p.oid,'execute') and not has_function_privilege('public',p.oid,'execute') from pg_proc p where p.oid=to_regprocedure('public.makeup_numbered_source_instant_v1(text)')),'source precision helper is invoker pinned and authenticated-only');
+select pg_temp.actor(804);
+create temp table precision_cases(n integer,start_at text,end_at text,target_start text,target_end text);
+grant select on precision_cases to authenticated;
+insert into precision_cases values
+ (201,'2026-08-31T00:00:59.9999999Z','2026-08-31T00:01:59.9999999Z','2026-08-31T00:00:00.000Z','2026-08-31T00:01:00.000Z'),
+ (202,'2026-08-31T00:00:00.9999999Z','2026-08-31T00:00:01.9999999Z','2026-08-31T00:00:00.000Z','2026-08-31T00:00:01.000Z'),
+ (203,'2026-08-31T23:59:59.9999999Z','2026-09-01T00:00:59.9999999Z','2026-08-31T23:59:00.000Z','2026-09-01T00:00:00.000Z');
+insert into public.makeup_requests(id,status,subject,approval_group,requester_id,teacher_profile_id,approver_profile_id,class_name,request_kind,reason,makeup_slots,created_at)
+select pg_temp.mid(n),'approval_pending','영어','english',pg_temp.mid(801),pg_temp.mid(801),pg_temp.mid(804),'정밀도 '||n,'makeup_only','R1 precision',jsonb_build_array(jsonb_build_object('startAt',start_at,'endAt',end_at,'classroom','A')),'2026-08-01T00:00:00Z' from precision_cases;
+insert into public.makeup_requests(id,status,subject,approval_group,requester_id,teacher_profile_id,approver_profile_id,class_name,request_kind,reason,makeup_slots,created_at)
+select pg_temp.mid(n),'approval_pending','영어','english',pg_temp.mid(801),pg_temp.mid(801),pg_temp.mid(804),'정밀도 대조 '||n,'makeup_only','R1 control',jsonb_build_array(jsonb_build_object('startAt','2026-09-03T00:00:00'||fraction||'Z','endAt','2026-09-03T01:00:00'||fraction||'Z','classroom','B')),'2026-08-01T00:00:00Z'
+from (values(204,'.1234'),(205,''),(206,'.1'),(207,'.12'),(208,'.123'))controls(n,fraction);
+insert into public.makeup_requests(id,status,subject,approval_group,requester_id,teacher_profile_id,teacher_catalog_id,approver_profile_id,class_name,request_kind,reason,makeup_slots,created_at)
+values(pg_temp.mid(209),'completed','영어','english',pg_temp.mid(801),pg_temp.mid(801),pg_temp.mid(701),pg_temp.mid(804),'정밀도 날짜','makeup_only','R1 date precision','[{"date":"2026-08-31T14:59:59.9999999Z","startTime":"09:00","endTime":"10:00","classroom":"C"}]','2026-08-01T00:00:00Z');
+set constraints all immediate;
+create temp table precision_read_before as select (select count(*) from dashboard_private.notification_events) events,(select count(*) from dashboard_private.notification_event_fanout_jobs) jobs,(select count(*) from dashboard_private.notification_deliveries) deliveries,(select count(*) from public.makeup_request_events) request_events;
+select diag('precision seed notification events='||((select events from precision_read_before)-(select events from read_before))||', jobs='||((select jobs from precision_read_before)-(select jobs from read_before)));
+set local timezone='UTC';
+select diag('precision PG cast='||public.makeup_numbered_instant_v1(start_at)::text||'; target end='||target_end) from precision_cases;
+select diag('precision date PG normalized='||(public.makeup_numbered_slots_v1(jsonb_build_object('makeup_slots',makeup_slots))#>>'{0,startAt}')) from public.makeup_requests where id=pg_temp.mid(209);
+set local role authenticated;
+select ok(exists(select 1 from jsonb_array_elements(public.get_makeup_reservation_context_v1(jsonb_build_array(jsonb_build_object('startAt',target_start,'endAt',target_end)),'{}')->'reservations')r where r->>'id'=pg_temp.mid(n)::text),'high-precision source remains candidate at boundary '||n) from precision_cases;
+select is((select r#>>'{makeupSlots,0,startAt}' from jsonb_array_elements(public.get_makeup_reservation_context_v1('[{"startAt":"2026-08-31T00:00:00.000Z","endAt":"2026-08-31T00:01:00.000Z"}]','{}')->'reservations')r where r->>'id'=pg_temp.mid(201)::text),'2026-08-31T00:00:59.9999999Z','candidate retains raw fractional source precision');
+select ok(exists(select 1 from jsonb_array_elements(public.get_makeup_reservation_context_v1('[{"startAt":"2026-08-31T00:00:00.000Z","endAt":"2026-08-31T00:01:00.000Z"}]','{}')->'reservations')r where r->>'id'=pg_temp.mid(204)::text),'unproved higher-precision nonoverlap remains a conservative candidate');
+select ok(not exists(select 1 from jsonb_array_elements(public.get_makeup_reservation_context_v1('[{"startAt":"2026-08-31T00:00:00.000Z","endAt":"2026-08-31T00:01:00.000Z"}]','{}')->'reservations')r where r->>'id' in(pg_temp.mid(205)::text,pg_temp.mid(206)::text,pg_temp.mid(207)::text,pg_temp.mid(208)::text)),'safe zero-to-three fractional digit nonoverlap stays excluded');
+select is(public.get_makeup_detail_v1(pg_temp.mid(209))->'rawMakeupSlots','[{"date":"2026-08-31T14:59:59.9999999Z","startTime":"09:00","endTime":"10:00","classroom":"C"}]'::jsonb,'high-precision date fallback keeps raw detail for exact JS normalization');
+select ok(public.makeup_numbered_legacy_slots_v1(jsonb_build_object('makeup_slots',(select makeup_slots from public.makeup_requests where id=pg_temp.mid(209)))),'high-precision date fallback is explicitly outside SQL date-key equivalence');
+select ok(exists(select 1 from jsonb_array_elements(public.get_makeup_reservation_context_v1('[{"startAt":"2026-08-31T00:00:00.000Z","endAt":"2026-08-31T01:00:00.000Z"}]','{}')->'reservations')r where r->>'id'=pg_temp.mid(209)::text and r ? 'rawMakeupSlots'),'Seoul-day rollover source stays a raw conservative reservation candidate');
+select throws_ok($$select pg_temp.page(jsonb_build_object('view','closed','teacher','id:'||pg_temp.mid(701),'period','custom','dateFrom','2026-08-31','dateTo','2026-08-31'))$$,'22023','makeup_legacy_slot_format_unsupported','high-precision date fallback uses existing scoped compatibility error, not rounded period keys');
+select is(public.makeup_numbered_slots_v1('{"makeup_slots":[{"date":"2026-08-31T14:59:59.999Z","startTime":"09:00","endTime":"10:00"}]}')#>>'{0,startAt}','2026-08-31T09:00:00+09:00','safe millisecond date fallback retains existing Seoul day');
+reset role;select pg_temp.actor(802);set local role authenticated;
+select ok(not exists(select 1 from jsonb_array_elements(public.get_makeup_reservation_context_v1('[{"startAt":"2026-08-31T00:00:00.000Z","endAt":"2026-08-31T00:01:00.000Z"}]','{}')->'reservations')r where r->>'id'=pg_temp.mid(201)::text),'precision candidates remain authorized by existing RLS');
+reset role;
+select is((select count(*) from dashboard_private.notification_events),(select events from precision_read_before),'precision reads no notification events');
+select is((select count(*) from dashboard_private.notification_event_fanout_jobs),(select jobs from precision_read_before),'precision reads no jobs');
+select is((select count(*) from dashboard_private.notification_deliveries),(select deliveries from seed_before),'precision fixture and reads no deliveries');
+select is((select count(*) from public.makeup_request_events),(select request_events from precision_read_before),'precision reads no request history writes');
 select * from finish();
 rollback;

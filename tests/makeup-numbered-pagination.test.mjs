@@ -219,6 +219,43 @@ test('conservative raw reservation projection and full legacy model agree for am
   } finally { if(oldTimezone===undefined) delete process.env.TZ; else process.env.TZ=oldTimezone; }
 });
 
+test('high-precision source candidates preserve legacy collisions across second minute and day boundaries',async()=>{
+ const {buildRoomAvailability}=modules(null)('src/features/makeup-requests/makeup-request-model.js');
+ const cases=[
+  ['2026-08-31T00:00:59.9999999Z','2026-08-31T00:01:59.9999999Z','2026-08-31T00:00:00.000Z','2026-08-31T00:01:00.000Z','2026-08-31T00:00:59.999Z'],
+  ['2026-08-31T00:00:00.9999999Z','2026-08-31T00:00:01.9999999Z','2026-08-31T00:00:00.000Z','2026-08-31T00:00:01.000Z','2026-08-31T00:00:00.999Z'],
+  ['2026-08-31T23:59:59.9999999Z','2026-09-01T00:00:59.9999999Z','2026-08-31T23:59:00.000Z','2026-09-01T00:00:00.000Z','2026-08-31T23:59:59.999Z'],
+ ];
+ for(const [startAt,endAt,targetStart,targetEnd,parsedStart] of cases){
+  assert.equal(new Date(startAt).toISOString(),parsedStart);
+  const full=row(201,{makeupSlots:[{id:'precision',startAt,endAt,classroom:'A'}],makeupStartAt:'',makeupEndAt:''});
+  const {id:requestId,status,className,makeupStartAt,makeupEndAt,makeupClassroom,makeupSlots}=full;
+  const io=transport(),service=modules(io.supabase)(servicePath),slots=[{startAt:targetStart,endAt:targetEnd}];
+  const pending=service.readMakeupReservationContext({slots,eventRequestIds:[]});
+  assert.deepEqual(io.requests[0].args.p_slots,slots);
+  io.requests[0].resolve({data:{reservations:[{id:requestId,status,className,makeupStartAt,makeupEndAt,makeupClassroom,makeupSlots}],activeEventRequestIds:[]},error:null});
+  const context=await pending;assert.equal(context.reservations[0].makeupSlots[0].startAt,startAt);
+  const base={classrooms:[{name:'A'},{name:'B'}],slots,ignoreOrphanedMakeupEvents:true};
+  const legacy=buildRoomAvailability({...base,requests:[full]}),conservative=buildRoomAvailability({...base,requests:context.reservations,activeEventRequestIds:context.activeEventRequestIds});
+  assert.deepEqual(conservative,legacy);assert.deepEqual(conservative.map(room=>[room.name,room.available,room.collisions.length]),[['A',false,1],['B',true,0]]);
+ }
+});
+
+test('high-precision date fallback keeps the browser Seoul day through private detail and reservation normalization',async()=>{
+ const model=modules(null)('src/features/makeup-requests/makeup-request-model.js');
+ const raw=[{date:'2026-08-31T14:59:59.9999999Z',startTime:'09:00',endTime:'10:00',classroom:'C'}];
+ const expected=[{id:'slot-1',startAt:'2026-08-31T09:00:00+09:00',endAt:'2026-08-31T10:00:00+09:00',classroom:'C'}];
+ assert.deepEqual(model.normalizeMakeupSlots({makeupSlots:raw}),expected);
+ const full=row(209,{status:'completed',makeupSlots:raw,makeupStartAt:'',makeupEndAt:'',makeupClassroom:'C'}),io=transport(),service=modules(io.supabase)(servicePath);
+ const detail=service.readMakeupDetail({id:id(209)});io.requests[0].resolve({data:{...full,makeupSlots:[],rawMakeupSlots:raw},error:null});
+ const normalized=await detail;assert.deepEqual(normalized.makeupSlots,expected);assert.equal('rawMakeupSlots' in normalized,false);
+ const slots=[{startAt:'2026-08-31T00:00:00.000Z',endAt:'2026-08-31T01:00:00.000Z'}],pending=service.readMakeupReservationContext({slots,eventRequestIds:[]});
+ io.requests[1].resolve({data:{reservations:[{id:id(209),status:'completed',className:full.className,makeupStartAt:'',makeupEndAt:'',makeupClassroom:'C',makeupSlots:[],rawMakeupSlots:raw}],activeEventRequestIds:[]},error:null});
+ const context=await pending;assert.deepEqual(context.reservations[0].makeupSlots,expected);assert.equal('rawMakeupSlots' in context.reservations[0],false);
+ const base={classrooms:[{name:'C'}],slots},legacy=model.buildRoomAvailability({...base,requests:[full]}),conservative=model.buildRoomAvailability({...base,requests:context.reservations});
+ assert.deepEqual(conservative,legacy);assert.equal(conservative[0].available,false);
+});
+
 test('strict wire DTOs reject nested corruption and duplicate identities but preserve raw source timestamps', async () => {
   const event = {id:id(500),requestId:id(1),actorId:'',actorLabel:'시스템',eventType:'approved',fieldName:'',beforeValue:'',afterValue:'',note:'',createdAt:stamp};
   for (const patch of [{makeupSlots:[null]}, {makeupSlots:[{startAt:5,endAt:'raw'}]}, {requesterId:'not-an-id'}, {events:[event,event]}, {makeupAcademicEventIds:[id(800),id(800)]}]) {

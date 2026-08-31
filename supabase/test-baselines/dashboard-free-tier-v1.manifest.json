@@ -179,6 +179,11 @@
       "fileName": "20260831101449_makeup_system_note_whitespace_parity.sql",
       "status": "final",
       "sha256": "940613f164be35b25661750e8be5c0f15409409890308a5e046ef0fed31369ff"
+    },
+    {
+      "fileName": "20260831103631_makeup_source_precision_parity.sql",
+      "status": "final",
+      "sha256": "47413b333331c9abfe4e771f52e9078b4edc8d88e8cf2b0125dc437a246328ba"
     }
   ]
 }
