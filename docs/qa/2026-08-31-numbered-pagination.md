@@ -126,6 +126,12 @@ Rendered desktop/mobile/keyboard/viewport evidence, remote migration/deployment 
 
 Adapters own filters/sort, authorized identity/role clearing, independent metadata/detail reads and domain drafts/aggregate/export semantics. They must not use cursor/full-table fallback or page-local aggregates to satisfy numbered UI. Task, academic/makeup/approval/curriculum, textbook/settings and auxiliary integrations remain pending under their separate plans.
 
+## Residual control spot-check before task adapters
+
+A read-only source search after the foundation gate found the remaining task/registration, curriculum/class-planning, textbook/supplier/publisher, settings and teacher Google Chat record-table surfaces in the existing domain plans. These remain pending implementation; this is not a final app-wide coverage claim, and card-based task/makeup/approval counterparts must also be checked at their slice gates.
+
+The residual text search also found intentionally separate controls: `class-schedule-workspace.tsx`'s lesson-textbook candidate list, `class-textbook-picker.tsx`, and `management-page.tsx`'s relationship picker keep their independent bounded selection readers. `nav-user.tsx`'s `더 보기` expands avatar presets, not database records. `notification-control-panel.tsx`'s table is the finite rule matrix, and `academic-annual-board-workspace.tsx` is the excluded school-by-month layout. Do not mechanically remove these controls to make a text search empty; the final audit must classify actual record-list scope.
+
 ## Resolved user/environment input
 
 - Docker was launched directly on the user's request; the local daemon responds. Candidate promotion still requires a passing isolated SQL run.

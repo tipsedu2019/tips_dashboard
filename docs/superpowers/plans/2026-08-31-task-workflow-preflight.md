@@ -81,3 +81,11 @@ Controller follow-up: the current WorkspaceKey union at293 contains only todo, r
 ## Evidence limits / next implementation brief
 
 No tests, EXPLAIN, remote ledger checks, browser checks, or DB writes were run. Required next gates are behavior tests for the exported seam (including no `.from` hydration/fallback calls), final-definition pgTAP filter/sort/auth/actor cases, and independent review that projection happens only after selected parent IDs. This report neither authorizes remote migrations/deployment nor changes no-send/notification boundaries.
+
+## Task 2 actor/cache follow-up
+
+Read-only client preflight on 2026-08-31 confirmed that the existing workspace session, cursor snapshots, stats, options and details use viewer ID without resolved role. The stats cache additionally retains in-flight promises across its values-only `clear()`. A same-ID role change can therefore reuse previous-authority data even after a React remount.
+
+The Task 2 plan now requires a resolved `viewerId + role` client scope and an invalidation epoch, including supplemental cache values, pending promises and UI completion ownership. Optional client cache scope arguments may preserve legacy defaults; the new numbered service remains cache-free and sends no role/viewer authority override to SQL. Registration cache-clear cascading and generation guards must remain intact. Login/profile resolution issues no production list RPC until ready.
+
+This is a targeted cache boundary correction, not an auth-provider redesign. Global registration schema/runtime capability probes, calendar range reads, mutation idempotency, notification sends and cursor compatibility remain unchanged. Required rendered tests cover same-ID role change, logout/user switch, delayed stats/catalog/detail/observation completions, and score drafts that survive pagination only within the same actor scope. Source inspection is not execution evidence.
