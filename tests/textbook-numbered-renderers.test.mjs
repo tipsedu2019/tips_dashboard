@@ -6,14 +6,17 @@ import {
   serializeTextbookNavigation,
 } from "../src/features/textbooks/textbook-navigation.ts"
 import {
-  button, closingDetailEnvelope, closingMovementRow, closingRow, id, masterRow, masterSummary, purchaseRow, purchaseSummary, saleHistoryRow, saleHistorySummary, saleRow, saleSummary, setup,
+  button, closingDetailEnvelope, closingMovementRow, closingRow, id, inventoryHistoryRow, masterRow, masterSummary, purchaseRow, purchaseSummary, saleHistoryRow, saleHistorySummary, saleRow, saleSummary, setup,
 } from "./helpers/textbook-numbered-harness.mjs"
+
+const preparedRowIds = (surface) => [...document.querySelectorAll(`[data-prepared-surface="${surface}"]`)]
+  .map((node) => node.getAttribute("data-prepared-row-id"))
 
 const masterFilters = {
   search: "grammar",
   subject: "english",
   schoolLevel: "middle",
-  gradeLevel: "2",
+  gradeLevel: "m2",
   subSubject: "문법",
   quality: "attention",
   inventory: "shortage",
@@ -74,12 +77,37 @@ test("textbook navigation rejects invalid primary, secondary and detail state wi
     pageSize: 10,
     filters: { search: "", year: "all", month: "all", classId: "all" },
   })
-  assert.deepEqual(parsed.movements, { page: 1, pageSize: 20, search: "  확인  " })
+  assert.deepEqual(parsed.movements, { page: 1, pageSize: 20, search: "확인" })
   assert.equal(parsed.detail, null)
 
   const serialized = serializeTextbookNavigation(params, parsed)
   assert.equal(serialized.has("selectedIds"), false)
   assert.equal(serialized.has("memo"), false)
+})
+
+test("textbook navigation validates fixed filter values and normalizes only bounded dynamic sub-subject text", () => {
+  const invalid = new URLSearchParams({
+    textbookTab: "master",
+    textbookPage: "01",
+    textbookPageSize: "015",
+    textbookFilters: JSON.stringify({ search: "", subject: "history", schoolLevel: "college", gradeLevel: "99", subSubject: "문법", quality: "all", inventory: "all" }),
+    textbookHistoryFilters: JSON.stringify({ search: "", year: "20x6", month: "2026-13", classId: "not-a-uuid" }),
+  })
+  const parsedInvalid = parseTextbookNavigation(invalid)
+  assert.equal(parsedInvalid.primary.page, 1)
+  assert.equal(parsedInvalid.primary.pageSize, 10)
+  assert.deepEqual(parsedInvalid.primary.filters, { search: "", subject: "all", schoolLevel: "all", gradeLevel: "all", subSubject: "all", quality: "all", inventory: "all" })
+  assert.deepEqual(parsedInvalid.history.filters, { search: "", year: "all", month: "all", classId: "all" })
+
+  const valid = new URLSearchParams({
+    textbookTab: "master",
+    textbookPage: "2",
+    textbookPageSize: "15",
+    textbookFilters: JSON.stringify({ search: "", subject: "english", schoolLevel: "middle", gradeLevel: "m2", subSubject: "  문법  ", quality: "attention", inventory: "shortage" }),
+  })
+  assert.deepEqual(parseTextbookNavigation(valid).primary.filters, {
+    search: "", subject: "english", schoolLevel: "middle", gradeLevel: "m2", subSubject: "문법", quality: "attention", inventory: "shortage",
+  })
 })
 
 test("mounted textbook workspace starts the strict direct master page independently of its action-only legacy loader", async (t) => {
@@ -100,15 +128,32 @@ test("mounted textbook workspace starts the strict direct master page independen
   assert.ok(h.requests.some((request) => request.table), "intermediate action-only loader remains until Task5d")
 })
 
+test("direct and external URL restoration use the requested size on the first actual page RPC", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=master&textbookPage=3&textbookPageSize=15" })
+  const direct = h.requests.filter((request) => request.name === "list_textbook_master_page_v1")
+  assert.equal(direct.length, 1)
+  assert.deepEqual({ page: direct[0].args.p_page, size: direct[0].args.p_page_size }, { page: 3, size: 15 })
+
+  await h.navigate("?textbookTab=master&textbookPage=2&textbookPageSize=20")
+  const restored = h.requests.filter((request) => request.name === "list_textbook_master_page_v1")
+  assert.equal(restored.length, 2)
+  assert.deepEqual({ page: restored[1].args.p_page, size: restored[1].args.p_page_size }, { page: 2, size: 20 })
+})
+
 test("mounted master renderer keeps strict server order on desktop and mobile and renders the 11-20 pager block", async (t) => {
-  const h = await setup(t, { search: "?textbookTab=master&textbookPage=11&textbookPageSize=10" })
-  const page = h.requests.find((request) => request.name === "list_textbook_master_page_v1")
+  const h = await setup(t, { search: "?textbookTab=master&textbookPage=10&textbookPageSize=10" })
+  const page = h.requests.find((request) => request.name === "list_textbook_master_page_v1" && request.args.p_page === 10)
   const summary = h.requests.find((request) => request.name === "get_textbook_master_summary_v1")
   assert.ok(page)
   assert.ok(summary)
-  const rows = Array.from({ length: 10 }, (_, index) => masterRow(110 + index))
-  await h.resolve(page, { rows, page: 11, pageSize: 10, totalCount: 200 })
+  await h.resolve(page, { rows: Array.from({ length: 10 }, (_, index) => masterRow(100 + index)), page: 10, pageSize: 10, totalCount: 200 })
   await h.resolve(summary, masterSummary(200))
+  await h.settleLegacy()
+  await h.act(() => document.querySelector('[aria-label="교재 목록 페이지 탐색"] [aria-label="다음 페이지"]').click())
+  const nextPage = h.requests.find((request) => request.name === "list_textbook_master_page_v1" && request.args.p_page === 11)
+  assert.ok(nextPage)
+  const rows = Array.from({ length: 10 }, (_, index) => masterRow(110 + index))
+  await h.resolve(nextPage, { rows, page: 11, pageSize: 10, totalCount: 200 })
   await h.settleLegacy()
 
   const expectedIds = rows.map((row) => row.id)
@@ -118,6 +163,8 @@ test("mounted master renderer keeps strict server order on desktop and mobile an
     .map((node) => node.getAttribute("data-testid").replace("textbook-master-desktop-row-", ""))
   assert.deepEqual(mobileIds, expectedIds)
   assert.deepEqual(desktopIds, expectedIds)
+  assert.deepEqual(preparedRowIds("master-mobile"), expectedIds)
+  assert.deepEqual(preparedRowIds("master-desktop"), expectedIds)
   assert.deepEqual(
     [...document.querySelectorAll('[data-slot="pagination-number-group"] button')].map((node) => Number(node.textContent)),
     [11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
@@ -176,6 +223,20 @@ test("a strict page API failure stays visible and retryable without fabricated t
   assert.equal(h.requests.filter((request) => request.name === "list_textbook_master_page_v1").length, 2)
 })
 
+test("a summary failure stays explicit and retryable without rendering current-page totals as authoritative", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=master&textbookPage=1&textbookPageSize=10" })
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_master_page_v1"), {
+    rows: [masterRow(91, { totalQuantity: 7 })], page: 1, pageSize: 10, totalCount: 1,
+  })
+  await h.reject(h.requests.find((request) => request.name === "get_textbook_master_summary_v1"), { code: "PGRST202", message: "missing summary" })
+  await h.settleLegacy()
+
+  assert.equal(document.body.textContent.includes("집계 정보를 불러오지 못했습니다"), true)
+  assert.equal(document.body.textContent.includes("집계 확인 필요"), true)
+  await h.act(() => document.querySelector('[aria-label="교재 집계 다시 시도"]').click())
+  assert.equal(h.requests.filter((request) => request.name === "get_textbook_master_summary_v1").length, 2)
+})
+
 test("mounted inventory waits for the real default location and renders prepared count and independent history pages", async (t) => {
   const h = await setup(t, { search: "?textbookTab=inventory&textbookPage=1&textbookPageSize=10" })
   assert.equal(h.requests.some((request) => request.name === "list_textbook_inventory_page_v1"), false)
@@ -197,17 +258,26 @@ test("mounted inventory waits for the real default location and renders prepared
     locationQuantities: { [locationId]: 3 }, studentLocationQuantities: { [locationId]: 3 }, teacherLocationQuantities: {}, totalQuantity: 3, studentQuantity: 3,
     locationSummary: [{ id: locationId, code: "main", name: "본관", sortOrder: 1, quantity: 3 }], stockValue: 30000,
   })
-  await h.resolve(page, { rows: [{ source, id: source.id, title: source.title, publisher: "출판사", locationId, locationName: "본관", currentQuantity: 3, latestCountAt: "", daysSinceLatestCount: null, isCountedThisCycle: false, isRecommended: true, status: "recommended", reason: "실사 필요", dueLabel: "지금" }], page: 1, pageSize: 10, totalCount: 1 })
-  await h.resolve(history, { rows: [], page: 1, pageSize: 10, totalCount: 0 })
-  await h.resolve(summary, masterSummary(1, {
+  const secondSource = masterRow(303, source)
+  secondSource.id = id(303)
+  secondSource.title = "교재 303"
+  secondSource.name = "교재 303"
+  const inventoryRows = [secondSource, source].map((row) => ({ source: row, id: row.id, title: row.title, publisher: "출판사", locationId, locationName: "본관", currentQuantity: 3, latestCountAt: "", daysSinceLatestCount: null, isCountedThisCycle: false, isRecommended: true, status: "recommended", reason: "실사 필요", dueLabel: "지금" }))
+  const historyRows = [inventoryHistoryRow(1), inventoryHistoryRow(0)]
+  await h.resolve(page, { rows: inventoryRows, page: 1, pageSize: 10, totalCount: 2 })
+  await h.resolve(history, { rows: historyRows, page: 1, pageSize: 10, totalCount: 2 })
+  await h.resolve(summary, masterSummary(2, {
     totalQuantity: 3, studentQuantity: 3, stockValue: 30000, locationQuantities: { [locationId]: 3 },
-    subjectTotals: [{ subject: "english", totalCount: 1, totalQuantity: 3, salePriceTotal: 0, stockValue: 30000 }],
+    subjectTotals: [{ subject: "english", totalCount: 2, totalQuantity: 3, salePriceTotal: 0, stockValue: 30000 }],
     locations: [{ id: locationId, code: "main", name: "본관", sortOrder: 1 }],
-    auditCounts: { all: 1, recommended: 1, pending: 0, done: 0 },
+    auditCounts: { all: 2, recommended: 2, pending: 0, done: 0 },
   }))
   await h.settleLegacy()
   assert.equal(document.body.textContent.includes("교재 301"), true)
-  assert.equal(document.body.textContent.includes("재고 이력이 없습니다"), true)
+  assert.deepEqual(preparedRowIds("inventory-mobile"), inventoryRows.map((row) => row.id))
+  assert.deepEqual(preparedRowIds("inventory-desktop"), inventoryRows.map((row) => row.id))
+  assert.deepEqual(preparedRowIds("inventory-history-mobile"), historyRows.map((row) => row.id))
+  assert.deepEqual(preparedRowIds("inventory-history-desktop"), historyRows.map((row) => row.id))
   assert.equal(document.querySelector('[aria-label="재고 실사 페이지 탐색"]') !== null, true)
   assert.equal(document.querySelector('[aria-label="재고 이력 페이지 탐색"]') !== null, true)
 })
@@ -224,6 +294,21 @@ test("inventory keeps prepared reads paused when the default-location reference 
   await h.act(() => document.querySelector('[aria-label="재고 위치 다시 시도"]').click())
   assert.equal(h.requests.filter((request) => request.name === "list_textbook_location_reference_page_v1").length, 2)
   assert.equal(h.requests.some((request) => request.name === "list_textbook_inventory_page_v1"), false)
+})
+
+test("inventory keeps prepared reads paused when the location catalog has no real default", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=inventory&textbookPage=1&textbookPageSize=10" })
+  const location = h.requests.find((request) => request.name === "list_textbook_location_reference_page_v1")
+  await h.resolve(location, {
+    rows: [], page: 1, pageSize: 20, totalCount: 0,
+    defaultLocation: null,
+  })
+  await h.settleLegacy()
+
+  assert.equal(h.requests.some((request) => request.name === "list_textbook_inventory_page_v1"), false)
+  assert.equal(h.requests.some((request) => request.name === "list_textbook_inventory_history_page_v1"), false)
+  assert.equal(document.body.textContent.includes("기본 재고 위치"), true)
+  assert.ok(document.querySelector('[aria-label="재고 위치 다시 시도"]'))
 })
 
 test("inventory page changes clear current-page selection while retaining page-one drafts", async (t) => {
@@ -290,10 +375,13 @@ for (const [tab, pageRpc, summaryRpc, mode, pagerLabel] of [
     assert.ok(page)
     assert.ok(summary)
     assert.equal(page.args.p_filters.mode, mode)
-    await h.resolve(page, { rows: [purchaseRow(mode)], page: 1, pageSize: 10, totalCount: 1 })
-    await h.resolve(summary, purchaseSummary(mode))
+    const rows = [purchaseRow(mode, 1), purchaseRow(mode, 0)]
+    await h.resolve(page, { rows, page: 1, pageSize: 10, totalCount: 2 })
+    await h.resolve(summary, purchaseSummary(mode, 2))
     await h.settleLegacy()
     assert.equal(document.body.textContent.includes("교재 101"), true)
+    assert.deepEqual(preparedRowIds(`${tab}-mobile`), rows.map((row) => row.id))
+    assert.deepEqual(preparedRowIds(`${tab}-desktop`), rows.map((row) => row.id))
     assert.ok(document.querySelector(`[aria-label="${pagerLabel}"]`))
     if (tab === "purchase") {
       await h.act(() => button("공급처별 주문 전달 열기").click())
@@ -305,6 +393,50 @@ for (const [tab, pageRpc, summaryRpc, mode, pagerLabel] of [
   })
 }
 
+test("purchase aggregate badges use only authoritative summary quantities", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=purchase&textbookPage=1&textbookPageSize=10" })
+  const page = h.requests.find((request) => request.name === "list_textbook_purchase_page_v1")
+  const summaryRequest = h.requests.find((request) => request.name === "get_textbook_purchase_summary_v1")
+  await h.resolve(page, { rows: [purchaseRow("order")], page: 1, pageSize: 10, totalCount: 1 })
+  const quantities = { requested: 99, ordered: 20, received: 10, student: { requested: 50, ordered: 10, received: 5 }, teacher: { requested: 49, ordered: 10, received: 5 } }
+  const summary = purchaseSummary("order")
+  await h.resolve(summaryRequest, { ...summary, quantities, groups: summary.groups.map((group) => ({ ...group, quantities })) })
+  await h.settleLegacy()
+
+  assert.equal(document.body.textContent.includes("요청 99"), true)
+  assert.equal(document.body.textContent.includes("주문 20"), true)
+  assert.equal(document.body.textContent.includes("입고 10"), true)
+})
+
+test("filtered-zero sales history and process retain their recovery controls", async (t) => {
+  const params = new URLSearchParams({
+    textbookTab: "sales",
+    textbookPage: "1",
+    textbookPageSize: "10",
+    textbookFilters: JSON.stringify({ search: "", status: "returned" }),
+    textbookHistoryPage: "1",
+    textbookHistoryPageSize: "10",
+    textbookHistoryFilters: JSON.stringify({ search: "", year: "2025", month: "all", classId: "all" }),
+  })
+  const h = await setup(t, { search: `?${params}` })
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_sale_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_sale_summary_v1"), {
+    totalCount: 0, totalQuantity: 0, studentCount: 0, classCount: 0, totalAmount: 0, groups: [],
+    statusCounts: { all: 4, waiting: 2, issued: 2, returned: 0, cancelled: 0 },
+  })
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_sale_history_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_sale_history_summary_v1"), {
+    totalCount: 0, totalWaitingQuantity: 0, totalIssuedQuantity: 0, sourceTotalCount: 4,
+    yearOptions: ["2026"], monthOptions: ["2026-08"], classOptions: [[id(800), "중2반"]], effectiveMonth: "all",
+  })
+  await h.settleLegacy()
+
+  assert.ok(document.querySelector('[aria-label="교재 출고 이력"]'))
+  assert.ok(document.querySelector('[aria-label="출고 이력 연도"]'))
+  assert.ok(document.querySelector('[aria-label="교재 출고 목록"]'))
+  assert.ok([...document.querySelectorAll('button[aria-pressed="true"]')].find((node) => node.textContent.includes("반품")))
+})
+
 test("mounted sales renderers consume independent prepared history and process pages", async (t) => {
   const h = await setup(t, { search: "?textbookTab=sales&textbookPage=1&textbookPageSize=10" })
   const page = h.requests.find((request) => request.name === "list_textbook_sale_page_v1")
@@ -312,13 +444,18 @@ test("mounted sales renderers consume independent prepared history and process p
   const history = h.requests.find((request) => request.name === "list_textbook_sale_history_page_v1")
   const historySummary = h.requests.find((request) => request.name === "get_textbook_sale_history_summary_v1")
   for (const request of [page, summary, history, historySummary]) assert.ok(request)
-  await h.resolve(page, { rows: [saleRow()], page: 1, pageSize: 10, totalCount: 1 })
-  await h.resolve(summary, saleSummary())
-  await h.resolve(history, { rows: [saleHistoryRow()], page: 1, pageSize: 10, totalCount: 1 })
-  await h.resolve(historySummary, saleHistorySummary())
+  const rows = [saleRow(1), saleRow(0)]
+  const historyRows = [saleHistoryRow(1), saleHistoryRow(0)]
+  await h.resolve(page, { rows, page: 1, pageSize: 10, totalCount: 2 })
+  await h.resolve(summary, saleSummary(2))
+  await h.resolve(history, { rows: historyRows, page: 1, pageSize: 10, totalCount: 2 })
+  await h.resolve(historySummary, saleHistorySummary(2))
   await h.settleLegacy()
   assert.equal(document.body.textContent.includes("교재 101"), true)
   assert.equal(document.body.textContent.includes("김선생"), true)
+  assert.deepEqual(preparedRowIds("sales-process-mobile"), rows.map((row) => row.id))
+  assert.deepEqual(preparedRowIds("sales-process-desktop"), rows.map((row) => row.id))
+  assert.deepEqual(preparedRowIds("sales-history"), historyRows.map((row) => row.id))
   assert.ok(document.querySelector('[aria-label="출고 이력 페이지 탐색"]'))
   assert.ok(document.querySelector('[aria-label="교재 출고 페이지 탐색"]'))
   await h.act(() => button("메이크에듀 청구 준비 열기").click())
@@ -331,9 +468,12 @@ test("mounted closing uses its prepared page, direct detail, independent movemen
   const h = await setup(t, { search: "?textbookTab=closing&textbookPage=1&textbookPageSize=10" })
   const page = h.requests.find((request) => request.name === "list_textbook_closing_page_v1")
   assert.ok(page)
-  await h.resolve(page, { rows: [closingRow()], page: 1, pageSize: 10, totalCount: 1 })
+  const closingRows = [closingRow({ id: id(702), closing_month: "2026-09" }), closingRow()]
+  await h.resolve(page, { rows: closingRows, page: 1, pageSize: 10, totalCount: 2 })
   await h.settleLegacy()
   assert.equal(document.body.textContent.includes("2026-08"), true)
+  assert.deepEqual(preparedRowIds("closing-mobile"), closingRows.map((row) => row.id))
+  assert.deepEqual(preparedRowIds("closing-desktop"), closingRows.map((row) => row.id))
   assert.ok(document.querySelector('[aria-label="월마감 페이지 탐색"]'))
 
   await h.act(() => button("2026-08 전체 정산 상세 열기").click())
@@ -343,8 +483,10 @@ test("mounted closing uses its prepared page, direct detail, independent movemen
   assert.ok(movements)
   assert.deepEqual(movements.args.p_filters, { closingMonth: "2026-08", subject: "all", search: "" })
   await h.resolve(detail, closingDetailEnvelope())
-  await h.resolve(movements, { rows: [closingMovementRow()], page: 1, pageSize: 10, totalCount: 1 })
+  const movementRows = [closingMovementRow(1), closingMovementRow(0)]
+  await h.resolve(movements, { rows: movementRows, page: 1, pageSize: 10, totalCount: 2 })
   assert.equal(document.body.textContent.includes("교재 101"), true)
+  assert.deepEqual(preparedRowIds("closing-movement"), movementRows.map((row) => row.id))
   assert.ok(document.querySelector('[aria-label="월마감 상세 이동 페이지 탐색"]'))
 
   await h.act(() => button("복사").click())
@@ -352,3 +494,60 @@ test("mounted closing uses its prepared page, direct detail, independent movemen
   assert.ok(exported)
   assert.deepEqual(exported.args.p_filters, { closingMonth: "2026-08", subject: "all", search: "" })
 })
+
+test("a closing detail URL loads an off-page detail before starting its scoped movement page", async (t) => {
+  const detailId = id(799)
+  const h = await setup(t, { search: `?textbookTab=closing&textbookPage=4&textbookPageSize=10&textbookDetailKind=closing&textbookDetail=${detailId}` })
+  const detail = h.requests.find((request) => request.name === "get_textbook_closing_detail_v1")
+  assert.ok(detail)
+  assert.equal(detail.args.p_id, detailId)
+  assert.equal(h.requests.some((request) => request.name === "list_textbook_closing_movement_page_v1"), false)
+
+  await h.resolve(detail, closingDetailEnvelope({ id: detailId }))
+  const movements = h.requests.find((request) => request.name === "list_textbook_closing_movement_page_v1")
+  assert.ok(movements)
+  assert.deepEqual(movements.args.p_filters, { closingMonth: "2026-08", subject: "all", search: "" })
+})
+
+test("a slow closing export cannot reach the clipboard or stale UI after a same-user role change", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=closing&textbookPage=1&textbookPageSize=10" })
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_closing_page_v1"), { rows: [closingRow()], page: 1, pageSize: 10, totalCount: 1 })
+  await h.settleLegacy()
+  await h.act(() => button("2026-08 전체 정산 상세 열기").click())
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_closing_detail_v1"), closingDetailEnvelope())
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_closing_movement_page_v1"), { rows: [closingMovementRow()], page: 1, pageSize: 10, totalCount: 1 })
+  await h.act(() => button("복사").click())
+  const exported = h.requests.find((request) => request.name === "get_textbook_closing_movement_export_v1")
+  assert.ok(exported)
+
+  await h.auth({ role: "staff", isAdmin: false, isStaff: true, canManageAll: false })
+  await h.resolve(exported, { rows: [closingMovementRow()], totalCount: 1 })
+
+  assert.equal(exported.signal?.aborted, true)
+  assert.deepEqual(h.clipboardWrites, [])
+  assert.equal(document.body.textContent.includes("복사됨"), false)
+})
+
+for (const [boundary, leaveActor] of [
+  ["logout", (h) => h.auth({ user: null, role: null, isAdmin: false, isStaff: false, canManageAll: false })],
+  ["unmount", (h) => h.unmount()],
+]) {
+  test(`a slow closing export cannot invoke the clipboard after ${boundary}`, async (t) => {
+    const h = await setup(t, { search: "?textbookTab=closing&textbookPage=1&textbookPageSize=10" })
+    await h.resolve(h.requests.find((request) => request.name === "list_textbook_closing_page_v1"), { rows: [closingRow()], page: 1, pageSize: 10, totalCount: 1 })
+    await h.settleLegacy()
+    await h.act(() => button("2026-08 전체 정산 상세 열기").click())
+    await h.resolve(h.requests.find((request) => request.name === "get_textbook_closing_detail_v1"), closingDetailEnvelope())
+    await h.resolve(h.requests.find((request) => request.name === "list_textbook_closing_movement_page_v1"), { rows: [closingMovementRow()], page: 1, pageSize: 10, totalCount: 1 })
+    await h.act(() => button("복사").click())
+    const exported = h.requests.find((request) => request.name === "get_textbook_closing_movement_export_v1")
+    assert.ok(exported)
+
+    await leaveActor(h)
+    await h.resolve(exported, { rows: [closingMovementRow()], totalCount: 1 })
+
+    assert.equal(exported.signal?.aborted, true)
+    assert.deepEqual(h.clipboardWrites, [])
+    if (boundary === "logout") assert.equal(document.body.textContent.includes("복사됨"), false)
+  })
+}

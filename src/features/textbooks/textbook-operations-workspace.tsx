@@ -1,6 +1,6 @@
 "use client";
 import { compactUniqueLabels, buildTextbookCleanupPreviewRows, getTeacherName, getDefaultTeacherForClass, inferClassLocationId, doesSearchOptionMatchFilters, buildSearchSelectCommandValue, buildSearchSelectFilterGroups, buildVisibleSearchSelectFilterGroups, buildTextbookReferenceOptions, buildTextbookClassReferenceOptions } from "./textbook-reference-model";
-import { saleStatusLabels, TEXTBOOK_HANDOFF_BUSINESS_NAME, getKnownPublisherLabel, normalizeMonthInput, getSaleLineQuantity, getSaleLineAmount, getSaleLineMonth, getSaleLineStatus, isBillableSaleLineStatus, formatCurrency, getTextbookHandoffDocumentMeta, formatPurchaseUnitCost, getStudentGradeLabel, getSupplierName, getConfiguredSupplierIdForTextbook, getConfiguredTextbookPurchaseUnitCost, getStudentNameById, getSaleLineRecipientName, purchaseStatusLabel } from "./textbook-handoff-model";
+import { saleStatusLabels, TEXTBOOK_HANDOFF_BUSINESS_NAME, getKnownPublisherLabel, normalizeMonthInput, getSaleLineQuantity, getSaleLineMonth, getSaleLineStatus, isBillableSaleLineStatus, formatCurrency, getTextbookHandoffDocumentMeta, formatPurchaseUnitCost, getStudentGradeLabel, getSupplierName, getConfiguredSupplierIdForTextbook, getConfiguredTextbookPurchaseUnitCost, getStudentNameById, getSaleLineRecipientName, purchaseStatusLabel } from "./textbook-handoff-model";
 import type { TextbookHandoffLine, TextbookHandoffGroup } from "./textbook-handoff-model";
 
 import { Fragment, FormEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
@@ -106,8 +106,6 @@ import {
   getSubjectLabel,
   getPublisherLabel,
   getTextbookQualityIssues,
-  hasTextbookQualityIssue,
-  buildDuplicateTextbookTitleKeys,
   normalizeStatusValue,
   numberValue,
   formatQuantity,
@@ -159,6 +157,7 @@ import type {
   PurchaseFilters,
   SaleFilters,
   TextbookOperationsSummary,
+  ClosingFilters,
 } from "./textbook-read-types";
 import {
   SCIENCE_TEXTBOOK_TAXONOMY,
@@ -1325,12 +1324,16 @@ function TextbookOperationsWorkspaceContent() {
   const [purchaseOrderFilter, setPurchaseOrderFilter] = useState<PurchaseOrderFilter>(() => (text(initialPrimaryFilters.orderFilter) || "all") as PurchaseOrderFilter);
   const [inventoryAuditFilter, setInventoryAuditFilter] = useState<InventoryAuditFilter>("recommended");
   const [inventoryCountLocationId, setInventoryCountLocationId] = useState("");
+  const inventoryCountLocationIdRef = useRef(inventoryCountLocationId);
+  inventoryCountLocationIdRef.current = inventoryCountLocationId;
   const [inventoryLocationReference, setInventoryLocationReference] = useState<{ ready: boolean; locations: Row[]; defaultLocationId: string; error: string }>({ ready: false, locations: [], defaultLocationId: "", error: "" });
   const [inventoryLocationRetryKey, setInventoryLocationRetryKey] = useState(0);
   const [inventoryCountDrafts, setInventoryCountDrafts] = useState<Record<string, string>>({});
   const [inventoryCountMemoDrafts, setInventoryCountMemoDrafts] = useState<Record<string, string>>({});
   const [saleForm, setSaleForm] = useState(emptySaleForm);
   const [salesProcessFilter, setSalesProcessFilter] = useState<SalesProcessFilter>(() => (text(initialPrimaryFilters.status) || "all") as SalesProcessFilter);
+  const [closingFilters, setClosingFilters] = useState<ClosingFilters>(() => initialNavigationRef.current.tab === "closing"
+    ? initialNavigationRef.current.primary.filters as ClosingFilters : { month: "all", subject: "all", status: "all" });
   const [saleHistoryFilters, setSaleHistoryFilters] = useState(initialNavigationRef.current.history.filters);
   const [observedQuery, setObservedQuery] = useState(searchParamString);
   const [navigationKey, setNavigationKey] = useState(searchParamString);
@@ -1355,6 +1358,7 @@ function TextbookOperationsWorkspaceContent() {
     setPurchaseRequestFilter((text(filters.requestFilter) || "all") as PurchaseRequestFilter);
     setPurchaseOrderFilter((text(filters.orderFilter) || "all") as PurchaseOrderFilter);
     setSalesProcessFilter((text(filters.status) || "all") as SalesProcessFilter);
+    setClosingFilters(restored.tab === "closing" ? restored.primary.filters as ClosingFilters : { month: "all", subject: "all", status: "all" });
     setSaleHistoryFilters(restored.history.filters);
     setSelectedTextbookIds([]);
     setSelectedPurchaseLineIds([]);
@@ -1374,9 +1378,9 @@ function TextbookOperationsWorkspaceContent() {
   const [saleDialogOpen, setSaleDialogOpen] = useState(false);
   const [closingDialogOpen, setClosingDialogOpen] = useState(false);
   const [selectedClosingIds, setSelectedClosingIds] = useState<string[]>([]);
-  const [selectedClosingDetailId, setSelectedClosingDetailId] = useState("");
+  const [selectedClosingDetailId, setSelectedClosingDetailId] = useState(() => initialNavigationRef.current.detail?.kind === "closing" ? initialNavigationRef.current.detail.id : "");
   const [selectedClosingScope, setSelectedClosingScope] = useState<{ closingMonth: string; subject: string } | null>(null);
-  const [closingMovementSearch, setClosingMovementSearch] = useState("");
+  const [closingMovementSearch, setClosingMovementSearch] = useState(() => initialNavigationRef.current.movements.search);
   const [closingDetailResource, setClosingDetailResource] = useState<{ value: TextbookClosingDetail | null; loading: boolean; error: string }>({ value: null, loading: false, error: "" });
   const [excludedStudentIds, setExcludedStudentIds] = useState<string[]>([]);
   const [saleStudentQuery, setSaleStudentQuery] = useState("");
@@ -1416,6 +1420,7 @@ function TextbookOperationsWorkspaceContent() {
     window.history.replaceState(null, "", `${window.location.pathname}?${queryString}`);
   }, [activeTab]);
   const primaryRestoredPage = initialNavigationRef.current.tab === activeTab ? initialNavigationRef.current.primary.page : 1;
+  const primaryRestoredPageSize = initialNavigationRef.current.tab === activeTab ? initialNavigationRef.current.primary.pageSize : undefined;
   useEffect(() => {
     if (activeTab !== "inventory" || !user?.id || !["admin", "staff"].includes(text(role))) {
       setInventoryLocationReference((current) => current.ready || current.locations.length || current.error ? { ready: false, locations: [], defaultLocationId: "", error: "" } : current);
@@ -1427,6 +1432,12 @@ function TextbookOperationsWorkspaceContent() {
       if (abort.signal.aborted || actorKey !== `${user.id}:${role}`) return;
       const locations = result.rows.map((option) => ({ id: option.value, name: option.label, code: option.description || "" }));
       const defaultLocationId = result.defaultLocation?.id || "";
+      const explicitLocationId = inventoryCountLocationIdRef.current;
+      const hasExplicitLocation = Boolean(explicitLocationId && locations.some((location) => location.id === explicitLocationId));
+      if (!defaultLocationId && !hasExplicitLocation) {
+        setInventoryLocationReference({ ready: false, locations, defaultLocationId: "", error: "기본 재고 위치가 설정되지 않았습니다. 위치 설정 후 다시 시도하세요." });
+        return;
+      }
       setInventoryLocationReference({ ready: true, locations, defaultLocationId, error: "" });
       setInventoryCountLocationId((current) => current || defaultLocationId);
     }, (error) => {
@@ -1435,20 +1446,26 @@ function TextbookOperationsWorkspaceContent() {
     return () => abort.abort();
   }, [activeTab, inventoryLocationRetryKey, role, user?.id]);
   const preparedInventoryLocationId = inventoryCountLocationId || inventoryLocationReference.defaultLocationId;
+  const selectInventoryCountLocation = useCallback((locationId: string) => {
+    setInventoryCountLocationId(locationId);
+    if (inventoryLocationReference.locations.some((location) => location.id === locationId)) {
+      setInventoryLocationReference((current) => ({ ...current, ready: true, error: "" }));
+    }
+  }, [inventoryLocationReference.locations]);
   const numbered = useTextbookNumberedData({
     viewerId: text(user?.id),
     viewerRole: text(role),
     authReady: Boolean(user?.id && role),
     operationsEnabled: activeTab !== "requests",
-    master: { enabled: activeTab === "master", filters: masterFilters, restoredPage: primaryRestoredPage, restorationKey: navigationKey },
-    requests: { enabled: activeTab === "requests", filters: purchaseFilters, restoredPage: primaryRestoredPage, restorationKey: navigationKey },
-    purchase: { enabled: activeTab === "purchase", filters: purchaseFilters, restoredPage: primaryRestoredPage, restorationKey: navigationKey },
-    sales: { enabled: activeTab === "sales", filters: salesFilters, restoredPage: primaryRestoredPage, restorationKey: navigationKey },
-    saleHistory: { enabled: activeTab === "sales", filters: saleHistoryFilters, restoredPage: initialNavigationRef.current.history.page, restorationKey: navigationKey },
-    inventory: { enabled: activeTab === "inventory" && inventoryLocationReference.ready, filters: { ...masterFilters, locationId: preparedInventoryLocationId, audit: inventoryAuditFilter }, restoredPage: primaryRestoredPage, restorationKey: navigationKey },
-    inventoryHistory: { enabled: activeTab === "inventory" && inventoryLocationReference.ready, filters: { textbookId: null, locationId: preparedInventoryLocationId || null } },
-    closing: { enabled: activeTab === "closing", filters: { month: "all", subject: "all", status: "all" }, restoredPage: primaryRestoredPage, restorationKey: navigationKey },
-    closingMovements: { enabled: Boolean(selectedClosingDetailId && selectedClosingScope), filters: { closingMonth: selectedClosingScope?.closingMonth || "", subject: selectedClosingScope?.subject || "all", search: closingMovementSearch }, restoredPage: initialNavigationRef.current.movements.page, restorationKey: navigationKey },
+    master: { enabled: activeTab === "master", filters: masterFilters, restoredPage: primaryRestoredPage, restoredPageSize: primaryRestoredPageSize, restorationKey: navigationKey },
+    requests: { enabled: activeTab === "requests", filters: purchaseFilters, restoredPage: primaryRestoredPage, restoredPageSize: primaryRestoredPageSize, restorationKey: navigationKey },
+    purchase: { enabled: activeTab === "purchase", filters: purchaseFilters, restoredPage: primaryRestoredPage, restoredPageSize: primaryRestoredPageSize, restorationKey: navigationKey },
+    sales: { enabled: activeTab === "sales", filters: salesFilters, restoredPage: primaryRestoredPage, restoredPageSize: primaryRestoredPageSize, restorationKey: navigationKey },
+    saleHistory: { enabled: activeTab === "sales", filters: saleHistoryFilters, restoredPage: initialNavigationRef.current.history.page, restoredPageSize: initialNavigationRef.current.history.pageSize, restorationKey: navigationKey },
+    inventory: { enabled: activeTab === "inventory" && inventoryLocationReference.ready, filters: { ...masterFilters, locationId: preparedInventoryLocationId, audit: inventoryAuditFilter }, restoredPage: primaryRestoredPage, restoredPageSize: primaryRestoredPageSize, restorationKey: navigationKey },
+    inventoryHistory: { enabled: activeTab === "inventory" && inventoryLocationReference.ready, filters: { textbookId: null, locationId: preparedInventoryLocationId || null }, restoredPage: initialNavigationRef.current.history.page, restoredPageSize: initialNavigationRef.current.history.pageSize, restorationKey: navigationKey },
+    closing: { enabled: activeTab === "closing", filters: closingFilters, restoredPage: primaryRestoredPage, restoredPageSize: primaryRestoredPageSize, restorationKey: navigationKey },
+    closingMovements: { enabled: Boolean(selectedClosingDetailId && selectedClosingScope), filters: { closingMonth: selectedClosingScope?.closingMonth || "", subject: selectedClosingScope?.subject || "all", search: closingMovementSearch }, restoredPage: initialNavigationRef.current.movements.page, restoredPageSize: initialNavigationRef.current.movements.pageSize, restorationKey: navigationKey },
   });
   const requestRendererData = useMemo(() => buildPreparedPurchaseRendererData(numbered.requests.rows), [numbered.requests.rows]);
   const purchaseRendererData = useMemo(() => buildPreparedPurchaseRendererData(numbered.purchase.rows), [numbered.purchase.rows]);
@@ -1464,6 +1481,8 @@ function TextbookOperationsWorkspaceContent() {
   }, [numbered.closing.rows, selectedClosingDetailId]);
   const activePrimaryState = activeTab === "master" ? numbered.master : activeTab === "requests" ? numbered.requests : activeTab === "purchase" ? numbered.purchase
     : activeTab === "sales" ? numbered.sales : activeTab === "inventory" ? numbered.inventory : numbered.closing;
+  const activeSummaryResource = activeTab === "master" ? numbered.master.summary : activeTab === "requests" ? numbered.requests.summary : activeTab === "purchase" ? numbered.purchase.summary
+    : activeTab === "sales" ? numbered.sales.summary : activeTab === "inventory" ? numbered.inventory.summary : null;
   useEffect(() => {
     if (activePrimaryState.loading || activePrimaryState.error || !activePrimaryState.acceptedFilters || activePrimaryState.totalCount === null) return;
     commitPrimaryPage({ page: activePrimaryState.page, pageSize: activePrimaryState.pageSize, filters: activePrimaryState.acceptedFilters as TextbookNavigationState["primary"]["filters"] });
@@ -1499,7 +1518,10 @@ function TextbookOperationsWorkspaceContent() {
     const actorKey = `${user.id}:${role}`;
     setClosingDetailResource({ value: null, loading: true, error: "" });
     void getTextbookClosingDetail(selectedClosingDetailId, { signal: abort.signal }).then((value) => {
-      if (!abort.signal.aborted && actorKey === `${user.id}:${role}`) setClosingDetailResource({ value, loading: false, error: "" });
+      if (!abort.signal.aborted && actorKey === `${user.id}:${role}`) {
+        setClosingDetailResource({ value, loading: false, error: "" });
+        if (value.row) setSelectedClosingScope({ closingMonth: text(value.row.closing_month), subject: text(value.row.subject) || "all" });
+      }
     }, (error) => {
       if (!abort.signal.aborted && actorKey === `${user.id}:${role}`) setClosingDetailResource({ value: null, loading: false, error: getTextbookActionErrorMessage(error) });
     });
@@ -1599,7 +1621,6 @@ function TextbookOperationsWorkspaceContent() {
       .sort((left, right) => left.localeCompare(right, "ko")),
     [activeInventory, subjectGroupFilter, textbookSubSubjectSettings],
   );
-  const duplicateTextbookTitleKeys = useMemo(() => buildDuplicateTextbookTitleKeys(activeInventory), [activeInventory]);
   const activeTextbookQualityFilter = activeTab === "master" ? textbookQualityFilter : "all";
   const acceptedMasterSummary = numbered.master.summary.value;
   const textbookQualityFilterCounts = acceptedMasterSummary?.qualityCounts
@@ -4921,6 +4942,7 @@ function TextbookOperationsWorkspaceContent() {
 
       <ClosingDetailDialog
         open={Boolean(selectedClosingDetailId)}
+        actorKey={`${user?.id || ""}:${role || ""}`}
         detail={closingDetailResource.value}
         loading={closingDetailResource.loading}
         error={closingDetailResource.error}
@@ -4957,6 +4979,15 @@ function TextbookOperationsWorkspaceContent() {
           <AlertDescription className="flex items-center justify-between gap-3">
             <span>{getTextbookActionErrorMessage(activePrimaryState.error)}</span>
             <Button type="button" size="sm" variant="outline" onClick={() => { void activePrimaryState.retry(); }}>다시 시도</Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {activeSummaryResource?.error ? (
+        <Alert role="alert">
+          <AlertDescription className="flex items-center justify-between gap-3">
+            <span>집계 정보를 불러오지 못했습니다.</span>
+            <Button type="button" size="sm" variant="outline" aria-label="교재 집계 다시 시도" onClick={() => { void activeSummaryResource.retry(); }}>다시 시도</Button>
           </AlertDescription>
         </Alert>
       ) : null}
@@ -5266,7 +5297,6 @@ function TextbookOperationsWorkspaceContent() {
             summary={acceptedMasterSummary}
             onSelectTextbook={selectMasterTextbook}
             amountMode="salePrice"
-            duplicateTitleKeys={duplicateTextbookTitleKeys}
             collapsedGroups={collapsedTextbookGroups}
             onToggleGroup={toggleTextbookGroup}
             selectedIds={selectedTextbookIds}
@@ -5428,7 +5458,7 @@ function TextbookOperationsWorkspaceContent() {
             schemaDisabled={schemaDisabled}
             collapsedGroups={collapsedTextbookGroups}
             onToggleGroup={toggleTextbookGroup}
-            onLocationChange={setInventoryCountLocationId}
+            onLocationChange={selectInventoryCountLocation}
             onFilterChange={setInventoryAuditFilter}
             onDraftChange={setInventoryCountDraft}
             onMemoChange={setInventoryCountMemoDraft}
@@ -6797,7 +6827,7 @@ function InventoryCountWorkspace({
   );
   const allDisplayRowsSelected = displayRowIds.length > 0 && displayRowIds.every((id) => selectedIdSet.has(id));
   const someDisplayRowsSelected = displayRowIds.some((id) => selectedIdSet.has(id)) && !allDisplayRowsSelected;
-  const visibleRowSummary = `${formatQuantity(summary?.totalCount ?? visibleRows.length)}종`;
+  const visibleRowSummary = summary ? `${formatQuantity(summary.totalCount)}종` : "집계 확인 필요";
   const groupedRows = useMemo(() => {
     const groups: Array<{ label: string; rows: InventoryCountRow[] }> = [];
     for (const row of displayRows) {
@@ -6964,7 +6994,7 @@ function InventoryCountWorkspace({
                     const difference = text(draftValue) ? numberValue(draftValue) - row.currentQuantity : 0;
                     const isSaving = saving === `count-inline-${draftKey}`;
                     return (
-                      <TableRow key={draftKey} className={cn(hasDraft && "bg-blue-50/40")}>
+                      <TableRow key={draftKey} data-prepared-surface="inventory-desktop" data-prepared-row-id={row.id} className={cn(hasDraft && "bg-blue-50/40")}>
                         <TableCell>
                           <Checkbox
                             checked={selectedIdSet.has(row.id)}
@@ -7108,6 +7138,8 @@ function InventoryCountMobileCard({
 
   return (
     <form
+      data-prepared-surface="inventory-mobile"
+      data-prepared-row-id={row.id}
       className={cn("min-w-0 max-w-full overflow-hidden rounded-lg border bg-background p-3 shadow-sm active:scale-[0.99]", text(value) && "border-blue-200 bg-blue-50/30")}
       onSubmit={(event) => {
         event.preventDefault();
@@ -7205,7 +7237,6 @@ function TextbookTable({
   summary,
   onSelectTextbook,
   amountMode = "stockValue",
-  duplicateTitleKeys = new Set<string>(),
   collapsedGroups = [],
   onToggleGroup,
   selectedIds = [],
@@ -7222,7 +7253,6 @@ function TextbookTable({
   summary?: TextbookMasterSummary | null;
   onSelectTextbook?: (row: Row) => void;
   amountMode?: TextbookAmountMode;
-  duplicateTitleKeys?: Set<string>;
   collapsedGroups?: string[];
   onToggleGroup?: (label: string) => void;
   selectedIds?: string[];
@@ -7258,29 +7288,11 @@ function TextbookTable({
     }
     return groups;
   }, [rows]);
-  const tableTotals = useMemo(() => {
-    const locationQuantities = Object.fromEntries(locationColumns.map((location) => [location.id, 0])) as Record<string, number>;
-    let totalQuantity = 0;
-    let amountValue = 0;
-
-    for (const row of rows) {
-      totalQuantity += numberValue(row.totalQuantity);
-      amountValue += numberValue(amountMode === "salePrice" ? getTextbookSalePrice(row) : row.stockValue);
-      const rowLocationQuantities = (row.locationQuantities || {}) as Record<string, unknown>;
-      for (const location of locationColumns) {
-        locationQuantities[location.id] += numberValue(rowLocationQuantities[location.id]);
-      }
-    }
-
-    if (summary) {
-      return {
-        totalQuantity: summary.totalQuantity,
-        amountValue: amountMode === "salePrice" ? summary.salePriceTotal : summary.stockValue,
-        locationQuantities: summary.locationQuantities,
-      };
-    }
-    return { totalQuantity, amountValue, locationQuantities };
-  }, [amountMode, locationColumns, rows, summary]);
+  const tableTotals = summary ? {
+    totalQuantity: summary.totalQuantity,
+    amountValue: amountMode === "salePrice" ? summary.salePriceTotal : summary.stockValue,
+    locationQuantities: summary.locationQuantities,
+  } : null;
 
   return (
     <div className="space-y-2" aria-label="교재 목록">
@@ -7320,7 +7332,7 @@ function TextbookTable({
                     const gradeLabel = getTextbookGradeSummary(row) || "-";
                     const subSubjectLabel = getTextbookSubSubject(row) || "-";
                     const categorySummary = compactUniqueLabels([getSubjectLabel(row.subject), schoolLevelLabel, gradeLabel, subSubjectLabel]).join(" · ") || "-";
-                    const qualityIssues = (row.qualityIssues || getTextbookQualityIssues(row, duplicateTitleKeys)) as ReturnType<typeof getTextbookQualityIssues>;
+                    const qualityIssues = row.qualityIssues as ReturnType<typeof getTextbookQualityIssues>;
                     const qualityIssueLabels = getTextbookQualityIssueLabels(qualityIssues);
                     const locationSummary = locationColumns
                       .map((location) => ({
@@ -7334,6 +7346,8 @@ function TextbookTable({
                       <article
                         key={rowId}
                         data-testid={`textbook-master-mobile-card-${rowId}`}
+                        data-prepared-surface="master-mobile"
+                        data-prepared-row-id={rowId}
                         className={cn(
                           "min-w-0 rounded-md border bg-background p-3 shadow-xs",
                           qualityIssues.inactive && "bg-muted/20 text-muted-foreground",
@@ -7473,7 +7487,7 @@ function TextbookTable({
                 const isCollapsed = collapsedGroups.includes(group.label);
                 const GroupIcon = isCollapsed ? ChevronRight : ChevronDown;
                 const groupTotalQuantity = group.rows.reduce((sum, row) => sum + numberValue(row.totalQuantity), 0);
-                const groupQualityIssueCount = group.rows.filter((row) => row.qualityScore ? Number(row.qualityScore) > 0 : hasTextbookQualityIssue(row, duplicateTitleKeys)).length;
+                const groupQualityIssueCount = group.rows.filter((row) => Number(row.qualityScore) > 0).length;
                 const groupCountLabel = `${formatQuantity(group.rows.length)}종`;
                 const groupDetailText = [
                   `${formatQuantity(group.rows.length)}종`,
@@ -7520,11 +7534,11 @@ function TextbookTable({
                 const gradeLabel = getTextbookGradeSummary(row) || "-";
                 const schoolLevelLabel = getTextbookSchoolLevelSummary(row) || "-";
                 const subSubjectLabel = getTextbookSubSubject(row) || "-";
-                const qualityIssues = (row.qualityIssues || getTextbookQualityIssues(row, duplicateTitleKeys)) as ReturnType<typeof getTextbookQualityIssues>;
+                const qualityIssues = row.qualityIssues as ReturnType<typeof getTextbookQualityIssues>;
                 const qualityIssueLabels = getTextbookQualityIssueLabels(qualityIssues);
                 const qualityIssueSummary = getQualityIssueSummary(qualityIssueLabels);
                 return (
-                  <TableRow data-testid={`textbook-master-desktop-row-${rowId}`} key={rowId} className={cn(qualityIssues.inactive && "bg-muted/20 text-muted-foreground")}>
+                  <TableRow data-testid={`textbook-master-desktop-row-${rowId}`} data-prepared-surface="master-desktop" data-prepared-row-id={rowId} key={rowId} className={cn(qualityIssues.inactive && "bg-muted/20 text-muted-foreground")}>
                     {hasSelection ? (
                       <TableCell className="w-10">
                         <Checkbox
@@ -7597,18 +7611,18 @@ function TextbookTable({
 	          {rows.length > 0 ? (
 	            <TableRow className="bg-muted/30 text-xs font-semibold text-muted-foreground">
 	              {hasSelection ? <TableCell /> : null}
-	              <TableCell>합계</TableCell>
+	              <TableCell>{tableTotals ? "합계" : "집계 확인 필요"}</TableCell>
 	              <TableCell />
 	              <TableCell />
 	              <TableCell />
 	              <TableCell />
 	              {locationColumns.map((location) => (
                 <TableCell key={location.id} className="text-right tabular-nums">
-                  {formatQuantity(tableTotals.locationQuantities[location.id])}
+                  {tableTotals ? formatQuantity(tableTotals.locationQuantities[location.id]) : "—"}
                 </TableCell>
               ))}
-              <TableCell className="text-right tabular-nums">{formatQuantity(tableTotals.totalQuantity)}</TableCell>
-              <TableCell className="text-right tabular-nums">{formatCurrency(tableTotals.amountValue)}</TableCell>
+              <TableCell className="text-right tabular-nums">{tableTotals ? formatQuantity(tableTotals.totalQuantity) : "—"}</TableCell>
+              <TableCell className="text-right tabular-nums">{tableTotals ? formatCurrency(tableTotals.amountValue) : "—"}</TableCell>
               {onSelectTextbook ? <TableCell /> : null}
             </TableRow>
           ) : null}
@@ -7662,7 +7676,7 @@ function InventoryHistoryPanel({
       </div>
       <div className="grid gap-2 p-2 md:hidden">
         {rows.map((row) => (
-          <div key={row.id} className="grid min-w-0 gap-2 rounded-md border bg-background p-3">
+          <div key={row.id} data-prepared-surface="inventory-history-mobile" data-prepared-row-id={row.id} className="grid min-w-0 gap-2 rounded-md border bg-background p-3">
             <div className="flex min-w-0 items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">{row.textbookTitle}</div>
@@ -7712,7 +7726,7 @@ function InventoryHistoryPanel({
           </TableHeader>
           <TableBody>
             {rows.map((row) => (
-              <TableRow key={row.id}>
+              <TableRow key={row.id} data-prepared-surface="inventory-history-desktop" data-prepared-row-id={row.id}>
                 <TableCell className="text-muted-foreground">{formatCompactDateTime(row.at)}</TableCell>
                 <TableCell className="max-w-[320px] truncate font-medium">{row.textbookTitle}</TableCell>
                 <TableCell className="truncate">{row.locationName}</TableCell>
@@ -7804,6 +7818,7 @@ function buildClosingDetailClipboardText({
 
 function ClosingDetailDialog({
   open,
+  actorKey,
   detail,
   loading,
   error,
@@ -7820,6 +7835,7 @@ function ClosingDetailDialog({
   onOpenChange,
 }: {
   open: boolean;
+  actorKey: string;
   detail: TextbookClosingDetail | null;
   loading: boolean;
   error: string;
@@ -7837,6 +7853,15 @@ function ClosingDetailDialog({
 }) {
   const [copyStatus, setCopyStatus] = useState("");
   const [isCopyingDetail, setIsCopyingDetail] = useState(false);
+  const copyAbortRef = useRef<AbortController | null>(null);
+  const copyLifetimeRef = useRef({ mounted: true, actorKey });
+  useEffect(() => {
+    copyLifetimeRef.current = { mounted: true, actorKey };
+    return () => {
+      copyLifetimeRef.current.mounted = false;
+      copyAbortRef.current?.abort();
+    };
+  }, [actorKey]);
   const row = detail?.row;
   const closingMonth = text(row?.closing_month);
   const subject = text(row?.subject) || "all";
@@ -7858,17 +7883,22 @@ function ClosingDetailDialog({
   const filteredDetailRows = detailRows;
   const copyClosingDetail = useCallback(async () => {
     if (!closingMonth) return;
+    copyAbortRef.current?.abort();
+    const abort = new AbortController();
+    copyAbortRef.current = abort;
+    const isCurrent = () => !abort.signal.aborted && copyAbortRef.current === abort && copyLifetimeRef.current.mounted && copyLifetimeRef.current.actorKey === actorKey;
     setIsCopyingDetail(true);
     try {
-      const exported = await getTextbookClosingMovementExport({ closingMonth, subject, search: movementSearch });
+      const exported = await getTextbookClosingMovementExport({ closingMonth, subject, search: movementSearch }, { signal: abort.signal });
+      if (!isCurrent()) return;
       await writeClipboardText(buildClosingDetailClipboardText({ title, storedClosingMetrics, detailClosing, filteredDetailRows: exported.rows, closingMetricMismatchCount }));
-      setCopyStatus("복사됨");
+      if (isCurrent()) setCopyStatus("복사됨");
     } catch {
-      setCopyStatus("복사 실패");
+      if (isCurrent()) setCopyStatus("복사 실패");
     } finally {
-      setIsCopyingDetail(false);
+      if (isCurrent()) setIsCopyingDetail(false);
     }
-  }, [closingMetricMismatchCount, closingMonth, detailClosing, movementSearch, storedClosingMetrics, subject, title]);
+  }, [actorKey, closingMetricMismatchCount, closingMonth, detailClosing, movementSearch, storedClosingMetrics, subject, title]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -7950,7 +7980,7 @@ function ClosingDetailDialog({
               </TableHeader>
               <TableBody>
                 {filteredDetailRows.map((item) => (
-                  <TableRow key={item.id}>
+                  <TableRow key={item.id} data-prepared-surface="closing-movement" data-prepared-row-id={item.id}>
                     <TableCell className="text-muted-foreground">{formatCompactDateTime(item.at)}</TableCell>
                     <TableCell>{item.typeLabel}</TableCell>
                     <TableCell className="max-w-[320px] truncate font-medium">{item.textbookTitle}</TableCell>
@@ -8364,19 +8394,11 @@ function PurchaseProcessTable({
     [getCurrentVisiblePurchaseRows, visibleGroups],
   );
 
-  const visibleRowCount = summary?.totalCount ?? visiblePurchaseRows.length;
-  const visibleRequestedTotal = visiblePurchaseRows.reduce(
-    (sum, line) => sum + numberValue(line.requested_quantity || line.requestedQuantity),
-    0,
-  );
-  const visibleOrderedTotal = visiblePurchaseRows.reduce(
-    (sum, line) => sum + numberValue(line.ordered_quantity || line.orderedQuantity),
-    0,
-  );
-  const visibleReceivedTotal = visiblePurchaseRows.reduce(
-    (sum, line) => sum + numberValue(line.received_quantity || line.receivedQuantity),
-    0,
-  );
+  const visibleRowCount = summary?.totalCount ?? null;
+  const visibleRequestedTotal = summary?.quantities.requested ?? null;
+  const visibleOrderedTotal = summary?.quantities.ordered ?? null;
+  const visibleReceivedTotal = summary?.quantities.received ?? null;
+  const hasVisiblePurchaseRows = visiblePurchaseRows.length > 0;
   const renderedGroups = visibleGroups.filter((group) => getCurrentVisiblePurchaseRows(group.id).length > 0);
   const emptyGroupId = visibleGroups[0]?.id || (mode === "request" ? "requested" : "ordered");
   const purchaseProcessFilterCounts = useMemo(() => {
@@ -8457,10 +8479,10 @@ function PurchaseProcessTable({
   );
   const hasProcessSearchQuery = Boolean(text(searchQuery));
   const totalProcessRowCount = groups.reduce((sum, group) => sum + (grouped[group.id] || []).length, 0);
-  const showProcessControls = totalProcessRowCount > 0 || hasProcessSearchQuery;
+  const showProcessControls = totalProcessRowCount > 0 || hasProcessSearchQuery || boardScope !== "active" || requestFilter !== "all" || orderFilter !== "all";
   const hasHiddenProcessRows =
-    mode === "order" && totalProcessRowCount > 0 && visibleRowCount === 0 && !hasProcessSearchQuery;
-  const showProcessSummary = visibleRowCount > 0 || hasProcessSearchQuery;
+    mode === "order" && totalProcessRowCount > 0 && !hasVisiblePurchaseRows && !hasProcessSearchQuery;
+  const showProcessSummary = Boolean(summary);
   const visibleBoardScopeOptions = (Object.keys(purchaseBoardScopeLabels) as PurchaseBoardScope[]).filter(
     (scope) => boardScope === scope || purchaseProcessFilterCounts.boardScope[scope] > 0,
   );
@@ -8480,10 +8502,10 @@ function PurchaseProcessTable({
     requestFilter !== "all" ? activeRequestFilterLabel : "",
   ].filter(Boolean).join(" · ") || "기본";
   const processSummaryParts = [
-    `표시 ${formatQuantity(visibleRowCount)}건`,
-    visibleRequestedTotal > 0 ? `요청 ${formatQuantity(visibleRequestedTotal)}` : "",
-    mode === "order" && visibleOrderedTotal > 0 ? `주문 ${formatQuantity(visibleOrderedTotal)}` : "",
-    mode === "order" && visibleReceivedTotal > 0 ? `입고 ${formatQuantity(visibleReceivedTotal)}` : "",
+    summary ? `표시 ${formatQuantity(visibleRowCount)}건` : "",
+    visibleRequestedTotal !== null && visibleRequestedTotal > 0 ? `요청 ${formatQuantity(visibleRequestedTotal)}` : "",
+    mode === "order" && visibleOrderedTotal !== null && visibleOrderedTotal > 0 ? `주문 ${formatQuantity(visibleOrderedTotal)}` : "",
+    mode === "order" && visibleReceivedTotal !== null && visibleReceivedTotal > 0 ? `입고 ${formatQuantity(visibleReceivedTotal)}` : "",
   ].filter(Boolean);
   const processSummaryText = processSummaryParts.join(" · ");
   const openPurchaseHandoff = useCallback((kind: "order" | "return") => {
@@ -8679,7 +8701,7 @@ function PurchaseProcessTable({
           ) : null}
         </div>
         <div className="flex flex-wrap justify-end gap-2">
-          {visibleRowCount > 0 ? (
+          {hasVisiblePurchaseRows ? (
             <div role="group" aria-label="교재 처리표 컬럼 구성" className="shrink-0">
               {columnSettingsControl}
             </div>
@@ -8733,7 +8755,7 @@ function PurchaseProcessTable({
               ) : null}
             </>
           ) : null}
-          {visibleRowCount > 0 ? (
+          {hasVisiblePurchaseRows ? (
             mode === "request" ? (
               <Button type="button" size="sm" className="shrink-0" aria-label="교재 요청 추가" title="교재 요청 추가" onClick={onAddLine}>
                 <Plus className="mr-2 size-4" />
@@ -8780,7 +8802,7 @@ function PurchaseProcessTable({
       </div>
       ) : null}
 
-      {visibleRowCount === 0 ? (
+      {!hasVisiblePurchaseRows ? (
         <ProcessGroupEmptyState
           label={getPurchaseProcessEmptyLabel(mode, emptyGroupId, requestFilter, orderFilter, searchQuery)}
           hint={showProcessControls && !hasHiddenProcessRows ? getPurchaseProcessEmptyHint(mode, emptyGroupId, requestFilter, orderFilter, searchQuery) : undefined}
@@ -8873,7 +8895,7 @@ function PurchaseProcessTable({
                     const isCancelablePurchaseLine = mode === "request" || (status !== "returned" && status !== "cancelled" && !isReturnablePurchaseLine);
 
                     return (
-                      <article key={`mobile-${displayRow.id}`} className="min-w-0 rounded-md border bg-background p-3 shadow-xs">
+                      <article key={`mobile-${displayRow.id}`} data-prepared-surface={`${mode === "request" ? "requests" : "purchase"}-mobile`} data-prepared-row-id={displayRow.id} className="min-w-0 rounded-md border bg-background p-3 shadow-xs">
                         <div className="flex min-w-0 items-start gap-3">
                           {showBulkPurchaseSelection && isPurchaseColumnVisible("select") ? (
                             <Checkbox
@@ -9132,7 +9154,7 @@ function PurchaseProcessTable({
                         const isReturnablePurchaseLine = mode === "order" && received > 0 && status !== "returned" && status !== "cancelled";
                         const isCancelablePurchaseLine = mode === "request" || (status !== "returned" && status !== "cancelled" && !isReturnablePurchaseLine);
                         return (
-                          <TableRow key={displayRow.id} className={cn((selectedLineId === lineId || displayLineIds.includes(selectedLineId)) && "bg-primary/5")}>
+                          <TableRow key={displayRow.id} data-prepared-surface={`${mode === "request" ? "requests" : "purchase"}-desktop`} data-prepared-row-id={displayRow.id} className={cn((selectedLineId === lineId || displayLineIds.includes(selectedLineId)) && "bg-primary/5")}>
                             {showBulkPurchaseSelection && isPurchaseColumnVisible("select") ? (
                               <TableCell>
                                 <Checkbox
@@ -9401,10 +9423,10 @@ function SalesHistoryLedger({
   const effectiveMonthFilter = monthFilter !== "all" && monthOptions.includes(monthFilter) ? monthFilter : "all";
 
   const filteredRows = rows;
-  const totalIssuedQuantity = summary?.totalIssuedQuantity || 0;
-  const totalWaitingQuantity = summary?.totalWaitingQuantity || 0;
+  const totalIssuedQuantity = summary?.totalIssuedQuantity ?? null;
+  const totalWaitingQuantity = summary?.totalWaitingQuantity ?? null;
 
-  if (rows.length === 0) {
+  if (summary?.sourceTotalCount === 0) {
     return null;
   }
 
@@ -9413,9 +9435,13 @@ function SalesHistoryLedger({
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b p-3">
         <div className="flex min-w-0 items-center gap-2">
           <span className="font-medium">출고 이력</span>
-          <Badge variant="secondary" className="rounded-md tabular-nums">{formatQuantity(filteredRows.length)}건</Badge>
-          <Badge variant="outline" className="rounded-md tabular-nums">대기 {formatQuantity(totalWaitingQuantity)}</Badge>
-          <Badge variant="outline" className="rounded-md tabular-nums">완료 {formatQuantity(totalIssuedQuantity)}</Badge>
+          {summary ? (
+            <>
+              <Badge variant="secondary" className="rounded-md tabular-nums">{formatQuantity(summary.totalCount)}건</Badge>
+              <Badge variant="outline" className="rounded-md tabular-nums">대기 {formatQuantity(totalWaitingQuantity)}</Badge>
+              <Badge variant="outline" className="rounded-md tabular-nums">완료 {formatQuantity(totalIssuedQuantity)}</Badge>
+            </>
+          ) : <Badge variant="outline" className="rounded-md">집계 확인 필요</Badge>}
         </div>
         <div className="grid w-full min-w-0 gap-2 sm:w-auto sm:grid-cols-3">
           <Select value={yearFilter} onValueChange={(value) => {
@@ -9470,7 +9496,7 @@ function SalesHistoryLedger({
           </TableHeader>
           <TableBody>
             {filteredRows.map((row) => (
-              <TableRow key={row.id}>
+              <TableRow key={row.id} data-prepared-surface="sales-history" data-prepared-row-id={row.id}>
                 <TableCell className="tabular-nums">{row.month}</TableCell>
                 <TableCell className="max-w-[180px] truncate" title={row.className}>{row.className}</TableCell>
                 <TableCell>
@@ -9633,26 +9659,12 @@ function SalesProcessTable({
     [visibleSaleRowsWithGroup],
   );
 
-  const visibleRowCount = summary?.totalCount ?? visibleSaleRows.length;
-  const visibleTotalQuantity = summary?.totalQuantity ?? visibleSaleRows.reduce(
-    (sum, line) => sum + getSaleLineQuantity(line),
-    0,
-  );
-  const visibleStudentCount = summary?.studentCount ?? new Set(
-    visibleSaleRows.map((line) => text(line.student_id || line.studentId)).filter(Boolean),
-  ).size;
-  const visibleClassCount = summary?.classCount ?? new Set(
-    visibleSaleRows.map((line) => {
-      const sale = salesById.get(text(line.sale_id || line.saleId));
-      return text(line.class_id || line.classId || sale?.class_id || sale?.classId);
-    }).filter(Boolean),
-  ).size;
-  const visibleTotalAmount = summary?.totalAmount ?? visibleSaleRows.reduce((sum, line) => {
-    const sale = salesById.get(text(line.sale_id || line.saleId));
-    if (!isBillableSaleLineStatus(getSaleLineStatus(line, sale))) return sum;
-    const textbook = getTextbookById(textbooks, text(line.textbook_id || line.textbookId));
-    return sum + getSaleLineAmount(line, textbook);
-  }, 0);
+  const visibleRowCount = summary?.totalCount ?? null;
+  const visibleTotalQuantity = summary?.totalQuantity ?? null;
+  const visibleStudentCount = summary?.studentCount ?? null;
+  const visibleClassCount = summary?.classCount ?? null;
+  const visibleTotalAmount = summary?.totalAmount ?? null;
+  const hasVisibleSaleRows = visibleSaleRows.length > 0;
   const saleProcessActionIds = useMemo(() => {
     const issuable: string[] = [];
     const cancelable: string[] = [];
@@ -9732,8 +9744,7 @@ function SalesProcessTable({
     return counts;
   }, [getVisibleSaleRows, groups]);
   const hasProcessSearchQuery = Boolean(text(searchQuery));
-  const totalSalesRowCount = lines.length;
-  const showSalesControls = totalSalesRowCount > 0 || hasProcessSearchQuery;
+  const showSalesControls = hasVisibleSaleRows || hasProcessSearchQuery || statusFilter !== "all" || Boolean(summary && summary.statusCounts.all > 0);
   const showSalesGroupToggleControls = renderedGroups.length > 1;
   const makeEduBillingTotalAmount = makeEduBillingGroups.reduce((sum, group) => sum + group.totalAmount, 0);
   const openBillingHandoff = useCallback(() => {
@@ -9791,21 +9802,15 @@ function SalesProcessTable({
           ))}
         </div>
         <div className="flex flex-wrap justify-end gap-2">
-          <Badge variant="secondary" className="h-8 rounded-md px-2 tabular-nums">
-            표시 {formatQuantity(visibleRowCount)}건
-          </Badge>
-          <Badge variant="outline" className="h-8 rounded-md px-2 tabular-nums">
-            수량 {formatQuantity(visibleTotalQuantity)}
-          </Badge>
-          <Badge variant="outline" className="h-8 rounded-md px-2 tabular-nums">
-            수업 {formatQuantity(visibleClassCount)}
-          </Badge>
-          <Badge variant="outline" className="h-8 rounded-md px-2 tabular-nums">
-            학생 {formatQuantity(visibleStudentCount)}
-          </Badge>
-          <Badge variant="outline" className="h-8 rounded-md px-2 tabular-nums">
-            청구 {formatCurrency(visibleTotalAmount)}
-          </Badge>
+          {summary ? (
+            <>
+              <Badge variant="secondary" className="h-8 rounded-md px-2 tabular-nums">표시 {formatQuantity(visibleRowCount)}건</Badge>
+              <Badge variant="outline" className="h-8 rounded-md px-2 tabular-nums">수량 {formatQuantity(visibleTotalQuantity)}</Badge>
+              <Badge variant="outline" className="h-8 rounded-md px-2 tabular-nums">수업 {formatQuantity(visibleClassCount)}</Badge>
+              <Badge variant="outline" className="h-8 rounded-md px-2 tabular-nums">학생 {formatQuantity(visibleStudentCount)}</Badge>
+              <Badge variant="outline" className="h-8 rounded-md px-2 tabular-nums">청구 {formatCurrency(visibleTotalAmount)}</Badge>
+            </>
+          ) : <Badge variant="outline" className="h-8 rounded-md px-2">집계 확인 필요</Badge>}
           {selectedActionableCount > 0 ? (
             <>
               <Badge variant="secondary" className="h-8 rounded-md px-2 tabular-nums">
@@ -9865,7 +9870,7 @@ function SalesProcessTable({
               ) : null}
             </>
           ) : null}
-          {visibleRowCount > 0 && showSalesGroupToggleControls ? (
+          {hasVisibleSaleRows && showSalesGroupToggleControls ? (
             <>
               <Button
                 type="button"
@@ -9891,7 +9896,7 @@ function SalesProcessTable({
               </Button>
             </>
           ) : null}
-          {visibleRowCount > 0 ? (
+          {hasVisibleSaleRows ? (
             <>
               {acceptedFilters ? (
                 <Button
@@ -9917,7 +9922,7 @@ function SalesProcessTable({
       </div>
       ) : null}
 
-      {visibleRowCount === 0 ? (
+      {!hasVisibleSaleRows ? (
         <ProcessGroupEmptyState
           label={getSalesProcessEmptyLabel(emptyGroupId, statusFilter, searchQuery)}
           hint={showSalesControls ? getSalesProcessEmptyHint(emptyGroupId, statusFilter, searchQuery) : undefined}
@@ -9981,7 +9986,7 @@ function SalesProcessTable({
                     const canSelectThisLine = canDeleteHistory || !isTerminalSaleStatus;
 
                     return (
-                      <article key={`mobile-${lineId}`} className="min-w-0 rounded-md border bg-background p-3 shadow-xs">
+                      <article key={`mobile-${lineId}`} data-prepared-surface="sales-process-mobile" data-prepared-row-id={lineId} className="min-w-0 rounded-md border bg-background p-3 shadow-xs">
                         <div className="flex min-w-0 items-start gap-3">
                           <Checkbox
                             checked={selectedLineIdSet.has(lineId)}
@@ -10130,7 +10135,7 @@ function SalesProcessTable({
                         const canSelectThisLine = canDeleteHistory || !isTerminalSaleStatus;
 
                         return (
-                          <TableRow key={lineId}>
+                          <TableRow key={lineId} data-prepared-surface="sales-process-desktop" data-prepared-row-id={lineId}>
                             <TableCell>
                               <Checkbox
                                 checked={selectedLineIdSet.has(lineId)}
@@ -10319,7 +10324,7 @@ function MonthlyClosingTable({
           const closingA11yLabel = `${text(row.closing_month)} ${subjectLabel}`;
 
           return (
-            <article key={`mobile-${rowId || closingA11yLabel}`} className="min-w-0 rounded-md border bg-background p-3 shadow-xs">
+            <article key={`mobile-${rowId || closingA11yLabel}`} data-prepared-surface="closing-mobile" data-prepared-row-id={rowId} className="min-w-0 rounded-md border bg-background p-3 shadow-xs">
               <div className="flex min-w-0 items-start gap-3">
                 <Checkbox
                   checked={selectedIdSet.has(rowId)}
@@ -10408,6 +10413,8 @@ function MonthlyClosingTable({
           {recentRows.map((row) => (
             <TableRow
               key={getRecordId(row)}
+              data-prepared-surface="closing-desktop"
+              data-prepared-row-id={getRecordId(row)}
               className="cursor-pointer"
               tabIndex={0}
               onClick={() => onInspectRow?.(row)}

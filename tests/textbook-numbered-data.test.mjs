@@ -66,6 +66,19 @@ test('actual hook restores page 11 directly with strict service rows and no full
   assert.deepEqual(h.requests.filter(item => item.table), []);
 });
 
+test('URL-restored size owns the first request and Back-size restoration reuses the matching summary', async t => {
+  let input = onlyMaster({ restoredPage: 3, restoredPageSize: 15, restorationKey: 'direct-15' });
+  const h = await setupHook(t, input);
+  assert.deepEqual(pages(h).map(request => [request.args.p_page, request.args.p_page_size]), [[3, 15]]);
+  await h.resolve(pages(h)[0], pageData(pages(h)[0], 40, [masterRow()]));
+  await h.resolve(summaries(h)[0], masterSummary());
+
+  input = onlyMaster({ restoredPage: 2, restoredPageSize: 20, restorationKey: 'back-20' });
+  await h.rerender(input);
+  assert.deepEqual(pages(h).map(request => [request.args.p_page, request.args.p_page_size]), [[3, 15], [2, 20]]);
+  assert.equal(summaries(h).length, 1);
+});
+
 for (const [key, rpc, sort, filters, summary] of cases) test(`${key} owns exact RPC/filter/sort/mode and all three persisted sizes`, async t => {
   const input = inputs(); input[key] = { enabled: true, filters };
   const h = await setupHook(t, input);
