@@ -18,6 +18,7 @@
 - Page size10/15/20, minimum10; same page result feeds desktop and mobile. Shared DataTablePagination stays outside desktop row scrollports.
 - Authorized full-filter counts and stable unique ordering; no loaded-subset count, full-list or intermediate-cursor fallback. Only selected-page relations receive full-history enrichment.
 - Use createNumberedPageController, retain successful page/rows/count on pending/error, reject stale results, reset page atomically with filters/sort/size, retain/clamp after refresh/mutation. No cross-user retained data.
+- Resolved actor ID and role form the client authorization scope. Wait for auth/profile readiness; clear retained rows, metadata, details, selection and drafts on logout/user/role change and reject old async completions. Any supplemental cache invalidation must cover in-flight writes as well as stored values. Do not send the client role as a SQL authority override.
 - Preserve URL/back/detail restoration, unsaved drafts, current-page selection and existing export/aggregate scope.
 - Preserve auth/RLS/ACL, final active SQL definitions and domain mutations. No remote migrations, deploy, push or sends. New migrations use CLI-generated filenames and candidate manifest entries until actual SQL proof.
 - Exclude timetable, calendar/agenda, annual board and single-class lesson timeline; leave independent search pickers bounded and unchanged.
@@ -93,6 +94,7 @@ Test malformed/missing RPC responses, over-page rows, invalid row IDs/page/size/
 - [ ] Generate migration. Use invoker security, RLS and authenticated grants from final approval chain (base `20260523190000_approval_requests.sql` plus later definitions), order `updated_at DESC,id DESC`. Derive tab counts from authorized rows independent of chosen view; enrich only paged request IDs. Direct detail uses the same visibility boundary.
 - [ ] Separate profiles/templates loading from list pages. Replace in-memory complete-list/tab count assumptions with service/controller. Deep links resolve directly, choose owning tab from returned record and open it without scanning pages. Preserve sessionStorage idempotency, composer/edit draft guards, approval/comment/send mutation semantics unchanged.
 - [ ] Render an outside-page approval detail in a separate detail region/dialog, not by prepending it to numbered rows. Preserve mine across statuses and the existing review/open `isClosedApproval` predicates. The exact new metadata field is `tabCounts` (not the older audit's viewCounts); align service/RPC/tests on this contract.
+- [ ] Exercise unresolved auth, logout/user switch and same-ID role change through the real approval consumer with delayed page/detail/catalog responses. Prior-authority rows, tab counts and editor/detail state must not reappear; preserve drafts only within their current actor scope.
 - [ ] Add shared pager/preferences `approvals:requests`, preserve previous displayed state on error, reset/clamp correctly, and use an explicit error/retry path rather than replacing prior rows with an empty success. Run service/controller/SQL tests and existing approval tests, lint/TS, then commit as `feat: paginate approval request lists`.
 
 ## Task 4: Makeup request full-filter numbered pages
@@ -113,6 +115,7 @@ These wire names are authoritative for new implementation; map current controls 
 - [ ] Include final assistant hard-deny policy chain through `20260721132249_assistant_makeup_policy_performance.sql`, not just the earlier `20260721131903` migration; preserve profiles.role checks and actual final ACL/RLS evidence.
 - [ ] Lift table-local filter/sort controls to the page-query scope while preserving exact visible options. Keep profiles/teachers/classes/rooms/academic events/lesson-session form catalogs separate and lazy as currently required. Replace deep-link in-page `find` with direct detail and preserve unsaved request form state.
 - [ ] Use common controller, `makeup:requests` preference and shared pager for desktop table/mobile cards. Keep prior displayed rows/count through pending/error, reset filters atomically, refresh/clamp after mutations and retain all current confirmation/no-send boundaries.
+- [ ] Exercise unresolved auth and same-ID role changes as well as logout/user switches with delayed page/detail/catalog reads. The assistant denial and all role-sensitive facets/actions must reflect the new resolved scope immediately, without cached or late prior-role state.
 - [ ] Run new behavior/SQL tests, affected makeup workflow tests, lint/TS and commit as `feat: paginate makeup request workflows`.
 
 ## Task 5: Slice verification
