@@ -2715,6 +2715,13 @@ export function ClassScheduleWorkspace() {
     loadClassLessonDesignDetail,
     loadLessonTextbookCandidates,
   } = useOperationsWorkspaceData(operationsRequest);
+  const handlePageChange = (page: number) => {
+    if (totalCount === null || displayRequest.mode !== "class_schedule") return;
+    setSearch(displayRequest.search); setTermId(displayRequest.termId || "");
+    setSubject(displayRequest.subject || ""); setGrade(displayRequest.grade || "");
+    setTeacher(displayRequest.teacher || ""); setSelectedSyncGroupId(displayRequest.syncGroupId || "");
+    return goToPage(page);
+  };
   const [editorActorScope, setEditorActorScope] = useState(actorScope);
   if (editorActorScope !== actorScope) {
     setEditorActorScope(actorScope);
@@ -6741,7 +6748,7 @@ export function ClassScheduleWorkspace() {
           </div>
           <div className="border-t px-4 py-3">
             <DataTablePagination page={displayedPage} pageSize={pageSize} totalCount={totalCount} loading={loading}
-              onPageChange={goToPage} pageSizeMode={pageSizeMode} onPageSizeChange={setPageSizePreference} />
+              onPageChange={handlePageChange} pageSizeMode={pageSizeMode} onPageSizeChange={setPageSizePreference} />
           </div>
         </section>
 

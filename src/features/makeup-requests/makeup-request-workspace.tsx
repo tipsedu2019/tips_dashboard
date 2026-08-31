@@ -1664,8 +1664,14 @@ export function MakeupRequestWorkspace() {
 function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const { user, role } = useAuth()
   const searchParams = useSearchParams()
+  const searchParamString = searchParams.toString()
+  const [observedQuery, setObservedQuery] = useState(searchParamString)
+  // One location watermark deduplicates Next/native events and acknowledges
+  // our own accepted-state writes; another location makes old URLs usable again.
+  const handledQuery = useRef(searchParamString)
   const [navigation, setNavigation] = useState(() => makeupNavigationFromUrl(new URLSearchParams(searchParams.toString())))
   const [pageState, setPageState] = useState<MakeupPageState>({ scope: null, requestedPage: 1, page: 1, pageSize: 10, totalCount: null, rows: [], loading: false, error: null })
+  const latestPageState = useRef(pageState)
   const pageSize = useDataTablePageSize("makeup:requests")
   const lifetime = useRef(true)
   const createLifetimeAbort = useRef<AbortController | null>(null)
@@ -1719,6 +1725,22 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const [requestDialogOpen, setRequestDialogOpen] = useState(false)
   const [selectedDetailRequest, setSelectedDetailRequest] = useState<MakeupRequest | null>(null)
   const [detailId, setDetailId] = useState(() => searchParams.get("requestId") || searchParams.get("request") || "")
+  const adoptLocationQuery = useCallback((query: string) => {
+    if (handledQuery.current === query) return
+    handledQuery.current = query
+    const params = new URLSearchParams(query)
+    const restored = makeupNavigationFromUrl(params)
+    customDates.current = makeupCustomDatesFromUrl(params, restored.filters)
+    // Detail-only links must not replay a list read or reset an editor draft.
+    setNavigation((current) => current.page === restored.page && JSON.stringify(current.filters) === JSON.stringify(restored.filters) ? current : restored)
+    setDetailId(params.get("requestId") || params.get("request") || "")
+  }, [])
+  // Next query-only navigation does not emit native popstate. Adopt it before
+  // effects can read or persist the previous location.
+  if (observedQuery !== searchParamString) {
+    setObservedQuery(searchParamString)
+    adoptLocationQuery(searchParamString)
+  }
   const consumedDeepLinkRequestIdRef = useRef("")
   const selectedClassIdRef = useRef("")
   const schedulePlanLoadCacheRef = useRef<ReturnType<typeof createMakeupClassSchedulePlanLoadCache> | null>(null)
@@ -1770,7 +1792,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     createLifetimeAbort.current = createAbort
     const controller = createNumberedPageController<MakeupRequest>({
       loadPage: ({ scope, page, pageSize, signal }) => readMakeupNumberedPage({ filters: JSON.parse(scope).filters, page, pageSize, signal }),
-      onChange: (snapshot) => { if (lifetime.current) setPageState(snapshot) },
+      onChange: (snapshot) => { if (lifetime.current) { latestPageState.current = snapshot; setPageState(snapshot) } },
     })
     controllerRef.current = controller
     return () => { lifetime.current = false; createAbort.abort(); controller.dispose(); schedulePlanLoadCacheRef.current?.reset() }
@@ -1809,23 +1831,21 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     return () => abort.abort()
   }, [contextScope, catalogReady])
   useEffect(() => {
-    if (!pageState.scope || pageState.loading || pageState.error) return
+    if (pageState !== latestPageState.current || !pageState.scope || pageState.loading || pageState.error) return
     const params = new URLSearchParams(window.location.search)
     params.set("view", JSON.parse(pageState.scope).filters.view); params.set("page", String(pageState.page)); params.set("makeupFilters", JSON.stringify(JSON.parse(pageState.scope).filters))
     params.set("makeupCustomDates", JSON.stringify(customDates.current))
-    window.history.replaceState(null, "", `${window.location.pathname}?${params}`)
+    const query = params.toString()
+    handledQuery.current = query
+    window.history.replaceState(null, "", `${window.location.pathname}?${query}`)
   }, [pageState])
   useEffect(() => {
     const onBack = () => {
-      const params = new URLSearchParams(window.location.search)
-      const restored = makeupNavigationFromUrl(params)
-      customDates.current = makeupCustomDatesFromUrl(params, restored.filters)
-      setNavigation(restored)
-      setDetailId(params.get("requestId") || params.get("request") || "")
+      adoptLocationQuery(new URLSearchParams(window.location.search).toString())
     }
     window.addEventListener("popstate", onBack)
     return () => { window.removeEventListener("popstate", onBack) }
-  }, [])
+  }, [adoptLocationQuery])
 
   useEffect(() => {
     const schedulePlanLoadCache = schedulePlanLoadCacheRef.current
@@ -1876,6 +1896,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     nextSearchParams.delete("requestId")
     nextSearchParams.delete("request")
     const queryString = nextSearchParams.toString()
+    handledQuery.current = queryString
     window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }, [])
 

@@ -74,7 +74,7 @@ async function setup(t, domain, initial = {}) {
   // react-dom was loaded before JSDOM; its legacy input-event fallback needs these DOM-only shims.
   window.HTMLElement.prototype.attachEvent = () => {};
   window.HTMLElement.prototype.detachEvent = () => {};
-  window.localStorage.setItem('tips.data-table-page-size.v1', JSON.stringify({ 'academic:curriculum': { mode: 'manual', pageSize: 10 }, 'operations:class-schedule': { mode: 'manual', pageSize: 10 } }));
+  window.localStorage.setItem('tips.data-table-page-size.v1', JSON.stringify({ 'academic:curriculum': { mode: 'manual', pageSize: initial.pageSize || 10 }, 'operations:class-schedule': { mode: 'manual', pageSize: initial.pageSize || 10 } }));
   const root = createRoot(document.getElementById('root'));
   t.after(async () => { await act(async () => root.unmount()); dom.window.close(); });
   let auth = { user: { id: id(800), app_metadata: { role: 'teacher' } }, role: 'admin', loading: false, session: null, ...initial.auth };
@@ -118,6 +118,81 @@ async function setup(t, domain, initial = {}) {
   };
 }
 for (const domain of ['academic', 'operations']) {
+  test(`${domain}: accepted scope owns paging after failed filter while explicit Retry retains the failed target`, async (t) => {
+    const page = await setup(t, domain, { request: { page: 11 } });
+    await act(async () => page.finish(page.numbered()[0]));
+    await page.render({ search: 'FAILED_FILTER' });
+    await act(async () => page.numbered().at(-1).reject(new Error('filter failure')));
+    await page.render();
+    await act(async () => { void page.state.refresh(); });
+    assert.equal(page.numbered().at(-1).args.p_filters.search, 'FAILED_FILTER');
+    await act(async () => page.numbered().at(-1).reject(new Error('filter retry failure')));
+    await act(async () => { void page.state.goToPage(12); });
+    assert.equal(page.numbered().at(-1).args.p_filters.search, '');
+    assert.equal(page.numbered().at(-1).args.p_page, 12);
+    if (domain === 'academic') assert.equal(page.numbered().at(-1).args.p_filters.periodId, id(900));
+    await act(async () => page.numbered().at(-1).reject(new Error('page failure')));
+    await page.render();
+    await act(async () => { void page.state.refresh(); });
+    assert.equal(page.numbered().at(-1).args.p_page, 12);
+    assert.equal(page.numbered().at(-1).args.p_filters.search, '');
+    await act(async () => page.finish(page.numbered().at(-1)));
+    assert.equal(page.state.page, 12);
+    assert.equal(page.state.displayRequest.search, '');
+    assert.equal(page.state.dataMatchesCurrentScope, false, 'unadopted FAILED_FILTER inputs must not be claimed current');
+  });
+  for (const [acceptedSize, failedPreference, failedSize] of [[10, 15, 15], [10, 20, 20], [20, 10, 10], [20, 'auto', 10]]) {
+    test(`${domain}: accepted ${acceptedSize} size owns paging after failed ${failedPreference} preference`, async (t) => {
+      const page = await setup(t, domain, { pageSize: acceptedSize, request: { page: 2 } });
+      await act(async () => page.finish(page.numbered()[0]));
+      await act(async () => page.state.setPageSizePreference(failedPreference));
+      assert.equal(page.numbered().at(-1).args.p_page_size, failedSize);
+      await act(async () => page.numbered().at(-1).reject(new Error('size failure')));
+      await page.render();
+      await act(async () => { void page.state.refresh(); });
+      assert.equal(page.numbered().at(-1).args.p_page_size, failedSize);
+      await act(async () => page.numbered().at(-1).reject(new Error('size retry failure')));
+      await act(async () => { void page.state.goToPage(3); });
+      assert.equal(page.numbered().at(-1).args.p_page_size, acceptedSize);
+      assert.equal(page.numbered().at(-1).args.p_page, 3);
+      await act(async () => page.finish(page.numbered().at(-1)));
+      assert.equal(page.state.pageSize, acceptedSize);
+      assert.equal(page.state.pageSizeMode, failedPreference === 'auto' ? 'auto' : 'manual');
+      assert.equal(page.numbered().length, 4);
+      await act(async () => page.state.setPageSizePreference(failedPreference));
+      assert.equal(page.numbered().length, 5, 'selecting the still-stored preference again is a new request intent');
+      assert.equal(page.numbered().at(-1).args.p_page_size, failedSize);
+      assert.equal(page.numbered().at(-1).args.p_page, 1);
+    });
+  }
+  test(`${domain}: workspace failed filter pager recovery adopts controls URL and return path without page1 replay`, async (t) => {
+    const page = await setup(t, domain, { workspace: true, search: '?page=11&q=accepted&keep=1' });
+    await act(async () => page.finish(page.numbered()[0]));
+    await page.render();
+    window.history.pushState(null, '', '?page=7&q=FAILED_FILTER&keep=1');
+    await page.render();
+    await act(async () => page.numbered().at(-1).reject(new Error('filter failure')));
+    await act(async () => document.querySelector('button[aria-label="12 페이지"]').click());
+    const recovery = page.numbered().at(-1);
+    assert.equal(recovery.args.p_filters.search, 'accepted');
+    assert.equal(recovery.args.p_page, 12);
+    assert.equal(page.numbered().length, 3, 'control adoption must not issue page1');
+    await act(async () => page.finish(recovery));
+    await page.render();
+    assert.equal(document.querySelector('input[placeholder*="검색"]').value, 'accepted');
+    assert.equal(new URLSearchParams(window.location.search).get('q'), 'accepted');
+    assert.equal(new URLSearchParams(window.location.search).get('page'), '12');
+    assert.equal(new URLSearchParams(window.location.search).get('keep'), '1');
+    assert.equal(page.numbered().length, 3, 'internal URL acknowledgement must not replay');
+    if (domain === 'academic') {
+      const returnTo = new URL(document.querySelector('tbody a').href).searchParams.get('returnTo');
+      assert.equal(new URL(returnTo, window.location.origin).searchParams.get('page'), '12');
+      assert.equal(new URL(returnTo, window.location.origin).searchParams.get('q'), 'accepted');
+    }
+    await act(async () => document.querySelector('button[aria-label="13 페이지"]').click());
+    assert.equal(page.numbered().at(-1).args.p_page, 13);
+    assert.equal(page.numbered().at(-1).args.p_filters.search, 'accepted');
+  });
   test(`${domain}: effect replay retains restored page and a live controller`, async (t) => {
     const page = await setup(t, domain, { strict: true, request: { page: 11 } });
     assert.ok(page.numbered().length > 0);
@@ -126,6 +201,18 @@ for (const domain of ['academic', 'operations']) {
     assert.equal(page.state.page, 11); assert.equal(page.state.loading, false);
     await act(async () => { void page.state.goToPage(12); });
     assert.equal(page.numbered().at(-1).args.p_page, 12);
+  });
+  test(`${domain}: accepted-page acknowledgement does not suppress later range-to-list reads`, async (t) => {
+    const page = await setup(t, domain);
+    const numberedRequest = { ...page.props };
+    await act(async () => page.finish(page.numbered()[0]));
+    await act(async () => { void page.state.goToPage(2); });
+    await act(async () => page.finish(page.numbered()[1]));
+    await page.render(domain === 'academic'
+      ? { mode: 'timetable', dateFrom: '2026-08-01', dateTo: '2026-08-07', filters: { classGroupId: null, status: null, subject: null } }
+      : { mode: 'calendar', dateFrom: '2026-08-01', dateTo: '2026-08-07' });
+    await page.render({ ...numberedRequest, dateFrom: undefined, dateTo: undefined, filters: undefined });
+    assert.equal(page.numbered().length, 3, 'range return is not a control adoption acknowledgement');
   });
   test(`${domain}: unresolved auth does not issue reads and readiness recovery cannot stick loading`, async (t) => {
     const page = await setup(t, domain, { auth: { loading: true, role: null } });
@@ -173,11 +260,13 @@ for (const domain of ['academic', 'operations']) {
     const page = await setup(t, domain);
     await act(async () => page.finish(page.numbered()[0]));
     const oldRefresh = page.state.refresh;
+    const oldGoToPage = page.state.goToPage;
+    const oldSetPreference = page.state.setPageSizePreference;
     await page.auth({ role: 'teacher' });
     assert.equal(page.state.data?.page?.rows?.length || 0, 0);
     await page.auth({ user: null, role: null });
     const count = page.requests.length;
-    await act(async () => { void oldRefresh(); });
+    await act(async () => { void oldRefresh(); void oldGoToPage(2); oldSetPreference(20); });
     assert.equal(page.requests.length, count); assert.equal(page.state.data, null);
   });
 }

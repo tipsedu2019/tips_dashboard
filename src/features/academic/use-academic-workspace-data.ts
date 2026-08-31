@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { getErrorMessage } from "@/lib/error-message";
 import { useAuth } from "@/providers/auth-provider";
 import { createNumberedPageController } from "@/lib/numbered-page-controller";
-import { normalizePage, type DataTablePageSize } from "@/lib/numbered-pagination";
+import { normalizePage, type DataTablePageSize, type DataTablePageSizePreference } from "@/lib/numbered-pagination";
 import { useDataTablePageSize } from "@/hooks/use-data-table-page-size";
 
 import { createAcademicReadService } from "./academic-read-service.js";
@@ -98,7 +98,9 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
   const [rangeError, setRangeError] = useState<string | null>(null);
   const [densityError, setDensityError] = useState<{ service: typeof service; fingerprint: string; value: AcademicDensityError } | null>(null);
   const rangeRevision = useRef(0);
-  const desired = useRef<{ service: typeof service; fingerprint: string; navigationKey: string; scope: string; pageSize: DataTablePageSize } | null>(null);
+  const [preferenceRevision, setPreferenceRevision] = useState(0);
+  const pageScopeAdoption = useRef(false);
+  const desired = useRef<{ service: typeof service; fingerprint: string; navigationKey: string; scope: string; pageSize: DataTablePageSize; preferenceRevision: number } | null>(null);
   const controller = useRef<ReturnType<typeof createNumberedPageController<NumberedResult["rows"][number]>> | null>(null);
   useEffect(() => {
     serviceRef.current = service;
@@ -132,14 +134,19 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
     };
   }, [service]);
   useEffect(() => {
+    const acknowledgingPageScope = pageScopeAdoption.current;
+    pageScopeAdoption.current = false;
     if (!service || !isNumbered || !size.ready) return;
     const previous = desired.current;
     const restored = !previous || previous.service !== service || previous.navigationKey !== navigationKey;
     const scopeChanged = !previous || previous.fingerprint !== fingerprint;
+    // A pager action already loaded this scope. Adopting its accepted controls
+    // is an acknowledgement, not a second page-1 request.
+    if (acknowledgingPageScope && !restored && !scopeChanged && previous.pageSize === size.pageSize && previous.preferenceRevision === preferenceRevision) return;
     const scope = !restored && !scopeChanged ? previous.scope : fingerprint;
-    desired.current = { service, fingerprint, navigationKey, scope, pageSize: size.pageSize };
+    desired.current = { service, fingerprint, navigationKey, scope, pageSize: size.pageSize, preferenceRevision };
     void controller.current?.load({ scope, page: restored ? restoredPage : 1, pageSize: size.pageSize });
-  }, [controller, fingerprint, isNumbered, navigationKey, restoredPage, service, size.pageSize, size.ready]);
+  }, [controller, fingerprint, isNumbered, navigationKey, preferenceRevision, restoredPage, service, size.pageSize, size.ready]);
 
   const loadRange = useCallback(async () => {
     if (!service || isNumbered || serviceRef.current !== service) return;
@@ -175,9 +182,20 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
     : Boolean(scopedRange && JSON.stringify(scopedRange.request) === fingerprint);
   const goToPage = useCallback((page: number) => {
     const target = desired.current;
-    if (!service || serviceRef.current !== service || !target || target.service !== service) return Promise.resolve();
-    return controller.current?.load({ scope: target.scope, page, pageSize: target.pageSize });
-  }, [controller, service]);
+    if (!service || serviceRef.current !== service || !target || target.service !== service || !snapshot?.scope) return Promise.resolve();
+    // Keep the preference input (including Auto) intact; ordinary paging belongs
+    // to the accepted dataset and size, while retry belongs to the last load.
+    pageScopeAdoption.current = true;
+    desired.current = { ...target, fingerprint: snapshot.scope, scope: snapshot.scope };
+    return controller.current?.load({ scope: snapshot.scope, page, pageSize: snapshot.pageSize });
+  }, [controller, service, snapshot]);
+  const persistPageSizePreference = size.setPreference;
+  const setPageSizePreference = useCallback((preference: DataTablePageSizePreference) => {
+    if (!service || serviceRef.current !== service) return;
+    persistPageSizePreference(preference);
+    // Re-selecting a failed preference is still a new explicit request.
+    setPreferenceRevision((revision) => revision + 1);
+  }, [service, persistPageSizePreference]);
   const refresh = useCallback(() => {
     if (!service || serviceRef.current !== service) return Promise.resolve();
     return isNumbered ? controller.current?.retry() || Promise.resolve() : loadRange();
@@ -196,7 +214,7 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
     error: isNumbered ? snapshot?.error ? getErrorMessage(snapshot.error, "목록을 불러오지 못했습니다.") : null : rangeError,
     page: snapshot?.page || 1, pageSize: snapshot?.scope ? snapshot.pageSize : size.pageSize,
     totalCount: snapshot?.totalCount ?? null, pageSizeMode: size.mode,
-    setPageSizePreference: size.setPreference, goToPage, refresh,
+    setPageSizePreference, goToPage, refresh,
     loadCurriculumDetail,
   };
 }

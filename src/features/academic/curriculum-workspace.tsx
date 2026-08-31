@@ -270,6 +270,15 @@ export function AcademicCurriculumWorkspace() {
     navigationKey: navigation.key,
   });
   const renderData = curriculumData;
+  const handlePageChange = (page: number) => {
+    if (totalCount === null || displayRequest.mode !== "curriculum") return;
+    setSearch(displayRequest.search); setPeriod(displayRequest.periodId || "");
+    setStatus(displayRequest.status || DEFAULT_CURRICULUM_STATUS_FILTER);
+    setSubject(displayRequest.subject || ""); setGrade(displayRequest.grade || "");
+    setTeacher(displayRequest.teacher || ""); setClassroom(displayRequest.classroom || "");
+    setViewMode(displayRequest.viewMode);
+    return goToPage(page);
+  };
   const page = (renderData?.page || {}) as {
     rows?: CurriculumRow[];
     hasMore?: boolean;
@@ -889,7 +898,7 @@ export function AcademicCurriculumWorkspace() {
             )}
             <div className="border-t px-4 py-3">
               <DataTablePagination page={displayedPage} pageSize={pageSize} totalCount={totalCount} loading={loading}
-                onPageChange={goToPage} pageSizeMode={pageSizeMode} onPageSizeChange={setPageSizePreference} />
+                onPageChange={handlePageChange} pageSizeMode={pageSizeMode} onPageSizeChange={setPageSizePreference} />
             </div>
         </section>
       </div>

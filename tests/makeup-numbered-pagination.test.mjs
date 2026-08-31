@@ -3,6 +3,106 @@ import { existsSync } from 'node:fs';
 import test from 'node:test';
 import { act } from 'react';
 import { modules, id, stamp, filters, row, counts, facets, response, transport, servicePath, setup, button, tab } from './helpers/makeup-numbered-harness.mjs';
+
+test('mounted query navigation adopts list, custom dates and off-page detail without native popstate or URL replay', async (t) => {
+  const p = await setup(t, { search: '?view=approvalPending&page=11&keep=1' });
+  await act(async () => p.finish(p.numbered()[0]));
+  await p.render();
+  assert.equal(p.numbered().length, 1, 'accepted URL acknowledgement is not navigation');
+  const dates = { dateFrom: '2026-08-17', dateTo: '' };
+  const query = new URLSearchParams({ view: 'closed', page: '2', requestId: id(999), makeupCustomDates: JSON.stringify(dates), keep: '1' });
+  window.history.pushState(null, '', `?${query}`);
+  await p.render();
+  assert.equal(p.numbered().length, 2);
+  assert.equal(p.numbered()[1].args.p_filters.view, 'closed');
+  assert.equal(p.numbered()[1].args.p_page, 2);
+  const detail = p.requests.find((r) => r.name === 'get_makeup_detail_v1');
+  assert.equal(detail.args.p_id, id(999));
+  await act(async () => { p.finish(p.numbered()[1]); detail.resolve({ data: row(999, { className: 'EXTERNAL DETAIL' }), error: null }); });
+  assert.equal(tab('승인/반려').getAttribute('aria-selected'), 'true');
+  assert.match(document.body.textContent, /EXTERNAL DETAIL/);
+  await p.render();
+  await act(async () => window.dispatchEvent(new window.PopStateEvent('popstate')));
+  assert.equal(p.numbered().length, 2, 'native event echo must not duplicate mounted query navigation');
+  assert.equal(p.requests.filter((r) => r.name === 'get_makeup_detail_v1').length, 1);
+  await act(async () => p.observed.changeFilters({ period: 'custom' }));
+  assert.equal(p.numbered().at(-1).args.p_filters.dateFrom, dates.dateFrom);
+  assert.equal(p.numbered().at(-1).args.p_filters.dateTo, dates.dateTo);
+});
+
+test('mounted detail alias replacement aborts old detail without reloading unchanged list or discarding an editor draft', async (t) => {
+  const p = await setup(t, { search: `?view=approvalPending&page=11&requestId=${id(999)}` });
+  await act(async () => p.finish(p.numbered()[0])); await p.catalogs();
+  const detail = p.requests.find((r) => r.name === 'get_makeup_detail_v1');
+  await act(async () => detail.resolve({ data: row(999, { requesterId: id(804), status: 'revision_requested', reason: 'original' }), error: null }));
+  await act(async () => button('보완').click());
+  await act(async () => p.observed.patch((input) => ({ ...input, reason: 'KEPT DRAFT' })));
+  // Opening the revision editor deliberately selects mine/page1.
+  await act(async () => p.finish(p.numbered().at(-1)));
+  await p.render();
+  const listReads = p.numbered().length;
+  const replaceDetail = async (number) => {
+    const params = new URLSearchParams(window.location.search);
+    params.delete('requestId'); params.set('request', id(number));
+    window.history.pushState(null, '', `?${params}`); await p.render();
+  };
+  await replaceDetail(998);
+  const opened = p.requests.filter((r) => r.name === 'get_makeup_detail_v1').at(-1);
+  assert.equal(opened.args.p_id, id(998));
+  await act(async () => opened.resolve({ data: row(998, { className: 'OPEN EXTERNAL' }), error: null }));
+  assert.match(document.body.textContent, /OPEN EXTERNAL/);
+  await replaceDetail(997);
+  const pending = p.requests.filter((r) => r.name === 'get_makeup_detail_v1').at(-1);
+  assert.equal(pending.args.p_id, id(997));
+  assert.doesNotMatch(document.body.textContent, /OPEN EXTERNAL/);
+  await replaceDetail(996);
+  const latest = p.requests.filter((r) => r.name === 'get_makeup_detail_v1').at(-1);
+  assert.equal(pending.signal.aborted, true);
+  assert.equal(latest.args.p_id, id(996));
+  await act(async () => { pending.resolve({ data: row(997, { className: 'STALE EXTERNAL' }), error: null }); latest.resolve({ data: row(996, { className: 'NEW EXTERNAL' }), error: null }); });
+  assert.doesNotMatch(document.body.textContent, /STALE EXTERNAL/);
+  assert.match(document.body.textContent, /NEW EXTERNAL/);
+  assert.equal(p.numbered().length, listReads, 'detail-only query navigation must not scan or reload the list');
+  assert.equal(p.observed.input.reason, 'KEPT DRAFT');
+  assert.equal(p.observed.editingRequestId, id(999));
+});
+
+test('native Back then search-param echo reads once and returning to an acknowledged URL is real navigation', async (t) => {
+  const p = await setup(t, { search: '?view=approvalPending&page=11' });
+  await act(async () => p.finish(p.numbered()[0])); await p.render();
+  const accepted = window.location.search;
+  await act(async () => { window.history.pushState(null, '', '?view=closed&page=2'); window.dispatchEvent(new window.PopStateEvent('popstate')); });
+  await p.render();
+  assert.equal(p.numbered().length, 2);
+  assert.equal(p.numbered()[1].args.p_page, 2);
+  await act(async () => p.numbered()[1].reject(new Error('BACK failure')));
+  window.history.pushState(null, '', accepted); await p.render();
+  assert.equal(p.numbered().length, 3, 'consumed internal URL must be adoptable again after another location');
+  assert.equal(p.numbered()[2].args.p_page, 11);
+  assert.equal(p.numbered()[2].args.p_filters.view, 'approvalPending');
+});
+
+test('mounted external navigation wins over an old page completion and rejects late next-location reads after role revocation', async (t) => {
+  const p = await setup(t, { search: '?view=approvalPending&page=11' });
+  await act(async () => p.finish(p.numbered()[0])); await p.render();
+  await act(async () => button('12 페이지').click());
+  const previousPage = p.numbered().at(-1);
+  window.history.pushState(null, '', `?view=closed&page=2&requestId=${id(995)}`);
+  // The old request causes the first render that observes the new query.
+  await act(async () => p.finish(previousPage));
+  const nextPage = p.numbered().at(-1);
+  assert.equal(nextPage.args.p_filters.view, 'closed');
+  assert.equal(nextPage.args.p_page, 2);
+  assert.equal(new URLSearchParams(window.location.search).get('view'), 'closed');
+  assert.equal(new URLSearchParams(window.location.search).get('page'), '2');
+  const detail = p.requests.filter((r) => r.name === 'get_makeup_detail_v1').at(-1);
+  assert.equal(detail.args.p_id, id(995));
+  await p.auth({ role: 'assistant' });
+  assert.equal(nextPage.signal.aborted, true); assert.equal(detail.signal.aborted, true);
+  await act(async () => { p.finish(nextPage); detail.resolve({ data: row(995, { className: 'REVOKED QUERY DETAIL' }), error: null }); });
+  assert.doesNotMatch(document.body.textContent, /REVOKED QUERY DETAIL|112건/);
+});
+
 test('page11 uses one full-filter RPC, preserves server order and independent facets', async () => {
   assert.ok(existsSync(servicePath), 'makeup numbered adapter is missing');
   const io = transport(), service = modules(io.supabase)(servicePath);
