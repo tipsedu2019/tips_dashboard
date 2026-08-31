@@ -330,6 +330,49 @@ test('operations: independent catalog failure remains visible and refresh can re
 });
 
 for (const domain of ['academic', 'operations']) {
+  for (const intervening of ['pending', 'error']) test(`${domain}: acknowledged self-written URL restores after ${intervening} navigation`, async (t) => {
+    const page = await setup(t, domain, { workspace: true, search: '?page=11' });
+    await act(async () => page.finish(page.numbered()[0]));
+    await act(async () => document.querySelector('button[aria-label="12 페이지"]').click());
+    await act(async () => page.finish(page.numbered()[1]));
+    const writtenUrl = window.location.pathname + window.location.search;
+    assert.equal(new URLSearchParams(window.location.search).get('page'), '12');
+    await page.render(); // Acknowledge the router's own write before genuine Back/Forward navigation.
+    assert.equal(page.numbered().length, 2);
+
+    window.history.pushState(null, '', '?page=7&q=other');
+    await act(async () => window.dispatchEvent(new window.PopStateEvent('popstate')));
+    await page.render();
+    const abandoned = page.numbered()[2];
+    assert.equal(abandoned.args.p_page, 7); assert.equal(abandoned.args.p_filters.search, 'other');
+    if (intervening === 'error') await act(async () => abandoned.reject(new Error('intervening read failed')));
+
+    window.history.pushState(null, '', writtenUrl);
+    await act(async () => window.dispatchEvent(new window.PopStateEvent('popstate')));
+    await page.render();
+    assert.equal(page.numbered().length, 4, 'returning to an acknowledged URL must adopt the restored scope');
+    const restored = page.numbered()[3];
+    assert.equal(restored.args.p_page, 12); assert.equal(restored.args.p_filters.search, '');
+    assert.equal(document.querySelector('input[placeholder*="검색"]').value, '');
+    if (domain === 'academic') assert.equal(restored.args.p_filters.periodId, id(900));
+    if (intervening === 'pending') await act(async () => page.finish(abandoned, 80));
+    assert.ok(document.querySelector('button[aria-label="12 페이지"][aria-current="page"]'));
+    assert.match(document.body.textContent, /260건/);
+    assert.equal(window.location.pathname + window.location.search, writtenUrl);
+
+    await act(async () => restored.reject(new Error('restored read failed')));
+    const retry = [...document.querySelectorAll('button')].find((button) => button.textContent === '다시 시도');
+    assert.ok(retry);
+    await act(async () => retry.click());
+    const retried = page.numbered()[4];
+    assert.equal(retried.args.p_page, 12); assert.equal(retried.args.p_filters.search, '');
+    if (domain === 'academic') assert.equal(retried.args.p_filters.periodId, id(900));
+    await act(async () => page.finish(retried));
+    assert.ok(document.querySelector('button[aria-label="12 페이지"][aria-current="page"]'));
+    assert.equal(document.querySelector('input[placeholder*="검색"]').value, '');
+    assert.match(document.querySelector('tbody tr').textContent, /111/);
+    assert.equal(page.numbered().length, 5);
+  });
   test(`${domain}: actual workspace page11 restoration and mounted Back preserve all controls before one read`, async (t) => {
     const periodKey = domain === 'academic' ? 'period' : 'term';
     const page = await setup(t, domain, { workspace: true, search: `?page=11&q=원본&${periodKey}=${id(900)}&subject=수학&grade=고1&teacher=교사&keep=1` });

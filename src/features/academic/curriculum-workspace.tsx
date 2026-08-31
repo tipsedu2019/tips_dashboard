@@ -236,6 +236,8 @@ export function AcademicCurriculumWorkspace() {
   // Adopt the complete restored location in one render, before reads or URL effects commit.
   if (observedQuery !== searchParamString) {
     setObservedQuery(searchParamString);
+    // A self-write is acknowledged once; any other location invalidates it too.
+    setWrittenQuery(null);
     if (writtenQuery !== searchParamString) {
       setSearch(text(searchParams.get("q"))); setPeriod(text(searchParams.get("period")));
       setStatus(text(searchParams.get("status")) || DEFAULT_CURRICULUM_STATUS_FILTER);

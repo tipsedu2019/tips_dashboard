@@ -2628,6 +2628,8 @@ export function ClassScheduleWorkspace() {
   const [navigation, setNavigation] = useState(() => ({ key: searchParamString, page: normalizePage(Number(searchParams.get("page"))) }));
   if (observedQuery !== searchParamString) {
     setObservedQuery(searchParamString);
+    // A self-write is acknowledged once; any other location invalidates it too.
+    setWrittenQuery(null);
     if (!isLessonDesignRouteActive && writtenQuery !== searchParamString) {
       setSearch(text(searchParams.get("q"))); setTermId(text(searchParams.get("term")));
       setSubject(text(searchParams.get("subject"))); setGrade(text(searchParams.get("grade")));
