@@ -668,19 +668,8 @@ test("management hook and UI keep list reads bounded while details and relation 
   const tableSource = await readFile(new URL("../src/features/management/management-data-table.tsx", import.meta.url), "utf8");
 
   const activeHook = hookSource.slice(hookSource.indexOf("export function useManagementRecords"));
-  assert.match(hookSource, /executeManagementInitialRequest/);
-  assert.match(hookSource, /executeManagementContinuationRequest/);
-  assert.match(activeHook, /\{ pageSize, enabled \}: UseManagementRecordsOptions/);
-  assert.match(activeHook, /if \(!enabled\)[\s\S]*?return/);
-  assert.match(activeHook, /executeManagementInitialRequest\(\{[\s\S]*?load: \(signal\) => readService\.loadInitialPage\(\{[\s\S]*?limit: pageSize,[\s\S]*?signal/);
-  assert.match(activeHook, /continuationRequestGateRef\.current\.abort\(\)[\s\S]*?setNextCursor\(null\)[\s\S]*?setHasMore\(false\)/);
-  assert.doesNotMatch(activeHook, /setRows\(\[\]\)/);
-  assert.match(activeHook, /void load\(\{ allowCanonicalReplay: true \}\)/);
-  assert.match(activeHook, /const refresh = useCallback\(\(\) => load\(\{ allowCanonicalReplay: false \}\)/);
-  assert.match(activeHook, /const loadMore = useCallback\(async \(\) => \{[\s\S]*?if \(!enabled \|\|/);
-  assert.match(activeHook, /executeManagementContinuationRequest\(\{[\s\S]*?load: \(signal\) => readService\.loadNextPage\(\{[\s\S]*?limit: pageSize,[\s\S]*?signal/);
+  // Direct numbered requests, stale completions and retained snapshots are runtime-tested.
   assert.match(activeHook, /readService\.searchClassTextbookCandidates\(\{ classId, search, filters, cursor, limit: 30 \}\)/);
-  assert.match(activeHook, /const byId = new Map\(current\.map/);
   assert.match(activeHook, /readService\.loadDetail\(\{ kind, id \}\)/);
   assert.doesNotMatch(activeHook, /readOptionalTable|enrichManagementRows|\.select\("\*"\)/);
 

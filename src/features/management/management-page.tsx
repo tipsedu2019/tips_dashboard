@@ -43,12 +43,9 @@ import {
 import { useAuth } from "@/providers/auth-provider";
 
 import { ManagementDataTable } from "./management-data-table";
-import {
-  estimateManagementListPageSize,
-  managementPageSizeStorageKey,
-  parseManagementPageSizePreference,
-  type ManagementListPageSize,
-} from "./management-page-size";
+import { useDataTablePageSize } from "@/hooks/use-data-table-page-size";
+import type { DataTablePageSize, DataTablePageSizePreference } from "@/lib/numbered-pagination";
+import { managementTableStorageKey, readManagementNumberedQuery, replaceManagementNumberedQuery, type ManagementNumberedQuery } from "./management-numbered-state";
 import { ClassTextbookPicker } from "./class-textbook-picker";
 import { ManagementRelationCombobox } from "./management-relation-combobox";
 import {
@@ -1442,71 +1439,55 @@ function FieldClearButton({
 }
 
 export function ManagementPage({ kind }: { kind: ManagementKind }) {
+  const { user, role } = useAuth();
+  return <ManagementPageContent key={JSON.stringify([kind, user?.id || null, role])} kind={kind} />;
+}
+
+function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { canManageAll } = useAuth();
+  const { canManageAll, user, role, loading: authLoading } = useAuth();
   const config = PAGE_CONFIG[kind];
   const managementListFilterScope = serializeManagementListFilters(kind, searchParams.toString());
   const managementListFilters = useMemo(
     () => JSON.parse(managementListFilterScope) as ManagementListFilters,
     [managementListFilterScope],
   );
-  const [pageSizeState, setPageSizeState] = useState<{
-    ready: boolean;
-    mode: "auto" | "user";
-    size: ManagementListPageSize;
-  }>({ ready: false, mode: "auto", size: 20 });
-
+  const pageSizeState = useDataTablePageSize(`management:${kind}`);
+  const { ready: pageSizeReady, mode: pageSizeMode, pageSize: requestedPageSize, setAutoPageSize, setPreference } = pageSizeState;
+  const [autoMeasurementKind, setAutoMeasurementKind] = useState<ManagementKind | null>(null);
+  const [savedSort, setSavedSort] = useState<{ kind: ManagementKind; value: unknown } | null>(null);
   useEffect(() => {
-    const storageKey = managementPageSizeStorageKey(kind);
-    let storedPreference = null;
-
-    try {
-      storedPreference = parseManagementPageSizePreference(window.localStorage.getItem(storageKey));
-    } catch {
-      // Storage can be unavailable; automatic sizing remains the safe fallback.
-    }
-
-    setPageSizeState({
-      ready: true,
-      mode: storedPreference ? "user" : "auto",
-      size: storedPreference?.size ?? estimateManagementListPageSize(window.innerHeight),
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      let value: unknown;
+      try { value = JSON.parse(window.localStorage.getItem(managementTableStorageKey(kind)) || "null")?.sorting; } catch { /* defaults */ }
+      setSavedSort({ kind, value });
     });
+    return () => { active = false; };
   }, [kind]);
-
-  const handleAutoPageSizeChange = useCallback((size: ManagementListPageSize) => {
-    setPageSizeState((current) => (
-      current.mode === "auto" && current.size !== size
-        ? { ...current, size }
-        : current
-    ));
-  }, []);
-
-  const handlePageSizePreferenceChange = useCallback((value: "auto" | ManagementListPageSize) => {
-    const storageKey = managementPageSizeStorageKey(kind);
-
-    if (value === "auto") {
-      try {
-        window.localStorage.removeItem(storageKey);
-      } catch {
-        // Keep automatic sizing active even if storage cleanup is unavailable.
-      }
-      setPageSizeState({
-        ready: true,
-        mode: "auto",
-        size: estimateManagementListPageSize(window.innerHeight),
-      });
+  const numberedQuery = readManagementNumberedQuery(kind, searchParams.toString(), savedSort?.kind === kind ? savedSort.value : undefined);
+  const changeNumberedQuery = useCallback((query: ManagementNumberedQuery) => {
+    // Read the live URL so a simultaneous detail/filter update is never overwritten.
+    replaceManagementNumberedQuery(window, pathname, query);
+  }, [pathname]);
+  const handleAutoPageSizeChange = useCallback((size: DataTablePageSize) => {
+    if (!pageSizeReady || pageSizeMode !== "auto") return;
+    if (autoMeasurementKind !== kind) {
+      setAutoPageSize(size);
+      setAutoMeasurementKind(kind);
       return;
     }
-
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify({ version: 1, size: value }));
-    } catch {
-      // The explicit in-memory choice still applies for the current session.
-    }
-    setPageSizeState({ ready: true, mode: "user", size: value });
-  }, [kind]);
+    if (requestedPageSize === size) return;
+    setAutoPageSize(size);
+    changeNumberedQuery({ ...readManagementNumberedQuery(kind, window.location.search, savedSort?.value), page: 1 });
+  }, [autoMeasurementKind, changeNumberedQuery, kind, pageSizeMode, pageSizeReady, requestedPageSize, savedSort, setAutoPageSize]);
+  const handlePageSizePreferenceChange = useCallback((value: DataTablePageSizePreference) => {
+    setPreference(value);
+    changeNumberedQuery({ ...readManagementNumberedQuery(kind, window.location.search, savedSort?.value), page: 1 });
+  }, [changeNumberedQuery, kind, savedSort, setPreference]);
   const {
     rows,
     stats,
@@ -1515,9 +1496,13 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     classFormReferences,
     filterOptions,
     effectiveClassPeriodId,
-    hasMore,
-    loadingMore,
-    loadMore,
+    page,
+    pageSize: displayedPageSize,
+    totalCount,
+    sort: displayedSort,
+    scope: displayedScope,
+    goToPage,
+    setSort,
     loadDetail,
     loadRelationPage,
     loadClassRosterPreview,
@@ -1525,8 +1510,12 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     removeRows,
     refresh,
   } = useManagementRecords(kind, managementListFilters, {
-    enabled: pageSizeState.ready,
-    pageSize: pageSizeState.size,
+    enabled: pageSizeReady && (pageSizeMode !== "auto" || autoMeasurementKind === kind) && savedSort?.kind === kind && !authLoading && Boolean(user?.id),
+    pageSize: pageSizeState.pageSize,
+    authorizationScope: JSON.stringify([user?.id || null, role]),
+    page: numberedQuery.page,
+    sort: numberedQuery.sort,
+    onQueryChange: changeNumberedQuery,
   });
   const canMutateRows = canManageAll;
   const [dialogMode, setDialogMode] = useState<"create" | "detail" | null>(null);
@@ -3729,15 +3718,18 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           rows={rows}
           stats={stats}
           loading={loading}
-          hasMore={hasMore}
-          loadingMore={loadingMore}
-          onLoadMore={loadMore}
+          page={page}
+          totalCount={totalCount}
+          sort={displayedSort}
+          displayedScope={displayedScope}
+          onPageChange={goToPage}
+          onSortChange={setSort}
           filterOptions={filterOptions}
           badgeLabel={config.badgeLabel}
           statusLabel={config.statusLabel}
           emptyLabel={config.emptyLabel}
           actions={actions}
-          pageSize={pageSizeState.size}
+          pageSize={displayedPageSize}
           pageSizeMode={pageSizeState.mode}
           onAutoPageSizeChange={handleAutoPageSizeChange}
           onPageSizePreferenceChange={handlePageSizePreferenceChange}

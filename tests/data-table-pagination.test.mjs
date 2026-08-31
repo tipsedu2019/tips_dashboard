@@ -245,14 +245,45 @@ test("measured auto sizing cannot overwrite a manual preference", async (t) => {
   }
   const root = createRoot(document.createElement("div"))
   await act(async () => root.render(createElement(Probe)))
-  await act(async () => seen.at(-1).setPreference(15))
-  await act(async () => seen.at(-1).setAutoPageSize(20))
+  await act(async () => {
+    seen.at(-1).setPreference(15)
+    seen.at(-1).setAutoPageSize(20)
+  })
   assert.equal(seen.at(-1).mode, "manual")
   assert.equal(seen.at(-1).pageSize, 15)
   assert.deepEqual(JSON.parse(localStorage.getItem("tips.data-table-page-size.v1") ?? "{}"), {
     classes: { mode: "manual", pageSize: 15 },
   })
   await act(async () => root.unmount())
+})
+
+test("management migrates legacy manual size once without overriding shared preference", async (t) => {
+  const dom = installDom()
+  t.after(() => dom.window.close())
+  const numbered = await import("../src/lib/numbered-pagination.ts")
+  const { useDataTablePageSize } = await loadTypeScript(hookUrl, new Map([["@/lib/numbered-pagination", numbered]]))
+  localStorage.setItem("tips:management-page-size:classes:v1", JSON.stringify({ version: 1, size: 20 }))
+  let state
+  function Probe() {
+    const result = useDataTablePageSize("management:classes")
+    useEffect(() => { state = result }, [result])
+    return null
+  }
+  const root = createRoot(document.createElement("div"))
+  await act(async () => root.render(createElement(Probe)))
+  assert.equal(state.pageSize, 20)
+  assert.equal(state.mode, "manual")
+  await act(async () => state.setPreference(15))
+  await act(async () => root.unmount())
+  const second = createRoot(document.createElement("div"))
+  await act(async () => second.render(createElement(Probe)))
+  assert.equal(state.pageSize, 15)
+  await act(async () => state.setPreference("auto"))
+  await act(async () => second.unmount())
+  const third = createRoot(document.createElement("div"))
+  await act(async () => third.render(createElement(Probe)))
+  assert.equal(state.mode, "auto", "legacy value must not revive after choosing auto")
+  await act(async () => third.unmount())
 })
 
 test("page-size preference tolerates malformed and unavailable browser storage", async (t) => {
@@ -279,5 +310,28 @@ test("page-size preference tolerates malformed and unavailable browser storage",
     }
   })
   assert.equal(storageFailure, undefined)
+  await act(async () => root.unmount())
+})
+
+test("legacy preference remains recoverable when writing the shared migration fails", async (t) => {
+  const dom = installDom()
+  t.after(() => dom.window.close())
+  const numbered = await import("../src/lib/numbered-pagination.ts")
+  const { useDataTablePageSize } = await loadTypeScript(hookUrl, new Map([["@/lib/numbered-pagination", numbered]]))
+  localStorage.setItem("tips:management-page-size:classes:v1", JSON.stringify({ version: 1, size: 15 }))
+  Object.defineProperty(window, "localStorage", { configurable: true, value: {
+    getItem: (key) => localStorage.getItem(key), removeItem: (key) => localStorage.removeItem(key),
+    setItem() { throw new Error("quota exceeded") },
+  } })
+  let state
+  function Probe() {
+    const result = useDataTablePageSize("management:classes")
+    useEffect(() => { state = result }, [result])
+    return null
+  }
+  const root = createRoot(document.createElement("div"))
+  await act(async () => root.render(createElement(Probe)))
+  assert.equal(state.pageSize, 15)
+  assert.notEqual(localStorage.getItem("tips:management-page-size:classes:v1"), null)
   await act(async () => root.unmount())
 })

@@ -845,7 +845,7 @@ test("class management ends classes through the status field and keeps audit dat
   assert.match(hookSource, /updated_by_name: latestActor/);
 
   assert.match(pageSource, /import \{ useAuth \} from "@\/providers\/auth-provider"/);
-  assert.match(pageSource, /const \{ canManageAll \} = useAuth\(\)/);
+  assert.match(pageSource, /const \{ canManageAll, user, role, loading: authLoading \} = useAuth\(\)/);
   assert.match(pageSource, /const canMutateRows = canManageAll/);
   assert.doesNotMatch(pageSource, /function getClassAuditInfo/);
   assert.doesNotMatch(pageSource, /data-testid="class-audit-summary"/);

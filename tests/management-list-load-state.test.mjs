@@ -56,16 +56,8 @@ test("management read errors expose retry for both empty and retained-row recove
 });
 
 test("the hook and page consume the tested loading and retry states", async () => {
-  const hookSource = await readFile(new URL("src/features/management/use-management-records.ts", root), "utf8");
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
-  const disabledBranch = hookSource.match(/if \(!enabled\) \{([\s\S]*?)\n    \}/)?.[1] || "";
-
-  assert.match(hookSource, /useState\(createManagementListLoadState\)/);
-  assert.match(hookSource, /setLoadState\(beginManagementListLoad\)/);
-  assert.match(hookSource, /onPage:[\s\S]*?setLoadState\(settleManagementListLoad\)/);
-  assert.match(hookSource, /onError:[\s\S]*?setLoadState\(settleManagementListLoad\)/);
-  assert.ok(disabledBranch, "the disabled hydration branch should remain explicit");
-  assert.doesNotMatch(disabledBranch, /setLoadState\(settleManagementListLoad\)/);
+  // Hook lifecycle is exercised with deferred RPCs in management-numbered-pagination.test.mjs.
 
   assert.match(pageSource, /getManagementListErrorRecoveryState\(\{[\s\S]*?error,[\s\S]*?loading,[\s\S]*?rowCount: rows\.length/);
   assert.match(pageSource, /aria-label=\{`\$\{config\.emptyLabel\} 목록 다시 시도`\}/);

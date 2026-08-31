@@ -159,27 +159,10 @@ test("management page wires adaptive sizing into the request and controlled tabl
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
   const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
-  assert.match(pageSource, /managementPageSizeStorageKey\(kind\)/);
-  assert.match(pageSource, /useManagementRecords\(kind, managementListFilters, \{[\s\S]*?enabled: pageSizeState\.ready,[\s\S]*?pageSize: pageSizeState\.size/);
-  assert.match(pageSource, /pageSize=\{pageSizeState\.size\}/);
+  // The shared preference hook and numbered request lifecycle have executable tests.
   assert.match(pageSource, /pageSizeMode=\{pageSizeState\.mode\}/);
   assert.match(pageSource, /onAutoPageSizeChange=\{handleAutoPageSizeChange\}/);
   assert.match(pageSource, /onPageSizePreferenceChange=\{handlePageSizePreferenceChange\}/);
-  assert.match(pageSource, /hasMore=\{hasMore\}/);
-  assert.match(pageSource, /loadingMore=\{loadingMore\}/);
-  assert.match(pageSource, /onLoadMore=\{loadMore\}/);
-  assert.doesNotMatch(pageSource, /data-testid="management-list-continuation"/);
-  assert.match(tableSource, /`다음 \$\{pageSize\}건`/);
-  assert.match(tableSource, /data-testid="management-list-continuation"/);
-  assert.match(tableSource, /onClick=\{\(\) => void onLoadMore\(\)\}/);
-  assert.match(tableSource, /disabled=\{loading \|\| loadingMore\}/);
-
-  assert.match(tableSource, /MANAGEMENT_LIST_PAGE_SIZES/);
-  assert.match(tableSource, /pagination: \{ pageIndex, pageSize \}/);
-  assert.match(tableSource, /onPaginationChange:/);
-  assert.match(tableSource, /useEffect\(\(\) => \{\s*setPageIndex\(0\);\s*\}, \[kind, pageSize\]\);/);
-  assert.match(tableSource, /const prePaginationRowCount = table\.getPrePaginationRowModel\(\)\.rows\.length/);
-  assert.match(tableSource, /clampManagementPageIndex\(current, prePaginationRowCount, pageSize\)/);
   assert.match(tableSource, /new ResizeObserver/);
   assert.match(tableSource, /resizeObserver\.disconnect\(\)/);
   assert.match(tableSource, /window\.removeEventListener\("resize", measurePageSize\)/);

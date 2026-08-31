@@ -14,20 +14,9 @@ import {
 import { buildCurriculumWorkspaceModel } from "../academic/records.js";
 import { createManagementReadService, getAssignedClassTextbookIds } from "./management-service.js";
 import type { ManagementListPageSize } from "./management-page-size";
-import {
-  createManagementRequestGate,
-  type ManagementRequestTicket,
-} from "./management-request-gate";
-import {
-  executeManagementContinuationRequest,
-  executeManagementInitialRequest,
-} from "./management-request-lifecycle";
-import {
-  beginManagementListLoad,
-  createManagementListLoadState,
-  isManagementListLoading,
-  settleManagementListLoad,
-} from "./management-list-load-state";
+import { createNumberedPageController, type NumberedPageSnapshot } from "@/lib/numbered-page-controller";
+import { createManagementNumberedReadService, type ManagementNumberedSort } from "./management-numbered-service";
+import { sanitizeManagementNumberedSort, type ManagementNumberedQuery } from "./management-numbered-state";
 
 export type ManagementKind = "students" | "classes" | "textbooks";
 
@@ -655,16 +644,11 @@ type ManagementPageCursor = { sortKey: string; id: string; scopeHash: string };
 export type UseManagementRecordsOptions = {
   pageSize: ManagementListPageSize;
   enabled: boolean;
+  authorizationScope?: string;
+  page?: number;
+  sort?: ManagementNumberedSort;
+  onQueryChange?: (query: ManagementNumberedQuery) => void;
 };
-
-function managementRequestScope(
-  kind: ManagementKind,
-  filters: ManagementListFilters,
-  pageSize: ManagementListPageSize,
-  cursor: ManagementPageCursor | null,
-) {
-  return JSON.stringify([kind, filters, pageSize, cursor]);
-}
 
 function defaultManagementFilters(kind: ManagementKind): ManagementListFilters {
   if (kind === "students") return { kind, search: "", status: null, schoolCategory: null, school: null, grade: null };
@@ -801,149 +785,95 @@ function listRowToSource(kind: ManagementKind, row: Record<string, unknown>) {
 export function useManagementRecords(
   kind: ManagementKind,
   requestedFilters?: ManagementListFilters,
-  { pageSize, enabled }: UseManagementRecordsOptions = { pageSize: 20, enabled: true },
+  { pageSize, enabled, authorizationScope = "", page = 1, sort, onQueryChange }: UseManagementRecordsOptions = { pageSize: 20, enabled: true },
 ) {
-  const [rows, setRows] = useState<ManagementRow[]>([]);
   const [stats, setStats] = useState<ManagementStat[]>([]);
   const [classFormReferences, setClassFormReferences] = useState<ClassFormReferences>(EMPTY_CLASS_FORM_REFERENCES);
-  const [loadState, setLoadState] = useState(createManagementListLoadState);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [nextCursor, setNextCursor] = useState<ManagementPageCursor | null>(null);
-  const [hasMore, setHasMore] = useState(false);
   const [filterOptions, setFilterOptions] = useState<Record<string, unknown>>({});
   const [effectiveClassPeriodId, setEffectiveClassPeriodId] = useState("");
-  const initialRequestGateRef = useRef(createManagementRequestGate());
-  const continuationRequestGateRef = useRef(createManagementRequestGate());
-  const initialTicketRef = useRef<ManagementRequestTicket | null>(null);
-  const canonicalReplayTokenRef = useRef("");
+  const [metadataFailure, setMetadataFailure] = useState<{ owner: string; error: string } | null>(null);
+  const [snapshot, setSnapshot] = useState<(NumberedPageSnapshot<ManagementRow> & { authorizationScope: string; kind: ManagementKind }) | null>(null);
+  const [metadataOwner, setMetadataOwner] = useState("");
+  const controllerRef = useRef<ReturnType<typeof createNumberedPageController<ManagementRow>> | null>(null);
+  const lastRequestKeyRef = useRef("");
+  const onQueryChangeRef = useRef(onQueryChange);
+  useEffect(() => { onQueryChangeRef.current = onQueryChange; }, [onQueryChange]);
   const filters = useMemo(() => requestedFilters || defaultManagementFilters(kind), [kind, requestedFilters]);
-  const effectiveFiltersRef = useRef<ManagementListFilters>(filters);
   const readService = useMemo(() => supabase ? createManagementReadService({ supabase }) : null, []);
-
-  const load = useCallback(async ({ allowCanonicalReplay = false }: { allowCanonicalReplay?: boolean } = {}) => {
-    continuationRequestGateRef.current.abort();
-    setLoadingMore(false);
-    setNextCursor(null);
-    setHasMore(false);
-
-    if (!enabled) {
-      initialRequestGateRef.current.abort();
-      initialTicketRef.current = null;
-      return;
-    }
-
-    if (!readService) {
-      initialRequestGateRef.current.abort();
-      initialTicketRef.current = null;
-      setError("Supabase 연결 설정을 확인해 주세요.");
-      setLoadState(settleManagementListLoad);
-      return;
-    }
-
-    setLoadState(beginManagementListLoad);
-    const canonicalReplayToken = allowCanonicalReplay ? canonicalReplayTokenRef.current : "";
-    if (!allowCanonicalReplay && canonicalReplayTokenRef.current) {
-      readService.discardCanonicalReplay(canonicalReplayTokenRef.current);
-    }
-    canonicalReplayTokenRef.current = "";
-    const execution = executeManagementInitialRequest({
-      gate: initialRequestGateRef.current,
-      scope: managementRequestScope(kind, filters, pageSize, null),
-      load: (signal) => readService.loadInitialPage({
-        kind,
-        filters,
-        cursor: null,
-        limit: pageSize,
-        canonicalReplayToken,
-        coalesceInitialRequest: allowCanonicalReplay,
-        signal,
-      }),
-      onPage: (result) => {
-        canonicalReplayTokenRef.current = textValue(result.canonicalReplayToken);
-        effectiveFiltersRef.current = result.effectiveFilters as ManagementListFilters;
-        setEffectiveClassPeriodId(kind === "classes" ? textValue(result.effectiveFilters.periodId) : "");
-        const sourceRows = result.page.rows.map((row: Record<string, unknown>) => listRowToSource(kind, row));
-        setRows(normalizeManagementRows(kind, sourceRows));
-        setNextCursor(result.page.nextCursor);
-        setHasMore(result.page.hasMore);
-        setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
-        setError(null);
-        setLoadState(settleManagementListLoad);
-      },
-      onMetadata: (metadata) => {
-        const settled = metadata as {
-          ok: true;
-          stats: Record<string, unknown>;
-          filterOptions: Record<string, unknown>;
-        };
-        setStats(aggregateToStats(kind, settled.stats));
-        setFilterOptions(settled.filterOptions);
-      },
-      onError: (fetchError, phase) => {
-        setError(
-          fetchError instanceof Error
-            ? fetchError.message
-            : phase === "metadata"
-              ? "목록 부가 정보를 불러오지 못했습니다."
-              : "알 수 없는 연결 오류가 발생했습니다.",
-        );
-        setLoadState(settleManagementListLoad);
-      },
-    });
-    initialTicketRef.current = execution.ticket;
-    await execution.completion;
-  }, [enabled, filters, kind, pageSize, readService]);
-
+  const numberedService = useMemo(() => supabase ? createManagementNumberedReadService({ supabase }) : null, []);
+  const requestedSort = sanitizeManagementNumberedSort(kind, sort);
+  const scope = JSON.stringify({ authorizationScope, kind, filters, sort: requestedSort });
+  const owner = JSON.stringify([authorizationScope, kind]);
   useEffect(() => {
-    const initialRequestGate = initialRequestGateRef.current;
-    const continuationRequestGate = continuationRequestGateRef.current;
     let active = true;
-    queueMicrotask(() => {
-      if (active) void load({ allowCanonicalReplay: true });
+    lastRequestKeyRef.current = "";
+    const controller = createNumberedPageController<ManagementRow>({
+      loadPage: async ({ scope: requestScope, page: requestedPage, pageSize: requestedSize, signal }) => {
+        if (!supabase || !numberedService) throw new Error("Supabase 연결 설정을 확인해 주세요.");
+        const request = JSON.parse(requestScope) as { filters: ManagementListFilters; sort: ManagementNumberedSort };
+        let effectiveFilters = request.filters;
+        const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(MANAGEMENT_TABLE_TIMEOUT_MS)]);
+        if (effectiveFilters.kind === "classes" && !effectiveFilters.periodId) {
+          const { data, error } = await supabase.rpc("get_management_default_class_period_v1").abortSignal(requestSignal).retry(false);
+          requestSignal.throwIfAborted();
+          if (error) throw error;
+          const period = textValue((Array.isArray(data) ? data[0] : data)?.periodId);
+          if (!period) throw new Error("management_default_period_unavailable");
+          effectiveFilters = { ...effectiveFilters, periodId: period };
+          // The subsequent canonical URL rewrite describes this same request.
+          lastRequestKeyRef.current = JSON.stringify([JSON.stringify({ authorizationScope, kind, filters: effectiveFilters, sort: request.sort }), requestedPage, requestedSize]);
+          setEffectiveClassPeriodId(period);
+        }
+        setMetadataFailure(null);
+        const metadata = Promise.all([
+          supabase.rpc("get_management_stats_v1", { p_kind: kind, p_filters: effectiveFilters }).abortSignal(requestSignal).retry(false),
+          supabase.rpc("list_management_filter_options_v1", { p_kind: kind, p_filters: effectiveFilters }).abortSignal(requestSignal).retry(false),
+        ]);
+        void metadata.then(([statsResult, optionsResult]) => {
+          if (!active || signal.aborted) return;
+          if (statsResult.error || optionsResult.error) throw statsResult.error || optionsResult.error;
+          setMetadataOwner(owner);
+          setStats(aggregateToStats(kind, (Array.isArray(statsResult.data) ? statsResult.data[0] : statsResult.data) || {}));
+          setFilterOptions((Array.isArray(optionsResult.data) ? optionsResult.data[0] : optionsResult.data) || {});
+        }).catch((error) => {
+          if (active && !signal.aborted) setMetadataFailure({ owner, error: error instanceof Error ? error.message : "목록 부가 정보를 불러오지 못했습니다." });
+        });
+        const result = await numberedService.readPage({ kind, filters: effectiveFilters, page: requestedPage, pageSize: requestedSize, sort: request.sort, signal });
+        return { ...result, rows: normalizeManagementRows(kind, result.rows.map((row) => listRowToSource(kind, row))) };
+      },
+      onChange: (next) => {
+        if (!active) return;
+        setSnapshot({ ...next, authorizationScope, kind });
+        if (!next.loading && !next.error && next.scope && lastRequestKeyRef.current) {
+          const [requestScope, requestedPage, requestedSize] = JSON.parse(lastRequestKeyRef.current);
+          if (requestedPage !== next.page) {
+            lastRequestKeyRef.current = JSON.stringify([requestScope, next.page, requestedSize]);
+            onQueryChangeRef.current?.({ page: next.page, sort: JSON.parse(next.scope).sort });
+          }
+        }
+      },
     });
+    controllerRef.current = controller;
     return () => {
       active = false;
-      initialRequestGate.abort();
-      continuationRequestGate.abort();
-      initialTicketRef.current = null;
+      controller.dispose();
+      if (controllerRef.current === controller) controllerRef.current = null;
     };
-  }, [load]);
+  }, [authorizationScope, enabled, kind, numberedService, owner]);
 
-  const loadMore = useCallback(async () => {
-    if (!enabled || !readService || !nextCursor || !hasMore || loadingMore) return;
-    const initialTicket = initialTicketRef.current;
-    if (!initialTicket || !initialRequestGateRef.current.isCurrent(initialTicket)) return;
-    setLoadingMore(true);
-    const execution = executeManagementContinuationRequest({
-      gate: continuationRequestGateRef.current,
-      initialGate: initialRequestGateRef.current,
-      initialTicket,
-      scope: managementRequestScope(kind, effectiveFiltersRef.current, pageSize, nextCursor),
-      load: (signal) => readService.loadNextPage({
-        kind,
-        filters: effectiveFiltersRef.current,
-        cursor: nextCursor,
-        limit: pageSize,
-        signal,
-      }),
-      onPage: (page) => {
-        const incoming = normalizeManagementRows(kind, page.rows.map((row: Record<string, unknown>) => listRowToSource(kind, row)));
-        setRows((current) => {
-          const byId = new Map(current.map((row) => [row.id, row]));
-          for (const row of incoming) byId.set(row.id, row);
-          return [...byId.values()];
-        });
-        setNextCursor(page.nextCursor);
-        setHasMore(page.hasMore);
-      },
-      onError: (fetchError) => {
-        setError(fetchError instanceof Error ? fetchError.message : "다음 목록을 불러오지 못했습니다.");
-      },
-      onSettled: () => setLoadingMore(false),
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      const key = JSON.stringify([scope, page, pageSize]);
+      if (!active || !enabled || lastRequestKeyRef.current === key) return;
+      lastRequestKeyRef.current = key;
+      void controllerRef.current?.load({ scope, page, pageSize });
     });
-    await execution.completion;
-  }, [enabled, hasMore, kind, loadingMore, nextCursor, pageSize, readService]);
+    return () => { active = false; };
+  }, [enabled, scope, page, pageSize]);
+
+  const goToPage = useCallback((nextPage: number) => onQueryChangeRef.current?.({ page: nextPage, sort: JSON.parse(scope).sort }), [onQueryChangeRef, scope]);
+  const setSort = useCallback((nextSort: ManagementNumberedSort) => onQueryChangeRef.current?.({ page: 1, sort: sanitizeManagementNumberedSort(kind, nextSort) }), [kind, onQueryChangeRef]);
 
   const loadDetail = useCallback(async (id: string) => {
     if (!readService) return null;
@@ -958,7 +888,7 @@ export function useManagementRecords(
       });
     }
     return normalizeManagementRows(kind, [sourceRow])[0] || null;
-  }, [kind, readService]);
+  }, [kind, readService, setClassFormReferences]);
 
   const loadRelationPage = useCallback(async ({
     id,
@@ -1008,32 +938,39 @@ export function useManagementRecords(
 
   const reloadRow = useCallback(async (id: string) => {
     const detailRow = await loadDetail(id);
-    if (!detailRow) return null;
-    setRows((current) => current.some((row) => row.id === id)
-      ? current.map((row) => row.id === id ? detailRow : row)
-      : [detailRow, ...current]);
+    if (detailRow) await controllerRef.current?.retry();
     return detailRow;
   }, [loadDetail]);
 
   const removeRows = useCallback((ids: string[]) => {
-    const removed = new Set(ids);
-    setRows((current) => current.filter((row) => !removed.has(row.id)));
+    // Keep the displayed count and rows from one server snapshot until reconciliation.
+    if (ids.length) void controllerRef.current?.retry();
   }, []);
 
-  const refresh = useCallback(() => load({ allowCanonicalReplay: false }), [load]);
-  const loading = isManagementListLoading(loadState);
+  const refresh = useCallback(async () => { if (enabled) await controllerRef.current?.retry(); }, [enabled]);
+  const displayed = snapshot?.authorizationScope === authorizationScope && snapshot.kind === kind ? snapshot : null;
+  const displayedQueryScope = displayed?.scope || scope;
+  const displayedSort = useMemo(() => JSON.parse(displayedQueryScope).sort as ManagementNumberedSort, [displayedQueryScope]);
+  const rows = displayed?.rows || [];
+  const loading = !displayed || (enabled && displayed.loading);
+  const fetchError = displayed?.error;
+  const error = fetchError ? fetchError instanceof Error ? fetchError.message : "목록을 불러오지 못했습니다." : metadataFailure?.owner === owner ? metadataFailure.error : null;
 
   return {
     rows,
-    stats,
+    stats: metadataOwner === owner ? stats : [],
     loading,
     error,
-    classFormReferences,
-    filterOptions,
-    effectiveClassPeriodId,
-    hasMore,
-    loadingMore,
-    loadMore,
+    classFormReferences: metadataOwner === owner ? classFormReferences : EMPTY_CLASS_FORM_REFERENCES,
+    filterOptions: metadataOwner === owner ? filterOptions : {},
+    effectiveClassPeriodId: displayed ? effectiveClassPeriodId : "",
+    page: displayed?.page || 1,
+    pageSize: displayed?.totalCount !== null && displayed ? displayed.pageSize : pageSize,
+    totalCount: displayed?.totalCount ?? null,
+    sort: displayedSort,
+    scope: displayed?.scope || owner,
+    goToPage,
+    setSort,
     loadDetail,
     loadRelationPage,
     loadClassRosterPreview,
