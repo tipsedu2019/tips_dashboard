@@ -18,6 +18,7 @@ Ten-number fixed blocks, one-page single arrows, global first/last double arrows
 | Makeup/approvals/curriculum/class planning | Pending | Pending | Pending | Pending |
 | Textbook operations/settings/auxiliary lists | Pending | Pending | Pending | Pending |
 | Teacher Google Chat identity table/cards | Identified in final inventory; auxiliary plan saved | Pending | Pending | Pending |
+| Statistics student/class drilldown lists | Existing accumulated `다음 30명/개` identified; added to auxiliary plan | Pending | Pending | Pending |
 
 No row marked pending is complete. Foundation completion alone is not app-wide completion.
 
