@@ -1,9 +1,10 @@
 "use client";
 import { compactUniqueLabels, buildTextbookCleanupPreviewRows, getTeacherName, getDefaultTeacherForClass, inferClassLocationId, doesSearchOptionMatchFilters, buildSearchSelectCommandValue, buildSearchSelectFilterGroups, buildVisibleSearchSelectFilterGroups, buildTextbookReferenceOptions, buildTextbookClassReferenceOptions } from "./textbook-reference-model";
-import { saleStatusLabels, TEXTBOOK_HANDOFF_BUSINESS_NAME, getKnownPublisherLabel, normalizeMonthInput, getSaleLineQuantity, getSaleLineAmount, getSaleLineMonth, getSaleLineStatus, isBillableSaleLineStatus, formatCurrency, getTextbookHandoffDocumentMeta, formatPurchaseUnitCost, getStudentGradeLabel, getSupplierName, getConfiguredSupplierIdForTextbook, getConfiguredTextbookPurchaseUnitCost, getStudentNameById, getSaleLineRecipientName, purchaseStatusLabel, buildPurchaseSupplierHandoffGroups, buildPurchaseSupplierReturnHandoffGroups, buildMakeEduBillingHandoffGroups } from "./textbook-handoff-model";
+import { saleStatusLabels, TEXTBOOK_HANDOFF_BUSINESS_NAME, getKnownPublisherLabel, normalizeMonthInput, getSaleLineQuantity, getSaleLineAmount, getSaleLineMonth, getSaleLineStatus, isBillableSaleLineStatus, formatCurrency, getTextbookHandoffDocumentMeta, formatPurchaseUnitCost, getStudentGradeLabel, getSupplierName, getConfiguredSupplierIdForTextbook, getConfiguredTextbookPurchaseUnitCost, getStudentNameById, getSaleLineRecipientName, purchaseStatusLabel } from "./textbook-handoff-model";
 import type { TextbookHandoffLine, TextbookHandoffGroup } from "./textbook-handoff-model";
 
 import { Fragment, FormEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Barcode,
   BookOpen,
@@ -66,11 +67,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useDataTableColumns, type DataTableColumn } from "@/components/data-table/data-table-columns";
+import { DataTablePagination } from "@/components/data-table/data-table-pagination";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { captureElementAsPdfBlob, captureElementAsPngBlob, downloadBlob } from "@/lib/export-as-image";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
+import { useTextbookNumberedData } from "./use-textbook-numbered-data";
+import { parseTextbookNavigation, serializeTextbookNavigation, type TextbookNavigationState, type TextbookTab } from "./textbook-navigation";
 
 import {
   buildTeacherTextbookIssueDraft,
@@ -88,7 +92,10 @@ import {
   normalizeBarcodeValue,
 } from "./textbook-ledger.js";
 import { textbookService } from "./textbook-service";
-import { buildTextbookLookupMap, getTextbookFromLookup, buildLocationNameLookup, getLocationNameFromLookup, stockMoveTypeLabels, getClosingStoredMetrics, hasClosingMetricMismatch, getClosingDetailSearchHaystack, buildClosingDetailRows, type ClosingStoredMetrics } from "./textbook-closing-model";
+import { listTextbookLocationReferencePage } from "./textbook-reference-service";
+import { getTextbookClosingDetail } from "./textbook-read-service";
+import { getTextbookBillingHandoff, getTextbookClosingMovementExport, getTextbookPurchaseHandoff } from "./textbook-work-context-service";
+import { getClosingStoredMetrics, type ClosingStoredMetrics } from "./textbook-closing-model";
 import {
   subjectOptions,
   INVENTORY_LOW_STOCK_THRESHOLD,
@@ -100,9 +107,7 @@ import {
   getPublisherLabel,
   getTextbookQualityIssues,
   hasTextbookQualityIssue,
-  getTextbookQualityScore,
   buildDuplicateTextbookTitleKeys,
-  matchesTextbookMasterFilters,
   normalizeStatusValue,
   numberValue,
   formatQuantity,
@@ -110,22 +115,18 @@ import {
   getClassName,
   getLocationName,
   getTextbookById,
-  buildTextbookSearchIndex,
   getRequestedTextbookTitle,
   getPurchaseTextbookTitle,
   getPurchaseLineOrder,
   getClassById,
   getInventoryQuantity,
-  buildInventoryCountRows,
   isActiveTextbook,
   shouldShowOperationalPurchaseLine,
   shouldShowOperationalSaleLine,
-  matchesInventoryFilter,
   getSaleEventAt,
   buildPurchaseCardDraft,
   getPurchaseScopeLines,
   buildPurchaseDisplayRows,
-  buildSaleHistorySummaryRows,
 } from "./textbook-read-model";
 import type {
   SearchSelectOption,
@@ -145,6 +146,19 @@ import type {
   PurchaseKanbanDraft,
   InventoryCountRow,
   InventoryHistoryRow,
+  TextbookMasterSummary,
+  TextbookInventorySummary,
+  TextbookInventoryHistoryTransport,
+  TextbookPurchaseCaseRow,
+  TextbookPurchaseSummary,
+  SaleLineRow,
+  TextbookSaleSummary,
+  ClosingRow,
+  ClosingMovementRow,
+  TextbookClosingDetail,
+  PurchaseFilters,
+  SaleFilters,
+  TextbookOperationsSummary,
 } from "./textbook-read-types";
 import {
   SCIENCE_TEXTBOOK_TAXONOMY,
@@ -163,7 +177,6 @@ import {
   getTextbookSubjectAreaKey,
   getTextbookSubjectWriteValue,
   getTextbookTaxonomySelection,
-  matchesTextbookTaxonomy,
   mergeTextbookSubSubjectSettings,
   toggleTextbookGradeLevel,
   toggleTextbookSchoolLevel,
@@ -178,6 +191,27 @@ type PreparedHandoffDownload = {
   filename: string;
   url: string;
 };
+
+function buildPreparedPurchaseRendererData(rows: TextbookPurchaseCaseRow[]) {
+  const unique = (items: Array<Row | null>) => [...new Map(items.filter((item): item is Row => Boolean(item)).map((item) => [getRecordId(item), item])).values()];
+  return {
+    orders: unique(rows.map((row) => row.line.order)),
+    lines: rows.map((row) => row.line),
+    textbooks: unique(rows.map((row) => row.references.textbook)),
+    publishers: unique(rows.map((row) => row.references.publisher)),
+    locations: unique(rows.map((row) => row.references.location)),
+    suppliers: unique(rows.map((row) => row.references.supplier)),
+    classes: unique(rows.map((row) => row.references.class)),
+  };
+}
+
+function buildPreparedSaleRendererData(rows: SaleLineRow[]) {
+  const unique = (items: Array<Row | null>) => [...new Map(items.filter((item): item is Row => Boolean(item)).map((item) => [getRecordId(item), item])).values()];
+  return {
+    sales: unique(rows.map((row) => row.sale)), lines: rows.map((row) => row.line), textbooks: unique(rows.map((row) => row.textbook)),
+    classes: unique(rows.map((row) => row.class)), students: unique(rows.map((row) => row.student)), locations: unique(rows.map((row) => row.location)),
+  };
+}
 type TextbookConfirmationPreviewItem = {
   id: string;
   title: string;
@@ -286,8 +320,6 @@ const inventoryFilterLabels: Record<InventoryFilter, string> = {
   negative: "마이너스",
 };
 
-const INVENTORY_COUNT_PAGE_SIZE = 30;
-const MASTER_TEXTBOOK_PAGE_SIZE = 60;
 const TEXTBOOK_DATA_LOAD_TIMEOUT_MS = 12_000;
 const textbookHistoryDeleteAdminEmails = new Set(["yeoyuasset@naver.com"]);
 
@@ -309,15 +341,6 @@ const textbookQualityFilterLabels: Record<TextbookQualityFilter, string> = {
   subjectMismatch: "과목 확인",
   inactive: "미사용 보관함",
 };
-const textbookQualityIssueFilterKeys: Exclude<TextbookQualityFilter, "all" | "attention">[] = [
-  "duplicate",
-  "missingCode",
-  "missingPublisher",
-  "missingCategory",
-  "missingPrice",
-  "subjectMismatch",
-  "inactive",
-];
 
 const textbookTabTriggerClassName =
   "gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm";
@@ -528,16 +551,6 @@ function getTextbookGroupLabel(row: Row) {
   return getSubjectLabel(row.subject);
 }
 
-function compareTextbookGroupLabels(left: string, right: string) {
-  const orderedLabels = subjectOptions.map((option) => option.label);
-  const leftIndex = orderedLabels.indexOf(left);
-  const rightIndex = orderedLabels.indexOf(right);
-  const safeLeftIndex = leftIndex === -1 ? orderedLabels.length : leftIndex;
-  const safeRightIndex = rightIndex === -1 ? orderedLabels.length : rightIndex;
-  if (safeLeftIndex !== safeRightIndex) return safeLeftIndex - safeRightIndex;
-  return left.localeCompare(right, "ko", { numeric: true });
-}
-
 function getPositivePurchaseQuantityText(value: unknown) {
   const normalized = textPreservingZero(value);
   return numberValue(normalized) > 0 ? normalized : "";
@@ -705,67 +718,6 @@ function inventoryQuantityTone(totalQuantity: number) {
   if (totalQuantity <= INVENTORY_LOW_STOCK_THRESHOLD) return "text-amber-700";
   return "text-foreground";
 }
-
-function buildTextbookOpsMetrics(data: Pick<TextbookOperationsData, "textbooks" | "purchaseOrders" | "purchaseOrderLines" | "saleLines" | "sales" | "inventory">) {
-  const purchaseOrdersById = new Map(data.purchaseOrders.map((order) => [getRecordId(order), order]));
-  const salesById = new Map(data.sales.map((sale) => [getRecordId(sale), sale]));
-  const metrics = {
-    requestCount: 0,
-    unregisteredRequestCount: 0,
-    orderNeededCount: 0,
-    receivingBacklogCount: 0,
-    partialReceiptCount: 0,
-    issueWaitingCount: 0,
-    stockRiskCount: 0,
-  };
-
-  for (const line of data.purchaseOrderLines) {
-    const order = getPurchaseLineOrder(line, purchaseOrdersById);
-    if (!shouldShowOperationalPurchaseLine(line, order, data.textbooks)) {
-      continue;
-    }
-    const status = text(line.status || order?.status || "requested");
-    const requestedQuantity = numberValue(line.requested_quantity || line.requestedQuantity);
-    const orderedQuantity = numberValue(line.ordered_quantity || line.orderedQuantity);
-    const receivedQuantity = numberValue(line.received_quantity || line.receivedQuantity);
-    const requestedTitle = getRequestedTextbookTitle(line);
-    const hasMasterTextbook = Boolean(getTextbookById(data.textbooks, text(line.textbook_id || line.textbookId) || requestedTitle));
-
-    if (status === "requested") {
-      metrics.requestCount += 1;
-      if (hasMasterTextbook) {
-        metrics.orderNeededCount += 1;
-      } else {
-        metrics.unregisteredRequestCount += 1;
-      }
-    }
-
-    if ((status === "ordered" || status === "partially_received") && Math.max(orderedQuantity, requestedQuantity) > receivedQuantity) {
-      metrics.receivingBacklogCount += 1;
-    }
-    if (status === "partially_received" || (orderedQuantity > 0 && receivedQuantity > 0 && receivedQuantity < orderedQuantity)) {
-      metrics.partialReceiptCount += 1;
-    }
-  }
-
-  for (const line of data.saleLines) {
-    if (!shouldShowOperationalSaleLine(line, data.textbooks)) {
-      continue;
-    }
-    const sale = salesById.get(text(line.sale_id || line.saleId));
-    const status = text(line.status || sale?.status || "charged");
-    if (status === "charged" || status === "paid") {
-      metrics.issueWaitingCount += 1;
-    }
-  }
-
-  metrics.stockRiskCount = data.inventory.filter(
-    (row) => isActiveTextbook(row) && (matchesInventoryFilter(row, "shortage") || matchesInventoryFilter(row, "negative")),
-  ).length;
-
-  return metrics;
-}
-
 
 function purchaseNextStatus(status: PurchaseKanbanStatus) {
   if (status === "requested") return "ordered";
@@ -1226,7 +1178,7 @@ function TextbookOpsCommandCenter({
   activeQueueKey,
   onSelectQueue,
 }: {
-  metrics: ReturnType<typeof buildTextbookOpsMetrics>;
+  metrics: TextbookOperationsSummary;
   activeQueueKey: TextbookOpsQueueKey | "";
   onSelectQueue: (key: TextbookOpsQueueKey | "") => void;
 }) {
@@ -1325,25 +1277,34 @@ function getOperationSearchLabel(activeTab: string) {
 }
 
 export function TextbookOperationsWorkspace() {
+  const { user, role, loading } = useAuth();
+  if (loading || !user?.id || !role) return <div role="status">로그인 정보를 확인하는 중입니다.</div>;
+  return <TextbookOperationsWorkspaceContent key={`${user.id}:${role}`} />;
+}
+
+function TextbookOperationsWorkspaceContent() {
   const { data, loading, error, refresh, user, lastLoadedAt, loadDurationMs } = useTextbookOperationsData();
   const { role, canManageAll, isAdmin, isStaff, isTeacher } = useAuth();
+  const searchParams = useSearchParams();
+  const searchParamString = searchParams.toString();
+  const initialNavigationRef = useRef(parseTextbookNavigation(new URLSearchParams(searchParamString)));
+  const initialPrimaryFilters = initialNavigationRef.current.primary.filters as Row;
   const [saving, setSaving] = useState("");
   const [message, setMessage] = useState("");
   const [actionErrorMessage, setActionErrorMessage] = useState("");
-  const [query, setQuery] = useState("");
-  const [operationQuery, setOperationQuery] = useState("");
+  const [query, setQuery] = useState(() => text(initialPrimaryFilters.search));
+  const [operationQuery, setOperationQuery] = useState(() => text(initialPrimaryFilters.search));
   const deferredQuery = useDeferredValue(query);
   const deferredOperationQuery = useDeferredValue(operationQuery);
   const masterSearchRef = useRef<HTMLInputElement>(null);
   const operationSearchRef = useRef<HTMLInputElement>(null);
-  const [activeTab, setActiveTab] = useState("master");
-  const [masterListLimit, setMasterListLimit] = useState(MASTER_TEXTBOOK_PAGE_SIZE);
-  const [inventoryFilter, setInventoryFilter] = useState<InventoryFilter>("all");
-  const [textbookQualityFilter, setTextbookQualityFilter] = useState<TextbookQualityFilter>("all");
-  const [subjectGroupFilter, setSubjectGroupFilter] = useState("all");
-  const [schoolLevelGroupFilter, setSchoolLevelGroupFilter] = useState("all");
-  const [gradeLevelGroupFilter, setGradeLevelGroupFilter] = useState("all");
-  const [categoryGroupFilter, setCategoryGroupFilter] = useState("all");
+  const [activeTab, setActiveTab] = useState<TextbookTab>(initialNavigationRef.current.tab);
+  const [inventoryFilter, setInventoryFilter] = useState<InventoryFilter>(() => (text(initialPrimaryFilters.inventory) || "all") as InventoryFilter);
+  const [textbookQualityFilter, setTextbookQualityFilter] = useState<TextbookQualityFilter>(() => (text(initialPrimaryFilters.quality) || "all") as TextbookQualityFilter);
+  const [subjectGroupFilter, setSubjectGroupFilter] = useState(() => text(initialPrimaryFilters.subject) || "all");
+  const [schoolLevelGroupFilter, setSchoolLevelGroupFilter] = useState(() => text(initialPrimaryFilters.schoolLevel) || "all");
+  const [gradeLevelGroupFilter, setGradeLevelGroupFilter] = useState(() => text(initialPrimaryFilters.gradeLevel) || "all");
+  const [categoryGroupFilter, setCategoryGroupFilter] = useState(() => text(initialPrimaryFilters.subSubject) || "all");
   const [collapsedTextbookGroups, setCollapsedTextbookGroups] = useState<string[]>([]);
   const [selectedTextbookIds, setSelectedTextbookIds] = useState<string[]>([]);
   const [bulkTextbookPatch, setBulkTextbookPatch] = useState(emptyBulkTextbookPatch);
@@ -1359,20 +1320,64 @@ export function TextbookOperationsWorkspace() {
   const [selectedPurchaseLineIds, setSelectedPurchaseLineIds] = useState<string[]>([]);
   const [bulkOrderDialogOpen, setBulkOrderDialogOpen] = useState(false);
   const [bulkOrderQuantities, setBulkOrderQuantities] = useState<Record<string, string>>({});
-  const [purchaseBoardScope, setPurchaseBoardScope] = useState<PurchaseBoardScope>("active");
-  const [purchaseRequestFilter, setPurchaseRequestFilter] = useState<PurchaseRequestFilter>("all");
-  const [purchaseOrderFilter, setPurchaseOrderFilter] = useState<PurchaseOrderFilter>("all");
+  const [purchaseBoardScope, setPurchaseBoardScope] = useState<PurchaseBoardScope>(() => (text(initialPrimaryFilters.boardScope) || "active") as PurchaseBoardScope);
+  const [purchaseRequestFilter, setPurchaseRequestFilter] = useState<PurchaseRequestFilter>(() => (text(initialPrimaryFilters.requestFilter) || "all") as PurchaseRequestFilter);
+  const [purchaseOrderFilter, setPurchaseOrderFilter] = useState<PurchaseOrderFilter>(() => (text(initialPrimaryFilters.orderFilter) || "all") as PurchaseOrderFilter);
   const [inventoryAuditFilter, setInventoryAuditFilter] = useState<InventoryAuditFilter>("recommended");
   const [inventoryCountLocationId, setInventoryCountLocationId] = useState("");
+  const [inventoryLocationReference, setInventoryLocationReference] = useState<{ ready: boolean; locations: Row[]; defaultLocationId: string; error: string }>({ ready: false, locations: [], defaultLocationId: "", error: "" });
+  const [inventoryLocationRetryKey, setInventoryLocationRetryKey] = useState(0);
   const [inventoryCountDrafts, setInventoryCountDrafts] = useState<Record<string, string>>({});
   const [inventoryCountMemoDrafts, setInventoryCountMemoDrafts] = useState<Record<string, string>>({});
   const [saleForm, setSaleForm] = useState(emptySaleForm);
-  const [salesProcessFilter, setSalesProcessFilter] = useState<SalesProcessFilter>("all");
+  const [salesProcessFilter, setSalesProcessFilter] = useState<SalesProcessFilter>(() => (text(initialPrimaryFilters.status) || "all") as SalesProcessFilter);
+  const [saleHistoryFilters, setSaleHistoryFilters] = useState(initialNavigationRef.current.history.filters);
+  const [observedQuery, setObservedQuery] = useState(searchParamString);
+  const [navigationKey, setNavigationKey] = useState(searchParamString);
+  const handledQuery = useRef(searchParamString);
+  const adoptLocationQuery = useCallback((queryString: string) => {
+    if (handledQuery.current === queryString) return;
+    handledQuery.current = queryString;
+    setNavigationKey(queryString);
+    const restored = parseTextbookNavigation(new URLSearchParams(queryString));
+    initialNavigationRef.current = restored;
+    const filters = restored.primary.filters as Row;
+    setActiveTab(restored.tab);
+    setQuery(text(filters.search));
+    setOperationQuery(text(filters.search));
+    setSubjectGroupFilter(text(filters.subject) || "all");
+    setSchoolLevelGroupFilter(text(filters.schoolLevel) || "all");
+    setGradeLevelGroupFilter(text(filters.gradeLevel) || "all");
+    setCategoryGroupFilter(text(filters.subSubject) || "all");
+    setTextbookQualityFilter((text(filters.quality) || "all") as TextbookQualityFilter);
+    setInventoryFilter((text(filters.inventory) || "all") as InventoryFilter);
+    setPurchaseBoardScope((text(filters.boardScope) || "active") as PurchaseBoardScope);
+    setPurchaseRequestFilter((text(filters.requestFilter) || "all") as PurchaseRequestFilter);
+    setPurchaseOrderFilter((text(filters.orderFilter) || "all") as PurchaseOrderFilter);
+    setSalesProcessFilter((text(filters.status) || "all") as SalesProcessFilter);
+    setSaleHistoryFilters(restored.history.filters);
+    setSelectedTextbookIds([]);
+    setSelectedPurchaseLineIds([]);
+    setSelectedSaleLineIds([]);
+    setSelectedClosingIds([]);
+  }, []);
+  if (observedQuery !== searchParamString) {
+    setObservedQuery(searchParamString);
+    adoptLocationQuery(searchParamString);
+  }
+  useEffect(() => {
+    const onPopState = () => adoptLocationQuery(new URLSearchParams(window.location.search).toString());
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [adoptLocationQuery]);
   const [selectedSaleLineIds, setSelectedSaleLineIds] = useState<string[]>([]);
   const [saleDialogOpen, setSaleDialogOpen] = useState(false);
   const [closingDialogOpen, setClosingDialogOpen] = useState(false);
   const [selectedClosingIds, setSelectedClosingIds] = useState<string[]>([]);
   const [selectedClosingDetailId, setSelectedClosingDetailId] = useState("");
+  const [selectedClosingScope, setSelectedClosingScope] = useState<{ closingMonth: string; subject: string } | null>(null);
+  const [closingMovementSearch, setClosingMovementSearch] = useState("");
+  const [closingDetailResource, setClosingDetailResource] = useState<{ value: TextbookClosingDetail | null; loading: boolean; error: string }>({ value: null, loading: false, error: "" });
   const [excludedStudentIds, setExcludedStudentIds] = useState<string[]>([]);
   const [saleStudentQuery, setSaleStudentQuery] = useState("");
   const [closingForm, setClosingForm] = useState({
@@ -1382,6 +1387,124 @@ export function TextbookOperationsWorkspace() {
     openingAmount: "0",
     memo: "",
   });
+
+  const masterFilters = useMemo(() => ({
+    search: deferredQuery,
+    subject: subjectGroupFilter,
+    schoolLevel: schoolLevelGroupFilter,
+    gradeLevel: gradeLevelGroupFilter,
+    subSubject: categoryGroupFilter,
+    quality: textbookQualityFilter,
+    inventory: inventoryFilter,
+  }), [categoryGroupFilter, deferredQuery, gradeLevelGroupFilter, inventoryFilter, schoolLevelGroupFilter, subjectGroupFilter, textbookQualityFilter]);
+  const purchaseFilters = useMemo(() => ({
+    search: deferredOperationQuery,
+    boardScope: purchaseBoardScope,
+    requestFilter: purchaseRequestFilter,
+    orderFilter: purchaseOrderFilter,
+  }), [deferredOperationQuery, purchaseBoardScope, purchaseOrderFilter, purchaseRequestFilter]);
+  const salesFilters = useMemo(() => ({ search: deferredOperationQuery, status: salesProcessFilter }), [deferredOperationQuery, salesProcessFilter]);
+  const commitPrimaryPage = useCallback((commit: { page: number; pageSize: 10 | 15 | 20; filters: TextbookNavigationState["primary"]["filters"] }) => {
+    const parsed = parseTextbookNavigation(new URLSearchParams(window.location.search));
+    const next = serializeTextbookNavigation(new URLSearchParams(window.location.search), {
+      ...parsed,
+      tab: activeTab,
+      primary: { page: commit.page, pageSize: commit.pageSize, filters: commit.filters },
+    });
+    const queryString = next.toString();
+    handledQuery.current = queryString;
+    window.history.replaceState(null, "", `${window.location.pathname}?${queryString}`);
+  }, [activeTab]);
+  const primaryRestoredPage = initialNavigationRef.current.tab === activeTab ? initialNavigationRef.current.primary.page : 1;
+  useEffect(() => {
+    if (activeTab !== "inventory" || !user?.id || !["admin", "staff"].includes(text(role))) {
+      setInventoryLocationReference((current) => current.ready || current.locations.length || current.error ? { ready: false, locations: [], defaultLocationId: "", error: "" } : current);
+      return;
+    }
+    const abort = new AbortController();
+    const actorKey = `${user.id}:${role}`;
+    void listTextbookLocationReferencePage({ page: 1, pageSize: 20, filters: { search: "" }, sort: "match-order" }, { signal: abort.signal }).then((result) => {
+      if (abort.signal.aborted || actorKey !== `${user.id}:${role}`) return;
+      const locations = result.rows.map((option) => ({ id: option.value, name: option.label, code: option.description || "" }));
+      const defaultLocationId = result.defaultLocation?.id || "";
+      setInventoryLocationReference({ ready: true, locations, defaultLocationId, error: "" });
+      setInventoryCountLocationId((current) => current || defaultLocationId);
+    }, (error) => {
+      if (!abort.signal.aborted) setInventoryLocationReference({ ready: false, locations: [], defaultLocationId: "", error: getTextbookActionErrorMessage(error) });
+    });
+    return () => abort.abort();
+  }, [activeTab, inventoryLocationRetryKey, role, user?.id]);
+  const preparedInventoryLocationId = inventoryCountLocationId || inventoryLocationReference.defaultLocationId;
+  const numbered = useTextbookNumberedData({
+    viewerId: text(user?.id),
+    viewerRole: text(role),
+    authReady: Boolean(user?.id && role),
+    operationsEnabled: activeTab !== "requests",
+    master: { enabled: activeTab === "master", filters: masterFilters, restoredPage: primaryRestoredPage, restorationKey: navigationKey },
+    requests: { enabled: activeTab === "requests", filters: purchaseFilters, restoredPage: primaryRestoredPage, restorationKey: navigationKey },
+    purchase: { enabled: activeTab === "purchase", filters: purchaseFilters, restoredPage: primaryRestoredPage, restorationKey: navigationKey },
+    sales: { enabled: activeTab === "sales", filters: salesFilters, restoredPage: primaryRestoredPage, restorationKey: navigationKey },
+    saleHistory: { enabled: activeTab === "sales", filters: saleHistoryFilters, restoredPage: initialNavigationRef.current.history.page, restorationKey: navigationKey },
+    inventory: { enabled: activeTab === "inventory" && inventoryLocationReference.ready, filters: { ...masterFilters, locationId: preparedInventoryLocationId, audit: inventoryAuditFilter }, restoredPage: primaryRestoredPage, restorationKey: navigationKey },
+    inventoryHistory: { enabled: activeTab === "inventory" && inventoryLocationReference.ready, filters: { textbookId: null, locationId: preparedInventoryLocationId || null } },
+    closing: { enabled: activeTab === "closing", filters: { month: "all", subject: "all", status: "all" }, restoredPage: primaryRestoredPage, restorationKey: navigationKey },
+    closingMovements: { enabled: Boolean(selectedClosingDetailId && selectedClosingScope), filters: { closingMonth: selectedClosingScope?.closingMonth || "", subject: selectedClosingScope?.subject || "all", search: closingMovementSearch }, restoredPage: initialNavigationRef.current.movements.page, restorationKey: navigationKey },
+  });
+  const requestRendererData = useMemo(() => buildPreparedPurchaseRendererData(numbered.requests.rows), [numbered.requests.rows]);
+  const purchaseRendererData = useMemo(() => buildPreparedPurchaseRendererData(numbered.purchase.rows), [numbered.purchase.rows]);
+  const saleRendererData = useMemo(() => buildPreparedSaleRendererData(numbered.sales.rows), [numbered.sales.rows]);
+  useEffect(() => {
+    const requested = initialNavigationRef.current.detail;
+    if (requested?.kind !== "closing" || selectedClosingDetailId) return;
+    const row = numbered.closing.rows.find((item) => item.id === requested.id);
+    if (!row) return;
+    setSelectedClosingDetailId(row.id);
+    setSelectedClosingScope({ closingMonth: row.closing_month, subject: row.subject || "all" });
+    setClosingMovementSearch(initialNavigationRef.current.movements.search);
+  }, [numbered.closing.rows, selectedClosingDetailId]);
+  const activePrimaryState = activeTab === "master" ? numbered.master : activeTab === "requests" ? numbered.requests : activeTab === "purchase" ? numbered.purchase
+    : activeTab === "sales" ? numbered.sales : activeTab === "inventory" ? numbered.inventory : numbered.closing;
+  useEffect(() => {
+    if (activePrimaryState.loading || activePrimaryState.error || !activePrimaryState.acceptedFilters || activePrimaryState.totalCount === null) return;
+    commitPrimaryPage({ page: activePrimaryState.page, pageSize: activePrimaryState.pageSize, filters: activePrimaryState.acceptedFilters as TextbookNavigationState["primary"]["filters"] });
+  }, [activePrimaryState.acceptedFilters, activePrimaryState.error, activePrimaryState.loading, activePrimaryState.page, activePrimaryState.pageSize, activePrimaryState.totalCount, commitPrimaryPage]);
+  useEffect(() => {
+    if (activeTab !== "sales" || numbered.saleHistory.loading || numbered.saleHistory.error || !numbered.saleHistory.acceptedFilters || numbered.saleHistory.totalCount === null) return;
+    const current = new URLSearchParams(window.location.search);
+    const parsed = parseTextbookNavigation(current);
+    const next = serializeTextbookNavigation(current, { ...parsed, history: { page: numbered.saleHistory.page, pageSize: numbered.saleHistory.pageSize, filters: numbered.saleHistory.acceptedFilters } });
+    const queryString = next.toString();
+    handledQuery.current = queryString;
+    window.history.replaceState(null, "", `${window.location.pathname}?${queryString}`);
+  }, [activeTab, numbered.saleHistory.acceptedFilters, numbered.saleHistory.error, numbered.saleHistory.loading, numbered.saleHistory.page, numbered.saleHistory.pageSize, numbered.saleHistory.totalCount]);
+  useEffect(() => {
+    if (!selectedClosingDetailId || numbered.closingMovements.loading || numbered.closingMovements.error || !numbered.closingMovements.acceptedFilters || numbered.closingMovements.totalCount === null) return;
+    const current = new URLSearchParams(window.location.search);
+    const parsed = parseTextbookNavigation(current);
+    const next = serializeTextbookNavigation(current, { ...parsed,
+      movements: { page: numbered.closingMovements.page, pageSize: numbered.closingMovements.pageSize, search: numbered.closingMovements.acceptedFilters.search },
+      detail: { kind: "closing", id: selectedClosingDetailId },
+    });
+    const queryString = next.toString();
+    handledQuery.current = queryString;
+    window.history.replaceState(null, "", `${window.location.pathname}?${queryString}`);
+  }, [numbered.closingMovements.acceptedFilters, numbered.closingMovements.error, numbered.closingMovements.loading, numbered.closingMovements.page, numbered.closingMovements.pageSize, numbered.closingMovements.totalCount, selectedClosingDetailId]);
+
+  useEffect(() => {
+    if (!selectedClosingDetailId || !user?.id || !role) {
+      setClosingDetailResource({ value: null, loading: false, error: "" });
+      return;
+    }
+    const abort = new AbortController();
+    const actorKey = `${user.id}:${role}`;
+    setClosingDetailResource({ value: null, loading: true, error: "" });
+    void getTextbookClosingDetail(selectedClosingDetailId, { signal: abort.signal }).then((value) => {
+      if (!abort.signal.aborted && actorKey === `${user.id}:${role}`) setClosingDetailResource({ value, loading: false, error: "" });
+    }, (error) => {
+      if (!abort.signal.aborted && actorKey === `${user.id}:${role}`) setClosingDetailResource({ value: null, loading: false, error: getTextbookActionErrorMessage(error) });
+    });
+    return () => abort.abort();
+  }, [role, selectedClosingDetailId, user?.id]);
 
   const locations = useMemo(
     () => data.locations.length > 0
@@ -1394,7 +1517,7 @@ export function TextbookOperationsWorkspace() {
   );
   const selectedLocationId = purchaseForm.locationId || data.defaultLocationId || text(locations[0]?.id);
   const saleLocationId = saleForm.locationId || data.defaultLocationId || text(locations[0]?.id);
-  const selectedInventoryCountLocationId = inventoryCountLocationId || data.defaultLocationId || text(locations[0]?.id);
+  const selectedInventoryCountLocationId = preparedInventoryLocationId;
   const schemaDisabled = !data.isSchemaReady;
   const schemaMessage = schemaDisabled
     ? `교재 관리 DB 마이그레이션이 아직 적용되지 않았습니다. 누락: ${data.missingTables.join(", ")}`
@@ -1477,89 +1600,17 @@ export function TextbookOperationsWorkspace() {
     [activeInventory, subjectGroupFilter, textbookSubSubjectSettings],
   );
   const duplicateTextbookTitleKeys = useMemo(() => buildDuplicateTextbookTitleKeys(activeInventory), [activeInventory]);
-  const textbookSearchIndexById = useMemo(
-    () => new Map(data.inventory.map((row) => [getRecordId(row), buildTextbookSearchIndex(row)])),
-    [data.inventory],
-  );
   const activeTextbookQualityFilter = activeTab === "master" ? textbookQualityFilter : "all";
-  const listFilteredInventory = useMemo(() => data.inventory.filter((row) => matchesTextbookMasterFilters(row, {
-    search: deferredQuery,
-    subject: subjectGroupFilter,
-    schoolLevel: schoolLevelGroupFilter,
-    gradeLevel: gradeLevelGroupFilter,
-    subSubject: categoryGroupFilter,
-    quality: activeTextbookQualityFilter,
-    inventory: "all",
-  }, duplicateTextbookTitleKeys, textbookSearchIndexById.get(getRecordId(row)))), [activeTextbookQualityFilter, categoryGroupFilter, data.inventory, deferredQuery, duplicateTextbookTitleKeys, gradeLevelGroupFilter, schoolLevelGroupFilter, subjectGroupFilter, textbookSearchIndexById]);
-  const textbookQualityFilterCounts = useMemo(
-    () => {
-      const counts = Object.fromEntries(
-        (Object.keys(textbookQualityFilterLabels) as TextbookQualityFilter[]).map((filter) => [filter, 0]),
-      ) as Record<TextbookQualityFilter, number>;
-
-      for (const row of data.inventory) {
-        if (!matchesTextbookTaxonomy(row, {
-          subject: subjectGroupFilter === "all" ? "" : subjectGroupFilter,
-          schoolLevel: schoolLevelGroupFilter === "all" ? "" : schoolLevelGroupFilter,
-          gradeLevel: gradeLevelGroupFilter === "all" ? "" : gradeLevelGroupFilter,
-          subSubject: categoryGroupFilter === "all" ? "" : categoryGroupFilter,
-        })) continue;
-
-        if (!isActiveTextbook(row)) {
-          counts.inactive += 1;
-          continue;
-        }
-
-        counts.all += 1;
-        const issues = getTextbookQualityIssues(row, duplicateTextbookTitleKeys);
-        let hasIssue = false;
-        for (const filter of textbookQualityIssueFilterKeys) {
-          if (filter === "inactive") continue;
-          if (issues[filter]) {
-            counts[filter] += 1;
-            hasIssue = true;
-          }
-        }
-        if (hasIssue) counts.attention += 1;
-      }
-
-      return counts;
-    },
-    [categoryGroupFilter, data.inventory, duplicateTextbookTitleKeys, gradeLevelGroupFilter, schoolLevelGroupFilter, subjectGroupFilter],
-  );
-  const inventoryFilterCounts = useMemo(
-    () => {
-      const counts = Object.fromEntries(
-        (Object.keys(inventoryFilterLabels) as InventoryFilter[]).map((filter) => [filter, 0]),
-      ) as Record<InventoryFilter, number>;
-
-      for (const row of listFilteredInventory) {
-        const totalQuantity = numberValue(row.totalQuantity);
-        counts.all += 1;
-        if (totalQuantity < 0) {
-          counts.negative += 1;
-          counts.shortage += 1;
-        }
-        if (totalQuantity === 0) counts.unused += 1;
-        if (totalQuantity > 0 && totalQuantity <= INVENTORY_LOW_STOCK_THRESHOLD) counts.shortage += 1;
-        if (totalQuantity >= 20) counts.surplus += 1;
-      }
-
-      return counts;
-    },
-    [listFilteredInventory],
-  );
-  const filteredInventory = useMemo(
-    () => listFilteredInventory.filter((row) => matchesInventoryFilter(row, inventoryFilter)),
-    [inventoryFilter, listFilteredInventory],
-  );
-  const masterVisibleInventory = useMemo(
-    () => filteredInventory.slice(0, masterListLimit),
-    [filteredInventory, masterListLimit],
-  );
+  const acceptedMasterSummary = numbered.master.summary.value;
+  const textbookQualityFilterCounts = acceptedMasterSummary?.qualityCounts
+    || Object.fromEntries((Object.keys(textbookQualityFilterLabels) as TextbookQualityFilter[]).map((filter) => [filter, 0])) as Record<TextbookQualityFilter, number>;
+  const inventoryFilterCounts = acceptedMasterSummary?.inventoryCounts
+    || Object.fromEntries((Object.keys(inventoryFilterLabels) as InventoryFilter[]).map((filter) => [filter, 0])) as Record<InventoryFilter, number>;
+  const filteredInventory = numbered.master.rows;
+  const masterVisibleInventory = numbered.master.rows;
   const inventoryById = useMemo(
-    () => new Map(data.inventory.map((row) => [getRecordId(row), row])),
-    [data.inventory],
+    () => new Map(masterVisibleInventory.map((row) => [getRecordId(row), row])),
+    [masterVisibleInventory],
   );
   const visibleTextbookIds = useMemo(
     () => masterVisibleInventory.map(getRecordId).filter(Boolean),
@@ -1570,7 +1621,7 @@ export function TextbookOperationsWorkspace() {
   const selectedTextbookRows = useMemo(
     () => selectedTextbookIds
       .map((id) => inventoryById.get(id))
-      .filter((row): row is Row => Boolean(row)),
+      .filter((row): row is NonNullable<typeof row> => Boolean(row)),
     [inventoryById, selectedTextbookIds],
   );
   const selectedTextbookCleanupRows = useMemo(
@@ -1603,22 +1654,16 @@ export function TextbookOperationsWorkspace() {
     categoryGroupFilter !== "all" ? categoryGroupFilter : "",
   ].filter(Boolean).length;
   const textbookEmptyLabel = hasTextbookListFilter ? "조건에 맞는 교재가 없습니다" : "교재가 없습니다";
-  const hasMoreMasterTextbooks = filteredInventory.length > masterVisibleInventory.length;
-  const remainingMasterTextbookCount = Math.max(0, filteredInventory.length - masterVisibleInventory.length);
-  const masterVisibleSummary = hasMoreMasterTextbooks
-    ? `${formatQuantity(masterVisibleInventory.length)}/${formatQuantity(filteredInventory.length)}종`
-    : `${formatQuantity(filteredInventory.length)}종`;
-
   useEffect(() => {
+    if (activeTab !== "master") return;
     const availableIds = new Set(filteredInventory.map(getRecordId).filter(Boolean));
     setSelectedTextbookIds((current) => {
       const next = current.filter((id) => availableIds.has(id));
       return next.length === current.length ? current : next;
     });
-  }, [filteredInventory]);
+  }, [activeTab, filteredInventory]);
 
   useEffect(() => {
-    setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
   }, [
     activeTextbookQualityFilter,
     categoryGroupFilter,
@@ -1662,23 +1707,32 @@ export function TextbookOperationsWorkspace() {
   ]);
 
   useEffect(() => {
-    setSelectedTextbookIds((current) => current.filter((id) => visibleTextbookIdSet.has(id)));
-  }, [visibleTextbookIdSet]);
+    if (activeTab !== "requests" && activeTab !== "purchase") return;
+    const preparedRows = activeTab === "requests" ? numbered.requests.rows : numbered.purchase.rows;
+    const existingIds = new Set(preparedRows.flatMap((row) => row.memberLineIds));
+    setSelectedPurchaseLineIds((current) => {
+      const next = current.filter((id) => existingIds.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [activeTab, numbered.purchase.rows, numbered.requests.rows]);
 
   useEffect(() => {
-    const existingIds = new Set(data.purchaseOrderLines.map(getRecordId).filter(Boolean));
-    setSelectedPurchaseLineIds((current) => current.filter((id) => existingIds.has(id)));
-  }, [data.purchaseOrderLines]);
+    if (activeTab !== "sales") return;
+    const existingIds = new Set(numbered.sales.rows.map((row) => row.id));
+    setSelectedSaleLineIds((current) => {
+      const next = current.filter((id) => existingIds.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [activeTab, numbered.sales.rows]);
 
   useEffect(() => {
-    const existingIds = new Set(data.saleLines.map(getRecordId).filter(Boolean));
-    setSelectedSaleLineIds((current) => current.filter((id) => existingIds.has(id)));
-  }, [data.saleLines]);
-
-  useEffect(() => {
-    const existingIds = new Set(data.monthlyClosings.map(getRecordId).filter(Boolean));
-    setSelectedClosingIds((current) => current.filter((id) => existingIds.has(id)));
-  }, [data.monthlyClosings]);
+    if (activeTab !== "closing") return;
+    const existingIds = new Set(numbered.closing.rows.map((row) => row.id));
+    setSelectedClosingIds((current) => {
+      const next = current.filter((id) => existingIds.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [activeTab, numbered.closing.rows]);
 
   useEffect(() => {
     if (!canManageTextbookOperations && activeTab !== "requests") {
@@ -1690,24 +1744,6 @@ export function TextbookOperationsWorkspace() {
       setSelectedClosingIds([]);
     }
   }, [activeTab, canManageTextbookOperations]);
-
-  useEffect(() => {
-    const validDraftKeys = new Set(
-      data.inventory.flatMap((row) => {
-        if (!isActiveTextbook(row)) return [];
-        const rowId = getRecordId(row);
-        return locations.map((location) => getInventoryCountDraftKey(rowId, getRecordId(location)));
-      }),
-    );
-    setInventoryCountDrafts((current) => {
-      const nextEntries = Object.entries(current).filter(([key]) => validDraftKeys.has(key));
-      return nextEntries.length === Object.keys(current).length ? current : Object.fromEntries(nextEntries);
-    });
-    setInventoryCountMemoDrafts((current) => {
-      const nextEntries = Object.entries(current).filter(([key]) => validDraftKeys.has(key));
-      return nextEntries.length === Object.keys(current).length ? current : Object.fromEntries(nextEntries);
-    });
-  }, [data.inventory, locations]);
 
   useEffect(() => {
     if (gradeLevelGroupFilter === "all") return;
@@ -1725,25 +1761,9 @@ export function TextbookOperationsWorkspace() {
     () => new Map(data.purchaseOrders.map((order) => [getRecordId(order), order])),
     [data.purchaseOrders],
   );
-  const activePurchaseOrderLines = useMemo(
-    () => data.purchaseOrderLines.filter((line) => shouldShowOperationalPurchaseLine(line, getPurchaseLineOrder(line, purchaseOrdersById), data.textbooks)),
-    [data.purchaseOrderLines, data.textbooks, purchaseOrdersById],
-  );
   const activeSaleLines = useMemo(
     () => data.saleLines.filter((line) => shouldShowOperationalSaleLine(line, data.textbooks)),
     [data.saleLines, data.textbooks],
-  );
-  const activeTextbookIdSet = useMemo(
-    () => new Set(activeTextbooks.map(getRecordId).filter(Boolean)),
-    [activeTextbooks],
-  );
-  const activeStockMoves = useMemo(
-    () => data.stockMoves.filter((move) => activeTextbookIdSet.has(text(move.textbook_id || move.textbookId))),
-    [activeTextbookIdSet, data.stockMoves],
-  );
-  const activeStockCounts = useMemo(
-    () => data.stockCounts.filter((count) => activeTextbookIdSet.has(text(count.textbook_id || count.textbookId))),
-    [activeTextbookIdSet, data.stockCounts],
   );
   const purchaseLinesById = useMemo(
     () => new Map(data.purchaseOrderLines.map((line) => [getRecordId(line), line])),
@@ -1979,7 +1999,9 @@ export function TextbookOperationsWorkspace() {
     .length;
   const saleProjectedAmount = saleDraft.totalAmount;
   const saleProjectedEndingQuantity = saleDraft.availableQuantity - saleDraft.totalQuantity;
-  const operationMetrics = useMemo(() => buildTextbookOpsMetrics(data), [data]);
+  const operationMetrics = numbered.operations.value || {
+    requestCount: 0, unregisteredRequestCount: 0, orderNeededCount: 0, receivingBacklogCount: 0, partialReceiptCount: 0, issueWaitingCount: 0, stockRiskCount: 0,
+  };
   const operationQueueTotal =
     operationMetrics.unregisteredRequestCount +
     operationMetrics.orderNeededCount +
@@ -1989,8 +2011,8 @@ export function TextbookOperationsWorkspace() {
   const showsInventoryTools = activeTab === "master" || activeTab === "inventory";
   const activeProcessHasRows =
     activeTab === "requests" ? operationMetrics.requestCount > 0 :
-    activeTab === "purchase" ? activePurchaseOrderLines.length > 0 :
-    activeTab === "sales" ? activeSaleLines.length > 0 :
+    activeTab === "purchase" ? (numbered.purchase.totalCount || 0) > 0 :
+    activeTab === "sales" ? (numbered.sales.totalCount || 0) > 0 :
     false;
   const showsProcessSearch = activeProcessHasRows || Boolean(text(operationQuery));
   const showsProcessCommandCenter =
@@ -2019,11 +2041,12 @@ export function TextbookOperationsWorkspace() {
     activeTab === "inventory" && inventoryFilter === "shortage" ? "stockRisk" :
     "";
   const activeTabResultCount =
-    activeTab === "master" || activeTab === "inventory" ? filteredInventory.length :
-    activeTab === "requests" ? operationMetrics.requestCount :
-    activeTab === "purchase" ? activePurchaseOrderLines.length :
-    activeTab === "sales" ? activeSaleLines.length :
-    data.monthlyClosings.length;
+    activeTab === "master" ? numbered.master.totalCount || 0 :
+    activeTab === "inventory" ? numbered.inventory.totalCount || 0 :
+    activeTab === "requests" ? numbered.requests.totalCount || 0 :
+    activeTab === "purchase" ? numbered.purchase.totalCount || 0 :
+    activeTab === "sales" ? numbered.sales.totalCount || 0 :
+    numbered.closing.totalCount || 0;
   const workspaceStatusItems: TextbookOperationsStatusItem[] = [
     { id: "result", label: "표시", value: `${formatQuantity(activeTabResultCount)}건` },
     { id: "filters", label: "필터", value: `${formatQuantity(textbookListFilterCount)}개`, hidden: textbookListFilterCount <= 0 },
@@ -2040,7 +2063,6 @@ export function TextbookOperationsWorkspace() {
           setQuery("");
           setSelectedTextbookIds([]);
           setBulkTextbookPatch(emptyBulkTextbookPatch);
-          setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
           return;
         }
         if (document.activeElement === operationSearchRef.current && operationQuery) {
@@ -2112,8 +2134,6 @@ export function TextbookOperationsWorkspace() {
     .filter((item) => closingForm.subject === "all" || item.team === closingForm.subject);
   // Pre-science closing contract: const closingTargetSubjects = closingForm.subject === "all" ? ["all", "english", "math"] : [closingForm.subject]
   const closingTargetSubjects = closingForm.subject === "all" ? ["all", "english", "math", "science"] : [closingForm.subject];
-  const selectedClosingDetail = data.monthlyClosings.find((row) => getRecordId(row) === selectedClosingDetailId);
-
   function setPurchaseField(name: string, value: string) {
     setPurchaseForm((current) => {
       if (name === "textbookId") {
@@ -2423,21 +2443,18 @@ export function TextbookOperationsWorkspace() {
     clearTransientTextbookFeedback();
     setQuery(value);
     clearMasterSelection();
-    setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
   }
 
   function changeInventoryFilter(value: InventoryFilter) {
     clearTransientTextbookFeedback();
     setInventoryFilter(value);
     clearMasterSelection();
-    setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
   }
 
   function changeTextbookQualityFilter(value: TextbookQualityFilter) {
     clearTransientTextbookFeedback();
     setTextbookQualityFilter(value);
     clearMasterSelection();
-    setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
   }
 
   function changeSubjectGroupFilter(value: string) {
@@ -2445,7 +2462,6 @@ export function TextbookOperationsWorkspace() {
     setSubjectGroupFilter(value);
     setCategoryGroupFilter("all");
     clearMasterSelection();
-    setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
   }
 
   function changeSchoolLevelGroupFilter(value: string) {
@@ -2453,21 +2469,18 @@ export function TextbookOperationsWorkspace() {
     setSchoolLevelGroupFilter(value);
     setGradeLevelGroupFilter("all");
     clearMasterSelection();
-    setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
   }
 
   function changeGradeLevelGroupFilter(value: string) {
     clearTransientTextbookFeedback();
     setGradeLevelGroupFilter(value);
     clearMasterSelection();
-    setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
   }
 
   function changeCategoryGroupFilter(value: string) {
     clearTransientTextbookFeedback();
     setCategoryGroupFilter(value);
     clearMasterSelection();
-    setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
   }
 
   function requestTextbookConfirmation(request: TextbookConfirmationRequest) {
@@ -2493,8 +2506,15 @@ export function TextbookOperationsWorkspace() {
       setSelectedPurchaseLineIds([]);
       setSelectedSaleLineIds([]);
       setSelectedClosingIds([]);
+      const params = new URLSearchParams(window.location.search);
+      params.set("textbookTab", value);
+      params.set("textbookPage", "1");
+      params.delete("textbookFilters");
+      const queryString = params.toString();
+      window.history.pushState(null, "", `${window.location.pathname}?${queryString}`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
     }
-    setActiveTab(value);
+    setActiveTab(value as TextbookTab);
     setMessage("");
     setActionErrorMessage("");
     if (value !== "requests" && value !== "purchase" && value !== "sales") {
@@ -2521,7 +2541,6 @@ export function TextbookOperationsWorkspace() {
     setCategoryGroupFilter("all");
     setCollapsedTextbookGroups([]);
     clearMasterSelection();
-    setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
   }
 
   function resetTextbookListFilters() {
@@ -4901,18 +4920,46 @@ export function TextbookOperationsWorkspace() {
       ) : null}
 
       <ClosingDetailDialog
-        open={Boolean(selectedClosingDetail)}
-        row={selectedClosingDetail}
-        stockMoves={data.stockMoves}
-        textbooks={data.textbooks}
-        publishers={data.publishers}
-        suppliers={data.suppliers}
-        publisherSupplierLinks={data.publisherSupplierLinks}
-        locations={locations}
+        open={Boolean(selectedClosingDetailId)}
+        detail={closingDetailResource.value}
+        loading={closingDetailResource.loading}
+        error={closingDetailResource.error}
+        rows={numbered.closingMovements.rows}
+        movementSearch={closingMovementSearch}
+        onMovementSearchChange={setClosingMovementSearch}
+        movementPage={numbered.closingMovements.page}
+        movementPageSize={numbered.closingMovements.pageSize}
+        movementTotalCount={numbered.closingMovements.totalCount}
+        movementLoading={numbered.closingMovements.loading}
+        onMovementPageChange={(page) => { void numbered.closingMovements.goToPage(page); }}
+        movementPageSizeMode={numbered.closingMovements.pageSizeMode}
+        onMovementPageSizeChange={numbered.closingMovements.setPageSizePreference}
         onOpenChange={(open) => {
-          if (!open) setSelectedClosingDetailId("");
+          if (!open) {
+            setSelectedClosingDetailId("");
+            setSelectedClosingScope(null);
+            setClosingMovementSearch("");
+          }
         }}
       />
+
+      {activeTab === "inventory" && inventoryLocationReference.error ? (
+        <Alert role="alert">
+          <AlertDescription className="flex items-center justify-between gap-3">
+            <span>{inventoryLocationReference.error}</span>
+            <Button type="button" size="sm" variant="outline" aria-label="재고 위치 다시 시도" onClick={() => setInventoryLocationRetryKey((current) => current + 1)}>다시 시도</Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {activePrimaryState.error ? (
+        <Alert role="alert">
+          <AlertDescription className="flex items-center justify-between gap-3">
+            <span>{getTextbookActionErrorMessage(activePrimaryState.error)}</span>
+            <Button type="button" size="sm" variant="outline" onClick={() => { void activePrimaryState.retry(); }}>다시 시도</Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       <Tabs value={activeTab} onValueChange={changeActiveTab} className="min-h-0 min-w-0 flex-1">
         <TabsList
@@ -4926,7 +4973,7 @@ export function TextbookOperationsWorkspace() {
             <TabsTrigger value="master" className={textbookTabTriggerClassName} aria-label="마스터">
               <BookOpen className="size-4" />
               마스터
-              <TabCountBadge value={activeTextbooks.length} />
+              <TabCountBadge value={numbered.master.totalCount || 0} />
             </TabsTrigger>
           ) : null}
           <TabsTrigger value="requests" className={textbookTabTriggerClassName} aria-label="요청">
@@ -4949,12 +4996,12 @@ export function TextbookOperationsWorkspace() {
               <TabsTrigger value="inventory" className={textbookTabTriggerClassName} aria-label="재고">
                 <PackageCheck className="size-4" />
                 재고
-                <TabCountBadge value={activeInventory.length} />
+                <TabCountBadge value={numbered.inventory.totalCount || 0} />
               </TabsTrigger>
               <TabsTrigger value="closing" className={textbookTabTriggerClassName} aria-label="정산">
                 <ClipboardCheck className="size-4" />
                 정산
-                <TabCountBadge value={data.monthlyClosings.length} />
+                <TabCountBadge value={numbered.closing.totalCount || 0} />
               </TabsTrigger>
             </>
           ) : null}
@@ -5215,7 +5262,8 @@ export function TextbookOperationsWorkspace() {
 
           <TextbookTable
             rows={masterVisibleInventory}
-            locations={locations}
+            locations={acceptedMasterSummary?.locations || []}
+            summary={acceptedMasterSummary}
             onSelectTextbook={selectMasterTextbook}
             amountMode="salePrice"
             duplicateTitleKeys={duplicateTextbookTitleKeys}
@@ -5230,37 +5278,34 @@ export function TextbookOperationsWorkspace() {
             emptyActionLabel={hasTextbookListFilter ? "필터 초기화" : "신규 등록"}
             onEmptyAction={hasTextbookListFilter ? resetTextbookListFilters : openNewMasterDialog}
           />
-          <div className="flex min-h-9 items-center justify-between gap-2 text-xs text-muted-foreground">
-            <span aria-live="polite">{masterVisibleSummary}</span>
-            {hasMoreMasterTextbooks ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 rounded-md"
-                aria-label={`교재 더 보기: ${formatQuantity(remainingMasterTextbookCount)}건 남음`}
-                title={`${formatQuantity(remainingMasterTextbookCount)}건 더 보기`}
-                onClick={() => setMasterListLimit((current) => current + MASTER_TEXTBOOK_PAGE_SIZE)}
-              >
-                더 보기 · {formatQuantity(remainingMasterTextbookCount)}건
-              </Button>
-            ) : null}
-          </div>
+          <DataTablePagination
+            page={numbered.master.page}
+            pageSize={numbered.master.pageSize}
+            totalCount={numbered.master.totalCount}
+            loading={numbered.master.loading}
+            onPageChange={(page) => { void numbered.master.goToPage(page); }}
+            pageSizeMode={numbered.master.pageSizeMode}
+            onPageSizeChange={numbered.master.setPageSizePreference}
+            ariaLabel="교재 목록 페이지 탐색"
+          />
         </TabsContent>
 
         <TabsContent value="requests" className="mt-4 grid min-w-0 content-start gap-4">
           <PurchaseProcessTable
             mode="request"
+            preparedRows={numbered.requests.rows}
+            summary={numbered.requests.summary.value}
+            acceptedFilters={numbered.requests.acceptedFilters}
             canManageRequestLines={canManageTextbookOperations}
-            orders={data.purchaseOrders}
-            lines={activePurchaseOrderLines}
-            textbooks={data.textbooks}
-            publishers={data.publishers}
-            locations={locations}
-            suppliers={data.suppliers}
-            publisherSupplierLinks={data.publisherSupplierLinks}
-            classes={data.classes}
-            students={data.students}
+            orders={requestRendererData.orders}
+            lines={requestRendererData.lines}
+            textbooks={requestRendererData.textbooks}
+            publishers={requestRendererData.publishers}
+            locations={requestRendererData.locations}
+            suppliers={requestRendererData.suppliers}
+            publisherSupplierLinks={[]}
+            classes={requestRendererData.classes}
+            students={[]}
             selectedLineId={selectedPurchaseLineId}
             boardScope={purchaseBoardScope}
             requestFilter={purchaseRequestFilter}
@@ -5277,20 +5322,26 @@ export function TextbookOperationsWorkspace() {
             onDeleteLine={deletePurchaseLine}
             onClearSearch={() => updateOperationSearchQuery("")}
           />
+          <DataTablePagination page={numbered.requests.page} pageSize={numbered.requests.pageSize} totalCount={numbered.requests.totalCount} loading={numbered.requests.loading}
+            onPageChange={(page) => { setSelectedPurchaseLineIds([]); void numbered.requests.goToPage(page); }} pageSizeMode={numbered.requests.pageSizeMode}
+            onPageSizeChange={numbered.requests.setPageSizePreference} ariaLabel="교재 요청 페이지 탐색" />
         </TabsContent>
 
         <TabsContent value="purchase" className="mt-4 grid min-w-0 content-start gap-4">
           <PurchaseProcessTable
             mode="order"
-            orders={data.purchaseOrders}
-            lines={activePurchaseOrderLines}
-            textbooks={data.textbooks}
-            publishers={data.publishers}
-            locations={locations}
-            suppliers={data.suppliers}
-            publisherSupplierLinks={data.publisherSupplierLinks}
-            classes={data.classes}
-            students={data.students}
+            preparedRows={numbered.purchase.rows}
+            summary={numbered.purchase.summary.value}
+            acceptedFilters={numbered.purchase.acceptedFilters}
+            orders={purchaseRendererData.orders}
+            lines={purchaseRendererData.lines}
+            textbooks={purchaseRendererData.textbooks}
+            publishers={purchaseRendererData.publishers}
+            locations={purchaseRendererData.locations}
+            suppliers={purchaseRendererData.suppliers}
+            publisherSupplierLinks={[]}
+            classes={purchaseRendererData.classes}
+            students={[]}
             selectedLineId={selectedPurchaseLineId}
             selectedLineIds={selectedPurchaseLineIds}
             boardScope={purchaseBoardScope}
@@ -5314,22 +5365,31 @@ export function TextbookOperationsWorkspace() {
             onReturnLine={returnPurchaseLine}
             onClearSearch={() => updateOperationSearchQuery("")}
           />
+          <DataTablePagination page={numbered.purchase.page} pageSize={numbered.purchase.pageSize} totalCount={numbered.purchase.totalCount} loading={numbered.purchase.loading}
+            onPageChange={(page) => { setSelectedPurchaseLineIds([]); void numbered.purchase.goToPage(page); }} pageSizeMode={numbered.purchase.pageSizeMode}
+            onPageSizeChange={numbered.purchase.setPageSizePreference} ariaLabel="주문 입고 페이지 탐색" />
         </TabsContent>
 
         <TabsContent value="sales" className="mt-4 grid min-w-0 content-start gap-4">
           <SalesHistoryLedger
-            sales={data.sales}
-            lines={activeSaleLines}
-            textbooks={data.textbooks}
-            classes={data.classes}
+            rows={numbered.saleHistory.rows}
+            summary={numbered.saleHistory.summary.value}
+            filters={saleHistoryFilters}
+            onFiltersChange={setSaleHistoryFilters}
           />
+          <DataTablePagination page={numbered.saleHistory.page} pageSize={numbered.saleHistory.pageSize} totalCount={numbered.saleHistory.totalCount} loading={numbered.saleHistory.loading}
+            onPageChange={(page) => { void numbered.saleHistory.goToPage(page); }} pageSizeMode={numbered.saleHistory.pageSizeMode}
+            onPageSizeChange={numbered.saleHistory.setPageSizePreference} ariaLabel="출고 이력 페이지 탐색" />
           <SalesProcessTable
-            sales={data.sales}
-            lines={activeSaleLines}
-            textbooks={data.textbooks}
-            classes={data.classes}
-            students={data.students}
-            locations={locations}
+            preparedRows={numbered.sales.rows}
+            summary={numbered.sales.summary.value}
+            acceptedFilters={numbered.sales.acceptedFilters}
+            sales={saleRendererData.sales}
+            lines={saleRendererData.lines}
+            textbooks={saleRendererData.textbooks}
+            classes={saleRendererData.classes}
+            students={saleRendererData.students}
+            locations={saleRendererData.locations}
             saving={saving}
             statusFilter={salesProcessFilter}
             searchQuery={deferredOperationQuery}
@@ -5349,13 +5409,16 @@ export function TextbookOperationsWorkspace() {
             onBulkDelete={deleteSelectedSaleHistoryLines}
             onClearSearch={() => updateOperationSearchQuery("")}
           />
+          <DataTablePagination page={numbered.sales.page} pageSize={numbered.sales.pageSize} totalCount={numbered.sales.totalCount} loading={numbered.sales.loading}
+            onPageChange={(page) => { setSelectedSaleLineIds([]); void numbered.sales.goToPage(page); }} pageSizeMode={numbered.sales.pageSizeMode}
+            onPageSizeChange={numbered.sales.setPageSizePreference} ariaLabel="교재 출고 페이지 탐색" />
         </TabsContent>
 
         <TabsContent value="inventory" className="mt-4 grid min-w-0 content-start gap-4">
           <InventoryCountWorkspace
-            rows={filteredInventory}
-            stockCounts={activeStockCounts}
-            locations={locations}
+            rows={numbered.inventory.rows}
+            summary={numbered.inventory.summary.value}
+            locations={numbered.inventory.summary.value?.locations || inventoryLocationReference.locations}
             locationId={selectedInventoryCountLocationId}
             auditFilter={inventoryAuditFilter}
             countDrafts={inventoryCountDrafts}
@@ -5376,16 +5439,33 @@ export function TextbookOperationsWorkspace() {
             onSubmitBulkCount={submitBulkInlineStockCounts}
             emptyLabel={textbookEmptyLabel}
           />
+          <DataTablePagination
+            page={numbered.inventory.page}
+            pageSize={numbered.inventory.pageSize}
+            totalCount={numbered.inventory.totalCount}
+            loading={numbered.inventory.loading}
+            onPageChange={(page) => { setSelectedTextbookIds([]); void numbered.inventory.goToPage(page); }}
+            pageSizeMode={numbered.inventory.pageSizeMode}
+            onPageSizeChange={numbered.inventory.setPageSizePreference}
+            ariaLabel="재고 실사 페이지 탐색"
+          />
           <InventoryHistoryPanel
-            stockMoves={activeStockMoves}
-            stockCounts={activeStockCounts}
-            textbooks={data.textbooks}
-            locations={locations}
+            rows={numbered.inventoryHistory.rows}
             currentUserId={currentUserId}
             currentUserLabel={currentUserLabel}
             canDeleteHistory={canDeleteTextbookHistory}
             saving={saving}
             onDeleteHistory={deleteInventoryHistory}
+          />
+          <DataTablePagination
+            page={numbered.inventoryHistory.page}
+            pageSize={numbered.inventoryHistory.pageSize}
+            totalCount={numbered.inventoryHistory.totalCount}
+            loading={numbered.inventoryHistory.loading}
+            onPageChange={(page) => { void numbered.inventoryHistory.goToPage(page); }}
+            pageSizeMode={numbered.inventoryHistory.pageSizeMode}
+            onPageSizeChange={numbered.inventoryHistory.setPageSizePreference}
+            ariaLabel="재고 이력 페이지 탐색"
           />
         </TabsContent>
 
@@ -5393,10 +5473,7 @@ export function TextbookOperationsWorkspace() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap gap-2">
                   <Badge variant="secondary" className="h-8 rounded-md px-2 tabular-nums">
-                    마감 {formatQuantity(data.monthlyClosings.length)}건
-                  </Badge>
-                  <Badge variant="outline" className="h-8 rounded-md px-2 tabular-nums">
-                    최근 {formatQuantity(Math.min(data.monthlyClosings.length, 12))}건
+                    마감 {formatQuantity(numbered.closing.totalCount ?? 0)}건
                   </Badge>
                 </div>
                 <Button type="button" onClick={openClosingDialog} aria-label="월마감 추가" title="월마감 추가">
@@ -5405,14 +5482,21 @@ export function TextbookOperationsWorkspace() {
                 </Button>
               </div>
               <MonthlyClosingTable
-                rows={data.monthlyClosings}
+                rows={numbered.closing.rows}
                 selectedIds={selectedClosingIds}
                 saving={saving}
                 onToggleRow={toggleClosingSelection}
                 onToggleVisibleRows={toggleVisibleClosingSelection}
                 onBulkLock={lockSelectedClosings}
-                onInspectRow={(row) => setSelectedClosingDetailId(getRecordId(row))}
+                onInspectRow={(row) => {
+                  setSelectedClosingDetailId(getRecordId(row));
+                  setSelectedClosingScope({ closingMonth: text(row.closing_month), subject: text(row.subject) || "all" });
+                  setClosingMovementSearch("");
+                }}
               />
+              <DataTablePagination page={numbered.closing.page} pageSize={numbered.closing.pageSize} totalCount={numbered.closing.totalCount} loading={numbered.closing.loading}
+                onPageChange={(page) => { setSelectedClosingIds([]); void numbered.closing.goToPage(page); }} pageSizeMode={numbered.closing.pageSizeMode}
+                onPageSizeChange={numbered.closing.setPageSizePreference} ariaLabel="월마감 페이지 탐색" />
             </TabsContent>
           </>
         )}
@@ -5558,6 +5642,7 @@ function TextbookHandoffDialog({
   emptyLabel,
   idPrefix,
   format = "default",
+  loadState = "",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -5567,6 +5652,7 @@ function TextbookHandoffDialog({
   emptyLabel: string;
   idPrefix: string;
   format?: "default" | "purchase-order" | "purchase-return";
+  loadState?: string;
 }) {
   const [status, setStatus] = useState("");
   const [manualCopyText, setManualCopyText] = useState("");
@@ -5645,6 +5731,7 @@ function TextbookHandoffDialog({
         </DialogHeader>
 
         <div className="grid min-h-0 gap-3">
+          {loadState ? <Alert role="status"><AlertDescription>{loadState}</AlertDescription></Alert> : null}
           <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
             <div className="flex flex-wrap gap-2">
               <Badge variant="secondary" className="h-8 rounded-md px-2 tabular-nums">
@@ -6647,7 +6734,7 @@ function getInventoryCountSubmitLabel({
 
 function InventoryCountWorkspace({
   rows,
-  stockCounts,
+  summary,
   locations,
   locationId,
   auditFilter,
@@ -6669,8 +6756,8 @@ function InventoryCountWorkspace({
   onSubmitBulkCount,
   emptyLabel = "교재가 없습니다",
 }: {
-  rows: Row[];
-  stockCounts: Row[];
+  rows: InventoryCountRow[];
+  summary: TextbookInventorySummary | null;
   locations: Row[];
   locationId: string;
   auditFilter: InventoryAuditFilter;
@@ -6692,36 +6779,13 @@ function InventoryCountWorkspace({
   onSubmitBulkCount?: (rows: InventoryCountRow[]) => void;
   emptyLabel?: string;
 }) {
-  const [displayLimitsByScope, setDisplayLimitsByScope] = useState<Record<string, number>>({});
-  const countRows = useMemo(
-    () => buildInventoryCountRows({ rows, stockCounts, locations, locationId }),
-    [locationId, locations, rows, stockCounts],
-  );
-  const filterCounts = useMemo(() => {
-    const counts = {
-      recommended: 0,
-      pending: 0,
-      done: 0,
-      all: countRows.length,
-    } as Record<InventoryAuditFilter, number>;
-
-    for (const row of countRows) {
-      counts[row.status] += 1;
-    }
-
-    return counts;
-  }, [countRows]);
+  const filterCounts = summary?.auditCounts || { recommended: 0, pending: 0, done: 0, all: 0 };
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const visibleRows = useMemo(
-    () => auditFilter === "all" ? countRows : countRows.filter((row) => row.status === auditFilter),
-    [auditFilter, countRows],
-  );
+  const visibleRows = rows;
   const visibleAuditFilterOptions = (Object.keys(inventoryAuditFilterLabels) as InventoryAuditFilter[]).filter(
     (filter) => auditFilter === filter || filterCounts[filter] > 0,
   );
-  const displayScopeKey = `${auditFilter}:${locationId}:${rows.length}`;
-  const displayLimit = displayLimitsByScope[displayScopeKey] || INVENTORY_COUNT_PAGE_SIZE;
-  const displayRows = useMemo(() => visibleRows.slice(0, displayLimit), [displayLimit, visibleRows]);
+  const displayRows = visibleRows;
   const displayRowIds = useMemo(() => displayRows.map((row) => row.id).filter(Boolean), [displayRows]);
   const selectedDisplayRows = useMemo(
     () => displayRows.filter((row) => selectedIdSet.has(row.id)),
@@ -6733,22 +6797,19 @@ function InventoryCountWorkspace({
   );
   const allDisplayRowsSelected = displayRowIds.length > 0 && displayRowIds.every((id) => selectedIdSet.has(id));
   const someDisplayRowsSelected = displayRowIds.some((id) => selectedIdSet.has(id)) && !allDisplayRowsSelected;
-  const hasMoreVisibleRows = visibleRows.length > displayRows.length;
-  const visibleRowSummary = hasMoreVisibleRows
-    ? `${formatQuantity(displayRows.length)}/${formatQuantity(visibleRows.length)}종`
-    : `${formatQuantity(visibleRows.length)}종`;
+  const visibleRowSummary = `${formatQuantity(summary?.totalCount ?? visibleRows.length)}종`;
   const groupedRows = useMemo(() => {
-    const groupsByLabel = new Map<string, { label: string; rows: InventoryCountRow[] }>();
+    const groups: Array<{ label: string; rows: InventoryCountRow[] }> = [];
     for (const row of displayRows) {
       const label = getTextbookGroupLabel(row.source);
-      const group = groupsByLabel.get(label);
-      if (group) {
-        group.rows.push(row);
+      const current = groups[groups.length - 1];
+      if (current?.label === label) {
+        current.rows.push(row);
       } else {
-        groupsByLabel.set(label, { label, rows: [row] });
+        groups.push({ label, rows: [row] });
       }
     }
-    return [...groupsByLabel.values()].sort((left, right) => compareTextbookGroupLabels(left.label, right.label));
+    return groups;
   }, [displayRows]);
   const currentLocation = getLocationName(locations, locationId) || "위치";
 
@@ -7011,21 +7072,6 @@ function InventoryCountWorkspace({
           </TableBody>
         </Table>
       </div>
-      {hasMoreVisibleRows ? (
-        <div className="flex justify-center">
-          <Button
-            type="button"
-            variant="outline"
-            className="min-w-48"
-            onClick={() => setDisplayLimitsByScope((current) => ({
-              ...current,
-              [displayScopeKey]: (current[displayScopeKey] || INVENTORY_COUNT_PAGE_SIZE) + INVENTORY_COUNT_PAGE_SIZE,
-            }))}
-          >
-            더 보기 · {formatQuantity(displayRows.length)}/{formatQuantity(visibleRows.length)}종
-          </Button>
-        </div>
-      ) : null}
     </section>
   );
 }
@@ -7156,6 +7202,7 @@ function InventoryCountMobileCard({
 function TextbookTable({
   rows,
   locations,
+  summary,
   onSelectTextbook,
   amountMode = "stockValue",
   duplicateTitleKeys = new Set<string>(),
@@ -7170,8 +7217,9 @@ function TextbookTable({
   emptyActionLabel,
   onEmptyAction,
 }: {
-  rows: Row[];
+  rows: import("./textbook-read-types").TextbookMasterRow[];
   locations: Row[];
+  summary?: TextbookMasterSummary | null;
   onSelectTextbook?: (row: Row) => void;
   amountMode?: TextbookAmountMode;
   duplicateTitleKeys?: Set<string>;
@@ -7198,29 +7246,18 @@ function TextbookTable({
   const columnSpan = locationColumns.length + 7 + (onSelectTextbook ? 1 : 0) + (hasSelection ? 1 : 0);
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const sortedGroupedRows = useMemo(() => {
-    const groupsByLabel = new Map<string, Row[]>();
+    const groups: Array<{ label: string; rows: Row[] }> = [];
     for (const row of rows) {
       const label = getTextbookGroupLabel(row);
-      const groupRows = groupsByLabel.get(label);
-      if (groupRows) {
-        groupRows.push(row);
+      const current = groups[groups.length - 1];
+      if (current?.label === label) {
+        current.rows.push(row);
       } else {
-        groupsByLabel.set(label, [row]);
+        groups.push({ label, rows: [row] });
       }
     }
-
-    return [...groupsByLabel.entries()]
-      .map(([label, groupRows]) => ({
-        label,
-        rows: [...groupRows].sort((left, right) => {
-          const leftScore = getTextbookQualityScore(left, duplicateTitleKeys);
-          const rightScore = getTextbookQualityScore(right, duplicateTitleKeys);
-          if (leftScore !== rightScore) return rightScore - leftScore;
-          return getTextbookTitle(left).localeCompare(getTextbookTitle(right), "ko", { numeric: true });
-        }),
-      }))
-      .sort((left, right) => compareTextbookGroupLabels(left.label, right.label));
-  }, [duplicateTitleKeys, rows]);
+    return groups;
+  }, [rows]);
   const tableTotals = useMemo(() => {
     const locationQuantities = Object.fromEntries(locationColumns.map((location) => [location.id, 0])) as Record<string, number>;
     let totalQuantity = 0;
@@ -7235,8 +7272,15 @@ function TextbookTable({
       }
     }
 
+    if (summary) {
+      return {
+        totalQuantity: summary.totalQuantity,
+        amountValue: amountMode === "salePrice" ? summary.salePriceTotal : summary.stockValue,
+        locationQuantities: summary.locationQuantities,
+      };
+    }
     return { totalQuantity, amountValue, locationQuantities };
-  }, [amountMode, locationColumns, rows]);
+  }, [amountMode, locationColumns, rows, summary]);
 
   return (
     <div className="space-y-2" aria-label="교재 목록">
@@ -7276,7 +7320,7 @@ function TextbookTable({
                     const gradeLabel = getTextbookGradeSummary(row) || "-";
                     const subSubjectLabel = getTextbookSubSubject(row) || "-";
                     const categorySummary = compactUniqueLabels([getSubjectLabel(row.subject), schoolLevelLabel, gradeLabel, subSubjectLabel]).join(" · ") || "-";
-                    const qualityIssues = getTextbookQualityIssues(row, duplicateTitleKeys);
+                    const qualityIssues = (row.qualityIssues || getTextbookQualityIssues(row, duplicateTitleKeys)) as ReturnType<typeof getTextbookQualityIssues>;
                     const qualityIssueLabels = getTextbookQualityIssueLabels(qualityIssues);
                     const locationSummary = locationColumns
                       .map((location) => ({
@@ -7429,7 +7473,7 @@ function TextbookTable({
                 const isCollapsed = collapsedGroups.includes(group.label);
                 const GroupIcon = isCollapsed ? ChevronRight : ChevronDown;
                 const groupTotalQuantity = group.rows.reduce((sum, row) => sum + numberValue(row.totalQuantity), 0);
-                const groupQualityIssueCount = group.rows.filter((row) => hasTextbookQualityIssue(row, duplicateTitleKeys)).length;
+                const groupQualityIssueCount = group.rows.filter((row) => row.qualityScore ? Number(row.qualityScore) > 0 : hasTextbookQualityIssue(row, duplicateTitleKeys)).length;
                 const groupCountLabel = `${formatQuantity(group.rows.length)}종`;
                 const groupDetailText = [
                   `${formatQuantity(group.rows.length)}종`,
@@ -7476,11 +7520,11 @@ function TextbookTable({
                 const gradeLabel = getTextbookGradeSummary(row) || "-";
                 const schoolLevelLabel = getTextbookSchoolLevelSummary(row) || "-";
                 const subSubjectLabel = getTextbookSubSubject(row) || "-";
-                const qualityIssues = getTextbookQualityIssues(row, duplicateTitleKeys);
+                const qualityIssues = (row.qualityIssues || getTextbookQualityIssues(row, duplicateTitleKeys)) as ReturnType<typeof getTextbookQualityIssues>;
                 const qualityIssueLabels = getTextbookQualityIssueLabels(qualityIssues);
                 const qualityIssueSummary = getQualityIssueSummary(qualityIssueLabels);
                 return (
-                  <TableRow key={rowId} className={cn(qualityIssues.inactive && "bg-muted/20 text-muted-foreground")}>
+                  <TableRow data-testid={`textbook-master-desktop-row-${rowId}`} key={rowId} className={cn(qualityIssues.inactive && "bg-muted/20 text-muted-foreground")}>
                     {hasSelection ? (
                       <TableCell className="w-10">
                         <Checkbox
@@ -7590,90 +7634,25 @@ function TextbookTable({
 }
 
 
-function getInventoryAuditActor(row: Row, currentUserId: string, currentUserLabel: string) {
-  const actorLabel = text(
-    row.created_by_email ||
-      row.createdByEmail ||
-      row.created_by_name ||
-      row.createdByName ||
-      row.actor ||
-      row.actor_name ||
-      row.actorName,
-  );
-  if (actorLabel) return actorLabel;
-
-  const actorId = text(row.created_by || row.createdBy || row.updated_by || row.updatedBy);
-  if (actorId && actorId === currentUserId && currentUserLabel) return currentUserLabel;
-  return actorId || "-";
-}
-
 function InventoryHistoryPanel({
-  stockMoves,
-  stockCounts,
-  textbooks,
-  locations,
+  rows: transportRows,
   currentUserId,
   currentUserLabel,
   canDeleteHistory,
   saving,
   onDeleteHistory,
 }: {
-  stockMoves: Row[];
-  stockCounts: Row[];
-  textbooks: Row[];
-  locations: Row[];
+  rows: TextbookInventoryHistoryTransport[];
   currentUserId: string;
   currentUserLabel: string;
   canDeleteHistory: boolean;
   saving: string;
   onDeleteHistory: (row: InventoryHistoryRow) => void;
 }) {
-  const textbookLookup = useMemo(() => buildTextbookLookupMap(textbooks), [textbooks]);
-  const locationNameLookup = useMemo(() => buildLocationNameLookup(locations), [locations]);
-  const rows = useMemo(() => {
-    const historyRows: InventoryHistoryRow[] = [];
-    for (const move of stockMoves) {
-      const quantity = numberValue(move.quantity);
-      const textbook = getTextbookFromLookup(textbookLookup, move.textbook_id || move.textbookId);
-      const type = text(move.move_type || move.moveType);
-      historyRows.push({
-        id: `move-${getRecordId(move)}`,
-        kind: "move" as const,
-        sourceId: getRecordId(move),
-        linkedMoveId: "",
-        at: text(move.moved_at || move.movedAt || move.created_at || move.createdAt),
-        textbookTitle: getTextbookTitle(textbook || {}) || "-",
-        locationName: getLocationNameFromLookup(locationNameLookup, move.location_id || move.locationId) || "-",
-        change: `${quantity > 0 ? "+" : ""}${formatQuantity(quantity)}권`,
-        action: stockMoveTypeLabels[type] || type || "재고 변경",
-        actor: getInventoryAuditActor(move, currentUserId, currentUserLabel),
-        memo: text(move.memo),
-      });
-    }
-    for (const count of stockCounts) {
-      const expected = numberValue(count.expected_quantity || count.expectedQuantity);
-      const counted = numberValue(count.counted_quantity || count.countedQuantity);
-      const difference = counted - expected;
-      const textbook = getTextbookFromLookup(textbookLookup, count.textbook_id || count.textbookId);
-      historyRows.push({
-        id: `count-${getRecordId(count)}`,
-        kind: "count" as const,
-        sourceId: getRecordId(count),
-        linkedMoveId: text(count.adjustment_move_id || count.adjustmentMoveId),
-        at: text(count.counted_at || count.countedAt || count.created_at || count.createdAt),
-        textbookTitle: getTextbookTitle(textbook || {}) || "-",
-        locationName: getLocationNameFromLookup(locationNameLookup, count.location_id || count.locationId) || "-",
-        change: `${difference > 0 ? "+" : ""}${formatQuantity(difference)}권`,
-        action: `실사 ${formatQuantity(expected)}→${formatQuantity(counted)}`,
-        actor: getInventoryAuditActor(count, currentUserId, currentUserLabel),
-        memo: text(count.memo),
-      });
-    }
-
-    return historyRows
-      .sort((left, right) => new Date(right.at).getTime() - new Date(left.at).getTime())
-      .slice(0, 30);
-  }, [currentUserId, currentUserLabel, locationNameLookup, stockCounts, stockMoves, textbookLookup]);
+  const rows = useMemo(() => transportRows.map((row) => ({
+    ...row,
+    actor: row.actorLabel || (row.actorId === currentUserId ? currentUserLabel : row.actorId) || "-",
+  })), [currentUserId, currentUserLabel, transportRows]);
 
   return (
     <section className="overflow-hidden rounded-lg border bg-background">
@@ -7825,95 +7804,71 @@ function buildClosingDetailClipboardText({
 
 function ClosingDetailDialog({
   open,
-  row,
-  stockMoves,
-  textbooks,
-  publishers,
-  suppliers,
-  publisherSupplierLinks,
-  locations,
+  detail,
+  loading,
+  error,
+  rows,
+  movementSearch,
+  onMovementSearchChange,
+  movementPage,
+  movementPageSize,
+  movementTotalCount,
+  movementLoading,
+  onMovementPageChange,
+  movementPageSizeMode,
+  onMovementPageSizeChange,
   onOpenChange,
 }: {
   open: boolean;
-  row: Row | undefined;
-  stockMoves: Row[];
-  textbooks: Row[];
-  publishers: Row[];
-  suppliers: Row[];
-  publisherSupplierLinks: Row[];
-  locations: Row[];
+  detail: TextbookClosingDetail | null;
+  loading: boolean;
+  error: string;
+  rows: ClosingMovementRow[];
+  movementSearch: string;
+  onMovementSearchChange: (value: string) => void;
+  movementPage: number;
+  movementPageSize: 10 | 15 | 20;
+  movementTotalCount: number | null;
+  movementLoading: boolean;
+  onMovementPageChange: (page: number) => void;
+  movementPageSizeMode: "auto" | "manual";
+  onMovementPageSizeChange: (value: "auto" | 10 | 15 | 20) => void;
   onOpenChange: (open: boolean) => void;
 }) {
-  const [detailQuery, setDetailQuery] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
   const [isCopyingDetail, setIsCopyingDetail] = useState(false);
-  const closingMonth = text(row?.closing_month || row?.closingMonth);
+  const row = detail?.row;
+  const closingMonth = text(row?.closing_month);
   const subject = text(row?.subject) || "all";
-  const storedClosingMetrics = useMemo(() => getClosingStoredMetrics(row), [row]);
-  const textbookLookup = useMemo(() => buildTextbookLookupMap(textbooks), [textbooks]);
-  const locationNameLookup = useMemo(() => buildLocationNameLookup(locations), [locations]);
+  const storedClosingMetrics = detail?.storedMetrics || getClosingStoredMetrics(row || {});
   useEffect(() => {
     if (!open) {
-      setDetailQuery("");
       setCopyStatus("");
       return;
     }
     setCopyStatus("");
   }, [open, row]);
-  const detailMoves = useMemo(() => {
-    if (!row) return [] as Row[];
-    return filterStockMovesForClosing({
-      closingMonth,
-      subject,
-      textbooks,
-      publishers,
-      suppliers,
-      publisherSupplierLinks,
-      stockMoves,
-    });
-  }, [closingMonth, publisherSupplierLinks, publishers, row, stockMoves, subject, suppliers, textbooks]);
-  const detailClosing = useMemo(
-    () => buildTextbookMonthlyClosing({
-      openingQuantity: numberValue(row?.opening_quantity || row?.openingQuantity),
-      openingAmount: numberValue(row?.opening_amount || row?.openingAmount),
-      stockMoves: detailMoves,
-    }),
-    [detailMoves, row],
-  );
-  const detailRows = useMemo(() => buildClosingDetailRows(detailMoves, textbookLookup, locationNameLookup), [detailMoves, locationNameLookup, textbookLookup]);
+  const detailClosing = detail?.preview?.closing || buildTextbookMonthlyClosing({ openingQuantity: 0, openingAmount: 0, stockMoves: [] });
+  const detailRows = rows;
   const title = `${closingMonth || "정산"} · ${subject === "all" ? "전체" : getSubjectLabel(subject)}`;
-  const closingMetricMismatches = useMemo(() => ({
-    purchase: hasClosingMetricMismatch(storedClosingMetrics.purchaseQuantity, detailClosing.purchaseQuantity),
-    sale: hasClosingMetricMismatch(storedClosingMetrics.saleQuantity, detailClosing.saleQuantity),
-    ending: hasClosingMetricMismatch(storedClosingMetrics.endingQuantity, detailClosing.endingQuantity),
-    margin: hasClosingMetricMismatch(storedClosingMetrics.marginAmount, detailClosing.textbookMarginAmount),
-  }), [detailClosing, storedClosingMetrics]);
-  const closingMetricMismatchCount = Object.values(closingMetricMismatches).filter(Boolean).length;
+  const closingMetricMismatches = detail?.metricMismatches || { purchase: false, sale: false, ending: false, margin: false };
+  const closingMetricMismatchCount = detail?.metricMismatchCount || 0;
   const closingDetailStatus = storedClosingMetrics.status;
   const closingDetailMemo = storedClosingMetrics.memo;
-  const normalizedDetailQuery = normalizeStoredTextInput(detailQuery).toLowerCase();
-  const filteredDetailRows = useMemo(() => {
-    if (!normalizedDetailQuery) return detailRows;
-    return detailRows.filter((item) => getClosingDetailSearchHaystack(item).includes(normalizedDetailQuery));
-  }, [detailRows, normalizedDetailQuery]);
-  const closingDetailCopyText = useMemo(() => buildClosingDetailClipboardText({
-    title,
-    storedClosingMetrics,
-    detailClosing,
-    filteredDetailRows,
-    closingMetricMismatchCount,
-  }), [closingMetricMismatchCount, detailClosing, filteredDetailRows, storedClosingMetrics, title]);
+  const filteredDetailRows = detailRows;
   const copyClosingDetail = useCallback(async () => {
+    if (!closingMonth) return;
     setIsCopyingDetail(true);
     try {
-      await writeClipboardText(closingDetailCopyText);
+      const exported = await getTextbookClosingMovementExport({ closingMonth, subject, search: movementSearch });
+      await writeClipboardText(buildClosingDetailClipboardText({ title, storedClosingMetrics, detailClosing, filteredDetailRows: exported.rows, closingMetricMismatchCount }));
       setCopyStatus("복사됨");
     } catch {
       setCopyStatus("복사 실패");
     } finally {
       setIsCopyingDetail(false);
     }
-  }, [closingDetailCopyText]);
+  }, [closingMetricMismatchCount, closingMonth, detailClosing, movementSearch, storedClosingMetrics, subject, title]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -7922,6 +7877,8 @@ function ClosingDetailDialog({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription className="sr-only">저장된 월마감값과 현재 재고 이동 재계산값을 함께 확인합니다.</DialogDescription>
         </DialogHeader>
+        {loading ? <div className="py-6 text-center text-sm text-muted-foreground">정산 상세 불러오는 중</div> : null}
+        {error ? <Alert role="alert"><AlertDescription>{error}</AlertDescription></Alert> : null}
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <Badge variant="secondary" className="h-7 rounded-md px-2">저장값</Badge>
           <Badge variant="outline" className="h-7 rounded-md px-2">상태 {closingDetailStatus}</Badge>
@@ -7954,12 +7911,12 @@ function ClosingDetailDialog({
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               type="search"
-              value={detailQuery}
+              value={movementSearch}
               onChange={(event) => {
-                setDetailQuery(event.target.value);
+                onMovementSearchChange(event.target.value);
                 setCopyStatus("");
               }}
-              onBlur={(event) => setDetailQuery(normalizeStoredTextInput(event.target.value))}
+              onBlur={(event) => onMovementSearchChange(normalizeStoredTextInput(event.target.value))}
               placeholder="교재·구분·위치 검색"
               aria-label="정산 상세 검색"
               autoComplete="off"
@@ -8014,6 +7971,9 @@ function ClosingDetailDialog({
             </Table>
           </div>
         </div>
+        <DataTablePagination page={movementPage} pageSize={movementPageSize} totalCount={movementTotalCount} loading={movementLoading}
+          onPageChange={onMovementPageChange} pageSizeMode={movementPageSizeMode} onPageSizeChange={onMovementPageSizeChange}
+          ariaLabel="월마감 상세 이동 페이지 탐색" />
         <div className={dialogFooterClassName}>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             닫기
@@ -8180,6 +8140,9 @@ function ProcessGroupEmptyState({
 
 function PurchaseProcessTable({
   mode,
+  preparedRows,
+  summary,
+  acceptedFilters,
   canManageRequestLines = true,
   orders,
   lines,
@@ -8214,6 +8177,9 @@ function PurchaseProcessTable({
   onClearSearch,
 }: {
   mode: "request" | "order";
+  preparedRows: TextbookPurchaseCaseRow[];
+  summary: TextbookPurchaseSummary | null;
+  acceptedFilters: PurchaseFilters | null;
   canManageRequestLines?: boolean;
   orders: Row[];
   lines: Row[];
@@ -8250,6 +8216,12 @@ function PurchaseProcessTable({
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [handoffDialogOpen, setHandoffDialogOpen] = useState(false);
   const [returnHandoffDialogOpen, setReturnHandoffDialogOpen] = useState(false);
+  const [purchaseHandoffGroups, setPurchaseHandoffGroups] = useState<TextbookHandoffGroup[]>([]);
+  const [returnHandoffGroups, setReturnHandoffGroups] = useState<TextbookHandoffGroup[]>([]);
+  const [purchaseHandoffState, setPurchaseHandoffState] = useState("");
+  const [returnHandoffState, setReturnHandoffState] = useState("");
+  const handoffAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => handoffAbortRef.current?.abort(), []);
   const grouped = useMemo(() => groupPurchaseLinesByStatus({ orders, lines }) as Record<string, Row[]>, [lines, orders]);
   const ordersById = useMemo(() => new Map(orders.map((order) => [getRecordId(order), order])), [orders]);
   const requestFilterOptions = useMemo(
@@ -8347,7 +8319,7 @@ function PurchaseProcessTable({
   const searchMatchedPurchaseRowsByGroup = useMemo(() => {
     const rowsByGroup = new Map<string, Row[]>();
     for (const group of groups) {
-      rowsByGroup.set(group.id, (grouped[group.id] || []).filter((line) => {
+      rowsByGroup.set(group.id, preparedRows.length > 0 ? (grouped[group.id] || []) : (grouped[group.id] || []).filter((line) => {
         const order = ((line.order || getPurchaseLineOrder(line, ordersById)) || {}) as Row;
         if (!shouldShowOperationalPurchaseLine(line, order, textbooks)) {
           return false;
@@ -8366,14 +8338,15 @@ function PurchaseProcessTable({
       }));
     }
     return rowsByGroup;
-  }, [classes, grouped, groups, locations, ordersById, publisherSupplierLinks, publishers, searchQuery, suppliers, textbooks]);
+  }, [classes, grouped, groups, locations, ordersById, preparedRows.length, publisherSupplierLinks, publishers, searchQuery, suppliers, textbooks]);
 
   const getVisiblePurchaseRows = useCallback((groupId: string, nextRequestFilter = requestFilter, nextBoardScope = boardScope, nextOrderFilter = orderFilter) => {
+    if (preparedRows.length > 0) return searchMatchedPurchaseRowsByGroup.get(groupId) || [];
     return (searchMatchedPurchaseRowsByGroup.get(groupId) || [])
       .filter((line) => shouldShowPurchaseLineOnBoard(line, nextBoardScope))
       .filter((line) => shouldShowRequestLineForFilter(line, nextRequestFilter))
       .filter((line) => shouldShowOrderLineForFilter(line, groupId, nextOrderFilter));
-  }, [boardScope, orderFilter, requestFilter, searchMatchedPurchaseRowsByGroup, shouldShowOrderLineForFilter, shouldShowRequestLineForFilter]);
+  }, [boardScope, orderFilter, preparedRows.length, requestFilter, searchMatchedPurchaseRowsByGroup, shouldShowOrderLineForFilter, shouldShowRequestLineForFilter]);
 
   const visiblePurchaseRowsByGroup = useMemo(() => {
     const rowsByGroup = new Map<string, Row[]>();
@@ -8391,7 +8364,7 @@ function PurchaseProcessTable({
     [getCurrentVisiblePurchaseRows, visibleGroups],
   );
 
-  const visibleRowCount = visiblePurchaseRows.length;
+  const visibleRowCount = summary?.totalCount ?? visiblePurchaseRows.length;
   const visibleRequestedTotal = visiblePurchaseRows.reduce(
     (sum, line) => sum + numberValue(line.requested_quantity || line.requestedQuantity),
     0,
@@ -8513,30 +8486,23 @@ function PurchaseProcessTable({
     mode === "order" && visibleReceivedTotal > 0 ? `입고 ${formatQuantity(visibleReceivedTotal)}` : "",
   ].filter(Boolean);
   const processSummaryText = processSummaryParts.join(" · ");
-  const purchaseHandoffGroups = useMemo(() => mode === "order"
-    ? buildPurchaseSupplierHandoffGroups({
-        rows: visiblePurchaseRows,
-        ordersById,
-        textbooks,
-        publishers,
-        suppliers,
-        publisherSupplierLinks,
-        locations,
-        classes,
-      })
-    : [], [classes, locations, mode, ordersById, publisherSupplierLinks, publishers, suppliers, textbooks, visiblePurchaseRows]);
-  const returnHandoffGroups = useMemo(() => mode === "order"
-    ? buildPurchaseSupplierReturnHandoffGroups({
-        rows: visiblePurchaseRows,
-        ordersById,
-        textbooks,
-        publishers,
-        suppliers,
-        publisherSupplierLinks,
-        locations,
-        classes,
-      })
-    : [], [classes, locations, mode, ordersById, publisherSupplierLinks, publishers, suppliers, textbooks, visiblePurchaseRows]);
+  const openPurchaseHandoff = useCallback((kind: "order" | "return") => {
+    if (kind === "order") setHandoffDialogOpen(true); else setReturnHandoffDialogOpen(true);
+    const setGroups = kind === "order" ? setPurchaseHandoffGroups : setReturnHandoffGroups;
+    const setState = kind === "order" ? setPurchaseHandoffState : setReturnHandoffState;
+    setGroups([]);
+    if (!acceptedFilters || mode !== "order") { setState("현재 필터가 아직 준비되지 않았습니다."); return; }
+    const frozenFilters = { ...acceptedFilters };
+    handoffAbortRef.current?.abort();
+    const abort = new AbortController();
+    handoffAbortRef.current = abort;
+    setState("전체 필터 범위를 불러오는 중");
+    void getTextbookPurchaseHandoff(frozenFilters, kind, { signal: abort.signal }).then((result) => {
+      if (abort.signal.aborted) return;
+      setGroups(result.groups);
+      setState(result.groups.length ? "전체 필터 범위 준비 완료" : "전체 필터 범위에 전달할 항목이 없습니다.");
+    }, (error) => { if (!abort.signal.aborted) setState(getTextbookActionErrorMessage(error)); });
+  }, [acceptedFilters, mode]);
   const emptyActionLabel = hasProcessSearchQuery
     ? "검색 초기화"
     : hasHiddenProcessRows
@@ -8566,6 +8532,7 @@ function PurchaseProcessTable({
             title="공급처 주문 전달"
             description="보이는 주문 건을 공급처별 이미지, PDF로 정리합니다."
             groups={purchaseHandoffGroups}
+            loadState={purchaseHandoffState}
             emptyLabel="전달할 주문 건이 없습니다"
             idPrefix="purchase-handoff"
             format="purchase-order"
@@ -8576,6 +8543,7 @@ function PurchaseProcessTable({
             title="공급처 반품 요청서"
             description="보이는 반품 가능 건을 공급처별 이미지, PDF로 정리합니다."
             groups={returnHandoffGroups}
+            loadState={returnHandoffState}
             emptyLabel="반품 요청할 입고 건이 없습니다"
             idPrefix="purchase-return-handoff"
             format="purchase-return"
@@ -8773,7 +8741,7 @@ function PurchaseProcessTable({
               </Button>
             ) : (
               <>
-                {purchaseHandoffGroups.length > 0 ? (
+                {acceptedFilters ? (
                   <Button
                     type="button"
                     size="sm"
@@ -8781,13 +8749,13 @@ function PurchaseProcessTable({
                     className="shrink-0"
                     aria-label="공급처별 주문 전달 열기"
                     title="공급처별 주문 전달"
-                    onClick={() => setHandoffDialogOpen(true)}
+                    onClick={() => openPurchaseHandoff("order")}
                   >
                     <Copy className="mr-2 size-3.5" />
                     전달
                   </Button>
                 ) : null}
-                {returnHandoffGroups.length > 0 ? (
+                {acceptedFilters ? (
                   <Button
                     type="button"
                     size="sm"
@@ -8795,7 +8763,7 @@ function PurchaseProcessTable({
                     className="shrink-0"
                     aria-label="공급처 반품 요청서 열기"
                     title="공급처 반품 요청서"
-                    onClick={() => setReturnHandoffDialogOpen(true)}
+                    onClick={() => openPurchaseHandoff("return")}
                   >
                     <Truck className="mr-2 size-3.5" />
                     반품 요청서
@@ -8823,7 +8791,9 @@ function PurchaseProcessTable({
         <div className="grid gap-0">
           {renderedGroups.map((group) => {
           const rows = getCurrentVisiblePurchaseRows(group.id);
-          const displayRows = buildPurchaseDisplayRows(rows, ordersById, textbooks);
+          const displayRows = preparedRows.length > 0
+            ? preparedRows.filter((row) => row.status === group.id)
+            : buildPurchaseDisplayRows(rows, ordersById, textbooks);
           const collapsed = Boolean(collapsedGroups[group.id]);
           const studentRequestedTotal = getPurchaseDisplayScopeQuantity(rows, "student", "requested");
           const studentOrderedTotal = getPurchaseDisplayScopeQuantity(rows, "student", "ordered");
@@ -9411,59 +9381,28 @@ function PurchaseProcessTable({
 }
 
 function SalesHistoryLedger({
-  sales,
-  lines,
-  textbooks,
-  classes,
+  rows,
+  summary,
+  filters,
+  onFiltersChange,
 }: {
-  sales: Row[];
-  lines: Row[];
-  textbooks: Row[];
-  classes: Row[];
+  rows: import("./textbook-read-types").SaleHistorySummaryRow[];
+  summary: import("./textbook-read-types").TextbookSaleHistorySummary | null;
+  filters: import("./textbook-read-types").SaleHistoryFilters;
+  onFiltersChange: (filters: import("./textbook-read-types").SaleHistoryFilters) => void;
 }) {
-  const [yearFilter, setYearFilter] = useState("all");
-  const [monthFilter, setMonthFilter] = useState("all");
-  const [classFilter, setClassFilter] = useState("all");
-  const rows = useMemo(
-    () => buildSaleHistorySummaryRows({ sales, lines, textbooks, classes }),
-    [sales, lines, textbooks, classes],
-  );
-
-  const yearOptions = useMemo(() => [...new Set(rows.map((row) => row.year).filter(Boolean))], [rows]);
-  const monthOptions = useMemo(
-    () => [...new Set(rows.filter((row) => yearFilter === "all" || row.year === yearFilter).map((row) => row.month))],
-    [rows, yearFilter],
-  );
-  const classOptions = useMemo(() => {
-    const options = new Map<string, string>();
-    rows.forEach((row) => {
-      if (row.classId) {
-        options.set(row.classId, row.className);
-      }
-    });
-    return [...options.entries()].sort((left, right) => left[1].localeCompare(right[1], "ko", { numeric: true }));
-  }, [rows]);
+  const yearFilter = filters.year;
+  const monthFilter = filters.month;
+  const classFilter = filters.classId;
+  const yearOptions = summary?.yearOptions || [];
+  const monthOptions = summary?.monthOptions || [];
+  const classOptions = summary?.classOptions || [];
 
   const effectiveMonthFilter = monthFilter !== "all" && monthOptions.includes(monthFilter) ? monthFilter : "all";
 
-  const salesHistorySummary = useMemo(() => {
-    const filteredRows: Array<(typeof rows)[number]> = [];
-    let totalIssuedQuantity = 0;
-    let totalWaitingQuantity = 0;
-    for (const row of rows) {
-      if (
-        (yearFilter === "all" || row.year === yearFilter) &&
-        (effectiveMonthFilter === "all" || row.month === effectiveMonthFilter) &&
-        (classFilter === "all" || row.classId === classFilter)
-      ) {
-        filteredRows.push(row);
-        totalIssuedQuantity += row.issuedQuantity;
-        totalWaitingQuantity += row.waitingQuantity;
-      }
-    }
-    return { filteredRows, totalIssuedQuantity, totalWaitingQuantity };
-  }, [classFilter, effectiveMonthFilter, rows, yearFilter]);
-  const { filteredRows, totalIssuedQuantity, totalWaitingQuantity } = salesHistorySummary;
+  const filteredRows = rows;
+  const totalIssuedQuantity = summary?.totalIssuedQuantity || 0;
+  const totalWaitingQuantity = summary?.totalWaitingQuantity || 0;
 
   if (rows.length === 0) {
     return null;
@@ -9480,8 +9419,7 @@ function SalesHistoryLedger({
         </div>
         <div className="grid w-full min-w-0 gap-2 sm:w-auto sm:grid-cols-3">
           <Select value={yearFilter} onValueChange={(value) => {
-            setYearFilter(value);
-            setMonthFilter("all");
+            onFiltersChange({ ...filters, year: value, month: "all" });
           }}>
             <SelectTrigger className="h-8 w-full sm:w-[112px]" aria-label="출고 이력 연도">
               <SelectValue />
@@ -9493,7 +9431,7 @@ function SalesHistoryLedger({
               ))}
             </SelectContent>
           </Select>
-          <Select value={effectiveMonthFilter} onValueChange={setMonthFilter}>
+          <Select value={effectiveMonthFilter} onValueChange={(value) => onFiltersChange({ ...filters, month: value })}>
             <SelectTrigger className="h-8 w-full sm:w-[112px]" aria-label="출고 이력 월">
               <SelectValue />
             </SelectTrigger>
@@ -9504,7 +9442,7 @@ function SalesHistoryLedger({
               ))}
             </SelectContent>
           </Select>
-          <Select value={classFilter} onValueChange={setClassFilter}>
+          <Select value={classFilter} onValueChange={(value) => onFiltersChange({ ...filters, classId: value })}>
             <SelectTrigger className="h-8 w-full sm:w-[180px]" aria-label="출고 이력 수업">
               <SelectValue />
             </SelectTrigger>
@@ -9553,6 +9491,9 @@ function SalesHistoryLedger({
 }
 
 function SalesProcessTable({
+  preparedRows,
+  summary,
+  acceptedFilters,
   sales,
   lines,
   textbooks,
@@ -9578,6 +9519,9 @@ function SalesProcessTable({
   onBulkDelete,
   onClearSearch,
 }: {
+  preparedRows: SaleLineRow[];
+  summary: TextbookSaleSummary | null;
+  acceptedFilters: SaleFilters | null;
   sales: Row[];
   lines: Row[];
   textbooks: Row[];
@@ -9605,6 +9549,10 @@ function SalesProcessTable({
 }) {
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [billingDialogOpen, setBillingDialogOpen] = useState(false);
+  const [makeEduBillingGroups, setMakeEduBillingGroups] = useState<TextbookHandoffGroup[]>([]);
+  const [billingHandoffState, setBillingHandoffState] = useState("");
+  const billingAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => billingAbortRef.current?.abort(), []);
   const salesById = useMemo(() => new Map(sales.map((sale) => [getRecordId(sale), sale])), [sales]);
   const studentsById = useMemo(() => new Map(students.map((student) => [getRecordId(student), student])), [students]);
   const grouped = useMemo(() => groupSaleLinesByStatus({ lines }) as Record<string, Row[]>, [lines]);
@@ -9648,7 +9596,7 @@ function SalesProcessTable({
   const searchMatchedSaleRowsByGroup = useMemo(() => {
     const rowsByGroup = new Map<string, Row[]>();
     for (const group of groups) {
-      rowsByGroup.set(group.id, (grouped[group.id] || []).filter((line) => {
+      rowsByGroup.set(group.id, preparedRows.length > 0 ? (grouped[group.id] || []) : (grouped[group.id] || []).filter((line) => {
         const sale = salesById.get(text(line.sale_id || line.saleId));
         if (!shouldShowOperationalSaleLine(line, textbooks)) {
           return false;
@@ -9657,7 +9605,7 @@ function SalesProcessTable({
       }));
     }
     return rowsByGroup;
-  }, [classes, grouped, groups, locations, salesById, searchQuery, students, textbooks]);
+  }, [classes, grouped, groups, locations, preparedRows.length, salesById, searchQuery, students, textbooks]);
 
   const getVisibleSaleRows = useCallback((groupId: string) => {
     return searchMatchedSaleRowsByGroup.get(groupId) || [];
@@ -9685,21 +9633,21 @@ function SalesProcessTable({
     [visibleSaleRowsWithGroup],
   );
 
-  const visibleRowCount = visibleSaleRows.length;
-  const visibleTotalQuantity = visibleSaleRows.reduce(
+  const visibleRowCount = summary?.totalCount ?? visibleSaleRows.length;
+  const visibleTotalQuantity = summary?.totalQuantity ?? visibleSaleRows.reduce(
     (sum, line) => sum + getSaleLineQuantity(line),
     0,
   );
-  const visibleStudentCount = new Set(
+  const visibleStudentCount = summary?.studentCount ?? new Set(
     visibleSaleRows.map((line) => text(line.student_id || line.studentId)).filter(Boolean),
   ).size;
-  const visibleClassCount = new Set(
+  const visibleClassCount = summary?.classCount ?? new Set(
     visibleSaleRows.map((line) => {
       const sale = salesById.get(text(line.sale_id || line.saleId));
       return text(line.class_id || line.classId || sale?.class_id || sale?.classId);
     }).filter(Boolean),
   ).size;
-  const visibleTotalAmount = visibleSaleRows.reduce((sum, line) => {
+  const visibleTotalAmount = summary?.totalAmount ?? visibleSaleRows.reduce((sum, line) => {
     const sale = salesById.get(text(line.sale_id || line.saleId));
     if (!isBillableSaleLineStatus(getSaleLineStatus(line, sale))) return sum;
     const textbook = getTextbookById(textbooks, text(line.textbook_id || line.textbookId));
@@ -9787,14 +9735,22 @@ function SalesProcessTable({
   const totalSalesRowCount = lines.length;
   const showSalesControls = totalSalesRowCount > 0 || hasProcessSearchQuery;
   const showSalesGroupToggleControls = renderedGroups.length > 1;
-  const makeEduBillingGroups = useMemo(() => buildMakeEduBillingHandoffGroups({
-    rows: visibleSaleRows,
-    salesById,
-    textbooks,
-    classes,
-    studentsById,
-  }), [classes, salesById, studentsById, textbooks, visibleSaleRows]);
   const makeEduBillingTotalAmount = makeEduBillingGroups.reduce((sum, group) => sum + group.totalAmount, 0);
+  const openBillingHandoff = useCallback(() => {
+    setBillingDialogOpen(true);
+    setMakeEduBillingGroups([]);
+    if (!acceptedFilters) { setBillingHandoffState("현재 필터가 아직 준비되지 않았습니다."); return; }
+    const frozenFilters = { ...acceptedFilters };
+    billingAbortRef.current?.abort();
+    const abort = new AbortController();
+    billingAbortRef.current = abort;
+    setBillingHandoffState("전체 필터 범위를 불러오는 중");
+    void getTextbookBillingHandoff(frozenFilters, { signal: abort.signal }).then((result) => {
+      if (abort.signal.aborted) return;
+      setMakeEduBillingGroups(result.groups);
+      setBillingHandoffState(result.groups.length ? "전체 필터 범위 준비 완료" : "전체 필터 범위에 청구할 항목이 없습니다.");
+    }, (error) => { if (!abort.signal.aborted) setBillingHandoffState(getTextbookActionErrorMessage(error)); });
+  }, [acceptedFilters]);
   const emptyActionLabel = hasProcessSearchQuery ? "검색 초기화" : "출고 바로 추가";
   const emptyAction = hasProcessSearchQuery ? onClearSearch : onAddSale;
 
@@ -9806,6 +9762,7 @@ function SalesProcessTable({
         title="메이크에듀 청구 준비"
         description="보이는 출고 건을 메이크에듀 기타수납 생성용 수납명, 금액, 대상 원생으로 정리합니다."
         groups={makeEduBillingGroups}
+        loadState={billingHandoffState}
         emptyLabel="청구할 출고 건이 없습니다"
         idPrefix="makeedu-billing"
       />
@@ -9936,7 +9893,7 @@ function SalesProcessTable({
           ) : null}
           {visibleRowCount > 0 ? (
             <>
-              {makeEduBillingGroups.length > 0 ? (
+              {acceptedFilters ? (
                 <Button
                   type="button"
                   size="sm"
@@ -9944,10 +9901,10 @@ function SalesProcessTable({
                   className="shrink-0"
                   aria-label="메이크에듀 청구 준비 열기"
                   title="메이크에듀 청구 준비"
-                  onClick={() => setBillingDialogOpen(true)}
+                  onClick={openBillingHandoff}
                 >
                   <Copy className="mr-2 size-3.5" />
-                  청구 {formatQuantity(makeEduBillingGroups.length)}건 · {formatCurrency(makeEduBillingTotalAmount)}
+                  청구 준비{makeEduBillingGroups.length ? ` ${formatQuantity(makeEduBillingGroups.length)}건 · ${formatCurrency(makeEduBillingTotalAmount)}` : ""}
                 </Button>
               ) : null}
               <Button type="button" size="sm" className="shrink-0" aria-label="교재 출고 추가" title="교재 출고 추가" onClick={onAddSale}>
@@ -10306,16 +10263,16 @@ function MonthlyClosingTable({
   onBulkLock,
   onInspectRow,
 }: {
-  rows: Row[];
+  rows: ClosingRow[];
   selectedIds?: string[];
   saving?: string;
   onToggleRow?: (id: string, checked: boolean) => void;
   onToggleVisibleRows?: (ids: string[], checked: boolean) => void;
   onBulkLock?: () => void;
-  onInspectRow?: (row: Row) => void;
+  onInspectRow?: (row: ClosingRow) => void;
 }) {
-  const recentRows = useMemo(() => [...rows].slice(-12).reverse(), [rows]);
-  const visibleIds = useMemo(() => recentRows.map(getRecordId).filter(Boolean), [recentRows]);
+  const recentRows = rows;
+  const visibleIds = useMemo(() => rows.map(getRecordId).filter(Boolean), [rows]);
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const selectedVisibleCount = visibleIds.filter((id) => selectedIdSet.has(id)).length;
   const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
@@ -10351,7 +10308,7 @@ function MonthlyClosingTable({
                 aria-label="정산 행 전체 선택"
                 className="shrink-0"
               />
-              <span className="truncate">최근 {formatQuantity(visibleIds.length)}건</span>
+              <span className="truncate">현재 페이지 {formatQuantity(visibleIds.length)}건</span>
             </div>
             <span className="shrink-0 tabular-nums">선택 {formatQuantity(selectedVisibleCount)}</span>
           </div>
