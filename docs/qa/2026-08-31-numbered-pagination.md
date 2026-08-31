@@ -15,12 +15,24 @@ Ten-number fixed blocks, one-page single arrows, global first/last double arrows
 | Shared pager/preferences | Reviewed (`1f62316f`, including interface repair) | 14/14 behavior tests; focused ESLint/TS pass | Not applicable | Live viewport pending |
 | Students/classes | Read API (`451b25d7`), SQL gate (`701e9a96`); UI (`0915e8d4`), first fix (`0a86a16a`) and final foundation fix (`97b17191`) reviewed and approved | Fresh combined foundation/query guard370/370; focused lint/TS, full ESLint0 errors/6 existing warnings, isolated production build81/81 pass | Final-only isolated pgTAP114/114 passed (unchanged; not rerun in final fix) | Pending |
 | Tasks/retests/registration/transfer/withdrawal | Numbered read model, route integration and final integration fix `57ea0622` independently reviewed; local slice complete | Final selected regression **960/960**; TypeScript pass; focused lint 0 errors/3 legacy warnings; fresh isolated build **81/81** | Isolated final-only **613/613** plus baseline/catalog **1937/1937**; unchanged after UI-only final fix; required `20260831031913_ops_task_numbered_pages.sql` final hash retained | Browser-policy blocked; remote RPC/deployment pending |
-| Makeup/approvals/curriculum/class planning | Pending | Pending | Pending | Pending |
+| Curriculum/class planning | Read model `466b2c2a` independently approved; UI integration running | Service76/76, query-budget121/121; focused lint/nonincremental TS pass; no new UI build yet | New134 + legacy86 = **220/220**; separate baseline/catalog **1937/1937**, candidate/final-only passed | Browser-policy blocked; remote RPC/deployment pending |
+| Makeup/approvals | Pending; off-page reservation context and actor-scoped save retry requirements clarified | Existing compatibility baseline only; new implementation pending | Pending | Pending |
 | Textbook operations/settings/auxiliary lists | Pending | Pending | Pending | Pending |
 | Teacher Google Chat identity table/cards | Identified in final inventory; auxiliary plan saved | Pending | Pending | Pending |
 | Statistics student/class drilldown lists | Existing accumulated `다음 30명/개` identified; added to auxiliary plan | Pending | Pending | Pending |
 
 No row marked pending is complete. Foundation completion alone is not app-wide completion.
+
+## Secondary read-model gate — before UI integration
+
+Commit `466b2c2a70b6e057f7d808bc2d3ff06a30e21111` adds direct academic curriculum and operations class-planning numbered reads with existing DTOs/filter semantics, authorized full-filter counts, stable full-name Korean-numeric/id ordering and selected-page display enrichment. Independent Task1 review approved spec and quality without Critical/Important/Minor findings. This does not approve the pending hook/workspace integration.
+
+- Migration `20260831052546_academic_operations_numbered_pages.sql` SHA256 `32b51bd8ac1fc14d32bf01a260d1fa22a9324b658960de265f5b89bc0c61b0df`; new pgTAP file SHA256 `b42538fc42a58b586f4010c3025b4eb9e11d419b07a3ef4a735826c23744b9f4`. Candidate2 and exact-hash final-only runs both passed new134 plus legacy86 assertions (**220/220**), separately **1937/1937** baseline/catalog checks. Both isolated projects stopped and temporary roots were removed; the unrelated pre-existing healthy DB remained untouched.
+- Service regression **76/76**, query-budget suite **121/121**, nonincremental TypeScript and focused lint exit0. Academic/operations query guards and final-history validator exit0; 30 prior final entries unchanged, one appended. Persistent logs `/private/tmp/secondary-task1-service-final.log`, `secondary-task1-query-full.log`, `secondary-task1-sql-final.log` retain the actual results.
+- Genuine pre-DDL missing-function RED is in `secondary-task1-sql-red5.log`. Earlier four attempts failed during fixture setup and are not numbered-RPC validation. Candidate1 exposed overly broad fixture search matching term names; narrowing the fixture search and adding a literal term-search assertion preserved production search semantics. Candidate2/final then passed; no prior final migration bytes were rewritten.
+- No current UI build, authenticated live request trace, nested EXPLAIN, remote migration or production latency claim accompanies this read-only API gate. Secondary Task2 began from clean `d0ef3f9f`; subsequent root plan-only clarification `c9208ccf` is not Task2 production work.
+
+Source-only follow-ups preserve two complete-set/state dependencies: makeup room-availability checks need independent time-slot-scoped reservation evidence (not current-page requests), and approval row comments/uncertain mutation attempts need actor-scoped draft/receipt ownership. Their planned client/read changes do not alter server mutation authority, notification producers or same-actor retry receipts. No approval/makeup implementation or SQL proof is claimed yet.
 
 ## Baseline
 
