@@ -2,7 +2,9 @@
 
 **Status:** Approved for implementation by the user on 2026-08-31.
 **Scope:** Shared pagination UI and behavior for administrative record lists, with domain-specific bounded page reads.
-**Not authorized by this design:** Remote migration application, deployment, provider activation, notification sends, or changes to domain mutations.
+**Not authorized by this design:** Remote migration application, deployment, provider activation, or notification sends. Domain mutations remain unchanged except the explicitly approved settings save/order API improvement below.
+
+**2026-08-31 authorization addendum:** The user requested that Codex launch Docker directly and include recommended save API improvements. This authorizes local Docker/isolated SQL verification and the settings transactional save/order/default handling necessary to preserve existing add, reorder, save, and account-link semantics under paging. It does not authorize changing business formulas, removing capabilities, broadening write access, or applying remote migrations.
 
 ## 1. User-facing contract
 

@@ -1,0 +1,162 @@
+# Settings Numbered Pagination and Atomic Save Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Apply the common numbered pager to the five editable settings catalogs and teacher history without losing staged edits, global ordering, default-period state, or teacher account synchronization.
+
+**Architecture:** A chronological edit journal is projected on the server before filter/count/page and committed by a transactional invoker API. The server owns ranks and collection revisions; actor-bound request receipts make retries idempotent. Existing catalog-specific editors retain their fields and controls while sharing a bounded read/draft adapter and the reviewed pager/controller.
+
+**Tech Stack:** React19, shadcn/Radix, Supabase/PostgreSQL17, node:test, pgTAP.
+
+**Spec:** `docs/superpowers/specs/2026-08-31-app-wide-numbered-pagination-design.md`, including the user's 2026-08-31 save-API authorization addendum.
+
+## Global Constraints
+
+- Page-number blocks contain ten existing numbers: 1–10, 11–20, 21–30. No ellipses or direct page input. Single arrows move one page; double arrows select global first/last.
+- List page size is 10/15/20, minimum ten. Existing independent relationship/picker contracts remain unchanged.
+- Total count represents the authorized full filtered result, never the loaded subset. Unknown count is not zero.
+- Number clicks fetch their page without fetching intermediate pages or full datasets. Stable sorts end with id.
+- Preserve previous rows on pending/error, abort superseded requests, reject stale rows/counts, reset page on filter/sort/size changes, and clamp after mutation shrink.
+- Preserve staged Save, add/delete/move/name-sort controls, drafts across pages, full global order, and existing account/default semantics. Do not write client page indexes as global ranks.
+- Preserve authentication/RLS/ACL/locks/idempotency/no-send. Do not apply remote migrations, push, deploy, or send notifications.
+- All new functions are invoker, with empty search_path, qualified objects, and explicit authenticated EXECUTE grants after PUBLIC/anon revocation. No generic privileged table endpoint.
+- Domain revision conflicts use SQLSTATE55000 and detail `settings_revision_conflict`; malformed requests use22023. Never manually raise40001. Preserve natural23505/23503/23514/42501 errors.
+- No arbitrary catalog limit, full-array fallback, silently truncated journal, or partial batch Save.
+- Read `docs/superpowers/plans/2026-08-31-settings-save-contract-audit.md` for exact existing normalization/order/access chains. It is required domain input, not implementation proof.
+- Supplier/publisher settings are owned by the textbook plan. The exactly-three-row subject configuration matrix is excluded.
+
+## File and interface map
+
+- `src/features/management/settings-catalog-draft.ts`: types, immutable journal operations, and save-generation tracking; no database or full catalog cache.
+- `src/features/management/settings-catalog-service.ts`: strict bounded page/preview/save RPC transport and error normalization.
+- `src/features/management/use-settings-catalog-page.ts`: common controller adapter and in-memory draft lifecycle; no field-specific normalization.
+- Existing five `*-master-workspace.tsx` files: field rendering and domain actions only.
+- `src/features/management/teacher-audit-page.tsx`: full history and authorized event detail, independent from the existing recent preview.
+- CLI-created `settings_catalog_pages`, `settings_catalog_atomic_saves`, and `teacher_audit_numbered_pages` migrations: reviewed invoker reads/projector, transactional saves/receipts, history/detail respectively.
+
+## Task 1: Executable journal contract and projected bounded reads
+
+**Files:** Create draft/service modules above; create `tests/settings-catalog-draft.test.mjs`, `tests/settings-numbered-read-service.test.mjs`; create CLI migration `settings_catalog_pages` and `supabase/tests/settings_numbered_reads_test.sql`; append only owned candidate manifest entry.
+
+**Interfaces:** Export `createSettingsCatalogDraft({kind,baseRevision,requestId})`, `appendSettingsCatalogOperation(draft,operation,{requestId})`, and `createSettingsCatalogService({supabase}).readPage({kind,filters,page,pageSize,draft,signal}) -> SettingsCatalogPage<Record<string,unknown>>`. The append function returns a new journal with a fresh logical requestId, never mutates the saved draft, and never reorders/coalesces patches across structural actions. Export all types below. SQL read API: `list_settings_catalog_numbered_page_v1(p_kind text,p_filters jsonb,p_page integer,p_page_size integer,p_draft jsonb default null) returns jsonb`. Put shared pure `project_settings_catalog_v1(p_kind text,p_rows jsonb,p_operations jsonb)` and revision helpers in the new non-exposed `settings_private` schema; explicit invoker grants, no schema CREATE for authenticated.
+
+Filters are strict per kind: school `{category,search}`, classroom `{subject}`, term `{}` (no new year control), teacher `{team}`, class_group `{}`. Strings preserve the current existing aliases through the domain adapter. No new search/filter UI is added. The request has `draft:null` for the persisted initial page; an edited request carries the entire journal, never all catalog rows.
+
+Teacher baseRevision also includes DISTINCT currently linked profile `id,role,teacher_catalog_id,updated_at` visible under invoker RLS. Unreadable links contribute a fixed sentinel keyed only by the already-visible catalog profile_id; never hash hidden fields. New profile links outside that initial revision use `expectedProfiles` from a bounded ID context: `service.readProfileVersions({ids,signal}) -> Record<string,string>` backed by invoker `get_settings_profile_versions_v1(p_ids uuid[])`. Return only requested RLS-readable IDs and their opaque versions; reject missing/inaccessible targets. Task1 produces this read; Task2 checks it after locks; Task3 calls it when a new link is chosen. This is separate from the existing account picker, not a full-profile-array transfer.
+
+The task produces these exact types (import `NumberedPage` from `src/lib/numbered-pagination.ts`):
+
+```ts
+export type SettingsCatalogKind = 'school' | 'classroom' | 'term' | 'teacher' | 'class_group';
+export type SettingsCatalogOperation =
+  | { op:'patch'; id:string; fields:Record<string,unknown> }
+  | { op:'add'; id:string; fields:Record<string,unknown>; team?:string }
+  | { op:'delete'; id:string }
+  | { op:'move'; id:string; direction:'up'|'down' }
+  | { op:'name_sort'; direction:'asc'|'desc' }
+  | { op:'set_default'; id:string };
+export type SettingsCatalogDraft = {
+  kind:SettingsCatalogKind; requestId:string; baseRevision:string;
+  operations:SettingsCatalogOperation[]; expectedProfiles:Record<string,string>;
+};
+export type SettingsCatalogPage<T> = NumberedPage<T> & {
+  baseRevision:string; projectedFingerprint:string;
+  defaultGroupId:string|null;
+  moveDirectionsById:Record<string,{up:boolean;down:boolean}>;
+};
+export type SettingsCatalogSaveResult = {
+  outcome:'applied'|'replayed'; revision:string;
+  changedIds:string[]; deletedIds:string[]; defaultGroupId:string|null;
+};
+```
+
+- [ ] Write RED tests for chronological operations and the exact read boundary:
+
+```js
+const first = createSettingsCatalogDraft({kind:'school',baseRevision:'revision-a',requestId:'11111111-1111-4111-8111-111111111111'});
+const renamed = appendSettingsCatalogOperation(first,{op:'patch',id:'22222222-2222-4222-8222-222222222222',fields:{name:'학교 2'}},{requestId:'33333333-3333-4333-8333-333333333333'});
+assert.deepEqual(first.operations, []);
+assert.equal(renamed.operations[0].fields.name, '학교 2');
+assert.equal(renamed.baseRevision, 'revision-a');
+let calls = 0;
+const reply = { rows:[],page:11,pageSize:10,totalCount:0,baseRevision:'revision-a',projectedFingerprint:'projection-a',defaultGroupId:null,moveDirectionsById:{} };
+const service = createSettingsCatalogService({supabase:{rpc(name,args) {
+  calls++;
+  assert.equal(name, 'list_settings_catalog_numbered_page_v1');
+  assert.deepEqual(args, {p_kind:'school',p_filters:{category:'',search:''},p_page:11,p_page_size:10,p_draft:renamed});
+  return {
+    abortSignal(signal) { assert.equal(typeof signal.aborted, 'boolean'); return this; },
+    retry(value) { assert.equal(value, false); return this; },
+    then(resolve,reject) { return Promise.resolve({data:reply,error:null}).then(resolve,reject); },
+  };
+}}});
+assert.equal((await service.readPage({kind:'school',filters:{category:'',search:''},page:11,pageSize:10,draft:renamed})).page, 11);
+assert.equal(calls, 1);
+```
+
+Record expected pre-implementation failures. Add pgTAP literal fixture expectations for rename→name-sort→rename, interleaved-team moves, prepend/team-add, cross-page/global neighbors under filters, invalid incomplete draft preview, filtered deletion filling a page, exact totals and off-page default. Assert projected reads do not write tables or audit. Include auth/ACL/invalid22023, malformed DTO, timeout/cancel, and no complete-array fallback.
+- [ ] Create migration via discovered CLI. Build an explicit five-kind source with edit-complete allowed fields and preserved hidden columns; do not accept table names from the caller. Compute canonical full visible collection revision including IDs/editable values/ranks/updated_at and metadata replay depends on, ordered byid. `max(updated_at)` is forbidden. Use a cryptographic fingerprint available in the final baseline. Initial page order matches the audit; ties end inid.
+- [ ] Implement one deterministic pure journal projector shared with Task2. Apply operations in order to server-side narrow state, retain stable input ordinal for natural name-sort ties, normalize fields at the documented boundary, preserve invalid untouched legacy rows. Preview allows incomplete new names/dates for typing; final validation belongs to Save. Filter/count/page only after projection. Return page rows plus revision/default/move metadata; never all reordered row bodies. Validate kind/filter/op/field/UUID/page/size shapes.
+- [ ] Strict service parses page/count/revision and per-kind editable DTOs, composes caller abort with eight-second timeout, sets retry(false), and reports missing RPC explicitly. Persist no row/draft data in localStorage. Run focused node tests, lint/TS and isolated SQL runner `--review-head --execute --authorized`; after candidate pass promote only owned entry and rerun`--require-final`. Commit owned files with `feat: add projected numbered settings reads`.
+
+## Task 2: Atomic changed-only saves and exact retry receipts
+
+**Files:** Extend draft/service modules; create CLI migration `settings_catalog_atomic_saves`; create `tests/settings-catalog-save-service.test.mjs`, `supabase/tests/settings_catalog_reorder_test.sql`; add `tests/settings-catalog-concurrency.test.mjs` using the existing isolated PostgreSQL harness for two real connections; update owned manifest entry only.
+
+**Interfaces:** `service.saveDraft({draft,signal}) -> SettingsCatalogSaveResult`; SQL `save_settings_catalog_draft_v1(p_draft jsonb) returns jsonb`. Reuse Task1 projector unchanged unless a behavior defect is reproduced. Request receipt key is `(actor_id,request_id)` and canonical hash includes kind/baseRevision/ordered operations/expectedProfiles. Result is narrow; no all-row response.
+
+- [ ] Write RED tests where losing the first Save response and retrying the same immutable request yields one move and one set of audit changes:
+
+```js
+// Execute against the local fixture using a fixed request UUID and a real
+// transaction; fetch the order and audit count independently before retry.
+const signal = new AbortController().signal;
+const initialPage = await service.readPage({kind:'school',filters:{category:'',search:''},page:1,pageSize:10,draft:null,signal});
+const draft = {
+  kind:'school',requestId:'11111111-1111-4111-8111-111111111111',
+  baseRevision:initialPage.baseRevision,
+  operations:[{op:'move',id:'22222222-2222-4222-8222-222222222222',direction:'down'}],
+  expectedProfiles:{},
+};
+const result = await service.saveDraft({draft,signal});
+const retry = await service.saveDraft({draft,signal});
+assert.deepEqual([result.outcome,retry.outcome], ['applied','replayed']);
+assert.equal(retry.revision, result.revision);
+```
+
+The SQL fixture independently asserts final ordered IDs, unchanged audit count on replay, request-ID/payload mismatch22023, stale revision55000 with exact detail, inaccessible writes42501, final uniqueness/FK/CHECK rollback, empty no-op without timestamp churn, off-page default replacement and all-or-nothing profile updates. Two-connection tests must show legacy direct INSERT/UPDATE/DELETE conflict with the save collection lock and that concurrent same-request execution does not double-move. Do not fake concurrency by only asserting a lock string in source.
+- [ ] Create immutable actor-bound receipt table in `settings_private` (not PostgREST exposed). Authenticated USAGE on this new schema, SELECT/INSERT on this table with actor=auth.uid() RLS, no CREATE/UPDATE/DELETE/TRUNCATE, no PUBLIC/anon access. No expiry job in v1; replay horizon must not be silently shortened. Receipts are retry state, not privileged security/audit evidence.
+- [ ] Validate caller/kind and acquire namespaced transaction advisory lock for actor/request. Check matching receipt before base-version checks; return stored result with replay outcome or reject different hash. For new requests, acquire collection SHARE ROW EXCLUSIVE before reading fingerprint so legacy direct writers are covered. Teacher saves lock affected profile rows in deterministic ID order before the teacher collection lock, matching the existing signup path; revalidate profile IDs/versions after locks and fail if the lock set changed. Set bounded transaction-local lock timeout, propagate real lock errors without mapping them to a domain40001.
+- [ ] Replay and validate final desired state; write only changed fields/ranks/inserts/deletes. Preserve hidden group term_id/color/note and school non-editor fields. Keep all constraints/triggers. For terms map known legacy `수강` to `수업 진행 중`; reject unknown status and retain final CHECK. For period defaults clear priortrue before setting replacementtrue in the same transaction; require explicit replacement when deleting default while rows survive, allow null for empty or already-defaultless collection. Move preference writes out of unsaved UI effects in Task3.
+- [ ] Teacher synchronization writes only changed linked teachers' profiles.role and teacher_catalog_id, including off-page rank changes only when the profile patch differs. Compare visible profile values before skipping DML. If a sync candidate is unreadable, required-vs-no-op cannot be established: fail42501 conservatively rather than silently skip. Preserve existing unlink/relink/delete semantics; do not reset old profile roles. Detect zero-row unauthorized updates and roll back catalog writes. Insert receipt in the same transaction. Leave existing audit writer and no-send boundaries untouched.
+- [ ] On uncertain transport preserve the exact request UUID/body/new-row UUIDs; no automatic write retry and no new UUID for Retry. Run service tests plus actual pgTAP/concurrency tests, lint/TS; promote only after actual candidate pass, final-only rerun, and commit `feat: save paginated settings atomically`.
+
+## Task 3: Wire five settings editors to shared paging and journal lifecycle
+
+**Files:** Create `use-settings-catalog-page.ts`; modify school/classroom/term/class-group/teacher master workspaces and only necessary shared settings layout; create `tests/settings-numbered-edit-boundary.test.mjs`; update affected existing school/classroom/teacher tests without replacing behavioral assertions with source scans.
+
+**Interfaces:** `useSettingsCatalogPage({kind,filters,actorScope,enabled})` returns displayed `{rows,page,pageSize,totalCount,loading,error,metadata}`, preference `{mode,setPreference,setAutoPageSize,ready}`, `{goToPage,appendOperation,save,retrySave,discardDraft,refresh,draft,saveState}`. `saveState` is idle/saving/uncertain/error; all page requests use `createNumberedPageController` from foundation and metadata commits only with that exact successful scope/page. The existing `DataTablePagination` accepts `{page,pageSize,totalCount,loading,onPageChange,pageSizeMode,onPageSizeChange,ariaLabel}`. Keep field normalization in domain code/SQL, not the hook.
+
+- [ ] Write RED real hook/editor tests with external transport doubled, production journal/controller/rendering intact. Assert a page1 edit survives page11 and Save sends its ID, while untouched page1/page11/off-page owners are absent from field writes. Verify draft preview delete refills the page; move crosses page boundary; name-sort with a pending rename; separate teacher team; off-page default remains selected; stale preview cannot replace newer edits. Failed/uncertain Save retains all drafts and Retry sends identical body/UUID; acknowledged generation clears only itself. Auth changes clear rows/drafts immediately.
+- [ ] Replace complete-list reads and `saveAll(allRows)` with service/controller/journal. Keep fields and current explicit Save controls. Add operation chronologically for each field/add/delete/move/sort/default action. Use server preview for structural changes; field typing may immediately overlay only that field pending the matching debounced preview. Never infer page membership, total, global ranks, neighbor availability, or uniqueness from page rows. Display server default metadata and global move availability. Do not disable a cross-page move merely because it is at the visible page edge.
+- [ ] Keep journal in memory through page/filter navigation, page reset atomic for filters/size, page requested directly, previous successful rows retained on error. Freeze editing during saving or unresolved uncertain outcome so retries cannot mutate the submitted body. After confirmed Save reload current page/clamp; after conflict preserve edits and offer explicit discard/reload, not silent rebase. Keep navigation-away unsaved guard. Shared preference readiness gates first query. Use common pager outside scrollport/mobilemirror and current semantic shadcn components.
+- [ ] Preserve separate bounded account/profile lookup and profile versions for changed links, not a teacher-page-derived selector. Remove pre-save local default-period preference writes; update fallback only after confirmed server state. Use valid canonical term default on new rows. Preserve current footer/column controls without adding instruction cards.
+- [ ] Run focused new/existing editor tests, common controller/pager suite, full TS and lint; record browser gates separately without bypassing existing URL policy. Commit `feat: paginate settings editors without losing drafts`.
+
+## Task 4: Teacher full history and independently authorized detail
+
+**Files:** Create teacher-audit-page component and `teacher-audit-service.ts`; integrate teacher workspace; create CLI migration `teacher_audit_numbered_pages`; create `tests/teacher-audit-numbered-page.test.mjs`, `supabase/tests/teacher_audit_numbered_pages_test.sql`; owned manifest entry.
+
+**Interfaces:** `createTeacherAuditService({supabase}).readPage({page,pageSize,signal})` returns sharedNumberedPage; `.readDetail({id,signal})` returns authorized event diff. SQL `list_teacher_audit_numbered_page_v1(p_page integer,p_page_size integer)` and `get_teacher_audit_detail_v1(p_id uuid)` are invoker. Keep current12-entry `최근 변경 이력` preview distinct; new full surface labelled`전체 변경 이력`, no new search/filter controls.
+
+- [ ] Write RED service/render/SQL tests: filter onlyteacher_catalogs/profiles, orderedchanged_atDESC,idDESC, page11direct/exacttotal, narrowlistwithout pre/post/full diff, authorizedoffpagedetail, unauthorizeddetaildenied, noauditwrites, previewretained. Invalidpage/size22023 and existing audit RLS remain.
+- [ ] Implement narrow filtered key/count/page then actor display enrichment; detail returns diff only after independentRLSauthorizedIDread. Wire common controller/pager and per-list preference. Selection/detail must not depend on loadedpage.find. Runfocusednode+isolatedSQL+TS/lint; promoteownedcandidateonlyafterpass/finalrerun. Commit `feat: add paginated teacher change history`.
+
+## Task 5: Settings verification and app-wide audit handoff
+
+**Files:** Update `docs/qa/2026-08-31-numbered-pagination.md` and the saved settings audits with actual evidence; no scope expansion.
+
+- [ ] Run combined settings service/draft/editor/history regressions, common pager/controller, all new SQL and catalog parity tests through final-only isolated verification, typecheck/lint/production build without replacing the protected live3017build.
+- [ ] Inspect code for remaining in-scope whole-list save/load paths; confirm subjectfiniteconfig and picker contracts are intentionally separate, not skipped record lists. Verify supplier/publisher coverage from textbook plan independently.
+- [ ] Rendered QA when browser access is permitted: desktop1440×768/900/952/mobile390×844, all10numbers, globalfirst/last, cross-page edit/move/default and savedserverresult. If policy blocks access, record pending rather than bypass. No remoteapply/deployclaim.
+- [ ] Conduct whole-plan review, resolve findings, and commit evidence. This finishes settings only; app-wide completion still requires every domain plan and final applicability audit.

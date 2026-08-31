@@ -19,7 +19,7 @@
 - Preserve current-page selection independently from per-user/per-record drafts. Never delete a draft merely because its record is absent from this page.
 - Preserve full-filter export and monthly settlement scope, existing write authority and all domain mutation semantics. Do not change formulas, negative-stock policy, notification/send behavior, RLS or authorization boundaries.
 - No remote migration, push, deployment or sends. CLI-generated migrations remain candidate until actual isolated SQL proof; no speculative indexes.
-- Supplier/publisher settings and other global-order settings are separate from operational pages; changes to ordering/save API structure await the user's scope decision. Do not silently remove existing reorder/add controls or introduce an arbitrary catalog cap.
+- Supplier/publisher settings and other global-order settings are separate from operational pages; on 2026-08-31 the user approved recommended ordering/save API improvements needed for paging. Preserve existing reorder/add and complete ordered publisher-link semantics; do not introduce an arbitrary catalog cap.
 - Distinguish unit/parity/SQL/build/browser evidence; do not bypass Browser access policy or deploy a UI without its required RPC capability.
 
 ## Required implementation input
@@ -101,7 +101,7 @@ Read `docs/superpowers/plans/2026-08-31-textbook-numbered-read-audit.md` complet
 
 **Interfaces:** Implement audit `listTextbookPublisherPage`, `listTextbookSupplierPage`; each row includes complete ordered links for that owner, authoritative related counts/names and independent picker support. Draft maps/tombstones are keyed by owner ID, not page.
 
-- [ ] Before implementation, resolve the user's pending settings save-structure scope choice recorded in the foundation ledger. If approval is absent, leave this task explicitly pending; do not invent a new ordering mutation or remove controls. Operational tasks1–4 remain independent.
+- [ ] Apply the user's 2026-08-31 approval of recommended settings save-structure improvements. Restrict each save to dirty supplier/publisher owners, preserve each dirty publisher's complete ordered links, and leave off-page owners untouched. Retain existing controls and write authority. Operational tasks1–4 remain independent.
 - [ ] With that scope resolved, write RED tests proving off-page publishers/links are unchanged when saving one owner, draft roundtrip retains all ordered supplier IDs and primary priorities, counts retain id-first/name-fallback semantics, and page changes never use a partial link set as replacement input.
 - [ ] Add invoker page/detail/picker reads with RLS/role parity, exact count and stable id order. Separate full owner link detail from arbitrary current-page links; catalog limits are not proof of completeness.
 - [ ] Refactor draft/save targets to dirty owners only while preserving each dirty owner's complete link list and existing primary/priority meaning. Apply any approved authoritative ordering contract separately; never globally renumber only a page. Keep subsubject lazy loading and its distinct global-order boundary.

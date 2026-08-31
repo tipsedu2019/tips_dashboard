@@ -126,14 +126,9 @@ This is not a license to retain the current client duplicate checks: school dupl
 
 To retain global ordering under numbered pages, add one authoritative transactional contract such as `move_<catalog>_item_v1(p_id uuid, p_before_id uuid null, p_after_id uuid null, p_expected_revision bigint)` or a reorder RPC that accepts the full ordered IDs plus collection revision. It must lock/revision-check the order, calculate ranks server-side, and return the affected rows/revision. Existing direct `upsert` calls are insufficient.
 
-**Status — awaiting user choice:** the controller has asked the user for authority to expand the settings ordering/save API model. Do not introduce this reorder/insert/default-atomicity mutation, remove current full-list save behavior, or wire editable master pages to numbered reads until that choice is made. Page-read DTO and test preparation may proceed, but no silent full-array fallback or arbitrary cap is permitted.
+**Status — authorized on 2026-08-31:** The user requested Docker launch and inclusion of recommended save API improvements. Implement the smallest transactional save/order contract that retains existing staged editing, add, cross-page move, alphabetical reorder, period default, and teacher account-link behavior. Page navigation must preserve off-page drafts; saving a page must not overwrite untouched off-page records. Use server-owned ranks and revision/conflict checks, not a full-array fallback or an arbitrary catalog cap. Preserve existing authorization and business semantics; remote application remains unapproved.
 
-Until then, choose one explicit behavior:
-
-1. **Pageable field editor:** remove/hide move and name-sort controls, preserve server `sort_order` as read order, save only dirty page rows; or
-2. **Global reorder editor:** enter an explicitly labelled full-order editing mode and load the authoritative complete collection only after a documented bounded catalog contract exists.
-
-Do not make the current page selection mean "all items" and do not silently switch between these modes.
+Do not make the current page selection mean "all items", silently remove existing ordering controls, or treat page rows as a complete collection.
 
 ## Tables, active access contracts, and history
 
@@ -171,6 +166,6 @@ Add, before implementation completion:
 2. `tests/settings-numbered-edit-boundary.test.mjs`: page-local dirty rows save only their IDs; page navigation preserves/guards unsaved drafts; school uniqueness conflict; no visible-page rank renumbering; add/reorder controls are unavailable until the approved mutation exists.
 3. `tests/teacher-audit-numbered-page.test.mjs`: retain the 12-entry explicitly `recent` preview and verify the approved separate full-history pager has no new filters, exact totals, deterministic `changed_at DESC, id DESC`, and an event-detail boundary for diffs.
 4. `supabase/tests/settings_numbered_reads_test.sql`: RLS/authenticated access, exact full-filter totals, arbitrary pages, stable order, invalid `22023`, catalog-list DTO non-leakage, and period default metadata that remains correct when the default is off-page.
-5. `supabase/tests/settings_catalog_reorder_test.sql` only after the user authorizes the new reorder/save API: concurrent/revision conflict, cross-page move, no duplicate/gap ranks, new-row placement, default-period replacement/atomicity, and rollback behavior.
+5. `supabase/tests/settings_catalog_reorder_test.sql` for the now-authorized reorder/save API: concurrent/revision conflict, cross-page move, no duplicate/gap ranks, new-row placement, default-period replacement/atomicity, and rollback behavior.
 
-No migration, test, deployment, or mutation change is authorized by this audit.
+This audit is design input; implementation and local testing are authorized by the user's request. Remote migration/deployment remains a separate permission boundary.
