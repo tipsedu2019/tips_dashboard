@@ -139,6 +139,32 @@ export type TextbookSaleHistorySummary = {
 export type InventoryFilters = MasterFilters & { locationId: string; audit: InventoryAuditFilter };
 export type InventoryHistoryFilters = { textbookId: string | null; locationId: string | null };
 export type ClosingFilters = { month: string; subject: string; status: string };
+export type ClosingMovementFilters = { closingMonth: string; subject: string; search: string };
+export type ClosingMovementRow = { id: string; at: string; typeLabel: string; textbookTitle: string; locationName: string; quantity: number; amount: number; marginAmount: number };
+export type ClosingRow = Row & {
+  id: string; closing_month: string; subject: string; opening_quantity: number; opening_amount: number;
+  purchase_quantity: number; purchase_amount: number; sale_quantity: number; sale_amount: number;
+  adjustment_quantity: number; adjustment_amount: number; ending_quantity: number; ending_amount: number;
+  received_amount: number; supplier_payment_amount: number; settlement_difference: number;
+  status: "draft" | "locked"; memo: string; created_by: string | null; created_at: string | null; updated_at: string | null;
+};
+export type ClosingPreviewInput = { closingMonth: string; subject: string; openingQuantity: number; openingAmount: number };
+export type ClosingCalculation = ReturnType<typeof import("./textbook-ledger.js").buildTextbookMonthlyClosing>;
+export type TextbookClosingPreview = { closingMonth: string; subject: string; sourceLineCount: number; closing: ClosingCalculation };
+export type TextbookClosingDetail = { row: ClosingRow | null; preview: TextbookClosingPreview | null;
+  storedMetrics: import("./textbook-closing-model").ClosingStoredMetrics | null;
+  metricMismatches: { purchase: boolean; sale: boolean; ending: boolean; margin: boolean } | null; metricMismatchCount: number };
+export type TextbookClosingSaveContext = { closingMonth: string; subject: string; sourceLineCount: number; sourceLineIds: string[];
+  stockMoves: Row[]; textbooks: Row[]; publishers: Row[]; suppliers: Row[]; publisherSupplierLinks: Row[]; complete: true };
+export type ClassTextbookSaleContextInput = { classId: string; textbookId: string; chargeMonth: string; locationId: string };
+export type ClassTextbookSaleContext = {
+  input: ClassTextbookSaleContextInput; class: Row; enrolledStudentIds: string[]; students: Row[]; missingStudentIds: string[];
+  textbook: WorkflowTextbookReference; location: WorkflowLocationReference; inventory: TextbookInventoryBalanceRow;
+  duplicateLines: SaleMemberSource[]; duplicateSales: SaleSource[]; duplicateLineIds: string[]; duplicateLineCount: number;
+  duplicateStudentIds: string[]; duplicateCount: number; complete: true;
+};
+export type TextbookHandoffResult = { groups: import("./textbook-handoff-model").TextbookHandoffGroup[]; sourceLineCount: number; complete: true };
+export type TextbookClosingMovementExport = { rows: ClosingMovementRow[]; sourceLineCount: number; complete: true };
 export type SettingFilters = { search: string };
 
 export type TextbookQualityIssues = Record<Exclude<TextbookQualityFilter, "all" | "attention">, boolean>;

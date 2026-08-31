@@ -1435,6 +1435,30 @@ test("actual textbook numbered adapter keeps all seventeen literal contracts and
   assert.deepEqual(inspectQuerySurfaceSource({ surface: "management", file, source: await readFile(new URL(`../${file}`, import.meta.url), "utf8") }), [])
 })
 
+test("closing work reads have exactly two numbered and seven purpose-complete contracts", async () => {
+  const inspect = (name, args, suffix = ".abortSignal(AbortSignal.timeout(8000)).retry(false)") => inspectQuerySurfaceSource({
+    surface: "management", file: "src/features/textbooks/closing-work-fixture.ts",
+    source: `async function read(client, request) { return client.rpc(${JSON.stringify(name)}, ${args})${suffix} }`,
+  }).map(item => item.reason)
+  const pages = ["list_textbook_closing_page_v1", "list_textbook_closing_movement_page_v1"]
+  const purposes = ["get_textbook_closing_detail_v1", "get_textbook_closing_preview_v1", "get_class_textbook_sale_context_v1", "get_textbook_purchase_handoff_context_v1", "get_textbook_billing_handoff_context_v1", "get_textbook_closing_save_context_v1", "get_textbook_closing_movement_export_v1"]
+  for (const name of pages) {
+    for (const size of ["10", "15", "20", "request.pageSize"]) assert.deepEqual(inspect(name, `{p_page:11,p_page_size:${size}}`), [])
+    for (const size of ["5", "25", "null"]) assert.deepEqual(inspect(name, `{p_page_size:${size}}`), ["rpc_page_limit_invalid"])
+    assert.deepEqual(inspect(name, "{}"), ["rpc_page_limit_missing"])
+    assert.deepEqual(inspect(name, "{...request,p_page_size:10}"), ["rpc_page_limit_unresolved"])
+  }
+  for (const name of purposes) assert.deepEqual(inspect(name, "{p_input:request.input}"), [])
+  for (const name of [...pages, ...purposes]) {
+    assert.deepEqual(inspect(name.replace("_v1", "_v2"), "{p_input:request.input}"), ["rpc_page_limit_missing"])
+    assert.ok(inspect(name, "{p_page_size:10}", ".retry(false)").includes("list_abort_signal_missing"))
+    assert.ok(inspect(name, "{p_page_size:10}", ".abortSignal(AbortSignal.timeout(8000))").includes("list_retry_false_missing"))
+  }
+  for (const file of ["src/features/textbooks/textbook-read-service.ts", "src/features/textbooks/textbook-work-context-service.ts"]) {
+    assert.deepEqual(inspectQuerySurfaceSource({ surface: "management", file, source: await readFile(new URL(`../${file}`, import.meta.url), "utf8") }), [])
+  }
+})
+
 test("ordered exact-key details and nested projections without wildcards remain allowed", async () => {
   const result = await verifyFixture({
     source: `async function load(client, id) {

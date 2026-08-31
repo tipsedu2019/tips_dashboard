@@ -5,7 +5,104 @@ import { createHash } from 'node:crypto';
 import { registerHooks } from 'node:module';
 
 const serviceUrl = new URL('../src/features/textbooks/textbook-read-service.ts', import.meta.url);
+const closingFilters = { month: 'all', subject: 'all', status: 'all' };
+const movementFilters = { closingMonth: '2026-08', subject: 'all', search: '' };
+const closingRow = () => ({ id: id(700), closing_month: '2026-08', subject: 'all', opening_quantity: 1, opening_amount: 0, purchase_quantity: 0, purchase_amount: 0,
+  sale_quantity: 0, sale_amount: 0, adjustment_quantity: 0, adjustment_amount: 0, ending_quantity: 1, ending_amount: 0, received_amount: 0, supplier_payment_amount: 0,
+  settlement_difference: 0, status: 'draft', memo: '', created_by: null, created_at: null, updated_at: null });
+const movementRow = () => ({ id: id(701), at: '2026-08-01T00:00:00+00:00', typeLabel: '출고', textbookTitle: '교재', locationName: '본관', quantity: -2, amount: -20000, marginAmount: 2000 });
+const closingDomains = [
+  ['listTextbookClosingPage', 'list_textbook_closing_page_v1', closingFilters, 'month-desc', closingRow],
+  ['listTextbookClosingMovementPage', 'list_textbook_closing_movement_page_v1', movementFilters, 'event-desc', movementRow],
+];
+const zeroCalculation = (openingQuantity = 1, openingAmount = 0) => ({ openingQuantity, openingAmount, purchaseQuantity: 0, purchaseAmount: 0, saleQuantity: 0, saleAmount: 0,
+  adjustmentQuantity: 0, adjustmentAmount: 0, endingQuantity: openingQuantity, endingAmount: openingAmount, receivedAmount: 0, supplierPaymentAmount: 0, paymentDifference: 0,
+  textbookMarginAmount: 0, settlementDifference: 0, needsReview: openingQuantity < 0,
+  teamMargins: ['english', 'math', 'science', 'other'].map((team) => ({ team, saleQuantity: 0, saleAmount: 0, purchaseCostAmount: 0, marginAmount: 0 })) });
+const closingPreview = () => ({ closingMonth: '2026-08', subject: 'all', sourceLineCount: 0, closing: zeroCalculation() });
+test('fractional preview opening follows the actual ledger without weakening stored integer fields', async () => {
+  const api = await service();
+  const { buildTextbookMonthlyClosing } = await import('../src/features/textbooks/textbook-ledger.js');
+  for (const openingQuantity of [2.5, 0.5]) {
+    const input = { closingMonth: '2026-08', subject: 'all', openingQuantity, openingAmount: 0 };
+    const closing = buildTextbookMonthlyClosing({ openingQuantity, stockMoves: [{ move_type: 'sale_issue', quantity: -2 }] });
+    assert.equal(closing.endingQuantity, openingQuantity === 2.5 ? 0.5 : -1.5);
+    assert.equal(closing.needsReview, openingQuantity === 0.5);
+    const data = { ...closingPreview(), sourceLineCount: 1, closing };
+    assert.deepEqual(await api.getTextbookClosingPreview(input, { client: wire(data).client }), data);
+  }
+  for (const openingQuantity of [NaN, Infinity, -Infinity]) {
+    const t = wire(null);
+    await assert.rejects(() => api.getTextbookClosingPreview({ closingMonth: '', subject: 'all', openingQuantity, openingAmount: 0 }, { client: t.client }), /input_invalid/);
+    assert.equal(t.calls.length, 0);
+  }
+  for (const key of ['opening_quantity', 'ending_quantity']) {
+    const data = { rows: [{ ...closingRow(), [key]: 2.5 }], totalCount: 1, page: 1, pageSize: 10 };
+    await assert.rejects(() => api.listTextbookClosingPage({ filters: closingFilters, sort: 'month-desc', page: 1, pageSize: 10 }, { client: wire(data).client }), /response_invalid/);
+  }
+});
+test('closing preview/detail preserve full totals, zero-default cash and original rounded mismatch', async () => {
+  const api = await service(); assert.equal(typeof api.getTextbookClosingPreview, 'function'); assert.equal(typeof api.getTextbookClosingDetail, 'function');
+  const input = { closingMonth: '2026-08', subject: 'all', openingQuantity: 1, openingAmount: 0 };
+  const t = wire(closingPreview()); assert.deepEqual(await api.getTextbookClosingPreview(input, { client: t.client }), closingPreview());
+  assert.deepEqual(t.calls[0].args, { p_input: input }); assert.equal(t.calls[0].name, 'get_textbook_closing_preview_v1');
+  for (const stored of [0.49, 0.5]) {
+    const row = { ...closingRow(), settlement_difference: stored, received_amount: 9900, supplier_payment_amount: 123 };
+    const result = await api.getTextbookClosingDetail(row.id, { client: wire({ row, preview: closingPreview() }).client });
+    assert.equal(result.preview.closing.paymentDifference, 0); assert.equal(result.metricMismatchCount, stored === 0.49 ? 0 : 1);
+    assert.equal(result.metricMismatches.margin, stored === 0.5);
+  }
+  assert.deepEqual(await api.getTextbookClosingDetail(id(700), { client: wire({ row: null, preview: null }).client }), { row: null, preview: null, storedMetrics: null, metricMismatches: null, metricMismatchCount: 0 });
+  for (const data of [null, { row: null, preview: closingPreview() }, { row: closingRow(), preview: null }, { row: { ...closingRow(), id: id(1) }, preview: closingPreview() }]) {
+    await assert.rejects(() => api.getTextbookClosingDetail(id(700), { client: wire(data).client }), /response_invalid/);
+  }
+  for (const patch of [{ sourceLineCount: -1 }, { closing: { ...zeroCalculation(), receivedAmount: 5 } }, { closing: { ...zeroCalculation(), endingQuantity: 0 } }, { closing: { ...zeroCalculation(), teamMargins: [] } }]) {
+    await assert.rejects(() => api.getTextbookClosingPreview(input, { client: wire({ ...closingPreview(), ...patch }).client }), /response_invalid/);
+  }
+  for (const closing of [
+    { ...zeroCalculation(), textbookMarginAmount: 5, settlementDifference: 5 },
+    { ...zeroCalculation(), endingAmount: 5 },
+    { ...zeroCalculation(), teamMargins: zeroCalculation().teamMargins.map((team, i) => i ? team : { ...team, saleQuantity: 1, marginAmount: 1 }) },
+    { ...zeroCalculation(), purchaseQuantity: 1, endingQuantity: 2 },
+  ]) await assert.rejects(() => api.getTextbookClosingPreview(input, { client: wire({ ...closingPreview(), closing }).client }), /response_invalid/);
+});
+for (const domain of closingDomains) {
+  test(`${domain[0]} reads direct page 11 without preceding pages, strict count and complete original rows`, async () => {
+    const api = await service(); assert.equal(typeof api[domain[0]], 'function');
+    const t = wire(envelope(domain));
+    assert.deepEqual(await api[domain[0]](request(domain), { client: t.client }), envelope(domain));
+    assert.equal(t.calls.length, 1); assert.equal(t.calls[0].name, domain[1]); assert.equal(t.calls[0].retry, false);
+    assert.deepEqual(t.calls[0].args, { p_filters: domain[2], p_sort: domain[3], p_page: 11, p_page_size: 10 });
+    for (const pageSize of [10, 15, 20]) {
+      const input = request(domain, { page: 200, pageSize }); const data = { rows: [], page: 200, pageSize, totalCount: 101 };
+      assert.deepEqual(await api[domain[0]](input, { client: wire(data).client }), data);
+    }
+    for (const bad of [null, {}, { ...envelope(domain), totalCount: 100 }, { ...envelope(domain), rows: [{}] }, { ...envelope(domain), extra: 1 }]) {
+      await assert.rejects(() => api[domain[0]](request(domain), { client: wire(bad).client }), /response_invalid/);
+    }
+    for (const patch of [{ page: 0 }, { pageSize: 30 }, { sort: 'other' }, { filters: {} }, { filters: { ...domain[2], extra: '' } }]) {
+      const transport = wire(null);
+      await assert.rejects(() => api[domain[0]](request(domain, patch), { client: transport.client }), /invalid/);
+      assert.equal(transport.calls.length, 0);
+    }
+  });
+}
+test('closing pages reject rows outside their echoed saved or searched movement scope', async () => {
+  const api = await service();
+  for (const [key, value] of [['month', '2026-09'], ['subject', 'science'], ['status', 'locked']]) {
+    await assert.rejects(() => api.listTextbookClosingPage({ filters: { ...closingFilters, [key]: value }, sort: 'month-desc', page: 1, pageSize: 10 },
+      { client: wire({ rows: [closingRow()], page: 1, pageSize: 10, totalCount: 1 }).client }), /response_invalid/);
+  }
+  for (const filters of [{ ...movementFilters, closingMonth: '2026-09' }, { ...movementFilters, search: 'absent' }]) {
+    await assert.rejects(() => api.listTextbookClosingMovementPage({ filters, sort: 'event-desc', page: 1, pageSize: 10 },
+      { client: wire({ rows: [movementRow()], page: 1, pageSize: 10, totalCount: 1 }).client }), /response_invalid/);
+  }
+});
 registerHooks({ resolve(specifier, context, next) {
+  if (specifier.startsWith('./') && context.parentURL?.includes('/src/features/textbooks/')) {
+    const candidate = new URL(`${specifier}.ts`, context.parentURL);
+    if (existsSync(candidate)) return next(candidate.href, context);
+  }
   if (context.parentURL === serviceUrl.href && specifier === '@/lib/supabase') {
     return { url: 'data:text/javascript,export const supabase=null;export const supabaseConfigError="unconfigured";', shortCircuit: true };
   }

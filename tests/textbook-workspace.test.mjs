@@ -17,6 +17,17 @@ const root = new URL("../", import.meta.url);
 const handoffModelSource = await readFile(new URL("src/features/textbooks/textbook-handoff-model.ts", root), "utf8");
 const readModelSource = await readFile(new URL("src/features/textbooks/textbook-read-model.ts", root), "utf8");
 const readTypesSource = await readFile(new URL("src/features/textbooks/textbook-read-types.ts", root), "utf8");
+const closingModelSource = await readFile(new URL("src/features/textbooks/textbook-closing-model.ts", root), "utf8");
+
+test("workspace delegates its original closing projection without changing clipboard or React behavior", async () => {
+  const source = await readFile(new URL("src/features/textbooks/textbook-operations-workspace.tsx", root), "utf8");
+  const imports = source.match(/import \{([^}]+)\} from "\.\/textbook-closing-model";/)?.[1].split(/[,\s]+/) || [];
+  for (const name of ["buildClosingDetailRows", "getClosingStoredMetrics", "hasClosingMetricMismatch", "getClosingDetailSearchHaystack", "buildTextbookLookupMap", "buildLocationNameLookup", "getTextbookFromLookup", "getLocationNameFromLookup"]) {
+    assert.ok(imports.includes(name)); assert.doesNotMatch(source, new RegExp(`function ${name}\\b`)); assert.match(source, new RegExp(`${name}\\(`));
+  }
+  assert.match(source, /const detailRows = useMemo\(\(\) => buildClosingDetailRows\(detailMoves, textbookLookup, locationNameLookup\), \[detailMoves, locationNameLookup, textbookLookup\]\)/);
+  assert.match(source, /function buildClosingDetailClipboardText/);
+});
 
 test("textbook workspace consumes extracted projections while filtering raw purchase members before grouping", async () => {
   const workspaceSource = await readFile(new URL("src/features/textbooks/textbook-operations-workspace.tsx", root), "utf8");
@@ -1720,8 +1731,8 @@ test("inventory tab shows stock change audit history", async () => {
   const serviceSource = await readFile(new URL("src/features/textbooks/textbook-service.ts", root), "utf8");
 
   assert.match(workspaceSource, /function InventoryHistoryPanel/);
-  assert.match(workspaceSource, /function buildTextbookLookupMap/);
-  assert.match(workspaceSource, /function buildLocationNameLookup/);
+  assert.match(closingModelSource, /function buildTextbookLookupMap/);
+  assert.match(closingModelSource, /function buildLocationNameLookup/);
   assert.match(workspaceSource, /const historyRows: InventoryHistoryRow\[\] = \[\]/);
   assert.match(workspaceSource, /getTextbookFromLookup\(textbookLookup, move\.textbook_id \|\| move\.textbookId\)/);
   assert.match(workspaceSource, /getLocationNameFromLookup\(locationNameLookup, move\.location_id \|\| move\.locationId\)/);
@@ -2163,10 +2174,10 @@ test("textbook workspace surfaces counts and data quality inside dense ledgers",
   assert.doesNotMatch(workspaceSource, /filteredInventorySaleValue/);
   assert.doesNotMatch(workspaceSource, /판매가합 \{formatCurrency\(filteredInventorySaleValue\)\}/);
   assert.match(readModelSource, /function getTextbookTitleKey/);
-  assert.match(workspaceSource, /function buildTextbookLookupMap/);
-  assert.match(workspaceSource, /function getTextbookFromLookup/);
-  assert.match(workspaceSource, /function buildLocationNameLookup/);
-  assert.match(workspaceSource, /function getLocationNameFromLookup/);
+  assert.match(closingModelSource, /function buildTextbookLookupMap/);
+  assert.match(closingModelSource, /function getTextbookFromLookup/);
+  assert.match(closingModelSource, /function buildLocationNameLookup/);
+  assert.match(closingModelSource, /function getLocationNameFromLookup/);
   assert.match(workspaceSource, /const duplicateTextbookTitleKeys = useMemo/);
   assert.match(workspaceSource, /duplicateTitleKeys=\{duplicateTextbookTitleKeys\}/);
   assert.match(workspaceSource, /function getTextbookQualityIssueLabels/);
@@ -2926,8 +2937,8 @@ test("textbook workspace locks 50 closing detail safeguards", async () => {
   ];
 
   assert.equal(safeguards.length, 50);
-  for (const safeguard of safeguards) {
-    assert.match(workspaceSource, safeguard);
+  for (const [index, safeguard] of safeguards.entries()) {
+    assert.match(index < 9 ? closingModelSource : workspaceSource, safeguard);
   }
 });
 

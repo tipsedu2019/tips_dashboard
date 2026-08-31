@@ -1,5 +1,6 @@
 import { supabase as sharedSupabase, supabaseConfigError } from "@/lib/supabase";
 import type { NumberedPage } from "@/lib/numbered-pagination";
+import { getClosingDetailSearchHaystack, getClosingStoredMetrics, hasClosingMetricMismatch } from "./textbook-closing-model";
 import type {
   InventoryCountRow, InventoryFilters, InventoryHistoryFilters, MasterFilters, PageRequest,
   TextbookInventoryBalance, TextbookInventoryBalanceInput, TextbookInventoryBalanceRow,
@@ -9,6 +10,8 @@ import type {
   PurchaseFilters, SaleFilters, TextbookPurchaseCaseRow, PurchaseMemberSource, PurchaseQuantities,
   SaleLineRow, TextbookPurchaseSummary, TextbookSaleSummary, TextbookOperationsSummary,
   TextbookPurchaseDetailInput, TextbookPurchaseDetail, TextbookSaleDetail,
+  ClosingFilters, ClosingMovementFilters, ClosingMovementRow, ClosingRow, ClosingPreviewInput,
+  TextbookClosingPreview, TextbookClosingDetail,
 } from "./textbook-read-types";
 
 export type TextbookReadOptions = { client?: NonNullable<typeof sharedSupabase> | null; signal?: AbortSignal };
@@ -483,3 +486,107 @@ export async function getTextbookSaleDetail(id: string, options: TextbookReadOpt
     if (row && row.id.toLowerCase() !== id.toLowerCase()) fail(); return { row };
   });
 }
+
+// Shared strict transport primitives for the separate complete-purpose adapter.
+// Existing finalized page parsers above retain their original contracts.
+export async function readTextbookPurpose<T>(options: TextbookReadOptions, query: (client: NonNullable<typeof sharedSupabase>) => PromiseLike<{ data: unknown; error: unknown }>, parser: (data: unknown) => T): Promise<T> {
+  return read(options, query, parser);
+}
+export function validateClosingMovementFilters(filters: unknown): asserts filters is ClosingMovementFilters {
+  if (!object(filters) || Object.keys(filters).length !== 3 || !["closingMonth", "subject", "search"].every((key) => typeof filters[key] === "string")) fail("filters");
+}
+export function parseClosingMovement(value: unknown): ClosingMovementRow {
+  fields(value, { id: "uuid", at: "text", typeLabel: "text", textbookTitle: "text", locationName: "text", quantity: "integer", amount: "number", marginAmount: "number" });
+  sourceTimes(value, ["at"]);
+  if ((value.marginAmount as number) < 0) fail();
+  return value as ClosingMovementRow;
+}
+const closingRowShape = {
+  id: "uuid", closing_month: "text", subject: "text", opening_quantity: "integer", opening_amount: "number", purchase_quantity: "integer", purchase_amount: "number",
+  sale_quantity: "integer", sale_amount: "number", adjustment_quantity: "integer", adjustment_amount: "number", ending_quantity: "integer", ending_amount: "number",
+  received_amount: "number", supplier_payment_amount: "number", settlement_difference: "number", status: "text", memo: "text", created_by: "nullableUuid", created_at: "nullableText", updated_at: "nullableText",
+} satisfies Record<string, FieldKind>;
+function parseClosingRow(value: unknown): ClosingRow {
+  fields(value, closingRowShape); sourceTimes(value, ["created_at", "updated_at"]);
+  if (!["draft", "locked"].includes(value.status as string)) fail(); return value as ClosingRow;
+}
+function closingAmountMatches(parts: number[], total: number) {
+  const scale = Math.max(Math.abs(total), ...parts.map(Math.abs)); if (scale === 0) return true;
+  const sum = parts.reduce((value, part) => value + part / scale, 0);
+  const magnitude = parts.reduce((value, part) => value + Math.abs(part / scale), Math.abs(total / scale));
+  return Math.abs(sum - total / scale) <= Number.EPSILON * (parts.length + 2) * magnitude;
+}
+function parseClosingPreview(value: unknown, input: ClosingPreviewInput): TextbookClosingPreview {
+  exact(value, ["closingMonth", "subject", "sourceLineCount", "closing"]);
+  if (value.closingMonth !== input.closingMonth.trim() || value.subject !== input.subject.trim() || !integer(value.sourceLineCount) || value.sourceLineCount < 0) fail();
+  const quantities = ["openingQuantity", "purchaseQuantity", "saleQuantity", "adjustmentQuantity", "endingQuantity"];
+  const amounts = ["openingAmount", "purchaseAmount", "saleAmount", "adjustmentAmount", "endingAmount", "receivedAmount", "supplierPaymentAmount", "paymentDifference", "textbookMarginAmount", "settlementDifference"];
+  exact(value.closing, [...quantities, ...amounts, "teamMargins", "needsReview"]); const c = value.closing;
+  if (!["purchaseQuantity", "saleQuantity", "adjustmentQuantity"].every((key) => integer(c[key])) || !["openingQuantity", "endingQuantity", ...amounts].every((key) => finite(c[key])) || !Array.isArray(c.teamMargins) || c.teamMargins.length !== 4
+    || c.openingQuantity !== input.openingQuantity || c.openingAmount !== input.openingAmount || c.receivedAmount !== 0 || c.supplierPaymentAmount !== 0 || c.paymentDifference !== 0
+    || c.settlementDifference !== c.textbookMarginAmount || c.needsReview !== ((c.endingQuantity as number) < 0)
+    || c.endingQuantity !== input.openingQuantity + (c.purchaseQuantity as number) - (c.saleQuantity as number) + (c.adjustmentQuantity as number)) fail();
+  c.teamMargins.forEach((team, i) => {
+    fields(team, { team: "text", saleQuantity: "integer", saleAmount: "number", purchaseCostAmount: "number", marginAmount: "number" });
+    if (team.team !== ["english", "math", "science", "other"][i] || (team.saleQuantity as number) < 0 || (team.marginAmount as number) < 0 || (team.purchaseCostAmount as number) < 0) fail();
+  });
+  if (!closingAmountMatches(c.teamMargins.map((team) => team.marginAmount as number), c.textbookMarginAmount as number)
+    || !closingAmountMatches([input.openingAmount, c.purchaseAmount as number, -(c.saleAmount as number), c.adjustmentAmount as number], c.endingAmount as number)
+    || (value.sourceLineCount === 0 && (["purchaseQuantity", "purchaseAmount", "saleQuantity", "saleAmount", "adjustmentQuantity", "adjustmentAmount", "textbookMarginAmount"].some((key) => c[key] !== 0)
+      || c.teamMargins.some((team) => ["saleQuantity", "saleAmount", "purchaseCostAmount", "marginAmount"].some((key) => team[key] !== 0))))) fail();
+  return value as TextbookClosingPreview;
+}
+function validateClosingPage(request: PageRequest<unknown, string>, movement: boolean) {
+  if (!object(request) || !integer(request.page) || request.page < 1 || request.page > 2147483647) fail("page");
+  if (![10, 15, 20].includes(request.pageSize)) fail("page_size");
+  if (request.sort !== (movement ? "event-desc" : "month-desc")) fail("sort");
+  if (movement) validateClosingMovementFilters(request.filters);
+  else if (!object(request.filters) || Object.keys(request.filters).length !== 3 || !["month", "subject", "status"].every((key) => typeof (request.filters as ObjectValue)[key] === "string")) fail("filters");
+}
+export async function listTextbookClosingPage(request: PageRequest<ClosingFilters, "month-desc">, options: TextbookReadOptions = {}): Promise<NumberedPage<ClosingRow>> {
+  validateClosingPage(request, false);
+  const deadline = AbortSignal.timeout(8000); const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+  return readTextbookPurpose({ ...options, signal }, (client) => client.rpc("list_textbook_closing_page_v1", { p_filters: request.filters, p_sort: request.sort, p_page: request.page, p_page_size: request.pageSize }).abortSignal(signal).retry(false), (data) => {
+    const page = parsePage(data, request, parseClosingRow);
+    if (page.rows.some((row) => (request.filters.month !== "all" && row.closing_month !== request.filters.month)
+      || (request.filters.subject !== "all" && row.subject !== request.filters.subject) || (request.filters.status !== "all" && row.status !== request.filters.status))) fail();
+    return page;
+  });
+}
+export async function listTextbookClosingMovementPage(request: PageRequest<ClosingMovementFilters, "event-desc">, options: TextbookReadOptions = {}): Promise<NumberedPage<ClosingMovementRow>> {
+  validateClosingPage(request, true);
+  const deadline = AbortSignal.timeout(8000); const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+  return readTextbookPurpose({ ...options, signal }, (client) => client.rpc("list_textbook_closing_movement_page_v1", { p_filters: request.filters, p_sort: request.sort, p_page: request.page, p_page_size: request.pageSize }).abortSignal(signal).retry(false), (data) => {
+    const page = parsePage(data, request, parseClosingMovement);
+    const search = request.filters.search.trim().replace(/\s+/g, " ").toLowerCase();
+    if (page.rows.some((row) => !row.at.startsWith(request.filters.closingMonth.trim()) || !getClosingDetailSearchHaystack(row).includes(search))) fail();
+    return page;
+  });
+}
+export async function getTextbookClosingPreview(input: ClosingPreviewInput, options: TextbookReadOptions = {}): Promise<TextbookClosingPreview> {
+  if (!object(input) || Object.keys(input).length !== 4 || typeof input.closingMonth !== "string" || typeof input.subject !== "string" || !finite(input.openingQuantity) || !finite(input.openingAmount)) fail("input");
+  const deadline = AbortSignal.timeout(8000); const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+  return readTextbookPurpose({ ...options, signal }, (client) => client.rpc("get_textbook_closing_preview_v1", { p_input: input }).abortSignal(signal).retry(false), (data) => parseClosingPreview(data, input));
+}
+export async function getTextbookClosingDetail(id: string, options: TextbookReadOptions = {}): Promise<TextbookClosingDetail> {
+  if (!uuid(id)) fail("id");
+  const deadline = AbortSignal.timeout(8000); const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+  return readTextbookPurpose({ ...options, signal }, (client) => client.rpc("get_textbook_closing_detail_v1", { p_id: id }).abortSignal(signal).retry(false), (data) => {
+    exact(data, ["row", "preview"]);
+    if (data.row === null) { if (data.preview !== null) fail(); return { row: null, preview: null, storedMetrics: null, metricMismatches: null, metricMismatchCount: 0 }; }
+    const row = parseClosingRow(data.row); if (row.id.toLowerCase() !== id.toLowerCase() || data.preview === null) fail();
+    const preview = parseClosingPreview(data.preview, { closingMonth: row.closing_month.trim(), subject: row.subject.trim() || "all", openingQuantity: row.opening_quantity, openingAmount: row.opening_amount });
+    const storedMetrics = getClosingStoredMetrics(row);
+    const metricMismatches = { purchase: hasClosingMetricMismatch(storedMetrics.purchaseQuantity, preview.closing.purchaseQuantity), sale: hasClosingMetricMismatch(storedMetrics.saleQuantity, preview.closing.saleQuantity),
+      ending: hasClosingMetricMismatch(storedMetrics.endingQuantity, preview.closing.endingQuantity), margin: hasClosingMetricMismatch(storedMetrics.marginAmount, preview.closing.textbookMarginAmount) };
+    return { row, preview, storedMetrics, metricMismatches, metricMismatchCount: Object.values(metricMismatches).filter(Boolean).length };
+  });
+}
+export const textbookPurposeValidation: {
+  fail: typeof fail; exact: typeof exact; fields: typeof fields; integer: typeof integer; finite: typeof finite; uuid: typeof uuid;
+  nullableUuid: typeof nullableUuid; stringArray: typeof stringArray; sourceTimes: typeof sourceTimes; sameValue: typeof sameValue;
+  validateFilters: typeof validateFilters; parsePurchaseMember: typeof parsePurchaseMember; parseSaleRow: typeof parseSaleRow;
+  reference: typeof reference; validateBalance: typeof validateBalance; workflowBookShape: typeof workflowBookShape;
+  saleMemberShape: typeof saleMemberShape; parseClosingMovement: typeof parseClosingMovement;
+} = { fail, exact, fields, integer, finite, uuid, nullableUuid, stringArray, sourceTimes, sameValue, validateFilters,
+  parsePurchaseMember, parseSaleRow, reference, validateBalance, workflowBookShape, saleMemberShape, parseClosingMovement };

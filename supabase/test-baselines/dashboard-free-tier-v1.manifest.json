@@ -199,6 +199,11 @@
       "fileName": "20260831164103_textbook_workflow_purchase_cost_whitespace.sql",
       "status": "final",
       "sha256": "a264ec78c4944fa8af5cfd42772ea2a40b64e1b473395421a61b91463489f947"
+    },
+    {
+      "fileName": "20260831170552_textbook_closing_work_context_reads.sql",
+      "status": "final",
+      "sha256": "85d36756ec325de86fd8edea2bd2b5b693a4cb9b9fda8b07e9bafb0ce56facdd"
     }
   ]
 }
