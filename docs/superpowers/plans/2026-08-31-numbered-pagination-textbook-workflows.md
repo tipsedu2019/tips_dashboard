@@ -12,6 +12,8 @@
 
 ## Global Constraints
 
+- For each new bounded RPC, extend the foundation's explicit numbered-RPC query-budget registry only after strict10/15/20 final-SQL validation and local pgTAP proof; retain timeout/retry/authorization checks. The owning read-model task may update `src/lib/query-surface-budget.js` and its focused tests for that exact contract, never exempt arbitrary list RPCs or weaken unrelated guards. Complete aggregate/export/write-context APIs have separate contracts and must not be misclassified as bounded list reads.
+
 - Page-number blocks contain ten existing numbers: 1–10, 11–20, 21–30. No ellipses or direct page input. Single arrows move one page; double arrows select global first/last.
 - Page size10/15/20 minimum10, shared DataTablePagination/useDataTablePageSize/createNumberedPageController, full-filter authorized total, direct target-page reads only. No general full-load fallback.
 - Preserve each display-parent unit: purchase student/teacher pairing and sales month/class/textbook aggregation are not raw-row pages.

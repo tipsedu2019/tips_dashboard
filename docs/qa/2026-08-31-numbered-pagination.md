@@ -13,10 +13,11 @@ Ten-number fixed blocks, one-page single arrows, global first/last double arrows
 | Surface | Implementation | Unit/type/build | Final SQL/pgTAP | Rendered/live |
 |---|---|---|---|---|
 | Shared pager/preferences | Reviewed (`1f62316f`, including interface repair) | 14/14 behavior tests; focused ESLint/TS pass | Not applicable | Live viewport pending |
-| Students/classes | Read API (`451b25d7`), SQL gate (`701e9a96`); UI pending | Service13/13; related41/41; fresh combined88/88; focused ESLint/TS pass | Final-only isolated pgTAP114/114 passed | Pending |
+| Students/classes | Read API (`451b25d7`), SQL gate (`701e9a96`); UI (`0915e8d4`) awaiting independent review | Relevant229/229; focused ESLint/TS and isolated production build pass | Final-only isolated pgTAP114/114 passed | Pending |
 | Tasks/retests/registration/transfer/withdrawal | Pending | Pending | Pending | Pending |
 | Makeup/approvals/curriculum/class planning | Pending | Pending | Pending | Pending |
 | Textbook operations/settings/auxiliary lists | Pending | Pending | Pending | Pending |
+| Teacher Google Chat identity table/cards | Identified in final inventory; auxiliary plan saved | Pending | Pending | Pending |
 
 No row marked pending is complete. Foundation completion alone is not app-wide completion.
 
@@ -54,7 +55,19 @@ Fresh controller command at `701e9a96`:
 node --test --experimental-strip-types tests/numbered-pagination.test.mjs tests/data-table-pagination.test.mjs tests/management-numbered-service.test.mjs tests/management-page-size.test.mjs tests/management-request-lifecycle.test.mjs tests/management-progressive-loading.test.mjs tests/management-students-toolbar.test.mjs
 ```
 
-Result:88/88 pass; fail/cancelled/skipped0. No fresh production-build claim is made for the numbered integration, because UI integration has not started.
+Result:88/88 pass; fail/cancelled/skipped0. At that checkpoint UI integration had not started, so no numbered-integration production build was claimed then; the subsequent UI evidence follows below.
+
+## Management UI integration
+
+Commit `0915e8d4` adds the shared request controller and connects student/class tables to numbered reads, controlled server sort and URL page/sort state. It retains successful rows/page/count during pending/error, clears cross-actor presentation, migrates valid manual page sizes and preserves initial restored pages through auto measurement/default-period resolution. This commit is awaiting independent Task3 review; it is not yet a foundation-complete claim.
+
+Implementer final command: `node --test --experimental-strip-types tests/management-*.test.mjs tests/numbered-page-controller.test.mjs tests/numbered-pagination.test.mjs tests/data-table-pagination.test.mjs`. Result229/229, fail/cancelled/skipped0; focused lint and non-incremental TypeScript exit0. Actual hook and real TanStack/shadcn component tests cover direct page11, stale/abort, actor/StrictMode transitions, header sorting, partial-page count and mobile measurement readiness. Superseded cursor/source assertions were updated; independent review checks their replacement coverage.
+
+An isolated source copy at `/private/tmp/tips-task3-build.4uOr0v` compiled with `next build --webpack`: exit0,81/81 static pages. The temporary copy was never served and the existing localhost3017 `.next` artifact was not replaced. This is compile/component evidence, not authenticated live UI evidence. Exact commands and logs are in the Task3 report/local `/private/tmp/tips-task3-*-final.log` artifacts.
+
+The query-surface verifier currently reports two known static-recognition gaps for the otherwise validated management RPC: immutable AbortSignal aliases and `p_page_size` rather than legacy `p_limit`. Foundation Task4 will add narrowly validated recognition with negative tests; this gate has not passed yet and no blanket/scalar exemption is planned.
+
+Read-only task/secondary preflights are saved in `docs/superpowers/plans/2026-08-31-task-workflow-preflight.md` and `2026-08-31-secondary-workflow-preflight.md`. They sharpen parent-count, metadata/facet, server-order, independent calendar/detail and auth contracts for later implementation; they are not implementation or SQL evidence for those routes.
 
 ## Resolved user/environment input
 

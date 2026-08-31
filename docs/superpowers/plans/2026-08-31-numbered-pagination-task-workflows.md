@@ -21,6 +21,7 @@
 - Preserve RLS/ACL, completed-actor snapshots, detail-by-id access and existing domain mutations. No remote migration, push, deployment or sends.
 - Existing date-range calendar/appointment views and search pickers keep their separate contracts; generic list pagination must not omit calendar events.
 - Use production behavior tests, not source-only assertions. Generate migration filenames with the installed Supabase CLI. Distinguish SQL, unit, build and browser evidence.
+- For each new bounded RPC, extend the foundation's explicit numbered-RPC query-budget registry only after strict10/15/20 final-SQL validation and local pgTAP proof; retain timeout/retry/authorization checks. The owning read-model task may update `src/lib/query-surface-budget.js` and its focused tests for that exact contract, never exempt arbitrary list RPCs or weaken unrelated guards.
 
 ## Prerequisites and interfaces
 
@@ -37,18 +38,21 @@ type NumberedPage<T> = { rows:T[]; page:number; pageSize:DataTablePageSize; tota
 
 Use existing `OpsTaskPageFilters`, `OpsTask`, `OpsTaskPageStats` from `src/features/tasks/ops-task-service.ts`; keep the discriminated filter union and its keys exactly.
 
+Final-source preflight evidence: `docs/superpowers/plans/2026-08-31-task-workflow-preflight.md`. Its contract corrections are incorporated below; verify definitions have not drifted before implementation.
+
 ## Task 1: Authorized numbered task read model
 
 **Files:**
 - Create migration named `ops_task_numbered_pages` through CLI.
 - Create `supabase/tests/ops_task_numbered_pages_test.sql`.
 - Create `src/features/tasks/ops-task-numbered-service.ts`.
-- Modify `src/features/tasks/ops-task-service.ts` only to expose shared row/filter validation and scoped workspace enrichment where needed; retain cursor readers.
+- Modify `src/features/tasks/ops-task-service.ts` only to expose pure shared row/filter validation and mapping where needed; retain cursor readers. The numbered list must not call workspace/catalog hydration.
 - Create `tests/ops-task-numbered-service.test.mjs`.
 
 **Interfaces:** Export `createOpsTaskNumberedReadService({supabase}).readPage({filters,page,pageSize,viewerId,signal})` returning `Promise<NumberedPage<OpsTask>>`. Add `list_ops_task_numbered_page_v1(p_type text,p_filters jsonb,p_page integer,p_page_size integer)` returning JSON `{rows,page,pageSize,totalCount}`. Sort remains inside the existing type-specific filter contract, not a second conflicting sort object.
 
 - [ ] Read final active filter/source/list functions in `20260813234824_ops_task_page_reads.sql`, active stats wrapper/count-only registration source in `20260818083818_optimize_registration_task_stats.sql`, and completed-actor augmentation in `20260820150057_ops_task_completion_actor.sql`. Verify no later migration replaces these before editing.
+- [ ] Build a predicate/order parity matrix before SQL changes. General includes general and textbook tasks, with existing requester/team/assignee/unassigned/inbox/focus semantics. Registration counts parent cases, not tracks or stats-byView buckets: compute the representative matching track using the existing consultation-waiting/phone-ready/track-id priority, then include every authorized sibling track with matching track first in the selected parent DTO. Withdrawal/transfer/retest selected-column search and sort need their existing formatted progress/checklist/status/score scalars before paging. Preserve Korean numeric collation, null order and final id tie-break; use the actual final ORDER BY expressions rather than infer ordering from cursor arity.
 - [ ] Write and run RED service behavior tests, including literal request checks:
 
 ```js
@@ -61,8 +65,8 @@ assert.equal(result.page, 11);
 
 Also reject invalid size5/30, missing viewer, malformed rows/count/page, mismatched page size and missing RPC; assert no retry/cursor fallback and caller abort propagation.
 - [ ] Write pgTAP fixtures for all five task types. Assert direct page11, exact parent registration total with multiple tracks per case, count/page consistency for every filter branch, stable ties and header sorts, last partial and empty pages, completed actor preservation, invalid-input SQLSTATE22023 and authenticated/anon/RLS boundaries. Keep no-send fixtures transactional.
-- [ ] Generate migration. Validate inputs with existing private validator. Reuse shared predicates/sort expressions, extracting narrow authorized keys when the current JSON source would shape all rows. Keep required relation predicates before paging but restrict DTO/enrichment and completed-actor augmentation to selected parent IDs. Return count even on empty page; no speculative indexes or SECURITY DEFINER. Preserve existing v1/v2 cursor APIs and stats wrapper behavior.
-- [ ] Implement service with eight-second timeout, caller signal, retry(false), strict response parsing and existing DTO mapping. Leave detail and stats supplemental loading independent. Run new service tests and isolated SQL; report exact SQL capability gaps without claiming pass. Commit owned files as `feat: add numbered task workflow reads`.
+- [ ] Generate migration. Add strict guards around the existing validator for null/invalid enum values, invalid ISO dates and offset overflow, so malformed numbered inputs reliably raise22023 instead of leaking casts or passing SQL three-valued logic. Do not weaken existing cursor validation. Reuse shared predicates/sort expressions through a narrow authorized parent-key source, materialize count/page from the same eligible keys, then project selected parents only. An OFFSET wrapper around the old all-row JSON source, an outer id predicate on that set-returning function, or calling the old source once per page ID does not satisfy bounded enrichment. Return count even on empty page; no speculative indexes or SECURITY DEFINER. Preserve existing v1/v2 cursor APIs and stats wrapper behavior.
+- [ ] Implement service with eight-second timeout, caller signal, retry(false), strict flat camelCase RPC row_data validation before the existing permissive DTO mapper, and strict filter/sort validation including direction membership. Keep comments/events/attachments unhydrated in list DTOs. Completed actor comes only from stored `ops_tasks.completed_by` and `_label`, never a fresh profile join or inferred viewer. `viewerId` scopes client state only: do not send a DB authority override. Leave detail and stats supplemental loading independent. Run new service tests and isolated SQL; report exact SQL capability gaps without claiming pass. Commit owned files as `feat: add numbered task workflow reads`.
 
 ## Task 2: All task-owned screens consume shared pagination
 
@@ -78,7 +82,9 @@ Also reject invalid size5/30, missing viewer, malformed rows/count/page, mismatc
 
 - [ ] Write RED real controller/hook tests for page11 one-request access, stale/cancelled page rejection, old displayed page on navigation error, same-page refresh/clamp, and filter+page1 atomicity. Exercise route/type/view changes and viewer switch clearing rather than relying on source regex.
 - [ ] Preserve existing `taskPageFilters` construction as the authority for general queue/sort, registration view/consultation owner, withdrawal/transfer column filters/sort and word-retest queue/branch/date/teacher/class/sort. Replace cursor state/loadMore with the numbered hook and common pager outside scroll areas. Remove page-local filtering/sorting only where it duplicates server selection; do not change authorization-derived transformations.
+- [ ] Replace the old `data.page` cursor-presence server-selection flag with an explicit numbered-server-page marker. Do not fabricate cursor metadata or accidentally reactivate local filtering/sorting. Cache by viewer, full filters, page and size. Keep word-retest facets/options independent of page rows; pending metadata must not reset a valid selection merely because it is absent from the new page.
 - [ ] Keep URL/back/detail return state scoped to route and task type without overwriting existing dialog/track/appointment parameters. Preserve direct `loadOpsTaskById` and registration case detail. Refetch page after relevant mutations; no intermediate page loads. Catalog hydration and tab counts must not be truncated to current rows.
+- [ ] Preserve registration appointment calendar's independent date-range reader in `registration-track-service.ts` and calendar component. The legacy generic `loadCalendarRows(visibleTasks)` render branch is unreachable for the current WorkspaceKey union/routes: registration, withdrawal, transfer and word_retest are handled first, while its condition excludes the remaining todo case. Do not add a new calendar API for that dead branch or perform unrelated dead-code cleanup; recheck reachability only if this implementation changes the workspace union/render ordering.
 - [ ] Remove `REGISTRATION_CASE_INITIAL_RENDER_LIMIT`, `windowState`, local slicing and its additional `더 보기`; render every parent case delivered by the server page. Test that two tracks in a case count as one page item. Keep desktop and mobile mirrors on the same items.
 - [ ] Clear word-retest selected task IDs on successful page/scope change. Keep `wordRetestScoreDrafts` by task ID across pagination; test draft restoration on return and current-page-only bulk targets. Guard any existing dirty editor before navigation using the existing workflow guard. Do not alter send/status/delete operations.
 - [ ] Render DataTablePagination with total from matching numbered response, not stats fallback or `visibleTasks.length`. Keep stats as independent supplementary data. Update fixture modes to use an explicitly complete fixture adapter; production must never use a full-array fallback.

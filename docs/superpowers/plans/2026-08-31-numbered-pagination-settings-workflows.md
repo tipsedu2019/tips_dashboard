@@ -12,6 +12,8 @@
 
 ## Global Constraints
 
+- For each new bounded RPC, extend the foundation's explicit numbered-RPC query-budget registry only after strict10/15/20 final-SQL validation and local pgTAP proof; retain timeout/retry/authorization checks. The owning read-model task may update `src/lib/query-surface-budget.js` and its focused tests for that exact contract, never exempt arbitrary list RPCs or weaken unrelated guards. Save/profile-version APIs remain separate from pageable reads.
+
 - Page-number blocks contain ten existing numbers: 1–10, 11–20, 21–30. No ellipses or direct page input. Single arrows move one page; double arrows select global first/last.
 - List page size is 10/15/20, minimum ten. Existing independent relationship/picker contracts remain unchanged.
 - Total count represents the authorized full filtered result, never the loaded subset. Unknown count is not zero.
