@@ -5,6 +5,11 @@ import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect,
 import { ArrowDown, ArrowUp, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, FileText, Filter, Inbox, List, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import { DataTablePagination } from "@/components/data-table/data-table-pagination"
+import { getCompleteOpsTaskFixturePage, useOpsTaskNumberedPage } from "./use-ops-task-numbered-page"
+import { useDataTablePageSize } from "@/hooks/use-data-table-page-size"
+import { readOpsTaskListNavigation, writeOpsTaskListNavigation } from "./ops-task-list-navigation"
+import type { DataTablePageSize } from "@/lib/numbered-pagination"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -78,12 +83,10 @@ import {
   createOpsTransitionTask,
   deleteOpsTask,
   emptyOpsTaskWorkspaceData,
-  getCachedOpsTaskWorkspaceData,
-  getPersistedOpsTaskWorkspaceData,
+  clearOpsTaskWorkspaceDataCache,
   loadOpsRegistrationCaseDetail,
   loadOpsTaskById,
   loadOpsRegistrationClassDetail,
-  loadOpsTaskWorkspaceData,
   loadOpsTaskWorkspaceOptionData,
   startOpsTaskPageStatsSupplementLoad,
   startOpsRegistrationTaskPageSupplementLoad,
@@ -108,7 +111,6 @@ import {
   type OpsTextbookOption,
   type OpsTaskPriority,
   type OpsTaskPageFilters,
-  type KeysetCursor,
   type OpsTask,
   type OpsTaskInput,
   type OpsTaskStatus,
@@ -788,7 +790,7 @@ function resolveRegistrationAppointmentFocus(
   return { appointment, focusTrackId }
 }
 
-const WORKSPACE_TASK_TYPE: Record<WorkspaceKey, OpsTaskType> = {
+const WORKSPACE_TASK_TYPE: Record<WorkspaceKey, Exclude<OpsTaskType, "textbook">> = {
   todo: "general",
   registration: "registration",
   transfer: "transfer",
@@ -6154,6 +6156,7 @@ function WithdrawalDataTable({
   serverFilterOptions,
   onFilterOpen,
   onPageControlsChange,
+  initialControls = EMPTY_OPERATION_TABLE_PAGE_CONTROLS,
 }: {
   tasks: OpsTask[]
   todayKey: string
@@ -6173,17 +6176,18 @@ function WithdrawalDataTable({
   serverFilterOptions?: { subject: TodoFilterOption[]; teacher: TodoFilterOption[] }
   onFilterOpen?: () => void
   onPageControlsChange?: (controls: OperationTablePageControls) => void
+  initialControls?: OperationTablePageControls
 }) {
   const [columnWidths, setColumnWidths] = useState<Record<WithdrawalTableColumnKey, number>>(WITHDRAWAL_TABLE_COLUMN_WIDTHS)
-  const [withdrawalTableSort, setWithdrawalTableSort] = useState<WithdrawalTableSort>(null)
-  const [filterColumnKey, setFilterColumnKey] = useState<WithdrawalTableColumnKey>("className")
-  const [filterValue, setFilterValue] = useState("")
+  const [withdrawalTableSort, setWithdrawalTableSort] = useState<WithdrawalTableSort>(() => initialControls.sortColumn && initialControls.sortDirection ? { columnKey: initialControls.sortColumn as WithdrawalTableColumnKey, direction: initialControls.sortDirection } : null)
+  const [filterColumnKey, setFilterColumnKey] = useState<WithdrawalTableColumnKey>((initialControls.filterColumn || "className") as WithdrawalTableColumnKey)
+  const [filterValue, setFilterValue] = useState(initialControls.search)
   const [filterInputOpen, setFilterInputOpen] = useState(false)
-  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState("all")
-  const [selectedTeacherFilter, setSelectedTeacherFilter] = useState("all")
-  const [withdrawalPeriodFilter, setWithdrawalPeriodFilter] = useState<WithdrawalPeriodFilter>("all")
-  const [withdrawalPeriodStartDate, setWithdrawalPeriodStartDate] = useState("")
-  const [withdrawalPeriodEndDate, setWithdrawalPeriodEndDate] = useState("")
+  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState(initialControls.subject || "all")
+  const [selectedTeacherFilter, setSelectedTeacherFilter] = useState(initialControls.teacher || "all")
+  const [withdrawalPeriodFilter, setWithdrawalPeriodFilter] = useState<WithdrawalPeriodFilter>(initialControls.period)
+  const [withdrawalPeriodStartDate, setWithdrawalPeriodStartDate] = useState(initialControls.dateFrom || "")
+  const [withdrawalPeriodEndDate, setWithdrawalPeriodEndDate] = useState(initialControls.dateTo || "")
   const filterInputRef = useRef<HTMLInputElement>(null)
   const gridTemplateColumns = getWithdrawalTableGridTemplate(columnWidths)
   const gridTemplateStyle = { "--withdrawal-grid-template": gridTemplateColumns } as CSSProperties
@@ -6629,6 +6633,7 @@ function TransferDataTable({
   serverFilterOptions,
   onFilterOpen,
   onPageControlsChange,
+  initialControls = EMPTY_OPERATION_TABLE_PAGE_CONTROLS,
 }: {
   tasks: OpsTask[]
   todayKey: string
@@ -6648,17 +6653,18 @@ function TransferDataTable({
   serverFilterOptions?: { subject: TodoFilterOption[]; teacher: TodoFilterOption[] }
   onFilterOpen?: () => void
   onPageControlsChange?: (controls: OperationTablePageControls) => void
+  initialControls?: OperationTablePageControls
 }) {
   const [columnWidths, setColumnWidths] = useState<Record<TransferTableColumnKey, number>>(TRANSFER_TABLE_COLUMN_WIDTHS)
-  const [transferTableSort, setTransferTableSort] = useState<TransferTableSort>(null)
-  const [filterColumnKey, setFilterColumnKey] = useState<TransferTableColumnKey>("fromClassName")
-  const [filterValue, setFilterValue] = useState("")
+  const [transferTableSort, setTransferTableSort] = useState<TransferTableSort>(() => initialControls.sortColumn && initialControls.sortDirection ? { columnKey: initialControls.sortColumn as TransferTableColumnKey, direction: initialControls.sortDirection } : null)
+  const [filterColumnKey, setFilterColumnKey] = useState<TransferTableColumnKey>((initialControls.filterColumn || "fromClassName") as TransferTableColumnKey)
+  const [filterValue, setFilterValue] = useState(initialControls.search)
   const [filterInputOpen, setFilterInputOpen] = useState(false)
-  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState("all")
-  const [selectedTeacherFilter, setSelectedTeacherFilter] = useState("all")
-  const [transferPeriodFilter, setTransferPeriodFilter] = useState<WithdrawalPeriodFilter>("all")
-  const [transferPeriodStartDate, setTransferPeriodStartDate] = useState("")
-  const [transferPeriodEndDate, setTransferPeriodEndDate] = useState("")
+  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState(initialControls.subject || "all")
+  const [selectedTeacherFilter, setSelectedTeacherFilter] = useState(initialControls.teacher || "all")
+  const [transferPeriodFilter, setTransferPeriodFilter] = useState<WithdrawalPeriodFilter>(initialControls.period)
+  const [transferPeriodStartDate, setTransferPeriodStartDate] = useState(initialControls.dateFrom || "")
+  const [transferPeriodEndDate, setTransferPeriodEndDate] = useState(initialControls.dateTo || "")
   const filterInputRef = useRef<HTMLInputElement>(null)
   const gridTemplateColumns = getTransferTableGridTemplate(columnWidths)
   const gridTemplateStyle = { "--transfer-grid-template": gridTemplateColumns } as CSSProperties
@@ -7890,8 +7896,30 @@ function mergeOpsTaskWorkspaceOptionData(
 }
 
 export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: WorkspaceKey }) {
-  const { user } = useAuth()
-  return <OpsTaskWorkspaceSession key={user?.id || "anonymous"} workspace={workspace} />
+  const { user, role, loading } = useAuth()
+  const pathname = usePathname()
+  const params = useSearchParams()
+  const fixture = workspace === "registration"
+    ? shouldEnableRegistrationSubjectTrackFixture(process.env.NODE_ENV, params.get("fixture"))
+    : workspace === "word_retest" && shouldEnableWordRetestBrowserFixture(params.get("fixture"), params.get("fixtureRole"))
+  const actorScope = !loading && user?.id && user.role ? JSON.stringify([user.id, role]) : ""
+  const previousActorScope = useRef(actorScope)
+  // Invalidate before the new session's passive reads. All caches reject writes
+  // from detached promises; capability/schema probes intentionally remain global.
+  useLayoutEffect(() => {
+    clearOpsTaskWorkspaceDataCache()
+    if (previousActorScope.current && previousActorScope.current !== actorScope) {
+      const params = new URLSearchParams(window.location.search)
+      if (params.has("observationId")) params.delete("view")
+      for (const key of ["taskId", "trackId", "appointmentId", "observationId", "taskPage", "taskPageType"]) params.delete(key)
+      const search = params.toString()
+      window.history.replaceState(window.history.state, "", `${window.location.pathname}${search ? `?${search}` : ""}`)
+    }
+    previousActorScope.current = actorScope
+    return () => clearOpsTaskWorkspaceDataCache()
+  }, [actorScope])
+  if (!actorScope && !fixture) return <div role="status">사용자 정보를 확인하는 중입니다.</div>
+  return <OpsTaskWorkspaceSession key={`${actorScope}:${pathname}:${workspace}:${fixture ? params.get("fixtureRole") : ""}`} workspace={workspace} />
 }
 
 function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
@@ -7907,9 +7935,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const requestedWithdrawalStudentId = isWithdrawalWorkspace && searchParams.get("create") === "withdrawal"
     ? searchParams.get("studentId") || ""
     : ""
-  const { user, session, canManageAll, isAdmin, isStaff, isTeacher, isAssistant } = useAuth()
+  const { user, role: resolvedViewerRole, loading: authLoading, session, canManageAll, isAdmin, isStaff, isTeacher, isAssistant } = useAuth()
   const notificationSessionToken = session?.access_token || ""
   const currentUserId = user?.id || ""
+  const navigationActorScope = JSON.stringify([currentUserId, resolvedViewerRole])
+  const [navigationRestore, setNavigationRestore] = useState({ key: 0, page: 1, filtersKey: "", ready: false })
+  const navigationBlockedRef = useRef(false)
+  const pendingNavigationRestoreRef = useRef(false)
+  const restoreScrollRef = useRef<number | null>(null)
   const registrationFixtureValue = searchParams.get("fixture")
   const registrationFixtureActionType = searchParams.get("fixtureActionType")
   const registrationFixtureActionDelayMs = searchParams.get("fixtureActionDelayMs")
@@ -7975,30 +8008,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         searchParams.get("fixtureRole"),
       ) || null
     : null
-  const workspaceLoadOptions = isRegistrationWorkspace
-    ? {
-        taskType: scopedTaskType,
-        viewerId: currentUserId,
-        includeManagementOptions: false,
-        includeTeacherOptions: false,
-        includeProfileOptions: false,
-      }
-    : {
-        taskType: scopedTaskType,
-        viewerId: currentUserId,
-        includeManagementOptions: !isTodoWorkspace,
-        includeTeacherOptions: true,
-        includeProfileOptions: true,
-      }
   const initialWorkspaceData = wordRetestFixtureRequested && wordRetestFixtureViewer
     ? getWordRetestBrowserFixtureData(wordRetestFixtureViewer.viewerRole)
-    : registrationFixtureRequested
-      ? null
-      : getCachedOpsTaskWorkspaceData(workspaceLoadOptions)
-  const [data, setData] = useState<OpsTaskWorkspaceData | null>(() => initialWorkspaceData)
+    : null
+  const [workspaceData, setData] = useState<OpsTaskWorkspaceData | null>(() => initialWorkspaceData)
   const [workspaceLoading, setLoading] = useState(() => !initialWorkspaceData)
   const registrationFixtureTransitioning = registrationFixtureRequested !== registrationFixtureRuntimeReady
-  const loading = workspaceLoading || registrationFixtureTransitioning
   const [registrationOptionsLoading, setRegistrationOptionsLoading] = useState(false)
   const [registrationOptionsError, setRegistrationOptionsError] = useState("")
   const [registrationSubjectCapabilities, setRegistrationSubjectCapabilities] = useState<readonly RegistrationSubjectCapability[]>(
@@ -8046,9 +8061,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [wordRetestClassFilter, setWordRetestClassFilter] = useState<WordRetestSelectFilterKey>("all")
   const [operationTablePageControls, setOperationTablePageControls] = useState<OperationTablePageControls>(EMPTY_OPERATION_TABLE_PAGE_CONTROLS)
   const [wordRetestTablePageSort, setWordRetestTablePageSort] = useState<{ column: string | null; direction: "asc" | "desc" | null }>({ column: null, direction: null })
-  const [taskPageCursor, setTaskPageCursor] = useState<KeysetCursor | null>(null)
-  const [taskPageHasMore, setTaskPageHasMore] = useState(false)
-  const [taskPageLoadingMore, setTaskPageLoadingMore] = useState(false)
   const [wordRetestScoreDrafts, setWordRetestScoreDrafts] = useState<Record<string, WordRetestScoreDraft>>({})
   const [wordRetestStudentIds, setWordRetestStudentIds] = useState<string[]>([])
   const [wordRetestSelectedTaskIds, setWordRetestSelectedTaskIds] = useState<Set<string>>(() => new Set())
@@ -8092,7 +8104,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   latestWorkspaceViewerIdRef.current = currentUserId
   const workspaceLoadGenerationRef = useRef(0)
   const workspaceLoadAbortControllerRef = useRef<AbortController | null>(null)
-  const workspaceViewerIdRef = useRef(currentUserId)
   const workspaceViewerGenerationRef = useRef(0)
   const workspaceDataViewerIdRef = useRef(currentUserId)
   const registrationTrackSelectionRef = useRef("")
@@ -8298,6 +8309,107 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     wordRetestTeacherFilter,
   ])
 
+  const numberedServerPage = !registrationFixtureRequested && !wordRetestFixtureRequested
+  const fixturePageSize = useDataTablePageSize(`ops-task:${scopedTaskType}`)
+  const [fixturePage, setFixturePage] = useState(1)
+  useEffect(() => { setFixturePage(1) }, [taskPageFilters, fixturePageSize.pageSize])
+  const restoreListNavigation = useCallback(() => {
+    const saved = readOpsTaskListNavigation(window.history.state, navigationActorScope, pathname, scopedTaskType)
+    const params = new URLSearchParams(window.location.search)
+    let filters = saved?.filters
+    // A copied history entry can accompany an incoming URL with new route-owned
+    // controls. Keep local controls, but never wait for a stale URL value to win.
+    if (filters?.taskType === "general") {
+      const route = getTodoRouteState(params)
+      const focus = params.get("focus") || ""
+      filters = { ...filters, ...(route ? { queue: route.list, sort: route.sort || (route.status ? "status" : "due") } : {}),
+        ...(isTaskFocus(focus) ? { focus } : {}) }
+    } else if (filters?.taskType === "registration") {
+      const view = normalizeRegistrationViewKey(params.get("flow") || "") || filters.view
+      filters = { ...filters, view, consultationOwnerId: isRegistrationConsultationViewKey(view)
+        && normalizeRegistrationConsultationOwnerScope(params.get("owner")) === "mine" ? currentUserId : null }
+    } else if (filters?.taskType === "word_retest") {
+      const role = params.get("role") || ""
+      const branch = params.get("branch") || ""
+      const period = params.get("period") || ""
+      const resolvedPeriod = isWordRetestPeriodFilterKey(period) ? period : "all"
+      filters = { ...filters, queue: isAssistant ? "assistant" : isWordRetestModeKey(role) ? role : wordRetestViewerRole === "teacher" ? "teacher" : "assistant",
+        branch: isWordRetestBranchFilterKey(branch) ? branch === "all" ? null : branch : filters.branch,
+        period: resolvedPeriod, dateFrom: resolvedPeriod === "custom" ? toDateKey(params.get("from") || "") || null : null,
+        dateTo: resolvedPeriod === "custom" ? toDateKey(params.get("to") || "") || null : null }
+    } else if (filters) {
+      const view = params.get("flow") || ""
+      if (isWithdrawalViewKey(view)) filters = { ...filters, view }
+    }
+    const routeChanged = Boolean(saved && JSON.stringify(filters) !== JSON.stringify(saved.filters))
+    if (filters) {
+      setQuery(filters.search)
+      if (filters.taskType === "general") {
+        setTodoView(filters.queue)
+        setTodoSort(filters.sort)
+        setRequestedByFilter(filters.requestedById || "all")
+        setRequestedTeamFilter(filters.requestedTeam || "all")
+        setAssigneeFilter(filters.assigneeId || "all")
+        setAssigneeTeamFilter(filters.assigneeTeam || "all")
+        setTaskFocus(filters.focus)
+      } else if (filters.taskType === "registration") {
+        setRegistrationView(filters.view)
+        setRegistrationConsultationOwnerScope(filters.consultationOwnerId ? "mine" : "all")
+      } else if (filters.taskType === "word_retest") {
+        setWordRetestMode(filters.queue)
+        setWordRetestBranchFilter(isWordRetestBranchFilterKey(filters.branch || "") ? filters.branch as WordRetestBranchFilter : "all")
+        setWordRetestPeriodFilter(filters.period)
+        setWordRetestCustomStartDate(filters.dateFrom || "")
+        setWordRetestCustomEndDate(filters.dateTo || "")
+        setWordRetestTeacherFilter(filters.teacherId || "all")
+        setWordRetestClassFilter(filters.classId || "all")
+        setShowClosed(filters.includeClosed)
+        setWordRetestTablePageSort({ column: filters.tableSortColumn, direction: filters.tableSortDirection })
+      } else {
+        setWithdrawalView(filters.view)
+        setOperationTablePageControls({ search: filters.search, subject: filters.subject, teacher: filters.teacher,
+          period: filters.period, dateFrom: filters.dateFrom || "", dateTo: filters.dateTo || "",
+          filterColumn: filters.filterColumn, sortColumn: filters.sortColumn, sortDirection: filters.sortDirection })
+      }
+    }
+    const urlPage = Number(params.get("taskPage"))
+    const page = routeChanged ? 1 : saved?.page ?? (!window.history.state?.tipsOpsTaskList && params.get("taskPageType") === scopedTaskType && Number.isInteger(urlPage) && urlPage >= 1 && urlPage <= 2147483647 ? urlPage : 1)
+    restoreScrollRef.current = saved?.scrollY ?? null
+    pendingNavigationRestoreRef.current = false
+    setNavigationRestore((current) => ({ key: current.key + 1, page, filtersKey: filters ? JSON.stringify(filters) : "", ready: true }))
+  }, [currentUserId, isAssistant, navigationActorScope, pathname, scopedTaskType, wordRetestViewerRole])
+  useEffect(() => { restoreListNavigation() }, [restoreListNavigation])
+  const filtersReady = !navigationRestore.filtersKey || navigationRestore.filtersKey === JSON.stringify(taskPageFilters)
+  useEffect(() => {
+    if (filtersReady && navigationRestore.filtersKey) setNavigationRestore((current) => ({ ...current, filtersKey: "" }))
+  }, [filtersReady, navigationRestore.filtersKey])
+  const commitListPage = useCallback(({ scope, page, pageSize }: { scope: string; page: number; pageSize: DataTablePageSize }) => {
+    if (pendingNavigationRestoreRef.current) return
+    const { filters } = JSON.parse(scope) as { filters: OpsTaskPageFilters }
+    writeOpsTaskListNavigation(window, { version: 1, actorScope: navigationActorScope, pathname, filters, page, pageSize, scrollY: restoreScrollRef.current ?? window.scrollY })
+    if (restoreScrollRef.current !== null) {
+      window.scrollTo({ top: restoreScrollRef.current })
+      restoreScrollRef.current = null
+    }
+  }, [navigationActorScope, pathname])
+  const numberedPage = useOpsTaskNumberedPage({
+    viewerId: currentUserId,
+    viewerRole: resolvedViewerRole,
+    filters: taskPageFilters,
+    enabled: numberedServerPage && !authLoading && Boolean(currentUserId && user?.role) && navigationRestore.ready && filtersReady,
+    restoredPage: navigationRestore.page,
+    restorationKey: String(navigationRestore.key),
+    onPageCommit: commitListPage,
+  })
+  const loading = (numberedServerPage ? numberedPage.totalCount === null && numberedPage.loading : workspaceLoading) || registrationFixtureTransitioning
+  const data = useMemo(() => {
+    if (!numberedServerPage) return workspaceData
+    if (numberedPage.totalCount === null && !workspaceData) return null
+    const next = { ...(workspaceData || emptyOpsTaskWorkspaceData), tasks: numberedPage.rows }
+    const options = isRegistrationWorkspace ? registrationOptionsDataRef.current : taskOptionsDataRef.current
+    return options ? mergeOpsTaskWorkspaceOptionData(next, options) : next
+  }, [isRegistrationWorkspace, numberedPage.rows, numberedPage.totalCount, numberedServerPage, workspaceData])
+
   const replaceRegistrationFixtureState = useCallback((nextState: RegistrationSubjectTrackFixtureState) => {
     registrationFixtureStateRef.current = nextState
     setRegistrationFixtureRevision((current) => current + 1)
@@ -8359,203 +8471,47 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     replaceRegistrationFixtureState,
   ])
 
-  const reload = useCallback(async (force = false, showPending = true) => {
-    if (latestWorkspaceViewerIdRef.current !== currentUserId) return
+  const [supplementRevision, setSupplementRevision] = useState(0)
+  const refreshNumberedPage = numberedPage.refresh
+  const reload = useCallback(async (_force = false, _showPending = true) => {
+    void _force
+    void _showPending
+    if (!workspaceMountedRef.current) return
     if (wordRetestFixtureRequested && wordRetestFixtureViewer) {
-      workspaceDataViewerIdRef.current = currentUserId
       setData(getWordRetestBrowserFixtureData(wordRetestFixtureViewer.viewerRole))
       setLoading(false)
       return
     }
-    if (registrationFixtureRequested && !registrationFixtureEnabled) {
-      setLoading(true)
+    if (registrationFixtureRequested) {
+      if (registrationFixtureEnabled) {
+        setData(registrationFixtureStateRef.current!.workspaceData)
+        setLoading(false)
+      }
       return
     }
-    if (registrationFixtureEnabled) {
-      workspaceDataViewerIdRef.current = currentUserId
-      setData(registrationFixtureStateRef.current!.workspaceData)
-      setLoading(false)
-      return
-    }
-    workspaceLoadAbortControllerRef.current?.abort()
-    const loadAbortController = isRegistrationWorkspace ? new AbortController() : null
-    workspaceLoadAbortControllerRef.current = loadAbortController
-    const loadGeneration = ++workspaceLoadGenerationRef.current
-    const viewerChanged = workspaceViewerIdRef.current !== currentUserId
-    if (viewerChanged) {
-      workspaceViewerIdRef.current = currentUserId
-      workspaceViewerGenerationRef.current += 1
-      workspaceDataViewerIdRef.current = ""
-      registrationOptionsLoadedRef.current = false
-      registrationOptionsLoadGenerationRef.current += 1
-      registrationOptionsDataRef.current = null
-      taskOptionsLoadedKeyRef.current = ""
-      taskOptionsLoadGenerationRef.current += 1
-      taskOptionsDataRef.current = null
-      setRegistrationOptionsLoading(false)
-      setRegistrationOptionsError("")
-      const resetForm = cloneForm()
-      formBaselineRef.current = serializeOpsTaskInput(resetForm)
-      setForm(resetForm)
-      setSelectedTask(null)
-      setSelectedRegistrationTrackId(null)
-      setSelectedRegistrationAppointmentId(null)
-      setRegistrationDeepLinkedAttempt(null)
-      setRegistrationCaseDetail(null)
-      registrationTrackSelectionRef.current = ""
-      registrationObservationDeepLinkTargetRef.current = null
-      registrationCreateAttemptRef.current = null
-      registrationCommittedReceiptRef.current = null
-      registrationCloseDeepLinkRestoreRef.current = null
-      registrationVisitNotificationRetryGenerationRef.current += 1
-      registrationVisitNotificationRetryInFlightRef.current = false
-      setPendingRegistrationVisitNotificationTargets([])
-      setRetryingRegistrationVisitNotifications(false)
-      setEditingTask(null)
-      setFormOpen(false)
-      setDetailOpen(false)
-      setRegistrationApplicationHost({ kind: "closed" })
-      setConfirmingFormClose(false)
-      setFormCompletionBlockers([])
-      setFormCompletionIntent(null)
-      setDeleteTarget(null)
-      setBulkDeleteTargets([])
-      setWordRetestSelectedTaskIds(new Set())
-      setWordRetestStudentIds([])
-      setWordRetestEditMode("full")
-      setWordRetestEditIntent("standard_edit")
-      setWordRetestPendingFocus("")
-      setExpectedRetestDraft(EMPTY_DATE_TIME_PICKER_DRAFT)
-      setStatusUndo(null)
-      setCommentBody("")
-      setAttachmentName("")
-      setAttachmentLink("")
-      setQuery("")
-      setQuickAddText("")
-      setMessage("")
-      setNotice("")
-      setSaving(false)
-      setData(null)
-    }
-    const loadOptions = isRegistrationWorkspace
-      ? {
-          taskType: scopedTaskType,
-          viewerId: currentUserId,
-          includeManagementOptions: false,
-          includeTeacherOptions: false,
-          includeProfileOptions: false,
-          filters: taskPageFilters,
-          cursor: null,
-          signal: loadAbortController?.signal,
-        }
-      : {
-          taskType: scopedTaskType,
-          viewerId: currentUserId,
-          includeManagementOptions: !isTodoWorkspace,
-          includeTeacherOptions: true,
-          includeProfileOptions: true,
-          filters: taskPageFilters,
-          cursor: null,
-          signal: loadAbortController?.signal,
-        }
-    const cachedData = force
-      ? null
-      : getCachedOpsTaskWorkspaceData(loadOptions) || getPersistedOpsTaskWorkspaceData(loadOptions)
-    if (cachedData) {
-      workspaceDataViewerIdRef.current = currentUserId
-      setData((current) => current || cachedData)
-      setLoading(false)
-    }
-    if (showPending && !cachedData) setLoading(true)
-    const nextData = await loadOpsTaskWorkspaceData({ ...loadOptions, force })
-    if (
-      latestWorkspaceViewerIdRef.current !== currentUserId
-      || workspaceLoadGenerationRef.current !== loadGeneration
-    ) return
-    const enrichmentData = isRegistrationWorkspace
-      ? registrationOptionsDataRef.current
-      : taskOptionsDataRef.current
-    workspaceDataViewerIdRef.current = currentUserId
-    setData(
-      enrichmentData
-        ? mergeOpsTaskWorkspaceOptionData(nextData, enrichmentData)
-        : nextData,
-    )
-    setTaskPageCursor(nextData.page?.nextCursor || null)
-    setTaskPageHasMore(Boolean(nextData.page?.hasMore))
-    setLoading(false)
-    const registrationSupplements = taskPageFilters.taskType === "registration"
-      ? startOpsRegistrationTaskPageSupplementLoad({
-          filters: taskPageFilters,
-          viewerId: currentUserId,
-          signal: loadAbortController?.signal,
-        })
-      : null
-    const statsSupplement = registrationSupplements
-      ? registrationSupplements.stats
-      : startOpsTaskPageStatsSupplementLoad({
-          filters: taskPageFilters,
-          viewerId: currentUserId,
-          signal: loadAbortController?.signal,
-        })
-    void statsSupplement.then((stats) => {
-      if (
-        !stats
-        || latestWorkspaceViewerIdRef.current !== currentUserId
-        || workspaceLoadGenerationRef.current !== loadGeneration
-      ) return
-      setData((current) => current
-        ? mergeOpsTaskPageSupplement(current, { stats })
-        : current)
-    })
-    if (registrationSupplements) {
-      void registrationSupplements.registrationRuntime.then((registrationRuntime) => {
-        if (
-          !registrationRuntime
-          || latestWorkspaceViewerIdRef.current !== currentUserId
-          || workspaceLoadGenerationRef.current !== loadGeneration
-        ) return
-        setData((current) => current
-          ? mergeOpsTaskPageSupplement(current, { registrationRuntime })
-          : current)
-      })
-    }
-  }, [currentUserId, isRegistrationWorkspace, isTodoWorkspace, registrationFixtureEnabled, registrationFixtureRequested, scopedTaskType, taskPageFilters, wordRetestFixtureRequested, wordRetestFixtureViewer])
+    setSupplementRevision((current) => current + 1)
+    await refreshNumberedPage()
+  }, [refreshNumberedPage, registrationFixtureEnabled, registrationFixtureRequested, wordRetestFixtureRequested, wordRetestFixtureViewer])
 
-  const loadMore = useCallback(async () => {
-    if (!taskPageCursor || !taskPageHasMore || taskPageLoadingMore || !currentUserId) return
-    const loadGeneration = workspaceLoadGenerationRef.current
-    setTaskPageLoadingMore(true)
-    try {
-      const nextData = await loadOpsTaskWorkspaceData({
-        taskType: scopedTaskType,
-        viewerId: currentUserId,
-        includeManagementOptions: false,
-        includeTeacherOptions: false,
-        includeProfileOptions: false,
-        filters: taskPageFilters,
-        cursor: taskPageCursor,
-        force: true,
-      })
-      if (workspaceLoadGenerationRef.current !== loadGeneration) return
-      setData((current) => {
-        if (!current) return nextData
-        const rowsById = new Map(current.tasks.map((task) => [task.id, task]))
-        nextData.tasks.forEach((task) => rowsById.set(task.id, task))
-        return {
-          ...current,
-          tasks: [...rowsById.values()],
-          page: nextData.page,
-          stats: current.stats,
-          registrationRuntime: current.registrationRuntime,
-        }
-      })
-      setTaskPageCursor(nextData.page?.nextCursor || null)
-      setTaskPageHasMore(Boolean(nextData.page?.hasMore))
-    } finally {
-      setTaskPageLoadingMore(false)
-    }
-  }, [currentUserId, scopedTaskType, taskPageCursor, taskPageFilters, taskPageHasMore, taskPageLoadingMore])
+  useEffect(() => {
+    if (!numberedServerPage || authLoading || !currentUserId) return
+    const controller = new AbortController()
+    workspaceLoadAbortControllerRef.current = controller
+    const generation = ++workspaceLoadGenerationRef.current
+    setData((current) => current ? { ...current, stats: undefined } : current)
+    const registration = taskPageFilters.taskType === "registration"
+      ? startOpsRegistrationTaskPageSupplementLoad({ filters: taskPageFilters, viewerId: currentUserId, signal: controller.signal })
+      : null
+    const stats = registration?.stats || startOpsTaskPageStatsSupplementLoad({ filters: taskPageFilters, viewerId: currentUserId, signal: controller.signal })
+    const current = () => workspaceMountedRef.current && !controller.signal.aborted && workspaceLoadGenerationRef.current === generation
+    void stats.then((stats) => {
+      if (stats && current()) setData((data) => mergeOpsTaskPageSupplement(data || emptyOpsTaskWorkspaceData, { stats }))
+    })
+    void registration?.registrationRuntime.then((registrationRuntime) => {
+      if (registrationRuntime && current()) setData((data) => mergeOpsTaskPageSupplement(data || emptyOpsTaskWorkspaceData, { registrationRuntime }))
+    })
+    return () => { controller.abort(); workspaceLoadGenerationRef.current += 1 }
+  }, [authLoading, currentUserId, numberedServerPage, supplementRevision, taskPageFilters])
 
   const refreshFirstTaskPageAfterMutation = useCallback(async () => {
     await reload(true, false)
@@ -8565,6 +8521,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     workspaceMountedRef.current = true
     return () => {
       workspaceMountedRef.current = false
+      latestWorkspaceViewerIdRef.current = ""
+      selectedDetailLoadRef.current += 1
+      taskOptionsLoadGenerationRef.current += 1
+      registrationOptionsLoadGenerationRef.current += 1
       workspaceViewerGenerationRef.current += 1
       registrationVisitNotificationRetryGenerationRef.current += 1
       registrationVisitNotificationRetryInFlightRef.current = false
@@ -8581,7 +8541,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   })
 
   useEffect(() => {
-    if (deferRegistrationWorkspaceLoad) return
+    if (numberedServerPage || deferRegistrationWorkspaceLoad) return
     void reload()
     return () => {
       workspaceLoadGenerationRef.current += 1
@@ -8589,7 +8549,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       workspaceLoadAbortControllerRef.current = null
       registrationOptionsLoadGenerationRef.current += 1
     }
-  }, [deferRegistrationWorkspaceLoad, reload])
+  }, [deferRegistrationWorkspaceLoad, numberedServerPage, reload])
 
   const ensureRegistrationOptions = useCallback(async (force = false) => {
     if (registrationFixtureRequested && !registrationFixtureEnabled) return false
@@ -8741,7 +8701,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         const routeParams = new URLSearchParams(window.location.search)
         routeParams.set("role", "assistant")
         const queryString = routeParams.toString()
-        window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+        window.history.replaceState(window.history.state, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
       }
       return
     }
@@ -8763,7 +8723,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       searchParams.set("focus", nextFocus)
     }
     const queryString = searchParams.toString()
-    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
   const syncTodoView = (nextView: TodoViewKey) => {
@@ -8776,7 +8736,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     searchParams.delete("focus")
     searchParams.delete("filter")
     const queryString = searchParams.toString()
-    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
   const syncWithdrawalView = (nextView: WithdrawalViewKey) => {
@@ -8788,7 +8748,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     searchParams.delete("list")
     searchParams.delete("focus")
     const queryString = searchParams.toString()
-    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
   const clearRegistrationWorkspaceSelection = () => {
@@ -8810,7 +8770,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       target,
     )
     const queryString = searchParams.toString()
-    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
   const syncRegistrationView = (nextView: RegistrationWorkspaceViewKey) => {
@@ -8869,7 +8829,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           },
     )
     const queryString = nextSearchParams.toString()
-    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }, [
     isRegistrationWorkspace,
     registrationCalendarKind,
@@ -8955,7 +8915,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     searchParams.delete("flow")
     searchParams.delete("focus")
     const queryString = searchParams.toString()
-    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
   const syncWordRetestBranchFilter = (nextBranch: WordRetestBranchFilter) => {
@@ -8967,7 +8927,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     searchParams.delete("list")
     searchParams.delete("flow")
     const queryString = searchParams.toString()
-    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
   const syncWordRetestPeriodFilter = (nextPeriod: WordRetestPeriodFilter) => {
@@ -8988,7 +8948,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     searchParams.delete("list")
     searchParams.delete("flow")
     const queryString = searchParams.toString()
-    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
   const syncWordRetestCustomDate = (key: "from" | "to", value: string) => {
@@ -9005,7 +8965,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     searchParams.delete("list")
     searchParams.delete("flow")
     const queryString = searchParams.toString()
-    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
   const syncTodoSort = (nextSort: TodoSortKey) => {
@@ -9017,7 +8977,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     searchParams.delete("focus")
     searchParams.delete("flow")
     const queryString = searchParams.toString()
-    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
   const writeTaskHistoryUrl = useCallback((
@@ -9073,10 +9033,19 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }, [writeTaskHistoryUrl])
 
   useEffect(() => {
-    const handlePopState = () => setTaskHistoryRevision((current) => current + 1)
+    const handlePopState = () => {
+      pendingNavigationRestoreRef.current = navigationBlockedRef.current
+      if (!navigationBlockedRef.current) restoreListNavigation()
+      setTaskHistoryRevision((current) => current + 1)
+    }
+    const saveScroll = () => {
+      const saved = readOpsTaskListNavigation(window.history.state, navigationActorScope, pathname, scopedTaskType)
+      if (saved && !pendingNavigationRestoreRef.current) window.history.replaceState({ ...window.history.state, tipsOpsTaskList: { ...saved, scrollY: window.scrollY } }, "")
+    }
     window.addEventListener("popstate", handlePopState)
-    return () => window.removeEventListener("popstate", handlePopState)
-  }, [])
+    window.addEventListener("scroll", saveScroll, { passive: true })
+    return () => { window.removeEventListener("popstate", handlePopState); window.removeEventListener("scroll", saveScroll) }
+  }, [navigationActorScope, pathname, restoreListNavigation, scopedTaskType])
 
   const workspaceDataBelongsToCurrentViewer = workspaceDataViewerIdRef.current === currentUserId
   const tasks = workspaceDataBelongsToCurrentViewer ? data?.tasks || EMPTY_TASKS : EMPTY_TASKS
@@ -9274,11 +9243,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     [form.assigneeId, form.assigneeTeam, profileTeamById, profiles],
   )
   const scopedTasks = useMemo(
-    () => tasks.filter((task) => task.type === scopedTaskType),
-    [scopedTaskType, tasks],
+    () => numberedServerPage ? tasks : tasks.filter((task) => task.type === scopedTaskType),
+    [numberedServerPage, scopedTaskType, tasks],
   )
   const authoritativeTaskStats = data?.stats
-  const hasAuthoritativeTaskStats = Boolean(data?.page && authoritativeTaskStats)
+  // Production never treats a selected page as a complete catalog/count source.
+  const hasAuthoritativeTaskStats = numberedServerPage
   const summary = useMemo(
     () => summarizeOpsTasks(scopedTasks, { currentUserId, currentUserLabel }),
     [currentUserId, currentUserLabel, scopedTasks],
@@ -9347,16 +9317,21 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     && registrationConsultationOwnerScope === "mine"
     ? registrationViewerId
     : undefined
+  const displayedRegistrationView = useMemo(() => {
+    if (!numberedServerPage || !numberedPage.scope) return registrationView
+    const { filters } = JSON.parse(numberedPage.scope) as { filters: OpsTaskPageFilters }
+    return filters.taskType === "registration" ? filters.view : registrationView
+  }, [numberedPage.scope, numberedServerPage, registrationView])
   const visibleRegistrationCaseItems = useMemo(
-    () => data?.page
-      ? registrationCaseItems.flatMap((item) => filterRegistrationCaseListItems([item], registrationView))
+    () => numberedServerPage
+      ? registrationCaseItems.flatMap((item) => filterRegistrationCaseListItems([item], displayedRegistrationView))
       : filterRegistrationCaseListItems(
         registrationCaseItems,
         registrationView,
         deferredQuery,
         { consultationOwnerId },
       ),
-    [consultationOwnerId, data?.page, deferredQuery, registrationCaseItems, registrationView],
+    [consultationOwnerId, numberedServerPage, deferredQuery, displayedRegistrationView, registrationCaseItems, registrationView],
   )
   const registrationConsultationScopeCounts = useMemo(() => hasAuthoritativeTaskStats ? ({
     mine: authoritativeTaskStats?.metrics.consultationMine || 0,
@@ -9443,13 +9418,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   )
   useEffect(() => {
     if (!isWordRetestWorkspace) return
+    if (numberedServerPage) return
     if (wordRetestTeacherFilter !== "all" && !wordRetestFilterOptions.teacher.some((option) => option.value === wordRetestTeacherFilter)) {
       setWordRetestTeacherFilter("all")
     }
     if (wordRetestClassFilter !== "all" && !wordRetestFilterOptions.class.some((option) => option.value === wordRetestClassFilter)) {
       setWordRetestClassFilter("all")
     }
-  }, [isWordRetestWorkspace, wordRetestClassFilter, wordRetestFilterOptions, wordRetestTeacherFilter])
+  }, [isWordRetestWorkspace, numberedServerPage, wordRetestClassFilter, wordRetestFilterOptions, wordRetestTeacherFilter])
   useEffect(() => {
     if (
       !isWordRetestWorkspace ||
@@ -9473,8 +9449,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   ])
   const hasQuery = !isWithdrawalWorkspace && !isTransferWorkspace && query.trim().length > 0
 
-  const visibleTasks = useMemo(() => {
-    if (data?.page) return scopedTasks
+  const filteredTasks = useMemo(() => {
+    if (numberedServerPage) return scopedTasks
     const todoTaskSource = scopedTasks
     const nextTasks = todoTaskSource
       .filter((task) => {
@@ -9520,7 +9496,24 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     if (todoSort === "status") return sortOpsTasksByWorkflowStatus(nextTasks, todayKey)
     if (todoSort === "priority") return sortOpsTasksByPriority(nextTasks, todayKey)
     return sortOpsTasksByWorkDate(nextTasks, todayKey)
-  }, [assigneeFilter, assigneeTeamFilter, confirmationByTaskId, currentUserContext, currentUserId, currentUserLabel, data?.page, deferredQuery, isRegistrationWorkspace, isTodoWorkspace, isTransferWorkspace, isWithdrawalWorkspace, isWordRetestWorkspace, requestedByFilter, requestedTeamFilter, scopedTasks, showClosed, taskFocus, todayKey, todoSort, todoView, view, withdrawalView, wordRetestBranchFilter, wordRetestClassFilter, wordRetestCustomEndDate, wordRetestCustomStartDate, wordRetestMode, wordRetestPeriodFilter, wordRetestRoleContext, wordRetestTeacherFilter])
+  }, [assigneeFilter, assigneeTeamFilter, confirmationByTaskId, currentUserContext, currentUserId, currentUserLabel, numberedServerPage, deferredQuery, isRegistrationWorkspace, isTodoWorkspace, isTransferWorkspace, isWithdrawalWorkspace, isWordRetestWorkspace, requestedByFilter, requestedTeamFilter, scopedTasks, showClosed, taskFocus, todayKey, todoSort, todoView, view, withdrawalView, wordRetestBranchFilter, wordRetestClassFilter, wordRetestCustomEndDate, wordRetestCustomStartDate, wordRetestMode, wordRetestPeriodFilter, wordRetestRoleContext, wordRetestTeacherFilter])
+  const completeFixtureTaskPage = useMemo(() => {
+    if (numberedServerPage) return null
+    const { column, direction } = wordRetestTablePageSort
+    const rows = isWordRetestWorkspace && column && direction
+      ? [...filteredTasks].sort((left, right) => {
+          const result = getWordRetestTableValue(left, column as WordRetestTableColumnKey)
+            .localeCompare(getWordRetestTableValue(right, column as WordRetestTableColumnKey), "ko", { numeric: true })
+          return direction === "asc" ? result : -result
+        })
+      : filteredTasks
+    return getCompleteOpsTaskFixturePage(rows, fixturePage, fixturePageSize.pageSize)
+  }, [filteredTasks, fixturePage, fixturePageSize.pageSize, isWordRetestWorkspace, numberedServerPage, wordRetestTablePageSort])
+  const completeFixtureRegistrationPage = useMemo(() => numberedServerPage ? null : getCompleteOpsTaskFixturePage(visibleRegistrationCaseItems, fixturePage, fixturePageSize.pageSize), [fixturePage, fixturePageSize.pageSize, numberedServerPage, visibleRegistrationCaseItems])
+  const visibleTasks = completeFixtureTaskPage?.rows || filteredTasks
+  const displayedRegistrationCaseItems = completeFixtureRegistrationPage?.rows || visibleRegistrationCaseItems
+  const fixtureNumberedPage = isRegistrationWorkspace ? completeFixtureRegistrationPage : completeFixtureTaskPage
+  const listNumberedPage = fixtureNumberedPage || numberedPage
 
   useEffect(() => {
     if (!isWordRetestWorkspace) return
@@ -9538,6 +9531,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       return changed ? next : current
     })
   }, [isWordRetestWorkspace, visibleTasks])
+
+  useEffect(() => {
+    setWordRetestSelectedTaskIds(new Set())
+  }, [numberedPage.page, numberedPage.pageSize, numberedPage.scope])
 
   const calendarItems = useMemo(
     () => {
@@ -9655,6 +9652,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     )
   const hasUnsavedWorkspaceInput = isFormDirty
     || (registrationApplicationHost.kind === "detail" && registrationApplicationDirty)
+  navigationBlockedRef.current = hasUnsavedWorkspaceInput || saving
 
   useEffect(() => {
     if (!hasUnsavedWorkspaceInput) return
@@ -10829,15 +10827,19 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const deepLinkedTaskId = currentSearchParams.get("taskId") || ""
     const deepLinkedTrackId = currentSearchParams.get("trackId") || ""
     const deepLinkedAppointmentId = currentSearchParams.get("appointmentId") || ""
-    const directRegistrationTarget = getRegistrationDirectDeepLinkTarget({
+    const directRegistrationTarget = isRegistrationWorkspace ? getRegistrationDirectDeepLinkTarget({
       viewerId: registrationViewerId,
       searchParams: currentSearchParams,
       observationRuntimeVersion: registrationObservationRuntime.runtimeVersion,
       workspaceReady: Boolean(data && workspaceDataBelongsToCurrentViewer),
       currentSelectionKey: registrationTrackSelectionRef.current,
       currentAppointmentId: selectedRegistrationAppointmentId || "",
-    })
+    }) : null
     if (!deepLinkedTaskId) {
+      if (!isRegistrationWorkspace) {
+        setDetailOpen(false)
+        setSelectedTask(null)
+      }
       if (!["loading_detail", "detail", "refresh_failed"].includes(registrationApplicationHost.kind)) return
       if (!("taskId" in registrationApplicationHost)) return
       const dirtyBackPlan = getRegistrationDirtyBackPlan({
@@ -10901,12 +10903,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       && registrationApplicationHost.taskId === deepLinkedTaskId
     ) return
     if (!data || !workspaceDataBelongsToCurrentViewer) return
-    const deepLinkedTask = taskById.get(deepLinkedTaskId)
+    const deepLinkedTask = (selectedTask?.id === deepLinkedTaskId ? selectedTask : null) || taskById.get(deepLinkedTaskId)
     if (!deepLinkedTask) {
       if (deepLinkTaskLoadRef.current === deepLinkedTaskId) return
       deepLinkTaskLoadRef.current = deepLinkedTaskId
       void loadOpsTaskById(deepLinkedTaskId).then((exactTask) => {
-        if (deepLinkTaskLoadRef.current !== deepLinkedTaskId) return
+        if (!workspaceMountedRef.current || deepLinkTaskLoadRef.current !== deepLinkedTaskId) return
         if (!exactTask) {
           syncTaskDeepLink(null)
           return
@@ -10915,16 +10917,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           void openRegistrationCase(exactTask.id, { allowDirectLoad: true })
           return
         }
-        setData((current) => current ? {
-          ...current,
-          tasks: current.tasks.some((task) => task.id === exactTask.id)
-            ? current.tasks.map((task) => task.id === exactTask.id ? exactTask : task)
-            : [exactTask, ...current.tasks],
-        } : current)
+        setSelectedTask(exactTask)
+        if (exactTask.type === "word_retest") openWordRetestEditor(exactTask)
+        else setDetailOpen(true)
       }).catch(() => {
-        if (deepLinkTaskLoadRef.current === deepLinkedTaskId) syncTaskDeepLink(null)
+        if (workspaceMountedRef.current && deepLinkTaskLoadRef.current === deepLinkedTaskId) syncTaskDeepLink(null)
       }).finally(() => {
-        if (deepLinkTaskLoadRef.current === deepLinkedTaskId) deepLinkTaskLoadRef.current = ""
+        if (workspaceMountedRef.current && deepLinkTaskLoadRef.current === deepLinkedTaskId) deepLinkTaskLoadRef.current = ""
       })
       return
     }
@@ -10977,7 +10976,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     registrationTrackSelectionRef.current = ""
     setSelectedTask(deepLinkedTask)
     setDetailOpen(true)
-  }, [data, deleteTarget, detailOpen, openRegistrationAppointment, openRegistrationCase, openRegistrationObservation, openRegistrationTrack, openWordRetestEditor, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, registrationDeepLinkedAttempt?.observationId, registrationObservationRuntime.runtimeVersion, registrationViewerId, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
+  }, [data, deleteTarget, isRegistrationWorkspace, detailOpen, openRegistrationAppointment, openRegistrationCase, openRegistrationObservation, openRegistrationTrack, openWordRetestEditor, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, registrationDeepLinkedAttempt?.observationId, registrationObservationRuntime.runtimeVersion, registrationViewerId, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
 
   function handleDetailOpenChange(nextOpen: boolean) {
     setDetailOpen(nextOpen)
@@ -11029,9 +11028,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setFormCompletionIntent(null)
       registrationCreateAttemptRef.current = null
     }
+    if (pendingNavigationRestoreRef.current) restoreListNavigation()
   }
 
   function cancelFormCloseConfirmation() {
+    pendingNavigationRestoreRef.current = false
     const restoreDeepLink = registrationCloseDeepLinkRestoreRef.current
     const closeDecision = getRegistrationDirtyCloseDecision("cancel", restoreDeepLink, {
       canRestoreForward: registrationCloseHistoryRestoreRef.current === "forward",
@@ -12064,7 +12065,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }
 
   useEffect(() => {
-    if (!isWordRetestWorkspace || loading || !data) return
+    if (!isWordRetestWorkspace || wordRetestFixtureRequested || loading || !data) return
     if (!["admin", "staff", "assistant"].includes(wordRetestViewerRole)) return
 
     const nextTasks = wordRetestFilterSourceTasks.filter((task) => (
@@ -12162,6 +12163,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     reload,
     refreshFirstTaskPageAfterMutation,
     wordRetestFilterSourceTasks,
+    wordRetestFixtureRequested,
     wordRetestViewerRole,
   ])
 
@@ -13116,7 +13118,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             ) : (
 	            <RegistrationCaseList
 	              key={registrationView}
-	              items={visibleRegistrationCaseItems}
+	              items={displayedRegistrationCaseItems}
 	              viewerId={registrationViewerId}
 	              viewerRole={registrationViewerRole}
 	              classes={classes}
@@ -13133,6 +13135,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             )
 	        ) : isWithdrawalWorkspace ? (
 	          <WithdrawalDataTable
+	            key={`withdrawal:${navigationRestore.key}`}
+	            initialControls={operationTablePageControls}
 	            tasks={visibleTasks}
 	            todayKey={todayKey}
 	            loading={loading}
@@ -13147,13 +13151,15 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            emptyActionLabel={emptyActionLabel}
 	            showEmptyAction={false}
 	            completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
-	            serverPaged={Boolean(data?.page)}
+	            serverPaged={Boolean(numberedServerPage)}
 	            serverFilterOptions={operationFilterOptions}
 	            onFilterOpen={() => void ensureTaskOptions()}
 	            onPageControlsChange={setOperationTablePageControls}
 	          />
 	        ) : isTransferWorkspace ? (
 	          <TransferDataTable
+	            key={`transfer:${navigationRestore.key}`}
+	            initialControls={operationTablePageControls}
 	            tasks={visibleTasks}
 	            todayKey={todayKey}
 	            loading={loading}
@@ -13168,13 +13174,15 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            emptyActionLabel={emptyActionLabel}
 	            showEmptyAction={false}
 	            completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
-	            serverPaged={Boolean(data?.page)}
+	            serverPaged={Boolean(numberedServerPage)}
 	            serverFilterOptions={operationFilterOptions}
 	            onFilterOpen={() => void ensureTaskOptions()}
 	            onPageControlsChange={setOperationTablePageControls}
 	          />
 	        ) : isWordRetestWorkspace ? (
 		          <WordRetestTaskList
+	            key={`word_retest:${navigationRestore.key}`}
+	            initialSort={wordRetestTablePageSort}
 	            tasks={visibleTasks}
 	            mode={wordRetestMode}
 		            onOpen={handleWordRetestOpen}
@@ -13200,7 +13208,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            emptyActionLabel={emptyActionLabel}
 	            showEmptyAction={showEmptyCreate}
 	            completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
-	            serverPaged={Boolean(data?.page)}
+	            serverPaged={Boolean(numberedServerPage)}
 	            onPageSortChange={setWordRetestTablePageSort}
 	          />
 	        ) : !isTodoWorkspace && view === "calendar" ? (
@@ -13270,21 +13278,37 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
           />
         )}
-        {!loading && data?.page ? (
-          <div className="flex justify-center border-t pt-3">
-            {taskPageHasMore ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void loadMore()}
-                disabled={taskPageLoadingMore}
-              >
-                {taskPageLoadingMore ? "다음 업무 불러오는 중" : "다음 30건"}
-              </Button>
-            ) : (
-              <span className="text-xs text-muted-foreground">마지막 업무입니다.</span>
-            )}
+        {!(isRegistrationWorkspace && registrationMode === "calendar") ? (
+          <div className="grid gap-2 border-t pt-3">
+            {numberedPage.error ? <div role="alert" className="flex items-center gap-2 text-sm text-destructive">
+              페이지를 불러오지 못했습니다.
+              <Button variant="outline" size="sm" onClick={() => void numberedPage.retry()}>다시 시도</Button>
+            </div> : null}
+            <DataTablePagination
+              page={listNumberedPage.page}
+              pageSize={listNumberedPage.pageSize}
+              totalCount={listNumberedPage.totalCount}
+              loading={numberedPage.loading}
+              pageSizeMode={numberedServerPage ? numberedPage.pageSizeMode : fixturePageSize.mode}
+              onPageChange={(page) => {
+                if (hasUnsavedWorkspaceInput) {
+                  if (registrationApplicationHost.kind !== "closed") requestRegistrationApplicationClose()
+                  else closeForm()
+                  return
+                }
+                if (numberedServerPage) void numberedPage.goToPage(page)
+                else setFixturePage(page)
+              }}
+              onPageSizeChange={(size) => {
+                if (hasUnsavedWorkspaceInput) {
+                  if (registrationApplicationHost.kind !== "closed") requestRegistrationApplicationClose()
+                  else closeForm()
+                  return
+                }
+                if (numberedServerPage) numberedPage.setPageSizePreference(size)
+                else fixturePageSize.setPreference(size)
+              }}
+            />
           </div>
         ) : null}
       </div>
@@ -16026,6 +16050,7 @@ function TaskList({
 
 function WordRetestTaskList({
   tasks,
+  initialSort,
   mode,
   onOpen,
   onEdit,
@@ -16054,6 +16079,7 @@ function WordRetestTaskList({
   onPageSortChange,
 }: {
   tasks: OpsTask[]
+  initialSort?: { column: string | null; direction: "asc" | "desc" | null }
   mode: WordRetestMode
   onOpen: (task: OpsTask) => void
   onEdit: (task: OpsTask, blockers?: string[]) => void
@@ -16082,7 +16108,8 @@ function WordRetestTaskList({
   onPageSortChange?: (sort: { column: string | null; direction: "asc" | "desc" | null }) => void
 }) {
   const [columnWidths, setColumnWidths] = useState<Record<WordRetestTableColumnKey, number>>(WORD_RETEST_TABLE_COLUMN_WIDTHS)
-  const [wordRetestTableSort, setWordRetestTableSort] = useState<WordRetestTableSort>(null)
+  const [wordRetestTableSort, setWordRetestTableSort] = useState<WordRetestTableSort>(() => initialSort?.column && initialSort.direction
+    ? { columnKey: initialSort.column as WordRetestTableColumnKey, direction: initialSort.direction } : null)
   const gridTemplateColumns = getWordRetestTableGridTemplate(columnWidths)
   const gridTemplateStyle = { "--word-retest-grid-template": gridTemplateColumns } as CSSProperties
   const visibleWordRetestTasks = useMemo(() => {

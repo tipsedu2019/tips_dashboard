@@ -38,3 +38,17 @@ test("task-page stats cache retries after an unavailable result", async () => {
   assert.deepEqual(await cache.load("general:inbox", loadStats), { total: 3 });
   assert.equal(loads, 2);
 });
+
+test("clear detaches old-role in-flight stats and prevents late cache restoration", async () => {
+  const cache = statsCacheModule.createOpsTaskPageStatsCache({ ttlMs: 60_000 });
+  const old = Promise.withResolvers();
+  const next = Promise.withResolvers();
+  const oldRead = cache.load("same-user:filters", () => old.promise);
+  cache.clear();
+  let newLoads = 0;
+  const newRead = cache.load("same-user:filters", () => { newLoads++; return next.promise; });
+  assert.equal(newLoads, 1);
+  next.resolve({ total: 2 }); await newRead;
+  old.resolve({ total: 900 }); await oldRead;
+  assert.deepEqual(await cache.load("same-user:filters", () => assert.fail("new-role value retained")), { total: 2 });
+});

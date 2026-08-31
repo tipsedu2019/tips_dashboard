@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type KeyboardEvent, type ReactNode } from "react"
+import { type KeyboardEvent, type ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
 
@@ -59,7 +59,6 @@ const WAITING_KIND_LABELS = {
   "": "미정",
 } as const
 
-const REGISTRATION_CASE_INITIAL_RENDER_LIMIT = 40
 const REGISTRATION_CASE_DATE_FORMATTER = new Intl.DateTimeFormat("ko-KR", {
   month: "short",
   day: "numeric",
@@ -451,11 +450,6 @@ export function RegistrationCaseList({
   onDelete,
 }: RegistrationCaseListProps) {
   const isEmpty = !loading && items.length === 0
-  const itemSetKey = items.map((item) => item.taskId).join("|")
-  const [windowState, setWindowState] = useState(() => ({ key: itemSetKey, count: REGISTRATION_CASE_INITIAL_RENDER_LIMIT }))
-  const visibleCount = windowState.key === itemSetKey ? windowState.count : REGISTRATION_CASE_INITIAL_RENDER_LIMIT
-  const visibleItems = items.slice(0, visibleCount)
-  const hasMore = visibleItems.length < items.length
   const columns = items[0] ? REGISTRATION_CASE_VIEW_COLUMNS[items[0].viewKey] : REGISTRATION_CASE_VIEW_COLUMNS.inquiry
   const showActionColumn = items.some(canDelete)
   const gridTemplateColumns = `repeat(${columns.length}, minmax(0, 1fr))${showActionColumn ? " minmax(5rem, auto)" : ""}`
@@ -491,7 +485,7 @@ export function RegistrationCaseList({
       ) : (
         <>
           <div data-testid="registration-case-mobile-list" className="grid min-w-0 gap-2 p-2 lg:hidden" role="list" aria-label="등록 신청 모바일 목록">
-            {visibleItems.map((item) => {
+            {items.map((item) => {
               const entryAvailable = !disabled && canOpenRegistrationCaseListItem(item)
               return <article
                 key={item.taskId}
@@ -512,7 +506,7 @@ export function RegistrationCaseList({
               {columns.map((column) => <div key={column} className="px-3 py-2" role="columnheader">{column}</div>)}
               {showActionColumn ? <div className="px-3 py-2 text-right" role="columnheader">관리</div> : null}
             </div>
-            {visibleItems.map((item) => {
+            {items.map((item) => {
               const entryAvailable = !disabled && canOpenRegistrationCaseListItem(item)
               return <div
                 key={item.taskId}
@@ -529,16 +523,6 @@ export function RegistrationCaseList({
               </div>
             })}
           </div>
-          {hasMore ? (
-            <div className="flex justify-center border-t p-2">
-              <Button type="button" variant="ghost" size="sm" onClick={() => setWindowState((current) => ({
-                key: itemSetKey,
-                count: (current.key === itemSetKey ? current.count : REGISTRATION_CASE_INITIAL_RENDER_LIMIT) + REGISTRATION_CASE_INITIAL_RENDER_LIMIT,
-              }))}>
-                더 보기
-              </Button>
-            </div>
-          ) : null}
         </>
       )}
     </section>

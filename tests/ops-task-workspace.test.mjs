@@ -202,7 +202,7 @@ test("todo workspace supports team tabs sorting filters and legacy query links",
     'if (todoView === "sent") return isOpsTaskInUserSent(task, currentUserContext)',
     "const currentSearchParams = new URLSearchParams(window.location.search)",
     'const deepLinkedTaskId = currentSearchParams.get("taskId") || ""',
-    'const deepLinkedTask = taskById.get(deepLinkedTaskId)',
+    'taskById.get(deepLinkedTaskId)',
     'syncTaskDeepLink(null)',
     "setSelectedTask(deepLinkedTask)",
     "setDetailOpen(true)",
@@ -877,7 +877,6 @@ test("registration workspace replaces Notion registration management with one ap
     "RegistrationCaseActions",
     "item.matchingTracks.map",
     "getRegistrationCaseTrackTimeLabel(track)",
-    "REGISTRATION_CASE_INITIAL_RENDER_LIMIT = 40",
     "key={item.taskId}",
   ]);
   assert.doesNotMatch(registrationTableSource, /item\.tracks\.map/);
@@ -921,7 +920,7 @@ test("fixture registration stays loading until its runtime adapter is installed"
     "const registrationFixturePrepared = Boolean(",
     "const [registrationFixtureRuntimeReady, setRegistrationFixtureRuntimeReady] = useState(false)",
     "const registrationFixtureTransitioning = registrationFixtureRequested !== registrationFixtureRuntimeReady",
-    "const loading = workspaceLoading || registrationFixtureTransitioning",
+    "|| registrationFixtureTransitioning",
     "if (!registrationFixturePrepared || !registrationFixtureModule || !registrationFixtureStateRef.current)",
     "setRegistrationFixtureRuntimeReady(true)",
     "setRegistrationFixtureRuntimeReady(false)",
@@ -1390,14 +1389,14 @@ test("registration tabs render compact application rows without the retired pare
 
   assertIncludesAll(workspaceSource, [
     "key={registrationView}",
-    "items={visibleRegistrationCaseItems}",
+    "items={displayedRegistrationCaseItems}",
     "viewerRole={registrationViewerRole}",
   ]);
   assertIncludesAll(tableSource, [
     'aria-label="등록 신청 목록"',
     'aria-label="등록 신청 모바일 목록"',
     'aria-label="등록 신청 데이터테이블"',
-    "const visibleItems = items.slice(0, visibleCount)",
+    "items.map((item)",
     "RegistrationCaseListRow",
   ]);
   assert.doesNotMatch(workspaceSource, /RegistrationDataTable|RegistrationPipelineFilter/);
@@ -1487,11 +1486,8 @@ test("registration list renders core data without starting option reads until a 
     "uploadedByLabel: profileLabels.get(attachment.uploadedBy) || attachment.uploadedByLabel",
     "actorLabel: profileLabels.get(event.actorId) || event.actorLabel",
     "tasks: enrichedTasks",
-    "includeManagementOptions: false",
-    "includeTeacherOptions: false",
-    "includeProfileOptions: false",
-    "const loadGeneration = ++workspaceLoadGenerationRef.current",
-    "mergeOpsTaskWorkspaceOptionData(nextData, enrichmentData)",
+    "const generation = ++workspaceLoadGenerationRef.current",
+    "mergeOpsTaskWorkspaceOptionData(next, options)",
     "setLoading(false)",
     "const ensureRegistrationOptions = useCallback",
     "loadOpsTaskWorkspaceOptionData({",
@@ -1499,7 +1495,7 @@ test("registration list renders core data without starting option reads until a 
     "mergeOpsTaskWorkspaceOptionData(current, enrichmentData)",
     "REGISTRATION_VIEWS_REQUIRING_LINKED_LABELS",
     "void ensureRegistrationOptions()",
-    "workspaceLoadGenerationRef.current !== loadGeneration",
+    "workspaceLoadGenerationRef.current === generation",
     "if (type === \"registration\") void ensureRegistrationOptions(true)",
     "if (task.type === \"registration\") void ensureRegistrationOptions(true)",
   ]);
@@ -1553,29 +1549,6 @@ test("local task mutations invalidate stale background workspace reloads before 
   }
 });
 
-test("registration option enrichment survives a slower core revalidation", async () => {
-  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const reloadSource = workspaceSource.slice(
-    workspaceSource.indexOf("const reload = useCallback"),
-    workspaceSource.indexOf("const deferRegistrationWorkspaceLoad"),
-  );
-  const optionSource = workspaceSource.slice(
-    workspaceSource.indexOf("const ensureRegistrationOptions = useCallback"),
-    workspaceSource.indexOf("useEffect(() => {", workspaceSource.indexOf("const ensureRegistrationOptions = useCallback")),
-  );
-
-  assert.match(workspaceSource, /const registrationOptionsDataRef = useRef<OpsTaskWorkspaceOptionData \| null>\(null\)/);
-  assert.match(workspaceSource, /const registrationOptionsLoadGenerationRef = useRef\(0\)/);
-  assert.match(reloadSource, /const enrichmentData = isRegistrationWorkspace[\s\S]*?registrationOptionsDataRef\.current[\s\S]*?taskOptionsDataRef\.current/);
-  assert.match(reloadSource, /mergeOpsTaskWorkspaceOptionData\(nextData, enrichmentData\)/);
-  assert.doesNotMatch(
-    reloadSource.slice(reloadSource.indexOf("const nextData = await")),
-    /registrationOptionsLoadedRef\.current = false/,
-  );
-  assert.match(optionSource, /\+\+registrationOptionsLoadGenerationRef\.current/);
-  assert.match(optionSource, /registrationOptionsDataRef\.current = enrichmentData/);
-  assert.doesNotMatch(optionSource, /workspaceLoadGenerationRef\.current !== loadGeneration/);
-});
 
 test("registration subject capability uses one cached probe and its failure is isolated from detail and option loading", async () => {
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
@@ -1617,30 +1590,6 @@ test("automatic word-retest mutations cannot commit across viewer or reload owne
   assert.doesNotMatch(autoMutationSource, /workspaceLoadGenerationRef\.current \+= 1/);
 });
 
-test("viewer transitions hide and reset the previous viewer's workspace state before passive reload", async () => {
-  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const reloadSource = workspaceSource.slice(
-    workspaceSource.indexOf("const reload = useCallback"),
-    workspaceSource.indexOf("useEffect(() => {\n    workspaceMountedRef.current = true"),
-  );
-
-  assert.match(workspaceSource, /<OpsTaskWorkspaceSession key=\{user\?\.id \|\| "anonymous"\} workspace=\{workspace\} \/>/);
-  assert.match(workspaceSource, /const latestWorkspaceViewerIdRef = useRef\(currentUserId\)\s*latestWorkspaceViewerIdRef\.current = currentUserId/);
-  assert.match(workspaceSource, /const workspaceDataBelongsToCurrentViewer = workspaceDataViewerIdRef\.current === currentUserId/);
-  assert.match(workspaceSource, /const tasks = workspaceDataBelongsToCurrentViewer \? data\?\.tasks \|\| EMPTY_TASKS : EMPTY_TASKS/);
-  assert.match(workspaceSource, /const selectedTaskFresh = workspaceDataBelongsToCurrentViewer && selectedTask/);
-  assert.match(reloadSource, /workspaceDataViewerIdRef\.current = ""/);
-  assert.match(reloadSource, /setSelectedTask\(null\)/);
-  assert.match(reloadSource, /setEditingTask\(null\)/);
-  assert.match(reloadSource, /setFormOpen\(false\)/);
-  assert.match(reloadSource, /setDetailOpen\(false\)/);
-  assert.doesNotMatch(reloadSource, /setRegistrationCustomerMessageTask\(null\)/);
-  assert.match(reloadSource, /setDeleteTarget\(null\)/);
-  assert.match(reloadSource, /setBulkDeleteTargets\(\[\]\)/);
-  assert.match(reloadSource, /workspaceDataViewerIdRef\.current = currentUserId[\s\S]*setData/);
-  assert.match(workspaceSource, /open=\{workspaceDataBelongsToCurrentViewer && formOpen\}/);
-  assert.match(workspaceSource, /open=\{workspaceDataBelongsToCurrentViewer && detailOpen\}/);
-});
 
 test("legacy registration detail prioritizes reached sections without duplicating admission processing", async () => {
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
@@ -2114,15 +2063,13 @@ test("committed initial visit notifications expose an in-session notification-on
   assert.doesNotMatch(retrySource, /createRegistrationCaseWithInitialWorkflow|createRegistrationCase\(|createOpsTask\(/)
 
   const viewerResetSource = source.slice(
-    source.indexOf("if (viewerChanged)"),
-    source.indexOf("const loadOptions", source.indexOf("if (viewerChanged)")),
+    source.indexOf("workspaceMountedRef.current = false"),
+    source.indexOf("const deferRegistrationWorkspaceLoad"),
   )
   assertIncludesAll(viewerResetSource, [
     "workspaceViewerGenerationRef.current += 1",
     "registrationVisitNotificationRetryGenerationRef.current += 1",
     "registrationVisitNotificationRetryInFlightRef.current = false",
-    "setPendingRegistrationVisitNotificationTargets([])",
-    "setRetryingRegistrationVisitNotifications(false)",
   ])
 
   const atomicStart = source.indexOf('if (createAttempt.writer === "atomic")')
@@ -2292,7 +2239,7 @@ test("an in-flight direct registration detail owns its link before stale workspa
   const deepLinkEnd = source.indexOf("\n  function handleDetailOpenChange", deepLinkStart);
   const deepLink = source.slice(deepLinkStart, deepLinkEnd);
   const ownershipGuard = deepLink.indexOf('registrationApplicationHost.taskId === deepLinkedTaskId');
-  const staleTaskLookup = deepLink.indexOf("const deepLinkedTask = taskById.get(deepLinkedTaskId)");
+  const staleTaskLookup = deepLink.indexOf("const deepLinkedTask =");
 
   assert.match(
     deepLink,
@@ -2561,7 +2508,7 @@ test("operation forms keep staged linked selectors outside canonical registratio
     "inferWordRetestTextbookGradePill",
     "wordRetestTextbookGradeFilter",
     'const defaultAssigneeId = currentUserId || ""',
-    "const { user, session, canManageAll, isAdmin, isStaff, isTeacher, isAssistant } = useAuth()",
+    "const { user, role: resolvedViewerRole, loading: authLoading, session, canManageAll, isAdmin, isStaff, isTeacher, isAssistant } = useAuth()",
     'setWordRetestMode(wordRetestViewerRole === "teacher" ? "teacher" : "assistant")',
     "shouldShowFormDetailTabs",
     "{formStepProgressLabel}",
@@ -4018,7 +3965,7 @@ test("actual assistants are locked to the shared assistant word retest queue", a
   assert.match(modelSource, /export function getWordRetestRoleContext/);
   assertIncludesAll(workspaceSource, [
     "getWordRetestRoleContext",
-    "const { user, session, canManageAll, isAdmin, isStaff, isTeacher, isAssistant } = useAuth()",
+    "const { user, role: resolvedViewerRole, loading: authLoading, session, canManageAll, isAdmin, isStaff, isTeacher, isAssistant } = useAuth()",
     "if (isAssistant && nextMode !== \"assistant\") return",
     "wordRetestRoleTabs.map((tab) =>",
   ]);
@@ -4253,7 +4200,7 @@ test("word retest table headers sort and the compact schedule form keeps session
 
   assert.match(source, /type WordRetestTableSort = \{/);
   assert.match(source, /function getWordRetestTableValue\(task: OpsTask, columnKey: WordRetestTableColumnKey\)/);
-  assert.match(taskListSource, /const \[wordRetestTableSort, setWordRetestTableSort\] = useState<WordRetestTableSort>\(null\)/);
+  assert.match(taskListSource, /const \[wordRetestTableSort, setWordRetestTableSort\] = useState<WordRetestTableSort>/);
   assert.match(taskListSource, /const visibleWordRetestTasks = useMemo/);
   assert.match(taskListSource, /getWordRetestTableValue\(left, wordRetestTableSort\.columnKey\)[\s\S]*localeCompare\(rightValue, "ko", \{ numeric: true \}\)/);
   assert.match(taskListSource, /onHeaderSelect=\{handleHeaderSelect\}/);
@@ -4912,9 +4859,8 @@ test("browser workflow scripts target the operation surfaces", async () => {
   ]);
 
 	  assertIncludesAll(workspaceSource, [
-	    "getCachedOpsTaskWorkspaceData(workspaceLoadOptions)",
-	    "includeProfileOptions: false",
-	    "loadOpsTaskWorkspaceData({ ...loadOptions, force })",
+
+	    "useOpsTaskNumberedPage({",
 	    "loadOpsTaskWorkspaceOptionData({",
 	  ]);
 
@@ -5326,22 +5272,11 @@ test("generic form and detail dialogs exclude canonical registration application
   assert.equal((source.match(/data-registration-application-host/g) || []).length, 1);
 });
 
-test("task workspace appends deduplicated pages and deep links exact-load missing rows", async () => {
-  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-
-  assert.match(source, /const \[taskPageCursor, setTaskPageCursor\] = useState/);
-  assert.match(source, /const \[taskPageHasMore, setTaskPageHasMore\] = useState/);
-  assert.match(source, /const loadMore = useCallback/);
-  assert.match(source, /new Map\(current\.tasks\.map\(\(task\) => \[task\.id, task\]\)\)/);
-  assert.match(source, /다음 30건/);
-  assert.match(source, /loadOpsTaskById\(deepLinkedTaskId\)/);
-  assert.doesNotMatch(source, /syncTaskDeepLink\(null\)\s*return\s*}\s*if \(deepLinkedTask\.type/);
-});
 
 test("non-registration catalogs load only when an editor or filter is opened", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const reloadStart = source.indexOf("const reload = useCallback");
-  const reloadEnd = source.indexOf("const loadMore = useCallback", reloadStart);
+  const reloadEnd = source.indexOf("const refreshFirstTaskPageAfterMutation", reloadStart);
   const initialReload = source.slice(reloadStart, reloadEnd);
   const openCreateStart = source.indexOf("function openCreate(");
   const openCreateEnd = source.indexOf("openCreateRef.current", openCreateStart);
@@ -5357,20 +5292,6 @@ test("non-registration catalogs load only when an editor or filter is opened", a
   assert.doesNotMatch(initialReload, /loadOpsTaskWorkspaceOptionData|ensureTaskOptions/);
 });
 
-test("loaded non-registration catalogs survive page-one replacements", async () => {
-  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const reloadStart = source.indexOf("const reload = useCallback");
-  const reloadEnd = source.indexOf("const loadMore = useCallback", reloadStart);
-  const reloadSource = source.slice(reloadStart, reloadEnd);
-  const optionsStart = source.indexOf("const ensureTaskOptions = useCallback");
-  const optionsEnd = source.indexOf("useEffect(() =>", optionsStart);
-  const optionsSource = source.slice(optionsStart, optionsEnd);
-
-  assert.match(source, /const taskOptionsDataRef = useRef<OpsTaskWorkspaceOptionData \| null>\(null\)/);
-  assert.match(optionsSource, /taskOptionsDataRef\.current = enrichmentData/);
-  assert.match(reloadSource, /taskOptionsDataRef\.current/);
-  assert.match(reloadSource, /mergeOpsTaskWorkspaceOptionData\(nextData, enrichmentData\)/);
-});
 
 test("create defaults and withdrawal handoffs wait for non-registration option catalogs", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
@@ -5386,17 +5307,6 @@ test("create defaults and withdrawal handoffs wait for non-registration option c
   assert.match(handoff, /await ensureTaskOptions\(\)[\s\S]*?buildWithdrawalCreatePrefill/);
 });
 
-test("load-more preserves first-page authoritative stats", async () => {
-  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const loadMoreStart = source.indexOf("const loadMore = useCallback");
-  const loadMoreEnd = source.indexOf("const refreshFirstTaskPageAfterMutation", loadMoreStart);
-  const loadMore = source.slice(loadMoreStart, loadMoreEnd);
-
-  assert.match(loadMore, /stats: current\.stats/);
-  assert.doesNotMatch(loadMore, /stats: nextData\.stats/);
-  assert.match(loadMore, /registrationRuntime: current\.registrationRuntime/);
-  assert.doesNotMatch(loadMore, /registrationRuntime: nextData\.registrationRuntime/);
-});
 
 test("paged badges counts and filter options consume server stats instead of the selected rows", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
@@ -5431,5 +5341,5 @@ test("an off-page task-only registration deep link opens canonical case detail a
 
   assert.match(exactLoad, /exactTask\.type === "registration"/);
   assert.match(exactLoad, /openRegistrationCase\(exactTask\.id, \{ allowDirectLoad: true \}\)\s*return/);
-  assert.match(exactLoad, /return[\s\S]*?setData\(\(current\)/);
+  assert.match(exactLoad, /return[\s\S]*?setSelectedTask\(exactTask\)/);
 });

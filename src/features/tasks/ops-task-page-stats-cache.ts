@@ -14,6 +14,7 @@ export function createOpsTaskPageStatsCache<T>({
 }: StatsCacheOptions) {
   const values = new Map<string, CachedValue<T>>()
   const inFlight = new Map<string, Promise<T>>()
+  let generation = 0
 
   async function load(key: string, loader: () => Promise<T>): Promise<T> {
     const cached = values.get(key)
@@ -22,11 +23,12 @@ export function createOpsTaskPageStatsCache<T>({
     const pending = inFlight.get(key)
     if (pending) return pending
 
+    const requestGeneration = generation
     const request = loader()
     inFlight.set(key, request)
     try {
       const value = await request
-      if (value !== undefined) {
+      if (value !== undefined && requestGeneration === generation && inFlight.get(key) === request) {
         values.set(key, { value, expiresAt: now() + ttlMs })
       }
       return value
@@ -37,6 +39,10 @@ export function createOpsTaskPageStatsCache<T>({
 
   return {
     load,
-    clear: () => values.clear(),
+    clear: () => {
+      generation += 1
+      values.clear()
+      inFlight.clear()
+    },
   }
 }
