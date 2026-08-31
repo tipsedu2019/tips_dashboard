@@ -13,7 +13,7 @@ Ten-number fixed blocks, one-page single arrows, global first/last double arrows
 | Surface | Implementation | Unit/type/build | Final SQL/pgTAP | Rendered/live |
 |---|---|---|---|---|
 | Shared pager/preferences | Reviewed (`1f62316f`, including interface repair) | 14/14 behavior tests; focused ESLint/TS pass | Not applicable | Live viewport pending |
-| Students/classes | Read API (`451b25d7`), SQL gate (`701e9a96`); UI (`0915e8d4`) plus fix (`0a86a16a`) reviewed and approved | Relevant235/235; combined foundation/query guard351/351; full ESLint0 errors/6 existing warnings, TS and isolated production build pass | Final-only isolated pgTAP114/114 passed | Pending |
+| Students/classes | Read API (`451b25d7`), SQL gate (`701e9a96`); UI (`0915e8d4`) and first fix (`0a86a16a`) reviewed; final foundation fix (`97b17191`) awaits scoped re-review | Fresh combined foundation/query guard370/370; focused lint/TS, full ESLint0 errors/6 existing warnings, isolated production build81/81 pass | Final-only isolated pgTAP114/114 passed (unchanged; not rerun in final fix) | Pending |
 | Tasks/retests/registration/transfer/withdrawal | Pending | Pending | Pending | Pending |
 | Makeup/approvals/curriculum/class planning | Pending | Pending | Pending | Pending |
 | Textbook operations/settings/auxiliary lists | Pending | Pending | Pending | Pending |
@@ -87,9 +87,31 @@ Fresh local verification at Task4 (Node `/Users/hyunjun/.cache/codex-runtimes/co
 - `node node_modules/eslint/bin/eslint.js src tests middleware.ts next.config.ts`: exit0,0 errors and6 pre-existing warnings in academic timetable, task service, public cache invalidation and its integration test. Those files have no diff from Task4 base`ad519cf5`; the two large-file Babel notices are informational.
 - Resynced isolated `/private/tmp/tips-task3-build.4uOr0v` with the existing repository node_modules symlink; `node node_modules/next/dist/bin/next build --webpack`: exit0,81/81 generated pages. Task4 analyzer/test bytes match the copy. No temporary server was started and the live workspace `.next` was not replaced.
 
-Task4 rechecked the migration SHA256 above and its sole ordered definition; it did not rerun SQL, change SQL/manifest bytes, apply remote migrations or contact providers. The114/114 SQL result remains the earlier separately recorded local proof. Task4 independent review and the final whole-foundation review are controller-owned next gates; no app-wide completion is claimed.
+Task4 rechecked the migration SHA256 above and its sole ordered definition; it did not rerun SQL, change SQL/manifest bytes, apply remote migrations or contact providers. The114/114 SQL result remains the earlier separately recorded local proof. Task4 independent review and scoped re-review are complete. The subsequent whole-foundation review and final fix are recorded separately below; no app-wide completion is claimed.
 
-Task4 review round1 found that class static-block `var` declarations were incorrectly owned by the outer function, allowing an outer8000 const to hide a nearer12000 variable. The owner search now stops at the static block. RED/GREEN regression covers direct, destructured, hoisted, nested-block/function bindings and sibling/outside isolation; the full query-budget suite passes117/117 and focused source/test ESLint passes. Scoped re-review remains pending. The combined351-test/full lint/TS/build results above are the preceding checkpoint, not fresh reruns after this tiny scope fix.
+Task4 review round1 found that class static-block `var` declarations were incorrectly owned by the outer function, allowing an outer8000 const to hide a nearer12000 variable. Fix `d1822bdd` stops the owner search at the static block. RED/GREEN regression covers direct, destructured, hoisted, nested-block/function bindings and sibling/outside isolation; the full query-budget suite passes117/117 and focused source/test ESLint passes. Scoped re-review is complete and clean. The combined351-test/full lint/TS/build results above remain the preceding checkpoint, not fresh reruns after that scope fix; the later fresh370-test checkpoint follows.
+
+## Final foundation fix — fresh local checkpoint
+
+Whole-foundation review at `513437b8` found two Important consumer defects: normalization reordered the RPC's server-sorted rows, and the default class period was canonicalized only in the URL dedup key, leaving controller retry/clamp bound to an unresolved period. It also found an unknown total reported as a server-zero class count and stale Task4 review wording. Fix `97b17191` addresses these findings; its final scoped re-review is **pending**, owned by the controller. Do not treat the earlier Task3/Task4 approvals as approval of this fix.
+
+The numbered normalization path now preserves RPC order while retaining normalized fields and the legacy helper default. Real DTO -> numbered service -> hook -> TanStack/shadcn component tests cover literal descending[Z,A], natural numeric[Class2,Class10] and primary/secondary sorting. The class caption and actual pager distinguish initial failure/unknown count from a successful zero.
+
+The approved additive `NumberedPageLoadRequest` contains `canonicalizeScope(scope:string):boolean`. A successful default resolver pins the current internal retry/clamp scope before the numbered read, including when that read fails. The callback cannot publish or relabel previous successful rows and expires when its particular read settles, before success/error observers run; stale/aborted/disposed and first-read callbacks during clamp returnfalse. The existing load/retry/dispose API and `NumberedPage<T>` payload are unchanged. Resolved-period presentation is also bound to the exact unresolved/canonical query scope, preventing old filter/actor/role results from fixing a new URL to the wrong period.
+
+TDD reproduced6 initial hook/component failures,3 missing-controller-contract failures,3 prior-period ownership failures and1 error-observer callback failure before each respective fix. Additional resolver failure/stale/disable negatives protect existing behavior. The final new coverage is18 tests; retained tests cover initial page restore, atomic page-size transitions, StrictMode cleanup, separate detail catalogs and single-owner mutation reconciliation.
+
+Fresh commands after all source/test fixes, using `/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node`:
+
+- `node --test --experimental-strip-types tests/management-*.test.mjs tests/numbered-page-controller.test.mjs tests/numbered-pagination.test.mjs tests/data-table-pagination.test.mjs tests/query-surface-budget.test.mjs`:370/370 pass,0 failed/cancelled/skipped, exit0. Includes unchanged full117-case query-budget suite. Log:`/private/tmp/tips-foundation-final-fix-tests.log`.
+- Focused ESLint over the five changed source/test files and `node node_modules/typescript/bin/tsc --noEmit --incremental false`: exit0, no output.
+- `node node_modules/eslint/bin/eslint.js src tests middleware.ts next.config.ts`: exit0,0 errors/6 pre-existing warnings. The four warning-bearing files have no diff from `513437b8`; large-file Babel notices are informational. Log:`/private/tmp/tips-foundation-final-fix-lint.log`.
+- Resynced `/private/tmp/tips-task3-build.4uOr0v`, excluding `.git`, `.next`, `node_modules`, `.codex-temp`, `.superpowers`, using its existing node_modules symlink. `node node_modules/next/dist/bin/next build --webpack`: exit0, compiled successfully,81/81 static pages. Log:`/private/tmp/tips-foundation-final-fix-build.log`. The copy was never served; live `.next/BUILD_ID` SHA256 remained `3553d308874a9a5457c0fa26af30abf82c1c9f6352413f9cfa87391b1105d323` before/after.
+- `git diff --check`: exit0. Management SQL SHA256 remains unchanged. No SQL/query-guard/manifest/dependency changes or SQL rerun occurred in this wave.
+
+Still tracked, **not fixed**: the pre-existing list-delete error is hidden because confirmation closes before deletion and operationError is rendered only in the now-closed detail dialog. The failed-delete test proves retained rows/no refresh, not visible error feedback.
+
+Rendered desktop/mobile/keyboard/viewport evidence, remote migration/deployment and representative performance measurements remain pending. The nine earlier privileged warm wrapper plans do not establish nested enrichment loop counts or production latency. No browser-policy workaround, remote mutation, push, deploy or send was used.
 
 ## Shared exports for downstream adapters
 
@@ -98,7 +120,7 @@ Task4 review round1 found that class static-block `var` declarations were incorr
 | `src/lib/numbered-pagination.ts` | `DataTablePageSize`, `DataTablePageSizePreference`, `NumberedPage<T>`, `getNumberedPagination({page,pageSize,totalCount})` |
 | `src/components/data-table/data-table-pagination.tsx` | `DataTablePagination` / `DataTablePaginationProps`; successful displayed page/size/count, loading, per-list ariaLabel and preference callback |
 | `src/hooks/use-data-table-page-size.ts` | `useDataTablePageSize(tableId)` → ready/pageSize/mode/setPreference/setAutoPageSize; wait for ready before loading |
-| `src/lib/numbered-page-controller.ts` | `createNumberedPageController<T>({loadPage,onChange})`; load/retry/dispose; scope/page/pageSize/signal request and successful-envelope snapshot retention |
+| `src/lib/numbered-page-controller.ts` | `createNumberedPageController<T>({loadPage,onChange})`; unchanged load/retry/dispose; `NumberedPageLoadRequest` adds invocation-bound canonicalizeScope to scope/page/pageSize/signal; successful-envelope snapshot retention |
 
 Adapters own filters/sort, authorized identity/role clearing, independent metadata/detail reads and domain drafts/aggregate/export semantics. They must not use cursor/full-table fallback or page-local aggregates to satisfy numbered UI. Task, academic/makeup/approval/curriculum, textbook/settings and auxiliary integrations remain pending under their separate plans.
 
