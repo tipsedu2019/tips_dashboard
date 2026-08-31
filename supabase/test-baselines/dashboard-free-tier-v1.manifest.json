@@ -154,6 +154,11 @@
       "fileName": "20260831031913_ops_task_numbered_pages.sql",
       "status": "final",
       "sha256": "2f3303d4dda16d925e70ed11ee5ae6b676aa90f92493cc54e4b5263e3199362c"
+    },
+    {
+      "fileName": "20260831052546_academic_operations_numbered_pages.sql",
+      "status": "final",
+      "sha256": "32b51bd8ac1fc14d32bf01a260d1fa22a9324b658960de265f5b89bc0c61b0df"
     }
   ]
 }

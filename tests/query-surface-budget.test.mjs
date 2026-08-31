@@ -1338,6 +1338,32 @@ test("actual task numbered service retains timeout, retry and bounded RPC contra
   assert.deepEqual(inspectQuerySurfaceSource({ surface: "tasks", file, source }), [])
 })
 
+test("secondary numbered RPCs allow only the two final-SQL-proven 10/15/20 contracts", () => {
+  for (const [surface, name] of [["academic", "get_academic_curriculum_numbered_page_v1"], ["operations", "get_operations_class_schedule_numbered_page_v1"]]) {
+    const inspect = (rpc, args, suffix = '.abortSignal(AbortSignal.timeout(8000)).retry(false)') => inspectQuerySurfaceSource({
+      surface, file: `src/features/${surface}/numbered-fixture.ts`,
+      source: `async function load(client, request) { return client.rpc(${JSON.stringify(rpc)}, ${args})${suffix} }`,
+    }).map((violation) => violation.reason)
+    for (const size of ["10", "15", "20", "request.pageSize"]) assert.deepEqual(inspect(name, `{p_page:request.page,p_page_size:${size}}`), [])
+    for (const size of ["5", "30", "11", "null", '"10"']) assert.deepEqual(inspect(name, `{p_page_size:${size}}`), ["rpc_page_limit_invalid"])
+    assert.deepEqual(inspect(name, "{}"), ["rpc_page_limit_missing"])
+    assert.deepEqual(inspect(name, "{...request,p_page_size:10}"), ["rpc_page_limit_unresolved"])
+    assert.deepEqual(inspect(name.replace("v1", "v2"), "{p_page_size:10}"), ["rpc_page_limit_missing"])
+    assert.deepEqual(inspect(name.replace("_numbered", ""), "{p_page_size:10}"), ["rpc_page_limit_missing"])
+    assert.ok(inspect(name, "{p_page_size:10}", ".retry(false)").includes("list_abort_signal_missing"))
+    assert.ok(inspect(name, "{p_page_size:10}", ".abortSignal(AbortSignal.timeout(8000))").includes("list_retry_false_missing"))
+    assert.ok(inspect(name, "{p_page_size:10}", ".abortSignal(AbortSignal.timeout(9000)).retry(false)").includes("list_abort_signal_missing"))
+  }
+})
+
+test("secondary numbered production adapters retain bounded parameters and union cancellation", async () => {
+  for (const surface of ["academic", "operations"]) {
+    const file = `src/features/${surface}/${surface}-read-service.js`
+    const source = await readFile(new URL(`../${file}`, import.meta.url), "utf8")
+    assert.deepEqual(inspectQuerySurfaceSource({ surface, file, source }), [])
+  }
+})
+
 test("ordered exact-key details and nested projections without wildcards remain allowed", async () => {
   const result = await verifyFixture({
     source: `async function load(client, id) {

@@ -42,9 +42,13 @@ const EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES = new Set([
 // management_numbered_pages_test.sql; local final-only proof 114/114.
 // tasks: 20260831031913_ops_task_numbered_pages.sql (final),
 // ops_task_numbered_pages_test.sql; local final-only proof 568/568.
+// academic/planning: 20260831052546_academic_operations_numbered_pages.sql (final),
+// academic_operations_numbered_pages_test.sql; local final-only proof 134/134.
 const EXACT_NUMBERED_RPC_CONTRACTS = new Map([
   ["list_management_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_ops_task_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["get_academic_curriculum_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["get_operations_class_schedule_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
 ])
 
 const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION"
