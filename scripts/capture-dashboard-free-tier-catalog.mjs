@@ -84,7 +84,7 @@ with migration_ledger as (
   where (namespace.nspname, procedure.proname || '(' || arguments.signature || ')') in (('public', 'get_dashboard_conflict_sources_v1(date,date)'), ('public', 'get_dashboard_summary_sources_v1()'), ('public', 'list_dashboard_class_session_dates_v1(date,date)'))
   union all select 'rls', namespace.nspname, relation_row.relname, pg_catalog.jsonb_build_object('enabled', relation_row.relrowsecurity, 'forced', relation_row.relforcerowsecurity)
   from pg_catalog.pg_class relation_row join pg_catalog.pg_namespace namespace on namespace.oid = relation_row.relnamespace join allowed_relations allowed on (allowed.schema_name, allowed.relation_name) = (namespace.nspname, relation_row.relname) where relation_row.relkind in ('r','p')
-  union all select 'policy', namespace.nspname, relation_row.relname || '.' || policy.polname, pg_catalog.jsonb_build_object('command', policy.polcmd, 'roles', (select pg_catalog.jsonb_agg(case when role_entry.role_oid = 0 then 'public' else pg_catalog.pg_get_userbyid(role_entry.role_oid) end order by role_entry.ordinality) from unnest(policy.polroles) with ordinality role_entry(role_oid, ordinality)), 'using', pg_catalog.pg_get_expr(policy.polqual, policy.polrelid), 'check', pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid))
+  union all select 'policy', namespace.nspname, relation_row.relname || '.' || policy.polname, pg_catalog.jsonb_build_object('command', policy.polcmd, 'permissive', policy.polpermissive, 'roles', (select pg_catalog.jsonb_agg(case when role_entry.role_oid = 0 then 'public' else pg_catalog.pg_get_userbyid(role_entry.role_oid) end order by role_entry.ordinality) from unnest(policy.polroles) with ordinality role_entry(role_oid, ordinality)), 'using', pg_catalog.pg_get_expr(policy.polqual, policy.polrelid), 'check', pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid))
   from pg_catalog.pg_policy policy join pg_catalog.pg_class relation_row on relation_row.oid = policy.polrelid join pg_catalog.pg_namespace namespace on namespace.oid = relation_row.relnamespace join allowed_relations allowed on (allowed.schema_name, allowed.relation_name) = (namespace.nspname, relation_row.relname)
   union all select 'grant', namespace.nspname, relation_row.relname || '.' || grant_row.grantee::text, pg_catalog.jsonb_build_object('acl', relation_row.relacl, 'expanded', (select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('grantee', acl.grantee, 'privilege', acl.privilege_type) order by acl.grantee, acl.privilege_type) from pg_catalog.aclexplode(relation_row.relacl) acl))
   from pg_catalog.pg_class relation_row join pg_catalog.pg_namespace namespace on namespace.oid = relation_row.relnamespace join allowed_relations allowed on (allowed.schema_name, allowed.relation_name) = (namespace.nspname, relation_row.relname) join lateral (select distinct acl.grantee from pg_catalog.aclexplode(relation_row.relacl) acl) grant_row on true
@@ -248,12 +248,12 @@ function stabilizeCatalogRoleFingerprints(value) {
     if (row?.objectKind !== "policy" || typeof row.fingerprint !== "string") return row;
     let fingerprint;
     try { fingerprint = JSON.parse(row.fingerprint); } catch { fail("management_api_contract_drift"); }
-    if (!Array.isArray(fingerprint?.roles)) fail("management_api_contract_drift");
+    if (!Array.isArray(fingerprint?.roles) || typeof fingerprint.permissive !== "boolean") fail("management_api_contract_drift");
     const roles = fingerprint.roles.map((role) => roleByOid.get(String(role)) || (/^[a-z_][a-z0-9_]*$/u.test(String(role)) ? String(role) : fail("management_api_contract_drift")));
     const check = fingerprint.check ?? null;
     const using = fingerprint.using ?? null;
     const roleJson = `[${roles.map((role) => JSON.stringify(role)).join(", ")}]`;
-    return { ...row, fingerprint: `{"check": ${JSON.stringify(check)}, "roles": ${roleJson}, "using": ${JSON.stringify(using)}, "command": ${JSON.stringify(fingerprint.command)}}` };
+    return { ...row, fingerprint: `{"check": ${JSON.stringify(check)}, "roles": ${roleJson}, "using": ${JSON.stringify(using)}, "command": ${JSON.stringify(fingerprint.command)}, "permissive": ${fingerprint.permissive}}` };
   });
 }
 
@@ -623,6 +623,11 @@ function functionAclGrantSql(entry) {
 }
 
 export function buildFinalSchemaReconciliation(definitions) {
+  for (const entry of definitions) {
+    if (entry.objectKind === "policy" && Object.hasOwn(entry, "policyFingerprintVersion") && entry.policyFingerprintVersion !== 2) fail("management_api_contract_drift");
+    if (entry.objectKind === "policy" && entry.replayFingerprint !== undefined && entry.replayFingerprint !== null
+      && typeof parsedReplayFingerprint(entry)?.permissive !== "boolean") fail("management_api_contract_drift");
+  }
   const publicTables = definitions.filter((entry) => entry.objectKind === "table" && entry.schema === "public" && entry.replayFingerprint);
   const defaults = new Map(definitions.filter((entry) => entry.objectKind === "default" && entry.schema === "public" && entry.replayFingerprint).map((entry) => [entry.identity, parsedReplayFingerprint(entry)]));
   const columnSql = publicTables.flatMap((entry) => {
@@ -679,8 +684,8 @@ export function buildFinalSchemaReconciliation(definitions) {
     const { relation, object } = relationIdentity(entry);
     const fingerprint = parsedReplayFingerprint(entry);
     const command = commandName.get(fingerprint?.command);
-    if (!command || !Array.isArray(fingerprint.roles) || !fingerprint.roles.every((role) => policyRoles.has(role)) || !(fingerprint.using === null || typeof fingerprint.using === "string") || !(fingerprint.check === null || typeof fingerprint.check === "string")) fail("management_api_contract_drift");
-    const clauses = [`create policy ${quoteIdentifier(object)} on public.${quoteIdentifier(relation)} for ${command} to ${fingerprint.roles.map(quoteIdentifier).join(", ")}`];
+    if (!command || typeof fingerprint.permissive !== "boolean" || !Array.isArray(fingerprint.roles) || !fingerprint.roles.every((role) => policyRoles.has(role)) || !(fingerprint.using === null || typeof fingerprint.using === "string") || !(fingerprint.check === null || typeof fingerprint.check === "string")) fail("management_api_contract_drift");
+    const clauses = [`create policy ${quoteIdentifier(object)} on public.${quoteIdentifier(relation)} as ${fingerprint.permissive ? "permissive" : "restrictive"} for ${command} to ${fingerprint.roles.map(quoteIdentifier).join(", ")}`];
     if (fingerprint.using !== null) clauses.push(`using (${fingerprint.using})`);
     if (fingerprint.check !== null) clauses.push(`with check (${fingerprint.check})`);
     return [`drop policy if exists ${quoteIdentifier(object)} on public.${quoteIdentifier(relation)};`, `${clauses.join(" ")};`];
@@ -752,6 +757,12 @@ export function normalizeDashboardFreeTierCatalog(value, scope) {
   const normalized = value.map((row) => {
     const rawDefinition = typeof row.definition === "string" ? row.definition : null;
     const fingerprint = typeof row.fingerprint === "string" ? row.fingerprint.normalize("NFC") : null;
+    if (row.objectKind === "policy" && Object.hasOwn(row, "policyFingerprintVersion") && row.policyFingerprintVersion !== 2) fail("management_api_contract_drift");
+    if (row.objectKind === "policy" && fingerprint !== null) {
+      let parsed;
+      try { parsed = JSON.parse(fingerprint); } catch { fail("management_api_contract_drift"); }
+      if (typeof parsed?.permissive !== "boolean") fail("management_api_contract_drift");
+    }
     const hash = fingerprint ? sha256(fingerprint) : typeof row.definitionSha256 === "string" ? row.definitionSha256 : rawDefinition ? sha256(rawDefinition) : null;
     if (!row || typeof row.identity !== "string" || typeof row.objectKind !== "string" || typeof row.schema !== "string" || !SHA256.test(hash || "")) fail("management_api_contract_drift");
     const identity = row.objectKind === "function" ? normalizeDashboardFunctionIdentity(row.identity) : row.identity;
@@ -765,7 +776,7 @@ export function normalizeDashboardFreeTierCatalog(value, scope) {
     const key = `${row.objectKind}|${row.schema}|${identity}`;
     if (seen.has(key)) fail("management_api_contract_drift");
     seen.add(key);
-    return { objectKind: row.objectKind, schema: row.schema, identity, definition: rawDefinition?.normalize("NFC") || null, definitionSha256: hash, metadata: row.metadata || null, replayFingerprint: fingerprint };
+    return { objectKind: row.objectKind, schema: row.schema, identity, definition: rawDefinition?.normalize("NFC") || null, definitionSha256: hash, metadata: row.metadata || null, replayFingerprint: fingerprint, ...(row.objectKind === "policy" && (fingerprint || row.policyFingerprintVersion === 2) ? { policyFingerprintVersion: 2 } : {}) };
   }).sort((left, right) => (
     left.objectKind.localeCompare(right.objectKind) || left.schema.localeCompare(right.schema) || left.identity.localeCompare(right.identity)
   ));
@@ -801,7 +812,8 @@ export function dashboardFreeTierCatalogFingerprintSql(entry) {
   if (entry.objectKind === "constraint") return `(select pg_catalog.jsonb_build_object('definition', pg_catalog.pg_get_constraintdef(con.oid, true)) from pg_catalog.pg_constraint con join pg_catalog.pg_class rel on rel.oid = con.conrelid join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace where ns.nspname = ${schema} and (rel.relname || '.' || con.conname) = ${identity})`;
   if (entry.objectKind === "index") return `(select pg_catalog.jsonb_build_object('definition', pg_catalog.pg_get_indexdef(rel.oid)) from pg_catalog.pg_class rel join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace where ns.nspname = ${schema} and rel.relname = ${identity})`;
   if (entry.objectKind === "trigger") return `(select pg_catalog.jsonb_build_object('definition', ranked.definition, 'function', ranked.function_identity, 'order', ranked.fire_order) from (select ns.nspname schema_name, rel.relname relation_name, trg.tgname, pg_catalog.pg_get_triggerdef(trg.oid, true) definition, trg.tgfoid::regprocedure::text function_identity, case when trg.tgtype & 2 = 2 then 'before' else 'after' end timing_name, trigger_event.event_name, row_number() over (partition by trg.tgrelid, case when trg.tgtype & 2 = 2 then 'before' else 'after' end, trigger_event.event_name order by trg.tgname) fire_order from pg_catalog.pg_trigger trg join pg_catalog.pg_class rel on rel.oid = trg.tgrelid join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace cross join lateral (values (4, 'insert'), (8, 'delete'), (16, 'update'), (32, 'truncate')) trigger_event(event_bit, event_name) where not trg.tgisinternal and trg.tgtype & trigger_event.event_bit = trigger_event.event_bit) ranked where ranked.schema_name = ${schema} and (ranked.relation_name || '.' || ranked.timing_name || '.' || ranked.event_name || '.' || pg_catalog.lpad(ranked.fire_order::text, 2, '0') || '.' || ranked.tgname) = ${identity})`;
-  if (entry.objectKind === "policy") return `(select pg_catalog.jsonb_build_object('command', pol.polcmd, 'roles', (select pg_catalog.jsonb_agg(case when role_entry.role_oid = 0 then 'public' else pg_catalog.pg_get_userbyid(role_entry.role_oid) end order by role_entry.ordinality) from unnest(pol.polroles) with ordinality role_entry(role_oid, ordinality)), 'using', pg_catalog.pg_get_expr(pol.polqual, pol.polrelid), 'check', pg_catalog.pg_get_expr(pol.polwithcheck, pol.polrelid)) from pg_catalog.pg_policy pol join pg_catalog.pg_class rel on rel.oid = pol.polrelid join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace where ns.nspname = ${schema} and (rel.relname || '.' || pol.polname) = ${identity})`;
+  if (entry.objectKind === "policy" && Object.hasOwn(entry, "policyFingerprintVersion") && entry.policyFingerprintVersion !== 2) fail("management_api_contract_drift");
+  if (entry.objectKind === "policy") return `(select pg_catalog.jsonb_build_object('command', pol.polcmd,${entry.policyFingerprintVersion === 2 ? " 'permissive', pol.polpermissive," : ""} 'roles', (select pg_catalog.jsonb_agg(case when role_entry.role_oid = 0 then 'public' else pg_catalog.pg_get_userbyid(role_entry.role_oid) end order by role_entry.ordinality) from unnest(pol.polroles) with ordinality role_entry(role_oid, ordinality)), 'using', pg_catalog.pg_get_expr(pol.polqual, pol.polrelid), 'check', pg_catalog.pg_get_expr(pol.polwithcheck, pol.polrelid)) from pg_catalog.pg_policy pol join pg_catalog.pg_class rel on rel.oid = pol.polrelid join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace where ns.nspname = ${schema} and (rel.relname || '.' || pol.polname) = ${identity})`;
   if (entry.objectKind === "role") return `(select pg_catalog.jsonb_build_object('login', rolcanlogin, 'inherit', rolinherit, 'superuser', rolsuper) from pg_catalog.pg_roles where rolname = ${identity})`;
   if (entry.objectKind === "grant" && entry.identity.startsWith("default.")) return `(select pg_catalog.jsonb_build_object('acl', default_acl.defaclacl, 'owner', owner.rolname, 'schema', ns.nspname, 'objectType', default_acl.defaclobjtype) from pg_catalog.pg_default_acl default_acl join pg_catalog.pg_roles owner on owner.oid = default_acl.defaclrole left join pg_catalog.pg_namespace ns on ns.oid = default_acl.defaclnamespace where ('default.' || owner.rolname || '.' || coalesce(ns.nspname, '') || '.' || default_acl.defaclobjtype::text) = ${identity})`;
   if (entry.objectKind === "grant") return `(select pg_catalog.jsonb_build_object('acl', rel.relacl, 'expanded', (select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('grantee', acl.grantee, 'privilege', acl.privilege_type) order by acl.grantee, acl.privilege_type) from pg_catalog.aclexplode(rel.relacl) acl)) from pg_catalog.pg_class rel join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace where ns.nspname = ${schema} and (rel.relname || '.' || (split_part(${identity}, '.', 2))) = ${identity})`;
@@ -822,7 +834,7 @@ export function buildDashboardFreeTierParitySql(catalog) {
 function artifactSet({ payload, originMainSha, definitions, replayLedger = payload.migrationLedger }) {
   const ledger = normalizeLedger(payload.migrationLedger);
   const constraintIndexNames = new Set(definitions.filter((entry) => entry.objectKind === "constraint").map((entry) => relationIdentity(entry).object));
-  const catalog = definitions.filter((entry) => entry.objectKind !== "grant" && !(entry.objectKind === "index" && constraintIndexNames.has(entry.identity))).map((entry) => ({ objectKind: entry.objectKind, schema: entry.schema, identity: entry.identity, definitionSha256: entry.definitionSha256 }));
+  const catalog = definitions.filter((entry) => entry.objectKind !== "grant" && !(entry.objectKind === "index" && constraintIndexNames.has(entry.identity))).map((entry) => ({ objectKind: entry.objectKind, schema: entry.schema, identity: entry.identity, definitionSha256: entry.definitionSha256, ...(entry.policyFingerprintVersion === 2 ? { policyFingerprintVersion: 2 } : {}) }));
   const normalized = {
     captureStatus: "reviewed", originMainSha, serverMajor: payload.serverMajor,
     migrationLedgerCount: ledger.length, migrationLedgerMaxVersion: ledger.at(-1)?.version || null,
@@ -833,7 +845,7 @@ function artifactSet({ payload, originMainSha, definitions, replayLedger = paylo
   return { catalog: `${JSON.stringify(normalized, null, 2)}\n`, baseline, parity, normalized };
 }
 
-async function publishCapture({ root, artifacts, manifest, artifactPaths, publish }) {
+export async function publishDashboardFreeTierCaptureSet({ root, artifacts, manifest, artifactPaths, publish = publishDashboardFreeTierCapture, publishManifest = false }) {
   const captures = resolve(root, "supabase/test-baselines/dashboard-free-tier-v1-captures");
   const captureId = sha256(canonical({
     baseline: artifacts.baseline,
@@ -848,6 +860,7 @@ async function publishCapture({ root, artifacts, manifest, artifactPaths, publis
     catalog: safeRepoPath(root, artifactPaths.catalog),
     baseline: safeRepoPath(root, artifactPaths.baseline),
     parityTest: safeRepoPath(root, artifactPaths.parityTest),
+    ...(publishManifest ? { manifest: resolve(root, "supabase/test-baselines/dashboard-free-tier-v1.manifest.json") } : {}),
   };
   try {
     await mkdir(stage, { recursive: true, mode: 0o700 });
@@ -855,14 +868,15 @@ async function publishCapture({ root, artifacts, manifest, artifactPaths, publis
     await writeFile(join(stage, "baseline.sql"), artifacts.baseline, { mode: 0o600 });
     await writeFile(join(stage, "parity.sql"), artifacts.parity, { mode: 0o600 });
     await writeFile(join(stage, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
-    await publish({ stage, final, active, captureId, artifactPaths, artifactTargets, artifacts });
+    await publish({ stage, final, active, captureId, artifactPaths, artifactTargets, artifacts, ...(publishManifest ? { manifest } : {}) });
+    return { captureId };
   } catch (error) {
     await rm(stage, { recursive: true, force: true });
     throw error;
   }
 }
 
-export async function publishDashboardFreeTierCapture({ stage, final, active, captureId, artifactPaths, artifactTargets, artifacts, afterStageRename = async () => {}, renameFile = rename }) {
+export async function publishDashboardFreeTierCapture({ stage, final, active, captureId, artifactPaths, artifactTargets, artifacts, manifest, afterStageRename = async () => {}, renameFile = rename }) {
   await mkdir(dirname(final), { recursive: true, mode: 0o700 });
   await renameFile(stage, final);
   await afterStageRename({ final, active, captureId });
@@ -870,6 +884,7 @@ export async function publishDashboardFreeTierCapture({ stage, final, active, ca
     [artifactTargets.catalog, artifacts.catalog],
     [artifactTargets.baseline, artifacts.baseline],
     [artifactTargets.parityTest, artifacts.parity],
+    ...(artifactTargets.manifest ? [[artifactTargets.manifest, `${JSON.stringify(manifest, null, 2)}\n`]] : []),
   ];
   const temporaryOutputs = outputs.map(([target]) => `${target}.tmp-${process.pid}-${captureId}`);
   const restorationOutputs = outputs.map(([target]) => `${target}.restore-${process.pid}-${captureId}`);
@@ -940,7 +955,7 @@ export async function captureDashboardFreeTierCatalog({ argv = process.argv.slic
   manifest.originMainSha = args.originMainSha;
   manifest.baselineSha256 = sha256(artifacts.baseline);
   manifest.catalogSha256 = sha256(artifacts.catalog);
-  await publishCapture({ root, artifacts, manifest, artifactPaths: { catalog: args.catalog, baseline: args.baseline, parityTest: args.parityTest }, publish });
+  await publishDashboardFreeTierCaptureSet({ root, artifacts, manifest, artifactPaths: { catalog: args.catalog, baseline: args.baseline, parityTest: args.parityTest }, publish });
   return artifacts.normalized;
 }
 

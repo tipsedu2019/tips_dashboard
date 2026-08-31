@@ -1657,7 +1657,7 @@ test("reviewed capture builds the replay baseline from exact production migratio
   });
 
   const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"), "utf8");
-  assert.equal(baseline, "create table public.from_ledger(id bigint);\nalter table public.from_ledger add column note text;\n");
+  assert.equal(baseline, "create table public.from_ledger(id bigint);\nalter table public.from_ledger add column note text;\ndrop policy if exists \"authenticated_select\" on public.\"classes\";\ncreate policy \"authenticated_select\" on public.\"classes\" as permissive for select to \"authenticated\" using (true);\n");
   assert.doesNotMatch(baseline, /create table public\.classes/u);
 });
 
@@ -1749,7 +1749,7 @@ test("reviewed capture compares policy roles semantically and omits redundant OI
   await writeCaptureScope(root);
   const originMainSha = "7".repeat(40);
   const catalog = completeCatalogFixture().map((entry) => {
-    if (entry.objectKind === "policy") return { ...entry, definition: undefined, fingerprint: JSON.stringify({ command: "r", roles: ["16485"], using: "true", check: null }) };
+    if (entry.objectKind === "policy") return { ...entry, definition: undefined, fingerprint: JSON.stringify({ command: "r", roles: ["16485"], using: "true", check: null, permissive: true }) };
     if (entry.objectKind === "grant") return { ...entry, identity: "classes.16485", definition: undefined, fingerprint: JSON.stringify({ acl: ["authenticated=r/postgres"], expanded: [{ grantee: "16485", privilege: "SELECT" }] }) };
     return entry;
   });
@@ -1763,7 +1763,8 @@ test("reviewed capture compares policy roles semantically and omits redundant OI
   const published = JSON.parse(await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json"), "utf8"));
   assert.equal(published.catalog.some((entry) => entry.objectKind === "grant"), false);
   const policy = published.catalog.find((entry) => entry.objectKind === "policy");
-  assert.equal(policy.definitionSha256, createHash("sha256").update('{"check": null, "roles": ["authenticated"], "using": "true", "command": "r"}').digest("hex"));
+  assert.equal(policy.definitionSha256, createHash("sha256").update('{"check": null, "roles": ["authenticated"], "using": "true", "command": "r", "permissive": true}').digest("hex"));
+  assert.equal(policy.policyFingerprintVersion, 2);
 });
 
 test("final schema reconciliation restores current columns, policies, RLS, triggers, and function ACLs", async () => {
@@ -1773,7 +1774,7 @@ test("final schema reconciliation restores current columns, policies, RLS, trigg
     { objectKind: "default", schema: "public", identity: "classes.current_note", replayFingerprint: JSON.stringify({ expression: "''::text", generated: "" }) },
     { objectKind: "constraint", schema: "public", identity: "classes.classes_note_check", replayFingerprint: JSON.stringify({ definition: "CHECK ((current_note <> ''::text))" }) },
     { objectKind: "rls", schema: "public", identity: "classes", replayFingerprint: JSON.stringify({ enabled: true, forced: false }) },
-    { objectKind: "policy", schema: "public", identity: "classes.classes_read", replayFingerprint: JSON.stringify({ check: null, roles: ["authenticated"], using: "is_admin_or_staff()", command: "r" }) },
+    { objectKind: "policy", schema: "public", identity: "classes.classes_read", replayFingerprint: JSON.stringify({ check: null, roles: ["authenticated"], using: "is_admin_or_staff()", command: "r", permissive: true }) },
     { objectKind: "trigger", schema: "public", identity: "classes.before.update.01.classes_touch", replayFingerprint: JSON.stringify({ definition: "CREATE TRIGGER classes_touch BEFORE UPDATE ON public.classes FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at()" }) },
     { objectKind: "function", schema: "public", identity: "get_dashboard_summary_sources_v1()", replayFingerprint: JSON.stringify({ signature: "", owner: "postgres", acl: ["postgres=X/postgres", "authenticated=X/postgres", "service_role=X/postgres"] }) },
   ];
@@ -1895,7 +1896,7 @@ test("baseline capture preserves the non-login audit writer role used by public 
   const sql = buildFinalSchemaReconciliation([
     { objectKind: "role", schema: "", identity: "dashboard_audit_writer_v2", replayFingerprint: JSON.stringify({ login: false, inherit: false, superuser: false }) },
     { objectKind: "table", schema: "public", identity: "dashboard_audit_logs", replayFingerprint: JSON.stringify({ columns: [{ name: "id", type: "uuid", notNull: true }], acl: ["dashboard_audit_writer_v2=ar/postgres"] }) },
-    { objectKind: "policy", schema: "public", identity: "dashboard_audit_logs.dashboard_audit_logs_writer_insert", replayFingerprint: JSON.stringify({ check: "true", roles: ["dashboard_audit_writer_v2"], using: null, command: "a" }) },
+    { objectKind: "policy", schema: "public", identity: "dashboard_audit_logs.dashboard_audit_logs_writer_insert", replayFingerprint: JSON.stringify({ check: "true", roles: ["dashboard_audit_writer_v2"], using: null, command: "a", permissive: true }) },
   ]);
   assert.match(sql, /create role "dashboard_audit_writer_v2" noinherit nologin nosuperuser/u);
   assert.match(sql, /to "dashboard_audit_writer_v2"/u);
@@ -2446,7 +2447,7 @@ function completeCatalogFixture(functionIdentity = "get_dashboard_summary_source
     { objectKind: "index", schema: "public", identity: "classes_id_idx", definition: "create index classes_id_idx on public.classes (id)" },
     { objectKind: "function", schema: "public", identity: functionIdentity, definition: `create function public.${functionIdentity} returns jsonb language sql as 'select ''{}''::jsonb'` },
     { objectKind: "rls", schema: "public", identity: "classes", definition: "alter table public.classes enable row level security" },
-    { objectKind: "policy", schema: "public", identity: "classes.authenticated_select", definition: "create policy authenticated_select on public.classes for select to authenticated using (true)" },
+    { objectKind: "policy", schema: "public", identity: "classes.authenticated_select", fingerprint: JSON.stringify({ command: "r", roles: ["authenticated"], using: "true", check: null, permissive: true }) },
     { objectKind: "grant", schema: "public", identity: "classes.authenticated", definition: "grant select on public.classes to authenticated" },
     { objectKind: "trigger", schema: "public", identity: "classes.before.insert.01.normalize", definition: "create trigger normalize before insert on public.classes execute function public.normalize()" },
   ];
