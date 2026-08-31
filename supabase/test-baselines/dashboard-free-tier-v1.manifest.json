@@ -204,6 +204,11 @@
       "fileName": "20260831170552_textbook_closing_work_context_reads.sql",
       "status": "final",
       "sha256": "85d36756ec325de86fd8edea2bd2b5b693a4cb9b9fda8b07e9bafb0ce56facdd"
+    },
+    {
+      "fileName": "20260831184952_textbook_reference_numbered_reads.sql",
+      "status": "final",
+      "sha256": "d963654d5a55bb10102f52b91dcc8402f1f89c8797688139a8393a4670b445e7"
     }
   ]
 }

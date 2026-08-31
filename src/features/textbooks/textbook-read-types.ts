@@ -1,5 +1,64 @@
 export type Row = Record<string, unknown>;
 
+export type TextbookReferenceFilters = { search: string; selectedFilters: Partial<Record<"subject" | "grade" | "subSubject", string[]>> };
+export type TextbookClassReferenceFilters = { search: string; selectedFilters: Partial<Record<"subject" | "grade" | "teacher", string[]>> };
+export type TextbookReferenceSearch = { search: string };
+export type TextbookReferenceFacetPage = import("@/lib/numbered-pagination").NumberedPage<SearchSelectOption> & {
+  baseFilterGroups: SearchSelectFilterGroup[]; visibleFilterGroups: SearchSelectFilterGroup[]; activeFilterCount: number;
+};
+export type TextbookReferenceLocation = { id: string; code: string; name: string };
+export type TextbookLocationReferencePage = import("@/lib/numbered-pagination").NumberedPage<SearchSelectOption> & { defaultLocation: TextbookReferenceLocation | null };
+export type TextbookReferenceInput = { reference: string; activeOnly: boolean; scope: "request" | "management"; fallbackSupplier: string };
+export type SelectedTextbookReference = WorkflowTextbookReference & {
+  category: string | null; school_level: string; grade_level: string; school_levels: string[]; grade_levels: string[]; sub_subject: string; subject_area_key: string | null;
+};
+export type TextbookReferenceResult = { row: { textbook: SelectedTextbookReference; option: SearchSelectOption | null; configuredSupplierId: string; supplier: { id: string; name: string } | null } | null };
+export type TextbookClassReferenceResult = { row: { id: string; name: string; option: SearchSelectOption; enrolledStudentCount: number; defaultTeacherName: string; inferredLocation: TextbookReferenceLocation | null } | null };
+export type TextbookLocationReferenceResult = { row: (TextbookReferenceLocation & { option: SearchSelectOption }) | null };
+export type TextbookMasterOptionsInput = { subject: "english" | "math" | "science" | "other"; listSubject: "all" | "english" | "math" | "science" | "other"; bulkSubject: "keep" | "english" | "math" | "science" | "other" };
+export type TextbookMasterOptions = { publisherOptions: Array<{ value: string; label: string; description: string }>; subSubjectOptions: string[]; categoryOptions: string[]; bulkCategoryOptions: string[];
+  scienceSubjectAreas: Array<{ subject: string; area_key: string; label: string; sort_order: number; is_active: boolean }>;
+  counts: Record<"publisherOptions" | "subSubjectOptions" | "categoryOptions" | "bulkCategoryOptions" | "scienceSubjectAreas", number>; complete: true };
+export type TextbookInactiveCleanupContext = { targetIds: string[]; totalCount: number; previewRows: Array<{ id: string; title: string; detail: string }>; complete: true };
+
+export type SearchSelectOption = {
+  value: string;
+  label: string;
+  description?: string;
+  searchText?: string;
+  metaRows?: SearchSelectMetaRow[];
+  filterValues?: Record<string, SearchSelectFilterValue[]>;
+};
+
+export type SearchSelectMetaRow = {
+  label: string;
+  value: string;
+};
+
+export type SearchSelectFilterValue = {
+  value: string;
+  label: string;
+};
+
+export type SearchSelectFilterOption = SearchSelectFilterValue & {
+  count: number;
+};
+
+export type SearchSelectFilterLayout = "default" | "subject-grade-teacher" | "subject-grade-detail";
+
+export type SearchSelectFilterGroupConfig = {
+  key: string;
+  label: string;
+  optionOrder?: string[];
+};
+
+export type SearchSelectFilterGroup = {
+  key: string;
+  label: string;
+  optionOrder?: string[];
+  options: SearchSelectFilterOption[];
+};
+
 export type InventoryFilter = "all" | "shortage" | "surplus" | "unused" | "negative";
 
 export type InventoryAuditFilter = "recommended" | "pending" | "done" | "all";

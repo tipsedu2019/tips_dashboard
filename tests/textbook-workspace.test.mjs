@@ -18,6 +18,7 @@ const handoffModelSource = await readFile(new URL("src/features/textbooks/textbo
 const readModelSource = await readFile(new URL("src/features/textbooks/textbook-read-model.ts", root), "utf8");
 const readTypesSource = await readFile(new URL("src/features/textbooks/textbook-read-types.ts", root), "utf8");
 const closingModelSource = await readFile(new URL("src/features/textbooks/textbook-closing-model.ts", root), "utf8");
+const referenceModelSource = await readFile(new URL("src/features/textbooks/textbook-reference-model.ts", root), "utf8");
 
 test("workspace delegates its original closing projection without changing clipboard or React behavior", async () => {
   const source = await readFile(new URL("src/features/textbooks/textbook-operations-workspace.tsx", root), "utf8");
@@ -424,7 +425,7 @@ test("textbook operation selectors keep long option menus scrollable without sel
   );
   const textbookSelectBlock = workspaceSource.slice(
     workspaceSource.indexOf("function TextbookSelect"),
-    workspaceSource.indexOf("function getClassTeacherLabel"),
+    workspaceSource.indexOf("function ClassSelect"),
   );
   const classSelectBlock = workspaceSource.slice(
     workspaceSource.indexOf("function ClassSelect"),
@@ -446,23 +447,19 @@ test("textbook operation selectors keep long option menus scrollable without sel
 });
 
 test("textbook operation selectors expose class and textbook attributes in menu options", async () => {
-  const workspaceSource = await readFile(
-    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
-    "utf8",
-  );
 
-  assert.match(workspaceSource, /function buildTextbookSelectMetaRows/);
-  assert.match(workspaceSource, /metaRows: buildTextbookSelectMetaRows\(textbook\)/);
-  assert.match(workspaceSource, /const categoryDetail = compactUniqueLabels\(\[schoolLevel, grade, subSubject\]\)\.join\(" · "\)/);
-  assert.match(workspaceSource, /\{ label: "구분", value: categoryDetail \|\| getTaxonomyCategoryLabel\(textbook\) \}/);
-  assert.match(workspaceSource, /label: "출판사"/);
-  assert.match(workspaceSource, /label: "ISBN"/);
-  assert.match(workspaceSource, /label: "바코드"/);
-  assert.match(workspaceSource, /function buildClassSelectMetaRows/);
-  assert.match(workspaceSource, /metaRows: buildClassSelectMetaRows\(classItem\)/);
-  const classSelectMetaRowsBlock = workspaceSource.slice(
-    workspaceSource.indexOf("function buildClassSelectMetaRows"),
-    workspaceSource.indexOf("function ClassSelect"),
+  assert.match(referenceModelSource, /function buildTextbookSelectMetaRows/);
+  assert.match(referenceModelSource, /metaRows: buildTextbookSelectMetaRows\(textbook\)/);
+  assert.match(referenceModelSource, /const categoryDetail = compactUniqueLabels\(\[schoolLevel, grade, subSubject\]\)\.join\(" · "\)/);
+  assert.match(referenceModelSource, /\{ label: "구분", value: categoryDetail \|\| getTaxonomyCategoryLabel\(textbook\) \}/);
+  assert.match(referenceModelSource, /label: "출판사"/);
+  assert.match(referenceModelSource, /label: "ISBN"/);
+  assert.match(referenceModelSource, /label: "바코드"/);
+  assert.match(referenceModelSource, /function buildClassSelectMetaRows/);
+  assert.match(referenceModelSource, /metaRows: buildClassSelectMetaRows\(classItem\)/);
+  const classSelectMetaRowsBlock = referenceModelSource.slice(
+    referenceModelSource.indexOf("function buildClassSelectMetaRows"),
+    referenceModelSource.indexOf("function buildTextbookReferenceOptions"),
   );
   assert.match(classSelectMetaRowsBlock, /\{ label: "선생님", value: getClassTeacherLabel\(classItem\) \}/);
   assert.match(classSelectMetaRowsBlock, /\{ label: "강의실", value: getClassClassroomSelectLabel\(classItem\) \}/);
@@ -485,15 +482,15 @@ test("textbook operation selectors support multi-select filters in option menus"
   );
   const textbookSelectBlock = workspaceSource.slice(
     workspaceSource.indexOf("function TextbookSelect"),
-    workspaceSource.indexOf("function getClassTeacherLabel"),
-  );
+    workspaceSource.indexOf("function ClassSelect"),
+  ) + referenceModelSource.slice(referenceModelSource.indexOf("function buildTextbookReferenceOptions"), referenceModelSource.indexOf("function buildTextbookClassReferenceOptions"));
   const classSelectBlock = workspaceSource.slice(
     workspaceSource.indexOf("function ClassSelect"),
     workspaceSource.indexOf("function TeacherSelect"),
-  );
+  ) + referenceModelSource.slice(referenceModelSource.indexOf("function buildTextbookClassReferenceOptions"));
 
-  assert.match(workspaceSource, /type SearchSelectFilterGroup =/);
-  assert.match(workspaceSource, /type SearchSelectFilterLayout = "default" \| "subject-grade-teacher" \| "subject-grade-detail"/);
+  assert.match(readTypesSource, /type SearchSelectFilterGroup =/);
+  assert.match(readTypesSource, /type SearchSelectFilterLayout = "default" \| "subject-grade-teacher" \| "subject-grade-detail"/);
   assert.match(workspaceSource, /filterGroups\?: SearchSelectFilterGroup\[\]/);
   assert.match(workspaceSource, /filterLayout\?: SearchSelectFilterLayout/);
   assert.match(workspaceSource, /const \[selectedFilterValues, setSelectedFilterValues\] = useState<Record<string, string\[\]>>/);
@@ -513,8 +510,8 @@ test("textbook operation selectors support multi-select filters in option menus"
   assert.doesNotMatch(workspaceSource, /필터\{activeFilterCount > 0/);
   assert.doesNotMatch(workspaceSource, /\{formatQuantity\(option\.count\)\}/);
   assert.match(workspaceSource, /buildSearchSelectFilterGroups/);
-  assert.match(workspaceSource, /function buildVisibleSearchSelectFilterGroups/);
-  assert.match(workspaceSource, /filterValues: \{/);
+  assert.match(referenceModelSource, /function buildVisibleSearchSelectFilterGroups/);
+  assert.match(referenceModelSource, /filterValues: \{/);
   assert.match(workspaceSource, /const textbookSelectFilterGroups = buildSearchSelectFilterGroups/);
   assert.match(workspaceSource, /const classSelectFilterGroups = buildSearchSelectFilterGroups/);
   assert.match(textbookSelectBlock, /subject: buildSearchSelectFilterValues/);
@@ -526,10 +523,10 @@ test("textbook operation selectors support multi-select filters in option menus"
   assert.match(textbookSelectBlock, /\{ key: "subSubject", label: "세부과목" \}/);
   assert.doesNotMatch(textbookSelectBlock, /\{ key: "schoolLevel"/);
   assert.match(textbookSelectBlock, /filterLayout="subject-grade-detail"/);
-  assert.match(workspaceSource, /function getTextbookSelectSubSubject/);
-  assert.match(workspaceSource, /const textbookNonSubSubjectFilterLabels = new Set/);
-  assert.match(workspaceSource, /TEXTBOOK_GRADE_OPTIONS\.map\(\(option\) => option\.label\)/);
-  assert.match(workspaceSource, /TEXTBOOK_SCHOOL_LEVEL_OPTIONS\.map\(\(option\) => option\.label\)/);
+  assert.match(referenceModelSource, /function getTextbookSelectSubSubject/);
+  assert.match(referenceModelSource, /const textbookNonSubSubjectFilterLabels = new Set/);
+  assert.match(referenceModelSource, /TEXTBOOK_GRADE_OPTIONS\.map\(\(option\) => option\.label\)/);
+  assert.match(referenceModelSource, /TEXTBOOK_SCHOOL_LEVEL_OPTIONS\.map\(\(option\) => option\.label\)/);
   assert.doesNotMatch(textbookSelectBlock, /publisher: buildSearchSelectFilterValues/);
   assert.doesNotMatch(textbookSelectBlock, /category: buildSearchSelectFilterValues/);
   assert.doesNotMatch(textbookSelectBlock, /\{ key: "publisher"/);
@@ -933,7 +930,7 @@ test("purchase supplier handoff is a location-first supplier order sheet with di
   );
   const dialogSource = workspaceSource.slice(
     workspaceSource.indexOf("function TextbookHandoffDialog"),
-    workspaceSource.indexOf("type SearchSelectOption"),
+    workspaceSource.indexOf("function SearchCombobox"),
   );
 
   assert.match(workspaceSource, /captureElementAsPdfBlob/);
@@ -979,7 +976,7 @@ test("purchase supplier handoff renders as a dated order document with academy f
   );
   const dialogSource = workspaceSource.slice(
     workspaceSource.indexOf("function TextbookHandoffDialog"),
-    workspaceSource.indexOf("type SearchSelectOption"),
+    workspaceSource.indexOf("function SearchCombobox"),
   );
   const messageSource = handoffModelSource.slice(
     handoffModelSource.indexOf("function buildPurchaseSupplierMessage"),
@@ -1342,7 +1339,7 @@ test("purchase process derives supplier and unit cost from settings and separate
 
   assert.match(workspaceSource, /getConfiguredSupplierIdForTextbook/);
   assert.match(handoffModelSource, /getPublisherIdForTextbook/);
-  assert.match(workspaceSource, /normalizeTextbookLookup/);
+  assert.match(handoffModelSource, /normalizeTextbookLookup/);
   assert.match(workspaceSource, /getTextbookTitle\(textbook\)/);
   assert.match(workspaceSource, /publisherSupplierLinks=\{data\.publisherSupplierLinks\}/);
   assert.match(workspaceSource, /publishers=\{data\.publishers\}/);
@@ -1451,7 +1448,7 @@ test("selecting a class defaults requester to its teacher without locking the fi
   );
 
   assert.match(workspaceSource, /getDefaultTeacherForClass/);
-  assert.match(workspaceSource, /splitTeacherNames/);
+  assert.match(referenceModelSource, /splitTeacherNames/);
   assert.match(workspaceSource, /name === "classId"/);
   assert.match(workspaceSource, /previousTeacher/);
   assert.match(workspaceSource, /nextTeacher/);
@@ -3002,8 +2999,8 @@ test("textbook workspace locks 50 cleanup confirmation safeguards", async () => 
   ];
 
   assert.equal(safeguards.length, 50);
-  for (const safeguard of safeguards) {
-    assert.match(workspaceSource, safeguard);
+  for (const [index, safeguard] of safeguards.entries()) {
+    assert.match(index >= 7 && index <= 12 ? referenceModelSource : workspaceSource, safeguard);
   }
 });
 

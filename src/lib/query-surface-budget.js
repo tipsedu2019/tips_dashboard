@@ -54,6 +54,13 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "get_textbook_billing_handoff_context_v1",
   "get_textbook_closing_save_context_v1",
   "get_textbook_closing_movement_export_v1",
+  // Final-proven selected references, complete metadata, and read-only cleanup
+  // context: nonpageable purposes, not scalar counts or full-catalog fallbacks.
+  "resolve_textbook_reference_v1",
+  "get_textbook_class_reference_v1",
+  "get_textbook_location_reference_v1",
+  "get_textbook_master_options_v1",
+  "get_textbook_inactive_cleanup_context_v1",
   "current_dashboard_role",
   "close_class_atomic_v1",
 ])
@@ -85,6 +92,8 @@ const EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES = new Set([
 // textbook_workflow_numbered_reads_test.sql; local final-only proof 160/160.
 // textbook closing/work: 20260831170552_textbook_closing_work_context_reads.sql (final),
 // textbook_closing_work_context_reads_test.sql; local final-only proof 153/153.
+// textbook references: 20260831184952_textbook_reference_numbered_reads.sql (final),
+// textbook_reference_numbered_reads_test.sql; local final-only proof 215/215.
 const EXACT_NUMBERED_RPC_CONTRACTS = new Map([
   ["list_management_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_ops_task_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
@@ -100,6 +109,10 @@ const EXACT_NUMBERED_RPC_CONTRACTS = new Map([
   ["list_textbook_sale_history_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_textbook_closing_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_textbook_closing_movement_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["list_textbook_reference_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["list_textbook_class_reference_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["list_textbook_teacher_reference_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["list_textbook_location_reference_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
 ])
 
 const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION"
