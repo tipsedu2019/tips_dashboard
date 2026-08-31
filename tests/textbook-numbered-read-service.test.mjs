@@ -199,6 +199,40 @@ test('summary retains full-filter price/location/subject totals and rejects inco
   }
 });
 
+function signedAmountSummary(stockValues, stockValue, inventorySummary = false) {
+  return { ...summary(), totalCount: stockValues.length, stockValue, salePriceTotal: stockValues.length * 10000,
+    subjectTotals: stockValues.map((value, index) => ({ subject: ['english', 'math', 'science', 'other'][index],
+      totalCount: 1, totalQuantity: index === 0 ? 10 : 0, salePriceTotal: 10000, stockValue: value })),
+    ...(inventorySummary ? { auditCounts: { all: stockValues.length, recommended: stockValues.length, pending: 0, done: 0 } } : {}),
+  };
+}
+for (const [method, , input] of contexts.slice(0, 2)) {
+  test(`${method} reconciles signed decimal cancellation without changing authoritative amounts`, async () => {
+    const api = await service();
+    for (const [parts, total] of [
+      [[10000.01, -10000], 0.01], [[-10000.01, 10000], -0.01],
+      [[10000.01, -10000, 0.2, -0.1], 0.11], [[1e-20, -9e-21], 1e-21],
+      [[1e308, 1e308, -1e308, -1e308], 0],
+    ]) {
+      const data = signedAmountSummary(parts, total, method === 'getTextbookInventorySummary');
+      assert.deepEqual(await api[method](input, { client: wire(data).client }), data);
+    }
+  });
+  test(`${method} rejects genuine amount discrepancies despite cancellation or overflow`, async () => {
+    const api = await service();
+    for (const [parts, total] of [
+      [[10000.01, -10000], 0.02], [[1e-20, -9e-21], 2e-21],
+      [[Number.MAX_VALUE, Number.MAX_VALUE], Number.MAX_VALUE],
+      [[1e308, -1e308, 1e308, -1e308], 1e307], [[Infinity, -10000], 0.01],
+    ]) {
+      const data = signedAmountSummary(parts, total, method === 'getTextbookInventorySummary');
+      await assert.rejects(() => api[method](input, { client: wire(data).client }), /response_invalid/);
+    }
+    const data = signedAmountSummary([10000.01, -10000], 0.01, method === 'getTextbookInventorySummary');
+    await assert.rejects(() => api[method](input, { client: wire({ ...data, salePriceTotal: 20000.01 }).client }), /response_invalid/);
+  });
+}
+
 // Exact original bounded payloads from authenticated final-only SQL execution.
 // Request: textbook-task2-final; actor a2000000-0000-4000-8000-000000000901 / authenticated.
 // SQL f4ba6fc76223af13704a1187ff45db5f187b1633392b2516714c9a1e2522dcb5

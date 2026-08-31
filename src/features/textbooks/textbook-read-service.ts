@@ -101,7 +101,8 @@ function parseSummary(data: unknown, inventory = false): TextbookMasterSummary |
   exact(data, ["totalCount", "totalQuantity", "studentQuantity", "teacherQuantity", "stockValue", "salePriceTotal", "locationQuantities", "subjectTotals", "qualityCounts", "inventoryCounts", "subSubjectOptions", "locations", ...(inventory ? ["auditCounts"] : [])]);
   if (!integer(data.totalCount) || data.totalCount < 0 || !["totalQuantity", "studentQuantity", "teacherQuantity"].every((key) => integer(data[key])) || !finite(data.stockValue) || !finite(data.salePriceTotal) || !numericMap(data.locationQuantities) || !Array.isArray(data.subjectTotals)) fail();
   const subjects = ["english", "math", "science", "other"];
-  const totals = { totalCount: 0, totalQuantity: 0, salePriceTotal: 0, stockValue: 0 };
+  const totals = { totalCount: 0, totalQuantity: 0 };
+  const amounts: { salePriceTotal: number[]; stockValue: number[] } = { salePriceTotal: [], stockValue: [] };
   let previousSubject = -1;
   for (const group of data.subjectTotals) {
     exact(group, ["subject", "totalCount", "totalQuantity", "salePriceTotal", "stockValue"]);
@@ -109,10 +110,21 @@ function parseSummary(data: unknown, inventory = false): TextbookMasterSummary |
     if (subject <= previousSubject || !integer(group.totalCount) || group.totalCount <= 0 || !integer(group.totalQuantity) || !finite(group.salePriceTotal) || !finite(group.stockValue)) fail();
     previousSubject = subject;
     totals.totalCount += group.totalCount; totals.totalQuantity += group.totalQuantity;
-    totals.salePriceTotal += group.salePriceTotal; totals.stockValue += group.stockValue;
+    amounts.salePriceTotal.push(group.salePriceTotal); amounts.stockValue.push(group.stockValue);
   }
-  const sameAmount = (left: number, right: number) => Math.abs(left - right) <= Number.EPSILON * Math.max(1, Math.abs(left), Math.abs(right)) * 16;
-  if (totals.totalCount !== data.totalCount || totals.totalQuantity !== data.totalQuantity || !sameAmount(totals.salePriceTotal, data.salePriceTotal) || !sameAmount(totals.stockValue, data.stockValue)
+  const sameAmount = (parts: number[], total: number) => {
+    // All operands are finite; at most four ordered subjects were admitted above.
+    // Scale before summing so neither signed sums nor absolute magnitudes overflow.
+    const scale = Math.max(Math.abs(total), ...parts.map(Math.abs));
+    if (scale === 0) return true;
+    const normalizedTotal = total / scale;
+    let sum = 0; let magnitude = Math.abs(normalizedTotal);
+    for (const part of parts) { const normalized = part / scale; sum += normalized; magnitude += Math.abs(normalized); }
+    // SQL numeric→double, normalization and additions incur operand-sized roundoff,
+    // even when the net total cancels. No currency rounding or absolute-value floor.
+    return Math.abs(sum - normalizedTotal) <= Number.EPSILON * (parts.length + 2) * magnitude;
+  };
+  if (totals.totalCount !== data.totalCount || totals.totalQuantity !== data.totalQuantity || !sameAmount(amounts.salePriceTotal, data.salePriceTotal) || !sameAmount(amounts.stockValue, data.stockValue)
     || Object.values(data.locationQuantities as Record<string, number>).reduce((sum, qty) => sum + qty, 0) !== data.totalQuantity) fail();
   countMap(data.qualityCounts, qualities); countMap(data.inventoryCounts, inventories);
   if (inventory) countMap(data.auditCounts, audits);
