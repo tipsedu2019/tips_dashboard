@@ -13,7 +13,7 @@ Ten-number fixed blocks, one-page single arrows, global first/last double arrows
 | Surface | Implementation | Unit/type/build | Final SQL/pgTAP | Rendered/live |
 |---|---|---|---|---|
 | Shared pager/preferences | Reviewed (`1f62316f`, including interface repair) | 14/14 behavior tests; focused ESLint/TS pass | Not applicable | Live viewport pending |
-| Students/classes | Read API (`451b25d7`), SQL gate (`701e9a96`); UI (`0915e8d4`) and first fix (`0a86a16a`) reviewed; final foundation fix (`97b17191`) awaits scoped re-review | Fresh combined foundation/query guard370/370; focused lint/TS, full ESLint0 errors/6 existing warnings, isolated production build81/81 pass | Final-only isolated pgTAP114/114 passed (unchanged; not rerun in final fix) | Pending |
+| Students/classes | Read API (`451b25d7`), SQL gate (`701e9a96`); UI (`0915e8d4`), first fix (`0a86a16a`) and final foundation fix (`97b17191`) reviewed and approved | Fresh combined foundation/query guard370/370; focused lint/TS, full ESLint0 errors/6 existing warnings, isolated production build81/81 pass | Final-only isolated pgTAP114/114 passed (unchanged; not rerun in final fix) | Pending |
 | Tasks/retests/registration/transfer/withdrawal | Pending | Pending | Pending | Pending |
 | Makeup/approvals/curriculum/class planning | Pending | Pending | Pending | Pending |
 | Textbook operations/settings/auxiliary lists | Pending | Pending | Pending | Pending |
@@ -59,7 +59,7 @@ Result:88/88 pass; fail/cancelled/skipped0. At that checkpoint UI integration ha
 
 ## Management UI integration
 
-Commit `0915e8d4` adds the shared request controller and connects student/class tables to numbered reads, controlled server sort and URL page/sort state. It retains successful rows/page/count during pending/error, clears cross-actor presentation, migrates valid manual page sizes and preserves initial restored pages through auto measurement/default-period resolution. The review/fix status below supersedes this initial implementation evidence; foundation is not yet complete.
+Commit `0915e8d4` adds the shared request controller and connects student/class tables to numbered reads, controlled server sort and URL page/sort state. It retains successful rows/page/count during pending/error, clears cross-actor presentation, migrates valid manual page sizes and preserves initial restored pages through auto measurement/default-period resolution. The review/fix status below supersedes this initial implementation evidence; foundation was not yet complete at that checkpoint.
 
 Independent review found three consumer defects: urgent size preference versus Next transition page reset sent an unintended intermediate request; detail catalogs depended on unrelated metadata success; confirmed deletion retried twice. Fix `0a86a16a` reconciles request page/size before effects, separates authorized detail ownership and removes duplicate delete reconciliation. Actual production Page+hook tests use a suspended native-history transition; detail tests cover stats failure/role changes and deletion tests cover normal/final-page counts. Relevant235/235, focused lint/TS and isolated build passed. Scoped re-review approved the fix; the initial229-test result did not cover these defects.
 
@@ -93,7 +93,7 @@ Task4 review round1 found that class static-block `var` declarations were incorr
 
 ## Final foundation fix — fresh local checkpoint
 
-Whole-foundation review at `513437b8` found two Important consumer defects: normalization reordered the RPC's server-sorted rows, and the default class period was canonicalized only in the URL dedup key, leaving controller retry/clamp bound to an unresolved period. It also found an unknown total reported as a server-zero class count and stale Task4 review wording. Fix `97b17191` addresses these findings; its final scoped re-review is **pending**, owned by the controller. Do not treat the earlier Task3/Task4 approvals as approval of this fix.
+Whole-foundation review at `513437b8` found two Important consumer defects: normalization reordered the RPC's server-sorted rows, and the default class period was canonicalized only in the URL dedup key, leaving controller retry/clamp bound to an unresolved period. It also found an unknown total reported as a server-zero class count and stale Task4 review wording. Fix `97b17191` and QA `60f8a1f2` passed the independent final scoped re-review: both Important findings and the two in-scope Minor findings were addressed, with no new Critical/Important breakage. The pre-existing hidden-delete error remains explicitly deferred below. Foundation code is ready for dependent adapters; this is not rendered, remote or whole-branch release approval.
 
 The numbered normalization path now preserves RPC order while retaining normalized fields and the legacy helper default. Real DTO -> numbered service -> hook -> TanStack/shadcn component tests cover literal descending[Z,A], natural numeric[Class2,Class10] and primary/secondary sorting. The class caption and actual pager distinguish initial failure/unknown count from a successful zero.
 
@@ -108,6 +108,8 @@ Fresh commands after all source/test fixes, using `/Users/hyunjun/.cache/codex-r
 - `node node_modules/eslint/bin/eslint.js src tests middleware.ts next.config.ts`: exit0,0 errors/6 pre-existing warnings. The four warning-bearing files have no diff from `513437b8`; large-file Babel notices are informational. Log:`/private/tmp/tips-foundation-final-fix-lint.log`.
 - Resynced `/private/tmp/tips-task3-build.4uOr0v`, excluding `.git`, `.next`, `node_modules`, `.codex-temp`, `.superpowers`, using its existing node_modules symlink. `node node_modules/next/dist/bin/next build --webpack`: exit0, compiled successfully,81/81 static pages. Log:`/private/tmp/tips-foundation-final-fix-build.log`. The copy was never served; live `.next/BUILD_ID` SHA256 remained `3553d308874a9a5457c0fa26af30abf82c1c9f6352413f9cfa87391b1105d323` before/after.
 - `git diff --check`: exit0. Management SQL SHA256 remains unchanged. No SQL/query-guard/manifest/dependency changes or SQL rerun occurred in this wave.
+
+The controller independently reran the same370-test combination at`60f8a1f2`:370/370,0 failed/cancelled/skipped,27.308s. `verify-query-surface-budget.mjs --surface all --base ff5c5ce4 --head HEAD` also exited0 with no findings. Documentation-only`8e664390` preserves the approved canonical-scope callback and carries real RPC-to-consumer server-order tests into the next task workflow plan.
 
 Still tracked, **not fixed**: the pre-existing list-delete error is hidden because confirmation closes before deletion and operationError is rendered only in the now-closed detail dialog. The failed-delete test proves retained rows/no refresh, not visible error feedback.
 
