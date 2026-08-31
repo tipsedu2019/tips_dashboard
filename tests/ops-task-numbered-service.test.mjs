@@ -155,6 +155,55 @@ async function readTyped(type, row) {
   const transport = wire({ data: { rows: [row], page: 1, pageSize: 10, totalCount: 1 }, error: null });
   return createService(transport).readPage(request({ page: 1, filters: shared.createDefaultOpsTaskPageFilters(type, 'viewer-a') }));
 }
+const correctionEnrollment = {
+  id: null, classId: id(910), textbookId: null, classStartDate: null, classStartSessionKey: null,
+  classStartLessonSessionId: null, classStartSession: null, classStartSourceObservationId: null, sortOrder: -1,
+};
+const canonicalEnrollment = {
+  ...correctionEnrollment, id: id(911), trackId: track.id, studentId: null, admissionBatchId: null,
+  status: 'planned', makeeduRegistered: false, rosterActive: false, rosterReleasedAt: null,
+  rosterReleaseReason: null, rosterReleaseSourceTaskId: null, rosterReleaseKind: null,
+};
+async function readEnrollment(enrollment) {
+  const row = structuredClone(typedRow('registration'));
+  row.registrationTracks[0].enrollmentDetailRows = [enrollment];
+  return readTyped('registration', row);
+}
+for (const [label, enrollment] of [
+  ['canonical planned response', canonicalEnrollment],
+  ['canonical populated class-close response', {
+    ...canonicalEnrollment, studentId: id(912), admissionBatchId: id(913), textbookId: id(914),
+    classStartDate: '2026-08-31', classStartSessionKey: '2026-08-31:1', classStartLessonSessionId: id(915),
+    classStartSession: '1교시', classStartSourceObservationId: id(916), status: 'canceled',
+    makeeduRegistered: true, rosterActive: false, rosterReleasedAt: '2026-08-31T10:00:00+09:00',
+    rosterReleaseReason: '반 종료', rosterReleaseSourceTaskId: id(917), rosterReleaseKind: 'class_close',
+  }],
+  ['normalized external correction with null ID', correctionEnrollment],
+  ['normalized external correction with UUID', { ...correctionEnrollment, id: id(911) }],
+  ['historic nullable ID', { id: null, classId: id(910), sortOrder: 0 }],
+  ...[-2147483648, -1, 2147483647].map((sortOrder) => [`historic signed int32 ${sortOrder}`, { classId: id(910), sortOrder }]),
+  ...['waitlisted', 'enrolled'].map((status) => [`canonical ${status}`, { ...canonicalEnrollment, status }]),
+  ...['withdrawal', 'transfer'].map((rosterReleaseKind) => [`canonical release ${rosterReleaseKind}`, { ...canonicalEnrollment, rosterReleaseKind }]),
+]) test(`registration preserves ${label} enrollment metadata`, async () => {
+  const result = await readEnrollment(enrollment);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.rows[0].registrationTracks[0].enrollmentDetailRows)), [enrollment]);
+});
+for (const patch of [
+  { id: null }, { id: 'bad' }, { trackId: null }, { classId: null }, { studentId: 1 }, { admissionBatchId: false },
+  { textbookId: {} }, { classStartDate: '2026-02-30' }, { classStartSessionKey: 1 },
+  { classStartLessonSessionId: 'bad' }, { classStartSession: false }, { classStartSourceObservationId: [] },
+  { status: 'registered' }, { makeeduRegistered: 'false' }, { rosterActive: 0 },
+  { rosterReleasedAt: '2026-08-31' }, { rosterReleaseReason: {} }, { rosterReleaseSourceTaskId: 'bad' },
+  { rosterReleaseKind: 'class_closed' }, { sortOrder: -2147483649 }, { sortOrder: 2147483648 },
+  { sortOrder: 0.5 }, { sortOrder: '-1' }, { unexpected: true },
+]) test(`registration rejects malformed canonical enrollment ${JSON.stringify(patch)}`, async () => {
+  await assert.rejects(() => readEnrollment({ ...canonicalEnrollment, ...patch }), /response_invalid/);
+});
+test('registration rejects incomplete canonical metadata and malformed historic IDs', async () => {
+  const incomplete = { ...canonicalEnrollment }; delete incomplete.status;
+  await assert.rejects(() => readEnrollment(incomplete), /response_invalid/);
+  await assert.rejects(() => readEnrollment({ ...correctionEnrollment, id: 'bad' }), /response_invalid/);
+});
 for (const type of ['registration', 'withdrawal', 'transfer', 'word_retest']) test(`${type}: validates full flat DTO then retains narrow list details`, async () => {
   const result = await readTyped(type, typedRow(type));
   assert.equal(result.rows[0].type, type); assert.equal(result.rows[0].comments.length, 0);

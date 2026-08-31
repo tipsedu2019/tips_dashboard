@@ -70,6 +70,21 @@ select ('96100000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,
  case when n%2=1 then '영어' else '수학' end,'inquiry','inquiry',1
 from generate_series(1,4) n;
 
+-- Match both final enrollment save paths without invoking enrollment/roster mutations.
+-- Canonical saves retain server metadata; external corrections retain normalized nullable IDs.
+create temp table enrollment_fixture(track_id uuid, rows jsonb);
+insert into enrollment_fixture values
+ ('96100000-0000-4000-8000-000000000001', '[
+  {"id":"97100000-0000-4000-8000-000000000001","trackId":"96100000-0000-4000-8000-000000000001","studentId":null,"admissionBatchId":null,"classId":"97200000-0000-4000-8000-000000000001","textbookId":null,"classStartDate":null,"classStartSessionKey":null,"classStartSession":null,"classStartLessonSessionId":null,"classStartSourceObservationId":null,"status":"planned","makeeduRegistered":false,"rosterActive":false,"rosterReleasedAt":null,"rosterReleaseReason":null,"rosterReleaseSourceTaskId":null,"rosterReleaseKind":null,"sortOrder":-2147483648},
+  {"id":"97100000-0000-4000-8000-000000000002","trackId":"96100000-0000-4000-8000-000000000001","studentId":"97300000-0000-4000-8000-000000000001","admissionBatchId":"97400000-0000-4000-8000-000000000001","classId":"97200000-0000-4000-8000-000000000002","textbookId":"97500000-0000-4000-8000-000000000001","classStartDate":"2026-08-31","classStartSessionKey":"2026-08-31:1","classStartSession":"1교시","classStartLessonSessionId":"97600000-0000-4000-8000-000000000001","classStartSourceObservationId":"97700000-0000-4000-8000-000000000001","status":"canceled","makeeduRegistered":true,"rosterActive":false,"rosterReleasedAt":"2026-08-31T10:00:00+09:00","rosterReleaseReason":"반 종료","rosterReleaseSourceTaskId":"96000000-0000-4000-8000-000000000001","rosterReleaseKind":"class_close","sortOrder":2147483647}
+ ]'),
+ ('96100000-0000-4000-8000-000000000002', '[
+  {"id":null,"classId":"97200000-0000-4000-8000-000000000003","textbookId":null,"classStartDate":null,"classStartSessionKey":null,"classStartSession":null,"classStartLessonSessionId":null,"classStartSourceObservationId":null,"sortOrder":-1}
+ ]');
+update public.ops_registration_subject_tracks track
+set enrollment_detail_rows=fixture.rows from enrollment_fixture fixture where track.id=fixture.track_id;
+grant select on enrollment_fixture to authenticated;
+
 -- Read-only stage fixtures: no enrollment/roster/appointment rows are needed.
 create temp table stage_fixture(n,workflow,pipeline,waiting_kind,view_key) as values
  (1,'inquiry','inquiry',null::text,'inquiry'),
@@ -170,6 +185,14 @@ select is(public.list_ops_task_numbered_page_v1('general',pg_temp.task_filters('
 select is(jsonb_array_length(public.list_ops_task_numbered_page_v1('general',pg_temp.task_filters('general'),1,n)->'rows'),n,'strict allowed size '||n) from (values(10),(15),(20)) s(n);
 select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration'),1,10)->>'totalCount','2','four tracks count as two parents');
 select is(jsonb_array_length(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration','{"search":"수학"}'),1,10)->'rows'->0->'registrationTracks'),2,'all authorized siblings retained');
+select is(jsonb_array_length(fixture.rows),case when right(fixture.track_id::text,1)='1' then 2 else 1 end,'nonempty enrollment fixture '||fixture.track_id) from enrollment_fixture fixture;
+select is(
+ (select track->'enrollmentDetailRows'
+  from jsonb_array_elements(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration'),1,10)->'rows') parent
+  cross join lateral jsonb_array_elements(parent->'registrationTracks') track
+  where track->>'id'=fixture.track_id::text),
+ fixture.rows,'final numbered projection preserves all stored enrollment metadata '||fixture.track_id)
+from enrollment_fixture fixture;
 select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration','{"search":"01012345678"}'),1,10)->>'totalCount','2','normalized phone search');
 select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration',jsonb_build_object('search','np-views','view',v)),1,10)->>'totalCount',expected,'positive membership for registration view '||v)
 from (values('inquiry','1'),('level_test','1'),('consultation_requested','1'),('consultation_completed','1'),('waiting','3'),('observation','3'),('enrollment','1'),('payment','1'),('completed','3')) f(v,expected);

@@ -46,10 +46,29 @@ const REGISTRATION: Shape = {
   ...fields("inquiryAt levelTestAt levelTestCompletedAt phoneConsultationAt visitConsultationAt consultationAt", nullable(timestamp)),
   classStartDate: nullable(date),
 }
+const ENROLLMENT_REQUIRED: Shape = {
+  classId: uuid,
+  sortOrder: (value) => typeof value === "number" && Number.isInteger(value) && value >= -2147483648 && value <= 2147483647,
+}
+const ENROLLMENT_OPTIONAL: Shape = {
+  id: nullable(uuid), textbookId: nullable(uuid), classStartDate: nullable(date), classStartSessionKey: nullable(string),
+  classStartLessonSessionId: nullable(uuid), classStartSession: nullable(string), classStartSourceObservationId: nullable(uuid),
+}
+const ENROLLMENT_CANONICAL: Shape = {
+  trackId: uuid, ...fields("studentId admissionBatchId rosterReleaseSourceTaskId", nullable(uuid)),
+  status: oneOf("planned", "waitlisted", "enrolled", "canceled"),
+  ...fields("makeeduRegistered rosterActive", boolean), rosterReleasedAt: nullable(timestamp),
+  rosterReleaseReason: nullable(string), rosterReleaseKind: oneOf(null, "withdrawal", "transfer", "class_close"),
+}
 const enrollment: Check = (value) => {
-  if (!object(value) || !uuid(value.classId) || !count(value.sortOrder)) return false
-  const optional: Shape = { id: uuid, textbookId: nullable(uuid), classStartDate: nullable(date), classStartSessionKey: nullable(string), classStartLessonSessionId: nullable(uuid), classStartSession: nullable(string), classStartSourceObservationId: nullable(uuid) }
-  return Object.entries(value).every(([key, item]) => key === "classId" || key === "sortOrder" || (Object.prototype.hasOwnProperty.call(optional, key) && optional[key](item)))
+  if (!object(value)) return false
+  // Ordinary saves persist canonical metadata; external corrections persist normalized request rows.
+  if (Object.keys(ENROLLMENT_CANONICAL).some((key) => Object.prototype.hasOwnProperty.call(value, key))) {
+    return matches(value, { ...ENROLLMENT_REQUIRED, ...ENROLLMENT_OPTIONAL, ...ENROLLMENT_CANONICAL, id: uuid })
+  }
+  const supported = { ...ENROLLMENT_REQUIRED, ...ENROLLMENT_OPTIONAL }
+  return Object.entries(ENROLLMENT_REQUIRED).every(([key, check]) => Object.prototype.hasOwnProperty.call(value, key) && check(value[key]))
+    && Object.entries(value).every(([key, item]) => Object.prototype.hasOwnProperty.call(supported, key) && supported[key](item))
 }
 const TRACK: Shape = {
   ...fields("id taskId", uuid), subject: oneOf("영어", "수학", "과학"),
