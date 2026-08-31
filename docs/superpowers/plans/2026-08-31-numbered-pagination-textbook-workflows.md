@@ -19,6 +19,7 @@
 - Preserve each display-parent unit: purchase student/teacher pairing and sales month/class/textbook aggregation are not raw-row pages.
 - Compute balances/quality/facets/summary and count over their complete authorized source scope before page slicing. Restrict raw relation/history DTO enrichment to returned page IDs or explicit detail.
 - Preserve current-page selection independently from per-user/per-record drafts. Never delete a draft merely because its record is absent from this page.
+- Bind retained rows, summaries, catalogs, details and drafts to resolved actor ID plus role. Disable reads until auth is ready; clear old presentation and invalidate late in-flight/cache writes on logout, user or same-user role change. No client actor value becomes a database authority override.
 - Preserve full-filter export and monthly settlement scope, existing write authority and all domain mutation semantics. Do not change formulas, negative-stock policy, notification/send behavior, RLS or authorization boundaries.
 - No remote migration, push, deployment or sends. CLI-generated migrations remain candidate until actual isolated SQL proof; no speculative indexes.
 - Supplier/publisher settings and other global-order settings are separate from operational pages; on 2026-08-31 the user approved recommended ordering/save API improvements needed for paging. Preserve existing reorder/add and complete ordered publisher-link semantics; do not introduce an arbitrary catalog cap.
@@ -27,6 +28,10 @@
 ## Required implementation input
 
 Read `docs/superpowers/plans/2026-08-31-textbook-numbered-read-audit.md` completely before coding this domain. It defines exact filter unions, page units, source anchors, existing quantity/cost formulas, lookup precedence, and required detail/export/draft boundaries. Its proposed API signatures are the contract for this plan, not evidence of an implementation.
+
+Implementation clarifications superseding the audit's delivery sketches: use the task-specific split CLI migration names below, not the audit's single illustrative migration; extract `textbook-read-model.ts` as Task1 specifies, not the audit's alternate `.js/.d.ts` sketch. Numbered SQL returns the requested page with matching total and empty rows when out of range; the reviewed common controller alone performs its bounded final-page clamp/reload. Do not silently relabel requested pages inside SQL.
+
+The variable-length editable `textbook_sub_subject_settings` table/mobile cards are in scope, unlike the excluded finite subject configuration matrix. Task6 covers their own draft/global-order/default-merge semantics. The root's source-only preflight is `.superpowers/sdd/2026-08-31-numbered-pagination-textbook-workflows/subsubject-preflight.md`; verify current source before implementation.
 
 ## Task 1: Extract executable projection and scope contracts
 
@@ -87,6 +92,7 @@ Read `docs/superpowers/plans/2026-08-31-textbook-numbered-read-audit.md` complet
 **Interfaces:** The new hook keeps separate page snapshots per visible record-list tab, full-filter summary metadata and explicit work contexts. It exposes prepared row DTOs rather than substituting page arrays into TextbookOperationsData. Preference IDs use `textbooks:<tab>`. Existing row components consume prepared page rows plus callbacks and matching summaries.
 
 - [ ] Write RED controller/component tests for direct page11, previous-page retention/error/retry, atomic scope reset, refresh clamp, URL/detail restoration and independent tab scopes. Add draft/selection fixtures verifying page changes preserve inventory drafts but clear current-page selections.
+- [ ] Exercise resolved same-ID role change, logout/relogin and late page/summary/catalog/detail completions through the real consumer. Clear old authorization-scoped data immediately and reject old cache writes; preserve same-actor drafts across ordinary paging. Carry server-selected order through actual raw DTO/service/model/hook/table paths rather than re-sorting display titles locally.
 - [ ] Replace TextbookTable master slice60, PurchaseProcessTable list processing, SalesProcessTable, SalesHistoryLedger, InventoryCountWorkspace, InventoryHistoryPanel slice30 and MonthlyClosingTable slice12 with prepared paged results. Remove list `더 보기` controls. Each shows shared pager and whole-filter count; mobile mirrors use the same page.
 - [ ] Remove inventory draft pruning based on `data.inventory`; key drafts by user/textbook/location, clean only after confirmed deletion/save. Preserve current-page member IDs for bulk actions; never select all filtered results implicitly.
 - [ ] Wire editor/mutation/export entrypoints to Task3's complete purpose-specific context. Forms must not infer missing reference records or duplicate absence from page contents. Dirty form guards remain; page changes cannot discard unsaved edits. Tab facets/options come from authoritative summaries, not page values.
@@ -98,6 +104,7 @@ Read `docs/superpowers/plans/2026-08-31-textbook-numbered-read-audit.md` complet
 **Files:**
 - Create CLI migration `textbook_supplier_numbered_reads` and `supabase/tests/textbook_supplier_numbered_reads_test.sql`.
 - Extend read service/types.
+- Create `src/features/textbooks/textbook-settings-draft-service.ts` and focused transport/draft tests for the authorized owner-scoped transactional save boundary; the following taxonomy task extends this same boundary rather than creating an unrelated Save button.
 - Modify `src/features/textbooks/textbook-supplier-settings-workspace.tsx`.
 - Create `tests/textbook-supplier-numbered-pagination.test.mjs`.
 
@@ -107,14 +114,33 @@ Read `docs/superpowers/plans/2026-08-31-textbook-numbered-read-audit.md` complet
 - [ ] With that scope resolved, write RED tests proving off-page publishers/links are unchanged when saving one owner, draft roundtrip retains all ordered supplier IDs and primary priorities, counts retain id-first/name-fallback semantics, and page changes never use a partial link set as replacement input.
 - [ ] Add invoker page/detail/picker reads with RLS/role parity, exact count and stable id order. Separate full owner link detail from arbitrary current-page links; catalog limits are not proof of completeness.
 - [ ] Refactor draft/save targets to dirty owners only while preserving each dirty owner's complete link list and existing primary/priority meaning. Apply any approved authoritative ordering contract separately; never globally renumber only a page. Keep subsubject lazy loading and its distinct global-order boundary.
+- [ ] Use one domain-specific transactional invoker save for dirty publisher/supplier owners and complete links, with optimistic base revision and actor/request replay identity for uncertain retries. Validate and apply the entire submitted owner set or none, retain untouched owner rows/links, and preserve existing DML authority. Preserve a single workspace Save coordinator and keep unrelated subsubject drafts until their explicit successful save; Task6 extends the same atomic endpoint to taxonomy. No generic table writer or partial-success masquerade. Read errors never imply missing/empty links.
 - [ ] Shared pager/preferences and preserved unsaved guards, then service/controller/SQL tests, lint/TS and commit as `feat: paginate textbook supplier settings`.
 
-## Task 6: Textbook verification gate
+## Task 6: Editable subsubject taxonomy pages and shared Save
+
+**Files:**
+- Create CLI migration `textbook_taxonomy_numbered_drafts` and `supabase/tests/textbook_taxonomy_numbered_drafts_test.sql`.
+- Extend textbook read types/service and `textbook-settings-draft-service.ts`.
+- Modify `textbook-supplier-settings-workspace.tsx` for its subsubject panel and shared Save coordinator only; preserve reviewed publisher/supplier paging.
+- Extend `textbook-taxonomy.ts` only with pure default identity/projection helpers if required; preserve existing picker and legacy helper behavior.
+- Create `tests/textbook-subsubject-numbered-pagination.test.mjs` and update affected lazy-taxonomy tests with actual behavior coverage.
+
+**Interfaces:** `listTextbookSubSubjectPage({page,pageSize,filters:{subject,search},draft},options)` uses `list_textbook_sub_subject_numbered_page_v1(p_filters jsonb,p_draft jsonb,p_page integer,p_page_size integer)` and returns the projected `NumberedPage<TextbookSubSubjectSettingRecord>` plus matching revision, whole-taxonomy visible count, and per-returned-row move directions from the entire subject order. Extend Task5's atomic settings save body with the chronological subsubject journal; reuse its actor/request identity and all-or-none transaction for the shared workspace Save. Add/patch/delete/move operations carry stable IDs; the server resolves off-page neighbors and duplicate checks without full-list client reads.
+
+- [ ] Verify final taxonomy table/RLS/constraints and executable `mergeTextbookSubSubjectSettings` parity. The effective source is persisted normalized named records plus every missing built-in `(subject,name)` default, not defaults only when a subject is empty. Preserve English/Math/Science/Other defaults, visible flags, subject order, numeric name ties and explicit duplicate-name validation after trim. Built-in defaults are a finite overlay; persisted custom rows are not bounded.
+- [ ] Keep reads lazy until the subsubject tab is opened. Ordinary page reads must not persist defaults or convert an unavailable/missing new RPC into a successful built-in-only catalog. Represent virtual defaults with stable non-DB identity; explicit save materializes only necessary rows with valid stable UUIDs/replay identity, never writes legacy `english-단어` strings to a UUID column. Preserve missing-default reappearance after a fresh canonical reload and suppress it while an explicit draft tombstone is active. Test rename/delete of a built-in separately from a custom row; do not change general textbook picker fallback behavior.
+- [ ] Project the full chronological journal over that effective source before filter/count/page. Add uses the active subject's global final rank; move swaps adjacent rows in the complete subject order regardless of search/page, preserving other subjects. Return global move availability instead of disabling the first/last row of each page. Use the existing stable Korean numeric name semantics with a deterministic identity tie; do not renumber only a page. Preserve blank editable new rows before Save and the legacy trimmed-empty omission rule without silently deleting persisted rows.
+- [ ] Test more than100 custom rows plus missing-default overlays, direct page11 in one request, full total/visible badge, page10→11, off-page duplicate, move across page/search boundaries, add-at-global-end and retained edits across page/subject/tab changes. Actual desktop/mobile consumers must use the same page and common pager preference `textbooks:subsubjects`; no current-page sorting/filtering that changes server order.
+- [ ] Extend the single atomic Save to pending publisher/supplier/link/subsubject changes together. Untouched taxonomy remains unread/unwritten on a publisher-only save. Validate all dirty edits before any DML; constraint/RLS/conflict failure rolls back all included changes and preserves all drafts. No-op leaves timestamps unchanged; uncertain retry reuses the identical request body/ID, with no automatic write retry. Subsubject duplicates are checked against off-page persisted/projected rows. Preserve native privilege/constraint errors and never manually raise40001.
+- [ ] Preserve resolved actor/role clearing, auth readiness, stale-result guards, existing unsaved navigation behavior and successful-save-only draft clearing. Run real model/service/consumer tests, final local pgTAP with permissions/default/order/atomic rollback/replay coverage, focused lint/TS and commit as `feat: paginate editable textbook taxonomy settings`.
+
+## Task 7: Textbook verification gate
 
 **Files:** Update `docs/qa/2026-08-31-numbered-pagination.md`.
 
-**Interfaces:** Evidence per master, request, order/receipt, sale/history, inventory/history, closing and supplier/publisher list; exact formula/parity/export/draft/permission test results and remaining authorization/deployment gates.
+**Interfaces:** Evidence per master, request, order/receipt, sale/history, inventory/history, closing, supplier/publisher and editable subsubject list; exact formula/parity/export/draft/permission test results and remaining deployment gates.
 
 - [ ] Run the complete affected textbook regressions and production build. Verify no in-scope operational list still starts the17-table full bundle or accumulates displayed pages, and no old full-scope calculation receives only page rows.
 - [ ] Execute isolated final SQL and first/middle/final explain probes when available; record offset cost honestly, and add an index only from measured plan evidence. Record browser tests only when permitted and RPC capability exists.
-- [ ] Independent whole-slice review and one fix/re-review wave; preserve settings tasks as pending if their scope decision remains unresolved. App-wide completion requires the remaining settings/audit plan, not just operational tabs.
+- [ ] Independent whole-slice review and one fix/re-review wave. The user has approved the required settings save improvements; unimplemented publisher/supplier/subsubject work is pending implementation, not an unresolved approval. App-wide completion requires the remaining general settings/audit plan, not just textbook tabs.
