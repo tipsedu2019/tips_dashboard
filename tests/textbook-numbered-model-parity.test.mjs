@@ -7,6 +7,9 @@ import {
   buildTextbookMonthlyClosing,
   filterStockMovesForClosing,
   validateMonthlyClosingDraft,
+  groupPurchaseLinesByStatus,
+  groupSaleLinesByStatus,
+  getTextbookByReference,
 } from "../src/features/textbooks/textbook-ledger.js";
 
 const modelUrl = new URL("../src/features/textbooks/textbook-read-model.ts", import.meta.url);
@@ -166,6 +169,41 @@ test("sale history counts complete month/class/textbook parents across source sa
   assert.deepEqual(rows[0], { id: "2026-08:class:book", year: "2026", month: "2026-08", classId: "class", className: "수업", textbookId: "book", textbookTitle: "교재 book", waitingQuantity: 2, issuedQuantity: 3, totalQuantity: 5, latestAt: "2026-08-02" });
   assert.equal(rows[1].textbookTitle, "book-0");
   assert.equal(rows[10].totalQuantity, 1);
+});
+
+test("empty raw sale status inherits sale only in history while process grouping trims line alone", async () => {
+  const { buildSaleHistorySummaryRows } = await model();
+  const lines = ['', ' ', ' issued ', ' paid '].map((status, index) => ({ id: `l${index}`, sale_id: 's', textbook_id: 'b', status, quantity: 2, updated_at: '2026-08-30T00:00:00Z' }));
+  const groups = groupSaleLinesByStatus({ lines });
+  assert.deepEqual(groups.charged.map((row) => row.id), ['l0', 'l1', 'l3']);
+  assert.deepEqual(groups.issued.map((row) => row.id), ['l2']);
+  const [history] = buildSaleHistorySummaryRows({ sales: [{ id: 's', charge_month: '2026-08', status: 'issued' }], lines, textbooks: [book('b')], classes: [], fallbackMonth: '2026-08' });
+  assert.equal(history.issuedQuantity, 4);
+  assert.equal(history.waitingQuantity, 4);
+});
+
+test("workflow SQL oracle keeps raw history, process grouping and purchase order-first status distinct", async () => {
+  const {buildSaleHistorySummaryRows}=await model();
+  assert.equal(groupPurchaseLinesByStatus({orders:[{id:'o',status:'ordered'}],lines:[{id:'l',purchase_order_id:'o',status:'requested'}]}).ordered[0].status,'ordered');
+  const process=groupSaleLinesByStatus({lines:[{id:'paid',status:'paid'},{id:'excluded',status:'excluded'}]});
+  assert.deepEqual(process.charged.map(row=>[row.id,row.status]),[['paid','charged'],['excluded','excluded']]);
+  const rows=buildSaleHistorySummaryRows({
+    sales:[{id:'sale',charge_month:'2026-09',class_id:'class',created_at:'2026-09-01T00:00:00+00:00'}],
+    lines:[
+      {id:'paid',sale_id:'sale',textbook_id:'book',status:'paid',quantity:0,copy_scope:'teacher'},
+      {id:'early',sale_id:'sale',textbook_id:'book',status:'issued',quantity:-2,copy_scope:'teacher',issued_at:'2026-09-01T23:00:00+09:00'},
+      {id:'later',sale_id:'sale',textbook_id:'book',status:'issued',quantity:3,issued_at:'2026-09-01T15:00:00+00:00'},
+      {id:'excluded',sale_id:'sale',textbook_id:'book',status:'excluded',quantity:100},
+    ],textbooks:[book('book')],classes:[{id:'class',name:'중2반'}],fallbackMonth:'2020-01',
+  });
+  assert.deepEqual(rows,[{id:'2026-09:class:book',year:'2026',month:'2026-09',classId:'class',className:'중2반',textbookId:'book',textbookTitle:'교재 book',waitingQuantity:1,issuedQuantity:4,totalQuantity:5,latestAt:'2026-09-01T23:00:00+09:00'}]);
+});
+test("canonical catalog identity ties do not promote active matches over inactive exact aliases",()=>{
+ const books=[book('a',{title:'Ｐａｒｉｔｙ Reader',status:'inactive'}),book('b',{title:'Parity Reader',status:'active'}),book('c',{title:'ParityReader'}),book('d',{title:'Parity Reader 2026'})];
+ assert.equal(getTextbookByReference(books,'Parity Reader').id,'a');
+ assert.equal(getTextbookByReference(books,'c').id,'c');
+ assert.equal(getTextbookByReference(books,'Parity Reader 2026').id,'d');
+ assert.equal(getTextbookByReference(books,'--'),undefined);
 });
 
 test("global duplicate title quality survives search/page boundaries but ignores inactive duplicates", async () => {

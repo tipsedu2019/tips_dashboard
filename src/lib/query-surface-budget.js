@@ -37,6 +37,14 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "get_textbook_master_detail_v1",
   "get_textbook_inventory_balance_v1",
   "check_textbook_master_duplicate_v1",
+  // Final-proven workflow summaries and selected-parent details; no catalog
+  // fallback, scalar-count substitution, or numbered-page exemption.
+  "get_textbook_purchase_summary_v1",
+  "get_textbook_sale_summary_v1",
+  "get_textbook_sale_history_summary_v1",
+  "get_textbook_operations_summary_v1",
+  "get_textbook_purchase_detail_v1",
+  "get_textbook_sale_detail_v1",
   "current_dashboard_role",
   "close_class_atomic_v1",
 ])
@@ -64,6 +72,8 @@ const EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES = new Set([
 // makeup_numbered_pages_test.sql; local final-only proof 115/115.
 // textbooks: 20260831123610_textbook_inventory_numbered_reads.sql (final),
 // textbook_inventory_numbered_reads_test.sql; local final-only proof 198/198.
+// textbook workflows: 20260831152429_textbook_workflow_numbered_reads.sql (final),
+// textbook_workflow_numbered_reads_test.sql; local final-only proof 160/160.
 const EXACT_NUMBERED_RPC_CONTRACTS = new Map([
   ["list_management_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_ops_task_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
@@ -74,6 +84,9 @@ const EXACT_NUMBERED_RPC_CONTRACTS = new Map([
   ["list_textbook_master_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_textbook_inventory_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_textbook_inventory_history_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["list_textbook_purchase_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["list_textbook_sale_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["list_textbook_sale_history_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
 ])
 
 const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION"

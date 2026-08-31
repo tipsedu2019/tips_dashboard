@@ -124,7 +124,18 @@ export type PurchaseFilters = {
   orderFilter: PurchaseOrderFilter;
 };
 export type SaleFilters = { search: string; status: SalesProcessFilter };
-export type SaleHistoryFilters = { search: string; year: string; month: string; classId: string };
+// History has no operations-search consumer or search semantics.
+export type SaleHistoryFilters = { search: ""; year: string; month: string; classId: string };
+export type TextbookSaleHistorySummary = {
+  totalCount: number;
+  totalWaitingQuantity: number;
+  totalIssuedQuantity: number;
+  sourceTotalCount: number;
+  yearOptions: string[];
+  monthOptions: string[];
+  classOptions: Array<[string, string]>;
+  effectiveMonth: string;
+};
 export type InventoryFilters = MasterFilters & { locationId: string; audit: InventoryAuditFilter };
 export type InventoryHistoryFilters = { textbookId: string | null; locationId: string | null };
 export type ClosingFilters = { month: string; subject: string; status: string };
@@ -153,6 +164,81 @@ export type PurchaseCaseRow = {
   line: Row & { purchaseScopeLines: Row[] };
   lines: Row[];
 };
+
+// Selected display references only; these are not complete save/picker contexts.
+export type WorkflowTextbookReference = {
+  id: string; title: string | null; name: string; status: string; subject: string | null;
+  publisher: string | null; publisher_id: string | null; default_supplier_id: string | null;
+  price: number | null; sale_price: number; list_price: number; isbn13: string | null;
+  barcode: string | null; is_returnable: boolean;
+};
+export type WorkflowClassReference = { id: string; name: string; studentCount: number };
+export type WorkflowLocationReference = { id: string; code: string; name: string };
+export type WorkflowNamedReference = { id: string; name: string };
+export type PurchaseOrderSource = Row & {
+  id: string; supplier_id: string | null; requested_by: string; requested_date: string;
+  order_date: string; expected_date: string | null; ordered_at: string | null; received_at: string | null;
+  status: PurchaseKanbanStatus; statement_number: string; memo: string; created_by: string | null;
+  created_at: string | null; updated_at: string | null;
+};
+export type PurchaseMemberSource = Row & {
+  id: string; purchase_order_id: string; textbook_id: string | null; requested_textbook_title: string;
+  class_id: string | null; location_id: string | null; requested_quantity: number; ordered_quantity: number;
+  received_quantity: number; teacher_ordered_quantity: number; teacher_received_quantity: number;
+  unit_cost: number; copy_scope: TextbookCopyScope; memo: string; created_at: string | null; updated_at: string | null;
+  status: PurchaseKanbanStatus; order: PurchaseOrderSource | null;
+};
+export type PurchaseScopeQuantities = Record<PurchaseQuantityKind, number>;
+export type PurchaseQuantities = PurchaseScopeQuantities & { student: PurchaseScopeQuantities; teacher: PurchaseScopeQuantities };
+// Keep the extracted pure parent contract usable by its unchanged legacy caller.
+// The RPC contract adds required typed enrichment to that existing parent shape.
+export type TextbookPurchaseCaseRow = PurchaseCaseRow & {
+  line: PurchaseMemberSource & { purchaseScopeLines: PurchaseMemberSource[] };
+  lines: PurchaseMemberSource[]; mode: "request" | "order"; status: PurchaseKanbanStatus;
+  eventAt: string; quantities: PurchaseQuantities;
+  references: {
+    textbook: WorkflowTextbookReference | null; class: WorkflowClassReference | null;
+    location: WorkflowLocationReference | null; publisher: WorkflowNamedReference | null;
+    supplier: WorkflowNamedReference | null; configuredSupplierId: string; unitCost: number;
+  };
+};
+export type SaleSource = {
+  id: string; class_id: string | null; charge_month: string; sale_date: string;
+  status: "draft" | "charged" | "paid" | "issued" | "cancelled";
+  memo: string; created_by: string | null; created_at: string | null; updated_at: string | null;
+};
+export type SaleMemberSource = {
+  id: string; sale_id: string; student_id: string | null; class_id: string | null; textbook_id: string;
+  charge_month: string; quantity: number; unit_price: number; location_id: string | null;
+  status: "charged" | "paid" | "issued" | "excluded" | "cancelled" | "returned";
+  exclusion_reason: string; memo: string; created_at: string | null; updated_at: string | null;
+  copy_scope: TextbookCopyScope; teacher_id: string | null; teacher_name: string;
+};
+export type SaleLineRow = {
+  id: string; line: SaleMemberSource; sale: SaleSource | null; textbook: WorkflowTextbookReference;
+  class: WorkflowClassReference | null; student: WorkflowNamedReference | null; location: WorkflowLocationReference | null;
+  status: Exclude<SaleMemberSource["status"], "paid">; groupStatus: "charged" | "issued" | "cancelled" | "returned";
+  eventAt: string; quantity: number; amount: number; recipientName: string;
+};
+export type TextbookPurchaseSummary = {
+  mode: "request" | "order"; totalCount: number; rawLineCount: number; quantities: PurchaseQuantities;
+  groups: Array<{ status: PurchaseKanbanStatus; totalCount: number; rawLineCount: number; quantities: PurchaseQuantities }>;
+  requestCounts: Record<PurchaseRequestFilter, number>; orderCounts: Record<PurchaseOrderFilter, number>;
+  boardScopeCounts: Record<PurchaseBoardScope, number>;
+};
+export type TextbookSaleSummary = {
+  totalCount: number; totalQuantity: number; studentCount: number; classCount: number; totalAmount: number;
+  // Existing group headers use quantity||1 (unlike the overall max(1,quantity||1)).
+  groups: Array<{ status: SaleLineRow["groupStatus"]; totalCount: number; totalQuantity: number }>;
+  statusCounts: Record<SalesProcessFilter, number>;
+};
+export type TextbookOperationsSummary = {
+  requestCount: number; unregisteredRequestCount: number; orderNeededCount: number;
+  receivingBacklogCount: number; partialReceiptCount: number; issueWaitingCount: number; stockRiskCount: number;
+};
+export type TextbookPurchaseDetailInput = { anchorLineId: string; mode: "request" | "order" };
+export type TextbookPurchaseDetail = { row: TextbookPurchaseCaseRow | null };
+export type TextbookSaleDetail = { row: SaleLineRow | null };
 
 export type TextbookMasterSummary = {
   totalCount: number;

@@ -5,6 +5,10 @@ import type {
   TextbookInventoryBalance, TextbookInventoryBalanceInput, TextbookInventoryBalanceRow,
   TextbookInventoryHistoryTransport, TextbookInventorySummary, TextbookMasterDetail,
   TextbookMasterDuplicate, TextbookMasterDuplicateInput, TextbookMasterRow, TextbookMasterSummary,
+  SaleHistoryFilters, SaleHistorySummaryRow, TextbookSaleHistorySummary,
+  PurchaseFilters, SaleFilters, TextbookPurchaseCaseRow, PurchaseMemberSource, PurchaseQuantities,
+  SaleLineRow, TextbookPurchaseSummary, TextbookSaleSummary, TextbookOperationsSummary,
+  TextbookPurchaseDetailInput, TextbookPurchaseDetail, TextbookSaleDetail,
 } from "./textbook-read-types";
 
 export type TextbookReadOptions = { client?: NonNullable<typeof sharedSupabase> | null; signal?: AbortSignal };
@@ -12,6 +16,12 @@ type ObjectValue = Record<string, unknown>;
 const qualities = ["all", "attention", "duplicate", "missingCode", "missingPublisher", "missingCategory", "missingPrice", "subjectMismatch", "inactive"];
 const inventories = ["all", "shortage", "surplus", "unused", "negative"];
 const audits = ["recommended", "pending", "done", "all"];
+const purchaseStatuses = ["requested", "ordered", "partially_received", "received", "returned", "cancelled"];
+const saleStatuses = ["charged", "issued", "cancelled", "returned"];
+const purchaseRequests = ["all", "unregistered", "orderable"];
+const purchaseOrders = ["all", "waiting", "partial", "returnable", "returned"];
+const purchaseBoards = ["active", "recent", "all"];
+const saleFilters = ["all", "waiting", "issued", "returned", "cancelled"];
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const balanceKeys = ["locationQuantities", "studentLocationQuantities", "teacherLocationQuantities", "totalQuantity", "studentQuantity", "teacherQuantity", "stockValue"];
 const masterStrings = ["id", "title", "name", "status", "school_level", "grade_level", "sub_subject"];
@@ -132,14 +142,49 @@ function parseSummary(data: unknown, inventory = false): TextbookMasterSummary |
   data.locations.forEach((location) => parseLocation(location));
   return data as TextbookMasterSummary | TextbookInventorySummary;
 }
-function validateFilters(filters: unknown, kind: "master" | "inventory" | "history") {
+function validateSaleHistoryFilters(filters: unknown): asserts filters is SaleHistoryFilters {
+  if (!object(filters) || Object.keys(filters).length !== 4 || filters.search !== "" || !["year", "month", "classId"].every((key) => typeof filters[key] === "string")) fail("filters");
+}
+function parseSaleHistoryRow(data: unknown): SaleHistorySummaryRow {
+  exact(data, ["id", "year", "month", "classId", "className", "textbookId", "textbookTitle", "waitingQuantity", "issuedQuantity", "totalQuantity", "latestAt"]);
+  if (!["id", "year", "month", "classId", "className", "textbookId", "textbookTitle", "latestAt"].every((key) => typeof data[key] === "string")
+    || !["waitingQuantity", "issuedQuantity", "totalQuantity"].every((key) => integer(data[key]) && data[key] >= 0)
+    || !uuid(data.textbookId) || !(data.classId === "" || uuid(data.classId)) || (data.totalQuantity as number) < 1
+    || data.totalQuantity !== (data.waitingQuantity as number) + (data.issuedQuantity as number)
+    || data.id !== `${data.month}:${data.classId || "-"}:${data.textbookId || "-"}` || data.year !== String(data.month).slice(0, 4)) fail();
+  return data as SaleHistorySummaryRow;
+}
+function parseSaleHistorySummary(data: unknown, filters: SaleHistoryFilters): TextbookSaleHistorySummary {
+  exact(data, ["totalCount", "totalWaitingQuantity", "totalIssuedQuantity", "sourceTotalCount", "yearOptions", "monthOptions", "classOptions", "effectiveMonth"]);
+  if (!["totalCount", "totalWaitingQuantity", "totalIssuedQuantity", "sourceTotalCount"].every((key) => integer(data[key]) && data[key] >= 0)
+    || (data.totalCount as number) > (data.sourceTotalCount as number)
+    || !stringArray(data.yearOptions) || !stringArray(data.monthOptions)
+    || new Set(data.yearOptions).size !== data.yearOptions.length || new Set(data.monthOptions).size !== data.monthOptions.length
+    || !Array.isArray(data.classOptions) || !data.classOptions.every((entry) => stringArray(entry) && entry.length === 2 && uuid(entry[0]))
+    || new Set(data.classOptions.map((entry) => entry[0])).size !== data.classOptions.length
+    || data.effectiveMonth !== (data.monthOptions.includes(filters.month) ? filters.month : "all")
+    || (data.totalCount === 0 && (data.totalWaitingQuantity !== 0 || data.totalIssuedQuantity !== 0))
+    || (data.totalWaitingQuantity as number) + (data.totalIssuedQuantity as number) < (data.totalCount as number)
+    || (data.sourceTotalCount === 0 && (data.yearOptions.length !== 0 || data.monthOptions.length !== 0 || data.classOptions.length !== 0))) fail();
+  return data as TextbookSaleHistorySummary;
+}
+type ReadKind = "master" | "inventory" | "history" | "sale-history" | "purchase" | "sale";
+function validateFilters(filters: unknown, kind: ReadKind) {
+  if (kind === "sale-history") { validateSaleHistoryFilters(filters); return; }
+  if (kind === "purchase" || kind === "sale") {
+    const keys = kind === "purchase" ? ["mode", "search", "boardScope", "requestFilter", "orderFilter"] : ["search", "status"];
+    if (!object(filters) || Object.keys(filters).length !== keys.length || !keys.every((key) => typeof filters[key] === "string")) fail("filters");
+    if (kind === "purchase" ? !["request", "order"].includes(filters.mode as string) || !purchaseBoards.includes(filters.boardScope as string)
+      || !purchaseRequests.includes(filters.requestFilter as string) || !purchaseOrders.includes(filters.orderFilter as string) : !saleFilters.includes(filters.status as string)) fail("filters");
+    return;
+  }
   const keys = kind === "history" ? ["textbookId", "locationId"] : ["search", "subject", "schoolLevel", "gradeLevel", "subSubject", "quality", "inventory", ...(kind === "inventory" ? ["locationId", "audit"] : [])];
   if (!object(filters) || Object.keys(filters).length !== keys.length || !keys.every((key) => Object.prototype.hasOwnProperty.call(filters, key))) fail("filters");
   if (kind === "history") { if (!keys.every((key) => nullableUuid(filters[key]))) fail("filters"); return; }
   if (!keys.every((key) => typeof filters[key] === "string") || !qualities.includes(filters.quality as string) || !inventories.includes(filters.inventory as string)
     || (kind === "inventory" && (!(filters.locationId === "" || uuid(filters.locationId)) || !audits.includes(filters.audit as string)))) fail("filters");
 }
-function validatePage(request: PageRequest<unknown, string>, kind: "master" | "inventory" | "history", sort: string) {
+function validatePage(request: PageRequest<unknown, string>, kind: ReadKind, sort: string) {
   if (!object(request) || !integer(request.page) || request.page < 1 || request.page > 2147483647) fail("page");
   if (![10, 15, 20].includes(request.pageSize)) fail("page_size");
   if (request.sort !== sort) fail("sort"); validateFilters(request.filters, kind);
@@ -223,5 +268,218 @@ export async function checkTextbookMasterDuplicate(input: TextbookMasterDuplicat
     const previewRows = data.previewRows.map(parseMaster);
     if (new Set(previewRows.map((row) => String(row.id).toLowerCase())).size !== previewRows.length || previewRows.some((row) => String(row.id).toLowerCase() === input.excludeId?.toLowerCase())) fail();
     return { totalCount: data.totalCount, previewRows };
+  });
+}
+
+export async function listTextbookSaleHistoryPage(request: PageRequest<SaleHistoryFilters, "month-class-title">, options: TextbookReadOptions = {}): Promise<NumberedPage<SaleHistorySummaryRow>> {
+  validatePage(request, "sale-history", "month-class-title");
+  const deadline = AbortSignal.timeout(8000);
+  const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+  return read({ ...options, signal }, (client) => client.rpc("list_textbook_sale_history_page_v1", { p_filters: request.filters, p_sort: request.sort, p_page: request.page, p_page_size: request.pageSize }).abortSignal(signal).retry(false), (data) => parsePage(data, request, parseSaleHistoryRow));
+}
+export async function getTextbookSaleHistorySummary(filters: SaleHistoryFilters, options: TextbookReadOptions = {}): Promise<TextbookSaleHistorySummary> {
+  validateSaleHistoryFilters(filters);
+  const deadline = AbortSignal.timeout(8000);
+  const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+  return read({ ...options, signal }, (client) => client.rpc("get_textbook_sale_history_summary_v1", { p_filters: filters }).abortSignal(signal).retry(false), (data) => parseSaleHistorySummary(data, filters));
+}
+
+type FieldKind = "text" | "nullableText" | "uuid" | "nullableUuid" | "integer" | "number" | "nullableNumber" | "boolean";
+function fields(value: unknown, shape: Record<string, FieldKind>, extra: string[] = []): asserts value is ObjectValue {
+  exact(value, [...Object.keys(shape), ...extra]);
+  for (const [key, kind] of Object.entries(shape)) {
+    const item = value[key];
+    const valid = kind === "text" ? typeof item === "string" : kind === "nullableText" ? item === null || typeof item === "string"
+      : kind === "uuid" ? uuid(item) : kind === "nullableUuid" ? nullableUuid(item) : kind === "integer" ? integer(item)
+      : kind === "number" ? finite(item) : kind === "nullableNumber" ? item === null || finite(item) : typeof item === "boolean";
+    if (!valid) fail();
+  }
+}
+const workflowBookShape = {
+  id: "uuid", title: "nullableText", name: "text", status: "text", subject: "nullableText", publisher: "nullableText",
+  publisher_id: "nullableUuid", default_supplier_id: "nullableUuid", price: "nullableNumber", sale_price: "number", list_price: "number",
+  isbn13: "nullableText", barcode: "nullableText", is_returnable: "boolean",
+} satisfies Record<string, FieldKind>;
+const purchaseOrderShape = {
+  id: "uuid", supplier_id: "nullableUuid", requested_by: "text", requested_date: "text", order_date: "text", expected_date: "nullableText",
+  ordered_at: "nullableText", received_at: "nullableText", status: "text", statement_number: "text", memo: "text", created_by: "nullableUuid", created_at: "nullableText", updated_at: "nullableText",
+} satisfies Record<string, FieldKind>;
+const purchaseMemberShape = {
+  id: "uuid", purchase_order_id: "uuid", textbook_id: "nullableUuid", requested_textbook_title: "text", class_id: "nullableUuid", location_id: "nullableUuid",
+  requested_quantity: "integer", ordered_quantity: "integer", received_quantity: "integer", teacher_ordered_quantity: "integer", teacher_received_quantity: "integer",
+  unit_cost: "number", copy_scope: "text", memo: "text", created_at: "nullableText", updated_at: "nullableText", status: "text",
+} satisfies Record<string, FieldKind>;
+const saleMemberShape = {
+  id: "uuid", sale_id: "uuid", student_id: "nullableUuid", class_id: "nullableUuid", textbook_id: "uuid", charge_month: "text", quantity: "integer", unit_price: "number",
+  location_id: "nullableUuid", status: "text", exclusion_reason: "text", memo: "text", created_at: "nullableText", updated_at: "nullableText", copy_scope: "text", teacher_id: "nullableUuid", teacher_name: "text",
+} satisfies Record<string, FieldKind>;
+function sameValue(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) && Array.isArray(right)) return left.length === right.length && left.every((item, index) => sameValue(item, right[index]));
+  return object(left) && object(right) && Object.keys(left).length === Object.keys(right).length && Object.keys(left).every((key) => Object.prototype.hasOwnProperty.call(right, key) && sameValue(left[key], right[key]));
+}
+function sourceTimes(value: ObjectValue, timestampKeys: string[], dateKeys: string[] = []) {
+  for (const key of timestampKeys) {
+    const at = value[key];
+    if (at !== null && !(typeof at === "string" && (["infinity", "-infinity"].includes(at)
+      || (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(at) && Number.isFinite(Date.parse(at)))))) fail();
+  }
+  for (const key of dateKeys) if (value[key] !== null && !dates(value[key])) fail();
+}
+function reference(value: unknown, kind: "book" | "class" | "location" | "named", id?: unknown) {
+  if (value === null) return; // RLS-hidden/missing references are explicitly null, never fabricated records.
+  fields(value, kind === "book" ? workflowBookShape : kind === "class" ? { id: "uuid", name: "text", studentCount: "integer" }
+    : kind === "location" ? { id: "uuid", code: "text", name: "text" } : { id: "uuid", name: "text" });
+  if ((id !== undefined && value.id !== id) || (kind === "class" && (value.studentCount as number) < 0)) fail();
+}
+function parsePurchaseMember(value: unknown, primary = false): PurchaseMemberSource {
+  fields(value, purchaseMemberShape, ["order", ...(primary ? ["purchaseScopeLines"] : [])]);
+  sourceTimes(value, ["created_at", "updated_at"]);
+  if (!["student", "teacher"].includes(value.copy_scope as string) || !purchaseStatuses.includes(value.status as string)) fail();
+  if (value.order !== null) {
+    fields(value.order, purchaseOrderShape);
+    sourceTimes(value.order, ["ordered_at", "received_at", "created_at", "updated_at"], ["requested_date", "order_date", "expected_date"]);
+    if (value.order.id !== value.purchase_order_id || !purchaseStatuses.includes(value.order.status as string)) fail();
+  }
+  return value as PurchaseMemberSource;
+}
+function parseQuantities(value: unknown): PurchaseQuantities {
+  exact(value, ["requested", "ordered", "received", "student", "teacher"]);
+  for (const scope of [value.student, value.teacher]) fields(scope, { requested: "integer", ordered: "integer", received: "integer" });
+  for (const key of ["requested", "ordered", "received"]) {
+    if (!integer(value[key]) || value[key] !== ((value.student as ObjectValue)[key] as number) + ((value.teacher as ObjectValue)[key] as number)) fail();
+  }
+  return value as PurchaseQuantities;
+}
+function parsePurchaseRow(value: unknown, mode: "request" | "order"): TextbookPurchaseCaseRow {
+  exact(value, ["id", "anchorLineId", "memberLineIds", "line", "lines", "mode", "status", "eventAt", "references", "quantities"]);
+  if (typeof value.id !== "string" || !value.id || !uuid(value.anchorLineId) || !stringArray(value.memberLineIds)
+    || !Array.isArray(value.lines) || value.lines.length < 1 || value.lines.length > 2 || value.mode !== mode
+    || !purchaseStatuses.includes(value.status as string) || (mode === "request" && value.status !== "requested") || typeof value.eventAt !== "string") fail();
+  const lines = value.lines.map((line) => parsePurchaseMember(line));
+  const primary = parsePurchaseMember(value.line, true);
+  const primarySource = { ...primary }; delete primarySource.purchaseScopeLines;
+  if (value.anchorLineId !== lines[0].id || !sameValue(value.memberLineIds, lines.map((line) => line.id)) || new Set(value.memberLineIds).size !== lines.length
+    || new Set(lines.map((line) => line.copy_scope)).size !== lines.length || !sameValue(primary.purchaseScopeLines, lines)
+    || !sameValue(primarySource, lines.find((line) => line.copy_scope === "student") || lines[0]) || lines.some((line) => line.status !== value.status)) fail();
+  const quantities = parseQuantities(value.quantities);
+  for (const scope of ["student", "teacher"] as const) for (const kind of ["requested", "ordered", "received"] as const) {
+    if (quantities[scope][kind] !== lines.filter((line) => line.copy_scope === scope).reduce((sum, line) => sum + (line[`${kind}_quantity`] as number), 0)) fail();
+  }
+  exact(value.references, ["textbook", "class", "location", "publisher", "supplier", "configuredSupplierId", "unitCost"]);
+  const refs = value.references;
+  reference(refs.textbook, "book", primary.textbook_id || undefined); reference(refs.class, "class", primary.class_id); reference(refs.location, "location", primary.location_id);
+  reference(refs.publisher, "named"); reference(refs.supplier, "named", refs.configuredSupplierId);
+  if (!(refs.configuredSupplierId === "" || uuid(refs.configuredSupplierId)) || !finite(refs.unitCost) || (mode === "request" && refs.supplier !== null)) fail();
+  const order = primary.order;
+  const expectedEvent = primary.status === "received" || primary.status === "partially_received" ? order?.received_at || order?.updated_at || primary.updated_at || ""
+    : primary.status === "ordered" ? order?.ordered_at || order?.order_date || order?.updated_at || primary.updated_at || "" : order?.created_at || primary.created_at || "";
+  const bookKey = (refs.textbook as ObjectValue | null)?.id || (primary.requested_textbook_title || primary.textbook_id || "-").trim().normalize("NFKC").toLowerCase().replace(/\s+/g, " ");
+  const baseKey = [primary.status, bookKey, primary.class_id || "", primary.location_id || "", order?.requested_by.trim() || "", order?.supplier_id || "", order?.order_date || "", order?.statement_number.trim() || ""].join("||");
+  if (value.eventAt !== expectedEvent || (value.id !== baseKey && !(lines.length === 1 && value.id === `${baseKey}||${primary.id}`))) fail();
+  return value as TextbookPurchaseCaseRow;
+}
+function parseSaleRow(value: unknown): SaleLineRow {
+  exact(value, ["id", "line", "sale", "textbook", "class", "student", "location", "status", "groupStatus", "eventAt", "quantity", "amount", "recipientName"]);
+  fields(value.line, saleMemberShape); const line = value.line;
+  sourceTimes(line, ["created_at", "updated_at"]);
+  if (!["charged", "paid", "issued", "excluded", "cancelled", "returned"].includes(line.status as string)) fail();
+  if (value.sale !== null) fields(value.sale, { id: "uuid", class_id: "nullableUuid", charge_month: "text", sale_date: "text", status: "text", memo: "text", created_by: "nullableUuid", created_at: "nullableText", updated_at: "nullableText" });
+  const sale = value.sale as ObjectValue | null;
+  if (sale) {
+    sourceTimes(sale, ["created_at", "updated_at"], ["sale_date"]);
+    if (!["draft", "charged", "paid", "issued", "cancelled"].includes(sale.status as string)) fail();
+  }
+  reference(value.textbook, "book", line.textbook_id); reference(value.class, "class", line.class_id || sale?.class_id || null);
+  reference(value.student, "named", line.student_id); reference(value.location, "location", line.location_id);
+  const status = line.status === "paid" ? "charged" : line.status;
+  if (value.id !== line.id || (sale && sale.id !== line.sale_id) || !["student", "teacher"].includes(line.copy_scope as string) || value.textbook === null
+    || value.status !== status || value.groupStatus !== (saleStatuses.includes(status as string) ? status : "charged")
+    || typeof value.eventAt !== "string" || typeof value.recipientName !== "string" || value.quantity !== Math.max(1, (line.quantity as number) || 1) || !finite(value.amount)) fail();
+  const book = value.textbook as ObjectValue;
+  const price = (line.unit_price as number) || (book.sale_price as number) || (book.price as number) || (book.list_price as number) || 0;
+  const expectedAmount = price * (value.quantity as number);
+  const scale = Math.max(Math.abs(value.amount), Math.abs(expectedAmount));
+  if (!Number.isFinite(expectedAmount) || (scale !== 0 && Math.abs(value.amount / scale - expectedAmount / scale) > Number.EPSILON * 4)) fail();
+  const expectedEvent = status === "issued" ? line.updated_at || "" : sale?.created_at || line.created_at || "";
+  const recipient = line.copy_scope === "teacher" ? String(line.teacher_name).trim() || "선생님 미지정" : String((value.student as ObjectValue | null)?.name || line.student_id || "").trim() || "-";
+  if (value.eventAt !== expectedEvent || value.recipientName !== recipient) fail();
+  return value as SaleLineRow;
+}
+function parsePurchaseSummary(value: unknown, mode: "request" | "order"): TextbookPurchaseSummary {
+  exact(value, ["mode", "totalCount", "rawLineCount", "quantities", "groups", "requestCounts", "orderCounts", "boardScopeCounts"]);
+  if (value.mode !== mode || !integer(value.totalCount) || value.totalCount < 0 || !integer(value.rawLineCount) || value.rawLineCount < value.totalCount || value.rawLineCount > value.totalCount * 2 || !Array.isArray(value.groups)) fail();
+  const quantities = parseQuantities(value.quantities); let total = 0; let raw = 0; let previous = -1;
+  const groups = value.groups.map((group) => {
+    exact(group, ["status", "totalCount", "rawLineCount", "quantities"]);
+    const index = purchaseStatuses.indexOf(group.status as string);
+    if (index <= previous || (mode === "request" && group.status !== "requested") || !integer(group.totalCount) || group.totalCount <= 0 || !integer(group.rawLineCount) || group.rawLineCount < group.totalCount || group.rawLineCount > 2 * group.totalCount) fail();
+    previous = index; total += group.totalCount; raw += group.rawLineCount; return parseQuantities(group.quantities);
+  });
+  if (total !== value.totalCount || raw !== value.rawLineCount) fail();
+  for (const kind of ["requested", "ordered", "received"] as const) {
+    if (groups.reduce((sum, q) => sum + q[kind], 0) !== quantities[kind]) fail();
+    for (const scope of ["student", "teacher"] as const) if (groups.reduce((sum, q) => sum + q[scope][kind], 0) !== quantities[scope][kind]) fail();
+  }
+  countMap(value.requestCounts, purchaseRequests); countMap(value.orderCounts, purchaseOrders); countMap(value.boardScopeCounts, purchaseBoards);
+  return value as TextbookPurchaseSummary;
+}
+function parseSaleSummary(value: unknown): TextbookSaleSummary {
+  exact(value, ["totalCount", "totalQuantity", "studentCount", "classCount", "totalAmount", "groups", "statusCounts"]);
+  if (!["totalCount", "totalQuantity", "studentCount", "classCount"].every((key) => integer(value[key]) && value[key] >= 0) || !finite(value.totalAmount)
+    || (value.studentCount as number) > (value.totalCount as number) || (value.classCount as number) > (value.totalCount as number) || !Array.isArray(value.groups)) fail();
+  let total = 0; let previous = -1;
+  for (const group of value.groups) {
+    fields(group, { status: "text", totalCount: "integer", totalQuantity: "integer" });
+    const index = saleStatuses.indexOf(group.status as string);
+    if (index <= previous || (group.totalCount as number) <= 0) fail(); previous = index; total += group.totalCount as number;
+  }
+  if (total !== value.totalCount || (value.totalQuantity as number) < total) fail();
+  countMap(value.statusCounts, saleFilters);
+  return value as TextbookSaleSummary;
+}
+
+export async function listTextbookPurchasePage(request: PageRequest<PurchaseFilters, "status-event">, options: TextbookReadOptions = {}): Promise<NumberedPage<TextbookPurchaseCaseRow>> {
+  validatePage(request, "purchase", "status-event");
+  const deadline = AbortSignal.timeout(8000); const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+  return read({ ...options, signal }, (client) => client.rpc("list_textbook_purchase_page_v1", { p_filters: request.filters, p_sort: request.sort, p_page: request.page, p_page_size: request.pageSize }).abortSignal(signal).retry(false), (data) => parsePage(data, request, (row) => parsePurchaseRow(row, request.filters.mode)));
+}
+export async function listTextbookSalePage(request: PageRequest<SaleFilters, "status-event">, options: TextbookReadOptions = {}): Promise<NumberedPage<SaleLineRow>> {
+  validatePage(request, "sale", "status-event");
+  const deadline = AbortSignal.timeout(8000); const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+  return read({ ...options, signal }, (client) => client.rpc("list_textbook_sale_page_v1", { p_filters: request.filters, p_sort: request.sort, p_page: request.page, p_page_size: request.pageSize }).abortSignal(signal).retry(false), (data) => parsePage(data, request, parseSaleRow));
+}
+export async function getTextbookPurchaseSummary(filters: PurchaseFilters, options: TextbookReadOptions = {}): Promise<TextbookPurchaseSummary> {
+  validateFilters(filters, "purchase");
+  const deadline = AbortSignal.timeout(8000); const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+  return read({ ...options, signal }, (client) => client.rpc("get_textbook_purchase_summary_v1", { p_filters: filters }).abortSignal(signal).retry(false), (data) => parsePurchaseSummary(data, filters.mode));
+}
+export async function getTextbookSaleSummary(filters: SaleFilters, options: TextbookReadOptions = {}): Promise<TextbookSaleSummary> {
+  validateFilters(filters, "sale");
+  const deadline = AbortSignal.timeout(8000); const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+  return read({ ...options, signal }, (client) => client.rpc("get_textbook_sale_summary_v1", { p_filters: filters }).abortSignal(signal).retry(false), parseSaleSummary);
+}
+export async function getTextbookOperationsSummary(options: TextbookReadOptions = {}): Promise<TextbookOperationsSummary> {
+  const deadline = AbortSignal.timeout(8000); const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+  return read({ ...options, signal }, (client) => client.rpc("get_textbook_operations_summary_v1", {}).abortSignal(signal).retry(false), (data) => {
+    countMap(data, ["requestCount", "unregisteredRequestCount", "orderNeededCount", "receivingBacklogCount", "partialReceiptCount", "issueWaitingCount", "stockRiskCount"]);
+    const result = data as TextbookOperationsSummary;
+    if (result.requestCount !== result.unregisteredRequestCount + result.orderNeededCount) fail(); return result;
+  });
+}
+export async function getTextbookPurchaseDetail(input: TextbookPurchaseDetailInput, options: TextbookReadOptions = {}): Promise<TextbookPurchaseDetail> {
+  if (!object(input) || Object.keys(input).length !== 2 || !uuid(input.anchorLineId) || !["request", "order"].includes(input.mode)) fail("input");
+  const deadline = AbortSignal.timeout(8000); const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+  return read({ ...options, signal }, (client) => client.rpc("get_textbook_purchase_detail_v1", { p_anchor_line_id: input.anchorLineId, p_mode: input.mode }).abortSignal(signal).retry(false), (data) => {
+    exact(data, ["row"]); const row = data.row === null ? null : parsePurchaseRow(data.row, input.mode);
+    if (row && !row.memberLineIds.some((id) => id.toLowerCase() === input.anchorLineId.toLowerCase())) fail(); return { row };
+  });
+}
+export async function getTextbookSaleDetail(id: string, options: TextbookReadOptions = {}): Promise<TextbookSaleDetail> {
+  if (!uuid(id)) fail("id");
+  const deadline = AbortSignal.timeout(8000); const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+  return read({ ...options, signal }, (client) => client.rpc("get_textbook_sale_detail_v1", { p_id: id }).abortSignal(signal).retry(false), (data) => {
+    exact(data, ["row"]); const row = data.row === null ? null : parseSaleRow(data.row);
+    if (row && row.id.toLowerCase() !== id.toLowerCase()) fail(); return { row };
   });
 }
