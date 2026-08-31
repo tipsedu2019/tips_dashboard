@@ -149,6 +149,11 @@
       "fileName": "20260831013310_management_numbered_pages.sql",
       "status": "final",
       "sha256": "577a477ad1ef68ad44768a39adc2cd7acda0a782dd12d02d9038397d24a65667"
+    },
+    {
+      "fileName": "20260831031913_ops_task_numbered_pages.sql",
+      "status": "final",
+      "sha256": "2f3303d4dda16d925e70ed11ee5ae6b676aa90f92493cc54e4b5263e3199362c"
     }
   ]
 }

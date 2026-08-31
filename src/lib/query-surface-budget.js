@@ -40,8 +40,11 @@ const EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES = new Set([
 // strict server-side allowlist, not a client promise or a clamped default.
 // management: 20260831013310_management_numbered_pages.sql (final),
 // management_numbered_pages_test.sql; local final-only proof 114/114.
+// tasks: 20260831031913_ops_task_numbered_pages.sql (final),
+// ops_task_numbered_pages_test.sql; local final-only proof 568/568.
 const EXACT_NUMBERED_RPC_CONTRACTS = new Map([
   ["list_management_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["list_ops_task_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
 ])
 
 const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION"

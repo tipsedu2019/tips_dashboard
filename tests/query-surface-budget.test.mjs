@@ -1313,6 +1313,31 @@ test("numbered RPC actual management service and hook retain verified timeout an
   }
 })
 
+test("task numbered RPC allows only its proven strict 10/15/20 contract", () => {
+  const inspect = (name, args, suffix = '.abortSignal(AbortSignal.timeout(8000)).retry(false)') => inspectQuerySurfaceSource({
+    surface: "tasks", file: "src/features/tasks/numbered-fixture.ts",
+    source: `async function load(client, request) { return client.rpc(${JSON.stringify(name)}, ${args})${suffix} }`,
+  }).map((violation) => violation.reason)
+  for (const size of ["10", "15", "20", "request.pageSize"]) {
+    assert.deepEqual(inspect("list_ops_task_numbered_page_v1", `{ p_page: request.page, p_page_size: ${size} }`), [], size)
+  }
+  for (const size of ["5", "30", "11", "null", '"10"']) {
+    assert.deepEqual(inspect("list_ops_task_numbered_page_v1", `{ p_page_size: ${size} }`), ["rpc_page_limit_invalid"], size)
+  }
+  assert.deepEqual(inspect("list_ops_task_numbered_page_v1", "{}"), ["rpc_page_limit_missing"])
+  assert.deepEqual(inspect("list_ops_task_numbered_page_v1", "{ ...request, p_page_size: 10 }"), ["rpc_page_limit_unresolved"])
+  assert.deepEqual(inspect("list_ops_task_numbered_page_v2", "{ p_page_size: 10 }"), ["rpc_page_limit_missing"])
+  assert.deepEqual(inspect("list_ops_task_page_v2", "{ p_page_size: 10 }"), ["rpc_page_limit_missing"])
+  assert.ok(inspect("list_ops_task_numbered_page_v1", "{ p_page_size: 10 }", ".retry(false)").includes("list_abort_signal_missing"))
+  assert.ok(inspect("list_ops_task_numbered_page_v1", "{ p_page_size: 10 }", ".abortSignal(AbortSignal.timeout(8000))").includes("list_retry_false_missing"))
+})
+
+test("actual task numbered service retains timeout, retry and bounded RPC contracts", async () => {
+  const file = "src/features/tasks/ops-task-numbered-service.ts"
+  const source = await readFile(new URL(`../${file}`, import.meta.url), "utf8")
+  assert.deepEqual(inspectQuerySurfaceSource({ surface: "tasks", file, source }), [])
+})
+
 test("ordered exact-key details and nested projections without wildcards remain allowed", async () => {
   const result = await verifyFixture({
     source: `async function load(client, id) {
