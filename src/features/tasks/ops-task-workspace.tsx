@@ -7869,7 +7869,7 @@ function mergeOpsTaskWorkspaceOptionData(
     requestedByLabel: profileLabels.get(task.requestedBy) || task.requestedByLabel,
     assigneeLabel: profileLabels.get(task.assigneeId) || task.assigneeLabel,
     secondaryAssigneeLabel: profileLabels.get(task.secondaryAssigneeId) || task.secondaryAssigneeLabel,
-    completedByLabel: profileLabels.get(task.completedBy) || task.completedByLabel,
+    // completedByLabel is a stored historical snapshot, including unrecorded values.
     comments: task.comments.map((comment) => ({
       ...comment,
       authorLabel: profileLabels.get(comment.authorId) || comment.authorLabel,
@@ -9315,21 +9315,27 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     && registrationConsultationOwnerScope === "mine"
     ? registrationViewerId
     : undefined
-  const displayedRegistrationView = useMemo(() => {
-    if (!numberedServerPage || !numberedPage.scope) return registrationView
+  const displayedRegistrationFilters = useMemo(() => {
+    const current = { view: registrationView, consultationOwnerId }
+    if (!numberedServerPage || !numberedPage.scope) return current
     const { filters } = JSON.parse(numberedPage.scope) as { filters: OpsTaskPageFilters }
-    return filters.taskType === "registration" ? filters.view : registrationView
-  }, [numberedPage.scope, numberedServerPage, registrationView])
+    // Wire null means all owners; the presentation model uses undefined for all.
+    return filters.taskType === "registration"
+      ? { view: filters.view, consultationOwnerId: filters.consultationOwnerId ?? undefined }
+      : current
+  }, [consultationOwnerId, numberedPage.scope, numberedServerPage, registrationView])
   const visibleRegistrationCaseItems = useMemo(
     () => numberedServerPage
-      ? registrationCaseItems.flatMap((item) => filterRegistrationCaseListItems([item], displayedRegistrationView))
+      ? registrationCaseItems.flatMap((item) => filterRegistrationCaseListItems(
+        [item], displayedRegistrationFilters.view, "", { consultationOwnerId: displayedRegistrationFilters.consultationOwnerId },
+      ))
       : filterRegistrationCaseListItems(
         registrationCaseItems,
         registrationView,
         deferredQuery,
         { consultationOwnerId },
       ),
-    [consultationOwnerId, numberedServerPage, deferredQuery, displayedRegistrationView, registrationCaseItems, registrationView],
+    [consultationOwnerId, numberedServerPage, deferredQuery, displayedRegistrationFilters, registrationCaseItems, registrationView],
   )
   const registrationConsultationScopeCounts = useMemo(() => hasAuthoritativeTaskStats ? ({
     mine: authoritativeTaskStats?.metrics.consultationMine || 0,

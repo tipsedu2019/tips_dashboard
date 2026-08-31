@@ -17,7 +17,10 @@ function modules(supabase, overrides = {}) {
   function load(file) {
     if (cache.has(file)) return cache.get(file).exports;
     const runtime = { exports: {} }; cache.set(file, runtime);
-    const source = ts.transpileModule(readFileSync(file, 'utf8'), { fileName: file, compilerOptions: {
+    // Observe private production consumers without adding production exports or replacing them.
+    const testExports = file.endsWith('/ops-task-workspace.tsx')
+      ? '\nexport { WithdrawalDetailPanel, mergeOpsTaskWorkspaceOptionData };' : '';
+    const source = ts.transpileModule(readFileSync(file, 'utf8') + testExports, { fileName: file, compilerOptions: {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
     } }).outputText;
     const resolve = (specifier) => {
@@ -159,6 +162,24 @@ test('restoration is edge-triggered and only successful commits notify the works
   await page.render({ restorationKey: 'entry-B', restoredPage: 7 });
   assert.equal(page.requests[3].args.p_page, 7);
 });
+for (const outcome of ['pending', 'failed']) test(`refresh preserves a new scope restored page seven while ${outcome}`, async (t) => {
+  const commits = [];
+  const page = await hook(t, { restoredPage: 11, restorationKey: 'old', onPageCommit: (value) => commits.push(value) });
+  await act(async () => page.finish(0));
+  await page.render({ filters: { ...page.props.filters, search: 'RESTORED' }, restoredPage: 7, restorationKey: 'new' });
+  if (outcome === 'failed') await act(async () => page.requests[1].reject(new Error('restore offline')));
+  await act(async () => { void page.state.refresh(); });
+  assert.deepEqual(page.requests.map((request) => [request.args.p_page, request.args.p_filters.search]), [[11, ''], [7, 'RESTORED'], [7, 'RESTORED']]);
+  assert.equal(page.state.page, 11); assert.equal(page.state.rows[0].title, '업무 101');
+  assert.equal(page.state.totalCount, 260); assert.deepEqual(commits.map((commit) => commit.page), [11]);
+  await act(async () => page.finish(2, 70));
+  assert.equal(page.state.page, 7); assert.equal(page.state.rows[0].title, '업무 61');
+  assert.deepEqual(commits.map((commit) => commit.page), [11, 7]);
+  if (outcome === 'pending') {
+    await act(async () => page.finish(1));
+    assert.equal(page.state.totalCount, 70); assert.deepEqual(commits.map((commit) => commit.page), [11, 7]);
+  }
+});
 test('explicit complete fixture adapter replaces rows and counts parent items', async () => {
   const { getCompleteOpsTaskFixturePage } = modules(null)('src/features/tasks/use-ops-task-numbered-page.ts');
   const rows = Array.from({ length: 26 }, (_, i) => ({ id: String(i + 1) }));
@@ -177,6 +198,13 @@ test('query readiness pauses without clearing the successful actor page', async 
   await act(async () => page.requests[1].reject(new Error('restoration offline')));
   assert.equal(page.state.rows[0]?.title, '업무 1');
   assert.equal(page.state.totalCount, 260);
+});
+test('refresh cannot restart a new-scope request while reads are paused', async (t) => {
+  const page = await hook(t); await act(async () => page.finish(0));
+  await page.render({ filters: { ...page.props.filters, search: 'NEW SCOPE' } });
+  await page.render({ enabled: false });
+  await act(async () => { void page.state.refresh(); });
+  assert.equal(page.requests.length, 2);
 });
 for (const outcome of ['complete', 'reject']) test(`paused in-flight ${outcome} resumes its requested page without page-one replay`, async (t) => {
   const page = await hook(t);
@@ -280,6 +308,102 @@ async function workspace(t, initial = {}) {
   await render();
   return { ...io, queries, tableRequests, render, load, remount: async () => { mountKey++; await render(); }, get props() { return props; } };
 }
+function currentComponentProps(name) {
+  const container = document.getElementById('root');
+  const rootFiber = container[Object.keys(container).find((key) => key.startsWith('__reactContainer'))].stateNode.current;
+  function visit(fiber) {
+    if (!fiber) return null;
+    if (fiber.type?.name === name) return fiber.memoizedProps;
+    return visit(fiber.child) || visit(fiber.sibling);
+  }
+  const props = visit(rootFiber);
+  assert.ok(props, `committed production ${name} consumer`);
+  return props;
+}
+for (const storedLabel of ['STORED ACTOR', '']) test(`completed workspace catalog keeps stored actor ${storedLabel || 'unrecorded'} across same-page refresh and replacement`, async (t) => {
+  const page = await workspace(t, { workspace: 'withdrawal', deferTables: true });
+  const completed = [...document.querySelectorAll('[role="tab"]')].find((tab) => tab.textContent.includes('완료'));
+  await act(async () => completed.click());
+  const numbered = () => page.requests.filter((request) => request.name === 'list_ops_task_numbered_page_v1');
+  assert.equal(numbered().at(-1).args.p_filters.view, 'closed');
+  const patch = { ...operationPatch('withdrawal'), status: 'done', completedAt: '2026-08-30T00:00:00Z', completedById: id(800), completedByLabel: storedLabel,
+    requestedById: id(800), requestedByLabel: 'OLD REQUESTER', assigneeId: id(800), assigneeLabel: 'OLD ASSIGNEE' };
+  const finish = async () => act(async () => page.finish(page.requests.indexOf(numbered().at(-1)), 11, Array.from({ length: 10 }, () => patch)));
+  await finish();
+  assert.equal(currentComponentProps('WithdrawalDataTable').tasks[0].completedByLabel, storedLabel);
+  // Actual table filter callback triggers the lazy catalog; no service/model stub.
+  await act(async () => currentComponentProps('WithdrawalDataTable').onFilterOpen());
+  await act(async () => {
+    for (const pending of page.tableRequests) pending.resolve({ error: null, data: pending.table === 'profiles'
+      ? [{ id: id(800), name: 'RENAMED LIVE ACTOR', role: 'staff' }] : [] });
+  });
+  const output = document.createElement('div'); document.body.appendChild(output);
+  const detailRoot = createRoot(output);
+  t.after(async () => act(async () => detailRoot.unmount()));
+  const { WithdrawalDetailPanel } = page.load('src/features/tasks/ops-task-workspace.tsx');
+  const assertStored = async (expectedId) => {
+    const task = currentComponentProps('WithdrawalDataTable').tasks[0];
+    assert.equal(task.id, expectedId); assert.equal(task.status, 'done');
+    assert.equal(task.completedByLabel, storedLabel, 'catalog cannot rewrite or infer the historical actor');
+    assert.equal(task.requestedByLabel, 'RENAMED LIVE ACTOR'); assert.equal(task.assigneeLabel, 'RENAMED LIVE ACTOR');
+    // Separate downstream rendering proof, not the normal independent exact-detail dialog.
+    await act(async () => detailRoot.render(createElement(WithdrawalDetailPanel, { task })));
+    const label = [...output.querySelectorAll('dt')].find((element) => element.textContent === '처리자');
+    assert.equal(label.nextElementSibling.textContent, storedLabel || '처리자 미기록');
+  };
+  await assertStored(id(1));
+  await act(async () => currentComponentProps('DataTablePagination').onPageChange(1));
+  assert.equal(numbered().at(-1).args.p_page, 1);
+  await finish(); await assertStored(id(1));
+  await act(async () => document.querySelector('button[aria-label="2 페이지"]').click());
+  await finish(); await assertStored(id(11));
+});
+test('catalog preserves absent actor snapshots while enriching live comment attachment and event labels', () => {
+  const { mergeOpsTaskWorkspaceOptionData } = modules(null, { '@/providers/auth-provider': {} })('src/features/tasks/ops-task-workspace.tsx');
+  const task = { completedBy: id(800), requestedBy: id(800), assigneeId: id(800), secondaryAssigneeId: id(800),
+    comments: [{ authorId: id(800), authorLabel: 'OLD' }], attachments: [{ uploadedBy: id(800), uploadedByLabel: 'OLD' }], events: [{ actorId: id(800), actorLabel: 'OLD' }] };
+  const options = { profiles: [{ id: id(800), label: 'LIVE' }], students: [], classes: [], textbooks: [], teachers: [] };
+  const [result] = mergeOpsTaskWorkspaceOptionData({ tasks: [task] }, options).tasks;
+  assert.equal(Object.hasOwn(result, 'completedByLabel'), false);
+  assert.equal(result.secondaryAssigneeLabel, 'LIVE'); assert.equal(result.comments[0].authorLabel, 'LIVE');
+  assert.equal(result.attachments[0].uploadedByLabel, 'LIVE'); assert.equal(result.events[0].actorLabel, 'LIVE');
+});
+for (const change of ['filter', 'size']) for (const outcome of ['pending', 'failed']) test(`actual workspace refresh preserves ${change} reset while ${outcome}`, async (t) => {
+  const page = await workspace(t, { search: '?taskPage=11&taskPageType=general' });
+  const numbered = () => page.requests.filter((request) => request.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(page.requests.indexOf(numbered()[0])));
+  assert.equal(window.history.state.tipsOpsTaskList.page, 11);
+  if (change === 'filter') {
+    const input = document.querySelector('input[placeholder*="검색"]');
+    await act(async () => input[Object.keys(input).find((key) => key.startsWith('__reactProps'))].onChange({ target: { value: 'NEW FILTER' } }));
+  } else {
+    const selector = document.querySelector('[aria-label="페이지당 행 수"]');
+    await act(async () => selector.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+    const option = [...document.querySelectorAll('[role="option"]')].find((option) => option.textContent.includes('15개'));
+    assert.ok(option);
+    await act(async () => option.click());
+  }
+  const reset = numbered()[1];
+  assert.equal(reset.args.p_page, 1);
+  if (outcome === 'failed') await act(async () => reset.reject(new Error('scope offline')));
+  const refresh = document.querySelector('button[aria-label="새로고침"]');
+  assert.equal(refresh.disabled, false);
+  await act(async () => refresh.click());
+  assert.deepEqual(numbered().map((request) => [request.args.p_page, request.args.p_page_size, request.args.p_filters.search]),
+    change === 'filter' ? [[11, 10, ''], [1, 10, 'NEW FILTER'], [1, 10, 'NEW FILTER']] : [[11, 10, ''], [1, 15, ''], [1, 15, '']]);
+  assert.equal(window.history.state.tipsOpsTaskList.page, 11, 'refresh cannot commit an unaccepted target');
+  assert.ok(document.body.textContent.includes('업무 101'));
+  assert.ok(document.body.textContent.includes('260건 · 101–110번째'));
+  await act(async () => page.finish(page.requests.indexOf(numbered()[2]), 2, [{ title: 'NEW ACCEPTED' }]));
+  assert.equal(window.history.state.tipsOpsTaskList.page, 1);
+  assert.ok(document.body.textContent.includes('NEW ACCEPTED'));
+  assert.ok(document.body.textContent.includes('2건 · 1–2번째'));
+  if (outcome === 'pending') {
+    assert.equal(reset.signal.aborted, true);
+    await act(async () => page.finish(page.requests.indexOf(reset)));
+    assert.ok(document.body.textContent.includes('2건 · 1–2번째'));
+  }
+});
 for (const fixture of [
   { label: 'literal descending', titles: ['Z 업무', 'A 업무'] },
   { label: 'natural numeric', titles: ['업무 2', '업무 10'] },
@@ -650,4 +774,45 @@ test('registration tab pending and failure retain the accepted parent and matchi
   await act(async () => pending.reject(new Error('tab offline')));
   assert.equal(list()?.textContent, accepted, 'failed tab must retain accepted tracks');
   assert.ok(document.body.textContent.includes('1건 · 1–1번째'));
+});
+for (const view of ['consultation_requested', 'consultation_completed']) for (const transition of ['mine', 'pending', 'failed', 'all']) test(`registration ${view} ${transition} presents accepted owners and opens its representative`, async (t) => {
+  const page = await workspace(t, { workspace: 'registration', viewerId: id(800), search: `?flow=${view}&owner=mine`,
+    historyState: { tipsOpsTaskList: { version: 1, actorScope: JSON.stringify([id(800), 'staff']), pathname: '/admin/registration',
+      filters: { taskType: 'registration', search: 'SERVER MATCHED METADATA', statuses: [], view, consultationOwnerId: id(800) }, page: 1, pageSize: 10, scrollY: 0 } },
+  });
+  const numbered = () => page.requests.filter((request) => request.name === 'list_ops_task_numbered_page_v1');
+  assert.equal(numbered()[0].args.p_filters.consultationOwnerId, id(800));
+  assert.equal(numbered()[0].args.p_filters.search, 'SERVER MATCHED METADATA', 'server search must not be reapplied to the narrower displayed fields');
+  const patch = registrationPatch(1, 'MATCHED PARENT');
+  patch.registrationTracks = patch.registrationTracks.map((track, i) => ({ ...track,
+    status: 'consultation_waiting', workflowStatus: view, directorProfileId: id(800 + i), directorName: i ? 'OTHER DIRECTOR' : 'OWN DIRECTOR',
+    phoneReadyAt: i ? '2026-08-01T00:00:00Z' : '2026-08-02T00:00:00Z',
+  }));
+  // Preserve server parent order even though the second parent has an earlier phone time.
+  const second = registrationPatch(2, 'SECOND PARENT');
+  second.registrationTracks = [{ ...patch.registrationTracks[0], id: id(1004), taskId: id(2), phoneReadyAt: '2026-07-01T00:00:00Z' }];
+  await act(async () => page.finish(page.requests.indexOf(numbered()[0]), 2, [patch, second]));
+  if (transition !== 'mine') {
+    const all = [...document.querySelectorAll('[aria-label="상담 목록 범위"] button')].find((button) => button.textContent.startsWith('전체'));
+    await act(async () => all.click());
+    assert.equal(numbered()[1].args.p_filters.consultationOwnerId, null, 'wire null means all');
+    if (transition === 'failed') await act(async () => numbered()[1].reject(new Error('owner scope offline')));
+    if (transition === 'all') await act(async () => page.finish(page.requests.indexOf(numbered()[1]), 2, [patch, second]));
+  }
+  const item = currentComponentProps('RegistrationCaseList').items[0];
+  assert.equal(item.viewKey, view);
+  assert.deepEqual(item.task.registrationTracks.map((track) => track.directorProfileId), [id(800), id(801)], 'all authorized siblings stay on detail DTO');
+  const owners = transition === 'all' ? (view === 'consultation_requested' ? [id(801), id(800)] : [id(800), id(801)]) : [id(800)];
+  assert.deepEqual(item.matchingTracks.map((track) => track.directorProfileId), owners);
+  const representative = transition === 'all' && view === 'consultation_requested' ? id(1003) : id(1002);
+  assert.equal(item.representativeTrack.trackId, representative);
+  for (const mirror of ['desktop', 'mobile']) {
+    const list = document.querySelector(`[data-testid="registration-case-${mirror}-list"]`);
+    assert.ok(list.textContent.includes('OWN DIRECTOR'));
+    assert.equal(list.textContent.includes('OTHER DIRECTOR'), transition === 'all');
+    assert.ok(list.textContent.indexOf('MATCHED PARENT') < list.textContent.indexOf('SECOND PARENT'));
+  }
+  assert.ok(document.body.textContent.includes('2건 · 1–2번째'));
+  await act(async () => document.querySelector('[data-testid="registration-case-desktop-list"] [data-registration-case-row]').click());
+  assert.equal(new URLSearchParams(window.location.search).get('trackId'), representative, 'actual row action opens the accepted owner track');
 });
