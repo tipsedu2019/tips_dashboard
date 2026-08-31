@@ -8,6 +8,8 @@ export const QUERY_SURFACES = Object.freeze(["tasks", "management", "operations"
 const BASELINE_SHA = "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101"
 const BOUND_OPERATION_METHODS = new WeakMap()
 const SCOPE_BINDINGS = new WeakMap()
+const LEXICAL_BINDINGS = new WeakMap()
+const UNKNOWN_LITERAL = Symbol("unknown literal")
 const EXACT_SCALAR_RPC_NAMES = new Set([
   "get_ops_task_list_stats_v1",
   "get_management_stats_v1",
@@ -32,6 +34,14 @@ const EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES = new Set([
   "generate_class_lesson_sessions_v1",
   "save_class_lesson_session_v1",
   "save_class_lesson_content_v1",
+])
+
+// Pageable, not scalar: additions require final migration + pgTAP proof of a
+// strict server-side allowlist, not a client promise or a clamped default.
+// management: 20260831013310_management_numbered_pages.sql (final),
+// management_numbered_pages_test.sql; local final-only proof 114/114.
+const EXACT_NUMBERED_RPC_CONTRACTS = new Map([
+  ["list_management_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
 ])
 
 const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION"
@@ -1011,25 +1021,150 @@ function chainHasWildcardProjection(value) {
   return /(?:^|[,(])\s*(?:[A-Za-z_$][\w$]*\s*:\s*)?\*(?=\s*(?:[,)]|$))/u.test(value)
 }
 
-function isProvablyBoundedAbortExpression(expression) {
+function isLexicalScope(node) {
+  return ts.isSourceFile(node) || ts.isBlock(node) || ts.isModuleBlock(node) || ts.isCaseBlock(node)
+    || ts.isFunctionLike(node) || ts.isCatchClause(node) || ts.isForStatement(node)
+    || ts.isForInStatement(node) || ts.isForOfStatement(node) || ts.isClassExpression(node)
+}
+
+function lexicalBindingIndex(source) {
+  const cached = LEXICAL_BINDINGS.get(source)
+  if (cached) return cached
+  const index = { scopes: new Map(), writes: new WeakMap() }
+  const add = (name, start, functionScoped = false) => {
+    let owner = start
+    while (owner && !(functionScoped ? ts.isFunctionLike(owner) || ts.isSourceFile(owner) : isLexicalScope(owner))) owner = owner.parent
+    if (!owner) return
+    const names = index.scopes.get(owner) ?? new Map()
+    for (const identifier of bindingIdentifiers(name)) {
+      names.set(identifier.text, [...(names.get(identifier.text) ?? []), identifier])
+    }
+    index.scopes.set(owner, names)
+  }
+  const visit = (node) => {
+    if (ts.isVariableDeclaration(node)) add(node.name, node.parent, isFunctionScopedBinding(node))
+    else if (ts.isParameter(node)) add(node.name, node.parent)
+    else if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) || ts.isEnumDeclaration(node) || ts.isModuleDeclaration(node)) && node.name) add(node.name, node.parent)
+    else if ((ts.isFunctionExpression(node) || ts.isClassExpression(node)) && node.name) add(node.name, node)
+    else if ((ts.isImportClause(node) || ts.isImportSpecifier(node) || ts.isNamespaceImport(node) || ts.isImportEqualsDeclaration(node)) && node.name) add(node.name, node.parent)
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  LEXICAL_BINDINGS.set(source, index)
+  return index
+}
+
+// Resolve the nearest lexical declaration even in its TDZ. Skipping an unsafe
+// parameter, destructuring binding or later declaration could borrow an outer
+// timeout with the same spelling. Binding nodes, not names, carry the proof.
+function lexicalBindingsAt(identifier) {
+  const { scopes } = lexicalBindingIndex(identifier.getSourceFile())
+  for (let owner = identifier.parent; owner; owner = owner.parent) {
+    const bindings = scopes.get(owner)?.get(identifier.text)
+    if (bindings) return bindings
+  }
+  return []
+}
+
+function lexicalWriteTargets(expression) {
+  const target = unwrap(expression)
+  if (ts.isIdentifier(target)) return [target]
+  if (ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target)) return lexicalWriteTargets(target.expression)
+  if (ts.isArrayLiteralExpression(target)) return target.elements.flatMap(lexicalWriteTargets)
+  if (ts.isObjectLiteralExpression(target)) return target.properties.flatMap((property) => {
+    if (ts.isShorthandPropertyAssignment(property)) return [property.name]
+    if (ts.isPropertyAssignment(property)) return lexicalWriteTargets(property.initializer)
+    if (ts.isSpreadAssignment(property)) return lexicalWriteTargets(property.expression)
+    return []
+  })
+  if (ts.isSpreadElement(target)) return lexicalWriteTargets(target.expression)
+  if (ts.isBinaryExpression(target) && target.operatorToken.kind === ts.SyntaxKind.EqualsToken) return lexicalWriteTargets(target.left)
+  return []
+}
+
+function hasLexicalWrite(binding) {
+  const source = binding.getSourceFile()
+  const { writes } = lexicalBindingIndex(source)
+  if (writes.has(binding)) return writes.get(binding)
+  let written = false
+  const visit = (node) => {
+    if (written) return
+    let target
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+      && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) target = node.left
+    else if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node))
+      && [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator)) target = node.operand
+    else if (ts.isDeleteExpression(node)) target = node.expression
+    else if ((ts.isForInStatement(node) || ts.isForOfStatement(node)) && !ts.isVariableDeclarationList(node.initializer)) target = node.initializer
+    if (target && lexicalWriteTargets(target).some((identifier) => lexicalBindingsAt(identifier).includes(binding))) written = true
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  writes.set(binding, written)
+  return written
+}
+
+function immutableLexicalInitializer(identifier, seen) {
+  const bindings = lexicalBindingsAt(identifier)
+  if (bindings.length !== 1) return null
+  const binding = bindings[0]
+  const declaration = binding.parent
+  if (!ts.isVariableDeclaration(declaration) || declaration.name !== binding || !declaration.initializer
+    || !isImmutableConst(declaration) || declaration.end > identifier.pos || seen.has(binding) || hasLexicalWrite(binding)) return null
+  return { initializer: declaration.initializer, seen: new Set([...seen, binding]) }
+}
+
+function lexicalLiteralValue(expression, seen = new Set()) {
+  const value = unwrap(expression)
+  if (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value)) return value.text
+  if (ts.isNumericLiteral(value)) return Number(value.text)
+  if (ts.isPrefixUnaryExpression(value) && value.operator === ts.SyntaxKind.MinusToken && ts.isNumericLiteral(value.operand)) return -Number(value.operand.text)
+  if (value.kind === ts.SyntaxKind.NullKeyword) return null
+  if (value.kind === ts.SyntaxKind.TrueKeyword) return true
+  if (value.kind === ts.SyntaxKind.FalseKeyword) return false
+  if (ts.isIdentifier(value)) {
+    if (value.text === "undefined" && lexicalBindingsAt(value).length === 0) return undefined
+    const alias = immutableLexicalInitializer(value, seen)
+    if (alias) return lexicalLiteralValue(alias.initializer, alias.seen)
+  }
+  return UNKNOWN_LITERAL
+}
+
+function isProvablyBoundedAbortExpression(expression, seen = new Set()) {
   const signal = unwrap(expression)
+  if (ts.isIdentifier(signal)) {
+    const alias = immutableLexicalInitializer(signal, seen)
+    return Boolean(alias && isProvablyBoundedAbortExpression(alias.initializer, alias.seen))
+  }
   if (ts.isConditionalExpression(signal)) {
-    return isProvablyBoundedAbortExpression(signal.whenTrue)
-      && isProvablyBoundedAbortExpression(signal.whenFalse)
+    return isProvablyBoundedAbortExpression(signal.whenTrue, seen)
+      && isProvablyBoundedAbortExpression(signal.whenFalse, seen)
   }
   if (!ts.isCallExpression(signal)) return false
   const access = accessParts(signal)
-  if (rootIdentifier(access?.receiver) !== "AbortSignal") return false
+  if (rootIdentifier(access?.receiver) !== "AbortSignal" || lexicalBindingsAt(access.receiver).length > 0) return false
   if (access.method === "timeout") {
     return signal.arguments.length === 1
-      && argumentValue(signal.arguments[0], new Map()) === 8000
+      && lexicalLiteralValue(signal.arguments[0], seen) === 8000
   }
   if (access.method !== "any" || signal.arguments.length !== 1) return false
   const signals = unwrap(signal.arguments[0])
   return ts.isArrayLiteralExpression(signals)
     && signals.elements.length === 2
     && !signals.elements.some(ts.isSpreadElement)
-    && signals.elements.some((candidate) => isProvablyBoundedAbortExpression(candidate))
+    && signals.elements.some((candidate) => isProvablyBoundedAbortExpression(candidate, seen))
+}
+
+function numberedRpcLimitViolation(argument, contract) {
+  if (!argument) return "rpc_page_limit_missing"
+  if (!ts.isObjectLiteralExpression(argument) || argument.properties.some((property) => !ts.isPropertyAssignment(property)
+    || ts.isComputedPropertyName(property.name))) return "rpc_page_limit_unresolved"
+  const limits = argument.properties.filter((property) => optionName(property) === contract.parameter)
+  if (limits.length === 0) return "rpc_page_limit_missing"
+  if (limits.length !== 1) return "rpc_page_limit_unresolved"
+  const value = lexicalLiteralValue(limits[0].initializer)
+  // Dynamic values are safe only for this exact server-validated contract.
+  return value !== UNKNOWN_LITERAL && !contract.sizes.includes(value) ? "rpc_page_limit_invalid" : null
 }
 
 function isExactTimeoutAbortSignal(call) {
@@ -1319,10 +1454,14 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
     const exactNonpageableRpc = typeof rpcName === "string"
       && (EXACT_SCALAR_RPC_NAMES.has(rpcName) || EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES.has(rpcName))
     const argument = entryArguments[1] ? unwrap(entryArguments[1]) : null
+    const numberedContract = entryArguments[0] && EXACT_NUMBERED_RPC_CONTRACTS.get(lexicalLiteralValue(entryArguments[0]))
     const hasSpread = argument && ts.isObjectLiteralExpression(argument) && argument.properties.some((property) => ts.isSpreadAssignment(property))
     const limits = argument && ts.isObjectLiteralExpression(argument) ? argument.properties.filter((property) => ts.isPropertyAssignment(property)
       && ((ts.isIdentifier(property.name) && property.name.text === "p_limit") || (ts.isStringLiteral(property.name) && property.name.text === "p_limit"))) : []
-    if (hasSpread) reasons.push("rpc_page_limit_unresolved")
+    if (numberedContract) {
+      const violation = numberedRpcLimitViolation(argument, numberedContract)
+      if (violation) reasons.push(violation)
+    } else if (hasSpread) reasons.push("rpc_page_limit_unresolved")
     else if (limits.length === 0 && !exactNonpageableRpc) reasons.push("rpc_page_limit_missing")
     for (const limit of limits) {
       const value = argumentValue(limit.initializer, constants)
@@ -1660,7 +1799,12 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
           && sourceDebt.get(key) <= baseDebt.get(key)
           && baseOccurrences.has(`${key}\u0000${expected.occurrenceFingerprint}`)
           && !queryOccurrenceRelocated(expected.occurrenceContext, violation.occurrenceContext)
-        if (overlapsChangedRange(violation, ranges) && !allowedDebt) violations.push(violation)
+        // An immutable deadline may be declared outside the query function.
+        // Compare raw baseline diagnostics by exact chain/occurrence so a
+        // module-only edit cannot silently remove a previously proven bound.
+        const newlyUnboundedAbort = violation.reason === "list_abort_signal_missing"
+          && !baseOccurrences.has(`${key}\u0000${violation.occurrenceFingerprint}`)
+        if ((overlapsChangedRange(violation, ranges) || newlyUnboundedAbort) && !allowedDebt) violations.push(violation)
     }
   }
   violations.sort((left, right) => exactDebtKey(left).localeCompare(exactDebtKey(right)))
