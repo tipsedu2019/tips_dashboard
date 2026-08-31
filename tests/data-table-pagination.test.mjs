@@ -5,7 +5,7 @@ import test from "node:test"
 import vm from "node:vm"
 
 import { JSDOM } from "jsdom"
-import { act, createElement, forwardRef, useEffect, useState } from "react"
+import { act, createContext, createElement, forwardRef, useContext, useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import ts from "typescript"
 
@@ -59,6 +59,27 @@ function createPagerUi() {
     PaginationContent: passthrough("ul"),
     PaginationItem: passthrough("li"),
   }
+}
+
+function createSelectUi() {
+  const SelectContext = createContext(null)
+  function Select({ children, value, onValueChange }) {
+    return createElement(SelectContext.Provider, { value: { value, onValueChange } }, children)
+  }
+  const SelectContent = passthrough("div")
+  const SelectGroup = passthrough("div")
+  const SelectTrigger = passthrough("button")
+  const SelectValue = passthrough("span")
+  function SelectItem({ children, value }) {
+    const select = useContext(SelectContext)
+    return createElement("button", {
+      type: "button",
+      "data-page-size-value": value,
+      "aria-pressed": select?.value === value,
+      onClick: () => select?.onValueChange(value),
+    }, children)
+  }
+  return { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue }
 }
 
 test("pager renders every current block number with semantic buttons and boundary states", async (t) => {
@@ -129,6 +150,53 @@ test("pager disables navigation at empty and known boundaries", async (t) => {
   await act(async () => root.unmount())
 })
 
+test("pager exposes automatic page-size selection, loading safety, and per-list navigation label", async (t) => {
+  const dom = installDom()
+  t.after(() => dom.window.close())
+  const numbered = await import("../src/lib/numbered-pagination.ts")
+  const preferences = []
+  const { DataTablePagination } = await loadTypeScript(componentUrl, new Map([
+    ["@/components/ui/button", { Button: passthrough("button") }],
+    ["@/components/ui/pagination", createPagerUi()],
+    ["@/components/ui/select", createSelectUi()],
+    ["@/lib/numbered-pagination", numbered],
+    ["lucide-react", { ChevronsLeft: () => null, ChevronLeft: () => null, ChevronRight: () => null, ChevronsRight: () => null }],
+  ]))
+  const container = document.createElement("div")
+  const root = createRoot(container)
+  await act(async () => root.render(createElement(DataTablePagination, {
+    page: 11, pageSize: 15, pageSizeMode: "manual", totalCount: 390, loading: true,
+    ariaLabel: "학생 목록 페이지 탐색", onPageChange: () => assert.fail("loading navigation must be disabled"),
+    onPageSizeChange: (preference) => preferences.push(preference),
+  })))
+  assert.equal(container.querySelector("nav")?.getAttribute("aria-label"), "학생 목록 페이지 탐색")
+  assert.equal(container.querySelector("button[data-page-size-value='15']")?.getAttribute("aria-pressed"), "true")
+  assert.ok(container.querySelector("button[data-page-size-value='auto']"))
+  assert.ok([...container.querySelectorAll("[data-slot=pagination-number-group] button")].every((button) => button.disabled))
+  assert.deepEqual([...container.querySelectorAll("[data-slot=pagination-number-group] button")].map((button) => button.textContent), ["11", "12", "13", "14", "15", "16", "17", "18", "19", "20"])
+  await act(async () => container.querySelector("button[data-page-size-value='auto']").click())
+  assert.deepEqual(preferences, ["auto"])
+  await act(async () => root.unmount())
+})
+
+test("pager renders the partial final block without removing later page buttons", async (t) => {
+  const dom = installDom()
+  t.after(() => dom.window.close())
+  const numbered = await import("../src/lib/numbered-pagination.ts")
+  const { DataTablePagination } = await loadTypeScript(componentUrl, new Map([
+    ["@/components/ui/button", { Button: passthrough("button") }],
+    ["@/components/ui/pagination", createPagerUi()],
+    ["@/components/ui/select", createSelectUi()],
+    ["@/lib/numbered-pagination", numbered],
+    ["lucide-react", { ChevronsLeft: () => null, ChevronLeft: () => null, ChevronRight: () => null, ChevronsRight: () => null }],
+  ]))
+  const container = document.createElement("div")
+  const root = createRoot(container)
+  await act(async () => root.render(createElement(DataTablePagination, { page: 26, pageSize: 10, totalCount: 260, onPageChange: () => undefined })))
+  assert.deepEqual([...container.querySelectorAll("[data-slot=pagination-number-group] button")].map((button) => button.textContent), ["21", "22", "23", "24", "25", "26"])
+  await act(async () => root.unmount())
+})
+
 test("page-size preference hydrates before exposing a requestable size and handles storage failures", async (t) => {
   const dom = installDom()
   t.after(() => dom.window.close())
@@ -155,11 +223,35 @@ test("page-size preference hydrates before exposing a requestable size and handl
     students: { mode: "manual", pageSize: 15 },
   })
   assert.throws(() => seen.at(-1).setPreference(5), /page size/i)
-  await act(async () => seen.at(-1).setAutoPageSize(20))
+  await act(async () => seen.at(-1).setPreference("auto"))
   assert.equal(seen.at(-1).mode, "auto")
+  await act(async () => seen.at(-1).setAutoPageSize(20))
   assert.equal(seen.at(-1).pageSize, 20)
   const saved = JSON.parse(localStorage.getItem("tips.data-table-page-size.v1") ?? "{}")
   assert.deepEqual(saved, {})
+  await act(async () => root.unmount())
+})
+
+test("measured auto sizing cannot overwrite a manual preference", async (t) => {
+  const dom = installDom()
+  t.after(() => dom.window.close())
+  const numbered = await import("../src/lib/numbered-pagination.ts")
+  const { useDataTablePageSize } = await loadTypeScript(hookUrl, new Map([["@/lib/numbered-pagination", numbered]]))
+  const seen = []
+  function Probe() {
+    const state = useDataTablePageSize("classes")
+    useEffect(() => { seen.push(state) }, [state])
+    return null
+  }
+  const root = createRoot(document.createElement("div"))
+  await act(async () => root.render(createElement(Probe)))
+  await act(async () => seen.at(-1).setPreference(15))
+  await act(async () => seen.at(-1).setAutoPageSize(20))
+  assert.equal(seen.at(-1).mode, "manual")
+  assert.equal(seen.at(-1).pageSize, 15)
+  assert.deepEqual(JSON.parse(localStorage.getItem("tips.data-table-page-size.v1") ?? "{}"), {
+    classes: { mode: "manual", pageSize: 15 },
+  })
   await act(async () => root.unmount())
 })
 

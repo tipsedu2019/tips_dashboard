@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { readFile } from "node:fs/promises"
 import test from "node:test"
 
 import {
@@ -6,6 +7,12 @@ import {
   normalizePage,
   validatePageSize,
 } from "../src/lib/numbered-pagination.ts"
+
+test("shared numbered-pagination contracts export page envelopes and size preferences", async () => {
+  const source = await readFile(new URL("../src/lib/numbered-pagination.ts", import.meta.url), "utf8")
+  assert.match(source, /export type DataTablePageSizePreference = "auto" \| DataTablePageSize/)
+  assert.match(source, /export type NumberedPage<T> = \{\s*rows: T\[\]\s*page: number\s*pageSize: DataTablePageSize\s*totalCount: number\s*\}/s)
+})
 
 test("numbered pagination uses fixed blocks of ten pages", () => {
   assert.deepEqual(getNumberedPagination({ page: 9, pageSize: 10, totalCount: 260 }).pages, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])

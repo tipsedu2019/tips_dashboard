@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 
 import {
   type DataTablePageSize,
+  type DataTablePageSizePreference,
   validatePageSize,
 } from "@/lib/numbered-pagination"
 
@@ -16,12 +17,12 @@ type StoredPreference = {
 
 type StoredPreferences = Record<string, StoredPreference>
 
-export type DataTablePageSizePreference = {
+export type UseDataTablePageSizeResult = {
   ready: boolean
   pageSize: DataTablePageSize
   mode: "auto" | "manual"
-  setPreference: (pageSize: DataTablePageSize) => void
-  setAutoPageSize: (measuredPageSize?: DataTablePageSize) => void
+  setPreference: (preference: DataTablePageSizePreference) => void
+  setAutoPageSize: (measuredPageSize: DataTablePageSize) => void
 }
 
 function estimateAutoPageSize(viewportHeight = typeof window === "undefined" ? 0 : window.innerHeight): DataTablePageSize {
@@ -62,7 +63,7 @@ function writePreferences(preferences: StoredPreferences) {
   }
 }
 
-export function useDataTablePageSize(tableId: string): DataTablePageSizePreference {
+export function useDataTablePageSize(tableId: string): UseDataTablePageSizeResult {
   const [hydratedTableId, setHydratedTableId] = useState<string | null>(null)
   const [mode, setMode] = useState<"auto" | "manual">("auto")
   const [pageSize, setPageSize] = useState<DataTablePageSize>(10)
@@ -87,8 +88,17 @@ export function useDataTablePageSize(tableId: string): DataTablePageSizePreferen
     }
   }, [tableId])
 
-  const setPreference = useCallback((nextPageSize: DataTablePageSize) => {
-    const validPageSize = validatePageSize(nextPageSize)
+  const setPreference = useCallback((preference: DataTablePageSizePreference) => {
+    if (preference === "auto") {
+      setMode("auto")
+      setPageSize(estimateAutoPageSize())
+      const preferences = readPreferences()
+      delete preferences[tableId]
+      writePreferences(preferences)
+      return
+    }
+
+    const validPageSize = validatePageSize(preference)
     setMode("manual")
     setPageSize(validPageSize)
     const preferences = readPreferences()
@@ -96,14 +106,10 @@ export function useDataTablePageSize(tableId: string): DataTablePageSizePreferen
     writePreferences(preferences)
   }, [tableId])
 
-  const setAutoPageSize = useCallback((measuredPageSize?: DataTablePageSize) => {
-    const nextPageSize = measuredPageSize === undefined ? estimateAutoPageSize() : validatePageSize(measuredPageSize)
-    setMode("auto")
-    setPageSize(nextPageSize)
-    const preferences = readPreferences()
-    delete preferences[tableId]
-    writePreferences(preferences)
-  }, [tableId])
+  const setAutoPageSize = useCallback((measuredPageSize: DataTablePageSize) => {
+    if (mode !== "auto") return
+    setPageSize(validatePageSize(measuredPageSize))
+  }, [mode])
 
   return { ready: hydratedTableId === tableId, pageSize, mode, setPreference, setAutoPageSize }
 }

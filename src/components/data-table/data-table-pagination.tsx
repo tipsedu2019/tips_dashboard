@@ -24,28 +24,34 @@ import {
 import {
   DATA_TABLE_PAGE_SIZES,
   type DataTablePageSize,
+  type DataTablePageSizePreference,
   getNumberedPagination,
+  validatePageSize,
 } from "@/lib/numbered-pagination"
 
-type DataTablePaginationProps = {
+export type DataTablePaginationProps = {
   page: number
   pageSize: DataTablePageSize
   totalCount: number | null
+  loading?: boolean
   onPageChange: (page: number) => void
-  onPageSizeChange?: (pageSize: DataTablePageSize) => void
-  disabled?: boolean
+  pageSizeMode?: "auto" | "manual"
+  onPageSizeChange?: (preference: DataTablePageSizePreference) => void
+  ariaLabel?: string
 }
 
 export function DataTablePagination({
   page,
   pageSize,
   totalCount,
+  loading = false,
   onPageChange,
+  pageSizeMode = "auto",
   onPageSizeChange,
-  disabled = false,
+  ariaLabel = "페이지 탐색",
 }: DataTablePaginationProps) {
   const pagination = getNumberedPagination({ page, pageSize, totalCount })
-  const navigationDisabled = disabled || pagination.totalPages === null
+  const navigationDisabled = loading || pagination.totalPages === null
   const changePage = (nextPage: number) => {
     if (!navigationDisabled && nextPage !== pagination.page) onPageChange(nextPage)
   }
@@ -59,12 +65,17 @@ export function DataTablePagination({
       </p>
       <div className="flex flex-wrap items-center justify-center gap-3">
         {onPageSizeChange ? (
-          <Select value={String(pageSize)} onValueChange={(value) => onPageSizeChange(Number(value) as DataTablePageSize)}>
+          <Select
+            value={pageSizeMode === "auto" ? "auto" : String(pageSize)}
+            onValueChange={(value) => onPageSizeChange(value === "auto" ? "auto" : validatePageSize(Number(value)))}
+            disabled={loading}
+          >
             <SelectTrigger size="sm" aria-label="페이지당 행 수">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
+                <SelectItem value="auto">자동</SelectItem>
                 {DATA_TABLE_PAGE_SIZES.map((size) => (
                   <SelectItem key={size} value={String(size)}>{size}개씩 보기</SelectItem>
                 ))}
@@ -72,7 +83,7 @@ export function DataTablePagination({
             </SelectContent>
           </Select>
         ) : null}
-        <Pagination aria-label="페이지 탐색" className="w-auto">
+        <Pagination aria-label={ariaLabel} className="w-auto">
           <PaginationContent className="flex-wrap justify-center">
             <PaginationItem>
               <Button type="button" variant="outline" size="sm" aria-label="첫 페이지" disabled={navigationDisabled || !pagination.canPrevious} onClick={() => changePage(1)}>
