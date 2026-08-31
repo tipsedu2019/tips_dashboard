@@ -1224,6 +1224,32 @@ test("immutable abort aliases reject unsupported bindings that shadow the native
   }
 })
 
+test("immutable abort aliases treat class static blocks as independent var scopes", () => {
+  const query = 'client.rpc("get_management_stats_v1").abortSignal(AbortSignal.timeout(duration)).retry(false);'
+  for (const body of [
+    `var duration = 12000; ${query}`,
+    `var duration = 8000; ${query}`,
+    `var duration; duration = 12000; ${query}`,
+    `var { duration } = request; ${query}`,
+    `{ var duration = 12000; } ${query}`,
+    `${query} var duration = 12000;`,
+    `var duration = 12000; const run = () => { ${query} }; run();`,
+  ]) {
+    assert.deepEqual(inspectManagementFixture(`async function load(client, request) {
+      const duration = 8000;
+      class DeadlineOwner { static { ${body} } }
+    }`), ["list_abort_signal_missing"], body)
+  }
+  assert.deepEqual(inspectManagementFixture(`async function load(client) {
+    const duration = 8000;
+    class DeadlineOwner {
+      static { var duration = 12000; }
+      static { ${query} }
+    }
+    ${query}
+  }`), [])
+})
+
 test("numbered RPC contract accepts only its strict server-validated page-size envelope", () => {
   for (const size of ["10", "15", "20", "request.pageSize"]) {
     assert.deepEqual(inspectManagementFixture(`async function load(client, request) {

@@ -1033,7 +1033,9 @@ function lexicalBindingIndex(source) {
   const index = { scopes: new Map(), writes: new WeakMap() }
   const add = (name, start, functionScoped = false) => {
     let owner = start
-    while (owner && !(functionScoped ? ts.isFunctionLike(owner) || ts.isSourceFile(owner) : isLexicalScope(owner))) owner = owner.parent
+    while (owner && !(functionScoped
+      ? ts.isFunctionLike(owner) || ts.isSourceFile(owner) || ts.isClassStaticBlockDeclaration(owner)
+      : isLexicalScope(owner))) owner = owner.parent
     if (!owner) return
     const names = index.scopes.get(owner) ?? new Map()
     for (const identifier of bindingIdentifiers(name)) {

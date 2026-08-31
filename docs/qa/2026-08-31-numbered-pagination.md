@@ -89,6 +89,8 @@ Fresh local verification at Task4 (Node `/Users/hyunjun/.cache/codex-runtimes/co
 
 Task4 rechecked the migration SHA256 above and its sole ordered definition; it did not rerun SQL, change SQL/manifest bytes, apply remote migrations or contact providers. The114/114 SQL result remains the earlier separately recorded local proof. Task4 independent review and the final whole-foundation review are controller-owned next gates; no app-wide completion is claimed.
 
+Task4 review round1 found that class static-block `var` declarations were incorrectly owned by the outer function, allowing an outer8000 const to hide a nearer12000 variable. The owner search now stops at the static block. RED/GREEN regression covers direct, destructured, hoisted, nested-block/function bindings and sibling/outside isolation; the full query-budget suite passes117/117 and focused source/test ESLint passes. Scoped re-review remains pending. The combined351-test/full lint/TS/build results above are the preceding checkpoint, not fresh reruns after this tiny scope fix.
+
 ## Shared exports for downstream adapters
 
 | Source | Contract |
