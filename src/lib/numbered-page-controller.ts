@@ -1,6 +1,12 @@
 import { normalizePage, validatePageSize, type DataTablePageSize, type NumberedPage } from "./numbered-pagination.ts";
 
 export type NumberedPageRequest = { scope: string; page: number; pageSize: DataTablePageSize };
+export type NumberedPageLoadRequest = NumberedPageRequest & {
+  signal: AbortSignal;
+  // Pins a resolved scope for this active read, retry and clamp without
+  // relabeling the previous successful snapshot. False after this read settles.
+  canonicalizeScope: (scope: string) => boolean;
+};
 export type NumberedPageSnapshot<T> = {
   scope: string | null;
   requestedPage: number;
@@ -13,7 +19,7 @@ export type NumberedPageSnapshot<T> = {
 };
 
 export function createNumberedPageController<T>({ loadPage, onChange }: {
-  loadPage: (request: NumberedPageRequest & { signal: AbortSignal }) => Promise<NumberedPage<T>>;
+  loadPage: (request: NumberedPageLoadRequest) => Promise<NumberedPage<T>>;
   onChange: (snapshot: NumberedPageSnapshot<T>) => void;
 }) {
   let snapshot: NumberedPageSnapshot<T> = {
@@ -33,13 +39,24 @@ export function createNumberedPageController<T>({ loadPage, onChange }: {
     const controller = new AbortController();
     active = controller;
     const current = () => !disposed && active === controller && !controller.signal.aborted;
+    let invocation = 0;
+    const loadRequest = (page: number): NumberedPageLoadRequest => {
+      const call = ++invocation;
+      return { ...target, page, signal: controller.signal, canonicalizeScope(scope) {
+        if (!current() || call !== invocation) return false;
+        target.scope = scope;
+        return true;
+      } };
+    };
     publish({ ...snapshot, requestedPage: target.page, loading: true, error: null });
     try {
-      let page = await loadPage({ ...target, signal: controller.signal });
+      let page = await loadPage(loadRequest(target.page));
+      invocation++;
       if (!current()) return;
       const lastPage = Math.max(1, Math.ceil(page.totalCount / target.pageSize));
       if (page.rows.length === 0 && target.page > lastPage) {
-        page = await loadPage({ ...target, page: lastPage, signal: controller.signal });
+        page = await loadPage(loadRequest(lastPage));
+        invocation++;
         if (!current()) return;
         if (page.rows.length === 0 && page.page > Math.max(1, Math.ceil(page.totalCount / target.pageSize))) {
           throw new Error("Page range changed again; retry the request.");
@@ -48,6 +65,7 @@ export function createNumberedPageController<T>({ loadPage, onChange }: {
       requested = { ...target, page: page.page };
       publish({ ...page, scope: target.scope, requestedPage: page.page, loading: false, error: null });
     } catch (error) {
+      invocation++;
       if (current()) publish({ ...snapshot, loading: false, error });
     }
   }

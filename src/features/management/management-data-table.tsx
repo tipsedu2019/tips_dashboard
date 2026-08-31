@@ -1950,11 +1950,11 @@ export function ManagementDataTable({
       hasActiveStudentFilters,
   );
   const filteredRowCount = table.getFilteredRowModel().rows.length;
-  const authoritativeTotal = (totalCount ?? 0).toLocaleString("ko-KR");
+  const authoritativeTotal = totalCount?.toLocaleString("ko-KR");
   const summaryLabel = loading
     ? `${emptyLabel} 불러오는 중`
     : kind === "classes"
-      ? `전체 수업 ${authoritativeTotal}개 · 서버 집계`
+      ? authoritativeTotal === undefined ? "수업 건수 확인 중" : `전체 수업 ${authoritativeTotal}개 · 서버 집계`
       : `표시 ${filteredRowCount}건`;
   const selectedRowCount = table.getFilteredSelectedRowModel().rows.length;
   const selectedRows = table.getFilteredSelectedRowModel().rows.map((row) => row.original);

@@ -506,11 +506,11 @@ function attachClassAuditSummary(
 function normalizeManagementRows(
   kind: ManagementKind,
   sourceRows: Record<string, unknown>[],
+  preserveOrder = false,
 ) {
   const config = CONFIG[kind];
-  return sourceRows
-    .map((row) => config.normalize(row))
-    .sort((left, right) => left.title.localeCompare(right.title, "ko"));
+  const rows = sourceRows.map((row) => config.normalize(row));
+  return preserveOrder ? rows : rows.sort((left, right) => left.title.localeCompare(right.title, "ko"));
 }
 
 // Kept for the legacy enrichment compatibility helpers exercised by older callers.
@@ -805,7 +805,9 @@ export function useManagementRecords(
   const [classFormReferences, setClassFormReferences] = useState<{ owner: string; references: ClassFormReferences } | null>(null);
   const detailAuthorizationRef = useRef<{ owner: string } | null>(null);
   const [filterOptions, setFilterOptions] = useState<Record<string, unknown>>({});
-  const [effectiveClassPeriodId, setEffectiveClassPeriodId] = useState("");
+  const [resolvedClassPeriod, setResolvedClassPeriod] = useState<{
+    requestScope: string; canonicalScope: string; periodId: string;
+  } | null>(null);
   const [metadataFailure, setMetadataFailure] = useState<{ owner: string; error: string } | null>(null);
   const [snapshot, setSnapshot] = useState<(NumberedPageSnapshot<ManagementRow> & { authorizationScope: string; kind: ManagementKind }) | null>(null);
   const [metadataOwner, setMetadataOwner] = useState("");
@@ -819,6 +821,11 @@ export function useManagementRecords(
   const requestedSort = sanitizeManagementNumberedSort(kind, sort);
   const scope = JSON.stringify({ authorizationScope, kind, filters, sort: requestedSort });
   const owner = JSON.stringify([authorizationScope, kind]);
+  const periodScopeMatches = enabled && resolvedClassPeriod !== null
+    && (resolvedClassPeriod.requestScope === scope || resolvedClassPeriod.canonicalScope === scope);
+  if (resolvedClassPeriod && !periodScopeMatches) {
+    setResolvedClassPeriod(null);
+  }
   if (classFormReferences && classFormReferences.owner !== owner) {
     setClassFormReferences(null);
   }
@@ -833,7 +840,7 @@ export function useManagementRecords(
     let active = true;
     lastRequestKeyRef.current = "";
     const controller = createNumberedPageController<ManagementRow>({
-      loadPage: async ({ scope: requestScope, page: requestedPage, pageSize: requestedSize, signal }) => {
+      loadPage: async ({ scope: requestScope, page: requestedPage, pageSize: requestedSize, signal, canonicalizeScope }) => {
         if (!supabase || !numberedService) throw new Error("Supabase 연결 설정을 확인해 주세요.");
         const request = JSON.parse(requestScope) as { filters: ManagementListFilters; sort: ManagementNumberedSort };
         let effectiveFilters = request.filters;
@@ -845,9 +852,11 @@ export function useManagementRecords(
           const period = textValue((Array.isArray(data) ? data[0] : data)?.periodId);
           if (!period) throw new Error("management_default_period_unavailable");
           effectiveFilters = { ...effectiveFilters, periodId: period };
+          const canonicalScope = JSON.stringify({ authorizationScope, kind, filters: effectiveFilters, sort: request.sort });
+          if (!canonicalizeScope(canonicalScope)) throw new Error("management_request_superseded");
           // The subsequent canonical URL rewrite describes this same request.
-          lastRequestKeyRef.current = JSON.stringify([JSON.stringify({ authorizationScope, kind, filters: effectiveFilters, sort: request.sort }), requestedPage, requestedSize]);
-          setEffectiveClassPeriodId(period);
+          lastRequestKeyRef.current = JSON.stringify([canonicalScope, requestedPage, requestedSize]);
+          setResolvedClassPeriod({ requestScope, canonicalScope, periodId: period });
         }
         setMetadataFailure(null);
         const metadata = Promise.all([
@@ -864,7 +873,7 @@ export function useManagementRecords(
           if (active && !signal.aborted) setMetadataFailure({ owner, error: error instanceof Error ? error.message : "목록 부가 정보를 불러오지 못했습니다." });
         });
         const result = await numberedService.readPage({ kind, filters: effectiveFilters, page: requestedPage, pageSize: requestedSize, sort: request.sort, signal });
-        return { ...result, rows: normalizeManagementRows(kind, result.rows.map((row) => listRowToSource(kind, row))) };
+        return { ...result, rows: normalizeManagementRows(kind, result.rows.map((row) => listRowToSource(kind, row)), true) };
       },
       onChange: (next) => {
         if (!active) return;
@@ -995,7 +1004,7 @@ export function useManagementRecords(
     error,
     classFormReferences: classFormReferences?.owner === owner ? classFormReferences.references : EMPTY_CLASS_FORM_REFERENCES,
     filterOptions: metadataOwner === owner ? filterOptions : {},
-    effectiveClassPeriodId: displayed ? effectiveClassPeriodId : "",
+    effectiveClassPeriodId: periodScopeMatches ? resolvedClassPeriod.periodId : "",
     page: displayed?.page || 1,
     pageSize: displayed?.totalCount !== null && displayed ? displayed.pageSize : pageSize,
     totalCount: displayed?.totalCount ?? null,

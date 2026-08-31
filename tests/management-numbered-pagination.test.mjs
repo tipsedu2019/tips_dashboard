@@ -45,17 +45,193 @@ function transport() {
       return new Promise((resolve, reject) => requests.push({ name, args, signal, resolve, reject }));
     } };
   } };
-  function finish(index, totalCount = 260) {
+  function finish(index, totalCount = 260, rowOverrides = []) {
     const request = requests[index], { p_page: page, p_page_size: pageSize, p_kind: kind } = request.args;
     request.resolve({ error: null, data: { page, pageSize, totalCount, rows: Array.from({ length: Math.min(pageSize, Math.max(0, totalCount - (page - 1) * pageSize)) }, (_, i) => ({
       kind, id: `row-${page}-${i}`, name: `Row ${page}-${i}`, status: "재원", sortKey: `row-${page}-${i}`, updatedAt: "2026-08-31", grade: null, school: null, contact: null, parentContact: null,
       subject: "수학", title: `Book ${page}-${i}`, publisher: null, price: null, activeClassCount: 0,
       schedule: null, teacherName: null, classroom: null, capacity: null, weeklyMinutes: null, fee: null, studentCount: 0,
+      ...rowOverrides[i],
     })) } });
   }
   return { supabase, requests, finish };
 }
 const filters = { kind: "students", search: "", status: null, schoolCategory: null, school: null, grade: null };
+
+async function mountClassConsumer(t, { renderTable = false, deferDefault = false, ...initial } = {}) {
+  const dom = new JSDOM("<div id='root'></div>", { url: "https://test.invalid/classes?page=11" });
+  globalThis.window = dom.window; globalThis.document = dom.window.document;
+  for (const key of ["HTMLElement", "DocumentFragment", "MutationObserver", "CustomEvent", "Event", "Node", "HTMLInputElement"]) globalThis[key] = dom.window[key];
+  globalThis.getComputedStyle = dom.window.getComputedStyle;
+  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+  window.requestAnimationFrame = (callback) => window.setTimeout(callback, 0);
+  window.cancelAnimationFrame = window.clearTimeout;
+  window.scrollTo = () => {};
+  const io = transport(), defaults = [];
+  let defaultPeriod = "period-A", state, query;
+  const rpc = io.supabase.rpc;
+  io.supabase.rpc = (name, args) => name === "get_management_default_class_period_v1" ? {
+    signal: null,
+    abortSignal(signal) { this.signal = signal; return this; },
+    retry() {
+      const pending = Promise.withResolvers();
+      defaults.push({ ...pending, signal: this.signal });
+      if (!deferDefault) pending.resolve({ data: { periodId: defaultPeriod }, error: null });
+      return pending.promise;
+    },
+  } : rpc(name, args);
+  const { useManagementRecords } = loadHook(io.supabase);
+  const { ManagementDataTable } = renderTable ? loadHook(io.supabase, "src/features/management/management-data-table.tsx", {
+    "next/navigation": { useRouter: () => ({ replace() {}, push() {} }), usePathname: () => "/classes", useSearchParams: () => new URLSearchParams("page=11") },
+  }) : {};
+  function Probe({ actor = "actor:admin", periodId = null, search = "", sort = [{ id: "title", desc: false }], enabled = true }) {
+    const [page, setPage] = useState(11);
+    const result = useManagementRecords("classes", { kind: "classes", periodId, search, status: "수강", subject: null, grade: null, teacher: null, classroom: null }, {
+      pageSize: 10, enabled, authorizationScope: actor, page, sort, onQueryChange: ({ page }) => setPage(page),
+    });
+    useEffect(() => { state = result; query = page; }, [result, page]);
+    return renderTable ? createElement(ManagementDataTable, { ...result, kind: "classes", displayedScope: result.scope, pageSizeMode: "manual",
+      actions: {}, badgeLabel: "과목", statusLabel: "상태", emptyLabel: "수업", onPageChange: result.goToPage, onSortChange: result.setSort }) : null;
+  }
+  const root = createRoot(document.getElementById("root"));
+  t.after(async () => { await act(async () => root.unmount()); dom.window.close(); });
+  let props = initial;
+  const render = async (next = {}) => { props = { ...props, ...next }; await act(async () => root.render(createElement(StrictMode, null, createElement(Probe, props)))); };
+  await render();
+  return { ...io, defaults, render, get state() { return state; }, get queryPage() { return query; }, setDefault(period) { defaultPeriod = period; } };
+}
+
+for (const fixture of [
+  { label: "descending titles", sort: [{ id: "title", desc: true }], rows: [{ name: "Z class" }, { name: "A class" }], want: ["Z class", "A class"] },
+  { label: "natural numeric titles", sort: [{ id: "title", desc: false }], rows: [{ name: "Class 2" }, { name: "Class 10" }], want: ["Class 2", "Class 10"] },
+  { label: "primary teacher and secondary descending titles", sort: [{ id: "teacher", desc: false }, { id: "title", desc: true }],
+    rows: [{ name: "Z class", teacherName: "A teacher" }, { name: "Y class", teacherName: "A teacher" }, { name: "A class", teacherName: "B teacher" }], want: ["Z class", "Y class", "A class"] },
+]) {
+  test(`RPC through real hook and table preserves ${fixture.label}`, async (t) => {
+    const page = await mountClassConsumer(t, { renderTable: true, periodId: "period-A", sort: fixture.sort });
+    assert.deepEqual(page.requests[0].args.p_sort, fixture.sort);
+    await act(async () => page.finish(0, 100 + fixture.rows.length, fixture.rows.map((row) => ({ ...row, studentCount: 3, updatedAt: "2026-08-31T01:00:00Z" }))));
+    assert.deepEqual(page.state.rows.map((row) => row.title), fixture.want);
+    assert.equal(page.state.rows[0].metrics.studentCount, 3);
+    assert.equal(page.state.rows[0].raw.updated_at, "2026-08-31T01:00:00Z");
+    const rendered = [...document.querySelectorAll('tr[data-management-row="true"]')];
+    assert.equal(rendered.length, fixture.want.length);
+    fixture.want.forEach((title, index) => assert.ok(rendered[index].textContent.includes(title)));
+    assert.deepEqual(page.state.sort, fixture.sort);
+  });
+}
+
+test("canonical class period survives default changes, refresh, mutation retry and shrink clamp", async (t) => {
+  const page = await mountClassConsumer(t);
+  await act(async () => page.finish(0, 102));
+  await page.render({ periodId: "period-A" });
+  assert.equal(page.requests.length, 1, "canonical URL rerender must not refetch");
+  page.setDefault("period-B");
+  await act(async () => { void page.state.refresh(); });
+  assert.equal(page.requests[1].args.p_filters.periodId, "period-A");
+  await act(async () => page.finish(1, 102));
+  assert.equal(JSON.parse(page.state.scope).filters.periodId, "period-A");
+  await act(async () => { void page.state.reloadRow("outside-page"); });
+  assert.equal(page.requests[2].args.p_filters.periodId, "period-A");
+  await act(async () => page.finish(2, 102));
+  await act(async () => page.state.removeRows(["deleted-row"]));
+  assert.equal(page.requests[3].args.p_filters.periodId, "period-A");
+  await act(async () => page.finish(3, 100));
+  assert.equal(page.requests[4].args.p_filters.periodId, "period-A");
+  assert.equal(page.requests[4].args.p_page, 10);
+  await act(async () => page.finish(4, 100));
+  assert.equal(page.state.page, 10); assert.equal(page.queryPage, 10);
+  assert.equal(page.requests.length, 5); assert.equal(page.defaults.length, 1);
+});
+
+test("canonical class period is retained even when its first numbered read fails", async (t) => {
+  const page = await mountClassConsumer(t);
+  await act(async () => page.requests[0].reject(new Error("page unavailable")));
+  assert.equal(page.state.error, "page unavailable");
+  await page.render({ periodId: "period-A" });
+  page.setDefault("period-B");
+  await act(async () => { void page.state.refresh(); });
+  assert.equal(page.requests[1].args.p_filters.periodId, "period-A");
+  assert.equal(page.requests[1].args.p_page, 11);
+  await act(async () => page.finish(1, 102));
+  assert.equal(page.defaults.length, 1);
+  assert.equal(JSON.parse(page.state.scope).filters.periodId, "period-A");
+});
+
+test("initial failed class load keeps visible caption and pager unknown, but true zero stays empty", async (t) => {
+  const page = await mountClassConsumer(t, { renderTable: true, periodId: "period-A" });
+  await act(async () => page.requests[0].reject(new Error("page unavailable")));
+  assert.equal(page.state.totalCount, null);
+  assert.match(document.querySelector("caption").textContent, /건수 확인 중/);
+  assert.doesNotMatch(document.body.textContent, /전체 수업 0개|서버 집계|0건 ·/);
+  assert.equal(document.querySelectorAll('button[aria-current="page"]').length, 0);
+  for (const label of ["첫 페이지", "이전 페이지", "다음 페이지", "마지막 페이지"]) assert.equal(document.querySelector(`button[aria-label="${label}"]`).disabled, true);
+  await act(async () => { void page.state.refresh(); });
+  await act(async () => page.finish(1, 0));
+  await act(async () => page.finish(2, 0));
+  assert.equal(page.state.totalCount, 0);
+  assert.match(document.querySelector("caption").textContent, /전체 수업 0개 · 서버 집계/);
+  assert.match(document.body.textContent, /0건 · 0–0번째/);
+  assert.equal(document.querySelectorAll('button[aria-current="page"]').length, 0);
+});
+
+test("default resolution failure is retryable and never pins a missing period", async (t) => {
+  const page = await mountClassConsumer(t, { deferDefault: true });
+  await act(async () => page.defaults[0].resolve({ data: null, error: new Error("resolver unavailable") }));
+  assert.equal(page.state.error, "resolver unavailable");
+  assert.equal(page.state.effectiveClassPeriodId, "");
+  assert.equal(page.requests.length, 0);
+  await act(async () => { void page.state.refresh(); });
+  await act(async () => page.defaults[1].resolve({ data: { periodId: "period-B" }, error: null }));
+  assert.equal(page.requests[0].args.p_filters.periodId, "period-B");
+  await act(async () => page.finish(0, 102));
+  assert.equal(JSON.parse(page.state.scope).filters.periodId, "period-B");
+});
+
+for (const transition of [
+  { label: "filter", props: { search: "changed" } },
+  { label: "actor", props: { actor: "other:admin" } },
+  { label: "role", props: { actor: "actor:teacher" } },
+]) {
+  test(`default resolution cannot reuse an old period across a ${transition.label} change`, async (t) => {
+    const page = await mountClassConsumer(t, { deferDefault: true });
+    await act(async () => page.defaults[0].resolve({ data: { periodId: "period-A" }, error: null }));
+    await act(async () => page.finish(0, 102));
+    assert.equal(page.state.effectiveClassPeriodId, "period-A");
+    await page.render(transition.props);
+    assert.equal(page.state.effectiveClassPeriodId, "", "do not canonicalize a new scope using the old resolver result");
+    await act(async () => page.defaults[1].resolve({ data: null, error: new Error("new resolver unavailable") }));
+    assert.equal(page.state.effectiveClassPeriodId, "");
+    await act(async () => { void page.state.refresh(); });
+    await act(async () => page.defaults[2].resolve({ data: { periodId: "period-B" }, error: null }));
+    assert.equal(page.requests[1].args.p_filters.periodId, "period-B");
+    await act(async () => page.finish(1, 102));
+    assert.equal(JSON.parse(page.state.scope).filters.periodId, "period-B");
+  });
+}
+
+for (const transition of [
+  { label: "filter", props: { search: "changed" } },
+  { label: "actor", props: { actor: "other:admin" } },
+  { label: "role", props: { actor: "actor:teacher" } },
+  { label: "disabled list", props: { enabled: false } },
+]) {
+  test(`late default resolver after ${transition.label} change cannot pin or fetch the abandoned period`, async (t) => {
+    const page = await mountClassConsumer(t, { deferDefault: true });
+    await page.render(transition.props);
+    assert.equal(page.defaults[0].signal.aborted, true);
+    await act(async () => page.defaults[0].resolve({ data: { periodId: "abandoned-period" }, error: null }));
+    assert.equal(page.requests.length, 0);
+    assert.equal(page.state.effectiveClassPeriodId, "");
+    if (transition.props.enabled === false) await page.render({ enabled: true });
+    await act(async () => page.defaults[1].resolve({ data: { periodId: "period-B" }, error: null }));
+    assert.equal(page.requests[0].args.p_filters.periodId, "period-B");
+    await act(async () => page.finish(0, 102));
+    await page.render({ periodId: "period-B" });
+    assert.equal(page.requests.length, 1);
+    assert.equal(JSON.parse(page.state.scope).filters.periodId, "period-B");
+  });
+}
 
 async function mountManagementPage(t, { kind = "students", preference = 10, holdNavigation = false, mutationError = null } = {}) {
   const dom = new JSDOM("<div id='root'></div>", { url: `https://test.invalid/admin/${kind}?page=11` });
