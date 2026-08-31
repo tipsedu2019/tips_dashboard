@@ -34,7 +34,7 @@ insert into public.profiles(id,role,name,email,created_at,updated_at)
 values ('94000000-0000-4000-8000-000000000900','admin','페이지 검증자','numbered-qa@example.invalid',now(),now())
 on conflict(id) do update set role='admin';
 
-insert into public.academic_schools(id,name,category) values ('94000000-0000-4000-8000-000000000901','__numbered_school__','중등');
+insert into public.academic_schools(id,name,category) values ('94000000-0000-4000-8000-000000000901','__numbered_school__','middle');
 insert into public.students(id,name,uid,school,grade,contact,parent_contact,status,class_ids,waitlist_class_ids)
 select ('94100000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid, '__numbered__ 학생 '||n, 'numbered-'||n,
   '__numbered_school__',case when n%2=0 then '중3' else '중2' end,'0107'||lpad(n::text,7,'0'),'0108'||lpad(n::text,7,'0'),
@@ -111,13 +111,14 @@ with numbered as (
   select kind,public.list_management_numbered_page_v1(kind,pg_temp.numbered_filters(kind),1,10,'[{"id":"title","desc":false}]')#>'{rows,0}' row_data
   from (values ('students'),('classes'),('textbooks')) kinds(kind)
 )
-select is(numbered.row_data,cursor_page.row_data,numbered.kind||' DTO is compatible with final existing cursor projection')
-from numbered cross join lateral public.list_management_page_v1(numbered.kind,pg_temp.numbered_filters(numbered.kind),null,null,10) cursor_page
-where numbered.row_data->>'id'=cursor_page.row_data->>'id';
+select ok(cursor_page.row_data is not null and numbered.row_data=cursor_page.row_data,
+  numbered.kind||' DTO has a matching final cursor counterpart with an identical projection')
+from numbered left join lateral public.list_management_page_v1(numbered.kind,pg_temp.numbered_filters(numbered.kind),null,null,10) cursor_page
+  on numbered.row_data->>'id'=cursor_page.row_data->>'id';
 
 -- Count and list apply exactly the same combined predicate, including period membership.
 with cases(kind,overrides,expected) as (values
-  ('students','{"status":"재원","schoolCategory":"중등","school":"__numbered_school__","grade":"중3"}'::jsonb,55),
+  ('students','{"status":"재원","schoolCategory":"middle","school":"__numbered_school__","grade":"중3"}'::jsonb,55),
   ('classes','{"periodId":"94000000-0000-4000-8000-000000000902","status":"수강","subject":"영어","grade":"중2","teacher":"교사 1","classroom":"1강"}'::jsonb,6),
   ('textbooks','{"status":"active","subject":"english","publisher":"출판 2"}'::jsonb,55)
 ), results as (
@@ -178,6 +179,8 @@ select ok((page->>'totalCount')::integer=110 and page->'rows'='[]'::jsonb,kind||
 reset role;
 
 -- Removal of the final row preserves the requested page so the controller can re-request 11.
+-- Honor the final roster-delete guard by first unlinking this fixture's class roster.
+update public.classes set student_ids='[]'::jsonb where id='94200000-0000-4000-8000-000000000111';
 delete from public.students where id='94100000-0000-4000-8000-000000000111';
 select is(public.list_management_numbered_page_v1('students',pg_temp.numbered_filters('students'),12,10,'[]'),
   '{"rows":[],"page":12,"pageSize":10,"totalCount":110}'::jsonb,'last-page deletion keeps count authoritative');
@@ -186,8 +189,15 @@ create function pg_temp.numbered_explain(query text) returns jsonb language plpg
 declare result jsonb;
 begin execute 'explain (analyze,buffers,format json) '||query into result; return result; end
 $f$;
-select ok(pg_temp.numbered_explain(format('select public.list_management_numbered_page_v1(%L,%L::jsonb,%s,10,''[]'')',kind,pg_temp.numbered_filters(kind),page))#>>'{0,Execution Time}' is not null,
-  kind||' measured ANALYZE/BUFFERS page '||page) from (values ('students'),('classes'),('textbooks')) kinds(kind) cross join (values(1),(6),(12)) pages(page);
+create temporary table numbered_wrapper_plans on commit drop as
+select kind,page,pg_temp.numbered_explain(format('select public.list_management_numbered_page_v1(%L,%L::jsonb,%s,10,''[]'')',kind,pg_temp.numbered_filters(kind),page)) plan
+from (values ('students'),('classes'),('textbooks')) kinds(kind) cross join (values(1),(6),(12)) pages(page);
+select ok(plan#>>'{0,Execution Time}' is not null and plan#>>'{0,Plan,Shared Hit Blocks}' is not null,
+  kind||' records wrapper timing/buffers for page '||page) from numbered_wrapper_plans;
+-- Preserve the complete observed plans in verbose TAP evidence. These wrapper plans
+-- measure total RPC cost only; nested enrichment bounds require nested statement plans.
+select diag(jsonb_build_object('evidence','management_numbered_wrapper_plan','kind',kind,'page',page,'plan',plan)::text)
+from numbered_wrapper_plans order by kind,page;
 
 set local role anon;
 select throws_ok($$select public.list_management_numbered_page_v1('students','{}',1,10,'[]')$$,'42501',null,'anonymous caller cannot execute numbered endpoint');
