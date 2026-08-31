@@ -72,6 +72,8 @@ Also reject invalid size5/30, missing viewer, malformed rows/count/page, mismatc
 
 ## Task 2: All task-owned screens consume shared pagination
 
+**Status:** Complete after Task2 R1 review (`0329233b`) and the whole-slice integration fix/re-review (`57ea0622`). Final selected regression960/960 and fresh isolated build81/81 passed; live Browser/remote rollout remain separate.
+
 **Files:**
 - Modify `src/features/tasks/ops-task-workspace.tsx`.
 - Modify `src/features/tasks/registration-case-list.tsx`.
@@ -100,6 +102,8 @@ Also reject invalid size5/30, missing viewer, malformed rows/count/page, mismatc
 - [ ] Run all task-related affected tests, focused lint/typecheck and foundation regression; run build at the slice gate. Commit as `feat: paginate all task workflow lists`.
 
 ## Task 3: Slice verification and coverage evidence
+
+**Status:** Complete at `cef4e3a3` with final slice fix/re-review `57ea0622`. Requested local SQL613/613 plus baseline1937/1937 passed; the UI-only final wave retained that SQL hash. Independent review approved Task3 and resolved all three integration findings. Continue the secondary-workflow plan; this is not app-wide or production completion.
 
 **Files:** Update `docs/qa/2026-08-31-numbered-pagination.md` with task-owned route evidence. Repair only the account/profile/JWT fixture prerequisites in `supabase/tests/ops_task_completion_actor_test.sql` as described below. Add bounded diagnostic execution-plan evidence to `supabase/tests/ops_task_numbered_pages_test.sql` using its existing synthetic fixture and actual authenticated actor; do not weaken existing assertions or change production SQL.
 
