@@ -75,7 +75,6 @@ import {
   buildTextbookSaleDraft,
   filterStockMovesForClosing,
   getRecordId,
-  getTextbookByReference,
   getTextbookCopyScope,
   getTextbookPurchaseUnitCost,
   getTextbookSalePrice,
@@ -89,12 +88,68 @@ import {
 } from "./textbook-ledger.js";
 import { textbookService } from "./textbook-service";
 import {
+  subjectOptions,
+  subjectAliases,
+  statusAliases,
+  INVENTORY_LOW_STOCK_THRESHOLD,
+  text,
+  textPreservingZero,
+  getRowFieldText,
+  normalizeSubjectValue,
+  getSubjectLabel,
+  getPublisherLabel,
+  getTaxonomyCategoryLabel,
+  getTextbookQualityIssues,
+  hasTextbookQualityIssue,
+  getTextbookQualityScore,
+  buildDuplicateTextbookTitleKeys,
+  matchesTextbookMasterFilters,
+  normalizeStatusValue,
+  numberValue,
+  formatQuantity,
+  currentMonth,
+  getClassName,
+  getLocationName,
+  normalizeTextbookLookup,
+  getTextbookById,
+  buildTextbookSearchIndex,
+  getRequestedTextbookTitle,
+  getPurchaseTextbookTitle,
+  getPurchaseLineOrder,
+  getClassById,
+  getInventoryQuantity,
+  buildInventoryCountRows,
+  isActiveTextbook,
+  shouldShowOperationalPurchaseLine,
+  shouldShowOperationalSaleLine,
+  matchesInventoryFilter,
+  getSaleEventAt,
+  buildPurchaseCardDraft,
+  getPurchaseScopeLines,
+  buildPurchaseDisplayRows,
+  buildSaleHistorySummaryRows,
+} from "./textbook-read-model";
+import type {
+  Row,
+  InventoryFilter,
+  InventoryAuditFilter,
+  TextbookQualityFilter,
+  PurchaseBoardScope,
+  PurchaseRequestFilter,
+  PurchaseOrderFilter,
+  SalesProcessFilter,
+  PurchaseKanbanStatus,
+  TextbookCopyScope,
+  PurchaseQuantityKind,
+  PurchaseKanbanDraft,
+  InventoryCountRow,
+  InventoryHistoryRow,
+} from "./textbook-read-types";
+import {
   SCIENCE_TEXTBOOK_TAXONOMY,
   TEXTBOOK_GRADE_OPTIONS,
   TEXTBOOK_SCHOOL_LEVEL_OPTIONS,
   TEXTBOOK_SCIENCE_AREA_OPTIONS,
-  TEXTBOOK_SUBJECT_ALIASES,
-  TEXTBOOK_SUBJECT_OPTIONS,
   TextbookGradeLevel,
   TextbookSchoolLevel,
   TextbookSubSubjectSettingRecord,
@@ -103,9 +158,7 @@ import {
   getTextbookCategoryLabel,
   getTextbookGradeSummary,
   getTextbookGradeLabel,
-  getTextbookGradeLevel,
   getTextbookSchoolLevelSummary,
-  getTextbookSchoolLevel,
   getTextbookSubSubject,
   getTextbookSubjectAreaKey,
   getTextbookSubjectWriteValue,
@@ -117,82 +170,8 @@ import {
   validateTextbookTaxonomyForWrite,
 } from "./textbook-taxonomy";
 
-type Row = Record<string, unknown>;
-type InventoryFilter = "all" | "shortage" | "surplus" | "unused" | "negative";
-type InventoryAuditFilter = "recommended" | "pending" | "done" | "all";
-type TextbookQualityFilter =
-  | "all"
-  | "attention"
-  | "duplicate"
-  | "missingCode"
-  | "missingPublisher"
-  | "missingCategory"
-  | "missingPrice"
-  | "subjectMismatch"
-  | "inactive";
 type TextbookAmountMode = "salePrice" | "stockValue";
-type PurchaseBoardScope = "active" | "recent" | "all";
-type PurchaseRequestFilter = "all" | "unregistered" | "orderable";
-type PurchaseOrderFilter = "all" | "waiting" | "partial" | "returnable" | "returned";
-type SalesProcessFilter = "all" | "waiting" | "issued" | "returned" | "cancelled";
 type TextbookOpsQueueKey = "unregistered" | "order" | "partial" | "issue" | "stockRisk";
-type PurchaseKanbanStatus = "requested" | "ordered" | "partially_received" | "received" | "cancelled" | "returned";
-type TextbookCopyScope = "student" | "teacher";
-type PurchaseQuantityKind = "requested" | "ordered" | "received";
-type PurchaseKanbanDraft = {
-  textbookId: string;
-  requestedTextbookTitle: string;
-  copyScope: TextbookCopyScope;
-  classId: string;
-  supplierId: string;
-  locationId: string;
-  requestBy: string;
-  requestedQuantity: string;
-  orderedQuantity: string;
-  receivedQuantity: string;
-  studentRequestedQuantity: string;
-  teacherRequestedQuantity: string;
-  studentOrderedQuantity: string;
-  teacherOrderedQuantity: string;
-  studentReceivedQuantity: string;
-  teacherReceivedQuantity: string;
-  unitCost: string;
-  statementNumber: string;
-  memo: string;
-};
-type InventoryCountRow = {
-  source: Row;
-  id: string;
-  title: string;
-  publisher: string;
-  locationId: string;
-  locationName: string;
-  currentQuantity: number;
-  latestCountAt: string;
-  daysSinceLatestCount: number;
-  isCountedThisCycle: boolean;
-  isRecommended: boolean;
-  status: InventoryAuditFilter;
-  reason: string;
-  dueLabel: string;
-};
-type InventoryHistoryRow = {
-  id: string;
-  kind: "move" | "count";
-  sourceId: string;
-  linkedMoveId: string;
-  at: string;
-  textbookTitle: string;
-  locationName: string;
-  change: string;
-  action: string;
-  actor: string;
-  memo: string;
-};
-type TextbookSearchIndex = {
-  haystack: string;
-  barcodeText: string;
-};
 type TextbookHandoffLine = {
   id: string;
   title: string;
@@ -259,20 +238,10 @@ type TextbookConfirmationRequest = {
   onConfirm: () => void;
 };
 
-const subjectOptions = TEXTBOOK_SUBJECT_OPTIONS;
-const subjectAliases: Record<string, string> = TEXTBOOK_SUBJECT_ALIASES;
-
 const statusOptions = [
   { value: "active", label: "사용중" },
   { value: "inactive", label: "미사용" },
 ];
-
-const statusAliases: Record<string, string> = {
-  active: "active",
-  "사용중": "active",
-  inactive: "inactive",
-  "미사용": "inactive",
-};
 
 const textbookCopyScopeOptions = [
   { value: "student", label: "학생용" },
@@ -364,8 +333,6 @@ const inventoryFilterLabels: Record<InventoryFilter, string> = {
   negative: "마이너스",
 };
 
-const INVENTORY_COUNT_CYCLE_DAYS = 30;
-const INVENTORY_LOW_STOCK_THRESHOLD = 3;
 const INVENTORY_COUNT_PAGE_SIZE = 30;
 const MASTER_TEXTBOOK_PAGE_SIZE = 60;
 const TEXTBOOK_DATA_LOAD_TIMEOUT_MS = 12_000;
@@ -541,24 +508,6 @@ const emptyData: TextbookOperationsData = {
   isSchemaReady: true,
 };
 
-function text(value: unknown) {
-  return String(value || "").trim();
-}
-
-function textPreservingZero(value: unknown) {
-  return value === null || value === undefined ? "" : String(value).trim();
-}
-
-function getRowFieldText(row: Row | undefined, ...fieldNames: string[]) {
-  if (!row) return "";
-  for (const fieldName of fieldNames) {
-    if (!Object.prototype.hasOwnProperty.call(row, fieldName)) continue;
-    const value = textPreservingZero(row[fieldName]);
-    if (value) return value;
-  }
-  return "";
-}
-
 function firstNonBlankText(...values: unknown[]) {
   for (const value of values) {
     const normalized = textPreservingZero(value);
@@ -576,25 +525,6 @@ function isEditableShortcutTarget(target: EventTarget | null) {
 
 function normalizeEmailValue(value: unknown) {
   return text(value).replace(/\s+/g, "").toLowerCase();
-}
-
-function normalizeOptionValue(value: unknown, aliases: Record<string, string>, fallback: string) {
-  const raw = text(value);
-  return aliases[raw] || aliases[raw.toLowerCase()] || fallback;
-}
-
-function normalizeSubjectValue(value: unknown) {
-  return normalizeOptionValue(value, subjectAliases, "other");
-}
-
-function getSubjectLabel(value: unknown) {
-  const raw = text(value);
-  const normalized = normalizeSubjectValue(raw);
-  return subjectOptions.find((option) => option.value === normalized)?.label || raw || "-";
-}
-
-function getPublisherLabel(row: Row) {
-  return text(row.publisher || row.publisher_name || row.publisherName) || "미분류";
 }
 
 function getKnownPublisherLabel(row: Row) {
@@ -652,60 +582,6 @@ function getCategoryLabel(row: Row) {
   return getTextbookCategoryLabel(row);
 }
 
-function getTextbookTitleKey(row: Row) {
-  return normalizeTextbookLookupValue(getTextbookTitle(row), { compact: true });
-}
-
-function getTaxonomyCategoryLabel(row: Row) {
-  return getTextbookCategoryLabel(row);
-}
-
-function hasTextbookTaxonomy(row: Row) {
-  return Boolean(getTextbookSchoolLevel(row) || getTextbookGradeLevel(row) || getTextbookSubSubject(row) || text(row.category));
-}
-
-function hasTextbookSubjectMismatch(row: Row) {
-  const title = getTextbookTitle(row).toLowerCase().replace(/\s+/g, " ");
-  const subject = normalizeSubjectValue(row.subject);
-  const mathWordBoundary = /(^|[^가-힣a-z0-9])수\s?[12ⅠⅡ]($|[^가-힣a-z0-9])/i;
-  const mathHints = ["수학", "rpm", "알피엠", "개념원리", "확률", "통계", "미적분", "대수"];
-  const englishHints = ["영어", "english", "reading", "writing", "grammar", "독해", "구문", "어법", "영단어", "리스닝"];
-  const hasMathHint = mathHints.some((keyword) => title.includes(keyword)) || mathWordBoundary.test(title);
-  const hasEnglishHint = englishHints.some((keyword) => title.includes(keyword));
-
-  if (subject === "english" && hasMathHint) {
-    return true;
-  }
-  if (subject === "math" && hasEnglishHint) {
-    return true;
-  }
-  return false;
-}
-
-function getTextbookQualityIssues(row: Row, duplicateTitleKeys: Set<string>) {
-  return {
-    duplicate: duplicateTitleKeys.has(getTextbookTitleKey(row)),
-    missingCode: !text(row.isbn13 || row.barcode),
-    missingPublisher: getPublisherLabel(row) === "미분류",
-    missingCategory: !hasTextbookTaxonomy(row),
-    missingPrice: getTextbookSalePrice(row) <= 0,
-    subjectMismatch: hasTextbookSubjectMismatch(row),
-    inactive: !isActiveTextbook(row),
-  };
-}
-
-function hasTextbookActionableQualityIssue(row: Row, duplicateTitleKeys: Set<string>) {
-  const issues = getTextbookQualityIssues(row, duplicateTitleKeys);
-  return (
-    issues.duplicate ||
-    issues.missingCode ||
-    issues.missingPublisher ||
-    issues.missingCategory ||
-    issues.missingPrice ||
-    issues.subjectMismatch
-  );
-}
-
 function getTextbookQualityIssueLabels(issues: ReturnType<typeof getTextbookQualityIssues>) {
   const labels: Array<{ label: string; tone: "default" | "warning" | "danger" | "muted" }> = [];
   if (issues.subjectMismatch) labels.push({ label: "과목 확인", tone: "danger" });
@@ -716,33 +592,6 @@ function getTextbookQualityIssueLabels(issues: ReturnType<typeof getTextbookQual
   if (issues.missingCode) labels.push({ label: "코드 없음", tone: "muted" });
   if (issues.inactive) labels.push({ label: "미사용", tone: "default" });
   return labels;
-}
-
-function hasTextbookQualityIssue(row: Row, duplicateTitleKeys: Set<string>) {
-  if (!isActiveTextbook(row)) return true;
-  return hasTextbookActionableQualityIssue(row, duplicateTitleKeys);
-}
-
-function getTextbookQualityScore(row: Row, duplicateTitleKeys: Set<string>) {
-  const issues = getTextbookQualityIssues(row, duplicateTitleKeys);
-  return (
-    (issues.subjectMismatch ? 16 : 0) +
-    (issues.duplicate ? 8 : 0) +
-    (issues.missingPublisher ? 4 : 0) +
-    (issues.missingCategory ? 4 : 0) +
-    (issues.missingPrice ? 4 : 0) +
-    (issues.missingCode ? 2 : 0) +
-    (issues.inactive ? 1 : 0)
-  );
-}
-
-function matchesTextbookQualityFilter(row: Row, filter: TextbookQualityFilter, duplicateTitleKeys: Set<string>) {
-  if (filter === "inactive") return !isActiveTextbook(row);
-  if (!isActiveTextbook(row)) return false;
-  if (filter === "all") return true;
-  if (filter === "attention") return hasTextbookActionableQualityIssue(row, duplicateTitleKeys);
-  const issues = getTextbookQualityIssues(row, duplicateTitleKeys);
-  return Boolean(issues[filter]);
 }
 
 function getTextbookGroupLabel(row: Row) {
@@ -757,15 +606,6 @@ function compareTextbookGroupLabels(left: string, right: string) {
   const safeRightIndex = rightIndex === -1 ? orderedLabels.length : rightIndex;
   if (safeLeftIndex !== safeRightIndex) return safeLeftIndex - safeRightIndex;
   return left.localeCompare(right, "ko", { numeric: true });
-}
-
-function normalizeStatusValue(value: unknown) {
-  return normalizeOptionValue(value, statusAliases, "active");
-}
-
-function numberValue(value: unknown) {
-  const numeric = Number(value ?? 0);
-  return Number.isFinite(numeric) ? numeric : 0;
 }
 
 function getPositivePurchaseQuantityText(value: unknown) {
@@ -851,10 +691,6 @@ function formatCurrency(value: unknown) {
   const amount = numberValue(value);
   if (!amount) return "-";
   return `${new Intl.NumberFormat("ko-KR").format(amount)}원`;
-}
-
-function formatQuantity(value: unknown) {
-  return new Intl.NumberFormat("ko-KR").format(numberValue(value));
 }
 
 const TEXTBOOK_HANDOFF_BUSINESS_NAME = "TIPS 영어수학학원";
@@ -963,10 +799,6 @@ function getSavedPurchaseBoardScope(stage: string): PurchaseBoardScope {
   return stage === "receive" ? "recent" : "active";
 }
 
-function currentMonth() {
-  return new Date().toISOString().slice(0, 7);
-}
-
 function formatLoadedAt(value: string) {
   if (!value) return "-";
   const date = new Date(value);
@@ -980,10 +812,6 @@ function getStudentName(row: Row) {
 
 function getStudentGradeLabel(row: Row | undefined) {
   return text(row?.grade || row?.grade_label || row?.gradeLabel || row?.school_grade || row?.schoolGrade) || "-";
-}
-
-function getClassName(row: Row) {
-  return text(row.name || row.class_name || row.className || row.title || row.id);
 }
 
 function getTeacherName(row: Row) {
@@ -1022,11 +850,6 @@ function getDefaultTeacherForClass(classRecord: Row | undefined, teacherCatalogs
     classRecord.teacher_names ||
     classRecord.teacherNames,
   )[0] || "";
-}
-
-function getLocationName(locations: Row[], id: string) {
-  const match = locations.find((location) => getRecordId(location) === id || text(location.code) === id);
-  return text(match?.name || match?.code || id);
 }
 
 function findLocationByCode(locations: Row[], code: string) {
@@ -1148,14 +971,6 @@ function getTextbookCopyScopeLabel(value: unknown) {
   return getTextbookCopyScope({ copyScope: value }) === "teacher" ? "교사용" : "학생용";
 }
 
-function normalizeTextbookLookup(value: unknown) {
-  return normalizeTextbookLookupValue(value);
-}
-
-function getTextbookById(textbooks: Row[], id: string) {
-  return getTextbookByReference(textbooks, id);
-}
-
 function buildTextbookLookupMap(textbooks: Row[]) {
   const lookup = new Map<string, Row>();
   for (const textbook of textbooks) {
@@ -1186,32 +1001,6 @@ function getTextbookFromLookup(lookup: Map<string, Row>, reference: unknown) {
     lookup.get(normalizeTextbookLookupValue(reference, { compact: true }));
 }
 
-function buildTextbookSearchIndex(row: Row): TextbookSearchIndex {
-  const taxonomy = getTextbookTaxonomySelection(row);
-  const compactTitle = normalizeTextbookLookupValue(getTextbookTitle(row), { compact: true });
-  return {
-    haystack: [
-      getTextbookTitle(row),
-      compactTitle,
-      row.subject,
-      getSubjectLabel(row.subject),
-      getTaxonomyCategoryLabel(row),
-      getTextbookSchoolLevelSummary(row),
-      getTextbookGradeSummary(row),
-      ...taxonomy.gradeLevels.map(getTextbookGradeLabel),
-      getTextbookSubSubject(row),
-      row.category,
-      row.publisher,
-      row.isbn13,
-      row.barcode,
-    ]
-      .map(text)
-      .join(" ")
-      .toLowerCase(),
-    barcodeText: normalizeBarcodeValue(`${text(row.isbn13)} ${text(row.barcode)}`),
-  };
-}
-
 function buildLocationNameLookup(locations: Row[]) {
   const lookup = new Map<string, string>();
   for (const location of locations) {
@@ -1231,24 +1020,8 @@ function getLocationNameFromLookup(lookup: Map<string, string>, reference: unkno
   return lookup.get(key) || key;
 }
 
-function getRequestedTextbookTitle(line: Row) {
-  return text(line.requested_textbook_title || line.requestedTextbookTitle || line.textbook_title || line.textbookTitle);
-}
-
-function getPurchaseTextbookTitle(line: Row, textbook: Row | undefined) {
-  return textbook ? getTextbookTitle(textbook) : getRequestedTextbookTitle(line) || text(line.textbook_id || line.textbookId) || "-";
-}
-
 function buildKyoboSearchUrl(title: string) {
   return `https://search.kyobobook.co.kr/search?keyword=${encodeURIComponent(title)}`;
-}
-
-function getPurchaseLineOrder(line: Row, ordersById: Map<string, Row>) {
-  return ordersById.get(text(line.purchase_order_id || line.purchaseOrderId));
-}
-
-function getClassById(classes: Row[], id: string) {
-  return classes.find((classItem) => getRecordId(classItem) === id);
 }
 
 function getStudentsByClass(classRecord: Row | undefined, students: Row[]) {
@@ -1291,12 +1064,6 @@ function getPurchaseQuantityClassFit(requestedQuantity: unknown, studentCount: n
   return { label: difference > 0 ? `${formatQuantity(difference)}권 여유` : "적정", tone: "good" as const, difference };
 }
 
-function getInventoryQuantity(inventoryRow: Row | undefined, locationId: string) {
-  const locationQuantities = (inventoryRow?.locationQuantities || {}) as Record<string, unknown>;
-  if (!locationId) return numberValue(inventoryRow?.totalQuantity);
-  return numberValue(locationQuantities[locationId]);
-}
-
 function getInventoryCountDraftKey(textbookId: string, locationId: string) {
   return `${textbookId}:${locationId}`;
 }
@@ -1305,142 +1072,11 @@ function getInventoryCurrentQuantityDraft(row: InventoryCountRow) {
   return String(Math.max(0, numberValue(row.currentQuantity)));
 }
 
-function getInventoryCountedAt(row: Row) {
-  return text(row.counted_at || row.countedAt || row.created_at || row.createdAt);
-}
-
-function getDaysSince(value: unknown) {
-  const rawValue = text(value);
-  if (!rawValue) return Number.POSITIVE_INFINITY;
-  const time = new Date(rawValue).getTime();
-  if (!Number.isFinite(time)) return Number.POSITIVE_INFINITY;
-  return Math.floor((Date.now() - time) / 86_400_000);
-}
-
-function getLatestStockCount(stockCounts: Row[], textbookId: string, locationId: string) {
-  return stockCounts
-    .filter((count) => (
-      text(count.textbook_id || count.textbookId) === textbookId &&
-      text(count.location_id || count.locationId) === locationId
-    ))
-    .sort((left, right) => new Date(getInventoryCountedAt(right)).getTime() - new Date(getInventoryCountedAt(left)).getTime())[0];
-}
-
-function getInventoryDueLabel(latestCountAt: string, daysSinceLatestCount: number) {
-  if (!latestCountAt) return "실사 이력 없음";
-  if (!Number.isFinite(daysSinceLatestCount)) return "실사일 확인 필요";
-  if (daysSinceLatestCount >= INVENTORY_COUNT_CYCLE_DAYS) {
-    return `${formatQuantity(daysSinceLatestCount)}일 경과`;
-  }
-  return `${formatQuantity(INVENTORY_COUNT_CYCLE_DAYS - daysSinceLatestCount)}일 남음`;
-}
-
-function getInventoryRecommendationReason(
-  row: Row,
-  latestCountAt: string,
-  daysSinceLatestCount: number,
-  currentQuantity: number,
-) {
-  if (currentQuantity < 0) return "마이너스 재고";
-  if (currentQuantity <= INVENTORY_LOW_STOCK_THRESHOLD) return "재고 부족";
-  if (!latestCountAt) return "실사 이력 없음";
-  if (!Number.isFinite(daysSinceLatestCount)) return "실사일 확인 필요";
-  if (daysSinceLatestCount >= INVENTORY_COUNT_CYCLE_DAYS) return `${formatQuantity(daysSinceLatestCount)}일 경과`;
-  if (!isActiveTextbook(row)) return "미사용 확인";
-  return `${formatQuantity(INVENTORY_COUNT_CYCLE_DAYS - daysSinceLatestCount)}일 남음`;
-}
-
-function buildInventoryCountRows({
-  rows,
-  stockCounts,
-  locations,
-  locationId,
-}: {
-  rows: Row[];
-  stockCounts: Row[];
-  locations: Row[];
-  locationId: string;
-}) {
-  return rows.map((row): InventoryCountRow => {
-    const id = getRecordId(row);
-    const latestCount = getLatestStockCount(stockCounts, id, locationId);
-    const latestCountAt = getInventoryCountedAt(latestCount || {});
-    const daysSinceLatestCount = getDaysSince(latestCountAt);
-    const isCountedThisCycle = Boolean(latestCountAt && daysSinceLatestCount < INVENTORY_COUNT_CYCLE_DAYS);
-    const currentQuantity = getInventoryQuantity(row, locationId);
-    const isRecommended = isActiveTextbook(row) && (
-      currentQuantity <= INVENTORY_LOW_STOCK_THRESHOLD ||
-      !latestCountAt ||
-      daysSinceLatestCount >= INVENTORY_COUNT_CYCLE_DAYS
-    );
-    const status: InventoryAuditFilter = isRecommended ? "recommended" : isCountedThisCycle ? "done" : "pending";
-    const reason = getInventoryRecommendationReason(row, latestCountAt, daysSinceLatestCount, currentQuantity);
-    return {
-      source: row,
-      id,
-      title: getTextbookTitle(row),
-      publisher: getPublisherLabel(row),
-      locationId,
-      locationName: getLocationName(locations, locationId) || "-",
-      currentQuantity,
-      latestCountAt,
-      daysSinceLatestCount,
-      isCountedThisCycle,
-      isRecommended,
-      status,
-      reason,
-      dueLabel: getInventoryDueLabel(latestCountAt, daysSinceLatestCount),
-    };
-  }).sort((left, right) => {
-    const leftPriority = left.isRecommended ? 0 : left.status === "pending" ? 1 : 2;
-    const rightPriority = right.isRecommended ? 0 : right.status === "pending" ? 1 : 2;
-    if (leftPriority !== rightPriority) return leftPriority - rightPriority;
-    const leftDays = Number.isFinite(left.daysSinceLatestCount) ? left.daysSinceLatestCount : 99_999;
-    const rightDays = Number.isFinite(right.daysSinceLatestCount) ? right.daysSinceLatestCount : 99_999;
-    if (leftDays !== rightDays) return rightDays - leftDays;
-    if (left.currentQuantity !== right.currentQuantity) return left.currentQuantity - right.currentQuantity;
-    return left.title.localeCompare(right.title, "ko", { numeric: true });
-  });
-}
-
-function isActiveTextbook(row: Row) {
-  return normalizeStatusValue(row.status || row.state) === "active";
-}
-
-function getTextbookReferenceState(textbooks: Row[], reference: unknown) {
-  const value = text(reference);
-  if (!value) return "none";
-  const textbook = getTextbookById(textbooks, value);
-  if (!textbook) return "missing";
-  return isActiveTextbook(textbook) ? "active" : "inactive";
-}
-
-function shouldShowOperationalPurchaseLine(line: Row, order: Row | undefined, textbooks: Row[]) {
-  const draft = buildPurchaseCardDraft(line, order);
-  const reference = draft.textbookId || draft.requestedTextbookTitle;
-  const state = getTextbookReferenceState(textbooks, reference);
-  return state !== "inactive";
-}
-
-function shouldShowOperationalSaleLine(line: Row, textbooks: Row[]) {
-  const reference = text(line.textbook_id || line.textbookId);
-  return getTextbookReferenceState(textbooks, reference) === "active";
-}
-
 function inventoryQuantityTone(totalQuantity: number) {
   if (totalQuantity < 0) return "text-red-700";
   if (totalQuantity === 0) return "text-zinc-500";
   if (totalQuantity <= INVENTORY_LOW_STOCK_THRESHOLD) return "text-amber-700";
   return "text-foreground";
-}
-
-function matchesInventoryFilter(row: Row, filter: InventoryFilter) {
-  const totalQuantity = numberValue(row.totalQuantity);
-  if (filter === "negative") return totalQuantity < 0;
-  if (filter === "unused") return totalQuantity === 0;
-  if (filter === "shortage") return totalQuantity < 0 || (totalQuantity > 0 && totalQuantity <= 3);
-  if (filter === "surplus") return totalQuantity >= 20;
-  return true;
 }
 
 function buildTextbookOpsMetrics(data: Pick<TextbookOperationsData, "textbooks" | "purchaseOrders" | "purchaseOrderLines" | "saleLines" | "sales" | "inventory">) {
@@ -1578,14 +1214,6 @@ function getPurchaseEventAt(line: Row, order: Row | undefined, status: string) {
     line.created_at ||
     line.createdAt
   );
-}
-
-function getSaleEventAt(line: Row, sale: Row | undefined, status: string) {
-  if (status === "issued") {
-    return line.issued_at || line.issuedAt || sale?.issued_at || sale?.issuedAt || line.updated_at || line.updatedAt;
-  }
-
-  return sale?.charge_date || sale?.chargeDate || sale?.created_at || sale?.createdAt || line.created_at || line.createdAt;
 }
 
 function getHandoffDomId(prefix: string, id: string) {
@@ -1745,81 +1373,6 @@ function getPurchaseFieldVisibility(stage: unknown) {
     statementNumber: normalizedStage === "receive",
     classFit: normalizedStage === "request" || normalizedStage === "order",
   };
-}
-
-function buildPurchaseCardDraft(line: Row, order: Row | undefined): PurchaseKanbanDraft {
-  const requested = getRowFieldText(line, "requested_quantity", "requestedQuantity");
-  const ordered = getRowFieldText(line, "ordered_quantity", "orderedQuantity");
-  const received = getRowFieldText(line, "received_quantity", "receivedQuantity");
-  const copyScope = getTextbookCopyScope(line);
-  const isTeacherCopy = copyScope === "teacher";
-
-  return {
-    textbookId: text(line.textbook_id || line.textbookId),
-    requestedTextbookTitle: text(line.requested_textbook_title || line.requestedTextbookTitle || line.textbook_title || line.textbookTitle),
-    copyScope,
-    classId: text(line.class_id || line.classId),
-    supplierId: text(order?.supplier_id || order?.supplierId),
-    locationId: text(line.location_id || line.locationId),
-    requestBy: text(order?.requested_by || order?.requestedBy),
-    requestedQuantity: requested || ordered || received || "1",
-    orderedQuantity: ordered,
-    receivedQuantity: received,
-    studentRequestedQuantity: isTeacherCopy ? "" : requested || ordered || received || "1",
-    teacherRequestedQuantity: isTeacherCopy ? requested || ordered || received || "1" : "",
-    studentOrderedQuantity: isTeacherCopy ? "" : ordered,
-    teacherOrderedQuantity: isTeacherCopy ? ordered : "",
-    studentReceivedQuantity: isTeacherCopy ? "" : received,
-    teacherReceivedQuantity: isTeacherCopy ? received : "",
-    unitCost: text(line.unit_cost || line.unitCost),
-    statementNumber: text(order?.statement_number || order?.statementNumber),
-    memo: text(line.memo || order?.memo),
-  };
-}
-
-function getPurchaseScopeLines(line: Row) {
-  const scopeLines = Array.isArray(line.purchaseScopeLines)
-    ? (line.purchaseScopeLines as Row[]).filter(Boolean)
-    : [];
-  return scopeLines.length > 0 ? scopeLines : [line];
-}
-
-function getPurchaseDisplayCaseKey(line: Row, order: Row | undefined, textbooks: Row[]) {
-  const draft = buildPurchaseCardDraft(line, order);
-  const textbook = getTextbookById(textbooks, draft.textbookId || draft.requestedTextbookTitle);
-  const textbookKey = getRecordId(textbook || {}) || normalizeTextbookLookup(draft.requestedTextbookTitle || getPurchaseTextbookTitle(line, textbook));
-  return [
-    text(line.status || order?.status),
-    textbookKey,
-    draft.classId,
-    draft.locationId,
-    draft.requestBy,
-    draft.supplierId,
-    text(order?.order_date || order?.orderDate),
-    text(order?.statement_number || order?.statementNumber),
-  ].join("||");
-}
-
-function buildPurchaseDisplayRows(rows: Row[], ordersById: Map<string, Row>, textbooks: Row[]) {
-  const displayRows = new Map<string, { id: string; line: Row; lines: Row[] }>();
-  for (const row of rows) {
-    const order = ((row.order || getPurchaseLineOrder(row, ordersById)) || {}) as Row;
-    const baseKey = getPurchaseDisplayCaseKey(row, order, textbooks);
-    const copyScope = getTextbookCopyScope(row);
-    const existing = displayRows.get(baseKey);
-    const key = existing && existing.lines.some((line) => getTextbookCopyScope(line) === copyScope)
-      ? `${baseKey}||${getRecordId(row)}`
-      : baseKey;
-    const current = displayRows.get(key);
-    const nextLines = current ? [...current.lines, row] : [row];
-    const primaryLine = nextLines.find((line) => getTextbookCopyScope(line) === "student") || nextLines[0];
-    displayRows.set(key, {
-      id: key,
-      line: { ...primaryLine, purchaseScopeLines: nextLines },
-      lines: nextLines,
-    });
-  }
-  return [...displayRows.values()];
 }
 
 function getPurchaseDisplayScopeQuantity(lines: Row[], scope: TextbookCopyScope, kind: PurchaseQuantityKind) {
@@ -2386,98 +1939,6 @@ function buildMakeEduBillingHandoffGroups({
   })).sort((left, right) => left.title.localeCompare(right.title, "ko", { numeric: true }));
 }
 
-type SaleHistorySummaryRow = {
-  id: string;
-  year: string;
-  month: string;
-  classId: string;
-  className: string;
-  textbookId: string;
-  textbookTitle: string;
-  waitingQuantity: number;
-  issuedQuantity: number;
-  totalQuantity: number;
-  latestAt: string;
-};
-
-function getSaleHistoryPeriod(line: Row, sale: Row | undefined) {
-  const month = text(line.charge_month || line.chargeMonth || sale?.charge_month || sale?.chargeMonth);
-  if (/^\d{4}-\d{2}/.test(month)) {
-    return month.slice(0, 7);
-  }
-
-  const status = text(line.status || sale?.status) || "charged";
-  const eventAt = text(getSaleEventAt(line, sale, status));
-  if (/^\d{4}-\d{2}/.test(eventAt)) {
-    return eventAt.slice(0, 7);
-  }
-
-  return currentMonth();
-}
-
-function buildSaleHistorySummaryRows({
-  sales,
-  lines,
-  textbooks,
-  classes,
-}: {
-  sales: Row[];
-  lines: Row[];
-  textbooks: Row[];
-  classes: Row[];
-}) {
-  const salesById = new Map(sales.map((sale) => [getRecordId(sale), sale]));
-  const rowsByKey = new Map<string, SaleHistorySummaryRow>();
-
-  for (const line of lines) {
-    const sale = salesById.get(text(line.sale_id || line.saleId));
-    const rawStatus = text(line.status || sale?.status) || "charged";
-    if (rawStatus === "cancelled" || rawStatus === "returned" || rawStatus === "excluded") {
-      continue;
-    }
-
-    const period = getSaleHistoryPeriod(line, sale);
-    const year = period.slice(0, 4) || "-";
-    const classId = text(line.class_id || line.classId || sale?.class_id || sale?.classId);
-    const textbookId = text(line.textbook_id || line.textbookId);
-    const classItem = getClassById(classes, classId);
-    const textbook = getTextbookById(textbooks, textbookId);
-    const key = `${period}:${classId || "-"}:${textbookId || "-"}`;
-    const quantity = Math.max(1, numberValue(line.quantity) || 1);
-    const latestAt = text(getSaleEventAt(line, sale, rawStatus));
-    const current = rowsByKey.get(key) || {
-      id: key,
-      year,
-      month: period,
-      classId,
-      className: getClassName(classItem || {}) || "-",
-      textbookId,
-      textbookTitle: textbook ? getTextbookTitle(textbook) : textbookId || "-",
-      waitingQuantity: 0,
-      issuedQuantity: 0,
-      totalQuantity: 0,
-      latestAt: "",
-    };
-
-    if (rawStatus === "issued") {
-      current.issuedQuantity += quantity;
-    } else {
-      current.waitingQuantity += quantity;
-    }
-    current.totalQuantity += quantity;
-    if (!current.latestAt || latestAt > current.latestAt) {
-      current.latestAt = latestAt;
-    }
-    rowsByKey.set(key, current);
-  }
-
-  return [...rowsByKey.values()].sort((left, right) => {
-    if (left.month !== right.month) return right.month.localeCompare(left.month);
-    if (left.className !== right.className) return left.className.localeCompare(right.className, "ko", { numeric: true });
-    return left.textbookTitle.localeCompare(right.textbookTitle, "ko", { numeric: true });
-  });
-}
-
 function buildPurchasePayloadFromDraft(
   line: Row,
   order: Row | undefined,
@@ -2859,38 +2320,21 @@ export function TextbookOperationsWorkspace() {
       .sort((left, right) => left.localeCompare(right, "ko")),
     [activeInventory, subjectGroupFilter, textbookSubSubjectSettings],
   );
-  const duplicateTextbookTitleKeys = useMemo(() => {
-    const titleCounts = new Map<string, number>();
-    for (const row of activeInventory) {
-      const key = getTextbookTitleKey(row);
-      if (!key) continue;
-      titleCounts.set(key, (titleCounts.get(key) || 0) + 1);
-    }
-    return new Set([...titleCounts.entries()].filter(([, count]) => count > 1).map(([key]) => key));
-  }, [activeInventory]);
+  const duplicateTextbookTitleKeys = useMemo(() => buildDuplicateTextbookTitleKeys(activeInventory), [activeInventory]);
   const textbookSearchIndexById = useMemo(
     () => new Map(data.inventory.map((row) => [getRecordId(row), buildTextbookSearchIndex(row)])),
     [data.inventory],
   );
   const activeTextbookQualityFilter = activeTab === "master" ? textbookQualityFilter : "all";
-  const listFilteredInventory = useMemo(() => {
-    const keyword = deferredQuery.trim().toLowerCase();
-    const normalizedBarcodeQuery = normalizeBarcodeValue(keyword);
-
-    return data.inventory.filter((row) => {
-      if (!matchesTextbookTaxonomy(row, {
-        subject: subjectGroupFilter === "all" ? "" : subjectGroupFilter,
-        schoolLevel: schoolLevelGroupFilter === "all" ? "" : schoolLevelGroupFilter,
-        gradeLevel: gradeLevelGroupFilter === "all" ? "" : gradeLevelGroupFilter,
-        subSubject: categoryGroupFilter === "all" ? "" : categoryGroupFilter,
-      })) return false;
-      if (!keyword) {
-        return true;
-      }
-      const searchIndex = textbookSearchIndexById.get(getRecordId(row)) || buildTextbookSearchIndex(row);
-      return searchIndex.haystack.includes(keyword) || (normalizedBarcodeQuery && searchIndex.barcodeText.includes(normalizedBarcodeQuery));
-    }).filter((row) => matchesTextbookQualityFilter(row, activeTextbookQualityFilter, duplicateTextbookTitleKeys));
-  }, [activeTextbookQualityFilter, categoryGroupFilter, data.inventory, deferredQuery, duplicateTextbookTitleKeys, gradeLevelGroupFilter, schoolLevelGroupFilter, subjectGroupFilter, textbookSearchIndexById]);
+  const listFilteredInventory = useMemo(() => data.inventory.filter((row) => matchesTextbookMasterFilters(row, {
+    search: deferredQuery,
+    subject: subjectGroupFilter,
+    schoolLevel: schoolLevelGroupFilter,
+    gradeLevel: gradeLevelGroupFilter,
+    subSubject: categoryGroupFilter,
+    quality: activeTextbookQualityFilter,
+    inventory: "all",
+  }, duplicateTextbookTitleKeys, textbookSearchIndexById.get(getRecordId(row)))), [activeTextbookQualityFilter, categoryGroupFilter, data.inventory, deferredQuery, duplicateTextbookTitleKeys, gradeLevelGroupFilter, schoolLevelGroupFilter, subjectGroupFilter, textbookSearchIndexById]);
   const textbookQualityFilterCounts = useMemo(
     () => {
       const counts = Object.fromEntries(
