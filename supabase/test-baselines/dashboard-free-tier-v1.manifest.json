@@ -169,6 +169,16 @@
       "fileName": "20260831063537_approval_detail_trim_parity.sql",
       "status": "final",
       "sha256": "6fb6efd7e5ba2441aa1ce91d23f2903d975c79567e42bea9d061aa5d6bf74c9b"
+    },
+    {
+      "fileName": "20260831065351_makeup_numbered_pages.sql",
+      "status": "final",
+      "sha256": "9c5bd203b41adee3cdceb4723c6a1f440b4abd67a6adfea0bfb06e3d5f0465bf"
+    },
+    {
+      "fileName": "20260831101449_makeup_system_note_whitespace_parity.sql",
+      "status": "final",
+      "sha256": "940613f164be35b25661750e8be5c0f15409409890308a5e046ef0fed31369ff"
     }
   ]
 }

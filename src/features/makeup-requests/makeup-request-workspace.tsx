@@ -13,6 +13,11 @@ import {
 } from "react"
 import { ArrowDown, ArrowUp, Check, ChevronRight, ChevronsUpDown, Filter, Plus, RotateCcw, Send, Trash2, X } from "lucide-react"
 import { useSearchParams } from "next/navigation"
+import { DataTablePagination } from "@/components/data-table/data-table-pagination"
+import { useDataTablePageSize } from "@/hooks/use-data-table-page-size"
+import { createNumberedPageController, type NumberedPageSnapshot } from "@/lib/numbered-page-controller"
+import { normalizePage } from "@/lib/numbered-pagination"
+import { readMakeupNumberedPage, readMakeupDetail, readMakeupReservationContext, type MakeupNumberedFilters, type MakeupNumberedPage, type MakeupReservationContext } from "./makeup-numbered-service"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -45,6 +50,7 @@ import {
   getMakeupRequestEffectiveYear,
   hasMakeupPart,
   MAKEUP_REQUEST_STATUS_LABELS,
+  extractMakeupCalendarMeta,
   type MakeupRequestKind,
 } from "./makeup-request-model.js"
 import {
@@ -53,7 +59,8 @@ import {
   completeMakeupRefund,
   createMakeupRequest,
   loadMakeupClassSchedulePlan,
-  loadMakeupRequestWorkspaceData,
+  loadMakeupFormCatalogs,
+  loadMakeupCollisionCatalogs,
   rejectMakeupRequest,
   requestMakeupRefund,
   requestMakeupRequestRevision,
@@ -69,8 +76,6 @@ type MakeupRequestView = "mine" | "approvalPending" | "makeupPending" | "refundP
 type MakeupRequestPeriodFilter = "all" | "today" | "week" | "month" | "custom"
 type MakeupActionNoteKind = "revision" | "reject" | "refund" | "refundComplete"
 
-const MAKEUP_REQUEST_REQUEST_STATUSES = ["revision_requested"] as Array<MakeupRequest["status"]>
-const MAKEUP_REQUEST_CLOSED_STATUSES = ["completed", "rejected", "canceled"] as Array<MakeupRequest["status"]>
 const MAKEUP_REQUEST_VIEW_TABS: Array<{ id: MakeupRequestView; label: string }> = [
   { id: "mine", label: "신청" },
   { id: "approvalPending", label: "결재대기" },
@@ -154,7 +159,6 @@ const MAKEUP_ACTION_NOTE_CONFIG: Record<MakeupActionNoteKind, {
 }
 
 const SUBJECT_SORT_ORDER = ["영어", "수학", "과학"]
-const MAKEUP_FILTER_SUBJECTS = SUBJECT_SORT_ORDER
 const MAKEUP_MANAGER_APPROVER_NAMES = new Set(Object.values(APPROVER_NAMES_BY_GROUP).flat())
 const MAKEUP_CLASS_SCHEDULE_PLAN_LOAD_ERROR = "수업 일정을 불러오지 못했습니다. 다시 불러오기를 눌러 재시도해 주세요."
 
@@ -231,6 +235,9 @@ function getMakeupActionErrorMessage(error: unknown, fallback: string) {
       ? error.message.trim()
       : ""
 
+  if (message === "makeup_legacy_slot_format_unsupported") {
+    return "이전 신청서의 보강 날짜 형식으로 이 필터를 적용할 수 없습니다. 기간·보강일시·강의실 필터를 해제하고 신청서를 확인해 주세요."
+  }
   if (message === "makeup_request_input_invalid" || code === "22023") {
     return "휴보강 신청 정보를 저장할 수 없습니다. 수업·담당 선생님·결재자 연결을 확인해 주세요."
   }
@@ -316,7 +323,7 @@ function getRequestEvent(request: MakeupRequest, eventTypes: string[]) {
   const typeSet = new Set(eventTypes)
   return [...(request.events || [])]
     .filter((event) => typeSet.has(event.eventType))
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0] || null
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id))[0] || null
 }
 
 function getRequestSlots(request: MakeupRequest) {
@@ -403,104 +410,6 @@ function getMakeupRequestMonthRange(todayKey: string) {
   const start = new Date(today.getFullYear(), today.getMonth(), 1)
   const end = new Date(today.getFullYear(), today.getMonth() + 1, 0)
   return { start: toDateKey(start), end: toDateKey(end) }
-}
-
-function isDateKeyInRange(dateKey: string, startDateKey: string, endDateKey: string) {
-  if (!dateKey) return false
-  if (startDateKey && dateKey < startDateKey) return false
-  if (endDateKey && dateKey > endDateKey) return false
-  return true
-}
-
-function getMakeupRequestPeriodDateKeys(request: MakeupRequest) {
-  const dateKeys = [
-    toDateKey(request.cancelDate),
-    ...getRequestSlots(request).flatMap((slot) => [
-      toDateKey(slot.startAt || request.makeupStartAt),
-      toDateKey(slot.endAt || request.makeupEndAt),
-    ]),
-  ].filter(Boolean)
-  return [...new Set(dateKeys)]
-}
-
-function matchesMakeupRequestPeriodFilter(
-  request: MakeupRequest,
-  periodFilter: MakeupRequestPeriodFilter,
-  todayKey: string,
-  customStartDate: string,
-  customEndDate: string,
-) {
-  if (periodFilter === "all") return true
-  const dateKeys = getMakeupRequestPeriodDateKeys(request)
-  if (dateKeys.length === 0) return false
-
-  if (periodFilter === "today") return dateKeys.some((dateKey) => dateKey === todayKey)
-  if (periodFilter === "week") {
-    const range = getMakeupRequestWeekRange(todayKey)
-    return dateKeys.some((dateKey) => isDateKeyInRange(dateKey, range.start, range.end))
-  }
-  if (periodFilter === "month") {
-    const range = getMakeupRequestMonthRange(todayKey)
-    return dateKeys.some((dateKey) => isDateKeyInRange(dateKey, range.start, range.end))
-  }
-
-  const startDateKey = toDateKey(customStartDate)
-  const endDateKey = toDateKey(customEndDate)
-  if (!startDateKey && !endDateKey) return true
-  return dateKeys.some((dateKey) => isDateKeyInRange(dateKey, startDateKey, endDateKey))
-}
-
-function getMakeupRequestTeacherFilterValue(request: MakeupRequest) {
-  return request.teacherCatalogId ? `id:${request.teacherCatalogId}` : `name:${request.teacherLabel}`
-}
-
-function matchesMakeupRequestSelectionFilters(
-  request: MakeupRequest,
-  selectedSubjectFilter: string,
-  selectedTeacherFilter: string,
-) {
-  if (selectedSubjectFilter !== "all" && request.subject !== selectedSubjectFilter) return false
-  if (selectedTeacherFilter !== "all" && getMakeupRequestTeacherFilterValue(request) !== selectedTeacherFilter) return false
-  return true
-}
-
-function isMakeupRequestParticipant(request: MakeupRequest, currentUserId: string) {
-  return request.requesterId === currentUserId || request.teacherProfileId === currentUserId || request.approverProfileId === currentUserId
-}
-
-function getMakeupRequestViewRequests(
-  requests: MakeupRequest[],
-  view: MakeupRequestView,
-  currentUserId: string,
-  canManage = false,
-) {
-  if (view === "mine") {
-    return requests.filter((request) => (
-      isMakeupRequestParticipant(request, currentUserId) &&
-      MAKEUP_REQUEST_REQUEST_STATUSES.includes(request.status)
-    ))
-  }
-  if (view === "approvalPending") {
-    return requests.filter((request) => (
-      (canManage || isMakeupRequestParticipant(request, currentUserId)) &&
-      request.status === "approval_pending"
-    ))
-  }
-  if (view === "makeupPending") {
-    return requests.filter((request) => (
-      (canManage || isMakeupRequestParticipant(request, currentUserId)) &&
-      request.status === "makeup_pending"
-    ))
-  }
-  if (view === "refundPending") {
-    return requests.filter((request) => (
-      request.status === "refund_pending" &&
-      (canManage || isMakeupRequestParticipant(request, currentUserId))
-    ))
-  }
-  return requests.filter((request) => (
-    MAKEUP_REQUEST_CLOSED_STATUSES.includes(request.status)
-  ))
 }
 
 type MakeupRequestTableColumnKey =
@@ -770,7 +679,7 @@ function MakeupRequestActionControls({
       ) : null}
       {canApprove ? (
         <>
-          <Button type="button" size="sm" disabled={hasRoomCollision || saving} onClick={() => onApprove(request)}>
+          <Button type="button" size="sm" disabled={hasRoomCollision || saving || data.collisionContextReady === false} onClick={() => onApprove(request)}>
             <Check className="size-4" aria-hidden="true" />
             승인
           </Button>
@@ -1137,24 +1046,6 @@ type MakeupRequestSelectFilterOption = {
   count: number
 }
 
-function buildMakeupRequestSelectFilterOptions(
-  requests: MakeupRequest[],
-  resolveOption: (request: MakeupRequest) => { value: string; label: string },
-) {
-  const optionMap = new Map<string, MakeupRequestSelectFilterOption>()
-  for (const request of requests) {
-    const option = resolveOption(request)
-    if (!option.value || !option.label) continue
-    const current = optionMap.get(option.value)
-    if (current) {
-      current.count += 1
-    } else {
-      optionMap.set(option.value, { ...option, count: 1 })
-    }
-  }
-  return [...optionMap.values()].sort((left, right) => left.label.localeCompare(right.label, "ko", { numeric: true }))
-}
-
 function MakeupRequestFilterSelect({
   ariaLabel,
   value,
@@ -1255,6 +1146,10 @@ function MakeupRequestDataTable({
   onCompleteRefund,
   onFinalCancel,
   onOpenDetail,
+  filters,
+  onFiltersChange,
+  subjectFilterOptions,
+  teacherFilterOptions,
 }: {
   requests: MakeupRequest[]
   loading: boolean
@@ -1271,77 +1166,28 @@ function MakeupRequestDataTable({
   onCompleteRefund: (request: MakeupRequest) => void
   onFinalCancel: (request: MakeupRequest) => void
   onOpenDetail: (request: MakeupRequest) => void
+  filters: MakeupNumberedFilters
+  onFiltersChange: (patch: Partial<MakeupNumberedFilters>) => void
+  subjectFilterOptions: MakeupRequestSelectFilterOption[]
+  teacherFilterOptions: MakeupRequestSelectFilterOption[]
 }) {
   const [columnWidths, setColumnWidths] = useState<Record<MakeupRequestTableColumnKey, number>>(MAKEUP_REQUEST_TABLE_COLUMN_WIDTHS)
-  const [makeupTableSort, setMakeupTableSort] = useState<MakeupRequestTableSort>(null)
-  const [filterColumnKey, setFilterColumnKey] = useState<MakeupRequestTableColumnKey>("className")
-  const [filterValue, setFilterValue] = useState("")
+  const makeupTableSort: MakeupRequestTableSort = filters.sortColumn && filters.sortDirection ? { columnKey: filters.sortColumn, direction: filters.sortDirection } : null
+  const filterColumnKey = filters.filterColumn
+  const filterValue = filters.search
+  const setFilterValue = (search: string) => onFiltersChange({ search })
   const [filterInputOpen, setFilterInputOpen] = useState(false)
-  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState("all")
-  const [selectedTeacherFilter, setSelectedTeacherFilter] = useState("all")
-  const [makeupPeriodFilter, setMakeupPeriodFilter] = useState<MakeupRequestPeriodFilter>("all")
-  const [makeupPeriodStartDate, setMakeupPeriodStartDate] = useState("")
-  const [makeupPeriodEndDate, setMakeupPeriodEndDate] = useState("")
+  const selectedSubjectFilter = filters.subject
+  const selectedTeacherFilter = filters.teacher
+  const makeupPeriodFilter = filters.period
+  const makeupPeriodStartDate = filters.dateFrom
+  const makeupPeriodEndDate = filters.dateTo
   const filterInputRef = useRef<HTMLInputElement>(null)
   const gridTemplateColumns = getMakeupRequestTableGridTemplate(columnWidths)
   const gridTemplateStyle = { "--makeup-request-grid-template": gridTemplateColumns } as CSSProperties
   const filterColumn = MAKEUP_REQUEST_TABLE_COLUMNS.find((column) => column.columnKey === filterColumnKey) || MAKEUP_REQUEST_TABLE_COLUMNS[1]
   const isFilterInputExpanded = filterInputOpen || Boolean(filterValue)
-  const todayKey = useMemo(() => toDateKey(new Date()), [])
-
-  const subjectFilterOptions = useMemo(() => buildMakeupSubjectFilterOptions(requests), [requests])
-
-  const teacherFilterSourceRequests = useMemo(() => (
-    selectedSubjectFilter === "all" ? requests : requests.filter((request) => request.subject === selectedSubjectFilter)
-  ), [requests, selectedSubjectFilter])
-
-  const teacherFilterOptions = useMemo(() => (
-    [
-      ...data.teachers
-        .filter((teacher) => teacher.isVisible && matchesMakeupTeacherSubject(teacher, selectedSubjectFilter === "all" ? "" : selectedSubjectFilter))
-        .sort(sortMakeupTeachers)
-        .map((teacher) => ({ value: getTeacherOptionKey(teacher), label: teacher.name, count: 0 })),
-      ...buildMakeupRequestSelectFilterOptions(teacherFilterSourceRequests, (request) => ({
-        value: getMakeupRequestTeacherFilterValue(request),
-        label: request.teacherLabel,
-      })),
-    ].reduce<MakeupRequestSelectFilterOption[]>((options, option) => {
-      if (!option.value || !option.label || options.some((current) => current.value === option.value)) return options
-      return [...options, option]
-    }, [])
-  ), [data.teachers, selectedSubjectFilter, teacherFilterSourceRequests])
-
-  const visibleRequests = useMemo(() => {
-    const selectionFilteredRequests = requests
-      .filter((request) => matchesMakeupRequestSelectionFilters(request, selectedSubjectFilter, selectedTeacherFilter))
-      .filter((request) => matchesMakeupRequestPeriodFilter(request, makeupPeriodFilter, todayKey, makeupPeriodStartDate, makeupPeriodEndDate))
-    const normalizedFilter = filterValue.trim().toLocaleLowerCase("ko")
-    const nextRequests = normalizedFilter
-      ? selectionFilteredRequests.filter((request) => getMakeupRequestTableValue(request, filterColumnKey).toLocaleLowerCase("ko").includes(normalizedFilter))
-      : [...selectionFilteredRequests]
-
-    if (makeupTableSort) {
-      nextRequests.sort((left, right) => {
-        const leftValue = getMakeupRequestTableValue(left, makeupTableSort.columnKey)
-        const rightValue = getMakeupRequestTableValue(right, makeupTableSort.columnKey)
-        const result = leftValue.localeCompare(rightValue, "ko", { numeric: true })
-        return makeupTableSort.direction === "asc" ? result : -result
-      })
-    }
-
-    return nextRequests
-  }, [
-    filterColumnKey,
-    filterValue,
-    makeupPeriodEndDate,
-    makeupPeriodFilter,
-    makeupPeriodStartDate,
-    makeupTableSort,
-    requests,
-    selectedSubjectFilter,
-    selectedTeacherFilter,
-    todayKey,
-  ])
+  const visibleRequests = requests
 
   useEffect(() => {
     if (filterInputOpen) filterInputRef.current?.focus()
@@ -1349,12 +1195,8 @@ function MakeupRequestDataTable({
 
   function handleHeaderSelect(columnKey: MakeupRequestTableColumnKey) {
     if (columnKey === "action") return
-    setFilterColumnKey(columnKey)
-    setMakeupTableSort((current) => {
-      if (!current || current.columnKey !== columnKey) return { columnKey, direction: "asc" }
-      if (current.direction === "asc") return { columnKey, direction: "desc" }
-      return null
-    })
+    const direction = !makeupTableSort || makeupTableSort.columnKey !== columnKey ? "asc" : makeupTableSort.direction === "asc" ? "desc" : null
+    onFiltersChange({ filterColumn: columnKey, sortColumn: direction ? columnKey : null, sortDirection: direction })
   }
 
   function startColumnResize(key: MakeupRequestTableColumnKey, event: ReactPointerEvent<HTMLButtonElement>) {
@@ -1387,8 +1229,7 @@ function MakeupRequestDataTable({
               allLabel="과목 전체"
               options={subjectFilterOptions}
               onChange={(value) => {
-                setSelectedSubjectFilter(value)
-                setSelectedTeacherFilter("all")
+                onFiltersChange({ subject: value, teacher: "all" })
               }}
             />
             <MakeupRequestFilterSelect
@@ -1396,16 +1237,16 @@ function MakeupRequestDataTable({
               value={selectedTeacherFilter}
               allLabel="선생님 전체"
               options={teacherFilterOptions}
-              onChange={setSelectedTeacherFilter}
+              onChange={(teacher) => onFiltersChange({ teacher })}
             />
           </div>
           <MakeupRequestPeriodFilterBar
             value={makeupPeriodFilter}
             startDate={makeupPeriodStartDate}
             endDate={makeupPeriodEndDate}
-            onChange={setMakeupPeriodFilter}
-            onStartDateChange={setMakeupPeriodStartDate}
-            onEndDateChange={setMakeupPeriodEndDate}
+            onChange={(period) => onFiltersChange({ period })}
+            onStartDateChange={(dateFrom) => onFiltersChange({ dateFrom })}
+            onEndDateChange={(dateTo) => onFiltersChange({ dateTo })}
           />
           <div className="ml-auto flex min-w-0 items-center gap-2 text-sm font-medium">
             <Button
@@ -1463,7 +1304,7 @@ function MakeupRequestDataTable({
                 />
               ))}
             </div>
-            {loading ? (
+            {loading && visibleRequests.length === 0 ? (
               <div className="px-4 py-12 text-center text-sm text-muted-foreground">불러오는 중입니다.</div>
             ) : visibleRequests.length === 0 ? (
               <div className="px-4 py-12 text-center text-sm text-muted-foreground">표시할 신청서가 없습니다.</div>
@@ -1526,7 +1367,7 @@ function MakeupRequestDataTable({
       </div>
       <MakeupRequestCardList
         requests={visibleRequests}
-        loading={loading}
+        loading={loading && visibleRequests.length === 0}
         data={data}
         currentUserId={currentUserId}
         canManage={canManage}
@@ -1621,14 +1462,6 @@ function getTeacherOptionKey(teacher: MakeupTeacherOption) {
   return teacher.id ? `id:${teacher.id}` : `name:${teacher.name}`
 }
 
-function buildMakeupSubjectFilterOptions(requests: MakeupRequest[]) {
-  return MAKEUP_FILTER_SUBJECTS.map((subject) => ({
-    value: subject,
-    label: subject,
-    count: requests.filter((request) => request.subject === subject).length,
-  }))
-}
-
 function normalizeMakeupTeacherSubjects(subjects: string) {
   return subjects
     .split(/[,，/]+/)
@@ -1679,13 +1512,14 @@ function getSlotRoomAvailability(
   return buildRoomAvailability({
     classrooms: data.classrooms,
     classes: data.classes,
-    requests: data.requests,
+    requests: data.collisionContextReady === undefined ? data.requests : data.reservationContext?.reservations || [],
     academicEvents: data.academicEvents,
     slots: materializedSlot ? [materializedSlot] : [],
     currentRequestId,
     subject,
-    ignoreOrphanedMakeupEvents: canIgnoreOrphanedMakeupEvents,
-  })
+    ignoreOrphanedMakeupEvents: data.reservationContext ? true : canIgnoreOrphanedMakeupEvents,
+    activeEventRequestIds: data.reservationContext?.activeEventRequestIds,
+  }).map((room) => data.collisionContextReady === false ? { ...room, available: false } : room)
 }
 
 function getSlotRoomCollisionState(
@@ -1798,11 +1632,61 @@ function createMakeupClassSchedulePlanLoadCache(
   }
 }
 
+const EMPTY_NUMBERED_FILTERS: MakeupNumberedFilters = { view: "mine", subject: "all", teacher: "all", period: "all", dateFrom: "", dateTo: "", filterColumn: "className", search: "", sortColumn: null, sortDirection: null }
+type MakeupPageState = NumberedPageSnapshot<MakeupRequest> & Partial<Pick<MakeupNumberedPage, "viewCounts" | "subjectOptions" | "teacherOptions">>
+
+function makeupNavigationFromUrl(params: URLSearchParams) {
+  let filters = { ...EMPTY_NUMBERED_FILTERS }
+  try {
+    const serialized = params.get("makeupFilters")
+    if (serialized) filters = { ...filters, ...JSON.parse(serialized) }
+  } catch { /* Invalid navigation starts at the default scope. */ }
+  const view = params.get("view")
+  if (MAKEUP_REQUEST_VIEW_TABS.some((tab) => tab.id === view)) filters.view = view as MakeupRequestView
+  return { filters, page: normalizePage(Number(params.get("page"))) }
+}
+
+function makeupCustomDatesFromUrl(params: URLSearchParams, filters: MakeupNumberedFilters) {
+  try {
+    const raw = JSON.parse(params.get("makeupCustomDates") || "null")
+    if (raw && typeof raw.dateFrom === "string" && typeof raw.dateTo === "string") return { dateFrom: raw.dateFrom, dateTo: raw.dateTo }
+  } catch { /* Keep the effective custom bounds for older deep links. */ }
+  return { dateFrom: filters.period === "custom" ? filters.dateFrom : "", dateTo: filters.period === "custom" ? filters.dateTo : "" }
+}
+
 export function MakeupRequestWorkspace() {
-  const { user, role, loading: authLoading } = useAuth()
+  const { user, role, loading } = useAuth()
+  if (loading || !user?.id || !role) return <div role="status">로그인 정보를 확인하는 중입니다.</div>
+  if (role === "assistant") return <div role="status">휴보강 신청을 조회할 권한이 없습니다.</div>
+  return <MakeupRequestWorkspaceContent key={`${user.id}:${role}`} actorScope={`${user.id}:${role}`} />
+}
+
+function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
+  const { user, role } = useAuth()
   const searchParams = useSearchParams()
-  const [view, setView] = useState<MakeupRequestView>("mine")
-  const [data, setData] = useState<MakeupRequestWorkspaceData>({
+  const [navigation, setNavigation] = useState(() => makeupNavigationFromUrl(new URLSearchParams(searchParams.toString())))
+  const [pageState, setPageState] = useState<MakeupPageState>({ scope: null, requestedPage: 1, page: 1, pageSize: 10, totalCount: null, rows: [], loading: false, error: null })
+  const pageSize = useDataTablePageSize("makeup:requests")
+  const lifetime = useRef(true)
+  const createLifetimeAbort = useRef<AbortController | null>(null)
+  const controllerRef = useRef<ReturnType<typeof createNumberedPageController<MakeupRequest>> | null>(null)
+  const acceptedFilters: MakeupNumberedFilters = useMemo(() => pageState.scope ? JSON.parse(pageState.scope).filters : navigation.filters, [pageState.scope, navigation.filters])
+  const view = acceptedFilters.view
+  const todayKey = useMemo(() => toDateKey(new Date()), [])
+  const customDates = useRef(makeupCustomDatesFromUrl(new URLSearchParams(searchParams.toString()), navigation.filters))
+  const changeFilters = useCallback((patch: Partial<MakeupNumberedFilters>) => {
+    setNavigation((current) => {
+      const filters = { ...(pageState.error ? acceptedFilters : current.filters), ...patch }
+      if (patch.dateFrom !== undefined || patch.dateTo !== undefined) customDates.current = { dateFrom: patch.dateFrom ?? customDates.current.dateFrom, dateTo: patch.dateTo ?? customDates.current.dateTo }
+      if (patch.period) {
+        const range = filters.period === "week" ? getMakeupRequestWeekRange(todayKey) : filters.period === "month" ? getMakeupRequestMonthRange(todayKey) : { start: todayKey, end: todayKey }
+        Object.assign(filters, filters.period === "all" ? { dateFrom: "", dateTo: "" } : filters.period === "custom" ? customDates.current : { dateFrom: range.start, dateTo: range.end })
+      }
+      return { filters, page: 1 }
+    })
+  }, [todayKey, acceptedFilters, pageState.error])
+  const setView = useCallback((view: MakeupRequestView) => changeFilters({ view }), [changeFilters])
+  const [catalogData, setData] = useState<MakeupRequestWorkspaceData>({
     schemaReady: true,
     requests: [],
     profiles: [],
@@ -1815,7 +1699,14 @@ export function MakeupRequestWorkspace() {
   const [selectedSubject, setSelectedSubject] = useState("")
   const [selectedTeacherKey, setSelectedTeacherKey] = useState("")
   const [editingRequestId, setEditingRequestId] = useState("")
-  const [loading, setLoading] = useState(true)
+  const [editingRequest, setEditingRequest] = useState<MakeupRequest | null>(null)
+  const loading = pageState.loading
+  const [catalogLoadedGeneration, setCatalogLoadedGeneration] = useState(-1)
+  const [catalogGeneration, setCatalogGeneration] = useState(0)
+  const catalogReady = catalogLoadedGeneration === catalogGeneration
+  const [formCatalogReady, setFormCatalogReady] = useState(false)
+  const formCatalogGeneration = useRef(-1)
+  const [contextState, setContextState] = useState<{ scope: string; context?: MakeupReservationContext; error?: string }>({ scope: "" })
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
@@ -1827,6 +1718,7 @@ export function MakeupRequestWorkspace() {
   const [finalCancelNote, setFinalCancelNote] = useState("")
   const [requestDialogOpen, setRequestDialogOpen] = useState(false)
   const [selectedDetailRequest, setSelectedDetailRequest] = useState<MakeupRequest | null>(null)
+  const [detailId, setDetailId] = useState(() => searchParams.get("requestId") || searchParams.get("request") || "")
   const consumedDeepLinkRequestIdRef = useRef("")
   const selectedClassIdRef = useRef("")
   const schedulePlanLoadCacheRef = useRef<ReturnType<typeof createMakeupClassSchedulePlanLoadCache> | null>(null)
@@ -1835,35 +1727,104 @@ export function MakeupRequestWorkspace() {
   }
 
   const currentUserId = user?.id || ""
+  const contextRequest = useMemo(() => {
+    const requests = [...pageState.rows, ...[selectedDetailRequest, editingRequest, approvalRequest].filter((request): request is MakeupRequest => Boolean(request))]
+    let invalidTargets = false
+    const slots = requests.flatMap((request) => getRequestSlots(request).flatMap((slot) => {
+      const target = materializeSlot(toFormSlot(slot))
+      if (!target && (slot.startAt || slot.endAt)) invalidTargets = true
+      return target ? [target] : []
+    }))
+    if (requestDialogOpen) slots.push(...materializeSlots(input))
+    const uniqueSlots = [...new Map(slots.map((slot) => [JSON.stringify([slot.startAt, slot.endAt]), { startAt: slot.startAt, endAt: slot.endAt }])).values()]
+    const eventRequestIds = [...new Set(catalogData.academicEvents.flatMap((event) => {
+      const meta = extractMakeupCalendarMeta(String(event.note || ""))
+      const requestId = typeof meta?.requestId === "string" ? meta.requestId.trim() : ""
+      return meta?.kind === "makeup" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId) ? [requestId] : []
+    }))].sort()
+    return { slots: uniqueSlots, eventRequestIds, invalidTargets }
+  }, [pageState.rows, selectedDetailRequest, editingRequest, approvalRequest, requestDialogOpen, input, catalogData.academicEvents])
+  const contextScope = JSON.stringify([actorScope, catalogGeneration, contextRequest])
+  const matchingContext = contextState.scope === contextScope ? contextState.context : undefined
+  const data: MakeupRequestWorkspaceData = useMemo(() => ({ ...catalogData, requests: pageState.rows, reservationContext: matchingContext, collisionContextReady: catalogReady && Boolean(matchingContext) }), [catalogData, pageState.rows, matchingContext, catalogReady])
   const selectedClass = useMemo(() => findSelectedClass(data, input), [data, input])
   selectedClassIdRef.current = selectedClass?.id || ""
   const isManager = canUserManage(role)
-  const editingRequest = useMemo(() => (
-    data.requests.find((request) => request.id === editingRequestId) || null
-  ), [data.requests, editingRequestId])
   const approverEffectiveYear = getMakeupApproverEffectiveYear(editingRequest?.createdAt)
-  const detailRequest = useMemo(() => (
-    selectedDetailRequest
-      ? data.requests.find((request) => request.id === selectedDetailRequest.id) || selectedDetailRequest
-      : null
-  ), [data.requests, selectedDetailRequest])
+  const detailRequest = selectedDetailRequest
   const actionNoteConfig = actionNoteRequest ? MAKEUP_ACTION_NOTE_CONFIG[actionNoteRequest.kind] : MAKEUP_ACTION_NOTE_CONFIG.revision
 
   const refresh = useCallback(async () => {
+    if (!lifetime.current) return
     schedulePlanLoadCacheRef.current?.reset()
-    setLoading(true)
+    setCatalogLoadedGeneration(-1)
+    setFormCatalogReady(false)
+    setCatalogGeneration((generation) => generation + 1)
     setError("")
-    try {
-      const nextData = await loadMakeupRequestWorkspaceData()
-      setData(nextData)
-      if (!nextData.schemaReady) {
-        setError(nextData.error || "휴보강 신청서 DB 상태를 확인해 주세요.")
+    await controllerRef.current?.retry()
+  }, [])
+
+  useEffect(() => {
+    lifetime.current = true
+    const createAbort = new AbortController()
+    createLifetimeAbort.current = createAbort
+    const controller = createNumberedPageController<MakeupRequest>({
+      loadPage: ({ scope, page, pageSize, signal }) => readMakeupNumberedPage({ filters: JSON.parse(scope).filters, page, pageSize, signal }),
+      onChange: (snapshot) => { if (lifetime.current) setPageState(snapshot) },
+    })
+    controllerRef.current = controller
+    return () => { lifetime.current = false; createAbort.abort(); controller.dispose(); schedulePlanLoadCacheRef.current?.reset() }
+  }, [])
+  useEffect(() => {
+    if (pageSize.ready) void controllerRef.current?.load({ scope: JSON.stringify({ actorScope, filters: navigation.filters }), page: navigation.page, pageSize: pageSize.pageSize })
+  }, [actorScope, navigation, pageSize.ready, pageSize.pageSize])
+  useEffect(() => {
+    const abort = new AbortController()
+    void loadMakeupCollisionCatalogs({ signal: abort.signal }).then((catalogs) => {
+      if (!abort.signal.aborted && lifetime.current) {
+        setData((current) => ({ ...current, ...catalogs, classes: formCatalogGeneration.current === catalogGeneration ? current.classes : catalogs.classes }))
+        setCatalogLoadedGeneration(catalogGeneration)
       }
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "휴보강 신청서를 불러오지 못했습니다.")
-    } finally {
-      setLoading(false)
+    }, (failure) => { if (!abort.signal.aborted && lifetime.current) setError(getMakeupActionErrorMessage(failure, "강의실 기준정보를 불러오지 못했습니다.")) })
+    return () => abort.abort()
+  }, [catalogGeneration])
+  useEffect(() => {
+    if (!requestDialogOpen) return
+    const abort = new AbortController()
+    void loadMakeupFormCatalogs({ signal: abort.signal }).then((catalogs) => {
+      if (!abort.signal.aborted && lifetime.current) { formCatalogGeneration.current = catalogGeneration; setData((current) => ({ ...current, ...catalogs })); setFormCatalogReady(true) }
+    }, (failure) => { if (!abort.signal.aborted && lifetime.current) setError(getMakeupActionErrorMessage(failure, "신청 기준정보를 불러오지 못했습니다.")) })
+    return () => abort.abort()
+  }, [requestDialogOpen, catalogGeneration])
+  useEffect(() => {
+    if (!catalogReady) return
+    const abort = new AbortController(), scope = contextScope
+    if (JSON.parse(scope)[2].invalidTargets) {
+      setContextState({ scope, error: "예약 대상 일시를 확인할 수 없습니다. 신청서의 보강일시를 확인해 주세요." })
+      return () => abort.abort()
     }
+    void readMakeupReservationContext({ ...JSON.parse(scope)[2], signal: abort.signal }).then((context) => {
+      if (!abort.signal.aborted && lifetime.current) setContextState({ scope, context })
+    }, (failure) => { if (!abort.signal.aborted && lifetime.current) setContextState({ scope, error: getMakeupActionErrorMessage(failure, "예약 충돌 정보를 불러오지 못했습니다.") }) })
+    return () => abort.abort()
+  }, [contextScope, catalogReady])
+  useEffect(() => {
+    if (!pageState.scope || pageState.loading || pageState.error) return
+    const params = new URLSearchParams(window.location.search)
+    params.set("view", JSON.parse(pageState.scope).filters.view); params.set("page", String(pageState.page)); params.set("makeupFilters", JSON.stringify(JSON.parse(pageState.scope).filters))
+    params.set("makeupCustomDates", JSON.stringify(customDates.current))
+    window.history.replaceState(null, "", `${window.location.pathname}?${params}`)
+  }, [pageState])
+  useEffect(() => {
+    const onBack = () => {
+      const params = new URLSearchParams(window.location.search)
+      const restored = makeupNavigationFromUrl(params)
+      customDates.current = makeupCustomDatesFromUrl(params, restored.filters)
+      setNavigation(restored)
+      setDetailId(params.get("requestId") || params.get("request") || "")
+    }
+    window.addEventListener("popstate", onBack)
+    return () => { window.removeEventListener("popstate", onBack) }
   }, [])
 
   useEffect(() => {
@@ -1897,19 +1858,16 @@ export function MakeupRequestWorkspace() {
   }, [selectedClass])
 
   useEffect(() => {
-    if (!authLoading) {
-      void refresh()
-    }
-  }, [authLoading, refresh])
-
-  useEffect(() => {
-    if (loading) return
-    const requestedRequestId = searchParams.get("requestId") || searchParams.get("request") || ""
-    if (!requestedRequestId || consumedDeepLinkRequestIdRef.current === requestedRequestId) return
-    const requestedRequest = data.requests.find((request) => request.id === requestedRequestId)
+    const requestedRequestId = detailId
+    setSelectedDetailRequest(null)
+    if (!requestedRequestId) return
+    const abort = new AbortController()
     consumedDeepLinkRequestIdRef.current = requestedRequestId
-    if (requestedRequest) setSelectedDetailRequest(requestedRequest)
-  }, [data.requests, loading, searchParams])
+    void readMakeupDetail({ id: requestedRequestId, signal: abort.signal }).then((request) => {
+      if (!abort.signal.aborted && lifetime.current) { setSelectedDetailRequest(request); if (!request) setError("신청서를 찾을 수 없습니다.") }
+    }, (failure) => { if (!abort.signal.aborted && lifetime.current) setError(getMakeupActionErrorMessage(failure, "상세를 불러오지 못했습니다.")) })
+    return () => abort.abort()
+  }, [detailId, catalogGeneration])
 
   const clearRequestDeepLink = useCallback(() => {
     consumedDeepLinkRequestIdRef.current = ""
@@ -1922,6 +1880,7 @@ export function MakeupRequestWorkspace() {
   }, [])
 
   const closeDetailRequest = useCallback(() => {
+    setDetailId("")
     setSelectedDetailRequest(null)
     clearRequestDeepLink()
   }, [clearRequestDeepLink])
@@ -1994,19 +1953,11 @@ export function MakeupRequestWorkspace() {
     (!requestHasCancelDate || selectedClassSchedulePlanReady) &&
     !hasIncompleteStartedMakeupSlot(input) &&
     (!requestHasMakeupSlots || materializedMakeupSlots.every((slot) => slot.classroom)) &&
-    !selectedRoomHasCollision,
+    !selectedRoomHasCollision && formCatalogReady && (!requestHasMakeupSlots || data.collisionContextReady),
   )
 
-  const filteredRequests = useMemo(() => (
-    getMakeupRequestViewRequests(data.requests, view, currentUserId, isManager)
-  ), [currentUserId, data.requests, isManager, view])
-
-  const viewCounts = useMemo(() => (
-    MAKEUP_REQUEST_VIEW_TABS.reduce((counts, tab) => ({
-      ...counts,
-      [tab.id]: getMakeupRequestViewRequests(data.requests, tab.id, currentUserId, isManager).length,
-    }), {} as Record<MakeupRequestView, number>)
-  ), [currentUserId, data.requests, isManager])
+  const filteredRequests = pageState.rows
+  const viewCounts = pageState.viewCounts || { mine: 0, approvalPending: 0, makeupPending: 0, refundPending: 0, closed: 0 }
 
   const patchInput = useCallback((patch: Partial<MakeupRequestInput>) => {
     setInput((current) => ({ ...current, ...patch }))
@@ -2106,9 +2057,11 @@ export function MakeupRequestWorkspace() {
     setSelectedSubject("")
     setSelectedTeacherKey("")
     setEditingRequestId("")
+    setEditingRequest(null)
   }, [])
 
   const openRequestDialog = useCallback(() => {
+    setFormCatalogReady(false)
     resetForm()
     setRequestDialogOpen(true)
   }, [resetForm])
@@ -2120,6 +2073,7 @@ export function MakeupRequestWorkspace() {
   }, [resetForm, saving])
 
   const handleSubmit = useCallback(async () => {
+    if (!lifetime.current) return
     if (!currentUserId) {
       setError("로그인 세션을 확인할 수 없습니다.")
       return
@@ -2151,6 +2105,10 @@ export function MakeupRequestWorkspace() {
       setError("각 보강일시의 강의실을 선택해 주세요.")
       return
     }
+    if (!formCatalogReady || requestHasMakeup && !data.collisionContextReady) {
+      setError("예약 및 신청 기준정보를 확인한 후 다시 시도해 주세요.")
+      return
+    }
     if (requestHasMakeup && selectedRoomHasCollision) {
       setError("충돌이 없는 보강 강의실을 선택해 주세요.")
       return
@@ -2172,9 +2130,11 @@ export function MakeupRequestWorkspace() {
       }
       if (editingRequestId) {
         await resubmitMakeupRequest(editingRequestId, payload, currentUserId)
+        if (!lifetime.current) return
         setMessage("휴보강 신청서를 재상신했습니다.")
       } else {
-        await createMakeupRequest(payload, currentUserId)
+        await createMakeupRequest(payload, currentUserId, { signal: createLifetimeAbort.current?.signal })
+        if (!lifetime.current) return
         setMessage("휴보강 신청서를 상신했습니다.")
       }
       setView("approvalPending")
@@ -2182,26 +2142,30 @@ export function MakeupRequestWorkspace() {
       setRequestDialogOpen(false)
       await refresh()
     } catch (submitError) {
+      if (!lifetime.current) return
       setError(getMakeupActionErrorMessage(submitError, "휴보강 신청서 저장에 실패했습니다."))
     } finally {
-      setSaving(false)
+      if (lifetime.current) setSaving(false)
     }
-  }, [currentUserId, data.teachers, editingRequest?.createdAt, editingRequestId, input, isManager, patchInput, refresh, resetForm, selectedClass, selectedRoomHasCollision])
+  }, [currentUserId, data.teachers, data.collisionContextReady, formCatalogReady, editingRequest?.createdAt, editingRequestId, input, isManager, patchInput, refresh, resetForm, selectedClass, selectedRoomHasCollision, setView])
 
   const runAction = useCallback(async (action: () => Promise<unknown>, successMessage: string) => {
+    if (!lifetime.current) return false
     setSaving(true)
     setError("")
     setMessage("")
     try {
       await action()
+      if (!lifetime.current) return false
       setMessage(successMessage)
       await refresh()
-      return true
+      return lifetime.current
     } catch (actionError) {
+      if (!lifetime.current) return false
       setError(getMakeupActionErrorMessage(actionError, "요청 처리에 실패했습니다."))
       return false
     } finally {
-      setSaving(false)
+      if (lifetime.current) setSaving(false)
     }
   }, [refresh])
 
@@ -2212,7 +2176,7 @@ export function MakeupRequestWorkspace() {
   }, [saving])
 
   const handleApproveWithNote = useCallback(async () => {
-    if (!approvalRequest) return
+    if (!approvalRequest || !data.collisionContextReady || hasMakeupRequestRoomCollision(approvalRequest, data)) return
     const approved = await runAction(
       () => approveMakeupRequest(approvalRequest.id, currentUserId, approvalNote),
       isRefundApprovalRequest(approvalRequest)
@@ -2226,7 +2190,7 @@ export function MakeupRequestWorkspace() {
       setApprovalNote("")
       closeDetailRequest()
     }
-  }, [approvalNote, approvalRequest, closeDetailRequest, currentUserId, runAction])
+  }, [approvalNote, approvalRequest, closeDetailRequest, currentUserId, runAction, data])
 
   const handleOpenActionNoteRequest = useCallback((request: MakeupRequest, kind: MakeupActionNoteKind) => {
     setActionNoteRequest({ request, kind })
@@ -2287,8 +2251,10 @@ export function MakeupRequestWorkspace() {
   }, [closeDetailRequest, currentUserId, finalCancelNote, finalCancelRequest, runAction])
 
   const handleEditForRevision = useCallback((request: MakeupRequest) => {
+    setFormCatalogReady(false)
     const requestClass = data.classes.find((classItem) => classItem.id === request.classId) || null
     setEditingRequestId(request.id)
+    setEditingRequest(request)
     setView("mine")
     if (requestClass) {
       setSelectedSubject(requestClass.subject)
@@ -2309,12 +2275,14 @@ export function MakeupRequestWorkspace() {
     })
     setError(clearMakeupClassSchedulePlanLoadError)
     setRequestDialogOpen(true)
-  }, [data.classes])
+  }, [data.classes, setView])
 
   const handleSchedulePendingMakeup = useCallback((request: MakeupRequest) => {
+    setFormCatalogReady(false)
     const requestClass = data.classes.find((classItem) => classItem.id === request.classId) || null
     closeDetailRequest()
     setEditingRequestId(request.id)
+    setEditingRequest(request)
     setView("mine")
     if (requestClass) {
       setSelectedSubject(requestClass.subject)
@@ -2333,7 +2301,7 @@ export function MakeupRequestWorkspace() {
     })
     setError(clearMakeupClassSchedulePlanLoadError)
     setRequestDialogOpen(true)
-  }, [closeDetailRequest, data.classes])
+  }, [closeDetailRequest, data.classes, setView])
 
   return (
     <div className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6">
@@ -2378,6 +2346,8 @@ export function MakeupRequestWorkspace() {
       </div>
 
       {message ? <div role="status" className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-primary">{message}</div> : null}
+      {pageState.error ? <div role="alert" className="flex items-center gap-2 text-sm text-destructive">{getMakeupActionErrorMessage(pageState.error, "목록을 불러오지 못했습니다.")}<Button variant="outline" onClick={() => void controllerRef.current?.retry()}>다시 시도</Button></div> : null}
+      {contextState.scope === contextScope && contextState.error ? <div role="alert" className="flex items-center gap-2 text-sm text-destructive">{contextState.error}<Button variant="outline" onClick={() => setCatalogGeneration((generation) => generation + 1)}>예약 다시 확인</Button></div> : !data.collisionContextReady ? <div role="status" className="text-sm text-muted-foreground">예약 충돌 정보 확인 중</div> : null}
       {error ? (
         <div role="alert" className="flex items-center justify-between gap-3 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
           <span>{error}</span>
@@ -2669,6 +2639,10 @@ export function MakeupRequestWorkspace() {
           currentUserId={currentUserId}
           canManage={isManager}
           saving={saving}
+          filters={pageState.error ? acceptedFilters : navigation.filters}
+          onFiltersChange={changeFilters}
+          subjectFilterOptions={pageState.subjectOptions || []}
+          teacherFilterOptions={pageState.teacherOptions || []}
           onEditForRevision={handleEditForRevision}
           onSchedulePendingMakeup={handleSchedulePendingMakeup}
           onApprove={(request) => {
@@ -2683,8 +2657,11 @@ export function MakeupRequestWorkspace() {
             setFinalCancelRequest(request)
             setFinalCancelNote("")
           }}
-          onOpenDetail={setSelectedDetailRequest}
+          onOpenDetail={(request) => { setSelectedDetailRequest(null); setDetailId(request.id) }}
         />
+        <DataTablePagination page={pageState.page} pageSize={pageState.totalCount === null ? pageSize.pageSize : pageState.pageSize} totalCount={pageState.totalCount} loading={loading}
+          pageSizeMode={pageSize.mode} onPageSizeChange={(preference) => { setNavigation({ filters: acceptedFilters, page: 1 }); pageSize.setPreference(preference) }}
+          onPageChange={(page) => setNavigation({ filters: acceptedFilters, page })} ariaLabel="휴보강 페이지 탐색" />
       </div>
 
       <Dialog open={Boolean(detailRequest)} onOpenChange={(open) => {
@@ -2755,7 +2732,7 @@ export function MakeupRequestWorkspace() {
             <Button type="button" variant="outline" onClick={closeApprovalDialog} disabled={saving}>
               닫기
             </Button>
-            <Button type="button" onClick={() => void handleApproveWithNote()} disabled={saving || !approvalRequest || !approvalNote.trim()}>
+            <Button type="button" onClick={() => void handleApproveWithNote()} disabled={saving || !approvalRequest || !approvalNote.trim() || !data.collisionContextReady || Boolean(approvalRequest && hasMakeupRequestRoomCollision(approvalRequest, data))}>
               <Check className="size-4" aria-hidden="true" />
               승인 처리
             </Button>

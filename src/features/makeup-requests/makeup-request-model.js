@@ -635,15 +635,16 @@ export function buildRoomAvailability({
   currentRequestId = "",
   subject = "",
   ignoreOrphanedMakeupEvents = false,
+  activeEventRequestIds,
 } = {}) {
   const selectedSubject = text(subject);
   const roomNames = buildRoomOptions(classrooms, classes, { subject: selectedSubject });
   const targetSlots = normalizeMakeupSlots({ makeupSlots: slots, makeupStartAt: startAt, makeupEndAt: endAt });
   const activeRequestIds = ignoreOrphanedMakeupEvents
-    ? new Set((requests || [])
+    ? new Set(activeEventRequestIds === undefined ? (requests || [])
       .filter((request) => ACTIVE_ROOM_RESERVATION_STATUSES.has(getRequestStatus(request)))
       .map((request) => text(request?.id))
-      .filter(Boolean))
+      .filter(Boolean) : activeEventRequestIds)
     : null;
   for (const slot of targetSlots) {
     addRoomName(roomNames, slot.classroom);
