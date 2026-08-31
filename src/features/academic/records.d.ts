@@ -253,6 +253,7 @@ export function buildTimetableGridPanels(input?: {
   selectedTargets?: string[];
 }): TimetableGridPanelsModel;
 export function buildCurriculumWorkspaceModel(input?: {
+  numbered?: boolean;
   classes?: AcademicSourceRow[];
   precomputedRows?: CurriculumRow[];
   classTerms?: AcademicSourceRow[];

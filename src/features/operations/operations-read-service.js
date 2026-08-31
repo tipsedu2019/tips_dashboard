@@ -14,6 +14,12 @@ const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const CLASS_FILTER_KEYS = ["grade", "search", "subject", "syncGroupId", "teacher", "termId"];
 const catalogCacheByActorScope = new Map();
+const catalogGenerationByActorScope = new Map();
+
+export function invalidateOperationsCatalogCache(actorScope) {
+  catalogCacheByActorScope.delete(actorScope);
+  catalogGenerationByActorScope.set(actorScope, (catalogGenerationByActorScope.get(actorScope) || 0) + 1);
+}
 
 function text(value) {
   return typeof value === "string" ? value.trim() : String(value || "").trim();
@@ -641,6 +647,7 @@ export function createOperationsReadService(options = {}) {
       };
     },
     async loadCatalogs() {
+      const generation = catalogGenerationByActorScope.get(actorScope) || 0;
       const timestamp = Number(now());
       const catalogCache = catalogCacheByActorScope.get(actorScope);
       if (catalogCache && catalogCache.actorScope === actorScope && timestamp < catalogCache.expiresAt) {
@@ -651,7 +658,9 @@ export function createOperationsReadService(options = {}) {
           .abortSignal(AbortSignal.timeout(8_000))
           .retry(false),
       );
-      catalogCacheByActorScope.set(actorScope, { actorScope, expiresAt: timestamp + CATALOG_TTL_MS, value });
+      if (generation === (catalogGenerationByActorScope.get(actorScope) || 0)) {
+        catalogCacheByActorScope.set(actorScope, { actorScope, expiresAt: timestamp + CATALOG_TTL_MS, value });
+      }
       return value;
     },
   };

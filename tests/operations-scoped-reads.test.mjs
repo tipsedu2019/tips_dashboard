@@ -591,9 +591,8 @@ test("annual list projects only bounded display metadata while exact detail reta
 });
 
 test("calendar and annual editors use the bounded authenticated academic-school catalog", async () => {
-  const [sql, hook, calendar, annual] = await Promise.all([
+  const [sql, calendar, annual] = await Promise.all([
     readFile(new URL("supabase/migrations/20260814035710_operations_scoped_reads.sql", root), "utf8"),
-    readFile(new URL("src/features/operations/use-operations-workspace-data.ts", root), "utf8"),
     readFile(new URL("src/features/operations/academic-calendar-workspace.tsx", root), "utf8"),
     readFile(new URL("src/features/operations/academic-annual-board-workspace.tsx", root), "utf8"),
   ]);
@@ -601,7 +600,6 @@ test("calendar and annual editors use the bounded authenticated academic-school 
   assert.match(sql, /'academicSchools'/);
   assert.match(sql, /from public\.academic_schools as school/i);
   assert.match(sql, /academic_schools[\s\S]*?limit 200/i);
-  assert.match(hook, /const catalogs = await service\.loadCatalogs\(\)/);
   assert.match(calendar, /catalogs\?\.academicSchools/);
   assert.match(annual, /catalogs\?\.academicSchools/);
 });
@@ -908,7 +906,6 @@ test("operations workspaces issue mode requests and expose dense-range recovery 
   assert.match(annual, /annual_board_too_dense/);
   assert.match(annual, /resolveAnnualBoardEntryParentId/);
   assert.match(schedule, /mode:\s*"class_schedule"/);
-  assert.match(schedule, /다음 30건/);
   assert.match(schedule, /loadClassLessonDesignDetail/);
   assert.match(schedule, /loadLessonTextbookCandidates/);
   assert.match(schedule, /lessonTextbookCandidatePage/);

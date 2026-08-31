@@ -950,6 +950,8 @@ function buildRouteSummary(rows = []) {
 
 export function buildClassScheduleRouteModel({
   classes = [],
+  numbered = false,
+  syncGroupCounts = [],
   textbooks = [],
   progressLogs = [],
   classTerms = [],
@@ -965,11 +967,12 @@ export function buildClassScheduleRouteModel({
     progressLogs,
     syncGroups,
     syncGroupMembers,
-    filters,
+    filters: numbered ? {} : filters,
   });
   const searchKeyword = text(filters.search).toLowerCase();
   const selectedSyncGroupId = text(filters.selectedSyncGroupId);
-  const routeRows = buildRouteRows(workspaceData.rows)
+  const inputRows = buildRouteRows(workspaceData.rows);
+  const routeRows = numbered ? inputRows : inputRows
     .filter((row) => {
       if (selectedSyncGroupId && text(row.raw?.syncGroupId) !== selectedSyncGroupId) {
         return false;
@@ -990,7 +993,11 @@ export function buildClassScheduleRouteModel({
   return {
     rows: routeRows,
     filterOptions: buildWorkspaceFilterOptions(workspaceData.rows),
-    syncGroupCards: buildSyncGroupCards(
+    syncGroupCards: numbered ? syncGroups.flatMap((group) => {
+      const count = syncGroupCounts.find((entry) => entry.groupId === text(group.id));
+      return count?.memberCount > 0 ? [{ ...group, memberCount: count.memberCount,
+        members: [{ classId: count.representativeClassId, className: "" }], warningText: "" }] : [];
+    }) : buildSyncGroupCards(
       workspaceData.syncGroups,
       workspaceData.syncGroupMembers,
       visibleWorkspaceRows,

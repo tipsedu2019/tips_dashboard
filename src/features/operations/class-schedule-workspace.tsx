@@ -15,6 +15,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DataTablePagination } from "@/components/data-table/data-table-pagination";
+import { normalizePage } from "@/lib/numbered-pagination";
 import {
   Table,
   TableBody,
@@ -759,6 +761,7 @@ function applyClassScheduleQueryState(
     grade: string;
     teacher: string;
     selectedSyncGroupId: string;
+    page: number;
   },
 ) {
   const values = [
@@ -768,6 +771,7 @@ function applyClassScheduleQueryState(
     ["grade", state.grade, ""],
     ["teacher", state.teacher, ""],
     ["syncGroup", state.selectedSyncGroupId, ""],
+    ["page", String(state.page), "1"],
   ] as const;
 
   for (const [key, value, defaultValue] of values) {
@@ -2619,6 +2623,18 @@ export function ClassScheduleWorkspace() {
   const [grade, setGrade] = useState(() => text(searchParams.get("grade")));
   const [teacher, setTeacher] = useState(() => text(searchParams.get("teacher")));
   const [selectedSyncGroupId, setSelectedSyncGroupId] = useState(() => text(searchParams.get("syncGroup")));
+  const [observedQuery, setObservedQuery] = useState(searchParamString);
+  const [writtenQuery, setWrittenQuery] = useState<string | null>(null);
+  const [navigation, setNavigation] = useState(() => ({ key: searchParamString, page: normalizePage(Number(searchParams.get("page"))) }));
+  if (observedQuery !== searchParamString) {
+    setObservedQuery(searchParamString);
+    if (!isLessonDesignRouteActive && writtenQuery !== searchParamString) {
+      setSearch(text(searchParams.get("q"))); setTermId(text(searchParams.get("term")));
+      setSubject(text(searchParams.get("subject"))); setGrade(text(searchParams.get("grade")));
+      setTeacher(text(searchParams.get("teacher"))); setSelectedSyncGroupId(text(searchParams.get("syncGroup")));
+      setNavigation({ key: searchParamString, page: normalizePage(Number(searchParams.get("page"))) });
+    }
+  }
   const [selectedClassId, setSelectedClassId] = useState("");
   const selectedClassIdRef = useRef("");
   const lessonMutationLifecycleRef = useRef<ReturnType<typeof createClassMutationLifecycle> | null>(null);
@@ -2669,33 +2685,54 @@ export function ClassScheduleWorkspace() {
   const pendingLessonDesignDialogScrollTopRef = useRef<number | null>(null);
   const pendingLessonDesignCalendarPointerScrollTopRef = useRef<number | null>(null);
   const pendingLessonDesignPairSessionIdRef = useRef("");
-  const deferredSearch = useDeferredValue(search);
   const deferredLessonTextbookSearch = useDeferredValue(lessonTextbookSearch);
   selectedClassIdRef.current = selectedClassId;
   const operationsRequest = useMemo(
     () => ({
       mode: "class_schedule" as const,
       termId: termId || null,
-      search: deferredSearch,
+      search,
       subject: subject || null,
       grade: grade || null,
       teacher: teacher || null,
       syncGroupId: selectedSyncGroupId || null,
       cursor: null,
+      page: navigation.page,
+      navigationKey: navigation.key,
     }),
-    [deferredSearch, grade, selectedSyncGroupId, subject, teacher, termId],
+    [grade, navigation, search, selectedSyncGroupId, subject, teacher, termId],
   );
   const {
     data: scopedData,
     loading,
-    loadingMore,
+    page: displayedPage, pageSize, totalCount, goToPage, pageSizeMode, setPageSizePreference,
+    actorScope, dataMatchesCurrentScope, displayRequest,
     error,
     refresh,
-    loadMore,
     loadClassScheduleDetail,
     loadClassLessonDesignDetail,
     loadLessonTextbookCandidates,
   } = useOperationsWorkspaceData(operationsRequest);
+  const [editorActorScope, setEditorActorScope] = useState(actorScope);
+  if (editorActorScope !== actorScope) {
+    setEditorActorScope(actorScope);
+    lessonMutationLifecycleRef.current?.revoke();
+    lessonDesignDetailRevisionRef.current++;
+    lessonTextbookCandidateRevisionRef.current++;
+    selectedClassIdRef.current = "";
+    lessonPlanDraftRef.current = null;
+    lessonPlanSourceKeyRef.current = "";
+    setSelectedClassId(""); setLessonDesignOpen(false);
+    setLessonDesignDetail(null); setLessonDesignDetailError(""); setLessonDesignDetailLoading(false);
+    setLessonPlanDraft(null); setLessonProgressDraft([]); setProgressDialogSessionId("");
+    setLessonTextbookCandidatePage({ rows: [], hasMore: false, nextCursor: null });
+    setLessonTextbookCandidateError(""); setLessonTextbookCandidateLoading(false);
+    setNormalizedLessonSessionDrafts({}); setNormalizedLessonSessionDetailsOpenSessionId("");
+    setSelectedLessonSessionId(""); setSelectedLessonMonthKeys([]); setFocusedLessonMonthKey("");
+    setLessonTextbookSearch(""); setIsLessonTextbookFinderOpen(false);
+    setGenerationPreview(null); setGenerationSaving(false); setIsLessonDesignSaving(false);
+    setIsNormalizedLessonSessionSaving(false); setLessonDesignSaveError(""); setLessonDesignSaveNotice("");
+  }
   const data = useMemo(() => {
     const page = (scopedData?.page || {}) as { rows?: Record<string, unknown>[]; hasMore?: boolean };
     const filterOptions = (scopedData?.filterOptions || {}) as {
@@ -2736,6 +2773,7 @@ export function ClassScheduleWorkspace() {
       classTerms,
       syncGroups,
       syncGroupMembers,
+      syncGroupCounts: (scopedData?.syncGroupCounts || []) as { groupId: string; memberCount: number; representativeClassId: string }[],
       teacherCatalogs: Array.isArray(catalogs.teachers) ? catalogs.teachers : [],
       classroomCatalogs: Array.isArray(catalogs.classrooms) ? catalogs.classrooms : [],
       page,
@@ -2758,7 +2796,7 @@ export function ClassScheduleWorkspace() {
     setGenerationPreview(null);
     setLessonDesignSaveError("");
     setLessonDesignSaveNotice("");
-    if (!isLessonDesignRouteActive || !requestedClassId) {
+    if (!actorScope || !isLessonDesignRouteActive || !requestedClassId) {
       mutationLifecycle?.revoke();
       setLessonDesignDetail(null);
       setLessonDesignDetailError("");
@@ -2790,7 +2828,7 @@ export function ClassScheduleWorkspace() {
     return () => {
       mutationLifecycle?.revoke();
     };
-  }, [isLessonDesignRouteActive, loadClassLessonDesignDetail, requestedClassId]);
+  }, [actorScope, isLessonDesignRouteActive, loadClassLessonDesignDetail, requestedClassId]);
 
   useLayoutEffect(() => {
     const scrollTop = pendingLessonDesignDialogScrollTopRef.current;
@@ -2862,6 +2900,8 @@ export function ClassScheduleWorkspace() {
         classTerms: data.classTerms,
         syncGroups: data.syncGroups,
         syncGroupMembers: data.syncGroupMembers,
+        numbered: true,
+        syncGroupCounts: data.syncGroupCounts,
         filters: {},
       });
     return {
@@ -2879,6 +2919,7 @@ export function ClassScheduleWorkspace() {
       data.filterOptions,
       data.progressLogs,
       data.syncGroupMembers,
+      data.syncGroupCounts,
       data.syncGroups,
       data.textbooks,
     ],
@@ -2886,14 +2927,15 @@ export function ClassScheduleWorkspace() {
   const allRowsModel = model;
   const classScheduleQueryState = useMemo(
     () => ({
-      search,
-      termId,
-      subject,
-      grade,
-      teacher,
-      selectedSyncGroupId,
+      search: displayRequest.mode === "class_schedule" ? displayRequest.search : search,
+      termId: displayRequest.mode === "class_schedule" ? displayRequest.termId || "" : termId,
+      subject: displayRequest.mode === "class_schedule" ? displayRequest.subject || "" : subject,
+      grade: displayRequest.mode === "class_schedule" ? displayRequest.grade || "" : grade,
+      teacher: displayRequest.mode === "class_schedule" ? displayRequest.teacher || "" : teacher,
+      selectedSyncGroupId: displayRequest.mode === "class_schedule" ? displayRequest.syncGroupId || "" : selectedSyncGroupId,
+      page: displayedPage,
     }),
-    [grade, search, selectedSyncGroupId, subject, teacher, termId],
+    [displayRequest, displayedPage, grade, search, selectedSyncGroupId, subject, teacher, termId],
   );
   const classScheduleReturnPath = useMemo(
     () => buildClassScheduleListHref("/admin/class-schedule", searchParamString, classScheduleQueryState),
@@ -2902,13 +2944,15 @@ export function ClassScheduleWorkspace() {
 
   useEffect(() => {
     if (isLessonDesignPage || searchParams.get("lessonDesign") === "1") return;
+    if (loading || !dataMatchesCurrentScope) return;
 
     const nextHref = buildClassScheduleListHref(pathname, searchParamString, classScheduleQueryState);
     const currentHref = searchParamString ? `${pathname}?${searchParamString}` : pathname;
     if (nextHref !== currentHref) {
+      setWrittenQuery(nextHref.split("?")[1] || "");
       router.replace(nextHref, { scroll: false });
     }
-  }, [classScheduleQueryState, isLessonDesignPage, pathname, router, searchParamString, searchParams]);
+  }, [classScheduleQueryState, dataMatchesCurrentScope, isLessonDesignPage, loading, pathname, router, searchParamString, searchParams]);
 
   const rememberClassScheduleListPosition = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -2970,6 +3014,7 @@ export function ClassScheduleWorkspace() {
   }, [classScheduleReturnPath, isLessonDesignPage, loading, model.rows.length]);
 
   useEffect(() => {
+    if (isLessonDesignRouteActive) return;
     if (model.rows.length === 0) {
       setSelectedClassId((current) => {
         if (current && allRowsModel.rows.some((row) => row.id === current)) {
@@ -2996,7 +3041,7 @@ export function ClassScheduleWorkspace() {
       selectedClassIdRef.current = next;
       return next;
     });
-  }, [allRowsModel.rows, model.rows]);
+  }, [allRowsModel.rows, isLessonDesignRouteActive, model.rows]);
 
   const syncGroupOptions = useMemo(
     () =>
@@ -4674,7 +4719,7 @@ export function ClassScheduleWorkspace() {
 
   useEffect(() => {
   
-  if (loading || lessonDesignDetailLoading) {
+  if (!actorScope || lessonDesignDetailLoading || (!exactLessonDesignRow && !lessonDesignDetailError)) {
       return;
     }
 
@@ -4744,7 +4789,8 @@ export function ClassScheduleWorkspace() {
     exactLessonDesignRow,
     lessonDesignOpen,
     lessonDesignDetailLoading,
-    loading,
+    lessonDesignDetailError,
+    actorScope,
     openLessonDesignForRow,
     isLessonDesignPage,
     pathname,
@@ -4924,7 +4970,7 @@ export function ClassScheduleWorkspace() {
   const lessonDesignReturnLabel = getLessonDesignReturnLabel(requestedLessonReturnPath);
   const lessonDesignReturnActionLabel = getLessonDesignReturnActionLabel(lessonDesignReturnLabel);
 
-  if (loading) {
+  if (loading && totalCount === null && !isLessonDesignRouteActive) {
     return <ClassScheduleSkeleton />;
   }
 
@@ -6275,7 +6321,10 @@ export function ClassScheduleWorkspace() {
       {error ? (
         <div className="px-4 lg:px-6">
           <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+              <span>{error}</span>
+              <Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>다시 시도</Button>
+            </AlertDescription>
           </Alert>
         </div>
       ) : null}
@@ -6361,7 +6410,7 @@ export function ClassScheduleWorkspace() {
                 onClick={() => setSelectedSyncGroupId("")}
               >
                 전체
-                <span className="rounded bg-background/20 px-1.5">{allRowsModel.rows.length}</span>
+                <span className="rounded bg-background/20 px-1.5">{totalCount ?? "…"}</span>
               </button>
               {model.syncGroupCards.map((group) => {
                 const isSelected = selectedSyncGroupId === group.id;
@@ -6688,20 +6737,10 @@ export function ClassScheduleWorkspace() {
               </>
             )}
           </div>
-          {data.page.hasMore ? (
-            <div className="flex justify-center border-t px-4 py-3">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={loadingMore}
-                onClick={() => void loadMore()}
-              >
-                {loadingMore ? "불러오는 중" : "다음 30건"}
-              </Button>
-            </div>
-          ) : model.rows.length > 0 ? (
-            <p className="border-t px-4 py-3 text-center text-xs text-muted-foreground">마지막 수업입니다.</p>
-          ) : null}
+          <div className="border-t px-4 py-3">
+            <DataTablePagination page={displayedPage} pageSize={pageSize} totalCount={totalCount} loading={loading}
+              onPageChange={goToPage} pageSizeMode={pageSizeMode} onPageSizeChange={setPageSizePreference} />
+          </div>
         </section>
 
       </div>
