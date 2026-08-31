@@ -25,6 +25,7 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "list_active_science_subject_areas_v1",
   "get_academic_timetable_range_v1",
   "get_academic_curriculum_detail_v1",
+  "get_approval_detail_v1",
   "current_dashboard_role",
   "close_class_atomic_v1",
 ])
@@ -44,11 +45,15 @@ const EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES = new Set([
 // ops_task_numbered_pages_test.sql; local final-only proof 568/568.
 // academic/planning: 20260831052546_academic_operations_numbered_pages.sql (final),
 // academic_operations_numbered_pages_test.sql; local final-only proof 134/134.
+// approvals: 20260831061736_approval_numbered_pages.sql (final),
+// detail trim parity: 20260831063537_approval_detail_trim_parity.sql (final),
+// approval_numbered_pages_test.sql; local final-only proof 71/71.
 const EXACT_NUMBERED_RPC_CONTRACTS = new Map([
   ["list_management_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_ops_task_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["get_academic_curriculum_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["get_operations_class_schedule_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["list_approval_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
 ])
 
 const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION"

@@ -159,6 +159,16 @@
       "fileName": "20260831052546_academic_operations_numbered_pages.sql",
       "status": "final",
       "sha256": "32b51bd8ac1fc14d32bf01a260d1fa22a9324b658960de265f5b89bc0c61b0df"
+    },
+    {
+      "fileName": "20260831061736_approval_numbered_pages.sql",
+      "status": "final",
+      "sha256": "f371ec311759886788112090fc0aeaeb9242ffb7f86d98348216eb553cbc799d"
+    },
+    {
+      "fileName": "20260831063537_approval_detail_trim_parity.sql",
+      "status": "final",
+      "sha256": "6fb6efd7e5ba2441aa1ce91d23f2903d975c79567e42bea9d061aa5d6bf74c9b"
     }
   ]
 }
