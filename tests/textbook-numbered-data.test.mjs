@@ -79,6 +79,25 @@ test('URL-restored size owns the first request and Back-size restoration reuses 
   assert.equal(summaries(h).length, 1);
 });
 
+test('URL-restored sizes are ephemeral Auto state and only explicit UI size changes persist', async t => {
+  const input = onlyMaster({ restoredPage: 3, restoredPageSize: 15, restorationKey: 'direct-15' });
+  const h = await setupHook(t, input, { preferences: {} });
+  assert.deepEqual(pages(h).map(request => [request.args.p_page, request.args.p_page_size]), [[3, 15]]);
+  assert.equal(h.current.master.pageSizeMode, 'auto');
+  assert.deepEqual(JSON.parse(window.localStorage.getItem('tips.data-table-page-size.v1')), {});
+
+  // Every disabled secondary entry also receives the parser's default size 10.
+  // Merely mounting them must not create manual preferences.
+  for (const key of ['textbooks:sales-history', 'textbooks:inventory-history', 'textbooks:closing-movements']) {
+    assert.equal(JSON.parse(window.localStorage.getItem('tips.data-table-page-size.v1'))[key], undefined);
+  }
+
+  await h.act(() => h.current.master.setPageSizePreference(20));
+  assert.equal(pages(h).at(-1).args.p_page_size, 20);
+  assert.deepEqual(JSON.parse(window.localStorage.getItem('tips.data-table-page-size.v1'))['textbooks:master'], { mode: 'manual', pageSize: 20 });
+  assert.equal(h.current.master.pageSizeMode, 'manual');
+});
+
 for (const [key, rpc, sort, filters, summary] of cases) test(`${key} owns exact RPC/filter/sort/mode and all three persisted sizes`, async t => {
   const input = inputs(); input[key] = { enabled: true, filters };
   const h = await setupHook(t, input);

@@ -119,7 +119,6 @@ import {
   getClassById,
   getInventoryQuantity,
   isActiveTextbook,
-  shouldShowOperationalPurchaseLine,
   shouldShowOperationalSaleLine,
   getSaleEventAt,
   buildPurchaseCardDraft,
@@ -421,11 +420,6 @@ const purchaseOrderFilterLabels: Record<PurchaseOrderFilter, string> = {
   returnable: "반품 가능",
   returned: "반품 완료",
 };
-const purchaseRequestFilterValues: PurchaseRequestFilter[] = ["all", "unregistered", "orderable"];
-const purchaseBoardScopeValues: PurchaseBoardScope[] = ["active", "recent", "all"];
-const purchaseOrderFilterValues: PurchaseOrderFilter[] = ["all", "waiting", "partial", "returnable", "returned"];
-const salesProcessFilterValues: SalesProcessFilter[] = ["all", "waiting", "issued", "returned", "cancelled"];
-
 
 type TextbookOperationsData = {
   textbooks: Row[];
@@ -875,12 +869,6 @@ async function downloadHandoffPdf(element: HTMLElement, filename: string) {
   return createPreparedHandoffDownload(blob, filename, "pdf", "PDF");
 }
 
-function matchesSearchQuery(query: string, values: unknown[]) {
-  const normalizedQuery = text(query).toLowerCase();
-  if (!normalizedQuery) return true;
-  return values.some((value) => text(value).toLowerCase().includes(normalizedQuery));
-}
-
 function processStatusPillClass(status: string) {
   if (status === "requested" || status === "charged") return "border-sky-200 bg-sky-50 text-sky-700";
   if (status === "ordered") return "border-violet-200 bg-violet-50 text-violet-700";
@@ -963,76 +951,6 @@ function isOrderablePurchaseRequestLine(line: Row, order: Row | undefined, textb
   return Boolean(getOrderablePurchaseRequestTextbook(line, order, textbooks));
 }
 
-function matchesPurchaseLineQuery({
-  line,
-  order,
-  query,
-  textbooks,
-  publishers,
-  classes,
-  suppliers,
-  publisherSupplierLinks,
-  locations,
-}: {
-  line: Row;
-  order: Row | undefined;
-  query: string;
-  textbooks: Row[];
-  publishers: Row[];
-  classes: Row[];
-  suppliers: Row[];
-  publisherSupplierLinks: Row[];
-  locations: Row[];
-}) {
-  const draft = buildPurchaseCardDraft(line, order);
-  const textbook = getTextbookById(textbooks, draft.textbookId || draft.requestedTextbookTitle);
-  const configuredSupplierId = getConfiguredSupplierIdForTextbook(textbook, publisherSupplierLinks, publishers) || draft.supplierId;
-  const classRecord = getClassById(classes, draft.classId);
-  return matchesSearchQuery(query, [
-    getPurchaseTextbookTitle(line, textbook),
-    draft.requestedTextbookTitle,
-    draft.requestBy,
-    getClassName(classRecord || {}),
-    getSupplierName(suppliers, configuredSupplierId),
-    getLocationName(locations, draft.locationId),
-    purchaseStatusLabel(line.status || order?.status, draft.orderedQuantity, draft.receivedQuantity),
-    draft.statementNumber,
-    draft.memo,
-  ]);
-}
-
-function matchesSaleLineQuery({
-  line,
-  sale,
-  query,
-  textbooks,
-  classes,
-  locations,
-  students,
-}: {
-  line: Row;
-  sale: Row | undefined;
-  query: string;
-  textbooks: Row[];
-  classes: Row[];
-  locations: Row[];
-  students: Row[];
-}) {
-  const textbook = getTextbookById(textbooks, text(line.textbook_id || line.textbookId));
-  const classItem = getClassById(classes, text(line.class_id || sale?.class_id || sale?.classId));
-  const studentsById = new Map(students.map((student) => [getRecordId(student), student]));
-  const status = text(line.status || sale?.status || "charged");
-  return matchesSearchQuery(query, [
-    textbook ? getTextbookTitle(textbook) : text(line.textbook_id || line.textbookId),
-    getTextbookCopyScopeLabel(getTextbookCopyScope(line)),
-    getClassName(classItem || {}),
-    getSaleLineRecipientName(line, studentsById),
-    getLocationName(locations, text(line.location_id || line.locationId || sale?.location_id || sale?.locationId)),
-    saleStatusLabels[status] || status,
-    text(line.charge_month || sale?.charge_month || sale?.chargeMonth),
-  ]);
-}
-
 
 
 
@@ -1094,22 +1012,6 @@ function buildPurchaseStatusPayload(line: Row, order: Row | undefined, targetSta
     },
     targetStatus,
   );
-}
-
-function shouldShowPurchaseLineOnBoard(line: Row, scope: PurchaseBoardScope) {
-  const order = (line.order || {}) as Row;
-  const status = text(line.status || order.status);
-  if (scope === "all") return true;
-  if (status !== "received" && status !== "returned" && status !== "cancelled") return true;
-  if (scope === "active") return false;
-
-  const receivedAt = text(order.received_at || order.receivedAt || order.updated_at || order.updatedAt || order.created_at || order.createdAt);
-  if (!receivedAt) return true;
-
-  const receivedMs = new Date(receivedAt).getTime();
-  if (!Number.isFinite(receivedMs)) return true;
-
-  return Date.now() - receivedMs <= 1000 * 60 * 60 * 24 * 30;
 }
 
 function useTextbookOperationsData() {
@@ -1360,6 +1262,10 @@ function TextbookOperationsWorkspaceContent() {
     setSalesProcessFilter((text(filters.status) || "all") as SalesProcessFilter);
     setClosingFilters(restored.tab === "closing" ? restored.primary.filters as ClosingFilters : { month: "all", subject: "all", status: "all" });
     setSaleHistoryFilters(restored.history.filters);
+    setSelectedClosingDetailId(restored.detail?.kind === "closing" ? restored.detail.id : "");
+    setSelectedClosingScope(null);
+    setClosingMovementSearch(restored.movements.search);
+    setClosingDetailResource({ value: null, loading: false, error: "" });
     setSelectedTextbookIds([]);
     setSelectedPurchaseLineIds([]);
     setSelectedSaleLineIds([]);
@@ -1470,15 +1376,6 @@ function TextbookOperationsWorkspaceContent() {
   const requestRendererData = useMemo(() => buildPreparedPurchaseRendererData(numbered.requests.rows), [numbered.requests.rows]);
   const purchaseRendererData = useMemo(() => buildPreparedPurchaseRendererData(numbered.purchase.rows), [numbered.purchase.rows]);
   const saleRendererData = useMemo(() => buildPreparedSaleRendererData(numbered.sales.rows), [numbered.sales.rows]);
-  useEffect(() => {
-    const requested = initialNavigationRef.current.detail;
-    if (requested?.kind !== "closing" || selectedClosingDetailId) return;
-    const row = numbered.closing.rows.find((item) => item.id === requested.id);
-    if (!row) return;
-    setSelectedClosingDetailId(row.id);
-    setSelectedClosingScope({ closingMonth: row.closing_month, subject: row.subject || "all" });
-    setClosingMovementSearch(initialNavigationRef.current.movements.search);
-  }, [numbered.closing.rows, selectedClosingDetailId]);
   const activePrimaryState = activeTab === "master" ? numbered.master : activeTab === "requests" ? numbered.requests : activeTab === "purchase" ? numbered.purchase
     : activeTab === "sales" ? numbered.sales : activeTab === "inventory" ? numbered.inventory : numbered.closing;
   const activeSummaryResource = activeTab === "master" ? numbered.master.summary : activeTab === "requests" ? numbered.requests.summary : activeTab === "purchase" ? numbered.purchase.summary
@@ -1608,25 +1505,16 @@ function TextbookOperationsWorkspaceContent() {
     () => getGradeOptionsForSchoolLevel(schoolLevelGroupFilter === "all" ? "" : schoolLevelGroupFilter),
     [schoolLevelGroupFilter],
   );
+  const acceptedMasterSummary = numbered.master.summary.value;
+  const acceptedInventorySummary = numbered.inventory.summary.value;
+  const acceptedCatalogSummary = activeTab === "inventory" ? acceptedInventorySummary : acceptedMasterSummary;
   const categoryGroupOptions = useMemo(
-    () => [
-      ...new Set([
-        ...getSubSubjectOptionsForSubject(textbookSubSubjectSettings, subjectGroupFilter),
-        ...activeInventory
-          .filter((row) => subjectGroupFilter === "all" || normalizeSubjectValue(row.subject) === subjectGroupFilter)
-          .map(getTextbookSubSubject),
-      ]),
-    ]
-      .filter(Boolean)
-      .sort((left, right) => left.localeCompare(right, "ko")),
-    [activeInventory, subjectGroupFilter, textbookSubSubjectSettings],
+    () => acceptedCatalogSummary?.subSubjectOptions || [],
+    [acceptedCatalogSummary],
   );
   const activeTextbookQualityFilter = activeTab === "master" ? textbookQualityFilter : "all";
-  const acceptedMasterSummary = numbered.master.summary.value;
-  const textbookQualityFilterCounts = acceptedMasterSummary?.qualityCounts
-    || Object.fromEntries((Object.keys(textbookQualityFilterLabels) as TextbookQualityFilter[]).map((filter) => [filter, 0])) as Record<TextbookQualityFilter, number>;
-  const inventoryFilterCounts = acceptedMasterSummary?.inventoryCounts
-    || Object.fromEntries((Object.keys(inventoryFilterLabels) as InventoryFilter[]).map((filter) => [filter, 0])) as Record<InventoryFilter, number>;
+  const textbookQualityFilterCounts = acceptedMasterSummary?.qualityCounts || null;
+  const inventoryFilterCounts = acceptedCatalogSummary?.inventoryCounts || null;
   const filteredInventory = numbered.master.rows;
   const masterVisibleInventory = numbered.master.rows;
   const inventoryById = useMemo(
@@ -1773,10 +1661,11 @@ function TextbookOperationsWorkspaceContent() {
   }, [gradeLevelGroupFilter, gradeLevelGroupOptions]);
 
   useEffect(() => {
+    if (!acceptedCatalogSummary) return;
     if (categoryGroupFilter === "all") return;
     if (categoryGroupOptions.includes(categoryGroupFilter)) return;
     setCategoryGroupFilter("all");
-  }, [categoryGroupFilter, categoryGroupOptions]);
+  }, [acceptedCatalogSummary, categoryGroupFilter, categoryGroupOptions]);
 
   const purchaseOrdersById = useMemo(
     () => new Map(data.purchaseOrders.map((order) => [getRecordId(order), order])),
@@ -4992,6 +4881,15 @@ function TextbookOperationsWorkspaceContent() {
         </Alert>
       ) : null}
 
+      {activeTab === "sales" && numbered.saleHistory.summary.error ? (
+        <Alert role="alert">
+          <AlertDescription className="flex items-center justify-between gap-3">
+            <span>출고 이력 집계 정보를 불러오지 못했습니다.</span>
+            <Button type="button" size="sm" variant="outline" aria-label="출고 이력 집계 다시 시도" onClick={() => { void numbered.saleHistory.summary.retry(); }}>다시 시도</Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       <Tabs value={activeTab} onValueChange={changeActiveTab} className="min-h-0 min-w-0 flex-1">
         <TabsList
           className={cn(
@@ -5168,7 +5066,7 @@ function TextbookOperationsWorkspaceContent() {
                               "ml-auto rounded px-1.5 text-[11px] font-semibold",
                               inventoryFilter === filter ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
                             )}>
-                              {formatQuantity(inventoryFilterCounts[filter])}
+                              {inventoryFilterCounts ? formatQuantity(inventoryFilterCounts[filter]) : "—"}
                             </span>
                           </Button>
                         ))}
@@ -5193,7 +5091,7 @@ function TextbookOperationsWorkspaceContent() {
                                 "ml-auto rounded px-1.5 text-[11px] font-semibold",
                                 textbookQualityFilter === filter ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
                               )}>
-                                {formatQuantity(textbookQualityFilterCounts[filter])}
+                                {textbookQualityFilterCounts ? formatQuantity(textbookQualityFilterCounts[filter]) : "—"}
                               </span>
                             </Button>
                           ))}
@@ -5203,7 +5101,7 @@ function TextbookOperationsWorkspaceContent() {
                   </div>
                 </PopoverContent>
               </Popover>
-              {activeTab === "master" && textbookQualityFilter === "inactive" && textbookQualityFilterCounts.inactive > 0 ? (
+              {activeTab === "master" && textbookQualityFilter === "inactive" && (textbookQualityFilterCounts?.inactive || 0) > 0 ? (
                 <Button
                   type="button"
                   variant="destructive"
@@ -5216,7 +5114,7 @@ function TextbookOperationsWorkspaceContent() {
                   비우기
                 </Button>
               ) : null}
-              {activeTab === "master" && textbookQualityFilterCounts.inactive > 0 ? (
+              {activeTab === "master" && (textbookQualityFilterCounts?.inactive || 0) > 0 ? (
                 <Button
                   type="button"
                   variant={textbookQualityFilter === "inactive" ? "default" : "outline"}
@@ -5231,12 +5129,12 @@ function TextbookOperationsWorkspaceContent() {
                   }}
                 >
                   <Trash2 className="size-4" />
-                  <span className="sr-only">미사용 교재 보관함 {formatQuantity(textbookQualityFilterCounts.inactive)}개</span>
+                  <span className="sr-only">미사용 교재 보관함 {formatQuantity(textbookQualityFilterCounts?.inactive || 0)}개</span>
                   <span className={cn(
                     "absolute -right-1 -top-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none tabular-nums",
                     textbookQualityFilter === "inactive" ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
                   )}>
-                    {formatQuantity(textbookQualityFilterCounts.inactive)}
+                    {formatQuantity(textbookQualityFilterCounts?.inactive || 0)}
                   </span>
                 </Button>
               ) : null}
@@ -5411,7 +5309,6 @@ function TextbookOperationsWorkspaceContent() {
             onPageChange={(page) => { void numbered.saleHistory.goToPage(page); }} pageSizeMode={numbered.saleHistory.pageSizeMode}
             onPageSizeChange={numbered.saleHistory.setPageSizePreference} ariaLabel="출고 이력 페이지 탐색" />
           <SalesProcessTable
-            preparedRows={numbered.sales.rows}
             summary={numbered.sales.summary.value}
             acceptedFilters={numbered.sales.acceptedFilters}
             sales={saleRendererData.sales}
@@ -5520,7 +5417,7 @@ function TextbookOperationsWorkspaceContent() {
                 onBulkLock={lockSelectedClosings}
                 onInspectRow={(row) => {
                   setSelectedClosingDetailId(getRecordId(row));
-                  setSelectedClosingScope({ closingMonth: text(row.closing_month), subject: text(row.subject) || "all" });
+                  setSelectedClosingScope(null);
                   setClosingMovementSearch("");
                 }}
               />
@@ -6809,11 +6706,11 @@ function InventoryCountWorkspace({
   onSubmitBulkCount?: (rows: InventoryCountRow[]) => void;
   emptyLabel?: string;
 }) {
-  const filterCounts = summary?.auditCounts || { recommended: 0, pending: 0, done: 0, all: 0 };
+  const filterCounts = summary?.auditCounts || null;
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const visibleRows = rows;
   const visibleAuditFilterOptions = (Object.keys(inventoryAuditFilterLabels) as InventoryAuditFilter[]).filter(
-    (filter) => auditFilter === filter || filterCounts[filter] > 0,
+    (filter) => auditFilter === filter || Boolean(filterCounts && filterCounts[filter] > 0),
   );
   const displayRows = visibleRows;
   const displayRowIds = useMemo(() => displayRows.map((row) => row.id).filter(Boolean), [displayRows]);
@@ -6880,7 +6777,7 @@ function InventoryCountWorkspace({
                 "rounded bg-muted px-1.5 text-xs",
                 auditFilter === filter && "bg-primary-foreground/20",
               )}>
-                {formatQuantity(filterCounts[filter])}
+                {filterCounts ? formatQuantity(filterCounts[filter]) : "—"}
               </span>
             </Button>
           ))}
@@ -8306,77 +8203,17 @@ function PurchaseProcessTable({
     setCollapsedGroups((current) => ({ ...current, [id]: !current[id] }));
   }
 
-  const shouldShowRequestLineForFilter = useCallback((line: Row, filter: PurchaseRequestFilter) => {
-    if (filter === "all") {
-      return true;
-    }
-    const orderStatus = text(line.status || getPurchaseLineOrder(line, ordersById)?.status);
-    if (mode === "order" && orderStatus !== "requested") {
-      return false;
-    }
-    const order = ((line.order || getPurchaseLineOrder(line, ordersById)) || {}) as Row;
-    const draft = buildPurchaseCardDraft(line, order);
-    const textbook = getTextbookById(textbooks, draft.textbookId || draft.requestedTextbookTitle);
-    if (filter === "unregistered") {
-      return !textbook;
-    }
-    return Boolean(textbook);
-  }, [mode, ordersById, textbooks]);
-
-  const shouldShowOrderGroupForFilter = useCallback((groupId: string, filter: PurchaseOrderFilter) => {
-    if (mode === "request") return true;
-    if (filter === "waiting") return groupId === "requested" || groupId === "ordered" || groupId === "partially_received";
-    if (filter === "partial") return groupId === "partially_received";
-    if (filter === "returnable") return groupId === "partially_received" || groupId === "received";
-    if (filter === "returned") return groupId === "returned";
-    return true;
-  }, [mode]);
-
-  const shouldShowOrderLineForFilter = useCallback((line: Row, groupId: string, filter: PurchaseOrderFilter) => {
-    if (mode === "request") return true;
-    if (filter === "returnable") {
-      const order = getPurchaseLineOrder(line, ordersById);
-      const status = text(line.status || order?.status || groupId);
-      return numberValue(line.received_quantity || line.receivedQuantity) > 0 && status !== "returned" && status !== "cancelled";
-    }
-    if (filter === "returned") {
-      const order = getPurchaseLineOrder(line, ordersById);
-      return text(line.status || order?.status || groupId) === "returned";
-    }
-    return true;
-  }, [mode, ordersById]);
-
   const searchMatchedPurchaseRowsByGroup = useMemo(() => {
     const rowsByGroup = new Map<string, Row[]>();
     for (const group of groups) {
-      rowsByGroup.set(group.id, preparedRows.length > 0 ? (grouped[group.id] || []) : (grouped[group.id] || []).filter((line) => {
-        const order = ((line.order || getPurchaseLineOrder(line, ordersById)) || {}) as Row;
-        if (!shouldShowOperationalPurchaseLine(line, order, textbooks)) {
-          return false;
-        }
-        return matchesPurchaseLineQuery({
-          line,
-          order,
-          query: searchQuery,
-          textbooks,
-          publishers,
-          classes,
-          suppliers,
-          publisherSupplierLinks,
-          locations,
-        });
-      }));
+      rowsByGroup.set(group.id, grouped[group.id] || []);
     }
     return rowsByGroup;
-  }, [classes, grouped, groups, locations, ordersById, preparedRows.length, publisherSupplierLinks, publishers, searchQuery, suppliers, textbooks]);
+  }, [grouped, groups]);
 
-  const getVisiblePurchaseRows = useCallback((groupId: string, nextRequestFilter = requestFilter, nextBoardScope = boardScope, nextOrderFilter = orderFilter) => {
-    if (preparedRows.length > 0) return searchMatchedPurchaseRowsByGroup.get(groupId) || [];
-    return (searchMatchedPurchaseRowsByGroup.get(groupId) || [])
-      .filter((line) => shouldShowPurchaseLineOnBoard(line, nextBoardScope))
-      .filter((line) => shouldShowRequestLineForFilter(line, nextRequestFilter))
-      .filter((line) => shouldShowOrderLineForFilter(line, groupId, nextOrderFilter));
-  }, [boardScope, orderFilter, preparedRows.length, requestFilter, searchMatchedPurchaseRowsByGroup, shouldShowOrderLineForFilter, shouldShowRequestLineForFilter]);
+  const getVisiblePurchaseRows = useCallback((groupId: string) => {
+    return searchMatchedPurchaseRowsByGroup.get(groupId) || [];
+  }, [searchMatchedPurchaseRowsByGroup]);
 
   const visiblePurchaseRowsByGroup = useMemo(() => {
     const rowsByGroup = new Map<string, Row[]>();
@@ -8401,28 +8238,11 @@ function PurchaseProcessTable({
   const hasVisiblePurchaseRows = visiblePurchaseRows.length > 0;
   const renderedGroups = visibleGroups.filter((group) => getCurrentVisiblePurchaseRows(group.id).length > 0);
   const emptyGroupId = visibleGroups[0]?.id || (mode === "request" ? "requested" : "ordered");
-  const purchaseProcessFilterCounts = useMemo(() => {
-    const requestCounts = Object.fromEntries(purchaseRequestFilterValues.map((filter) => [filter, 0])) as Record<PurchaseRequestFilter, number>;
-    const orderCounts = Object.fromEntries(purchaseOrderFilterValues.map((filter) => [filter, 0])) as Record<PurchaseOrderFilter, number>;
-    const boardScopeCounts = Object.fromEntries(purchaseBoardScopeValues.map((scope) => [scope, 0])) as Record<PurchaseBoardScope, number>;
-
-    for (const filter of purchaseRequestFilterValues) {
-      requestCounts[filter] = groups.reduce((sum, group) => sum + getVisiblePurchaseRows(group.id, filter).length, 0);
-    }
-    for (const filter of purchaseOrderFilterValues) {
-      orderCounts[filter] = groups.reduce((sum, group) => {
-        if (!shouldShowOrderGroupForFilter(group.id, filter)) {
-          return sum;
-        }
-        return sum + getVisiblePurchaseRows(group.id, requestFilter, boardScope, filter).length;
-      }, 0);
-    }
-    for (const scope of purchaseBoardScopeValues) {
-      boardScopeCounts[scope] = groups.reduce((sum, group) => sum + getVisiblePurchaseRows(group.id, requestFilter, scope).length, 0);
-    }
-
-    return { request: requestCounts, order: orderCounts, boardScope: boardScopeCounts };
-  }, [boardScope, getVisiblePurchaseRows, groups, requestFilter, shouldShowOrderGroupForFilter]);
+  const purchaseProcessFilterCounts = summary ? {
+    request: summary.requestCounts,
+    order: summary.orderCounts,
+    boardScope: summary.boardScopeCounts,
+  } : null;
   const purchaseProcessActionIds = useMemo(() => {
     const orderable: string[] = [];
     const receivable: string[] = [];
@@ -8478,19 +8298,19 @@ function PurchaseProcessTable({
     [selectedLineIdSet, visibleActionablePurchaseLineIds],
   );
   const hasProcessSearchQuery = Boolean(text(searchQuery));
-  const totalProcessRowCount = groups.reduce((sum, group) => sum + (grouped[group.id] || []).length, 0);
-  const showProcessControls = totalProcessRowCount > 0 || hasProcessSearchQuery || boardScope !== "active" || requestFilter !== "all" || orderFilter !== "all";
+  const totalProcessRowCount = summary?.totalCount ?? null;
+  const showProcessControls = Boolean(totalProcessRowCount && totalProcessRowCount > 0) || hasProcessSearchQuery || boardScope !== "active" || requestFilter !== "all" || orderFilter !== "all";
   const hasHiddenProcessRows =
-    mode === "order" && totalProcessRowCount > 0 && !hasVisiblePurchaseRows && !hasProcessSearchQuery;
+    mode === "order" && Boolean(totalProcessRowCount && totalProcessRowCount > 0) && !hasVisiblePurchaseRows && !hasProcessSearchQuery;
   const showProcessSummary = Boolean(summary);
   const visibleBoardScopeOptions = (Object.keys(purchaseBoardScopeLabels) as PurchaseBoardScope[]).filter(
-    (scope) => boardScope === scope || purchaseProcessFilterCounts.boardScope[scope] > 0,
+    (scope) => boardScope === scope || Boolean(purchaseProcessFilterCounts && purchaseProcessFilterCounts.boardScope[scope] > 0),
   );
   const visibleOrderFilterOptions = (Object.keys(purchaseOrderFilterLabels) as PurchaseOrderFilter[]).filter(
-    (filter) => orderFilter === filter || purchaseProcessFilterCounts.order[filter] > 0,
+    (filter) => orderFilter === filter || Boolean(purchaseProcessFilterCounts && purchaseProcessFilterCounts.order[filter] > 0),
   );
   const visibleRequestFilterOptions = mode === "order"
-    ? requestFilterOptions.filter((option) => requestFilter === option.value || purchaseProcessFilterCounts.request[option.value] > 0)
+    ? requestFilterOptions.filter((option) => requestFilter === option.value || Boolean(purchaseProcessFilterCounts && purchaseProcessFilterCounts.request[option.value] > 0))
     : [];
   const activeRequestFilterLabel = requestFilterOptions.find((option) => option.value === requestFilter)?.label || "";
   const activePurchaseFilterCount = mode === "order"
@@ -8619,7 +8439,7 @@ function PurchaseProcessTable({
                             "ml-2 rounded px-1.5 text-[11px] font-semibold",
                             boardScope === scope ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
                           )}>
-                            {formatQuantity(purchaseProcessFilterCounts.boardScope[scope])}
+                            {purchaseProcessFilterCounts ? formatQuantity(purchaseProcessFilterCounts.boardScope[scope]) : "—"}
                           </span>
                         </Button>
                       ))}
@@ -8643,7 +8463,7 @@ function PurchaseProcessTable({
                             "ml-2 rounded px-1.5 text-[11px] font-semibold",
                             orderFilter === filter ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
                           )}>
-                            {formatQuantity(purchaseProcessFilterCounts.order[filter])}
+                            {purchaseProcessFilterCounts ? formatQuantity(purchaseProcessFilterCounts.order[filter]) : "—"}
                           </span>
                         </Button>
                       ))}
@@ -8668,7 +8488,7 @@ function PurchaseProcessTable({
                               "ml-2 rounded px-1.5 text-[11px] font-semibold",
                               requestFilter === option.value ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
                             )}>
-                              {formatQuantity(purchaseProcessFilterCounts.request[option.value])}
+                              {purchaseProcessFilterCounts ? formatQuantity(purchaseProcessFilterCounts.request[option.value]) : "—"}
                             </span>
                           </Button>
                         ))}
@@ -8817,15 +8637,16 @@ function PurchaseProcessTable({
             ? preparedRows.filter((row) => row.status === group.id)
             : buildPurchaseDisplayRows(rows, ordersById, textbooks);
           const collapsed = Boolean(collapsedGroups[group.id]);
-          const studentRequestedTotal = getPurchaseDisplayScopeQuantity(rows, "student", "requested");
-          const studentOrderedTotal = getPurchaseDisplayScopeQuantity(rows, "student", "ordered");
-          const studentReceivedTotal = getPurchaseDisplayScopeQuantity(rows, "student", "received");
-          const teacherRequestedTotal = getPurchaseDisplayScopeQuantity(rows, "teacher", "requested");
-          const teacherOrderedTotal = getPurchaseDisplayScopeQuantity(rows, "teacher", "ordered");
-          const teacherReceivedTotal = getPurchaseDisplayScopeQuantity(rows, "teacher", "received");
-          const requestedTotal = studentRequestedTotal + teacherRequestedTotal;
-          const orderedTotal = studentOrderedTotal + teacherOrderedTotal;
-          const receivedTotal = studentReceivedTotal + teacherReceivedTotal;
+          const aggregateGroup = summary?.groups.find((item) => item.status === group.id) || null;
+          const studentRequestedTotal = aggregateGroup?.quantities.student.requested ?? null;
+          const studentOrderedTotal = aggregateGroup?.quantities.student.ordered ?? null;
+          const studentReceivedTotal = aggregateGroup?.quantities.student.received ?? null;
+          const teacherRequestedTotal = aggregateGroup?.quantities.teacher.requested ?? null;
+          const teacherOrderedTotal = aggregateGroup?.quantities.teacher.ordered ?? null;
+          const teacherReceivedTotal = aggregateGroup?.quantities.teacher.received ?? null;
+          const requestedTotal = aggregateGroup?.quantities.requested ?? null;
+          const orderedTotal = aggregateGroup?.quantities.ordered ?? null;
+          const receivedTotal = aggregateGroup?.quantities.received ?? null;
           const groupActionableLineIds: string[] = [];
           for (const line of rows) {
             const lineId = getRecordId(line);
@@ -8839,10 +8660,10 @@ function PurchaseProcessTable({
           const groupSomeActionableSelected =
             groupSelectedActionableCount > 0 && !groupAllActionableSelected;
           const groupSummaryText = [
-            `${formatQuantity(displayRows.length)}건`,
-            requestedTotal > 0 ? `요청 ${formatQuantity(requestedTotal)}` : "",
-            mode === "order" && orderedTotal > 0 ? `주문 ${formatQuantity(orderedTotal)}` : "",
-            mode === "order" && receivedTotal > 0 ? `입고 ${formatQuantity(receivedTotal)}` : "",
+            aggregateGroup ? `${formatQuantity(aggregateGroup.totalCount)}건` : "집계 확인 필요",
+            requestedTotal !== null && requestedTotal > 0 ? `요청 ${formatQuantity(requestedTotal)}` : "",
+            mode === "order" && orderedTotal !== null && orderedTotal > 0 ? `주문 ${formatQuantity(orderedTotal)}` : "",
+            mode === "order" && receivedTotal !== null && receivedTotal > 0 ? `입고 ${formatQuantity(receivedTotal)}` : "",
           ].filter(Boolean).join(" · ");
 
           return (
@@ -9362,18 +9183,18 @@ function PurchaseProcessTable({
                         {isPurchaseColumnVisible("textbook") ? <TableCell /> : null}
                         {isPurchaseColumnVisible("location") ? <TableCell /> : null}
                         {isPurchaseColumnVisible("class") ? <TableCell /> : null}
-                        {isPurchaseColumnVisible("studentRequested") ? <TableCell className={purchaseQuantityCellClassName("student")}>{formatQuantity(studentRequestedTotal)}</TableCell> : null}
+                        {isPurchaseColumnVisible("studentRequested") ? <TableCell className={purchaseQuantityCellClassName("student")}>{studentRequestedTotal === null ? "—" : formatQuantity(studentRequestedTotal)}</TableCell> : null}
                         {mode === "order" ? (
                           <>
-                            {isPurchaseColumnVisible("studentOrdered") ? <TableCell className={purchaseQuantityCellClassName("student")}>{formatQuantity(studentOrderedTotal)}</TableCell> : null}
-                            {isPurchaseColumnVisible("studentReceived") ? <TableCell className={purchaseQuantityCellClassName("student")}>{formatQuantity(studentReceivedTotal)}</TableCell> : null}
+                            {isPurchaseColumnVisible("studentOrdered") ? <TableCell className={purchaseQuantityCellClassName("student")}>{studentOrderedTotal === null ? "—" : formatQuantity(studentOrderedTotal)}</TableCell> : null}
+                            {isPurchaseColumnVisible("studentReceived") ? <TableCell className={purchaseQuantityCellClassName("student")}>{studentReceivedTotal === null ? "—" : formatQuantity(studentReceivedTotal)}</TableCell> : null}
                           </>
                         ) : null}
-                        {isPurchaseColumnVisible("teacherRequested") ? <TableCell className={purchaseQuantityCellClassName("teacher")}>{formatQuantity(teacherRequestedTotal)}</TableCell> : null}
+                        {isPurchaseColumnVisible("teacherRequested") ? <TableCell className={purchaseQuantityCellClassName("teacher")}>{teacherRequestedTotal === null ? "—" : formatQuantity(teacherRequestedTotal)}</TableCell> : null}
                         {mode === "order" ? (
                           <>
-                            {isPurchaseColumnVisible("teacherOrdered") ? <TableCell className={purchaseQuantityCellClassName("teacher")}>{formatQuantity(teacherOrderedTotal)}</TableCell> : null}
-                            {isPurchaseColumnVisible("teacherReceived") ? <TableCell className={purchaseQuantityCellClassName("teacher")}>{formatQuantity(teacherReceivedTotal)}</TableCell> : null}
+                            {isPurchaseColumnVisible("teacherOrdered") ? <TableCell className={purchaseQuantityCellClassName("teacher")}>{teacherOrderedTotal === null ? "—" : formatQuantity(teacherOrderedTotal)}</TableCell> : null}
+                            {isPurchaseColumnVisible("teacherReceived") ? <TableCell className={purchaseQuantityCellClassName("teacher")}>{teacherReceivedTotal === null ? "—" : formatQuantity(teacherReceivedTotal)}</TableCell> : null}
                           </>
                         ) : null}
                         {isPurchaseColumnVisible("decision") ? <TableCell /> : null}
@@ -9517,7 +9338,6 @@ function SalesHistoryLedger({
 }
 
 function SalesProcessTable({
-  preparedRows,
   summary,
   acceptedFilters,
   sales,
@@ -9545,7 +9365,6 @@ function SalesProcessTable({
   onBulkDelete,
   onClearSearch,
 }: {
-  preparedRows: SaleLineRow[];
   summary: TextbookSaleSummary | null;
   acceptedFilters: SaleFilters | null;
   sales: Row[];
@@ -9622,16 +9441,10 @@ function SalesProcessTable({
   const searchMatchedSaleRowsByGroup = useMemo(() => {
     const rowsByGroup = new Map<string, Row[]>();
     for (const group of groups) {
-      rowsByGroup.set(group.id, preparedRows.length > 0 ? (grouped[group.id] || []) : (grouped[group.id] || []).filter((line) => {
-        const sale = salesById.get(text(line.sale_id || line.saleId));
-        if (!shouldShowOperationalSaleLine(line, textbooks)) {
-          return false;
-        }
-        return matchesSaleLineQuery({ line, sale, query: searchQuery, textbooks, classes, locations, students });
-      }));
+      rowsByGroup.set(group.id, grouped[group.id] || []);
     }
     return rowsByGroup;
-  }, [classes, grouped, groups, locations, preparedRows.length, salesById, searchQuery, students, textbooks]);
+  }, [grouped, groups]);
 
   const getVisibleSaleRows = useCallback((groupId: string) => {
     return searchMatchedSaleRowsByGroup.get(groupId) || [];
@@ -9731,18 +9544,7 @@ function SalesProcessTable({
   );
   const renderedGroups = visibleGroups.filter((group) => getCurrentVisibleSaleRows(group.id).length > 0);
   const emptyGroupId = visibleGroups[0]?.id || "charged";
-  const salesProcessFilterCounts = useMemo(() => {
-    const counts = Object.fromEntries(salesProcessFilterValues.map((filter) => [filter, 0])) as Record<SalesProcessFilter, number>;
-    for (const group of groups) {
-      const rowCount = getVisibleSaleRows(group.id).length;
-      counts.all += rowCount;
-      if (group.id === "charged") counts.waiting += rowCount;
-      if (group.id === "issued") counts.issued += rowCount;
-      if (group.id === "returned") counts.returned += rowCount;
-      if (group.id === "cancelled") counts.cancelled += rowCount;
-    }
-    return counts;
-  }, [getVisibleSaleRows, groups]);
+  const salesProcessFilterCounts = summary?.statusCounts || null;
   const hasProcessSearchQuery = Boolean(text(searchQuery));
   const showSalesControls = hasVisibleSaleRows || hasProcessSearchQuery || statusFilter !== "all" || Boolean(summary && summary.statusCounts.all > 0);
   const showSalesGroupToggleControls = renderedGroups.length > 1;
@@ -9796,7 +9598,7 @@ function SalesProcessTable({
                 "ml-2 rounded px-1.5 text-[11px] font-semibold",
                 statusFilter === option.value ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
               )}>
-                {formatQuantity(salesProcessFilterCounts[option.value as SalesProcessFilter])}
+                {salesProcessFilterCounts ? formatQuantity(salesProcessFilterCounts[option.value as SalesProcessFilter]) : "—"}
               </span>
             </Button>
           ))}

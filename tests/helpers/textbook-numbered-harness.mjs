@@ -112,7 +112,7 @@ export async function setup(t, initial = {}) {
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator });
   for (const key of ['HTMLElement', 'Element', 'DocumentFragment', 'MutationObserver', 'CustomEvent', 'Event', 'Node', 'NodeFilter', 'HTMLInputElement']) globalThis[key] = dom.window[key];
   globalThis.getComputedStyle = dom.window.getComputedStyle;
-  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+  globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
   window.requestAnimationFrame = callback => window.setTimeout(callback, 0);
   window.cancelAnimationFrame = window.clearTimeout;
   globalThis.requestAnimationFrame = window.requestAnimationFrame;
@@ -121,7 +121,7 @@ export async function setup(t, initial = {}) {
   window.HTMLElement.prototype.scrollIntoView = () => {};
   window.HTMLElement.prototype.attachEvent = () => {};
   window.HTMLElement.prototype.detachEvent = () => {};
-  window.localStorage.setItem('tips.data-table-page-size.v1', JSON.stringify(Object.fromEntries(
+  window.localStorage.setItem('tips.data-table-page-size.v1', JSON.stringify(initial.preferences ?? Object.fromEntries(
     ['master', 'requests', 'purchase', 'sales', 'sales-history', 'inventory', 'inventory-history', 'closing', 'closing-movements']
       .map(scope => [`textbooks:${scope}`, { mode: 'manual', pageSize: 10 }]),
   )));
@@ -156,17 +156,21 @@ export async function setup(t, initial = {}) {
     }),
     auth: async patch => { auth = { ...auth, ...patch }; await render(); },
     navigate: async query => { window.history.replaceState(null, '', `/admin/textbooks${query}`); await render(); },
+    popstate: async query => act(async () => {
+      window.history.replaceState(null, '', `/admin/textbooks${query}`);
+      window.dispatchEvent(new window.PopStateEvent('popstate'));
+    }),
   };
 }
 
 export const button = label => [...document.querySelectorAll('button')].find(node => node.textContent.trim() === label || node.getAttribute('aria-label') === label);
 
 // A rendering probe for the typed state capability, not a substitute controller.
-export async function setupHook(t, initial, { strictMode = false } = {}) {
+export async function setupHook(t, initial, { strictMode = false, preferences } = {}) {
   const dom = new JSDOM('<div id="root"></div>', { url: 'https://test.invalid/admin/textbooks' });
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
-  window.localStorage.setItem('tips.data-table-page-size.v1', JSON.stringify(Object.fromEntries(
+  window.localStorage.setItem('tips.data-table-page-size.v1', JSON.stringify(preferences ?? Object.fromEntries(
     ['master', 'requests', 'purchase', 'sales', 'sales-history', 'inventory', 'inventory-history', 'closing', 'closing-movements']
       .map(scope => [`textbooks:${scope}`, { mode: 'manual', pageSize: 10 }]),
   )));

@@ -400,12 +400,50 @@ test("purchase aggregate badges use only authoritative summary quantities", asyn
   await h.resolve(page, { rows: [purchaseRow("order")], page: 1, pageSize: 10, totalCount: 1 })
   const quantities = { requested: 99, ordered: 20, received: 10, student: { requested: 50, ordered: 10, received: 5 }, teacher: { requested: 49, ordered: 10, received: 5 } }
   const summary = purchaseSummary("order")
-  await h.resolve(summaryRequest, { ...summary, quantities, groups: summary.groups.map((group) => ({ ...group, quantities })) })
+  await h.resolve(summaryRequest, {
+    ...summary,
+    quantities,
+    groups: summary.groups.map((group) => ({ ...group, totalCount: 31, rawLineCount: 62, quantities })),
+    totalCount: 31,
+    rawLineCount: 62,
+    requestCounts: { all: 77, unregistered: 23, orderable: 54 },
+    orderCounts: { all: 66, waiting: 55, partial: 44, returnable: 33, returned: 22 },
+    boardScopeCounts: { active: 71, recent: 72, all: 73 },
+  })
   await h.settleLegacy()
 
   assert.equal(document.body.textContent.includes("요청 99"), true)
   assert.equal(document.body.textContent.includes("주문 20"), true)
   assert.equal(document.body.textContent.includes("입고 10"), true)
+  assert.equal(document.querySelector('[aria-label^="주문 필요 그룹"]').getAttribute('aria-label').includes('31건'), true)
+  assert.equal(document.querySelector('[aria-label^="주문 필요 그룹"]').getAttribute('aria-label').includes('요청 99'), true)
+  await h.act(() => document.querySelector('[aria-label="주문·입고 보기 필터"]').click())
+  assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('전체') && node.textContent.includes('73')), true)
+  assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('부분입고') && node.textContent.includes('44')), true)
+  assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('미등록 요청') && node.textContent.includes('23')), true)
+})
+
+test("master and inventory controls use only their matching authoritative summary facets and options", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=inventory&textbookPage=1&textbookPageSize=10" })
+  const locationId = id(900)
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_location_reference_page_v1"), {
+    rows: [{ value: locationId, label: "본관", searchText: "본관 main" }], page: 1, pageSize: 20, totalCount: 1,
+    defaultLocation: { id: locationId, code: "main", name: "본관" },
+  })
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_inventory_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_inventory_history_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_inventory_summary_v1"), masterSummary(41, {
+    inventoryCounts: { all: 41, shortage: 37, surplus: 3, unused: 1, negative: 9 },
+    subSubjectOptions: ["서버 세부과목"],
+    auditCounts: { all: 41, recommended: 31, pending: 7, done: 3 },
+  }))
+  await h.settleLegacy()
+
+  await h.act(() => document.querySelector('[aria-label="교재 상태 필터 열기"]').click())
+  assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('부족') && node.textContent.includes('37')), true)
+  assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('대기') && node.textContent.includes('7')), true)
+  await h.act(() => document.querySelector('[aria-label="교재 세부과목 필터"]').click())
+  assert.equal(document.body.textContent.includes("서버 세부과목"), true)
 })
 
 test("filtered-zero sales history and process retain their recovery controls", async (t) => {
@@ -435,6 +473,22 @@ test("filtered-zero sales history and process retain their recovery controls", a
   assert.ok(document.querySelector('[aria-label="출고 이력 연도"]'))
   assert.ok(document.querySelector('[aria-label="교재 출고 목록"]'))
   assert.ok([...document.querySelectorAll('button[aria-pressed="true"]')].find((node) => node.textContent.includes("반품")))
+  assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('전체 출고') && node.textContent.includes('4')), true)
+  assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('출고 대기') && node.textContent.includes('2')), true)
+})
+
+test("sale-history summary failure is visible and retryable independently of the sales summary", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=sales&textbookPage=1&textbookPageSize=10" })
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_sale_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_sale_summary_v1"), saleSummary(0))
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_sale_history_page_v1"), { rows: [saleHistoryRow()], page: 1, pageSize: 10, totalCount: 1 })
+  await h.reject(h.requests.find((request) => request.name === "get_textbook_sale_history_summary_v1"), { message: "history summary failed" })
+  await h.settleLegacy()
+
+  assert.equal(document.body.textContent.includes("출고 이력 집계 정보를 불러오지 못했습니다"), true)
+  await h.act(() => document.querySelector('[aria-label="출고 이력 집계 다시 시도"]').click())
+  assert.equal(h.requests.filter((request) => request.name === "get_textbook_sale_history_summary_v1").length, 2)
+  assert.equal(h.requests.filter((request) => request.name === "get_textbook_sale_summary_v1").length, 1)
 })
 
 test("mounted sales renderers consume independent prepared history and process pages", async (t) => {
@@ -478,13 +532,18 @@ test("mounted closing uses its prepared page, direct detail, independent movemen
 
   await h.act(() => button("2026-08 전체 정산 상세 열기").click())
   const detail = h.requests.find((request) => request.name === "get_textbook_closing_detail_v1")
-  const movements = h.requests.find((request) => request.name === "list_textbook_closing_movement_page_v1")
   assert.ok(detail)
+  assert.equal(h.requests.some((request) => request.name === "list_textbook_closing_movement_page_v1"), false)
+  await h.resolve(detail, closingDetailEnvelope({ closing_month: "2026-09", subject: "science" }))
+  const movementRequests = h.requests.filter((request) => request.name === "list_textbook_closing_movement_page_v1")
+  assert.equal(movementRequests.length, 1, JSON.stringify(movementRequests.map((request) => request.args)))
+  const [movements] = movementRequests
   assert.ok(movements)
-  assert.deepEqual(movements.args.p_filters, { closingMonth: "2026-08", subject: "all", search: "" })
-  await h.resolve(detail, closingDetailEnvelope())
-  const movementRows = [closingMovementRow(1), closingMovementRow(0)]
-  await h.resolve(movements, { rows: movementRows, page: 1, pageSize: 10, totalCount: 2 })
+  assert.deepEqual(movements.args.p_filters, { closingMonth: "2026-09", subject: "science", search: "" })
+  assert.equal(movements.signal.aborted, false)
+  const movementRows = [closingMovementRow(1), closingMovementRow(0)].map((row) => ({ ...row, at: "2026-09-01T00:00:00+00:00" }))
+  await h.resolve(movements, { rows: movementRows, page: 1, pageSize: movements.args.p_page_size, totalCount: 2 })
+  assert.equal(movements.signal.aborted, false)
   assert.equal(document.body.textContent.includes("교재 101"), true)
   assert.deepEqual(preparedRowIds("closing-movement"), movementRows.map((row) => row.id))
   assert.ok(document.querySelector('[aria-label="월마감 상세 이동 페이지 탐색"]'))
@@ -492,7 +551,31 @@ test("mounted closing uses its prepared page, direct detail, independent movemen
   await h.act(() => button("복사").click())
   const exported = h.requests.find((request) => request.name === "get_textbook_closing_movement_export_v1")
   assert.ok(exported)
-  assert.deepEqual(exported.args.p_filters, { closingMonth: "2026-08", subject: "all", search: "" })
+  assert.deepEqual(exported.args.p_filters, { closingMonth: "2026-09", subject: "science", search: "" })
+})
+
+test("external and popstate navigation restore or clear off-page closing detail identity and movement search", async (t) => {
+  const a = id(791), b = id(792)
+  const h = await setup(t, { search: "?textbookTab=closing&textbookPage=1&textbookPageSize=10" })
+  await h.navigate(`?textbookTab=closing&textbookPage=4&textbookPageSize=10&textbookDetailKind=closing&textbookDetail=${a}&textbookMovementSearch=alpha`)
+  const detailA = h.requests.find((request) => request.name === "get_textbook_closing_detail_v1" && request.args.p_id === a)
+  assert.ok(detailA)
+  await h.resolve(detailA, closingDetailEnvelope({ id: a, closing_month: "2026-08", subject: "english" }))
+  const movementA = h.requests.find((request) => request.name === "list_textbook_closing_movement_page_v1" && request.args.p_filters.search === "alpha")
+  assert.ok(movementA)
+
+  await h.popstate(`?textbookTab=closing&textbookPage=8&textbookPageSize=10&textbookDetailKind=closing&textbookDetail=${b}&textbookMovementSearch=beta`)
+  const detailB = h.requests.find((request) => request.name === "get_textbook_closing_detail_v1" && request.args.p_id === b)
+  assert.ok(detailB)
+  assert.equal(movementA.signal.aborted, true)
+  assert.equal(h.requests.some((request) => request.name === "list_textbook_closing_movement_page_v1" && request.args.p_filters.search === "beta"), false)
+  await h.resolve(detailB, closingDetailEnvelope({ id: b, closing_month: "2026-09", subject: "science" }))
+  assert.deepEqual(h.requests.find((request) => request.name === "list_textbook_closing_movement_page_v1" && request.args.p_filters.search === "beta").args.p_filters,
+    { closingMonth: "2026-09", subject: "science", search: "beta" })
+
+  await h.popstate("?textbookTab=closing&textbookPage=1&textbookPageSize=10")
+  assert.equal(document.querySelector('[aria-label="월마감 상세 이동 페이지 탐색"]'), null)
+  assert.equal(h.requests.filter((request) => request.name === "get_textbook_closing_detail_v1").length, 2)
 })
 
 test("a closing detail URL loads an off-page detail before starting its scoped movement page", async (t) => {

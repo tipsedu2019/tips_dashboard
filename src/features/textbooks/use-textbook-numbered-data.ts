@@ -74,8 +74,19 @@ function useNumberedPage<F, T>(actor: Actor | null, tableId: string, entry: Text
   const setPreference = preference.setPreference
   const { enabled, restoredPage = 1, restoredPageSize, restorationKey, onPageCommit } = entry
   const route = typeof window === "undefined" ? "" : window.location.pathname
+  const [restoredSize, setRestoredSize] = useState<{ key: string | undefined; value: DataTablePageSize | undefined; explicit: boolean }>(() => ({
+    key: restorationKey,
+    value: restoredPageSize,
+    explicit: false,
+  }))
+  if (restoredSize.key !== restorationKey) {
+    setRestoredSize({ key: restorationKey, value: restoredPageSize, explicit: false })
+  }
+  const effectivePageSize = restoredSize.key === restorationKey && !restoredSize.explicit
+    ? restoredSize.value ?? preference.pageSize
+    : preference.pageSize
   const resourceScope = JSON.stringify({ actor: actor?.key, route, tableId, filters: entry.filters })
-  const scope = JSON.stringify({ actor: actor?.key, route, tableId, filters: entry.filters, pageSize: preference.pageSize })
+  const scope = JSON.stringify({ actor: actor?.key, route, tableId, filters: entry.filters, pageSize: effectivePageSize })
   const [display, setDisplay] = useState<{ actor: Actor | null; snapshot: NumberedPageSnapshot<T> }>({ actor: null, snapshot: emptyPage() })
   const controllerRef = useRef<ReturnType<typeof createNumberedPageController<T>> | null>(null)
   const current = useRef({ actor, enabled, scope, ready: preference.ready, onPageCommit })
@@ -84,14 +95,6 @@ function useNumberedPage<F, T>(actor: Actor | null, tableId: string, entry: Text
   const consumedRestoration = useRef<string | undefined>(undefined)
   const latest = useRef<NumberedPageSnapshot<T>>(emptyPage())
   const resumeRequired = useRef(false)
-  const appliedRestoredSize = useRef<string | undefined>(undefined)
-
-  useLayoutEffect(() => {
-    if (restorationKey === undefined || restoredPageSize === undefined || appliedRestoredSize.current === restorationKey) return
-    appliedRestoredSize.current = restorationKey
-    setPreference(restoredPageSize)
-  }, [setPreference, restorationKey, restoredPageSize])
-
   useLayoutEffect(() => {
     if (!enabled || current.current.scope !== scope || current.current.actor !== actor) {
       if (latest.current.loading) resumeRequired.current = true
@@ -132,7 +135,6 @@ function useNumberedPage<F, T>(actor: Actor | null, tableId: string, entry: Text
   useEffect(() => {
     if (!actor || !enabled || !preference.ready || !controllerRef.current) return
     const restoring = restorationKey !== undefined && restorationKey !== consumedRestoration.current
-    if (restoring && restoredPageSize !== undefined && preference.pageSize !== restoredPageSize) return
     if (!restoring && activeScope.current === scope) {
       if (resumeRequired.current) {
         resumeRequired.current = false
@@ -145,12 +147,12 @@ function useNumberedPage<F, T>(actor: Actor | null, tableId: string, entry: Text
     consumedRestoration.current = restorationKey
     activeScope.current = scope
     resumeRequired.current = false
-    void controllerRef.current.load({ scope, page, pageSize: preference.pageSize })
-  }, [actor, enabled, preference.ready, preference.pageSize, restorationKey, restoredPage, restoredPageSize, scope])
+    void controllerRef.current.load({ scope, page, pageSize: effectivePageSize })
+  }, [actor, effectivePageSize, enabled, preference.ready, restorationKey, restoredPage, scope])
 
   const isCurrent = useCallback(() => Boolean(actor && current.current.actor === actor && current.current.enabled && current.current.ready && current.current.scope === scope), [actor, scope])
   const goToPage = useCallback((page: number) => isCurrent()
-    ? controllerRef.current?.load({ scope, page, pageSize: preference.pageSize }) ?? Promise.resolve() : Promise.resolve(), [isCurrent, scope, preference.pageSize])
+    ? controllerRef.current?.load({ scope, page, pageSize: effectivePageSize }) ?? Promise.resolve() : Promise.resolve(), [effectivePageSize, isCurrent, scope])
   const retry = useCallback(() => isCurrent() ? controllerRef.current?.retry() ?? Promise.resolve() : Promise.resolve(), [isCurrent])
   const refresh = useCallback(() => {
     if (!isCurrent()) return Promise.resolve()
@@ -158,8 +160,11 @@ function useNumberedPage<F, T>(actor: Actor | null, tableId: string, entry: Text
     return accepted.scope === scope ? goToPage(accepted.page) : retry()
   }, [isCurrent, scope, goToPage, retry])
   const setPageSizePreference = useCallback((value: DataTablePageSizePreference) => {
-    if (actor && current.current.actor === actor && current.current.scope === scope) setPreference(value)
-  }, [actor, scope, setPreference])
+    if (actor && current.current.actor === actor && current.current.scope === scope) {
+      setRestoredSize({ key: restorationKey, value: undefined, explicit: true })
+      setPreference(value)
+    }
+  }, [actor, restorationKey, scope, setPreference])
   const snapshot = actor && display.actor === actor ? display.snapshot : emptyPage<T>()
   const acceptedFilters = useMemo(() => snapshot.scope === null ? null : (JSON.parse(snapshot.scope) as { filters: F }).filters, [snapshot.scope])
   return { page: { ...snapshot, loading: Boolean(actor && enabled && (!preference.ready || snapshot.loading)), acceptedFilters,
