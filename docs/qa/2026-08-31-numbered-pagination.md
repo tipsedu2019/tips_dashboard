@@ -123,6 +123,19 @@ At clean Task5 base `c1c164d92a0438a49f9724ec6e522b80dcc17b0b`, the final local 
 
 This is local synthetic verification for the secondary slice only. It does not close the independent whole-slice review, textbook/settings/auxiliary plans, remote migration/deployment, provider/send, production performance, source-format prevalence, or browser gates.
 
+### Secondary final integration review closure
+
+The full original slice review covered `60786d2df7bf3b4d337bdf87970f867cd57e7788..e2dec1806ea168ef673ba9a1281fa98d6874f381`. Task5 probe/evidence passed; two Important navigation defects were found and then fixed together in `b823b281f5f242ca82f28ab2307f13af95169e12`:
+
+- Academic/operations page buttons now use the actor-valid accepted filter scope and runtime size after a failed filter/size request. Their callers adopt the displayed filters without replaying page1; explicit Retry remains bound to the latest requested target. Stored Auto/manual preferences are preserved and an explicit repeated size choice remains actionable.
+- Mounted makeup query-only navigation now updates list/custom dates and independent detail IDs, with internal URL acknowledgements/native Back deduplicated. Detail replacement, pending-request cancellation, editor draft preservation and late role-revoked results have actual consumer coverage.
+
+The authoritative pre-fix RED reproduced all15 new scenarios. After narrow self-review corrections, the frozen final selected suite passed **504/504**, zero fail/cancel/skip/todo (27.612s); this is the prior486-test selection plus18 cases, not a whole-repository run. Nonincremental TypeScript and owned-file lint exited0 with no diagnostics. Fresh never-served `/private/tmp/tips-secondary-final-fix-build.PxrFZc` had an empty source checksum diff and built **81/81** pages successfully. All7 changed source/test hashes matched the frozen inputs afterward, and both live `.next` hashes above remained unchanged. Initial test-expectation corrections and resolved new lint warnings are retained in the full fix report rather than hidden.
+
+The single independent scoped re-review of `e2dec180..b823b281` marked both findings addressed with no new Critical/Important breakage. Immutable-history validation preserved all36 prior final migrations with zero additions; SQL, fixtures, manifest, services, shared pager/controller and probe remained unchanged, so the337+1937 SQL and12 synthetic wrapper-plan results retain their original separate provenance.
+
+The secondary slice's **local code/test/review gate is complete**. The known CLI2.115-to-2.116 advisory is deferred. Textbook/settings/auxiliary implementation, permitted real-browser checks, source-format prevalence, production performance and remote migration/deployment remain separate unfinished gates; no provider/send action was taken.
+
 ## Baseline
 
 Before new numbered code, `b4bc900e` included61 passing tests from `management-page-size`, `management-request-lifecycle`, `management-progressive-loading`, and `management-students-toolbar`. This only establishes the previous behavior baseline, not numbered-pagination evidence.

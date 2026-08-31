@@ -40,11 +40,12 @@ The variable-length editable `textbook_sub_subject_settings` table/mobile cards 
 - Create `src/features/textbooks/textbook-read-model.ts`.
 - Modify `src/features/textbooks/textbook-operations-workspace.tsx` only to import extracted pure models/types.
 - Create `tests/textbook-numbered-model-parity.test.mjs`.
+- Modify `tests/textbook-workspace.test.mjs` only to move affected definition-location assertions to the extracted module and verify the real workspace imports/wiring; retain unrelated UI/service safeguards.
 
 **Interfaces:** Export audit-named `MasterFilters`, `PurchaseFilters`, `SaleFilters`, `SaleHistoryFilters`, `InventoryFilters`, `InventoryHistoryFilters`, `ClosingFilters`, `SettingFilters`, `PageRequest<F,S>`. Extract existing `InventoryCountRow`, `InventoryHistoryRow`, `SaleHistorySummaryRow` and purchase/master DTO types without inventing alternate copies. Export pure grouping/filter projections matching current `buildPurchaseDisplayRows`, `buildSaleHistorySummaryRows`, `buildInventoryCountRows`, master quality and inventory filters. Keep UI rendering outside this module.
 
 - [ ] Write RED fixture tests using literal expectations: paired student+teacher lines count as one display row; repeated same-copy-scope lines remain separate; sales from two source rows in one month/class/textbook yield one history group; opening/purchase/sale/return quantities preserve existing balance and closing formulas.
-- [ ] Include cross-page-boundary fixtures (at least101 display parents), inactive/missing-reference textbook resolution, global duplicate title beyond the page, zero/negative/teacher stock, and all-time balances. Freeze purchase pairing using stable `(created_at,id)` source order before offset selection.
+- [ ] Include cross-page-boundary fixtures (at least101 display parents), inactive/missing-reference textbook resolution, global duplicate title beyond the page, zero/negative/teacher stock, and all-time balances. Freeze purchase pairing using stable `(created_at ASC NULLS LAST,id ASC)` source order before offset selection. This explicitly stabilizes previously unspecified input order; preserve native timestamp precision for that ordering and test equal/missing timestamps and shuffled inputs.
 - [ ] Extract existing pure functions/types and wire old workspace consumers to them without paging yet. Give `PurchaseCaseRow` stable anchorLineId/memberLineIds plus complete member DTOs. Preserve title/ISBN/barcode lookup exact→normalized→compact precedence and edition separation.
 - [ ] Run new parity tests and existing textbook ledger/workspace/service regressions; typecheck/lint and commit as `refactor: isolate textbook list projection contracts`. This task must not change data loading or formulas.
 
