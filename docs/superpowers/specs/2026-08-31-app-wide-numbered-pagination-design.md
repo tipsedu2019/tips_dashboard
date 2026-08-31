@@ -1,6 +1,6 @@
 # App-wide Numbered Pagination Design
 
-**Status:** User-specified ten-page block behavior recorded on 2026-08-31; written design ready for review before implementation.
+**Status:** Approved for implementation by the user on 2026-08-31.
 **Scope:** Shared pagination UI and behavior for administrative record lists, with domain-specific bounded page reads.
 **Not authorized by this design:** Remote migration application, deployment, provider activation, notification sends, or changes to domain mutations.
 
