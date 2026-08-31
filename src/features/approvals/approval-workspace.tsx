@@ -1239,7 +1239,7 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
             ) : visibleRequests.map((request) => renderRequest(request))}
           </div>
           <div className="border-t p-3"><DataTablePagination page={snapshot?.page || 1} pageSize={snapshot?.scope ? snapshot.pageSize : size.pageSize}
-            totalCount={snapshot?.totalCount ?? null} loading={loading} onPageChange={(page) => navigate(navigation.view, page)}
+            totalCount={snapshot?.totalCount ?? null} loading={loading} onPageChange={(page) => navigate(view, page)}
             pageSizeMode={size.mode} onPageSizeChange={size.setPreference} /></div>
         </section>
       </div>

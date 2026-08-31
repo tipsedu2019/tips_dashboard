@@ -145,6 +145,7 @@ async function setup(t, initial = {}) {
   };
 }
 const button = (label) => [...document.querySelectorAll('button')].find((node) => node.textContent.trim() === label || node.getAttribute('aria-label') === label);
+const tab = (label) => [...document.querySelectorAll('[role="tab"]')].find((node) => node.textContent.trim().startsWith(label));
 const changeInput = async (input, value) => act(async () => input[Object.keys(input).find((key) => key.startsWith('__reactProps'))].onChange({ target: { value } }));
 
 test('actual approval workspace restores page11, preserves accepted rows/counts on failure, retries and clamps', async (t) => {
@@ -162,6 +163,59 @@ test('actual approval workspace restores page11, preserves accepted rows/counts 
   await act(async () => p.finish(p.numbered()[2], 97)); assert.equal(p.numbered()[3].args.p_page, 10);
   await act(async () => p.finish(p.numbered()[3], 97)); assert.match(document.body.textContent, /97건/);
   assert.equal(new URLSearchParams(window.location.search).get('other'), 'keep');
+});
+
+for (const { page, nextPage, pageAction, firstTitle } of [
+  { page: 1, nextPage: 2, pageAction: '2 페이지', firstTitle: '문서 1' },
+  { page: 11, nextPage: 12, pageAction: '12 페이지', firstTitle: '문서 101' },
+  { page: 10, nextPage: 11, pageAction: '다음 페이지', firstTitle: '문서 91' },
+]) test(`failed tab switch pages the retained mine view from ${page} to ${nextPage}`, async (t) => {
+  const p = await setup(t, { search: `?view=mine&page=${page}` });
+  await act(async () => p.finish(p.numbered()[0]));
+  await act(async () => tab('반려').click());
+  const failed = p.numbered()[1];
+  assert.deepEqual(failed.args, { p_view: 'returned', p_page: 1, p_page_size: 10 });
+  assert.equal(tab('내 문서').getAttribute('aria-selected'), 'true');
+  assert.match(document.querySelector('[aria-label="전자결재 목록"]').textContent, new RegExp(firstTitle));
+  assert.match(document.body.textContent, /260건/);
+  assert.equal(button(pageAction).disabled, true, 'pending tab request keeps retained pager disabled');
+  await act(async () => button(pageAction).click()); assert.equal(p.numbered().length, 2);
+  await act(async () => failed.reject(new Error('TAB FAILURE')));
+  assert.equal(button(pageAction).disabled, false);
+  assert.equal(button(`${page} 페이지`).getAttribute('aria-current'), 'page');
+  await act(async () => button(pageAction).click());
+  const next = p.numbered()[2];
+  assert.deepEqual(next.args, { p_view: 'mine', p_page: nextPage, p_page_size: 10 });
+  await act(async () => p.finish(next));
+  assert.equal(tab('내 문서').getAttribute('aria-selected'), 'true');
+  assert.equal(button(`${nextPage} 페이지`).getAttribute('aria-current'), 'page');
+  assert.match(document.body.textContent, /260건/);
+  assert.equal(new URLSearchParams(window.location.search).get('view'), 'mine');
+});
+
+test('failed tab retry retains its target while a late superseded tab result cannot replace paged mine rows', async (t) => {
+  const p = await setup(t, { search: '?view=mine&page=11' });
+  await act(async () => p.finish(p.numbered()[0]));
+  await act(async () => tab('반려').click());
+  await act(async () => p.numbered()[1].reject(new Error('RETURNED FAILURE')));
+  await act(async () => button('다시 시도').click());
+  const oldRetry = p.numbered()[2];
+  assert.deepEqual(oldRetry.args, { p_view: 'returned', p_page: 1, p_page_size: 10 });
+  assert.equal(tab('내 문서').getAttribute('aria-selected'), 'true');
+  assert.equal(button('11 페이지').getAttribute('aria-current'), 'page');
+  await act(async () => tab('진행').click());
+  assert.equal(oldRetry.signal.aborted, true);
+  await act(async () => p.numbered()[3].reject(new Error('OPEN FAILURE')));
+  await act(async () => button('12 페이지').click());
+  assert.deepEqual(p.numbered()[4].args, { p_view: 'mine', p_page: 12, p_page_size: 10 });
+  await act(async () => p.finish(p.numbered()[4]));
+  await act(async () => p.finish(oldRetry, 1, { rows: [row(999, { status: 'returned', title: 'LATE WRONG TAB' })] }));
+  assert.equal(p.numbered().length, 5, 'late small-count tab cannot clamp the accepted mine page');
+  assert.equal(tab('내 문서').getAttribute('aria-selected'), 'true');
+  assert.equal(button('12 페이지').getAttribute('aria-current'), 'page');
+  assert.match(document.body.textContent, /문서 111/); assert.match(document.body.textContent, /260건/);
+  assert.doesNotMatch(document.body.textContent, /LATE WRONG TAB/);
+  assert.equal(new URLSearchParams(window.location.search).get('view'), 'mine');
 });
 
 test('unresolved auth does not read; user/role changes discard old page, detail and catalog callbacks', async (t) => {
