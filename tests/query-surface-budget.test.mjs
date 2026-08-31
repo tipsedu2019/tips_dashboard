@@ -1408,6 +1408,33 @@ test("actual makeup numbered adapter keeps bounded literal RPCs and cancellation
   assert.deepEqual(inspectQuerySurfaceSource({ surface: "tasks", file, source: await readFile(new URL(`../${file}`, import.meta.url), "utf8") }), [])
 })
 
+test("textbook numbered RPCs permit only final-proven sizes and exact purpose-specific contexts", () => {
+  const inspect = (name, args, suffix = ".abortSignal(AbortSignal.timeout(8000)).retry(false)") => inspectQuerySurfaceSource({
+    surface: "management", file: "src/features/textbooks/numbered-fixture.ts",
+    source: `async function read(client, request) { return client.rpc(${JSON.stringify(name)}, ${args})${suffix} }`,
+  }).map((item) => item.reason)
+  for (const name of ["list_textbook_master_page_v1", "list_textbook_inventory_page_v1", "list_textbook_inventory_history_page_v1"]) {
+    for (const size of ["10", "15", "20", "request.pageSize"]) assert.deepEqual(inspect(name, `{p_page:11,p_page_size:${size}}`), [])
+    for (const size of ["5", "25", "null"]) assert.deepEqual(inspect(name, `{p_page_size:${size}}`), ["rpc_page_limit_invalid"])
+    assert.deepEqual(inspect(name, "{}"), ["rpc_page_limit_missing"])
+    assert.deepEqual(inspect(name, "{...request,p_page_size:10}"), ["rpc_page_limit_unresolved"])
+    assert.deepEqual(inspect(name.replace("_v1", "_v2"), "{p_page_size:10}"), ["rpc_page_limit_missing"])
+    assert.ok(inspect(name, "{p_page_size:10}", ".retry(false)").includes("list_abort_signal_missing"))
+    assert.ok(inspect(name, "{p_page_size:10}", ".abortSignal(AbortSignal.timeout(8000))").includes("list_retry_false_missing"))
+  }
+  for (const name of ["get_textbook_master_summary_v1", "get_textbook_inventory_summary_v1", "get_textbook_master_detail_v1", "get_textbook_inventory_balance_v1", "check_textbook_master_duplicate_v1"]) {
+    assert.deepEqual(inspect(name, "{p_input:request.input}"), [])
+    assert.deepEqual(inspect(name.replace("_v1", "_v2"), "{p_input:request.input}"), ["rpc_page_limit_missing"])
+    assert.ok(inspect(name, "{}", ".retry(false)").includes("list_abort_signal_missing"))
+    assert.ok(inspect(name, "{}", ".abortSignal(AbortSignal.timeout(8000))").includes("list_retry_false_missing"))
+  }
+})
+
+test("actual textbook numbered adapter keeps all eight literal contracts and cancellation", async () => {
+  const file = "src/features/textbooks/textbook-read-service.ts"
+  assert.deepEqual(inspectQuerySurfaceSource({ surface: "management", file, source: await readFile(new URL(`../${file}`, import.meta.url), "utf8") }), [])
+})
+
 test("ordered exact-key details and nested projections without wildcards remain allowed", async () => {
   const result = await verifyFixture({
     source: `async function load(client, id) {

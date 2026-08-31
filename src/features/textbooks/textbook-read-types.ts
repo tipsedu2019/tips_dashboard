@@ -153,3 +153,45 @@ export type PurchaseCaseRow = {
   line: Row & { purchaseScopeLines: Row[] };
   lines: Row[];
 };
+
+export type TextbookMasterSummary = {
+  totalCount: number;
+  totalQuantity: number;
+  studentQuantity: number;
+  teacherQuantity: number;
+  stockValue: number;
+  salePriceTotal: number;
+  locationQuantities: Record<string, number>;
+  subjectTotals: Array<{
+    subject: "english" | "math" | "science" | "other";
+    totalCount: number;
+    totalQuantity: number;
+    salePriceTotal: number;
+    stockValue: number;
+  }>;
+  qualityCounts: Record<TextbookQualityFilter, number>;
+  inventoryCounts: Record<InventoryFilter, number>;
+  subSubjectOptions: string[];
+  locations: Array<{ id: string; code: string; name: string; sortOrder: number }>;
+};
+export type TextbookInventorySummary = TextbookMasterSummary & {
+  auditCounts: Record<InventoryAuditFilter, number>;
+};
+export type TextbookMasterDetail = { row: TextbookMasterRow | null };
+export type TextbookInventoryBalanceInput = { textbookIds: string[]; locationId: string | null };
+export type TextbookInventoryBalanceRow = Pick<TextbookMasterRow,
+  "locationQuantities" | "studentLocationQuantities" | "teacherLocationQuantities" |
+  "totalQuantity" | "studentQuantity" | "teacherQuantity" | "stockValue"
+> & { textbookId: string; currentQuantity: number };
+export type TextbookInventoryBalance = { locationId: string | null; rows: TextbookInventoryBalanceRow[] };
+export type TextbookMasterDuplicateInput = { excludeId: string | null; title: string; subject: string; publisher: string; category: string };
+export type TextbookMasterDuplicate = { totalCount: number; previewRows: TextbookMasterRow[] };
+// JSON has no Infinity: null is the explicit wire sentinel. The read service
+// restores +Infinity before exposing the existing InventoryCountRow model.
+export type TextbookInventoryCountTransport = Omit<InventoryCountRow, "source" | "daysSinceLatestCount"> & {
+  source: TextbookMasterRow;
+  daysSinceLatestCount: number | null;
+};
+// Task4 applies the signed-in user's email only when actorLabel is empty and
+// actorId matches that session. Neither value is a database authority argument.
+export type TextbookInventoryHistoryTransport = InventoryHistoryRow & { actorId: string; actorLabel: string };

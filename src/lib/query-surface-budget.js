@@ -29,6 +29,14 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "get_makeup_detail_v1",
   // Purpose-complete reservation context is nonpageable, not a scalar count.
   "get_makeup_reservation_context_v1",
+  // Textbook summaries/detail are purpose-specific nonpageable reads. Balance
+  // is complete selected-ID context; duplicate is an exact count + max10 preview,
+  // not a scalar count or a pageable exemption.
+  "get_textbook_master_summary_v1",
+  "get_textbook_inventory_summary_v1",
+  "get_textbook_master_detail_v1",
+  "get_textbook_inventory_balance_v1",
+  "check_textbook_master_duplicate_v1",
   "current_dashboard_role",
   "close_class_atomic_v1",
 ])
@@ -54,6 +62,8 @@ const EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES = new Set([
 // makeup: 20260831065351_makeup_numbered_pages.sql (final),
 // note parity: 20260831101449_makeup_system_note_whitespace_parity.sql (final),
 // makeup_numbered_pages_test.sql; local final-only proof 115/115.
+// textbooks: 20260831123610_textbook_inventory_numbered_reads.sql (final),
+// textbook_inventory_numbered_reads_test.sql; local final-only proof 198/198.
 const EXACT_NUMBERED_RPC_CONTRACTS = new Map([
   ["list_management_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_ops_task_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
@@ -61,6 +71,9 @@ const EXACT_NUMBERED_RPC_CONTRACTS = new Map([
   ["get_operations_class_schedule_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_approval_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_makeup_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["list_textbook_master_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["list_textbook_inventory_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["list_textbook_inventory_history_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
 ])
 
 const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION"
