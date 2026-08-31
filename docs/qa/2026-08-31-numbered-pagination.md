@@ -13,7 +13,7 @@ Ten-number fixed blocks, one-page single arrows, global first/last double arrows
 | Surface | Implementation | Unit/type/build | Final SQL/pgTAP | Rendered/live |
 |---|---|---|---|---|
 | Shared pager/preferences | Reviewed (`1f62316f`, including interface repair) | 14/14 behavior tests; focused ESLint/TS pass | Not applicable | Live viewport pending |
-| Students/classes | Read API (`451b25d7`), SQL gate (`701e9a96`); UI (`0915e8d4`) awaiting independent review | Relevant229/229; focused ESLint/TS and isolated production build pass | Final-only isolated pgTAP114/114 passed | Pending |
+| Students/classes | Read API (`451b25d7`), SQL gate (`701e9a96`); UI (`0915e8d4`) plus fix (`0a86a16a`) awaiting scoped re-review | Relevant235/235; focused ESLint/TS and isolated production build pass | Final-only isolated pgTAP114/114 passed | Pending |
 | Tasks/retests/registration/transfer/withdrawal | Pending | Pending | Pending | Pending |
 | Makeup/approvals/curriculum/class planning | Pending | Pending | Pending | Pending |
 | Textbook operations/settings/auxiliary lists | Pending | Pending | Pending | Pending |
@@ -59,7 +59,9 @@ Result:88/88 pass; fail/cancelled/skipped0. At that checkpoint UI integration ha
 
 ## Management UI integration
 
-Commit `0915e8d4` adds the shared request controller and connects student/class tables to numbered reads, controlled server sort and URL page/sort state. It retains successful rows/page/count during pending/error, clears cross-actor presentation, migrates valid manual page sizes and preserves initial restored pages through auto measurement/default-period resolution. This commit is awaiting independent Task3 review; it is not yet a foundation-complete claim.
+Commit `0915e8d4` adds the shared request controller and connects student/class tables to numbered reads, controlled server sort and URL page/sort state. It retains successful rows/page/count during pending/error, clears cross-actor presentation, migrates valid manual page sizes and preserves initial restored pages through auto measurement/default-period resolution. The review/fix status below supersedes this initial implementation evidence; foundation is not yet complete.
+
+Independent review found three consumer defects: urgent size preference versus Next transition page reset sent an unintended intermediate request; detail catalogs depended on unrelated metadata success; confirmed deletion retried twice. Fix `0a86a16a` reconciles request page/size before effects, separates authorized detail ownership and removes duplicate delete reconciliation. Actual production Page+hook tests use a suspended native-history transition; detail tests cover stats failure/role changes and deletion tests cover normal/final-page counts. Relevant235/235, focused lint/TS and isolated build passed. Scoped re-review is pending; the initial229-test result did not cover these defects.
 
 Implementer final command: `node --test --experimental-strip-types tests/management-*.test.mjs tests/numbered-page-controller.test.mjs tests/numbered-pagination.test.mjs tests/data-table-pagination.test.mjs`. Result229/229, fail/cancelled/skipped0; focused lint and non-incremental TypeScript exit0. Actual hook and real TanStack/shadcn component tests cover direct page11, stale/abort, actor/StrictMode transitions, header sorting, partial-page count and mobile measurement readiness. Superseded cursor/source assertions were updated; independent review checks their replacement coverage.
 
@@ -75,6 +77,8 @@ Read-only task/secondary preflights are saved in `docs/superpowers/plans/2026-08
 - The user approved recommended save API improvements. Include transactional settings save/order/default handling to preserve cross-page behavior; do not renumber only visible rows, remove controls, broaden write authority, or change business semantics.
 
 The settings plan is saved at `docs/superpowers/plans/2026-08-31-numbered-pagination-settings-workflows.md`. It uses chronological edits, server-side draft pages, atomic changed-only saves and actor/request retry receipts. This is an approved implementation plan, not a claim that settings APIs/UI are implemented.
+
+The read-only compatibility review is preserved at `docs/superpowers/plans/2026-08-31-settings-save-plan-compat-review.md`. The plan now requires settings-local natural-sort equality parity, fail-fast teacher/profile prelocks and bounded implicit-FK lock waits, exact native lock errors, conservative existing-rights checks and limited-trust retry receipts. No new settings SQL has run and no receipt or lock guarantee is claimed as implemented.
 
 ## Browser and rollout boundaries
 
