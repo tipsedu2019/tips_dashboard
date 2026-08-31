@@ -42,6 +42,8 @@ Final-source preflight evidence: `docs/superpowers/plans/2026-08-31-task-workflo
 
 ## Task 1: Authorized numbered task read model
 
+**Status:** Complete at `31b3c2b1` after Task1 spec/quality review and R1 scoped fix re-review. Exact Node/SQL/evidence limits are recorded in `docs/qa/2026-08-31-numbered-pagination.md`; this does not complete Task2 UI or Task3 verification.
+
 **Files:**
 - Create migration named `ops_task_numbered_pages` through CLI.
 - Create `supabase/tests/ops_task_numbered_pages_test.sql`.
@@ -101,5 +103,6 @@ Also reject invalid size5/30, missing viewer, malformed rows/count/page, mismatc
 **Interfaces:** Record coverage for `/admin/tasks`, `/admin/word-retests`, `/admin/registration`, `/admin/transfer`, `/admin/withdrawal`, exact commits, unit/SQL/build/browser statuses and required RPC migration.
 
 - [ ] Verify no in-scope task record list retains `다음30건`/`더 보기`, registration parent count and completed actor tests pass, and old cursor contracts remain compatible.
+- [ ] Capture first/middle/final-page execution-plan evidence in the authorized isolated local fixture, preserving actual auth/filter/size and reporting fixture size and warm/cold context. The spec requires measuring the narrow OFFSET path: distinguish public-function wrapper plans from any observed nested eligible-key/projector plan; do not infer nested loop counts, constant-time offsets or production latency from wrapper-only output. No speculative index or remote load test.
 - [ ] Verify rendered desktop/mobile when Browser access is permitted and backend RPC capability exists; do not bypass prior localhost policy denial or claim mocks prove live requests.
 - [ ] Review the entire slice diff independently, resolve findings, commit evidence, and proceed to the remaining domain plan without a new approval prompt.

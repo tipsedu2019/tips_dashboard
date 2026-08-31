@@ -115,6 +115,19 @@ Still tracked, **not fixed**: the pre-existing list-delete error is hidden becau
 
 Rendered desktop/mobile/keyboard/viewport evidence, remote migration/deployment and representative performance measurements remain pending. The nine earlier privileged warm wrapper plans do not establish nested enrichment loop counts or production latency. No browser-policy workaround, remote mutation, push, deploy or send was used.
 
+## Task read model checkpoint — UI integration pending
+
+Commit `ebde2adb` adds `list_ops_task_numbered_page_v1` and the cache-free numbered task service for general/textbook tasks, registration parent cases, withdrawal, transfer and word retests. Independent review found that the new nested enrollment parser rejects legitimate canonical rows, nullable correction IDs and signed sort order. Fix `31b3c2b1` adds the strict persisted-shape union and populated-row regressions; scoped independent re-review marked R1 addressed with no new Critical/Important breakage. The read-model gate is complete; task screens remain pending.
+
+- Scoped Node regression: **396/396**, comprising new service68, existing task suites209 and query-budget119; zero failures/cancelled/skipped. TypeScript passed. Focused lint has zero errors and three pre-existing unused warnings in the legacy task service.
+- Local Docker candidate: baseline/catalog **1937/1937**, new task plus retained cursor SQL **590/590**. After actual candidate success, only the new manifest entry was promoted; final-only rerun passed **568/568** new task SQL plus the same1937 baseline assertions. Both isolated projects stopped and temporary roots were removed.
+- Exact final migration: `20260831031913_ops_task_numbered_pages.sql`, SHA256 `2f3303d4dda16d925e70ed11ee5ae6b676aa90f92493cc54e4b5263e3199362c`. Immutable-history validation confirmed29 previous final entries unchanged and one appended entry. The query guard registered this exact RPC only after final-only proof.
+- Registration phone-ready fixtures use a disabled in-app rule/template; seed and read phases assert zero new deliveries. No trigger suppression, provider call or worker/send run was used.
+- The separate existing `ops_task_completion_actor_test.sql` attempt failed before its16 assertions because its profile fixtures omit `auth.users` rows. It was not changed or claimed passing. The new suite independently covers stored actor snapshots, real auth/RLS and masked observation data.
+- The R1 fix reproduced11 legitimate-row failures before implementation, then passed **143/143** new service/retained mapping cases. Final-only SQL rerun with populated canonical/correction rows passed **572/572** plus1937 baseline assertions; cleanup succeeded. Migration/hash/manifest stayed unchanged; the updated fixture hash is `6d586e617717264a375a949a6f69de575236a1f2da9cda03bb1ebf7a478a6cd2`. Narrow parser/test lint and full TypeScript passed. This later focused evidence supplements, rather than relabels, the earlier396-case run.
+
+These are synthetic local correctness checks, not production latency measurements, remote RPC availability or rendered task UI evidence. Task screen/cache/draft integration is the next gate.
+
 ## Shared exports for downstream adapters
 
 | Source | Contract |
