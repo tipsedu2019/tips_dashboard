@@ -13,7 +13,7 @@ Ten-number fixed blocks, one-page single arrows, global first/last double arrows
 | Surface | Implementation | Unit/type/build | Final SQL/pgTAP | Rendered/live |
 |---|---|---|---|---|
 | Shared pager/preferences | Reviewed (`1f62316f`, including interface repair) | 14/14 behavior tests; focused ESLint/TS pass | Not applicable | Live viewport pending |
-| Students/classes | Read API (`451b25d7`), SQL gate (`701e9a96`); UI (`0915e8d4`) plus fix (`0a86a16a`) awaiting scoped re-review | Relevant235/235; focused ESLint/TS and isolated production build pass | Final-only isolated pgTAP114/114 passed | Pending |
+| Students/classes | Read API (`451b25d7`), SQL gate (`701e9a96`); UI (`0915e8d4`) plus fix (`0a86a16a`) reviewed and approved | Relevant235/235; combined foundation/query guard351/351; full ESLint0 errors/6 existing warnings, TS and isolated production build pass | Final-only isolated pgTAP114/114 passed | Pending |
 | Tasks/retests/registration/transfer/withdrawal | Pending | Pending | Pending | Pending |
 | Makeup/approvals/curriculum/class planning | Pending | Pending | Pending | Pending |
 | Textbook operations/settings/auxiliary lists | Pending | Pending | Pending | Pending |
@@ -61,15 +61,44 @@ Result:88/88 pass; fail/cancelled/skipped0. At that checkpoint UI integration ha
 
 Commit `0915e8d4` adds the shared request controller and connects student/class tables to numbered reads, controlled server sort and URL page/sort state. It retains successful rows/page/count during pending/error, clears cross-actor presentation, migrates valid manual page sizes and preserves initial restored pages through auto measurement/default-period resolution. The review/fix status below supersedes this initial implementation evidence; foundation is not yet complete.
 
-Independent review found three consumer defects: urgent size preference versus Next transition page reset sent an unintended intermediate request; detail catalogs depended on unrelated metadata success; confirmed deletion retried twice. Fix `0a86a16a` reconciles request page/size before effects, separates authorized detail ownership and removes duplicate delete reconciliation. Actual production Page+hook tests use a suspended native-history transition; detail tests cover stats failure/role changes and deletion tests cover normal/final-page counts. Relevant235/235, focused lint/TS and isolated build passed. Scoped re-review is pending; the initial229-test result did not cover these defects.
+Independent review found three consumer defects: urgent size preference versus Next transition page reset sent an unintended intermediate request; detail catalogs depended on unrelated metadata success; confirmed deletion retried twice. Fix `0a86a16a` reconciles request page/size before effects, separates authorized detail ownership and removes duplicate delete reconciliation. Actual production Page+hook tests use a suspended native-history transition; detail tests cover stats failure/role changes and deletion tests cover normal/final-page counts. Relevant235/235, focused lint/TS and isolated build passed. Scoped re-review approved the fix; the initial229-test result did not cover these defects.
 
 Implementer final command: `node --test --experimental-strip-types tests/management-*.test.mjs tests/numbered-page-controller.test.mjs tests/numbered-pagination.test.mjs tests/data-table-pagination.test.mjs`. Result229/229, fail/cancelled/skipped0; focused lint and non-incremental TypeScript exit0. Actual hook and real TanStack/shadcn component tests cover direct page11, stale/abort, actor/StrictMode transitions, header sorting, partial-page count and mobile measurement readiness. Superseded cursor/source assertions were updated; independent review checks their replacement coverage.
 
 An isolated source copy at `/private/tmp/tips-task3-build.4uOr0v` compiled with `next build --webpack`: exit0,81/81 static pages. The temporary copy was never served and the existing localhost3017 `.next` artifact was not replaced. This is compile/component evidence, not authenticated live UI evidence. Exact commands and logs are in the Task3 report/local `/private/tmp/tips-task3-*-final.log` artifacts.
 
-The query-surface verifier currently reports two known static-recognition gaps for the otherwise validated management RPC: immutable AbortSignal aliases and `p_page_size` rather than legacy `p_limit`. Foundation Task4 will add narrowly validated recognition with negative tests; this gate has not passed yet and no blanket/scalar exemption is planned.
+Task4 reproduced the numbered service's two static-recognition gaps (immutable AbortSignal aliases and `p_page_size` instead of legacy `p_limit`), plus three hook abort-alias findings. The narrow guard correction and final local gates are recorded below; no blanket or scalar exemption was added.
 
 Read-only task/secondary preflights are saved in `docs/superpowers/plans/2026-08-31-task-workflow-preflight.md` and `2026-08-31-secondary-workflow-preflight.md`. They sharpen parent-count, metadata/facet, server-order, independent calendar/detail and auth contracts for later implementation; they are not implementation or SQL evidence for those routes.
+
+## Task4 query guard and final local gates
+
+Implementation `ea6f1b2a` recognizes immutable signal/8000ms const chains by their actual lexical declaration, including module/function/block ancestors. It rejects nearer unsafe shadows, parameters, destructuring/property aliases, mutable or reassigned bindings, forward references and cycles. All conditional paths still need a bound, and AbortSignal.any still requires exactly two non-spread elements. Native AbortSignal shadow bindings are not trusted. Arithmetic/property-derived timeout values remain unsupported.
+
+Only `list_management_numbered_page_v1` is in the separate numbered-RPC registry. It requires exactly one direct `p_page_size` field with no ambiguous/spread envelope, rejects known invalid sizes (including9/11/31), and permits a dynamic size only because the final SQL rejects everything except10/15/20. Other list RPCs retain `p_limit`; scalar exemptions are unchanged. Future adapters must provide equivalent final ordered-migration and pgTAP proof before adding any registry entry; a client-side type or server clamp is insufficient.
+
+Self-review reproduced a module-only8000→12000 edit escaping function changed-line selection. The fix compares raw baseline abort findings by exact chain and occurrence: a new `list_abort_signal_missing` is checked even outside the changed function. Safe alias rewrites and unchanged raw legacy findings remain unchanged. This is a narrow abort regression guard, not a generic dependency-span system.
+
+Fresh local verification at Task4 (Node `/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node`):
+
+- `node --test --experimental-strip-types tests/management-*.test.mjs tests/numbered-page-controller.test.mjs tests/numbered-pagination.test.mjs tests/data-table-pagination.test.mjs tests/query-surface-budget.test.mjs`:351/351 pass,0 failed/cancelled/skipped; includes the full116-case query-budget suite with its prior104 cases unchanged.
+- `node scripts/verify-query-surface-budget.mjs --surface management --base ff5c5ce4 --head HEAD`: exit0, no findings. The same command with `--surface all` also exits0.
+- `node node_modules/typescript/bin/tsc --noEmit --incremental false`: exit0.
+- `node node_modules/eslint/bin/eslint.js src tests middleware.ts next.config.ts`: exit0,0 errors and6 pre-existing warnings in academic timetable, task service, public cache invalidation and its integration test. Those files have no diff from Task4 base`ad519cf5`; the two large-file Babel notices are informational.
+- Resynced isolated `/private/tmp/tips-task3-build.4uOr0v` with the existing repository node_modules symlink; `node node_modules/next/dist/bin/next build --webpack`: exit0,81/81 generated pages. Task4 analyzer/test bytes match the copy. No temporary server was started and the live workspace `.next` was not replaced.
+
+Task4 rechecked the migration SHA256 above and its sole ordered definition; it did not rerun SQL, change SQL/manifest bytes, apply remote migrations or contact providers. The114/114 SQL result remains the earlier separately recorded local proof. Task4 independent review and the final whole-foundation review are controller-owned next gates; no app-wide completion is claimed.
+
+## Shared exports for downstream adapters
+
+| Source | Contract |
+|---|---|
+| `src/lib/numbered-pagination.ts` | `DataTablePageSize`, `DataTablePageSizePreference`, `NumberedPage<T>`, `getNumberedPagination({page,pageSize,totalCount})` |
+| `src/components/data-table/data-table-pagination.tsx` | `DataTablePagination` / `DataTablePaginationProps`; successful displayed page/size/count, loading, per-list ariaLabel and preference callback |
+| `src/hooks/use-data-table-page-size.ts` | `useDataTablePageSize(tableId)` → ready/pageSize/mode/setPreference/setAutoPageSize; wait for ready before loading |
+| `src/lib/numbered-page-controller.ts` | `createNumberedPageController<T>({loadPage,onChange})`; load/retry/dispose; scope/page/pageSize/signal request and successful-envelope snapshot retention |
+
+Adapters own filters/sort, authorized identity/role clearing, independent metadata/detail reads and domain drafts/aggregate/export semantics. They must not use cursor/full-table fallback or page-local aggregates to satisfy numbered UI. Task, academic/makeup/approval/curriculum, textbook/settings and auxiliary integrations remain pending under their separate plans.
 
 ## Resolved user/environment input
 
