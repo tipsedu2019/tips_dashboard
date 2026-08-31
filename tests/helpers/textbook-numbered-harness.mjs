@@ -5,7 +5,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { JSDOM } from 'jsdom';
-import { act, createElement, useLayoutEffect } from 'react';
+import { act, createElement, StrictMode, useLayoutEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 
 const require = createRequire(import.meta.url);
@@ -103,7 +103,7 @@ export async function setup(t, initial = {}) {
 export const button = label => [...document.querySelectorAll('button')].find(node => node.textContent.trim() === label || node.getAttribute('aria-label') === label);
 
 // A rendering probe for the typed state capability, not a substitute controller.
-export async function setupHook(t, initial) {
+export async function setupHook(t, initial, { strictMode = false } = {}) {
   const dom = new JSDOM('<div id="root"></div>', { url: 'https://test.invalid/admin/textbooks' });
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
@@ -112,21 +112,32 @@ export async function setupHook(t, initial) {
       .map(scope => [`textbooks:${scope}`, { mode: 'manual', pageSize: 10 }]),
   )));
   const root = createRoot(document.getElementById('root'));
-  t.after(async () => { await act(async () => root.unmount()); dom.window.close(); });
+  let rootMounted = true;
+  const unmount = async () => {
+    if (!rootMounted) return;
+    await act(async () => root.unmount());
+    rootMounted = false;
+  };
+  t.after(async () => { await unmount(); dom.window.close(); });
   const io = transport();
   const load = modules(io.supabase, {});
   const { useTextbookNumberedData } = load('src/features/textbooks/use-textbook-numbered-data.ts');
   assert.equal(typeof useTextbookNumberedData, 'function', 'real typed textbook hook must exist');
   let input = initial;
   let current;
+  let ownerPresent = true;
   function Probe() {
     const state = useTextbookNumberedData(input);
     useLayoutEffect(() => { current = state; });
     return null;
   }
-  const render = () => act(async () => root.render(createElement(Probe)));
+  // Models an outer auth boundary removing the owner without one final auth prop render.
+  function Boundary() { return ownerPresent ? createElement(Probe) : null; }
+  const render = () => act(async () => root.render(strictMode
+    ? createElement(StrictMode, null, createElement(Boundary)) : createElement(Boundary)));
   await render();
-  return { ...io, get current() { return current; },
+  return { ...io, get current() { return current; }, unmount,
+    setOwnerPresent: async present => { ownerPresent = present; await render(); },
     rerender: async next => { input = next; await render(); },
     act: callback => act(async () => { callback(); }),
     resolve: (request, data) => act(async () => { request.resolve({ data, error: null }); }),

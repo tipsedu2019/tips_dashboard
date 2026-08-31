@@ -289,3 +289,60 @@ test('refreshVisible waits for enabled pages and summaries without starting disa
   await h.resolve(fresh.find(r => r.name === 'get_textbook_operations_summary_v1'), operationsSummary()); await promise;
   assert.equal(settled, true); assert.equal(h.current.operations.value.requestCount, 3);
 });
+
+for (const boundary of ['normal', 'auth']) test(`${boundary} unmount invalidates retained summary/operations/refresh callbacks`, async t => {
+  const input = onlyMaster(); input.operationsEnabled = true;
+  const h = await setupHook(t, input); const retained = h.current;
+  const original = [...h.requests];
+  assert.equal(original.length, 3);
+  if (boundary === 'normal') await h.unmount();
+  else await h.setOwnerPresent(false);
+  assert.ok(original.every(request => request.signal.aborted));
+  const pending = [];
+  await h.act(() => { pending.push(retained.master.summary.retry(), retained.operations.retry(), retained.refreshVisible()); });
+  const unexpected = h.requests.slice(original.length).map(request => request.name);
+  // Settle even a broken implementation's new transports so RED leaves no pending work.
+  for (const request of h.requests) await h.reject(request, { message: 'post-unmount settlement' });
+  await Promise.all(pending);
+  assert.deepEqual(unexpected, [], 'unmounted owner must not restart summary RPCs');
+});
+
+test('auth-boundary remount creates a working lifetime without reviving the disposed owner callbacks', async t => {
+  const input = onlyMaster(); input.operationsEnabled = true;
+  const h = await setupHook(t, input); const retained = h.current; const original = [...h.requests];
+  await h.setOwnerPresent(false);
+  await h.setOwnerPresent(true);
+  const fresh = h.requests.slice(original.length);
+  assert.equal(fresh.length, 3); assert.ok(fresh.every(request => !request.signal.aborted));
+  const before = h.requests.length; const pending = [];
+  await h.act(() => { pending.push(retained.master.summary.retry(), retained.operations.retry(), retained.refreshVisible()); });
+  const unexpected = h.requests.slice(before).map(request => request.name);
+  for (const request of h.requests.slice(before)) await h.reject(request, { message: 'disposed owner settlement' });
+  await Promise.all(pending);
+  assert.deepEqual(unexpected, [], 'remount must not reactivate the old lifetime');
+  for (const request of original) await h.reject(request, { message: 'old completion' });
+  assert.deepEqual(h.current.master.rows, []); assert.equal(h.current.operations.value, null);
+  const page = fresh.find(request => request.name.startsWith('list_'));
+  await h.resolve(page, pageData(page, 1, [masterRow(202)]));
+  await h.resolve(fresh.find(request => request.name === 'get_textbook_master_summary_v1'), masterSummary());
+  await h.resolve(fresh.find(request => request.name === 'get_textbook_operations_summary_v1'), operationsSummary());
+  assert.equal(h.current.master.rows[0].id, id(202));
+  assert.deepEqual(h.current.master.summary.value, masterSummary()); assert.deepEqual(h.current.operations.value, operationsSummary());
+  await h.act(() => { h.current.master.summary.retry(); h.current.operations.retry(); });
+  assert.equal(h.requests.length, before + 2, 'current owner callbacks remain eligible');
+});
+
+test('StrictMode lifetime cleanup/setup replay keeps current summary callbacks working', async t => {
+  const input = onlyMaster(); input.operationsEnabled = true;
+  const h = await setupHook(t, input, { strictMode: true });
+  const live = h.requests.filter(request => !request.signal.aborted);
+  assert.equal(live.length, 3);
+  const page = live.find(request => request.name.startsWith('list_'));
+  await h.resolve(page, pageData(page, 1, [masterRow()]));
+  await h.resolve(live.find(request => request.name === 'get_textbook_master_summary_v1'), masterSummary());
+  await h.resolve(live.find(request => request.name === 'get_textbook_operations_summary_v1'), operationsSummary());
+  assert.deepEqual(h.current.master.summary.value, masterSummary()); assert.deepEqual(h.current.operations.value, operationsSummary());
+  const before = h.requests.length;
+  await h.act(() => { h.current.master.summary.retry(); h.current.operations.retry(); });
+  assert.equal(h.requests.length, before + 2);
+});

@@ -163,16 +163,21 @@ function useSummary<F, T>(actor: Actor | null, enabled: boolean, scope: string, 
   const [display, setDisplay] = useState<{ actor: Actor | null; resource: Omit<TextbookSummaryResource<T>, "retry"> }>({ actor: null, resource: emptySummary() })
   const current = useRef({ actor, enabled, scope, filters })
   const active = useRef<AbortController | null>(null)
+  const mounted = useRef(false)
+  useLayoutEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false; active.current?.abort() }
+  }, [])
   useLayoutEffect(() => {
     if (current.current.actor !== actor || current.current.scope !== scope || !enabled) active.current?.abort()
     current.current = { actor, enabled, scope, filters }
   }, [actor, enabled, scope, filters])
   const retry = useCallback(async () => {
-    if (!actor || current.current.actor !== actor || !current.current.enabled || current.current.scope !== scope) return
+    if (!mounted.current || !actor || current.current.actor !== actor || !current.current.enabled || current.current.scope !== scope) return
     active.current?.abort()
     const abort = new AbortController()
     active.current = abort
-    const valid = () => !abort.signal.aborted && active.current === abort && current.current.actor === actor && current.current.enabled && current.current.scope === scope
+    const valid = () => mounted.current && !abort.signal.aborted && active.current === abort && current.current.actor === actor && current.current.enabled && current.current.scope === scope
     setDisplay({ actor, resource: { value: null, scope, loading: true, error: null } })
     try {
       const value = await read(current.current.filters, { signal: abort.signal })
