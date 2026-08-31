@@ -4,10 +4,12 @@
 import {
   type ChangeEvent,
   type CompositionEvent,
+  type CSSProperties,
   type ReactNode,
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -73,6 +75,7 @@ import type { ManagementKind, ManagementRow, ManagementStat } from "@/features/m
 import {
   clampManagementPageIndex,
   getManagementListRowCapacity,
+  getManagementListViewportHeight,
   MANAGEMENT_LIST_PAGE_SIZES,
   pickManagementListPageSize,
   type ManagementListPageSize,
@@ -348,6 +351,7 @@ type ManagementTableActions = {
 type StoredManagementScroll = {
   pageY: number;
   tableX: number;
+  tableY: number;
 };
 
 type BulkEditField = {
@@ -578,6 +582,7 @@ function parseStoredManagementScroll(rawValue: string | null): StoredManagementS
     const parsed = JSON.parse(rawValue) as Partial<StoredManagementScroll>;
     const pageY = Number(parsed.pageY || 0);
     const tableX = Number(parsed.tableX || 0);
+    const tableY = Number(parsed.tableY || 0);
 
     if (!Number.isFinite(pageY) && !Number.isFinite(tableX)) {
       return null;
@@ -586,6 +591,7 @@ function parseStoredManagementScroll(rawValue: string | null): StoredManagementS
     return {
       pageY: Number.isFinite(pageY) ? Math.max(0, pageY) : 0,
       tableX: Number.isFinite(tableX) ? Math.max(0, tableX) : 0,
+      tableY: Number.isFinite(tableY) ? Math.max(0, tableY) : 0,
     };
   } catch {
     return null;
@@ -1313,6 +1319,7 @@ export function ManagementDataTable({
   const [grouping, setGrouping] = useState<GroupingState>([]);
   const [expanded, setExpanded] = useState<ExpandedState>({});
   const [pageIndex, setPageIndex] = useState(0);
+  const [tableViewportHeight, setTableViewportHeight] = useState<number>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [columnSearchQuery, setColumnSearchQuery] = useState("");
   const [hydratedStorageKey, setHydratedStorageKey] = useState("");
@@ -1333,6 +1340,7 @@ export function ManagementDataTable({
       JSON.stringify({
         pageY: window.scrollY,
         tableX: tableViewportRef.current?.scrollLeft || 0,
+        tableY: tableViewportRef.current?.scrollTop || 0,
       }),
     );
   }, [managementScrollStorageKey]);
@@ -1781,15 +1789,12 @@ export function ManagementDataTable({
     setPageIndex((current) => clampManagementPageIndex(current, prePaginationRowCount, pageSize));
   }, [pageSize, prePaginationRowCount]);
 
-  useEffect(() => {
-    if (pageSizeMode !== "auto") {
-      return undefined;
-    }
-
+  useLayoutEffect(() => {
     const tableLayout = tableLayoutRef.current;
     const tableBody = tableBodyRef.current;
     const tablePager = tablePagerRef.current;
-    if (!tableLayout || !tableBody || !tablePager) {
+    const tableViewport = tableViewportRef.current;
+    if (!tableLayout || !tableBody || !tablePager || !tableViewport) {
       return undefined;
     }
 
@@ -1802,6 +1807,9 @@ export function ManagementDataTable({
       const measuredRowHeight = firstRealRow?.getBoundingClientRect().height || 34;
       const bodyRect = tableBody.getBoundingClientRect();
       const pagerRect = tablePager.getBoundingClientRect();
+      const viewportRect = tableViewport.getBoundingClientRect();
+      const viewportBottomBorder = Number.parseFloat(window.getComputedStyle(tableViewport).borderBottomWidth) || 0;
+      const footerGap = Math.max(0, pagerRect.top - viewportRect.bottom);
       let bottomReserve = 0;
       for (let ancestor: HTMLElement | null = tableLayout; ancestor; ancestor = ancestor.parentElement) {
         const style = window.getComputedStyle(ancestor);
@@ -1812,16 +1820,25 @@ export function ManagementDataTable({
       }
       const fitRows = getManagementListRowCapacity({
         viewportHeight: window.innerHeight,
-        bodyViewportTop: bodyRect.top,
+        // Internal scrolling must not increase the apparent space for rows.
+        bodyViewportTop: bodyRect.top + tableViewport.scrollTop,
         documentScrollTop: window.scrollY,
         rowHeight: measuredRowHeight,
         footerHeight: pagerRect.height || 44,
-        bodyToFooterGap: pagerRect.top - bodyRect.bottom,
+        bodyToFooterGap: footerGap + viewportBottomBorder,
         bottomReserve,
       });
+      const nextViewportHeight = getManagementListViewportHeight({
+        viewportHeight: window.innerHeight,
+        viewportDocumentTop: viewportRect.top + window.scrollY,
+        footerHeight: pagerRect.height || 44,
+        footerGap,
+        bottomReserve,
+      });
+      setTableViewportHeight((current) => current === nextViewportHeight ? current : nextViewportHeight);
       const nextPageSize = pickManagementListPageSize(fitRows);
 
-      if (nextPageSize !== pageSize) {
+      if (pageSizeMode === "auto" && nextPageSize !== pageSize) {
         onAutoPageSizeChange(nextPageSize);
       }
     };
@@ -1837,7 +1854,11 @@ export function ManagementDataTable({
       resizeObserver.disconnect();
       window.removeEventListener("resize", measurePageSize);
     };
-  }, [onAutoPageSizeChange, pageSize, pageSizeMode]);
+  }, [kind, onAutoPageSizeChange, pageSize, pageSizeMode]);
+
+  useEffect(() => {
+    if (tableViewportRef.current) tableViewportRef.current.scrollTop = 0;
+  }, [kind, pageIndex, pageSize, searchParamString, sorting, columnFilters, grouping]);
 
   const badgeOptions = useMemo(
     () =>
@@ -1994,6 +2015,9 @@ export function ManagementDataTable({
 
       if (tableViewportRef.current && savedScroll.tableX > 0) {
         tableViewportRef.current.scrollLeft = savedScroll.tableX;
+      }
+      if (tableViewportRef.current && savedScroll.tableY > 0) {
+        tableViewportRef.current.scrollTop = savedScroll.tableY;
       }
     };
     const firstFrame = window.requestAnimationFrame(() => {
@@ -3320,7 +3344,19 @@ export function ManagementDataTable({
       {studentMobileList}
       {classMobileList}
 
-      <div ref={tableViewportRef} className={cn("overflow-x-auto rounded-lg border border-border/70 bg-background", (kind === "classes" || kind === "students") && "hidden md:block")} aria-busy={loading}>
+      <div
+        ref={tableViewportRef}
+        data-testid="management-table-viewport"
+        role="region"
+        aria-label={`${emptyLabel} 목록 스크롤`}
+        tabIndex={0}
+        className={cn(
+          "overflow-auto rounded-lg border border-border/70 bg-background md:max-h-[var(--management-table-height)] [&>[data-slot=table-container]]:overflow-visible focus-visible:outline-2 focus-visible:outline-ring",
+          (kind === "classes" || kind === "students") && "hidden md:block",
+        )}
+        style={{ "--management-table-height": tableViewportHeight ? `${tableViewportHeight}px` : undefined } as CSSProperties}
+        aria-busy={loading}
+      >
         <Table className="min-w-[980px] table-fixed">
           <caption className="sr-only">{emptyLabel} 운영 목록{captionSuffix ? ` · ${captionSuffix}` : ""}</caption>
           <TableHeader>
@@ -3335,8 +3371,9 @@ export function ManagementDataTable({
                       key={header.id}
                       aria-sort={sortState === "asc" ? "ascending" : sortState === "desc" ? "descending" : undefined}
                       className={cn(
-                        "sticky top-0 z-10 h-9 border-b bg-muted/30 px-2 py-1 text-xs font-semibold text-foreground relative",
+                        "sticky top-0 z-10 h-9 border-b bg-muted px-2 py-1 text-xs font-semibold text-foreground",
                         getPinnedColumnClassName(header.id),
+                        header.id === "select" || header.id === "title" ? "z-40" : "z-30",
                       )}
                       style={getColumnSizeStyle(header.getSize())}
                     >

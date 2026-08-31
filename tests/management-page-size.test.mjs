@@ -14,6 +14,8 @@ import * as managementPageSizing from "../src/features/management/management-pag
 const root = new URL("../", import.meta.url);
 
 test("management sizing quantizes measured row capacity without exceeding 20", () => {
+  assert.equal(pickManagementListPageSize(0), 10);
+  assert.equal(pickManagementListPageSize(5), 10);
   assert.equal(pickManagementListPageSize(9), 10);
   assert.equal(pickManagementListPageSize(10), 10);
   assert.equal(pickManagementListPageSize(14), 10);
@@ -21,6 +23,48 @@ test("management sizing quantizes measured row capacity without exceeding 20", (
   assert.equal(pickManagementListPageSize(19), 15);
   assert.equal(pickManagementListPageSize(20), 20);
   assert.equal(pickManagementListPageSize(200), 20);
+});
+
+test("management scrollport reserves the pager without reducing the minimum page size", () => {
+  assert.equal(typeof managementPageSizing.getManagementListViewportHeight, "function");
+  for (const [viewportHeight, viewportDocumentTop, expected] of [
+    [768, 250, 430],
+    [900, 250, 562],
+    [952, 250, 614],
+    [768, 376, 304],
+    [400, 376, 160],
+  ]) {
+    assert.equal(managementPageSizing.getManagementListViewportHeight({
+      viewportHeight, viewportDocumentTop, footerHeight: 44, footerGap: 12, bottomReserve: 32,
+    }), expected);
+  }
+});
+
+test("management scrollport sizing does not depend on tall rows or internal scroll position", () => {
+  assert.equal(typeof managementPageSizing.getManagementListViewportHeight, "function");
+  for (const [viewportTop, documentScrollTop] of [[250, 0], [50, 200]]) {
+    const height = managementPageSizing.getManagementListViewportHeight({
+      viewportHeight: 768, viewportDocumentTop: viewportTop + documentScrollTop,
+      footerHeight: 44, footerGap: 12, bottomReserve: 32,
+    });
+    assert.equal(height, 430);
+    assert.equal(pickManagementListPageSize(Math.floor((height - 37) / 81)), 10);
+  }
+});
+
+test("management table has one keyboard-accessible scrollport and an external pager", async () => {
+  const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+  assert.match(source, /data-testid="management-table-viewport"/);
+  assert.match(source, /useLayoutEffect\(\(\) => \{\s*const tableLayout = tableLayoutRef\.current/);
+  assert.match(source, /tabIndex=\{0\}/);
+  assert.match(source, /md:max-h-\[var\(--management-table-height\)\]/);
+  assert.match(source, /\[&>\[data-slot=table-container\]\]:overflow-visible/);
+  assert.match(source, /bodyViewportTop: bodyRect\.top \+ tableViewport\.scrollTop/);
+  assert.match(source, /bodyToFooterGap: footerGap \+ viewportBottomBorder/);
+  assert.match(source, /<\/Table>\s*<\/div>\s*<div ref=\{tablePagerRef\}/);
+  assert.doesNotMatch(source, /sticky top-0[^"\n]*relative/);
+  assert.match(source, /tableY: tableViewportRef\.current\?\.scrollTop \|\| 0/);
+  assert.match(source, /tableViewportRef\.current\.scrollTop = savedScroll\.tableY/);
 });
 
 test("management pagination preserves appends and clamps shrink at an unchanged page size", () => {
@@ -33,6 +77,7 @@ test("management pagination preserves appends and clamps shrink at an unchanged 
 test("management sizing accepts only a versioned user override", () => {
   assert.deepEqual(parseManagementPageSizePreference('{"version":1,"size":15}'), { version: 1, size: 15 });
   assert.equal(parseManagementPageSizePreference('{"version":1,"size":30}'), null);
+  assert.equal(parseManagementPageSizePreference('{"version":1,"size":5}'), null);
   assert.equal(parseManagementPageSizePreference('{"version":2,"size":20}'), null);
   assert.equal(parseManagementPageSizePreference("broken"), null);
 });

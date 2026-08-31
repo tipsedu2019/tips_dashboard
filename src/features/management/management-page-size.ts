@@ -17,6 +17,24 @@ export function pickManagementListPageSize(fitRows: number): ManagementListPageS
   return [...MANAGEMENT_LIST_PAGE_SIZES].reverse().find((size) => size <= safeFit) ?? 10;
 }
 
+export function getManagementListViewportHeight({
+  viewportHeight,
+  viewportDocumentTop,
+  footerHeight,
+  footerGap,
+  bottomReserve,
+}: {
+  viewportHeight: number;
+  viewportDocumentTop: number;
+  footerHeight: number;
+  footerGap: number;
+  bottomReserve: number;
+}) {
+  // Extremely short windows may scroll the page; never collapse the table to zero.
+  return Math.max(160, Math.floor(viewportHeight - viewportDocumentTop
+    - footerHeight - Math.max(0, footerGap) - Math.max(0, bottomReserve)));
+}
+
 export function getManagementListRowCapacity({
   viewportHeight,
   bodyViewportTop,

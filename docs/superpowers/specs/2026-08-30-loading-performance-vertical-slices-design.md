@@ -51,6 +51,17 @@ The first management slice changes only list reads made by the student/class man
 8. Render compact desktop rows near 34px while keeping interactive targets at least 24px.
 9. Preserve the current explicit “load next N rows” continuation control. Automatic infinite scroll is not introduced.
 
+### Approved density adjustment (2026-08-31)
+
+The user rejected a five-row fallback and approved retaining the minimum ten rows. Automatic sizing stays `10/15/20`; fitting every multiline row without any vertical scroll is no longer an absolute acceptance criterion.
+
+- On desktop, constrain the table scrollport to the space left after the complete pager and shell bottom reserve. Keep the header sticky inside that scrollport and the pager outside it.
+- Preserve every schedule, teacher, and classroom line. Scrolling reveals overflow; truncation and hidden rows are not substitutes.
+- Apply the same scrollport bound to manual sizes. Internal scrolling must not change the automatic row capacity or issue new list requests.
+- Keep the scrollport keyboard-accessible, start new pages at the top, and preserve its vertical position when returning from a record.
+- Preserve the mobile student/class card layout and its normal page scrolling. Extremely short windows may also scroll the page instead of collapsing the desktop table below 160px.
+- Browser acceptance now checks header/pager access, full last-row visibility after scrolling, page transitions, selected-row toolbars, and mobile behavior, rather than requiring zero vertical overflow in every data state.
+
 ### Compatibility choice
 
 This slice does not lower the database function's 30-row ceiling. The same function is used by already deployed clients and a forced server cap would be a compatibility change. The new management list caller validates `10 | 15 | 20`; independent detail/relation callers retain 30. A later RPC version can lower the server ceiling together with explicit whole-result sort parameters.

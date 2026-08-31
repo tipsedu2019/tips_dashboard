@@ -4,6 +4,8 @@
 
 **Goal:** Make student and class management lists publish at most 20 initial rows quickly, cancel obsolete reads, reject stale continuation results, and fit 10/15/20 compact rows to the available desktop height.
 
+**Approved addendum (2026-08-31):** Keep the ten-row minimum; do not introduce five rows. For multiline content, allow vertical scrolling inside a height-bounded desktop table with a sticky header and the complete pager outside the scrollport. Preserve all cell content and mobile cards. This supersedes an absolute no-scroll interpretation of the original density goal. Validate both automatic and manual sizes, page-top reset, record-return scroll restoration, and toolbar-induced height changes. Browser evidence remains a separate gate from source/unit tests.
+
 **Architecture:** Keep the existing `list_management_page_v1` keyset RPC and its database compatibility ceiling, but enforce the smaller list-page contract in the new UI caller. Introduce a pure page-size policy, pass one controlled size through page → hook → service → table, publish rows before non-critical metadata, and compose a caller-owned abort signal with the existing hard timeout. Detail, relation, and textbook-picker pagination remain independent at 30 rows.
 
 **Tech Stack:** Next.js 15, React 19, TypeScript, TanStack Table 8, Supabase JS, Node test runner, Tailwind CSS
