@@ -1226,7 +1226,7 @@ function isProvablyBoundedAbortExpression(expression, seen = new Set()) {
   }
   if (!ts.isCallExpression(signal)) return false
   const access = accessParts(signal)
-  if (rootIdentifier(access?.receiver) !== "AbortSignal" || lexicalBindingsAt(access.receiver).length > 0) return false
+  if (!access || rootIdentifier(access.receiver) !== "AbortSignal" || lexicalBindingsAt(access.receiver).length > 0) return false
   if (access.method === "timeout") {
     return signal.arguments.length === 1
       && lexicalLiteralValue(signal.arguments[0], seen) === 8000

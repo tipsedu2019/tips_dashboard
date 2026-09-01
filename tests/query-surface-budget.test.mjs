@@ -1026,6 +1026,27 @@ test("list contracts accept caller cancellation only when every path retains the
   assert.deepEqual(result, { ok: true, violations: [] })
 })
 
+test("list contracts fail closed for opaque abort helper calls without crashing", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client, callerSignal) {
+  return client.from("ops_tasks")
+    .select("id")
+    .limit(30)
+    .order("id")
+    .abortSignal(managementRequestSignal(callerSignal))
+    .retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/tasks/list-tasks.ts",
+    symbol: "load",
+    surface: "tasks",
+    reason: "list_abort_signal_missing",
+  }])
+})
+
 test("list contracts reject combined cancellation when the exact timeout bound is not provable", async () => {
   const result = await verifyFixture({
     source: `async function load(client, callerSignal, signals) {
