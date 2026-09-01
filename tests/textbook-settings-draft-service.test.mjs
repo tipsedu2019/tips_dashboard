@@ -38,6 +38,78 @@ test("atomic draft service freezes exact RPC body and rejects malformed receipts
   await assert.rejects(() => saveTextbookSettingsDraft(request, { client: bad }), /textbook_read_response_invalid/);
 });
 
+test("taxonomy-only save accepts blank preview rows and parses materialized default identities", async () => {
+  const { saveTextbookSettingsDraft } = await import(url.href);
+  const revision = "d".repeat(64);
+  const materializedId = "6a000000-0000-4000-8000-000000000020";
+  const request = {
+    requestId: "6a000000-0000-4000-8000-000000000019",
+    draft: {
+      version: 1,
+      owners: null,
+      subSubjects: {
+        version: 1,
+        baseRevision: revision,
+        operations: [
+          { type: "add", id: "6a000000-0000-4000-8000-000000000021", subject: "english", name: "", isVisible: true },
+          { type: "patch", id: "english-단어", patch: { isVisible: false } },
+        ],
+      },
+    },
+  };
+  const receipt = {
+    requestId: request.requestId,
+    owners: null,
+    subSubjects: {
+      baseRevision: revision,
+      newRevision: "e".repeat(64),
+      changedIds: [materializedId],
+      deletedIds: [],
+      materializedIds: { "english-단어": materializedId },
+    },
+  };
+  const calls = [];
+  const client = { rpc(name, args) { calls.push({ name, args }); return { abortSignal() { return this; }, retry(value) { assert.equal(value, false); return Promise.resolve({ data: receipt, error: null }); } }; } };
+  assert.deepEqual(await saveTextbookSettingsDraft(request, { client }), receipt);
+  assert.deepEqual(calls, [{ name: "save_textbook_settings_draft_v1", args: { p_request_id: request.requestId, p_draft: request.draft } }]);
+
+  for (const materializedIds of [
+    { "not-a-default": materializedId },
+    { "english-단어": "6A000000-0000-4000-8000-000000000020" },
+    { "english-단어": "6a000000-0000-4000-8000-000000000022" },
+  ]) {
+    const invalid = structuredClone(receipt);
+    invalid.subSubjects.materializedIds = materializedIds;
+    const bad = { rpc() { return { abortSignal() { return this; }, retry() { return Promise.resolve({ data: invalid, error: null }); } }; } };
+    await assert.rejects(() => saveTextbookSettingsDraft(request, { client: bad }), /textbook_read_response_invalid/);
+  }
+});
+
+test("mixed save requires exact section parity and sorted disjoint taxonomy receipts", async () => {
+  const { saveTextbookSettingsDraft } = await import(url.href);
+  const request = {
+    requestId: "6a000000-0000-4000-8000-000000000030",
+    draft: {
+      version: 1,
+      owners: { version: 1, baseRevision: "a".repeat(64), operations: [] },
+      subSubjects: { version: 1, baseRevision: "b".repeat(64), operations: [] },
+    },
+  };
+  const receipt = {
+    requestId: request.requestId,
+    owners: { baseRevision: "a".repeat(64), newRevision: "a".repeat(64), changedPublisherIds: [], deletedPublisherIds: [], changedSupplierIds: [], deletedSupplierIds: [], changedLinkPublisherIds: [] },
+    subSubjects: { baseRevision: "b".repeat(64), newRevision: "b".repeat(64), changedIds: [], deletedIds: [], materializedIds: {} },
+  };
+  const client = (data) => ({ rpc() { return { abortSignal() { return this; }, retry() { return Promise.resolve({ data, error: null }); } }; } });
+  assert.deepEqual(await saveTextbookSettingsDraft(request, { client: client(receipt) }), receipt);
+  for (const invalid of [
+    { ...receipt, owners: null },
+    { ...receipt, subSubjects: null },
+    { ...receipt, subSubjects: { ...receipt.subSubjects, changedIds: ["6a000000-0000-4000-8000-000000000041"], deletedIds: ["6a000000-0000-4000-8000-000000000041"] } },
+    { ...receipt, subSubjects: { ...receipt.subSubjects, baseRevision: "c".repeat(64) } },
+  ]) await assert.rejects(() => saveTextbookSettingsDraft(request, { client: client(invalid) }), /textbook_read_response_invalid/);
+});
+
 test("atomic draft save has no automatic retry and preserves abort and unknown transport errors", async () => {
   const { saveTextbookSettingsDraft } = await import(url.href);
   const request = { requestId: id, draft: { version: 1, owners: { version: 1, baseRevision: "a".repeat(64), operations: [] }, subSubjects: null } };

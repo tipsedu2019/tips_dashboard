@@ -99,6 +99,8 @@ const EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES = new Set([
 // textbook_closing_work_context_reads_test.sql; local final-only proof 153/153.
 // textbook references: 20260831184952_textbook_reference_numbered_reads.sql (final),
 // textbook_reference_numbered_reads_test.sql; local final-only proof 215/215.
+// textbook taxonomy: 20260901072345_textbook_taxonomy_numbered_drafts.sql (final),
+// textbook_taxonomy_numbered_drafts_test.sql; combined local final-only proof 255/255.
 const EXACT_NUMBERED_RPC_CONTRACTS = new Map([
   ["list_management_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_ops_task_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
@@ -121,6 +123,7 @@ const EXACT_NUMBERED_RPC_CONTRACTS = new Map([
   ["list_textbook_publisher_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_textbook_supplier_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_textbook_supplier_setting_picker_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["list_textbook_sub_subject_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
 ])
 
 const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION"

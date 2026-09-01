@@ -224,6 +224,11 @@
       "fileName": "20260901065056_textbook_owner_settings_contract_fix.sql",
       "status": "final",
       "sha256": "cff2df0b819ba4bc5d9e64b3223899ba4a5e304fe25ded166b4b0b70b3faf965"
+    },
+    {
+      "fileName": "20260901072345_textbook_taxonomy_numbered_drafts.sql",
+      "status": "final",
+      "sha256": "d22d9ac3a9656c92b9d2cb6978e49ad5ec6fec3955b0d095c4ee33214c3a3c26"
     }
   ]
 }
