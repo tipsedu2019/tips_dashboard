@@ -332,7 +332,15 @@ export async function buildTransactionalPreflightSql({
     const source = await readFile(resolveInsideRepo(repoRoot, `${forwardMigrationsPath}/${file}`), "utf8")
     const body = stripMigrationTransaction(source)
     migrationSections.push(
-      [`-- transactional preflight migration ${version}: ${file}`, body, `-- end migration ${version}`]
+      [
+        `-- transactional preflight migration ${version}: ${file}`,
+        body,
+        "-- enforce the deferred-constraint checks that a real migration commit would run",
+        "set constraints all immediate;",
+        "-- restore the initially-deferred mode expected by the next transaction",
+        "set constraints all deferred;",
+        `-- end migration ${version}`,
+      ]
         .filter(Boolean)
         .join("\n"),
     )

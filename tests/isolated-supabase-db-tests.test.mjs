@@ -135,7 +135,7 @@ async function createFinalManifestHistory(t) {
   await mkdir(migrationsPath, { recursive: true });
   const migrationSources = new Map([
     ["20260814000000_alpha.sql", "select 1;\n"],
-    ["20260814000001_beta.sql", "select 2;\n"],
+    ["20260814000200_beta.sql", "select 2;\n"],
   ]);
   const manifest = {
     baselineVersion: "dashboard-free-tier-v1",
@@ -516,7 +516,7 @@ test("review boundary rejects edits, deletions, renames, and reordering of base-
 test("review boundary accepts an exact final prefix with only a valid appended migration", async (t) => {
   const { validateImmutableFinalMigrationHistory, sha256 } = await import(runnerUrl.href);
   const history = await createFinalManifestHistory(t);
-  const fileName = "20260814000002_gamma.sql";
+  const fileName = "20260814000300_gamma.sql";
   const source = "select 3;\n";
   await writeFile(join(history.migrationsPath, fileName), source);
   history.manifest.orderedNewMigrations.push({ fileName, status: "final", sha256: sha256(source) });
@@ -533,6 +533,63 @@ test("review boundary accepts an exact final prefix with only a valid appended m
     baseFinalCount: 2,
     appendedCount: 1,
   });
+});
+
+test("review boundary accepts a valid final migration inserted between immutable final entries", async (t) => {
+  const { validateImmutableFinalMigrationHistory, sha256 } = await import(runnerUrl.href);
+  const history = await createFinalManifestHistory(t);
+  const fileName = "20260814000100_compatibility.sql";
+  const source = "select 3;\n";
+  await writeFile(join(history.migrationsPath, fileName), source);
+  history.manifest.orderedNewMigrations.splice(1, 0, {
+    fileName,
+    status: "final",
+    sha256: sha256(source),
+  });
+  await history.writeManifest();
+  const headSha = history.commitHead();
+
+  const result = await validateImmutableFinalMigrationHistory({
+    root: history.root,
+    baseSha: history.baseSha,
+    headSha,
+  });
+  assert.deepEqual(result, {
+    mergeBaseSha: history.baseSha,
+    baseFinalCount: 2,
+    appendedCount: 1,
+  });
+});
+
+test("review boundary rejects an inserted migration unless its lifecycle and SQL hash are final", async (t) => {
+  const { validateImmutableFinalMigrationHistory, sha256 } = await import(runnerUrl.href);
+  for (const fixture of [
+    { name: "candidate lifecycle", status: "candidate", sha256: null },
+    { name: "SQL hash drift", status: "final", sha256: "0".repeat(64) },
+  ]) {
+    await t.test(fixture.name, async (subtest) => {
+      const history = await createFinalManifestHistory(subtest);
+      const fileName = "20260814000100_compatibility.sql";
+      const source = "select 3;\n";
+      await writeFile(join(history.migrationsPath, fileName), source);
+      history.manifest.orderedNewMigrations.splice(1, 0, {
+        fileName,
+        status: fixture.status,
+        sha256: fixture.sha256 ?? sha256(source),
+      });
+      await history.writeManifest();
+      const headSha = history.commitHead();
+
+      await assert.rejects(
+        validateImmutableFinalMigrationHistory({
+          root: history.root,
+          baseSha: history.baseSha,
+          headSha,
+        }),
+        /isolated_supabase_db_final_migration_history_drift/u,
+      );
+    });
+  }
 });
 
 test("review boundary accepts only the pinned one-time reviewed manifest completion", async () => {

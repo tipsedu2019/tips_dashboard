@@ -395,9 +395,17 @@ export async function validateImmutableFinalMigrationHistory({
     };
   }
   if (headEntries.length < baseEntries.length) fail("isolated_supabase_db_final_migration_history_drift");
-  for (let index = 0; index < baseEntries.length; index += 1) {
-    if (canonical(headEntries[index]) !== canonical(baseEntries[index])) fail("isolated_supabase_db_final_migration_history_drift");
+  let nextHeadIndex = 0;
+  for (const entry of baseEntries) {
+    const matchingHeadIndex = headEntries.findIndex((headEntry, index) => (
+      index >= nextHeadIndex && headEntry.fileName === entry.fileName
+    ));
+    if (matchingHeadIndex < 0 || canonical(headEntries[matchingHeadIndex]) !== canonical(entry)) {
+      fail("isolated_supabase_db_final_migration_history_drift");
+    }
+    nextHeadIndex = matchingHeadIndex + 1;
   }
+  const baseFileNames = new Set(baseEntries.map((entry) => entry.fileName));
   for (const entry of baseFinalEntries) {
     const migrationPath = `supabase/migrations/${entry.fileName}`;
     let baseSql;
@@ -411,6 +419,18 @@ export async function validateImmutableFinalMigrationHistory({
       fail("isolated_supabase_db_final_migration_history_drift");
     }
     if (baseSql !== headSql || sha256(baseSql) !== entry.sha256 || sha256(headSql) !== entry.sha256) fail("isolated_supabase_db_final_migration_history_drift");
+  }
+  for (const entry of headEntries) {
+    if (baseFileNames.has(entry.fileName)) continue;
+    let headSql;
+    try {
+      headSql = await readRevisionFile(headSha, `supabase/migrations/${entry.fileName}`);
+    } catch {
+      fail("isolated_supabase_db_final_migration_history_drift");
+    }
+    if (entry.status !== "final" || sha256(headSql) !== entry.sha256) {
+      fail("isolated_supabase_db_final_migration_history_drift");
+    }
   }
   return {
     mergeBaseSha,

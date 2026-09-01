@@ -1884,6 +1884,21 @@ select (
       or pg_catalog.has_function_privilege('authenticated', procedure.oid, 'EXECUTE')
       or not pg_catalog.has_function_privilege('service_role', procedure.oid, 'EXECUTE')
   )
+  and not exists (
+    select 1
+    from pg_catalog.pg_proc procedure
+    where procedure.oid = pg_catalog.to_regprocedure(
+      'dashboard_private.write_registration_track_event_payload_v3(uuid,uuid,text,text,text,text,jsonb,text,text)'
+    )
+      and (
+        pg_catalog.pg_get_userbyid(procedure.proowner) <> 'postgres'
+        or pg_catalog.pg_get_functiondef(procedure.oid) like '%40001%'
+        or pg_catalog.has_function_privilege('public', procedure.oid, 'EXECUTE')
+        or pg_catalog.has_function_privilege('anon', procedure.oid, 'EXECUTE')
+        or pg_catalog.has_function_privilege('authenticated', procedure.oid, 'EXECUTE')
+        or pg_catalog.has_function_privilege('service_role', procedure.oid, 'EXECUTE')
+      )
+  )
   and exists (
     select 1
     from pg_catalog.pg_trigger trigger
