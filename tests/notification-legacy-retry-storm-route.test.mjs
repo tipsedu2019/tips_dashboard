@@ -97,12 +97,26 @@ function planItem(eventKey) {
   }
 }
 
-function actorClient() {
+function actorClient({
+  registrationScope = true,
+  authorizationError = null,
+} = {}) {
+  const calls = []
   return {
+    calls,
     auth: {
       async getUser() {
         return { data: { user: { id: IDS.actor } }, error: null }
       },
+    },
+    async rpc(name, parameters) {
+      calls.push({ name, parameters })
+      if (name !== "authorize_registration_legacy_dispatch_v1") {
+        throw new Error(`unexpected_actor_rpc:${name}`)
+      }
+      return authorizationError
+        ? { data: null, error: authorizationError }
+        : { data: registrationScope, error: null }
     },
   }
 }
@@ -142,8 +156,9 @@ function serviceHarness({
   }
 }
 
-async function postWithHarness(t, harness, providerSend) {
-  const clients = [actorClient(), harness.client]
+async function postWithHarness(t, harness, providerSend, actorOptions = {}) {
+  const actor = actorClient(actorOptions)
+  const clients = [actor, harness.client]
   let fetchCalls = 0
   const originalFetch = globalThis.fetch
   const previousUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -184,8 +199,61 @@ async function postWithHarness(t, harness, providerSend) {
     headers: { authorization: "Bearer fixture-token" },
     body: JSON.stringify({ sourceEventId: IDS.source }),
   }))
-  return { body: await result.json(), fetchCalls, status: result.status }
+  return {
+    actorCalls: actor.calls,
+    body: await result.json(),
+    fetchCalls,
+    status: result.status,
+  }
 }
+
+test("교사·정지 계정의 등록 알림 재시도는 plan과 provider 전에 403으로 끝난다", async (t) => {
+  for (const actorState of ["teacher", "banned"]) {
+    await t.test(actorState, async (subtest) => {
+      const harness = serviceHarness({
+        eventKey: "registration.case_created",
+        begun: {
+          acquired: true,
+          claim_id: IDS.claim,
+          owner_generation: "0",
+          dispatch_token: IDS.token,
+          status: "dispatch_started",
+        },
+      })
+      let providerCalls = 0
+      const result = await postWithHarness(
+        subtest,
+        harness,
+        async () => {
+          providerCalls += 1
+          return { status: "sent" }
+        },
+        {
+          authorizationError: {
+            code: "42501",
+            message: "registration_legacy_dispatch_access_denied",
+          },
+        },
+      )
+
+      assert.equal(result.status, 403)
+      assert.deepEqual(result.body, {
+        ok: false,
+        error: "등록·전반·퇴원 알림 후처리를 완료하지 못했습니다.",
+      })
+      assert.deepEqual(result.actorCalls, [{
+        name: "authorize_registration_legacy_dispatch_v1",
+        parameters: { p_source_event_id: IDS.source },
+      }])
+      assert.equal(
+        harness.calls.filter(({ name }) => name.includes("legacy_dispatch_plan_v1")).length,
+        0,
+      )
+      assert.equal(providerCalls, 0)
+      assert.equal(result.fetchCalls, 0)
+    })
+  }
+})
 
 test("closed begin replay는 provider, external attempt, finalize를 모두 0회로 유지한다", async (t) => {
   const harness = serviceHarness({
