@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import { JSDOM } from 'jsdom';
 import { act, createElement, StrictMode, useLayoutEffect } from 'react';
+import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 
 const require = createRequire(import.meta.url);
@@ -96,7 +97,10 @@ function modules(supabase, overrides) {
       assert.ok(target, `production module required: ${specifier}`);
       return load(target);
     }
-    vm.runInThisContext(`(function(require,module,exports){${source}\n})`, { filename: file })(resolve, evaluated, evaluated.exports);
+    const exposePrivateTestComponents = file.endsWith('textbook-operations-workspace.tsx')
+      ? '\nmodule.exports.__testOnlyTeacherSelect = TeacherSelect;'
+      : '';
+    vm.runInThisContext(`(function(require,module,exports){${source}${exposePrivateTestComponents}\n})`, { filename: file })(resolve, evaluated, evaluated.exports);
     return evaluated.exports;
   }
   return entry => load(path.join(rootPath, entry));
@@ -146,7 +150,22 @@ export async function setup(t, initial = {}) {
   };
   t.after(async () => { await unmount(); dom.window.close(); });
   await render();
-  return { ...io, load, render, clipboardWrites, unmount,
+  const mountTestComponent = async (Component, props) => {
+    const node = document.createElement('div');
+    document.body.appendChild(node);
+    const componentRoot = createRoot(node);
+    await act(async () => componentRoot.render(createElement(Component, props)));
+    let mounted = true;
+    const cleanup = async () => {
+      if (!mounted) return;
+      mounted = false;
+      await act(async () => componentRoot.unmount());
+      node.remove();
+    };
+    t.after(cleanup);
+    return { node, cleanup };
+  };
+  return { ...io, load, render, clipboardWrites, unmount, mountTestComponent,
     act: callback => act(async () => { await callback(); }),
     resolve: (request, data) => act(async () => { request.resolve({ data, error: null }); }),
     reject: (request, error) => act(async () => { request.resolve({ data: null, error }); }),
@@ -238,6 +257,11 @@ export async function setupReferenceHook(t, initial, { strictMode = false } = {}
   await render();
   return { ...io, get current() { return current; }, unmount,
     rerender: async next => { input = next; await render(); },
+    rerenderSync: next => {
+      input = next;
+      flushSync(() => root.render(strictMode
+        ? createElement(StrictMode, null, createElement(Boundary)) : createElement(Boundary)));
+    },
     setOwnerPresent: async present => { ownerPresent = present; await render(); },
     resolve: (request, data) => act(async () => { request.resolve({ data, error: null }); }),
     reject: (request, error) => act(async () => { request.resolve({ data: null, error }); }),

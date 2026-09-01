@@ -423,7 +423,7 @@ test("purchase aggregate badges use only authoritative summary quantities", asyn
   assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('미등록 요청') && node.textContent.includes('23')), true)
 })
 
-test("master and inventory controls use only their matching authoritative summary facets and options", async (t) => {
+test("master and inventory controls use summary counts plus authoritative reference options", async (t) => {
   const h = await setup(t, { search: "?textbookTab=inventory&textbookPage=1&textbookPageSize=10" })
   const locationId = id(900)
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_location_reference_page_v1"), {
@@ -437,13 +437,18 @@ test("master and inventory controls use only their matching authoritative summar
     subSubjectOptions: ["서버 세부과목"],
     auditCounts: { all: 41, recommended: 31, pending: 7, done: 3 },
   }))
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_master_options_v1"), {
+    publisherOptions: [], subSubjectOptions: [], categoryOptions: ["서비스 목록 분류"], bulkCategoryOptions: [], scienceSubjectAreas: [],
+    counts: { publisherOptions: 0, subSubjectOptions: 0, categoryOptions: 1, bulkCategoryOptions: 0, scienceSubjectAreas: 0 }, complete: true,
+  })
   await h.settleLegacy()
 
   await h.act(() => document.querySelector('[aria-label="교재 상태 필터 열기"]').click())
   assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('부족') && node.textContent.includes('37')), true)
   assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('대기') && node.textContent.includes('7')), true)
   await h.act(() => document.querySelector('[aria-label="교재 세부과목 필터"]').click())
-  assert.equal(document.body.textContent.includes("서버 세부과목"), true)
+  assert.equal(document.body.textContent.includes("서비스 목록 분류"), true)
+  assert.equal(document.body.textContent.includes("서버 세부과목"), false)
 })
 
 test("filtered-zero sales history and process retain their recovery controls", async (t) => {

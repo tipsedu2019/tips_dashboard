@@ -73,6 +73,7 @@ export type TextbookReferenceDataInput = {
   masterDuplicateInput?: TextbookMasterDuplicateInput | null
   classSalePreviewInput?: ClassTextbookSaleContextInput | null
   teacherSaleBalanceInput?: TextbookInventoryBalanceInput | null
+  purchaseBalanceInput?: TextbookInventoryBalanceInput | null
   closingPreviewInput?: ClosingPreviewInput | null
 }
 
@@ -126,8 +127,9 @@ function useIndependentResource<TInput, TValue>(
   // Intentional structural memoization: callers build typed request objects during render.
   // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const frozenInput = useMemo(() => input === null ? null : clone(input), [identity]) // eslint-disable-line react-hooks/exhaustive-deps
-  const [state, setState] = useState<Omit<TextbookReferenceResource<TInput, TValue>, "retry">>({
-    value: null, loading: false, error: null, acceptedInput: null,
+  const publishKey = actorKey && frozenInput !== null ? JSON.stringify([actorKey, identity]) : ""
+  const [state, setState] = useState<Omit<TextbookReferenceResource<TInput, TValue>, "retry"> & { publishKey: string }>({
+    value: null, loading: false, error: null, acceptedInput: null, publishKey: "",
   })
   const mounted = useRef(false)
   const active = useRef<AbortController | null>(null)
@@ -157,14 +159,15 @@ function useIndependentResource<TInput, TValue>(
     const id = requestId.current + 1
     requestId.current = id
     const accepted = clone(expected.input)
+    const expectedPublishKey = JSON.stringify([expected.actorKey, expected.identity])
     const valid = () => mounted.current && !abort.signal.aborted && requestId.current === id
       && current.current.actorKey === expected.actorKey && current.current.identity === expected.identity
-    setState({ value: null, loading: true, error: null, acceptedInput: null })
+    setState({ value: null, loading: true, error: null, acceptedInput: null, publishKey: expectedPublishKey })
     try {
       const value = await reader(accepted, { signal: abort.signal })
-      if (valid()) setState({ value, loading: false, error: null, acceptedInput: accepted })
+      if (valid()) setState({ value, loading: false, error: null, acceptedInput: accepted, publishKey: expectedPublishKey })
     } catch (error) {
-      if (valid()) setState({ value: null, loading: false, error, acceptedInput: null })
+      if (valid()) setState({ value: null, loading: false, error, acceptedInput: null, publishKey: expectedPublishKey })
     }
   }, [actorKey, frozenInput, identity, reader])
 
@@ -174,7 +177,7 @@ function useIndependentResource<TInput, TValue>(
     if (!actorKey || frozenInput === null) {
       // Disabled resources synchronously clear any value accepted for the former identity.
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setState({ value: null, loading: false, error: null, acceptedInput: null })
+      setState({ value: null, loading: false, error: null, acceptedInput: null, publishKey: "" })
       return
     }
     let live = true
@@ -182,7 +185,10 @@ function useIndependentResource<TInput, TValue>(
     return () => { live = false; active.current?.abort(); requestId.current += 1 }
   }, [actorKey, frozenInput, retry])
 
-  return { ...state, retry }
+  if (state.publishKey !== publishKey) {
+    return { value: null, loading: Boolean(publishKey), error: null, acceptedInput: null, retry }
+  }
+  return { value: state.value, loading: state.loading, error: state.error, acceptedInput: state.acceptedInput, retry }
 }
 
 function usePicker(
@@ -247,10 +253,11 @@ export function useTextbookReferenceData(input: TextbookReferenceDataInput) {
   const masterDuplicate = useIndependentResource<TextbookMasterDuplicateInput, TextbookMasterDuplicate>(managementActor, input.masterDuplicateInput || null, checkTextbookMasterDuplicate)
   const classSalePreview = useIndependentResource<ClassTextbookSaleContextInput, ClassTextbookSaleContext>(managementActor, input.classSalePreviewInput || null, getClassTextbookSaleContext)
   const teacherSaleBalance = useIndependentResource<TextbookInventoryBalanceInput, TextbookInventoryBalance>(managementActor, input.teacherSaleBalanceInput || null, getTextbookInventoryBalance)
+  const purchaseBalance = useIndependentResource<TextbookInventoryBalanceInput, TextbookInventoryBalance>(managementActor, input.purchaseBalanceInput || null, getTextbookInventoryBalance)
   const closingPreview = useIndependentResource<ClosingPreviewInput, TextbookClosingPreview>(managementActor, input.closingPreviewInput || null, getTextbookClosingPreview)
   return {
     bookOptions, classOptions, teacherOptions, locationOptions, selectedBook, selectedClass, selectedLocation,
     masterOptions, masterDetail, purchaseDetail, saleDetail, masterDuplicate, classSalePreview,
-    teacherSaleBalance, closingPreview,
+    teacherSaleBalance, purchaseBalance, closingPreview,
   }
 }
