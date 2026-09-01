@@ -9,6 +9,7 @@ const ACTIVE_RELATIVE_PATH = join("supabase", "migrations")
 const WORKFLOWS_RELATIVE_PATH = join(".github", "workflows")
 const REQUIRED_DB_PUSH_WORKFLOW = "supabase-db-push.yml"
 const REQUIRED_SQL_REVIEW_WORKFLOW = "supabase-sql-review.yml"
+const REQUIRED_SQUAWK_CONFIG = ".squawk.toml"
 const FOCUSED_TRANSACTIONAL_PGTAP =
   "supabase/tests/registration_level_test_result_parent_reconciliation_test.sql"
 const LINKED_MIGRATION_LEDGER = '"${RUNNER_TEMP}/supabase-migration-list.txt"'
@@ -40,6 +41,8 @@ const EXPECTED_POSTDEPLOY_VERIFIER_COMMAND =
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
   "ff2ac1e3eef41bd422d422cc10775af1f4c4636760d30b76d77e7cea122c992f"
+const REQUIRED_SQUAWK_CONFIG_SHA256 =
+  "d60cc00d379fd993e0357fd21bf237a5f78044c0490c0c1d14f1bf6378bd8307"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
   ["free-tier-guardrails.yml", "8ec5eadf18411ab3946228e9bf4a85fcd9e5152d2a92e7e888f1b35fda6f0258"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
@@ -1040,6 +1043,7 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
   const workflowsDir = join(resolvedRoot, WORKFLOWS_RELATIVE_PATH)
   const requiredWorkflowPath = join(workflowsDir, REQUIRED_DB_PUSH_WORKFLOW)
   const requiredSqlReviewWorkflowPath = join(workflowsDir, REQUIRED_SQL_REVIEW_WORKFLOW)
+  const requiredSquawkConfigPath = join(resolvedRoot, REQUIRED_SQUAWK_CONFIG)
   const manifestPath = join(quarantineDir, "manifest.json")
   const quarantineReadmePath = join(quarantineDir, "README.md")
   const scienceMigrationPath = join(activeDir, SCIENCE_MIGRATION_FILE)
@@ -1427,6 +1431,12 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       "required_sql_review_workflow_hash_mismatch",
       relative(resolvedRoot, requiredSqlReviewWorkflowPath),
     )
+  }
+  const requiredSquawkConfigStat = await statKind(requiredSquawkConfigPath)
+  if (!requiredSquawkConfigStat?.isFile()) {
+    addError(errors, "required_squawk_config_not_regular", REQUIRED_SQUAWK_CONFIG)
+  } else if (sha256(await readFile(requiredSquawkConfigPath)) !== REQUIRED_SQUAWK_CONFIG_SHA256) {
+    addError(errors, "required_squawk_config_hash_mismatch", REQUIRED_SQUAWK_CONFIG)
   }
   const { nonRegularEntries: workflowNonRegularEntries, yamlEntries: workflowYamlEntries } =
     await listWorkflowYamlEntries(workflowsDir)

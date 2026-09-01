@@ -1,0 +1,19 @@
+# Hash-attested immutable final migrations; new migration files remain linted.
+excluded_paths = [
+  "supabase/migrations/20260831013310_management_numbered_pages.sql",
+  "supabase/migrations/20260831031913_ops_task_numbered_pages.sql",
+  "supabase/migrations/20260831061736_approval_numbered_pages.sql",
+  "supabase/migrations/20260831063537_approval_detail_trim_parity.sql",
+  "supabase/migrations/20260831065351_makeup_numbered_pages.sql",
+  "supabase/migrations/20260831101449_makeup_system_note_whitespace_parity.sql",
+  "supabase/migrations/20260831103631_makeup_source_precision_parity.sql",
+  "supabase/migrations/20260831123610_textbook_inventory_numbered_reads.sql",
+  "supabase/migrations/20260831152429_textbook_workflow_numbered_reads.sql",
+  "supabase/migrations/20260831164103_textbook_workflow_purchase_cost_whitespace.sql",
+  "supabase/migrations/20260831170552_textbook_closing_work_context_reads.sql",
+  "supabase/migrations/20260831184952_textbook_reference_numbered_reads.sql",
+  "supabase/migrations/20260831234634_textbook_class_sale_roster_school.sql",
+  "supabase/migrations/20260901045629_textbook_supplier_numbered_reads.sql",
+  "supabase/migrations/20260901065056_textbook_owner_settings_contract_fix.sql",
+  "supabase/migrations/20260901072345_textbook_taxonomy_numbered_drafts.sql",
+]

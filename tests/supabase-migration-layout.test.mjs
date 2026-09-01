@@ -43,6 +43,24 @@ const LINKED_MIGRATION_LEDGER_PATH = "\${RUNNER_TEMP}/supabase-migration-list.tx
 const PINNED_SUPABASE_CLI_VERSION = "2.115.0"
 const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
   "ff099608ce758b625532ef03a61f4c9520b995e94ff6cd5480dc0428cad64cb3"
+const SQUAWK_IMMUTABLE_FINAL_EXCEPTIONS = Object.freeze([
+  "supabase/migrations/20260831013310_management_numbered_pages.sql",
+  "supabase/migrations/20260831031913_ops_task_numbered_pages.sql",
+  "supabase/migrations/20260831061736_approval_numbered_pages.sql",
+  "supabase/migrations/20260831063537_approval_detail_trim_parity.sql",
+  "supabase/migrations/20260831065351_makeup_numbered_pages.sql",
+  "supabase/migrations/20260831101449_makeup_system_note_whitespace_parity.sql",
+  "supabase/migrations/20260831103631_makeup_source_precision_parity.sql",
+  "supabase/migrations/20260831123610_textbook_inventory_numbered_reads.sql",
+  "supabase/migrations/20260831152429_textbook_workflow_numbered_reads.sql",
+  "supabase/migrations/20260831164103_textbook_workflow_purchase_cost_whitespace.sql",
+  "supabase/migrations/20260831170552_textbook_closing_work_context_reads.sql",
+  "supabase/migrations/20260831184952_textbook_reference_numbered_reads.sql",
+  "supabase/migrations/20260831234634_textbook_class_sale_roster_school.sql",
+  "supabase/migrations/20260901045629_textbook_supplier_numbered_reads.sql",
+  "supabase/migrations/20260901065056_textbook_owner_settings_contract_fix.sql",
+  "supabase/migrations/20260901072345_textbook_taxonomy_numbered_drafts.sql",
+])
 const PREPARE_ACL_MIGRATION_FILE = "20260722130000_notification_prepare_acl_hardening.sql"
 const PREPARE_ACL_MIGRATION_SHA256 = "970d203f816736b05ed56d973d415a75e00e2f659f55f84c7831c60db8c261a3"
 const CLAIM_RECONCILE_BASELINE_FILE = "20260716112000_notification_control_plane_worker_rpc.sql"
@@ -122,6 +140,7 @@ async function createRepoFixture() {
   await Promise.all([
     cp(join(repoRoot, ".github"), join(fixtureRoot, ".github"), { recursive: true }),
     cp(join(repoRoot, "supabase"), join(fixtureRoot, "supabase"), { recursive: true }),
+    copyFile(join(repoRoot, ".squawk.toml"), join(fixtureRoot, ".squawk.toml")),
   ])
   await mkdir(join(fixtureRoot, "scripts"), { recursive: true })
   await copyFile(
@@ -1689,6 +1708,22 @@ test("required SQL review workflow의 실파일과 바이트를 fail-closed로 �
   )
 })
 
+test("required Squawk config의 실파일과 바이트를 fail-closed로 고정한다", async () => {
+  const missingConfigFixture = await createRepoFixture()
+  await rm(join(missingConfigFixture, ".squawk.toml"))
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: missingConfigFixture }),
+    "required_squawk_config_not_regular",
+  )
+
+  const mutatedConfigFixture = await createRepoFixture()
+  await appendFile(join(mutatedConfigFixture, ".squawk.toml"), "\n# unreviewed Squawk mutation\n")
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: mutatedConfigFixture }),
+    "required_squawk_config_hash_mismatch",
+  )
+})
+
 test("SQL review workflow는 PR base/head SHA로 immutable-final boundary를 호출한다", async () => {
   const workflow = await readFile(
     join(repoRoot, ".github", "workflows", "supabase-sql-review.yml"),
@@ -1706,6 +1741,32 @@ test("SQL review workflow는 PR base/head SHA로 immutable-final boundary를 호
     /--test supabase\/tests\/notification_contract_drain_evidence_schema_repair_test\.sql/u,
   )
   assert.doesNotMatch(workflow, /secrets\./u)
+})
+
+test("Squawk 예외는 manifest 해시로 고정된 immutable final 파일만 정확히 허용한다", async () => {
+  const config = await readFile(join(repoRoot, ".squawk.toml"), "utf8")
+  const expected = [
+    "# Hash-attested immutable final migrations; new migration files remain linted.",
+    "excluded_paths = [",
+    ...SQUAWK_IMMUTABLE_FINAL_EXCEPTIONS.map((path) => `  ${JSON.stringify(path)},`),
+    "]",
+    "",
+  ].join("\n")
+  assert.equal(config, expected)
+  const configuredPaths = [...config.matchAll(/^\s+"([^"]+)",$/gmu)].map((match) => match[1])
+  assert.deepEqual(configuredPaths, SQUAWK_IMMUTABLE_FINAL_EXCEPTIONS)
+  for (const path of configuredPaths) assert.doesNotMatch(path, /[*?\[\]]/u)
+
+  const manifest = JSON.parse(await readFile(
+    join(repoRoot, "supabase", "test-baselines", "dashboard-free-tier-v1.manifest.json"),
+    "utf8",
+  ))
+  for (const path of SQUAWK_IMMUTABLE_FINAL_EXCEPTIONS) {
+    const fileName = path.slice(path.lastIndexOf("/") + 1)
+    const entry = manifest.orderedNewMigrations.find((candidate) => candidate.fileName === fileName)
+    assert.equal(entry?.status, "final", fileName)
+    assert.equal(entry?.sha256, await sha256(join(repoRoot, path)), fileName)
+  }
 })
 
 test("immutable-final boundary는 Git history 부재를 argument-array 호출에서 fail-closed한다", async () => {
