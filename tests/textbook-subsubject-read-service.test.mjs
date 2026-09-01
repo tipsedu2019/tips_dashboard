@@ -35,7 +35,7 @@ const envelope = (patch = {}) => ({
   totalCount: 100,
   baseRevision: revision,
   visibleCount: 118,
-  subjectCounts: { english: 6, math: 9, science: 5, other: 101 },
+  subjectCounts: { english: 6, math: 9, science: 5, other: 100 },
   ...patch,
 });
 
@@ -87,11 +87,61 @@ test("strict taxonomy parser rejects impossible counts, IDs, order metadata, and
     envelope({ visibleCount: 122 }),
     envelope({ totalCount: 102 }),
     envelope({ rows: [row], totalCount: 100 }),
-    envelope({ rows: [{ ...row, id: "not-a-uuid" }], totalCount: 101 }),
-    envelope({ rows: [{ ...row, id: "other-기타", kind: "persisted" }], totalCount: 101 }),
-    envelope({ rows: [{ ...row, subject: "english" }], totalCount: 101 }),
+    envelope({ rows: [{ ...row, id: "not-a-uuid" }], totalCount: 101, subjectCounts: { english: 6, math: 9, science: 5, other: 101 } }),
+    envelope({ rows: [{ ...row, id: "other-기타", kind: "persisted" }], totalCount: 101, subjectCounts: { english: 6, math: 9, science: 5, other: 101 } }),
+    envelope({ rows: [{ ...row, subject: "english" }], totalCount: 101, subjectCounts: { english: 6, math: 9, science: 5, other: 101 } }),
     envelope({ rows: [{ ...row, canMoveUp: true, canMoveDown: true }], totalCount: 101, subjectCounts: { english: 6, math: 9, science: 5, other: 1 } }),
   ]) await assert.rejects(() => listTextbookSubSubjectPage(request(), { client: client(data) }), /textbook_read_response_invalid/);
+});
+
+test("unfiltered taxonomy requires exact subject totals and global move endpoints", async () => {
+  const { listTextbookSubSubjectPage } = await import(serviceUrl.href);
+  const first = { id: id(10), subject: "other", name: "첫 행", sortOrder: 10, isVisible: true, kind: "persisted", canMoveUp: false, canMoveDown: true };
+  const last = { id: id(11), subject: "other", name: "끝 행", sortOrder: 20, isVisible: true, kind: "persisted", canMoveUp: true, canMoveDown: false };
+  const input = request({ page: 1 });
+  const whitespaceInput = request({ page: 1, filters: { subject: "other", search: " \u00a0" } });
+  const response = (patch = {}) => envelope({
+    page: 1,
+    rows: [first, last],
+    totalCount: 2,
+    visibleCount: 22,
+    subjectCounts: { english: 6, math: 9, science: 5, other: 2 },
+    ...patch,
+  });
+  const client = (data) => ({ rpc() { return { abortSignal() { return this; }, retry() { return Promise.resolve({ data, error: null }); } }; } });
+
+  assert.deepEqual((await listTextbookSubSubjectPage(input, { client: client(response()) })).rows, [first, last]);
+  assert.deepEqual((await listTextbookSubSubjectPage(whitespaceInput, { client: client(response()) })).rows, [first, last]);
+  for (const data of [
+    response({ subjectCounts: { english: 6, math: 9, science: 5, other: 3 } }),
+    response({ rows: [{ ...first, canMoveUp: true }, last] }),
+    response({ rows: [{ ...first, canMoveDown: false }, last] }),
+    response({ rows: [first, { ...last, canMoveUp: false }] }),
+    response({ rows: [first, { ...last, canMoveDown: true }] }),
+  ]) await assert.rejects(() => listTextbookSubSubjectPage(input, { client: client(data) }), /textbook_read_response_invalid/);
+  await assert.rejects(() => listTextbookSubSubjectPage(whitespaceInput, { client: client(response({
+    subjectCounts: { english: 6, math: 9, science: 5, other: 3 },
+  })) }), /textbook_read_response_invalid/);
+});
+
+test("filtered taxonomy keeps unknown global endpoints but rejects impossible local neighbors", async () => {
+  const { listTextbookSubSubjectPage } = await import(serviceUrl.href);
+  const input = request({ page: 1, filters: { subject: "other", search: "행" } });
+  const first = { id: id(20), subject: "other", name: "검색 첫 행", sortOrder: 20, isVisible: true, kind: "persisted", canMoveUp: true, canMoveDown: true };
+  const last = { id: id(21), subject: "other", name: "검색 끝 행", sortOrder: 40, isVisible: true, kind: "persisted", canMoveUp: true, canMoveDown: true };
+  const response = (rows) => envelope({
+    page: 1,
+    rows,
+    totalCount: rows.length,
+    visibleCount: 24,
+    subjectCounts: { english: 6, math: 9, science: 5, other: 4 },
+  });
+  const client = (data) => ({ rpc() { return { abortSignal() { return this; }, retry() { return Promise.resolve({ data, error: null }); } }; } });
+
+  assert.deepEqual((await listTextbookSubSubjectPage(input, { client: client(response([first, last])) })).rows, [first, last]);
+  assert.deepEqual((await listTextbookSubSubjectPage(input, { client: client(response([first])) })).rows, [first]);
+  await assert.rejects(() => listTextbookSubSubjectPage(input, { client: client(response([{ ...first, canMoveDown: false }, last])) }), /textbook_read_response_invalid/);
+  await assert.rejects(() => listTextbookSubSubjectPage(input, { client: client(response([first, { ...last, canMoveUp: false }])) }), /textbook_read_response_invalid/);
 });
 
 test("taxonomy request validates exact filters, draft, positive pages, and sizes 10/15/20", async () => {

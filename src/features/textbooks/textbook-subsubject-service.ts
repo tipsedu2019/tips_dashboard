@@ -57,13 +57,16 @@ function parseRow(value: unknown, requestedSubject: TextbookSettingsSubject): Te
 function parse(value: unknown, request: SubSubjectPageRequest): TextbookSubSubjectSettingsPage {
   const result = exact(value, ["rows", "page", "pageSize", "totalCount", "baseRevision", "visibleCount", "subjectCounts"]);
   const subjectCounts = counts(result.subjectCounts);
+  const subjectCount = subjectCounts[request.filters.subject];
+  const unfiltered = request.filters.search.trim().length === 0;
   const projectedCount = subjects.reduce((total, subject) => total + subjectCounts[subject], 0);
   const expectedLength = Math.min(request.pageSize, Math.max(0, result.totalCount - (request.page - 1) * request.pageSize));
   if (result.page !== request.page
     || result.pageSize !== request.pageSize
     || !v.integer(result.totalCount)
     || result.totalCount < 0
-    || result.totalCount > subjectCounts[request.filters.subject]
+    || result.totalCount > subjectCount
+    || (unfiltered && result.totalCount !== subjectCount)
     || typeof result.baseRevision !== "string"
     || !/^[0-9a-f]{64}$/.test(result.baseRevision)
     || !v.integer(result.visibleCount)
@@ -73,7 +76,15 @@ function parse(value: unknown, request: SubSubjectPageRequest): TextbookSubSubje
     || result.rows.length !== expectedLength) v.fail();
   const rows = result.rows.map((row: unknown) => parseRow(row, request.filters.subject));
   if (new Set(rows.map((row) => row.id.toLowerCase())).size !== rows.length) v.fail();
-  if (subjectCounts[request.filters.subject] <= 1 && rows.some((row) => row.canMoveUp || row.canMoveDown)) v.fail();
+  const offset = (request.page - 1) * request.pageSize;
+  rows.forEach((row, index) => {
+    const matchingIndex = offset + index;
+    if (unfiltered) {
+      if (row.canMoveUp !== (matchingIndex > 0)
+        || row.canMoveDown !== (matchingIndex < result.totalCount - 1)) v.fail();
+    } else if ((matchingIndex > 0 && !row.canMoveUp)
+      || (matchingIndex < result.totalCount - 1 && !row.canMoveDown)) v.fail();
+  });
   return {
     rows,
     page: result.page,
