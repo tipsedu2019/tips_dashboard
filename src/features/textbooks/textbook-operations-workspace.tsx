@@ -1,6 +1,6 @@
 "use client";
-import { compactUniqueLabels, buildTextbookCleanupPreviewRows, getTeacherName, getDefaultTeacherForClass, inferClassLocationId, doesSearchOptionMatchFilters, buildSearchSelectCommandValue, buildSearchSelectFilterGroups, buildVisibleSearchSelectFilterGroups, buildTextbookReferenceOptions, buildTextbookClassReferenceOptions } from "./textbook-reference-model";
-import { saleStatusLabels, TEXTBOOK_HANDOFF_BUSINESS_NAME, getKnownPublisherLabel, normalizeMonthInput, getSaleLineQuantity, getSaleLineMonth, getSaleLineStatus, isBillableSaleLineStatus, formatCurrency, getTextbookHandoffDocumentMeta, formatPurchaseUnitCost, getStudentGradeLabel, getSupplierName, getConfiguredSupplierIdForTextbook, getConfiguredTextbookPurchaseUnitCost, getStudentNameById, getSaleLineRecipientName, purchaseStatusLabel } from "./textbook-handoff-model";
+import { compactUniqueLabels, buildTextbookCleanupPreviewRows, getTeacherName, doesSearchOptionMatchFilters, buildSearchSelectCommandValue, buildSearchSelectFilterGroups, buildVisibleSearchSelectFilterGroups, buildTextbookReferenceOptions, buildTextbookClassReferenceOptions } from "./textbook-reference-model";
+import { saleStatusLabels, TEXTBOOK_HANDOFF_BUSINESS_NAME, getKnownPublisherLabel, normalizeMonthInput, getSaleLineQuantity, getSaleLineMonth, getSaleLineStatus, formatCurrency, getTextbookHandoffDocumentMeta, formatPurchaseUnitCost, getStudentGradeLabel, getSupplierName, getConfiguredSupplierIdForTextbook, getConfiguredTextbookPurchaseUnitCost, getStudentNameById, getSaleLineRecipientName, purchaseStatusLabel } from "./textbook-handoff-model";
 import type { TextbookHandoffLine, TextbookHandoffGroup } from "./textbook-handoff-model";
 
 import { Fragment, FormEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
@@ -74,13 +74,13 @@ import { captureElementAsPdfBlob, captureElementAsPngBlob, downloadBlob } from "
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 import { useTextbookNumberedData } from "./use-textbook-numbered-data";
+import { useTextbookReferenceData, type TextbookReferencePickerState } from "./use-textbook-reference-data";
 import { parseTextbookNavigation, serializeTextbookNavigation, type TextbookNavigationState, type TextbookTab } from "./textbook-navigation";
 
 import {
   buildTeacherTextbookIssueDraft,
   buildTextbookMonthlyClosing,
   buildTextbookSaleDraft,
-  filterStockMovesForClosing,
   getRecordId,
   getTextbookCopyScope,
   getTextbookSalePrice,
@@ -92,7 +92,6 @@ import {
   normalizeBarcodeValue,
 } from "./textbook-ledger.js";
 import { textbookService } from "./textbook-service";
-import { listTextbookLocationReferencePage } from "./textbook-reference-service";
 import { getTextbookClosingDetail } from "./textbook-read-service";
 import { getTextbookBillingHandoff, getTextbookClosingMovementExport, getTextbookPurchaseHandoff } from "./textbook-work-context-service";
 import { getClosingStoredMetrics, type ClosingStoredMetrics } from "./textbook-closing-model";
@@ -102,7 +101,6 @@ import {
   text,
   textPreservingZero,
   getRowFieldText,
-  normalizeSubjectValue,
   getSubjectLabel,
   getPublisherLabel,
   getTextbookQualityIssues,
@@ -119,7 +117,6 @@ import {
   getClassById,
   getInventoryQuantity,
   isActiveTextbook,
-  shouldShowOperationalSaleLine,
   getSaleEventAt,
   buildPurchaseCardDraft,
   getPurchaseScopeLines,
@@ -490,20 +487,19 @@ function normalizeEmailValue(value: unknown) {
   return text(value).replace(/\s+/g, "").toLowerCase();
 }
 
-
-function getPublisherSettingLabel(row: Row) {
-  return text(row.name || row.publisher || row.publisher_name || row.publisherName);
+function isTextbookUuid(value: unknown) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text(value));
 }
 
+// Kept as the source-locked legacy metadata ordering contract until Task 5d removes its loader consumer.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function uniqueSortedLabels(values: unknown[]) {
   const labelsByKey = new Map<string, string>();
   for (const value of values) {
     const label = text(value);
     if (!label || label === "미분류") continue;
     const key = label.toLowerCase();
-    if (!labelsByKey.has(key)) {
-      labelsByKey.set(key, label);
-    }
+    if (!labelsByKey.has(key)) labelsByKey.set(key, label);
   }
   return [...labelsByKey.values()].sort((left, right) => left.localeCompare(right, "ko", { numeric: true }));
 }
@@ -1216,6 +1212,7 @@ function TextbookOperationsWorkspaceContent() {
   const [purchaseForm, setPurchaseForm] = useState(emptyPurchaseForm);
   const [purchaseDialogOpen, setPurchaseDialogOpen] = useState(false);
   const [purchaseRequestInputMode, setPurchaseRequestInputMode] = useState<"catalog" | "manual">("catalog");
+  const purchaseAutoDefaultsRef = useRef({ title: "", supplierId: "", unitCost: "", requestBy: "", locationId: "" });
   const [selectedPurchaseLineId, setSelectedPurchaseLineId] = useState("");
   const [selectedPurchaseScopeLineIds, setSelectedPurchaseScopeLineIds] = useState<Record<TextbookCopyScope, string>>({ student: "", teacher: "" });
   const [selectedPurchaseLineIds, setSelectedPurchaseLineIds] = useState<string[]>([]);
@@ -1226,13 +1223,10 @@ function TextbookOperationsWorkspaceContent() {
   const [purchaseOrderFilter, setPurchaseOrderFilter] = useState<PurchaseOrderFilter>(() => (text(initialPrimaryFilters.orderFilter) || "all") as PurchaseOrderFilter);
   const [inventoryAuditFilter, setInventoryAuditFilter] = useState<InventoryAuditFilter>("recommended");
   const [inventoryCountLocationId, setInventoryCountLocationId] = useState("");
-  const inventoryCountLocationIdRef = useRef(inventoryCountLocationId);
-  inventoryCountLocationIdRef.current = inventoryCountLocationId;
-  const [inventoryLocationReference, setInventoryLocationReference] = useState<{ ready: boolean; locations: Row[]; defaultLocationId: string; error: string }>({ ready: false, locations: [], defaultLocationId: "", error: "" });
-  const [inventoryLocationRetryKey, setInventoryLocationRetryKey] = useState(0);
   const [inventoryCountDrafts, setInventoryCountDrafts] = useState<Record<string, string>>({});
   const [inventoryCountMemoDrafts, setInventoryCountMemoDrafts] = useState<Record<string, string>>({});
   const [saleForm, setSaleForm] = useState(emptySaleForm);
+  const saleAutoDefaultsRef = useRef({ locationId: "" });
   const [salesProcessFilter, setSalesProcessFilter] = useState<SalesProcessFilter>(() => (text(initialPrimaryFilters.status) || "all") as SalesProcessFilter);
   const [closingFilters, setClosingFilters] = useState<ClosingFilters>(() => initialNavigationRef.current.tab === "closing"
     ? initialNavigationRef.current.primary.filters as ClosingFilters : { month: "all", subject: "all", status: "all" });
@@ -1262,7 +1256,12 @@ function TextbookOperationsWorkspaceContent() {
     setSalesProcessFilter((text(filters.status) || "all") as SalesProcessFilter);
     setClosingFilters(restored.tab === "closing" ? restored.primary.filters as ClosingFilters : { month: "all", subject: "all", status: "all" });
     setSaleHistoryFilters(restored.history.filters);
+    setSelectedMasterDetailId(restored.detail?.kind === "master" ? restored.detail.id : "");
+    setSelectedPurchaseDetail(restored.detail?.kind === "purchase" ? { anchorLineId: restored.detail.id, mode: restored.tab === "requests" ? "request" : "order" } : null);
+    setSelectedSaleDetailId(restored.detail?.kind === "sale" ? restored.detail.id : "");
     setSelectedClosingDetailId(restored.detail?.kind === "closing" ? restored.detail.id : "");
+    if (restored.detail?.kind !== "master") setMasterDialogOpen(false);
+    if (restored.detail?.kind !== "purchase") setPurchaseDialogOpen(false);
     setSelectedClosingScope(null);
     setClosingMovementSearch(restored.movements.search);
     setClosingDetailResource({ value: null, loading: false, error: "" });
@@ -1284,6 +1283,11 @@ function TextbookOperationsWorkspaceContent() {
   const [saleDialogOpen, setSaleDialogOpen] = useState(false);
   const [closingDialogOpen, setClosingDialogOpen] = useState(false);
   const [selectedClosingIds, setSelectedClosingIds] = useState<string[]>([]);
+  const [selectedMasterDetailId, setSelectedMasterDetailId] = useState(() => initialNavigationRef.current.detail?.kind === "master" ? initialNavigationRef.current.detail.id : "");
+  const [selectedPurchaseDetail, setSelectedPurchaseDetail] = useState<{ anchorLineId: string; mode: "request" | "order" } | null>(() => initialNavigationRef.current.detail?.kind === "purchase"
+    ? { anchorLineId: initialNavigationRef.current.detail.id, mode: initialNavigationRef.current.tab === "requests" ? "request" : "order" }
+    : null);
+  const [selectedSaleDetailId, setSelectedSaleDetailId] = useState(() => initialNavigationRef.current.detail?.kind === "sale" ? initialNavigationRef.current.detail.id : "");
   const [selectedClosingDetailId, setSelectedClosingDetailId] = useState(() => initialNavigationRef.current.detail?.kind === "closing" ? initialNavigationRef.current.detail.id : "");
   const [selectedClosingScope, setSelectedClosingScope] = useState<{ closingMonth: string; subject: string } | null>(null);
   const [closingMovementSearch, setClosingMovementSearch] = useState(() => initialNavigationRef.current.movements.search);
@@ -1327,37 +1331,161 @@ function TextbookOperationsWorkspaceContent() {
   }, [activeTab]);
   const primaryRestoredPage = initialNavigationRef.current.tab === activeTab ? initialNavigationRef.current.primary.page : 1;
   const primaryRestoredPageSize = initialNavigationRef.current.tab === activeTab ? initialNavigationRef.current.primary.pageSize : undefined;
+  const managementEnabled = Boolean(canManageAll || isAdmin || isStaff || role === "admin" || role === "staff");
+  const selectedFormBookReference = purchaseDialogOpen
+    ? purchaseForm.textbookId || (purchaseRequestInputMode === "manual" ? normalizeStoredTextInput(purchaseForm.requestedTextbookTitle) : "")
+    : saleDialogOpen ? saleForm.textbookId : "";
+  const selectedFormClassId = purchaseDialogOpen ? purchaseForm.classId : saleDialogOpen && getTextbookCopyScope(saleForm) === "student" ? saleForm.classId : "";
+  const selectedFormLocationId = purchaseDialogOpen ? purchaseForm.locationId : saleDialogOpen ? saleForm.locationId : "";
+  const referenceData = useTextbookReferenceData({
+    viewerId: text(user?.id), viewerRole: text(role), authReady: Boolean(user?.id && role), managementEnabled,
+    bookOptions: { enabled: purchaseDialogOpen || saleDialogOpen },
+    classOptions: { enabled: purchaseDialogOpen || (saleDialogOpen && getTextbookCopyScope(saleForm) === "student") },
+    teacherOptions: { enabled: purchaseDialogOpen || (saleDialogOpen && getTextbookCopyScope(saleForm) === "teacher") },
+    locationOptions: { enabled: activeTab === "inventory" || purchaseDialogOpen || saleDialogOpen },
+    selectedBook: selectedFormBookReference ? {
+      reference: selectedFormBookReference,
+      activeOnly: true,
+      scope: purchaseDialogOpen && purchaseForm.requestStage === "request" ? "request" : "management",
+      fallbackSupplier: purchaseForm.supplierId,
+    } : null,
+    selectedClassId: isTextbookUuid(selectedFormClassId) ? selectedFormClassId : null,
+    selectedLocationId: isTextbookUuid(selectedFormLocationId) ? selectedFormLocationId : null,
+    masterOptions: activeTab === "master" || masterDialogOpen ? {
+      subject: masterForm.subject as "english" | "math" | "science" | "other",
+      listSubject: subjectGroupFilter as "all" | "english" | "math" | "science" | "other",
+      bulkSubject: bulkTextbookPatch.subject as "keep" | "english" | "math" | "science" | "other",
+    } : null,
+    masterDetailId: isTextbookUuid(selectedMasterDetailId || masterForm.id) ? selectedMasterDetailId || masterForm.id : null,
+    purchaseDetailInput: selectedPurchaseDetail,
+    saleDetailId: isTextbookUuid(selectedSaleDetailId) ? selectedSaleDetailId : null,
+    masterDuplicateInput: masterDialogOpen && normalizeStoredTextInput(masterForm.title) ? {
+      excludeId: isTextbookUuid(masterForm.id) ? masterForm.id : null,
+      title: normalizeStoredTextInput(masterForm.title),
+      subject: normalizeStoredTextInput(masterForm.subject),
+      publisher: normalizeStoredTextInput(masterForm.publisher),
+      category: normalizeStoredTextInput(masterForm.category || masterForm.subSubject),
+    } : null,
+    classSalePreviewInput: saleDialogOpen && getTextbookCopyScope(saleForm) === "student"
+      && [saleForm.classId, saleForm.textbookId, saleForm.locationId].every(isTextbookUuid)
+      ? { classId: saleForm.classId, textbookId: saleForm.textbookId, locationId: saleForm.locationId, chargeMonth: normalizeMonthInput(saleForm.chargeMonth) }
+      : null,
+    teacherSaleBalanceInput: saleDialogOpen && getTextbookCopyScope(saleForm) === "teacher"
+      && isTextbookUuid(saleForm.textbookId) && isTextbookUuid(saleForm.locationId)
+      ? { textbookIds: [saleForm.textbookId], locationId: saleForm.locationId }
+      : null,
+    closingPreviewInput: closingDialogOpen ? {
+      closingMonth: normalizeMonthInput(closingForm.closingMonth), subject: closingForm.subject,
+      openingQuantity: numberValue(closingForm.openingQuantity), openingAmount: numberValue(closingForm.openingAmount),
+    } : null,
+  });
+  const purchaseReferenceError = referenceData.selectedBook.error
+    ? referenceData.selectedBook : referenceData.selectedClass.error
+      ? referenceData.selectedClass : referenceData.selectedLocation.error ? referenceData.selectedLocation : null;
+  const saleReferenceError = referenceData.classSalePreview.error
+    ? referenceData.classSalePreview : referenceData.teacherSaleBalance.error
+      ? referenceData.teacherSaleBalance : referenceData.selectedBook.error
+        ? referenceData.selectedBook : referenceData.selectedClass.error
+          ? referenceData.selectedClass : referenceData.selectedLocation.error ? referenceData.selectedLocation : null;
+  const inventoryReferenceLocations = useMemo<Row[]>(() => referenceData.locationOptions.rows.map((option) => ({
+    id: option.value, name: option.label, code: option.searchText || option.description || "",
+  })), [referenceData.locationOptions.rows]);
+  const inventoryDefaultLocationId = referenceData.locationOptions.defaultLocation?.id || "";
+  const inventoryHasExplicitLocation = Boolean(inventoryCountLocationId && inventoryReferenceLocations.some((location) => getRecordId(location) === inventoryCountLocationId));
+  const inventoryLocationReference = {
+    ready: Boolean(!referenceData.locationOptions.loading && !referenceData.locationOptions.error && (inventoryDefaultLocationId || inventoryHasExplicitLocation)),
+    locations: inventoryReferenceLocations,
+    defaultLocationId: inventoryDefaultLocationId,
+    error: referenceData.locationOptions.error
+      ? getTextbookActionErrorMessage(referenceData.locationOptions.error)
+      : !referenceData.locationOptions.loading && referenceData.locationOptions.acceptedInput && !inventoryDefaultLocationId && !inventoryHasExplicitLocation
+        ? "기본 재고 위치가 설정되지 않았습니다. 위치 설정 후 다시 시도하세요." : "",
+  };
   useEffect(() => {
-    if (activeTab !== "inventory" || !user?.id || !["admin", "staff"].includes(text(role))) {
-      setInventoryLocationReference((current) => current.ready || current.locations.length || current.error ? { ready: false, locations: [], defaultLocationId: "", error: "" } : current);
-      return;
-    }
-    const abort = new AbortController();
-    const actorKey = `${user.id}:${role}`;
-    void listTextbookLocationReferencePage({ page: 1, pageSize: 20, filters: { search: "" }, sort: "match-order" }, { signal: abort.signal }).then((result) => {
-      if (abort.signal.aborted || actorKey !== `${user.id}:${role}`) return;
-      const locations = result.rows.map((option) => ({ id: option.value, name: option.label, code: option.description || "" }));
-      const defaultLocationId = result.defaultLocation?.id || "";
-      const explicitLocationId = inventoryCountLocationIdRef.current;
-      const hasExplicitLocation = Boolean(explicitLocationId && locations.some((location) => location.id === explicitLocationId));
-      if (!defaultLocationId && !hasExplicitLocation) {
-        setInventoryLocationReference({ ready: false, locations, defaultLocationId: "", error: "기본 재고 위치가 설정되지 않았습니다. 위치 설정 후 다시 시도하세요." });
-        return;
-      }
-      setInventoryLocationReference({ ready: true, locations, defaultLocationId, error: "" });
-      setInventoryCountLocationId((current) => current || defaultLocationId);
-    }, (error) => {
-      if (!abort.signal.aborted) setInventoryLocationReference({ ready: false, locations: [], defaultLocationId: "", error: getTextbookActionErrorMessage(error) });
+    const resolved = referenceData.selectedBook.value?.row;
+    if (!purchaseDialogOpen || !resolved || !referenceData.selectedBook.acceptedInput) return;
+    const supplierId = resolved.configuredSupplierId;
+    const supplierRows = resolved.supplier ? [resolved.supplier] : [];
+    setPurchaseForm((current) => {
+      if (current.textbookId && getRecordId(resolved.textbook) !== current.textbookId) return current;
+      const nextTitle = getTextbookTitle(resolved.textbook);
+      const nextUnitCost = String(getConfiguredTextbookPurchaseUnitCost(resolved.textbook, supplierId, supplierRows, current.unitCost, current.copyScope));
+      const canSetTitle = purchaseRequestInputMode === "catalog" && (!current.requestedTextbookTitle || current.requestedTextbookTitle === purchaseAutoDefaultsRef.current.title);
+      const canSetSupplier = !current.supplierId || current.supplierId === purchaseAutoDefaultsRef.current.supplierId;
+      const canSetUnitCost = !current.unitCost || current.unitCost === purchaseAutoDefaultsRef.current.unitCost;
+      purchaseAutoDefaultsRef.current = {
+        ...purchaseAutoDefaultsRef.current,
+        title: canSetTitle ? nextTitle : purchaseAutoDefaultsRef.current.title,
+        supplierId: canSetSupplier ? supplierId : purchaseAutoDefaultsRef.current.supplierId,
+        unitCost: canSetUnitCost ? nextUnitCost : purchaseAutoDefaultsRef.current.unitCost,
+      };
+      return {
+        ...current,
+        requestedTextbookTitle: canSetTitle ? nextTitle : current.requestedTextbookTitle,
+        supplierId: canSetSupplier ? supplierId : current.supplierId,
+        unitCost: canSetUnitCost ? nextUnitCost : current.unitCost,
+      };
     });
-    return () => abort.abort();
-  }, [activeTab, inventoryLocationRetryKey, role, user?.id]);
+  }, [purchaseDialogOpen, purchaseRequestInputMode, referenceData.selectedBook.acceptedInput, referenceData.selectedBook.value]);
+  useEffect(() => {
+    const resolved = referenceData.selectedClass.value?.row;
+    if (!resolved || !referenceData.selectedClass.acceptedInput) return;
+    if (purchaseDialogOpen && purchaseForm.classId === resolved.id) {
+      const nextTeacher = resolved.defaultTeacherName;
+      const nextLocation = resolved.inferredLocation?.id || "";
+      setPurchaseForm((current) => {
+        if (current.classId !== resolved.id) return current;
+        const canSetTeacher = !current.requestBy || current.requestBy === purchaseAutoDefaultsRef.current.requestBy;
+        const canSetLocation = Boolean(nextLocation) && (!current.locationId || current.locationId === purchaseAutoDefaultsRef.current.locationId);
+        purchaseAutoDefaultsRef.current = {
+          ...purchaseAutoDefaultsRef.current,
+          requestBy: canSetTeacher ? nextTeacher : purchaseAutoDefaultsRef.current.requestBy,
+          locationId: canSetLocation ? nextLocation : purchaseAutoDefaultsRef.current.locationId,
+        };
+        return { ...current, requestBy: canSetTeacher ? nextTeacher : current.requestBy, locationId: canSetLocation ? nextLocation : current.locationId };
+      });
+    }
+    if (saleDialogOpen && saleForm.classId === resolved.id && resolved.inferredLocation?.id) {
+      setSaleForm((current) => {
+        if (current.classId !== resolved.id) return current;
+        const canSetLocation = !current.locationId || current.locationId === saleAutoDefaultsRef.current.locationId;
+        if (canSetLocation) saleAutoDefaultsRef.current.locationId = resolved.inferredLocation?.id || "";
+        return canSetLocation ? { ...current, locationId: resolved.inferredLocation?.id || current.locationId } : current;
+      });
+    }
+  }, [purchaseDialogOpen, purchaseForm.classId, referenceData.selectedClass.acceptedInput, referenceData.selectedClass.value, saleDialogOpen, saleForm.classId]);
+  useEffect(() => {
+    const row = referenceData.masterDetail.value?.row;
+    if (!row || referenceData.masterDetail.acceptedInput !== selectedMasterDetailId) return;
+    selectMasterTextbook(row);
+    // The selector intentionally remains an event-style helper; request identity guards this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [referenceData.masterDetail.acceptedInput, referenceData.masterDetail.value, selectedMasterDetailId]);
+  useEffect(() => {
+    const row = referenceData.purchaseDetail.value?.row;
+    const accepted = referenceData.purchaseDetail.acceptedInput;
+    if (!row || !accepted || !selectedPurchaseDetail || accepted.anchorLineId !== selectedPurchaseDetail.anchorLineId || accepted.mode !== selectedPurchaseDetail.mode) return;
+    selectPurchaseLine(row.line, row.line.order || undefined, accepted.mode, true, row);
+    // The selector intentionally remains an event-style helper; request identity guards this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [referenceData.purchaseDetail.acceptedInput, referenceData.purchaseDetail.value, selectedPurchaseDetail]);
+  useEffect(() => {
+    if (activeTab === "inventory" && inventoryDefaultLocationId) setInventoryCountLocationId((current) => current || inventoryDefaultLocationId);
+    if (purchaseDialogOpen && inventoryDefaultLocationId) setPurchaseForm((current) => {
+      if (current.locationId) return current;
+      purchaseAutoDefaultsRef.current.locationId = inventoryDefaultLocationId;
+      return { ...current, locationId: inventoryDefaultLocationId };
+    });
+    if (saleDialogOpen && inventoryDefaultLocationId) setSaleForm((current) => {
+      if (current.locationId) return current;
+      saleAutoDefaultsRef.current.locationId = inventoryDefaultLocationId;
+      return { ...current, locationId: inventoryDefaultLocationId };
+    });
+  }, [activeTab, inventoryDefaultLocationId, purchaseDialogOpen, saleDialogOpen]);
   const preparedInventoryLocationId = inventoryCountLocationId || inventoryLocationReference.defaultLocationId;
   const selectInventoryCountLocation = useCallback((locationId: string) => {
     setInventoryCountLocationId(locationId);
-    if (inventoryLocationReference.locations.some((location) => location.id === locationId)) {
-      setInventoryLocationReference((current) => ({ ...current, ready: true, error: "" }));
-    }
-  }, [inventoryLocationReference.locations]);
+  }, []);
   const numbered = useTextbookNumberedData({
     viewerId: text(user?.id),
     viewerRole: text(role),
@@ -1425,17 +1553,15 @@ function TextbookOperationsWorkspaceContent() {
     return () => abort.abort();
   }, [role, selectedClosingDetailId, user?.id]);
 
-  const locations = useMemo(
-    () => data.locations.length > 0
-      ? data.locations
-      : [
-          { id: "main", code: "main", name: "본관" },
-          { id: "annex", code: "annex", name: "별관" },
-        ],
-    [data.locations],
-  );
-  const selectedLocationId = purchaseForm.locationId || data.defaultLocationId || text(locations[0]?.id);
-  const saleLocationId = saleForm.locationId || data.defaultLocationId || text(locations[0]?.id);
+  const locations = useMemo<Row[]>(() => {
+    const direct = referenceData.selectedLocation.value?.row;
+    return [...new Map([
+      ...inventoryReferenceLocations,
+      ...(direct ? [{ id: direct.id, code: direct.code, name: direct.name }] : []),
+    ].map((row) => [getRecordId(row), row])).values()];
+  }, [inventoryReferenceLocations, referenceData.selectedLocation.value]);
+  const selectedLocationId = purchaseForm.locationId;
+  const saleLocationId = saleForm.locationId;
   const selectedInventoryCountLocationId = preparedInventoryLocationId;
   const schemaDisabled = !data.isSchemaReady;
   const schemaMessage = schemaDisabled
@@ -1451,55 +1577,34 @@ function TextbookOperationsWorkspaceContent() {
     isAdmin ||
     role === "admin" ||
     textbookHistoryDeleteAdminEmails.has(currentUserEmail);
-  const activeTextbooks = useMemo(() => data.textbooks.filter(isActiveTextbook), [data.textbooks]);
-  const activeInventory = useMemo(() => data.inventory.filter(isActiveTextbook), [data.inventory]);
   const inactiveTextbookRows = useMemo(() => data.inventory.filter((row) => !isActiveTextbook(row)), [data.inventory]);
   const inactiveTextbookTrashItems = useMemo(
     () => buildTextbookCleanupPreviewRows(inactiveTextbookRows),
     [inactiveTextbookRows],
   );
-  const configuredPublisherOptions = useMemo(
-    () => uniqueSortedLabels(data.publishers.map(getPublisherSettingLabel)),
-    [data.publishers],
-  );
-  const publisherGroupOptions = useMemo(
-    () => uniqueSortedLabels([
-      ...configuredPublisherOptions,
-      ...activeInventory.map(getKnownPublisherLabel),
-    ]),
-    [activeInventory, configuredPublisherOptions],
-  );
+  const configuredPublisherOptions = useMemo(() => referenceData.masterOptions.value?.publisherOptions.map((option) => option.label) || [], [referenceData.masterOptions.value]);
+  const publisherGroupOptions = configuredPublisherOptions;
   const masterPublisherOptions = useMemo(() => {
-    const configuredPublisherKeys = new Set(configuredPublisherOptions.map((option) => option.toLowerCase()));
-    const optionLabels = uniqueSortedLabels([
-      ...publisherGroupOptions,
-      masterForm.publisher,
-    ]);
-
     return [
       { value: "none", label: "선택" },
-      ...optionLabels.map((label) => ({
-        value: label,
-        label,
-        description: configuredPublisherKeys.has(label.toLowerCase()) ? "설정" : "기존",
-      })),
+      ...(referenceData.masterOptions.value?.publisherOptions || []),
+      ...(!configuredPublisherOptions.includes(masterForm.publisher) && masterForm.publisher
+        ? [{ value: masterForm.publisher, label: masterForm.publisher, description: "현재" }] : []),
     ];
-  }, [configuredPublisherOptions, masterForm.publisher, publisherGroupOptions]);
+  }, [configuredPublisherOptions, masterForm.publisher, referenceData.masterOptions.value]);
   const textbookSubSubjectSettings = useMemo<TextbookSubSubjectSettingRecord[]>(
-    () => mergeTextbookSubSubjectSettings(data.textbookSubSubjectSettings),
-    [data.textbookSubSubjectSettings],
+    () => mergeTextbookSubSubjectSettings((referenceData.masterOptions.value?.subSubjectOptions || []).map((name) => ({ name, subject: masterForm.subject, is_active: true }))),
+    [masterForm.subject, referenceData.masterOptions.value],
   );
   const scienceSubjectAreaOptions = useMemo(
-    () => data.scienceSubjectAreas
-      .filter((area) => area.is_active !== false && text(area.area_key || area.areaKey))
-      .sort((left, right) => Number(left.sort_order || left.sortOrder || 0) - Number(right.sort_order || right.sortOrder || 0))
+    () => (referenceData.masterOptions.value?.scienceSubjectAreas || [])
       .map((area) => ({
-        value: text(area.area_key || area.areaKey),
+        value: text(area.area_key),
         label: text(area.label)
-          || TEXTBOOK_SCIENCE_AREA_OPTIONS.find((option) => option.value === text(area.area_key || area.areaKey))?.label
-          || text(area.area_key || area.areaKey),
+          || TEXTBOOK_SCIENCE_AREA_OPTIONS.find((option) => option.value === text(area.area_key))?.label
+          || text(area.area_key),
       })),
-    [data.scienceSubjectAreas],
+    [referenceData.masterOptions.value],
   );
   const gradeLevelGroupOptions = useMemo(
     () => getGradeOptionsForSchoolLevel(schoolLevelGroupFilter === "all" ? "" : schoolLevelGroupFilter),
@@ -1582,38 +1687,7 @@ function TextbookOperationsWorkspaceContent() {
     schoolLevelGroupFilter,
     subjectGroupFilter,
   ]);
-  const masterDuplicateRows = useMemo(() => {
-    const currentTitle = text(masterForm.title).trim().toLowerCase();
-    if (!currentTitle) return [];
-
-    const currentPublisher = text(masterForm.publisher).trim().toLowerCase();
-    const currentCategory = (
-      [
-        getTextbookSchoolLevelSummary({ schoolLevels: masterForm.schoolLevels, gradeLevels: masterForm.gradeLevels }),
-        getTextbookGradeSummary({ schoolLevels: masterForm.schoolLevels, gradeLevels: masterForm.gradeLevels }),
-        text(masterForm.subSubject),
-      ].filter(Boolean).join(" ") || text(masterForm.category)
-    ).trim().toLowerCase();
-
-    return activeInventory.filter((row) => {
-      if (getRecordId(row) === masterForm.id) return false;
-      if (getTextbookTitle(row).trim().toLowerCase() !== currentTitle) return false;
-      if (normalizeSubjectValue(row.subject) !== masterForm.subject) return false;
-      if (currentPublisher && getPublisherLabel(row).trim().toLowerCase() !== currentPublisher) return false;
-      if (currentCategory && getCategoryLabel(row).trim().toLowerCase() !== currentCategory) return false;
-      return true;
-    });
-  }, [
-    activeInventory,
-    masterForm.category,
-    masterForm.gradeLevels,
-    masterForm.id,
-    masterForm.publisher,
-    masterForm.schoolLevels,
-    masterForm.subSubject,
-    masterForm.subject,
-    masterForm.title,
-  ]);
+  const masterDuplicateRows = referenceData.masterDuplicate.value?.previewRows || [];
 
   useEffect(() => {
     if (activeTab !== "requests" && activeTab !== "purchase") return;
@@ -1670,10 +1744,6 @@ function TextbookOperationsWorkspaceContent() {
   const purchaseOrdersById = useMemo(
     () => new Map(data.purchaseOrders.map((order) => [getRecordId(order), order])),
     [data.purchaseOrders],
-  );
-  const activeSaleLines = useMemo(
-    () => data.saleLines.filter((line) => shouldShowOperationalSaleLine(line, data.textbooks)),
-    [data.saleLines, data.textbooks],
   );
   const purchaseLinesById = useMemo(
     () => new Map(data.purchaseOrderLines.map((line) => [getRecordId(line), line])),
@@ -1753,37 +1823,41 @@ function TextbookOperationsWorkspaceContent() {
     [saleLinesById, selectedSaleLineIds],
   );
   const purchaseFieldVisibility = getPurchaseFieldVisibility(purchaseForm.requestStage);
-  const explicitlySelectedPurchaseTextbook = getTextbookById(data.textbooks, purchaseForm.textbookId);
+  const selectedBookReference = referenceData.selectedBook.value?.row || null;
+  const explicitlySelectedPurchaseTextbook = purchaseDialogOpen ? selectedBookReference?.textbook : undefined;
   const explicitPurchaseTextbookId = getRecordId(explicitlySelectedPurchaseTextbook || {});
   const purchaseRequestTitle = text(purchaseForm.requestedTextbookTitle || getTextbookTitle(explicitlySelectedPurchaseTextbook || {}) || purchaseForm.textbookId);
-  const requestedCatalogTextbook = getTextbookById(activeTextbooks, purchaseRequestTitle);
+  const requestedCatalogTextbook = purchaseDialogOpen && selectedBookReference?.textbook && getTextbookTitle(selectedBookReference.textbook) === purchaseRequestTitle
+    ? selectedBookReference.textbook : undefined;
   const selectedPurchaseTextbook = explicitlySelectedPurchaseTextbook || requestedCatalogTextbook;
   const selectedPurchaseTextbookId = getRecordId(selectedPurchaseTextbook || {});
   const purchaseRequestUsesCatalog = purchaseRequestInputMode === "catalog";
   const manualPurchaseCatalogMatches = useMemo(
     () => {
       if (purchaseRequestInputMode !== "manual") return [];
-      const textbook = getTextbookById(activeTextbooks, purchaseRequestTitle);
+      const textbook = selectedBookReference?.textbook && getTextbookTitle(selectedBookReference.textbook) === purchaseRequestTitle
+        ? selectedBookReference.textbook : undefined;
       return textbook ? [textbook] : [];
     },
-    [activeTextbooks, purchaseRequestInputMode, purchaseRequestTitle],
+    [purchaseRequestInputMode, purchaseRequestTitle, selectedBookReference],
   );
   const hasManualPurchaseCatalogMatch = manualPurchaseCatalogMatches.length > 0;
   const configuredPurchaseSupplierId =
-    getConfiguredSupplierIdForTextbook(selectedPurchaseTextbook, data.publisherSupplierLinks, data.publishers) || purchaseForm.supplierId;
+    selectedBookReference?.configuredSupplierId || purchaseForm.supplierId;
+  const selectedPurchaseSupplierRows = selectedBookReference?.supplier ? [selectedBookReference.supplier] : [];
   const purchaseCopyScope = getTextbookCopyScope(purchaseForm);
   const configuredPurchaseUnitCost = getConfiguredTextbookPurchaseUnitCost(
     selectedPurchaseTextbook,
     configuredPurchaseSupplierId,
-    data.suppliers,
+    selectedPurchaseSupplierRows,
     purchaseForm.unitCost,
     purchaseCopyScope,
   );
   const configuredPurchaseSupplierLabel = configuredPurchaseSupplierId
-    ? getSupplierName(data.suppliers, configuredPurchaseSupplierId)
+    ? selectedBookReference?.supplier?.name || configuredPurchaseSupplierId
     : "-";
-  const selectedPurchaseClass = getClassById(data.classes, purchaseForm.classId);
-  const purchaseClassStudentCount = getClassStudentCount(selectedPurchaseClass, data.students);
+  const selectedPurchaseClassReference = referenceData.selectedClass.value?.row || null;
+  const purchaseClassStudentCount = selectedPurchaseClassReference?.enrolledStudentCount || 0;
   const purchaseStudentRequestedQuantity = numberValue(getPurchaseScopeQuantity(purchaseForm, "student", "requested"));
   const purchaseTeacherRequestedQuantity = numberValue(getPurchaseScopeQuantity(purchaseForm, "teacher", "requested"));
   const purchaseRequestedTotalQuantity = purchaseStudentRequestedQuantity + purchaseTeacherRequestedQuantity;
@@ -1803,7 +1877,7 @@ function TextbookOperationsWorkspaceContent() {
   const configuredPurchaseStudentUnitCost = getConfiguredTextbookPurchaseUnitCost(
     selectedPurchaseTextbook,
     configuredPurchaseSupplierId,
-    data.suppliers,
+    selectedPurchaseSupplierRows,
     purchaseForm.unitCost,
     "student",
   );
@@ -1814,16 +1888,17 @@ function TextbookOperationsWorkspaceContent() {
         ? purchaseStudentOrderedQuantity
         : purchaseStudentRequestedQuantity
   );
-  const selectedClassId = saleForm.classId;
   const saleCopyScope = getTextbookCopyScope(saleForm);
   const isTeacherSale = saleCopyScope === "teacher";
-  const selectedSaleClass = getClassById(data.classes, selectedClassId);
-  const selectedSaleTextbook = getTextbookById(data.textbooks, saleForm.textbookId);
-  const selectedSaleInventory = inventoryById.get(saleForm.textbookId);
-  const saleAvailableQuantity = getInventoryQuantity(selectedSaleInventory, saleLocationId);
+  const classSaleContext = !isTeacherSale ? referenceData.classSalePreview.value : null;
+  const selectedSaleClass = classSaleContext?.class;
+  const selectedSaleTextbook = saleDialogOpen ? selectedBookReference?.textbook : undefined;
+  const teacherBalance = referenceData.teacherSaleBalance.value?.rows.find((row) => row.textbookId === saleForm.textbookId);
+  const saleAvailableQuantity = isTeacherSale ? teacherBalance?.currentQuantity || 0 : classSaleContext?.inventory.currentQuantity || 0;
   const saleTeacherName = text(saleForm.teacherName);
   const saleTeacherQuantity = Math.max(1, numberValue(saleForm.quantity) || 1);
-  const selectedClassStudents = getStudentsByClass(selectedSaleClass, data.students);
+  const selectedClassStudents = useMemo(() => classSaleContext?.enrolledStudentIds.map((studentId) =>
+    classSaleContext.students.find((student) => student.id === studentId) || { id: studentId, name: studentId, grade: null, school: null }) || [], [classSaleContext]);
   const normalizedSaleChargeMonth = normalizeMonthInput(saleForm.chargeMonth);
   const saleStudentSearchQuery = normalizeStoredTextInput(saleStudentQuery).toLowerCase();
   const visibleSaleStudents = useMemo(
@@ -1833,30 +1908,15 @@ function TextbookOperationsWorkspaceContent() {
         [
           getStudentName(student),
           getStudentGradeLabel(student),
-          text(student.school || student.school_name || student.schoolName),
+          text(student.school),
         ].join(" ").toLowerCase().includes(saleStudentSearchQuery),
       );
     },
     [saleStudentSearchQuery, selectedClassStudents],
   );
-  const saleDuplicateLines = useMemo(
-    () => {
-      if (isTeacherSale || !selectedClassId || !saleForm.textbookId || !normalizedSaleChargeMonth) return [];
-      const salesById = new Map(data.sales.map((sale) => [getRecordId(sale), sale]));
-      return activeSaleLines.filter((line) => {
-        if (getTextbookCopyScope(line) === "teacher") return false;
-        const sale = salesById.get(text(line.sale_id || line.saleId));
-        const status = getSaleLineStatus(line, sale);
-        if (!isBillableSaleLineStatus(status)) return false;
-        return text(line.class_id || line.classId || sale?.class_id || sale?.classId) === selectedClassId &&
-          text(line.textbook_id || line.textbookId) === saleForm.textbookId &&
-          getSaleLineMonth(line, sale) === normalizedSaleChargeMonth;
-      });
-    },
-    [activeSaleLines, data.sales, isTeacherSale, normalizedSaleChargeMonth, saleForm.textbookId, selectedClassId],
-  );
+  const saleDuplicateLines = useMemo(() => classSaleContext?.duplicateLines || [], [classSaleContext]);
   const saleDuplicateStudentCount = useMemo(
-    () => new Set(saleDuplicateLines.map((line) => text(line.student_id || line.studentId)).filter(Boolean)).size || saleDuplicateLines.length,
+    () => new Set(saleDuplicateLines.map((line) => text(line.student_id)).filter(Boolean)).size || saleDuplicateLines.length,
     [saleDuplicateLines],
   );
   const saleDraft = isTeacherSale
@@ -1881,10 +1941,19 @@ function TextbookOperationsWorkspaceContent() {
           availableQuantity: saleAvailableQuantity,
         })
       : { lines: [], totalAmount: 0, totalQuantity: 0, availableQuantity: saleAvailableQuantity, stockShortage: 0, hasStockShortage: false };
+  const classSalePreviewAccepted = Boolean(classSaleContext && referenceData.classSalePreview.acceptedInput
+    && referenceData.classSalePreview.acceptedInput.classId === saleForm.classId
+    && referenceData.classSalePreview.acceptedInput.textbookId === saleForm.textbookId
+    && referenceData.classSalePreview.acceptedInput.locationId === saleLocationId
+    && normalizeMonthInput(referenceData.classSalePreview.acceptedInput.chargeMonth) === normalizedSaleChargeMonth);
+  const teacherSalePreviewAccepted = Boolean(referenceData.teacherSaleBalance.acceptedInput
+    && referenceData.teacherSaleBalance.acceptedInput.textbookIds[0] === saleForm.textbookId
+    && referenceData.teacherSaleBalance.acceptedInput.locationId === saleLocationId);
   const saleSubmitDisabled = isTeacherSale
-    ? !selectedSaleTextbook || !saleTeacherName || saleTeacherQuantity <= 0
+    ? !selectedSaleTextbook || !saleTeacherName || saleTeacherQuantity <= 0 || !teacherSalePreviewAccepted
     : !selectedSaleClass ||
       !selectedSaleTextbook ||
+      !classSalePreviewAccepted ||
       saleDraft.lines.length === 0 ||
       saleDuplicateLines.length > 0;
   const saleSubmitHint = !selectedSaleClass ? "수업을 선택하세요" : !selectedSaleTextbook ? "교재를 선택하세요" : saleDraft.lines.length === 0
@@ -2005,6 +2074,11 @@ function TextbookOperationsWorkspaceContent() {
   const masterTitleValue = text(masterForm.title);
   const masterDuplicatePreviewRows = masterDuplicateRows.slice(0, 3);
   const isNewMasterDuplicate = !masterForm.id && masterDuplicateRows.length > 0;
+  const masterDuplicateAccepted = Boolean(referenceData.masterDuplicate.acceptedInput
+    && referenceData.masterDuplicate.acceptedInput.title === normalizeStoredTextInput(masterForm.title)
+    && referenceData.masterDuplicate.acceptedInput.subject === normalizeStoredTextInput(masterForm.subject)
+    && referenceData.masterDuplicate.acceptedInput.publisher === normalizeStoredTextInput(masterForm.publisher)
+    && referenceData.masterDuplicate.acceptedInput.category === normalizeStoredTextInput(masterForm.category || masterForm.subSubject));
   const bulkCategoryOptions = [
     ...new Set([
       ...(bulkTextbookPatch.subject === "keep"
@@ -2016,7 +2090,8 @@ function TextbookOperationsWorkspaceContent() {
     .filter(Boolean)
     .sort((left, right) => left.localeCompare(right, "ko", { numeric: true }));
   const masterTaxonomyValidation = validateTextbookTaxonomyForWrite(masterForm);
-  const masterSubmitDisabled = saving === "master" || !masterTitleValue || !masterTaxonomyValidation.valid || isNewMasterDuplicate;
+  const masterSubmitDisabled = saving === "master" || !masterTitleValue || !masterTaxonomyValidation.valid || isNewMasterDuplicate
+    || referenceData.masterDuplicate.loading || Boolean(referenceData.masterDuplicate.error) || !masterDuplicateAccepted;
   const purchaseSubmitDisabled = schemaDisabled ||
     saving === "purchase" ||
     (purchaseForm.requestStage === "request" && !purchaseRequestTitle) ||
@@ -2024,22 +2099,9 @@ function TextbookOperationsWorkspaceContent() {
     (purchaseForm.requestStage === "request" && !purchaseRequestedTotalQuantity && !selectedPurchaseLineId) ||
     (purchaseForm.requestStage !== "request" && !purchaseOrderedTotalQuantity) ||
     (purchaseForm.requestStage === "receive" && !purchaseReceivedTotalQuantity);
-  const filteredClosingMoves = filterStockMovesForClosing({
-    closingMonth: closingForm.closingMonth,
-    subject: closingForm.subject,
-    textbooks: data.textbooks,
-    publishers: data.publishers,
-    suppliers: data.suppliers,
-    publisherSupplierLinks: data.publisherSupplierLinks,
-    stockMoves: data.stockMoves,
-  });
-  const closingPreview = buildTextbookMonthlyClosing({
-    openingQuantity: numberValue(closingForm.openingQuantity),
-    openingAmount: numberValue(closingForm.openingAmount),
-    stockMoves: filteredClosingMoves,
-  });
-  const closingNeedsMemo = closingPreview.needsReview && !text(closingForm.memo);
-  const closingTeamMarginMetrics = ((closingPreview.teamMargins || []) as Array<{ team: string; marginAmount: number; saleQuantity: number }>)
+  const closingPreview = referenceData.closingPreview.value?.closing || null;
+  const closingNeedsMemo = Boolean(closingPreview?.needsReview) && !text(closingForm.memo);
+  const closingTeamMarginMetrics = ((closingPreview?.teamMargins || []) as Array<{ team: string; marginAmount: number; saleQuantity: number }>)
     .filter((item) => item.team === "english" || item.team === "math" || item.team === "science")
     .filter((item) => closingForm.subject === "all" || item.team === closingForm.subject);
   // Pre-science closing contract: const closingTargetSubjects = closingForm.subject === "all" ? ["all", "english", "math"] : [closingForm.subject]
@@ -2047,29 +2109,17 @@ function TextbookOperationsWorkspaceContent() {
   function setPurchaseField(name: string, value: string) {
     setPurchaseForm((current) => {
       if (name === "textbookId") {
-        const textbook = getTextbookById(data.textbooks, value);
         return {
           ...current,
           textbookId: value,
-          requestedTextbookTitle: current.requestStage === "request" && textbook
-            ? getTextbookTitle(textbook)
-            : current.requestedTextbookTitle,
+          requestedTextbookTitle: value ? current.requestedTextbookTitle : "",
         };
       }
 
       if (name === "classId") {
-        const previousClass = getClassById(data.classes, current.classId);
-        const nextClass = getClassById(data.classes, value);
-        const previousTeacher = getDefaultTeacherForClass(previousClass, data.teacherCatalogs);
-        const nextTeacher = getDefaultTeacherForClass(nextClass, data.teacherCatalogs);
-        const shouldDefaultTeacher = !text(current.requestBy) || text(current.requestBy) === previousTeacher;
-        const nextLocationId = inferClassLocationId(nextClass, locations);
-
         return {
           ...current,
           classId: value,
-          requestBy: shouldDefaultTeacher ? nextTeacher : current.requestBy,
-          locationId: nextLocationId || current.locationId,
         };
       }
 
@@ -2202,6 +2252,24 @@ function TextbookOperationsWorkspaceContent() {
     setMasterForm((current) => ({ ...current, [name]: normalizeStoredTextInput(current[name]) }));
   }
 
+  function navigateToTextbookDetail(kind: "master" | "purchase" | "sale", id: string) {
+    if (!isTextbookUuid(id)) return;
+    const current = new URLSearchParams(window.location.search);
+    const parsed = parseTextbookNavigation(current);
+    const next = serializeTextbookNavigation(current, { ...parsed, detail: { kind, id } });
+    window.history.pushState(null, "", `${window.location.pathname}?${next.toString()}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }
+
+  function closeTextbookDetail(kind: "master" | "purchase" | "sale") {
+    const current = new URLSearchParams(window.location.search);
+    const parsed = parseTextbookNavigation(current);
+    if (parsed.detail?.kind !== kind) return;
+    const next = serializeTextbookNavigation(current, { ...parsed, detail: null });
+    window.history.pushState(null, "", `${window.location.pathname}?${next.toString()}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }
+
   function setMasterIsbn13(value: string) {
     const nextIsbn = normalizeBarcodeValue(value);
     setMasterForm((current) => {
@@ -2227,6 +2295,11 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function selectMasterTextbook(row: Row) {
+    const rowId = getRecordId(row);
+    if (rowId !== selectedMasterDetailId) {
+      navigateToTextbookDetail("master", rowId);
+      return;
+    }
     const taxonomy = getTextbookTaxonomySelection(row);
     setMasterForm({
       id: getRecordId(row),
@@ -2264,6 +2337,7 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function resetPurchaseForm() {
+    purchaseAutoDefaultsRef.current = { title: "", supplierId: "", unitCost: "", requestBy: "", locationId: "" };
     setSelectedPurchaseLineId("");
     setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
     setPurchaseForm(emptyPurchaseForm);
@@ -2272,6 +2346,7 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function resetSaleForm() {
+    saleAutoDefaultsRef.current = { locationId: "" };
     setSaleForm({ ...emptySaleForm, chargeMonth: currentMonth() });
     setExcludedStudentIds([]);
     setSaleStudentQuery("");
@@ -2317,12 +2392,14 @@ function TextbookOperationsWorkspaceContent() {
     setMasterDialogOpen(false);
     setMasterForm(emptyMasterForm);
     setMessage("");
+    closeTextbookDetail("master");
     window.setTimeout(() => setMasterDialogOpen(false), 0);
   }
 
   function closePurchaseDialog() {
     setPurchaseDialogOpen(false);
     resetPurchaseForm();
+    closeTextbookDetail("purchase");
     window.setTimeout(() => setPurchaseDialogOpen(false), 0);
   }
 
@@ -2967,9 +3044,14 @@ function TextbookOperationsWorkspaceContent() {
     });
   }
 
-  function selectPurchaseLine(line: Row, order: Row | undefined, stageOverride?: string) {
+  function selectPurchaseLine(line: Row, order: Row | undefined, stageOverride?: string, fromDirectDetail = false, directDetail?: TextbookPurchaseCaseRow) {
     const scopeLines = getPurchaseScopeLines(line);
     const primaryLine = scopeLines.find((scopeLine) => getRecordId(scopeLine) === getRecordId(line)) || scopeLines[0];
+    if (!fromDirectDetail) {
+      const anchorLineId = getRecordId(primaryLine);
+      if (anchorLineId) navigateToTextbookDetail("purchase", anchorLineId);
+      return;
+    }
     const primaryOrder = order || getPurchaseLineOrder(primaryLine, purchaseOrdersById);
     const studentLine = scopeLines.find((scopeLine) => getTextbookCopyScope(scopeLine) === "student");
     const teacherLine = scopeLines.find((scopeLine) => getTextbookCopyScope(scopeLine) === "teacher");
@@ -2980,7 +3062,7 @@ function TextbookOperationsWorkspaceContent() {
     const nextStage = stageOverride || purchaseStageFromStatus(status);
     const nextOrderedQuantity = nextStage === "request" ? orderedQuantity : getPositivePurchaseQuantityText(orderedQuantity) || primaryRequestedQuantity;
     const requestedTitle = getRequestedTextbookTitle(primaryLine);
-    const textbook = getTextbookById(data.textbooks, text(primaryLine.textbook_id || primaryLine.textbookId) || requestedTitle);
+    const textbook = directDetail?.references.textbook || getTextbookById(data.textbooks, text(primaryLine.textbook_id || primaryLine.textbookId) || requestedTitle);
     const copyScope = getTextbookCopyScope(primaryLine);
     const nextReceivedQuantity = nextStage === "receive"
       ? getRowFieldText(primaryLine, "received_quantity", "receivedQuantity") || nextOrderedQuantity || primaryRequestedQuantity
@@ -3883,6 +3965,14 @@ function TextbookOperationsWorkspaceContent() {
             <DialogDescription className="sr-only">교재명, 학년, 세부과목, 출판사, 판매가, ISBN, 바코드를 등록하거나 수정합니다.</DialogDescription>
           </DialogHeader>
           <form onSubmit={submitMaster} className="grid min-w-0 gap-3" aria-busy={saving === "master"}>
+            {referenceData.masterDuplicate.error ? (
+              <Alert role="alert">
+                <AlertDescription className="flex items-center justify-between gap-3">
+                  <span>{getTextbookActionErrorMessage(referenceData.masterDuplicate.error)}</span>
+                  <Button type="button" variant="outline" size="sm" onClick={() => { void referenceData.masterDuplicate.retry(); }}>다시 시도</Button>
+                </AlertDescription>
+              </Alert>
+            ) : null}
             <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_140px_140px]">
               <Field label="교재명" required>
                 <Input
@@ -4150,6 +4240,12 @@ function TextbookOperationsWorkspaceContent() {
             <DialogDescription className="sr-only">교재 요청, 주문, 입고 단계에 필요한 수량과 연결 정보를 저장합니다.</DialogDescription>
           </DialogHeader>
           <form onSubmit={submitPurchase} className="grid min-w-0 max-w-full gap-3 [&>*]:min-w-0 [&>*]:max-w-full" aria-busy={saving === "purchase"}>
+            {purchaseReferenceError ? (
+              <Alert role="alert"><AlertDescription className="flex items-center justify-between gap-3">
+                <span>{getTextbookActionErrorMessage(purchaseReferenceError.error)}</span>
+                <Button type="button" variant="outline" size="sm" onClick={() => { void purchaseReferenceError.retry(); }}>다시 시도</Button>
+              </AlertDescription></Alert>
+            ) : null}
             {purchaseForm.requestStage === "request" ? (
               <div className="grid gap-3">
                 <section className="grid gap-2 rounded-lg border bg-muted/20 p-3">
@@ -4187,8 +4283,9 @@ function TextbookOperationsWorkspaceContent() {
                   {purchaseRequestUsesCatalog ? (
                     <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_2.5rem]">
                       <TextbookSelect
-                        textbooks={activeTextbooks}
                         value={explicitPurchaseTextbookId}
+                        serverState={referenceData.bookOptions}
+                        selectedDisplayOption={referenceData.selectedBook.value?.row?.option || null}
                         onValueChange={(value) => {
                           setPurchaseRequestInputMode("catalog");
                           setPurchaseField("textbookId", value);
@@ -4244,7 +4341,7 @@ function TextbookOperationsWorkspaceContent() {
                 </section>
                 <div className="grid gap-3 sm:grid-cols-3">
                   <Field label="수업">
-                    <ClassSelect classes={data.classes} value={purchaseForm.classId} onValueChange={(value) => setPurchaseField("classId", value)} />
+                    <ClassSelect value={purchaseForm.classId} serverState={referenceData.classOptions} selectedDisplayOption={referenceData.selectedClass.value?.row?.option || null} onValueChange={(value) => setPurchaseField("classId", value)} />
                   </Field>
                   <Field label="학생용 요청">
                     <Input value={purchaseForm.studentRequestedQuantity} onChange={(event) => setPurchaseField("studentRequestedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="학생용 요청 수량" />
@@ -4256,10 +4353,11 @@ function TextbookOperationsWorkspaceContent() {
                     selectedPurchaseLineId ? (
                       <Field label="선생님">
                         <TeacherSelect
-                          teachers={data.teacherCatalogs}
+                          teachers={[]}
                           value={purchaseForm.requestBy}
                           onValueChange={(value) => setPurchaseField("requestBy", value)}
                           ariaLabel="선생님 선택"
+                          serverState={referenceData.teacherOptions}
                         />
                       </Field>
                     ) : (
@@ -4281,6 +4379,8 @@ function TextbookOperationsWorkspaceContent() {
                       <LocationSelect
                         locations={locations}
                         value={selectedLocationId}
+                        serverState={referenceData.locationOptions}
+                        selectedDisplayOption={referenceData.selectedLocation.value?.row?.option || null}
                         onValueChange={(value) => setPurchaseField("locationId", value)}
                         ariaLabel="요청 위치 선택"
                       />
@@ -4302,13 +4402,14 @@ function TextbookOperationsWorkspaceContent() {
                 </Field>
                 <Field label="등록 교재" required>
                   <TextbookSelect
-                    textbooks={activeTextbooks}
                     value={selectedPurchaseTextbookId || purchaseForm.textbookId}
+                    serverState={referenceData.bookOptions}
+                    selectedDisplayOption={referenceData.selectedBook.value?.row?.option || null}
                     onValueChange={(value) => setPurchaseField("textbookId", value)}
                   />
                 </Field>
                 <Field label="수업">
-                  <ClassSelect classes={data.classes} value={purchaseForm.classId} onValueChange={(value) => setPurchaseField("classId", value)} />
+                  <ClassSelect value={purchaseForm.classId} serverState={referenceData.classOptions} selectedDisplayOption={referenceData.selectedClass.value?.row?.option || null} onValueChange={(value) => setPurchaseField("classId", value)} />
                 </Field>
               </div>
             )}
@@ -4336,10 +4437,11 @@ function TextbookOperationsWorkspaceContent() {
                 {purchaseFieldVisibility.requester ? (
                   <Field label="선생님">
                     <TeacherSelect
-                      teachers={data.teacherCatalogs}
+                      teachers={[]}
                       value={purchaseForm.requestBy}
                       onValueChange={(value) => setPurchaseField("requestBy", value)}
                       ariaLabel={purchaseForm.requestStage === "order" ? "주문 요청자 선택" : "요청자 선택"}
+                      serverState={referenceData.teacherOptions}
                     />
                   </Field>
                 ) : null}
@@ -4352,6 +4454,8 @@ function TextbookOperationsWorkspaceContent() {
                     <LocationSelect
                       locations={locations}
                       value={selectedLocationId}
+                      serverState={referenceData.locationOptions}
+                      selectedDisplayOption={referenceData.selectedLocation.value?.row?.option || null}
                       onValueChange={(value) => setPurchaseField("locationId", value)}
                       ariaLabel={purchaseForm.requestStage === "order" ? "주문 위치 선택" : "입고 위치 선택"}
                     />
@@ -4539,6 +4643,12 @@ function TextbookOperationsWorkspaceContent() {
             <DialogDescription className="sr-only">수업 또는 선생님과 교재를 선택해 출고 대기 내역을 생성합니다.</DialogDescription>
           </DialogHeader>
           <form onSubmit={submitSale} className="grid min-w-0 max-w-full gap-3 [&>*]:min-w-0 [&>*]:max-w-full" aria-busy={saving === "sale"}>
+            {saleReferenceError ? (
+              <Alert role="alert"><AlertDescription className="flex items-center justify-between gap-3">
+                <span>{getTextbookActionErrorMessage(saleReferenceError.error)}</span>
+                <Button type="button" variant="outline" size="sm" onClick={() => { void saleReferenceError.retry(); }}>다시 시도</Button>
+              </AlertDescription></Alert>
+            ) : null}
             <Field label="대상">
               <div className="grid grid-cols-2 rounded-md border bg-background p-0.5" role="group" aria-label="출고 대상">
                 {textbookCopyScopeOptions.map((option) => (
@@ -4563,7 +4673,7 @@ function TextbookOperationsWorkspaceContent() {
             <div className="grid gap-3 sm:grid-cols-2">
               {!isTeacherSale ? (
                 <Field label="수업" required>
-                  <ClassSelect classes={data.classes} value={saleForm.classId} onValueChange={(value) => {
+                  <ClassSelect value={saleForm.classId} serverState={referenceData.classOptions} selectedDisplayOption={referenceData.selectedClass.value?.row?.option || null} onValueChange={(value) => {
                     setSaleField("classId", value);
                     setExcludedStudentIds([]);
                     setSaleStudentQuery("");
@@ -4572,15 +4682,16 @@ function TextbookOperationsWorkspaceContent() {
               ) : (
                 <Field label="선생님" required>
                   <TeacherSelect
-                    teachers={data.teacherCatalogs}
+                    teachers={[]}
                     value={saleForm.teacherName}
                     onValueChange={(value) => setSaleField("teacherName", value)}
                     ariaLabel="교사용 수령 선생님 선택"
+                    serverState={referenceData.teacherOptions}
                   />
                 </Field>
               )}
               <Field label="교재" required>
-                <TextbookSelect textbooks={activeTextbooks} value={saleForm.textbookId} onValueChange={(value) => setSaleField("textbookId", value)} />
+                <TextbookSelect value={saleForm.textbookId} serverState={referenceData.bookOptions} selectedDisplayOption={referenceData.selectedBook.value?.row?.option || null} onValueChange={(value) => setSaleField("textbookId", value)} />
               </Field>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -4588,7 +4699,7 @@ function TextbookOperationsWorkspaceContent() {
                 <Input type="month" value={saleForm.chargeMonth} onChange={(event) => setSaleField("chargeMonth", event.target.value)} aria-label="출고월" />
               </Field>
               <Field label="위치">
-                <LocationSelect locations={locations} value={saleLocationId} onValueChange={(value) => setSaleField("locationId", value)} ariaLabel="출고 위치 선택" />
+                <LocationSelect locations={locations} value={saleLocationId} serverState={referenceData.locationOptions} selectedDisplayOption={referenceData.selectedLocation.value?.row?.option || null} onValueChange={(value) => setSaleField("locationId", value)} ariaLabel="출고 위치 선택" />
               </Field>
             </div>
             {isTeacherSale ? (
@@ -4665,12 +4776,12 @@ function TextbookOperationsWorkspaceContent() {
                 </div>
               ) : null}
               <div className="max-h-56 overflow-y-auto p-2">
-                {visibleSaleStudents.length > 0 ? visibleSaleStudents.map((student) => {
+                {visibleSaleStudents.length > 0 ? visibleSaleStudents.map((student, studentIndex) => {
                   const id = getRecordId(student);
                   const checked = !excludedStudentIds.includes(id);
                   const studentName = getStudentName(student);
                   return (
-                    <label key={id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60">
+                    <label key={`${id}-${studentIndex}`} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60">
                       <Checkbox
                         checked={checked}
                         title={`${studentName} 출고 대상 선택`}
@@ -4760,6 +4871,12 @@ function TextbookOperationsWorkspaceContent() {
             <DialogDescription className="sr-only">월별 입고, 출고, 기말 수량과 금액 차이를 정산합니다.</DialogDescription>
           </DialogHeader>
           <form onSubmit={submitClosing} className="grid min-w-0 max-w-full gap-3 [&>*]:min-w-0 [&>*]:max-w-full" aria-busy={saving === "closing"}>
+            {referenceData.closingPreview.error ? (
+              <Alert role="alert"><AlertDescription className="flex items-center justify-between gap-3">
+                <span>{getTextbookActionErrorMessage(referenceData.closingPreview.error)}</span>
+                <Button type="button" variant="outline" size="sm" onClick={() => { void referenceData.closingPreview.retry(); }}>다시 시도</Button>
+              </AlertDescription></Alert>
+            ) : null}
             <div className="grid grid-cols-2 gap-3">
               <Field label="월" required>
                 <Input type="month" value={closingForm.closingMonth} onChange={(event) => setClosingForm((current) => ({ ...current, closingMonth: event.target.value }))} aria-label="마감 월" />
@@ -4786,10 +4903,10 @@ function TextbookOperationsWorkspaceContent() {
             </div>
             <div className="grid grid-cols-2 gap-2 text-sm">
               <Metric label="저장" value={`${formatQuantity(closingTargetSubjects.length)}건`} />
-              <Metric label="입고" value={`${formatQuantity(closingPreview.purchaseQuantity)}권`} />
-              <Metric label="출고" value={`${formatQuantity(closingPreview.saleQuantity)}권`} />
-              <Metric label="기말" value={`${formatQuantity(closingPreview.endingQuantity)}권`} />
-              <Metric label="마진" value={closingNeedsMemo ? "사유 필요" : formatCurrency(closingPreview.textbookMarginAmount)} tone={closingPreview.needsReview ? "danger" : "default"} />
+              <Metric label="입고" value={closingPreview ? `${formatQuantity(closingPreview.purchaseQuantity)}권` : "—"} />
+              <Metric label="출고" value={closingPreview ? `${formatQuantity(closingPreview.saleQuantity)}권` : "—"} />
+              <Metric label="기말" value={closingPreview ? `${formatQuantity(closingPreview.endingQuantity)}권` : "—"} />
+              <Metric label="마진" value={!closingPreview ? "—" : closingNeedsMemo ? "사유 필요" : formatCurrency(closingPreview.textbookMarginAmount)} tone={closingPreview?.needsReview ? "danger" : "default"} />
             </div>
             {closingTeamMarginMetrics.length > 0 ? (
               <div className="grid grid-cols-2 gap-2 text-sm">
@@ -4817,7 +4934,7 @@ function TextbookOperationsWorkspaceContent() {
               </Button>
               <Button
                 type="submit"
-                disabled={schemaDisabled || saving === "closing" || closingNeedsMemo}
+                disabled={schemaDisabled || saving === "closing" || closingNeedsMemo || !closingPreview || referenceData.closingPreview.loading || Boolean(referenceData.closingPreview.error)}
                 title={closingNeedsMemo ? "차이 사유를 메모에 입력하세요" : "월마감 저장"}
               >
                 <ClipboardCheck className="mr-2 size-4" />
@@ -4828,6 +4945,46 @@ function TextbookOperationsWorkspaceContent() {
         </DialogContent>
       </Dialog>
       ) : null}
+
+      <Dialog open={Boolean(selectedMasterDetailId && !masterDialogOpen)} onOpenChange={(open) => { if (!open) closeTextbookDetail("master"); }}>
+        <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
+          <DialogHeader><DialogTitle>교재 상세</DialogTitle><DialogDescription className="sr-only">선택한 교재의 직접 조회 결과입니다.</DialogDescription></DialogHeader>
+          {referenceData.masterDetail.loading ? <div role="status">교재 상세를 불러오는 중입니다.</div> : referenceData.masterDetail.error ? (
+            <Alert role="alert"><AlertDescription className="flex items-center justify-between gap-3"><span>{getTextbookActionErrorMessage(referenceData.masterDetail.error)}</span><Button type="button" variant="outline" size="sm" onClick={() => { void referenceData.masterDetail.retry(); }}>다시 시도</Button></AlertDescription></Alert>
+          ) : referenceData.masterDetail.acceptedInput ? <div className="text-sm text-muted-foreground">교재를 찾을 수 없습니다.</div> : null}
+          <DialogFooter><Button type="button" variant="outline" onClick={() => closeTextbookDetail("master")}>닫기</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(selectedPurchaseDetail && !purchaseDialogOpen)} onOpenChange={(open) => { if (!open) closeTextbookDetail("purchase"); }}>
+        <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
+          <DialogHeader><DialogTitle>구매 상세</DialogTitle><DialogDescription className="sr-only">선택한 구매 건의 직접 조회 결과입니다.</DialogDescription></DialogHeader>
+          {referenceData.purchaseDetail.loading ? <div role="status">구매 상세를 불러오는 중입니다.</div> : referenceData.purchaseDetail.error ? (
+            <Alert role="alert"><AlertDescription className="flex items-center justify-between gap-3"><span>{getTextbookActionErrorMessage(referenceData.purchaseDetail.error)}</span><Button type="button" variant="outline" size="sm" onClick={() => { void referenceData.purchaseDetail.retry(); }}>다시 시도</Button></AlertDescription></Alert>
+          ) : referenceData.purchaseDetail.acceptedInput ? <div className="text-sm text-muted-foreground">구매 내역을 찾을 수 없습니다.</div> : null}
+          <DialogFooter><Button type="button" variant="outline" onClick={() => closeTextbookDetail("purchase")}>닫기</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(selectedSaleDetailId)} onOpenChange={(open) => { if (!open) closeTextbookDetail("sale"); }}>
+        <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>출고 상세</DialogTitle>
+            <DialogDescription className="sr-only">선택한 출고 한 건의 직접 조회 결과입니다.</DialogDescription>
+          </DialogHeader>
+          {referenceData.saleDetail.loading ? <div role="status">출고 상세를 불러오는 중입니다.</div> : referenceData.saleDetail.error ? (
+            <Alert role="alert"><AlertDescription className="flex items-center justify-between gap-3"><span>{getTextbookActionErrorMessage(referenceData.saleDetail.error)}</span><Button type="button" variant="outline" size="sm" onClick={() => { void referenceData.saleDetail.retry(); }}>다시 시도</Button></AlertDescription></Alert>
+          ) : referenceData.saleDetail.value?.row ? (
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <Metric label="대상" value={referenceData.saleDetail.value.row.recipientName} />
+              <Metric label="교재" value={getTextbookTitle(referenceData.saleDetail.value.row.textbook)} />
+              <Metric label="수량" value={`${formatQuantity(referenceData.saleDetail.value.row.quantity)}권`} />
+              <Metric label="금액" value={formatCurrency(referenceData.saleDetail.value.row.amount)} />
+            </div>
+          ) : <div className="text-sm text-muted-foreground">출고 내역을 찾을 수 없습니다.</div>}
+          <DialogFooter><Button type="button" variant="outline" onClick={() => closeTextbookDetail("sale")}>닫기</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ClosingDetailDialog
         open={Boolean(selectedClosingDetailId)}
@@ -4858,7 +5015,7 @@ function TextbookOperationsWorkspaceContent() {
         <Alert role="alert">
           <AlertDescription className="flex items-center justify-between gap-3">
             <span>{inventoryLocationReference.error}</span>
-            <Button type="button" size="sm" variant="outline" aria-label="재고 위치 다시 시도" onClick={() => setInventoryLocationRetryKey((current) => current + 1)}>다시 시도</Button>
+            <Button type="button" size="sm" variant="outline" aria-label="재고 위치 다시 시도" onClick={() => { void referenceData.locationOptions.retry(); }}>다시 시도</Button>
           </AlertDescription>
         </Alert>
       ) : null}
@@ -5334,6 +5491,7 @@ function TextbookOperationsWorkspaceContent() {
             onBulkCancel={cancelSelectedSaleLines}
             onBulkReturn={returnSelectedSaleLines}
             onBulkDelete={deleteSelectedSaleHistoryLines}
+            onInspectSale={(line) => navigateToTextbookDetail("sale", getRecordId(line))}
             onClearSearch={() => updateOperationSearchQuery("")}
           />
           <DataTablePagination page={numbered.sales.page} pageSize={numbered.sales.pageSize} totalCount={numbered.sales.totalCount} loading={numbered.sales.loading}
@@ -5990,6 +6148,8 @@ function SearchCombobox({
   allowDeselect = false,
   filterGroups = [],
   filterLayout = "default",
+  serverState,
+  selectedDisplayOption,
 }: {
   options: SearchSelectOption[];
   value: string;
@@ -6004,16 +6164,20 @@ function SearchCombobox({
   allowDeselect?: boolean;
   filterGroups?: SearchSelectFilterGroup[];
   filterLayout?: SearchSelectFilterLayout;
+  serverState?: TextbookReferencePickerState;
+  selectedDisplayOption?: SearchSelectOption | null;
 }) {
   const [open, setOpen] = useState(false);
   const [selectedFilterValues, setSelectedFilterValues] = useState<Record<string, string[]>>({});
-  const selected = options.find((option) => option.value === value);
-  const activeFilterCount = filterGroups.reduce((sum, group) => {
+  const selected = options.find((option) => option.value === value) || (selectedDisplayOption?.value === value ? selectedDisplayOption : undefined);
+  const effectiveFilterGroups = serverState?.baseFilterGroups || filterGroups;
+  const effectiveSelectedFilterValues = serverState?.selectedFilters || selectedFilterValues;
+  const activeFilterCount = serverState?.activeFilterCount ?? effectiveFilterGroups.reduce((sum, group) => {
     const validValues = new Set(group.options.map((option) => option.value));
-    return sum + (selectedFilterValues[group.key] || []).filter((value) => validValues.has(value)).length;
+    return sum + (effectiveSelectedFilterValues[group.key] || []).filter((value) => validValues.has(value)).length;
   }, 0);
-  const visibleFilterGroups = buildVisibleSearchSelectFilterGroups(options, filterGroups, selectedFilterValues);
-  const filteredOptions = filterGroups.length === 0
+  const visibleFilterGroups = serverState?.visibleFilterGroups || buildVisibleSearchSelectFilterGroups(options, effectiveFilterGroups, effectiveSelectedFilterValues);
+  const filteredOptions = serverState ? options : filterGroups.length === 0
     ? options
     : options.filter((option) => doesSearchOptionMatchFilters(option, filterGroups, selectedFilterValues));
   const usesTwoColumnFilterLayout = filterLayout === "subject-grade-teacher" || filterLayout === "subject-grade-detail";
@@ -6033,7 +6197,7 @@ function SearchCombobox({
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
             {triggerLabel ? <span className="shrink-0 text-xs font-medium text-muted-foreground">{triggerLabel}</span> : null}
             <span className={cn("min-w-0 truncate", !selected && "text-muted-foreground")}>
-              {selected?.label || placeholder}
+              {selected?.label || (serverState && value ? "선택 항목을 찾을 수 없습니다" : placeholder)}
             </span>
           </span>
           <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
@@ -6045,8 +6209,12 @@ function SearchCombobox({
         onWheelCapture={(event) => event.stopPropagation()}
         onTouchMoveCapture={(event) => event.stopPropagation()}
       >
-        <Command>
-          <CommandInput placeholder={searchPlaceholder} />
+        <Command shouldFilter={serverState ? false : undefined}>
+          <CommandInput
+            placeholder={searchPlaceholder}
+            value={serverState?.search}
+            onValueChange={serverState ? serverState.setSearch : undefined}
+          />
           {visibleFilterGroups.length > 0 ? (
             <div className="grid gap-2 border-b px-2 py-2">
               {!usesTwoColumnFilterLayout && activeFilterCount > 0 ? (
@@ -6056,7 +6224,7 @@ function SearchCombobox({
                     variant="ghost"
                     size="sm"
                     className="h-7 rounded-md px-2 text-xs"
-                    onClick={() => setSelectedFilterValues({})}
+                    onClick={() => serverState ? serverState.setSelectedFilters({}) : setSelectedFilterValues({})}
                     aria-label={`${ariaLabel} 필터 초기화`}
                   >
                     필터 초기화
@@ -6081,7 +6249,7 @@ function SearchCombobox({
                       <div className="text-[11px] font-medium text-muted-foreground">{group.label}</div>
                       <div className="flex flex-wrap gap-1">
                         {group.options.map((option) => {
-                          const isFilterSelected = (selectedFilterValues[group.key] || []).includes(option.value);
+                          const isFilterSelected = (effectiveSelectedFilterValues[group.key] || []).includes(option.value);
                           return (
                             <button
                               key={`${group.key}-${option.value}`}
@@ -6097,7 +6265,9 @@ function SearchCombobox({
                               onClick={(event) => {
                                 event.preventDefault();
                                 event.stopPropagation();
-                                setSelectedFilterValues((current) => toggleSearchSelectFilter(current, group.key, option.value));
+                                const next = toggleSearchSelectFilter(effectiveSelectedFilterValues, group.key, option.value);
+                                if (serverState) serverState.setSelectedFilters(next);
+                                else setSelectedFilterValues(next);
                               }}
                             >
                               <span className="min-w-0 truncate">{option.label}</span>
@@ -6113,7 +6283,7 @@ function SearchCombobox({
                           variant="ghost"
                           size="sm"
                           className="h-7 rounded-md px-2 text-xs"
-                          onClick={() => setSelectedFilterValues({})}
+                          onClick={() => serverState ? serverState.setSelectedFilters({}) : setSelectedFilterValues({})}
                           aria-label={`${ariaLabel} 필터 초기화`}
                         >
                           필터 초기화
@@ -6130,7 +6300,7 @@ function SearchCombobox({
             onWheelCapture={(event) => event.stopPropagation()}
             onTouchMoveCapture={(event) => event.stopPropagation()}
           >
-            <CommandEmpty>{emptyLabel}</CommandEmpty>
+            <CommandEmpty>{serverState?.loading ? "불러오는 중" : emptyLabel}</CommandEmpty>
             <CommandGroup>
               {filteredOptions.map((option) => (
                 <CommandItem
@@ -6167,6 +6337,17 @@ function SearchCombobox({
                 </CommandItem>
               ))}
             </CommandGroup>
+            {serverState ? (
+              <div className="sticky bottom-0 flex items-center justify-between gap-2 border-t bg-background px-2 py-2" aria-label={`${ariaLabel} 서버 페이지`}>
+                <Button type="button" variant="outline" size="sm" disabled={serverState.loading || serverState.page <= 1} onClick={() => { void serverState.goToPage(serverState.page - 1); }}>이전</Button>
+                <span className="text-xs text-muted-foreground">{formatQuantity(serverState.page)} / {formatQuantity(Math.max(1, Math.ceil((serverState.totalCount || 0) / serverState.pageSize)))}</span>
+                {serverState.error ? (
+                  <Button type="button" variant="outline" size="sm" onClick={() => { void serverState.retry(); }}>다시 시도</Button>
+                ) : (
+                  <Button type="button" variant="outline" size="sm" disabled={serverState.loading || serverState.totalCount === null || serverState.page * serverState.pageSize >= serverState.totalCount} onClick={() => { void serverState.goToPage(serverState.page + 1); }}>다음</Button>
+                )}
+              </div>
+            ) : null}
           </CommandList>
         </Command>
       </PopoverContent>
@@ -6188,9 +6369,9 @@ function toggleSearchSelectFilter(current: Record<string, string[]>, groupKey: s
   return next;
 }
 
-function TextbookSelect({ textbooks, value, onValueChange }: { textbooks: Row[]; value: string; onValueChange: (value: string) => void }) {
+function TextbookSelect({ textbooks = [], value, onValueChange, serverState, selectedDisplayOption }: { textbooks?: Row[]; value: string; onValueChange: (value: string) => void; serverState?: TextbookReferencePickerState; selectedDisplayOption?: SearchSelectOption | null }) {
   // Pre-science selector contract: { key: "subject", label: "과목", optionOrder: ["영어", "수학", "기타"] }
-  const options = buildTextbookReferenceOptions(textbooks);
+  const options = serverState?.rows || buildTextbookReferenceOptions(textbooks);
   const textbookSelectFilterGroups = buildSearchSelectFilterGroups(options, [
     { key: "subject", label: "과목", optionOrder: ["영어", "수학", "과학", "기타"] },
     { key: "grade", label: "학년" },
@@ -6208,13 +6389,15 @@ function TextbookSelect({ textbooks, value, onValueChange }: { textbooks: Row[];
       ariaLabel="교재 선택"
       filterGroups={textbookSelectFilterGroups}
       filterLayout="subject-grade-detail"
+      serverState={serverState}
+      selectedDisplayOption={selectedDisplayOption}
     />
   );
 }
 
-function ClassSelect({ classes, value, onValueChange }: { classes: Row[]; value: string; onValueChange: (value: string) => void }) {
+function ClassSelect({ classes = [], value, onValueChange, serverState, selectedDisplayOption }: { classes?: Row[]; value: string; onValueChange: (value: string) => void; serverState?: TextbookReferencePickerState; selectedDisplayOption?: SearchSelectOption | null }) {
   // Pre-science selector contract: { key: "subject", label: "과목", optionOrder: ["영어", "수학", "기타"] }
-  const options = buildTextbookClassReferenceOptions(classes);
+  const options = serverState?.rows || buildTextbookClassReferenceOptions(classes);
   const classSelectFilterGroups = buildSearchSelectFilterGroups(options, [
     { key: "subject", label: "과목", optionOrder: ["영어", "수학", "과학", "기타"] },
     { key: "grade", label: "학년" },
@@ -6233,6 +6416,8 @@ function ClassSelect({ classes, value, onValueChange }: { classes: Row[]; value:
       allowDeselect={true}
       filterGroups={classSelectFilterGroups}
       filterLayout="subject-grade-teacher"
+      serverState={serverState}
+      selectedDisplayOption={selectedDisplayOption}
     />
   );
 }
@@ -6242,29 +6427,31 @@ function TeacherSelect({
   value,
   onValueChange,
   ariaLabel = "선생님 선택",
+  serverState,
 }: {
   teachers: Row[];
   value: string;
   onValueChange: (value: string) => void;
   ariaLabel?: string;
+  serverState?: TextbookReferencePickerState;
 }) {
-  const teacherNames = [...new Set(teachers.map(getTeacherName).filter(Boolean))]
-    .sort((left, right) => left.localeCompare(right, "ko"));
+  const teacherNames = [...new Set((serverState ? serverState.rows.map((option) => option.label) : teachers.map(getTeacherName)).filter(Boolean))];
+  if (!serverState) teacherNames.sort((left, right) => left.localeCompare(right, "ko"));
   const hasCustomValue = Boolean(value) && !teacherNames.includes(value);
 
   return (
-    <Select value={value || "none"} onValueChange={(nextValue) => onValueChange(nextValue === "none" ? "" : nextValue)}>
-      <SelectTrigger className="w-full" aria-label={ariaLabel}><SelectValue placeholder="선생님 선택" /></SelectTrigger>
-      <SelectContent>
-        <SelectItem value="none">미지정</SelectItem>
-        {hasCustomValue ? <SelectItem value={value}>{value}</SelectItem> : null}
-        {teacherNames.map((teacher) => (
-          <SelectItem key={teacher} value={teacher}>
-            {teacher}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <SearchCombobox
+      options={[...(hasCustomValue ? [{ value, label: value }] : []), ...teacherNames.map((teacher) => ({ value: teacher, label: teacher }))]}
+      value={value}
+      onValueChange={onValueChange}
+      placeholder="선생님 선택"
+      searchPlaceholder="선생님 검색"
+      emptyLabel="선생님이 없습니다"
+      ariaLabel={ariaLabel}
+      allowDeselect={true}
+      serverState={serverState}
+      selectedDisplayOption={hasCustomValue ? { value, label: value } : null}
+    />
   );
 }
 
@@ -6273,23 +6460,28 @@ function LocationSelect({
   value,
   onValueChange,
   ariaLabel = "위치 선택",
+  serverState,
+  selectedDisplayOption,
 }: {
   locations: Row[];
   value: string;
   onValueChange: (value: string) => void;
   ariaLabel?: string;
+  serverState?: TextbookReferencePickerState;
+  selectedDisplayOption?: SearchSelectOption | null;
 }) {
   return (
-    <Select value={value || undefined} onValueChange={onValueChange}>
-      <SelectTrigger className="w-full" aria-label={ariaLabel}><SelectValue placeholder="위치" /></SelectTrigger>
-      <SelectContent>
-        {locations.map((location) => (
-          <SelectItem key={getRecordId(location)} value={getRecordId(location)}>
-            {text(location.name || location.code)}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <SearchCombobox
+      options={serverState?.rows || locations.map((location) => ({ value: getRecordId(location), label: text(location.name || location.code), searchText: text(location.code) }))}
+      value={value}
+      onValueChange={onValueChange}
+      placeholder="위치"
+      searchPlaceholder="위치 검색"
+      emptyLabel="위치가 없습니다"
+      ariaLabel={ariaLabel}
+      serverState={serverState}
+      selectedDisplayOption={selectedDisplayOption}
+    />
   );
 }
 
@@ -9363,6 +9555,7 @@ function SalesProcessTable({
   onBulkCancel,
   onBulkReturn,
   onBulkDelete,
+  onInspectSale,
   onClearSearch,
 }: {
   summary: TextbookSaleSummary | null;
@@ -9390,6 +9583,7 @@ function SalesProcessTable({
   onBulkCancel?: () => void;
   onBulkReturn?: () => void;
   onBulkDelete?: () => void;
+  onInspectSale?: (line: Row) => void;
   onClearSearch: () => void;
 }) {
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
@@ -9828,6 +10022,7 @@ function SalesProcessTable({
                           </div>
                         </div>
                         <div className="mt-3 grid min-w-0 grid-cols-2 gap-2 [&>button]:w-full">
+                          {onInspectSale ? <Button type="button" variant="outline" size="sm" aria-label={`${studentName} ${textbookTitle} 출고 상세 열기`} onClick={() => onInspectSale(line)}>상세</Button> : null}
                           {status !== "issued" && status !== "cancelled" && status !== "returned" ? (
                             <>
                               <Button
@@ -9966,6 +10161,7 @@ function SalesProcessTable({
                             <TableCell className="text-right tabular-nums">{formatQuantity(quantity)}</TableCell>
                             <TableCell className={stickyActionCellClassName}>
                               <div className="flex justify-end gap-1">
+                                {onInspectSale ? <Button type="button" variant="ghost" size="sm" aria-label={`${studentName} ${textbookTitle} 출고 상세 열기`} onClick={() => onInspectSale(line)}>상세</Button> : null}
                                 {status !== "issued" && status !== "cancelled" && status !== "returned" ? (
                                   <>
                                     <Button

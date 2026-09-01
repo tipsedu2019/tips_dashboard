@@ -110,7 +110,7 @@ export async function setup(t, initial = {}) {
   const clipboardWrites = [];
   Object.defineProperty(dom.window.navigator, 'clipboard', { configurable: true, value: { writeText: async value => { clipboardWrites.push(value); } } });
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator });
-  for (const key of ['HTMLElement', 'Element', 'DocumentFragment', 'MutationObserver', 'CustomEvent', 'Event', 'Node', 'NodeFilter', 'HTMLInputElement']) globalThis[key] = dom.window[key];
+  for (const key of ['HTMLElement', 'Element', 'DocumentFragment', 'MutationObserver', 'CustomEvent', 'Event', 'PopStateEvent', 'Node', 'NodeFilter', 'HTMLInputElement']) globalThis[key] = dom.window[key];
   globalThis.getComputedStyle = dom.window.getComputedStyle;
   globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
   window.requestAnimationFrame = callback => window.setTimeout(callback, 0);
@@ -205,5 +205,42 @@ export async function setupHook(t, initial, { strictMode = false, preferences } 
     act: callback => act(async () => { callback(); }),
     resolve: (request, data) => act(async () => { request.resolve({ data, error: null }); }),
     reject: (request, error) => act(async () => { request.resolve({ data: null, error }); }),
+  };
+}
+
+export async function setupReferenceHook(t, initial, { strictMode = false } = {}) {
+  const dom = new JSDOM('<div id="root"></div>', { url: 'https://test.invalid/admin/textbooks' });
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  const root = createRoot(document.getElementById('root'));
+  const io = transport();
+  const load = modules(io.supabase, {});
+  const { useTextbookReferenceData } = load('src/features/textbooks/use-textbook-reference-data.ts');
+  assert.equal(typeof useTextbookReferenceData, 'function', 'real typed textbook reference hook must exist');
+  let input = initial;
+  let current;
+  let ownerPresent = true;
+  function Probe() {
+    const state = useTextbookReferenceData(input);
+    useLayoutEffect(() => { current = state; });
+    return null;
+  }
+  function Boundary() { return ownerPresent ? createElement(Probe) : null; }
+  const render = () => act(async () => root.render(strictMode
+    ? createElement(StrictMode, null, createElement(Boundary)) : createElement(Boundary)));
+  let mounted = true;
+  const unmount = async () => {
+    if (!mounted) return;
+    await act(async () => root.unmount());
+    mounted = false;
+  };
+  t.after(async () => { await unmount(); dom.window.close(); });
+  await render();
+  return { ...io, get current() { return current; }, unmount,
+    rerender: async next => { input = next; await render(); },
+    setOwnerPresent: async present => { ownerPresent = present; await render(); },
+    resolve: (request, data) => act(async () => { request.resolve({ data, error: null }); }),
+    reject: (request, error) => act(async () => { request.resolve({ data: null, error }); }),
+    act: callback => act(async () => { await callback(); }),
   };
 }
