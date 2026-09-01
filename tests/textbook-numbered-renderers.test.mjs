@@ -247,6 +247,39 @@ test("master bulk edit preserves a newer selection and patch after its first wri
   assert.equal(document.body.textContent.includes("개 교재를 수정했습니다."), false, "obsolete action publishes no stale success")
 })
 
+test("master bulk edit preserves a same-book deselect and reselect intent after its writer starts", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=master&textbookPage=1&textbookPageSize=10" })
+  const row = masterRow(23)
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_master_page_v1"), { rows: [row], page: 1, pageSize: 10, totalCount: 1 })
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_master_summary_v1"), masterSummary(1))
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_master_options_v1"), {
+    publisherOptions: [], subSubjectOptions: ["문법"], categoryOptions: ["문법"], bulkCategoryOptions: ["문법"], scienceSubjectAreas: [],
+    counts: { publisherOptions: 0, subSubjectOptions: 1, categoryOptions: 1, bulkCategoryOptions: 1, scienceSubjectAreas: 0 }, complete: true,
+  })
+  const selection = document.querySelector(`[data-testid="textbook-master-mobile-card-${row.id}"] [aria-label$="선택"]`)
+  await h.act(() => selection.click())
+  await h.act(() => button("속성 변경").click())
+  const publisher = document.querySelector('[aria-label="일괄 출판사"]')
+  const publisherProps = publisher[Object.keys(publisher).find((key) => key.startsWith("__reactProps$"))]
+  await h.act(() => publisherProps.onChange({ target: { value: "동일 작업 출판사" } }))
+  await h.act(() => button("적용").click())
+  const writer = h.requests.find((request) => request.table === "textbooks")
+  assert.ok(writer)
+  assert.equal(writer.steps.find((step) => step.method === "upsert").args[0].publisher, "동일 작업 출판사")
+
+  await h.act(() => selection.click())
+  await h.act(() => selection.click())
+  const rpcCountAtReselection = h.requests.filter((request) => request.name).length
+  await h.resolve(writer, row)
+  await h.act(() => Promise.resolve())
+
+  assert.equal(h.requests.filter((request) => request.table === "textbooks").length, 1, "the started writer is neither cancelled nor retried")
+  assert.equal(h.requests.filter((request) => request.name).length, rpcCountAtReselection, "the obsolete completion dispatches no stale invalidation")
+  assert.equal(document.querySelector('[aria-label="선택한 교재 일괄 작업"]')?.textContent.includes("1개 선택"), true, "the reselected A remains selected")
+  assert.equal(document.querySelector('[aria-label="일괄 출판사"]')?.value, "동일 작업 출판사", "the unchanged patch remains owned by the new intent")
+  assert.equal(document.body.textContent.includes("개 교재를 수정했습니다."), false, "the obsolete completion publishes no stale success")
+})
+
 test("external query navigation aborts obsolete page work and restores the requested page", async (t) => {
   const h = await setup(t, { search: "?textbookTab=master&textbookPage=1&textbookPageSize=10" })
   const obsolete = h.requests.find((request) => request.name === "list_textbook_master_page_v1")

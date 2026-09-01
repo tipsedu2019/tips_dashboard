@@ -1472,7 +1472,11 @@ function TextbookOperationsWorkspaceContent() {
     revisions: inventoryCountDraftRevisionsRef.current,
     selectionRevisions: textbookSelectionRevisionsRef.current,
   });
-  const masterBulkIdentity = JSON.stringify({ selection: selectedTextbookIds, patch: bulkTextbookPatch });
+  const masterBulkIdentity = JSON.stringify({
+    selection: selectedTextbookIds,
+    selectionRevisions: Object.fromEntries(selectedTextbookIds.map((id) => [id, textbookSelectionRevisionsRef.current[id] || 0])),
+    patch: bulkTextbookPatch,
+  });
   const liveActionInputsRef = useRef({
     master: JSON.stringify(masterForm), purchase: JSON.stringify(purchaseForm), sale: JSON.stringify(saleForm), closing: JSON.stringify(closingForm),
     purchaseSelection: JSON.stringify(selectedPurchaseLineIds), saleSelection: JSON.stringify(selectedSaleLineIds),
