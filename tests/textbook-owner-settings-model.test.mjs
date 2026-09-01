@@ -75,3 +75,22 @@ test("owner model mirrors exact whitespace search, numeric first-three names, an
   ]);
   assert.deepEqual([...counts], [[id(20), 1], [id(21), 1]], "nonempty publisherId wins even when dangling; null display fallback is the last canonical matching trimmed name");
 });
+
+test("owner draft preview retains blank add and patch names until the save boundary", async () => {
+  const { projectOwnerDraft } = await import(modelUrl.href);
+  const result = projectOwnerDraft({
+    publishers: [{ id: id(30), name: "기존 출판사", subjects: [], supplierIds: [], isNew: false }],
+    suppliers: [{ id: id(40), name: "기존 공급처", contact: "", memo: "", isNew: false }],
+  }, {
+    version: 1,
+    baseRevision: "f".repeat(64),
+    operations: [
+      { type: "publisher.add", id: id(31), name: "", subjects: [], supplierIds: [] },
+      { type: "publisher.patch", id: id(30), patch: { name: "   " } },
+      { type: "supplier.add", id: id(41), name: " \t ", contact: "", memo: "" },
+      { type: "supplier.patch", id: id(40), patch: { name: "" } },
+    ],
+  });
+  assert.deepEqual(result.publishers.map(row => [row.id, row.name]), [[id(31), ""], [id(30), ""]]);
+  assert.deepEqual(result.suppliers.map(row => [row.id, row.name]), [[id(41), ""], [id(40), ""]]);
+});

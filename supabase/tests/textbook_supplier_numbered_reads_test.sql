@@ -531,8 +531,8 @@ select 'duplicate_final_name', captured.* from pg_temp.capture_save(pg_temp.sid(
   jsonb_build_object('type','supplier.add','id',pg_temp.sid(720),'name','zz rollback marker','contact','','memo',''),
   jsonb_build_object('type','publisher.add','id',pg_temp.sid(721),'name','zz hidden owner renamed',
     'subjects','[]'::jsonb,'supplierIds','[]'::jsonb)))) captured;
-select is((select result_sqlstate from task6a_errors where key='duplicate_final_name'), '22023',
-  'duplicate dirty final owner name is rejected before DML');
+select is((select result_sqlstate from task6a_errors where key='duplicate_final_name'), '23505',
+  'duplicate dirty final raw owner name preserves native UNIQUE SQLSTATE');
 select is((select count(*) from public.textbook_suppliers where id=pg_temp.sid(720)), 0::bigint,
   'late journal validation rolls back an earlier valid add');
 

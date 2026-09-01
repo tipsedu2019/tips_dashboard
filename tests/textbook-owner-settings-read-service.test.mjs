@@ -194,6 +194,47 @@ test("owner page/detail boundaries reject count contradictions and request shape
   }
 });
 
+test("owner reads retain blank draft rows for page and selected-detail preview", async () => {
+  const service = await import(ownerServiceUrl.href);
+  const revision = "c".repeat(64);
+  const publisherId = id(520);
+  const supplierId = id(521);
+  const publisherDraft = { version: 1, baseRevision: revision, operations: [
+    { type: "publisher.add", id: publisherId, name: "", subjects: [], supplierIds: [] },
+  ] };
+  const supplierDraft = { version: 1, baseRevision: revision, operations: [
+    { type: "supplier.add", id: supplierId, name: "   ", contact: "", memo: "" },
+  ] };
+  const publisher = { id: publisherId, name: "", subjects: [], suppliers: [], textbookCount: 0, isNew: true };
+  const supplier = { id: supplierId, name: "", contact: "", memo: "", linkedPublisherCount: 0, linkedPublisherNames: [], isNew: true };
+  const request = draft => ({ page: 1, pageSize: 10, sort: "name", filters: { search: "" }, draft });
+  const pageClient = data => ({ rpc() { return { abortSignal() { return this; }, retry() { return Promise.resolve({ data, error: null }); } }; } });
+  const publisherPage = await service.listTextbookPublisherPage(request(publisherDraft), { client: pageClient({ rows: [publisher], page: 1, pageSize: 10, totalCount: 1, baseRevision: revision, ownerCounts: { publishers: 1, suppliers: 0 } }) });
+  assert.equal(publisherPage.rows[0].name, "");
+  const publisherDetail = await service.getTextbookPublisherSettingDetail({ id: publisherId, draft: publisherDraft }, { client: pageClient({ row: publisher, baseRevision: revision, ownerCounts: { publishers: 1, suppliers: 0 } }) });
+  assert.equal(publisherDetail.row.name, "");
+  const supplierPage = await service.listTextbookSupplierPage(request(supplierDraft), { client: pageClient({ rows: [supplier], page: 1, pageSize: 10, totalCount: 1, baseRevision: revision, ownerCounts: { publishers: 0, suppliers: 1 } }) });
+  assert.equal(supplierPage.rows[0].name, "");
+  const supplierDetail = await service.getTextbookSupplierSettingDetail({ id: supplierId, draft: supplierDraft }, { client: pageClient({ row: supplier, baseRevision: revision, ownerCounts: { publishers: 0, suppliers: 1 } }) });
+  assert.equal(supplierDetail.row.name, "");
+});
+
+test("owner page and detail parsers reject impossible relationship counts", async () => {
+  const service = await import(ownerServiceUrl.href);
+  const request = { page: 1, pageSize: 10, sort: "name", filters: { search: "" }, draft: null };
+  const publisher = { id: id(530), name: "출판사", subjects: [], suppliers: [{ id: id(531), name: "공급처" }], textbookCount: 0, isNew: false };
+  const supplier = { id: id(532), name: "공급처", contact: "", memo: "", linkedPublisherCount: 2, linkedPublisherNames: ["출판사 1", "출판사 2"], isNew: false };
+  const client = data => ({ rpc() { return { abortSignal() { return this; }, retry() { return Promise.resolve({ data, error: null }); } }; } });
+  for (const [method, data] of [
+    ["listTextbookPublisherPage", { rows: [publisher], page: 1, pageSize: 10, totalCount: 1, baseRevision: "d".repeat(64), ownerCounts: { publishers: 1, suppliers: 0 } }],
+    ["listTextbookSupplierPage", { rows: [supplier], page: 1, pageSize: 10, totalCount: 1, baseRevision: "d".repeat(64), ownerCounts: { publishers: 1, suppliers: 1 } }],
+  ]) await assert.rejects(() => service[method](request, { client: client(data) }), /textbook_read_response_invalid/);
+  for (const [method, selectedId, row, ownerCounts] of [
+    ["getTextbookPublisherSettingDetail", publisher.id, publisher, { publishers: 1, suppliers: 0 }],
+    ["getTextbookSupplierSettingDetail", supplier.id, supplier, { publishers: 1, suppliers: 1 }],
+  ]) await assert.rejects(() => service[method]({ id: selectedId, draft: null }, { client: client({ row, baseRevision: "d".repeat(64), ownerCounts }) }), /textbook_read_response_invalid/);
+});
+
 test("owner reads respect a caller abort before transport and after an in-flight response", async () => {
   const service = await import(ownerServiceUrl.href);
   const input = { page: 1, pageSize: 10, sort: "name", filters: { search: "" }, draft: null };
