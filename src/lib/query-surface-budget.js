@@ -61,6 +61,11 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "get_textbook_location_reference_v1",
   "get_textbook_master_options_v1",
   "get_textbook_inactive_cleanup_context_v1",
+  // Task6a final proof 122/122: owner-settings selected details and atomic
+  // draft save are selected-owner/action purposes, never full-catalog fallbacks.
+  "get_textbook_publisher_setting_detail_v1",
+  "get_textbook_supplier_setting_detail_v1",
+  "save_textbook_settings_draft_v1",
   "current_dashboard_role",
   "close_class_atomic_v1",
 ])
@@ -113,6 +118,9 @@ const EXACT_NUMBERED_RPC_CONTRACTS = new Map([
   ["list_textbook_class_reference_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_textbook_teacher_reference_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_textbook_location_reference_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["list_textbook_publisher_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["list_textbook_supplier_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["list_textbook_supplier_setting_picker_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
 ])
 
 const PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION = "PUBLIC_CLASSES_SUMMARY_COMPATIBILITY_PROJECTION"

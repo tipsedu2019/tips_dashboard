@@ -214,6 +214,11 @@
       "fileName": "20260831234634_textbook_class_sale_roster_school.sql",
       "status": "final",
       "sha256": "458b951d33356be1f8544c1d1b7c80e4023031dedb78ce7029bef9ea10aa301b"
+    },
+    {
+      "fileName": "20260901045629_textbook_supplier_numbered_reads.sql",
+      "status": "final",
+      "sha256": "f2df2c48c4959cf3c03e763d16002677a8359bb9f705f5b6c7f6d830b7c6e637"
     }
   ]
 }
